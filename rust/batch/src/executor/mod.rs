@@ -10,7 +10,7 @@ use projection::*;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::Result;
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::PlanNode;
 pub use row_seq_scan::*;
@@ -97,7 +97,6 @@ macro_rules! build_executor {
           <$data_type>::new_boxed_executor($source)
         },
       )*
-      _ => Err(RwError::from(InternalError(format!("Unsupported plan node type: {:?}", $source.plan_node().get_node_type()))))
     }
   }
 }

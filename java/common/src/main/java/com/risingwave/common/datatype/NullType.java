@@ -12,10 +12,7 @@ public class NullType extends PrimitiveTypeBase {
 
   @Override
   public DataType getProtobufType() {
-    return DataType.newBuilder()
-        .setTypeName(DataType.TypeName.NULL)
-        .setIsNullable(nullable)
-        .build();
+    throw new UnsupportedOperationException();
   }
 
   @Override

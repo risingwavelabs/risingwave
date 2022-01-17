@@ -21,8 +21,6 @@ pub use native_type::*;
 use risingwave_pb::data::data_type::TypeName;
 pub use scalar_impl::*;
 
-use crate::error::ErrorCode::InternalError;
-
 mod bool_type;
 mod datetime_type;
 mod decimal;
@@ -144,7 +142,6 @@ impl From<&ProstDataType> for DataTypeKind {
             TypeName::Decimal => DataTypeKind::Decimal,
             TypeName::Interval => DataTypeKind::Interval,
             TypeName::Symbol => DataTypeKind::Varchar,
-            _ => panic!("{:?} not supported", proto.get_type_name()),
         }
     }
 }
@@ -212,7 +209,6 @@ macro_rules! build_data_type {
           <$data_type>::try_from($proto).map(|d| Arc::new(d) as DataTypeRef)
         },
       )*
-      _ => Err(InternalError(format!("Unsupported proto type: {:?}", $proto.get_type_name())).into())
     }
   }
 }

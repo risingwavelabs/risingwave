@@ -10,7 +10,6 @@ import com.risingwave.planner.rel.common.dist.RwDistributionTraitDef;
 import com.risingwave.planner.rel.logical.RwLogicalAggregate;
 import com.risingwave.proto.plan.HashAggNode;
 import com.risingwave.proto.plan.PlanNode;
-import com.risingwave.proto.plan.SimpleAggNode;
 import java.util.List;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptRule;
@@ -40,14 +39,6 @@ public class RwBatchHashAgg extends RwAggregate implements RisingWaveBatchPhyRel
     checkConvention();
   }
 
-  private SimpleAggNode serializeSimpleAgg() {
-    SimpleAggNode.Builder simpleAggNodeBuilder = SimpleAggNode.newBuilder();
-    for (AggregateCall aggCall : aggCalls) {
-      simpleAggNodeBuilder.addAggCalls(serializeAggCall(aggCall));
-    }
-    return simpleAggNodeBuilder.build();
-  }
-
   private HashAggNode serializeHashAgg() {
     HashAggNode.Builder hashAggNodeBuilder = HashAggNode.newBuilder();
     for (int i = groupSet.nextSetBit(0); i >= 0; i = groupSet.nextSetBit(i + 1)) {
@@ -61,23 +52,11 @@ public class RwBatchHashAgg extends RwAggregate implements RisingWaveBatchPhyRel
 
   @Override
   public PlanNode serialize() {
-    PlanNode plan;
-    if (groupSet.length() == 0) {
-      plan =
-          PlanNode.newBuilder()
-              .setNodeType(PlanNode.PlanNodeType.SIMPLE_AGG)
-              .setBody(Any.pack(serializeSimpleAgg()))
-              .addChildren(((RisingWaveBatchPhyRel) input).serialize())
-              .build();
-    } else {
-      plan =
-          PlanNode.newBuilder()
-              .setNodeType(PlanNode.PlanNodeType.HASH_AGG)
-              .setBody(Any.pack(serializeHashAgg()))
-              .addChildren(((RisingWaveBatchPhyRel) input).serialize())
-              .build();
-    }
-    return plan;
+    return PlanNode.newBuilder()
+        .setNodeType(PlanNode.PlanNodeType.HASH_AGG)
+        .setBody(Any.pack(serializeHashAgg()))
+        .addChildren(((RisingWaveBatchPhyRel) input).serialize())
+        .build();
   }
 
   @Override

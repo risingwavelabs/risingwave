@@ -36,25 +36,22 @@ message DataType {
     MINUTE_TO_SECOND = 13;
   }
   enum TypeName {
-    UNKNOWN = 0;
-    INT16 = 1;
-    INT32 = 2;
-    INT64 = 3;
-    FLOAT = 4;
-    DOUBLE = 5;
-    BOOLEAN = 6;
-    CHAR = 7;
-    VARCHAR = 8;
-    DECIMAL = 9;
-    TIME = 10;
-    TIMESTAMP = 11;
-    INTERVAL = 12;
-    DATE = 13;
-    NULL = 14;
+    INT16 = 0;
+    INT32 = 1;
+    INT64 = 2;
+    FLOAT = 3;
+    DOUBLE = 4;
+    BOOLEAN = 5;
+    CHAR = 6;
+    VARCHAR = 7;
+    DECIMAL = 8;
+    TIME = 9;
+    TIMESTAMP = 10;
+    INTERVAL = 11;
+    DATE = 12;
     // Timestamp type with timezone
-    TIMESTAMPZ = 15;
-    SYMBOL = 16;
-    CURSOR = 17;
+    TIMESTAMPZ = 13;
+    SYMBOL = 14;
   }
   TypeName type_name = 1;
   // data length for char,
@@ -76,7 +73,6 @@ enum ArrayType {
   UTF8 = 5;
   BOOL = 6;
   DECIMAL = 7;
-  INTERVAL = 8;
 }
 
 message Array {

@@ -117,7 +117,6 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataType> {
         TypeName::Decimal,
     ];
     let all_types = vec![
-        TypeName::Unknown,
         TypeName::Int16,
         TypeName::Int32,
         TypeName::Int64,
@@ -131,10 +130,8 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataType> {
         TypeName::Timestamp,
         TypeName::Interval,
         TypeName::Date,
-        TypeName::Null,
         TypeName::Timestampz,
         TypeName::Symbol,
-        TypeName::Cursor,
     ];
     let atm_exprs = vec![
         expr_node::Type::Add,

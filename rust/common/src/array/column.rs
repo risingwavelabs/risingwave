@@ -7,8 +7,7 @@ use crate::array::value_reader::{
     I64ValueReader, Utf8ValueReader,
 };
 use crate::array::{ArrayImpl, ArrayRef, DecimalArrayBuilder, Utf8ArrayBuilder};
-use crate::error::ErrorCode::InternalError;
-use crate::error::{Result, RwError};
+use crate::error::Result;
 use crate::types::{OrderedF32, OrderedF64};
 use crate::util::prost::pack_to_any;
 
@@ -48,12 +47,6 @@ impl Column {
             }
             ArrayType::Decimal => {
                 read_string_array::<DecimalArrayBuilder, DecimalValueReader>(array, cardinality)?
-            }
-            _ => {
-                return Err(RwError::from(InternalError(format!(
-                    "unsupported array type: {:?}",
-                    array.array_type()
-                ))))
             }
         };
         Ok(Self { array })

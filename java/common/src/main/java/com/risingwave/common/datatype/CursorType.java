@@ -18,7 +18,7 @@ public class CursorType extends PrimitiveTypeBase {
 
   @Override
   public DataType getProtobufType() {
-    return DataType.newBuilder().setTypeName(DataType.TypeName.CURSOR).setIsNullable(false).build();
+    throw new UnsupportedOperationException();
   }
 
   @Override

@@ -179,11 +179,6 @@ message SortAggNode {
   repeated expr.AggCall agg_calls = 2;
 }
 
-message SimpleAggNode {
-  // When there is no group_by_key, we use SimpleAggNode
-  repeated expr.AggCall agg_calls = 1;
-}
-
 message HashJoinNode {
   JoinType join_type = 1;
   repeated int32 left_key = 2;
@@ -207,31 +202,28 @@ message GenerateInt32SeriesNode {
 
 message PlanNode {
   enum PlanNodeType {
-    INVALID = 0;
-    FILTER_SCAN = 1;
-    INSERT = 2;
-    SEQ_SCAN = 3;
-    PROJECT = 4;
-    CREATE_TABLE = 5;
-    DROP_TABLE = 6;
-    HASH_AGG = 7;
-    SIMPLE_AGG = 8;
-    FILTER = 9;
-    EXCHANGE = 10;
-    ORDER_BY = 11;
-    NESTED_LOOP_JOIN = 12;
-    CREATE_SOURCE = 13;
-    SOURCE_SCAN = 14;
-    TOP_N = 15;
-    SORT_AGG = 16;
-    ROW_SEQ_SCAN = 17;
-    LIMIT = 18;
-    VALUE = 19;
-    HASH_JOIN = 20;
-    DROP_SOURCE = 21;
-    MERGE_SORT_EXCHANGE = 22;
-    SORT_MERGE_JOIN = 23;
-    GENERATE_SERIES = 24;
+    INSERT = 0;
+    SEQ_SCAN = 1;
+    PROJECT = 2;
+    CREATE_TABLE = 3;
+    DROP_TABLE = 4;
+    HASH_AGG = 5;
+    FILTER = 6;
+    EXCHANGE = 7;
+    ORDER_BY = 8;
+    NESTED_LOOP_JOIN = 9;
+    CREATE_SOURCE = 10;
+    SOURCE_SCAN = 11;
+    TOP_N = 12;
+    SORT_AGG = 13;
+    ROW_SEQ_SCAN = 14;
+    LIMIT = 15;
+    VALUE = 16;
+    HASH_JOIN = 17;
+    DROP_SOURCE = 18;
+    MERGE_SORT_EXCHANGE = 19;
+    SORT_MERGE_JOIN = 20;
+    GENERATE_SERIES = 21;
   }
   PlanNodeType node_type = 1;
   google.protobuf.Any body = 2;

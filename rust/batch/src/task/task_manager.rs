@@ -84,15 +84,11 @@ impl Default for TaskManager {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_pb::plan::plan_node::PlanNodeType;
-    use risingwave_pb::plan::{ExchangeInfo, PlanFragment, PlanNode};
-    use risingwave_pb::task_service::{
-        QueryId, StageId, TaskId as ProstTaskId, TaskSinkId as ProstTaskSinkId,
-    };
+    use risingwave_pb::task_service::{QueryId, StageId, TaskSinkId as ProstTaskSinkId};
     use tonic::Code;
 
     use crate::task::test_utils::{ResultChecker, TestRunner};
-    use crate::task::{BatchTaskEnv, TaskId, TaskManager};
+    use crate::task::{TaskId, TaskManager};
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_select_all() {
@@ -119,37 +115,6 @@ mod tests {
             .add_i32_column(false, &[4, 3, 4, 3])
             .add_i32_column(false, &[2, 3, 4, 5])
             .check_result(&res);
-    }
-
-    #[tokio::test]
-    async fn test_bad_node_type() {
-        let env = BatchTaskEnv::for_test();
-        let manager = TaskManager::new();
-        let plan = PlanFragment {
-            root: Some(PlanNode {
-                node_type: PlanNodeType::Invalid as i32,
-                ..Default::default()
-            }),
-            exchange_info: Some(ExchangeInfo {
-                mode: 0,
-                distribution: None,
-            }),
-        };
-        assert!(manager
-            .fire_task(
-                env,
-                &ProstTaskId {
-                    stage_id: Some(StageId {
-                        query_id: Some(QueryId {
-                            trace_id: "".to_string()
-                        }),
-                        stage_id: 0
-                    }),
-                    task_id: 0
-                },
-                plan
-            )
-            .is_err());
     }
 
     #[test]
