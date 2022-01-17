@@ -151,7 +151,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_server_shutdown() {
-        let meta = LocalMeta::start().await;
+        let sled_root = tempfile::tempdir().unwrap();
+        let meta = LocalMeta::start(sled_root).await;
         let (join, shutdown) = start_compute_node().await;
         shutdown.send(()).unwrap();
         join.await.unwrap();

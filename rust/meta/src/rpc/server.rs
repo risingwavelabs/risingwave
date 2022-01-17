@@ -125,11 +125,12 @@ mod tests {
     #[tokio::test]
     async fn test_server_shutdown() {
         let addr = get_host_port("127.0.0.1:9527").unwrap();
+        let sled_root = tempfile::tempdir().unwrap();
         let (join_handle, shutdown_send) = rpc_serve(
             addr,
             None,
             None,
-            MetaStoreBackend::Sled(tempfile::tempdir().unwrap().into_path()),
+            MetaStoreBackend::Sled(sled_root.path().to_path_buf()),
         )
         .await;
         shutdown_send.send(()).unwrap();

@@ -11,14 +11,14 @@ pub struct LocalMeta {
 
 impl LocalMeta {
     /// Start a local meta node in the background.
-    pub async fn start() -> Self {
+    pub async fn start(sled_root: impl AsRef<std::path::Path>) -> Self {
         let dashboard_addr = get_host_port("127.0.0.1:5691").unwrap();
         let addr = get_host_port("127.0.0.1:5690").unwrap();
         let (join_handle, shutdown_sender) = crate::rpc::server::rpc_serve(
             addr,
             Some(dashboard_addr),
             None,
-            MetaStoreBackend::Sled(tempfile::tempdir().unwrap().into_path()),
+            MetaStoreBackend::Sled(sled_root.as_ref().to_path_buf()),
         )
         .await;
         Self {

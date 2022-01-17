@@ -472,8 +472,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_sled_metastore_basic() -> Result<()> {
-        let tempdir = tempfile::tempdir().unwrap();
-        let meta_store = SledMetaStore::new(tempdir.path())?;
+        let sled_root = tempfile::tempdir().unwrap();
+        let meta_store = SledMetaStore::new(sled_root.path())?;
         let result = meta_store.get_impl(vec![("key1".as_bytes().to_vec(), vec![])])?;
         assert!(result.is_empty());
         let result = meta_store.put_impl(&[(
@@ -501,7 +501,7 @@ mod tests {
             "value2".as_bytes().to_vec(),
         )])?;
         drop(meta_store);
-        let meta_store = SledMetaStore::new(tempdir.path())?;
+        let meta_store = SledMetaStore::new(sled_root.path())?;
         let result = meta_store.get_impl(vec![("key2".as_bytes().to_vec(), vec![])]);
         assert_eq!(
             result.unwrap(),
@@ -566,8 +566,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_sled_metastore_with_op_options() -> Result<()> {
-        let tempdir = tempfile::tempdir().unwrap();
-        let meta_store = SledMetaStore::new(tempdir.path())?;
+        let sled_root = tempfile::tempdir().unwrap();
+        let meta_store = SledMetaStore::new(sled_root.path())?;
         // put with one kv
         meta_store.put_impl(&[(
             "key1".as_bytes().to_vec(),
@@ -728,8 +728,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_sled_transaction() -> Result<()> {
-        let tempdir = tempfile::tempdir().unwrap();
-        let meta_store = SledMetaStore::new(tempdir.path())?;
+        let sled_root = tempfile::tempdir().unwrap();
+        let meta_store = SledMetaStore::new(sled_root.path())?;
 
         let mut trx = meta_store.get_transaction();
         trx.add_preconditions(vec![]);

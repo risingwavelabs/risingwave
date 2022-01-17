@@ -30,7 +30,8 @@ async fn test_hummock_context_management() -> Result<()> {
         context_ttl: 1000,
         context_check_interval: 300,
     };
-    let env = MetaSrvEnv::for_test_with_sled().await;
+    let sled_root = tempfile::tempdir().unwrap();
+    let env = MetaSrvEnv::for_test_with_sled(sled_root.path()).await;
     let (hummock_manager, ..) = create_hummock_manager(env, &hummock_config).await?;
     let context = hummock_manager.create_hummock_context().await?;
     let invalidate = hummock_manager
@@ -69,7 +70,8 @@ async fn test_hummock_pin_unpin() -> Result<()> {
         context_ttl: 1000,
         context_check_interval: 300,
     };
-    let env = MetaSrvEnv::for_test_with_sled().await;
+    let sled_root = tempfile::tempdir().unwrap();
+    let env = MetaSrvEnv::for_test_with_sled(sled_root).await;
     let (hummock_manager, _) = create_hummock_manager(env.clone(), &hummock_config).await?;
     let context = hummock_manager.create_hummock_context().await?;
     let manager_config = env.config();
@@ -170,7 +172,8 @@ async fn test_hummock_table() -> Result<()> {
         context_ttl: 1000,
         context_check_interval: 300,
     };
-    let env = MetaSrvEnv::for_test_with_sled().await;
+    let sled_root = tempfile::tempdir().unwrap();
+    let env = MetaSrvEnv::for_test_with_sled(sled_root).await;
     let (hummock_manager, _) = create_hummock_manager(env.clone(), &hummock_config).await?;
     let context = hummock_manager.create_hummock_context().await?;
 
@@ -242,7 +245,8 @@ async fn test_hummock_transaction() -> Result<()> {
         context_ttl: 1000,
         context_check_interval: 300,
     };
-    let env = MetaSrvEnv::for_test_with_sled().await;
+    let sled_root = tempfile::tempdir().unwrap();
+    let env = MetaSrvEnv::for_test_with_sled(sled_root).await;
     let (hummock_manager, _) = create_hummock_manager(env.clone(), &hummock_config).await?;
     let context = hummock_manager.create_hummock_context().await?;
     let mut table_id = 1;
@@ -468,7 +472,8 @@ async fn test_hummock_context_tracker_shutdown() -> Result<()> {
         context_ttl: 1000,
         context_check_interval: 300,
     };
-    let env = MetaSrvEnv::for_test_with_sled().await;
+    let sled_root = tempfile::tempdir().unwrap();
+    let env = MetaSrvEnv::for_test_with_sled(sled_root).await;
     let (hummock_manager_ref, join_handle) = create_hummock_manager(env, &hummock_config).await?;
     drop(hummock_manager_ref);
     let result = join_handle.await;

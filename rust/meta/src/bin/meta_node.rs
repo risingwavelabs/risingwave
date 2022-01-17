@@ -25,11 +25,12 @@ async fn main() {
     let addr = get_host_port(opts.host.as_str()).unwrap();
     let dashboard_addr = get_host_port(opts.dashboard_host.as_str()).unwrap();
     info!("Starting meta server at {}", addr);
+    let sled_root = tempfile::tempdir().unwrap();
     let (join_handle, _shutdown_send) = rpc_serve(
         addr,
         Some(dashboard_addr),
         None,
-        MetaStoreBackend::Sled(tempfile::tempdir().unwrap().into_path()),
+        MetaStoreBackend::Sled(sled_root.path().to_path_buf()),
     )
     .await;
     join_handle.await.unwrap();

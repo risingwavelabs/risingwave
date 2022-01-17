@@ -527,11 +527,12 @@ mod tests {
     async fn test_create_and_drop_table_remote() {
         let addr = get_host_port("127.0.0.1:9526").unwrap();
         // Run a meta node server.
+        let sled_root = tempfile::tempdir().unwrap();
         let (_join_handle, _shutdown) = rpc_serve(
             addr,
             None,
             None,
-            MetaStoreBackend::Sled(tempfile::tempdir().unwrap().into_path()),
+            MetaStoreBackend::Sled(sled_root.path().to_path_buf()),
         )
         .await;
         let endpoint = Endpoint::from_shared(format!("http://{}", addr));

@@ -72,7 +72,8 @@ mod tests {
 
         use super::*;
 
-        let meta = LocalMeta::start().await;
+        let sled_root = tempfile::tempdir().unwrap();
+        let meta = LocalMeta::start(sled_root).await;
         let args: [OsString; 0] = []; // No argument.
         let opts = FrontendOpts::parse_from(args);
         let mgr = RwSessionManager::new(opts).await.unwrap();

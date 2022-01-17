@@ -20,6 +20,7 @@ use crate::rpc::server::{rpc_serve_with_listener, MetaStoreBackend};
 async fn start_server(
     hummock_config: &hummock::Config,
     port: Option<u32>,
+    sled_root: impl AsRef<std::path::Path>,
 ) -> (String, JoinHandle<()>, UnboundedSender<()>) {
     let listener = TcpListener::bind(format!("127.0.0.1:{}", port.unwrap_or(0)))
         .await
@@ -30,7 +31,7 @@ async fn start_server(
         listener,
         None,
         Some(hummock_config.clone()),
-        MetaStoreBackend::Sled(tempfile::tempdir().unwrap().into_path()),
+        MetaStoreBackend::Sled(sled_root.as_ref().to_path_buf()),
     )
     .await;
     // Till the server is up
@@ -45,7 +46,9 @@ async fn test_create_hummock_client() -> Result<()> {
         context_ttl: 1000,
         context_check_interval: 300,
     };
-    let (endpoint, join_handle, shutdown_send) = start_server(&hummock_config, None).await;
+    let sled_root = tempfile::tempdir().unwrap();
+    let (endpoint, join_handle, shutdown_send) =
+        start_server(&hummock_config, None, sled_root.path()).await;
     // create hummock_client without refresher
     let hummock_client = HummockClient::new(endpoint.as_str()).await;
     assert!(hummock_client.is_ok());
@@ -217,7 +220,9 @@ async fn test_table_operations() -> Result<()> {
         context_ttl: 1000,
         context_check_interval: 300,
     };
-    let (endpoint, join_handle, shutdown_send) = start_server(&hummock_config, None).await;
+    let sled_root = tempfile::tempdir().unwrap();
+    let (endpoint, join_handle, shutdown_send) =
+        start_server(&hummock_config, None, sled_root).await;
 
     let mut epoch: u64 = 1;
     let mut table_id = 1;
@@ -257,7 +262,9 @@ async fn test_hummock_transaction() -> Result<()> {
         context_ttl: 1000,
         context_check_interval: 300,
     };
-    let (endpoint, join_handle, shutdown_send) = start_server(&hummock_config, None).await;
+    let sled_root = tempfile::tempdir().unwrap();
+    let (endpoint, join_handle, shutdown_send) =
+        start_server(&hummock_config, None, sled_root).await;
     let hummock_client = HummockClient::new(endpoint.as_str()).await?;
     hummock_client.start_hummock_context_refresher().await;
     let mut table_id = 1;
@@ -432,7 +439,9 @@ async fn test_retry_connect() -> Result<()> {
         tokio::time::sleep(Duration::from_secs(2)).await;
         // There is still a chance the port was already used and then failed this test. But I think
         // it is acceptable.
-        let (_, join_handle, shutdown_send) = start_server(&hummock_config, Some(port)).await;
+        let sled_root = tempfile::tempdir().unwrap();
+        let (_, join_handle, shutdown_send) =
+            start_server(&hummock_config, Some(port), sled_root).await;
         tokio::time::sleep(Duration::from_secs(2)).await;
         shutdown_send.send(()).unwrap();
         join_handle.await.unwrap();
