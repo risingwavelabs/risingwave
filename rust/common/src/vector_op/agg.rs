@@ -9,7 +9,7 @@ use crate::types::*;
 
 /// An `Aggregator` supports `update` data and `output` result.
 pub trait Aggregator: Send + 'static {
-    fn return_type_ref(&self) -> DataTypeRef;
+    fn return_type(&self) -> DataTypeKind;
 
     /// `update` the aggregator with a row with type checked at runtime.
     fn update_with_row(&mut self, input: &DataChunk, row_id: usize) -> Result<()>;
@@ -41,19 +41,19 @@ pub type BoxedAggState = Box<dyn Aggregator>;
 
 pub struct AggStateFactory {
     // When agg func is count(*), the args is empty and input type is None.
-    input_type: Option<DataTypeRef>,
+    input_type: Option<DataTypeKind>,
     input_col_idx: usize,
     agg_kind: AggKind,
-    return_type: DataTypeRef,
+    return_type: DataTypeKind,
 }
 
 impl AggStateFactory {
     pub fn new(prost: &AggCall) -> Result<Self> {
-        let return_type = build_from_prost(prost.get_return_type())?;
+        let return_type = DataTypeKind::from(prost.get_return_type());
         let agg_kind = AggKind::try_from(prost.get_type())?;
         match &prost.get_args()[..] {
             [ref arg] => {
-                let input_type = build_from_prost(arg.get_type())?;
+                let input_type = DataTypeKind::from(arg.get_type());
                 let input_col_idx = arg.get_input().get_column_idx() as usize;
                 Ok(Self {
                     input_type: Some(input_type),
@@ -62,7 +62,7 @@ impl AggStateFactory {
                     return_type,
                 })
             }
-            [] => match (&agg_kind, return_type.data_type_kind()) {
+            [] => match (&agg_kind, return_type) {
                 (AggKind::Count, DataTypeKind::Int64) => Ok(Self {
                     input_type: None,
                     input_col_idx: 0,
@@ -82,38 +82,38 @@ impl AggStateFactory {
     }
 
     pub fn create_agg_state(&self) -> Result<Box<dyn Aggregator>> {
-        if let Some(input_type) = self.input_type.clone() {
+        if let Some(input_type) = self.input_type {
             create_agg_state_unary(
                 input_type,
                 self.input_col_idx,
                 &self.agg_kind,
-                self.return_type.clone(),
+                self.return_type,
             )
         } else {
             Ok(Box::new(CountStar {
-                return_type: self.return_type.clone(),
+                return_type: self.return_type,
                 result: 0,
             }))
         }
     }
 
-    pub fn get_return_type(&self) -> DataTypeRef {
-        self.return_type.clone()
+    pub fn get_return_type(&self) -> DataTypeKind {
+        self.return_type
     }
 }
 
 fn create_agg_state_unary(
-    input_type: DataTypeRef,
+    input_type: DataTypeKind,
     input_col_idx: usize,
     agg_type: &AggKind,
-    return_type: DataTypeRef,
+    return_type: DataTypeKind,
 ) -> Result<Box<dyn Aggregator>> {
     macro_rules! gen_arms {
     [$(($agg:ident, $fn:expr, $in_type:ident, $in_arr:ty, $ret_type:ident, $ret_arr:ty)),* $(,)?] => {
       match (
-        input_type.data_type_kind(),
+        input_type,
         agg_type,
-        return_type.data_type_kind(),
+        return_type,
       ) {
         $(
         (DataTypeKind::$in_type, AggKind::$agg, DataTypeKind::$ret_type) => {
@@ -175,12 +175,12 @@ fn create_agg_state_unary(
 }
 
 struct CountStar {
-    return_type: DataTypeRef,
+    return_type: DataTypeKind,
     result: usize,
 }
 impl Aggregator for CountStar {
-    fn return_type_ref(&self) -> DataTypeRef {
-        self.return_type.clone()
+    fn return_type(&self) -> DataTypeKind {
+        self.return_type
     }
     fn update(&mut self, input: &DataChunk) -> Result<()> {
         self.result += input.cardinality();
@@ -243,7 +243,7 @@ where
     F: Send + for<'a> RTFn<'a, T, R>,
     R: Array,
 {
-    return_type: DataTypeRef,
+    return_type: DataTypeKind,
     input_col_idx: usize,
     result: Option<R::OwnedItem>,
     f: F,
@@ -255,7 +255,7 @@ where
     F: Send + for<'a> RTFn<'a, T, R>,
     R: Array,
 {
-    fn new(return_type: DataTypeRef, input_col_idx: usize, f: F) -> Self {
+    fn new(return_type: DataTypeKind, input_col_idx: usize, f: F) -> Self {
         Self {
             return_type,
             input_col_idx,
@@ -329,7 +329,7 @@ macro_rules! impl_aggregator {
         where
             F: 'static + Send + for<'a> RTFn<'a, $input, $result>,
         {
-            fn return_type_ref(&self) -> DataTypeRef {
+            fn return_type(&self) -> DataTypeKind {
                 self.return_type.clone()
             }
             fn update_with_row(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
@@ -543,8 +543,8 @@ pub trait SortedGrouper: Send + 'static {
 }
 pub type BoxedSortedGrouper = Box<dyn SortedGrouper>;
 
-pub fn create_sorted_grouper(input_type: &dyn DataType) -> Result<BoxedSortedGrouper> {
-    match input_type.data_type_kind() {
+pub fn create_sorted_grouper(input_type: DataTypeKind) -> Result<BoxedSortedGrouper> {
+    match input_type {
         // DataTypeKind::Int16 => Ok(Box::new(GeneralSortedGrouper::<I16Array>::new())),
         // DataTypeKind::Int32 => Ok(Box::new(GeneralSortedGrouper::<I32Array>::new())),
         DataTypeKind::Int32 => Ok(Box::new(GeneralSortedGrouper::<I32Array> {
@@ -675,7 +675,7 @@ mod tests {
     use std::sync::Arc;
 
     use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::DataType;
+    use risingwave_pb::data::DataType as ProstDataType;
     use risingwave_pb::expr::agg_call::Type;
     use risingwave_pb::expr::AggCall;
 
@@ -684,16 +684,16 @@ mod tests {
     use crate::types::Decimal;
 
     fn eval_agg(
-        input_type: DataTypeRef,
+        input_type: DataTypeKind,
         input: ArrayRef,
         agg_type: &AggKind,
-        return_type: DataTypeRef,
+        return_type: DataTypeKind,
         mut builder: ArrayBuilderImpl,
     ) -> Result<ArrayImpl> {
         let input_chunk = DataChunk::builder()
             .columns(vec![Column::new(input)])
             .build();
-        let mut agg_state = create_agg_state_unary(input_type, 0, agg_type, return_type.clone())?;
+        let mut agg_state = create_agg_state_unary(input_type, 0, agg_type, return_type)?;
         agg_state.update(&input_chunk)?;
         agg_state.output(&mut builder)?;
         builder.finish()
@@ -701,10 +701,10 @@ mod tests {
 
     #[test]
     fn test_create_agg_state() {
-        let int64_type = Int64Type::create(true);
-        let decimal_type = DecimalType::create(true, 10, 0).unwrap();
-        let bool_type = BoolType::create(true);
-        let char_type = StringType::create(true, 5, DataTypeKind::Char);
+        let int64_type = DataTypeKind::Int64;
+        let decimal_type = DataTypeKind::Decimal;
+        let bool_type = DataTypeKind::Boolean;
+        let char_type = DataTypeKind::Char;
 
         macro_rules! test_create {
             ($input_type:expr, $agg:ident, $return_type:expr, $expected:ident) => {
@@ -738,8 +738,8 @@ mod tests {
     fn vec_sum_int32() -> Result<()> {
         let input = I32Array::from_slice(&[Some(1), Some(2), Some(3)]).unwrap();
         let agg_type = AggKind::Sum;
-        let input_type = Int32Type::create(true);
-        let return_type = Int64Type::create(true);
+        let input_type = DataTypeKind::Int32;
+        let return_type = DataTypeKind::Int64;
         let actual = eval_agg(
             input_type,
             Arc::new(input.into()),
@@ -757,8 +757,8 @@ mod tests {
     fn vec_sum_int64() -> Result<()> {
         let input = I64Array::from_slice(&[Some(1), Some(2), Some(3)])?;
         let agg_type = AggKind::Sum;
-        let input_type = Int64Type::create(true);
-        let return_type = DecimalType::create(true, 10, 0)?;
+        let input_type = DataTypeKind::Int64;
+        let return_type = DataTypeKind::Decimal;
         let actual = eval_agg(
             input_type,
             Arc::new(input.into()),
@@ -777,8 +777,8 @@ mod tests {
         let input =
             F32Array::from_slice(&[Some(1.0.into()), Some(2.0.into()), Some(3.0.into())]).unwrap();
         let agg_type = AggKind::Min;
-        let input_type = Float32Type::create(true);
-        let return_type = Float32Type::create(true);
+        let input_type = DataTypeKind::Float32;
+        let return_type = DataTypeKind::Float32;
         let actual = eval_agg(
             input_type,
             Arc::new(input.into()),
@@ -796,8 +796,8 @@ mod tests {
     fn vec_min_char() -> Result<()> {
         let input = Utf8Array::from_slice(&[Some("b"), Some("aa")])?;
         let agg_type = AggKind::Min;
-        let input_type = StringType::create(true, 5, DataTypeKind::Char);
-        let return_type = StringType::create(true, 5, DataTypeKind::Char);
+        let input_type = DataTypeKind::Char;
+        let return_type = DataTypeKind::Char;
         let actual = eval_agg(
             input_type,
             Arc::new(input.into()),
@@ -815,8 +815,8 @@ mod tests {
     fn vec_max_char() -> Result<()> {
         let input = Utf8Array::from_slice(&[Some("b"), Some("aa")])?;
         let agg_type = AggKind::Max;
-        let input_type = StringType::create(true, 5, DataTypeKind::Varchar);
-        let return_type = StringType::create(true, 5, DataTypeKind::Varchar);
+        let input_type = DataTypeKind::Varchar;
+        let return_type = DataTypeKind::Varchar;
         let actual = eval_agg(
             input_type,
             Arc::new(input.into()),
@@ -834,8 +834,8 @@ mod tests {
     fn vec_count_int32() -> Result<()> {
         let input = I32Array::from_slice(&[Some(1), Some(2), Some(3)]).unwrap();
         let agg_type = AggKind::Count;
-        let input_type = Int32Type::create(true);
-        let return_type = Int64Type::create(true);
+        let input_type = DataTypeKind::Int32;
+        let return_type = DataTypeKind::Int64;
         let actual = eval_agg(
             input_type,
             Arc::new(input.into()),
@@ -894,7 +894,7 @@ mod tests {
             group_value: None,
         };
         let mut g1_builder = I32ArrayBuilder::new(0)?;
-        let mut a = GeneralAgg::<I32Array, _, I64Array>::new(Int64Type::create(true), 0, sum);
+        let mut a = GeneralAgg::<I32Array, _, I64Array>::new(DataTypeKind::Int64, 0, sum);
         let mut a_builder = I64ArrayBuilder::new(0)?;
 
         let g0_input = I32Array::from_slice(&[Some(1), Some(1), Some(3)]).unwrap();
@@ -945,7 +945,7 @@ mod tests {
         let prost = AggCall {
             r#type: Type::Count as i32,
             args: vec![],
-            return_type: Some(DataType {
+            return_type: Some(ProstDataType {
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
@@ -954,7 +954,7 @@ mod tests {
             .unwrap()
             .create_agg_state()
             .unwrap();
-        let mut a_builder = a.return_type_ref().create_array_builder(0).unwrap();
+        let mut a_builder = a.return_type().create_array_builder(0).unwrap();
 
         let input = I32Array::from_slice(&[Some(1), Some(1), Some(3)]).unwrap();
         let eq = g0.split_groups_concrete(&input).unwrap();

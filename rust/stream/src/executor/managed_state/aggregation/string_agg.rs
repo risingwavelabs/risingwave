@@ -94,7 +94,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
             // We only need to deserialize the value, and keep the key as bytes.
             let mut deserializer = memcomparable::Deserializer::new(&raw_value[..]);
             let value =
-                deserialize_datum_not_null_from(&DataTypeKind::Char, &mut deserializer)?.unwrap();
+                deserialize_datum_not_null_from(DataTypeKind::Char, &mut deserializer)?.unwrap();
             let value_string: String = value.into_utf8();
             self.cache.insert(
                 raw_key,

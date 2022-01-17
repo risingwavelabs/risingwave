@@ -10,7 +10,7 @@ use crate::array::{
 };
 use crate::error::Result;
 use crate::expr::{BoxedExpression, Expression};
-use crate::types::{option_as_scalar_ref, DataType, DataTypeRef, Scalar};
+use crate::types::{option_as_scalar_ref, DataTypeKind, Scalar};
 
 macro_rules! gen_expr_normal {
   ($ty_name:ident,$($arg:ident),*) => {
@@ -23,7 +23,7 @@ macro_rules! gen_expr_normal {
         // pub the fields in super mod, so that we can construct it directly.
         // FIXME: make private while new function available.
         $(pub(super) [<expr_ $arg:lower>]: BoxedExpression,)*
-        pub(super) return_type: DataTypeRef,
+        pub(super) return_type: DataTypeKind,
         pub(super) func: F,
         pub(super) _phantom: std::marker::PhantomData<($($arg, )* OA)>,
       }
@@ -49,12 +49,8 @@ macro_rules! gen_expr_normal {
         $(for<'a> &'a $arg: std::convert::From<&'a ArrayImpl>,)*
         for<'a> &'a OA: std::convert::From<&'a ArrayImpl>,
       {
-        fn return_type(&self) -> &dyn DataType {
-          &*self.return_type
-        }
-
-        fn return_type_ref(&self) -> DataTypeRef {
-          self.return_type.clone()
+        fn return_type(&self) -> DataTypeKind {
+          self.return_type
         }
 
         fn eval(&mut self, data_chunk: &DataChunk) -> Result<ArrayRef> {
@@ -105,7 +101,7 @@ macro_rules! gen_expr_normal {
         // Check issues #742.
         fn new(
           $([<expr_ $arg:lower>]: BoxedExpression, )*
-          return_type: DataTypeRef,
+          return_type: DataTypeKind,
           func: F,
         ) -> Self {
           Self {
@@ -130,7 +126,7 @@ macro_rules! gen_expr_bytes {
         // pub the fields in super mod, so that we can construct it directly.
         // FIXME: make private while new function available.
         $(pub(super) [<expr_ $arg:lower>]: BoxedExpression,)*
-        pub(super) return_type: DataTypeRef,
+        pub(super) return_type: DataTypeKind,
         pub(super) func: F,
         pub(super) _phantom: std::marker::PhantomData<($($arg, )*)>,
       }
@@ -153,12 +149,8 @@ macro_rules! gen_expr_bytes {
       where
         $(for<'a> &'a $arg: std::convert::From<&'a ArrayImpl>,)*
       {
-        fn return_type(&self) -> &dyn DataType {
-          &*self.return_type
-        }
-
-        fn return_type_ref(&self) -> DataTypeRef {
-          self.return_type.clone()
+        fn return_type(&self) -> DataTypeKind {
+          self.return_type
         }
 
         fn eval(&mut self, data_chunk: &DataChunk) -> Result<ArrayRef> {
@@ -206,7 +198,7 @@ macro_rules! gen_expr_bytes {
       > $ty_name<$($arg, )* F> {
         fn new(
           $([<expr_ $arg:lower>]: BoxedExpression, )*
-          return_type: DataTypeRef,
+          return_type: DataTypeKind,
           func: F,
         ) -> Self {
           Self {
@@ -233,7 +225,7 @@ macro_rules! gen_expr_nullable {
         // pub the fields in super mod, so that we can construct it directly.
         // FIXME: make private while new function available.
         $(pub(super) [<expr_ $arg:lower>]: BoxedExpression,)*
-        pub(super) return_type: DataTypeRef,
+        pub(super) return_type: DataTypeKind,
         pub(super) func: F,
         pub(super) _phantom: std::marker::PhantomData<($($arg, )* OA)>,
       }
@@ -259,12 +251,8 @@ macro_rules! gen_expr_nullable {
         $(for<'a> &'a $arg: std::convert::From<&'a ArrayImpl>,)*
         for<'a> &'a OA: std::convert::From<&'a ArrayImpl>,
       {
-        fn return_type(&self) -> &dyn DataType {
-          &*self.return_type
-        }
-
-        fn return_type_ref(&self) -> DataTypeRef {
-          self.return_type.clone()
+        fn return_type(&self) -> DataTypeKind {
+          self.return_type
         }
 
         fn eval(&mut self, data_chunk: &DataChunk) -> Result<ArrayRef> {
@@ -305,7 +293,7 @@ macro_rules! gen_expr_nullable {
         // Check issues #742.
         fn new(
           $([<expr_ $arg:lower>]: BoxedExpression, )*
-          return_type: DataTypeRef,
+          return_type: DataTypeKind,
           func: F,
         ) -> Self {
           Self {

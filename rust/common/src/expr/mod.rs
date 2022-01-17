@@ -24,14 +24,13 @@ use crate::array::{ArrayRef, DataChunk};
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
 use crate::expr::build_expr_from_prost::*;
-use crate::types::{DataType, DataTypeRef};
+use crate::types::DataTypeKind;
 
 pub type ExpressionRef = Arc<dyn Expression>;
 
 /// Instance of an expression
 pub trait Expression: std::fmt::Debug + Sync + Send {
-    fn return_type(&self) -> &dyn DataType;
-    fn return_type_ref(&self) -> DataTypeRef;
+    fn return_type(&self) -> DataTypeKind;
 
     /// Evaluate the expression
     ///

@@ -4,16 +4,16 @@ use itertools::Itertools;
 
 use crate::array::{ArrayImpl, DataChunk};
 use crate::error::Result;
-use crate::types::{serialize_datum_ref_into, DataTypeKind, DataTypeRef};
+use crate::types::{serialize_datum_ref_into, DataTypeKind};
 use crate::util::sort_util::{OrderPair, OrderType};
 
 struct EncodedColumn(pub Vec<Vec<u8>>);
 
 /// This function is used to check whether we can perform encoding on this type.
 /// TODO: based on `memcomparable`, we may support more data type in the future.
-pub fn is_type_encodable(t: DataTypeRef) -> bool {
+pub fn is_type_encodable(t: DataTypeKind) -> bool {
     matches!(
-        t.data_type_kind(),
+        t,
         DataTypeKind::Boolean
             | DataTypeKind::Int16
             | DataTypeKind::Int32

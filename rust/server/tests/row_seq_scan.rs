@@ -44,7 +44,7 @@ async fn test_row_seq_scan() -> Result<()> {
         schema
             .fields
             .iter()
-            .map(|field| field.data_type.clone())
+            .map(|field| field.data_type.data_type_kind())
             .collect(),
         vec![0, 1],
         schema,

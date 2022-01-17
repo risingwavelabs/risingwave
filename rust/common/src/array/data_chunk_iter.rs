@@ -201,7 +201,7 @@ impl RowDeserializer {
         values.reserve(self.data_type_kinds.len());
         let mut deserializer = memcomparable::Deserializer::new(data);
         for &ty in &self.data_type_kinds {
-            values.push(deserialize_datum_not_null_from(&ty, &mut deserializer)?);
+            values.push(deserialize_datum_not_null_from(ty, &mut deserializer)?);
         }
         Ok(Row(values))
     }

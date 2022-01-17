@@ -7,7 +7,7 @@ use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
 use crate::expr::template::BinaryExpression;
 use crate::expr::BoxedExpression;
-use crate::types::{DataTypeRef, *};
+use crate::types::*;
 use crate::vector_op::arithmetic_op::*;
 use crate::vector_op::cmp::*;
 use crate::vector_op::extract::{extract_from_date, extract_from_timestamp};
@@ -38,7 +38,7 @@ pub fn atm_placeholder<T1, T2, T3>(_l: T1, _r: T2) -> Result<T3> {
 ///   of `$i1, $i2, $cast`
 macro_rules! gen_atm_impl {
   ([$l:expr, $r:expr, $ret:expr], $( { $i1:ty, $i2:ty, $cast:ty, $func:ident} ),*) => {
-    match ($l.return_type().data_type_kind(), $r.return_type().data_type_kind()) {
+    match ($l.return_type(), $r.return_type()) {
       $(
           (<$i1 as DataTypeTrait>::DATA_TYPE_ENUM, <$i2 as DataTypeTrait>::DATA_TYPE_ENUM) => {
             Box::new(BinaryExpression::< <$i1 as DataTypeTrait>::ArrayType, <$i2 as DataTypeTrait>::ArrayType, <$cast as DataTypeTrait>::ArrayType, _> {
@@ -51,7 +51,7 @@ macro_rules! gen_atm_impl {
           }
       ),*
       _ => {
-        unimplemented!("The expression ({:?}, {:?}, {:?}) using vectorized expression framework is not supported yet!", $l.return_type().data_type_kind(), $r.return_type().data_type_kind(), $ret.data_type_kind())
+        unimplemented!("The expression ({:?}, {:?}, {:?}) using vectorized expression framework is not supported yet!", $l.return_type(), $r.return_type(), $ret)
       }
     }
   };
@@ -61,7 +61,7 @@ macro_rules! gen_atm_impl {
 /// Similar to `gen_atm_impl`.
 macro_rules! gen_cmp_impl {
   ([$l:expr, $r:expr, $ret:expr], $( { $i1:ty, $i2:ty, $cast:ty, $func: ident} ),*) => {
-    match ($l.return_type().data_type_kind(), $r.return_type().data_type_kind()) {
+    match ($l.return_type(), $r.return_type()) {
       $(
           (<$i1 as DataTypeTrait>::DATA_TYPE_ENUM, <$i2 as DataTypeTrait>::DATA_TYPE_ENUM) => {
             Box::new(BinaryExpression::< <$i1 as DataTypeTrait>::ArrayType, <$i2 as DataTypeTrait>::ArrayType, BoolArray, _> {
@@ -74,7 +74,7 @@ macro_rules! gen_cmp_impl {
           }
       ),*
       _ => {
-        unimplemented!("The expression ({:?}, {:?}) using vectorized expression framework is not supported yet!", $l.return_type().data_type_kind(), $r.return_type().data_type_kind())
+        unimplemented!("The expression ({:?}, {:?}) using vectorized expression framework is not supported yet!", $l.return_type(), $r.return_type())
       }
     }
   };
@@ -90,10 +90,7 @@ macro_rules! gen_cmp_impl {
 /// * `str_f`: cmp function between str
 macro_rules! gen_binary_expr_cmp {
     ($macro:tt, $general_f:ident, $str_f:ident, $l:expr, $r:expr, $ret:expr) => {
-        match (
-            $l.return_type().data_type_kind(),
-            $r.return_type().data_type_kind(),
-        ) {
+        match ($l.return_type(), $r.return_type()) {
             (DataTypeKind::Varchar, DataTypeKind::Varchar) => {
                 Box::new(BinaryExpression::<Utf8Array, Utf8Array, BoolArray, _> {
                     expr_ia1: $l,
@@ -232,8 +229,12 @@ macro_rules! gen_binary_expr_atm {
     };
 }
 
-fn build_extract_expr(ret: DataTypeRef, l: BoxedExpression, r: BoxedExpression) -> BoxedExpression {
-    match r.return_type().data_type_kind() {
+fn build_extract_expr(
+    ret: DataTypeKind,
+    l: BoxedExpression,
+    r: BoxedExpression,
+) -> BoxedExpression {
+    match r.return_type() {
         DataTypeKind::Date => Box::new(BinaryExpression::<Utf8Array, I32Array, DecimalArray, _> {
             expr_ia1: l,
             expr_ia2: r,
@@ -251,17 +252,14 @@ fn build_extract_expr(ret: DataTypeRef, l: BoxedExpression, r: BoxedExpression) 
             })
         }
         _ => {
-            unimplemented!(
-                "Extract ( {:?} ) is not supported yet!",
-                r.return_type().data_type_kind()
-            )
+            unimplemented!("Extract ( {:?} ) is not supported yet!", r.return_type())
         }
     }
 }
 
 pub fn new_binary_expr(
     expr_type: Type,
-    ret: DataTypeRef,
+    ret: DataTypeKind,
     l: BoxedExpression,
     r: BoxedExpression,
 ) -> BoxedExpression {
@@ -326,7 +324,7 @@ pub fn new_binary_expr(
 pub fn new_like_default(
     expr_ia1: BoxedExpression,
     expr_ia2: BoxedExpression,
-    return_type: DataTypeRef,
+    return_type: DataTypeKind,
 ) -> BoxedExpression {
     Box::new(BinaryExpression::<Utf8Array, Utf8Array, BoolArray, _> {
         expr_ia1,
@@ -340,7 +338,7 @@ pub fn new_like_default(
 pub fn new_position_expr(
     expr_ia1: BoxedExpression,
     expr_ia2: BoxedExpression,
-    return_type: DataTypeRef,
+    return_type: DataTypeKind,
 ) -> BoxedExpression {
     Box::new(BinaryExpression::<Utf8Array, Utf8Array, I32Array, _> {
         expr_ia1,

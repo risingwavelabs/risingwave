@@ -13,7 +13,7 @@ use risingwave_common::collection::hash_map::{
     Key256, Key32, Key64, KeySerialized, PrecomputedBuildHasher,
 };
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::DataTypeRef;
+use risingwave_common::types::DataTypeKind;
 use risingwave_common::vector_op::agg::{AggStateFactory, BoxedAggState};
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::HashAggNode;
@@ -40,7 +40,7 @@ pub(super) struct HashAggExecutorBuilder {
     agg_factories: Vec<AggStateFactory>,
     group_key_columns: Vec<usize>,
     child: BoxedExecutor,
-    group_key_types: Vec<DataTypeRef>,
+    group_key_types: Vec<DataTypeKind>,
     schema: Schema,
 }
 
@@ -62,14 +62,16 @@ impl HashAggExecutorBuilder {
 
         let group_key_types = group_key_columns
             .iter()
-            .map(|i| child_schema.fields[*i].data_type.clone())
+            .map(|i| child_schema.fields[*i].data_type.data_type_kind())
             .collect_vec();
 
         let fields = group_key_types
             .iter()
             .cloned()
             .chain(agg_factories.iter().map(|e| e.get_return_type()))
-            .map(|t| Field { data_type: t })
+            .map(|t| Field {
+                data_type: t.to_data_type(),
+            })
             .collect::<Vec<Field>>();
 
         let hash_key_kind = calc_hash_key_kind(&group_key_types);
@@ -119,7 +121,7 @@ pub(super) struct HashAggExecutor<K> {
     /// the aggregated result set
     result: Option<DataChunk>,
     /// the data types of key columns
-    group_key_types: Vec<DataTypeRef>,
+    group_key_types: Vec<DataTypeKind>,
     schema: Schema,
 }
 

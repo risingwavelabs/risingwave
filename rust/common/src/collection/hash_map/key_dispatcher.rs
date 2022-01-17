@@ -1,7 +1,7 @@
 use crate::collection::hash_map::hash_key::HashKey;
 use crate::collection::hash_map::HashKeyKind::{Key128, Key16, Key256, Key32, Key64};
 use crate::collection::hash_map::MAX_FIXED_SIZE_KEY_ELEMENTS;
-use crate::types::{DataSize, DataTypeRef};
+use crate::types::{DataSize, DataTypeKind};
 
 /// An enum to help to dynamically dispatch [`HashKey`] template.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -41,7 +41,7 @@ pub trait HashKeyDispatcher<K: HashKey> {
 /// 4. Any column's serialized format can't be used for equality check.
 ///
 /// Otherwise we choose smallest [`FixedSizeKey`] whose size can hold all data types.
-pub fn calc_hash_key_kind(data_types: &[DataTypeRef]) -> HashKeyKind {
+pub fn calc_hash_key_kind(data_types: &[DataTypeKind]) -> HashKeyKind {
     if data_types.len() > MAX_FIXED_SIZE_KEY_ELEMENTS {
         return HashKeyKind::KeySerialized;
     }
@@ -94,24 +94,20 @@ pub use hash_key_dispatch;
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
     use crate::collection::hash_map::{calc_hash_key_kind, HashKeyKind};
-    use crate::types::{
-        BoolType, DataTypeKind, DataTypeRef, DecimalType, Float32Type, Float64Type, Int16Type,
-        Int32Type, Int64Type, StringType,
-    };
+    use crate::types::DataTypeKind;
 
-    fn all_data_types() -> Vec<DataTypeRef> {
+    fn all_data_types() -> Vec<DataTypeKind> {
         vec![
-            BoolType::create(true),                              // 0
-            Int16Type::create(true),                             // 1
-            Int32Type::create(true),                             // 2
-            Int64Type::create(true),                             // 3
-            Float32Type::create(true),                           // 4
-            Float64Type::create(true),                           // 5
-            Arc::new(DecimalType::new(true, 20, 10).unwrap()),   // 6
-            StringType::create(true, 20, DataTypeKind::Varchar), // 7
+            DataTypeKind::Boolean, // 0
+            DataTypeKind::Int16,   // 1
+            DataTypeKind::Int32,   // 2
+            DataTypeKind::Int64,   // 3
+            DataTypeKind::Float32, // 4
+            DataTypeKind::Float64, // 5
+            DataTypeKind::Decimal, // 6
+            DataTypeKind::Varchar, // 7
         ]
     }
 
@@ -120,8 +116,8 @@ mod tests {
 
         let input_types = input_indices
             .iter()
-            .map(|idx| all_types[*idx].clone())
-            .collect::<Vec<DataTypeRef>>();
+            .map(|idx| all_types[*idx])
+            .collect::<Vec<DataTypeKind>>();
 
         let calculated_kind = calc_hash_key_kind(&input_types);
         assert_eq!(expected, calculated_kind);

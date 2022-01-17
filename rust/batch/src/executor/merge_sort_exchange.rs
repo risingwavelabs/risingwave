@@ -225,7 +225,7 @@ mod tests {
     use risingwave_common::array::{Array, DataChunk, I32Array};
     use risingwave_common::array_nonnull;
     use risingwave_common::expr::InputRefExpression;
-    use risingwave_common::types::Int32Type;
+    use risingwave_common::types::{DataTypeKind, Int32Type};
     use risingwave_common::util::sort_util::OrderType;
 
     use super::*;
@@ -267,7 +267,7 @@ mod tests {
         for _ in 0..num_sources {
             proto_sources.push(ProstExchangeSource::default());
         }
-        let input_ref_1 = InputRefExpression::new(Int32Type::create(false), 0usize);
+        let input_ref_1 = InputRefExpression::new(DataTypeKind::Int32, 0);
         let order_pairs = Arc::new(vec![OrderPair {
             order: Box::new(input_ref_1),
             order_type: OrderType::Ascending,

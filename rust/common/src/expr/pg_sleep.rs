@@ -5,7 +5,7 @@ use log::debug;
 use crate::array::{ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, I32ArrayBuilder};
 use crate::error::Result;
 use crate::expr::{BoxedExpression, Expression};
-use crate::types::{DataType, DataTypeRef, Int32Type};
+use crate::types::DataTypeKind;
 
 /// `PG_SLEEP` sleeps on current session for given duration (double precision in seconds),
 /// and returns `NULL` for all inputs.
@@ -16,25 +16,21 @@ use crate::types::{DataType, DataTypeRef, Int32Type};
 #[derive(Debug)]
 pub struct PgSleepExpression {
     child_expr: BoxedExpression,
-    return_type: DataTypeRef,
+    return_type: DataTypeKind,
 }
 
 impl PgSleepExpression {
     pub fn new(child_expr: BoxedExpression) -> Self {
         PgSleepExpression {
             child_expr,
-            return_type: Int32Type::create(true),
+            return_type: DataTypeKind::Int32,
         }
     }
 }
 
 impl Expression for PgSleepExpression {
-    fn return_type(&self) -> &dyn DataType {
-        &*self.return_type
-    }
-
-    fn return_type_ref(&self) -> DataTypeRef {
-        self.return_type.clone()
+    fn return_type(&self) -> DataTypeKind {
+        self.return_type
     }
 
     fn eval(&mut self, input: &DataChunk) -> Result<ArrayRef> {
@@ -69,13 +65,12 @@ mod tests {
     use crate::array::column::Column;
     use crate::array::DecimalArrayBuilder;
     use crate::expr::InputRefExpression;
-    use crate::types::{Decimal, DecimalType};
+    use crate::types::Decimal;
 
     #[test]
     fn test_pg_sleep() -> Result<()> {
-        let decimal_type = DecimalType::create(true, 10, 2)?;
         let mut expr =
-            PgSleepExpression::new(Box::new(InputRefExpression::new(decimal_type.clone(), 0)));
+            PgSleepExpression::new(Box::new(InputRefExpression::new(DataTypeKind::Decimal, 0)));
 
         let input_array = {
             let mut builder = DecimalArrayBuilder::new(3)?;

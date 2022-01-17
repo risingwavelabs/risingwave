@@ -82,7 +82,7 @@ impl<K: Scalar, const EXTREME_TYPE: usize> ExtremeSerializer<K, EXTREME_TYPE> {
         deserializer.set_reverse(self.is_reversed_order());
 
         // 1. key
-        let _key = deserialize_datum_not_null_from(&self.data_type_kind, &mut deserializer)?;
+        let _key = deserialize_datum_not_null_from(self.data_type_kind, &mut deserializer)?;
 
         // 2. pk
         let mut pk = ExtremePk::with_capacity(self.pk_data_type_kinds.len());

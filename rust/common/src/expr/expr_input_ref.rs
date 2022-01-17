@@ -6,22 +6,18 @@ use risingwave_pb::expr::ExprNode;
 use crate::array::{ArrayRef, DataChunk};
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::Expression;
-use crate::types::{build_from_prost as type_build_from_prost, DataType, DataTypeRef};
+use crate::types::DataTypeKind;
 
 /// `InputRefExpression` references to a column in input relation
 #[derive(Debug)]
 pub struct InputRefExpression {
-    return_type: DataTypeRef,
+    return_type: DataTypeKind,
     idx: usize,
 }
 
 impl Expression for InputRefExpression {
-    fn return_type(&self) -> &dyn DataType {
-        &*self.return_type
-    }
-
-    fn return_type_ref(&self) -> DataTypeRef {
-        self.return_type.clone()
+    fn return_type(&self) -> DataTypeKind {
+        self.return_type
     }
 
     fn eval(&mut self, input: &DataChunk) -> Result<ArrayRef> {
@@ -30,7 +26,7 @@ impl Expression for InputRefExpression {
 }
 
 impl InputRefExpression {
-    pub fn new(return_type: DataTypeRef, idx: usize) -> Self {
+    pub fn new(return_type: DataTypeKind, idx: usize) -> Self {
         InputRefExpression { return_type, idx }
     }
 
@@ -45,7 +41,7 @@ impl<'a> TryFrom<&'a ExprNode> for InputRefExpression {
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
         ensure!(prost.get_expr_type() == Type::InputRef);
 
-        let ret_type = type_build_from_prost(prost.get_return_type())?;
+        let ret_type = DataTypeKind::from(prost.get_return_type());
         if let RexNode::InputRef(input_ref_node) = prost.get_rex_node() {
             Ok(Self {
                 return_type: ret_type,

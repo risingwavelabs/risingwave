@@ -12,10 +12,10 @@ use crate::expr::expr_unary::{
     new_length_default, new_ltrim_expr, new_rtrim_expr, new_trim_expr, new_unary_expr,
 };
 use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
-use crate::types::{build_from_prost as type_build_from_prost, DataTypeKind, DataTypeRef};
+use crate::types::DataTypeKind;
 
-fn get_return_type_and_children(prost: &ExprNode) -> Result<(Vec<ExprNode>, DataTypeRef)> {
-    let ret_type = type_build_from_prost(prost.get_return_type())?;
+fn get_return_type_and_children(prost: &ExprNode) -> Result<(Vec<ExprNode>, DataTypeKind)> {
+    let ret_type = DataTypeKind::from(prost.get_return_type());
     if let RexNode::FuncCall(func_call) = prost.get_rex_node() {
         Ok((func_call.get_children().to_vec(), ret_type))
     } else {
@@ -137,7 +137,7 @@ pub fn build_case_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let len = children.len();
     let else_clause = if len % 2 == 1 {
         let else_clause = expr_build_from_prost(&children[len - 1])?;
-        if else_clause.return_type().data_type_kind() != ret_type.data_type_kind() {
+        if else_clause.return_type() != ret_type {
             return Err(RwError::from(ErrorCode::ProtocolError(
                 "the return type of else and case not match".to_string(),
             )));
@@ -152,12 +152,12 @@ pub fn build_case_expr(prost: &ExprNode) -> Result<BoxedExpression> {
         let then_index = i * 2 + 1;
         let when_expr = expr_build_from_prost(&children[when_index])?;
         let then_expr = expr_build_from_prost(&children[then_index])?;
-        if when_expr.return_type().data_type_kind() != DataTypeKind::Boolean {
+        if when_expr.return_type() != DataTypeKind::Boolean {
             return Err(RwError::from(ErrorCode::ProtocolError(
                 "the return type of when clause and condition not match".to_string(),
             )));
         }
-        if then_expr.return_type().data_type_kind() != ret_type.data_type_kind() {
+        if then_expr.return_type() != ret_type {
             return Err(RwError::from(ErrorCode::ProtocolError(
                 "the return type of then clause and case not match".to_string(),
             )));

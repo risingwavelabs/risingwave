@@ -73,7 +73,7 @@ impl BoxedExecutorBuilder for ProjectionExecutor {
         let fields = project_exprs
             .iter()
             .map(|expr| Field {
-                data_type: expr.return_type_ref(),
+                data_type: expr.return_type().to_data_type(),
             })
             .collect::<Vec<Field>>();
 
@@ -103,8 +103,7 @@ mod tests {
         let col2 = column_nonnull! {I32Array, [7, 8, 66666, 4, 3]};
         let chunk = DataChunk::builder().columns(vec![col1, col2]).build();
 
-        let type1 = Int32Type::create(false);
-        let expr1 = InputRefExpression::new(type1, 0);
+        let expr1 = InputRefExpression::new(DataTypeKind::Int32, 0);
         let expr_vec = vec![Box::new(expr1) as BoxedExpression];
 
         let schema = Schema {
@@ -123,7 +122,7 @@ mod tests {
         let fields = expr_vec
             .iter()
             .map(|expr| Field {
-                data_type: expr.return_type_ref(),
+                data_type: expr.return_type().to_data_type(),
             })
             .collect::<Vec<Field>>();
 

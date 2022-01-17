@@ -143,21 +143,18 @@ impl From<&ProstDataType> for DataTypeKind {
             TypeName::Timestampz => DataTypeKind::Timestampz,
             TypeName::Decimal => DataTypeKind::Decimal,
             TypeName::Interval => DataTypeKind::Interval,
+            TypeName::Symbol => DataTypeKind::Varchar,
             _ => panic!("{:?} not supported", proto.get_type_name()),
         }
     }
 }
 
-impl DataType for DataTypeKind {
-    fn data_type_kind(&self) -> DataTypeKind {
-        *self
-    }
-
-    fn is_nullable(&self) -> bool {
+impl DataTypeKind {
+    pub fn is_nullable(&self) -> bool {
         true
     }
 
-    fn create_array_builder(&self, capacity: usize) -> Result<ArrayBuilderImpl> {
+    pub fn create_array_builder(&self, capacity: usize) -> Result<ArrayBuilderImpl> {
         use crate::array::*;
         Ok(match self {
             DataTypeKind::Boolean => BoolArrayBuilder::new(capacity)?.into(),
@@ -176,7 +173,7 @@ impl DataType for DataTypeKind {
         })
     }
 
-    fn to_protobuf(&self) -> Result<ProstDataType> {
+    pub fn to_protobuf(&self) -> Result<ProstDataType> {
         Ok(ProstDataType {
             type_name: self.prost_type_name() as i32,
             precision: 0,
@@ -186,11 +183,7 @@ impl DataType for DataTypeKind {
         })
     }
 
-    fn as_any(&self) -> &dyn Any {
-        todo!("will be removed")
-    }
-
-    fn data_size(&self) -> DataSize {
+    pub fn data_size(&self) -> DataSize {
         use std::mem::size_of;
         match self {
             DataTypeKind::Boolean => DataSize::Variable,
@@ -408,10 +401,10 @@ pub fn deserialize_datum_from(
 
 // TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions.
 pub fn deserialize_datum_not_null_from(
-    ty: &DataTypeKind,
+    ty: DataTypeKind,
     deserializer: &mut memcomparable::Deserializer<impl Buf>,
 ) -> memcomparable::Result<Datum> {
-    Ok(Some(ScalarImpl::deserialize(*ty, deserializer)?))
+    Ok(Some(ScalarImpl::deserialize(ty, deserializer)?))
 }
 
 /// This trait is to implement `to_owned_datum` for `Option<ScalarImpl>`
@@ -713,7 +706,7 @@ mod tests {
         fn deserialize(data: Vec<u8>) -> OrderedF32 {
             let mut deserializer = memcomparable::Deserializer::new(data.as_slice());
             let datum =
-                deserialize_datum_not_null_from(&DataTypeKind::Float32, &mut deserializer).unwrap();
+                deserialize_datum_not_null_from(DataTypeKind::Float32, &mut deserializer).unwrap();
             datum.unwrap().try_into().unwrap()
         }
 

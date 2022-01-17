@@ -5,7 +5,7 @@ use risingwave_pb::plan::ColumnDesc;
 
 use crate::array::ArrayBuilderImpl;
 use crate::error::Result;
-use crate::types::{build_from_prost, DataType, DataTypeRef};
+use crate::types::{build_from_prost, DataType, DataTypeKind, DataTypeRef};
 
 /// The field in the schema of the executor's return data
 #[derive(Clone)]
@@ -43,6 +43,13 @@ impl Schema {
         self.fields
             .iter()
             .map(|field| field.data_type.clone())
+            .collect()
+    }
+
+    pub fn data_types(&self) -> Vec<DataTypeKind> {
+        self.fields
+            .iter()
+            .map(|field| field.data_type.data_type_kind())
             .collect()
     }
 

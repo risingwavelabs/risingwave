@@ -1,5 +1,4 @@
 use std::convert::{TryFrom, TryInto};
-use std::ops::Deref;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -13,10 +12,7 @@ use crate::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk};
 use crate::error::ErrorCode::InternalError;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::Expression;
-use crate::types::{
-    build_from_prost as type_build_from_prost, DataType, DataTypeKind, DataTypeRef, Datum, Decimal,
-    IntervalUnit, Scalar, ScalarImpl,
-};
+use crate::types::{DataTypeKind, Datum, Decimal, IntervalUnit, Scalar, ScalarImpl};
 
 macro_rules! array_impl_literal_append {
   ([$arr_builder: ident, $literal: ident, $cardinality: ident], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
@@ -36,22 +32,17 @@ macro_rules! array_impl_literal_append {
 
 #[derive(Debug)]
 pub struct LiteralExpression {
-    return_type: DataTypeRef,
+    return_type: DataTypeKind,
     literal: Datum,
 }
 
 impl Expression for LiteralExpression {
-    fn return_type(&self) -> &dyn DataType {
-        &*self.return_type
-    }
-
-    fn return_type_ref(&self) -> DataTypeRef {
-        self.return_type.clone()
+    fn return_type(&self) -> DataTypeKind {
+        self.return_type
     }
 
     fn eval(&mut self, input: &DataChunk) -> Result<ArrayRef> {
-        let mut array_builder =
-            DataType::create_array_builder(self.return_type.as_ref(), input.cardinality())?;
+        let mut array_builder = self.return_type.create_array_builder(input.cardinality())?;
         let cardinality = input.cardinality();
         let builder = &mut array_builder;
         let literal = &self.literal;
@@ -90,7 +81,6 @@ fn literal_type_match(return_type: DataTypeKind, literal: Option<&ScalarImpl>) -
                     | (DataTypeKind::Varchar, ScalarImpl::Utf8(_))
             )
         }
-
         None => true,
     }
 }
@@ -119,11 +109,8 @@ fn make_interval(bytes: &[u8], ty: IntervalType) -> Result<IntervalUnit> {
 }
 
 impl LiteralExpression {
-    pub fn new(return_type: DataTypeRef, literal: Datum) -> Self {
-        assert!(literal_type_match(
-            return_type.deref().data_type_kind(),
-            literal.as_ref()
-        ));
+    pub fn new(return_type: DataTypeKind, literal: Datum) -> Self {
+        assert!(literal_type_match(return_type, literal.as_ref()));
         LiteralExpression {
             return_type,
             literal,
@@ -140,7 +127,7 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
         ensure!(prost.expr_type == Type::ConstantValue as i32);
-        let ret_type = type_build_from_prost(prost.get_return_type())?;
+        let ret_type = DataTypeKind::from(prost.get_return_type());
         if prost.rex_node.is_none() {
             return Ok(Self {
                 return_type: ret_type,

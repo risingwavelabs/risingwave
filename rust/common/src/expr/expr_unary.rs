@@ -12,7 +12,7 @@ use crate::expr::expr_is_null::{IsNotNullExpression, IsNullExpression};
 use crate::expr::pg_sleep::PgSleepExpression;
 use crate::expr::template::UnaryNullableExpression;
 use crate::expr::BoxedExpression;
-use crate::types::{DataTypeKind, DataTypeRef, *};
+use crate::types::*;
 use crate::vector_op::cast::*;
 use crate::vector_op::cmp::{is_false, is_not_false, is_not_true, is_true};
 use crate::vector_op::conjunction;
@@ -34,7 +34,7 @@ use crate::vector_op::upper::upper;
 ///   of `$input, $cast`
 macro_rules! gen_cast_impl {
   ([$child:expr, $ret:expr], $( { $input:ty, $cast:ty, $func:expr} ),*) => {
-    match ($child.return_type().data_type_kind(), $ret.data_type_kind()) {
+    match ($child.return_type(), $ret) {
       $(
           (<$input as DataTypeTrait>::DATA_TYPE_ENUM, <$cast as DataTypeTrait>::DATA_TYPE_ENUM) => {
             Box::new(UnaryExpression::< <$input as DataTypeTrait>::ArrayType, <$cast as DataTypeTrait>::ArrayType, _> {
@@ -46,7 +46,7 @@ macro_rules! gen_cast_impl {
           }
       ),*
       _ => {
-        unimplemented!("The expression ({:?}, {:?}) using vectorized expression framework is not supported yet!", $child.return_type().data_type_kind(), $ret.data_type_kind())
+        unimplemented!("The expression ({:?}, {:?}) using vectorized expression framework is not supported yet!", $child.return_type(), $ret)
       }
     }
   };
@@ -101,14 +101,10 @@ macro_rules! gen_cast {
 
 pub fn new_unary_expr(
     expr_type: ProstType,
-    return_type: DataTypeRef,
+    return_type: DataTypeKind,
     child_expr: BoxedExpression,
 ) -> BoxedExpression {
-    match (
-        expr_type,
-        return_type.data_type_kind(),
-        child_expr.return_type().data_type_kind(),
-    ) {
+    match (expr_type, return_type, child_expr.return_type()) {
         // FIXME: We can not unify char and varchar because they are different in PG while share the
         // same logical type (String type) in our system (#2414).
         (ProstType::Cast, DataTypeKind::Date, DataTypeKind::Char) => {
@@ -269,7 +265,7 @@ pub fn new_unary_expr(
     }
 }
 
-pub fn new_length_default(expr_ia1: BoxedExpression, return_type: DataTypeRef) -> BoxedExpression {
+pub fn new_length_default(expr_ia1: BoxedExpression, return_type: DataTypeKind) -> BoxedExpression {
     Box::new(UnaryExpression::<Utf8Array, I64Array, _> {
         expr_ia1,
         return_type,
@@ -278,7 +274,7 @@ pub fn new_length_default(expr_ia1: BoxedExpression, return_type: DataTypeRef) -
     })
 }
 
-pub fn new_trim_expr(expr_ia1: BoxedExpression, return_type: DataTypeRef) -> BoxedExpression {
+pub fn new_trim_expr(expr_ia1: BoxedExpression, return_type: DataTypeKind) -> BoxedExpression {
     Box::new(UnaryBytesExpression::<Utf8Array, _> {
         expr_ia1,
         return_type,
@@ -287,7 +283,7 @@ pub fn new_trim_expr(expr_ia1: BoxedExpression, return_type: DataTypeRef) -> Box
     })
 }
 
-pub fn new_ltrim_expr(expr_ia1: BoxedExpression, return_type: DataTypeRef) -> BoxedExpression {
+pub fn new_ltrim_expr(expr_ia1: BoxedExpression, return_type: DataTypeKind) -> BoxedExpression {
     Box::new(UnaryBytesExpression::<Utf8Array, _> {
         expr_ia1,
         return_type,
@@ -296,7 +292,7 @@ pub fn new_ltrim_expr(expr_ia1: BoxedExpression, return_type: DataTypeRef) -> Bo
     })
 }
 
-pub fn new_rtrim_expr(expr_ia1: BoxedExpression, return_type: DataTypeRef) -> BoxedExpression {
+pub fn new_rtrim_expr(expr_ia1: BoxedExpression, return_type: DataTypeKind) -> BoxedExpression {
     Box::new(UnaryBytesExpression::<Utf8Array, _> {
         expr_ia1,
         return_type,

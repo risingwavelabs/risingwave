@@ -8,8 +8,8 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
 use risingwave_common::expr::AggKind;
 use risingwave_common::types::{
-    deserialize_datum_not_null_from, serialize_datum_not_null_into, DataType, DataTypeKind,
-    DataTypeRef, Datum, ScalarImpl, ScalarRef,
+    deserialize_datum_not_null_from, serialize_datum_not_null_into, DataTypeKind, DataTypeRef,
+    Datum, ScalarImpl, ScalarRef,
 };
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
@@ -277,11 +277,11 @@ where
             // following logic.
 
             let all_data = self.keyspace.scan_strip_prefix(self.top_n_count).await?;
-            let kind = self.data_type.data_type_kind();
+            let data_type = self.data_type.data_type_kind();
 
             for (raw_key, raw_value) in all_data {
                 let mut deserializer = memcomparable::Deserializer::new(&raw_value[..]);
-                let value = deserialize_datum_not_null_from(&kind, &mut deserializer)?.unwrap();
+                let value = deserialize_datum_not_null_from(data_type, &mut deserializer)?.unwrap();
                 let key = value.clone().try_into().unwrap();
                 let pks = self.serializer.get_pk(&raw_key[..])?;
                 self.top_n.insert((key, pks), value);
@@ -369,15 +369,11 @@ where
     pub async fn iterate_store(&self) -> Result<Vec<(A::OwnedItem, ExtremePk)>> {
         let all_data = self.keyspace.scan_strip_prefix(None).await?;
         let mut result = vec![];
-        let _kind = self.data_type.data_type_kind();
+        let data_type = self.data_type.data_type_kind();
 
         for (raw_key, raw_value) in all_data {
             let mut deserializer = memcomparable::Deserializer::new(&raw_value[..]);
-            let value = deserialize_datum_not_null_from(
-                &self.data_type.data_type_kind(),
-                &mut deserializer,
-            )?
-            .unwrap();
+            let value = deserialize_datum_not_null_from(data_type, &mut deserializer)?.unwrap();
             let key = value.clone().try_into().unwrap();
             let pks = self.serializer.get_pk(&raw_key[..])?;
             result.push((key, pks));
@@ -416,7 +412,7 @@ pub async fn create_streaming_extreme_state<S: StateStore>(
       use risingwave_common::array::*;
 
       let data_type = agg_call.return_type.to_data_type();
-      match (agg_call.kind, agg_call.return_type.data_type_kind()) {
+      match (agg_call.kind, agg_call.return_type) {
         $(
           (AggKind::Max, $( $kind )|+) => Ok(Box::new(
             ManagedMaxState::<_, $array>::new(keyspace, data_type, top_n_count, row_count, pk_data_type_kinds).await?,

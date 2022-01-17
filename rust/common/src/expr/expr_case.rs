@@ -2,8 +2,8 @@ use itertools::Itertools;
 
 use crate::array::{ArrayRef, DataChunk};
 use crate::error::Result;
-use crate::expr::{BoxedExpression, DataType, Expression};
-use crate::types::DataTypeRef;
+use crate::expr::{BoxedExpression, Expression};
+use crate::types::DataTypeKind;
 
 #[derive(Debug)]
 pub struct WhenClause {
@@ -19,14 +19,14 @@ impl WhenClause {
 
 #[derive(Debug)]
 pub struct CaseExpression {
-    return_type: DataTypeRef,
+    return_type: DataTypeKind,
     when_clauses: Vec<WhenClause>,
     else_clause: Option<BoxedExpression>,
 }
 
 impl CaseExpression {
     pub fn new(
-        return_type: DataTypeRef,
+        return_type: DataTypeKind,
         when_clauses: Vec<WhenClause>,
         else_clause: Option<BoxedExpression>,
     ) -> Self {
@@ -39,12 +39,10 @@ impl CaseExpression {
 }
 
 impl Expression for CaseExpression {
-    fn return_type(&self) -> &dyn DataType {
-        &*self.return_type
+    fn return_type(&self) -> DataTypeKind {
+        self.return_type
     }
-    fn return_type_ref(&self) -> DataTypeRef {
-        self.return_type.clone()
-    }
+
     fn eval(&mut self, input: &DataChunk) -> Result<ArrayRef> {
         let mut els = self
             .else_clause
@@ -60,9 +58,7 @@ impl Expression for CaseExpression {
                 )
             })
             .collect_vec();
-        let mut output_array = self
-            .return_type_ref()
-            .create_array_builder(input.capacity())?;
+        let mut output_array = self.return_type().create_array_builder(input.capacity())?;
         for idx in 0..input.capacity() {
             if let Some((_, t)) = when_thens
                 .iter()
@@ -94,7 +90,6 @@ mod tests {
     use crate::array::PrimitiveArray;
     use crate::expr::expr_binary_nonnull::new_binary_expr;
     use crate::expr::{InputRefExpression, LiteralExpression};
-    use crate::types::{BoolType, Float32Type, Int32Type};
 
     fn create_column_i32(vec: &[Option<i32>]) -> Result<Column> {
         let array = PrimitiveArray::from_slice(vec).map(|x| Arc::new(x.into()))?;
@@ -103,26 +98,26 @@ mod tests {
 
     #[test]
     fn test_searched_case() {
-        let ret_type = Float32Type::create(false);
+        let ret_type = DataTypeKind::Float32;
         // when x <= 2 then 3.1
         let when_clauses = vec![WhenClause::new(
             new_binary_expr(
                 Type::LessThanOrEqual,
-                BoolType::create(false),
-                Box::new(InputRefExpression::new(Int32Type::create(false), 0)),
+                DataTypeKind::Boolean,
+                Box::new(InputRefExpression::new(DataTypeKind::Int32, 0)),
                 Box::new(LiteralExpression::new(
-                    Float32Type::create(false),
+                    DataTypeKind::Float32,
                     Some(2f32.into()),
                 )),
             ),
             Box::new(LiteralExpression::new(
-                Float32Type::create(false),
+                DataTypeKind::Float32,
                 Some(3.1f32.into()),
             )),
         )];
         // else 4.1
         let els = Box::new(LiteralExpression::new(
-            Float32Type::create(false),
+            DataTypeKind::Float32,
             Some(4.1f32.into()),
         ));
         let mut searched_case_expr = CaseExpression::new(ret_type, when_clauses, Some(els));
@@ -138,20 +133,20 @@ mod tests {
 
     #[test]
     fn test_without_else() {
-        let ret_type = Float32Type::create(true);
+        let ret_type = DataTypeKind::Float32;
         // when x <= 3 then 3.1
         let when_clauses = vec![WhenClause::new(
             new_binary_expr(
                 Type::LessThanOrEqual,
-                BoolType::create(false),
-                Box::new(InputRefExpression::new(Int32Type::create(false), 0)),
+                DataTypeKind::Boolean,
+                Box::new(InputRefExpression::new(DataTypeKind::Int32, 0)),
                 Box::new(LiteralExpression::new(
-                    Float32Type::create(false),
+                    DataTypeKind::Float32,
                     Some(3f32.into()),
                 )),
             ),
             Box::new(LiteralExpression::new(
-                Float32Type::create(true),
+                DataTypeKind::Float32,
                 Some(3.1f32.into()),
             )),
         )];

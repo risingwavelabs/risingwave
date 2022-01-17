@@ -152,7 +152,7 @@ async fn test_merger_sum_aggr() {
         vec![],
         vec![
             // TODO: use the new streaming_if_null expression here, and add `None` tests
-            Box::new(InputRefExpression::new(Int64Type::create(false), 1)),
+            Box::new(InputRefExpression::new(DataTypeKind::Int64, 1)),
         ],
         3,
     );
@@ -208,97 +208,97 @@ fn str_to_timestamp(elem: &str) -> i64 {
 
 fn make_tpchq6_expr() -> (BoxedExpression, BoxedExpression) {
     let const_1994_01_01 = LiteralExpression::new(
-        StringType::create(true, 20, DataTypeKind::Char),
+        DataTypeKind::Char,
         Some(ScalarImpl::Utf8("1994-01-01 00:00:00".to_string())),
     );
     let const_1995_01_01 = LiteralExpression::new(
-        StringType::create(true, 20, DataTypeKind::Char),
+        DataTypeKind::Char,
         Some(ScalarImpl::Utf8("1995-01-01 00:00:00".to_string())),
     );
     let const_0_05 = LiteralExpression::new(
-        Float64Type::create(false),
+        DataTypeKind::Float64,
         Some(ScalarImpl::Float64(0.05.into())),
     );
     let const_0_07 = LiteralExpression::new(
-        Float64Type::create(false),
+        DataTypeKind::Float64,
         Some(ScalarImpl::Float64(0.07.into())),
     );
-    let const_24 = LiteralExpression::new(Int32Type::create(false), Some(ScalarImpl::Int32(24)));
-    let t_shipdate = TimestampType::create(false, 10);
-    let l_shipdate = InputRefExpression::new(t_shipdate.clone(), 0);
-    let l_shipdate_2 = InputRefExpression::new(t_shipdate.clone(), 0);
-    let t_discount = Float64Type::create(false);
-    let l_discount = InputRefExpression::new(t_discount.clone(), 1);
-    let l_discount_2 = InputRefExpression::new(t_discount.clone(), 1);
-    let l_discount_3 = InputRefExpression::new(t_discount.clone(), 1);
-    let t_quantity = Float64Type::create(false);
-    let l_quantity = InputRefExpression::new(t_quantity.clone(), 2);
-    let t_extended_price = Float64Type::create(false);
-    let l_extended_price = InputRefExpression::new(t_extended_price.clone(), 3);
+    let const_24 = LiteralExpression::new(DataTypeKind::Int32, Some(ScalarImpl::Int32(24)));
+    let t_shipdate = DataTypeKind::Timestamp;
+    let l_shipdate = InputRefExpression::new(t_shipdate, 0);
+    let l_shipdate_2 = InputRefExpression::new(t_shipdate, 0);
+    let t_discount = DataTypeKind::Float64;
+    let l_discount = InputRefExpression::new(t_discount, 1);
+    let l_discount_2 = InputRefExpression::new(t_discount, 1);
+    let l_discount_3 = InputRefExpression::new(t_discount, 1);
+    let t_quantity = DataTypeKind::Float64;
+    let l_quantity = InputRefExpression::new(t_quantity, 2);
+    let t_extended_price = DataTypeKind::Float64;
+    let l_extended_price = InputRefExpression::new(t_extended_price, 3);
 
     let l_shipdate_geq_cast = new_unary_expr(
         Type::Cast,
-        TimestampType::create(false, 10),
+        DataTypeKind::Timestamp,
         Box::new(const_1994_01_01),
     );
 
     let l_shipdate_le_cast = new_unary_expr(
         Type::Cast,
-        TimestampType::create(false, 10),
+        DataTypeKind::Timestamp,
         Box::new(const_1995_01_01),
     );
 
     let l_shipdate_geq = new_binary_expr(
         Type::GreaterThanOrEqual,
-        BoolType::create(false),
+        DataTypeKind::Boolean,
         Box::new(l_shipdate),
         l_shipdate_geq_cast,
     );
 
     let l_shipdate_le = new_binary_expr(
         Type::LessThanOrEqual,
-        BoolType::create(false),
+        DataTypeKind::Boolean,
         Box::new(l_shipdate_2),
         l_shipdate_le_cast,
     );
 
     let l_discount_geq = new_binary_expr(
         Type::GreaterThanOrEqual,
-        BoolType::create(false),
+        DataTypeKind::Boolean,
         Box::new(l_discount),
         Box::new(const_0_05),
     );
 
     let l_discount_leq = new_binary_expr(
         Type::LessThanOrEqual,
-        BoolType::create(false),
+        DataTypeKind::Boolean,
         Box::new(l_discount_2),
         Box::new(const_0_07),
     );
 
     let l_quantity_le = new_binary_expr(
         Type::LessThan,
-        BoolType::create(false),
+        DataTypeKind::Boolean,
         Box::new(l_quantity),
         Box::new(const_24),
     );
 
     let and = new_nullable_binary_expr(
         Type::And,
-        BoolType::create(false),
+        DataTypeKind::Boolean,
         l_shipdate_geq,
         l_shipdate_le,
     );
 
-    let and = new_nullable_binary_expr(Type::And, BoolType::create(false), and, l_discount_geq);
+    let and = new_nullable_binary_expr(Type::And, DataTypeKind::Boolean, and, l_discount_geq);
 
-    let and = new_nullable_binary_expr(Type::And, BoolType::create(false), and, l_discount_leq);
+    let and = new_nullable_binary_expr(Type::And, DataTypeKind::Boolean, and, l_discount_leq);
 
-    let and = new_nullable_binary_expr(Type::And, BoolType::create(false), and, l_quantity_le);
+    let and = new_nullable_binary_expr(Type::And, DataTypeKind::Boolean, and, l_quantity_le);
 
     let multiply = new_binary_expr(
         Type::Multiply,
-        Float64Type::create(false),
+        DataTypeKind::Float64,
         Box::new(l_extended_price),
         Box::new(l_discount_3),
     );
@@ -432,7 +432,7 @@ async fn test_tpch_q6() {
         vec![],
         vec![
             // TODO: use the new streaming_if_null expression here, and add `None` tests
-            Box::new(InputRefExpression::new(Float64Type::create(false), 1)),
+            Box::new(InputRefExpression::new(DataTypeKind::Float64, 1)),
         ],
         5,
     );

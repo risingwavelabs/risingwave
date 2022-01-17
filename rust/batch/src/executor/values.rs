@@ -7,7 +7,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::ErrorCode::{InternalError, ProstError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::expr::{build_from_prost, BoxedExpression};
-use risingwave_common::types::{build_from_prost as type_build_from_prost, DataTypeRef};
+use risingwave_common::types::DataTypeKind;
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::ValuesNode;
 
@@ -105,12 +105,12 @@ impl BoxedExecutorBuilder for ValuesExecutor {
         let data_types = value_node
             .get_column_types()
             .iter()
-            .map(type_build_from_prost)
-            .collect::<Result<Vec<DataTypeRef>>>()?;
+            .map(DataTypeKind::from)
+            .collect::<Vec<DataTypeKind>>();
         let fields = data_types
             .iter()
             .map(|data_type| Field {
-                data_type: data_type.clone(),
+                data_type: data_type.to_data_type(),
             })
             .collect::<Vec<Field>>();
 
@@ -125,7 +125,7 @@ impl BoxedExecutorBuilder for ValuesExecutor {
 mod tests {
     use risingwave_common::array::Array;
     use risingwave_common::expr::LiteralExpression;
-    use risingwave_common::types::{DataTypeKind, Int16Type, Int32Type, Int64Type, ScalarImpl};
+    use risingwave_common::types::{DataTypeKind, ScalarImpl};
 
     use super::*;
 
@@ -133,15 +133,15 @@ mod tests {
     async fn test_values_executor() -> Result<()> {
         let exprs = vec![vec![
             Box::new(LiteralExpression::new(
-                Int16Type::create(false),
+                DataTypeKind::Int16,
                 Some(ScalarImpl::Int16(1)),
             )) as BoxedExpression,
             Box::new(LiteralExpression::new(
-                Int32Type::create(false),
+                DataTypeKind::Int32,
                 Some(ScalarImpl::Int32(2)),
             )),
             Box::new(LiteralExpression::new(
-                Int64Type::create(false),
+                DataTypeKind::Int64,
                 Some(ScalarImpl::Int64(3)),
             )),
         ]];
@@ -151,7 +151,7 @@ mod tests {
             .ok_or_else(|| RwError::from(InternalError("Can't values empty rows!".to_string())))?
             .iter() // for each column
             .map(|col| Field {
-                data_type: col.return_type_ref(),
+                data_type: col.return_type().to_data_type(),
             })
             .collect::<Vec<Field>>();
         let mut values_executor = ValuesExecutor {

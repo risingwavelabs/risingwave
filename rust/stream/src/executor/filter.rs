@@ -161,7 +161,7 @@ mod tests {
     use risingwave_common::column_nonnull;
     use risingwave_common::expr::expr_binary_nonnull::new_binary_expr;
     use risingwave_common::expr::InputRefExpression;
-    use risingwave_common::types::{BoolType, Int64Type};
+    use risingwave_common::types::{DataTypeKind, Int64Type};
     use risingwave_pb::expr::expr_node::Type;
 
     use crate::executor::test_utils::MockSource;
@@ -207,13 +207,11 @@ mod tests {
         };
         let source = MockSource::with_chunks(schema, PkIndices::new(), vec![chunk1, chunk2]);
 
-        let left_type = Int64Type::create(false);
-        let left_expr = InputRefExpression::new(left_type, 0);
-        let right_type = Int64Type::create(false);
-        let right_expr = InputRefExpression::new(right_type, 1);
+        let left_expr = InputRefExpression::new(DataTypeKind::Int64, 0);
+        let right_expr = InputRefExpression::new(DataTypeKind::Int64, 1);
         let test_expr = new_binary_expr(
             Type::GreaterThan,
-            BoolType::create(false),
+            DataTypeKind::Boolean,
             Box::new(left_expr),
             Box::new(right_expr),
         );

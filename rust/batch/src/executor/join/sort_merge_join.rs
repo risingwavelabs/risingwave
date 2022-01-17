@@ -190,7 +190,7 @@ impl SortMergeJoinExecutor {
     ) -> Self {
         Self {
             join_type,
-            chunk_builder: DataChunkBuilder::new_with_default_size(schema.data_types_clone()),
+            chunk_builder: DataChunkBuilder::new_with_default_size(schema.data_types()),
             schema,
             probe_side_source,
             build_side_source,
@@ -295,7 +295,7 @@ mod tests {
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{DataChunk, F32Array, F64Array, I32Array};
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::{DataTypeRef, Float32Type, Float64Type, Int32Type};
+    use risingwave_common::types::{DataTypeKind, Float32Type, Float64Type, Int32Type};
 
     use crate::executor::join::sort_merge_join::{RowLevelIter, SortMergeJoinExecutor};
     use crate::executor::join::JoinType;
@@ -303,8 +303,8 @@ mod tests {
     use crate::executor::BoxedExecutor;
 
     struct TestFixture {
-        left_types: Vec<DataTypeRef>,
-        right_types: Vec<DataTypeRef>,
+        left_types: Vec<DataTypeKind>,
+        right_types: Vec<DataTypeKind>,
         join_type: JoinType,
     }
 
@@ -326,14 +326,8 @@ mod tests {
     impl TestFixture {
         fn with_join_type(join_type: JoinType) -> Self {
             Self {
-                left_types: vec![
-                    Arc::new(Int32Type::new(false)),
-                    Arc::new(Float32Type::new(true)),
-                ],
-                right_types: vec![
-                    Arc::new(Int32Type::new(false)),
-                    Arc::new(Float64Type::new(true)),
-                ],
+                left_types: vec![DataTypeKind::Int32, DataTypeKind::Float32],
+                right_types: vec![DataTypeKind::Int32, DataTypeKind::Float64],
                 join_type,
             }
         }

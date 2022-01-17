@@ -96,7 +96,7 @@ impl BoxedExecutorBuilder for FilterExecutor {
             let child = source.clone_for_plan(child_plan).build()?;
             debug!("Child schema: {:?}", child.schema());
             let chunk_builder =
-                DataChunkBuilder::new(child.schema().data_types_clone(), DEFAULT_CHUNK_BUFFER_SIZE);
+                DataChunkBuilder::new(child.schema().data_types(), DEFAULT_CHUNK_BUFFER_SIZE);
 
             return Ok(Box::new(Self {
                 expr,
@@ -146,7 +146,7 @@ mod tests {
         mock_executor.add(data_chunk);
         let expr = make_expression(Type::Equal);
         let chunk_builder = DataChunkBuilder::new(
-            mock_executor.schema().data_types_clone(),
+            mock_executor.schema().data_types(),
             DEFAULT_CHUNK_BUFFER_SIZE,
         );
         let mut filter_executor = FilterExecutor {

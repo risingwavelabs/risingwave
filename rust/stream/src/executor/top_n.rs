@@ -314,7 +314,7 @@ impl<S: StateStore> TopNExecutorBase for TopNExecutor<S> {
 
         if !new_rows.is_empty() {
             let mut data_chunk_builder =
-                DataChunkBuilder::new_with_default_size(self.schema().data_types_clone());
+                DataChunkBuilder::new_with_default_size(self.schema().data_types());
             for row in new_rows {
                 data_chunk_builder.append_one_row_ref((&row).into())?;
             }

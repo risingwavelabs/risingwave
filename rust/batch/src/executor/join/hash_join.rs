@@ -11,7 +11,7 @@ use risingwave_common::collection::hash_map::{
     Key256, Key32, Key64, KeySerialized,
 };
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::DataTypeRef;
+use risingwave_common::types::DataTypeKind;
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::HashJoinNode;
@@ -33,18 +33,18 @@ pub(super) struct EquiJoinParams {
     /// Column indexes of left keys in equi join, e.g., the column indexes of `b1` and `b3` in `b`.
     left_key_columns: Vec<usize>,
     /// Data types of left keys in equi join, e.g., the column types of `b1` and `b3` in `b`.
-    left_key_types: Vec<DataTypeRef>,
+    left_key_types: Vec<DataTypeKind>,
     /// Column indexes of right keys in equi join, e.g., the column indexes of `a1` and `a3` in
     /// `a`.
     right_key_columns: Vec<usize>,
     /// Data types of right keys in equi join, e.g., the column types of `a1` and `a3` in `a`.
-    right_key_types: Vec<DataTypeRef>,
+    right_key_types: Vec<DataTypeKind>,
     /// Column indexes of outputs in equi join, e.g. the column indexes of `a1`, `a2`, `b1`, `b2`.
     /// [`Either::Left`] is used to mark left side input, and [`Either::Right`] is used to mark
     /// right side input.
     output_columns: Vec<Either<usize, usize>>,
     /// Column types of outputs in equi join, e.g. the column types of `a1`, `a2`, `b1`, `b2`.
-    output_data_types: Vec<DataTypeRef>,
+    output_data_types: Vec<DataTypeKind>,
     /// Data chunk buffer size
     batch_size: usize,
 }
@@ -103,7 +103,7 @@ impl EquiJoinParams {
     }
 
     #[inline(always)]
-    pub(super) fn output_types(&self) -> &[DataTypeRef] {
+    pub(super) fn output_types(&self) -> &[DataTypeKind] {
         &self.output_data_types
     }
 
@@ -312,7 +312,7 @@ impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
             params.left_key_columns.push(left_key);
             params
                 .left_key_types
-                .push(left_child.schema()[left_key].data_type());
+                .push(left_child.schema()[left_key].data_type().data_type_kind());
         }
 
         for right_key in hash_join_node.get_right_key() {
@@ -320,7 +320,7 @@ impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
             params.right_key_columns.push(right_key);
             params
                 .right_key_types
-                .push(right_child.schema()[right_key].data_type());
+                .push(right_child.schema()[right_key].data_type().data_type_kind());
         }
 
         ensure!(params.left_key_columns.len() == params.right_key_columns.len());
@@ -328,17 +328,21 @@ impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
         for left_output in hash_join_node.get_left_output() {
             let left_output = *left_output as usize;
             params.output_columns.push(Either::Left(left_output));
-            params
-                .output_data_types
-                .push(left_child.schema()[left_output].data_type());
+            params.output_data_types.push(
+                left_child.schema()[left_output]
+                    .data_type()
+                    .data_type_kind(),
+            );
         }
 
         for right_output in hash_join_node.get_right_output() {
             let right_output = *right_output as usize;
             params.output_columns.push(Either::Right(right_output));
-            params
-                .output_data_types
-                .push(right_child.schema()[right_output].data_type());
+            params.output_data_types.push(
+                right_child.schema()[right_output]
+                    .data_type()
+                    .data_type_kind(),
+            );
         }
 
         params.join_type = JoinType::from_prost(hash_join_node.get_join_type());
@@ -379,9 +383,7 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::collection::hash_map::Key32;
     use risingwave_common::error::Result;
-    use risingwave_common::types::{
-        DataTypeKind, DataTypeRef, Float32Type, Float64Type, Int32Type,
-    };
+    use risingwave_common::types::{DataTypeKind, Float32Type, Float64Type, Int32Type};
 
     use crate::executor::join::hash_join::{EquiJoinParams, HashJoinExecutor};
     use crate::executor::join::JoinType;
@@ -389,12 +391,12 @@ mod tests {
     use crate::executor::BoxedExecutor;
 
     struct DataChunkMerger {
-        data_types: Vec<DataTypeRef>,
+        data_types: Vec<DataTypeKind>,
         array_builders: Vec<ArrayBuilderImpl>,
     }
 
     impl DataChunkMerger {
-        fn new(data_types: Vec<DataTypeRef>) -> Result<Self> {
+        fn new(data_types: Vec<DataTypeKind>) -> Result<Self> {
             let array_builders = data_types
                 .iter()
                 .map(|data_type| data_type.create_array_builder(1024))
@@ -440,8 +442,8 @@ mod tests {
     }
 
     struct TestFixture {
-        left_types: Vec<DataTypeRef>,
-        right_types: Vec<DataTypeRef>,
+        left_types: Vec<DataTypeKind>,
+        right_types: Vec<DataTypeKind>,
         join_type: JoinType,
     }
 
@@ -464,14 +466,8 @@ mod tests {
     impl TestFixture {
         fn with_join_type(join_type: JoinType) -> Self {
             Self {
-                left_types: vec![
-                    Arc::new(Int32Type::new(true)),
-                    Arc::new(Float32Type::new(true)),
-                ],
-                right_types: vec![
-                    Arc::new(Int32Type::new(true)),
-                    Arc::new(Float64Type::new(true)),
-                ],
+                left_types: vec![DataTypeKind::Int32, DataTypeKind::Float32],
+                right_types: vec![DataTypeKind::Int32, DataTypeKind::Float64],
                 join_type,
             }
         }
@@ -592,16 +588,16 @@ mod tests {
             }
         }
 
-        fn output_data_types(&self) -> Vec<DataTypeRef> {
+        fn output_data_types(&self) -> Vec<DataTypeKind> {
             let output_columns = self.output_columns();
 
             output_columns
                 .iter()
                 .map(|column| match column {
-                    Either::Left(idx) => self.left_types[*idx].clone(),
-                    Either::Right(idx) => self.right_types[*idx].clone(),
+                    Either::Left(idx) => self.left_types[*idx],
+                    Either::Right(idx) => self.right_types[*idx],
                 })
-                .collect::<Vec<DataTypeRef>>()
+                .collect::<Vec<DataTypeKind>>()
         }
 
         fn create_join_executor(&self) -> BoxedExecutor {
@@ -617,9 +613,9 @@ mod tests {
             let params = EquiJoinParams {
                 join_type,
                 left_key_columns: vec![0],
-                left_key_types: vec![self.left_types[0].clone()],
+                left_key_types: vec![self.left_types[0]],
                 right_key_columns: vec![0],
-                right_key_types: vec![self.right_types[0].clone()],
+                right_key_types: vec![self.right_types[0]],
                 output_columns,
                 output_data_types,
                 batch_size: 2,

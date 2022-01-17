@@ -9,7 +9,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
-use risingwave_common::types::DataTypeRef;
+use risingwave_common::types::DataTypeKind;
 use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::NestedLoopJoinNode;
@@ -43,7 +43,7 @@ pub struct NestedLoopJoinExecutor {
     /// during join probing. Flush it in begin of execution.
     last_chunk: Option<SlicedDataChunk>,
     /// The data type of probe side. Cache to avoid copy too much.
-    probe_side_schema: Vec<DataTypeRef>,
+    probe_side_schema: Vec<DataTypeKind>,
     /// Row-level iteration of probe side.
     probe_side_source: RowLevelIter,
     /// The table used for look up matched rows.
@@ -193,7 +193,7 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
         match (left_plan_opt, right_plan_opt) {
             (Some(left_plan), Some(right_plan)) => {
                 let left_child = source.clone_for_plan(left_plan).build()?;
-                let probe_side_schema = left_child.schema().data_types_clone();
+                let probe_side_schema = left_child.schema().data_types();
                 let right_child = source.clone_for_plan(right_plan).build()?;
 
                 let fields = left_child
@@ -217,7 +217,7 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
                             join_type,
                             state: join_state,
                             chunk_builder: DataChunkBuilder::new_with_default_size(
-                                schema.data_types_clone(),
+                                schema.data_types(),
                             ),
                             schema,
                             last_chunk: None,
@@ -431,7 +431,7 @@ mod tests {
     use risingwave_common::expr::expr_binary_nonnull::new_binary_expr;
     use risingwave_common::expr::InputRefExpression;
     use risingwave_common::types::{
-        BoolType, DataTypeRef, Float32Type, Float64Type, Int32Type, ScalarRefImpl,
+        DataTypeKind, Float32Type, Float64Type, Int32Type, ScalarRefImpl,
     };
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
     use risingwave_pb::expr::expr_node::Type;
@@ -487,15 +487,13 @@ mod tests {
         // Note that only probe side schema of this executor is meaningful. All other fields are
         // meaningless. They are just used to pass Rust checker.
         let source = NestedLoopJoinExecutor {
-            join_expr: Box::new(InputRefExpression::new(Int32Type::create(false), 0)),
+            join_expr: Box::new(InputRefExpression::new(DataTypeKind::Int32, 0)),
             join_type: JoinType::Inner,
             state: NestedLoopJoinState::Build,
-            chunk_builder: DataChunkBuilder::new_with_default_size(
-                probe_side_schema.data_types_clone(),
-            ),
+            chunk_builder: DataChunkBuilder::new_with_default_size(probe_side_schema.data_types()),
             schema: Schema { fields: vec![] },
             last_chunk: None,
-            probe_side_schema: probe_side_schema.data_types_clone(),
+            probe_side_schema: probe_side_schema.data_types(),
             probe_side_source: RowLevelIter::new(probe_source),
             build_table: RowLevelIter::new(build_source),
             probe_remain_chunk_idx: 0,
@@ -510,8 +508,8 @@ mod tests {
     }
 
     struct TestFixture {
-        left_types: Vec<DataTypeRef>,
-        right_types: Vec<DataTypeRef>,
+        left_types: Vec<DataTypeKind>,
+        right_types: Vec<DataTypeKind>,
         join_type: JoinType,
     }
 
@@ -533,14 +531,8 @@ mod tests {
     impl TestFixture {
         fn with_join_type(join_type: JoinType) -> Self {
             Self {
-                left_types: vec![
-                    Arc::new(Int32Type::new(false)),
-                    Arc::new(Float32Type::new(true)),
-                ],
-                right_types: vec![
-                    Arc::new(Int32Type::new(false)),
-                    Arc::new(Float64Type::new(true)),
-                ],
+                left_types: vec![DataTypeKind::Int32, DataTypeKind::Float32],
+                right_types: vec![DataTypeKind::Int32, DataTypeKind::Float64],
                 join_type,
             }
         }
@@ -663,19 +655,19 @@ mod tests {
                 })
                 .collect();
             let schema = Schema { fields };
-            let probe_side_schema = left_child.schema().data_types_clone();
+            let probe_side_schema = left_child.schema().data_types();
 
             Box::new(NestedLoopJoinExecutor {
                 join_expr: new_binary_expr(
                     Type::Equal,
-                    BoolType::create(false),
-                    Box::new(InputRefExpression::new(Int32Type::create(false), 0)),
-                    Box::new(InputRefExpression::new(Int32Type::create(false), 2)),
+                    DataTypeKind::Boolean,
+                    Box::new(InputRefExpression::new(DataTypeKind::Int32, 0)),
+                    Box::new(InputRefExpression::new(DataTypeKind::Int32, 2)),
                 ),
                 join_type,
                 state: NestedLoopJoinState::Build,
                 schema: schema.clone(),
-                chunk_builder: DataChunkBuilder::new_with_default_size(schema.data_types_clone()),
+                chunk_builder: DataChunkBuilder::new_with_default_size(schema.data_types()),
                 last_chunk: None,
                 probe_side_schema,
                 probe_side_source: RowLevelIter::new(left_child),

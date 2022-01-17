@@ -65,9 +65,11 @@ impl BoxedExecutorBuilder for SortAggExecutor {
 
         let fields = group_exprs
             .iter()
-            .map(|e| e.return_type_ref())
-            .chain(agg_states.iter().map(|e| e.return_type_ref()))
-            .map(|t| Field { data_type: t })
+            .map(|e| e.return_type())
+            .chain(agg_states.iter().map(|e| e.return_type()))
+            .map(|t| Field {
+                data_type: t.to_data_type(),
+            })
             .collect::<Vec<Field>>();
 
         Ok(Box::new(Self {
@@ -101,7 +103,7 @@ impl Executor for SortAggExecutor {
         let mut array_builders = self
             .agg_states
             .iter()
-            .map(|e| e.return_type_ref().create_array_builder(cardinality))
+            .map(|e| e.return_type().create_array_builder(cardinality))
             .collect::<Result<Vec<_>>>()?;
 
         while let Some(child_chunk) = self.child.next().await? {
@@ -216,9 +218,11 @@ mod tests {
         let agg_states = vec![s];
         let fields = group_exprs
             .iter()
-            .map(|e| e.return_type_ref())
-            .chain(agg_states.iter().map(|e| e.return_type_ref()))
-            .map(|t| Field { data_type: t })
+            .map(|e| e.return_type())
+            .chain(agg_states.iter().map(|e| e.return_type()))
+            .map(|t| Field {
+                data_type: t.to_data_type(),
+            })
             .collect::<Vec<Field>>();
         let mut executor = SortAggExecutor {
             agg_states,
@@ -317,9 +321,11 @@ mod tests {
         let agg_states = vec![s];
         let fields = group_exprs
             .iter()
-            .map(|e| e.return_type_ref())
-            .chain(agg_states.iter().map(|e| e.return_type_ref()))
-            .map(|t| Field { data_type: t })
+            .map(|e| e.return_type())
+            .chain(agg_states.iter().map(|e| e.return_type()))
+            .map(|t| Field {
+                data_type: t.to_data_type(),
+            })
             .collect::<Vec<Field>>();
 
         let mut executor = SortAggExecutor {

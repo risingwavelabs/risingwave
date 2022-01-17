@@ -138,7 +138,7 @@ impl Executor for OrderByExecutor {
             self.encodable = self
                 .order_pairs
                 .iter()
-                .all(|pair| is_type_encodable(pair.order.return_type_ref()))
+                .all(|pair| is_type_encodable(pair.order.return_type()))
         }
 
         self.collect_child_data().await?;
@@ -275,8 +275,8 @@ mod tests {
         };
         let mut mock_executor = MockExecutor::new(schema);
         mock_executor.add(data_chunk);
-        let input_ref_1 = InputRefExpression::new(Int32Type::create(false), 0usize);
-        let input_ref_2 = InputRefExpression::new(Int32Type::create(false), 1usize);
+        let input_ref_1 = InputRefExpression::new(DataTypeKind::Int32, 0);
+        let input_ref_2 = InputRefExpression::new(DataTypeKind::Int32, 1);
         let order_pairs = vec![
             OrderPair {
                 order: Box::new(input_ref_2),
@@ -332,8 +332,8 @@ mod tests {
         };
         let mut mock_executor = MockExecutor::new(schema);
         mock_executor.add(data_chunk);
-        let input_ref_1 = InputRefExpression::new(Float32Type::create(false), 0usize);
-        let input_ref_2 = InputRefExpression::new(Float64Type::create(false), 1usize);
+        let input_ref_1 = InputRefExpression::new(DataTypeKind::Float32, 0);
+        let input_ref_2 = InputRefExpression::new(DataTypeKind::Float64, 1);
         let order_pairs = vec![
             OrderPair {
                 order: Box::new(input_ref_2),
@@ -398,10 +398,8 @@ mod tests {
         };
         let mut mock_executor = MockExecutor::new(schema);
         mock_executor.add(data_chunk);
-        let input_ref_1 =
-            InputRefExpression::new(StringType::create(false, 0, DataTypeKind::Varchar), 0usize);
-        let input_ref_2 =
-            InputRefExpression::new(StringType::create(false, 0, DataTypeKind::Varchar), 1usize);
+        let input_ref_1 = InputRefExpression::new(DataTypeKind::Varchar, 0);
+        let input_ref_2 = InputRefExpression::new(DataTypeKind::Varchar, 1);
         let order_pairs = vec![
             OrderPair {
                 order: Box::new(input_ref_2),
@@ -492,13 +490,10 @@ mod tests {
             };
             let mut mock_executor = MockExecutor::new(schema);
             mock_executor.add(data_chunk);
-            let input_ref_0 = InputRefExpression::new(Int16Type::create(false), 0usize);
-            let input_ref_1 = InputRefExpression::new(BoolType::create(false), 1usize);
-            let input_ref_2 = InputRefExpression::new(Float32Type::create(false), 2usize);
-            let input_ref_3 = InputRefExpression::new(
-                StringType::create(false, 0, DataTypeKind::Varchar),
-                3usize,
-            );
+            let input_ref_0 = InputRefExpression::new(DataTypeKind::Int16, 0);
+            let input_ref_1 = InputRefExpression::new(DataTypeKind::Boolean, 1);
+            let input_ref_2 = InputRefExpression::new(DataTypeKind::Float32, 2);
+            let input_ref_3 = InputRefExpression::new(DataTypeKind::Varchar, 3);
             let order_pairs = vec![
                 OrderPair {
                     order: Box::new(input_ref_1),

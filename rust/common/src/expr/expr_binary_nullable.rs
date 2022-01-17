@@ -7,7 +7,7 @@ use super::BoxedExpression;
 use crate::array::{BoolArray, DecimalArray, F32Array, F64Array, I16Array, I32Array, I64Array};
 use crate::error::Result;
 use crate::expr::template::BinaryNullableExpression;
-use crate::types::{DataTypeKind, DataTypeRef};
+use crate::types::DataTypeKind;
 use crate::vector_op::conjunction::{and, or};
 
 // TODO: consider implement it using generic function.
@@ -33,13 +33,13 @@ fn stream_null_by_row_count<T1>(l: Option<i64>, r: Option<T1>) -> Result<Option<
 
 pub fn new_nullable_binary_expr(
     expr_type: Type,
-    ret: DataTypeRef,
+    ret: DataTypeKind,
     l: BoxedExpression,
     r: BoxedExpression,
 ) -> BoxedExpression {
     match expr_type {
-        Type::StreamNullByRowCount => match l.return_type().data_type_kind() {
-            DataTypeKind::Int64 => match r.return_type().data_type_kind() {
+        Type::StreamNullByRowCount => match l.return_type() {
+            DataTypeKind::Int64 => match r.return_type() {
                 DataTypeKind::Boolean => gen_stream_null_by_row_count_expr!(l, r, ret, BoolArray),
                 DataTypeKind::Int16 => gen_stream_null_by_row_count_expr!(l, r, ret, I16Array),
                 DataTypeKind::Int32 => gen_stream_null_by_row_count_expr!(l, r, ret, I32Array),
