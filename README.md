@@ -1,5 +1,6 @@
 # RisingWave
 
+[![Slack](https://badgen.net/badge/Slack/Join%20RisingWave/0abd59?icon=slack)](https://join.slack.com/t/singularitydata/shared_invite/zt-10gwxwbcl-HVIKl2RcU~V3cOsA2Njm8g)
 [![CI](https://github.com/singularity-data/risingwave/actions/workflows/main.yml/badge.svg)](https://github.com/singularity-data/risingwave/actions/workflows/main.yml)
 [![codecov](https://codecov.io/gh/singularity-data/risingwave/branch/main/graph/badge.svg?token=C5ZX0L0GWK)](https://codecov.io/gh/singularity-data/risingwave)
 
