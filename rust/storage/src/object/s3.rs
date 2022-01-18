@@ -120,14 +120,16 @@ impl ObjectStore for S3ObjectStore {
     /// Amazon S3 doesn't support retrieving multiple ranges of data per GET request.
     async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> Result<Vec<u8>> {
         ensure!(self.client.is_some());
-        let block_loc = block_loc.as_ref().unwrap();
-
+        let range = match block_loc.as_ref() {
+            None => None,
+            Some(block_location) => block_location.byte_range_specifier(),
+        };
         let response = FutureRetry::new(
             || {
                 self.client.as_ref().unwrap().get_object(GetObjectRequest {
                     bucket: self.bucket.clone(),
                     key: path.to_string(),
-                    range: block_loc.byte_range_specifier(),
+                    range: range.clone(),
                     ..Default::default()
                 })
             },
@@ -156,14 +158,13 @@ impl ObjectStore for S3ObjectStore {
                             path, err
                         )))
                     })?;
-                assert_eq!(
-                    block_loc.size,
-                    val.len(),
+                assert!(
+                    block_loc.is_none() || block_loc.as_ref().unwrap().size == val.len(),
                     "mismatched size: expected {}, found {} when reading {} at {:?}",
-                    block_loc.size,
+                    block_loc.as_ref().unwrap().size,
                     val.len(),
                     path,
-                    block_loc
+                    block_loc.as_ref().unwrap()
                 );
                 Ok(val)
             }
