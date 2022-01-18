@@ -1,0 +1,59 @@
+{
+  "input": [{
+    "pkIndices": [3],
+    "tableSourceNode": {
+      "tableRefId": {
+        "schemaRefId": {
+          "databaseRefId": {
+          }
+        },
+        "tableId": 1
+      },
+      "columnIds": [2, 3, 1, 0]
+    }
+  }],
+  "mviewNode": {
+    "tableRefId": {
+      "schemaRefId": {
+        "databaseRefId": {
+        }
+      },
+      "tableId": 6
+    },
+    "columnDescs": [{
+      "columnType": {
+        "typeName": "INT32"
+      },
+      "encoding": "RAW",
+      "name": "v2"
+    }, {
+      "columnType": {
+        "typeName": "FLOAT"
+      },
+      "encoding": "RAW",
+      "name": "v3"
+    }, {
+      "columnType": {
+        "typeName": "FLOAT"
+      },
+      "encoding": "RAW",
+      "name": "v1"
+    }, {
+      "columnType": {
+        "typeName": "INT64"
+      },
+      "encoding": "RAW",
+      "name": "_row_id"
+    }],
+    "pkIndices": [3],
+    "columnOrders": [{
+      "orderType": "ASCENDING",
+      "inputRef": {
+        "columnIdx": 3
+      },
+      "returnType": {
+        "typeName": "INT64"
+      }
+    }]
+  }
+}

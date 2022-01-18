@@ -2,14 +2,14 @@
     <TestCase name="query 1">
         <Resource name="sql">
             <![CDATA[
-create materialized view M1 as select v1, v2 from t where v1 = 1;
+create materialized view m1 as select v1, v2 from t1 where v1 = 1;
             ]]>
         </Resource>
         <Resource name="plan">
             <![CDATA[
 RwStreamMaterializedView(name=[m1])
   RwStreamFilter(condition=[=($0, 1)])
-    RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,_row_id])
+    RwStreamTableSource(table=[[test_schema, t1]], columns=[v1,v2,_row_id])
 ]]>
         </Resource>
         <Resource name="json" path="streaming/materialized_view_on_materialized_view_plan_test/q1">
@@ -24,14 +24,14 @@ RwStreamMaterializedView(name=[m1])
     <TestCase name="query 2">
         <Resource name="sql">
             <![CDATA[
-create materialized view M2 as select v1, v2 from t where v2 = 1;
+create materialized view m2 as select v1, v2 from t1 where v2 = 1;
             ]]>
         </Resource>
         <Resource name="plan">
             <![CDATA[
 RwStreamMaterializedView(name=[m2])
   RwStreamFilter(condition=[=($1, 1)])
-    RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,_row_id])
+    RwStreamTableSource(table=[[test_schema, t1]], columns=[v1,v2,_row_id])
 ]]>
         </Resource>
         <Resource name="json" path="streaming/materialized_view_on_materialized_view_plan_test/q2">
@@ -46,7 +46,7 @@ RwStreamMaterializedView(name=[m2])
     <TestCase name="query 3">
         <Resource name="sql">
             <![CDATA[
-create materialized view M3 as select sum(M1.v1) as sum_m1_v1, sum(M1.v2) as sum_m1_v2 from M1;
+create materialized view m3 as select sum(M1.v1) as sum_m1_v1, sum(m1.v2) as sum_m1_v2 from m1;
             ]]>
         </Resource>
         <Resource name="plan">
@@ -54,7 +54,7 @@ create materialized view M3 as select sum(M1.v1) as sum_m1_v1, sum(M1.v2) as sum
 RwStreamMaterializedView(name=[m3])
   RwStreamProject(sum_m1_v1=[$STREAM_NULL_BY_ROW_COUNT($0, $1)], sum_m1_v2=[$STREAM_NULL_BY_ROW_COUNT($0, $2)], $f0=[$0], sum_m1_v1_copy=[$1], sum_m1_v2_copy=[$2])
     RwStreamAgg(group=[{}], agg#0=[COUNT()], sum_m1_v1=[SUM($0)], sum_m1_v2=[SUM($1)])
-      RwStreamChain(table=[[test_schema, m1]], tableId=[0.0.1])
+      RwStreamChain(table=[[test_schema, m1]], tableId=[0.0.2], primaryKeyIndices=[[2]], columnIds=[[0.0.2.0, 0.0.2.1, 0.0.2.2]])
 ]]>
         </Resource>
         <Resource name="json" path="streaming/materialized_view_on_materialized_view_plan_test/q3">
@@ -69,7 +69,7 @@ RwStreamMaterializedView(name=[m3])
     <TestCase name="query 4">
         <Resource name="sql">
             <![CDATA[
-create materialized view M4 as select M1.v1 as m1v1, M1.v2 as m1v2, M2.v1 as m2v1, M2.v2 as m2v2 from M1 join M2 on M1.v1 = M2.v1;
+create materialized view m4 as select m1.v1, m1.v2, m2.v1, m2.v2 from m1 join m2 on m1.v1 = m2.v1;
             ]]>
         </Resource>
         <Resource name="plan">
@@ -77,9 +77,9 @@ create materialized view M4 as select M1.v1 as m1v1, M1.v2 as m1v2, M2.v1 as m2v
 RwStreamMaterializedView(name=[m4])
   RwStreamHashJoin(condition=[=($0, $3)], joinType=[inner])
     RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
-      RwStreamChain(table=[[test_schema, m1]], tableId=[0.0.1])
+      RwStreamChain(table=[[test_schema, m1]], tableId=[0.0.2], primaryKeyIndices=[[2]], columnIds=[[0.0.2.0, 0.0.2.1, 0.0.2.2]])
     RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
-      RwStreamChain(table=[[test_schema, m2]], tableId=[0.0.2])
+      RwStreamChain(table=[[test_schema, m2]], tableId=[0.0.3], primaryKeyIndices=[[2]], columnIds=[[0.0.3.0, 0.0.3.1, 0.0.3.2]])
 ]]>
         </Resource>
         <Resource name="json" path="streaming/materialized_view_on_materialized_view_plan_test/q4">
@@ -87,6 +87,70 @@ RwStreamMaterializedView(name=[m4])
         <Resource name="primaryKey">
             <![CDATA[
 [2, 5]
+            ]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="query 5">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view m5 as select v2, v3, v1 from t2;
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView(name=[m5])
+  RwStreamTableSource(table=[[test_schema, t2]], columns=[v2,v3,v1,_row_id])
+]]>
+        </Resource>
+        <Resource name="json" path="streaming/materialized_view_on_materialized_view_plan_test/q5">
+        </Resource>>
+        <Resource name="primaryKey">
+            <![CDATA[
+[3]
+            ]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="query 6">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view m6 as select sum(v1) as sum_v1, avg(v3) as avg_v3 from m5 group by v1;
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView(name=[m6])
+  RwStreamProject(sum_v1=[$2], avg_v3=[/(CAST($3):DOUBLE NOT NULL, $4)], v1=[$0])
+    RwStreamAgg(group=[{0}], agg#0=[COUNT()], sum_v1=[SUM($0)], agg#2=[SUM($1)], agg#3=[COUNT($1)])
+      RwStreamChain(table=[[test_schema, m5]], tableId=[0.0.6], primaryKeyIndices=[[2]], columnIds=[[0.0.6.2, 0.0.6.1, 0.0.6.3]])
+]]>
+        </Resource>
+        <Resource name="json" path="streaming/materialized_view_on_materialized_view_plan_test/q6">
+        </Resource>>
+        <Resource name="primaryKey">
+            <![CDATA[
+[2]
+            ]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="query 7">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view m7 as select sum(v1) as sum_v1 from m5 group by v2;
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView(name=[m7])
+  RwStreamProject(sum_v1=[$2], v2=[$0])
+    RwStreamAgg(group=[{0}], agg#0=[COUNT()], sum_v1=[SUM($1)])
+      RwStreamChain(table=[[test_schema, m5]], tableId=[0.0.6], primaryKeyIndices=[[2]], columnIds=[[0.0.6.0, 0.0.6.2, 0.0.6.3]])
+]]>
+        </Resource>
+        <Resource name="json" path="streaming/materialized_view_on_materialized_view_plan_test/q7">
+        </Resource>>
+        <Resource name="primaryKey">
+            <![CDATA[
+[1]
             ]]>
         </Resource>
     </TestCase>

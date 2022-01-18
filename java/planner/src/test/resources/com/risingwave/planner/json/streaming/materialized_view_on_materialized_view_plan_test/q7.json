@@ -1,0 +1,94 @@
+{
+  "input": [{
+    "pkIndices": [1],
+    "input": [{
+      "pkIndices": [0],
+      "input": [{
+        "chainNode": {
+          "tableRefId": {
+            "schemaRefId": {
+              "databaseRefId": {
+              }
+            },
+            "tableId": 6
+          },
+          "pkIndices": [2],
+          "columnIds": [0, 2, 3]
+        }
+      }],
+      "hashAggNode": {
+        "groupKeys": [{
+        }],
+        "aggCalls": [{
+          "type": "COUNT",
+          "returnType": {
+            "typeName": "INT64"
+          }
+        }, {
+          "type": "SUM",
+          "args": [{
+            "input": {
+              "columnIdx": 1
+            },
+            "type": {
+              "typeName": "FLOAT"
+            }
+          }],
+          "returnType": {
+            "typeName": "FLOAT"
+          }
+        }]
+      }
+    }],
+    "projectNode": {
+      "selectList": [{
+        "exprType": "INPUT_REF",
+        "returnType": {
+          "typeName": "FLOAT"
+        },
+        "inputRef": {
+          "columnIdx": 2
+        }
+      }, {
+        "exprType": "INPUT_REF",
+        "returnType": {
+          "typeName": "INT32"
+        },
+        "inputRef": {
+        }
+      }]
+    }
+  }],
+  "mviewNode": {
+    "tableRefId": {
+      "schemaRefId": {
+        "databaseRefId": {
+        }
+      },
+      "tableId": 8
+    },
+    "columnDescs": [{
+      "columnType": {
+        "typeName": "FLOAT"
+      },
+      "encoding": "RAW",
+      "name": "sum_v1"
+    }, {
+      "columnType": {
+        "typeName": "INT32"
+      },
+      "encoding": "RAW",
+      "name": "v2"
+    }],
+    "pkIndices": [1],
+    "columnOrders": [{
+      "orderType": "ASCENDING",
+      "inputRef": {
+        "columnIdx": 1
+      },
+      "returnType": {
+        "typeName": "INT32"
+      }
+    }]
+  }
+}

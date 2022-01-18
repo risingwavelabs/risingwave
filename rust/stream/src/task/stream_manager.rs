@@ -672,21 +672,37 @@ impl StreamManagerCore {
                     .iter()
                     .map(|x| *x as usize)
                     .collect_vec();
-                let mut schema = table.schema().into_owned();
-                let pk_fields = pk_indices
-                    .iter()
-                    .map(|col| schema.fields[*col].clone())
-                    .collect_vec();
-                schema.fields.extend(pk_fields);
-                let mview = Box::new(ReceiverExecutor::new(schema, pk_indices, rx));
+                let upstream_schema = table.schema().into_owned();
+                let mview = Box::new(ReceiverExecutor::new(
+                    upstream_schema.clone(),
+                    pk_indices,
+                    rx,
+                ));
 
                 // TODO(MrCroxx): ConfChange should be triggered by meta when it's done.
                 self.send_conf_change_barrier(Mutation::AddOutput(
                     chain_node.upstream_actor_id,
                     vec![self.actor_infos.get(&actor_id).unwrap().to_owned()],
                 ))?;
-
-                Ok(Box::new(ChainExecutor::new(snapshot, mview)))
+                // TODO(MrCroxx): Use column_descs to get idx after mv planner can generate stable
+                // column_ids. Now simply treat column_id as column_idx.
+                let column_idxs: Vec<usize> = chain_node
+                    .column_ids
+                    .iter()
+                    .map(|id| *id as usize)
+                    .collect();
+                let schema = Schema::new(
+                    column_idxs
+                        .iter()
+                        .map(|i| upstream_schema.fields()[*i].clone())
+                        .collect_vec(),
+                );
+                Ok(Box::new(ChainExecutor::new(
+                    snapshot,
+                    mview,
+                    schema,
+                    column_idxs,
+                )))
             }
             _ => Err(RwError::from(ErrorCode::InternalError(format!(
                 "unsupported node:{:?}",

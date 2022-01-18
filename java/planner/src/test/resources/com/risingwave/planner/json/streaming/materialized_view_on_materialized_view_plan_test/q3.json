@@ -10,9 +10,10 @@
               "databaseRefId": {
               }
             },
-            "tableId": 1
+            "tableId": 2
           },
-          "pkIndices": [2]
+          "pkIndices": [2],
+          "columnIds": [0, 1, 2]
         }
       }],
       "simpleAggNode": {
@@ -128,7 +129,7 @@
         "databaseRefId": {
         }
       },
-      "tableId": 3
+      "tableId": 4
     },
     "columnDescs": [{
       "columnType": {

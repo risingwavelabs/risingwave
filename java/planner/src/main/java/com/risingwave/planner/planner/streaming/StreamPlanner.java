@@ -10,6 +10,7 @@ import static com.risingwave.planner.rules.physical.BatchRuleSets.LOGICAL_OPTIMI
 import static com.risingwave.planner.rules.physical.BatchRuleSets.LOGICAL_REWRITE_RULES;
 
 import com.risingwave.catalog.CatalogService;
+import com.risingwave.catalog.MaterializedViewCatalog;
 import com.risingwave.catalog.TableCatalog;
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.planner.planner.Planner;
@@ -36,7 +37,6 @@ import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.ddl.SqlCreateMaterializedView;
-import org.apache.calcite.util.ImmutableIntList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -119,8 +119,10 @@ public class StreamPlanner implements Planner<StreamingPlan> {
           catalogService.getTable(database, qualifiedName.get(0), qualifiedName.get(1));
       if (source != null && source.isMaterializedView()) {
         // source is a materialized view source
+        assert source instanceof MaterializedViewCatalog;
         assert parent != null;
         assert indexInParent >= 0;
+
         RwStreamChain chain =
             new RwStreamChain(
                 node.getCluster(),
@@ -128,7 +130,8 @@ public class StreamPlanner implements Planner<StreamingPlan> {
                 ((RwStreamTableSource) node).getHints(),
                 node.getTable(),
                 ((RwStreamTableSource) node).getTableId(),
-                ImmutableIntList.of());
+                source.getPrimaryKeyColumnIds(),
+                ((RwStreamTableSource) node).getColumnIds());
         parent.replaceInput(indexInParent, chain);
       }
     }

@@ -3,7 +3,6 @@ package com.risingwave.planner.rel.streaming;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.risingwave.catalog.ColumnCatalog;
-import com.risingwave.catalog.MaterializedViewCatalog;
 import com.risingwave.catalog.TableCatalog;
 import com.risingwave.planner.rel.streaming.join.RwStreamHashJoin;
 import java.util.ArrayList;
@@ -22,6 +21,7 @@ import org.apache.calcite.rel.type.RelDataTypeFieldImpl;
 import org.apache.calcite.rex.RexInputRef;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.rex.RexShuttle;
+import org.apache.calcite.util.ImmutableIntList;
 import org.apache.calcite.util.mapping.IntPair;
 import org.apache.calcite.util.mapping.Mapping;
 import org.apache.calcite.util.mapping.MappingType;
@@ -644,8 +644,28 @@ public class PrimaryKeyDerivationVisitor
   @Override
   public Result<PrimaryKeyIndicesAndPositionMap> visit(RwStreamChain chain) {
     LOGGER.debug("visit RwStreamChain");
-    var viewCatalog = chain.getTable().unwrapOrThrow(MaterializedViewCatalog.class);
-    var primaryKeyColumnIds = viewCatalog.getPrimaryKeyColumnIds();
+    // If we don't have full pk columns, we need to append the rest to chain.
+    ImmutableList.Builder<ColumnCatalog.ColumnId> newColumnIds = ImmutableList.builder();
+    ImmutableList.Builder<Integer> newPrimaryKeyIndicesBuilder = ImmutableList.builder();
+    var primaryKeyIndices = new HashSet<>(chain.getPrimaryKeyIndices());
+    var columnIds = chain.getColumnIds();
+
+    int idx = 0;
+    for (; idx < columnIds.size(); idx++) {
+      var columnId = columnIds.get(idx);
+      newColumnIds.add(columnId);
+      if (primaryKeyIndices.remove(columnId.getValue())) {
+        newPrimaryKeyIndicesBuilder.add(idx);
+      }
+    }
+    for (var rest : primaryKeyIndices) {
+      var columnId = new ColumnCatalog.ColumnId(rest, chain.getTableId());
+      newColumnIds.add(columnId);
+      newPrimaryKeyIndicesBuilder.add(idx);
+      idx++;
+    }
+    var newPrimaryKeyIndices = newPrimaryKeyIndicesBuilder.build();
+
     var newChain =
         new RwStreamChain(
             chain.getCluster(),
@@ -653,10 +673,10 @@ public class PrimaryKeyDerivationVisitor
             chain.getHints(),
             chain.getTable(),
             chain.getTableId(),
-            primaryKeyColumnIds);
-    var info =
-        new PrimaryKeyIndicesAndPositionMap(
-            ImmutableList.copyOf(primaryKeyColumnIds), ImmutableMap.of());
+            ImmutableIntList.copyOf(newPrimaryKeyIndices),
+            newColumnIds.build());
+
+    var info = new PrimaryKeyIndicesAndPositionMap(newPrimaryKeyIndices, ImmutableMap.of());
     LOGGER.debug("leave RwStreamChain");
     return new Result<>(newChain, info);
   }

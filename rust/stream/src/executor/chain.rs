@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 
@@ -19,22 +20,51 @@ pub struct ChainExecutor {
     snapshot: Box<dyn Executor>,
     mview: Box<dyn Executor>,
     state: ChainState,
+    schema: Schema,
+    column_idxs: Vec<usize>,
 }
 
 impl ChainExecutor {
-    pub fn new(snapshot: Box<dyn Executor>, mview: Box<dyn Executor>) -> Self {
+    pub fn new(
+        snapshot: Box<dyn Executor>,
+        mview: Box<dyn Executor>,
+        schema: Schema,
+        column_idxs: Vec<usize>,
+    ) -> Self {
         Self {
             snapshot,
             mview,
             state: ChainState::ReadingSnapshot,
+            schema,
+            column_idxs,
+        }
+    }
+
+    fn mapping(&self, msg: Message) -> Result<Message> {
+        match msg {
+            Message::Chunk(chunk) => {
+                let columns = self
+                    .column_idxs
+                    .iter()
+                    .map(|i| chunk.columns()[*i].clone())
+                    .collect();
+                Ok(Message::Chunk(StreamChunk::new(
+                    chunk.ops().to_vec(),
+                    columns,
+                    chunk.visibility().clone(),
+                )))
+            }
+            _ => Ok(msg),
         }
     }
 
     async fn read_mview(&mut self) -> Result<Message> {
-        self.mview.next().await
+        let msg = self.mview.next().await?;
+        self.mapping(msg)
     }
     async fn read_snapshot(&mut self) -> Result<Message> {
-        self.snapshot.next().await
+        let msg = self.snapshot.next().await?;
+        self.mapping(msg)
     }
     async fn switch_and_read_mview(&mut self) -> Result<Message> {
         self.state = ChainState::ReadingMView;
@@ -42,7 +72,7 @@ impl ChainExecutor {
     }
     async fn next_inner(&mut self) -> Result<Message> {
         match &self.state {
-            ChainState::ReadingSnapshot => match self.snapshot.next().await {
+            ChainState::ReadingSnapshot => match self.read_snapshot().await {
                 Err(e) => {
                     // TODO: Refactor this once we find a better way to know the upstream is done.
                     if let ErrorCode::EOF = e.inner() {
@@ -64,7 +94,7 @@ impl Executor for ChainExecutor {
     }
 
     fn schema(&self) -> &Schema {
-        self.mview.schema()
+        &self.schema
     }
 
     fn pk_indices(&self) -> PkIndicesRef {
@@ -186,7 +216,7 @@ mod test {
             ],
         ));
 
-        let mut chain = ChainExecutor::new(first, second);
+        let mut chain = ChainExecutor::new(first, second, schema, vec![0]);
         let mut count = 0;
         loop {
             let k = &chain.next().await.unwrap();

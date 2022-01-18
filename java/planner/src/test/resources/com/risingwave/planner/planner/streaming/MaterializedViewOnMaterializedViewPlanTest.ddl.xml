@@ -1,8 +1,12 @@
 <Root>
     <Resource>
         <![CDATA[
-create table t(v1 int not null, v2 int not null);
+create table t1(v1 int not null, v2 int not null);
         ]]>
     </Resource>
-
+    <Resource>
+        <![CDATA[
+create table t2(v1 real not null, v2 int not null, v3 real not null);
+        ]]>
+    </Resource>
 </Root>
