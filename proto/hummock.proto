@@ -237,6 +237,13 @@ message AbortEpochResponse {
   common.Status status = 1;
 }
 
+message GetNewTableIdRequest {}
+
+message GetNewTableIdResponse {
+  common.Status status = 1;
+  uint64 table_id = 2;
+}
+
 service HummockManagerService {
   rpc CreateHummockContext(CreateHummockContextRequest) returns (CreateHummockContextResponse);
   rpc InvalidateHummockContext(InvalidateHummockContextRequest) returns (InvalidateHummockContextResponse);
@@ -252,4 +259,5 @@ service HummockManagerService {
   rpc UnpinSnapshot(UnpinSnapshotRequest) returns (UnpinSnapshotResponse);
   rpc CommitEpoch(CommitEpochRequest) returns (CommitEpochResponse);
   rpc AbortEpoch(AbortEpochRequest) returns (AbortEpochResponse);
+  rpc GetNewTableId(GetNewTableIdRequest) returns (GetNewTableIdResponse);
 }

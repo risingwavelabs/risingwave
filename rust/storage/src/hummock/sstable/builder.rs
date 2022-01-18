@@ -266,6 +266,7 @@ pub(super) mod tests {
     use crate::hummock::cloud::gen_remote_sstable;
     use crate::hummock::key::key_with_epoch;
     use crate::hummock::sstable::SSTable;
+    use crate::hummock::REMOTE_DIR;
     use crate::object::{InMemObjectStore, ObjectStore};
 
     /// Number of keys in table generated in `generate_table`.
@@ -343,7 +344,7 @@ pub(super) mod tests {
         // get remote table
         let (data, meta) = b.finish();
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
-        gen_remote_sstable(obj_client, 0, data, meta, None)
+        gen_remote_sstable(obj_client, 0, data, meta, REMOTE_DIR)
             .await
             .unwrap()
     }

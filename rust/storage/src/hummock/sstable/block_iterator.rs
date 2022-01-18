@@ -206,7 +206,7 @@ mod tests {
     use super::super::{SSTableBuilder, SSTableBuilderOptions};
     use super::*;
     use crate::hummock::cloud::gen_remote_sstable;
-    use crate::hummock::HummockValue;
+    use crate::hummock::{HummockValue, REMOTE_DIR};
     use crate::object::{InMemObjectStore, ObjectStore};
 
     #[tokio::test]
@@ -235,7 +235,7 @@ mod tests {
         let (blocks, meta) = b.finish();
 
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
-        let table = gen_remote_sstable(obj_client, 0, blocks, meta, None)
+        let table = gen_remote_sstable(obj_client, 0, blocks, meta, REMOTE_DIR)
             .await
             .unwrap();
 

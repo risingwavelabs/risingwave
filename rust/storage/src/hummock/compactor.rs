@@ -198,13 +198,12 @@ impl Compactor {
         local_sorted_output_ssts.reserve(builder.len());
         // TODO: decide upload concurrency
         for (table_id, blocks, meta) in builder.finish() {
-            let remote_dir = Some(context.options.remote_dir.as_str());
             let table = gen_remote_sstable(
                 context.obj_client.clone(),
                 table_id,
                 blocks,
                 meta,
-                remote_dir,
+                context.options.remote_dir.as_str(),
             )
             .await?;
             local_sorted_output_ssts.push(table);

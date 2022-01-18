@@ -209,4 +209,19 @@ impl HummockManagerService for HummockServiceImpl {
             Err(e) => Err(e.to_grpc_status()),
         }
     }
+
+    async fn get_new_table_id(
+        &self,
+        request: Request<GetNewTableIdRequest>,
+    ) -> Result<Response<GetNewTableIdResponse>, Status> {
+        let _req = request.into_inner();
+        let result = self.hummock_manager.get_new_table_id().await;
+        match result {
+            Ok(table_id) => Ok(Response::new(GetNewTableIdResponse {
+                status: None,
+                table_id,
+            })),
+            Err(e) => Err(e.to_grpc_status()),
+        }
+    }
 }

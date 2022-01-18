@@ -247,11 +247,15 @@ impl HummockStorage {
 
             // TODO: decide upload concurrency
             for (table_id, blocks, meta) in builder.finish() {
-                let remote_dir = Some(self.options.remote_dir.as_str());
                 total_size += blocks.len();
-                let table =
-                    gen_remote_sstable(self.obj_client.clone(), table_id, blocks, meta, remote_dir)
-                        .await?;
+                let table = gen_remote_sstable(
+                    self.obj_client.clone(),
+                    table_id,
+                    blocks,
+                    meta,
+                    self.options.remote_dir.as_str(),
+                )
+                .await?;
                 tables.push(table);
             }
 

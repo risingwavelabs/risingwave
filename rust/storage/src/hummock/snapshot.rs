@@ -198,7 +198,7 @@ mod tests {
         default_builder_opt_for_test, iterator_test_key_of, iterator_test_key_of_epoch,
     };
     use crate::hummock::value::HummockValue;
-    use crate::hummock::SSTableBuilder;
+    use crate::hummock::{SSTableBuilder, REMOTE_DIR};
     use crate::object::{InMemObjectStore, ObjectStore};
 
     const TEST_KEY_TABLE_ID: u64 = 233;
@@ -223,7 +223,7 @@ mod tests {
         }
         let (data, meta) = b.finish();
         // get remote table
-        let table = gen_remote_sstable(obj_client, table_id, data, meta, None)
+        let table = gen_remote_sstable(obj_client, table_id, data, meta, REMOTE_DIR)
             .await
             .unwrap();
         vm.add_single_l0_sst(table, epoch).await.unwrap();

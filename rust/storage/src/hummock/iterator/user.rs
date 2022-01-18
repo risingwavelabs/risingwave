@@ -242,7 +242,7 @@ mod tests {
     use crate::hummock::key::user_key;
     use crate::hummock::sstable::{SSTable, SSTableIterator};
     use crate::hummock::value::HummockValue;
-    use crate::hummock::SSTableBuilder;
+    use crate::hummock::{SSTableBuilder, REMOTE_DIR};
     use crate::object::{InMemObjectStore, ObjectStore};
 
     #[tokio::test]
@@ -697,7 +697,7 @@ mod tests {
         let (data, meta) = b.finish();
         // get remote table
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
-        gen_remote_sstable(obj_client, 0, data, meta, None)
+        gen_remote_sstable(obj_client, 0, data, meta, REMOTE_DIR)
             .await
             .unwrap()
     }

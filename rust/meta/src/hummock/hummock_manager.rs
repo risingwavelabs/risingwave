@@ -17,8 +17,8 @@ use risingwave_pb::hummock::{
 use risingwave_pb::meta::get_id_request::IdCategory;
 use risingwave_storage::hummock::key_range::KeyRange;
 use risingwave_storage::hummock::{
-    HummockContextId, HummockEpoch, HummockError, HummockSnapshotId, HummockTTL, HummockVersionId,
-    INVALID_EPOCH,
+    HummockContextId, HummockEpoch, HummockError, HummockSSTableId, HummockSnapshotId, HummockTTL,
+    HummockVersionId, INVALID_EPOCH,
 };
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
@@ -83,6 +83,7 @@ pub trait HummockManager: Sync + Send + 'static {
     ) -> Result<()>;
     async fn commit_epoch(&self, context_id: HummockContextId, epoch: HummockEpoch) -> Result<()>;
     async fn abort_epoch(&self, context_id: HummockContextId, epoch: HummockEpoch) -> Result<()>;
+    async fn get_new_table_id(&self) -> Result<HummockSSTableId>;
 }
 
 const RESERVED_HUMMOCK_CONTEXT_ID: HummockContextId = -1;
@@ -1097,5 +1098,14 @@ impl HummockManager for DefaultHummockManager {
             }
             None => Ok(()),
         }
+    }
+
+    async fn get_new_table_id(&self) -> Result<HummockSSTableId> {
+        // TODO id_gen_manager generates u32, we need u64
+        self.env
+            .id_gen_manager_ref()
+            .generate(IdCategory::HummockSsTableId)
+            .await
+            .map(|id| id as HummockSSTableId)
     }
 }
