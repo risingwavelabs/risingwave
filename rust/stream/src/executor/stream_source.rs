@@ -167,7 +167,7 @@ mod tests {
     use risingwave_common::array::{ArrayImpl, I32Array, I64Array, Op, StreamChunk, Utf8Array};
     use risingwave_common::array_nonnull;
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::{DataTypeKind, Int32Type, Int64Type, StringType};
+    use risingwave_common::types::DataTypeKind;
     use risingwave_source::*;
     use risingwave_storage::bummock::BummockTable;
     use risingwave_storage::TableColumnDesc;
@@ -179,24 +179,24 @@ mod tests {
     async fn test_table_source() -> Result<()> {
         let table_id = TableId::default();
 
-        let rowid_type = Int64Type::create(false);
-        let col1_type = Int32Type::create(false);
-        let col2_type = StringType::create(true, 10, DataTypeKind::Varchar);
+        let rowid_type = DataTypeKind::Int64;
+        let col1_type = DataTypeKind::Int32;
+        let col2_type = DataTypeKind::Varchar;
 
         let table_columns = vec![
             TableColumnDesc {
                 column_id: 0,
-                data_type: rowid_type.clone(),
+                data_type: rowid_type,
                 name: String::new(),
             },
             TableColumnDesc {
                 column_id: 1,
-                data_type: col1_type.clone(),
+                data_type: col1_type,
                 name: String::new(),
             },
             TableColumnDesc {
                 column_id: 2,
-                data_type: col2_type.clone(),
+                data_type: col2_type,
                 name: String::new(),
             },
         ];
@@ -236,9 +236,9 @@ mod tests {
 
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(rowid_type.clone()),
-                Field::new_without_name(col1_type.clone()),
-                Field::new_without_name(col2_type.clone()),
+                Field::new_without_name(rowid_type),
+                Field::new_without_name(col1_type),
+                Field::new_without_name(col2_type),
             ],
         };
 
@@ -314,24 +314,24 @@ mod tests {
     async fn test_table_dropped() -> Result<()> {
         let table_id = TableId::default();
 
-        let rowid_type = Int64Type::create(false);
-        let col1_type = Int32Type::create(false);
-        let col2_type = StringType::create(true, 10, DataTypeKind::Varchar);
+        let rowid_type = DataTypeKind::Int64;
+        let col1_type = DataTypeKind::Int32;
+        let col2_type = DataTypeKind::Varchar;
 
         let table_columns = vec![
             TableColumnDesc {
                 column_id: 0,
-                data_type: rowid_type.clone(),
+                data_type: rowid_type,
                 name: String::new(),
             },
             TableColumnDesc {
                 column_id: 1,
-                data_type: col1_type.clone(),
+                data_type: col1_type,
                 name: String::new(),
             },
             TableColumnDesc {
                 column_id: 2,
-                data_type: col2_type.clone(),
+                data_type: col2_type,
                 name: String::new(),
             },
         ];
@@ -359,9 +359,9 @@ mod tests {
 
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(rowid_type.clone()),
-                Field::new_without_name(col1_type.clone()),
-                Field::new_without_name(col2_type.clone()),
+                Field::new_without_name(rowid_type),
+                Field::new_without_name(col1_type),
+                Field::new_without_name(col2_type),
             ],
         };
 

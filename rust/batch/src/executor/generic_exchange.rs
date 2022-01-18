@@ -157,7 +157,7 @@ mod tests {
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{DataChunk, I32Array};
     use risingwave_common::array_nonnull;
-    use risingwave_common::types::Int32Type;
+    use risingwave_common::types::DataTypeKind;
 
     use super::*;
 
@@ -206,7 +206,7 @@ mod tests {
             source_creator: PhantomData,
             env: BatchTaskEnv::for_test(),
             schema: Schema {
-                fields: vec![Field::new_without_name(Int32Type::create(false))],
+                fields: vec![Field::new_without_name(DataTypeKind::Int32)],
             },
             task_id: TaskId::default(),
             identity: format!("GenericExchangeExecutor{:?}", TaskId::default()),

@@ -97,7 +97,7 @@ mod tests {
     use assert_matches::assert_matches;
     use risingwave_common::array::{F64Array, I64Array, Op, StreamChunk};
     use risingwave_common::catalog::Field;
-    use risingwave_common::types::{Float64Type, Int64Type};
+    use risingwave_common::types::DataTypeKind;
 
     use super::*;
     use crate::executor::test_utils::MockSource;
@@ -114,8 +114,8 @@ mod tests {
         );
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(Int64Type::create(false)),
-                Field::new_without_name(Float64Type::create(false)),
+                Field::new_without_name(DataTypeKind::Int64),
+                Field::new_without_name(DataTypeKind::Float64),
             ],
         };
 
@@ -141,8 +141,8 @@ mod tests {
         );
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(Int64Type::create(false)),
-                Field::new_without_name(Float64Type::create(false)),
+                Field::new_without_name(DataTypeKind::Int64),
+                Field::new_without_name(DataTypeKind::Float64),
             ],
         };
 

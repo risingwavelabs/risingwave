@@ -59,11 +59,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutor {
             .get_table(&table_id)?;
 
         let schema = table.schema();
-        let data_types = schema
-            .fields
-            .iter()
-            .map(|f| f.data_type.data_type_kind())
-            .collect_vec();
+        let data_types = schema.fields.iter().map(|f| f.data_type).collect_vec();
         let schema = schema.into_owned();
 
         let column_ids = seq_scan_node

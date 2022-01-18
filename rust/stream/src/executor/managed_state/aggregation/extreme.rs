@@ -8,15 +8,15 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
 use risingwave_common::expr::AggKind;
 use risingwave_common::types::{
-    deserialize_datum_not_null_from, serialize_datum_not_null_into, DataTypeKind, DataTypeRef,
-    Datum, ScalarImpl, ScalarRef,
+    deserialize_datum_not_null_from, serialize_datum_not_null_into, DataTypeKind, Datum,
+    ScalarImpl, ScalarRef,
 };
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::extreme_serializer::{variants, ExtremePk, ExtremeSerializer};
 use crate::executor::managed_state::flush_status::BtreeMapFlushStatus as FlushStatus;
-use crate::executor::{AggArgs, AggCall, PkDataTypeKinds};
+use crate::executor::{AggArgs, AggCall, PkDataTypes};
 pub type ManagedMinState<S, A> = GenericManagedState<S, A, { variants::EXTREME_MIN }>;
 pub type ManagedMaxState<S, A> = GenericManagedState<S, A, { variants::EXTREME_MAX }>;
 
@@ -59,7 +59,7 @@ where
     top_n_count: Option<usize>,
 
     /// Data type of the sort column
-    data_type: DataTypeRef,
+    data_type: DataTypeKind,
 
     /// The keyspace to operate on.
     keyspace: Keyspace<S>,
@@ -103,14 +103,12 @@ where
     /// after each flush.
     pub async fn new(
         keyspace: Keyspace<S>,
-        data_type: DataTypeRef,
+        data_type: DataTypeKind,
         top_n_count: Option<usize>,
         row_count: usize,
-        pk_data_type_kinds: PkDataTypeKinds,
+        pk_data_types: PkDataTypes,
     ) -> Result<Self> {
         // Create the internal state based on the value we get.
-        let kind = data_type.data_type_kind();
-
         Ok(Self {
             top_n: BTreeMap::new(),
             flush_buffer: BTreeMap::new(),
@@ -118,16 +116,16 @@ where
             keyspace,
             top_n_count,
             data_type,
-            serializer: ExtremeSerializer::new(kind, pk_data_type_kinds),
+            serializer: ExtremeSerializer::new(data_type, pk_data_types),
         })
     }
 
-    fn pk_data_type_kinds(&self) -> &[DataTypeKind] {
-        self.serializer.pk_data_type_kinds.as_slice()
+    fn pk_data_types(&self) -> &[DataTypeKind] {
+        self.serializer.pk_data_types.as_slice()
     }
 
     fn pk_length(&self) -> usize {
-        self.pk_data_type_kinds().len()
+        self.pk_data_types().len()
     }
 
     /// Retain only top n elements in the cache
@@ -277,11 +275,11 @@ where
             // following logic.
 
             let all_data = self.keyspace.scan_strip_prefix(self.top_n_count).await?;
-            let data_type = self.data_type.data_type_kind();
 
             for (raw_key, raw_value) in all_data {
                 let mut deserializer = memcomparable::Deserializer::new(&raw_value[..]);
-                let value = deserialize_datum_not_null_from(data_type, &mut deserializer)?.unwrap();
+                let value =
+                    deserialize_datum_not_null_from(self.data_type, &mut deserializer)?.unwrap();
                 let key = value.clone().try_into().unwrap();
                 let pks = self.serializer.get_pk(&raw_key[..])?;
                 self.top_n.insert((key, pks), value);
@@ -369,11 +367,11 @@ where
     pub async fn iterate_store(&self) -> Result<Vec<(A::OwnedItem, ExtremePk)>> {
         let all_data = self.keyspace.scan_strip_prefix(None).await?;
         let mut result = vec![];
-        let data_type = self.data_type.data_type_kind();
 
         for (raw_key, raw_value) in all_data {
             let mut deserializer = memcomparable::Deserializer::new(&raw_value[..]);
-            let value = deserialize_datum_not_null_from(data_type, &mut deserializer)?.unwrap();
+            let value =
+                deserialize_datum_not_null_from(self.data_type, &mut deserializer)?.unwrap();
             let key = value.clone().try_into().unwrap();
             let pks = self.serializer.get_pk(&raw_key[..])?;
             result.push((key, pks));
@@ -392,7 +390,7 @@ pub async fn create_streaming_extreme_state<S: StateStore>(
     keyspace: Keyspace<S>,
     row_count: usize,
     top_n_count: Option<usize>,
-    pk_data_type_kinds: PkDataTypeKinds,
+    pk_data_types: PkDataTypes,
 ) -> Result<Box<dyn ManagedExtremeState<S>>> {
     match &agg_call.args {
         AggArgs::Unary(x, _) => {
@@ -411,14 +409,13 @@ pub async fn create_streaming_extreme_state<S: StateStore>(
       use DataTypeKind::*;
       use risingwave_common::array::*;
 
-      let data_type = agg_call.return_type.to_data_type();
       match (agg_call.kind, agg_call.return_type) {
         $(
           (AggKind::Max, $( $kind )|+) => Ok(Box::new(
-            ManagedMaxState::<_, $array>::new(keyspace, data_type, top_n_count, row_count, pk_data_type_kinds).await?,
+            ManagedMaxState::<_, $array>::new(keyspace, agg_call.return_type, top_n_count, row_count, pk_data_types).await?,
           )),
           (AggKind::Min, $( $kind )|+) => Ok(Box::new(
-            ManagedMinState::<_, $array>::new(keyspace, data_type, top_n_count, row_count, pk_data_type_kinds).await?,
+            ManagedMinState::<_, $array>::new(keyspace, agg_call.return_type, top_n_count, row_count, pk_data_types).await?,
           )),
         )*
         (kind, return_type) => unimplemented!("unsupported extreme agg, kind: {:?}, return type: {:?}", kind, return_type),
@@ -446,7 +443,7 @@ mod tests {
     use itertools::Itertools;
     use rand::prelude::*;
     use risingwave_common::array::{I64Array, Op};
-    use risingwave_common::types::{Int64Type, ScalarImpl};
+    use risingwave_common::types::ScalarImpl;
     use risingwave_storage::memory::MemoryStateStore;
     use smallvec::smallvec;
 
@@ -458,10 +455,10 @@ mod tests {
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
         let mut managed_state = ManagedMinState::<_, I64Array>::new(
             keyspace.clone(),
-            Int64Type::create(false),
+            DataTypeKind::Int64,
             Some(5),
             0,
-            PkDataTypeKinds::new(),
+            PkDataTypes::new(),
         )
         .await
         .unwrap();
@@ -595,10 +592,10 @@ mod tests {
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
         let mut managed_state = ManagedMinState::<_, I64Array>::new(
             keyspace,
-            Int64Type::create(false),
+            DataTypeKind::Int64,
             Some(5),
             row_count,
-            PkDataTypeKinds::new(),
+            PkDataTypes::new(),
         )
         .await
         .unwrap();
@@ -626,7 +623,7 @@ mod tests {
 
         let mut managed_state = GenericManagedState::<_, I64Array, EXTREME_TYPE>::new(
             keyspace.clone(),
-            Int64Type::create(false),
+            DataTypeKind::Int64,
             Some(3),
             0,
             smallvec![DataTypeKind::Int64],
@@ -712,10 +709,10 @@ mod tests {
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
         let mut managed_state = ManagedMinState::<_, I64Array>::new(
             keyspace.clone(),
-            Int64Type::create(false),
+            DataTypeKind::Int64,
             Some(3),
             0,
-            PkDataTypeKinds::new(),
+            PkDataTypes::new(),
         )
         .await
         .unwrap();
@@ -791,10 +788,10 @@ mod tests {
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
         let mut managed_state = GenericManagedState::<_, I64Array, EXTREME_TYPE>::new(
             keyspace.clone(),
-            Int64Type::create(false),
+            DataTypeKind::Int64,
             Some(3),
             0,
-            PkDataTypeKinds::new(),
+            PkDataTypes::new(),
         )
         .await
         .unwrap();
@@ -888,10 +885,10 @@ mod tests {
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
         let mut managed_state = ManagedMinState::<_, I64Array>::new(
             keyspace.clone(),
-            Int64Type::create(false),
+            DataTypeKind::Int64,
             Some(3),
             0,
-            PkDataTypeKinds::new(),
+            PkDataTypes::new(),
         )
         .await
         .unwrap();

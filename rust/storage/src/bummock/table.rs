@@ -99,7 +99,7 @@ impl ScannableTable for BummockTable {
         let schema = Schema::new(
             self.table_columns
                 .iter()
-                .map(|c| Field::new(c.data_type.clone(), c.name.clone()))
+                .map(|c| Field::new(c.data_type, c.name.clone()))
                 .collect(),
         );
 
@@ -279,7 +279,7 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema, TableId};
     use risingwave_common::column_nonnull;
     use risingwave_common::error::Result;
-    use risingwave_common::types::DecimalType;
+    use risingwave_common::types::DataTypeKind;
 
     use crate::bummock::{BummockResult, BummockTable};
     use crate::{ScannableTable, Table, TableColumnDesc};
@@ -290,8 +290,8 @@ mod tests {
 
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(Arc::new(DecimalType::new(false, 10, 5)?)),
-                Field::new_without_name(Arc::new(DecimalType::new(false, 10, 5)?)),
+                Field::new_without_name(DataTypeKind::Decimal),
+                Field::new_without_name(DataTypeKind::Decimal),
             ],
         };
 
@@ -300,7 +300,7 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(i, f)| TableColumnDesc {
-                data_type: f.data_type.clone(),
+                data_type: f.data_type,
                 column_id: i as i32, // use column index as column id
                 name: f.name.clone(),
             })

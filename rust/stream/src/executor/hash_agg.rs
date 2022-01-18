@@ -174,7 +174,7 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
         // Previously, this is done in `unique_keys` inner loop, which is very inefficient.
         let all_agg_input_arrays = agg_input_arrays(&self.agg_calls, &columns);
         let pk_input_arrays = pk_input_arrays(self.input.pk_indices(), &columns);
-        let input_pk_data_type_kinds = self.input.pk_data_type_kinds();
+        let input_pk_data_types = self.input.pk_data_types();
 
         // When applying batch, we will send columns of primary keys to the last N columns.
         let all_agg_data = all_agg_input_arrays
@@ -194,7 +194,7 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
                         Some(key),
                         &self.agg_calls,
                         &self.keyspace,
-                        input_pk_data_type_kinds.clone(),
+                        input_pk_data_types.clone(),
                     )
                     .await?;
                     self.state_map.put(key.to_owned(), state);
@@ -320,7 +320,6 @@ mod tests {
     use risingwave_common::catalog::Field;
     use risingwave_common::column_nonnull;
     use risingwave_common::expr::*;
-    use risingwave_common::types::Int64Type;
 
     use super::*;
     use crate::executor::test_utils::*;
@@ -356,7 +355,7 @@ mod tests {
             Some((vec![true, false, true]).try_into().unwrap()),
         );
         let schema = Schema {
-            fields: vec![Field::new_without_name(Int64Type::create(false))],
+            fields: vec![Field::new_without_name(DataTypeKind::Int64)],
         };
         let mut source = MockSource::new(schema, PkIndices::new());
         source.push_chunks([chunk1].into_iter());
@@ -453,9 +452,9 @@ mod tests {
         );
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(Int64Type::create(false)),
-                Field::new_without_name(Int64Type::create(false)),
-                Field::new_without_name(Int64Type::create(false)),
+                Field::new_without_name(DataTypeKind::Int64),
+                Field::new_without_name(DataTypeKind::Int64),
+                Field::new_without_name(DataTypeKind::Int64),
             ],
         };
 
@@ -569,10 +568,10 @@ mod tests {
         );
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(Int64Type::create(false)),
-                Field::new_without_name(Int64Type::create(false)),
+                Field::new_without_name(DataTypeKind::Int64),
+                Field::new_without_name(DataTypeKind::Int64),
                 // primary key column
-                Field::new_without_name(Int64Type::create(false)),
+                Field::new_without_name(DataTypeKind::Int64),
             ],
         };
         let mut source = MockSource::new(schema, vec![2]); // pk

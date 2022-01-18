@@ -13,11 +13,9 @@
 #![feature(backtrace)]
 #![feature(map_first_last)]
 
-use std::sync::Arc;
-
 use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::error::Result;
-use risingwave_common::types::{DataTypeRef, PrimitiveDataType};
+use risingwave_common::types::DataTypeKind;
 use table::ScannableTable;
 
 pub mod bummock;
@@ -67,15 +65,15 @@ pub trait Table: ScannableTable {
 
 #[derive(Clone, Debug)]
 pub struct TableColumnDesc {
-    pub data_type: DataTypeRef,
+    pub data_type: DataTypeKind,
     pub column_id: i32,
     pub name: String, // for debugging
 }
 
 impl TableColumnDesc {
-    pub fn new_for_test<T: Default + PrimitiveDataType>(column_id: i32) -> TableColumnDesc {
+    pub fn new_without_name(column_id: i32, data_type: DataTypeKind) -> TableColumnDesc {
         TableColumnDesc {
-            data_type: Arc::new(T::default()),
+            data_type,
             column_id,
             name: String::new(),
         }

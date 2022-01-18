@@ -200,11 +200,11 @@ pub trait Executor: Send + Debug + 'static {
     /// pk indices are maintained independently.
     fn pk_indices(&self) -> PkIndicesRef;
 
-    fn pk_data_type_kinds(&self) -> PkDataTypeKinds {
+    fn pk_data_types(&self) -> PkDataTypes {
         let schema = self.schema();
         self.pk_indices()
             .iter()
-            .map(|idx| schema.fields[*idx].data_type.data_type_kind())
+            .map(|idx| schema.fields[*idx].data_type)
             .collect()
     }
 
@@ -214,7 +214,7 @@ pub trait Executor: Send + Debug + 'static {
 
 pub type PkIndices = Vec<usize>;
 pub type PkIndicesRef<'a> = &'a [usize];
-pub type PkDataTypeKinds = SmallVec<[DataTypeKind; 1]>;
+pub type PkDataTypes = SmallVec<[DataTypeKind; 1]>;
 
 // Get inputs by given `pk_indices` from `columns`.
 pub fn pk_input_arrays<'a>(pk_indices: PkIndicesRef, columns: &'a [Column]) -> Vec<&'a ArrayImpl> {

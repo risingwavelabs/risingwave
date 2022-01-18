@@ -209,7 +209,7 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
                     .iter()
                     .chain(right_child.schema().fields.iter())
                     .map(|f| Field {
-                        data_type: f.data_type.clone(),
+                        data_type: f.data_type,
                         name: f.name.clone(),
                     })
                     .collect();
@@ -439,9 +439,7 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::expr::expr_binary_nonnull::new_binary_expr;
     use risingwave_common::expr::InputRefExpression;
-    use risingwave_common::types::{
-        DataTypeKind, Float32Type, Float64Type, Int32Type, ScalarRefImpl,
-    };
+    use risingwave_common::types::{DataTypeKind, ScalarRefImpl};
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
     use risingwave_pb::expr::expr_node::Type;
 
@@ -488,7 +486,7 @@ mod tests {
     fn test_convert_row_to_chunk() {
         let row = RowRef::new(vec![Some(ScalarRefImpl::Int32(3))]);
         let probe_side_schema = Schema {
-            fields: vec![Field::new_without_name(Arc::new(Int32Type::new(false)))],
+            fields: vec![Field::new_without_name(DataTypeKind::Int32)],
         };
         let probe_source = Box::new(MockExecutor::new(probe_side_schema.clone()));
         let build_source = Box::new(MockExecutor::new(probe_side_schema.clone()));
@@ -549,8 +547,8 @@ mod tests {
         fn create_left_executor(&self) -> BoxedExecutor {
             let schema = Schema {
                 fields: vec![
-                    Field::new_without_name(Int32Type::create(false)),
-                    Field::new_without_name(Float32Type::create(true)),
+                    Field::new_without_name(DataTypeKind::Int32),
+                    Field::new_without_name(DataTypeKind::Float32),
                 ],
             };
             let mut executor = MockExecutor::new(schema);
@@ -588,8 +586,8 @@ mod tests {
         fn create_right_executor(&self) -> BoxedExecutor {
             let schema = Schema {
                 fields: vec![
-                    Field::new_without_name(Int32Type::create(false)),
-                    Field::new_without_name(Float64Type::create(true)),
+                    Field::new_without_name(DataTypeKind::Int32),
+                    Field::new_without_name(DataTypeKind::Float64),
                 ],
             };
             let mut executor = MockExecutor::new(schema);

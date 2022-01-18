@@ -228,7 +228,7 @@ mod tests {
     use risingwave_common::array::{Array, DataChunk, I32Array};
     use risingwave_common::array_nonnull;
     use risingwave_common::expr::InputRefExpression;
-    use risingwave_common::types::{DataTypeKind, Int32Type};
+    use risingwave_common::types::DataTypeKind;
     use risingwave_common::util::sort_util::OrderType;
 
     use super::*;
@@ -286,7 +286,7 @@ mod tests {
             sources: vec![],
             source_creator: PhantomData,
             schema: Schema {
-                fields: vec![Field::new_without_name(Int32Type::create(false))],
+                fields: vec![Field::new_without_name(DataTypeKind::Int32)],
             },
             first_execution: true,
             task_id: TaskId::default(),

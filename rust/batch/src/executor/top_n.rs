@@ -153,7 +153,7 @@ mod tests {
     use risingwave_common::array::{Array, DataChunk, PrimitiveArray};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::expr::InputRefExpression;
-    use risingwave_common::types::{DataTypeKind, Int32Type};
+    use risingwave_common::types::DataTypeKind;
     use risingwave_common::util::sort_util::OrderType;
 
     use super::*;
@@ -172,8 +172,8 @@ mod tests {
         let data_chunk = DataChunk::builder().columns(vec![col0, col1]).build();
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(Int32Type::create(false)),
-                Field::new_without_name(Int32Type::create(false)),
+                Field::new_without_name(DataTypeKind::Int32),
+                Field::new_without_name(DataTypeKind::Int32),
             ],
         };
         let mut mock_executor = MockExecutor::new(schema);
@@ -197,8 +197,8 @@ mod tests {
             format!("TopNExecutor{:?}", TaskId::default()),
         );
         let fields = &top_n_executor.schema().fields;
-        assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);
-        assert_eq!(fields[1].data_type.data_type_kind(), DataTypeKind::Int32);
+        assert_eq!(fields[0].data_type, DataTypeKind::Int32);
+        assert_eq!(fields[1].data_type, DataTypeKind::Int32);
         top_n_executor.open().await.unwrap();
         let res = top_n_executor.next().await.unwrap();
         assert!(matches!(res, Some(_)));

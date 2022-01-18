@@ -77,7 +77,7 @@ impl BoxedExecutorBuilder for ProjectionExecutor {
 
         let fields = project_exprs
             .iter()
-            .map(|expr| Field::new_without_name(expr.return_type().to_data_type()))
+            .map(|expr| Field::new_without_name(expr.return_type()))
             .collect::<Vec<Field>>();
 
         Ok(Box::new(Self {
@@ -95,7 +95,7 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::column_nonnull;
     use risingwave_common::expr::InputRefExpression;
-    use risingwave_common::types::{DataTypeKind, Int32Type};
+    use risingwave_common::types::DataTypeKind;
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
@@ -113,8 +113,8 @@ mod tests {
 
         let schema = Schema {
             fields: vec![
-                Field::new(Int32Type::create(false), String::from("")),
-                Field::new(Int32Type::create(false), String::from("")),
+                Field::new(DataTypeKind::Int32, String::from("")),
+                Field::new(DataTypeKind::Int32, String::from("")),
             ],
         };
         let mut mock_executor = MockExecutor::new(schema);
@@ -122,7 +122,7 @@ mod tests {
 
         let fields = expr_vec
             .iter()
-            .map(|expr| Field::new_without_name(expr.return_type().to_data_type()))
+            .map(|expr| Field::new_without_name(expr.return_type()))
             .collect::<Vec<Field>>();
 
         let mut proj_executor = ProjectionExecutor {
@@ -134,7 +134,7 @@ mod tests {
         proj_executor.open().await.unwrap();
 
         let fields = &proj_executor.schema().fields;
-        assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);
+        assert_eq!(fields[0].data_type, DataTypeKind::Int32);
 
         let result_chunk = proj_executor.next().await?.unwrap();
         proj_executor.close().await.unwrap();

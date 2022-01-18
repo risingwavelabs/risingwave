@@ -5,7 +5,7 @@ use std::time::Duration;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, DataChunk, PrimitiveArrayBuilder, Row};
 use risingwave_common::catalog::{SchemaId, TableId};
-use risingwave_common::types::Int32Type;
+use risingwave_common::types::DataTypeKind;
 use risingwave_common::util::addr::get_host_port;
 use risingwave_common::util::downcast_arc;
 use risingwave_pb::common::{ActorInfo, HostAddress};
@@ -125,8 +125,8 @@ async fn test_stream_mv_proto() {
     let source_manager = Arc::new(MemSourceManager::new());
     let table_id = TableId::default();
     let table_columns = vec![
-        TableColumnDesc::new_for_test::<Int32Type>(0),
-        TableColumnDesc::new_for_test::<Int32Type>(1),
+        TableColumnDesc::new_without_name(0, DataTypeKind::Int32),
+        TableColumnDesc::new_without_name(1, DataTypeKind::Int32),
     ];
     let table = table_manager
         .create_table(&table_id, table_columns)

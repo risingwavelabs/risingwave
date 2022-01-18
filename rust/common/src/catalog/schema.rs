@@ -4,12 +4,12 @@ use risingwave_pb::plan::{ColumnDesc, Field as ProstField};
 
 use crate::array::ArrayBuilderImpl;
 use crate::error::Result;
-use crate::types::{build_from_prost, DataType, DataTypeKind, DataTypeRef};
+use crate::types::DataTypeKind;
 
 /// The field in the schema of the executor's return data
 #[derive(Clone)]
 pub struct Field {
-    pub data_type: DataTypeRef,
+    pub data_type: DataTypeKind,
     pub name: String,
 }
 
@@ -43,18 +43,8 @@ impl Schema {
         Self { fields }
     }
 
-    pub fn data_types_clone(&self) -> Vec<DataTypeRef> {
-        self.fields
-            .iter()
-            .map(|field| field.data_type.clone())
-            .collect()
-    }
-
     pub fn data_types(&self) -> Vec<DataTypeKind> {
-        self.fields
-            .iter()
-            .map(|field| field.data_type.data_type_kind())
-            .collect()
+        self.fields.iter().map(|field| field.data_type).collect()
     }
 
     pub fn fields(&self) -> &[Field] {
@@ -67,7 +57,7 @@ impl Schema {
                 .into_iter()
                 .map(|col| {
                     Ok(Field {
-                        data_type: build_from_prost(col.get_column_type())?,
+                        data_type: DataTypeKind::from(col.get_column_type()),
                         name: col.get_name().to_string(),
                     })
                 })
@@ -85,11 +75,11 @@ impl Schema {
 }
 
 impl Field {
-    pub fn new(data_type: DataTypeRef, name: String) -> Self {
+    pub fn new(data_type: DataTypeKind, name: String) -> Self {
         Self { data_type, name }
     }
 
-    pub fn new_without_name(data_type: DataTypeRef) -> Self {
+    pub fn new_without_name(data_type: DataTypeKind) -> Self {
         Self {
             data_type,
             name: String::new(),
@@ -98,17 +88,13 @@ impl Field {
 
     pub fn from(prost_field: &ProstField) -> Self {
         Self {
-            data_type: build_from_prost(prost_field.get_data_type()).unwrap(),
+            data_type: DataTypeKind::from(prost_field.get_data_type()),
             name: prost_field.get_name().clone(),
         }
     }
 
-    pub fn data_type(&self) -> DataTypeRef {
-        self.data_type.clone()
-    }
-
-    pub fn data_type_ref(&self) -> &dyn DataType {
-        self.data_type.as_ref()
+    pub fn data_type(&self) -> DataTypeKind {
+        self.data_type
     }
 }
 

@@ -44,7 +44,7 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
                     .iter()
                     .find(|c| c.column_id == *id)
                     .map(|col| Field {
-                        data_type: col.data_type.clone(),
+                        data_type: col.data_type,
                         name: col.name.clone(),
                     })
                     .ok_or_else(|| {
@@ -118,7 +118,7 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{Array, I32Array};
-    use risingwave_common::types::Int32Type;
+    use risingwave_common::types::DataTypeKind;
 
     use super::*;
     use crate::task::TaskId;
@@ -151,7 +151,7 @@ mod tests {
         let mut executor = StreamScanExecutor {
             reader: Box::new(reader),
             done: false,
-            schema: Schema::new(vec![Field::new_without_name(Int32Type::create(false))]),
+            schema: Schema::new(vec![Field::new_without_name(DataTypeKind::Int32)]),
             identity: format!("StreamScanExecutor{:?}", TaskId::default()),
         };
         executor.open().await.unwrap();

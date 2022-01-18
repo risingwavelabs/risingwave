@@ -150,7 +150,7 @@ mod tests {
             .first()
             .ok_or_else(|| RwError::from(InternalError("Can't values empty rows!".to_string())))?
             .iter() // for each column
-            .map(|col| Field::new_without_name(col.return_type().to_data_type()))
+            .map(|col| Field::new_without_name(col.return_type()))
             .collect::<Vec<Field>>();
         let mut values_executor = ValuesExecutor {
             rows: exprs,
@@ -160,9 +160,9 @@ mod tests {
         values_executor.open().await.unwrap();
 
         let fields = &values_executor.schema().fields;
-        assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int16);
-        assert_eq!(fields[1].data_type.data_type_kind(), DataTypeKind::Int32);
-        assert_eq!(fields[2].data_type.data_type_kind(), DataTypeKind::Int64);
+        assert_eq!(fields[0].data_type, DataTypeKind::Int16);
+        assert_eq!(fields[1].data_type, DataTypeKind::Int32);
+        assert_eq!(fields[2].data_type, DataTypeKind::Int64);
 
         values_executor.open().await.unwrap();
         let result = values_executor.next().await?.unwrap();

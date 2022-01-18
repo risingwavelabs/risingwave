@@ -415,10 +415,7 @@ impl StreamManagerCore {
                         .iter()
                         .find(|c| c.column_id == column_id)
                         .unwrap();
-                    fields.push(Field::new(
-                        column_desc.data_type.clone(),
-                        column_desc.name.clone(),
-                    ));
+                    fields.push(Field::new(column_desc.data_type, column_desc.name.clone()));
                 }
                 let schema = Schema::new(fields);
 

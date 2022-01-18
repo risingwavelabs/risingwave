@@ -7,7 +7,7 @@ use risingwave_common::types::{
 };
 use smallvec::SmallVec;
 
-use crate::executor::PkDataTypeKinds;
+use crate::executor::PkDataTypes;
 
 type ExtremePkItem = Datum;
 
@@ -25,15 +25,15 @@ pub mod variants {
 /// we will flip the bits of the whole encoded data (including pks).
 pub struct ExtremeSerializer<K: Scalar, const EXTREME_TYPE: usize> {
     pub data_type_kind: DataTypeKind,
-    pub pk_data_type_kinds: PkDataTypeKinds,
+    pub pk_data_types: PkDataTypes,
     _phantom: PhantomData<K>,
 }
 
 impl<K: Scalar, const EXTREME_TYPE: usize> ExtremeSerializer<K, EXTREME_TYPE> {
-    pub fn new(data_type_kind: DataTypeKind, pk_data_type_kinds: PkDataTypeKinds) -> Self {
+    pub fn new(data_type_kind: DataTypeKind, pk_data_types: PkDataTypes) -> Self {
         Self {
             data_type_kind,
-            pk_data_type_kinds,
+            pk_data_types,
             _phantom: PhantomData,
         }
     }
@@ -58,11 +58,7 @@ impl<K: Scalar, const EXTREME_TYPE: usize> ExtremeSerializer<K, EXTREME_TYPE> {
         key.serialize(&mut serializer)?;
 
         // 2. pk
-        assert_eq!(
-            pk.len(),
-            self.pk_data_type_kinds.len(),
-            "mismatch pk length"
-        );
+        assert_eq!(pk.len(), self.pk_data_types.len(), "mismatch pk length");
         for i in pk {
             serialize_datum_into(i, &mut serializer)?;
         }
@@ -74,7 +70,7 @@ impl<K: Scalar, const EXTREME_TYPE: usize> ExtremeSerializer<K, EXTREME_TYPE> {
 
     /// Extract the pks from the sort key
     pub fn get_pk(&self, data: &[u8]) -> Result<ExtremePk> {
-        if self.pk_data_type_kinds.is_empty() {
+        if self.pk_data_types.is_empty() {
             return Ok(ExtremePk::default());
         }
 
@@ -85,8 +81,8 @@ impl<K: Scalar, const EXTREME_TYPE: usize> ExtremeSerializer<K, EXTREME_TYPE> {
         let _key = deserialize_datum_not_null_from(self.data_type_kind, &mut deserializer)?;
 
         // 2. pk
-        let mut pk = ExtremePk::with_capacity(self.pk_data_type_kinds.len());
-        for kind in self.pk_data_type_kinds.iter() {
+        let mut pk = ExtremePk::with_capacity(self.pk_data_types.len());
+        for kind in self.pk_data_types.iter() {
             let i = deserialize_datum_from(kind, &mut deserializer)?;
             pk.push(i);
         }

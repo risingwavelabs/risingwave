@@ -183,7 +183,7 @@ impl SourceParser for ProtobufParser {
 
       // Use `remove` instead of `get` to take the ownership of the value
       let value = map.remove(&key);
-      match column.data_type.data_type_kind() {
+      match column.data_type {
         DataTypeKind::Boolean => {
           protobuf_match_type!(value, ScalarImpl::Bool, { Bool }, bool)
         }
@@ -235,9 +235,7 @@ mod tests {
 
     use maplit::hashmap;
     use risingwave_common::error::Result;
-    use risingwave_common::types::{
-        DataTypeKind, DateType, Float32Type, Int32Type, Int64Type, ScalarImpl, StringType,
-    };
+    use risingwave_common::types::{DataTypeKind, ScalarImpl};
     use risingwave_common::vector_op::cast::str_to_date;
     use risingwave_pb::plan::ColumnDesc;
     use serde_value::Value;
@@ -350,42 +348,42 @@ mod tests {
         let descs = vec![
             SourceColumnDesc {
                 name: "id".to_string(),
-                data_type: Int32Type::create(false),
+                data_type: DataTypeKind::Int32,
                 column_id: 0,
                 skip_parse: false,
                 is_primary: false,
             },
             SourceColumnDesc {
                 name: "address".to_string(),
-                data_type: StringType::create(false, 16, DataTypeKind::Char),
+                data_type: DataTypeKind::Char,
                 column_id: 1,
                 skip_parse: false,
                 is_primary: false,
             },
             SourceColumnDesc {
                 name: "city".to_string(),
-                data_type: StringType::create(false, 8, DataTypeKind::Char),
+                data_type: DataTypeKind::Char,
                 column_id: 2,
                 skip_parse: false,
                 is_primary: false,
             },
             SourceColumnDesc {
                 name: "zipcode".to_string(),
-                data_type: Int64Type::create(false),
+                data_type: DataTypeKind::Int64,
                 column_id: 3,
                 skip_parse: false,
                 is_primary: false,
             },
             SourceColumnDesc {
                 name: "rate".to_string(),
-                data_type: Float32Type::create(false),
+                data_type: DataTypeKind::Float32,
                 column_id: 4,
                 skip_parse: false,
                 is_primary: false,
             },
             SourceColumnDesc {
                 name: "date".to_string(),
-                data_type: DateType::create(false),
+                data_type: DataTypeKind::Date,
                 column_id: 5,
                 skip_parse: false,
                 is_primary: false,
@@ -421,21 +419,13 @@ mod tests {
                     ..Default::default()
                 },
                 ColumnDesc {
-                    column_type: Some(
-                        StringType::create(true, 0, DataTypeKind::Varchar)
-                            .to_protobuf()
-                            .unwrap()
-                    ),
+                    column_type: Some(DataTypeKind::Varchar.to_protobuf().unwrap()),
                     is_primary: false,
                     name: "address".to_string(),
                     ..Default::default()
                 },
                 ColumnDesc {
-                    column_type: Some(
-                        StringType::create(true, 0, DataTypeKind::Varchar)
-                            .to_protobuf()
-                            .unwrap()
-                    ),
+                    column_type: Some(DataTypeKind::Varchar.to_protobuf().unwrap()),
                     is_primary: false,
                     name: "city".to_string(),
                     ..Default::default()
@@ -453,11 +443,7 @@ mod tests {
                     ..Default::default()
                 },
                 ColumnDesc {
-                    column_type: Some(
-                        StringType::create(true, 0, DataTypeKind::Varchar)
-                            .to_protobuf()
-                            .unwrap()
-                    ),
+                    column_type: Some(DataTypeKind::Varchar.to_protobuf().unwrap()),
                     is_primary: false,
                     name: "date".to_string(),
                     ..Default::default()

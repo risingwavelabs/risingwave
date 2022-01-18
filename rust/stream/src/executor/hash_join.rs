@@ -7,7 +7,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk, Op, Row, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
-use risingwave_common::types::{DataTypeRef, ToOwnedDatum};
+use risingwave_common::types::{DataTypeKind, ToOwnedDatum};
 use risingwave_storage::keyspace::Segment;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -53,7 +53,7 @@ struct StreamChunkBuilder {
 impl StreamChunkBuilder {
     fn new(
         capacity: usize,
-        data_types: &[DataTypeRef],
+        data_types: &[DataTypeKind],
         update_start_pos: usize,
         matched_start_pos: usize,
     ) -> Result<Self> {
@@ -170,7 +170,7 @@ struct JoinSide<S: StateStore> {
     /// The primary key indices of this side, used for state store
     pk_indices: Vec<usize>,
     /// The date type of each columns to join on
-    col_types: Vec<DataTypeRef>,
+    col_types: Vec<DataTypeKind>,
     /// The start position for the side in output new columns
     start_pos: usize,
     /// The join side operates on this keyspace.
@@ -193,9 +193,8 @@ impl<S: StateStore> std::fmt::Debug for JoinSide<S> {
 pub struct HashJoinExecutor<S: StateStore, const T: JoinTypePrimitive> {
     /// Barrier aligner that combines two input streams and aligns their barriers
     aligner: BarrierAligner,
-    // TODO: maybe remove `new_column_datatypes` and use schema
     /// the data types of the formed new columns
-    new_column_datatypes: Vec<DataTypeRef>,
+    output_data_types: Vec<DataTypeKind>,
     /// The schema of the hash join executor
     schema: Schema,
     /// The primary key indices of the schema
@@ -223,7 +222,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> std::fmt::Debug for HashJoinExec
             .field("side_r", &self.side_r)
             .field("pk_indices", &self.pk_indices)
             .field("schema", &self.schema)
-            .field("new_column_datatypes", &self.new_column_datatypes)
+            .field("output_data_types", &self.output_data_types)
             .finish()
     }
 }
@@ -284,21 +283,18 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
 
         assert_eq!(schema_fields.len(), new_column_n);
 
-        let new_column_datatypes = schema_fields
-            .iter()
-            .map(|field| field.data_type.clone())
-            .collect();
+        let output_data_types = schema_fields.iter().map(|field| field.data_type).collect();
         let col_l_datatypes = input_l
             .schema()
             .fields
             .iter()
-            .map(|field| field.data_type.clone())
+            .map(|field| field.data_type)
             .collect();
         let col_r_datatypes = input_r
             .schema()
             .fields
             .iter()
-            .map(|field| field.data_type.clone())
+            .map(|field| field.data_type)
             .collect();
         let pk_indices_l = input_l.pk_indices().to_vec();
         let pk_indices_r = input_r.pk_indices().to_vec();
@@ -307,7 +303,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
         let ks_r = keyspace.with_segment(Segment::FixedLength(JOIN_RIGHT_PATH.to_vec()));
         Self {
             aligner: BarrierAligner::new(input_l, input_r),
-            new_column_datatypes,
+            output_data_types,
             schema: Schema {
                 fields: schema_fields,
             },
@@ -407,7 +403,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
 
         let mut stream_chunk_builder = StreamChunkBuilder::new(
             capacity,
-            &self.new_column_datatypes,
+            &self.output_data_types,
             side_update.start_pos,
             side_match.start_pos,
         )?;
@@ -524,7 +520,6 @@ mod tests {
     use risingwave_common::array::*;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::column_nonnull;
-    use risingwave_common::types::Int64Type;
     use risingwave_storage::memory::MemoryStateStore;
     use tokio::sync::mpsc::unbounded_channel;
 
@@ -573,8 +568,8 @@ mod tests {
         );
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(Int64Type::create(false)),
-                Field::new_without_name(Int64Type::create(false)),
+                Field::new_without_name(DataTypeKind::Int64),
+                Field::new_without_name(DataTypeKind::Int64),
             ],
         };
 
@@ -716,8 +711,8 @@ mod tests {
         );
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(Int64Type::create(false)),
-                Field::new_without_name(Int64Type::create(false)),
+                Field::new_without_name(DataTypeKind::Int64),
+                Field::new_without_name(DataTypeKind::Int64),
             ],
         };
 
@@ -886,8 +881,8 @@ mod tests {
         );
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(Int64Type::create(false)),
-                Field::new_without_name(Int64Type::create(false)),
+                Field::new_without_name(DataTypeKind::Int64),
+                Field::new_without_name(DataTypeKind::Int64),
             ],
         };
 
@@ -1049,8 +1044,8 @@ mod tests {
         );
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(Int64Type::create(false)),
-                Field::new_without_name(Int64Type::create(false)),
+                Field::new_without_name(DataTypeKind::Int64),
+                Field::new_without_name(DataTypeKind::Int64),
             ],
         };
 
@@ -1192,8 +1187,8 @@ mod tests {
         );
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(Int64Type::create(false)),
-                Field::new_without_name(Int64Type::create(false)),
+                Field::new_without_name(DataTypeKind::Int64),
+                Field::new_without_name(DataTypeKind::Int64),
             ],
         };
 

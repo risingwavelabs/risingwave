@@ -63,7 +63,7 @@ impl<S: StateStore> MViewTable<S> {
         let schema = {
             let fields = column_descs
                 .iter()
-                .map(|c| Field::new(c.data_type.clone(), c.name.clone()))
+                .map(|c| Field::new(c.data_type, c.name.clone()))
                 .collect();
             Schema::new(fields)
         };
@@ -122,7 +122,7 @@ impl<S: StateStore> MViewTable<S> {
             Some(buf) => {
                 let mut deserializer = memcomparable::Deserializer::new(buf);
                 let datum = deserialize_datum_from(
-                    &self.schema.fields[cell_idx].data_type.data_type_kind(),
+                    &self.schema.fields[cell_idx].data_type,
                     &mut deserializer,
                 )?;
                 Ok(Some(datum))
@@ -193,13 +193,7 @@ impl<S: StateStore> TableIter for MViewTableIter<S> {
                 None => return Err(ErrorCode::InternalError("incomplete item".to_owned()).into()),
             }
         }
-        let schema = self
-            .schema
-            .data_types_clone()
-            .into_iter()
-            .map(|data_type| data_type.data_type_kind())
-            .collect::<Vec<_>>();
-        let row_deserializer = RowDeserializer::new(schema);
+        let row_deserializer = RowDeserializer::new(self.schema.data_types());
         let row = row_deserializer.deserialize(&row_bytes)?;
         Ok(Some(row))
     }

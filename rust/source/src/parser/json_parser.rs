@@ -34,10 +34,7 @@ impl SourceParser for JSONParser {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::types::{
-        BoolType, DataTypeKind, DateType, Float32Type, Float64Type, Int16Type, Int32Type,
-        Int64Type, ScalarImpl, StringType,
-    };
+    use risingwave_common::types::{DataTypeKind, ScalarImpl};
     use risingwave_common::vector_op::cast::str_to_date;
 
     use crate::{JSONParser, SourceColumnDesc, SourceParser};
@@ -50,63 +47,63 @@ mod tests {
         let descs = vec![
             SourceColumnDesc {
                 name: "i32".to_string(),
-                data_type: Int32Type::create(false),
+                data_type: DataTypeKind::Int32,
                 column_id: 0,
                 skip_parse: false,
                 is_primary: false,
             },
             SourceColumnDesc {
                 name: "char".to_string(),
-                data_type: StringType::create(false, 8, DataTypeKind::Char),
+                data_type: DataTypeKind::Char,
                 column_id: 1,
                 skip_parse: false,
                 is_primary: false,
             },
             SourceColumnDesc {
                 name: "bool".to_string(),
-                data_type: BoolType::create(false),
+                data_type: DataTypeKind::Boolean,
                 column_id: 2,
                 skip_parse: false,
                 is_primary: false,
             },
             SourceColumnDesc {
                 name: "i16".to_string(),
-                data_type: Int16Type::create(false),
+                data_type: DataTypeKind::Int16,
                 column_id: 3,
                 skip_parse: false,
                 is_primary: false,
             },
             SourceColumnDesc {
                 name: "i64".to_string(),
-                data_type: Int64Type::create(false),
+                data_type: DataTypeKind::Int64,
                 column_id: 4,
                 skip_parse: false,
                 is_primary: false,
             },
             SourceColumnDesc {
                 name: "f32".to_string(),
-                data_type: Float32Type::create(false),
+                data_type: DataTypeKind::Float32,
                 column_id: 5,
                 skip_parse: false,
                 is_primary: false,
             },
             SourceColumnDesc {
                 name: "f64".to_string(),
-                data_type: Float64Type::create(false),
+                data_type: DataTypeKind::Float64,
                 column_id: 6,
                 skip_parse: false,
                 is_primary: false,
             },
             SourceColumnDesc {
                 name: "varchar".to_string(),
-                data_type: StringType::create(false, 9, DataTypeKind::Varchar),
+                data_type: DataTypeKind::Varchar,
                 column_id: 7,
                 skip_parse: false,
                 is_primary: false,
             },
             SourceColumnDesc {
                 name: "date".to_string(),
-                data_type: DateType::create(false),
+                data_type: DataTypeKind::Date,
                 column_id: 8,
                 skip_parse: false,
                 is_primary: false,

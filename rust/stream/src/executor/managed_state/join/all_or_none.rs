@@ -4,7 +4,7 @@ use itertools::Itertools;
 use risingwave_common::array::data_chunk_iter::RowDeserializer;
 use risingwave_common::array::Row;
 use risingwave_common::error::Result;
-use risingwave_common::types::{DataTypeKind, DataTypeRef};
+use risingwave_common::types::DataTypeKind;
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -31,10 +31,10 @@ pub struct AllOrNoneState<S: StateStore> {
     cache_evicted: bool,
 
     /// Data types of the sort column
-    data_type_kinds: Vec<DataTypeKind>,
+    data_types: Vec<DataTypeKind>,
 
     /// Data types of primary keys
-    pk_data_type_kinds: Vec<DataTypeKind>,
+    pk_data_types: Vec<DataTypeKind>,
 
     /// Indices of primary keys
     pk_indices: Vec<usize>,
@@ -46,28 +46,17 @@ pub struct AllOrNoneState<S: StateStore> {
 impl<S: StateStore> AllOrNoneState<S> {
     pub fn new(
         keyspace: Keyspace<S>,
-        data_types: Vec<DataTypeRef>,
+        data_types: Vec<DataTypeKind>,
         pk_indices: Vec<usize>,
     ) -> Self {
-        let pk_data_types = pk_indices
-            .iter()
-            .map(|idx| data_types[*idx].clone())
-            .collect_vec();
-        let data_type_kinds = data_types
-            .iter()
-            .map(|typ| typ.data_type_kind())
-            .collect_vec();
-        let pk_data_type_kinds = pk_data_types
-            .iter()
-            .map(|typ| typ.data_type_kind())
-            .collect_vec();
+        let pk_data_types = pk_indices.iter().map(|idx| data_types[*idx]).collect_vec();
         Self {
             cached: BTreeMap::new(),
             flush_buffer: BTreeMap::new(),
             total_count: 0,
             cache_evicted: false,
-            data_type_kinds,
-            pk_data_type_kinds,
+            data_types,
+            pk_data_types,
             pk_indices,
             keyspace,
         }
@@ -131,9 +120,9 @@ impl<S: StateStore> AllOrNoneState<S> {
         let all_data = self.keyspace.scan_strip_prefix(None).await.unwrap();
 
         for (raw_key, raw_value) in all_data {
-            let pk_deserializer = RowDeserializer::new(self.pk_data_type_kinds.clone());
+            let pk_deserializer = RowDeserializer::new(self.pk_data_types.clone());
             let key = pk_deserializer.deserialize_not_null(&raw_key).unwrap();
-            let deserializer = RowDeserializer::new(self.data_type_kinds.clone());
+            let deserializer = RowDeserializer::new(self.data_types.clone());
             let value = deserializer.deserialize(&raw_value).unwrap();
             self.cached.insert(key, value);
         }
@@ -158,7 +147,7 @@ impl<S: StateStore> AllOrNoneState<S> {
 mod tests {
     use risingwave_common::array::*;
     use risingwave_common::column_nonnull;
-    use risingwave_common::types::{Int64Type, ScalarImpl};
+    use risingwave_common::types::ScalarImpl;
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
@@ -168,7 +157,7 @@ mod tests {
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
         let mut managed_state = AllOrNoneState::new(
             keyspace,
-            vec![Int64Type::create(false), Int64Type::create(false)],
+            vec![DataTypeKind::Int64, DataTypeKind::Int64],
             vec![0],
         );
         assert!(!managed_state.is_dirty());

@@ -72,7 +72,7 @@ pub trait ScannableTable: Sync + Send + Any + core::fmt::Debug {
         let schema = self.schema();
         let mut builders = indices
             .iter()
-            .map(|i| schema.fields()[*i].data_type_ref().create_array_builder(0))
+            .map(|i| schema.fields()[*i].data_type().create_array_builder(0))
             .collect::<Result<Vec<_>>>()?;
 
         while let Some(row) = iter.next().await? {

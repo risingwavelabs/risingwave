@@ -154,7 +154,7 @@ impl Executor for OrderByExecutor {
             .schema()
             .fields()
             .iter()
-            .map(|f| f.data_type.clone())
+            .map(|f| f.data_type)
             .collect_vec();
         let mut builders = data_types
             .iter()
@@ -218,10 +218,7 @@ mod tests {
     use risingwave_common::array::{BoolArray, DataChunk, PrimitiveArray, Utf8Array};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::expr::InputRefExpression;
-    use risingwave_common::types::{
-        BoolType, DataTypeKind, Float32Type, Float64Type, Int16Type, Int32Type, OrderedF32,
-        OrderedF64, StringType,
-    };
+    use risingwave_common::types::{DataTypeKind, OrderedF32, OrderedF64};
     use risingwave_common::util::sort_util::OrderType;
     use test::Bencher;
 
@@ -272,8 +269,8 @@ mod tests {
         let data_chunk = DataChunk::builder().columns([col0, col1].to_vec()).build();
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(Int32Type::create(false)),
-                Field::new_without_name(Int32Type::create(false)),
+                Field::new_without_name(DataTypeKind::Int32),
+                Field::new_without_name(DataTypeKind::Int32),
             ],
         };
         let mut mock_executor = MockExecutor::new(schema);
@@ -303,8 +300,8 @@ mod tests {
             identity: format!("OrderByExecutor{:?}", TaskId::default()),
         };
         let fields = &order_by_executor.schema().fields;
-        assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);
-        assert_eq!(fields[1].data_type.data_type_kind(), DataTypeKind::Int32);
+        assert_eq!(fields[0].data_type, DataTypeKind::Int32);
+        assert_eq!(fields[1].data_type, DataTypeKind::Int32);
         order_by_executor.open().await.unwrap();
         let res = order_by_executor.next().await.unwrap();
         assert!(matches!(res, Some(_)));
@@ -326,8 +323,8 @@ mod tests {
         let data_chunk = DataChunk::builder().columns([col0, col1].to_vec()).build();
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(Float32Type::create(false)),
-                Field::new_without_name(Float64Type::create(false)),
+                Field::new_without_name(DataTypeKind::Float32),
+                Field::new_without_name(DataTypeKind::Float64),
             ],
         };
         let mut mock_executor = MockExecutor::new(schema);
@@ -357,8 +354,8 @@ mod tests {
             identity: format!("OrderByExecutor{:?}", TaskId::default()),
         };
         let fields = &order_by_executor.schema().fields;
-        assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Float32);
-        assert_eq!(fields[1].data_type.data_type_kind(), DataTypeKind::Float64);
+        assert_eq!(fields[0].data_type, DataTypeKind::Float32);
+        assert_eq!(fields[1].data_type, DataTypeKind::Float64);
         order_by_executor.open().await.unwrap();
         let res = order_by_executor.next().await.unwrap();
         assert!(matches!(res, Some(_)));
@@ -389,8 +386,8 @@ mod tests {
         let data_chunk = DataChunk::builder().columns([col0, col1].to_vec()).build();
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(StringType::create(false, 0, DataTypeKind::Varchar)),
-                Field::new_without_name(StringType::create(false, 0, DataTypeKind::Varchar)),
+                Field::new_without_name(DataTypeKind::Varchar),
+                Field::new_without_name(DataTypeKind::Varchar),
             ],
         };
         let mut mock_executor = MockExecutor::new(schema);
@@ -420,8 +417,8 @@ mod tests {
             identity: format!("OrderByExecutor{:?}", TaskId::default()),
         };
         let fields = &order_by_executor.schema().fields;
-        assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Varchar);
-        assert_eq!(fields[1].data_type.data_type_kind(), DataTypeKind::Varchar);
+        assert_eq!(fields[0].data_type, DataTypeKind::Varchar);
+        assert_eq!(fields[1].data_type, DataTypeKind::Varchar);
         order_by_executor.open().await.unwrap();
         let res = order_by_executor.next().await.unwrap();
         assert!(matches!(res, Some(_)));
@@ -472,10 +469,10 @@ mod tests {
                 .build();
             let schema = Schema {
                 fields: vec![
-                    Field::new_without_name(Int16Type::create(false)),
-                    Field::new_without_name(BoolType::create(false)),
-                    Field::new_without_name(Float32Type::create(false)),
-                    Field::new_without_name(StringType::create(false, 0, DataTypeKind::Varchar)),
+                    Field::new_without_name(DataTypeKind::Int16),
+                    Field::new_without_name(DataTypeKind::Boolean),
+                    Field::new_without_name(DataTypeKind::Float32),
+                    Field::new_without_name(DataTypeKind::Varchar),
                 ],
             };
             let mut mock_executor = MockExecutor::new(schema);

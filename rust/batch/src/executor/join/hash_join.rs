@@ -322,7 +322,7 @@ impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
             params.left_key_columns.push(left_key);
             params
                 .left_key_types
-                .push(left_child.schema()[left_key].data_type().data_type_kind());
+                .push(left_child.schema()[left_key].data_type());
         }
 
         for right_key in hash_join_node.get_right_key() {
@@ -330,7 +330,7 @@ impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
             params.right_key_columns.push(right_key);
             params
                 .right_key_types
-                .push(right_child.schema()[right_key].data_type().data_type_kind());
+                .push(right_child.schema()[right_key].data_type());
         }
 
         ensure!(params.left_key_columns.len() == params.right_key_columns.len());
@@ -338,21 +338,17 @@ impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
         for left_output in hash_join_node.get_left_output() {
             let left_output = *left_output as usize;
             params.output_columns.push(Either::Left(left_output));
-            params.output_data_types.push(
-                left_child.schema()[left_output]
-                    .data_type()
-                    .data_type_kind(),
-            );
+            params
+                .output_data_types
+                .push(left_child.schema()[left_output].data_type());
         }
 
         for right_output in hash_join_node.get_right_output() {
             let right_output = *right_output as usize;
             params.output_columns.push(Either::Right(right_output));
-            params.output_data_types.push(
-                right_child.schema()[right_output]
-                    .data_type()
-                    .data_type_kind(),
-            );
+            params
+                .output_data_types
+                .push(right_child.schema()[right_output].data_type());
         }
 
         params.join_type = JoinType::from_prost(hash_join_node.get_join_type());
@@ -394,7 +390,7 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::collection::hash_map::Key32;
     use risingwave_common::error::Result;
-    use risingwave_common::types::{DataTypeKind, Float32Type, Float64Type, Int32Type};
+    use risingwave_common::types::DataTypeKind;
 
     use crate::executor::join::hash_join::{EquiJoinParams, HashJoinExecutor};
     use crate::executor::join::JoinType;
@@ -486,8 +482,8 @@ mod tests {
         fn create_left_executor(&self) -> BoxedExecutor {
             let schema = Schema {
                 fields: vec![
-                    Field::new_without_name(Int32Type::create(false)),
-                    Field::new_without_name(Float32Type::create(false)),
+                    Field::new_without_name(DataTypeKind::Int32),
+                    Field::new_without_name(DataTypeKind::Float32),
                 ],
             };
             let mut executor = MockExecutor::new(schema);
@@ -526,8 +522,8 @@ mod tests {
         fn create_right_executor(&self) -> BoxedExecutor {
             let schema = Schema {
                 fields: vec![
-                    Field::new_without_name(Int32Type::create(false)),
-                    Field::new_without_name(Float64Type::create(false)),
+                    Field::new_without_name(DataTypeKind::Int32),
+                    Field::new_without_name(DataTypeKind::Float64),
                 ],
             };
             let mut executor = MockExecutor::new(schema);
@@ -660,14 +656,14 @@ mod tests {
                 | JoinType::LeftOuter
                 | JoinType::RightOuter
                 | JoinType::FullOuter => {
-                    assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Float32);
-                    assert_eq!(fields[1].data_type.data_type_kind(), DataTypeKind::Float64);
+                    assert_eq!(fields[0].data_type, DataTypeKind::Float32);
+                    assert_eq!(fields[1].data_type, DataTypeKind::Float64);
                 }
                 JoinType::LeftAnti | JoinType::LeftSemi => {
-                    assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Float32)
+                    assert_eq!(fields[0].data_type, DataTypeKind::Float32)
                 }
                 JoinType::RightAnti | JoinType::RightSemi => {
-                    assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Float64)
+                    assert_eq!(fields[0].data_type, DataTypeKind::Float64)
                 }
             };
 

@@ -68,14 +68,14 @@ impl HashAggExecutorBuilder {
 
         let group_key_types = group_key_columns
             .iter()
-            .map(|i| child_schema.fields[*i].data_type.data_type_kind())
+            .map(|i| child_schema.fields[*i].data_type)
             .collect_vec();
 
         let fields = group_key_types
             .iter()
             .cloned()
             .chain(agg_factories.iter().map(|e| e.get_return_type()))
-            .map(|t| Field::new_without_name(t.to_data_type()))
+            .map(Field::new_without_name)
             .collect::<Vec<Field>>();
 
         let hash_key_kind = calc_hash_key_kind(&group_key_types);
@@ -240,7 +240,6 @@ mod tests {
     use risingwave_common::array::{I32Array, I64Array};
     use risingwave_common::array_nonnull;
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::{Int32Type, Int64Type};
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType;
     use risingwave_pb::expr::agg_call::{Arg, Type};
@@ -255,8 +254,8 @@ mod tests {
         let key2_col = Arc::new(array_nonnull! { I32Array, [1,1,0,1,0,0,1,1] }.into());
         let sum_col = Arc::new(array_nonnull! { I32Array,  [1,1,1,2,1,2,3,2] }.into());
 
-        let t32 = Int32Type::create(false);
-        let t64 = Int64Type::create(false);
+        let t32 = DataTypeKind::Int32;
+        let t64 = DataTypeKind::Int64;
 
         let src_exec = MockExecutor::with_chunk(
             DataChunk::builder()
@@ -268,9 +267,9 @@ mod tests {
                 .build(),
             Schema {
                 fields: vec![
-                    Field::new_without_name(t32.clone()),
-                    Field::new_without_name(t32.clone()),
-                    Field::new_without_name(t32.clone()),
+                    Field::new_without_name(t32),
+                    Field::new_without_name(t32),
+                    Field::new_without_name(t32),
                 ],
             },
         );
@@ -301,9 +300,9 @@ mod tests {
 
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(t32.clone()),
-                Field::new_without_name(t32.clone()),
-                Field::new_without_name(t64.clone()),
+                Field::new_without_name(t32),
+                Field::new_without_name(t32),
+                Field::new_without_name(t64),
             ],
         };
 
@@ -328,11 +327,11 @@ mod tests {
     #[tokio::test]
     async fn execute_count_star() {
         let col = Arc::new(array_nonnull! { I32Array, [0,1,0,1,1,0,1,0] }.into());
-        let t32 = Int32Type::create(false);
+        let t32 = DataTypeKind::Int32;
         let src_exec = MockExecutor::with_chunk(
             DataChunk::builder().columns(vec![Column::new(col)]).build(),
             Schema {
-                fields: vec![Field::new_without_name(t32.clone())],
+                fields: vec![Field::new_without_name(t32)],
             },
         );
 
@@ -354,7 +353,7 @@ mod tests {
             HashAggExecutorBuilder::deserialize(&agg_prost, Box::new(src_exec), TaskId::default())
                 .unwrap();
         let schema = Schema {
-            fields: vec![Field::new_without_name(t32.clone())],
+            fields: vec![Field::new_without_name(t32)],
         };
         let res = Arc::new(array_nonnull! { I64Array, [8] }.into());
 

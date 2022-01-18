@@ -68,7 +68,7 @@ impl BoxedExecutorBuilder for SortAggExecutor {
             .iter()
             .map(|e| e.return_type())
             .chain(agg_states.iter().map(|e| e.return_type()))
-            .map(|t| Field::new_without_name(t.to_data_type()))
+            .map(Field::new_without_name)
             .collect::<Vec<Field>>();
 
         Ok(Box::new(Self {
@@ -177,7 +177,7 @@ mod tests {
     use risingwave_common::array_nonnull;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::expr::build_from_prost;
-    use risingwave_common::types::{DataTypeKind, Int32Type};
+    use risingwave_common::types::DataTypeKind;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType;
     use risingwave_pb::expr::agg_call::{Arg, Type};
@@ -195,7 +195,7 @@ mod tests {
         let a = Arc::new(array_nonnull! { I32Array, [1, 2, 3] }.into());
         let chunk = DataChunk::builder().columns(vec![Column::new(a)]).build();
         let schema = Schema {
-            fields: vec![Field::new_without_name(Int32Type::create(false))],
+            fields: vec![Field::new_without_name(DataTypeKind::Int32)],
         };
         let mut child = MockExecutor::new(schema);
         child.add(chunk);
@@ -223,7 +223,7 @@ mod tests {
             .iter()
             .map(|e| e.return_type())
             .chain(agg_states.iter().map(|e| e.return_type()))
-            .map(|t| Field::new_without_name(t.to_data_type()))
+            .map(Field::new_without_name)
             .collect::<Vec<Field>>();
         let mut executor = SortAggExecutor {
             agg_states,
@@ -264,9 +264,9 @@ mod tests {
             .build();
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(Int32Type::create(false)),
-                Field::new_without_name(Int32Type::create(false)),
-                Field::new_without_name(Int32Type::create(false)),
+                Field::new_without_name(DataTypeKind::Int32),
+                Field::new_without_name(DataTypeKind::Int32),
+                Field::new_without_name(DataTypeKind::Int32),
             ],
         };
         let mut child = MockExecutor::new(schema);
@@ -319,7 +319,7 @@ mod tests {
             .iter()
             .map(|e| e.return_type())
             .chain(agg_states.iter().map(|e| e.return_type()))
-            .map(|t| Field::new_without_name(t.to_data_type()))
+            .map(Field::new_without_name)
             .collect::<Vec<Field>>();
 
         let mut executor = SortAggExecutor {
@@ -334,9 +334,9 @@ mod tests {
 
         executor.open().await?;
         let fields = &executor.schema().fields;
-        assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);
-        assert_eq!(fields[1].data_type.data_type_kind(), DataTypeKind::Int32);
-        assert_eq!(fields[2].data_type.data_type_kind(), DataTypeKind::Int64);
+        assert_eq!(fields[0].data_type, DataTypeKind::Int32);
+        assert_eq!(fields[1].data_type, DataTypeKind::Int32);
+        assert_eq!(fields[2].data_type, DataTypeKind::Int64);
         let o = executor.next().await?.unwrap();
         if executor.next().await?.is_some() {
             panic!("simple agg should have no more than 1 output.");

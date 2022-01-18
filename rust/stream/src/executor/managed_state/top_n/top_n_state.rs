@@ -33,7 +33,7 @@ pub struct ManagedTopNState<S: StateStore, const TOP_N_TYPE: usize> {
     /// The keyspace to operate on.
     keyspace: Keyspace<S>,
     /// `DataTypeKind`s use for deserializing `Row`.
-    data_type_kinds: Vec<DataTypeKind>,
+    data_types: Vec<DataTypeKind>,
     /// For deserializing `OrderedRow`.
     ordered_row_deserializer: OrderedRowDeserializer,
     /// epoch
@@ -45,7 +45,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         top_n_count: Option<usize>,
         total_count: usize,
         keyspace: Keyspace<S>,
-        data_type_kinds: Vec<DataTypeKind>,
+        data_types: Vec<DataTypeKind>,
         ordered_row_deserializer: OrderedRowDeserializer,
         epoch: u64,
     ) -> Self {
@@ -55,7 +55,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
             total_count,
             top_n_count,
             keyspace,
-            data_type_kinds,
+            data_types,
             ordered_row_deserializer,
             epoch,
         }
@@ -279,22 +279,20 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
     ) -> Result<Vec<(OrderedRow, Row)>> {
         let pk_row_bytes = self
             .keyspace
-            .scan_strip_prefix(
-                number_rows.map(|top_n_count| top_n_count * self.data_type_kinds.len()),
-            )
+            .scan_strip_prefix(number_rows.map(|top_n_count| top_n_count * self.data_types.len()))
             .await?;
         // We must have enough cells to restore a complete row.
-        debug_assert_eq!(pk_row_bytes.len() % self.data_type_kinds.len(), 0);
-        // cell-based storage format, so `self.data_type_kinds.len()`
+        debug_assert_eq!(pk_row_bytes.len() % self.data_types.len(), 0);
+        // cell-based storage format, so `self.data_types.len()`
         let mut row_bytes = vec![];
         let mut cell_restored = 0;
         let mut res = vec![];
         for (pk, cell_bytes) in pk_row_bytes {
             row_bytes.extend_from_slice(&cell_bytes);
             cell_restored += 1;
-            if cell_restored == self.data_type_kinds.len() {
+            if cell_restored == self.data_types.len() {
                 cell_restored = 0;
-                let deserializer = RowDeserializer::new(self.data_type_kinds.clone());
+                let deserializer = RowDeserializer::new(self.data_types.clone());
                 let row = deserializer.deserialize(&std::mem::take(&mut row_bytes))?;
                 // format: [pk_buf | cell_idx (4B)]
                 // Take `pk_buf` out.
@@ -348,7 +346,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
                 TOP_N_MAX => ordered_row.reverse_serialize(),
                 _ => unreachable!(),
             }?;
-            for cell_idx in 0..self.data_type_kinds.len() {
+            for cell_idx in 0..self.data_types.len() {
                 // format: [pk_buf | cell_idx (4B)]
                 let key_encoded = [&pk_buf[..], &serialize_cell_idx(cell_idx as u32)?[..]].concat();
 
@@ -398,7 +396,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::types::{DataType, DataTypeKind, Int64Type, StringType};
+    use risingwave_common::types::DataTypeKind;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::{Keyspace, StateStore};
@@ -411,17 +409,16 @@ mod tests {
     fn create_managed_top_n_state<S: StateStore, const TOP_N_TYPE: usize>(
         store: &S,
         row_count: usize,
-        data_type_kinds: Vec<DataTypeKind>,
+        data_types: Vec<DataTypeKind>,
         order_types: Vec<OrderType>,
     ) -> ManagedTopNState<S, TOP_N_TYPE> {
-        let ordered_row_deserializer =
-            OrderedRowDeserializer::new(data_type_kinds.clone(), order_types);
+        let ordered_row_deserializer = OrderedRowDeserializer::new(data_types.clone(), order_types);
 
         ManagedTopNState::<S, TOP_N_TYPE>::new(
             Some(2),
             row_count,
             Keyspace::executor_root(store.clone(), 0x2333),
-            data_type_kinds,
+            data_types,
             ordered_row_deserializer,
             0,
         )
@@ -430,16 +427,13 @@ mod tests {
     #[tokio::test]
     async fn test_managed_top_n_state() {
         let store = MemoryStateStore::new();
-        let data_type_kinds = vec![
-            StringType::create(false, 5, DataTypeKind::Varchar).data_type_kind(),
-            Int64Type::new(false).data_type_kind(),
-        ];
+        let data_types = vec![DataTypeKind::Varchar, DataTypeKind::Int64];
         let order_types = vec![OrderType::Descending, OrderType::Ascending];
 
         let mut managed_state = create_managed_top_n_state::<_, TOP_N_MAX>(
             &store,
             0,
-            data_type_kinds.clone(),
+            data_types.clone(),
             order_types.clone(),
         );
 
@@ -503,7 +497,7 @@ mod tests {
         let mut managed_state = create_managed_top_n_state::<_, TOP_N_MAX>(
             &store,
             row_count,
-            data_type_kinds.clone(),
+            data_types.clone(),
             order_types.clone(),
         );
         assert_eq!(managed_state.top_element(), None);
@@ -557,12 +551,8 @@ mod tests {
         // Exclude the last `insert` as the state crashes before recovery.
         let row_count = managed_state.total_count - 1;
         drop(managed_state);
-        let mut managed_state = create_managed_top_n_state::<_, TOP_N_MAX>(
-            &store,
-            row_count,
-            data_type_kinds,
-            order_types,
-        );
+        let mut managed_state =
+            create_managed_top_n_state::<_, TOP_N_MAX>(&store, row_count, data_types, order_types);
         managed_state.fill_in_cache().await.unwrap();
         assert_eq!(
             managed_state.top_element(),

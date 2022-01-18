@@ -161,7 +161,7 @@ mod tests {
     use risingwave_common::column_nonnull;
     use risingwave_common::expr::expr_binary_nonnull::new_binary_expr;
     use risingwave_common::expr::InputRefExpression;
-    use risingwave_common::types::{DataTypeKind, Int64Type};
+    use risingwave_common::types::DataTypeKind;
     use risingwave_pb::expr::expr_node::Type;
 
     use crate::executor::test_utils::MockSource;
@@ -197,8 +197,8 @@ mod tests {
         );
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(Int64Type::create(false)),
-                Field::new_without_name(Int64Type::create(false)),
+                Field::new_without_name(DataTypeKind::Int64),
+                Field::new_without_name(DataTypeKind::Int64),
             ],
         };
         let source = MockSource::with_chunks(schema, PkIndices::new(), vec![chunk1, chunk2]);

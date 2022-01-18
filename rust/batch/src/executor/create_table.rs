@@ -3,7 +3,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::error::ErrorCode::ProstError;
 use risingwave_common::error::Result;
-use risingwave_common::types::build_from_prost;
+use risingwave_common::types::DataTypeKind;
 use risingwave_common::util::downcast_arc;
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::CreateTableNode;
@@ -56,7 +56,7 @@ impl BoxedExecutorBuilder for CreateTableExecutor {
             .iter()
             .map(|col| {
                 Ok(TableColumnDesc {
-                    data_type: build_from_prost(col.get_column_type())?,
+                    data_type: DataTypeKind::from(col.get_column_type()),
                     column_id: col.get_column_id(),
                     name: col.get_name().to_string(),
                 })

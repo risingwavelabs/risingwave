@@ -56,7 +56,7 @@ async fn test_merger_sum_aggr() {
     // `make_actor` build an actor to do local aggregation
     let make_actor = |input_rx| {
         let schema = Schema {
-            fields: vec![Field::new_without_name(Int64Type::create(false))],
+            fields: vec![Field::new_without_name(DataTypeKind::Int64)],
         };
         let input = ReceiverExecutor::new(schema, vec![], input_rx);
         // for the local aggregator, we need two states: row count and sum
@@ -108,7 +108,7 @@ async fn test_merger_sum_aggr() {
     // create a round robin dispatcher, which dispatches messages to the actors
     let (mut input, rx) = channel(16);
     let schema = Schema {
-        fields: vec![Field::new_without_name(Int64Type::create(false))],
+        fields: vec![Field::new_without_name(DataTypeKind::Int64)],
     };
     let receiver_op = ReceiverExecutor::new(schema.clone(), vec![], rx);
     let dispatcher = DispatchExecutor::new(
@@ -321,10 +321,10 @@ fn make_tpchq6_expr() -> (BoxedExpression, BoxedExpression) {
 async fn test_tpch_q6() {
     let schema = Schema {
         fields: vec![
-            Field::new(TimestampType::create(false, 10), String::from("l_shipdate")),
-            Field::new(Float64Type::create(false), String::from("l_discount")),
-            Field::new(Float64Type::create(false), String::from("l_quantity")),
-            Field::new(Float64Type::create(false), String::from("l_extendedprice")),
+            Field::new(DataTypeKind::Timestamp, String::from("l_shipdate")),
+            Field::new(DataTypeKind::Float64, String::from("l_discount")),
+            Field::new(DataTypeKind::Float64, String::from("l_quantity")),
+            Field::new(DataTypeKind::Float64, String::from("l_extendedprice")),
         ],
     };
 

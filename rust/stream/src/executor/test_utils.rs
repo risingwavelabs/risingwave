@@ -200,14 +200,14 @@ pub fn create_in_memory_keyspace() -> Keyspace<MemoryStateStore> {
 
 pub mod schemas {
     use risingwave_common::catalog::*;
-    use risingwave_common::types::{DataTypeKind, DataTypeRef, Int32Type, StringType};
+    use risingwave_common::types::DataTypeKind;
 
-    fn field_n<const N: usize>(data_type: DataTypeRef) -> Schema {
+    fn field_n<const N: usize>(data_type: DataTypeKind) -> Schema {
         Schema::new(vec![Field::new(data_type, String::from("")); N])
     }
 
     fn int32_n<const N: usize>() -> Schema {
-        field_n::<N>(Int32Type::create(false))
+        field_n::<N>(DataTypeKind::Int32)
     }
 
     /// Create a util schema **for test only** with two int32 fields.
@@ -221,7 +221,7 @@ pub mod schemas {
     }
 
     fn varchar_n<const N: usize>() -> Schema {
-        field_n::<N>(StringType::create(true, 0, DataTypeKind::Varchar))
+        field_n::<N>(DataTypeKind::Varchar)
     }
 
     /// Create a util schema **for test only** with three varchar fields.

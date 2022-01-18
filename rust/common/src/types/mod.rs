@@ -201,37 +201,24 @@ impl DataTypeKind {
     }
 }
 
-macro_rules! build_data_type {
-  ($proto: expr, $($proto_type_name:path => $data_type:ty),*) => {
-    match $proto.get_type_name() {
-      $(
-        $proto_type_name => {
-          <$data_type>::try_from($proto).map(|d| Arc::new(d) as DataTypeRef)
-        },
-      )*
-    }
-  }
-}
-
-pub fn build_from_prost(proto: &ProstDataType) -> Result<DataTypeRef> {
-    build_data_type! {
-      proto,
-      TypeName::Int16 => Int16Type,
-      TypeName::Int32 => Int32Type,
-      TypeName::Int64 => Int64Type,
-      TypeName::Float => Float32Type,
-      TypeName::Double => Float64Type,
-      TypeName::Boolean => BoolType,
-      TypeName::Symbol => StringType,
-      TypeName::Char => StringType,
-      TypeName::Varchar => StringType,
-      TypeName::Date => DateType,
-      TypeName::Time => TimeType,
-      TypeName::Timestamp => TimestampType,
-      TypeName::Timestampz => TimestampWithTimeZoneType,
-      TypeName::Decimal => DecimalType,
-      TypeName::Interval => IntervalType
-    }
+pub fn build_from_prost(proto: &ProstDataType) -> Result<DataTypeKind> {
+    Ok(match proto.get_type_name() {
+        TypeName::Int16 => DataTypeKind::Int16,
+        TypeName::Int32 => DataTypeKind::Int32,
+        TypeName::Int64 => DataTypeKind::Int64,
+        TypeName::Float => DataTypeKind::Float32,
+        TypeName::Double => DataTypeKind::Float64,
+        TypeName::Boolean => DataTypeKind::Boolean,
+        TypeName::Symbol => DataTypeKind::Varchar,
+        TypeName::Char => DataTypeKind::Char,
+        TypeName::Varchar => DataTypeKind::Varchar,
+        TypeName::Date => DataTypeKind::Date,
+        TypeName::Time => DataTypeKind::Time,
+        TypeName::Timestamp => DataTypeKind::Timestamp,
+        TypeName::Timestampz => DataTypeKind::Timestampz,
+        TypeName::Decimal => DataTypeKind::Decimal,
+        TypeName::Interval => DataTypeKind::Interval,
+    })
 }
 
 /// `Scalar` is a trait over all possible owned types in the evaluation

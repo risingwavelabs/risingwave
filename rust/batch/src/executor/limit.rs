@@ -127,7 +127,7 @@ mod tests {
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{Array, BoolArray, DataChunk, PrimitiveArray};
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::{BoolType, DataTypeKind, Int32Type};
+    use risingwave_common::types::DataTypeKind;
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
@@ -153,7 +153,7 @@ mod tests {
         )
         .unwrap();
         let schema = Schema {
-            fields: vec![Field::new_without_name(Int32Type::create(false))],
+            fields: vec![Field::new_without_name(DataTypeKind::Int32)],
         };
         let mut mock_executor = MockExecutor::new(schema);
 
@@ -172,7 +172,7 @@ mod tests {
             identity: format!("LimitExecutor{:?}", TaskId::default()),
         };
         let fields = &limit_executor.schema().fields;
-        assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int32);
+        assert_eq!(fields[0].data_type, DataTypeKind::Int32);
         let mut results = vec![];
         while let Some(chunk) = limit_executor.next().await.unwrap() {
             results.push(Arc::new(chunk));
@@ -281,8 +281,8 @@ mod tests {
         let col1 = Column::new(Arc::new(visible_array.into()));
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(Int32Type::create(false)),
-                Field::new_without_name(BoolType::create(false)),
+                Field::new_without_name(DataTypeKind::Int32),
+                Field::new_without_name(DataTypeKind::Boolean),
             ],
         };
         let mut mock_executor = MockExecutor::new(schema);

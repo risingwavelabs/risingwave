@@ -71,12 +71,12 @@ impl<S: StateStore> TopNExecutor<S> {
         total_count: (usize, usize, usize),
         executor_id: u64,
     ) -> Self {
-        let data_type_kinds = pk_indices
+        let data_types = pk_indices
             .iter()
-            .map(|idx| input.schema().fields[*idx].data_type().data_type_kind())
+            .map(|idx| input.schema().fields[*idx].data_type())
             .collect::<Vec<_>>();
         let ordered_row_deserializer =
-            OrderedRowDeserializer::new(data_type_kinds.clone(), order_types.clone());
+            OrderedRowDeserializer::new(data_types.clone(), order_types.clone());
         let lower_sub_keyspace = keyspace.with_segment(Segment::FixedLength(b"l".to_vec()));
         let middle_sub_keyspace = keyspace.with_segment(Segment::FixedLength(b"m".to_vec()));
         let higher_sub_keyspace = keyspace.with_segment(Segment::FixedLength(b"h".to_vec()));
@@ -84,7 +84,7 @@ impl<S: StateStore> TopNExecutor<S> {
             cache_size,
             total_count.0,
             lower_sub_keyspace,
-            data_type_kinds.clone(),
+            data_types.clone(),
             ordered_row_deserializer.clone(),
             0,
         );
@@ -92,14 +92,14 @@ impl<S: StateStore> TopNExecutor<S> {
             cache_size,
             total_count.1,
             middle_sub_keyspace,
-            data_type_kinds.clone(),
+            data_types.clone(),
             ordered_row_deserializer.clone(),
         );
         let managed_highest_state = ManagedTopNState::<S, TOP_N_MIN>::new(
             cache_size,
             total_count.2,
             higher_sub_keyspace,
-            data_type_kinds,
+            data_types,
             ordered_row_deserializer,
             0,
         );
@@ -351,7 +351,7 @@ mod tests {
     use risingwave_common::array::{Array, I64Array};
     use risingwave_common::catalog::Field;
     use risingwave_common::column_nonnull;
-    use risingwave_common::types::Int64Type;
+    use risingwave_common::types::DataTypeKind;
     use risingwave_common::util::sort_util::OrderType;
 
     use super::*;
@@ -404,8 +404,8 @@ mod tests {
     fn create_schema() -> Schema {
         Schema {
             fields: vec![
-                Field::new_without_name(Int64Type::create(false)),
-                Field::new_without_name(Int64Type::create(false)),
+                Field::new_without_name(DataTypeKind::Int64),
+                Field::new_without_name(DataTypeKind::Int64),
             ],
         }
     }

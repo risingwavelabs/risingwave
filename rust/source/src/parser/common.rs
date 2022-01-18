@@ -20,7 +20,7 @@ pub(crate) fn json_parse_value(
     column: &SourceColumnDesc,
     value: Option<&Value>,
 ) -> Result<ScalarImpl> {
-    match column.data_type.data_type_kind() {
+    match column.data_type {
         DataTypeKind::Boolean => {
             make_ScalarImpl!(value.and_then(|v| v.as_bool()), |x| ScalarImpl::Bool(
                 x as bool

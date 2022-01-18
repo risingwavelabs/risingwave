@@ -302,7 +302,7 @@ mod tests {
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{DataChunk, F32Array, F64Array, I32Array};
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::{DataTypeKind, Float32Type, Float64Type, Int32Type};
+    use risingwave_common::types::DataTypeKind;
 
     use crate::executor::join::sort_merge_join::{RowLevelIter, SortMergeJoinExecutor};
     use crate::executor::join::JoinType;
@@ -343,8 +343,8 @@ mod tests {
         fn create_left_executor(&self) -> BoxedExecutor {
             let schema = Schema {
                 fields: vec![
-                    Field::new_without_name(Int32Type::create(false)),
-                    Field::new_without_name(Float32Type::create(true)),
+                    Field::new_without_name(DataTypeKind::Int32),
+                    Field::new_without_name(DataTypeKind::Float32),
                 ],
             };
             let mut executor = MockExecutor::new(schema);
@@ -382,8 +382,8 @@ mod tests {
         fn create_right_executor(&self) -> BoxedExecutor {
             let schema = Schema {
                 fields: vec![
-                    Field::new_without_name(Int32Type::create(false)),
-                    Field::new_without_name(Float64Type::create(true)),
+                    Field::new_without_name(DataTypeKind::Int32),
+                    Field::new_without_name(DataTypeKind::Float64),
                 ],
             };
             let mut executor = MockExecutor::new(schema);

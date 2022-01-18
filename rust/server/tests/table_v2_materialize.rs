@@ -10,7 +10,7 @@ use risingwave_common::array::{Array, DataChunk, F64Array};
 use risingwave_common::array_nonnull;
 use risingwave_common::catalog::{Field, Schema, SchemaId, TableId};
 use risingwave_common::error::Result;
-use risingwave_common::types::{Float64Type, Int64Type, IntoOrdered};
+use risingwave_common::types::{DataTypeKind, IntoOrdered};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_source::{MemSourceManager, SourceManager};
 use risingwave_storage::memory::MemoryStateStore;
@@ -71,8 +71,8 @@ async fn test_table_v2_materialize() -> Result<()> {
     let table_manager = Arc::new(SimpleTableManager::new(store));
     let source_table_id = TableId::default();
     let column_descs = vec![
-        TableColumnDesc::new_for_test::<Float64Type>(233), // data column
-        TableColumnDesc::new_for_test::<Int64Type>(0),     // row id column
+        TableColumnDesc::new_without_name(233, DataTypeKind::Float64), // data column
+        TableColumnDesc::new_without_name(0, DataTypeKind::Int64),     // row id column
     ];
 
     // Create table v2 using `CreateTableExecutor`
@@ -98,7 +98,7 @@ async fn test_table_v2_materialize() -> Result<()> {
                 .iter()
                 .find(|c| c.column_id == column_id)
                 .unwrap();
-            fields.push(Field::new(column_desc.data_type.clone(), String::from("")));
+            fields.push(Field::new(column_desc.data_type, String::from("")));
         }
         Schema::new(fields)
     };

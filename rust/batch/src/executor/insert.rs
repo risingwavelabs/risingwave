@@ -9,7 +9,7 @@ use risingwave_common::array::{
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::ErrorCode::ProstError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::Int64Type;
+use risingwave_common::types::DataTypeKind;
 use risingwave_pb::plan::plan_node::PlanNodeType;
 use risingwave_pb::plan::InsertNode;
 use risingwave_source::{Source, SourceImpl, SourceManagerRef, SourceWriter};
@@ -42,7 +42,7 @@ impl InsertExecutor {
             child,
             executed: false,
             schema: Schema {
-                fields: vec![Field::new_without_name(Int64Type::create(false))],
+                fields: vec![Field::new_without_name(DataTypeKind::Int64)],
             },
             identity,
         }
@@ -199,7 +199,7 @@ mod tests {
     use risingwave_common::array::{Array, I64Array};
     use risingwave_common::catalog::{Field, Schema, SchemaId};
     use risingwave_common::column_nonnull;
-    use risingwave_common::types::{DataTypeKind, DecimalType, Int64Type};
+    use risingwave_common::types::DataTypeKind;
     use risingwave_common::util::downcast_arc;
     use risingwave_source::{
         MemSourceManager, SourceManager, StreamSourceReader, TableV2ReaderContext,
@@ -222,8 +222,8 @@ mod tests {
         // Schema for mock executor.
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(Int64Type::create(false)),
-                Field::new_without_name(Int64Type::create(false)),
+                Field::new_without_name(DataTypeKind::Int64),
+                Field::new_without_name(DataTypeKind::Int64),
             ],
         };
         let mut mock_executor = MockExecutor::new(schema.clone());
@@ -231,9 +231,9 @@ mod tests {
         // Schema of first table
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(Arc::new(DecimalType::new(false, 10, 5)?)),
-                Field::new_without_name(Arc::new(DecimalType::new(false, 10, 5)?)),
-                Field::new_without_name(Arc::new(DecimalType::new(false, 10, 5)?)),
+                Field::new_without_name(DataTypeKind::Decimal),
+                Field::new_without_name(DataTypeKind::Decimal),
+                Field::new_without_name(DataTypeKind::Decimal),
             ],
         };
 
@@ -242,7 +242,7 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(i, f)| TableColumnDesc {
-                data_type: f.data_type.clone(),
+                data_type: f.data_type,
                 column_id: i as i32, // use column index as column id
                 name: f.name.clone(),
             })
@@ -269,13 +269,13 @@ mod tests {
             child: Box::new(mock_executor),
             executed: false,
             schema: Schema {
-                fields: vec![Field::new_without_name(Int64Type::create(false))],
+                fields: vec![Field::new_without_name(DataTypeKind::Int64)],
             },
             identity: format!("InsertExecutor{:?}", TaskId::default()),
         };
         insert_executor.open().await.unwrap();
         let fields = &insert_executor.schema().fields;
-        assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int64);
+        assert_eq!(fields[0].data_type, DataTypeKind::Int64);
         let result = insert_executor.next().await?.unwrap();
         insert_executor.close().await.unwrap();
         assert_eq!(
@@ -343,13 +343,13 @@ mod tests {
             child: Box::new(mock_executor),
             executed: false,
             schema: Schema {
-                fields: vec![Field::new_without_name(Int64Type::create(false))],
+                fields: vec![Field::new_without_name(DataTypeKind::Int64)],
             },
             identity: format!("InsertExecutor{:?}", TaskId::default()),
         };
         insert_executor.open().await.unwrap();
         let fields = &insert_executor.schema().fields;
-        assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int64);
+        assert_eq!(fields[0].data_type, DataTypeKind::Int64);
         let result = insert_executor.next().await?.unwrap();
         insert_executor.close().await.unwrap();
         assert_eq!(
@@ -397,7 +397,7 @@ mod tests {
             child: Box::new(mock_executor),
             executed: false,
             schema: Schema {
-                fields: vec![Field::new_without_name(Int64Type::create(false))],
+                fields: vec![Field::new_without_name(DataTypeKind::Int64)],
             },
             identity: format!("InsertExecutor{:?}", TaskId::default()),
         };
@@ -411,7 +411,7 @@ mod tests {
 
         insert_executor.open().await.unwrap();
         let fields = &insert_executor.schema().fields;
-        assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int64);
+        assert_eq!(fields[0].data_type, DataTypeKind::Int64);
         let result = insert_executor.next().await?.unwrap();
         insert_executor.close().await.unwrap();
         assert_eq!(
@@ -480,8 +480,8 @@ mod tests {
         // Schema for mock executor.
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(Int64Type::create(false)),
-                Field::new_without_name(Int64Type::create(false)),
+                Field::new_without_name(DataTypeKind::Int64),
+                Field::new_without_name(DataTypeKind::Int64),
             ],
         };
         let mut mock_executor = MockExecutor::new(schema.clone());
@@ -489,9 +489,9 @@ mod tests {
         // Schema of first table
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(Arc::new(DecimalType::new(false, 10, 5)?)),
-                Field::new_without_name(Arc::new(DecimalType::new(false, 10, 5)?)),
-                Field::new_without_name(Arc::new(DecimalType::new(false, 10, 5)?)),
+                Field::new_without_name(DataTypeKind::Decimal),
+                Field::new_without_name(DataTypeKind::Decimal),
+                Field::new_without_name(DataTypeKind::Decimal),
             ],
         };
 
@@ -500,7 +500,7 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(i, f)| TableColumnDesc {
-                data_type: f.data_type.clone(),
+                data_type: f.data_type,
                 column_id: i as i32, // use column index as column id
                 name: f.name.clone(),
             })
@@ -526,7 +526,7 @@ mod tests {
         );
         insert_executor.open().await.unwrap();
         let fields = &insert_executor.schema().fields;
-        assert_eq!(fields[0].data_type.data_type_kind(), DataTypeKind::Int64);
+        assert_eq!(fields[0].data_type, DataTypeKind::Int64);
         let result = insert_executor.next().await?.unwrap();
         insert_executor.close().await.unwrap();
         assert_eq!(
