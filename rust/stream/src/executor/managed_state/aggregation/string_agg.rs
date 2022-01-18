@@ -222,7 +222,7 @@ impl<S: StateStore> ManagedExtremeState<S> for ManagedStringAggState<S> {
             return Ok(());
         }
 
-        let mut local = write_batch.local(&self.keyspace);
+        let mut local = write_batch.prefixify(&self.keyspace);
 
         for (key, value) in std::mem::take(&mut self.cache) {
             let mut serializer = memcomparable::Serializer::new(vec![]);

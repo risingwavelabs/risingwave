@@ -336,7 +336,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
             for state in side.ht.values_mut() {
                 state.flush(&mut write_batch)?;
             }
-            write_batch.ingest(epoch).await?;
+            write_batch.ingest(epoch).await.unwrap();
         }
         Ok(())
     }

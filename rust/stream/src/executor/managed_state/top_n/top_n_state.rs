@@ -337,7 +337,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         iterator: impl Iterator<Item = (OrderedRow, FlushStatus<Row>)>,
     ) -> Result<()> {
         let mut write_batch = self.keyspace.state_store().start_write_batch();
-        let mut local = write_batch.local(&self.keyspace);
+        let mut local = write_batch.prefixify(&self.keyspace);
 
         for (ordered_row, cells) in iterator {
             let row_option = cells.into_option();
@@ -362,7 +362,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
             }
         }
 
-        write_batch.ingest(self.epoch).await?;
+        write_batch.ingest(self.epoch).await.unwrap();
         Ok(())
     }
 

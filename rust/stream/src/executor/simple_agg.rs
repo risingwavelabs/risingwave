@@ -150,7 +150,7 @@ impl<S: StateStore> AggExecutor for SimpleAggExecutor<S> {
         for state in &mut states.managed_states {
             state.flush(&mut write_batch)?;
         }
-        write_batch.ingest(epoch).await?;
+        write_batch.ingest(epoch).await.unwrap();
 
         // --- Create array builders ---
         // As the datatype is retrieved from schema, it contains both group key and aggregation

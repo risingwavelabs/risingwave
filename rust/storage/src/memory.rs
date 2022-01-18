@@ -40,19 +40,8 @@ impl MemoryStateStore {
         STORE.clone()
     }
 
-    /// Verify if the ingested batch does not have duplicated key.
-    fn verify_ingest_batch(&self, kv_pairs: &mut Vec<(Bytes, Option<Bytes>)>) -> bool {
-        let original_length = kv_pairs.len();
-        kv_pairs.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-        // There should not be duplicated key in one batch
-        kv_pairs.dedup_by(|(k1, _), (k2, _)| k1 == k2);
-        original_length == kv_pairs.len()
-    }
-
-    async fn ingest_batch_inner(&self, mut kv_pairs: Vec<(Bytes, Option<Bytes>)>) -> Result<()> {
+    async fn ingest_batch_inner(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>) -> Result<()> {
         let mut inner = self.inner.lock().await;
-        let result = self.verify_ingest_batch(&mut kv_pairs);
-        debug_assert!(result);
         for (key, value) in kv_pairs {
             if let Some(value) = value {
                 inner.insert(key, value);

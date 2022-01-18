@@ -289,7 +289,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         }
 
         let mut write_batch = self.keyspace.state_store().start_write_batch();
-        let mut local = write_batch.local(&self.keyspace);
+        let mut local = write_batch.prefixify(&self.keyspace);
 
         for (ordered_row, cells) in std::mem::take(&mut self.flush_buffer) {
             let row_option = cells.into_option();
@@ -314,7 +314,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
             }
         }
 
-        write_batch.ingest(epoch).await?;
+        write_batch.ingest(epoch).await.unwrap();
 
         // We don't retain `n` elements as we have a all-or-nothing policy for now.
         Ok(())

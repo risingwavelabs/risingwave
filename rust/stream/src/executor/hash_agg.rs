@@ -218,7 +218,6 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
         // --- Flush states to the state store ---
         // Some state will have the correct output only after their internal states have been fully
         // flushed.
-
         let (write_batch, dirty_cnt) = {
             let mut write_batch = self.keyspace.state_store().start_write_batch();
             let mut dirty_cnt = 0;
@@ -240,7 +239,7 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
             return Ok(None);
         }
 
-        write_batch.ingest(epoch).await?;
+        write_batch.ingest(epoch).await.unwrap();
 
         // --- Produce the stream chunk ---
 

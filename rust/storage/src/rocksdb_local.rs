@@ -157,7 +157,6 @@ impl RocksDBStorage {
     }
 
     async fn write_batch(&self, mut kv_pairs: Vec<(Bytes, Option<Bytes>)>) -> Result<()> {
-        kv_pairs.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
         let wb = WriteBatch::new();
         for (key, value) in kv_pairs {
             if let Some(value) = value {

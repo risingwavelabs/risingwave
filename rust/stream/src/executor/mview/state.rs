@@ -52,7 +52,7 @@ impl<S: StateStore> ManagedMViewState<S> {
     pub async fn flush(&mut self, epoch: u64) -> Result<()> {
         let mut batch = self.keyspace.state_store().start_write_batch();
         batch.reserve(self.memtable.len() * self.schema.len());
-        let mut local = batch.local(&self.keyspace);
+        let mut local = batch.prefixify(&self.keyspace);
 
         for (pk, cells) in self.memtable.drain() {
             let cells = cells.into_option();
@@ -74,7 +74,7 @@ impl<S: StateStore> ManagedMViewState<S> {
             }
         }
 
-        batch.ingest(epoch).await?;
+        batch.ingest(epoch).await.unwrap();
         Ok(())
     }
 }

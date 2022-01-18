@@ -303,7 +303,7 @@ where
             return Ok(());
         }
 
-        let mut local = write_batch.local(&self.keyspace);
+        let mut local = write_batch.prefixify(&self.keyspace);
 
         // TODO: we can populate the cache while flushing, but that's hard.
 

@@ -92,7 +92,7 @@ impl<S: StateStore> ManagedValueState<S> {
         // cause incorrect result: it will only produce more I/O.
         debug_assert!(self.is_dirty());
 
-        let mut local = write_batch.local(&self.keyspace);
+        let mut local = write_batch.prefixify(&self.keyspace);
         let v = self.state.get_output()?;
         let mut serializer = memcomparable::Serializer::new(vec![]);
         serialize_datum_into(&v, &mut serializer)?;

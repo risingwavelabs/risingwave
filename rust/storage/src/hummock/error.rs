@@ -5,26 +5,28 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum HummockError {
-    #[error("Checksum Mismatch: expected {expected}, found: {found}")]
+    #[error("Checksum mismatch: expected {expected}, found: {found}.")]
     ChecksumMismatch { expected: u64, found: u64 },
-    #[error("Invalid Block")]
+    #[error("Invalid block.")]
     InvalidBlock,
-    #[error("Decode Error {0}")]
+    #[error("Decode error {0}.")]
     DecodeError(String),
-    #[error("Mock Error {0}")]
+    #[error("Mock error {0}.")]
     MockError(String),
-    #[error("Object Store IO Error {0}")]
+    #[error("ObjectStore failed with IO error {0}.")]
     ObjectIoError(String),
-    #[error("Invalid Hummock Context {0}")]
+    #[error("Invalid HummockContext {0}.")]
     InvalidHummockContext(i32),
-    #[error("Failed to Create RPC Client")]
+    #[error("Failed to create RPC client.")]
     CreateRPCClientError,
-    #[error("No Pin Version Record Matching version_id={0} in context")]
+    #[error("No matching pinned version with version_id={0} was found in context.")]
     NoMatchingPinVersion(u64),
-    #[error("No Pin Snapshot Record Matching snapshot_id={0} in context")]
+    #[error("No matching pinned snapshot with snapshot_id={0} found in context.")]
     NoMatchingPinSnapshot(u64),
-    #[error("No compact task")]
+    #[error("No compact task.")]
     NoCompactTaskFound,
+    #[error("Invalid WriteBatch.")]
+    InvalidWriteBatch,
 }
 
 impl HummockError {
@@ -62,6 +64,10 @@ impl HummockError {
 
     pub fn invalid_hummock_context(context_id: i32) -> TracedHummockError {
         Self::InvalidHummockContext(context_id).into()
+    }
+
+    pub fn invalid_write_batch() -> TracedHummockError {
+        Self::InvalidWriteBatch.into()
     }
 }
 

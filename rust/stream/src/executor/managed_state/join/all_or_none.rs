@@ -97,7 +97,7 @@ impl<S: StateStore> AllOrNoneState<S> {
 
     // Flush data to the state store
     pub fn flush(&mut self, write_batch: &mut WriteBatch<S>) -> Result<()> {
-        let mut local = write_batch.local(&self.keyspace);
+        let mut local = write_batch.prefixify(&self.keyspace);
 
         for (pk, v) in std::mem::take(&mut self.flush_buffer) {
             let key_encoded = pk.serialize_not_null()?;
