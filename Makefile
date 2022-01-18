@@ -23,6 +23,9 @@ rust_check_all: rust_fmt_check rust_clippy_check rust_cargo_sort_check
 rust_fmt_check:
 	cd rust && cargo fmt --all -- --check
 
+rust_clippy_check_locked:
+	cd rust && cargo clippy --all-targets --locked -- -D warnings
+
 rust_clippy_check:
 	cd rust && cargo clippy --all-targets -- -D warnings
 

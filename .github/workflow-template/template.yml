@@ -307,7 +307,7 @@ jobs:
           aws-region: us-east-2
       - name: Start EC2 runner
         id: start-ec2-runner
-        uses: skyzh/ec2-github-runner@ba2298a67875dfdd29a88fafbc1ba27f4f94af39
+        uses: machulav/ec2-github-runner@v2
         with:
           mode: start
           github-token: ${{ secrets.WUTAO_PAT }}
@@ -364,7 +364,8 @@ jobs:
 
       - name: Run rust clippy check
         run: |
-          make rust_clippy_check
+          # If new CI checks are added, the one with `--locked` must be run first.
+          make rust_clippy_check_locked
 
       - name: Build compute-node and meta-node
         run: make rust_build
@@ -508,7 +509,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-2
       - name: Stop EC2 runner
-        uses: skyzh/ec2-github-runner@ba2298a67875dfdd29a88fafbc1ba27f4f94af39
+        uses: machulav/ec2-github-runner@v2
         with:
           mode: stop
           github-token: ${{ secrets.WUTAO_PAT }}
