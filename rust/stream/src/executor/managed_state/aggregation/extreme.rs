@@ -89,7 +89,7 @@ pub trait ManagedExtremeState<S: StateStore>: Send + Sync + 'static {
     /// Check if this state needs a flush.
     fn is_dirty(&self) -> bool;
 
-    /// Flush the internal state to a write batch. TODO: add `WriteBatch` to Hummock.
+    /// Flush the internal state to a write batch.
     fn flush(&mut self, write_batch: &mut WriteBatch<S>) -> Result<()>;
 }
 
@@ -293,7 +293,7 @@ where
         }
     }
 
-    /// Flush the internal state to a write batch. TODO: add `WriteBatch` to Hummock.
+    /// Flush the internal state to a write batch.
     fn flush_inner(&mut self, write_batch: &mut WriteBatch<S>) -> Result<()> {
         // Generally, we require the state the be dirty before flushing. However, it is possible
         // that after a sequence of operations, the flush buffer becomes empty. Then, the

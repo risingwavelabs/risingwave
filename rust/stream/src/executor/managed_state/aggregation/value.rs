@@ -86,7 +86,7 @@ impl<S: StateStore> ManagedValueState<S> {
         self.is_dirty
     }
 
-    /// Flush the internal state to a write batch. TODO: add `WriteBatch` to Hummock.
+    /// Flush the internal state to a write batch.
     pub fn flush(&mut self, write_batch: &mut WriteBatch<S>) -> Result<()> {
         // If the managed state is not dirty, the caller should not flush. But forcing a flush won't
         // cause incorrect result: it will only produce more I/O.

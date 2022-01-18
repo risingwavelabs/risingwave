@@ -71,7 +71,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
         }
     }
 
-    /// Flush the internal state to a write batch. TODO: add `WriteBatch` to Hummock.
+    /// Flush the internal state to a write batch.
     pub fn flush(&mut self, write_batch: &mut WriteBatch<S>) -> Result<()> {
         match self {
             Self::Value(state) => state.flush(write_batch),
