@@ -5,8 +5,10 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::try_match_expand;
 use risingwave_pb::common::HostAddress;
+use risingwave_pb::meta::catalog_service_client::CatalogServiceClient;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
+use risingwave_pb::meta::id_generator_service_client::IdGeneratorServiceClient;
 use risingwave_pb::meta::{AddWorkerNodeRequest, ClusterType, HeartbeatRequest};
 use tonic::transport::{Channel, Endpoint};
 
@@ -15,6 +17,8 @@ use tonic::transport::{Channel, Endpoint};
 pub struct MetaClient {
     pub cluster_client: ClusterServiceClient<Channel>,
     pub heartbeat_client: HeartbeatServiceClient<Channel>,
+    pub catalog_client: CatalogServiceClient<Channel>,
+    pub id_client: IdGeneratorServiceClient<Channel>,
 }
 
 impl MetaClient {
@@ -27,10 +31,14 @@ impl MetaClient {
             .await
             .to_rw_result_with(format!("failed to connect to {}", addr))?;
         let cluster_client = ClusterServiceClient::new(channel.clone());
-        let heartbeat_client = HeartbeatServiceClient::new(channel);
+        let heartbeat_client = HeartbeatServiceClient::new(channel.clone());
+        let catalog_client = CatalogServiceClient::new(channel.clone());
+        let id_client = IdGeneratorServiceClient::new(channel);
         Ok(Self {
             cluster_client,
             heartbeat_client,
+            catalog_client,
+            id_client,
         })
     }
 

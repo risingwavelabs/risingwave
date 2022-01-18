@@ -3,16 +3,14 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use risingwave_common::array::RwError;
 use risingwave_common::error::{Result, ToRwResult};
-use risingwave_pb::meta::catalog_service_client::CatalogServiceClient;
+use risingwave_meta::rpc::meta_client::MetaClient;
 use risingwave_pb::meta::create_request::CatalogBody;
 use risingwave_pb::meta::drop_request::CatalogId;
 use risingwave_pb::meta::get_id_request::IdCategory;
-use risingwave_pb::meta::id_generator_service_client::IdGeneratorServiceClient;
 use risingwave_pb::meta::{
     CreateRequest, Database, DropRequest, GetIdRequest, GetIdResponse, Schema, Table,
 };
 use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
-use tonic::transport::Channel;
 use tonic::Response;
 
 use crate::catalog::create_table_info::CreateTableInfo;
@@ -21,8 +19,8 @@ use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::{CatalogError, DatabaseId, SchemaId, TableId};
 
-const DEFAULT_DATABASE_NAME: &str = "dev";
-const DEFAULT_SCHEMA_NAME: &str = "dev";
+pub const DEFAULT_DATABASE_NAME: &str = "dev";
+pub const DEFAULT_SCHEMA_NAME: &str = "dev";
 
 struct LocalCatalogManager {
     next_database_id: AtomicU32,
@@ -170,20 +168,15 @@ impl LocalCatalogManager {
 /// 1. Do not use Id generator service (#2459).
 /// 2. Support more fields for ddl in future (#2473)
 /// 3. MVCC of schema (`version` flag in message) (#2474).
-struct RemoteCatalogManager {
-    catalog_client: CatalogServiceClient<Channel>,
-    id_client: IdGeneratorServiceClient<Channel>,
+pub struct RemoteCatalogManager {
+    meta_client: MetaClient,
     local_catalog_manager: LocalCatalogManager,
 }
 
 impl RemoteCatalogManager {
-    pub fn new(
-        catalog_client: CatalogServiceClient<Channel>,
-        id_client: IdGeneratorServiceClient<Channel>,
-    ) -> Self {
+    pub fn new(meta_client: MetaClient) -> Self {
         Self {
-            catalog_client,
-            id_client,
+            meta_client,
             local_catalog_manager: LocalCatalogManager::new(),
         }
     }
@@ -202,7 +195,8 @@ impl RemoteCatalogManager {
                 }),
             })),
         };
-        self.catalog_client
+        self.meta_client
+            .catalog_client
             .create(ddl_request)
             .await
             .to_rw_result_with("create database from meta failed")?;
@@ -232,7 +226,8 @@ impl RemoteCatalogManager {
                 }),
             })),
         };
-        self.catalog_client
+        self.meta_client
+            .catalog_client
             .create(ddl_request)
             .await
             .to_rw_result_with("create schema from meta failed")?;
@@ -292,7 +287,8 @@ impl RemoteCatalogManager {
                 version: 0,
             })),
         };
-        self.catalog_client
+        self.meta_client
+            .catalog_client
             .create(ddl_request)
             .await
             .to_rw_result_with("create table from meta failed")?;
@@ -337,7 +333,8 @@ impl RemoteCatalogManager {
                 table_id,
             })),
         };
-        self.catalog_client
+        self.meta_client
+            .catalog_client
             .drop(ddl_request)
             .await
             .to_rw_result_with("drop table from meta failed")?;
@@ -369,7 +366,8 @@ impl RemoteCatalogManager {
                 schema_id,
             })),
         };
-        self.catalog_client
+        self.meta_client
+            .catalog_client
             .drop(ddl_request)
             .await
             .to_rw_result_with("drop schema from meta failed")?;
@@ -390,7 +388,8 @@ impl RemoteCatalogManager {
             node_id: 0,
             catalog_id: Some(CatalogId::DatabaseId(DatabaseRefId { database_id })),
         };
-        self.catalog_client
+        self.meta_client
+            .catalog_client
             .drop(ddl_request)
             .await
             .to_rw_result_with("drop database from meta failed")?;
@@ -423,7 +422,8 @@ impl RemoteCatalogManager {
             interval: 1,
         };
 
-        self.id_client
+        self.meta_client
+            .id_client
             .get_id(get_id_request)
             .await
             .to_rw_result_with("get id from meta failed")
@@ -441,7 +441,6 @@ mod tests {
     };
     use crate::catalog::column_catalog::ColumnDesc;
     use crate::catalog::create_table_info::CreateTableInfo;
-
     #[test]
     fn test_create_and_drop_table() {
         let mut catalog_manager = LocalCatalogManager::new();
@@ -512,19 +511,14 @@ mod tests {
             .is_none());
     }
 
-    use std::time::Duration;
-
-    use risingwave_common::error::ErrorCode::InternalError;
-    use risingwave_common::error::ToRwResult;
+    use risingwave_meta::rpc::meta_client::MetaClient;
     use risingwave_meta::rpc::server::{rpc_serve, MetaStoreBackend};
-    use risingwave_pb::meta::catalog_service_client::CatalogServiceClient;
-    use risingwave_pb::meta::id_generator_service_client::IdGeneratorServiceClient;
     use risingwave_pb::meta::GetCatalogRequest;
-    use tonic::transport::Endpoint;
 
     #[tokio::test]
     async fn test_create_and_drop_table_remote() {
-        let addr = get_host_port("127.0.0.1:9526").unwrap();
+        let host = "127.0.0.1:9526";
+        let addr = get_host_port(host).unwrap();
         // Run a meta node server.
         let sled_root = tempfile::tempdir().unwrap();
         let (_join_handle, _shutdown) = rpc_serve(
@@ -534,28 +528,6 @@ mod tests {
             MetaStoreBackend::Sled(sled_root.path().to_path_buf()),
         )
         .await;
-        let endpoint = Endpoint::from_shared(format!("http://{}", addr));
-        let mut catalog_client = CatalogServiceClient::new(
-            endpoint
-                .map_err(|e| InternalError(format!("{}", e)))
-                .unwrap()
-                .connect_timeout(Duration::from_secs(10))
-                .connect()
-                .await
-                .to_rw_result_with(format!("failed to connect to {}", 0))
-                .unwrap(),
-        );
-        let endpoint = Endpoint::from_shared(format!("http://{}", addr));
-        let id_client = IdGeneratorServiceClient::new(
-            endpoint
-                .map_err(|e| InternalError(format!("{}", e)))
-                .unwrap()
-                .connect_timeout(Duration::from_secs(10))
-                .connect()
-                .await
-                .to_rw_result_with(format!("failed to connect to {}", 0))
-                .unwrap(),
-        );
         let columns = vec![
             (
                 "v1".to_string(),
@@ -566,8 +538,8 @@ mod tests {
                 ColumnDesc::new(DataTypeKind::Int32, false),
             ),
         ];
-        let mut remote_catalog_manager =
-            RemoteCatalogManager::new(catalog_client.clone(), id_client);
+        let mut meta_client = MetaClient::new(&format!("http://{}", addr)).await.unwrap();
+        let mut remote_catalog_manager = RemoteCatalogManager::new(meta_client.clone());
         remote_catalog_manager
             .create_database(DEFAULT_DATABASE_NAME)
             .await
@@ -585,7 +557,11 @@ mod tests {
             .await
             .unwrap();
         let req = GetCatalogRequest { node_id: 0 };
-        let response = catalog_client.get_catalog(req.clone()).await.unwrap();
+        let response = meta_client
+            .catalog_client
+            .get_catalog(req.clone())
+            .await
+            .unwrap();
         let catalog = response.get_ref().catalog.as_ref();
         catalog
             .map(|catalog| {
@@ -608,7 +584,8 @@ mod tests {
             .get_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, test_table_name)
             .await
             .is_none());
-        catalog_client
+        meta_client
+            .catalog_client
             .get_catalog(req.clone())
             .await
             .unwrap()
@@ -628,7 +605,8 @@ mod tests {
             .get_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, test_table_name)
             .await
             .is_none());
-        catalog_client
+        meta_client
+            .catalog_client
             .get_catalog(req.clone())
             .await
             .unwrap()
@@ -648,7 +626,8 @@ mod tests {
             .get_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, test_table_name)
             .await
             .is_none());
-        catalog_client
+        meta_client
+            .catalog_client
             .get_catalog(req.clone())
             .await
             .unwrap()
