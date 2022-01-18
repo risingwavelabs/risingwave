@@ -1,4 +1,4 @@
-use risingwave_pb::data::DataType;
+use risingwave_common::types::DataTypeKind;
 use risingwave_pb::expr::expr_node;
 
 use super::{infer_type, BoundExpr, BoundExprImpl};
@@ -6,7 +6,7 @@ use super::{infer_type, BoundExpr, BoundExprImpl};
 #[derive(Clone, Debug)]
 pub struct BoundFunctionCall {
     func_type: expr_node::Type,
-    return_type: DataType,
+    return_type: DataTypeKind,
     inputs: Vec<BoundExprImpl>,
 }
 impl BoundFunctionCall {
@@ -22,7 +22,7 @@ impl BoundFunctionCall {
     pub fn new_with_return_type(
         func_type: expr_node::Type,
         inputs: Vec<BoundExprImpl>,
-        return_type: DataType,
+        return_type: DataTypeKind,
     ) -> Self {
         BoundFunctionCall {
             func_type,
@@ -39,7 +39,7 @@ impl BoundFunctionCall {
     }
 }
 impl BoundExpr for BoundFunctionCall {
-    fn return_type(&self) -> DataType {
-        self.return_type.clone()
+    fn return_type(&self) -> DataTypeKind {
+        self.return_type
     }
 }

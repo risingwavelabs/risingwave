@@ -1,12 +1,12 @@
 use risingwave_common::expr::AggKind;
-use risingwave_pb::data::DataType;
+use risingwave_common::types::DataTypeKind;
 
 use super::{BoundExpr, BoundExprImpl};
 
 #[derive(Clone, Debug)]
 pub struct BoundAggCall {
     agg_kind: AggKind,
-    return_type: DataType,
+    return_type: DataTypeKind,
     inputs: Vec<BoundExprImpl>,
 }
 impl BoundAggCall {
@@ -29,7 +29,7 @@ impl BoundAggCall {
     }
 }
 impl BoundExpr for BoundAggCall {
-    fn return_type(&self) -> DataType {
-        self.return_type.clone()
+    fn return_type(&self) -> DataTypeKind {
+        self.return_type
     }
 }

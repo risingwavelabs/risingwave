@@ -1,51 +1,28 @@
-//! this type inference is just to infer the return type of function calls and make sure the
-//! functionCall expressions have same input type requirement and retrun type definition.
+//! This type inference is just to infer the return type of function calls, and make sure the
+//! functionCall expressions have same input type requirement and return type definition as backend.
 use std::collections::HashMap;
 use std::vec;
 
 use itertools::iproduct;
-use risingwave_pb::data::data_type::TypeName;
-use risingwave_pb::data::DataType;
+use risingwave_common::types::DataTypeKind;
 use risingwave_pb::expr::expr_node;
 
-/// infer the return type of a functional, if the backend's expression implementation can't recive
+/// Infer the return type of a function. If the backend's expression implementation can't receive
 /// the datatypes, return Null.
-pub fn infer_type(func_type: expr_node::Type, inputs_type: Vec<DataType>) -> Option<DataType> {
-    // we will do a simple infer at first, which just infer the type name. if the return type need
-    // other description, like data length for char, max data length for varchar or precision for
-    // time, decimal, we will do the further infer.
-
-    let ret_type = infer_type_name(
-        func_type,
-        inputs_type.iter().map(|t| t.get_type_name()).collect(),
-    )?;
-    match ret_type.get_type_name() {
-        TypeName::Decimal => infer_decimal(func_type, inputs_type),
-        TypeName::Interval => infer_interval(func_type, inputs_type),
-        _ => Some(ret_type),
-    }
+pub fn infer_type(
+    func_type: expr_node::Type,
+    inputs_type: Vec<DataTypeKind>,
+) -> Option<DataTypeKind> {
+    // With our current simplified type system, where all types are nullable and not parameterized
+    // by things like length or precision, the inference can be done with a map lookup.
+    infer_type_name(func_type, inputs_type)
 }
 
-/// infer the return type of expressions whose retrun type is decimal, specifically, return the
-/// Decimal type with precision and scale.
-fn infer_decimal(_func_type: expr_node::Type, _inputs_type: Vec<DataType>) -> Option<DataType> {
-    // TODO:
-    Some(DataType {
-        type_name: TypeName::Decimal as i32,
-        precision: 28,
-        scale: 10,
-        is_nullable: false,
-        interval_type: 0,
-    })
-}
-
-/// infer the return type of expressions whose retrun type is interval.
-fn infer_interval(_func_type: expr_node::Type, _inputs_typee: Vec<DataType>) -> Option<DataType> {
-    todo!()
-}
-
-/// the first inference just infer the `type_name` and `null_able` for the expression
-fn infer_type_name(func_type: expr_node::Type, inputs_type: Vec<TypeName>) -> Option<DataType> {
+/// Infer the return type name without parameters like length or precision.
+fn infer_type_name(
+    func_type: expr_node::Type,
+    inputs_type: Vec<DataTypeKind>,
+) -> Option<DataTypeKind> {
     FUNC_SIG_MAP
         .get(&FuncSign {
             func: func_type,
@@ -57,12 +34,12 @@ fn infer_type_name(func_type: expr_node::Type, inputs_type: Vec<TypeName>) -> Op
 #[derive(PartialEq, Hash)]
 struct FuncSign {
     func: expr_node::Type,
-    inputs_type: Vec<TypeName>,
+    inputs_type: Vec<DataTypeKind>,
 }
 impl Eq for FuncSign {}
 #[allow(dead_code)]
 impl FuncSign {
-    pub fn new(func: expr_node::Type, inputs_type: Vec<TypeName>) -> Self {
+    pub fn new(func: expr_node::Type, inputs_type: Vec<DataTypeKind>) -> Self {
         FuncSign { func, inputs_type }
     }
     pub fn new_no_input(func: expr_node::Type) -> Self {
@@ -71,67 +48,62 @@ impl FuncSign {
             inputs_type: vec![],
         }
     }
-    pub fn new_unary(func: expr_node::Type, p1: TypeName) -> Self {
+    pub fn new_unary(func: expr_node::Type, p1: DataTypeKind) -> Self {
         FuncSign {
             func,
             inputs_type: vec![p1],
         }
     }
-    pub fn new_binary(func: expr_node::Type, p1: TypeName, p2: TypeName) -> Self {
+    pub fn new_binary(func: expr_node::Type, p1: DataTypeKind, p2: DataTypeKind) -> Self {
         FuncSign {
             func,
             inputs_type: vec![p1, p2],
         }
     }
-    pub fn new_ternary(func: expr_node::Type, p1: TypeName, p2: TypeName, p3: TypeName) -> Self {
+    pub fn new_ternary(
+        func: expr_node::Type,
+        p1: DataTypeKind,
+        p2: DataTypeKind,
+        p3: DataTypeKind,
+    ) -> Self {
         FuncSign {
             func,
             inputs_type: vec![p1, p2, p3],
         }
     }
 }
-fn new_data_type(type_name: TypeName, is_nullable: bool) -> DataType {
-    DataType {
-        type_name: type_name as i32,
-        precision: 0,
-        scale: 0,
-        is_nullable,
-        interval_type: 0,
-    }
-}
-fn arithmetic_type_derive(t1: TypeName, t2: TypeName) -> TypeName {
+fn arithmetic_type_derive(t1: DataTypeKind, t2: DataTypeKind) -> DataTypeKind {
     if t2 as i32 > t1 as i32 {
         t2
     } else {
         t1
     }
 }
-fn build_type_derive_map() -> HashMap<FuncSign, DataType> {
+fn build_type_derive_map() -> HashMap<FuncSign, DataTypeKind> {
     let mut map = HashMap::new();
     let num_types = vec![
-        TypeName::Int16,
-        TypeName::Int32,
-        TypeName::Int64,
-        TypeName::Float,
-        TypeName::Double,
-        TypeName::Decimal,
+        DataTypeKind::Int16,
+        DataTypeKind::Int32,
+        DataTypeKind::Int64,
+        DataTypeKind::Float32,
+        DataTypeKind::Float64,
+        DataTypeKind::Decimal,
     ];
     let all_types = vec![
-        TypeName::Int16,
-        TypeName::Int32,
-        TypeName::Int64,
-        TypeName::Float,
-        TypeName::Double,
-        TypeName::Boolean,
-        TypeName::Char,
-        TypeName::Varchar,
-        TypeName::Decimal,
-        TypeName::Time,
-        TypeName::Timestamp,
-        TypeName::Interval,
-        TypeName::Date,
-        TypeName::Timestampz,
-        TypeName::Symbol,
+        DataTypeKind::Int16,
+        DataTypeKind::Int32,
+        DataTypeKind::Int64,
+        DataTypeKind::Float32,
+        DataTypeKind::Float64,
+        DataTypeKind::Boolean,
+        DataTypeKind::Char,
+        DataTypeKind::Varchar,
+        DataTypeKind::Decimal,
+        DataTypeKind::Time,
+        DataTypeKind::Timestamp,
+        DataTypeKind::Interval,
+        DataTypeKind::Date,
+        DataTypeKind::Timestampz,
     ];
     let atm_exprs = vec![
         expr_node::Type::Add,
@@ -169,73 +141,65 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataType> {
     for (expr, t1, t2) in iproduct!(atm_exprs, num_types.clone(), num_types.clone()) {
         map.insert(
             FuncSign::new_binary(expr, t1, t2),
-            new_data_type(arithmetic_type_derive(t1, t2), false),
+            arithmetic_type_derive(t1, t2),
         );
     }
     for (expr, t1, t2) in iproduct!(cmp_exprs.clone(), num_types.clone(), num_types) {
-        map.insert(
-            FuncSign::new_binary(expr, t1, t2),
-            new_data_type(TypeName::Boolean, false),
-        );
+        map.insert(FuncSign::new_binary(expr, t1, t2), DataTypeKind::Boolean);
     }
     for expr in cmp_exprs {
         map.insert(
-            FuncSign::new_binary(expr, TypeName::Boolean, TypeName::Boolean),
-            new_data_type(TypeName::Boolean, false),
+            FuncSign::new_binary(expr, DataTypeKind::Boolean, DataTypeKind::Boolean),
+            DataTypeKind::Boolean,
         );
     }
     for expr in logical_exprs {
         map.insert(
-            FuncSign::new_binary(expr, TypeName::Boolean, TypeName::Boolean),
-            new_data_type(TypeName::Boolean, false),
+            FuncSign::new_binary(expr, DataTypeKind::Boolean, DataTypeKind::Boolean),
+            DataTypeKind::Boolean,
         );
     }
     for expr in bool_check_exprs {
         map.insert(
-            FuncSign::new_binary(expr, TypeName::Boolean, TypeName::Boolean),
-            new_data_type(TypeName::Boolean, false),
+            FuncSign::new_binary(expr, DataTypeKind::Boolean, DataTypeKind::Boolean),
+            DataTypeKind::Boolean,
         );
     }
     for (expr, t) in iproduct!(null_check_exprs, all_types) {
-        map.insert(
-            FuncSign::new_unary(expr, t),
-            new_data_type(TypeName::Boolean, false),
-        );
+        map.insert(FuncSign::new_unary(expr, t), DataTypeKind::Boolean);
     }
 
     map
 }
 lazy_static::lazy_static! {
-  static ref FUNC_SIG_MAP: HashMap<FuncSign, DataType> = {
+  static ref FUNC_SIG_MAP: HashMap<FuncSign, DataTypeKind> = {
     build_type_derive_map()
   };
 }
 #[cfg(test)]
 mod tests {
     use itertools::iproduct;
-    use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::DataType;
+    use risingwave_common::types::DataTypeKind;
     use risingwave_pb::expr::expr_node;
 
-    use super::{infer_type, new_data_type};
+    use super::infer_type;
 
     fn test_simple_infer_type(
         func_type: expr_node::Type,
-        inputs_type: Vec<DataType>,
-        expected_type_name: TypeName,
-        expected_nullable: bool,
+        inputs_type: Vec<DataTypeKind>,
+        expected_type_name: DataTypeKind,
     ) {
         let ret = infer_type(func_type, inputs_type).unwrap();
-        assert_eq!(ret.get_type_name(), expected_type_name);
-        assert_eq!(ret.get_is_nullable(), expected_nullable);
+        assert_eq!(ret, expected_type_name);
     }
-    fn test_infer_type_not_exist(func_type: expr_node::Type, inputs_type: Vec<DataType>) {
+    fn test_infer_type_not_exist(func_type: expr_node::Type, inputs_type: Vec<DataTypeKind>) {
         let ret = infer_type(func_type, inputs_type);
         assert_eq!(ret, None);
     }
 
     #[test]
     fn test_arithmetics() {
+        use DataTypeKind::*;
         let atm_exprs = vec![
             expr_node::Type::Add,
             expr_node::Type::Subtract,
@@ -244,50 +208,45 @@ mod tests {
             expr_node::Type::Modulus,
         ];
         let num_promote_table = vec![
-            (TypeName::Int16, TypeName::Int16, TypeName::Int16),
-            (TypeName::Int16, TypeName::Int32, TypeName::Int32),
-            (TypeName::Int16, TypeName::Int64, TypeName::Int64),
-            (TypeName::Int16, TypeName::Float, TypeName::Float),
-            (TypeName::Int16, TypeName::Double, TypeName::Double),
-            (TypeName::Int16, TypeName::Decimal, TypeName::Decimal),
-            (TypeName::Int32, TypeName::Int16, TypeName::Int32),
-            (TypeName::Int32, TypeName::Int32, TypeName::Int32),
-            (TypeName::Int32, TypeName::Int64, TypeName::Int64),
-            (TypeName::Int32, TypeName::Float, TypeName::Float),
-            (TypeName::Int32, TypeName::Double, TypeName::Double),
-            (TypeName::Int32, TypeName::Decimal, TypeName::Decimal),
-            (TypeName::Int64, TypeName::Int16, TypeName::Int64),
-            (TypeName::Int64, TypeName::Int32, TypeName::Int64),
-            (TypeName::Int64, TypeName::Int64, TypeName::Int64),
-            (TypeName::Int64, TypeName::Float, TypeName::Float),
-            (TypeName::Int64, TypeName::Double, TypeName::Double),
-            (TypeName::Int64, TypeName::Decimal, TypeName::Decimal),
-            (TypeName::Float, TypeName::Int16, TypeName::Float),
-            (TypeName::Float, TypeName::Int32, TypeName::Float),
-            (TypeName::Float, TypeName::Int64, TypeName::Float),
-            (TypeName::Float, TypeName::Float, TypeName::Float),
-            (TypeName::Float, TypeName::Double, TypeName::Double),
-            (TypeName::Float, TypeName::Decimal, TypeName::Decimal),
-            (TypeName::Double, TypeName::Int16, TypeName::Double),
-            (TypeName::Double, TypeName::Int32, TypeName::Double),
-            (TypeName::Double, TypeName::Int64, TypeName::Double),
-            (TypeName::Double, TypeName::Float, TypeName::Double),
-            (TypeName::Double, TypeName::Double, TypeName::Double),
-            (TypeName::Double, TypeName::Decimal, TypeName::Decimal),
-            (TypeName::Decimal, TypeName::Int16, TypeName::Decimal),
-            (TypeName::Decimal, TypeName::Int32, TypeName::Decimal),
-            (TypeName::Decimal, TypeName::Int64, TypeName::Decimal),
-            (TypeName::Decimal, TypeName::Float, TypeName::Decimal),
-            (TypeName::Decimal, TypeName::Double, TypeName::Decimal),
-            (TypeName::Decimal, TypeName::Decimal, TypeName::Decimal),
+            (Int16, Int16, Int16),
+            (Int16, Int32, Int32),
+            (Int16, Int64, Int64),
+            (Int16, Float32, Float32),
+            (Int16, Float64, Float64),
+            (Int16, Decimal, Decimal),
+            (Int32, Int16, Int32),
+            (Int32, Int32, Int32),
+            (Int32, Int64, Int64),
+            (Int32, Float32, Float32),
+            (Int32, Float64, Float64),
+            (Int32, Decimal, Decimal),
+            (Int64, Int16, Int64),
+            (Int64, Int32, Int64),
+            (Int64, Int64, Int64),
+            (Int64, Float32, Float32),
+            (Int64, Float64, Float64),
+            (Int64, Decimal, Decimal),
+            (Float32, Int16, Float32),
+            (Float32, Int32, Float32),
+            (Float32, Int64, Float32),
+            (Float32, Float32, Float32),
+            (Float32, Float64, Float64),
+            (Float32, Decimal, Decimal),
+            (Float64, Int16, Float64),
+            (Float64, Int32, Float64),
+            (Float64, Int64, Float64),
+            (Float64, Float32, Float64),
+            (Float64, Float64, Float64),
+            (Float64, Decimal, Decimal),
+            (Decimal, Int16, Decimal),
+            (Decimal, Int32, Decimal),
+            (Decimal, Int64, Decimal),
+            (Decimal, Float32, Decimal),
+            (Decimal, Float64, Decimal),
+            (Decimal, Decimal, Decimal),
         ];
         for (expr, (t1, t2, tr)) in iproduct!(atm_exprs, num_promote_table) {
-            test_simple_infer_type(
-                expr,
-                vec![new_data_type(t1, true), new_data_type(t2, false)],
-                tr,
-                false,
-            );
+            test_simple_infer_type(expr, vec![t1, t2], tr);
         }
     }
 
@@ -310,22 +269,16 @@ mod tests {
             expr_node::Type::Not,
         ];
         let num_types = vec![
-            TypeName::Int16,
-            TypeName::Int32,
-            TypeName::Int64,
-            TypeName::Float,
-            TypeName::Double,
-            TypeName::Decimal,
+            DataTypeKind::Int16,
+            DataTypeKind::Int32,
+            DataTypeKind::Int64,
+            DataTypeKind::Float32,
+            DataTypeKind::Float64,
+            DataTypeKind::Decimal,
         ];
 
         for (expr, num_t) in iproduct!(exprs, num_types) {
-            test_infer_type_not_exist(
-                expr,
-                vec![
-                    new_data_type(num_t, false),
-                    new_data_type(TypeName::Boolean, false),
-                ],
-            );
+            test_infer_type_not_exist(expr, vec![num_t, DataTypeKind::Boolean]);
         }
     }
 }

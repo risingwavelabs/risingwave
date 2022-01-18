@@ -1,4 +1,4 @@
-use risingwave_pb::data::DataType;
+use risingwave_common::types::DataTypeKind;
 mod input_ref;
 pub use input_ref::*;
 mod literal;
@@ -11,7 +11,7 @@ mod type_inference;
 pub use type_inference::*;
 /// the trait of bound exprssions
 pub trait BoundExpr {
-    fn return_type(&self) -> DataType;
+    fn return_type(&self) -> DataTypeKind;
 }
 #[derive(Clone, Debug)]
 pub enum BoundExprImpl {
@@ -22,7 +22,7 @@ pub enum BoundExprImpl {
     AggCall(Box<BoundAggCall>),
 }
 impl BoundExpr for BoundExprImpl {
-    fn return_type(&self) -> DataType {
+    fn return_type(&self) -> DataTypeKind {
         match self {
             BoundExprImpl::InputRef(expr) => expr.return_type(),
             BoundExprImpl::Literal(expr) => expr.return_type(),
