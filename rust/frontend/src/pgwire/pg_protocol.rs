@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use bytes::BytesMut;
 use log::info;
 use risingwave_common::error::Result;
 use tokio::io::AsyncWriteExt;
@@ -15,8 +16,10 @@ use crate::pgwire::pg_result::PgResult;
 /// The state machine for each psql connection.
 /// Read pg messages from tcp stream and write results back.
 pub struct PgProtocol {
-    /// Used for write/read message.
+    /// Used for write/read message in tcp connection.
     stream: TcpStream,
+    /// Write into buffer before flush to stream.
+    buf_out: BytesMut,
     /// Current states of pg connection.
     state: PgProtocolState,
     /// Whether the connection is terminated.
@@ -38,6 +41,7 @@ impl PgProtocol {
             stream,
             is_terminate: false,
             state: PgProtocolState::Startup,
+            buf_out: BytesMut::with_capacity(10 * 1024),
             session_mgr,
             session: None,
         }
@@ -55,11 +59,10 @@ impl PgProtocol {
         let msg = self.read_message().await.unwrap();
         match msg {
             FeMessage::Ssl => {
-                self.write_message_no_flush(&BeMessage::EncryptionResponse)
-                    .await?;
+                self.write_message_no_flush(&BeMessage::EncryptionResponse)?;
             }
             FeMessage::Startup(msg) => {
-                self.process_startup_msg(msg).await?;
+                self.process_startup_msg(msg)?;
                 self.state = PgProtocolState::Regular;
             }
             FeMessage::Query(query_msg) => {
@@ -69,7 +72,7 @@ impl PgProtocol {
                 self.process_terminate();
             }
         }
-        self.stream.flush().await?;
+        self.flush().await?;
         Ok(false)
     }
 
@@ -80,21 +83,17 @@ impl PgProtocol {
         }
     }
 
-    async fn process_startup_msg(&mut self, _msg: FeStartupMessage) -> Result<()> {
+    fn process_startup_msg(&mut self, _msg: FeStartupMessage) -> Result<()> {
         self.session = Some(self.session_mgr.connect());
-
-        self.write_message_no_flush(&BeMessage::AuthenticationOk)
-            .await?;
+        self.session = Some(self.session_mgr.connect());
+        self.write_message_no_flush(&BeMessage::AuthenticationOk)?;
         self.write_message_no_flush(&BeMessage::ParameterStatus(
             BeParameterStatusMessage::Encoding("utf8"),
-        ))
-        .await?;
+        ))?;
         self.write_message_no_flush(&BeMessage::ParameterStatus(
             BeParameterStatusMessage::StandardConformingString("on"),
-        ))
-        .await?;
-        self.write_message_no_flush(&BeMessage::ReadyForQuery)
-            .await?;
+        ))?;
+        self.write_message_no_flush(&BeMessage::ReadyForQuery)?;
         Ok(())
     }
 
@@ -114,11 +113,9 @@ impl PgProtocol {
             self.write_message_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
                 stmt_type: res.get_stmt_type(),
                 rows_cnt: res.get_effected_rows_cnt(),
-            }))
-            .await?;
+            }))?;
         }
-        self.write_message_no_flush(&BeMessage::ReadyForQuery)
-            .await?;
+        self.write_message_no_flush(&BeMessage::ReadyForQuery)?;
         Ok(())
     }
 
@@ -135,8 +132,7 @@ impl PgProtocol {
         self.write_message_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
             stmt_type: res.get_stmt_type(),
             rows_cnt,
-        }))
-        .await?;
+        }))?;
         Ok(())
     }
 
@@ -144,12 +140,19 @@ impl PgProtocol {
         self.is_terminate
     }
 
-    pub async fn write_message_no_flush(&mut self, message: &BeMessage<'_>) -> Result<()> {
-        BeMessage::write(&mut self.stream, message).await
+    fn write_message_no_flush(&mut self, message: &BeMessage<'_>) -> Result<()> {
+        BeMessage::write(&mut self.buf_out, message)
     }
 
-    pub async fn write_message(&mut self, message: &BeMessage<'_>) -> Result<()> {
-        self.write_message_no_flush(message).await?;
+    async fn write_message(&mut self, message: &BeMessage<'_>) -> Result<()> {
+        self.write_message_no_flush(message)?;
+        self.flush().await?;
+        Ok(())
+    }
+
+    async fn flush(&mut self) -> Result<()> {
+        self.stream.write_all(&self.buf_out).await?;
+        self.buf_out.clear();
         self.stream.flush().await?;
         Ok(())
     }

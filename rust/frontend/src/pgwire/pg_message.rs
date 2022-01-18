@@ -1,8 +1,12 @@
+use std::io;
+use std::io::{IoSlice, Write};
+
+use byteorder::{BigEndian, ByteOrder};
 /// Part of code learned from https://github.com/zenithdb/zenith/blob/main/zenith_utils/src/pq_proto.rs.
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
 use risingwave_common::array::Row;
 use risingwave_common::error::Result;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
 
 use crate::pgwire::pg_field_descriptor::PgFieldDescriptor;
@@ -83,7 +87,7 @@ impl FeStartupMessage {
 pub enum BeMessage<'a> {
     AuthenticationOk,
     CommandComplete(BeCommandCompleteMessage),
-    // single byte - used in response to SSLRequest/GSSENCRequest
+    // Single byte - used in response to SSLRequest/GSSENCRequest.
     EncryptionResponse,
     DataRow(&'a Row),
     ParameterStatus(BeParameterStatusMessage<'a>),
@@ -105,16 +109,16 @@ pub struct BeCommandCompleteMessage {
 
 impl<'a> BeMessage<'a> {
     /// Write message to the given buf.
-    pub async fn write(stream: &mut TcpStream, message: &BeMessage<'_>) -> Result<()> {
+    pub fn write(buf: &mut BytesMut, message: &BeMessage<'_>) -> Result<()> {
         match message {
             // AuthenticationOk
             // +-----+----------+-----------+
             // | 'R' | int32(8) | int32(0)  |
             // +-----+----------+-----------+
             BeMessage::AuthenticationOk => {
-                stream.write_all(b"R").await?;
-                stream.write_i32(8).await?;
-                stream.write_i32(0).await?;
+                buf.put_u8(b'R');
+                buf.put_i32(8);
+                buf.put_i32(0);
             }
 
             // ParameterStatus
@@ -146,14 +150,17 @@ impl<'a> BeMessage<'a> {
                     }
                 };
 
-                stream.write_all(b"S").await?;
-                stream
-                    .write_i32((4 + name.len() + 1 + value.len() + 1) as i32)
-                    .await?;
-                stream.write_all(name).await?;
-                stream.write_all(b"\0").await?;
-                stream.write_all(value).await?;
-                stream.write_all(b"\0").await?;
+                // Parameter names and values are passed as null-terminated strings
+                let iov = &mut [name, b"\0", value, b"\0"].map(IoSlice::new);
+                let mut buffer = [0u8; 64]; // this should be enough
+                let cnt = buffer.as_mut().write_vectored(iov).unwrap();
+
+                buf.put_u8(b'S');
+                write_body(buf, |stream| {
+                    stream.put_slice(&buffer[..cnt]);
+                    Ok(())
+                })
+                .unwrap();
             }
 
             // CommandComplete
@@ -172,10 +179,11 @@ impl<'a> BeMessage<'a> {
                     tag.push(' ');
                     tag.push_str(&rows_cnt.to_string());
                 }
-                stream.write_all(b"C").await?;
-                stream.write_i32((4 + tag.len() + 1) as i32).await?;
-                stream.write_all(tag.as_bytes()).await?;
-                stream.write_all(b"\0").await?;
+                buf.put_u8(b'C');
+                write_body(buf, |buf| {
+                    write_cstr(buf, tag.as_bytes())?;
+                    Ok(())
+                })?;
             }
 
             // DataRow
@@ -186,28 +194,22 @@ impl<'a> BeMessage<'a> {
             //                          +-----------+v------+
             //                          | int32 len | bytes |
             //                          +-----------+-------+
-            BeMessage::DataRow(row) => {
-                stream.write_all(b"D").await?;
-                let mut total_len = 4 + 2 + row.size() * 4;
-                for val in &row.0 {
-                    total_len += val.as_ref().map_or(0, |v| v.to_string().len());
-                }
-
-                stream.write_i32(total_len as i32).await?;
-                stream.write_i16(row.size() as i16).await?;
-
-                for val in &row.0 {
-                    match val {
-                        Some(inner_val) => {
-                            let val_data = inner_val.to_string();
-                            stream.write_i32(val_data.len() as i32).await?;
-                            stream.write_all(val_data.as_bytes()).await?;
-                        }
-                        None => {
-                            stream.write_i32(-1).await?;
+            BeMessage::DataRow(vals) => {
+                buf.put_u8(b'D');
+                write_body(buf, |buf| {
+                    buf.put_u16(vals.size() as u16); // num of cols
+                    for val_opt in &vals.0 {
+                        if let Some(val) = val_opt {
+                            let val_data = val.to_string();
+                            buf.put_u32(val_data.len() as u32);
+                            buf.put_slice(val_data.as_bytes());
+                        } else {
+                            buf.put_i32(-1);
                         }
                     }
-                }
+                    Ok(())
+                })
+                .unwrap();
             }
             // RowDescription
             // +-----+-----------+--------------+-------+-----+-------+
@@ -223,44 +225,91 @@ impl<'a> BeMessage<'a> {
             //                             v                       v
             //                        colAttrNum               typeModifier
             BeMessage::RowDescription(row_descs) => {
-                stream.write_all(b"T").await?;
-                let mut len = 4 + 2 + row_descs.len() * (4 + 2 + 4 + 2 + 4 + 2);
-                for pg_field in row_descs.iter() {
-                    len += pg_field.get_name().len() + 1;
-                }
-                stream.write_i32(len as i32).await?;
-                stream.write_i16(row_descs.len() as i16).await?;
-
-                for pg_field in row_descs.iter() {
-                    stream.write_all(pg_field.get_name().as_bytes()).await?;
-                    stream.write_all(b"\0").await?;
-
-                    stream.write_i32(pg_field.get_table_oid()).await?;
-                    stream.write_i16(pg_field.get_col_attr_num()).await?;
-                    stream
-                        .write_i32(pg_field.get_type_oid().as_number())
-                        .await?;
-                    stream.write_i16(pg_field.get_type_len()).await?;
-                    stream.write_i32(pg_field.get_type_modifier()).await?;
-                    stream.write_i16(pg_field.get_format_code()).await?;
-                }
+                buf.put_u8(b'T');
+                write_body(buf, |buf| {
+                    buf.put_i16(row_descs.len() as i16); // # of fields
+                    for pg_field in row_descs.iter() {
+                        write_cstr(buf, pg_field.get_name().as_bytes())?;
+                        buf.put_i32(pg_field.get_table_oid()); // table oid
+                        buf.put_i16(pg_field.get_col_attr_num()); // attnum
+                        buf.put_i32(pg_field.get_type_oid().as_number());
+                        buf.put_i16(pg_field.get_type_len());
+                        buf.put_i32(pg_field.get_type_modifier()); // typmod
+                        buf.put_i16(pg_field.get_format_code()); // format code
+                    }
+                    Ok(())
+                })?;
             }
             // ReadyForQuery
             // +-----+----------+---------------------------+
             // | 'Z' | int32(5) | byte1(transaction status) |
             // +-----+----------+---------------------------+
             BeMessage::ReadyForQuery => {
-                stream.write_all(b"Z").await?;
-                stream.write_i32(5).await?;
+                buf.put_u8(b'Z');
+                buf.put_i32(5);
                 // TODO: add transaction status
-                stream.write_all(b"I").await?;
+                buf.put_u8(b'I');
             }
 
             BeMessage::EncryptionResponse => {
-                stream.write_all(b"N").await?;
+                buf.put_u8(b'N');
             }
         }
 
         Ok(())
     }
+}
+
+// Safe usize -> i32|i16 conversion, from rust-postgres
+trait FromUsize: Sized {
+    fn from_usize(x: usize) -> Result<Self>;
+}
+
+macro_rules! from_usize {
+    ($t:ty) => {
+        impl FromUsize for $t {
+            #[inline]
+            fn from_usize(x: usize) -> Result<$t> {
+                if x > <$t>::max_value() as usize {
+                    Err(
+                        io::Error::new(io::ErrorKind::InvalidInput, "value too large to transmit")
+                            .into(),
+                    )
+                } else {
+                    Ok(x as $t)
+                }
+            }
+        }
+    };
+}
+
+from_usize!(i32);
+
+/// Call f() to write body of the message and prepend it with 4-byte len as
+/// prescribed by the protocol. First write out body value and fill length value as i32 in front of
+/// it.
+fn write_body<F>(buf: &mut BytesMut, f: F) -> Result<()>
+where
+    F: FnOnce(&mut BytesMut) -> Result<()>,
+{
+    let base = buf.len();
+    buf.extend_from_slice(&[0; 4]);
+
+    f(buf)?;
+
+    let size = i32::from_usize(buf.len() - base)?;
+    BigEndian::write_i32(&mut buf[base..], size);
+    Ok(())
+}
+
+/// Safe write of s into buf as cstring (String in the protocol).
+fn write_cstr(buf: &mut BytesMut, s: &[u8]) -> Result<()> {
+    if s.contains(&0) {
+        return Err(
+            io::Error::new(io::ErrorKind::InvalidInput, "string contains embedded null").into(),
+        );
+    }
+    buf.put_slice(s);
+    buf.put_u8(0);
+    Ok(())
 }

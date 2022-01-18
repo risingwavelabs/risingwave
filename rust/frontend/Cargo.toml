@@ -6,6 +6,7 @@ edition = "2021"
 
 [dependencies]
 async-trait = "0.1"
+byteorder = "1.4"
 bytes = "1"
 clap = { version = "3", features = ["derive"] }
 downcast-rs = "1.2"
