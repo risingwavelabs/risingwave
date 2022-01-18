@@ -412,6 +412,14 @@ impl RemoteCatalogManager {
             .get_table(db_name, schema_name, table_name)
     }
 
+    pub fn get_database(&self, db_name: &str) -> Option<&DatabaseCatalog> {
+        self.local_catalog_manager.get_database(db_name)
+    }
+
+    pub fn get_schema(&self, db_name: &str, schema_name: &str) -> Option<&SchemaCatalog> {
+        self.local_catalog_manager.get_schema(db_name, schema_name)
+    }
+
     /// Get one id (database/schema/table) from meta service.
     async fn get_id_from_meta(
         &mut self,
