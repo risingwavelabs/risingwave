@@ -1,29 +1,40 @@
 [package]
 edition = "2021"
-name = "risingwave_source"
+name = "risingwave_connector"
 version = "0.1.1"
 
 [dependencies]
 anyhow = "1"
+async-std = { version = "1" }
 async-stream = "0.3"
 async-trait = "0.1"
+aws-config = "0.4.1"
+aws-sdk-kinesis = "0.4.1"
+aws-smithy-http = "0.34.0"
+aws-smithy-types = "0.32.0"
+aws-types = { version = "0.4.1", features = ["hardcoded-credentials"] }
+backtrace = "0.3"
 byteorder = "1"
-bytes = "1"
+bytes = { version = "1", features = ["serde"] }
 chrono = "0.4"
 crc32fast = "1"
 either = "1"
 farmhash = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
+http = "0.2.6"
+httpmock = "0.6.5"
+hyper = "0.14.16"
 itertools = "0.10"
 lazy_static = "1"
 log = "0.4"
-maplit = "1"
 memcomparable = { path = "../utils/memcomparable" }
 num-traits = "0.2"
 paste = "1"
 prost = "0.9"
+prost-types = "0.9"
 protobuf = "2"
 protobuf-codegen-pure = "2.25.2"
+pulsar = { git = "https://github.com/shanicky/pulsar-rs.git", rev = "3b6353943833057f4379a354c1754a4e86fa57ff" }
 rdkafka = { version = "0.28", features = ["cmake-build"] }
 risingwave-pb = { path = "../prost" }
 risingwave_common = { path = "../common" }
@@ -44,6 +55,7 @@ tokio-stream = "0.1"
 tonic = "0.6"
 twox-hash = "1"
 url = "2"
+urlencoding = "2.1.0"
 
 [dev-dependencies]
 assert_matches = "1"

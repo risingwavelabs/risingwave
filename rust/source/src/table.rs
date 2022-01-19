@@ -134,7 +134,7 @@ impl StreamSourceReader for TableStreamReader {
             BummockResult::DataEof => vec![],
         };
 
-        for chunk in snapshot.into_iter() {
+        for chunk in snapshot {
             let stream_chunk = StreamChunk::new(
                 vec![Op::Insert; chunk.capacity()],
                 chunk.columns().to_vec(),
@@ -143,7 +143,7 @@ impl StreamSourceReader for TableStreamReader {
             self.existing_data.push_back(stream_chunk);
         }
 
-        for stream_chunk in core.buffer.iter() {
+        for stream_chunk in &core.buffer {
             self.existing_data.push_back(stream_chunk.clone())
         }
 

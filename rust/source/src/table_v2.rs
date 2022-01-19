@@ -89,7 +89,7 @@ impl BatchSourceReader for TableV2BatchReader {
 /// [`TableV2StreamReader`] reads changes from a certain table continuously.
 /// This struct should be only used for associated materialize task, thus the reader should be
 /// created only once. Further streaming task relying on this table source should follow the
-/// structure of "MView on MView".
+/// structure of "`MView` on `MView`".
 #[derive(Debug)]
 pub struct TableV2StreamReader {
     core: Arc<RwLock<TableSourceV2Core>>,

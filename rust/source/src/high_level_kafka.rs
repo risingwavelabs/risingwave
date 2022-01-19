@@ -191,7 +191,7 @@ impl HighLevelKafkaSource {
             },
         );
 
-        for (k, v) in self.config.properties.iter() {
+        for (k, v) in &self.config.properties {
             config.set(k, v);
         }
 

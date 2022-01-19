@@ -18,6 +18,7 @@ clap = { version = "3", features = ["derive"] }
 crc32fast = "1"
 either = "1"
 futures = "0.3"
+hyper = "0.14.16"
 itertools = "0.10"
 lazy_static = "1"
 log = "0.4"
@@ -26,12 +27,15 @@ num-integer = "0.1"
 num-traits = "0.2"
 paste = "1"
 prost = "0.9"
+prost-types = "0.9"
+rdkafka = "0.28.0"
 risingwave-pb = { path = "../prost" }
 risingwave_common = { path = "../common" }
 risingwave_storage = { path = "../storage" }
 rust_decimal = "1"
 serde = { version = "1", features = ["derive"] }
 serde-value = "0.7"
+serde_derive = "1"
 serde_json = "1"
 serde_with = "1"
 sled = "0.34.7"

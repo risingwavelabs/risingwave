@@ -3,6 +3,7 @@ members = [
   "batch",
   "bench",
   "common",
+  "connector",
   "frontend",
   "meta",
   "prost",
