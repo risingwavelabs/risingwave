@@ -29,7 +29,7 @@ impl Actor {
             let message = self.consumer.next().instrument(span.clone()).await;
             match message {
                 Ok(Some(barrier)) => {
-                    if let Mutation::Stop(actors) = barrier.mutation {
+                    if let Some(Mutation::Stop(actors)) = barrier.mutation.as_deref() {
                         if actors.contains(&self.id) {
                             debug!("actor exit: {}", self.id);
                             break;

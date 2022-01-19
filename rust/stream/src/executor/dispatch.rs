@@ -122,9 +122,10 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
         };
         Ok(())
     }
+
     async fn update_outputs(&mut self, barrier: &Barrier) -> Result<()> {
-        match &barrier.mutation {
-            Mutation::UpdateOutputs(updates) => {
+        match barrier.mutation.as_deref() {
+            Some(Mutation::UpdateOutputs(updates)) => {
                 if let Some((_, v)) = updates.get_key_value(&self.actor_id) {
                     let mut new_outputs = vec![];
                     let mut channel_pool_guard = self.context.channel_pool.lock().unwrap();
@@ -176,7 +177,7 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
                 }
                 Ok(())
             }
-            Mutation::AddOutput(actor_id, downstream_actor_infos) => {
+            Some(Mutation::AddOutput(actor_id, downstream_actor_infos)) => {
                 if self.actor_id != *actor_id {
                     return Ok(());
                 }
@@ -729,7 +730,7 @@ mod tests {
         add_local_channels(ctx.clone(), vec![(233, 234), (233, 235)]);
         add_remote_channels(ctx.clone(), 233, vec![238]);
 
-        let b1 = Barrier::new(0, Mutation::UpdateOutputs(updates1));
+        let b1 = Barrier::new(0).with_mutation(Mutation::UpdateOutputs(updates1));
         tx.send(Message::Barrier(b1)).await.unwrap();
         executor.next().await.unwrap();
         let tctx = ctx.clone();
@@ -752,7 +753,7 @@ mod tests {
             }],
         );
         add_local_channels(ctx.clone(), vec![(233, 235)]);
-        let b2 = Barrier::new(0, Mutation::UpdateOutputs(updates2));
+        let b2 = Barrier::new(0).with_mutation(Mutation::UpdateOutputs(updates2));
 
         tx.send(Message::Barrier(b2)).await.unwrap();
         executor.next().await.unwrap();
@@ -766,8 +767,7 @@ mod tests {
 
         add_local_channels(ctx.clone(), vec![(233, 245)]);
         add_remote_channels(ctx.clone(), 233, vec![246]);
-        tx.send(Message::Barrier(Barrier::new(
-            0,
+        tx.send(Message::Barrier(Barrier::new(0).with_mutation(
             Mutation::AddOutput(
                 233,
                 vec![

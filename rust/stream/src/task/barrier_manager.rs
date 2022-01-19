@@ -53,7 +53,7 @@ impl BarrierManager {
                 .unwrap();
         }
 
-        if let Mutation::Stop(actors) = barrier.mutation {
+        if let Some(Mutation::Stop(actors)) = barrier.mutation.as_deref() {
             actors.iter().for_each(|actor| {
                 if let Some(sender) = self.sender_placeholder.remove(actor) {
                     sender.close_channel();

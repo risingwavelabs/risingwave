@@ -171,16 +171,12 @@ async fn test_merger_sum_aggr() {
             );
             input.send(Message::Chunk(chunk)).await.unwrap();
         }
-        input
-            .send(Message::Barrier(Barrier::new(j, Mutation::Nothing)))
-            .await
-            .unwrap();
+        input.send(Message::Barrier(Barrier::new(j))).await.unwrap();
     }
     input
-        .send(Message::Barrier(Barrier::new(
-            0,
-            Mutation::Stop(HashSet::from([0])),
-        )))
+        .send(Message::Barrier(
+            Barrier::new(0).with_mutation(Mutation::Stop(HashSet::from([0]))),
+        ))
         .await
         .unwrap();
 
@@ -509,14 +505,13 @@ async fn test_tpch_q6() {
         .unwrap();
 
     input
-        .send(Message::Barrier(Barrier::new(100, Mutation::Nothing)))
+        .send(Message::Barrier(Barrier::new(100)))
         .await
         .unwrap();
     input
-        .send(Message::Barrier(Barrier::new(
-            200,
-            Mutation::Stop(HashSet::from([0])),
-        )))
+        .send(Message::Barrier(
+            Barrier::new(200).with_mutation(Mutation::Stop(HashSet::from([0]))),
+        ))
         .await
         .unwrap();
 

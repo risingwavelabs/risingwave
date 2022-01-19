@@ -222,20 +222,16 @@ async fn test_stream_proto() {
         for _epoch in 0..100 {
             assert!(matches!(
                 sink.next().await.unwrap(),
-                Message::Barrier(Barrier {
-                    epoch: _,
-                    mutation: Mutation::Nothing,
-                    ..
-                })
+                Message::Barrier(Barrier { mutation: None, .. })
             ));
         }
         assert!(matches!(
-            sink.next().await.unwrap(),
-            Message::Barrier(Barrier {
-                epoch: 0,
-                mutation: Mutation::Stop(_),
-                ..
-            })
+          sink.next().await.unwrap(),
+          Message::Barrier(Barrier {
+            epoch: 0,
+            mutation,
+            ..
+          }) if mutation.as_deref().unwrap().is_stop()
         ));
     });
 
@@ -256,8 +252,7 @@ async fn test_stream_proto() {
 
     tokio::time::timeout(
         timeout,
-        source.send(Message::Barrier(Barrier::new(
-            0,
+        source.send(Message::Barrier(Barrier::new(0).with_mutation(
             Mutation::Stop(HashSet::from([1, 3, 7, 11, 13, 233])),
         ))),
     )

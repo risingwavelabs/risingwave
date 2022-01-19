@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
+use std::sync::Arc;
 
 pub use actor::Actor;
 pub use aggregation::*;
@@ -62,33 +63,42 @@ pub trait ExprFn = Fn(&DataChunk) -> Result<Bitmap> + Send + Sync + 'static;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Mutation {
-    Nothing,
     Stop(HashSet<u32>),
     UpdateOutputs(HashMap<u32, Vec<ActorInfo>>),
     AddOutput(u32, Vec<ActorInfo>),
-}
-impl Default for Mutation {
-    fn default() -> Self {
-        Mutation::Nothing
-    }
 }
 
 #[derive(Default, Debug, Clone)]
 pub struct Barrier {
     pub epoch: u64,
-    pub mutation: Mutation,
+    pub mutation: Option<Arc<Mutation>>,
     pub span: Option<tracing::span::Span>,
 }
 
 impl Barrier {
-    // TODO: Barrier::new will create a barrier in local environment, but in reality, it should
-    // contain tracing info and timestamps. Therefore, this function should never be called after we
-    // migrated barrier generation to meta service.
-    pub fn new(epoch: u64, mutation: Mutation) -> Self {
+    /// Create a plain barrier.
+    pub fn new(epoch: u64) -> Self {
         Self {
             epoch,
-            mutation,
-            span: None,
+            ..Default::default()
+        }
+    }
+
+    #[must_use]
+    pub fn with_mutation(self, mutation: Mutation) -> Self {
+        Self {
+            mutation: Some(Arc::new(mutation)),
+            ..self
+        }
+    }
+
+    // TODO: The barrier should always contain trace info after we migrated barrier generation to
+    // meta service.
+    #[must_use]
+    pub fn with_span(self, span: tracing::span::Span) -> Self {
+        Self {
+            span: Some(span),
+            ..self
         }
     }
 }
@@ -100,7 +110,8 @@ impl PartialEq for Barrier {
 }
 
 impl Mutation {
-    fn is_stop(&self) -> bool {
+    /// Return true if the mutation is stop.
+    pub fn is_stop(&self) -> bool {
         matches!(self, Mutation::Stop(_))
     }
 }
@@ -112,29 +123,31 @@ impl Barrier {
         }: Barrier = self.clone();
         ProstBarrier {
             epoch,
-            mutation: match mutation {
-                Mutation::Nothing => Some(ProstMutation::Nothing(NothingMutation {})),
-                Mutation::Stop(actors) => Some(ProstMutation::Stop(StopMutation {
+            mutation: match mutation.as_deref() {
+                None => Some(ProstMutation::Nothing(NothingMutation {})),
+                Some(Mutation::Stop(actors)) => Some(ProstMutation::Stop(StopMutation {
                     actors: actors.iter().cloned().collect::<Vec<_>>(),
                 })),
-                Mutation::UpdateOutputs(update) => Some(ProstMutation::Update(UpdateMutation {
-                    actors: update
-                        .iter()
-                        .map(|(&f, actors)| {
-                            (
-                                f,
-                                MutationActors {
-                                    info: actors.clone(),
-                                },
-                            )
-                        })
-                        .collect(),
-                })),
-                Mutation::AddOutput(actor_id, downstream_actors) => {
+                Some(Mutation::UpdateOutputs(update)) => {
+                    Some(ProstMutation::Update(UpdateMutation {
+                        actors: update
+                            .iter()
+                            .map(|(&f, actors)| {
+                                (
+                                    f,
+                                    MutationActors {
+                                        info: actors.clone(),
+                                    },
+                                )
+                            })
+                            .collect(),
+                    }))
+                }
+                Some(Mutation::AddOutput(actor_id, downstream_actors)) => {
                     Some(ProstMutation::Add(AddMutation {
-                        actor_id,
+                        actor_id: *actor_id,
                         downstream_actors: Some(MutationActors {
-                            info: downstream_actors,
+                            info: downstream_actors.clone(),
                         }),
                     }))
                 }
@@ -146,20 +159,24 @@ impl Barrier {
         Barrier {
             epoch: prost.get_epoch(),
             mutation: match prost.get_mutation() {
-                ProstMutation::Nothing(_) => Mutation::Nothing,
+                ProstMutation::Nothing(_) => None,
                 ProstMutation::Stop(stop) => {
-                    Mutation::Stop(HashSet::from_iter(stop.get_actors().clone()))
+                    Some(Mutation::Stop(HashSet::from_iter(stop.get_actors().clone())).into())
                 }
-                ProstMutation::Update(update) => Mutation::UpdateOutputs(
-                    update
-                        .actors
-                        .iter()
-                        .map(|(&f, actors)| (f, actors.get_info().clone()))
-                        .collect::<HashMap<u32, Vec<ActorInfo>>>(),
+                ProstMutation::Update(update) => Some(
+                    Mutation::UpdateOutputs(
+                        update
+                            .actors
+                            .iter()
+                            .map(|(&f, actors)| (f, actors.get_info().clone()))
+                            .collect::<HashMap<u32, Vec<ActorInfo>>>(),
+                    )
+                    .into(),
                 ),
-                ProstMutation::Add(add) => {
+                ProstMutation::Add(add) => Some(
                     Mutation::AddOutput(add.actor_id, add.get_downstream_actors().info.clone())
-                }
+                        .into(),
+                ),
             },
             span: None,
         }
@@ -177,12 +194,11 @@ impl Message {
     /// will not continue, false otherwise.
     pub fn is_terminate(&self) -> bool {
         matches!(
-            self,
-            Message::Barrier(Barrier {
-                epoch: _,
-                mutation: Mutation::Stop(..),
-                span: _
-            })
+          self,
+          Message::Barrier(Barrier {
+            mutation,
+            ..
+          }) if mutation.as_deref().unwrap().is_stop()
         )
     }
 

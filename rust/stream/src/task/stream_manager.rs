@@ -125,8 +125,7 @@ impl StreamManager {
 
     pub fn checkpoint(&self, epoch: u64) -> Result<()> {
         let mut core = self.core.lock().unwrap();
-        core.barrier_manager
-            .send_barrier(&Barrier::new(epoch, Mutation::Nothing))
+        core.barrier_manager.send_barrier(&Barrier::new(epoch))
     }
 
     pub fn send_barrier(&self, barrier: &Barrier) -> Result<()> {
@@ -351,7 +350,7 @@ impl StreamManagerCore {
 
     fn send_conf_change_barrier(&mut self, mutation: Mutation) -> Result<()> {
         self.barrier_manager
-            .send_barrier(&Barrier::new(0, mutation))
+            .send_barrier(&Barrier::new(0).with_mutation(mutation))
     }
 
     /// Create a chain(tree) of nodes, with given `store`.

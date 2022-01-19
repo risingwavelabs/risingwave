@@ -69,14 +69,11 @@ impl MockSource {
     }
 
     pub fn push_barrier(&mut self, epoch: u64, stop: bool) {
-        self.msgs.push_back(Message::Barrier(Barrier::new(
-            epoch,
-            if stop {
-                Mutation::Stop(HashSet::default())
-            } else {
-                Mutation::Nothing
-            },
-        )));
+        let mut barrier = Barrier::new(epoch);
+        if stop {
+            barrier = barrier.with_mutation(Mutation::Stop(HashSet::default()));
+        }
+        self.msgs.push_back(Message::Barrier(barrier));
     }
 }
 
@@ -86,10 +83,9 @@ impl Executor for MockSource {
         self.epoch += 1;
         match self.msgs.pop_front() {
             Some(msg) => Ok(msg),
-            None => Ok(Message::Barrier(Barrier::new(
-                self.epoch,
-                Mutation::Stop(HashSet::default()),
-            ))),
+            None => Ok(Message::Barrier(
+                Barrier::new(self.epoch).with_mutation(Mutation::Stop(HashSet::default())),
+            )),
         }
     }
 
@@ -156,15 +152,11 @@ impl MockAsyncSource {
     }
 
     pub fn push_barrier(tx: &mut UnboundedSender<Message>, epoch: u64, stop: bool) {
-        tx.send(Message::Barrier(Barrier::new(
-            epoch,
-            if stop {
-                Mutation::Stop(HashSet::default())
-            } else {
-                Mutation::Nothing
-            },
-        )))
-        .expect("Receiver closed");
+        let mut barrier = Barrier::new(epoch);
+        if stop {
+            barrier = barrier.with_mutation(Mutation::Stop(HashSet::default()))
+        }
+        tx.send(Message::Barrier(barrier)).expect("Receiver closed");
     }
 }
 
@@ -174,10 +166,9 @@ impl Executor for MockAsyncSource {
         self.epoch += 1;
         match self.rx.recv().await {
             Some(msg) => Ok(msg),
-            None => Ok(Message::Barrier(Barrier::new(
-                self.epoch,
-                Mutation::Stop(HashSet::default()),
-            ))),
+            None => Ok(Message::Barrier(
+                Barrier::new(self.epoch).with_mutation(Mutation::Stop(HashSet::default())),
+            )),
         }
     }
 

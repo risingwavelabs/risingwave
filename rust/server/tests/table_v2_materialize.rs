@@ -17,7 +17,7 @@ use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::{SimpleTableManager, TableManager};
 use risingwave_storage::{Keyspace, StateStoreImpl, TableColumnDesc};
 use risingwave_stream::executor::{
-    Barrier, Executor as StreamExecutor, MaterializeExecutor, Message, Mutation, PkIndices,
+    Barrier, Executor as StreamExecutor, MaterializeExecutor, Message, PkIndices,
     StreamSourceExecutor,
 };
 
@@ -185,7 +185,7 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     // Send a barrier and poll again, should write changes to storage
     barrier_tx
-        .unbounded_send(Message::Barrier(Barrier::new(1919, Mutation::Nothing)))
+        .unbounded_send(Message::Barrier(Barrier::new(1919)))
         .unwrap();
 
     assert!(matches!(

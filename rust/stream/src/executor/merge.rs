@@ -228,7 +228,7 @@ impl Executor for MergeExecutor {
                     return Ok(Message::Chunk(chunk));
                 }
                 Message::Barrier(barrier) => {
-                    if let Mutation::Stop(actors) = barrier.mutation.clone() {
+                    if let Some(Mutation::Stop(actors)) = barrier.mutation.as_deref() {
                         if actors.contains(&self.actor_id) {
                             self.terminated += 1;
                         }
@@ -324,15 +324,14 @@ mod tests {
                     tx.send(Message::Chunk(build_test_chunk(epoch)))
                         .await
                         .unwrap();
-                    tx.send(Message::Barrier(Barrier::new(epoch, Mutation::Nothing)))
+                    tx.send(Message::Barrier(Barrier::new(epoch)))
                         .await
                         .unwrap();
                     tokio::time::sleep(Duration::from_millis(1)).await;
                 }
-                tx.send(Message::Barrier(Barrier::new(
-                    1000,
-                    Mutation::Stop(HashSet::default()),
-                )))
+                tx.send(Message::Barrier(
+                    Barrier::new(1000).with_mutation(Mutation::Stop(HashSet::default())),
+                ))
                 .await
                 .unwrap();
             });
@@ -352,12 +351,11 @@ mod tests {
             });
         }
         assert_matches!(
-            merger.next().await.unwrap(),
-            Message::Barrier(Barrier {
-                epoch: _,
-                mutation: Mutation::Stop(_),
-                ..
-            })
+          merger.next().await.unwrap(),
+          Message::Barrier(Barrier {
+            mutation,
+            ..
+          }) if mutation.as_deref().unwrap().is_stop()
         );
 
         for handle in handles {
