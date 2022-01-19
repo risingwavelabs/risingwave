@@ -255,24 +255,37 @@ mod tests {
     use super::*;
     use crate::hummock::iterator::BoxedHummockIterator;
     use crate::hummock::key::{key_with_epoch, Epoch};
+    use crate::hummock::local_version_manager::LocalVersionManager;
+    use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
     use crate::hummock::utils::bloom_filter_sstables;
     use crate::hummock::version_manager::{ScopedUnpinSnapshot, VersionManager};
     use crate::hummock::{user_key, HummockOptions, HummockResult, HummockStorage};
     use crate::object::InMemObjectStore;
 
     #[tokio::test]
+    // TODO #2649 compactor test should base on HummockManager in meta crate
+    #[ignore]
     async fn test_basic() -> HummockResult<()> {
-        let hummock_storage = Arc::new(HummockStorage::new(
-            Arc::new(InMemObjectStore::new()),
-            HummockOptions {
-                sstable_size: 1048576,
-                block_size: 1024,
-                bloom_false_positive: 0.1,
-                remote_dir: String::from(""),
-                checksum_algo: ChecksumAlg::Crc32c,
-            },
-            Arc::new(VersionManager::new()),
-        ));
+        let object_client = Arc::new(InMemObjectStore::new());
+        let remote_dir = "";
+        let hummock_storage = Arc::new(
+            HummockStorage::new(
+                object_client.clone(),
+                HummockOptions {
+                    sstable_size: 1048576,
+                    block_size: 1024,
+                    bloom_false_positive: 0.1,
+                    remote_dir: remote_dir.to_string(),
+                    checksum_algo: ChecksumAlg::Crc32c,
+                },
+                Arc::new(VersionManager::new()),
+                Arc::new(LocalVersionManager::new(object_client, remote_dir)),
+                Arc::new(MockHummockMetaClient::new(Arc::new(
+                    MockHummockMetaService::new(),
+                ))),
+            )
+            .await,
+        );
         let sub_compact_context = SubCompactContext {
             options: hummock_storage.options.clone(),
             version_manager: hummock_storage.version_manager.clone(),
@@ -324,6 +337,7 @@ mod tests {
         // Get the value after flushing to remote.
         let value = hummock_storage
             .get_snapshot()
+            .await
             .get(&anchor)
             .await
             .unwrap()
@@ -333,6 +347,7 @@ mod tests {
         // Test looking for a nonexistent key. `next()` would return the next key.
         let value = hummock_storage
             .get_snapshot()
+            .await
             .get(&Bytes::from("ab"))
             .await
             .unwrap();
@@ -353,6 +368,7 @@ mod tests {
         // Get the value after flushing to remote.
         let value = hummock_storage
             .get_snapshot()
+            .await
             .get(&anchor)
             .await
             .unwrap()
@@ -412,12 +428,18 @@ mod tests {
         Compactor::compact(&sub_compact_context).await?;
 
         // Get the value after flushing to remote.
-        let value = hummock_storage.get_snapshot().get(&anchor).await.unwrap();
+        let value = hummock_storage
+            .get_snapshot()
+            .await
+            .get(&anchor)
+            .await
+            .unwrap();
         assert_eq!(value, None);
 
         // Get non-existent maximum key.
         let value = hummock_storage
             .get_snapshot()
+            .await
             .get(&Bytes::from("ff"))
             .await
             .unwrap();
@@ -427,12 +449,28 @@ mod tests {
     }
 
     #[tokio::test]
+    // TODO #2649 compactor test should base on HummockManager in meta crate
+    #[ignore]
     async fn test_same_key_not_splitted() -> HummockResult<()> {
         let options = HummockOptions::small_for_test();
+        let object_client = Arc::new(InMemObjectStore::new());
         let version_manager = Arc::new(VersionManager::new());
+        let local_version_manager = Arc::new(LocalVersionManager::new(
+            object_client.clone(),
+            &options.remote_dir,
+        ));
         let target_table_size = options.sstable_size;
-        let mut storage =
-            HummockStorage::new(Arc::new(InMemObjectStore::new()), options, version_manager);
+        let hummock_meta_client = Arc::new(MockHummockMetaClient::new(Arc::new(
+            MockHummockMetaService::new(),
+        )));
+        let mut storage = HummockStorage::new(
+            object_client,
+            options,
+            version_manager,
+            local_version_manager,
+            hummock_meta_client,
+        )
+        .await;
         storage.shutdown_compactor().await.unwrap();
         let sub_compact_context = SubCompactContext {
             options: storage.options.clone(),

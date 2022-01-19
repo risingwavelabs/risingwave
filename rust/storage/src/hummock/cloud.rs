@@ -57,11 +57,11 @@ pub async fn gen_remote_sstable(
     SSTable::load(sstable_id, obj_client, data_path, meta).await
 }
 
-fn get_sst_meta_path(remote_dir: &str, sstable_id: HummockSSTableId) -> String {
+pub fn get_sst_meta_path(remote_dir: &str, sstable_id: HummockSSTableId) -> String {
     format!("{}{}.meta", remote_dir, sstable_id)
 }
 
-fn get_sst_data_path(remote_dir: &str, sstable_id: HummockSSTableId) -> String {
+pub fn get_sst_data_path(remote_dir: &str, sstable_id: HummockSSTableId) -> String {
     format!("{}{}.data", remote_dir, sstable_id)
 }
 

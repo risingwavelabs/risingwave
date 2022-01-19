@@ -3411,6 +3411,7 @@ dependencies = [
  "thiserror",
  "tikv-client",
  "tokio",
+ "tokio-retry",
  "tokio-stream",
  "tonic",
  "tracing",
@@ -4278,6 +4279,17 @@ dependencies = [
  "socket2",
  "tokio",
  "tokio-util",
+]
+
+[[package]]
+name = "tokio-retry"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f57eb36ecbe0fc510036adff84824dd3c24bb781e21bfa67b69d556aa85214f"
+dependencies = [
+ "pin-project",
+ "rand 0.8.4",
+ "tokio",
 ]
 
 [[package]]

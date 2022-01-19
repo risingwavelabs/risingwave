@@ -41,6 +41,7 @@ smallvec = "1"
 thiserror = "1"
 tikv-client = { version = "0.1.0", optional = true }
 tokio = { version = "1", features = ["fs", "rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
+tokio-retry = "0.3"
 tokio-stream = "0.1"
 tonic = "0.6"
 tracing = "0.1"

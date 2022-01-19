@@ -40,7 +40,7 @@ pub async fn compute_node_serve(
     let worker_id = meta_client.register(addr).await.unwrap();
     let _config = load_config(&opts); // TODO: _config will be used by streaming env & batch env.
 
-    let state_store: StateStoreImpl = opts.state_store.parse().unwrap();
+    let state_store = StateStoreImpl::from_str(&opts.state_store).await.unwrap();
     let table_mgr = Arc::new(SimpleTableManager::new(state_store.clone()));
     let task_mgr = Arc::new(TaskManager::new());
     let stream_mgr = Arc::new(StreamManager::new(addr, state_store));

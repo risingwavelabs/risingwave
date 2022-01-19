@@ -9,6 +9,8 @@ use prometheus::{Encoder, Registry, TextEncoder};
 
 use super::iterator::UserIterator;
 use super::{HummockOptions, HummockStorage};
+use crate::hummock::local_version_manager::LocalVersionManager;
+use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
 use crate::hummock::version_manager::VersionManager;
 use crate::object::InMemObjectStore;
 
@@ -32,12 +34,21 @@ async fn prometheus_service(
 async fn test_prometheus_endpoint_hummock() {
     let hummock_options = HummockOptions::default_for_test();
     let host_addr = "127.0.0.1:1222";
-
+    let object_client = Arc::new(InMemObjectStore::new());
+    let local_version_manager = Arc::new(LocalVersionManager::new(
+        object_client.clone(),
+        &hummock_options.remote_dir,
+    ));
     let hummock_storage = HummockStorage::new(
-        Arc::new(InMemObjectStore::new()),
+        object_client,
         hummock_options,
         Arc::new(VersionManager::new()),
-    );
+        local_version_manager,
+        Arc::new(MockHummockMetaClient::new(Arc::new(
+            MockHummockMetaService::new(),
+        ))),
+    )
+    .await;
     let anchor = Bytes::from("aa");
     let mut batch1 = vec![
         (anchor.clone(), Some(Bytes::from("111"))),
@@ -101,11 +112,22 @@ async fn test_prometheus_endpoint_hummock() {
 
 #[tokio::test]
 async fn test_basic() {
+    let object_client = Arc::new(InMemObjectStore::new());
+    let hummock_options = HummockOptions::default_for_test();
+    let local_version_manager = Arc::new(LocalVersionManager::new(
+        object_client.clone(),
+        &hummock_options.remote_dir,
+    ));
     let hummock_storage = HummockStorage::new(
-        Arc::new(InMemObjectStore::new()),
-        HummockOptions::default_for_test(),
+        object_client,
+        hummock_options,
         Arc::new(VersionManager::new()),
-    );
+        local_version_manager,
+        Arc::new(MockHummockMetaClient::new(Arc::new(
+            MockHummockMetaService::new(),
+        ))),
+    )
+    .await;
     let anchor = Bytes::from("aa");
 
     // First batch inserts the anchor and others.
@@ -136,7 +158,8 @@ async fn test_basic() {
     // Make sure the batch is sorted.
     batch3.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
 
-    let mut epoch: u64 = 0;
+    // epoch 0 is reserved by storage service
+    let mut epoch: u64 = 1;
 
     // Write first batch.
     hummock_storage
@@ -149,7 +172,7 @@ async fn test_basic() {
         .await
         .unwrap();
 
-    let snapshot1 = hummock_storage.get_snapshot();
+    let snapshot1 = hummock_storage.get_snapshot().await;
 
     // Get the value after flushing to remote.
     let value = snapshot1.get(&anchor).await.unwrap().unwrap();
@@ -171,7 +194,7 @@ async fn test_basic() {
         .await
         .unwrap();
 
-    let snapshot2 = hummock_storage.get_snapshot();
+    let snapshot2 = hummock_storage.get_snapshot().await;
 
     // Get the value after flushing to remote.
     let value = snapshot2.get(&anchor).await.unwrap().unwrap();
@@ -189,7 +212,7 @@ async fn test_basic() {
         .await
         .unwrap();
 
-    let snapshot3 = hummock_storage.get_snapshot();
+    let snapshot3 = hummock_storage.get_snapshot().await;
 
     // Get the value after flushing to remote.
     let value = snapshot3.get(&anchor).await.unwrap();
@@ -243,13 +266,24 @@ async fn count_iter(iter: &mut UserIterator) -> usize {
 #[tokio::test]
 async fn test_reload_storage() {
     let mem_objstore = Arc::new(InMemObjectStore::new());
+    let hummock_options = HummockOptions::default_for_test();
     let version_manager = Arc::new(VersionManager::new());
+    let local_version_manager = Arc::new(LocalVersionManager::new(
+        mem_objstore.clone(),
+        &hummock_options.remote_dir,
+    ));
+    let hummock_meta_client = Arc::new(MockHummockMetaClient::new(Arc::new(
+        MockHummockMetaService::new(),
+    )));
 
     let hummock_storage = HummockStorage::new(
         mem_objstore.clone(),
-        HummockOptions::default_for_test(),
+        hummock_options,
         version_manager.clone(),
-    );
+        local_version_manager.clone(),
+        hummock_meta_client.clone(),
+    )
+    .await;
     let anchor = Bytes::from("aa");
 
     // First batch inserts the anchor and others.
@@ -270,7 +304,8 @@ async fn test_reload_storage() {
     // Make sure the batch is sorted.
     batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
 
-    let mut epoch: u64 = 0;
+    // epoch 0 is reserved by storage service
+    let mut epoch: u64 = 1;
 
     // Write first batch.
     hummock_storage
@@ -283,7 +318,7 @@ async fn test_reload_storage() {
         .await
         .unwrap();
 
-    let snapshot1 = hummock_storage.get_snapshot();
+    let snapshot1 = hummock_storage.get_snapshot().await;
 
     // Mock somthing happened to storage internal, and storage is reloaded.
     drop(hummock_storage);
@@ -291,7 +326,10 @@ async fn test_reload_storage() {
         mem_objstore,
         HummockOptions::default_for_test(),
         version_manager,
-    );
+        local_version_manager,
+        hummock_meta_client,
+    )
+    .await;
 
     // Get the value after flushing to remote.
     let value = snapshot1.get(&anchor).await.unwrap().unwrap();
@@ -313,7 +351,7 @@ async fn test_reload_storage() {
         .await
         .unwrap();
 
-    let snapshot2 = hummock_storage.get_snapshot();
+    let snapshot2 = hummock_storage.get_snapshot().await;
 
     // Get the value after flushing to remote.
     let value = snapshot2.get(&anchor).await.unwrap().unwrap();

@@ -6,6 +6,8 @@ mod utils;
 use clap::Parser;
 use operation::{get_random, prefix_scan_random, write_batch};
 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
+use risingwave_storage::hummock::local_version_manager::LocalVersionManager;
+use risingwave_storage::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
 use risingwave_storage::hummock::version_manager::VersionManager;
 use risingwave_storage::hummock::{HummockOptions, HummockStateStore, HummockStorage};
 use risingwave_storage::memory::MemoryStateStore;
@@ -73,7 +75,7 @@ pub(crate) enum StateStoreImpl {
     Tikv(TikvStateStore),
 }
 
-fn get_state_store_impl(opts: &Opts) -> StateStoreImpl {
+async fn get_state_store_impl(opts: &Opts) -> StateStoreImpl {
     match opts.store.as_ref() {
         "in-memory" | "in_memory" => StateStoreImpl::Memory(MemoryStateStore::new()),
         tikv if tikv.starts_with("tikv") => StateStoreImpl::Tikv(TikvStateStore::new(vec![tikv
@@ -81,37 +83,54 @@ fn get_state_store_impl(opts: &Opts) -> StateStoreImpl {
             .unwrap()
             .to_string()])),
         minio if minio.starts_with("hummock+minio://") => {
-            StateStoreImpl::Hummock(HummockStateStore::new(HummockStorage::new(
-                Arc::new(S3ObjectStore::new_with_minio(
-                    minio.strip_prefix("hummock+").unwrap(),
-                )),
-                HummockOptions {
-                    sstable_size: opts.table_size_mb * (1 << 20),
-                    block_size: opts.block_size_kb * (1 << 10),
-                    bloom_false_positive: opts.bloom_false_positive,
-                    remote_dir: "hummock_001".to_string(),
-                    checksum_algo: get_checksum_algo(opts.checksum_algo.as_ref()),
-                },
-                Arc::new(VersionManager::new()),
-            )))
+            let object_client = Arc::new(S3ObjectStore::new_with_minio(
+                minio.strip_prefix("hummock+").unwrap(),
+            ));
+            let remote_dir = "hummock_001";
+            StateStoreImpl::Hummock(HummockStateStore::new(
+                HummockStorage::new(
+                    object_client.clone(),
+                    HummockOptions {
+                        sstable_size: opts.table_size_mb * (1 << 20),
+                        block_size: opts.block_size_kb * (1 << 10),
+                        bloom_false_positive: opts.bloom_false_positive,
+                        remote_dir: remote_dir.to_string(),
+                        checksum_algo: get_checksum_algo(opts.checksum_algo.as_ref()),
+                    },
+                    Arc::new(VersionManager::new()),
+                    Arc::new(LocalVersionManager::new(object_client, remote_dir)),
+                    Arc::new(MockHummockMetaClient::new(Arc::new(
+                        MockHummockMetaService::new(),
+                    ))),
+                )
+                .await,
+            ))
         }
         s3 if s3.starts_with("hummock+s3://") => {
             let s3_test_conn_info = ConnectionInfo::new();
-            let s3_store = S3ObjectStore::new(
+            let s3_store = Arc::new(S3ObjectStore::new(
                 s3_test_conn_info,
                 s3.strip_prefix("hummock+s3://").unwrap().to_string(),
-            );
-            StateStoreImpl::Hummock(HummockStateStore::new(HummockStorage::new(
-                Arc::new(s3_store),
-                HummockOptions {
-                    sstable_size: opts.table_size_mb * (1 << 20),
-                    block_size: opts.block_size_kb * (1 << 10),
-                    bloom_false_positive: opts.bloom_false_positive,
-                    remote_dir: "hummock_001".to_string(),
-                    checksum_algo: get_checksum_algo(opts.checksum_algo.as_ref()),
-                },
-                Arc::new(VersionManager::new()),
-            )))
+            ));
+            let remote_dir = "hummock_001";
+            StateStoreImpl::Hummock(HummockStateStore::new(
+                HummockStorage::new(
+                    s3_store.clone(),
+                    HummockOptions {
+                        sstable_size: opts.table_size_mb * (1 << 20),
+                        block_size: opts.block_size_kb * (1 << 10),
+                        bloom_false_positive: opts.bloom_false_positive,
+                        remote_dir: remote_dir.to_string(),
+                        checksum_algo: get_checksum_algo(opts.checksum_algo.as_ref()),
+                    },
+                    Arc::new(VersionManager::new()),
+                    Arc::new(LocalVersionManager::new(s3_store, remote_dir)),
+                    Arc::new(MockHummockMetaClient::new(Arc::new(
+                        MockHummockMetaService::new(),
+                    ))),
+                )
+                .await,
+            ))
         }
         rocksdb if rocksdb.starts_with("rocksdb_local://") => StateStoreImpl::RocksDB(
             RocksDBStateStore::new(rocksdb.strip_prefix("rocksdb_local://").unwrap()),
@@ -154,7 +173,7 @@ async fn main() {
 
     println!("Input configurations: {:?}", &opts);
 
-    match get_state_store_impl(&opts) {
+    match get_state_store_impl(&opts).await {
         StateStoreImpl::Hummock(store) => run_op(store, &opts).await,
         StateStoreImpl::Memory(store) => run_op(store, &opts).await,
         StateStoreImpl::RocksDB(store) => run_op(store, &opts).await,
