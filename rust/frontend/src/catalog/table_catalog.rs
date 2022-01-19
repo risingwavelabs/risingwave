@@ -1,6 +1,8 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use risingwave_common::array::RwError;
 use risingwave_common::error::Result;
+use risingwave_pb::meta::Table;
 
 use crate::catalog::column_catalog::{ColumnCatalog, ColumnDesc};
 use crate::catalog::{ColumnId, TableId};
@@ -48,5 +50,20 @@ impl TableCatalog {
 
     pub fn get_pks(&self) -> Vec<u32> {
         self.primary_keys.clone()
+    }
+}
+
+impl TryFrom<&Table> for TableCatalog {
+    type Error = RwError;
+
+    fn try_from(tb: &Table) -> Result<Self> {
+        let mut table_catalog = Self::new(tb.get_table_ref_id().table_id as u32);
+        for col in &tb.column_descs {
+            table_catalog.add_column(
+                &col.name,
+                ColumnDesc::new(col.get_column_type().into(), col.is_primary),
+            )?;
+        }
+        Ok(table_catalog)
     }
 }

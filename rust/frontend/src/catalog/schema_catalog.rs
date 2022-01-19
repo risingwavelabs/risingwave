@@ -1,12 +1,12 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::AtomicU32;
 
 use risingwave_common::array::RwError;
 use risingwave_common::error::Result;
+use risingwave_pb::meta::Table;
 
-use crate::catalog::create_table_info::CreateTableInfo;
 use crate::catalog::table_catalog::TableCatalog;
-use crate::catalog::{CatalogError, SchemaId, TableId};
+use crate::catalog::{CatalogError, SchemaId};
 
 pub struct SchemaCatalog {
     schema_id: SchemaId,
@@ -22,30 +22,14 @@ impl SchemaCatalog {
             table_by_name: HashMap::new(),
         }
     }
-    pub fn create_table_local(&mut self, info: &CreateTableInfo) -> Result<()> {
-        self.create_table_with_id(info, self.next_table_id.fetch_add(1, Ordering::Relaxed))
-    }
-
-    pub fn create_table_with_id(
-        &mut self,
-        info: &CreateTableInfo,
-        table_id: TableId,
-    ) -> Result<()> {
-        let table_name = info.get_name().to_string();
-
-        // Wrap info into table catalog.
-        let mut table_catalog = TableCatalog::new(table_id);
-        let columns = info.get_columns();
-        for (col_name, col_desc) in columns {
-            table_catalog
-                .add_column(col_name, col_desc.clone())
-                .unwrap();
-        }
+    pub fn create_table(&mut self, table: &Table) -> Result<()> {
+        let table_name = &table.table_name;
+        let table_catalog = table.try_into()?;
 
         self.table_by_name
             .try_insert(table_name.clone(), table_catalog)
             .map(|_val| ())
-            .map_err(|_| CatalogError::Duplicated("table", table_name).into())
+            .map_err(|_| CatalogError::Duplicated("table", table_name.clone()).into())
     }
 
     pub fn drop_table(&mut self, table_name: &str) -> Result<()> {

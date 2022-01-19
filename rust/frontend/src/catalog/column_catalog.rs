@@ -1,4 +1,5 @@
 use risingwave_common::types::DataTypeKind;
+use risingwave_pb::plan::ColumnDesc as ProstColumnDesc;
 
 use crate::catalog::ColumnId;
 
@@ -23,6 +24,15 @@ impl ColumnDesc {
 
     pub fn data_type(&self) -> DataTypeKind {
         self.data_type
+    }
+}
+
+impl From<ProstColumnDesc> for ColumnDesc {
+    fn from(col: ProstColumnDesc) -> Self {
+        Self {
+            data_type: col.get_column_type().into(),
+            is_primary: col.is_primary,
+        }
     }
 }
 

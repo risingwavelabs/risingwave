@@ -7,9 +7,14 @@ use risingwave_common::try_match_expand;
 use risingwave_pb::common::HostAddress;
 use risingwave_pb::meta::catalog_service_client::CatalogServiceClient;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
+use risingwave_pb::meta::create_request::CatalogBody;
+use risingwave_pb::meta::get_id_request::IdCategory;
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::id_generator_service_client::IdGeneratorServiceClient;
-use risingwave_pb::meta::{AddWorkerNodeRequest, ClusterType, HeartbeatRequest};
+use risingwave_pb::meta::{
+    AddWorkerNodeRequest, ClusterType, CreateRequest, Database, GetIdRequest, HeartbeatRequest,
+    Schema, Table,
+};
 use tonic::transport::{Channel, Endpoint};
 
 /// Client to meta server. Cloning the instance is lightweight.
@@ -77,5 +82,48 @@ impl MetaClient {
             .await
             .to_rw_result()?;
         Ok(())
+    }
+
+    pub async fn create_table(&self, table: Table) -> Result<()> {
+        self.create_catalog_body(CatalogBody::Table(table)).await
+    }
+
+    pub async fn create_database(&self, db: Database) -> Result<()> {
+        self.create_catalog_body(CatalogBody::Database(db)).await
+    }
+
+    pub async fn create_schema(&self, schema: Schema) -> Result<()> {
+        self.create_catalog_body(CatalogBody::Schema(schema)).await
+    }
+
+    async fn create_catalog_body(&self, catalog_body: CatalogBody) -> Result<()> {
+        let request = CreateRequest {
+            catalog_body: Some(catalog_body),
+            ..Default::default()
+        };
+        let _resp = self
+            .catalog_client
+            .to_owned()
+            .create(request)
+            .await
+            .to_rw_result()?
+            .into_inner();
+        Ok(())
+    }
+
+    /// Generate a globally unique id.
+    pub async fn generate_id(&self, id_category: IdCategory) -> Result<i32> {
+        let request = GetIdRequest {
+            category: id_category as i32,
+            interval: 1,
+        };
+        let resp = self
+            .id_client
+            .to_owned()
+            .get_id(request)
+            .await
+            .to_rw_result()?
+            .into_inner();
+        Ok(resp.id)
     }
 }
