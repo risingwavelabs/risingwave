@@ -124,7 +124,7 @@ create materialized view mom_m9 as select * from mom_t2;
 statement ok
 create materialized view mom_m10 as select sum(v1) as sum_v1, sum(v3) as sum_v3 from mom_m9 group by v2;
 
-sleep 1s
+sleep 2s
 
 query IIII
 select * from mom_m9;
