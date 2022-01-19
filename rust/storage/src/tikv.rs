@@ -65,11 +65,10 @@ impl StateStore for TikvStateStore {
         if limit == Some(0) {
             return Ok(vec![]);
         }
-        let scan_limit;
-        match limit {
-            Some(x) => scan_limit = x as u32,
+        let scan_limit = match limit {
+            Some(x) => x as u32,
             None => return Ok(vec![]),
-        }
+        };
 
         let mut txn = self.client().await.begin_optimistic().await.unwrap();
         let res: Vec<KvPair> = txn
@@ -152,15 +151,14 @@ impl StateStoreIter for TikvStateStoreIter {
 
         let mut txn = self.store.client().await.begin_optimistic().await.unwrap();
         if self.index == self.kv_pair_buffer.len() {
-            let start_key;
-            if self.kv_pair_buffer.is_empty() {
-                start_key = tikv_client::Key::from(self.prefix.to_vec())
+            let start_key = if self.kv_pair_buffer.is_empty() {
+                tikv_client::Key::from(self.prefix.to_vec())
             } else {
-                start_key = tikv_client::Key::from(
+                tikv_client::Key::from(
                     Bytes::copy_from_slice(self.kv_pair_buffer.last().unwrap().0.as_ref().into())
                         .to_vec(),
                 )
-            }
+            };
             self.kv_pair_buffer = txn
                 .scan(start_key.., SCAN_LIMIT as u32)
                 .await

@@ -156,7 +156,7 @@ impl RocksDBStorage {
         .await?
     }
 
-    async fn write_batch(&self, mut kv_pairs: Vec<(Bytes, Option<Bytes>)>) -> Result<()> {
+    async fn write_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>) -> Result<()> {
         let wb = WriteBatch::new();
         for (key, value) in kv_pairs {
             if let Some(value) = value {
