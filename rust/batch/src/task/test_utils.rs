@@ -40,8 +40,8 @@ fn get_num_sinks(plan: &PlanFragment) -> u32 {
     }
 }
 
-// Write the execution results into a buffer for testing.
-// In a real server, the results will be flushed into a grpc sink.
+/// Write the execution results into a buffer for testing.
+/// In a real server, the results will be flushed into a grpc sink.
 struct FakeExchangeWriter {
     messages: Vec<GetDataResponse>,
 }

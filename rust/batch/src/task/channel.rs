@@ -25,9 +25,10 @@ pub trait ChanReceiver: Send {
 pub type BoxChanSender = Box<dyn ChanSender>;
 pub type BoxChanReceiver = Box<dyn ChanReceiver>;
 
-// Output-channel is a synchronous, bounded single-producer-multiple-consumer queue.
-// The producer is the local task executor, the consumer is ExchangeService.
-// The implementation depends on the shuffling strategy.
+/// Output-channel is a synchronous, bounded single-producer-multiple-consumer queue.
+/// The producer is the local task executor, the consumer is
+/// [`ExchangeService`](risingwave_pb::task_service::exchange_service_server::ExchangeService).
+/// The implementation depends on the shuffling strategy.
 pub fn create_output_channel(
     shuffle: &ExchangeInfo,
 ) -> Result<(BoxChanSender, Vec<BoxChanReceiver>)> {

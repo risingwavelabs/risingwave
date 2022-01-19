@@ -16,11 +16,12 @@ use crate::vector_op::like::like_default;
 use crate::vector_op::position::position;
 use crate::vector_op::round::round_digits;
 
-// this is a placeholder function that return bool in gen_binary_expr
+/// A placeholder function that return bool in [`gen_binary_expr_atm`]
 pub fn cmp_placeholder<T1, T2, T3>(_l: T1, _r: T2) -> Result<bool> {
     Err(InternalError("The function is not supported".to_string()).into())
 }
-// this is a placeholder function that return T3 in gen_binary_expr
+
+/// A placeholder function that return T3 in [`gen_binary_expr_atm`]
 pub fn atm_placeholder<T1, T2, T3>(_l: T1, _r: T2) -> Result<T3> {
     Err(InternalError("The function is not supported".to_string()).into())
 }

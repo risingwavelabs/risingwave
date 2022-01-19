@@ -8,9 +8,9 @@ use risingwave_common::error::Result;
 use super::BoxedExecutor;
 use crate::executor::Executor;
 
-// MockExecutor is to mock the input of executor.
-// You can bind one or more MockExecutor as the children of the executor to test,
-// (HashAgg, e.g), so that allow testing without instantiating real SeqScans and real storage.
+/// Mock the input of executor.
+/// You can bind one or more `MockExecutor` as the children of the executor to test,
+/// (`HashAgg`, e.g), so that allow testing without instantiating real `SeqScan`s and real storage.
 pub struct MockExecutor {
     chunks: VecDeque<DataChunk>,
     schema: Schema,

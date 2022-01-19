@@ -216,7 +216,7 @@ pub type PkIndices = Vec<usize>;
 pub type PkIndicesRef<'a> = &'a [usize];
 pub type PkDataTypes = SmallVec<[DataTypeKind; 1]>;
 
-// Get inputs by given `pk_indices` from `columns`.
+/// Get inputs by given `pk_indices` from `columns`.
 pub fn pk_input_arrays<'a>(pk_indices: PkIndicesRef, columns: &'a [Column]) -> Vec<&'a ArrayImpl> {
     pk_indices
         .iter()

@@ -15,11 +15,9 @@ use super::barrier_align::{AlignedMessage, BarrierAligner};
 use super::managed_state::join::{create_hash_join_state, AllOrNoneState};
 use super::{Executor, Message, PkIndices, PkIndicesRef};
 
-// The `JoinType` and `SideType` are to mimic a enum, because currently
-// enum is not supported in const generic.
-// TODO: Use enum to replace this once `feature(adt_const_params)` get completed
-// https://github.com/rust-lang/rust/issues/44580
-// https://blog.rust-lang.org/inside-rust/2021/09/06/Splitting-const-generics.html
+/// The `JoinType` and `SideType` are to mimic a enum, because currently
+/// enum is not supported in const generic.
+// TODO: Use enum to replace this once [feature(adt_const_params)](https://github.com/rust-lang/rust/issues/44580) get completed.
 type JoinTypePrimitive = u8;
 #[allow(non_snake_case, non_upper_case_globals)]
 pub mod JoinType {

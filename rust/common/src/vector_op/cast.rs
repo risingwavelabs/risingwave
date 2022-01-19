@@ -9,8 +9,8 @@ use crate::error::ErrorCode::{InternalError, InvalidInputSyntax, ParseError};
 use crate::error::{Result, RwError};
 use crate::types::{Decimal, OrderedF32, OrderedF64};
 
-// The same as NaiveDate::from_ymd(1970, 1, 1).num_days_from_ce().
-// Minus this magic number to store the number of days since 1970-01-01.
+/// The same as `NaiveDate::from_ymd(1970, 1, 1).num_days_from_ce()`.
+/// Minus this magic number to store the number of days since 1970-01-01.
 pub const UNIX_EPOCH_DAYS: i32 = 719_163;
 
 /// String literals for bool type.
