@@ -12,7 +12,7 @@ include ../../tpch/insert_supplier.slt.part
 include ./create_views.slt.part
 
 
-sleep 3s
+sleep 15s
 
 
 include ./q1.slt.part
