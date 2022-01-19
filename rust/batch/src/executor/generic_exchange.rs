@@ -1,15 +1,12 @@
 use std::marker::PhantomData;
 use std::net::SocketAddr;
 
-use prost::Message;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::ErrorCode::ProstError;
 use risingwave_common::error::Result;
 use risingwave_common::util::addr::{get_host_port, is_local_address};
-use risingwave_pb::plan::plan_node::PlanNodeType;
-use risingwave_pb::plan::Field as NodeField;
-use risingwave_pb::task_service::{ExchangeNode, ExchangeSource as ProstExchangeSource};
+use risingwave_pb::plan::plan_node::NodeBody;
+use risingwave_pb::plan::{ExchangeSource as ProstExchangeSource, Field as NodeField};
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::execution::exchange_source::{ExchangeSource, GrpcExchangeSource, LocalExchangeSource};
@@ -81,9 +78,8 @@ impl CreateSource for DefaultCreateSource {
 
 impl<CS: 'static + CreateSource> BoxedExecutorBuilder for GenericExchangeExecutor<CS> {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_node_type() == PlanNodeType::Exchange);
-        let node =
-            ExchangeNode::decode(&(source.plan_node()).get_body().value[..]).map_err(ProstError)?;
+        let node = try_match_expand!(source.plan_node().get_node_body(), NodeBody::Exchange)?;
+
         let server_addr = *source.env.server_address();
 
         ensure!(!node.get_sources().is_empty());

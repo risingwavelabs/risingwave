@@ -1,13 +1,11 @@
 use std::cmp::min;
 
 use itertools::Itertools;
-use prost::Message;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::ErrorCode::{InternalError, ProstError};
+use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
-use risingwave_pb::plan::plan_node::PlanNodeType;
-use risingwave_pb::plan::LimitNode as LimitProto;
+use risingwave_pb::plan::plan_node::NodeBody;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
 
@@ -28,10 +26,10 @@ pub(super) struct LimitExecutor {
 
 impl BoxedExecutorBuilder for LimitExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_node_type() == PlanNodeType::Limit);
         ensure!(source.plan_node().get_children().len() == 1);
-        let limit_node =
-            LimitProto::decode(&(source.plan_node()).get_body().value[..]).map_err(ProstError)?;
+
+        let limit_node = try_match_expand!(source.plan_node().get_node_body(), NodeBody::Limit)?;
+
         let limit = limit_node.get_limit() as usize;
         let offset = limit_node.get_offset() as usize;
 

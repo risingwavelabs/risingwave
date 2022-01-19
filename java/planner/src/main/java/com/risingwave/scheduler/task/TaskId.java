@@ -5,6 +5,7 @@ import static java.util.Objects.requireNonNull;
 import com.google.common.base.Objects;
 import com.risingwave.scheduler.stage.StageId;
 
+/** The id of Task in a stage */
 public class TaskId {
   private final StageId stageId;
   private final int id;
@@ -22,8 +23,8 @@ public class TaskId {
     return id;
   }
 
-  public com.risingwave.proto.computenode.TaskId toTaskIdProto() {
-    return com.risingwave.proto.computenode.TaskId.newBuilder()
+  public com.risingwave.proto.plan.TaskId toTaskIdProto() {
+    return com.risingwave.proto.plan.TaskId.newBuilder()
         .setStageId(stageId.toStageIdProto())
         .setTaskId(id)
         .build();

@@ -9,17 +9,15 @@ use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::{Column, DataType};
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::ConstantValue;
-use risingwave_pb::google::protobuf::Any;
 use risingwave_pb::plan::exchange_info::{Distribution, DistributionMode};
-use risingwave_pb::plan::plan_node::PlanNodeType;
+use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::values_node::ExprTuple;
 use risingwave_pb::plan::{
     exchange_info, ColumnDesc, CreateTableNode, ExchangeInfo, Field as NodeField, InsertNode,
-    PlanFragment, PlanNode, SeqScanNode, ValuesNode,
+    PlanFragment, PlanNode, QueryId, SeqScanNode, StageId, TaskId as ProstTaskId,
+    TaskSinkId as ProstSinkId, ValuesNode,
 };
-use risingwave_pb::task_service::{
-    GetDataResponse, QueryId, StageId, TaskId as ProstTaskId, TaskSinkId as ProstSinkId,
-};
+use risingwave_pb::task_service::GetDataResponse;
 use risingwave_storage::bummock::BummockTable;
 use risingwave_storage::Table;
 
@@ -214,12 +212,8 @@ impl<'a> TableBuilder<'a> {
 
         PlanFragment {
             root: Some(PlanNode {
-                node_type: PlanNodeType::CreateTable as i32,
-                body: Some(Any {
-                    type_url: "/".to_string(),
-                    value: create.encode_to_vec(),
-                }),
                 children: vec![],
+                node_body: Some(NodeBody::CreateTable(create)),
             }),
 
             exchange_info: Some(ExchangeInfo {
@@ -252,19 +246,11 @@ impl<'a> TableBuilder<'a> {
             .collect::<Vec<_>>();
         PlanFragment {
             root: Some(PlanNode {
-                node_type: PlanNodeType::Insert as i32,
-                body: Some(Any {
-                    type_url: "/".to_string(),
-                    value: insert.encode_to_vec(),
-                }),
                 children: vec![PlanNode {
-                    node_type: PlanNodeType::Value as i32,
-                    body: Some(Any {
-                        type_url: "/".to_string(),
-                        value: ValuesNode { tuples, fields }.encode_to_vec(),
-                    }),
                     children: vec![],
+                    node_body: Some(NodeBody::Values(ValuesNode { tuples, fields })),
                 }],
+                node_body: Some(NodeBody::Insert(insert)),
             }),
 
             exchange_info: Some(ExchangeInfo {
@@ -336,12 +322,8 @@ impl<'a> SelectBuilder<'a> {
             runner,
             plan: PlanFragment {
                 root: Some(PlanNode {
-                    node_type: 0,
-                    body: Some(Any {
-                        type_url: "/".to_string(),
-                        value: vec![],
-                    }),
                     children: vec![],
+                    node_body: None,
                 }),
                 exchange_info: Some(ExchangeInfo {
                     mode: 0,
@@ -369,12 +351,8 @@ impl<'a> SelectBuilder<'a> {
 
             self.plan = PlanFragment {
                 root: Some(PlanNode {
-                    node_type: PlanNodeType::SeqScan as i32,
-                    body: Some(Any {
-                        type_url: "/".to_string(),
-                        value: scan.encode_to_vec(),
-                    }),
                     children: vec![],
+                    node_body: Some(NodeBody::SeqScan(scan)),
                 }),
                 exchange_info: Some(ExchangeInfo {
                     mode: 0,

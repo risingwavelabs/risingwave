@@ -9,6 +9,7 @@ import com.google.inject.Injector;
 import com.risingwave.node.DefaultWorkerNode;
 import com.risingwave.planner.rel.physical.BatchPlan;
 import com.risingwave.planner.rel.physical.RisingWaveBatchPhyRel;
+import com.risingwave.proto.plan.CreateTableNode;
 import com.risingwave.proto.plan.PlanNode;
 import com.risingwave.scheduler.query.PlanFragmenter;
 import com.risingwave.scheduler.query.Query;
@@ -49,7 +50,7 @@ public class QueryManagerTest {
 
     QueryStage rootStage = query.getQueryStageChecked(query.getRootStageId());
     PlanNode protoPlan = rootStage.getRoot().serialize();
-    assertEquals(protoPlan.getNodeType(), PlanNode.PlanNodeType.CREATE_TABLE);
+    assertEquals(protoPlan.getNodeBodyCase(), PlanNode.NodeBodyCase.CREATE_TABLE);
 
     List<StageId> leafStages = query.getLeafStages();
     assertEquals(leafStages.size(), 1);
@@ -64,7 +65,7 @@ public class QueryManagerTest {
 
   private static BatchPlan newSingleNodePlan() {
     PlanNode planNode =
-        PlanNode.newBuilder().setNodeType(PlanNode.PlanNodeType.CREATE_TABLE).build();
+        PlanNode.newBuilder().setCreateTable(CreateTableNode.newBuilder().build()).build();
 
     RisingWaveBatchPhyRel root = mock(RisingWaveBatchPhyRel.class);
     when(root.serialize()).thenReturn(planNode);

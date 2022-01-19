@@ -4,12 +4,12 @@ use std::sync::{Arc, Mutex};
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::{json_to_pretty_string, JsonFormatter};
-use risingwave_pb::plan::PlanFragment;
-use risingwave_pb::task_service::task_info::TaskStatus;
-use risingwave_pb::task_service::{
-    GetDataResponse, QueryId as ProstQueryId, StageId as ProstStageId, TaskId as ProstTaskId,
+use risingwave_pb::plan::{
+    PlanFragment, QueryId as ProstQueryId, StageId as ProstStageId, TaskId as ProstTaskId,
     TaskSinkId as ProstSinkId,
 };
+use risingwave_pb::task_service::task_info::TaskStatus;
+use risingwave_pb::task_service::GetDataResponse;
 
 use crate::executor::{BoxedExecutor, ExecutorBuilder};
 use crate::rpc::service::exchange::ExchangeWriter;

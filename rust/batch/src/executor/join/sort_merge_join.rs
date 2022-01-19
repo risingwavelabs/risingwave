@@ -1,14 +1,12 @@
 use std::cmp::Ordering;
 
-use prost::Message;
 use risingwave_common::array::{DataChunk, Row, RowRef};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::plan::plan_node::PlanNodeType;
-use risingwave_pb::plan::{OrderType as OrderTypeProst, SortMergeJoinNode};
+use risingwave_pb::plan::plan_node::NodeBody;
+use risingwave_pb::plan::OrderType as OrderTypeProst;
 
 use crate::executor::join::row_level_iter::RowLevelIter;
 use crate::executor::join::JoinType;
@@ -233,11 +231,11 @@ impl BoxedExecutorBuilder for SortMergeJoinExecutor {
     fn new_boxed_executor(
         source: &ExecutorBuilder,
     ) -> risingwave_common::error::Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_node_type() == PlanNodeType::SortMergeJoin);
         ensure!(source.plan_node().get_children().len() == 2);
+
         let sort_merge_join_node =
-            SortMergeJoinNode::decode(&(source.plan_node()).get_body().value[..])
-                .map_err(|e| RwError::from(ErrorCode::ProstError(e)))?;
+            try_match_expand!(source.plan_node().get_node_body(), NodeBody::SortMergeJoin)?;
+
         let sort_order = sort_merge_join_node.get_direction();
         // Only allow it in ascending order.
         ensure!(sort_order == OrderTypeProst::Ascending);

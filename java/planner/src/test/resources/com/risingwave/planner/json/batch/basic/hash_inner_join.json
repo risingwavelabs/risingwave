@@ -1,16 +1,6 @@
 {
-  "nodeType": "HASH_JOIN",
-  "body": {
-    "@type": "type.googleapis.com/plan.HashJoinNode",
-    "leftKey": [0],
-    "leftOutput": [0, 1, 2],
-    "rightKey": [0],
-    "rightOutput": [0]
-  },
   "children": [{
-    "nodeType": "SEQ_SCAN",
-    "body": {
-      "@type": "type.googleapis.com/plan.SeqScanNode",
+    "seqScan": {
       "tableRefId": {
         "schemaRefId": {
           "databaseRefId": {
@@ -36,9 +26,7 @@
       }]
     }
   }, {
-    "nodeType": "SEQ_SCAN",
-    "body": {
-      "@type": "type.googleapis.com/plan.SeqScanNode",
+    "seqScan": {
       "tableRefId": {
         "schemaRefId": {
           "databaseRefId": {
@@ -54,5 +42,11 @@
         "name": "v1"
       }]
     }
-  }]
+  }],
+  "hashJoin": {
+    "leftKey": [0],
+    "leftOutput": [0, 1, 2],
+    "rightKey": [0],
+    "rightOutput": [0]
+  }
 }

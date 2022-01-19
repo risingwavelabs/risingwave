@@ -3,7 +3,6 @@ package com.risingwave.planner.rel.physical;
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
 import com.google.common.collect.ImmutableList;
-import com.google.protobuf.Any;
 import com.risingwave.common.datatype.RisingWaveDataType;
 import com.risingwave.planner.rel.common.RwValues;
 import com.risingwave.planner.rel.common.dist.RwDistributions;
@@ -60,10 +59,7 @@ public class RwBatchValues extends RwValues implements RisingWaveBatchPhyRel {
           Field.newBuilder().setDataType(dataType).setName(field.getName()).build());
     }
 
-    return PlanNode.newBuilder()
-        .setNodeType(PlanNode.PlanNodeType.VALUE)
-        .setBody(Any.pack(valuesNodeBuilder.build()))
-        .build();
+    return PlanNode.newBuilder().setValues(valuesNodeBuilder.build()).build();
   }
 
   public RelNode copy(RelTraitSet traitSet) {

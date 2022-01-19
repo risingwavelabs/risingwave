@@ -2,7 +2,6 @@ package com.risingwave.execution.handler;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
-import com.google.protobuf.Any;
 import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.ColumnDesc;
 import com.risingwave.catalog.ColumnEncoding;
@@ -20,11 +19,11 @@ import com.risingwave.proto.common.Status;
 import com.risingwave.proto.computenode.CreateTaskRequest;
 import com.risingwave.proto.computenode.CreateTaskResponse;
 import com.risingwave.proto.computenode.GetDataRequest;
-import com.risingwave.proto.computenode.TaskSinkId;
 import com.risingwave.proto.plan.CreateSourceNode;
 import com.risingwave.proto.plan.ExchangeInfo;
 import com.risingwave.proto.plan.PlanFragment;
 import com.risingwave.proto.plan.PlanNode;
+import com.risingwave.proto.plan.TaskSinkId;
 import com.risingwave.rpc.ComputeClient;
 import com.risingwave.rpc.ComputeClientManager;
 import com.risingwave.rpc.Messages;
@@ -65,11 +64,11 @@ public class CreateSourceHandler implements SqlHandler {
     CreateSourceNode.Builder createSourceNodeBuilder = CreateSourceNode.newBuilder();
 
     ImmutableList<ColumnCatalog> allColumns = table.getAllColumns(false);
-      createSourceNodeBuilder.setRowIdIndex(-1);
+    createSourceNodeBuilder.setRowIdIndex(-1);
 
     if (allColumns.stream().noneMatch(column -> column.getDesc().isPrimary())) {
       allColumns = table.getAllColumns(true);
-        createSourceNodeBuilder.setRowIdIndex(0);
+      createSourceNodeBuilder.setRowIdIndex(0);
     }
 
     for (ColumnCatalog columnCatalog : allColumns) {
@@ -85,7 +84,7 @@ public class CreateSourceHandler implements SqlHandler {
 
       createSourceNodeBuilder.addColumnDescs(columnDescBuilder);
     }
-      createSourceNodeBuilder.putAllProperties(table.getProperties());
+    createSourceNodeBuilder.putAllProperties(table.getProperties());
 
     switch (table.getRowFormat().toLowerCase()) {
       case "json":
@@ -98,7 +97,7 @@ public class CreateSourceHandler implements SqlHandler {
         createSourceNodeBuilder.setFormat(CreateSourceNode.RowFormatType.PROTOBUF);
         break;
       case "debezium-json":
-          createSourceNodeBuilder.setFormat(CreateSourceNode.RowFormatType.DEBEZIUM_JSON);
+        createSourceNodeBuilder.setFormat(CreateSourceNode.RowFormatType.DEBEZIUM_JSON);
         break;
       default:
         throw new PgException(PgErrorCode.PROTOCOL_VIOLATION, "unsupported row format");
@@ -107,16 +106,12 @@ public class CreateSourceHandler implements SqlHandler {
     createSourceNodeBuilder.setSchemaLocation(table.getRowSchemaLocation());
 
     CreateSourceNode createSourceNode =
-            createSourceNodeBuilder.setTableRefId(Messages.getTableRefId(tableId)).build();
+        createSourceNodeBuilder.setTableRefId(Messages.getTableRefId(tableId)).build();
 
     ExchangeInfo exchangeInfo =
         ExchangeInfo.newBuilder().setMode(ExchangeInfo.DistributionMode.SINGLE).build();
 
-    PlanNode rootNode =
-        PlanNode.newBuilder()
-            .setBody(Any.pack(createSourceNode))
-            .setNodeType(PlanNode.PlanNodeType.CREATE_SOURCE)
-            .build();
+    PlanNode rootNode = PlanNode.newBuilder().setCreateSource(createSourceNode).build();
 
     return PlanFragment.newBuilder().setRoot(rootNode).setExchangeInfo(exchangeInfo).build();
   }

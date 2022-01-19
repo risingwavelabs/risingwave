@@ -4,7 +4,6 @@ import static com.google.common.base.Preconditions.checkNotNull;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
-import com.google.protobuf.Any;
 import com.risingwave.catalog.TableCatalog;
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
@@ -16,11 +15,12 @@ import com.risingwave.proto.common.Status;
 import com.risingwave.proto.computenode.CreateTaskRequest;
 import com.risingwave.proto.computenode.CreateTaskResponse;
 import com.risingwave.proto.computenode.GetDataRequest;
-import com.risingwave.proto.computenode.TaskSinkId;
+import com.risingwave.proto.plan.DropSourceNode;
 import com.risingwave.proto.plan.DropTableNode;
 import com.risingwave.proto.plan.ExchangeInfo;
 import com.risingwave.proto.plan.PlanFragment;
 import com.risingwave.proto.plan.PlanNode;
+import com.risingwave.proto.plan.TaskSinkId;
 import com.risingwave.rpc.ComputeClient;
 import com.risingwave.rpc.ComputeClientManager;
 import com.risingwave.rpc.Messages;
@@ -63,18 +63,19 @@ public class DropTableHandler implements SqlHandler {
 
   private static PlanFragment serialize(TableCatalog table) {
     TableCatalog.TableId tableId = table.getId();
-    DropTableNode dropTableNode =
-        DropTableNode.newBuilder().setTableRefId(Messages.getTableRefId(tableId)).build();
     ExchangeInfo exchangeInfo =
         ExchangeInfo.newBuilder().setMode(ExchangeInfo.DistributionMode.SINGLE).build();
 
-    PlanNode.PlanNodeType planNodeType = PlanNode.PlanNodeType.DROP_TABLE;
-
+    PlanNode rootNode;
     if (table.isSource()) {
-      planNodeType = PlanNode.PlanNodeType.DROP_SOURCE;
+      DropSourceNode dropSourceNode =
+          DropSourceNode.newBuilder().setTableRefId(Messages.getTableRefId(tableId)).build();
+      rootNode = PlanNode.newBuilder().setDropSource(dropSourceNode).build();
+    } else {
+      DropTableNode dropTableNode =
+          DropTableNode.newBuilder().setTableRefId(Messages.getTableRefId(tableId)).build();
+      rootNode = PlanNode.newBuilder().setDropTable(dropTableNode).build();
     }
-    PlanNode rootNode =
-        PlanNode.newBuilder().setBody(Any.pack(dropTableNode)).setNodeType(planNodeType).build();
 
     return PlanFragment.newBuilder().setRoot(rootNode).setExchangeInfo(exchangeInfo).build();
   }

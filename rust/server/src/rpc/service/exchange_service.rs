@@ -7,10 +7,9 @@ use risingwave_batch::rpc::service::exchange::GrpcExchangeWriter;
 use risingwave_batch::task::{TaskManager, TaskSinkId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::data::StreamMessage;
+use risingwave_pb::plan::TaskSinkId as ProtoTaskSinkId;
 use risingwave_pb::task_service::exchange_service_server::ExchangeService;
-use risingwave_pb::task_service::{
-    GetDataRequest, GetDataResponse, GetStreamRequest, TaskSinkId as ProtoTaskSinkId,
-};
+use risingwave_pb::task_service::{GetDataRequest, GetDataResponse, GetStreamRequest};
 use risingwave_stream::executor::Message;
 use risingwave_stream::task::StreamManager;
 use tokio_stream::wrappers::ReceiverStream;

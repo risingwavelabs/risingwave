@@ -3,6 +3,7 @@ package com.risingwave.scheduler.query;
 import com.google.common.base.Objects;
 import java.util.UUID;
 
+/** The id of Query */
 public class QueryId {
   /** A random id. */
   private final String id;
@@ -15,8 +16,8 @@ public class QueryId {
     return id;
   }
 
-  public com.risingwave.proto.computenode.QueryId toQueryIdProto() {
-    return com.risingwave.proto.computenode.QueryId.newBuilder().setTraceId(id).build();
+  public com.risingwave.proto.plan.QueryId toQueryIdProto() {
+    return com.risingwave.proto.plan.QueryId.newBuilder().setTraceId(id).build();
   }
 
   public static QueryId next() {

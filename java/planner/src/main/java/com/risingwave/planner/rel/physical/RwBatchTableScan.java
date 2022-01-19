@@ -1,7 +1,6 @@
 package com.risingwave.planner.rel.physical;
 
 import com.google.common.collect.ImmutableList;
-import com.google.protobuf.Any;
 import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.TableCatalog;
 import com.risingwave.planner.rel.common.RwScan;
@@ -72,9 +71,6 @@ public class RwBatchTableScan extends RwScan implements RisingWaveBatchPhyRel {
                   .build());
           ;
         });
-    return PlanNode.newBuilder()
-        .setNodeType(PlanNode.PlanNodeType.SEQ_SCAN)
-        .setBody(Any.pack(seqScanNodeBuilder.build()))
-        .build();
+    return PlanNode.newBuilder().setSeqScan(seqScanNodeBuilder.build()).build();
   }
 }

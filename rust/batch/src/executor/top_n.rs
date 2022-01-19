@@ -3,14 +3,12 @@ use std::collections::BinaryHeap;
 use std::sync::Arc;
 use std::vec::Vec;
 
-use prost::Message;
 use risingwave_common::array::{DataChunk, DataChunkRef};
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::ErrorCode::{InternalError, ProstError};
+use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::{fetch_orders, HeapElem, OrderPair};
-use risingwave_pb::plan::plan_node::PlanNodeType;
-use risingwave_pb::plan::TopNNode;
+use risingwave_pb::plan::plan_node::NodeBody;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::executor::{Executor, ExecutorBuilder};
@@ -74,10 +72,10 @@ pub(super) struct TopNExecutor {
 
 impl BoxedExecutorBuilder for TopNExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_node_type() == PlanNodeType::TopN);
         ensure!(source.plan_node().get_children().len() == 1);
-        let top_n_node: TopNNode =
-            TopNNode::decode(&(source.plan_node()).get_body().value[..]).map_err(ProstError)?;
+
+        let top_n_node = try_match_expand!(source.plan_node().get_node_body(), NodeBody::TopN)?;
+
         let order_pairs = fetch_orders(top_n_node.get_column_orders()).unwrap();
         if let Some(child_plan) = source.plan_node.get_children().get(0) {
             let child = source.clone_for_plan(child_plan).build()?;

@@ -1,4 +1,4 @@
-use risingwave_pb::{data, plan, task_service};
+use risingwave_pb::{data, plan};
 use serde::Serialize;
 use serde_json::{json, Value};
 use serde_with::skip_serializing_none;
@@ -30,9 +30,9 @@ where
     }
 }
 
-impl TypeUrl for task_service::ExchangeNode {
+impl TypeUrl for plan::ExchangeNode {
     fn type_url() -> &'static str {
-        "type.googleapis.com/task_service.ExchangeNode"
+        "type.googleapis.com/plan.ExchangeNode"
     }
 }
 
@@ -55,34 +55,25 @@ impl JsonFormatter for plan::PlanFragment {
 #[skip_serializing_none]
 #[derive(Serialize)]
 struct JsonPlanNode {
-    node_type: String,
     body: Option<Value>,
     children: Vec<Value>,
 }
 
 impl JsonFormatter for plan::PlanNode {
     fn to_json(&self) -> Result<Value> {
-        let body = match self.get_node_type() {
-            plan::plan_node::PlanNodeType::Exchange => Some(
-                unpack_from_any::<task_service::ExchangeNode>(self.get_body())
-                    .unwrap()
-                    .to_json()?,
-            ),
+        let body = match self.get_node_body() {
+            plan::plan_node::NodeBody::Exchange(x) => Some(x.to_json()?),
             _ => None,
         };
         let mut children = vec![];
         for node in self.get_children() {
             children.push(node.to_json()?);
         }
-        Ok(json!(JsonPlanNode {
-            node_type: format!("{:?}", self.get_node_type()),
-            body,
-            children
-        }))
+        Ok(json!(JsonPlanNode { body, children }))
     }
 }
 
-impl JsonFormatter for task_service::ExchangeNode {
+impl JsonFormatter for plan::ExchangeNode {
     fn to_json(&self) -> Result<Value> {
         let mut sources = vec![];
         for src in self.get_sources() {

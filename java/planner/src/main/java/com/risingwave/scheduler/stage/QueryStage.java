@@ -4,20 +4,18 @@ import static java.util.Objects.requireNonNull;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import com.google.protobuf.Any;
-import com.google.protobuf.InvalidProtocolBufferException;
 import com.risingwave.common.datatype.RisingWaveDataType;
 import com.risingwave.node.WorkerNode;
 import com.risingwave.planner.rel.physical.RisingWaveBatchPhyRel;
 import com.risingwave.planner.rel.physical.RwBatchExchange;
 import com.risingwave.proto.common.HostAddress;
-import com.risingwave.proto.computenode.ExchangeNode;
-import com.risingwave.proto.computenode.ExchangeSource;
-import com.risingwave.proto.computenode.MergeSortExchangeNode;
-import com.risingwave.proto.computenode.TaskSinkId;
+import com.risingwave.proto.plan.ExchangeNode;
+import com.risingwave.proto.plan.ExchangeSource;
 import com.risingwave.proto.plan.Field;
+import com.risingwave.proto.plan.MergeSortExchangeNode;
 import com.risingwave.proto.plan.PlanFragment;
 import com.risingwave.proto.plan.PlanNode;
+import com.risingwave.proto.plan.TaskSinkId;
 import com.risingwave.scheduler.exchange.Distribution;
 import com.risingwave.scheduler.query.Query;
 import java.util.NoSuchElementException;
@@ -134,9 +132,9 @@ public class QueryStage {
     PlanNode node = relNode.serialize();
     PlanNode.Builder builder = node.toBuilder();
     builder.clearChildren();
-    PlanNode.PlanNodeType planNodeType = node.getNodeType();
-    if (planNodeType.equals(PlanNode.PlanNodeType.EXCHANGE)
-        || planNodeType.equals(PlanNode.PlanNodeType.MERGE_SORT_EXCHANGE)) {
+    PlanNode.NodeBodyCase planNodeType = node.getNodeBodyCase();
+    if (planNodeType.equals(PlanNode.NodeBodyCase.EXCHANGE)
+        || planNodeType.equals(PlanNode.NodeBodyCase.MERGE_SORT_EXCHANGE)) {
       assert node.getChildrenCount() == 0;
       StageId stageId = query.getExchangeSource((RwBatchExchange) relNode);
       ScheduledStage stage =
@@ -146,22 +144,13 @@ public class QueryStage {
                       new NoSuchElementException(
                           String.format("stage %s has not been scheduled", stageId.toString())));
       ExchangeNode exchangeNode = createExchange(stage, relNode, taskId);
-      if (planNodeType.equals(PlanNode.PlanNodeType.MERGE_SORT_EXCHANGE)) {
-        // This try catch is a temporary fix as Any will be gradually removed from the proto.
-        try {
-          MergeSortExchangeNode mergeSortExchangeNode =
-              node.getBody().unpack(MergeSortExchangeNode.class);
-          var mergeSortBuilder = mergeSortExchangeNode.toBuilder();
-          mergeSortBuilder.setExchangeNode(exchangeNode);
-          builder.setBody(Any.pack(mergeSortBuilder.build()));
-        } catch (InvalidProtocolBufferException e) {
-          var errorMessage =
-              "The plan node type is MERGE_SORT_EXCHANGE and expects a MergeSortExchangeNode in Any.";
-          LOGGER.error(errorMessage);
-          throw new IllegalArgumentException(errorMessage);
-        }
+      if (planNodeType.equals(PlanNode.NodeBodyCase.MERGE_SORT_EXCHANGE)) {
+        MergeSortExchangeNode mergeSortExchangeNode = node.getMergeSortExchange();
+        var mergeSortBuilder = mergeSortExchangeNode.toBuilder();
+        mergeSortBuilder.setExchangeNode(exchangeNode);
+        builder.setMergeSortExchange(mergeSortBuilder.build());
       } else {
-        builder.setBody(Any.pack(exchangeNode));
+        builder.setExchange(exchangeNode);
       }
     } else {
       for (var child : relNode.getInputs()) {

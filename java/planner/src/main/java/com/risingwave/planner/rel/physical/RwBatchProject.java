@@ -3,7 +3,6 @@ package com.risingwave.planner.rel.physical;
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
 import com.google.common.collect.ImmutableList;
-import com.google.protobuf.Any;
 import com.risingwave.planner.rel.common.dist.RwDistributionTraitDef;
 import com.risingwave.planner.rel.logical.RwLogicalProject;
 import com.risingwave.planner.rel.serialization.RexToProtoSerializer;
@@ -50,8 +49,7 @@ public class RwBatchProject extends Project implements RisingWaveBatchPhyRel, Ph
       projectNodeBuilder.addSelectList(exps.get(i).accept(rexVisitor));
     }
     return PlanNode.newBuilder()
-        .setNodeType(PlanNode.PlanNodeType.PROJECT)
-        .setBody(Any.pack(projectNodeBuilder.build()))
+        .setProject(projectNodeBuilder.build())
         .addChildren(((RisingWaveBatchPhyRel) input).serialize())
         .build();
   }

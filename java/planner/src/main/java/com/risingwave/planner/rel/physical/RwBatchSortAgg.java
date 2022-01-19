@@ -6,7 +6,6 @@ import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 import static java.util.Objects.requireNonNull;
 
 import com.google.common.collect.ImmutableList;
-import com.google.protobuf.Any;
 import com.risingwave.planner.rel.common.dist.RwDistributionTraitDef;
 import com.risingwave.planner.rel.logical.RwLogicalAggregate;
 import com.risingwave.planner.rel.serialization.RexToProtoSerializer;
@@ -63,8 +62,7 @@ public class RwBatchSortAgg extends RwAggregate implements RisingWaveBatchPhyRel
   @Override
   public PlanNode serialize() {
     return PlanNode.newBuilder()
-        .setNodeType(PlanNode.PlanNodeType.SORT_AGG)
-        .setBody(Any.pack(serializeSortAgg()))
+        .setSortAgg(serializeSortAgg())
         .addChildren(((RisingWaveBatchPhyRel) input).serialize())
         .build();
   }

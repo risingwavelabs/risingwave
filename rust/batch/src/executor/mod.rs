@@ -11,7 +11,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
-use risingwave_pb::plan::plan_node::PlanNodeType;
+use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::PlanNode;
 pub use row_seq_scan::*;
 pub use seq_scan::*;
@@ -91,9 +91,9 @@ pub struct ExecutorBuilder<'a> {
 
 macro_rules! build_executor {
   ($source: expr, $($proto_type_name:path => $data_type:ty),*) => {
-    match $source.plan_node().get_node_type() {
+    match $source.plan_node().get_node_body() {
       $(
-        $proto_type_name => {
+        $proto_type_name(..) => {
           <$data_type>::new_boxed_executor($source)
         },
       )*
@@ -113,8 +113,8 @@ impl<'a> ExecutorBuilder<'a> {
     pub fn build(&self) -> Result<BoxedExecutor> {
         self.try_build().map_err(|e| {
             InternalError(format!(
-                "[PlanNodeType: {:?}] Failed to build executor: {}",
-                self.plan_node.get_node_type(),
+                "[PlanNode: {:?}] Failed to build executor: {}",
+                self.plan_node.get_node_body(),
                 e,
             ))
             .into()
@@ -128,28 +128,28 @@ impl<'a> ExecutorBuilder<'a> {
 
     fn try_build(&self) -> Result<BoxedExecutor> {
         let real_executor = build_executor! { self,
-          PlanNodeType::CreateTable => CreateTableExecutor,
-          PlanNodeType::SeqScan => SeqScanExecutor,
-          PlanNodeType::RowSeqScan => RowSeqScanExecutor,
-          PlanNodeType::Insert => InsertExecutor,
-          PlanNodeType::DropTable => DropTableExecutor,
-          PlanNodeType::Exchange => ExchangeExecutor,
-          PlanNodeType::Filter => FilterExecutor,
-          PlanNodeType::Project => ProjectionExecutor,
-          PlanNodeType::SortAgg => SortAggExecutor,
-          PlanNodeType::OrderBy => OrderByExecutor,
-          PlanNodeType::CreateSource => CreateSourceExecutor,
-          PlanNodeType::SourceScan => StreamScanExecutor,
-          PlanNodeType::TopN => TopNExecutor,
-          PlanNodeType::Limit => LimitExecutor,
-          PlanNodeType::Value => ValuesExecutor,
-          PlanNodeType::NestedLoopJoin => NestedLoopJoinExecutor,
-          PlanNodeType::HashJoin => HashJoinExecutorBuilder,
-          PlanNodeType::SortMergeJoin => SortMergeJoinExecutor,
-          PlanNodeType::DropSource => DropStreamExecutor,
-          PlanNodeType::HashAgg => HashAggExecutorBuilder,
-          PlanNodeType::MergeSortExchange => MergeSortExchangeExecutor,
-          PlanNodeType::GenerateSeries => GenerateSeriesI32Executor
+          NodeBody::CreateTable => CreateTableExecutor,
+          NodeBody::SeqScan => SeqScanExecutor,
+          NodeBody::RowSeqScan => RowSeqScanExecutor,
+          NodeBody::Insert => InsertExecutor,
+          NodeBody::DropTable => DropTableExecutor,
+          NodeBody::Exchange => ExchangeExecutor,
+          NodeBody::Filter => FilterExecutor,
+          NodeBody::Project => ProjectionExecutor,
+          NodeBody::SortAgg => SortAggExecutor,
+          NodeBody::OrderBy => OrderByExecutor,
+          NodeBody::CreateSource => CreateSourceExecutor,
+          NodeBody::SourceScan => StreamScanExecutor,
+          NodeBody::TopN => TopNExecutor,
+          NodeBody::Limit => LimitExecutor,
+          NodeBody::Values => ValuesExecutor,
+          NodeBody::NestedLoopJoin => NestedLoopJoinExecutor,
+          NodeBody::HashJoin => HashJoinExecutorBuilder,
+          NodeBody::SortMergeJoin => SortMergeJoinExecutor,
+          NodeBody::DropSource => DropStreamExecutor,
+          NodeBody::HashAgg => HashAggExecutorBuilder,
+          NodeBody::MergeSortExchange => MergeSortExchangeExecutor,
+          NodeBody::GenerateInt32Series => GenerateSeriesI32Executor
         }?;
         let input_desc = real_executor.identity().to_string();
         Ok(Box::new(TraceExecutor::new(real_executor, input_desc)))

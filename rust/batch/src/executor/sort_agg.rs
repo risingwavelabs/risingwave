@@ -1,17 +1,14 @@
 use std::sync::Arc;
 
-use prost::Message as _;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::ErrorCode::ProstError;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::expr::{build_from_prost, BoxedExpression};
 use risingwave_common::vector_op::agg::{
     self, AggStateFactory, BoxedAggState, BoxedSortedGrouper, EqGroups,
 };
-use risingwave_pb::plan::plan_node::PlanNodeType;
-use risingwave_pb::plan::SortAggNode;
+use risingwave_pb::plan::plan_node::NodeBody;
 
 use super::BoxedExecutorBuilder;
 use crate::executor::{BoxedExecutor, Executor, ExecutorBuilder};
@@ -34,8 +31,6 @@ pub(super) struct SortAggExecutor {
 
 impl BoxedExecutorBuilder for SortAggExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_node_type() == PlanNodeType::SortAgg);
-
         ensure!(source.plan_node().get_children().len() == 1);
         let proto_child = source
             .plan_node()
@@ -44,8 +39,8 @@ impl BoxedExecutorBuilder for SortAggExecutor {
             .ok_or_else(|| ErrorCode::InternalError(String::from("")))?;
         let child = source.clone_for_plan(proto_child).build()?;
 
-        let sort_agg_node = SortAggNode::decode(&(source.plan_node()).get_body().value[..])
-            .map_err(|e| RwError::from(ProstError(e)))?;
+        let sort_agg_node =
+            try_match_expand!(source.plan_node().get_node_body(), NodeBody::SortAgg)?;
 
         let agg_states = sort_agg_node
             .get_agg_calls()

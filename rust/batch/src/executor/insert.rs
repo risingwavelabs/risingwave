@@ -1,17 +1,14 @@
 use std::iter::once;
 use std::sync::Arc;
 
-use prost::Message;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{
     ArrayBuilder, ArrayImpl, DataChunk, I64ArrayBuilder, Op, PrimitiveArrayBuilder, StreamChunk,
 };
 use risingwave_common::catalog::{Field, Schema, TableId};
-use risingwave_common::error::ErrorCode::ProstError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataTypeKind;
-use risingwave_pb::plan::plan_node::PlanNodeType;
-use risingwave_pb::plan::InsertNode;
+use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_source::{Source, SourceImpl, SourceManagerRef, SourceWriter};
 
 use super::BoxedExecutor;
@@ -170,9 +167,7 @@ impl Executor for InsertExecutor {
 
 impl BoxedExecutorBuilder for InsertExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_node_type() == PlanNodeType::Insert);
-        let insert_node =
-            InsertNode::decode(&(source.plan_node()).get_body().value[..]).map_err(ProstError)?;
+        let insert_node = try_match_expand!(source.plan_node().get_node_body(), NodeBody::Insert)?;
 
         let table_id = TableId::from(&insert_node.table_ref_id);
 

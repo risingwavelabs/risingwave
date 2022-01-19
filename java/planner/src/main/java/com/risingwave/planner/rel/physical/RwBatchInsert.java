@@ -3,7 +3,6 @@ package com.risingwave.planner.rel.physical;
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
 import com.google.common.collect.ImmutableList;
-import com.google.protobuf.Any;
 import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.TableCatalog;
 import com.risingwave.planner.rel.common.dist.RwDistributions;
@@ -92,8 +91,7 @@ public class RwBatchInsert extends TableModify implements RisingWaveBatchPhyRel 
 
     insertNodeBuilder.addAllColumnIds(columnIds);
     return PlanNode.newBuilder()
-        .setNodeType(PlanNode.PlanNodeType.INSERT)
-        .setBody(Any.pack(insertNodeBuilder.build()))
+        .setInsert(insertNodeBuilder.build())
         .addChildren(((RisingWaveBatchPhyRel) input).serialize())
         .build();
   }

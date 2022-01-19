@@ -1,7 +1,6 @@
 package com.risingwave.execution.handler;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.protobuf.Any;
 import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.ColumnDesc;
 import com.risingwave.catalog.ColumnEncoding;
@@ -19,11 +18,11 @@ import com.risingwave.proto.common.Status;
 import com.risingwave.proto.computenode.CreateTaskRequest;
 import com.risingwave.proto.computenode.CreateTaskResponse;
 import com.risingwave.proto.computenode.GetDataRequest;
-import com.risingwave.proto.computenode.TaskSinkId;
 import com.risingwave.proto.plan.CreateTableNode;
 import com.risingwave.proto.plan.ExchangeInfo;
 import com.risingwave.proto.plan.PlanFragment;
 import com.risingwave.proto.plan.PlanNode;
+import com.risingwave.proto.plan.TaskSinkId;
 import com.risingwave.rpc.ComputeClient;
 import com.risingwave.rpc.ComputeClientManager;
 import com.risingwave.rpc.Messages;
@@ -76,11 +75,7 @@ public class CreateTableHandler implements SqlHandler {
     ExchangeInfo exchangeInfo =
         ExchangeInfo.newBuilder().setMode(ExchangeInfo.DistributionMode.SINGLE).build();
 
-    PlanNode rootNode =
-        PlanNode.newBuilder()
-            .setBody(Any.pack(creatTableNode))
-            .setNodeType(PlanNode.PlanNodeType.CREATE_TABLE)
-            .build();
+    PlanNode rootNode = PlanNode.newBuilder().setCreateTable(creatTableNode).build();
 
     return PlanFragment.newBuilder().setRoot(rootNode).setExchangeInfo(exchangeInfo).build();
   }

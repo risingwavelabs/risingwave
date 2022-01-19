@@ -1,20 +1,6 @@
 {
-  "nodeType": "ORDER_BY",
-  "body": {
-    "@type": "type.googleapis.com/plan.OrderByNode",
-    "columnOrders": [{
-      "orderType": "ASCENDING",
-      "inputRef": {
-      },
-      "returnType": {
-        "typeName": "INT32"
-      }
-    }]
-  },
   "children": [{
-    "nodeType": "SEQ_SCAN",
-    "body": {
-      "@type": "type.googleapis.com/plan.SeqScanNode",
+    "seqScan": {
       "tableRefId": {
         "schemaRefId": {
           "databaseRefId": {
@@ -39,5 +25,15 @@
         "name": "v3"
       }]
     }
-  }]
+  }],
+  "orderBy": {
+    "columnOrders": [{
+      "orderType": "ASCENDING",
+      "inputRef": {
+      },
+      "returnType": {
+        "typeName": "INT32"
+      }
+    }]
+  }
 }

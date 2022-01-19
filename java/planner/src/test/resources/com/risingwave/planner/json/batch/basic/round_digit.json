@@ -1,7 +1,26 @@
 {
-  "nodeType": "PROJECT",
-  "body": {
-    "@type": "type.googleapis.com/plan.ProjectNode",
+  "children": [{
+    "seqScan": {
+      "tableRefId": {
+        "schemaRefId": {
+          "databaseRefId": {
+          }
+        },
+        "tableId": 4
+      },
+      "columnIds": [1],
+      "fields": [{
+        "dataType": {
+          "typeName": "DECIMAL",
+          "precision": 28,
+          "scale": 10,
+          "isNullable": true
+        },
+        "name": "v1"
+      }]
+    }
+  }],
+  "project": {
     "selectList": [{
       "exprType": "ROUND_DIGIT",
       "returnType": {
@@ -32,28 +51,5 @@
         }]
       }
     }]
-  },
-  "children": [{
-    "nodeType": "SEQ_SCAN",
-    "body": {
-      "@type": "type.googleapis.com/plan.SeqScanNode",
-      "tableRefId": {
-        "schemaRefId": {
-          "databaseRefId": {
-          }
-        },
-        "tableId": 4
-      },
-      "columnIds": [1],
-      "fields": [{
-        "dataType": {
-          "typeName": "DECIMAL",
-          "precision": 28,
-          "scale": 10,
-          "isNullable": true
-        },
-        "name": "v1"
-      }]
-    }
-  }]
+  }
 }

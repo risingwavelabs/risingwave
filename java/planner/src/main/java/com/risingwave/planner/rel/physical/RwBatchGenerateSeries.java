@@ -3,7 +3,6 @@ package com.risingwave.planner.rel.physical;
 import static com.google.common.base.Verify.verify;
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
-import com.google.protobuf.Any;
 import com.risingwave.planner.rel.common.dist.RwDistributions;
 import com.risingwave.planner.rel.logical.RwLogicalGenerateSeries;
 import com.risingwave.proto.plan.GenerateInt32SeriesNode;
@@ -62,7 +61,7 @@ public class RwBatchGenerateSeries extends TableFunctionScan implements RisingWa
     var call = (RexCall) getCall();
     var start = (RexLiteral) call.getOperands().get(0);
     var stop = (RexLiteral) call.getOperands().get(1);
-    com.google.protobuf.Message node = null;
+    GenerateInt32SeriesNode node = null;
     if (start.getTypeName().equals(SqlTypeName.DECIMAL)
         && stop.getTypeName().equals(SqlTypeName.DECIMAL)) {
       node = serializeI32(start, stop);
@@ -70,10 +69,7 @@ public class RwBatchGenerateSeries extends TableFunctionScan implements RisingWa
     if (node == null) {
       throw new IllegalArgumentException("no matching overload of generate_series");
     }
-    return PlanNode.newBuilder()
-        .setNodeType(PlanNode.PlanNodeType.GENERATE_SERIES)
-        .setBody(Any.pack(node))
-        .build();
+    return PlanNode.newBuilder().setGenerateInt32Series(node).build();
   }
 
   private GenerateInt32SeriesNode serializeI32(RexLiteral start, RexLiteral stop) {

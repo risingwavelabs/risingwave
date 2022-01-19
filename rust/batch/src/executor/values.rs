@@ -1,14 +1,12 @@
 use std::sync::Arc;
 
-use prost::Message;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk, I32Array};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::ErrorCode::{InternalError, ProstError};
+use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::expr::{build_from_prost, BoxedExpression};
-use risingwave_pb::plan::plan_node::PlanNodeType;
-use risingwave_pb::plan::ValuesNode;
+use risingwave_pb::plan::plan_node::NodeBody;
 
 use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
 
@@ -92,9 +90,7 @@ impl Executor for ValuesExecutor {
 
 impl BoxedExecutorBuilder for ValuesExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_node_type() == PlanNodeType::Value);
-        let value_node: ValuesNode =
-            ValuesNode::decode(&(source.plan_node()).get_body().value[..]).map_err(ProstError)?;
+        let value_node = try_match_expand!(source.plan_node().get_node_body(), NodeBody::Values)?;
 
         let mut rows: Vec<Vec<BoxedExpression>> = Vec::with_capacity(value_node.get_tuples().len());
         for row in value_node.get_tuples() {

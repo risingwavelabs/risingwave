@@ -1,7 +1,6 @@
 package com.risingwave.planner.rel.physical;
 
 import com.google.common.collect.ImmutableList;
-import com.google.protobuf.Any;
 import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.TableCatalog;
 import com.risingwave.planner.rel.common.RwScan;
@@ -58,13 +57,10 @@ public class RwBatchSourceScan extends RwScan implements RisingWaveBatchPhyRel {
   public PlanNode serialize() {
     TableRefId tableRefId = Messages.getTableRefId(tableId);
     SourceScanNode.Builder streamScanNodeBuilder =
-            SourceScanNode.newBuilder()
+        SourceScanNode.newBuilder()
             .setTableRefId(tableRefId)
             .setTimestampMs(System.currentTimeMillis());
     columnIds.forEach(c -> streamScanNodeBuilder.addColumnIds(c.getValue()));
-    return PlanNode.newBuilder()
-        .setNodeType(PlanNode.PlanNodeType.SOURCE_SCAN)
-        .setBody(Any.pack(streamScanNodeBuilder.build()))
-        .build();
+    return PlanNode.newBuilder().setSourceScan(streamScanNodeBuilder.build()).build();
   }
 }

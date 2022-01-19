@@ -1,15 +1,12 @@
 use std::sync::Arc;
 
-use prost::Message;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, DataChunk, I32ArrayBuilder};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::ErrorCode::ProstError;
 use risingwave_common::error::Result;
 use risingwave_common::types::DataTypeKind;
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
-use risingwave_pb::plan::plan_node::PlanNodeType;
-use risingwave_pb::plan::GenerateInt32SeriesNode;
+use risingwave_pb::plan::plan_node::NodeBody;
 
 use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
 
@@ -25,10 +22,10 @@ pub(super) struct GenerateSeriesI32Executor {
 
 impl BoxedExecutorBuilder for GenerateSeriesI32Executor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_node_type() == PlanNodeType::GenerateSeries);
-
-        let node = GenerateInt32SeriesNode::decode(&(source.plan_node()).get_body().value[..])
-            .map_err(ProstError)?;
+        let node = try_match_expand!(
+            source.plan_node().get_node_body(),
+            NodeBody::GenerateInt32Series
+        )?;
 
         Ok(Box::new(Self {
             start: node.start,

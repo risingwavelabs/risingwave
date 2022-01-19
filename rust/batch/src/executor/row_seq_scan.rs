@@ -1,15 +1,13 @@
 use std::sync::Arc;
 
 use itertools::Itertools;
-use prost::Message;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::{Schema, TableId};
-use risingwave_common::error::ErrorCode::{InternalError, ProstError};
+use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataTypeKind;
-use risingwave_pb::plan::plan_node::PlanNodeType;
-use risingwave_pb::plan::RowSeqScanNode;
+use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_storage::table::{ScannableTable, TableIterRef};
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
@@ -46,10 +44,8 @@ impl RowSeqScanExecutor {
 
 impl BoxedExecutorBuilder for RowSeqScanExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_node_type() == PlanNodeType::RowSeqScan);
-
-        let seq_scan_node = RowSeqScanNode::decode(&(source.plan_node()).get_body().value[..])
-            .map_err(|e| RwError::from(ProstError(e)))?;
+        let seq_scan_node =
+            try_match_expand!(source.plan_node().get_node_body(), NodeBody::RowSeqScan)?;
 
         let table_id = TableId::from(&seq_scan_node.table_ref_id);
 

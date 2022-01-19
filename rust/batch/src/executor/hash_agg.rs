@@ -4,9 +4,8 @@ use std::sync::Arc;
 use std::{mem, vec};
 
 use itertools::Itertools;
-use prost::Message;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{DataChunk, RwError};
+use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::collection::hash_map::{
     calc_hash_key_kind, hash_key_dispatch, HashKey, HashKeyDispatcher, HashKeyKind, Key128, Key16,
@@ -15,7 +14,7 @@ use risingwave_common::collection::hash_map::{
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataTypeKind;
 use risingwave_common::vector_op::agg::{AggStateFactory, BoxedAggState};
-use risingwave_pb::plan::plan_node::PlanNodeType;
+use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::HashAggNode;
 
 use super::{BoxedExecutorBuilder, Executor, ExecutorBuilder};
@@ -99,8 +98,8 @@ impl HashAggExecutorBuilder {
 
 impl BoxedExecutorBuilder for HashAggExecutorBuilder {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_node_type() == PlanNodeType::HashAgg);
         ensure!(source.plan_node().get_children().len() == 1);
+
         let proto_child = source
             .plan_node()
             .get_children()
@@ -108,9 +107,10 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
             .ok_or_else(|| ErrorCode::InternalError(String::from("")))?;
         let child = source.clone_for_plan(proto_child).build()?;
 
-        let hash_agg_node = HashAggNode::decode(&(source.plan_node()).get_body().value[..])
-            .map_err(|e| RwError::from(ErrorCode::ProstError(e)))?;
-        Self::deserialize(&hash_agg_node, child, source.task_id.clone())
+        let hash_agg_node =
+            try_match_expand!(source.plan_node().get_node_body(), NodeBody::HashAgg)?;
+
+        Self::deserialize(hash_agg_node, child, source.task_id.clone())
     }
 }
 /// `HashAggExecutor` implements the hash aggregate algorithm.

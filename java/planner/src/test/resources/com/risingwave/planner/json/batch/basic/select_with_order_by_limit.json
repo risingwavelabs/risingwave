@@ -1,21 +1,6 @@
 {
-  "nodeType": "TOP_N",
-  "body": {
-    "@type": "type.googleapis.com/plan.TopNNode",
-    "columnOrders": [{
-      "orderType": "ASCENDING",
-      "inputRef": {
-      },
-      "returnType": {
-        "typeName": "INT32"
-      }
-    }],
-    "limit": 1
-  },
   "children": [{
-    "nodeType": "SEQ_SCAN",
-    "body": {
-      "@type": "type.googleapis.com/plan.SeqScanNode",
+    "seqScan": {
       "tableRefId": {
         "schemaRefId": {
           "databaseRefId": {
@@ -40,5 +25,16 @@
         "name": "v3"
       }]
     }
-  }]
+  }],
+  "topN": {
+    "columnOrders": [{
+      "orderType": "ASCENDING",
+      "inputRef": {
+      },
+      "returnType": {
+        "typeName": "INT32"
+      }
+    }],
+    "limit": 1
+  }
 }

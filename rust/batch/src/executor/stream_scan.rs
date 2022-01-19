@@ -1,11 +1,10 @@
 use std::fmt::{Debug, Formatter};
 
-use prost::Message;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema, TableId};
-use risingwave_common::error::ErrorCode::{InternalError, ProstError};
+use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_pb::plan::SourceScanNode;
+use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_source::{BatchSourceReader, HighLevelKafkaSourceReaderContext, Source, SourceImpl};
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
@@ -24,8 +23,8 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
     /// 1. `SourceScanNode` whose definition can be shared by OLAP and Streaming
     /// 2. `SourceManager` whose definition can also be shared. But is it physically shared?
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        let stream_scan_node = SourceScanNode::decode(&(source.plan_node()).get_body().value[..])
-            .map_err(ProstError)?;
+        let stream_scan_node =
+            try_match_expand!(source.plan_node().get_node_body(), NodeBody::SourceScan)?;
 
         let table_id = TableId::from(&stream_scan_node.table_ref_id);
 

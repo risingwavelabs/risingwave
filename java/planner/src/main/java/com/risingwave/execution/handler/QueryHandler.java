@@ -8,7 +8,7 @@ import com.risingwave.planner.planner.batch.BatchPlanner;
 import com.risingwave.planner.rel.physical.BatchPlan;
 import com.risingwave.proto.computenode.GetDataRequest;
 import com.risingwave.proto.computenode.GetDataResponse;
-import com.risingwave.proto.computenode.TaskSinkId;
+import com.risingwave.proto.plan.TaskSinkId;
 import com.risingwave.rpc.ComputeClient;
 import com.risingwave.rpc.Messages;
 import com.risingwave.scheduler.QueryManager;

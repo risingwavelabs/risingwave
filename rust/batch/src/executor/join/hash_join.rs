@@ -3,18 +3,16 @@ use std::marker::PhantomData;
 use std::mem::take;
 
 use either::Either;
-use prost::Message;
-use risingwave_common::array::{DataChunk, RwError};
+use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::collection::hash_map::{
     calc_hash_key_kind, hash_key_dispatch, HashKey, HashKeyDispatcher, HashKeyKind, Key128, Key16,
     Key256, Key32, Key64, KeySerialized,
 };
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::Result;
 use risingwave_common::types::DataTypeKind;
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
-use risingwave_pb::plan::plan_node::PlanNodeType;
-use risingwave_pb::plan::HashJoinNode;
+use risingwave_pb::plan::plan_node::NodeBody;
 
 use crate::executor::join::hash_join::HashJoinState::{Done, FirstProbe, Probe, ProbeRemaining};
 use crate::executor::join::hash_join_state::{BuildTable, ProbeTable};
@@ -300,7 +298,6 @@ impl<K: HashKey> HashKeyDispatcher<K> for HashJoinExecutorBuilderDispatcher<K> {
 /// Hash join executor builder.
 impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
     fn new_boxed_executor(context: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        ensure!(context.plan_node().get_node_type() == PlanNodeType::HashJoin);
         ensure!(context.plan_node().get_children().len() == 2);
 
         let left_child = context
@@ -310,8 +307,8 @@ impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
             .clone_for_plan(&context.plan_node.get_children()[1])
             .build()?;
 
-        let hash_join_node = HashJoinNode::decode(&(context.plan_node()).get_body().value[..])
-            .map_err(|e| RwError::from(ErrorCode::ProstError(e)))?;
+        let hash_join_node =
+            try_match_expand!(context.plan_node().get_node_body(), NodeBody::HashJoin)?;
 
         let mut params = EquiJoinParams {
             batch_size: DEFAULT_CHUNK_BUFFER_SIZE,

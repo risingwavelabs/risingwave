@@ -5,21 +5,19 @@ use std::sync::Arc;
 use std::vec::Vec;
 
 use itertools::Itertools;
-use prost::Message;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, DataChunkRef,
 };
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::ErrorCode::{InternalError, ProstError};
+use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_common::expr::Expression;
 use risingwave_common::util::encoding_for_comparison::{encode_chunk, is_type_encodable};
 use risingwave_common::util::sort_util::{
     compare_two_row, fetch_orders, HeapElem, OrderPair, K_PROCESSING_WINDOW_SIZE,
 };
-use risingwave_pb::plan::plan_node::PlanNodeType;
-use risingwave_pb::plan::OrderByNode as OrderByProto;
+use risingwave_pb::plan::plan_node::NodeBody;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::executor::{Executor, ExecutorBuilder};
@@ -39,10 +37,11 @@ pub(super) struct OrderByExecutor {
 
 impl BoxedExecutorBuilder for OrderByExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_node_type() == PlanNodeType::OrderBy);
         ensure!(source.plan_node().get_children().len() == 1);
-        let order_by_node: OrderByProto =
-            OrderByProto::decode(&(source.plan_node()).get_body().value[..]).map_err(ProstError)?;
+
+        let order_by_node =
+            try_match_expand!(source.plan_node().get_node_body(), NodeBody::OrderBy)?;
+
         let order_pairs = fetch_orders(order_by_node.get_column_orders()).unwrap();
         if let Some(child_plan) = source.plan_node.get_children().get(0) {
             let child = source.clone_for_plan(child_plan).build()?;

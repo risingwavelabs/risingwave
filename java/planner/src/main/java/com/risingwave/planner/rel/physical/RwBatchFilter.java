@@ -3,7 +3,6 @@ package com.risingwave.planner.rel.physical;
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
 import com.google.common.collect.ImmutableList;
-import com.google.protobuf.Any;
 import com.risingwave.planner.rel.common.dist.RwDistributionTraitDef;
 import com.risingwave.planner.rel.logical.RwLogicalFilter;
 import com.risingwave.planner.rel.serialization.RexToProtoSerializer;
@@ -36,8 +35,7 @@ public class RwBatchFilter extends Filter implements RisingWaveBatchPhyRel, Phys
     FilterNode filter =
         FilterNode.newBuilder().setSearchCondition(condition.accept(rexVisitor)).build();
     return PlanNode.newBuilder()
-        .setNodeType(PlanNode.PlanNodeType.FILTER)
-        .setBody(Any.pack(filter))
+        .setFilter(filter)
         .addChildren(((RisingWaveBatchPhyRel) input).serialize())
         .build();
   }

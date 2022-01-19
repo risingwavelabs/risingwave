@@ -3,6 +3,7 @@ package com.risingwave.scheduler.stage;
 import com.google.common.base.Objects;
 import com.risingwave.scheduler.query.QueryId;
 
+/** The id of Stage in a query */
 public class StageId {
   private final QueryId queryId;
   private final int id;
@@ -20,8 +21,8 @@ public class StageId {
     return id;
   }
 
-  public com.risingwave.proto.computenode.StageId toStageIdProto() {
-    return com.risingwave.proto.computenode.StageId.newBuilder()
+  public com.risingwave.proto.plan.StageId toStageIdProto() {
+    return com.risingwave.proto.plan.StageId.newBuilder()
         .setQueryId(queryId.toQueryIdProto())
         .setStageId(id)
         .build();

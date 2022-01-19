@@ -1,7 +1,6 @@
 package com.risingwave.planner.rel.physical;
 
 import com.google.common.collect.ImmutableList;
-import com.google.protobuf.Any;
 import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.TableCatalog;
 import com.risingwave.planner.rel.common.RwScan;
@@ -59,9 +58,6 @@ public class RwBatchMaterializedViewScan extends RwScan implements RisingWaveBat
     TableRefId tableRefId = Messages.getTableRefId(tableId);
     RowSeqScanNode.Builder builder = RowSeqScanNode.newBuilder().setTableRefId(tableRefId);
     columnIds.forEach(c -> builder.addColumnIds(c.getValue()));
-    return PlanNode.newBuilder()
-        .setNodeType(PlanNode.PlanNodeType.ROW_SEQ_SCAN)
-        .setBody(Any.pack(builder.build()))
-        .build();
+    return PlanNode.newBuilder().setRowSeqScan(builder.build()).build();
   }
 }

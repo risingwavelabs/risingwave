@@ -6,9 +6,9 @@ option java_multiple_files = true;
 option java_package = "com.risingwave.proto.plan";
 option optimize_for = SPEED;
 
+import "common.proto";
 import "data.proto";
 import "expr.proto";
-import "google/protobuf/any.proto";
 
 message Field {
   data.DataType data_type = 1;
@@ -200,34 +200,69 @@ message GenerateInt32SeriesNode {
   int32 step = 3;
 }
 
+message QueryId {
+  string trace_id = 1;
+}
+
+message StageId {
+  QueryId query_id = 1;
+  uint32 stage_id = 2;
+}
+
+message TaskId {
+  StageId stage_id = 1;
+  uint32 task_id = 2;
+}
+
+message TaskSinkId {
+  TaskId task_id = 1;
+  uint32 sink_id = 2;
+}
+
+message ExchangeSource {
+  TaskSinkId sink_id = 1;
+  common.HostAddress host = 2;
+}
+
+message ExchangeNode {
+  repeated ExchangeSource sources = 1;
+  // An exchange only links to one stage, but a stage could be
+  // linked by multiple exchanges.
+  StageId source_stage_id = 2;
+  repeated Field input_schema = 3;
+}
+
+message MergeSortExchangeNode {
+  ExchangeNode exchange_node = 1;
+  repeated ColumnOrder column_orders = 2;
+}
+
 message PlanNode {
-  enum PlanNodeType {
-    INSERT = 0;
-    SEQ_SCAN = 1;
-    PROJECT = 2;
-    CREATE_TABLE = 3;
-    DROP_TABLE = 4;
-    HASH_AGG = 5;
-    FILTER = 6;
-    EXCHANGE = 7;
-    ORDER_BY = 8;
-    NESTED_LOOP_JOIN = 9;
-    CREATE_SOURCE = 10;
-    SOURCE_SCAN = 11;
-    TOP_N = 12;
-    SORT_AGG = 13;
-    ROW_SEQ_SCAN = 14;
-    LIMIT = 15;
-    VALUE = 16;
-    HASH_JOIN = 17;
-    DROP_SOURCE = 18;
-    MERGE_SORT_EXCHANGE = 19;
-    SORT_MERGE_JOIN = 20;
-    GENERATE_SERIES = 21;
+  repeated PlanNode children = 1;
+  oneof node_body {
+    InsertNode insert = 2;
+    SeqScanNode seq_scan = 3;
+    ProjectNode project = 4;
+    CreateTableNode create_table = 5;
+    DropTableNode drop_table = 6;
+    HashAggNode hash_agg = 7;
+    FilterNode filter = 8;
+    ExchangeNode exchange = 9;
+    OrderByNode order_by = 10;
+    NestedLoopJoinNode nested_loop_join = 11;
+    CreateSourceNode create_source = 12;
+    SourceScanNode source_scan = 13;
+    TopNNode top_n = 14;
+    SortAggNode sort_agg = 15;
+    RowSeqScanNode row_seq_scan = 16;
+    LimitNode limit = 17;
+    ValuesNode values = 18;
+    HashJoinNode hash_join = 19;
+    DropSourceNode drop_source = 20;
+    MergeSortExchangeNode merge_sort_exchange = 21;
+    SortMergeJoinNode sort_merge_join = 22;
+    GenerateInt32SeriesNode generate_int32_series = 23;
   }
-  PlanNodeType node_type = 1;
-  google.protobuf.Any body = 2;
-  repeated PlanNode children = 3;
 }
 
 message ExchangeInfo {

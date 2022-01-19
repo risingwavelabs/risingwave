@@ -3,7 +3,6 @@ package com.risingwave.planner.rel.physical;
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
 import com.google.common.collect.ImmutableList;
-import com.google.protobuf.Any;
 import com.risingwave.common.datatype.RisingWaveDataType;
 import com.risingwave.planner.rel.common.dist.RwDistributionTraitDef;
 import com.risingwave.planner.rel.common.dist.RwDistributions;
@@ -94,8 +93,7 @@ public class RwBatchSort extends Sort implements RisingWaveBatchPhyRel, Physical
       TopNNode.Builder topnNodeBuilder = TopNNode.newBuilder();
       topnNodeBuilder.addAllColumnOrders(columnOrders).setLimit(RexLiteral.intValue(fetch));
       return PlanNode.newBuilder()
-          .setNodeType(PlanNode.PlanNodeType.TOP_N)
-          .setBody(Any.pack(topnNodeBuilder.build()))
+          .setTopN(topnNodeBuilder.build())
           .addChildren(((RisingWaveBatchPhyRel) input).serialize())
           .build();
     } else {
@@ -103,8 +101,7 @@ public class RwBatchSort extends Sort implements RisingWaveBatchPhyRel, Physical
       OrderByNode.Builder orderByNodeBuilder = OrderByNode.newBuilder();
       orderByNodeBuilder.addAllColumnOrders(columnOrders);
       return PlanNode.newBuilder()
-          .setNodeType(PlanNode.PlanNodeType.ORDER_BY)
-          .setBody(Any.pack(orderByNodeBuilder.build()))
+          .setOrderBy(orderByNodeBuilder.build())
           .addChildren(((RisingWaveBatchPhyRel) input).serialize())
           .build();
     }

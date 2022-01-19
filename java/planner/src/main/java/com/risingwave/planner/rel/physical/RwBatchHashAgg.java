@@ -5,7 +5,6 @@ import static com.risingwave.execution.context.ExecutionContext.contextOf;
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
 import com.google.common.collect.ImmutableList;
-import com.google.protobuf.Any;
 import com.risingwave.planner.rel.common.dist.RwDistributionTraitDef;
 import com.risingwave.planner.rel.logical.RwLogicalAggregate;
 import com.risingwave.proto.plan.HashAggNode;
@@ -53,8 +52,7 @@ public class RwBatchHashAgg extends RwAggregate implements RisingWaveBatchPhyRel
   @Override
   public PlanNode serialize() {
     return PlanNode.newBuilder()
-        .setNodeType(PlanNode.PlanNodeType.HASH_AGG)
-        .setBody(Any.pack(serializeHashAgg()))
+        .setHashAgg(serializeHashAgg())
         .addChildren(((RisingWaveBatchPhyRel) input).serialize())
         .build();
   }

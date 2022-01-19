@@ -1,10 +1,7 @@
-use prost::Message;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Schema, TableId};
-use risingwave_common::error::ErrorCode::ProstError;
 use risingwave_common::error::Result;
-use risingwave_pb::plan::plan_node::PlanNodeType;
-use risingwave_pb::plan::DropSourceNode;
+use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_source::SourceManagerRef;
 
 use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
@@ -44,10 +41,7 @@ impl Executor for DropStreamExecutor {
 
 impl BoxedExecutorBuilder for DropStreamExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_node_type() == PlanNodeType::DropSource);
-
-        let node = DropSourceNode::decode(&(source.plan_node()).get_body().value[..])
-            .map_err(ProstError)?;
+        let node = try_match_expand!(source.plan_node().get_node_body(), NodeBody::DropSource)?;
 
         let table_id = TableId::from(&node.table_ref_id);
 

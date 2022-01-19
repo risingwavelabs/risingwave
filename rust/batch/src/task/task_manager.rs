@@ -3,8 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use risingwave_common::error::ErrorCode::TaskNotFound;
 use risingwave_common::error::{Result, RwError};
-use risingwave_pb::plan::PlanFragment;
-use risingwave_pb::task_service::{TaskId as ProstTaskId, TaskSinkId as ProstSinkId};
+use risingwave_pb::plan::{PlanFragment, TaskId as ProstTaskId, TaskSinkId as ProstSinkId};
 
 use crate::task::env::BatchTaskEnv;
 use crate::task::task::{TaskExecution, TaskId};
@@ -84,7 +83,7 @@ impl Default for TaskManager {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_pb::task_service::{QueryId, StageId, TaskSinkId as ProstTaskSinkId};
+    use risingwave_pb::plan::{QueryId, StageId, TaskSinkId as ProstTaskSinkId};
     use tonic::Code;
 
     use crate::task::test_utils::{ResultChecker, TestRunner};
@@ -136,7 +135,7 @@ mod tests {
         );
 
         let sink_id = ProstTaskSinkId {
-            task_id: Some(risingwave_pb::task_service::TaskId {
+            task_id: Some(risingwave_pb::plan::TaskId {
                 stage_id: Some(StageId {
                     query_id: Some(QueryId {
                         trace_id: "".to_string(),

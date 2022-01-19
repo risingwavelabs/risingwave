@@ -10,25 +10,6 @@ import "common.proto";
 import "data.proto";
 import "plan.proto";
 
-message QueryId {
-  string trace_id = 1;
-}
-
-message StageId {
-  QueryId query_id = 1;
-  uint32 stage_id = 2;
-}
-
-message TaskId {
-  StageId stage_id = 1;
-  uint32 task_id = 2;
-}
-
-message TaskSinkId {
-  TaskId task_id = 1;
-  uint32 sink_id = 2;
-}
-
 message TaskInfo {
   enum TaskStatus {
     NOT_FOUND = 0;
@@ -39,30 +20,12 @@ message TaskInfo {
     FINISHED = 5;
     FAILED = 6;
   }
-  TaskId task_id = 1;
+  plan.TaskId task_id = 1;
   TaskStatus task_status = 2;
 }
 
-message ExchangeSource {
-  TaskSinkId sink_id = 1;
-  common.HostAddress host = 2;
-}
-
-message ExchangeNode {
-  repeated ExchangeSource sources = 1;
-  // An exchange only links to one stage, but a stage could be
-  // linked by multiple exchanges.
-  StageId source_stage_id = 2;
-  repeated plan.Field input_schema = 3;
-}
-
-message MergeSortExchangeNode {
-  ExchangeNode exchange_node = 1;
-  repeated plan.ColumnOrder column_orders = 2;
-}
-
 message CreateTaskRequest {
-  TaskId task_id = 1;
+  plan.TaskId task_id = 1;
   plan.PlanFragment plan = 2;
 }
 
@@ -71,7 +34,7 @@ message CreateTaskResponse {
 }
 
 message AbortTaskRequest {
-  TaskId task_id = 1;
+  plan.TaskId task_id = 1;
   bool force = 2;
 }
 
@@ -80,7 +43,7 @@ message AbortTaskResponse {
 }
 
 message GetTaskInfoRequest {
-  TaskId task_id = 1;
+  plan.TaskId task_id = 1;
 }
 
 message GetTaskInfoResponse {
@@ -105,7 +68,7 @@ service TaskService {
 }
 
 message GetDataRequest {
-  TaskSinkId sink_id = 1;
+  plan.TaskSinkId sink_id = 1;
 }
 
 service ExchangeService {

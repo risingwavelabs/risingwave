@@ -3,18 +3,16 @@ use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use prost::Message;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk, DataChunkRef};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::ErrorCode::ProstError;
 use risingwave_common::error::Result;
 use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::sort_util::{
     fetch_orders, HeapElem, OrderPair, K_PROCESSING_WINDOW_SIZE,
 };
-use risingwave_pb::plan::plan_node::PlanNodeType;
-use risingwave_pb::task_service::{ExchangeSource as ProstExchangeSource, MergeSortExchangeNode};
+use risingwave_pb::plan::plan_node::NodeBody;
+use risingwave_pb::plan::ExchangeSource as ProstExchangeSource;
 
 use crate::execution::exchange_source::ExchangeSource;
 use crate::executor::{
@@ -185,11 +183,12 @@ impl<CS: 'static + CreateSource> Executor for MergeSortExchangeExecutorImpl<CS> 
 
 impl<CS: 'static + CreateSource> BoxedExecutorBuilder for MergeSortExchangeExecutorImpl<CS> {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_node_type() == PlanNodeType::MergeSortExchange);
-        let plan_node = source.plan_node();
+        let sort_merge_node = try_match_expand!(
+            source.plan_node().get_node_body(),
+            NodeBody::MergeSortExchange
+        )?;
+
         let server_addr = *source.env.server_address();
-        let sort_merge_node: MergeSortExchangeNode =
-            MergeSortExchangeNode::decode(&(plan_node).get_body().value[..]).map_err(ProstError)?;
         let order_pairs = Arc::new(fetch_orders(sort_merge_node.get_column_orders()).unwrap());
 
         let exchange_node = sort_merge_node.get_exchange_node();

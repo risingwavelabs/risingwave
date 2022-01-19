@@ -1,18 +1,27 @@
 {
-  "body": {
-    "@type": "type.googleapis.com/plan.InsertNode",
-    "tableRefId": {
-      "schemaRefId": {
-        "databaseRefId": {
-        }
-      }
-    },
-    "columnIds": [1, 2, 3, 4]
-  },
   "children": [{
-    "nodeType": "PROJECT",
-    "body": {
-      "@type": "type.googleapis.com/plan.ProjectNode",
+    "children": [{
+      "values": {
+        "tuples": [{
+          "cells": [{
+            "exprType": "CONSTANT_VALUE",
+            "returnType": {
+              "typeName": "INT32"
+            },
+            "constant": {
+              "body": "AAAAAA=="
+            }
+          }]
+        }],
+        "fields": [{
+          "dataType": {
+            "typeName": "INT32"
+          },
+          "name": "ZERO"
+        }]
+      }
+    }],
+    "project": {
       "selectList": [{
         "exprType": "CAST",
         "returnType": {
@@ -82,29 +91,15 @@
           }]
         }
       }]
-    },
-    "children": [{
-      "nodeType": "VALUE",
-      "body": {
-        "@type": "type.googleapis.com/plan.ValuesNode",
-        "tuples": [{
-          "cells": [{
-            "exprType": "CONSTANT_VALUE",
-            "returnType": {
-              "typeName": "INT32"
-            },
-            "constant": {
-              "body": "AAAAAA=="
-            }
-          }]
-        }],
-        "fields": [{
-          "dataType": {
-            "typeName": "INT32"
-          },
-          "name": "ZERO"
-        }]
+    }
+  }],
+  "insert": {
+    "tableRefId": {
+      "schemaRefId": {
+        "databaseRefId": {
+        }
       }
-    }]
-  }]
+    },
+    "columnIds": [1, 2, 3, 4]
+  }
 }

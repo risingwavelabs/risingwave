@@ -63,9 +63,9 @@ public class BasicStreamTest {
         ((CreateSourceHandler) sqlHandlerFactory.create(ast, executionContext))
             .execute(ast, executionContext);
     PlanNode root = ret.getRoot();
-    assertEquals(root.getNodeType(), PlanNode.PlanNodeType.CREATE_SOURCE);
+    assertEquals(root.getNodeBodyCase(), PlanNode.NodeBodyCase.CREATE_SOURCE);
 
-    CreateSourceNode node = root.getBody().unpack(CreateSourceNode.class);
+    CreateSourceNode node = root.getCreateSource();
     assertEquals(node.getColumnDescsCount(), 4);
 
     assertEquals(node.getColumnDescs(1).getName(), "id");
@@ -91,6 +91,6 @@ public class BasicStreamTest {
             .execute(ast, executionContext)
             .get(0);
     PlanNode root = ret.getRoot();
-    assertEquals(root.getNodeType(), PlanNode.PlanNodeType.DROP_SOURCE);
+    assertEquals(root.getNodeBodyCase(), PlanNode.NodeBodyCase.DROP_SOURCE);
   }
 }

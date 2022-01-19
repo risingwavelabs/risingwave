@@ -3,13 +3,13 @@ package com.risingwave.planner.rel.physical;
 import static com.google.common.base.Verify.verify;
 
 import com.google.common.collect.ImmutableList;
-import com.google.protobuf.Any;
 import com.risingwave.common.datatype.RisingWaveDataType;
 import com.risingwave.planner.rel.common.dist.RwDistributionTrait;
-import com.risingwave.proto.computenode.MergeSortExchangeNode;
 import com.risingwave.proto.data.DataType;
 import com.risingwave.proto.expr.InputRefExpr;
 import com.risingwave.proto.plan.ColumnOrder;
+import com.risingwave.proto.plan.ExchangeNode;
+import com.risingwave.proto.plan.MergeSortExchangeNode;
 import com.risingwave.proto.plan.OrderType;
 import com.risingwave.proto.plan.PlanNode;
 import com.risingwave.scheduler.exchange.BroadcastDistribution;
@@ -98,12 +98,9 @@ public class RwBatchExchange extends Exchange implements RisingWaveBatchPhyRel {
       }
       MergeSortExchangeNode.Builder builder = MergeSortExchangeNode.newBuilder();
       builder.addAllColumnOrders(columnOrders);
-      return PlanNode.newBuilder()
-          .setNodeType(PlanNode.PlanNodeType.MERGE_SORT_EXCHANGE)
-          .setBody(Any.pack(builder.build()))
-          .build();
+      return PlanNode.newBuilder().setMergeSortExchange(builder.build()).build();
     } else {
-      return PlanNode.newBuilder().setNodeType(PlanNode.PlanNodeType.EXCHANGE).build();
+      return PlanNode.newBuilder().setExchange(ExchangeNode.newBuilder().build()).build();
     }
   }
 

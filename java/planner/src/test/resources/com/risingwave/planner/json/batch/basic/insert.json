@@ -1,18 +1,6 @@
 {
-  "body": {
-    "@type": "type.googleapis.com/plan.InsertNode",
-    "tableRefId": {
-      "schemaRefId": {
-        "databaseRefId": {
-        }
-      }
-    },
-    "columnIds": [1, 2, 3]
-  },
   "children": [{
-    "nodeType": "VALUE",
-    "body": {
-      "@type": "type.googleapis.com/plan.ValuesNode",
+    "values": {
       "tuples": [{
         "cells": [{
           "exprType": "CONSTANT_VALUE",
@@ -135,5 +123,14 @@
         "name": "v3"
       }]
     }
-  }]
+  }],
+  "insert": {
+    "tableRefId": {
+      "schemaRefId": {
+        "databaseRefId": {
+        }
+      }
+    },
+    "columnIds": [1, 2, 3]
+  }
 }

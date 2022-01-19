@@ -1,7 +1,32 @@
 {
-  "nodeType": "FILTER",
-  "body": {
-    "@type": "type.googleapis.com/plan.FilterNode",
+  "children": [{
+    "seqScan": {
+      "tableRefId": {
+        "schemaRefId": {
+          "databaseRefId": {
+          }
+        }
+      },
+      "columnIds": [1, 2, 3],
+      "fields": [{
+        "dataType": {
+          "typeName": "INT32"
+        },
+        "name": "v1"
+      }, {
+        "dataType": {
+          "typeName": "INT32"
+        },
+        "name": "v2"
+      }, {
+        "dataType": {
+          "typeName": "FLOAT"
+        },
+        "name": "v3"
+      }]
+    }
+  }],
+  "filter": {
     "searchCondition": {
       "exprType": "AND",
       "returnType": {
@@ -90,34 +115,5 @@
         }]
       }
     }
-  },
-  "children": [{
-    "nodeType": "SEQ_SCAN",
-    "body": {
-      "@type": "type.googleapis.com/plan.SeqScanNode",
-      "tableRefId": {
-        "schemaRefId": {
-          "databaseRefId": {
-          }
-        }
-      },
-      "columnIds": [1, 2, 3],
-      "fields": [{
-        "dataType": {
-          "typeName": "INT32"
-        },
-        "name": "v1"
-      }, {
-        "dataType": {
-          "typeName": "INT32"
-        },
-        "name": "v2"
-      }, {
-        "dataType": {
-          "typeName": "FLOAT"
-        },
-        "name": "v3"
-      }]
-    }
-  }]
+  }
 }

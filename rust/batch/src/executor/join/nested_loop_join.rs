@@ -1,18 +1,16 @@
 use std::option::Option::Some;
 use std::sync::Arc;
 
-use prost::Message;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::data_chunk_iter::RowRef;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::Result;
 use risingwave_common::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
 use risingwave_common::types::DataTypeKind;
 use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
-use risingwave_pb::plan::plan_node::PlanNodeType;
-use risingwave_pb::plan::NestedLoopJoinNode;
+use risingwave_pb::plan::plan_node::NodeBody;
 
 use crate::executor::join::chunked_data::RowId;
 use crate::executor::join::row_level_iter::RowLevelIter;
@@ -184,12 +182,10 @@ impl NestedLoopJoinExecutor {
 
 impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_node_type() == PlanNodeType::NestedLoopJoin);
         ensure!(source.plan_node().get_children().len() == 2);
 
         let nested_loop_join_node =
-            NestedLoopJoinNode::decode(&(source.plan_node()).get_body().value[..])
-                .map_err(|e| RwError::from(ErrorCode::ProstError(e)))?;
+            try_match_expand!(source.plan_node().get_node_body(), NodeBody::NestedLoopJoin)?;
 
         let join_type = JoinType::from_prost(nested_loop_join_node.get_join_type());
         let join_expr = expr_build_from_prost(nested_loop_join_node.get_join_cond())?;

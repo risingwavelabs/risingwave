@@ -1,16 +1,13 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use prost::Message;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Schema, TableId};
-use risingwave_common::ensure;
-use risingwave_common::error::ErrorCode::{InternalError, ProstError, ProtocolError};
+use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataTypeKind;
 use risingwave_pb::plan::create_source_node::RowFormatType;
-use risingwave_pb::plan::plan_node::PlanNodeType;
-use risingwave_pb::plan::CreateSourceNode;
+use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_source::parser::JSONParser;
 use risingwave_source::{
     DebeziumJsonParser, HighLevelKafkaSourceConfig, ProtobufParser, SourceColumnDesc, SourceConfig,
@@ -67,10 +64,7 @@ impl CreateSourceExecutor {
 
 impl BoxedExecutorBuilder for CreateSourceExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_node_type() == PlanNodeType::CreateSource);
-
-        let node = CreateSourceNode::decode(&(source.plan_node()).get_body().value[..])
-            .map_err(ProstError)?;
+        let node = try_match_expand!(source.plan_node().get_node_body(), NodeBody::CreateSource)?;
 
         let table_id = TableId::from(&node.table_ref_id);
 

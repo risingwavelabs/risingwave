@@ -2,7 +2,6 @@ package com.risingwave.planner.rel.physical;
 
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
-import com.google.protobuf.Any;
 import com.risingwave.planner.rel.logical.RwLogicalLimit;
 import com.risingwave.proto.plan.LimitNode;
 import com.risingwave.proto.plan.PlanNode;
@@ -67,8 +66,7 @@ public class RwBatchLimit extends SingleRel implements RisingWaveBatchPhyRel, Ph
     }
     LimitNode limitNode = builder.build();
     return PlanNode.newBuilder()
-        .setNodeType(PlanNode.PlanNodeType.LIMIT)
-        .setBody(Any.pack(limitNode))
+        .setLimit(limitNode)
         .addChildren(((RisingWaveBatchPhyRel) input).serialize())
         .build();
   }

@@ -1,36 +1,6 @@
 {
-  "nodeType": "NESTED_LOOP_JOIN",
-  "body": {
-    "@type": "type.googleapis.com/plan.NestedLoopJoinNode",
-    "joinCond": {
-      "exprType": "GREATER_THAN",
-      "returnType": {
-        "typeName": "BOOLEAN"
-      },
-      "funcCall": {
-        "children": [{
-          "exprType": "INPUT_REF",
-          "returnType": {
-            "typeName": "INT32"
-          },
-          "inputRef": {
-          }
-        }, {
-          "exprType": "INPUT_REF",
-          "returnType": {
-            "typeName": "INT32"
-          },
-          "inputRef": {
-            "columnIdx": 3
-          }
-        }]
-      }
-    }
-  },
   "children": [{
-    "nodeType": "SEQ_SCAN",
-    "body": {
-      "@type": "type.googleapis.com/plan.SeqScanNode",
+    "seqScan": {
       "tableRefId": {
         "schemaRefId": {
           "databaseRefId": {
@@ -56,9 +26,7 @@
       }]
     }
   }, {
-    "nodeType": "SEQ_SCAN",
-    "body": {
-      "@type": "type.googleapis.com/plan.SeqScanNode",
+    "seqScan": {
       "tableRefId": {
         "schemaRefId": {
           "databaseRefId": {
@@ -74,5 +42,31 @@
         "name": "v1"
       }]
     }
-  }]
+  }],
+  "nestedLoopJoin": {
+    "joinCond": {
+      "exprType": "GREATER_THAN",
+      "returnType": {
+        "typeName": "BOOLEAN"
+      },
+      "funcCall": {
+        "children": [{
+          "exprType": "INPUT_REF",
+          "returnType": {
+            "typeName": "INT32"
+          },
+          "inputRef": {
+          }
+        }, {
+          "exprType": "INPUT_REF",
+          "returnType": {
+            "typeName": "INT32"
+          },
+          "inputRef": {
+            "columnIdx": 3
+          }
+        }]
+      }
+    }
+  }
 }

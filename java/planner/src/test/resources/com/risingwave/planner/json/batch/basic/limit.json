@@ -1,14 +1,6 @@
 {
-  "nodeType": "LIMIT",
-  "body": {
-    "@type": "type.googleapis.com/plan.LimitNode",
-    "limit": 1,
-    "offset": 1
-  },
   "children": [{
-    "nodeType": "SEQ_SCAN",
-    "body": {
-      "@type": "type.googleapis.com/plan.SeqScanNode",
+    "seqScan": {
       "tableRefId": {
         "schemaRefId": {
           "databaseRefId": {
@@ -27,5 +19,9 @@
         "name": "v1"
       }]
     }
-  }]
+  }],
+  "limit": {
+    "limit": 1,
+    "offset": 1
+  }
 }

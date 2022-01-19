@@ -1,12 +1,9 @@
-use prost::Message;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::ErrorCode::ProstError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::expr::{build_from_prost, BoxedExpression};
-use risingwave_pb::plan::plan_node::PlanNodeType;
-use risingwave_pb::plan::ProjectNode;
+use risingwave_pb::plan::plan_node::NodeBody;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::executor::{Executor, ExecutorBuilder};
@@ -57,11 +54,11 @@ impl Executor for ProjectionExecutor {
 
 impl BoxedExecutorBuilder for ProjectionExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        ensure!(source.plan_node().get_node_type() == PlanNodeType::Project);
         ensure!(source.plan_node().get_children().len() == 1);
 
         let project_node =
-            ProjectNode::decode(&(source.plan_node()).get_body().value[..]).map_err(ProstError)?;
+            try_match_expand!(source.plan_node().get_node_body(), NodeBody::Project)?;
+
         let proto_child = source.plan_node.get_children().get(0).ok_or_else(|| {
             RwError::from(ErrorCode::InternalError(String::from(
                 "Child interpreting error",
