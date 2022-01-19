@@ -105,7 +105,32 @@
 						]
 					}
 				},
-				"overrides": []
+				"overrides": [
+					{
+						"__systemRef": "hideSeriesFrom",
+						"matcher": {
+							"id": "byNames",
+							"options": {
+								"mode": "exclude",
+								"names": [
+									"iter_count"
+								],
+								"prefix": "All except:",
+								"readOnly": true
+							}
+						},
+						"properties": [
+							{
+								"id": "custom.hideFrom",
+								"value": {
+									"legend": false,
+									"tooltip": false,
+									"viz": true
+								}
+							}
+						]
+					}
+				]
 			},
 			"gridPos": {
 				"h": 8,
@@ -131,7 +156,7 @@
 						"uid": "${DS_PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "state_store_iter_counts",
+					"expr": "irate(state_store_iter_counts[5s])",
 					"interval": "",
 					"legendFormat": "iter_count",
 					"refId": "A"
@@ -142,7 +167,7 @@
 						"uid": "${DS_PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "state_store_iter_next_counts",
+					"expr": "irate(state_store_iter_next_counts[5s])",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "iter_next_count",
@@ -154,7 +179,7 @@
 						"uid": "${DS_PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "rate(state_store_iter_next_latency_sum[5m])",
+					"expr": "irate(state_store_iter_next_latency_sum[5s])",
 					"hide": false,
 					"instant": false,
 					"interval": "",
@@ -167,7 +192,7 @@
 						"uid": "${DS_PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "state_store_iter_next_latency_sum",
+					"expr": "irate(state_store_iter_next_latency_sum[5s])",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "iter_next_latency",
@@ -226,7 +251,32 @@
 						]
 					}
 				},
-				"overrides": []
+				"overrides": [
+					{
+						"__systemRef": "hideSeriesFrom",
+						"matcher": {
+							"id": "byNames",
+							"options": {
+								"mode": "exclude",
+								"names": [
+									"get_snapshot_latency"
+								],
+								"prefix": "All except:",
+								"readOnly": true
+							}
+						},
+						"properties": [
+							{
+								"id": "custom.hideFrom",
+								"value": {
+									"legend": false,
+									"tooltip": false,
+									"viz": true
+								}
+							}
+						]
+					}
+				]
 			},
 			"gridPos": {
 				"h": 8,
@@ -252,7 +302,7 @@
 						"uid": "${DS_PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "get_snapshot_latency_sum",
+					"expr": "irate(state_store_get_snapshot_latency_sum[5s])",
 					"interval": "",
 					"legendFormat": "get_snapshot_latency",
 					"refId": "A"
@@ -263,7 +313,7 @@
 						"uid": "${DS_PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "state_store_iter_next_latency_sum",
+					"expr": "irate(state_store_iter_next_latency_sum[5s])",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "iter_next_latency",
@@ -275,7 +325,7 @@
 						"uid": "${DS_PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "state_store_iter_next_latency_sum",
+					"expr": "irate(state_store_iter_next_latency_sum[5s])",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "iter_next_latency",
@@ -287,7 +337,7 @@
 						"uid": "${DS_PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "state_store_get_latency_sum",
+					"expr": "irate(state_store_get_latency_sum[5s])",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "get_latency",
@@ -299,7 +349,7 @@
 						"uid": "${DS_PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "state_store_batch_write_add_l0_ssts_latency_sum",
+					"expr": "irate(state_store_batch_write_add_l0_ssts_latency_sum[5s])",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "batch_write_add_l0_ssts_latency",
@@ -311,7 +361,7 @@
 						"uid": "${DS_PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "state_store_batch_write_build_table_latency_sum",
+					"expr": "irate(state_store_batch_write_build_table_latency_sum[5s])",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "batch_write_build_table_latency",
@@ -323,7 +373,7 @@
 						"uid": "${DS_PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "state_store_batched_write_latency_sum",
+					"expr": "irate(state_store_batched_write_latency_sum[5s])",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "batched_write_latency",
@@ -382,7 +432,32 @@
 						]
 					}
 				},
-				"overrides": []
+				"overrides": [
+					{
+						"__systemRef": "hideSeriesFrom",
+						"matcher": {
+							"id": "byNames",
+							"options": {
+								"mode": "exclude",
+								"names": [
+									"write_batch_count"
+								],
+								"prefix": "All except:",
+								"readOnly": true
+							}
+						},
+						"properties": [
+							{
+								"id": "custom.hideFrom",
+								"value": {
+									"legend": false,
+									"tooltip": false,
+									"viz": true
+								}
+							}
+						]
+					}
+				]
 			},
 			"gridPos": {
 				"h": 8,
@@ -408,7 +483,7 @@
 						"uid": "${DS_PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "state_store_batched_write_counts",
+					"expr": "irate(state_store_batched_write_counts[5s])",
 					"interval": "",
 					"legendFormat": "write_batch_count",
 					"refId": "A"
@@ -419,7 +494,7 @@
 						"uid": "${DS_PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "state_store_batch_write_build_table_latency_sum",
+					"expr": "irate(state_store_batch_write_build_table_latency_sum[5s])",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "build_table_latency",
@@ -431,7 +506,7 @@
 						"uid": "${DS_PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "state_store_batched_write_latency_sum",
+					"expr": "irate(state_store_batched_write_latency_sum[5s])",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "batched_write_latency",
@@ -443,7 +518,7 @@
 						"uid": "${DS_PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "state_store_batch_write_add_l0_ssts_latency_sum",
+					"expr": "irate(state_store_batch_write_add_l0_ssts_latency_sum[5s])",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "add_l0_ssts_latency",
@@ -455,7 +530,7 @@
 						"uid": "${DS_PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "state_store_batched_write_tuple_counts",
+					"expr": "irate(state_store_batched_write_tuple_counts[5s])",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "batch_write_kvpair_count",
@@ -467,7 +542,7 @@
 						"uid": "${DS_PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "state_store_batched_write_size_sum",
+					"expr": "irate(state_store_batched_write_size_sum[5s])",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "write_batch_size",
@@ -526,7 +601,32 @@
 						]
 					}
 				},
-				"overrides": []
+				"overrides": [
+					{
+						"__systemRef": "hideSeriesFrom",
+						"matcher": {
+							"id": "byNames",
+							"options": {
+								"mode": "exclude",
+								"names": [
+									"batched_write_size"
+								],
+								"prefix": "All except:",
+								"readOnly": true
+							}
+						},
+						"properties": [
+							{
+								"id": "custom.hideFrom",
+								"value": {
+									"legend": false,
+									"tooltip": false,
+									"viz": true
+								}
+							}
+						]
+					}
+				]
 			},
 			"gridPos": {
 				"h": 8,
@@ -552,7 +652,7 @@
 						"uid": "${DS_PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "state_store_get_key_size_sum",
+					"expr": "irate(state_store_get_key_size_sum[5s])",
 					"interval": "",
 					"legendFormat": "get_key_size",
 					"refId": "A"
@@ -563,7 +663,7 @@
 						"uid": "${DS_PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "state_store_get_value_size_sum",
+					"expr": "irate(state_store_get_value_size_sum[5s])",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "get_value_size",
@@ -575,7 +675,7 @@
 						"uid": "${DS_PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "state_store_batched_write_size_sum",
+					"expr": "irate(state_store_batched_write_size_sum[5s])",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "batched_write_size",
@@ -634,7 +734,32 @@
 						]
 					}
 				},
-				"overrides": []
+				"overrides": [
+					{
+						"__systemRef": "hideSeriesFrom",
+						"matcher": {
+							"id": "byNames",
+							"options": {
+								"mode": "exclude",
+								"names": [
+									"get_snapshot_latency"
+								],
+								"prefix": "All except:",
+								"readOnly": true
+							}
+						},
+						"properties": [
+							{
+								"id": "custom.hideFrom",
+								"value": {
+									"legend": false,
+									"tooltip": false,
+									"viz": true
+								}
+							}
+						]
+					}
+				]
 			},
 			"gridPos": {
 				"h": 8,
@@ -660,7 +785,7 @@
 						"uid": "${DS_PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "get_snapshot_latency_sum",
+					"expr": "irate(state_store_get_snapshot_latency_sum[5s])",
 					"interval": "",
 					"legendFormat": "get_snapshot_latency",
 					"refId": "A"
@@ -671,7 +796,7 @@
 						"uid": "${DS_PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "state_store_get_key_size_sum",
+					"expr": "irate(state_store_get_key_size_sum[5s])",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "get_key_size",
@@ -683,7 +808,7 @@
 						"uid": "${DS_PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "state_store_get_counts",
+					"expr": "irate(state_store_get_counts[5s])",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "get_counts",
@@ -695,7 +820,7 @@
 						"uid": "${DS_PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "state_store_get_value_size_sum",
+					"expr": "irate(state_store_get_value_size_sum[5s])",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "get_value_size",
@@ -707,7 +832,7 @@
 						"uid": "${DS_PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "state_store_get_latency_sum",
+					"expr": "irate(state_store_get_latency_sum[5s])",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "get_latency",
@@ -792,7 +917,7 @@
 						"uid": "${DS_PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "state_store_get_counts",
+					"expr": "irate(state_store_get_counts[5s])",
 					"interval": "",
 					"legendFormat": "get_counts",
 					"refId": "A"
@@ -803,7 +928,7 @@
 						"uid": "${DS_PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "state_store_batched_write_counts",
+					"expr": "irate(state_store_batched_write_counts[5s])",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "write_batch_count",
@@ -815,7 +940,7 @@
 						"uid": "${DS_PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "state_store_iter_counts",
+					"expr": "irate(state_store_iter_counts[5s])",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "iter_counts",
@@ -827,7 +952,7 @@
 						"uid": "${DS_PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "state_store_iter_next_counts",
+					"expr": "irate(state_store_iter_next_counts[5s])",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "iter_next_counts",
@@ -839,7 +964,7 @@
 						"uid": "${DS_PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "state_store_batched_write_tuple_counts",
+					"expr": "irate(state_store_batched_write_tuple_counts[5s])",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "batched_write_kvpair_counts",
@@ -852,7 +977,7 @@
 	],
 	"refresh": false,
 	"schemaVersion": 34,
-	"style": "light",
+	"style": "dark",
 	"tags": [],
 	"templating": {
 		"list": []
@@ -863,8 +988,8 @@
 	},
 	"timepicker": {},
 	"timezone": "",
-	"title": "risingwave_dashboard",
+	"title": "wcy_dashboard",
 	"uid": "Ecy3uV1nz",
-	"version": 10,
+	"version": 19,
 	"weekStart": ""
 }

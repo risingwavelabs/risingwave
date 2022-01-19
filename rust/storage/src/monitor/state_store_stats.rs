@@ -94,7 +94,7 @@ impl StateStoreStats {
             .map(|x| x * GET_SNAPSHOT_LATENCY_SCALE)
             .to_vec();
         let get_snapshot_latency_opts = histogram_opts!(
-            "get_snapshot_latency",
+            "state_store_get_snapshot_latency",
             "Total latency of get snapshot that have been issued to state store",
             buckets
         );

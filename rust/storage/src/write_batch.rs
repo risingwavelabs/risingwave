@@ -95,7 +95,7 @@ where
             .batch_write_size
             .observe(write_batch_size as f64);
         let timer = self.state_store_stats.batch_write_latency.start_timer();
-        self.store.ingest_batch(self.batch, epoch).await.unwrap();
+        self.store.ingest_batch(self.batch, epoch).await?;
         timer.observe_duration();
         Ok(())
     }
