@@ -7,11 +7,10 @@ use async_recursion::async_recursion;
 use risingwave_common::array::RwError;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
-use risingwave_pb::meta::get_id_request::IdCategory;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{StreamActor, StreamNode};
 
-use crate::manager::IdGeneratorManagerRef;
+use crate::manager::{IdCategory, IdGeneratorManagerRef};
 use crate::stream::graph::{
     StreamActorBuilder, StreamFragment, StreamFragmentGraph, StreamGraphBuilder,
 };

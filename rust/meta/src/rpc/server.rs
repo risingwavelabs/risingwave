@@ -6,7 +6,6 @@ use risingwave_pb::meta::catalog_service_server::CatalogServiceServer;
 use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
 use risingwave_pb::meta::epoch_service_server::EpochServiceServer;
 use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
-use risingwave_pb::meta::id_generator_service_server::IdGeneratorServiceServer;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::UnboundedSender;
@@ -22,7 +21,6 @@ use crate::rpc::service::cluster_service::ClusterServiceImpl;
 use crate::rpc::service::epoch_service::EpochServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
 use crate::rpc::service::hummock_service::HummockServiceImpl;
-use crate::rpc::service::id_service::IdGeneratorServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::storage::{MetaStoreRef, SledMetaStore};
 use crate::stream::{DefaultStreamManager, StoredStreamMetaManager};
@@ -72,9 +70,8 @@ pub async fn rpc_serve_with_listener(
 
     let epoch_srv = EpochServiceImpl::new(env.clone());
     let heartbeat_srv = HeartbeatServiceImpl::new(catalog_manager_ref.clone());
-    let catalog_srv = CatalogServiceImpl::new(catalog_manager_ref);
+    let catalog_srv = CatalogServiceImpl::new(catalog_manager_ref, env.clone());
     let cluster_srv = ClusterServiceImpl::new(cluster_manager.clone());
-    let id_generator_srv = IdGeneratorServiceImpl::new(env.clone());
     let stream_srv = StreamServiceImpl::new(stream_manager_ref, cluster_manager, env);
     let hummock_srv = HummockServiceImpl::new(hummock_manager);
 
@@ -85,7 +82,6 @@ pub async fn rpc_serve_with_listener(
             .add_service(HeartbeatServiceServer::new(heartbeat_srv))
             .add_service(CatalogServiceServer::new(catalog_srv))
             .add_service(ClusterServiceServer::new(cluster_srv))
-            .add_service(IdGeneratorServiceServer::new(id_generator_srv))
             .add_service(StreamManagerServiceServer::new(stream_srv))
             .add_service(HummockManagerServiceServer::new(hummock_srv))
             .serve_with_incoming_shutdown(

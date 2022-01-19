@@ -58,33 +58,6 @@ service EpochService {
   rpc GetEpoch(GetEpochRequest) returns (GetEpochResponse);
 }
 
-// Below for id generator service.
-
-message GetIdRequest {
-  enum IdCategory {
-    Default = 0;
-    Database = 1;
-    Schema = 2;
-    Table = 3;
-    Actor = 4;
-    HummockContext = 5;
-    HummockSnapshot = 6;
-    Worker = 7;
-    HummockSSTableId = 8;
-  }
-  IdCategory category = 1;
-  int32 interval = 2;
-}
-
-message GetIdResponse {
-  common.Status status = 1;
-  int32 id = 2;
-}
-
-service IdGeneratorService {
-  rpc GetId(GetIdRequest) returns (GetIdResponse);
-}
-
 // Below for catalog service.
 
 message CreateRequest {
@@ -98,7 +71,8 @@ message CreateRequest {
 
 message CreateResponse {
   common.Status status = 1;
-  uint64 version = 2;
+  int32 id = 2;
+  uint64 version = 3;
 }
 
 message DropRequest {

@@ -42,49 +42,54 @@ public class CatalogCast {
     return builder.build();
   }
 
-  public static Database databaseToProto(DatabaseCatalog databaseCatalog) {
+  public static Database databaseToProto(String databaseName) {
     Database.Builder builder = Database.newBuilder();
-    builder.setDatabaseName(databaseCatalog.getEntityName().getValue());
-    builder.setDatabaseRefId(buildDatabaseRefId(databaseCatalog));
+    builder.setDatabaseName(databaseName);
     return builder.build();
   }
 
-  public static Schema schemaToProto(DatabaseCatalog databaseCatalog, SchemaCatalog schemaCatalog) {
+  public static Schema schemaToProto(
+      DatabaseCatalog databaseCatalog, SchemaCatalog.SchemaName schemaName) {
     Schema.Builder builder = Schema.newBuilder();
-    builder.setSchemaName(schemaCatalog.getEntityName().getValue());
-    builder.setSchemaRefId(buildSchemaRefId(databaseCatalog, schemaCatalog));
+    builder.setSchemaName(schemaName.getValue());
+    builder.setSchemaRefId(
+        SchemaRefId.newBuilder().setDatabaseRefId(buildDatabaseRefId(databaseCatalog)).build());
     return builder.build();
   }
 
   public static Table tableToProto(
-      DatabaseCatalog databaseCatalog, SchemaCatalog schemaCatalog, TableCatalog tableCatalog) {
+      DatabaseCatalog databaseCatalog,
+      SchemaCatalog schemaCatalog,
+      CreateTableInfo createTableInfo) {
     Table.Builder builder = Table.newBuilder();
-    builder.setTableName(tableCatalog.getEntityName().getValue());
+    builder.setTableName(createTableInfo.getName());
     builder.setTableRefId(
-        buildTableRefId(databaseCatalog, schemaCatalog, tableCatalog.getEntityName()));
-    builder.setIsMaterializedView(tableCatalog.isMaterializedView());
-    builder.setIsSource(tableCatalog.isSource());
-    builder.setDistType(Table.DistributionType.valueOf(tableCatalog.getDistributionType().name()));
-    builder.setRowFormat(tableCatalog.getRowFormat());
-    builder.putAllProperties(tableCatalog.getProperties());
-    builder.addAllPkColumns(tableCatalog.getPrimaryKeyColumnIds());
-    builder.setRowSchemaLocation(tableCatalog.getRowSchemaLocation());
-    for (ColumnCatalog columnCatalog : tableCatalog.getAllColumns()) {
+        TableRefId.newBuilder().setSchemaRefId(buildSchemaRefId(databaseCatalog, schemaCatalog)));
+    builder.setIsMaterializedView(createTableInfo.isMv());
+    builder.setIsSource(createTableInfo.isSource());
+    builder.setDistType(Table.DistributionType.ALL);
+    builder.setRowFormat(createTableInfo.getRowFormat());
+    builder.putAllProperties(createTableInfo.getProperties());
+    builder.addAllPkColumns(createTableInfo.getPrimaryKeyIndices());
+    builder.setRowSchemaLocation(createTableInfo.getRowSchemaLocation());
+    for (var columns : createTableInfo.getColumns()) {
       com.risingwave.proto.plan.ColumnDesc.Builder colBuilder =
           com.risingwave.proto.plan.ColumnDesc.newBuilder();
-      colBuilder.setName(columnCatalog.getName());
+      colBuilder.setName(columns.left);
       colBuilder.setEncoding(
           com.risingwave.proto.plan.ColumnDesc.ColumnEncodingType.valueOf(
-              columnCatalog.getDesc().getEncoding().name()));
-      colBuilder.setIsPrimary(columnCatalog.getDesc().isPrimary());
-      colBuilder.setColumnType(columnCatalog.getDesc().getDataType().getProtobufType());
+              columns.right.getEncoding().name()));
+      colBuilder.setIsPrimary(columns.right.isPrimary());
+      colBuilder.setColumnType(columns.right.getDataType().getProtobufType());
       builder.addColumnDescs(colBuilder.build());
     }
 
-    if (tableCatalog.isMaterializedView()) {
-      MaterializedViewCatalog materializedViewCatalog = (MaterializedViewCatalog) tableCatalog;
-      if (materializedViewCatalog.getCollation() != null) {
-        List<RelFieldCollation> rfc = materializedViewCatalog.getCollation().getFieldCollations();
+    if (createTableInfo.isMv()) {
+      CreateMaterializedViewInfo createMaterializedViewInfo =
+          (CreateMaterializedViewInfo) createTableInfo;
+      if (createMaterializedViewInfo.getCollation() != null) {
+        List<RelFieldCollation> rfc =
+            createMaterializedViewInfo.getCollation().getFieldCollations();
         for (RelFieldCollation relFieldCollation : rfc) {
           InputRefExpr inputRefExpr =
               InputRefExpr.newBuilder().setColumnIdx(relFieldCollation.getFieldIndex()).build();
@@ -101,7 +106,7 @@ public class CatalogCast {
               ColumnOrder.newBuilder().setOrderType(orderType).setInputRef(inputRefExpr).build();
           builder.addColumnOrders(columnOrder);
         }
-        builder.setIsAssociated(materializedViewCatalog.isAssociatedMaterializedView());
+        builder.setIsAssociated(createMaterializedViewInfo.isAssociated());
       }
     }
 

@@ -2,10 +2,10 @@ use async_trait::async_trait;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::common::{Cluster, HostAddress, WorkerNode};
-use risingwave_pb::meta::get_id_request::IdCategory;
 use risingwave_pb::meta::ClusterType;
 
 use crate::cluster::{ClusterMetaManager, StoredClusterManager};
+use crate::manager::IdCategory;
 
 #[async_trait]
 pub trait WorkerNodeMetaManager: Sync + Send + 'static {

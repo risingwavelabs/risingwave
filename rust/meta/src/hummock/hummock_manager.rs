@@ -14,7 +14,6 @@ use risingwave_pb::hummock::{
     HummockSnapshot, HummockTablesToDelete, HummockVersion, Level, LevelType, SstableInfo,
     UncommittedEpoch,
 };
-use risingwave_pb::meta::get_id_request::IdCategory;
 use risingwave_storage::hummock::key_range::KeyRange;
 use risingwave_storage::hummock::{
     HummockContextId, HummockEpoch, HummockError, HummockSSTableId, HummockSnapshotId, HummockTTL,
@@ -25,7 +24,7 @@ use tokio::task::JoinHandle;
 
 use crate::hummock::compaction::{CompactStatus, CompactionInner};
 use crate::hummock::level_handler::{LevelHandler, SSTableStat};
-use crate::manager::{MetaSrvEnv, SINGLE_VERSION_EPOCH};
+use crate::manager::{IdCategory, MetaSrvEnv, SINGLE_VERSION_EPOCH};
 use crate::storage::{ColumnFamilyUtils, Operation, Transaction};
 
 #[derive(Clone)]
@@ -1104,7 +1103,7 @@ impl HummockManager for DefaultHummockManager {
         // TODO id_gen_manager generates u32, we need u64
         self.env
             .id_gen_manager_ref()
-            .generate(IdCategory::HummockSsTableId)
+            .generate(IdCategory::HummockSSTableId)
             .await
             .map(|id| id as HummockSSTableId)
     }

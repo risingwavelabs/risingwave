@@ -3,7 +3,6 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::meta::get_id_request::IdCategory;
 use tokio::sync::RwLock;
 
 use crate::manager::SINGLE_VERSION_EPOCH;
@@ -11,7 +10,7 @@ use crate::storage::MetaStoreRef;
 
 pub const ID_PREALLOCATE_INTERVAL: i32 = 1000;
 
-type Id = i32;
+pub type Id = i32;
 
 #[async_trait::async_trait]
 pub trait IdGenerator: Sync + Send + 'static {
@@ -100,6 +99,19 @@ impl IdGenerator for StoredIdGenerator {
     }
 }
 
+#[derive(PartialEq, Eq, Hash)]
+pub enum IdCategory {
+    Default = 0,
+    Database = 1,
+    Schema = 2,
+    Table = 3,
+    Actor = 4,
+    HummockContext = 5,
+    HummockSnapshot = 6,
+    Worker = 7,
+    HummockSSTableId = 8,
+}
+
 pub type IdGeneratorManagerRef = Arc<IdGeneratorManager>;
 
 /// [`IdGeneratorManager`] manages id generators in all categories,
@@ -120,6 +132,7 @@ impl IdGeneratorManager {
             (IdCategory::Actor, "actor", Some(1)),
             (IdCategory::HummockContext, "hummock_context", Some(1)),
             (IdCategory::HummockSnapshot, "hummock_snapshot", Some(1)),
+            (IdCategory::HummockSSTableId, "hummock_sstable", Some(1)),
         ] {
             inner.insert(
                 category,

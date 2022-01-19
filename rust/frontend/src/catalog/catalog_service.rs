@@ -5,7 +5,6 @@ use risingwave_common::array::RwError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_meta::rpc::meta_client::MetaClient;
 use risingwave_pb::meta::drop_request::CatalogId;
-use risingwave_pb::meta::get_id_request::IdCategory;
 use risingwave_pb::meta::{Database, DropRequest, Schema, Table};
 use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
 
@@ -142,9 +141,8 @@ impl LocalCatalogManager {
 /// manager.
 ///
 /// Some changes need to be done in future:
-/// 1. Do not use Id generator service (#2459).
-/// 2. Support more fields for ddl in future (#2473)
-/// 3. MVCC of schema (`version` flag in message) (#2474).
+/// 1. Support more fields for ddl in future (#2473)
+/// 2. MVCC of schema (`version` flag in message) (#2474).
 pub struct RemoteCatalogManager {
     meta_client: MetaClient,
     local_catalog_manager: LocalCatalogManager,
@@ -159,16 +157,16 @@ impl RemoteCatalogManager {
     }
 
     pub async fn create_database(&mut self, db_name: &str) -> Result<()> {
-        let database_id = self.meta_client.generate_id(IdCategory::Database).await?;
-        self.meta_client
+        let id = self
+            .meta_client
             .create_database(Database {
                 database_name: db_name.to_string(),
                 // Do not support MVCC DDL now.
-                version: 0,
-                database_ref_id: Some(DatabaseRefId { database_id }),
+                ..Default::default()
             })
             .await?;
-        self.local_catalog_manager.create_database_local(db_name)?;
+        self.local_catalog_manager
+            .create_database_with_id(db_name, id as DatabaseId)?;
         Ok(())
     }
 
@@ -178,8 +176,8 @@ impl RemoteCatalogManager {
             .get_database(db_name)
             .ok_or_else(|| RwError::from(CatalogError::NotFound("database", db_name.to_string())))?
             .id();
-        let schema_id = self.meta_client.generate_id(IdCategory::Schema).await?;
-        self.meta_client
+        let schema_id = self
+            .meta_client
             .create_schema(Schema {
                 schema_name: schema_name.to_string(),
                 version: 0,
@@ -187,7 +185,7 @@ impl RemoteCatalogManager {
                     database_ref_id: Some(DatabaseRefId {
                         database_id: database_id as i32,
                     }),
-                    schema_id,
+                    schema_id: 0,
                 }),
             })
             .await?;
@@ -217,17 +215,20 @@ impl RemoteCatalogManager {
                 RwError::from(CatalogError::NotFound("schema", schema_name.to_string()))
             })?
             .id() as i32;
-        // Request Id from meta service.
-        let table_id = self.meta_client.generate_id(IdCategory::Table).await?;
-        table.table_ref_id = Some(TableRefId {
-            table_id,
-            schema_ref_id: Some(SchemaRefId {
-                database_ref_id: Some(DatabaseRefId { database_id }),
-                schema_id,
-            }),
+        let schema_ref_id = Some(SchemaRefId {
+            database_ref_id: Some(DatabaseRefId { database_id }),
+            schema_id,
         });
-        self.meta_client.create_table(table.clone()).await?;
+        table.table_ref_id = Some(TableRefId {
+            schema_ref_id: schema_ref_id.clone(),
+            table_id: 0,
+        });
+        let table_id = self.meta_client.create_table(table.clone()).await?;
         // Create table locally.
+        table.table_ref_id = Some(TableRefId {
+            schema_ref_id,
+            table_id,
+        });
         self.local_catalog_manager
             .create_table(db_name, schema_name, &table)
     }

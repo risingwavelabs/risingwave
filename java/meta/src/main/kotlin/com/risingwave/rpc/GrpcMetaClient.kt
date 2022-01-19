@@ -16,12 +16,9 @@ import com.risingwave.proto.metanode.GetCatalogRequest
 import com.risingwave.proto.metanode.GetCatalogResponse
 import com.risingwave.proto.metanode.GetEpochRequest
 import com.risingwave.proto.metanode.GetEpochResponse
-import com.risingwave.proto.metanode.GetIdRequest
-import com.risingwave.proto.metanode.GetIdResponse
 import com.risingwave.proto.metanode.HeartbeatRequest
 import com.risingwave.proto.metanode.HeartbeatResponse
 import com.risingwave.proto.metanode.HeartbeatServiceGrpc
-import com.risingwave.proto.metanode.IdGeneratorServiceGrpc
 import com.risingwave.proto.metanode.StreamManagerServiceGrpc
 import io.grpc.Channel
 import io.grpc.StatusRuntimeException
@@ -84,16 +81,6 @@ class GrpcMetaClient(private val channel: Channel) : MetaClient {
     } catch (e: StatusRuntimeException) {
       LOGGER.warn("RPC failed: {}", e.status)
       throw rpcException("getEpoch", e)
-    }
-  }
-
-  override fun getId(request: GetIdRequest): GetIdResponse {
-    val stub = IdGeneratorServiceGrpc.newBlockingStub(channel)
-    try {
-      return stub.getId(request)
-    } catch (e: StatusRuntimeException) {
-      LOGGER.warn("RPC failed: {}", e.status)
-      throw rpcException("getId", e)
     }
   }
 
