@@ -20,7 +20,6 @@ use risingwave_stream::executor::{
     Barrier, Executor as StreamExecutor, MaterializeExecutor, Message, Mutation, PkIndices,
     StreamSourceExecutor,
 };
-use risingwave_stream::task::StreamTableManager;
 
 struct SingleChunkExecutor {
     chunk: Option<DataChunk>,

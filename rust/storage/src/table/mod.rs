@@ -9,6 +9,8 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::error::Result;
+use risingwave_common::util::sort_util::OrderType;
+use risingwave_pb::plan::ColumnDesc;
 pub use simple_manager::*;
 
 use crate::bummock::BummockResult;
@@ -37,6 +39,25 @@ pub trait TableManager: Sync + Send + AsRef<dyn Any> {
 
     /// Drop a specific table.
     async fn drop_table(&self, table_id: &TableId) -> Result<()>;
+
+    /// Create materialized view.
+    fn create_materialized_view(
+        &self,
+        table_id: &TableId,
+        columns: &[ColumnDesc],
+        pk_columns: Vec<usize>,
+        orderings: Vec<OrderType>,
+    ) -> Result<()>;
+
+    /// Create materialized view associated to table v2
+    fn register_associated_materialized_view(
+        &self,
+        associated_table_id: &TableId,
+        mview_id: &TableId,
+    ) -> Result<ScannableTableRef>;
+
+    /// Drop materialized view.
+    async fn drop_materialized_view(&self, table_id: &TableId) -> Result<()>;
 }
 
 #[async_trait::async_trait]

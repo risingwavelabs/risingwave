@@ -1,14 +1,13 @@
 use std::net::SocketAddr;
 
 use risingwave_source::{SourceManager, SourceManagerRef};
-
-use crate::task::{StreamTableManager, StreamTableManagerRef};
+use risingwave_storage::table::{TableManager, TableManagerRef};
 
 /// The global environment for task execution.
 /// The instance will be shared by every task.
 #[derive(Clone)]
 pub struct StreamTaskEnv {
-    table_manager: StreamTableManagerRef,
+    table_manager: TableManagerRef,
     server_addr: SocketAddr,
     source_manager: SourceManagerRef,
     worker_id: u32,
@@ -16,7 +15,7 @@ pub struct StreamTaskEnv {
 
 impl StreamTaskEnv {
     pub fn new(
-        table_manager: StreamTableManagerRef,
+        table_manager: TableManagerRef,
         source_manager: SourceManagerRef,
         server_addr: SocketAddr,
         worker_id: u32,
@@ -45,11 +44,11 @@ impl StreamTaskEnv {
         }
     }
 
-    pub fn table_manager(&self) -> &dyn StreamTableManager {
+    pub fn table_manager(&self) -> &dyn TableManager {
         &*self.table_manager
     }
 
-    pub fn table_manager_ref(&self) -> StreamTableManagerRef {
+    pub fn table_manager_ref(&self) -> TableManagerRef {
         self.table_manager.clone()
     }
 
