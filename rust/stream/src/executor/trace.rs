@@ -8,6 +8,10 @@ use tracing_futures::Instrument;
 
 use super::{Executor, Message, PkIndicesRef};
 
+/// Barrier event might quickly flush the log to millions of lines. Should enable this when you
+/// really want to debug.
+pub const ENABLE_BARRIER_EVENT: bool = false;
+
 /// `TraceExecutor` prints data passing in the stream graph to stdout.
 ///
 /// The position of `TraceExecutor` in graph:
@@ -22,6 +26,8 @@ pub struct TraceExecutor {
     input_desc: String,
     /// Input position of the input executor
     input_pos: usize,
+    /// Actor id
+    actor_id: u32,
 }
 
 impl Debug for TraceExecutor {
@@ -33,11 +39,17 @@ impl Debug for TraceExecutor {
 }
 
 impl TraceExecutor {
-    pub fn new(input: Box<dyn Executor>, input_desc: String, input_pos: usize) -> Self {
+    pub fn new(
+        input: Box<dyn Executor>,
+        input_desc: String,
+        input_pos: usize,
+        actor_id: u32,
+    ) -> Self {
         Self {
             input,
             input_desc,
             input_pos,
+            actor_id,
         }
     }
 }
@@ -61,9 +73,16 @@ impl Executor for TraceExecutor {
             .await;
         match input_message {
             Ok(message) => {
-                if let Message::Chunk(ref chunk) = message {
-                    if chunk.cardinality() > 0 {
-                        event!(tracing::Level::TRACE, prev = %input_desc, msg = "chunk", "input = \n{:#?}", chunk);
+                match &message {
+                    Message::Chunk(chunk) => {
+                        if chunk.cardinality() > 0 {
+                            event!(tracing::Level::TRACE, prev = %input_desc, msg = "chunk", "input = \n{:#?}", chunk);
+                        }
+                    }
+                    Message::Barrier(barrier) => {
+                        if ENABLE_BARRIER_EVENT {
+                            event!(tracing::Level::TRACE, prev = %input_desc, msg = "barrier", epoch = barrier.epoch, actor_id = self.actor_id, "process barrier");
+                        }
                     }
                 }
                 Ok(message)

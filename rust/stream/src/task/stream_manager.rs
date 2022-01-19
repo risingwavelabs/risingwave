@@ -125,10 +125,8 @@ impl StreamManager {
 
     pub fn checkpoint(&self, epoch: u64) -> Result<()> {
         let mut core = self.core.lock().unwrap();
-        core.barrier_manager.send_barrier(&Barrier {
-            epoch,
-            mutation: Mutation::Nothing,
-        })
+        core.barrier_manager
+            .send_barrier(&Barrier::new(epoch, Mutation::Nothing))
     }
 
     pub fn send_barrier(&self, barrier: &Barrier) -> Result<()> {
@@ -353,7 +351,7 @@ impl StreamManagerCore {
 
     fn send_conf_change_barrier(&mut self, mutation: Mutation) -> Result<()> {
         self.barrier_manager
-            .send_barrier(&Barrier { epoch: 0, mutation })
+            .send_barrier(&Barrier::new(0, mutation))
     }
 
     /// Create a chain(tree) of nodes, with given `store`.
@@ -377,7 +375,7 @@ impl StreamManagerCore {
                 if cfg!(debug_assertions) {
                     let input = input?;
                     let identity = input.identity().to_string();
-                    let traced = Box::new(TraceExecutor::new(input, identity, input_pos));
+                    let traced = Box::new(TraceExecutor::new(input, identity, input_pos, actor_id));
                     let checked = Box::new(SchemaCheckExecutor::new(traced));
                     Ok(checked as Box<dyn Executor>)
                 } else {
@@ -842,7 +840,7 @@ impl StreamManagerCore {
             let actor = self.actors.remove(&actor_id).unwrap();
             let executor = self.create_nodes(actor_id, actor.get_nodes(), env.clone())?;
             let identity = executor.identity().to_string();
-            let executor = Box::new(TraceExecutor::new(executor, identity, 0));
+            let executor = Box::new(TraceExecutor::new(executor, identity, 0, actor_id));
             let dispatcher = self.create_dispatcher(
                 executor,
                 actor.get_dispatcher(),

@@ -324,18 +324,15 @@ mod tests {
                     tx.send(Message::Chunk(build_test_chunk(epoch)))
                         .await
                         .unwrap();
-                    tx.send(Message::Barrier(Barrier {
-                        epoch,
-                        ..Barrier::default()
-                    }))
-                    .await
-                    .unwrap();
+                    tx.send(Message::Barrier(Barrier::new(epoch, Mutation::Nothing)))
+                        .await
+                        .unwrap();
                     tokio::time::sleep(Duration::from_millis(1)).await;
                 }
-                tx.send(Message::Barrier(Barrier {
-                    epoch: 1000,
-                    mutation: Mutation::Stop(HashSet::default()),
-                }))
+                tx.send(Message::Barrier(Barrier::new(
+                    1000,
+                    Mutation::Stop(HashSet::default()),
+                )))
                 .await
                 .unwrap();
             });
@@ -350,7 +347,7 @@ mod tests {
                 });
             }
             // expect a barrier
-            assert_matches!(merger.next().await.unwrap(), Message::Barrier(Barrier{epoch:barrier_epoch,mutation:_}) => {
+            assert_matches!(merger.next().await.unwrap(), Message::Barrier(Barrier{epoch:barrier_epoch,mutation:_,..}) => {
               assert_eq!(barrier_epoch, epoch);
             });
         }
@@ -359,6 +356,7 @@ mod tests {
             Message::Barrier(Barrier {
                 epoch: _,
                 mutation: Mutation::Stop(_),
+                ..
             })
         );
 
@@ -450,7 +448,7 @@ mod tests {
           assert_eq!(columns.len() as u64, 0);
           assert_eq!(visibility, None);
         });
-        assert_matches!(rx.next().await.unwrap(), Message::Barrier(Barrier{epoch:barrier_epoch,mutation:_}) => {
+        assert_matches!(rx.next().await.unwrap(), Message::Barrier(Barrier { epoch: barrier_epoch, mutation: _, .. }) => {
           assert_eq!(barrier_epoch, 12345);
         });
         assert!(rpc_called.load(Ordering::SeqCst));

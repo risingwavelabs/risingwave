@@ -224,7 +224,8 @@ async fn test_stream_proto() {
                 sink.next().await.unwrap(),
                 Message::Barrier(Barrier {
                     epoch: _,
-                    mutation: Mutation::Nothing
+                    mutation: Mutation::Nothing,
+                    ..
                 })
             ));
         }
@@ -232,7 +233,8 @@ async fn test_stream_proto() {
             sink.next().await.unwrap(),
             Message::Barrier(Barrier {
                 epoch: 0,
-                mutation: Mutation::Stop(_)
+                mutation: Mutation::Stop(_),
+                ..
             })
         ));
     });
@@ -254,10 +256,10 @@ async fn test_stream_proto() {
 
     tokio::time::timeout(
         timeout,
-        source.send(Message::Barrier(Barrier {
-            epoch: 0,
-            mutation: Mutation::Stop(HashSet::from([1, 3, 7, 11, 13, 233])),
-        })),
+        source.send(Message::Barrier(Barrier::new(
+            0,
+            Mutation::Stop(HashSet::from([1, 3, 7, 11, 13, 233])),
+        ))),
     )
     .await
     .expect("timeout while sending terminate message")

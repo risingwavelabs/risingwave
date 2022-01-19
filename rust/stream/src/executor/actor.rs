@@ -35,14 +35,26 @@ impl Actor {
                             break;
                         }
                     }
-                    span = tracing::trace_span!(
-                        "actor_poll",
-                        otel.name = span_name.as_str(),
-                        // For the upstream trace pipe, its output is our input.
-                        actor_id = self.id,
-                        next = "Outbound",
-                        epoch = barrier.epoch
-                    );
+                    if let Some(ref span_parent) = barrier.span {
+                        span = tracing::trace_span!(
+                            parent: span_parent,
+                            "actor_poll",
+                            otel.name = span_name.as_str(),
+                            // For the upstream trace pipe, its output is our input.
+                            actor_id = self.id,
+                            next = "Outbound",
+                            epoch = barrier.epoch,
+                        );
+                    } else {
+                        span = tracing::trace_span!(
+                            "actor_poll",
+                            otel.name = span_name.as_str(),
+                            // For the upstream trace pipe, its output is our input.
+                            actor_id = self.id,
+                            next = "Outbound",
+                            epoch = barrier.epoch,
+                        );
+                    }
                 }
                 Ok(None) => {
                     continue;

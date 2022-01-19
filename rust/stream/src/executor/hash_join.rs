@@ -790,6 +790,7 @@ mod tests {
             Message::Barrier(Barrier {
                 epoch: 0,
                 mutation: Mutation::Nothing,
+                ..
             })
         ));
 

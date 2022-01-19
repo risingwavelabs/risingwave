@@ -384,10 +384,10 @@ mod tests {
         writer.write(chunk1.clone()).await?;
 
         barrier_sender
-            .unbounded_send(Message::Barrier(Barrier {
-                epoch: 1,
-                mutation: Mutation::Stop(HashSet::default()),
-            }))
+            .unbounded_send(Message::Barrier(Barrier::new(
+                1,
+                Mutation::Stop(HashSet::default()),
+            )))
             .unwrap();
 
         source.next().await.unwrap();

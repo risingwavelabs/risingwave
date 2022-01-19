@@ -193,10 +193,7 @@ async fn test_stream_mv_proto() {
     // then we can send the stop barrier.
     tokio::time::sleep(Duration::from_millis(500)).await;
     stream_manager
-        .send_barrier(&Barrier {
-            epoch: 0,
-            mutation: Mutation::Stop(HashSet::from([1])),
-        })
+        .send_barrier(&Barrier::new(0, Mutation::Stop(HashSet::from([1]))))
         .unwrap();
     // TODO(MrCroxx): fix this
     // FIXME: use channel when testing hummock to make sure local state has already flushed.

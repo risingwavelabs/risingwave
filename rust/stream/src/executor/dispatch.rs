@@ -729,10 +729,7 @@ mod tests {
         add_local_channels(ctx.clone(), vec![(233, 234), (233, 235)]);
         add_remote_channels(ctx.clone(), 233, vec![238]);
 
-        let b1 = Barrier {
-            epoch: 0,
-            mutation: Mutation::UpdateOutputs(updates1),
-        };
+        let b1 = Barrier::new(0, Mutation::UpdateOutputs(updates1));
         tx.send(Message::Barrier(b1)).await.unwrap();
         executor.next().await.unwrap();
         let tctx = ctx.clone();
@@ -755,10 +752,7 @@ mod tests {
             }],
         );
         add_local_channels(ctx.clone(), vec![(233, 235)]);
-        let b2 = Barrier {
-            epoch: 0,
-            mutation: Mutation::UpdateOutputs(updates2),
-        };
+        let b2 = Barrier::new(0, Mutation::UpdateOutputs(updates2));
 
         tx.send(Message::Barrier(b2)).await.unwrap();
         executor.next().await.unwrap();
@@ -772,9 +766,9 @@ mod tests {
 
         add_local_channels(ctx.clone(), vec![(233, 245)]);
         add_remote_channels(ctx.clone(), 233, vec![246]);
-        tx.send(Message::Barrier(Barrier {
-            epoch: 0,
-            mutation: Mutation::AddOutput(
+        tx.send(Message::Barrier(Barrier::new(
+            0,
+            Mutation::AddOutput(
                 233,
                 vec![
                     ActorInfo {
@@ -793,7 +787,7 @@ mod tests {
                     },
                 ],
             ),
-        }))
+        )))
         .await
         .unwrap();
         executor.next().await.unwrap();

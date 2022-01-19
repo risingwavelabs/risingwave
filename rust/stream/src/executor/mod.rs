@@ -73,10 +73,30 @@ impl Default for Mutation {
     }
 }
 
-#[derive(Default, Debug, Clone, PartialEq)]
+#[derive(Default, Debug, Clone)]
 pub struct Barrier {
     pub epoch: u64,
     pub mutation: Mutation,
+    pub span: Option<tracing::span::Span>,
+}
+
+impl Barrier {
+    // TODO: Barrier::new will create a barrier in local environment, but in reality, it should
+    // contain tracing info and timestamps. Therefore, this function should never be called after we
+    // migrated barrier generation to meta service.
+    pub fn new(epoch: u64, mutation: Mutation) -> Self {
+        Self {
+            epoch,
+            mutation,
+            span: None,
+        }
+    }
+}
+
+impl PartialEq for Barrier {
+    fn eq(&self, other: &Self) -> bool {
+        self.epoch == other.epoch && self.mutation == other.mutation
+    }
 }
 
 impl Mutation {
@@ -87,7 +107,9 @@ impl Mutation {
 
 impl Barrier {
     fn to_protobuf(&self) -> ProstBarrier {
-        let Barrier { epoch, mutation }: Barrier = self.clone();
+        let Barrier {
+            epoch, mutation, ..
+        }: Barrier = self.clone();
         ProstBarrier {
             epoch,
             mutation: match mutation {
@@ -139,6 +161,7 @@ impl Barrier {
                     Mutation::AddOutput(add.actor_id, add.get_downstream_actors().info.clone())
                 }
             },
+            span: None,
         }
     }
 }
@@ -158,6 +181,7 @@ impl Message {
             Message::Barrier(Barrier {
                 epoch: _,
                 mutation: Mutation::Stop(..),
+                span: _
             })
         )
     }

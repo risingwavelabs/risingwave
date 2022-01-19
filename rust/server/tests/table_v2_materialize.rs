@@ -185,10 +185,7 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     // Send a barrier and poll again, should write changes to storage
     barrier_tx
-        .unbounded_send(Message::Barrier(Barrier {
-            epoch: 1919,
-            mutation: Mutation::Nothing,
-        }))
+        .unbounded_send(Message::Barrier(Barrier::new(1919, Mutation::Nothing)))
         .unwrap();
 
     assert!(matches!(

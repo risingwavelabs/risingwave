@@ -69,14 +69,14 @@ impl MockSource {
     }
 
     pub fn push_barrier(&mut self, epoch: u64, stop: bool) {
-        self.msgs.push_back(Message::Barrier(Barrier {
+        self.msgs.push_back(Message::Barrier(Barrier::new(
             epoch,
-            mutation: if stop {
+            if stop {
                 Mutation::Stop(HashSet::default())
             } else {
                 Mutation::Nothing
             },
-        }));
+        )));
     }
 }
 
@@ -86,10 +86,10 @@ impl Executor for MockSource {
         self.epoch += 1;
         match self.msgs.pop_front() {
             Some(msg) => Ok(msg),
-            None => Ok(Message::Barrier(Barrier {
-                epoch: self.epoch,
-                mutation: Mutation::Stop(HashSet::default()),
-            })),
+            None => Ok(Message::Barrier(Barrier::new(
+                self.epoch,
+                Mutation::Stop(HashSet::default()),
+            ))),
         }
     }
 
@@ -156,14 +156,14 @@ impl MockAsyncSource {
     }
 
     pub fn push_barrier(tx: &mut UnboundedSender<Message>, epoch: u64, stop: bool) {
-        tx.send(Message::Barrier(Barrier {
+        tx.send(Message::Barrier(Barrier::new(
             epoch,
-            mutation: if stop {
+            if stop {
                 Mutation::Stop(HashSet::default())
             } else {
                 Mutation::Nothing
             },
-        }))
+        )))
         .expect("Receiver closed");
     }
 }
@@ -174,10 +174,10 @@ impl Executor for MockAsyncSource {
         self.epoch += 1;
         match self.rx.recv().await {
             Some(msg) => Ok(msg),
-            None => Ok(Message::Barrier(Barrier {
-                epoch: self.epoch,
-                mutation: Mutation::Stop(HashSet::default()),
-            })),
+            None => Ok(Message::Barrier(Barrier::new(
+                self.epoch,
+                Mutation::Stop(HashSet::default()),
+            ))),
         }
     }
 
