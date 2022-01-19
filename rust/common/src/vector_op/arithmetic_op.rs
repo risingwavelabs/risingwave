@@ -9,7 +9,7 @@ use num_traits::{AsPrimitive, CheckedAdd, CheckedDiv, CheckedMul, CheckedRem, Ch
 use crate::array::PrimitiveArrayItemType;
 use crate::error::ErrorCode::{InternalError, NumericValueOutOfRange};
 use crate::error::{Result, RwError};
-use crate::types::{get_mouth_days, IntervalUnit};
+use crate::types::IntervalUnit;
 use crate::vector_op::cast::UNIX_EPOCH_DAYS;
 
 #[inline(always)]
@@ -100,6 +100,22 @@ where
         )))
     })?;
     atm(l, r)
+}
+
+const LEAP_DAYS: &[i32] = &[0, 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+const NORMAL_DAYS: &[i32] = &[0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+fn is_leap_year(year: i32) -> bool {
+    year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
+}
+
+/// return the days of the `year-month`
+fn get_mouth_days(year: i32, month: usize) -> i32 {
+    if is_leap_year(year) {
+        LEAP_DAYS[month]
+    } else {
+        NORMAL_DAYS[month]
+    }
 }
 
 #[inline(always)]

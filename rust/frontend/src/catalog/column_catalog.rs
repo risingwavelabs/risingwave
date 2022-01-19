@@ -21,10 +21,6 @@ impl ColumnDesc {
         self.is_primary
     }
 
-    pub fn is_nullable(&self) -> bool {
-        self.data_type.is_nullable()
-    }
-
     pub fn data_type(&self) -> DataTypeKind {
         self.data_type
     }
@@ -57,10 +53,6 @@ impl ColumnCatalog {
 
     pub fn is_primary(&self) -> bool {
         self.desc.is_primary()
-    }
-
-    pub fn is_nullable(&self) -> bool {
-        self.desc.is_nullable()
     }
 
     pub fn col_desc_ref(&self) -> &ColumnDesc {

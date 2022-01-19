@@ -486,62 +486,6 @@ impl PartialEq for ArrayImpl {
     }
 }
 
-// This trait combine the array with its data type. It helps generate the across type expression
-pub trait DataTypeTrait {
-    const DATA_TYPE_ENUM: DataTypeKind;
-    type ArrayType: Array;
-}
-impl DataTypeTrait for BoolType {
-    const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Boolean;
-    type ArrayType = BoolArray;
-}
-impl DataTypeTrait for Int16Type {
-    const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Int16;
-    type ArrayType = I16Array;
-}
-impl DataTypeTrait for Int32Type {
-    const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Int32;
-    type ArrayType = I32Array;
-}
-impl DataTypeTrait for Int64Type {
-    const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Int64;
-    type ArrayType = I64Array;
-}
-impl DataTypeTrait for Float32Type {
-    const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Float32;
-    type ArrayType = F32Array;
-}
-impl DataTypeTrait for Float64Type {
-    const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Float64;
-    type ArrayType = F64Array;
-}
-impl DataTypeTrait for DecimalType {
-    const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Decimal;
-    type ArrayType = DecimalArray;
-}
-impl DataTypeTrait for TimestampType {
-    const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Timestamp;
-    type ArrayType = I64Array;
-}
-impl DataTypeTrait for TimestampWithTimeZoneType {
-    const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Timestampz;
-    type ArrayType = I64Array;
-}
-impl DataTypeTrait for DateType {
-    const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Date;
-    type ArrayType = I32Array;
-}
-impl DataTypeTrait for IntervalType {
-    const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Interval;
-    type ArrayType = IntervalArray;
-}
-
-impl DataTypeTrait for StringType {
-    // TODO: How about char?
-    const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Varchar;
-    type ArrayType = Utf8Array;
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

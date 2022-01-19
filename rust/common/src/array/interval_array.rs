@@ -6,7 +6,7 @@ use super::NULL_VAL_FOR_HASH;
 use crate::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayIterator};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::error::Result;
-use crate::types::interval_type::IntervalUnit;
+use crate::types::interval::IntervalUnit;
 
 #[derive(Debug)]
 pub struct IntervalArray {

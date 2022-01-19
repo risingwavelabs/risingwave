@@ -73,5 +73,6 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     }
 }
 
+mod data_types;
 #[cfg(test)]
 mod test_utils;

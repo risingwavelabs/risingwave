@@ -1,17 +1,10 @@
-use std::any::Any;
 use std::convert::TryFrom;
-use std::sync::Arc;
 
 use bytes::{Buf, BufMut};
 use risingwave_pb::data::DataType as ProstDataType;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{ErrorCode, Result, RwError};
-
-mod numeric_type;
-pub use numeric_type::*;
-mod primitive_data_type;
-pub use primitive_data_type::*;
 mod native_type;
 
 mod scalar_impl;
@@ -21,22 +14,14 @@ pub use native_type::*;
 use risingwave_pb::data::data_type::TypeName;
 pub use scalar_impl::*;
 
-mod bool_type;
-mod datetime_type;
 mod decimal;
-mod decimal_type;
-pub mod interval_type;
-mod string_type;
+pub mod interval;
 
 mod ordered_float;
-pub use bool_type::*;
-pub use datetime_type::*;
 pub use decimal::Decimal;
-pub use decimal_type::*;
-pub use interval_type::*;
+pub use interval::*;
 pub use ordered_float::IntoOrdered;
 use paste::paste;
-pub use string_type::*;
 
 use crate::array::{ArrayBuilderImpl, PrimitiveArrayItemType};
 
@@ -70,60 +55,6 @@ pub enum DataSize {
     Variable,
 }
 
-// TODO(eric): DataType is deprecated and will be removed later
-pub trait DataType: Debug + Sync + Send + 'static {
-    fn data_type_kind(&self) -> DataTypeKind;
-    fn is_nullable(&self) -> bool;
-    fn create_array_builder(&self, capacity: usize) -> Result<ArrayBuilderImpl>;
-    fn to_protobuf(&self) -> Result<ProstDataType>;
-    fn as_any(&self) -> &dyn Any;
-    fn data_size(&self) -> DataSize;
-}
-
-pub type DataTypeRef = Arc<dyn DataType>;
-
-impl DataTypeKind {
-    fn prost_type_name(&self) -> TypeName {
-        match self {
-            DataTypeKind::Int16 => TypeName::Int16,
-            DataTypeKind::Int32 => TypeName::Int32,
-            DataTypeKind::Int64 => TypeName::Int64,
-            DataTypeKind::Float32 => TypeName::Float,
-            DataTypeKind::Float64 => TypeName::Double,
-            DataTypeKind::Boolean => TypeName::Boolean,
-            DataTypeKind::Char => TypeName::Char,
-            DataTypeKind::Varchar => TypeName::Varchar,
-            DataTypeKind::Date => TypeName::Date,
-            DataTypeKind::Time => TypeName::Time,
-            DataTypeKind::Timestamp => TypeName::Timestamp,
-            DataTypeKind::Timestampz => TypeName::Timestampz,
-            DataTypeKind::Decimal => TypeName::Decimal,
-            DataTypeKind::Interval => TypeName::Interval,
-        }
-    }
-
-    /// `to_data_type` converts data type to a `DataTypeRef`. This would be useful during migration
-    /// from `DataTypeRef` to enum.
-    pub fn to_data_type(&self) -> DataTypeRef {
-        match self {
-            DataTypeKind::Int16 => Int16Type::create(true),
-            DataTypeKind::Int32 => Int32Type::create(true),
-            DataTypeKind::Int64 => Int64Type::create(true),
-            DataTypeKind::Float32 => Float32Type::create(true),
-            DataTypeKind::Float64 => Float64Type::create(true),
-            DataTypeKind::Boolean => BoolType::create(true),
-            DataTypeKind::Char => StringType::create(true, 0, DataTypeKind::Char),
-            DataTypeKind::Varchar => StringType::create(true, 0, DataTypeKind::Varchar),
-            DataTypeKind::Date => DateType::create(true),
-            DataTypeKind::Time => TimeType::create(true, 0),
-            DataTypeKind::Timestamp => TimestampType::create(true, 0),
-            DataTypeKind::Timestampz => TimestampWithTimeZoneType::create(true, 0),
-            DataTypeKind::Decimal => DecimalType::create(true, 28, 0).unwrap(),
-            DataTypeKind::Interval => IntervalType::create(true),
-        }
-    }
-}
-
 impl From<&ProstDataType> for DataTypeKind {
     fn from(proto: &ProstDataType) -> DataTypeKind {
         match proto.get_type_name() {
@@ -147,10 +78,6 @@ impl From<&ProstDataType> for DataTypeKind {
 }
 
 impl DataTypeKind {
-    pub fn is_nullable(&self) -> bool {
-        true
-    }
-
     pub fn create_array_builder(&self, capacity: usize) -> Result<ArrayBuilderImpl> {
         use crate::array::*;
         Ok(match self {
@@ -168,6 +95,25 @@ impl DataTypeKind {
             DataTypeKind::Timestampz => PrimitiveArrayBuilder::<i64>::new(capacity)?.into(),
             DataTypeKind::Interval => IntervalArrayBuilder::new(capacity)?.into(),
         })
+    }
+
+    fn prost_type_name(&self) -> TypeName {
+        match self {
+            DataTypeKind::Int16 => TypeName::Int16,
+            DataTypeKind::Int32 => TypeName::Int32,
+            DataTypeKind::Int64 => TypeName::Int64,
+            DataTypeKind::Float32 => TypeName::Float,
+            DataTypeKind::Float64 => TypeName::Double,
+            DataTypeKind::Boolean => TypeName::Boolean,
+            DataTypeKind::Char => TypeName::Char,
+            DataTypeKind::Varchar => TypeName::Varchar,
+            DataTypeKind::Date => TypeName::Date,
+            DataTypeKind::Time => TypeName::Time,
+            DataTypeKind::Timestamp => TypeName::Timestamp,
+            DataTypeKind::Timestampz => TypeName::Timestampz,
+            DataTypeKind::Decimal => TypeName::Decimal,
+            DataTypeKind::Interval => TypeName::Interval,
+        }
     }
 
     pub fn to_protobuf(&self) -> Result<ProstDataType> {
@@ -199,26 +145,6 @@ impl DataTypeKind {
             DataTypeKind::Interval => DataSize::Variable,
         }
     }
-}
-
-pub fn build_from_prost(proto: &ProstDataType) -> Result<DataTypeKind> {
-    Ok(match proto.get_type_name() {
-        TypeName::Int16 => DataTypeKind::Int16,
-        TypeName::Int32 => DataTypeKind::Int32,
-        TypeName::Int64 => DataTypeKind::Int64,
-        TypeName::Float => DataTypeKind::Float32,
-        TypeName::Double => DataTypeKind::Float64,
-        TypeName::Boolean => DataTypeKind::Boolean,
-        TypeName::Symbol => DataTypeKind::Varchar,
-        TypeName::Char => DataTypeKind::Char,
-        TypeName::Varchar => DataTypeKind::Varchar,
-        TypeName::Date => DataTypeKind::Date,
-        TypeName::Time => DataTypeKind::Time,
-        TypeName::Timestamp => DataTypeKind::Timestamp,
-        TypeName::Timestampz => DataTypeKind::Timestampz,
-        TypeName::Decimal => DataTypeKind::Decimal,
-        TypeName::Interval => DataTypeKind::Interval,
-    })
 }
 
 /// `Scalar` is a trait over all possible owned types in the evaluation

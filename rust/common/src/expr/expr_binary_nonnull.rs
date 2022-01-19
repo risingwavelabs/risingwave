@@ -2,9 +2,10 @@ use std::marker::PhantomData;
 
 use risingwave_pb::expr::expr_node::Type;
 
-use crate::array::{Array, BoolArray, DataTypeTrait, DecimalArray, I32Array, I64Array, Utf8Array};
+use crate::array::{Array, BoolArray, DecimalArray, I32Array, I64Array, Utf8Array};
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
+use crate::expr::data_types::*;
 use crate::expr::template::BinaryExpression;
 use crate::expr::BoxedExpression;
 use crate::types::*;

@@ -4,10 +4,8 @@ use risingwave_pb::expr::expr_node::Type as ProstType;
 
 /// For expression that only accept one value as input (e.g. CAST)
 use super::template::{UnaryBytesExpression, UnaryExpression};
-use crate::array::{
-    BoolArray, DataTypeTrait, DecimalArray, F32Array, F64Array, I16Array, I32Array, I64Array,
-    Utf8Array,
-};
+use crate::array::*;
+use crate::expr::data_types::*;
 use crate::expr::expr_is_null::{IsNotNullExpression, IsNullExpression};
 use crate::expr::pg_sleep::PgSleepExpression;
 use crate::expr::template::UnaryNullableExpression;
@@ -22,16 +20,17 @@ use crate::vector_op::rtrim::rtrim;
 use crate::vector_op::trim::trim;
 use crate::vector_op::upper::upper;
 
-/// This macro helps create cast expression.
+/// This macro helps to create cast expression.
 /// It receives all the combinations of `gen_cast` and generates corresponding match cases
-/// In [], the parameters are for constructing new expression
-/// * $child: child expression
-/// * $ret: return expression
-/// In ()*, the parameters are for generating match cases
-/// * $input: input type
-/// * $cast: The cast type in that the operation will calculate
-/// * $func: The scalar function for expression, it's a generic function and specialized by the type
-///   of `$input, $cast`
+/// In `[]`, the parameters are for constructing new expression
+/// * `$child`: child expression
+/// * `$ret`: return expression
+///
+/// In `()*`, the parameters are for generating match cases
+/// * `$input`: input type
+/// * `$cast`: The cast type in that the operation will calculate
+/// * `$func`: The scalar function for expression, it's a generic function and specialized by the
+///   type of `$input, $cast`
 macro_rules! gen_cast_impl {
   ([$child:expr, $ret:expr], $( { $input:ty, $cast:ty, $func:expr} ),*) => {
     match ($child.return_type(), $ret) {
@@ -46,7 +45,7 @@ macro_rules! gen_cast_impl {
           }
       ),*
       _ => {
-        unimplemented!("The expression ({:?}, {:?}) using vectorized expression framework is not supported yet!", $child.return_type(), $ret)
+        unimplemented!("CAST({:?} AS {:?}) not supported yet!", $child.return_type(), $ret)
       }
     }
   };

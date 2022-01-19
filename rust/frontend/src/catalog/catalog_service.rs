@@ -489,7 +489,6 @@ mod tests {
             .unwrap();
         let col2 = table.get_column_by_id(1).unwrap();
         let col1 = table.get_column_by_id(0).unwrap();
-        assert!(col1.is_nullable());
         assert_eq!(col1.id(), 0);
         assert_eq!(col1.data_type(), DataTypeKind::Int32);
         assert_eq!(col2.name(), "v2");

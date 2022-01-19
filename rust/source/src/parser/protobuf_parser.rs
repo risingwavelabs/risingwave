@@ -7,10 +7,7 @@ use risingwave_common::error::ErrorCode::{
     InternalError, ItemNotFound, NotImplementedError, ProtocolError,
 };
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{
-    BoolType, DataTypeKind, DataTypeRef, Datum, Decimal, Float32Type, Float64Type, Int32Type,
-    Int64Type, OrderedF32, OrderedF64, ScalarImpl, StringType,
-};
+use risingwave_common::types::{DataTypeKind, Datum, Decimal, OrderedF32, OrderedF64, ScalarImpl};
 use risingwave_common::vector_op::cast::str_to_date;
 use risingwave_pb::plan::ColumnDesc;
 use serde::de::Deserialize;
@@ -147,17 +144,17 @@ macro_rules! protobuf_match_type {
 }
 
 /// Maps a protobuf field type to a DB column type.
-fn protobuf_type_mapping(field_type: &FieldType, is_repeated: bool) -> Result<DataTypeRef> {
+fn protobuf_type_mapping(field_type: &FieldType, is_repeated: bool) -> Result<DataTypeKind> {
     if is_repeated {
         return Err(NotImplementedError("repeated field is not supported".to_string()).into());
     }
     let t = match field_type {
-        FieldType::Double => Float64Type::create(true),
-        FieldType::Float => Float32Type::create(true),
-        FieldType::Int64 | FieldType::SFixed64 | FieldType::SInt64 => Int64Type::create(true),
-        FieldType::Int32 | FieldType::SFixed32 | FieldType::SInt32 => Int32Type::create(true),
-        FieldType::Bool => BoolType::create(true),
-        FieldType::String => StringType::create(true, 0, DataTypeKind::Varchar),
+        FieldType::Double => DataTypeKind::Float64,
+        FieldType::Float => DataTypeKind::Float32,
+        FieldType::Int64 | FieldType::SFixed64 | FieldType::SInt64 => DataTypeKind::Int64,
+        FieldType::Int32 | FieldType::SFixed32 | FieldType::SInt32 => DataTypeKind::Int32,
+        FieldType::Bool => DataTypeKind::Boolean,
+        FieldType::String => DataTypeKind::Varchar,
         actual_type => {
             return Err(
                 NotImplementedError(format!("unsupported field type: {:?}", actual_type)).into(),
@@ -413,7 +410,7 @@ mod tests {
             columns,
             vec![
                 ColumnDesc {
-                    column_type: Some(Int32Type::create(true).to_protobuf().unwrap()),
+                    column_type: Some(DataTypeKind::Int32.to_protobuf().unwrap()),
                     is_primary: false,
                     name: "id".to_string(),
                     ..Default::default()
@@ -431,13 +428,13 @@ mod tests {
                     ..Default::default()
                 },
                 ColumnDesc {
-                    column_type: Some(Int64Type::create(true).to_protobuf().unwrap()),
+                    column_type: Some(DataTypeKind::Int64.to_protobuf().unwrap()),
                     is_primary: false,
                     name: "zipcode".to_string(),
                     ..Default::default()
                 },
                 ColumnDesc {
-                    column_type: Some(Float32Type::create(true).to_protobuf().unwrap()),
+                    column_type: Some(DataTypeKind::Float32.to_protobuf().unwrap()),
                     is_primary: false,
                     name: "rate".to_string(),
                     ..Default::default()
