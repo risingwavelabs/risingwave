@@ -126,8 +126,8 @@ pub fn create_streaming_agg_state(
                     // Count
                     (Count, Int64, Int64, StreamingCountAgg::<I64Array>),
                     (Count, Int32, Int64, StreamingCountAgg::<I32Array>),
-                    (Count, Int16, Int64, StreamingCountAgg::<I32Array>),
-                    (Count, Float64, Int64, StreamingCountAgg::<F32Array>),
+                    (Count, Int16, Int64, StreamingCountAgg::<I16Array>),
+                    (Count, Float64, Int64, StreamingCountAgg::<F64Array>),
                     (Count, Float32, Int64, StreamingCountAgg::<F32Array>),
                     (Count, Decimal, Int64, StreamingCountAgg::<DecimalArray>),
                     (Count, Boolean, Int64, StreamingCountAgg::<BoolArray>),
