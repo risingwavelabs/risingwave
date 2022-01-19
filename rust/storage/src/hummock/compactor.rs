@@ -9,7 +9,7 @@ use super::key::{get_epoch, Epoch, FullKey};
 use super::key_range::KeyRange;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::version_cmp::VersionedComparator;
-use super::version_manager::{CompactTask, Level, LevelEntry};
+use super::version_manager::{CompactMetrics, CompactTask, Level, LevelEntry, TableSetStatistics};
 use super::{
     HummockError, HummockOptions, HummockResult, HummockStorage, HummockValue, SSTable,
     SSTableIterator, VersionManager,
@@ -31,14 +31,28 @@ impl Compactor {
     ) -> HummockResult<()> {
         let mut overlapping_tables = vec![];
         let mut non_overlapping_table_seqs = vec![];
-        for LevelEntry { level, .. } in &compact_task.input_ssts {
+        let target_level = compact_task.target_level;
+        let accumulating_readsize =
+            |metrics: &mut CompactMetrics, level_idx: u8, tables: &Vec<Arc<SSTable>>| {
+                let read_statistics: &mut TableSetStatistics = if level_idx == target_level {
+                    &mut metrics.read_level_nplus1
+                } else {
+                    &mut metrics.read_level_n
+                };
+                for table in tables {
+                    read_statistics.add_table(table);
+                }
+            };
+        for LevelEntry { level_idx, level } in &compact_task.input_ssts {
             match level {
                 Level::Tiering(input_sst_ids) => {
                     let tables = context.version_manager.pick_few_tables(input_sst_ids)?;
+                    accumulating_readsize(&mut compact_task.metrics, *level_idx, &tables);
                     overlapping_tables.extend(tables);
                 }
                 Level::Leveling(input_sst_ids) => {
                     let tables = context.version_manager.pick_few_tables(input_sst_ids)?;
+                    accumulating_readsize(&mut compact_task.metrics, *level_idx, &tables);
                     non_overlapping_table_seqs.push(tables);
                 }
             }
@@ -108,6 +122,9 @@ impl Compactor {
 
         sub_compact_outputsets.sort_by_key(|(sub_kr_idx, _)| *sub_kr_idx);
         for (_, mut sub_output) in sub_compact_outputsets {
+            for table in &sub_output {
+                compact_task.metrics.write.add_table(table);
+            }
             compact_task.sorted_output_ssts.append(&mut sub_output);
         }
 

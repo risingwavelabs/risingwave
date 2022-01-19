@@ -23,7 +23,7 @@ pub enum Level {
     Tiering(Vec<u64>),
 }
 pub struct LevelEntry {
-    level_idx: u8,
+    pub level_idx: u8,
     pub level: Level,
 }
 
@@ -39,6 +39,25 @@ struct CompactStatus {
     level_handlers: Vec<LevelHandler>,
     next_compact_task_id: u64,
 }
+/// In [`TableSetStatistics`] object, we store total size of all tables in tableset in [`size_gb`]
+/// field, and number of tables in the table set in [`cnt`] field
+#[derive(Default)]
+pub struct TableSetStatistics {
+    size_gb: f64,
+    cnt: u64,
+}
+impl TableSetStatistics {
+    pub fn add_table(&mut self, table: &SSTable) {
+        self.size_gb += table.meta.estimated_size as f64 / (1024 * 1024 * 1024) as f64;
+        self.cnt += 1;
+    }
+}
+#[derive(Default)]
+pub struct CompactMetrics {
+    pub read_level_n: TableSetStatistics,
+    pub read_level_nplus1: TableSetStatistics,
+    pub write: TableSetStatistics,
+}
 pub struct CompactTask {
     /// SSTs to be compacted, which will be removed from LSM after compaction
     pub input_ssts: Vec<LevelEntry>,
@@ -52,9 +71,10 @@ pub struct CompactTask {
     /// task id assigned by hummock storage service
     task_id: u64,
     /// compacion output will be added to [`target_level`] of LSM after compaction
-    target_level: u8,
+    pub target_level: u8,
 
     pub is_target_ultimate_and_leveling: bool,
+    pub metrics: CompactMetrics,
 }
 
 struct VersionManagerInner {
@@ -574,6 +594,7 @@ impl VersionManager {
                     is_target_ultimate_and_leveling: target_level as usize
                         == compact_status.level_handlers.len() - 1
                         && is_target_level_leveling,
+                    metrics: CompactMetrics::default(),
                 }
                 .into()
             }
