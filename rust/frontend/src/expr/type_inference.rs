@@ -5,24 +5,19 @@ use std::vec;
 
 use itertools::iproduct;
 use risingwave_common::types::DataTypeKind;
-use risingwave_pb::expr::expr_node;
+
+use crate::expr::ExprType;
 
 /// Infer the return type of a function. If the backend's expression implementation can't receive
 /// the datatypes, return Null.
-pub fn infer_type(
-    func_type: expr_node::Type,
-    inputs_type: Vec<DataTypeKind>,
-) -> Option<DataTypeKind> {
+pub fn infer_type(func_type: ExprType, inputs_type: Vec<DataTypeKind>) -> Option<DataTypeKind> {
     // With our current simplified type system, where all types are nullable and not parameterized
     // by things like length or precision, the inference can be done with a map lookup.
     infer_type_name(func_type, inputs_type)
 }
 
 /// Infer the return type name without parameters like length or precision.
-fn infer_type_name(
-    func_type: expr_node::Type,
-    inputs_type: Vec<DataTypeKind>,
-) -> Option<DataTypeKind> {
+fn infer_type_name(func_type: ExprType, inputs_type: Vec<DataTypeKind>) -> Option<DataTypeKind> {
     FUNC_SIG_MAP
         .get(&FuncSign {
             func: func_type,
@@ -33,35 +28,35 @@ fn infer_type_name(
 
 #[derive(PartialEq, Hash)]
 struct FuncSign {
-    func: expr_node::Type,
+    func: ExprType,
     inputs_type: Vec<DataTypeKind>,
 }
 impl Eq for FuncSign {}
 #[allow(dead_code)]
 impl FuncSign {
-    pub fn new(func: expr_node::Type, inputs_type: Vec<DataTypeKind>) -> Self {
+    pub fn new(func: ExprType, inputs_type: Vec<DataTypeKind>) -> Self {
         FuncSign { func, inputs_type }
     }
-    pub fn new_no_input(func: expr_node::Type) -> Self {
+    pub fn new_no_input(func: ExprType) -> Self {
         FuncSign {
             func,
             inputs_type: vec![],
         }
     }
-    pub fn new_unary(func: expr_node::Type, p1: DataTypeKind) -> Self {
+    pub fn new_unary(func: ExprType, p1: DataTypeKind) -> Self {
         FuncSign {
             func,
             inputs_type: vec![p1],
         }
     }
-    pub fn new_binary(func: expr_node::Type, p1: DataTypeKind, p2: DataTypeKind) -> Self {
+    pub fn new_binary(func: ExprType, p1: DataTypeKind, p2: DataTypeKind) -> Self {
         FuncSign {
             func,
             inputs_type: vec![p1, p2],
         }
     }
     pub fn new_ternary(
-        func: expr_node::Type,
+        func: ExprType,
         p1: DataTypeKind,
         p2: DataTypeKind,
         p3: DataTypeKind,
@@ -106,36 +101,32 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeKind> {
         DataTypeKind::Timestampz,
     ];
     let atm_exprs = vec![
-        expr_node::Type::Add,
-        expr_node::Type::Subtract,
-        expr_node::Type::Multiply,
-        expr_node::Type::Divide,
-        expr_node::Type::Modulus,
+        ExprType::Add,
+        ExprType::Subtract,
+        ExprType::Multiply,
+        ExprType::Divide,
+        ExprType::Modulus,
     ];
 
     let cmp_exprs = vec![
-        expr_node::Type::Equal,
-        expr_node::Type::NotEqual,
-        expr_node::Type::LessThan,
-        expr_node::Type::LessThanOrEqual,
-        expr_node::Type::GreaterThan,
-        expr_node::Type::GreaterThanOrEqual,
+        ExprType::Equal,
+        ExprType::NotEqual,
+        ExprType::LessThan,
+        ExprType::LessThanOrEqual,
+        ExprType::GreaterThan,
+        ExprType::GreaterThanOrEqual,
     ];
-    let logical_exprs = vec![
-        expr_node::Type::And,
-        expr_node::Type::Or,
-        expr_node::Type::Not,
-    ];
+    let logical_exprs = vec![ExprType::And, ExprType::Or, ExprType::Not];
     let bool_check_exprs = vec![
-        expr_node::Type::IsTrue,
-        expr_node::Type::IsNotTrue,
-        expr_node::Type::IsFalse,
-        expr_node::Type::IsNotFalse,
+        ExprType::IsTrue,
+        ExprType::IsNotTrue,
+        ExprType::IsFalse,
+        ExprType::IsNotFalse,
     ];
     let null_check_exprs = vec![
-        expr_node::Type::IsNull,
-        expr_node::Type::IsNotNull,
-        expr_node::Type::StreamNullByRowCount,
+        ExprType::IsNull,
+        ExprType::IsNotNull,
+        ExprType::StreamNullByRowCount,
     ];
 
     for (expr, t1, t2) in iproduct!(atm_exprs, num_types.clone(), num_types.clone()) {
@@ -178,21 +169,17 @@ lazy_static::lazy_static! {
 }
 #[cfg(test)]
 mod tests {
-    use itertools::iproduct;
-    use risingwave_common::types::DataTypeKind;
-    use risingwave_pb::expr::expr_node;
-
-    use super::infer_type;
+    use super::*;
 
     fn test_simple_infer_type(
-        func_type: expr_node::Type,
+        func_type: ExprType,
         inputs_type: Vec<DataTypeKind>,
         expected_type_name: DataTypeKind,
     ) {
         let ret = infer_type(func_type, inputs_type).unwrap();
         assert_eq!(ret, expected_type_name);
     }
-    fn test_infer_type_not_exist(func_type: expr_node::Type, inputs_type: Vec<DataTypeKind>) {
+    fn test_infer_type_not_exist(func_type: ExprType, inputs_type: Vec<DataTypeKind>) {
         let ret = infer_type(func_type, inputs_type);
         assert_eq!(ret, None);
     }
@@ -201,11 +188,11 @@ mod tests {
     fn test_arithmetics() {
         use DataTypeKind::*;
         let atm_exprs = vec![
-            expr_node::Type::Add,
-            expr_node::Type::Subtract,
-            expr_node::Type::Multiply,
-            expr_node::Type::Divide,
-            expr_node::Type::Modulus,
+            ExprType::Add,
+            ExprType::Subtract,
+            ExprType::Multiply,
+            ExprType::Divide,
+            ExprType::Modulus,
         ];
         let num_promote_table = vec![
             (Int16, Int16, Int16),
@@ -253,20 +240,20 @@ mod tests {
     #[test]
     fn test_bool_num_not_exist() {
         let exprs = vec![
-            expr_node::Type::Add,
-            expr_node::Type::Subtract,
-            expr_node::Type::Multiply,
-            expr_node::Type::Divide,
-            expr_node::Type::Modulus,
-            expr_node::Type::Equal,
-            expr_node::Type::NotEqual,
-            expr_node::Type::LessThan,
-            expr_node::Type::LessThanOrEqual,
-            expr_node::Type::GreaterThan,
-            expr_node::Type::GreaterThanOrEqual,
-            expr_node::Type::And,
-            expr_node::Type::Or,
-            expr_node::Type::Not,
+            ExprType::Add,
+            ExprType::Subtract,
+            ExprType::Multiply,
+            ExprType::Divide,
+            ExprType::Modulus,
+            ExprType::Equal,
+            ExprType::NotEqual,
+            ExprType::LessThan,
+            ExprType::LessThanOrEqual,
+            ExprType::GreaterThan,
+            ExprType::GreaterThanOrEqual,
+            ExprType::And,
+            ExprType::Or,
+            ExprType::Not,
         ];
         let num_types = vec![
             DataTypeKind::Int16,

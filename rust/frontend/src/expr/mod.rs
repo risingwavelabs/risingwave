@@ -9,6 +9,9 @@ mod agg_call;
 pub use agg_call::*;
 mod type_inference;
 pub use type_inference::*;
+
+pub type ExprType = risingwave_pb::expr::expr_node::Type;
+
 /// the trait of bound exprssions
 pub trait BoundExpr {
     fn return_type(&self) -> DataTypeKind;

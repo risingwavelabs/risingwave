@@ -1,7 +1,7 @@
 use risingwave_common::types::DataTypeKind;
-use risingwave_pb::expr::expr_node;
 
 use super::BoundExpr;
+use crate::expr::ExprType;
 #[derive(Clone)]
 pub struct BoundInputRef {
     index: usize,
@@ -11,8 +11,8 @@ impl BoundInputRef {
     pub fn new(index: usize, data_type: DataTypeKind) -> Self {
         BoundInputRef { index, data_type }
     }
-    pub fn get_expr_type(&self) -> expr_node::Type {
-        expr_node::Type::InputRef
+    pub fn get_expr_type(&self) -> ExprType {
+        ExprType::InputRef
     }
 }
 impl BoundExpr for BoundInputRef {

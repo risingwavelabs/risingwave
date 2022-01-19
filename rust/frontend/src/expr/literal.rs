@@ -1,7 +1,7 @@
 use risingwave_common::types::{DataTypeKind, Datum};
-use risingwave_pb::expr::expr_node;
 
 use super::BoundExpr;
+use crate::expr::ExprType;
 #[derive(Clone, Debug)]
 pub struct BoundLiteral {
     #[allow(dead_code)]
@@ -12,8 +12,8 @@ impl BoundLiteral {
     pub fn new(data: Datum, data_type: DataTypeKind) -> Self {
         BoundLiteral { data, data_type }
     }
-    pub fn get_expr_type(&self) -> expr_node::Type {
-        expr_node::Type::ConstantValue
+    pub fn get_expr_type(&self) -> ExprType {
+        ExprType::ConstantValue
     }
 }
 impl BoundExpr for BoundLiteral {

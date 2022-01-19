@@ -1,16 +1,16 @@
 use risingwave_common::types::DataTypeKind;
-use risingwave_pb::expr::expr_node;
 
 use super::{infer_type, BoundExpr, BoundExprImpl};
+use crate::expr::ExprType;
 
 #[derive(Clone, Debug)]
 pub struct BoundFunctionCall {
-    func_type: expr_node::Type,
+    func_type: ExprType,
     return_type: DataTypeKind,
     inputs: Vec<BoundExprImpl>,
 }
 impl BoundFunctionCall {
-    pub fn new(func_type: expr_node::Type, inputs: Vec<BoundExprImpl>) -> Option<Self> {
+    pub fn new(func_type: ExprType, inputs: Vec<BoundExprImpl>) -> Option<Self> {
         let return_type = infer_type(
             func_type,
             inputs.iter().map(|expr| expr.return_type()).collect(),
@@ -20,7 +20,7 @@ impl BoundFunctionCall {
 
     /// used for expressions like cast
     pub fn new_with_return_type(
-        func_type: expr_node::Type,
+        func_type: ExprType,
         inputs: Vec<BoundExprImpl>,
         return_type: DataTypeKind,
     ) -> Self {
@@ -31,10 +31,10 @@ impl BoundFunctionCall {
         }
     }
 
-    pub fn decompose(self) -> (expr_node::Type, Vec<BoundExprImpl>) {
+    pub fn decompose(self) -> (ExprType, Vec<BoundExprImpl>) {
         (self.func_type, self.inputs)
     }
-    pub fn get_expr_type(&self) -> expr_node::Type {
+    pub fn get_expr_type(&self) -> ExprType {
         self.func_type
     }
 }
