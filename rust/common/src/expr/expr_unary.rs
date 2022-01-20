@@ -32,11 +32,11 @@ use crate::vector_op::upper::upper;
 /// * `$func`: The scalar function for expression, it's a generic function and specialized by the
 ///   type of `$input, $cast`
 macro_rules! gen_cast_impl {
-  ([$child:expr, $ret:expr], $( { $input:ty, $cast:ty, $func:expr} ),*) => {
+  ([$child:expr, $ret:expr], $( { $input:tt, $cast:tt, $func:expr } ),*) => {
     match ($child.return_type(), $ret) {
       $(
-          (<$input as DataTypeTrait>::DATA_TYPE_ENUM, <$cast as DataTypeTrait>::DATA_TYPE_ENUM) => {
-            Box::new(UnaryExpression::< <$input as DataTypeTrait>::ArrayType, <$cast as DataTypeTrait>::ArrayType, _> {
+          ($input! { type_match_pattern }, $cast! { type_match_pattern }) => {
+            Box::new(UnaryExpression::< $input! { type_array }, $cast! { type_array }, _> {
               expr_ia1: $child,
               return_type: $ret,
               func: $func,
@@ -55,45 +55,45 @@ macro_rules! gen_cast {
   ($($x:tt, )* ) => {
     gen_cast_impl! {
       [$($x),*],
-      { StringType, DateType, str_to_date},
-      { StringType, TimestampType, str_to_timestamp},
-      { StringType, TimestampWithTimeZoneType, str_to_timestampz},
-      { StringType, Int16Type, str_to_i16},
-      { StringType, Int32Type, str_to_i32},
-      { StringType, Int64Type, str_to_i64},
-      { StringType, Float32Type, str_to_real},
-      { StringType, Float64Type, str_to_double},
-      { StringType, DecimalType, str_to_decimal},
-      { StringType, BoolType, str_to_bool},
-      { BoolType, StringType, bool_to_str},
+      { varchar, date, str_to_date},
+      { varchar, timestamp, str_to_timestamp},
+      { varchar, timestampz, str_to_timestampz},
+      { varchar, int16, str_to_i16},
+      { varchar, int32, str_to_i32},
+      { varchar, int64, str_to_i64},
+      { varchar, float32, str_to_real},
+      { varchar, float64, str_to_double},
+      { varchar, decimal, str_to_decimal},
+      { varchar, boolean, str_to_bool},
+      { boolean, varchar, bool_to_str},
       // TODO: decide whether nullability-cast should be allowed (#2350)
-      { BoolType, BoolType, |x| Ok(x)},
-      { Int16Type, Int32Type, general_cast },
-      { Int16Type, Int64Type, general_cast },
-      { Int16Type, Float32Type, general_cast },
-      { Int16Type, Float64Type, general_cast },
-      { Int16Type, DecimalType, general_cast },
-      { Int32Type, Int16Type, general_cast },
-      { Int32Type, Int64Type, general_cast },
-      { Int32Type, Float64Type, general_cast },
-      { Int32Type, DecimalType, general_cast },
-      { Int64Type, Int16Type, general_cast },
-      { Int64Type, Int32Type, general_cast },
-      { Int64Type, DecimalType, general_cast },
-      { Float32Type, Float64Type, general_cast },
-      { Float32Type,  DecimalType, general_cast },
-      { Float32Type, Int16Type, to_i16 },
-      { Float32Type, Int32Type, to_i32 },
-      { Float32Type, Int64Type, to_i64 },
-      { Float64Type, DecimalType, general_cast },
-      { Float64Type, Int16Type, to_i16 },
-      { Float64Type, Int32Type, to_i32 },
-      { Float64Type, Int64Type, to_i64 },
-      { DecimalType,  DecimalType, dec_to_dec },
-      { DecimalType, Int16Type, deci_to_i16 },
-      { DecimalType, Int32Type, deci_to_i32 },
-      { DecimalType, Int64Type, deci_to_i64 },
-      { DateType, TimestampType, date_to_timestamp }
+      { boolean, boolean, |x| Ok(x)},
+      { int16, int32, general_cast },
+      { int16, int64, general_cast },
+      { int16, float32, general_cast },
+      { int16, float64, general_cast },
+      { int16, decimal, general_cast },
+      { int32, int16, general_cast },
+      { int32, int64, general_cast },
+      { int32, float64, general_cast },
+      { int32, decimal, general_cast },
+      { int64, int16, general_cast },
+      { int64, int32, general_cast },
+      { int64, decimal, general_cast },
+      { float32, float64, general_cast },
+      { float32, decimal, general_cast },
+      { float32, int16, to_i16 },
+      { float32, int32, to_i32 },
+      { float32, int64, to_i64 },
+      { float64, decimal, general_cast },
+      { float64, int16, to_i16 },
+      { float64, int32, to_i32 },
+      { float64, int64, to_i64 },
+      { decimal, decimal, dec_to_dec },
+      { decimal, int16, deci_to_i16 },
+      { decimal, int32, deci_to_i32 },
+      { decimal, int64, deci_to_i64 },
+      { date, timestamp, date_to_timestamp }
     }
   };
 }

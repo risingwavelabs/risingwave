@@ -1,81 +1,183 @@
-use crate::array::*;
-use crate::types::DataTypeKind;
+//! Macros containing all necessary information for a logical type.
+//!
+//! Each type macro will call the `$macro` with multiple parameters:
+//! * Patterns when being used in pattern match. e.g., `DataTypeKind::Decimal { .. }`.
+//! * Array types. e.g., `DecimalArray`.
 
-/// This trait combine the array with its data type. It helps generate the across type expression
-pub trait DataTypeTrait {
-    const DATA_TYPE_ENUM: DataTypeKind;
-    type ArrayType: Array;
+macro_rules! boolean {
+    ($macro:tt) => {
+        $macro! {
+          DataTypeKind::Boolean,
+          $crate::array::BoolArray
+        }
+    };
 }
 
-pub struct BoolType;
-impl DataTypeTrait for BoolType {
-    const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Boolean;
-    type ArrayType = BoolArray;
+pub(crate) use boolean;
+
+macro_rules! int16 {
+    ($macro:tt) => {
+        $macro! {
+          DataTypeKind::Int16,
+          $crate::array::I16Array
+        }
+    };
 }
 
-pub struct Int16Type;
-impl DataTypeTrait for Int16Type {
-    const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Int16;
-    type ArrayType = I16Array;
+pub(crate) use int16;
+
+macro_rules! int32 {
+    ($macro:tt) => {
+        $macro! {
+          DataTypeKind::Int32,
+          $crate::array::I32Array
+        }
+    };
 }
 
-pub struct Int32Type;
-impl DataTypeTrait for Int32Type {
-    const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Int32;
-    type ArrayType = I32Array;
+pub(crate) use int32;
+
+macro_rules! int64 {
+    ($macro:tt) => {
+        $macro! {
+          DataTypeKind::Int64,
+          $crate::array::I64Array
+        }
+    };
 }
 
-pub struct Int64Type;
-impl DataTypeTrait for Int64Type {
-    const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Int64;
-    type ArrayType = I64Array;
+pub(crate) use int64;
+
+macro_rules! float32 {
+    ($macro:tt) => {
+        $macro! {
+          DataTypeKind::Float32,
+          $crate::array::F32Array
+        }
+    };
 }
 
-pub struct Float32Type;
-impl DataTypeTrait for Float32Type {
-    const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Float32;
-    type ArrayType = F32Array;
+pub(crate) use float32;
+
+macro_rules! float64 {
+    ($macro:tt) => {
+        $macro! {
+          DataTypeKind::Float64,
+          $crate::array::F64Array
+        }
+    };
 }
 
-pub struct Float64Type;
-impl DataTypeTrait for Float64Type {
-    const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Float64;
-    type ArrayType = F64Array;
+pub(crate) use float64;
+
+macro_rules! decimal {
+    ($macro:tt) => {
+        $macro! {
+          DataTypeKind::Decimal,
+          $crate::array::DecimalArray
+        }
+    };
 }
 
-pub struct DecimalType;
-impl DataTypeTrait for DecimalType {
-    const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Decimal;
-    type ArrayType = DecimalArray;
+pub(crate) use decimal;
+
+macro_rules! date {
+    ($macro:tt) => {
+        $macro! {
+          DataTypeKind::Date,
+          $crate::array::I32Array
+        }
+    };
 }
 
-pub struct TimestampType;
-impl DataTypeTrait for TimestampType {
-    const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Timestamp;
-    type ArrayType = I64Array;
+pub(crate) use date;
+
+#[allow(unused_macros)]
+macro_rules! char {
+    ($macro:tt) => {
+        $macro! {
+          DataTypeKind::Char,
+          $crate::array::Utf8Array
+        }
+    };
 }
 
-pub struct TimestampWithTimeZoneType;
-impl DataTypeTrait for TimestampWithTimeZoneType {
-    const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Timestampz;
-    type ArrayType = I64Array;
+#[allow(unused_imports)]
+pub(crate) use char;
+
+macro_rules! varchar {
+    ($macro:tt) => {
+        $macro! {
+          DataTypeKind::Varchar,
+          $crate::array::Utf8Array
+        }
+    };
 }
 
-pub struct DateType;
-impl DataTypeTrait for DateType {
-    const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Date;
-    type ArrayType = I32Array;
+pub(crate) use varchar;
+
+#[allow(unused_macros)]
+macro_rules! time {
+    ($macro:tt) => {
+        $macro! {
+          DataTypeKind::Time,
+          $crate::array::I64Array
+        }
+    };
 }
 
-pub struct IntervalType;
-impl DataTypeTrait for IntervalType {
-    const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Interval;
-    type ArrayType = IntervalArray;
+#[allow(unused_imports)]
+pub(crate) use time;
+
+macro_rules! timestamp {
+    ($macro:tt) => {
+        $macro! {
+          DataTypeKind::Timestamp,
+          $crate::array::I64Array
+        }
+    };
 }
 
-pub struct StringType;
-impl DataTypeTrait for StringType {
-    // TODO: How about char?
-    const DATA_TYPE_ENUM: DataTypeKind = DataTypeKind::Varchar;
-    type ArrayType = Utf8Array;
+pub(crate) use timestamp;
+
+#[allow(unused_macros)]
+macro_rules! timestampz {
+    ($macro:tt) => {
+        $macro! {
+          DataTypeKind::Timestampz,
+          $crate::array::I64Array
+        }
+    };
 }
+
+pub(crate) use timestampz;
+
+#[allow(unused_macros)]
+macro_rules! interval {
+    ($macro:tt) => {
+        $macro! {
+          DataTypeKind::Interval,
+          $crate::array::IntervalArray
+        }
+    };
+}
+
+pub(crate) use interval;
+
+/// Get the type match pattern out of the type macro. e.g., `DataTypeKind::Decimal { .. }`.
+macro_rules! type_match_pattern {
+    ($match_pattern:pat, $array:ty) => {
+        $match_pattern
+    };
+}
+
+pub(crate) use type_match_pattern;
+
+/// Get the array type out of the type macro. e.g., `Int32Array`.
+macro_rules! type_array {
+    ($match_pattern:pat, $array:ty) => {
+        $array
+    };
+}
+
+pub(crate) use type_array;

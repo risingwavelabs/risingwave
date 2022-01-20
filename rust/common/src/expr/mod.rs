@@ -1,5 +1,6 @@
 mod agg;
 pub mod build_expr_from_prost;
+pub mod data_types;
 mod expr_binary_bytes;
 pub mod expr_binary_nonnull;
 pub mod expr_binary_nullable;
@@ -73,6 +74,5 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     }
 }
 
-mod data_types;
 #[cfg(test)]
 mod test_utils;

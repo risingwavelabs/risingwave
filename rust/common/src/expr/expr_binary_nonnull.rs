@@ -39,15 +39,15 @@ pub fn atm_placeholder<T1, T2, T3>(_l: T1, _r: T2) -> Result<T3> {
 /// * $func: The scalar function for expression, it's a generic function and specialized by the type
 ///   of `$i1, $i2, $cast`
 macro_rules! gen_atm_impl {
-  ([$l:expr, $r:expr, $ret:expr], $( { $i1:ty, $i2:ty, $cast:ty, $func:ident} ),*) => {
+  ([$l:expr, $r:expr, $ret:expr], $( { $i1:tt, $i2:tt, $cast:tt, $func:ident} ),*) => {
     match ($l.return_type(), $r.return_type()) {
       $(
-          (<$i1 as DataTypeTrait>::DATA_TYPE_ENUM, <$i2 as DataTypeTrait>::DATA_TYPE_ENUM) => {
-            Box::new(BinaryExpression::< <$i1 as DataTypeTrait>::ArrayType, <$i2 as DataTypeTrait>::ArrayType, <$cast as DataTypeTrait>::ArrayType, _> {
+          ($i1! { type_match_pattern }, $i2! { type_match_pattern }) => {
+            Box::new(BinaryExpression::< $i1! { type_array },  $i2! { type_array }, $cast! { type_array }, _> {
               expr_ia1: $l,
               expr_ia2: $r,
               return_type: $ret,
-              func: $func::< <<$i1 as DataTypeTrait>::ArrayType as Array>::OwnedItem, <<$i2 as DataTypeTrait>::ArrayType as Array>::OwnedItem, <<$cast as DataTypeTrait>::ArrayType as Array>::OwnedItem>,
+              func: $func::< <$i1! { type_array } as Array>::OwnedItem, <$i2! { type_array } as Array>::OwnedItem, <$cast! { type_array } as Array>::OwnedItem>,
               _phantom: PhantomData,
             })
           }
@@ -62,15 +62,15 @@ macro_rules! gen_atm_impl {
 /// This macro helps create comparison expression. Its output array is a bool array
 /// Similar to `gen_atm_impl`.
 macro_rules! gen_cmp_impl {
-  ([$l:expr, $r:expr, $ret:expr], $( { $i1:ty, $i2:ty, $cast:ty, $func: ident} ),*) => {
+  ([$l:expr, $r:expr, $ret:expr], $( { $i1:tt, $i2:tt, $cast:tt, $func: ident} ),*) => {
     match ($l.return_type(), $r.return_type()) {
       $(
-          (<$i1 as DataTypeTrait>::DATA_TYPE_ENUM, <$i2 as DataTypeTrait>::DATA_TYPE_ENUM) => {
-            Box::new(BinaryExpression::< <$i1 as DataTypeTrait>::ArrayType, <$i2 as DataTypeTrait>::ArrayType, BoolArray, _> {
+          ($i1! { type_match_pattern }, $i2! { type_match_pattern }) => {
+            Box::new(BinaryExpression::< $i1! { type_array },  $i2! { type_array }, BoolArray, _> {
               expr_ia1: $l,
               expr_ia2: $r,
               return_type: $ret,
-              func: $func::< <<$i1 as DataTypeTrait>::ArrayType as Array>::OwnedItem, <<$i2 as DataTypeTrait>::ArrayType as Array>::OwnedItem, <<$cast as DataTypeTrait>::ArrayType as Array>::OwnedItem>,
+              func: $func::< <$i1! { type_array } as Array>::OwnedItem, <$i2! { type_array } as Array>::OwnedItem, <$cast! { type_array } as Array>::OwnedItem>,
               _phantom: PhantomData,
             })
           }
@@ -122,46 +122,46 @@ macro_rules! gen_binary_expr_cmp {
             }
             _ => {
                 $macro! {
-                      [$l, $r, $ret],
-                      { Int16Type, Int16Type, Int16Type, $general_f },
-                      { Int16Type, Int32Type, Int32Type, $general_f },
-                      { Int16Type, Int64Type, Int64Type, $general_f },
-                      { Int16Type, Float32Type, Float64Type, $general_f },
-                      { Int16Type, Float64Type, Float64Type, $general_f },
-                      { Int32Type, Int16Type, Int32Type, $general_f },
-                      { Int32Type, Int32Type, Int32Type, $general_f },
-                      { Int32Type, Int64Type, Int64Type, $general_f },
-                      { Int32Type, Float32Type, Float64Type, $general_f },
-                      { Int32Type, Float64Type, Float64Type, $general_f },
-                      { Int64Type, Int16Type,Int64Type, $general_f },
-                      { Int64Type, Int32Type,Int64Type, $general_f },
-                      { Int64Type, Int64Type, Int64Type, $general_f },
-                      { Int64Type, Float32Type, Float64Type , $general_f},
-                      { Int64Type, Float64Type, Float64Type, $general_f },
-                      { Float32Type, Int16Type, Float64Type, $general_f },
-                      { Float32Type, Int32Type, Float64Type, $general_f },
-                      { Float32Type, Int64Type, Float64Type , $general_f},
-                      { Float32Type, Float32Type, Float32Type, $general_f },
-                      { Float32Type, Float64Type, Float64Type, $general_f },
-                      { Float64Type, Int16Type, Float64Type, $general_f },
-                      { Float64Type, Int32Type, Float64Type, $general_f },
-                      { Float64Type, Int64Type, Float64Type, $general_f },
-                      { Float64Type, Float32Type, Float64Type, $general_f },
-                      { Float64Type, Float64Type, Float64Type, $general_f },
-                      { DecimalType, Int16Type, DecimalType, $general_f },
-                      { DecimalType, Int32Type, DecimalType, $general_f },
-                      { DecimalType, Int64Type, DecimalType, $general_f },
-                      { DecimalType, Float32Type, Float64Type, $general_f },
-                      { DecimalType, Float64Type, Float64Type, $general_f },
-                      { Int16Type, DecimalType, DecimalType, $general_f },
-                      { Int32Type, DecimalType, DecimalType, $general_f },
-                      { Int64Type, DecimalType, DecimalType, $general_f },
-                      { DecimalType, DecimalType, DecimalType, $general_f },
-                      { Float32Type, DecimalType, Float64Type, $general_f },
-                      { Float64Type, DecimalType, Float64Type, $general_f },
-                      { TimestampType, TimestampType, TimestampType, $general_f },
-                      { DateType, DateType, Int32Type, $general_f },
-                      { BoolType, BoolType, BoolType, $general_f }
+                  [$l, $r, $ret],
+                  { int16, int16, int16, $general_f },
+                  { int16, int32, int32, $general_f },
+                  { int16, int64, int64, $general_f },
+                  { int16, float32, float64, $general_f },
+                  { int16, float64, float64, $general_f },
+                  { int32, int16, int32, $general_f },
+                  { int32, int32, int32, $general_f },
+                  { int32, int64, int64, $general_f },
+                  { int32, float32, float64, $general_f },
+                  { int32, float64, float64, $general_f },
+                  { int64, int16,int64, $general_f },
+                  { int64, int32,int64, $general_f },
+                  { int64, int64, int64, $general_f },
+                  { int64, float32, float64 , $general_f},
+                  { int64, float64, float64, $general_f },
+                  { float32, int16, float64, $general_f },
+                  { float32, int32, float64, $general_f },
+                  { float32, int64, float64 , $general_f},
+                  { float32, float32, float32, $general_f },
+                  { float32, float64, float64, $general_f },
+                  { float64, int16, float64, $general_f },
+                  { float64, int32, float64, $general_f },
+                  { float64, int64, float64, $general_f },
+                  { float64, float32, float64, $general_f },
+                  { float64, float64, float64, $general_f },
+                  { decimal, int16, decimal, $general_f },
+                  { decimal, int32, decimal, $general_f },
+                  { decimal, int64, decimal, $general_f },
+                  { decimal, float32, float64, $general_f },
+                  { decimal, float64, float64, $general_f },
+                  { int16, decimal, decimal, $general_f },
+                  { int32, decimal, decimal, $general_f },
+                  { int64, decimal, decimal, $general_f },
+                  { decimal, decimal, decimal, $general_f },
+                  { float32, decimal, float64, $general_f },
+                  { float64, decimal, float64, $general_f },
+                  { timestamp, timestamp, timestamp, $general_f },
+                  { date, date, int32, $general_f },
+                  { boolean, boolean, boolean, $general_f }
                 }
             }
         }
@@ -187,46 +187,46 @@ macro_rules! gen_binary_expr_atm {
     ) => {
         $macro! {
           [$l, $r, $ret],
-          { Int16Type, Int16Type, Int16Type, $general_f },
-          { Int16Type, Int32Type, Int32Type, $general_f },
-          { Int16Type, Int64Type, Int64Type, $general_f },
-          { Int16Type, Float32Type, Float64Type, $general_f },
-          { Int16Type, Float64Type, Float64Type, $general_f },
-          { Int32Type, Int16Type, Int32Type, $general_f },
-          { Int32Type, Int32Type, Int32Type, $general_f },
-          { Int32Type, Int64Type, Int64Type, $general_f },
-          { Int32Type, Float32Type, Float64Type, $general_f },
-          { Int32Type, Float64Type, Float64Type, $general_f },
-          { Int64Type, Int16Type,Int64Type, $general_f },
-          { Int64Type, Int32Type,Int64Type, $general_f },
-          { Int64Type, Int64Type, Int64Type, $general_f },
-          { Int64Type, Float32Type, Float64Type , $general_f},
-          { Int64Type, Float64Type, Float64Type, $general_f },
-          { Float32Type, Int16Type, Float64Type, $general_f },
-          { Float32Type, Int32Type, Float64Type, $general_f },
-          { Float32Type, Int64Type, Float64Type , $general_f},
-          { Float32Type, Float32Type, Float32Type, $general_f },
-          { Float32Type, Float64Type, Float64Type, $general_f },
-          { Float64Type, Int16Type, Float64Type, $general_f },
-          { Float64Type, Int32Type, Float64Type, $general_f },
-          { Float64Type, Int64Type, Float64Type, $general_f },
-          { Float64Type, Float32Type, Float64Type, $general_f },
-          { Float64Type, Float64Type, Float64Type, $general_f },
-          { DecimalType, Int16Type, DecimalType, $general_f },
-          { DecimalType, Int32Type, DecimalType, $general_f },
-          { DecimalType, Int64Type, DecimalType, $general_f },
-          { DecimalType, Float32Type, DecimalType, $general_f },
-          { DecimalType, Float64Type, DecimalType, $general_f },
-          { Int16Type, DecimalType, DecimalType, $general_f },
-          { Int32Type, DecimalType, DecimalType, $general_f },
-          { Int64Type, DecimalType, DecimalType, $general_f },
-          { DecimalType, DecimalType, DecimalType, $general_f },
-          { Float32Type, DecimalType, Float64Type, $general_f },
-          { Float64Type, DecimalType, Float64Type, $general_f },
-          { TimestampType, TimestampType, TimestampType, $general_f },
-          { DateType, DateType, Int32Type, $general_f },
-          { DateType, IntervalType, TimestampType, $date_interval_f },
-          { IntervalType, DateType, TimestampType, $interval_date_f }
+          { int16, int16, int16, $general_f },
+          { int16, int32, int32, $general_f },
+          { int16, int64, int64, $general_f },
+          { int16, float32, float64, $general_f },
+          { int16, float64, float64, $general_f },
+          { int32, int16, int32, $general_f },
+          { int32, int32, int32, $general_f },
+          { int32, int64, int64, $general_f },
+          { int32, float32, float64, $general_f },
+          { int32, float64, float64, $general_f },
+          { int64, int16,int64, $general_f },
+          { int64, int32,int64, $general_f },
+          { int64, int64, int64, $general_f },
+          { int64, float32, float64 , $general_f},
+          { int64, float64, float64, $general_f },
+          { float32, int16, float64, $general_f },
+          { float32, int32, float64, $general_f },
+          { float32, int64, float64 , $general_f},
+          { float32, float32, float32, $general_f },
+          { float32, float64, float64, $general_f },
+          { float64, int16, float64, $general_f },
+          { float64, int32, float64, $general_f },
+          { float64, int64, float64, $general_f },
+          { float64, float32, float64, $general_f },
+          { float64, float64, float64, $general_f },
+          { decimal, int16, decimal, $general_f },
+          { decimal, int32, decimal, $general_f },
+          { decimal, int64, decimal, $general_f },
+          { decimal, float32, decimal, $general_f },
+          { decimal, float64, decimal, $general_f },
+          { int16, decimal, decimal, $general_f },
+          { int32, decimal, decimal, $general_f },
+          { int64, decimal, decimal, $general_f },
+          { decimal, decimal, decimal, $general_f },
+          { float32, decimal, float64, $general_f },
+          { float64, decimal, float64, $general_f },
+          { timestamp, timestamp, timestamp, $general_f },
+          { date, date, int32, $general_f },
+          { date, interval, timestamp, $date_interval_f },
+          { interval, date, timestamp, $interval_date_f }
         }
     };
 }
