@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use futures::channel::mpsc::unbounded;
 use risingwave_batch::executor::{
     CreateTableExecutor, Executor as BatchExecutor, InsertExecutor, SeqScanExecutor,
 };
@@ -20,6 +19,7 @@ use risingwave_stream::executor::{
     Barrier, Executor as StreamExecutor, MaterializeExecutor, Message, PkIndices,
     StreamSourceExecutor,
 };
+use tokio::sync::mpsc::unbounded_channel;
 
 struct SingleChunkExecutor {
     chunk: Option<DataChunk>,
@@ -110,7 +110,7 @@ async fn test_table_v2_materialize() -> Result<()> {
     // Create a `StreamSourceExecutor` to read the changes
     let all_column_ids = vec![233, 0];
     let all_schema = get_schema(&all_column_ids);
-    let (barrier_tx, barrier_rx) = unbounded();
+    let (barrier_tx, barrier_rx) = unbounded_channel();
     let stream_source = StreamSourceExecutor::new(
         source_table_id.clone(),
         source_desc.clone(),
@@ -185,7 +185,7 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     // Send a barrier and poll again, should write changes to storage
     barrier_tx
-        .unbounded_send(Message::Barrier(Barrier::new(1919)))
+        .send(Message::Barrier(Barrier::new(1919)))
         .unwrap();
 
     assert!(matches!(

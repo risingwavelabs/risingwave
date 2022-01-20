@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use async_std::net::SocketAddr;
-use futures::channel::mpsc::{channel, unbounded, Receiver, Sender};
+use futures::channel::mpsc::{channel, Receiver, Sender};
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
@@ -17,11 +17,12 @@ use risingwave_pb::common::ActorInfo;
 use risingwave_pb::plan::JoinType as JoinTypeProto;
 use risingwave_pb::{expr, stream_plan, stream_service};
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
+use tokio::sync::mpsc::unbounded_channel;
 use tokio::task::JoinHandle;
 
 use crate::executor::snapshot::BatchQueryExecutor;
 use crate::executor::*;
-use crate::task::{BarrierManager, StreamTaskEnv};
+use crate::task::{LocalBarrierManager, StreamTaskEnv};
 
 /// Default capacity of channel if two actors are on the same node
 pub const LOCAL_OUTPUT_CHANNEL_SIZE: usize = 16;
@@ -96,7 +97,7 @@ pub struct StreamManagerCore {
     /// Stores all actor information.
     actors: HashMap<u32, stream_plan::StreamActor>,
 
-    barrier_manager: BarrierManager,
+    barrier_manager: LocalBarrierManager,
 
     /// Mock source, `actor_id = 0`.
     /// TODO: remove this
@@ -121,11 +122,6 @@ impl StreamManager {
     #[cfg(test)]
     pub fn with_in_memory_store(addr: SocketAddr) -> Self {
         Self::new(addr, StateStoreImpl::shared_in_memory_store())
-    }
-
-    pub fn checkpoint(&self, epoch: u64) -> Result<()> {
-        let mut core = self.core.lock().unwrap();
-        core.barrier_manager.send_barrier(&Barrier::new(epoch))
     }
 
     pub fn send_barrier(&self, barrier: &Barrier) -> Result<()> {
@@ -249,7 +245,7 @@ impl StreamManagerCore {
             context: Arc::new(SharedContext::new(addr)),
             actor_infos: HashMap::new(),
             actors: HashMap::new(),
-            barrier_manager: BarrierManager::new(),
+            barrier_manager: LocalBarrierManager::new(),
             mock_source: (Some(tx), Some(rx)),
             state_store,
         }
@@ -401,7 +397,7 @@ impl StreamManagerCore {
                 let source_id = TableId::from(&node.table_ref_id);
                 let source_desc = source_manager.get_source(&source_id)?;
 
-                let (sender, barrier_receiver) = unbounded();
+                let (sender, barrier_receiver) = unbounded_channel();
                 self.barrier_manager.register_sender(actor_id, sender);
 
                 let column_ids = node.get_column_ids().to_vec();

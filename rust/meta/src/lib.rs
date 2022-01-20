@@ -8,6 +8,7 @@
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
 
+mod barrier;
 mod catalog;
 mod cluster;
 mod dashboard;

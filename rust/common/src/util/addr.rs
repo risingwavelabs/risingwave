@@ -1,4 +1,4 @@
-use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
+use std::net::SocketAddr;
 use std::str::FromStr;
 
 use crate::error::ErrorCode::InternalError;
@@ -13,11 +13,7 @@ pub fn is_local_address(server_addr: &SocketAddr, peer_addr: &SocketAddr) -> boo
 }
 
 pub fn get_host_port(addr: &str) -> Result<SocketAddr> {
-    if let Ok(a) = SocketAddrV4::from_str(addr) {
-        return Ok(SocketAddr::V4(a));
-    }
-    SocketAddrV6::from_str(addr)
-        .map(SocketAddr::V6)
+    SocketAddr::from_str(addr)
         .map_err(|e| RwError::from(InternalError(format!("failed to resolve address: {}", e))))
 }
 

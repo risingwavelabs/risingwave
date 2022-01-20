@@ -1226,6 +1226,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "dashmap"
+version = "5.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b799062aaf67eb976af3bdca031ee6f846d2f0a5710ddbb0d2efee33f3cc4760"
+dependencies = [
+ "cfg-if",
+ "num_cpus",
+ "parking_lot",
+]
+
+[[package]]
 name = "derivative"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3571,7 +3582,6 @@ name = "risingwave"
 version = "0.1.1"
 dependencies = [
  "anyhow",
- "async-std",
  "async-stream",
  "async-trait",
  "backtrace",
@@ -3648,7 +3658,6 @@ name = "risingwave_batch"
 version = "0.1.1"
 dependencies = [
  "anyhow",
- "async-std",
  "async-stream",
  "async-trait",
  "backtrace",
@@ -3827,6 +3836,7 @@ dependencies = [
  "chrono",
  "clap",
  "crc32fast",
+ "dashmap",
  "either",
  "futures 0.3.19",
  "hyper",
@@ -3993,7 +4003,6 @@ dependencies = [
  "anyhow",
  "approx",
  "assert_matches",
- "async-std",
  "async-stream",
  "async-trait",
  "backtrace",

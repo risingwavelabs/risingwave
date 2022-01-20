@@ -3,8 +3,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::channel::mpsc::UnboundedReceiver;
-use futures::StreamExt;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{
     ArrayBuilder, ArrayImpl, I64ArrayBuilder, InternalError, RwError, StreamChunk,
@@ -12,6 +10,7 @@ use risingwave_common::array::{
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::error::Result;
 use risingwave_source::*;
+use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::executor::{Executor, Message, PkIndices, PkIndicesRef};
 
@@ -127,7 +126,7 @@ impl Executor for StreamSourceExecutor {
 
             Ok(Message::Chunk(chunk))
           }
-          message = self.barrier_receiver.next() => {
+          message = self.barrier_receiver.recv() => {
             message.ok_or_else(|| RwError::from(InternalError("stream closed unexpectedly".to_string())))
           }
         }
@@ -161,7 +160,6 @@ mod tests {
     use std::collections::HashSet;
     use std::sync::Arc;
 
-    use futures::channel::mpsc::unbounded;
     use itertools::Itertools;
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{ArrayImpl, I32Array, I64Array, Op, StreamChunk, Utf8Array};
@@ -171,6 +169,7 @@ mod tests {
     use risingwave_source::*;
     use risingwave_storage::bummock::BummockTable;
     use risingwave_storage::TableColumnDesc;
+    use tokio::sync::mpsc::unbounded_channel;
 
     use super::*;
     use crate::executor::{Barrier, Mutation, StreamSourceExecutor};
@@ -245,7 +244,7 @@ mod tests {
         let column_ids = vec![0, 1, 2];
         let pk_indices = vec![0];
 
-        let (barrier_sender, barrier_receiver) = unbounded();
+        let (barrier_sender, barrier_receiver) = unbounded_channel();
 
         let mut source = StreamSourceExecutor::new(
             table_id,
@@ -259,7 +258,7 @@ mod tests {
         .unwrap();
 
         barrier_sender
-            .unbounded_send(Message::Barrier(Barrier {
+            .send(Message::Barrier(Barrier {
                 epoch: 1,
                 ..Barrier::default()
             }))
@@ -368,7 +367,7 @@ mod tests {
         let column_ids = vec![0, 1, 2];
         let pk_indices = vec![0];
 
-        let (barrier_sender, barrier_receiver) = unbounded();
+        let (barrier_sender, barrier_receiver) = unbounded_channel();
         let mut source = StreamSourceExecutor::new(
             table_id,
             source_desc,
@@ -384,7 +383,7 @@ mod tests {
         writer.write(chunk1.clone()).await?;
 
         barrier_sender
-            .unbounded_send(Message::Barrier(
+            .send(Message::Barrier(
                 Barrier::new(1).with_mutation(Mutation::Stop(HashSet::default())),
             ))
             .unwrap();

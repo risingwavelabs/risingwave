@@ -1,12 +1,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 
 use async_trait::async_trait;
 use log::debug;
-use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
-use risingwave_common::util::addr::get_host_port;
 use risingwave_pb::common::{ActorInfo, WorkerNode};
 use risingwave_pb::data::barrier::Mutation;
 use risingwave_pb::data::{Barrier, StopMutation};
@@ -14,17 +11,14 @@ use risingwave_pb::meta::{ActorLocation, TableActors};
 use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{StreamActor, StreamNode};
-use risingwave_pb::stream_service::stream_service_client::StreamServiceClient;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, DropActorsRequest, InjectBarrierRequest,
     UpdateActorsRequest,
 };
-use tokio::sync::RwLock;
-use tonic::transport::{Channel, Endpoint};
 use uuid::Uuid;
 
 use crate::cluster::StoredClusterManager;
-use crate::manager::Epoch;
+use crate::manager::{Epoch, MetaSrvEnv, StreamClientsRef};
 use crate::stream::{ScheduleCategory, Scheduler, StreamMetaManagerRef};
 
 #[async_trait]
@@ -46,53 +40,19 @@ pub type StreamManagerRef = Arc<dyn StreamManager>;
 pub struct DefaultStreamManager {
     smm: StreamMetaManagerRef,
     scheduler: Scheduler,
-    /// [`clients`] stores the StreamServiceClient mapping: `node_id` => client.
-    clients: RwLock<HashMap<u32, StreamServiceClient<Channel>>>,
+    clients: StreamClientsRef,
 }
 
 impl DefaultStreamManager {
-    pub fn new(smm: StreamMetaManagerRef, cluster_manager: Arc<StoredClusterManager>) -> Self {
+    pub fn new(
+        env: MetaSrvEnv,
+        smm: StreamMetaManagerRef,
+        cluster_manager: Arc<StoredClusterManager>,
+    ) -> Self {
         Self {
             smm,
             scheduler: Scheduler::new(ScheduleCategory::RoundRobin, cluster_manager),
-            clients: RwLock::new(HashMap::new()),
-        }
-    }
-
-    async fn get_client(&self, node: &WorkerNode) -> Result<StreamServiceClient<Channel>> {
-        {
-            let guard = self.clients.read().await;
-            let client = guard.get(&node.get_id());
-            if client.is_some() {
-                return Ok(client.cloned().unwrap());
-            }
-        }
-
-        let mut guard = self.clients.write().await;
-        let client = guard.get(&node.get_id());
-        if client.is_some() {
-            Ok(client.cloned().unwrap())
-        } else {
-            let addr = get_host_port(
-                format!(
-                    "{}:{}",
-                    node.get_host().get_host(),
-                    node.get_host().get_port()
-                )
-                .as_str(),
-            )
-            .unwrap();
-            let endpoint = Endpoint::from_shared(format!("http://{}", addr));
-            let client = StreamServiceClient::new(
-                endpoint
-                    .map_err(|e| InternalError(format!("{}", e)))?
-                    .connect_timeout(Duration::from_secs(5))
-                    .connect()
-                    .await
-                    .to_rw_result_with(format!("failed to connect to {}", node.get_id()))?,
-            );
-            guard.insert(node.get_id(), client.clone());
-            Ok(client)
+            clients: env.stream_clients_ref(),
         }
     }
 
@@ -207,7 +167,7 @@ impl StreamManager for DefaultStreamManager {
         for (node_id, actors) in node_actors_map {
             let node = node_map.get(&node_id).unwrap();
 
-            let client = self.get_client(node).await?;
+            let client = self.clients.get(node).await?;
             client
                 .to_owned()
                 .broadcast_actor_info_table(BroadcastActorInfoTableRequest {
@@ -281,7 +241,7 @@ impl StreamManager for DefaultStreamManager {
             node_map.insert(node.get_id(), node);
         }
         for (node_id, actors) in node_actors {
-            let client = self.get_client(node_map.get(&node_id).unwrap()).await?;
+            let client = self.clients.get(node_map.get(&node_id).unwrap()).await?;
             let request_id = Uuid::new_v4().to_string();
             debug!("[{}]inject stop barrier at: {}", request_id, node_id);
             client
@@ -322,8 +282,10 @@ mod tests {
     use std::collections::HashSet;
     use std::sync::{Arc, Mutex};
     use std::thread::sleep;
+    use std::time::Duration;
 
     use risingwave_common::error::ErrorCode;
+    use risingwave_common::util::addr::get_host_port;
     use risingwave_pb::common::HostAddress;
     use risingwave_pb::meta::ClusterType;
     use risingwave_pb::stream_plan::stream_node::Node;
@@ -451,7 +413,7 @@ mod tests {
 
             let env = MetaSrvEnv::for_test().await;
             let meta_manager = Arc::new(StoredStreamMetaManager::new(env.clone()));
-            let cluster_manager = Arc::new(StoredClusterManager::new(env));
+            let cluster_manager = Arc::new(StoredClusterManager::new(env.clone()));
             cluster_manager
                 .add_worker_node(
                     HostAddress {
@@ -462,8 +424,11 @@ mod tests {
                 )
                 .await?;
 
-            let stream_manager =
-                DefaultStreamManager::new(meta_manager.clone(), cluster_manager.clone());
+            let stream_manager = DefaultStreamManager::new(
+                env.clone(),
+                meta_manager.clone(),
+                cluster_manager.clone(),
+            );
 
             Ok(Self {
                 stream_manager,

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use super::{StreamClients, StreamClientsRef};
 #[cfg(test)]
 use crate::manager::MemEpochGenerator;
 use crate::manager::{
@@ -21,6 +22,8 @@ pub struct MetaSrvEnv {
     meta_store: MetaStoreRef,
     /// epoch generator.
     epoch_generator: EpochGeneratorRef,
+    /// stream clients memoization.
+    stream_clients: StreamClientsRef,
 }
 
 impl MetaSrvEnv {
@@ -31,12 +34,14 @@ impl MetaSrvEnv {
     ) -> Self {
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
+        let stream_clients = Arc::new(StreamClients::default());
 
         Self {
             config,
             id_gen_manager,
             meta_store,
             epoch_generator,
+            stream_clients,
         }
     }
 
@@ -47,12 +52,14 @@ impl MetaSrvEnv {
         let meta_store = Arc::new(MemStore::new());
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let epoch_generator = Arc::new(MemEpochGenerator::new());
+        let stream_clients = Arc::new(StreamClients::default());
 
         Self {
             config: Default::default(),
             id_gen_manager,
             meta_store,
             epoch_generator,
+            stream_clients,
         }
     }
 
@@ -63,12 +70,14 @@ impl MetaSrvEnv {
         let meta_store = Arc::new(crate::storage::SledMetaStore::new(sled_root.as_ref()).unwrap());
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let epoch_generator = Arc::new(MemEpochGenerator::new());
+        let stream_clients = Arc::new(StreamClients::default());
 
         Self {
             config: Default::default(),
             id_gen_manager,
             meta_store,
             epoch_generator,
+            stream_clients,
         }
     }
 
@@ -94,5 +103,9 @@ impl MetaSrvEnv {
 
     pub fn epoch_generator_ref(&self) -> EpochGeneratorRef {
         self.epoch_generator.clone()
+    }
+
+    pub fn stream_clients_ref(&self) -> StreamClientsRef {
+        self.stream_clients.clone()
     }
 }

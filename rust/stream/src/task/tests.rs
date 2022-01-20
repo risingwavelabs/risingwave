@@ -209,7 +209,6 @@ async fn test_stream_proto() {
         Arc::new(SimpleTableManager::with_in_memory_store()),
         Arc::new(MemSourceManager::new()),
         std::net::SocketAddr::V4("127.0.0.1:5688".parse().unwrap()),
-        0,
     );
     stream_manager
         .build_actors(&[1, 3, 7, 11, 13], env)

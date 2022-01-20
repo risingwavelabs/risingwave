@@ -36,8 +36,6 @@ pub async fn compute_node_serve(
     addr: SocketAddr,
     opts: ComputeNodeOpts,
 ) -> (JoinHandle<()>, UnboundedSender<()>) {
-    let meta_client = MetaClient::new(&opts.meta_address).await.unwrap();
-    let worker_id = meta_client.register(addr).await.unwrap();
     let _config = load_config(&opts); // TODO: _config will be used by streaming env & batch env.
 
     let state_store = StateStoreImpl::from_str(&opts.state_store).await.unwrap();
@@ -46,29 +44,18 @@ pub async fn compute_node_serve(
     let stream_mgr = Arc::new(StreamManager::new(addr, state_store));
     let source_mgr = Arc::new(MemSourceManager::new());
 
-    // FIXME: We should trigger barrier from meta service. Currently, we use a timer to
-    // trigger barrier periodically.
-    let stream_mgr1 = stream_mgr.clone();
-    tokio::spawn(async move {
-        let mut epoch = 0u64;
-        loop {
-            stream_mgr1.checkpoint(epoch).unwrap();
-            epoch += 1;
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        }
-    });
-
     let batch_env = BatchTaskEnv::new(
         table_mgr.clone(),
         source_mgr.clone(),
         task_mgr.clone(),
         addr,
     );
-    let stream_env = StreamTaskEnv::new(table_mgr, source_mgr, addr, worker_id);
+    let stream_env = StreamTaskEnv::new(table_mgr, source_mgr, addr);
     let task_srv = TaskServiceImpl::new(task_mgr.clone(), batch_env);
     let exchange_srv = ExchangeServiceImpl::new(task_mgr, stream_mgr.clone());
-    let stream_srv = StreamServiceImpl::new(stream_mgr, stream_env);
+    let stream_srv = StreamServiceImpl::new(stream_mgr, stream_env.clone());
 
+    // Start gRPC services.
     let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
     let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()
@@ -89,6 +76,11 @@ pub async fn compute_node_serve(
     if opts.metrics_level > 0 {
         MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone());
     }
+
+    // After all services booted, register self to meta service
+    let meta_client = MetaClient::new(&opts.meta_address).await.unwrap();
+    let worker_id = meta_client.register(addr).await.unwrap();
+    stream_env.set_worker_id(worker_id);
 
     (join_handle, shutdown_send)
 }
