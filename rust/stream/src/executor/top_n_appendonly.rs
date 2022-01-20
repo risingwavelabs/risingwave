@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use itertools::*;
+use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Op, Row};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
@@ -30,7 +32,7 @@ pub trait TopNExecutorBase: Executor {
 /// We remark that topN executor diffs from aggregate executor as it must output diffs
 /// whenever it applies a batch of input data. Therefore, topN executor flushes data only instead of
 /// computing diffs and flushing when receiving a barrier.
-pub async fn top_n_executor_next(executor: &mut dyn TopNExecutorBase) -> Result<Message> {
+pub(super) async fn top_n_executor_next(executor: &mut dyn TopNExecutorBase) -> Result<Message> {
     let msg = executor.input().next().await?;
     let res = match msg {
         Message::Chunk(chunk) => Ok(Message::Chunk(executor.apply_chunk(chunk).await?)),
@@ -252,21 +254,7 @@ impl<S: StateStore> TopNExecutorBase for AppendOnlyTopNExecutor<S> {
             // the largest element in [offset, offset+limit), which is already full.
             // Therefore, nothing happens.
         }
-
-        if !new_rows.is_empty() {
-            let mut data_chunk_builder =
-                DataChunkBuilder::new_with_default_size(self.schema().data_types());
-            for row in new_rows {
-                data_chunk_builder.append_one_row_ref((&row).into())?;
-            }
-            // since `new_rows` is not empty, we unwrap directly
-            let new_data_chunk = data_chunk_builder.consume_all()?.unwrap();
-            let new_stream_chunk =
-                StreamChunk::new(new_ops, new_data_chunk.columns().to_vec(), None);
-            Ok(new_stream_chunk)
-        } else {
-            Ok(StreamChunk::new(vec![], vec![], None))
-        }
+        generate_output(new_rows, new_ops, self.schema())
     }
 
     async fn flush_data(&mut self, epoch: u64) -> Result<()> {
@@ -275,6 +263,31 @@ impl<S: StateStore> TopNExecutorBase for AppendOnlyTopNExecutor<S> {
 
     fn input(&mut self) -> &mut dyn Executor {
         &mut *self.input
+    }
+}
+
+pub(super) fn generate_output(
+    new_rows: Vec<Row>,
+    new_ops: Vec<Op>,
+    schema: &Schema,
+) -> Result<StreamChunk> {
+    if !new_rows.is_empty() {
+        let mut data_chunk_builder = DataChunkBuilder::new_with_default_size(schema.data_types());
+        for row in new_rows {
+            data_chunk_builder.append_one_row_ref((&row).into())?;
+        }
+        // since `new_rows` is not empty, we unwrap directly
+        let new_data_chunk = data_chunk_builder.consume_all()?.unwrap();
+        let new_stream_chunk = StreamChunk::new(new_ops, new_data_chunk.columns().to_vec(), None);
+        Ok(new_stream_chunk)
+    } else {
+        let columns = schema
+            .create_array_builders(0)
+            .unwrap()
+            .into_iter()
+            .map(|x| Column::new(Arc::new(x.finish().unwrap())))
+            .collect_vec();
+        Ok(StreamChunk::new(vec![], columns, None))
     }
 }
 

@@ -1,13 +1,8 @@
-use std::sync::Arc;
-
 use async_trait::async_trait;
-use itertools::Itertools;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Op, Row, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_common::types::ToOwnedDatum;
-use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::{Keyspace, Segment, StateStore};
@@ -15,7 +10,8 @@ use risingwave_storage::{Keyspace, Segment, StateStore};
 use crate::executor::managed_state::top_n::variants::*;
 use crate::executor::managed_state::top_n::{ManagedTopNBottomNState, ManagedTopNState};
 use crate::executor::{
-    top_n_executor_next, Executor, Message, PkIndices, PkIndicesRef, TopNExecutorBase,
+    generate_output, top_n_executor_next, Executor, Message, PkIndices, PkIndicesRef,
+    TopNExecutorBase,
 };
 
 /// `TopNExecutor` works with input with modification, it keeps all the data
@@ -311,28 +307,7 @@ impl<S: StateStore> TopNExecutorBase for TopNExecutor<S> {
                 }
             }
         }
-
-        if !new_rows.is_empty() {
-            let mut data_chunk_builder =
-                DataChunkBuilder::new_with_default_size(self.schema().data_types());
-            for row in new_rows {
-                data_chunk_builder.append_one_row_ref((&row).into())?;
-            }
-            // since `new_rows` is not empty, we unwrap directly
-            let new_data_chunk = data_chunk_builder.consume_all()?.unwrap();
-            let new_stream_chunk =
-                StreamChunk::new(new_ops, new_data_chunk.columns().to_vec(), None);
-            Ok(new_stream_chunk)
-        } else {
-            let columns = self
-                .schema()
-                .create_array_builders(0)
-                .unwrap()
-                .into_iter()
-                .map(|x| Column::new(Arc::new(x.finish().unwrap())))
-                .collect_vec();
-            Ok(StreamChunk::new(vec![], columns, None))
-        }
+        generate_output(new_rows, new_ops, self.schema())
     }
 
     async fn flush_data(&mut self, epoch: u64) -> Result<()> {
