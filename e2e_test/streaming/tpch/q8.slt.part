@@ -1,0 +1,5 @@
+query TR
+select * from tpch_q8;
+----
+1995  0.157661
+1996  0.576635
