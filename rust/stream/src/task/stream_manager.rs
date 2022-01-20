@@ -912,6 +912,33 @@ impl StreamManagerCore {
         handle.abort();
     }
 
+    fn build_channel_for_chain_node(
+        &self,
+        actor_id: u32,
+        stream_node: &stream_plan::StreamNode,
+    ) -> Result<()> {
+        if let stream_plan::stream_node::Node::ChainNode(chain) = stream_node.node.as_ref().unwrap()
+        {
+            // Create channel based on upstream actor id for [`ChainNode`], check if upstream
+            // exists.
+            if !self.actor_infos.contains_key(&chain.upstream_actor_id) {
+                return Err(ErrorCode::InternalError(format!(
+                    "chain upstream actor {} not exists",
+                    chain.upstream_actor_id
+                ))
+                .into());
+            }
+            let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
+            let up_down_ids = (chain.upstream_actor_id, actor_id);
+            let mut guard = self.context.lock_channel_pool();
+            guard.insert(up_down_ids, (Some(tx), Some(rx)));
+        }
+        for child in &stream_node.input {
+            self.build_channel_for_chain_node(actor_id, child)?;
+        }
+        Ok(())
+    }
+
     fn update_actors(&mut self, actors: &[stream_plan::StreamActor]) -> Result<()> {
         for actor in actors {
             let ret = self.actors.insert(actor.get_actor_id(), actor.clone());
@@ -925,23 +952,7 @@ impl StreamManagerCore {
         }
 
         for (current_id, actor) in &self.actors {
-            if let stream_plan::stream_node::Node::ChainNode(chain) =
-                actor.nodes.as_ref().unwrap().node.as_ref().unwrap()
-            {
-                // Create channel based on upstream actor id for [`ChainNode`], check if upstream
-                // exists.
-                if !self.actor_infos.contains_key(&chain.upstream_actor_id) {
-                    return Err(ErrorCode::InternalError(format!(
-                        "chain upstream actor {} not exists",
-                        chain.upstream_actor_id
-                    ))
-                    .into());
-                }
-                let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-                let up_down_ids = (chain.upstream_actor_id, *current_id);
-                let mut guard = self.context.lock_channel_pool();
-                guard.insert(up_down_ids, (Some(tx), Some(rx)));
-            }
+            self.build_channel_for_chain_node(*current_id, actor.nodes.as_ref().unwrap())?;
 
             for downstream_id in actor.get_downstream_actor_id() {
                 // At this time, the graph might not be complete, so we do not check if downstream

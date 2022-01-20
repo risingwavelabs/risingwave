@@ -18,34 +18,44 @@ import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.util.ImmutableIntList;
 
-/**
- * Chain Node
- *
- * <p>TODO: Chain node should take 2 inputs: a batch plan with a epoch attached, and a broadcast
- * node.
- */
+/** Chain Node */
 public class RwStreamChain extends TableScan implements RisingWaveStreamingRel {
 
   private final TableCatalog.TableId tableId;
-  private final ImmutableIntList primaryKeyIndices;
+  private final ImmutableList<ColumnCatalog.ColumnId> primaryKeyColumnIds;
   private final ImmutableList<ColumnCatalog.ColumnId> columnIds;
+  private final ImmutableIntList primaryKeyIndices;
 
+  /**
+   * ChainNode is used to scan materialized view snapshot and its further stream chunks.
+   *
+   * @param tableId table id of the origin materialized view table.
+   * @param primaryKeyColumnIds column ids of the origin materialized view table.
+   * @param primaryKeyIndices derived pk indices of chain output.
+   * @param columnIds column ids of the origin materialized view.
+   */
   public RwStreamChain(
       RelOptCluster cluster,
       RelTraitSet traitSet,
       List<RelHint> hints,
       RelOptTable table,
       TableCatalog.TableId tableId,
+      ImmutableList<ColumnCatalog.ColumnId> primaryKeyColumnIds,
       ImmutableIntList primaryKeyIndices,
       ImmutableList<ColumnCatalog.ColumnId> columnIds) {
     super(cluster, traitSet, hints, table);
     this.tableId = tableId;
+    this.primaryKeyColumnIds = primaryKeyColumnIds;
     this.primaryKeyIndices = primaryKeyIndices;
     this.columnIds = columnIds;
   }
 
   public TableCatalog.TableId getTableId() {
     return tableId;
+  }
+
+  public ImmutableList<ColumnCatalog.ColumnId> getPrimaryKeyColumnIds() {
+    return primaryKeyColumnIds;
   }
 
   public ImmutableIntList getPrimaryKeyIndices() {

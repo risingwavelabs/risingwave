@@ -647,19 +647,18 @@ public class PrimaryKeyDerivationVisitor
     // If we don't have full pk columns, we need to append the rest to chain.
     ImmutableList.Builder<ColumnCatalog.ColumnId> newColumnIds = ImmutableList.builder();
     ImmutableList.Builder<Integer> newPrimaryKeyIndicesBuilder = ImmutableList.builder();
-    var primaryKeyIndices = new HashSet<>(chain.getPrimaryKeyIndices());
+    var primaryKeyIndices = new HashSet<>(chain.getPrimaryKeyColumnIds());
     var columnIds = chain.getColumnIds();
 
     int idx = 0;
     for (; idx < columnIds.size(); idx++) {
       var columnId = columnIds.get(idx);
       newColumnIds.add(columnId);
-      if (primaryKeyIndices.remove(columnId.getValue())) {
+      if (primaryKeyIndices.remove(columnId)) {
         newPrimaryKeyIndicesBuilder.add(idx);
       }
     }
-    for (var rest : primaryKeyIndices) {
-      var columnId = new ColumnCatalog.ColumnId(rest, chain.getTableId());
+    for (var columnId : primaryKeyIndices) {
       newColumnIds.add(columnId);
       newPrimaryKeyIndicesBuilder.add(idx);
       idx++;
@@ -673,6 +672,7 @@ public class PrimaryKeyDerivationVisitor
             chain.getHints(),
             chain.getTable(),
             chain.getTableId(),
+            chain.getPrimaryKeyColumnIds(),
             ImmutableIntList.copyOf(newPrimaryKeyIndices),
             newColumnIds.build());
 

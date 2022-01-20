@@ -154,4 +154,46 @@ RwStreamMaterializedView(name=[m7])
             ]]>
         </Resource>
     </TestCase>
+    <TestCase name="query 8">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view m8 as select v1, v2, v3 from t2;
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView(name=[m8])
+  RwStreamTableSource(table=[[test_schema, t2]], columns=[v1,v2,v3,_row_id])
+]]>
+        </Resource>
+        <Resource name="json" path="streaming/materialized_view_on_materialized_view_plan_test/q8">
+        </Resource>>
+        <Resource name="primaryKey">
+            <![CDATA[
+[3]
+            ]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="query 9">
+        <Resource name="sql">
+            <![CDATA[
+create materialized view m9 as select round(avg(v1), 1) as avg_v1, sum(v2) as sum_v2, count(v3) as count_v3 from m8;
+            ]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+RwStreamMaterializedView(name=[m9])
+  RwStreamProject(avg_v1=[ROUND($STREAM_NULL_BY_ROW_COUNT($0, /(CAST($1):DOUBLE, $2)), 1)], sum_v2=[$STREAM_NULL_BY_ROW_COUNT($0, $3)], count_v3=[$0], $f1=[$1], $f2=[$2], sum_v2_copy=[$3])
+    RwStreamAgg(group=[{}], agg#0=[COUNT()], agg#1=[SUM($0)], agg#2=[COUNT($0)], sum_v2=[SUM($1)])
+      RwStreamChain(table=[[test_schema, m8]], tableId=[0.0.9], primaryKeyIndices=[[2]], columnIds=[[0.0.9.0, 0.0.9.1, 0.0.9.3]])
+]]>
+        </Resource>
+        <Resource name="json" path="streaming/materialized_view_on_materialized_view_plan_test/q9">
+        </Resource>>
+        <Resource name="primaryKey">
+            <![CDATA[
+[2, 3, 4, 5]
+            ]]>
+        </Resource>
+    </TestCase>
 </Root>

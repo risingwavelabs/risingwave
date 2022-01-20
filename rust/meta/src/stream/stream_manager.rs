@@ -12,7 +12,8 @@ use risingwave_pb::data::barrier::Mutation;
 use risingwave_pb::data::{Barrier, StopMutation};
 use risingwave_pb::meta::{ActorLocation, TableActors};
 use risingwave_pb::plan::TableRefId;
-use risingwave_pb::stream_plan::StreamActor;
+use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::{StreamActor, StreamNode};
 use risingwave_pb::stream_service::stream_service_client::StreamServiceClient;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, DropActorsRequest, InjectBarrierRequest,
@@ -94,6 +95,48 @@ impl DefaultStreamManager {
             Ok(client)
         }
     }
+
+    fn search_chain_table_ref_ids(&self, stream_node: &StreamNode) -> Vec<TableRefId> {
+        let mut table_ref_ids = vec![];
+        if let Node::ChainNode(chain) = stream_node.node.as_ref().unwrap() {
+            table_ref_ids.push(chain.table_ref_id.clone().unwrap());
+        }
+        for child in &stream_node.input {
+            table_ref_ids.extend(self.search_chain_table_ref_ids(child));
+        }
+        table_ref_ids
+    }
+
+    async fn lookup_actor_ids(&self, table_ref_ids: Vec<TableRefId>) -> Result<HashMap<i32, u32>> {
+        let mut result = HashMap::default();
+        for table_ref_id in table_ref_ids {
+            // TODO(MrCroxx): A create materialized view plan will be split into multiple stages.
+            // Currently, we simply assume that MView lays on the actor with min actor id. We need
+            // an interface in [`StreamMetaManager`] to query the actor id of the MView
+            // node.
+            let table_actors = self.smm.get_table_actors(&table_ref_id).await?;
+            result.insert(
+                table_ref_id.table_id,
+                *table_actors.actor_ids.iter().min().unwrap(),
+            );
+        }
+        Ok(result)
+    }
+
+    fn update_chain_upstream_actor_ids(
+        &self,
+        stream_node: &mut StreamNode,
+        table_actor_map: &HashMap<i32, u32>,
+    ) {
+        if let Node::ChainNode(chain) = stream_node.node.as_mut().unwrap() {
+            chain.upstream_actor_id = *table_actor_map
+                .get(&chain.table_ref_id.as_ref().unwrap().table_id)
+                .expect("table id not exists");
+        }
+        for child in &mut stream_node.input {
+            self.update_chain_upstream_actor_ids(child, table_actor_map);
+        }
+    }
 }
 
 #[async_trait]
@@ -111,19 +154,10 @@ impl StreamManager for DefaultStreamManager {
     ) -> Result<()> {
         // Fill `upstream_actor_id` of [`ChainNode`].
         for actor in actors.iter_mut() {
-            if let risingwave_pb::stream_plan::stream_node::Node::ChainNode(chain) =
-                actor.nodes.as_mut().unwrap().node.as_mut().unwrap()
-            {
-                // TODO(MrCroxx): A create materialized view plan will be split into multiple
-                // stages. Currently, we simply assume that MView lays on the actor
-                // with min actor id. We need an interface in [`StreamMetaManager`]
-                // to query the actor id of the MView node.
-                let table_fragments = self
-                    .smm
-                    .get_table_actors(&chain.table_ref_id.clone().unwrap())
-                    .await?;
-                chain.upstream_actor_id = *table_fragments.actor_ids.iter().min().unwrap();
-            }
+            let stream_node = actor.nodes.as_mut().unwrap();
+            let table_ref_ids = self.search_chain_table_ref_ids(stream_node);
+            let table_actor_map = self.lookup_actor_ids(table_ref_ids).await?;
+            self.update_chain_upstream_actor_ids(stream_node, &table_actor_map);
         }
 
         // Divide all actors into source and non-source actors.
@@ -289,8 +323,11 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::thread::sleep;
 
+    use risingwave_common::error::ErrorCode;
     use risingwave_pb::common::HostAddress;
     use risingwave_pb::meta::ClusterType;
+    use risingwave_pb::stream_plan::stream_node::Node;
+    use risingwave_pb::stream_plan::*;
     use risingwave_pb::stream_service::stream_service_server::{
         StreamService, StreamServiceServer,
     };
@@ -298,6 +335,8 @@ mod tests {
         BroadcastActorInfoTableResponse, BuildActorsResponse, DropActorsRequest,
         DropActorsResponse, InjectBarrierRequest, InjectBarrierResponse, UpdateActorsResponse,
     };
+    use tokio::sync::mpsc::UnboundedSender;
+    use tokio::task::JoinHandle;
     use tonic::{Request, Response, Status};
 
     use super::*;
@@ -376,46 +415,75 @@ mod tests {
         }
     }
 
+    struct MockServices {
+        stream_manager: DefaultStreamManager,
+        meta_manager: Arc<StoredStreamMetaManager>,
+        cluster_manager: Arc<StoredClusterManager>,
+        state: Arc<FakeFragmentState>,
+        join_handle: JoinHandle<()>,
+        shutdown_tx: UnboundedSender<()>,
+    }
+
+    impl MockServices {
+        async fn start(host: &str, port: i32) -> Result<Self> {
+            let addr = get_host_port(&format!("{}:{}", host, port)).unwrap();
+            let state = Arc::new(FakeFragmentState {
+                actor_streams: Mutex::new(HashMap::new()),
+                actor_ids: Mutex::new(HashSet::new()),
+                actor_infos: Mutex::new(HashMap::new()),
+            });
+            let fake_service = FakeStreamService {
+                inner: state.clone(),
+            };
+
+            let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+            let stream_srv = StreamServiceServer::new(fake_service);
+            let join_handle = tokio::spawn(async move {
+                tonic::transport::Server::builder()
+                    .add_service(stream_srv)
+                    .serve_with_shutdown(addr, async move {
+                        shutdown_rx.recv().await;
+                    })
+                    .await
+                    .unwrap();
+            });
+            sleep(Duration::from_secs(1));
+
+            let env = MetaSrvEnv::for_test().await;
+            let meta_manager = Arc::new(StoredStreamMetaManager::new(env.clone()));
+            let cluster_manager = Arc::new(StoredClusterManager::new(env));
+            cluster_manager
+                .add_worker_node(
+                    HostAddress {
+                        host: host.to_string(),
+                        port,
+                    },
+                    ClusterType::ComputeNode,
+                )
+                .await?;
+
+            let stream_manager =
+                DefaultStreamManager::new(meta_manager.clone(), cluster_manager.clone());
+
+            Ok(Self {
+                stream_manager,
+                meta_manager,
+                cluster_manager,
+                state,
+                join_handle,
+                shutdown_tx,
+            })
+        }
+
+        async fn stop(self) {
+            self.shutdown_tx.send(()).unwrap();
+            self.join_handle.await.unwrap();
+        }
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn test_create_materialized_view() -> Result<()> {
-        // Start fake stream service.
-        let addr = get_host_port("127.0.0.1:12345").unwrap();
-        let state = Arc::new(FakeFragmentState {
-            actor_streams: Mutex::new(HashMap::new()),
-            actor_ids: Mutex::new(HashSet::new()),
-            actor_infos: Mutex::new(HashMap::new()),
-        });
-        let fake_service = FakeStreamService {
-            inner: state.clone(),
-        };
-
-        let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
-        let stream_srv = StreamServiceServer::new(fake_service);
-        let join_handle = tokio::spawn(async move {
-            tonic::transport::Server::builder()
-                .add_service(stream_srv)
-                .serve_with_shutdown(addr, async move {
-                    shutdown_recv.recv().await;
-                })
-                .await
-                .unwrap();
-        });
-        sleep(Duration::from_secs(1));
-
-        let env = MetaSrvEnv::for_test().await;
-        let meta_manager = Arc::new(StoredStreamMetaManager::new(env.clone()));
-        let cluster_manager = Arc::new(StoredClusterManager::new(env));
-        cluster_manager
-            .add_worker_node(
-                HostAddress {
-                    host: "127.0.0.1".to_string(),
-                    port: 12345,
-                },
-                ClusterType::ComputeNode,
-            )
-            .await?;
-
-        let stream_manager = DefaultStreamManager::new(meta_manager.clone(), cluster_manager);
+        let services = MockServices::start("127.0.0.1", 12345).await?;
 
         let table_ref_id = TableRefId {
             schema_ref_id: None,
@@ -444,13 +512,15 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        stream_manager
+        services
+            .stream_manager
             .create_materialized_view(&table_ref_id, &mut actors, vec![])
             .await?;
 
         for actor in actors.clone() {
             assert_eq!(
-                state
+                services
+                    .state
                     .actor_streams
                     .lock()
                     .unwrap()
@@ -459,13 +529,15 @@ mod tests {
                     .unwrap(),
                 actor
             );
-            assert!(state
+            assert!(services
+                .state
                 .actor_ids
                 .lock()
                 .unwrap()
                 .contains(&actor.get_actor_id()));
             assert_eq!(
-                state
+                services
+                    .state
                     .actor_infos
                     .lock()
                     .unwrap()
@@ -479,17 +551,114 @@ mod tests {
             );
         }
 
-        let locations = meta_manager.load_all_actors().await?;
+        let locations = services.meta_manager.load_all_actors().await?;
         assert_eq!(locations.len(), 1);
         assert_eq!(locations.get(0).unwrap().get_node().get_id(), 0);
         assert_eq!(locations.get(0).unwrap().actors, actors);
-        let table_actors = meta_manager.get_table_actors(&table_ref_id).await?;
+        let table_actors = services
+            .meta_manager
+            .get_table_actors(&table_ref_id)
+            .await?;
         assert_eq!(table_actors.actor_ids, (0..5).collect::<Vec<u32>>());
 
-        // Gracefully terminate the server.
-        shutdown_send.send(()).unwrap();
-        join_handle.await.unwrap();
+        services.stop().await;
+        Ok(())
+    }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_create_materialized_view_on_materialized_view() -> Result<()> {
+        let services = MockServices::start("127.0.0.1", 12346).await?;
+
+        let table_ref_id_1 = TableRefId {
+            schema_ref_id: None,
+            table_id: 1,
+        };
+        let table_ref_id_2 = TableRefId {
+            schema_ref_id: None,
+            table_id: 2,
+        };
+
+        let actor_1 = StreamActor {
+            actor_id: 1,
+            nodes: Some(StreamNode {
+                node_id: 1,
+                node: Some(Node::MviewNode(MViewNode {
+                    table_ref_id: Some(table_ref_id_1.clone()),
+                    associated_table_ref_id: None,
+                    column_descs: vec![],
+                    pk_indices: vec![],
+                    column_orders: vec![],
+                })),
+                pk_indices: vec![],
+                input: vec![],
+            }),
+            dispatcher: None,
+            downstream_actor_id: vec![],
+        };
+
+        let actor_2 = StreamActor {
+            actor_id: 2,
+            nodes: Some(StreamNode {
+                node_id: 2,
+                node: Some(Node::MviewNode(MViewNode {
+                    table_ref_id: Some(table_ref_id_2.clone()),
+                    associated_table_ref_id: None,
+                    column_descs: vec![],
+                    pk_indices: vec![],
+                    column_orders: vec![],
+                })),
+                pk_indices: vec![],
+                input: vec![StreamNode {
+                    node_id: 3,
+                    node: Some(Node::ChainNode(ChainNode {
+                        table_ref_id: Some(table_ref_id_1.clone()),
+                        upstream_actor_id: 0,
+                        pk_indices: vec![],
+                        column_ids: vec![],
+                    })),
+                    pk_indices: vec![],
+                    input: vec![],
+                }],
+            }),
+            dispatcher: None,
+            downstream_actor_id: vec![],
+        };
+
+        services
+            .stream_manager
+            .create_materialized_view(&table_ref_id_1, &mut [actor_1], vec![])
+            .await?;
+
+        services
+            .stream_manager
+            .create_materialized_view(&table_ref_id_2, &mut [actor_2], vec![])
+            .await?;
+
+        let stored_actor_2 = services
+            .state
+            .actor_streams
+            .lock()
+            .unwrap()
+            .get(&2)
+            .cloned()
+            .unwrap();
+        if let Node::ChainNode(chain) = stored_actor_2
+            .nodes
+            .as_ref()
+            .unwrap()
+            .input
+            .get(0)
+            .unwrap()
+            .node
+            .as_ref()
+            .unwrap()
+        {
+            assert_eq!(chain.upstream_actor_id, 1);
+        } else {
+            return Err(ErrorCode::UnknownError("chain node is expected".to_owned()).into());
+        }
+
+        services.stop().await;
         Ok(())
     }
 }
