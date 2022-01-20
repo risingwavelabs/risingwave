@@ -4,13 +4,13 @@ use std::io::{IoSlice, Write};
 use byteorder::{BigEndian, ByteOrder};
 /// Part of code learned from https://github.com/zenithdb/zenith/blob/main/zenith_utils/src/pq_proto.rs.
 use bytes::{BufMut, Bytes, BytesMut};
-use risingwave_common::array::Row;
+use risingwave_common::array::{Row, RwError};
 use risingwave_common::error::Result;
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
 
 use crate::pgwire::pg_field_descriptor::PgFieldDescriptor;
-use crate::pgwire::pg_result::StatementType;
+use crate::pgwire::pg_response::StatementType;
 
 /// Messages that can be sent from pg client to server. Implement `read`.
 pub enum FeMessage {
@@ -82,7 +82,8 @@ impl FeStartupMessage {
     }
 }
 
-/// Message sent from server to psql client. Implement `write`.
+/// Message sent from server to psql client. Implement `write` (how to serialize it into psql
+/// buffer).
 #[derive(Debug)]
 pub enum BeMessage<'a> {
     AuthenticationOk,
@@ -93,6 +94,7 @@ pub enum BeMessage<'a> {
     ParameterStatus(BeParameterStatusMessage<'a>),
     ReadyForQuery,
     RowDescription(&'a [PgFieldDescriptor]),
+    ErrorResponse(RwError),
 }
 
 #[derive(Debug)]
@@ -253,6 +255,28 @@ impl<'a> BeMessage<'a> {
 
             BeMessage::EncryptionResponse => {
                 buf.put_u8(b'N');
+            }
+
+            BeMessage::ErrorResponse(error) => {
+                // For all the errors set Severity to Error and error code to
+                // 'internal error'.
+
+                // 'E' signalizes ErrorResponse messages
+                buf.put_u8(b'E');
+                write_body(buf, |buf| {
+                    buf.put_u8(b'S'); // severity
+                    write_cstr(buf, &Bytes::from("ERROR"))?;
+
+                    buf.put_u8(b'C'); // SQLSTATE error code
+                    write_cstr(buf, &Bytes::from("XX000"))?;
+
+                    buf.put_u8(b'M'); // the message
+                    write_cstr(buf, error.to_string().as_bytes())?;
+
+                    buf.put_u8(0); // terminator
+                    Ok(())
+                })
+                .unwrap();
             }
         }
 

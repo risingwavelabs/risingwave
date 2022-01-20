@@ -35,7 +35,7 @@ impl std::fmt::Display for StatementType {
     }
 }
 
-pub struct PgResult {
+pub struct PgResponse {
     stmt_type: StatementType,
     row_cnt: i32,
 
@@ -58,7 +58,7 @@ impl StatementType {
     }
 }
 
-impl PgResult {
+impl PgResponse {
     pub fn new(
         stmt_type: StatementType,
         row_cnt: i32,
@@ -95,12 +95,12 @@ impl PgResult {
 }
 
 /// Helper to return a 1-row-1-col string at early stage of developement.
-impl From<String> for PgResult {
+impl From<String> for PgResponse {
     fn from(s: String) -> Self {
         use risingwave_common::types::ScalarImpl;
 
         use crate::pgwire::pg_field_descriptor::TypeOid;
-        PgResult::new(
+        PgResponse::new(
             StatementType::SELECT,
             1,
             vec![Row::new(vec![Some(ScalarImpl::Utf8(s))])],

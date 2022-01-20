@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 
-use risingwave_common::error::Result;
+use risingwave_common::array::RwError;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_meta::rpc::meta_client::MetaClient;
 use risingwave_sqlparser::parser::Parser;
 
@@ -8,7 +9,7 @@ use crate::catalog::catalog_service::{
     RemoteCatalogManager, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
 };
 use crate::handler::handle;
-use crate::pgwire::pg_result::PgResult;
+use crate::pgwire::pg_response::PgResponse;
 use crate::pgwire::pg_server::{Session, SessionManager};
 use crate::FrontendOpts;
 
@@ -72,9 +73,10 @@ impl RwSessionManager {
 
 #[async_trait::async_trait]
 impl Session for RwSession {
-    async fn run_statement(&self, sql: &str) -> PgResult {
+    async fn run_statement(&self, sql: &str) -> Result<PgResponse> {
         // Parse sql.
-        let mut stmts = Parser::parse_sql(sql).unwrap();
+        let mut stmts = Parser::parse_sql(sql)
+            .map_err(|e| RwError::from(ErrorCode::ParseError(Box::new(e))))?;
         // With pgwire, there would be at most 1 statement in the vec.
         assert_eq!(stmts.len(), 1);
         let stmt = stmts.swap_remove(0);
@@ -108,7 +110,7 @@ mod tests {
             .get_database(DEFAULT_DATABASE_NAME)
             .is_some());
         let session = mgr.connect();
-        let _result = session.run_statement("select 1").await;
+        assert!(session.run_statement("select * from t").await.is_err());
         meta.stop().await;
     }
 }

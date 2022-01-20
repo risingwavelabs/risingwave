@@ -11,7 +11,7 @@ use crate::pgwire::pg_message::{
     BeCommandCompleteMessage, BeMessage, BeParameterStatusMessage, FeMessage, FeQueryMessage,
     FeStartupMessage,
 };
-use crate::pgwire::pg_result::PgResult;
+use crate::pgwire::pg_response::PgResponse;
 
 /// The state machine for each psql connection.
 /// Read pg messages from tcp stream and write results back.
@@ -106,20 +106,30 @@ impl PgProtocol {
         let session = self.session.as_ref().unwrap();
 
         // execute query
-        let res = session.run_statement(query.get_sql()).await;
-        if res.is_query() {
-            self.process_query_with_results(res).await?;
-        } else {
-            self.write_message_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
-                stmt_type: res.get_stmt_type(),
-                rows_cnt: res.get_effected_rows_cnt(),
-            }))?;
+        let process_res = session.run_statement(query.get_sql()).await;
+        match process_res {
+            Ok(res) => {
+                if res.is_query() {
+                    self.process_query_with_results(res).await?;
+                } else {
+                    self.write_message_no_flush(&BeMessage::CommandComplete(
+                        BeCommandCompleteMessage {
+                            stmt_type: res.get_stmt_type(),
+                            rows_cnt: res.get_effected_rows_cnt(),
+                        },
+                    ))?;
+                }
+            }
+
+            Err(e) => {
+                self.write_message_no_flush(&BeMessage::ErrorResponse(e))?;
+            }
         }
         self.write_message_no_flush(&BeMessage::ReadyForQuery)?;
         Ok(())
     }
 
-    async fn process_query_with_results(&mut self, res: PgResult) -> Result<()> {
+    async fn process_query_with_results(&mut self, res: PgResponse) -> Result<()> {
         self.write_message(&BeMessage::RowDescription(&res.get_row_desc()))
             .await?;
 

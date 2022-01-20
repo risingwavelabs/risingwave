@@ -5,7 +5,7 @@ use risingwave_common::error::Result;
 use tokio::net::{TcpListener, TcpStream};
 
 use super::pg_protocol::PgProtocol;
-use super::pg_result::PgResult;
+use super::pg_response::PgResponse;
 
 /// The interface for a database system behind pgwire protocol.
 /// We can mock it for testing purpose.
@@ -16,7 +16,7 @@ pub trait SessionManager: Send + Sync {
 /// A psql connection.
 #[async_trait::async_trait]
 pub trait Session: Send + Sync {
-    async fn run_statement(&self, sql: &str) -> PgResult;
+    async fn run_statement(&self, sql: &str) -> Result<PgResponse>;
 }
 
 /// Binds a Tcp listener at [`addr`]. Spawn a coroutine to serve every new connection.
@@ -58,13 +58,15 @@ async fn pg_serve_conn(socket: TcpStream, session_mgr: Arc<dyn SessionManager>) 
 mod tests {
     use std::sync::Arc;
 
-    use risingwave_common::array::Row;
+    use risingwave_common::array::{Row, RwError};
+    use risingwave_common::error::{ErrorCode, Result};
     use risingwave_common::types::ScalarImpl;
+    use risingwave_sqlparser::parser::Parser;
     use tokio_postgres::{NoTls, SimpleQueryMessage};
 
     use super::{Session, SessionManager};
     use crate::pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
-    use crate::pgwire::pg_result::{PgResult, StatementType};
+    use crate::pgwire::pg_response::{PgResponse, StatementType};
     use crate::pgwire::pg_server::pg_serve;
 
     struct TestSessionManager {}
@@ -79,13 +81,20 @@ mod tests {
 
     #[async_trait::async_trait]
     impl Session for TestSession {
-        async fn run_statement(&self, sql: &str) -> PgResult {
-            // Returns a single-column single-row result, containing the sql string.
-            PgResult::new(
-                StatementType::SELECT,
-                1,
-                vec![Row::new(vec![Some(ScalarImpl::Utf8(sql.to_string()))])],
-                vec![PgFieldDescriptor::new("sql".to_string(), TypeOid::Varchar)],
+        async fn run_statement(&self, sql: &str) -> Result<PgResponse> {
+            let stmts = Parser::parse_sql(sql)
+                .map_err(|e| RwError::from(ErrorCode::ParseError(Box::new(e))))?;
+            Ok(
+                // Returns a single-column single-row result, containing the sql string.
+                PgResponse::new(
+                    StatementType::SELECT,
+                    1,
+                    vec![Row::new(vec![Some(ScalarImpl::Utf8(format!(
+                        "{:?}",
+                        stmts
+                    )))])],
+                    vec![PgFieldDescriptor::new("sql".to_string(), TypeOid::Varchar)],
+                ),
             )
         }
     }
@@ -116,7 +125,10 @@ mod tests {
         for (idx, row) in ret.iter().enumerate() {
             if idx == 0 {
                 if let SimpleQueryMessage::Row(row_inner) = row {
-                    assert_eq!(row_inner.get(0), Some("SELECT * from t;"));
+                    assert_eq!(
+                        row_inner.get(0),
+                        Some(format!("{:?}", Parser::parse_sql(query).unwrap()).as_str())
+                    );
                 } else {
                     panic!("The first message should be row values")
                 }
@@ -127,6 +139,14 @@ mod tests {
                     panic!("The last message should be command complete")
                 }
             }
+        }
+
+        let query2 = "SELECTA * from t;";
+        let ret = client.simple_query(query2).await;
+        assert!(ret.is_err());
+        if let Err(e) = ret {
+            // Internal error code.
+            assert_eq!(e.code().unwrap().code(), "XX000");
         }
     }
 }
