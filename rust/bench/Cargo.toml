@@ -13,6 +13,7 @@ itertools = "0.10"
 log = "0.4"
 rand = "0.8"
 risingwave-pb = { path = "../prost" }
+risingwave_common = { path = "../common" }
 risingwave_storage = { path = "../storage" } 
 rusoto_core = "0.47"
 rusoto_credential = "0.47"

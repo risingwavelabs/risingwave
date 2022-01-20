@@ -4,7 +4,7 @@ use risingwave_pb::hummock::SstableMeta;
 
 use crate::hummock::key::{Epoch, FullKey};
 use crate::hummock::value::HummockValue;
-use crate::hummock::SSTableBuilder;
+use crate::hummock::{HummockResult, SSTableBuilder};
 
 struct SSTableBuilderWrapper {
     id: u64,
@@ -28,7 +28,7 @@ pub struct CapacitySplitTableBuilder<B> {
 impl<B, F> CapacitySplitTableBuilder<B>
 where
     B: FnMut() -> F,
-    F: Future<Output = (u64, SSTableBuilder)>,
+    F: Future<Output = HummockResult<(u64, SSTableBuilder)>>,
 {
     /// Create a new [`CapacitySplitTableBuilder`] using given configuration generator.
     pub fn new(get_id_and_builder: B) -> Self {
@@ -57,10 +57,11 @@ where
         user_key: Vec<u8>,
         value: HummockValue<Vec<u8>>,
         epoch: Epoch,
-    ) {
+    ) -> HummockResult<()> {
         assert!(!user_key.is_empty());
         let full_key = FullKey::from_user_key(user_key, epoch);
-        self.add_full_key(full_key.as_slice(), value, true).await;
+        self.add_full_key(full_key.as_slice(), value, true).await?;
+        Ok(())
     }
 
     /// Add a key-value pair to the underlying builders.
@@ -75,7 +76,7 @@ where
         full_key: FullKey<&[u8]>,
         value: HummockValue<Vec<u8>>,
         allow_split: bool,
-    ) {
+    ) -> HummockResult<()> {
         let new_builder_required = allow_split
             && self
                 .builders
@@ -84,7 +85,7 @@ where
                 .unwrap_or(true);
 
         if new_builder_required {
-            let (id, builder) = (self.get_id_and_builder)().await;
+            let (id, builder) = (self.get_id_and_builder)().await?;
             self.builders.push(SSTableBuilderWrapper {
                 id,
                 builder,
@@ -94,6 +95,7 @@ where
 
         let builder = &mut self.builders.last_mut().unwrap().builder;
         builder.add(full_key.into_inner(), value);
+        Ok(())
     }
 
     /// Mark current builder as sealed. Next calling of `add` will always create a new table.
@@ -138,7 +140,7 @@ mod tests {
         let block_size = 1 << 10;
         let table_capacity = 4 * block_size;
         let get_id_and_builder = || async {
-            (
+            Ok((
                 next_id.fetch_add(1, SeqCst),
                 SSTableBuilder::new(SSTableBuilderOptions {
                     table_capacity,
@@ -146,14 +148,15 @@ mod tests {
                     bloom_false_positive: 0.1,
                     checksum_algo: checksum::Algorithm::XxHash64,
                 }),
-            )
+            ))
         };
         let mut builder = CapacitySplitTableBuilder::new(get_id_and_builder);
 
         for _ in 0..table_capacity {
             builder
                 .add_user_key(b"key".to_vec(), Put(b"value".to_vec()), 233)
-                .await;
+                .await
+                .unwrap();
         }
 
         let results = builder.finish();
@@ -165,17 +168,18 @@ mod tests {
     async fn test_table_seal() {
         let next_id = AtomicU64::new(1001);
         let mut builder = CapacitySplitTableBuilder::new(|| async {
-            (
+            Ok((
                 next_id.fetch_add(1, SeqCst),
                 SSTableBuilder::new(default_builder_opt_for_test()),
-            )
+            ))
         });
 
         macro_rules! add {
             () => {
                 builder
                     .add_user_key(b"k".to_vec(), Put(b"v".to_vec()), 233)
-                    .await;
+                    .await
+                    .unwrap();
             };
         }
 

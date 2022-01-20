@@ -26,10 +26,7 @@ async fn gen_and_upload_table(
     if kv_pairs.is_empty() {
         return;
     }
-    let table_id = hummock_meta_client
-        .get_new_table_id(GetNewTableIdRequest {})
-        .await
-        .table_id;
+    let table_id = hummock_meta_client.get_new_table_id().await.unwrap();
 
     let mut b = SSTableBuilder::new(default_builder_opt_for_test());
     for kv in kv_pairs {
@@ -44,9 +41,9 @@ async fn gen_and_upload_table(
         .await
         .unwrap();
     hummock_meta_client
-        .add_tables(AddTablesRequest {
-            context_identifier: 0,
-            tables: vec![SstableInfo {
+        .add_tables(
+            epoch,
+            vec![SstableInfo {
                 id: table.id,
                 key_range: Some(risingwave_pb::hummock::KeyRange {
                     left: table.meta.smallest_key,
@@ -54,11 +51,11 @@ async fn gen_and_upload_table(
                     inf: false,
                 }),
             }],
-            epoch,
-        })
-        .await;
+        )
+        .await
+        .unwrap();
     // TODO #2336 we need to maintain local version.
-    vm.update_local_version(hummock_meta_client).await;
+    vm.update_local_version(hummock_meta_client).await.unwrap();
 }
 
 macro_rules! assert_count_range_scan {

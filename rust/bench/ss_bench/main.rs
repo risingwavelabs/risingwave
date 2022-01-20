@@ -5,6 +5,7 @@ mod utils;
 
 use clap::Parser;
 use operation::{get_random, prefix_scan_random, write_batch};
+use risingwave_common::error::{Result, RwError};
 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 use risingwave_storage::hummock::local_version_manager::LocalVersionManager;
 use risingwave_storage::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
@@ -75,8 +76,8 @@ pub(crate) enum StateStoreImpl {
     Tikv(TikvStateStore),
 }
 
-async fn get_state_store_impl(opts: &Opts) -> StateStoreImpl {
-    match opts.store.as_ref() {
+async fn get_state_store_impl(opts: &Opts) -> Result<StateStoreImpl> {
+    let instance = match opts.store.as_ref() {
         "in-memory" | "in_memory" => StateStoreImpl::Memory(MemoryStateStore::new()),
         tikv if tikv.starts_with("tikv") => StateStoreImpl::Tikv(TikvStateStore::new(vec![tikv
             .strip_prefix("tikv://")
@@ -103,7 +104,8 @@ async fn get_state_store_impl(opts: &Opts) -> StateStoreImpl {
                         MockHummockMetaService::new(),
                     ))),
                 )
-                .await,
+                .await
+                .map_err(RwError::from)?,
             ))
         }
         s3 if s3.starts_with("hummock+s3://") => {
@@ -129,14 +131,16 @@ async fn get_state_store_impl(opts: &Opts) -> StateStoreImpl {
                         MockHummockMetaService::new(),
                     ))),
                 )
-                .await,
+                .await
+                .map_err(RwError::from)?,
             ))
         }
         rocksdb if rocksdb.starts_with("rocksdb_local://") => StateStoreImpl::RocksDB(
             RocksDBStateStore::new(rocksdb.strip_prefix("rocksdb_local://").unwrap()),
         ),
         other => unimplemented!("state store \"{}\" is not supported", other),
-    }
+    };
+    Ok(instance)
 }
 
 async fn run_op(store: impl StateStore, opts: &Opts) {
@@ -173,7 +177,15 @@ async fn main() {
 
     println!("Input configurations: {:?}", &opts);
 
-    match get_state_store_impl(&opts).await {
+    let state_store = match get_state_store_impl(&opts).await {
+        Ok(state_store_impl) => state_store_impl,
+        Err(_) => {
+            eprintln!("Failed to get state_store");
+            return;
+        }
+    };
+
+    match state_store {
         StateStoreImpl::Hummock(store) => run_op(store, &opts).await,
         StateStoreImpl::Memory(store) => run_op(store, &opts).await,
         StateStoreImpl::RocksDB(store) => run_op(store, &opts).await,

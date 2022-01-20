@@ -48,7 +48,8 @@ async fn test_prometheus_endpoint_hummock() {
             MockHummockMetaService::new(),
         ))),
     )
-    .await;
+    .await
+    .unwrap();
     let anchor = Bytes::from("aa");
     let mut batch1 = vec![
         (anchor.clone(), Some(Bytes::from("111"))),
@@ -127,7 +128,8 @@ async fn test_basic() {
             MockHummockMetaService::new(),
         ))),
     )
-    .await;
+    .await
+    .unwrap();
     let anchor = Bytes::from("aa");
 
     // First batch inserts the anchor and others.
@@ -172,7 +174,7 @@ async fn test_basic() {
         .await
         .unwrap();
 
-    let snapshot1 = hummock_storage.get_snapshot().await;
+    let snapshot1 = hummock_storage.get_snapshot().await.unwrap();
 
     // Get the value after flushing to remote.
     let value = snapshot1.get(&anchor).await.unwrap().unwrap();
@@ -194,7 +196,7 @@ async fn test_basic() {
         .await
         .unwrap();
 
-    let snapshot2 = hummock_storage.get_snapshot().await;
+    let snapshot2 = hummock_storage.get_snapshot().await.unwrap();
 
     // Get the value after flushing to remote.
     let value = snapshot2.get(&anchor).await.unwrap().unwrap();
@@ -212,7 +214,7 @@ async fn test_basic() {
         .await
         .unwrap();
 
-    let snapshot3 = hummock_storage.get_snapshot().await;
+    let snapshot3 = hummock_storage.get_snapshot().await.unwrap();
 
     // Get the value after flushing to remote.
     let value = snapshot3.get(&anchor).await.unwrap();
@@ -283,7 +285,8 @@ async fn test_reload_storage() {
         local_version_manager.clone(),
         hummock_meta_client.clone(),
     )
-    .await;
+    .await
+    .unwrap();
     let anchor = Bytes::from("aa");
 
     // First batch inserts the anchor and others.
@@ -318,7 +321,7 @@ async fn test_reload_storage() {
         .await
         .unwrap();
 
-    let snapshot1 = hummock_storage.get_snapshot().await;
+    let snapshot1 = hummock_storage.get_snapshot().await.unwrap();
 
     // Mock somthing happened to storage internal, and storage is reloaded.
     drop(hummock_storage);
@@ -329,7 +332,8 @@ async fn test_reload_storage() {
         local_version_manager,
         hummock_meta_client,
     )
-    .await;
+    .await
+    .unwrap();
 
     // Get the value after flushing to remote.
     let value = snapshot1.get(&anchor).await.unwrap().unwrap();
@@ -351,7 +355,7 @@ async fn test_reload_storage() {
         .await
         .unwrap();
 
-    let snapshot2 = hummock_storage.get_snapshot().await;
+    let snapshot2 = hummock_storage.get_snapshot().await.unwrap();
 
     // Get the value after flushing to remote.
     let value = snapshot2.get(&anchor).await.unwrap().unwrap();

@@ -69,7 +69,7 @@ impl MockHummockMetaService {
 
     pub fn pin_version(&self, _request: PinVersionRequest) -> PinVersionResponse {
         let mut guard = self.inner.lock();
-        let greatest_version_id = guard.versions.keys().cloned().last().unwrap();
+        let greatest_version_id = *guard.versions.keys().last().unwrap();
         let greatest_version = guard.versions.get(&greatest_version_id).unwrap().clone();
         let ref_count_entry = guard.version_ref_counts.entry(greatest_version_id);
         *ref_count_entry.or_insert(0) += 1;
@@ -96,7 +96,7 @@ impl MockHummockMetaService {
         // TODO #2336 Because e2e checkpoint is not ready yet, we temporarily return the maximum
         // write_batch epoch to enable uncommitted read.
         let guard = self.inner.lock();
-        let greatest_version = guard.versions.values().cloned().last().unwrap();
+        let greatest_version = guard.versions.values().last().unwrap().clone();
         let maximum_uncommitted_epoch = greatest_version
             .uncommitted_epochs
             .iter()

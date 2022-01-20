@@ -3,9 +3,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use parking_lot::{Mutex, RwLock};
-use risingwave_pb::hummock::{
-    HummockVersion, Level, LevelType, PinVersionRequest, UnpinVersionRequest,
-};
+use risingwave_pb::hummock::{HummockVersion, Level, LevelType};
 
 use crate::hummock::cloud::{get_sst_data_path, get_sst_meta};
 use crate::hummock::{
@@ -111,19 +109,17 @@ impl LocalVersionManager {
     /// Currently it's invoked in two places:
     /// - At the end of `HummockStorage` creation.
     /// - At the end of `write_batch`.
-    pub async fn update_local_version(&self, hummock_meta_client: &dyn HummockMetaClient) {
-        let new_pinned_version = hummock_meta_client
-            .pin_version(PinVersionRequest {
-                context_identifier: 0,
-            })
-            .await;
+    pub async fn update_local_version(
+        &self,
+        hummock_meta_client: &dyn HummockMetaClient,
+    ) -> HummockResult<()> {
+        let (new_pinned_version_id, new_pinned_version) = hummock_meta_client.pin_version().await?;
         let versions_to_unpin = {
             // Add to local state
             let mut guard = self.inner.lock();
-            guard.pinned_versions.insert(
-                new_pinned_version.pinned_version_id,
-                Arc::new(new_pinned_version.pinned_version.unwrap()),
-            );
+            guard
+                .pinned_versions
+                .insert(new_pinned_version_id, Arc::new(new_pinned_version));
 
             // Unpin versions with ref_count = 0 except for the greatest version in local state.
             // TODO Should be called periodically.
@@ -149,13 +145,10 @@ impl LocalVersionManager {
                 // Edge case. This is an artificial version.
                 continue;
             }
-            hummock_meta_client
-                .unpin_version(UnpinVersionRequest {
-                    context_identifier: 0,
-                    pinned_version_id: version_id,
-                })
-                .await;
+            hummock_meta_client.unpin_version(version_id).await?;
         }
+
+        Ok(())
     }
 
     /// Get and pin the greatest local version

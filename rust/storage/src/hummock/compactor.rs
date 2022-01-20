@@ -158,7 +158,7 @@ impl Compactor {
         let mut builder = CapacitySplitTableBuilder::new(|| async {
             let table_id = context.version_manager.generate_table_id().await;
             let builder = HummockStorage::get_builder(&context.options);
-            (table_id, builder)
+            Ok((table_id, builder))
         });
 
         while iter.is_valid() {
@@ -204,7 +204,7 @@ impl Compactor {
                     iter.value().to_owned_value(),
                     is_new_user_key,
                 )
-                .await;
+                .await?;
 
             iter.next().await?;
         }
@@ -301,7 +301,8 @@ mod tests {
                     MockHummockMetaService::new(),
                 ))),
             )
-            .await,
+            .await
+            .unwrap(),
         );
         let sub_compact_context = SubCompactContext {
             options: hummock_storage.options.clone(),
@@ -355,6 +356,7 @@ mod tests {
         let value = hummock_storage
             .get_snapshot()
             .await
+            .unwrap()
             .get(&anchor)
             .await
             .unwrap()
@@ -365,6 +367,7 @@ mod tests {
         let value = hummock_storage
             .get_snapshot()
             .await
+            .unwrap()
             .get(&Bytes::from("ab"))
             .await
             .unwrap();
@@ -386,6 +389,7 @@ mod tests {
         let value = hummock_storage
             .get_snapshot()
             .await
+            .unwrap()
             .get(&anchor)
             .await
             .unwrap()
@@ -448,6 +452,7 @@ mod tests {
         let value = hummock_storage
             .get_snapshot()
             .await
+            .unwrap()
             .get(&anchor)
             .await
             .unwrap();
@@ -457,6 +462,7 @@ mod tests {
         let value = hummock_storage
             .get_snapshot()
             .await
+            .unwrap()
             .get(&Bytes::from("ff"))
             .await
             .unwrap();
@@ -487,7 +493,8 @@ mod tests {
             local_version_manager,
             hummock_meta_client,
         )
-        .await;
+        .await
+        .unwrap();
         storage.shutdown_compactor().await.unwrap();
         let sub_compact_context = SubCompactContext {
             options: storage.options.clone(),

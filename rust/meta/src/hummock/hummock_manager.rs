@@ -16,8 +16,8 @@ use risingwave_pb::hummock::{
 };
 use risingwave_storage::hummock::key_range::KeyRange;
 use risingwave_storage::hummock::{
-    HummockContextId, HummockEpoch, HummockError, HummockSSTableId, HummockSnapshotId, HummockTTL,
-    HummockVersionId, INVALID_EPOCH,
+    HummockContextId, HummockEpoch, HummockError, HummockSSTableId, HummockTTL, HummockVersionId,
+    INVALID_EPOCH,
 };
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
@@ -235,7 +235,11 @@ impl DefaultHummockManagerInner {
                 context_pinned_version.version_id.remove(pos);
                 Ok(())
             }
-            None => Err(HummockError::no_matching_pin_version(pinned_version_id).into()),
+            None => Err(HummockError::meta_error(format!(
+                "version id not found: {0}",
+                pinned_version_id
+            ))
+            .into()),
         }
     }
 
@@ -288,7 +292,7 @@ impl DefaultHummockManagerInner {
     fn pin_snapshot(
         &self,
         context_pinned_snapshot: &mut HummockContextPinnedSnapshot,
-        new_snapshot_id: HummockSnapshotId,
+        new_snapshot_id: HummockEpoch,
     ) {
         context_pinned_snapshot.snapshot_id.push(new_snapshot_id);
     }
@@ -296,7 +300,7 @@ impl DefaultHummockManagerInner {
     fn unpin_snapshot(
         &self,
         context_pinned_snapshot: &mut HummockContextPinnedSnapshot,
-        pinned_snapshot_id: HummockSnapshotId,
+        pinned_snapshot_id: HummockEpoch,
     ) -> Result<()> {
         let found = context_pinned_snapshot
             .snapshot_id
@@ -307,7 +311,11 @@ impl DefaultHummockManagerInner {
                 context_pinned_snapshot.snapshot_id.remove(pos);
                 Ok(())
             }
-            None => Err(HummockError::no_matching_pin_snapshot(pinned_snapshot_id).into()),
+            None => Err(HummockError::meta_error(format!(
+                "epoch not found: {0}",
+                pinned_snapshot_id
+            ))
+            .into()),
         }
     }
 
@@ -343,7 +351,7 @@ impl DefaultHummockManagerInner {
         }
     }
 
-    async fn get_snapshot_low_watermark(&self) -> Result<HummockSnapshotId> {
+    async fn get_snapshot_low_watermark(&self) -> Result<HummockEpoch> {
         let version_data = self
             .get_version_data(self.get_current_version_id().await?)
             .await?;

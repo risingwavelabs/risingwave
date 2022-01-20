@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
@@ -148,7 +148,8 @@ impl StateStoreImpl {
                             MockHummockMetaService::new(),
                         ))),
                     )
-                    .await,
+                    .await
+                    .map_err(RwError::from)?,
                 ))
             }
             s3 if s3.starts_with("hummock+s3://") => {
@@ -178,7 +179,8 @@ impl StateStoreImpl {
                             MockHummockMetaService::new(),
                         ))),
                     )
-                    .await,
+                    .await
+                    .map_err(RwError::from)?,
                 ))
             }
             rocksdb if rocksdb.starts_with("rocksdb_local://") => {

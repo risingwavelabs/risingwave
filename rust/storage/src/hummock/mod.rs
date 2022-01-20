@@ -34,12 +34,12 @@ use compactor::{Compactor, SubCompactContext};
 pub use error::*;
 use parking_lot::Mutex as PLMutex;
 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
-use risingwave_pb::hummock::{
-    AddTablesRequest, GetNewTableIdRequest, KeyRange, PinSnapshotRequest, SstableInfo,
-};
+use risingwave_pb::hummock::{KeyRange, SstableInfo};
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
+use tokio_retry::strategy::{jitter, ExponentialBackoff};
+use tokio_retry::RetryIf;
 use value::*;
 
 use self::iterator::UserIterator;
@@ -49,7 +49,7 @@ use self::snapshot::HummockSnapshot;
 pub use self::state_store::*;
 use self::version_manager::VersionManager;
 use super::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
-use crate::hummock::hummock_meta_client::HummockMetaClient;
+use crate::hummock::hummock_meta_client::{HummockMetaClient, RetryableError};
 use crate::hummock::iterator::ReverseUserIterator;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::object::ObjectStore;
@@ -140,7 +140,7 @@ impl HummockStorage {
         version_manager: Arc<VersionManager>,
         local_version_manager: Arc<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
-    ) -> Self {
+    ) -> HummockResult<HummockStorage> {
         let (trigger_compact_tx, trigger_compact_rx) = mpsc::unbounded_channel();
         let (stop_compact_tx, stop_compact_rx) = mpsc::unbounded_channel();
 
@@ -153,12 +153,19 @@ impl HummockStorage {
         let rx = Arc::new(PLMutex::new(Some(trigger_compact_rx)));
         let rx_for_compact = rx.clone();
 
-        // Initialize the local version
-        local_version_manager
-            .update_local_version(hummock_meta_client.as_ref())
-            .await;
+        RetryIf::spawn(
+            ExponentialBackoff::from_millis(10).map(jitter).take(4),
+            || async {
+                // Initialize the local version
+                local_version_manager
+                    .update_local_version(hummock_meta_client.as_ref())
+                    .await
+            },
+            RetryableError::default(),
+        )
+        .await?;
 
-        Self {
+        let instance = Self {
             options: arc_options,
             version_manager,
             local_version_manager,
@@ -180,23 +187,16 @@ impl HummockStorage {
             })))),
             stats,
             hummock_meta_client,
-        }
+        };
+        Ok(instance)
     }
 
-    async fn get_snapshot(&self) -> HummockSnapshot {
+    async fn get_snapshot(&self) -> HummockResult<HummockSnapshot> {
         let timer = self.get_stats_ref().get_snapshot_latency.start_timer();
-        let epoch: HummockEpoch = self
-            .hummock_meta_client()
-            .pin_snapshot(PinSnapshotRequest {
-                context_identifier: 0,
-            })
-            .await
-            .snapshot
-            .unwrap()
-            .epoch;
+        let epoch = self.hummock_meta_client().pin_snapshot().await?;
         let res = HummockSnapshot::new(epoch, self.local_version_manager.clone());
         timer.observe_duration();
-        res
+        Ok(res)
     }
 
     pub fn get_stats_ref(&self) -> &StateStoreStats {
@@ -216,7 +216,7 @@ impl HummockStorage {
         self.get_stats_ref().get_counts.inc();
         self.get_stats_ref().get_key_size.observe(key.len() as f64);
 
-        let value = self.get_snapshot().await.get(key).await?;
+        let value = self.get_snapshot().await?.get(key).await?;
         self.get_stats_ref()
             .get_value_size
             .observe((value.as_ref().map(|x| x.len()).unwrap_or(0) + 1) as f64);
@@ -232,7 +232,7 @@ impl HummockStorage {
     {
         self.get_stats_ref().range_scan_counts.inc();
 
-        self.get_snapshot().await.range_scan(key_range).await
+        self.get_snapshot().await?.range_scan(key_range).await
     }
 
     /// Return a reversed iterator that scans from the end key to the begin key
@@ -244,7 +244,7 @@ impl HummockStorage {
         self.get_stats_ref().range_scan_counts.inc();
 
         self.get_snapshot()
-            .await
+            .await?
             .reverse_range_scan(key_range)
             .await
     }
@@ -264,24 +264,20 @@ impl HummockStorage {
         epoch: u64,
     ) -> HummockResult<()> {
         let get_id_and_builder = || async {
-            let id = self
-                .hummock_meta_client()
-                .get_new_table_id(GetNewTableIdRequest {})
-                .await
-                .table_id;
+            let id = self.hummock_meta_client().get_new_table_id().await?;
             let timer = self
                 .get_stats_ref()
                 .batch_write_build_table_latency
                 .start_timer();
             let builder = Self::get_builder(&self.options);
             timer.observe_duration();
-            (id, builder)
+            Ok((id, builder))
         };
         let mut builder = CapacitySplitTableBuilder::new(get_id_and_builder);
 
         // TODO: do not generate epoch if `kv_pairs` is empty
         for (k, v) in kv_pairs {
-            builder.add_user_key(k, v, epoch).await;
+            builder.add_user_key(k, v, epoch).await?;
         }
 
         let (total_size, tables) = {
@@ -315,9 +311,9 @@ impl HummockStorage {
             .batch_write_add_l0_latency
             .start_timer();
         self.hummock_meta_client()
-            .add_tables(AddTablesRequest {
-                context_identifier: 0,
-                tables: tables
+            .add_tables(
+                epoch,
+                tables
                     .iter()
                     .map(|table| SstableInfo {
                         id: table.id,
@@ -328,9 +324,8 @@ impl HummockStorage {
                         }),
                     })
                     .collect_vec(),
-                epoch,
-            })
-            .await;
+            )
+            .await?;
         timer.observe_duration();
         // Update statistics if needed.
         self.get_stats_ref()
@@ -345,7 +340,7 @@ impl HummockStorage {
         // after each write_batch to make uncommitted write visible.
         self.local_version_manager
             .update_local_version(self.hummock_meta_client())
-            .await;
+            .await?;
 
         Ok(())
     }

@@ -3704,6 +3704,7 @@ dependencies = [
  "log",
  "rand 0.8.4",
  "risingwave-pb",
+ "risingwave_common",
  "risingwave_storage",
  "rusoto_core",
  "rusoto_credential",

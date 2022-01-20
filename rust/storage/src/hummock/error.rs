@@ -17,12 +17,8 @@ pub enum HummockError {
     ObjectIoError(String),
     #[error("Invalid HummockContext {0}.")]
     InvalidHummockContext(i32),
-    #[error("Failed to create RPC client.")]
-    CreateRPCClientError,
-    #[error("No matching pinned version with version_id={0} was found in context.")]
-    NoMatchingPinVersion(u64),
-    #[error("No matching pinned snapshot with snapshot_id={0} found in context.")]
-    NoMatchingPinSnapshot(u64),
+    #[error("Meta error {0}.")]
+    MetaError(String),
     #[error("No compact task.")]
     NoCompactTaskFound,
     #[error("Invalid WriteBatch.")]
@@ -50,16 +46,8 @@ impl HummockError {
         Self::NoCompactTaskFound.into()
     }
 
-    pub fn create_rpc_client_error() -> TracedHummockError {
-        Self::CreateRPCClientError.into()
-    }
-
-    pub fn no_matching_pin_version(version: u64) -> TracedHummockError {
-        Self::NoMatchingPinVersion(version).into()
-    }
-
-    pub fn no_matching_pin_snapshot(snapshot: u64) -> TracedHummockError {
-        Self::NoMatchingPinSnapshot(snapshot).into()
+    pub fn meta_error(error: impl ToString) -> TracedHummockError {
+        Self::MetaError(error.to_string()).into()
     }
 
     pub fn invalid_hummock_context(context_id: i32) -> TracedHummockError {
