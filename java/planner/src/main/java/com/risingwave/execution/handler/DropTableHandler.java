@@ -126,9 +126,10 @@ public class DropTableHandler implements SqlHandler {
           throw new PgException(
               PgErrorCode.INTERNAL_ERROR, "Not available in local stream manager");
         }
+      } else {
+        var planFragment = serialize(table);
+        builder.add(planFragment);
       }
-      var planFragment = serialize(table);
-      builder.add(planFragment);
     }
     return builder.build();
   }
