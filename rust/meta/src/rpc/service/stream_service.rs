@@ -52,14 +52,14 @@ impl StreamManagerService for StreamServiceImpl {
 
         let mut fragmenter =
             StreamFragmenter::new(self.id_gen_manager_ref.clone(), worker_count as u32);
-        let mut graph = fragmenter
+        let (mut graph, source_actor_ids) = fragmenter
             .generate_graph(req.get_stream_node())
             .await
             .map_err(|e| e.to_grpc_status())?;
 
         match self
             .sm
-            .create_materialized_view(req.get_table_ref_id(), &mut graph)
+            .create_materialized_view(req.get_table_ref_id(), &mut graph, source_actor_ids)
             .await
         {
             Ok(()) => Ok(Response::new(CreateMaterializedViewResponse {

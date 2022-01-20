@@ -235,8 +235,10 @@ async fn test_fragmenter() -> Result<()> {
     let stream_node = make_stream_node();
     let mut fragmenter = StreamFragmenter::new(env.id_gen_manager_ref(), 1);
 
-    let graph = fragmenter.generate_graph(&stream_node).await?;
+    let (graph, source_actor_ids) = fragmenter.generate_graph(&stream_node).await?;
     assert_eq!(graph.len(), 6);
+    assert_eq!(source_actor_ids.len(), 1);
+    assert_eq!(source_actor_ids[0], 6);
     let mut expected_downstream = HashMap::new();
     expected_downstream.insert(1, vec![]);
     expected_downstream.insert(2, vec![1]);
@@ -252,6 +254,78 @@ async fn test_fragmenter() -> Result<()> {
     expected_upstream.insert(4, vec![6]);
     expected_upstream.insert(5, vec![6]);
     expected_upstream.insert(6, vec![]);
+    for actor in graph {
+        assert_eq!(
+            expected_downstream.get(&actor.get_actor_id()).unwrap(),
+            actor.get_downstream_actor_id(),
+        );
+        let mut node = actor.get_nodes();
+        while !node.get_input().is_empty() {
+            node = node.get_input().get(0).unwrap();
+        }
+        let mut source_node_cnt = 0;
+        match node.get_node() {
+            Node::MergeNode(merge_node) => {
+                assert_eq!(
+                    expected_upstream
+                        .get(&actor.get_actor_id())
+                        .unwrap()
+                        .iter()
+                        .collect::<HashSet<_>>(),
+                    merge_node
+                        .get_upstream_actor_id()
+                        .iter()
+                        .collect::<HashSet<_>>(),
+                );
+            }
+            Node::TableSourceNode(_) => {
+                source_node_cnt += 1;
+                assert_eq!(source_node_cnt, 1);
+            }
+            _ => {
+                panic!("it should be MergeNode.");
+            }
+        }
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+/// Test case for multiple compute nodes.
+async fn test_fragmenter_case2() -> Result<()> {
+    let env = MetaSrvEnv::for_test().await;
+    let stream_node = make_stream_node();
+    let mut fragmenter = StreamFragmenter::new(env.id_gen_manager_ref(), 3);
+
+    let (graph, source_actor_ids) = fragmenter.generate_graph(&stream_node).await?;
+    assert_eq!(graph.len(), 10);
+    assert_eq!(source_actor_ids.len(), 3);
+    assert_eq!(source_actor_ids, vec![8, 9, 10]);
+    let mut expected_downstream = HashMap::new();
+    expected_downstream.insert(1, vec![]);
+    expected_downstream.insert(2, vec![1]);
+    expected_downstream.insert(3, vec![1]);
+    expected_downstream.insert(4, vec![1]);
+    expected_downstream.insert(5, vec![1]);
+    expected_downstream.insert(6, vec![1]);
+    expected_downstream.insert(7, vec![1]);
+    expected_downstream.insert(8, vec![2, 3, 4, 5, 6, 7]);
+    expected_downstream.insert(9, vec![2, 3, 4, 5, 6, 7]);
+    expected_downstream.insert(10, vec![2, 3, 4, 5, 6, 7]);
+
+    let mut expected_upstream = HashMap::new();
+    expected_upstream.insert(1, vec![2, 3, 4, 5, 6, 7]);
+    expected_upstream.insert(2, vec![8, 9, 10]);
+    expected_upstream.insert(3, vec![8, 9, 10]);
+    expected_upstream.insert(4, vec![8, 9, 10]);
+    expected_upstream.insert(5, vec![8, 9, 10]);
+    expected_upstream.insert(6, vec![8, 9, 10]);
+    expected_upstream.insert(7, vec![8, 9, 10]);
+    expected_upstream.insert(8, vec![]);
+    expected_upstream.insert(9, vec![]);
+    expected_upstream.insert(10, vec![]);
+
     for actor in graph {
         assert_eq!(
             expected_downstream.get(&actor.get_actor_id()).unwrap(),

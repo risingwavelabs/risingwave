@@ -1,6 +1,8 @@
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
+use risingwave_common::error::Result;
+use risingwave_common::{ensure, gen_error};
 use risingwave_pb::stream_plan::StreamNode;
 
 /// [`StreamFragment`] represent a fragment node in fragment DAG.
@@ -10,11 +12,18 @@ pub struct StreamFragment {
     fragment_id: u32,
     /// root stream node in this fragment.
     node: Arc<StreamNode>,
+
+    /// mark whether this fragment is of table source.
+    is_table_source_fragment: bool,
 }
 
 impl StreamFragment {
     pub fn new(fragment_id: u32, node: Arc<StreamNode>) -> Self {
-        Self { fragment_id, node }
+        Self {
+            fragment_id,
+            node,
+            is_table_source_fragment: false,
+        }
     }
 
     pub fn get_fragment_id(&self) -> u32 {
@@ -23,6 +32,14 @@ impl StreamFragment {
 
     pub fn get_node(&self) -> Arc<StreamNode> {
         self.node.clone()
+    }
+
+    pub fn set_as_table_source_fragment(&mut self) {
+        self.is_table_source_fragment = true;
+    }
+
+    pub fn is_table_source_fragment(&self) -> bool {
+        self.is_table_source_fragment
     }
 }
 
@@ -78,5 +95,18 @@ impl StreamFragmentGraph {
 
     pub fn get_fragment_by_id(&self, fragment_id: u32) -> Option<StreamFragment> {
         self.fragments.get(&fragment_id).cloned()
+    }
+
+    pub fn set_source_fragment_by_id(&mut self, fragment_id: u32) -> Result<()> {
+        ensure!(
+            self.fragments.contains_key(&fragment_id),
+            "fragment id not exist!"
+        );
+        self.fragments
+            .get_mut(&fragment_id)
+            .unwrap()
+            .set_as_table_source_fragment();
+
+        Ok(())
     }
 }

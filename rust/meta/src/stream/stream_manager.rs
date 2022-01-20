@@ -34,6 +34,7 @@ pub trait StreamManager: Sync + Send + 'static {
         &self,
         table_id: &TableRefId,
         actors: &mut [StreamActor],
+        source_actor_ids: Vec<u32>,
     ) -> Result<()>;
     /// [`drop_materialized_view`] drops materialized view.
     async fn drop_materialized_view(&self, table_id: &TableRefId, epoch: Epoch) -> Result<()>;
@@ -52,7 +53,7 @@ impl DefaultStreamManager {
     pub fn new(smm: StreamMetaManagerRef, cluster_manager: Arc<StoredClusterManager>) -> Self {
         Self {
             smm,
-            scheduler: Scheduler::new(ScheduleCategory::Simple, cluster_manager),
+            scheduler: Scheduler::new(ScheduleCategory::RoundRobin, cluster_manager),
             clients: RwLock::new(HashMap::new()),
         }
     }
@@ -106,13 +107,14 @@ impl StreamManager for DefaultStreamManager {
         &self,
         table_id: &TableRefId,
         actors: &mut [StreamActor],
+        source_actor_ids: Vec<u32>,
     ) -> Result<()> {
         // Fill `upstream_actor_id` of [`ChainNode`].
         for actor in actors.iter_mut() {
             if let risingwave_pb::stream_plan::stream_node::Node::ChainNode(chain) =
                 actor.nodes.as_mut().unwrap().node.as_mut().unwrap()
             {
-                // TODO(MrCroxx): A create materialized view plan will be splited into multiple
+                // TODO(MrCroxx): A create materialized view plan will be split into multiple
                 // stages. Currently, we simply assume that MView lays on the actor
                 // with min actor id. We need an interface in [`StreamMetaManager`]
                 // to query the actor id of the MView node.
@@ -124,12 +126,25 @@ impl StreamManager for DefaultStreamManager {
             }
         }
 
-        let actor_ids = actors.iter().map(|a| a.get_actor_id()).collect::<Vec<_>>();
+        // Divide all actors into source and non-source actors.
+        let actor_ids = actors.iter().map(|a| a.actor_id).collect::<Vec<_>>();
+        let non_source_actor_ids = actor_ids
+            .clone()
+            .into_iter()
+            .filter(|id| !source_actor_ids.contains(id))
+            .collect::<Vec<_>>();
 
-        let nodes = self.scheduler.schedule(&actor_ids).await?;
+        let nodes = self
+            .scheduler
+            .schedule(&non_source_actor_ids, &source_actor_ids)
+            .await?;
+
+        // Re-sort actors by `non_source_actor_ids`::`source_actor_ids`.
+        let mut sorted_actor_ids = non_source_actor_ids.clone();
+        sorted_actor_ids.extend(source_actor_ids.iter().cloned());
 
         let mut node_actors_map = HashMap::new();
-        for (node, actor) in nodes.iter().zip(actor_ids.clone()) {
+        for (node, actor) in nodes.iter().zip(sorted_actor_ids) {
             node_actors_map
                 .entry(node.get_id())
                 .or_insert_with(Vec::new)
@@ -430,7 +445,7 @@ mod tests {
             .collect::<Vec<_>>();
 
         stream_manager
-            .create_materialized_view(&table_ref_id, &mut actors)
+            .create_materialized_view(&table_ref_id, &mut actors, vec![])
             .await?;
 
         for actor in actors.clone() {

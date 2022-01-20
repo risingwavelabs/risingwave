@@ -31,6 +31,9 @@ pub struct StreamFragmenter {
     id_gen_manager_ref: IdGeneratorManagerRef,
     /// worker count, used to init actor parallelization.
     worker_count: u32,
+
+    /// the list of ids of all source actors.
+    source_actor_ids: Vec<u32>,
 }
 
 impl StreamFragmenter {
@@ -39,20 +42,26 @@ impl StreamFragmenter {
             next_fragment_id: AtomicU32::new(0),
             fragment_graph: StreamFragmentGraph::new(None),
             stream_graph: StreamGraphBuilder::new(),
-
             id_gen_manager_ref,
             worker_count,
+            source_actor_ids: Vec::new(),
         }
     }
 
     /// Build a stream graph in two steps:
     /// (1) Break the streaming plan into fragments with their dependency.
     /// (2) Duplicate each fragment as parallel actors.
-    pub async fn generate_graph(&mut self, stream_node: &StreamNode) -> Result<Vec<StreamActor>> {
+    ///
+    /// Return a pair of (1) all stream actors, and (2) the actor id of sources to be forcefully
+    /// round-robin scheduled.
+    pub async fn generate_graph(
+        &mut self,
+        stream_node: &StreamNode,
+    ) -> Result<(Vec<StreamActor>, Vec<u32>)> {
         self.generate_fragment_graph(stream_node);
         self.build_graph_from_fragment(self.fragment_graph.get_root_fragment(), vec![])
             .await?;
-        Ok(self.stream_graph.build())
+        Ok((self.stream_graph.build(), self.source_actor_ids.clone()))
     }
 
     /// Generate fragment DAG from input streaming plan by their dependency.
@@ -74,6 +83,12 @@ impl StreamFragmenter {
                         child_fragment.get_fragment_id(),
                     );
                     self.build_fragment(&child_fragment, node);
+                }
+                Node::TableSourceNode(_) => {
+                    let _res = self
+                        .fragment_graph
+                        .set_source_fragment_by_id(parent_fragment.get_fragment_id());
+                    self.build_fragment(parent_fragment, node);
                 }
                 _ => {
                     self.build_fragment(parent_fragment, node);
@@ -145,6 +160,11 @@ impl StreamFragmenter {
                 actor_builder.set_dispatcher(dispatcher.clone());
                 self.stream_graph.add_actor(actor_builder);
                 current_actor_ids.push(id);
+
+                // If the current fragment is table source, then add the id to the source id list.
+                if current_fragment.is_table_source_fragment() {
+                    self.source_actor_ids.push(id);
+                }
             }
         }
 
