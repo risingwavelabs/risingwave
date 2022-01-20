@@ -1,5 +1,0 @@
-[hooks]
-pre-commit = "cd rust && cargo fmt --check"
-
-[logging]
-verbose = true
