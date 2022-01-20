@@ -15,8 +15,8 @@ use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
 use crate::types::DataTypeKind;
 
 fn get_return_type_and_children(prost: &ExprNode) -> Result<(Vec<ExprNode>, DataTypeKind)> {
-    let ret_type = DataTypeKind::from(prost.get_return_type());
-    if let RexNode::FuncCall(func_call) = prost.get_rex_node() {
+    let ret_type = DataTypeKind::from(prost.get_return_type()?);
+    if let RexNode::FuncCall(func_call) = prost.get_rex_node()? {
         Ok((func_call.get_children().to_vec(), ret_type))
     } else {
         Err(RwError::from(ErrorCode::NotImplementedError(
@@ -29,7 +29,7 @@ pub fn build_unary_expr_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_return_type_and_children(prost)?;
     ensure!(children.len() == 1);
     let child_expr = expr_build_from_prost(&children[0])?;
-    Ok(new_unary_expr(prost.get_expr_type(), ret_type, child_expr))
+    Ok(new_unary_expr(prost.get_expr_type()?, ret_type, child_expr))
 }
 
 pub fn build_binary_expr_prost(prost: &ExprNode) -> Result<BoxedExpression> {
@@ -38,7 +38,7 @@ pub fn build_binary_expr_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     let left_expr = expr_build_from_prost(&children[0])?;
     let right_expr = expr_build_from_prost(&children[1])?;
     Ok(new_binary_expr(
-        prost.get_expr_type(),
+        prost.get_expr_type()?,
         ret_type,
         left_expr,
         right_expr,
@@ -51,7 +51,7 @@ pub fn build_nullable_binary_expr_prost(prost: &ExprNode) -> Result<BoxedExpress
     let left_expr = expr_build_from_prost(&children[0])?;
     let right_expr = expr_build_from_prost(&children[1])?;
     Ok(new_nullable_binary_expr(
-        prost.get_expr_type(),
+        prost.get_expr_type()?,
         ret_type,
         left_expr,
         right_expr,

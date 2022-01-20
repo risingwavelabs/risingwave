@@ -39,8 +39,10 @@ impl BoxedExecutorBuilder for SortAggExecutor {
             .ok_or_else(|| ErrorCode::InternalError(String::from("")))?;
         let child = source.clone_for_plan(proto_child).build()?;
 
-        let sort_agg_node =
-            try_match_expand!(source.plan_node().get_node_body(), NodeBody::SortAgg)?;
+        let sort_agg_node = try_match_expand!(
+            source.plan_node().get_node_body().unwrap(),
+            NodeBody::SortAgg
+        )?;
 
         let agg_states = sort_agg_node
             .get_agg_calls()

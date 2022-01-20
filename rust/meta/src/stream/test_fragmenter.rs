@@ -259,12 +259,12 @@ async fn test_fragmenter() -> Result<()> {
             expected_downstream.get(&actor.get_actor_id()).unwrap(),
             actor.get_downstream_actor_id(),
         );
-        let mut node = actor.get_nodes();
+        let mut node = actor.get_nodes().unwrap();
         while !node.get_input().is_empty() {
             node = node.get_input().get(0).unwrap();
         }
         let mut source_node_cnt = 0;
-        match node.get_node() {
+        match node.get_node().unwrap() {
             Node::MergeNode(merge_node) => {
                 assert_eq!(
                     expected_upstream
@@ -331,12 +331,12 @@ async fn test_fragmenter_case2() -> Result<()> {
             expected_downstream.get(&actor.get_actor_id()).unwrap(),
             actor.get_downstream_actor_id(),
         );
-        let mut node = actor.get_nodes();
+        let mut node = actor.get_nodes().unwrap();
         while !node.get_input().is_empty() {
             node = node.get_input().get(0).unwrap();
         }
         let mut source_node_cnt = 0;
-        match node.get_node() {
+        match node.get_node().unwrap() {
             Node::MergeNode(merge_node) => {
                 assert_eq!(
                     expected_upstream

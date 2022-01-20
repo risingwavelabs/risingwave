@@ -27,7 +27,7 @@ impl TaskManager {
         tid: &ProstTaskId,
         plan: PlanFragment,
     ) -> Result<()> {
-        let task = TaskExecution::new(tid, plan, env);
+        let task = TaskExecution::new(tid, plan, env)?;
 
         task.async_execute()?;
         self.tasks
@@ -39,7 +39,7 @@ impl TaskManager {
     }
 
     pub fn take_sink(&self, sink_id: &ProstSinkId) -> Result<TaskSink> {
-        let task_id = TaskId::from(sink_id.get_task_id());
+        let task_id = TaskId::try_from(sink_id.get_task_id()?)?;
         self.tasks
             .lock()
             .unwrap()
@@ -50,7 +50,7 @@ impl TaskManager {
 
     #[cfg(test)]
     pub fn remove_task(&self, sid: &ProstTaskId) -> Result<Option<Box<TaskExecution>>> {
-        let task_id = TaskId::from(sid);
+        let task_id = TaskId::try_from(sid)?;
         match self.tasks.lock().unwrap().remove(&task_id) {
             Some(t) => Ok(Some(t)),
             None => Err(TaskNotFound.into()),

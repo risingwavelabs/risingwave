@@ -64,7 +64,10 @@ impl CreateSourceExecutor {
 
 impl BoxedExecutorBuilder for CreateSourceExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        let node = try_match_expand!(source.plan_node().get_node_body(), NodeBody::CreateSource)?;
+        let node = try_match_expand!(
+            source.plan_node().get_node_body().unwrap(),
+            NodeBody::CreateSource
+        )?;
 
         let table_id = TableId::from(&node.table_ref_id);
 
@@ -77,7 +80,7 @@ impl BoxedExecutorBuilder for CreateSourceExecutor {
             .map(|(idx, c)| {
                 Ok(SourceColumnDesc {
                     name: c.name.clone(),
-                    data_type: DataTypeKind::from(c.get_column_type()),
+                    data_type: DataTypeKind::from(c.get_column_type()?),
                     column_id: c.column_id,
                     skip_parse: idx as i32 == row_id_index,
                     is_primary: c.is_primary,
@@ -85,7 +88,7 @@ impl BoxedExecutorBuilder for CreateSourceExecutor {
             })
             .collect::<Result<Vec<SourceColumnDesc>>>()?;
 
-        let format = match node.get_format() {
+        let format = match node.get_format()? {
             RowFormatType::Json => SourceFormat::Json,
             RowFormatType::Protobuf => SourceFormat::Protobuf,
             RowFormatType::Avro => SourceFormat::Avro,

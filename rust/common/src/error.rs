@@ -8,6 +8,7 @@ use std::sync::Arc;
 use memcomparable::Error as MemComparableError;
 use prost::Message;
 use risingwave_pb::common::Status;
+use risingwave_pb::ProstFieldNotFound;
 use thiserror::Error;
 use tokio::task::JoinError;
 use tonic::metadata::{MetadataMap, MetadataValue};
@@ -214,6 +215,21 @@ impl PartialEq for ErrorCode {
             (_, _) => false,
         }
     }
+}
+
+impl From<ProstFieldNotFound> for RwError {
+    fn from(err: ProstFieldNotFound) -> Self {
+        ErrorCode::InternalError(format!(
+            "Failed to decode prost: field not found `{}`",
+            err.0
+        ))
+        .into()
+    }
+}
+
+/// Convert `RwError` into `tonic::Status`. Generally used in `map_err`.
+pub fn tonic_err(err: impl Into<RwError>) -> tonic::Status {
+    err.into().to_grpc_status()
 }
 
 pub type Result<T> = std::result::Result<T, RwError>;

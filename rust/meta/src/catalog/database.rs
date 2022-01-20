@@ -32,7 +32,7 @@ impl DatabaseMetaManager for StoredCatalogManager {
     async fn create_database(&self, mut database: Database) -> Result<Epoch> {
         let version = self.epoch_generator.generate()?;
         database.version = version.into_inner();
-        let database_ref_id = database.get_database_ref_id();
+        let database_ref_id = database.get_database_ref_id()?;
 
         self.meta_store_ref
             .put_cf(

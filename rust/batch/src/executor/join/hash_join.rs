@@ -307,8 +307,10 @@ impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
             .clone_for_plan(&context.plan_node.get_children()[1])
             .build()?;
 
-        let hash_join_node =
-            try_match_expand!(context.plan_node().get_node_body(), NodeBody::HashJoin)?;
+        let hash_join_node = try_match_expand!(
+            context.plan_node().get_node_body().unwrap(),
+            NodeBody::HashJoin
+        )?;
 
         let mut params = EquiJoinParams {
             batch_size: DEFAULT_CHUNK_BUFFER_SIZE,
@@ -348,7 +350,7 @@ impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
                 .push(right_child.schema()[right_output].data_type());
         }
 
-        params.join_type = JoinType::from_prost(hash_join_node.get_join_type());
+        params.join_type = JoinType::from_prost(hash_join_node.get_join_type()?);
 
         let hash_key_kind = calc_hash_key_kind(&params.right_key_types);
 

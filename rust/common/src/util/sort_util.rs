@@ -155,9 +155,9 @@ pub fn compare_two_row(
 pub fn fetch_orders(column_orders: &[ColumnOrder]) -> Result<Vec<OrderPair>> {
     let mut order_pairs = Vec::<OrderPair>::new();
     for column_order in column_orders {
-        let order_type: ProstOrderType = column_order.get_order_type();
-        let return_type = DataTypeKind::from(column_order.get_return_type());
-        let input_ref: &InputRefExpr = column_order.get_input_ref();
+        let order_type: ProstOrderType = column_order.get_order_type()?;
+        let return_type = DataTypeKind::from(column_order.get_return_type()?);
+        let input_ref: &InputRefExpr = column_order.get_input_ref()?;
         let input_ref_expr = InputRefExpression::new(return_type, input_ref.column_idx as usize);
         order_pairs.push(OrderPair {
             order_type: match order_type {

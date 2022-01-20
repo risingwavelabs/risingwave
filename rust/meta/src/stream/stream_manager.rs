@@ -284,7 +284,7 @@ mod tests {
     use std::thread::sleep;
     use std::time::Duration;
 
-    use risingwave_common::error::ErrorCode;
+    use risingwave_common::error::{tonic_err, ErrorCode};
     use risingwave_common::util::addr::get_host_port;
     use risingwave_pb::common::HostAddress;
     use risingwave_pb::meta::ClusterType;
@@ -354,7 +354,10 @@ mod tests {
             let req = request.into_inner();
             let mut guard = self.inner.actor_infos.lock().unwrap();
             for info in req.get_info() {
-                guard.insert(info.get_actor_id(), info.get_host().clone());
+                guard.insert(
+                    info.get_actor_id(),
+                    info.get_host().map_err(tonic_err)?.clone(),
+                );
             }
 
             Ok(Response::new(BroadcastActorInfoTableResponse {
@@ -518,7 +521,7 @@ mod tests {
 
         let locations = services.meta_manager.load_all_actors().await?;
         assert_eq!(locations.len(), 1);
-        assert_eq!(locations.get(0).unwrap().get_node().get_id(), 0);
+        assert_eq!(locations.get(0).unwrap().get_node().unwrap().get_id(), 0);
         assert_eq!(locations.get(0).unwrap().actors, actors);
         let table_actors = services
             .meta_manager

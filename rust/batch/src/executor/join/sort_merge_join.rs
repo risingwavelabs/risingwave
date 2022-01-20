@@ -233,13 +233,15 @@ impl BoxedExecutorBuilder for SortMergeJoinExecutor {
     ) -> risingwave_common::error::Result<BoxedExecutor> {
         ensure!(source.plan_node().get_children().len() == 2);
 
-        let sort_merge_join_node =
-            try_match_expand!(source.plan_node().get_node_body(), NodeBody::SortMergeJoin)?;
+        let sort_merge_join_node = try_match_expand!(
+            source.plan_node().get_node_body().unwrap(),
+            NodeBody::SortMergeJoin
+        )?;
 
-        let sort_order = sort_merge_join_node.get_direction();
+        let sort_order = sort_merge_join_node.get_direction()?;
         // Only allow it in ascending order.
         ensure!(sort_order == OrderTypeProst::Ascending);
-        let join_type = JoinType::from_prost(sort_merge_join_node.get_join_type());
+        let join_type = JoinType::from_prost(sort_merge_join_node.get_join_type()?);
         // Note: Assume that optimizer has set up probe side and build side. Left is the probe side,
         // right is the build side. This is the same for all join executors.
         let left_plan_opt = source.plan_node().get_children().get(0);

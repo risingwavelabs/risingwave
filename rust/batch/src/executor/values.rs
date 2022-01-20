@@ -90,7 +90,10 @@ impl Executor for ValuesExecutor {
 
 impl BoxedExecutorBuilder for ValuesExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        let value_node = try_match_expand!(source.plan_node().get_node_body(), NodeBody::Values)?;
+        let value_node = try_match_expand!(
+            source.plan_node().get_node_body().unwrap(),
+            NodeBody::Values
+        )?;
 
         let mut rows: Vec<Vec<BoxedExpression>> = Vec::with_capacity(value_node.get_tuples().len());
         for row in value_node.get_tuples() {

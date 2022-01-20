@@ -49,12 +49,12 @@ pub struct AggStateFactory {
 
 impl AggStateFactory {
     pub fn new(prost: &AggCall) -> Result<Self> {
-        let return_type = DataTypeKind::from(prost.get_return_type());
-        let agg_kind = AggKind::try_from(prost.get_type())?;
+        let return_type = DataTypeKind::from(prost.get_return_type()?);
+        let agg_kind = AggKind::try_from(prost.get_type()?)?;
         match &prost.get_args()[..] {
             [ref arg] => {
-                let input_type = DataTypeKind::from(arg.get_type());
-                let input_col_idx = arg.get_input().get_column_idx() as usize;
+                let input_type = DataTypeKind::from(arg.get_type()?);
+                let input_col_idx = arg.get_input()?.get_column_idx() as usize;
                 Ok(Self {
                     input_type: Some(input_type),
                     input_col_idx,

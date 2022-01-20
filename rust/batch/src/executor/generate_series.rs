@@ -23,7 +23,7 @@ pub(super) struct GenerateSeriesI32Executor {
 impl BoxedExecutorBuilder for GenerateSeriesI32Executor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
         let node = try_match_expand!(
-            source.plan_node().get_node_body(),
+            source.plan_node().get_node_body().unwrap(),
             NodeBody::GenerateInt32Series
         )?;
 

@@ -47,6 +47,11 @@ pub mod stream_service_serde;
 #[path = "hummock.serde.rs"]
 pub mod hummock_serde;
 
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct ProstFieldNotFound(pub &'static str);
+
+mod imp;
+
 #[cfg(test)]
 mod tests {
     use crate::data::{data_type, DataType};
@@ -58,14 +63,17 @@ mod tests {
             database_ref_id: Some(DatabaseRefId { database_id: 0 }),
             schema_id: 0,
         };
-        assert_eq!(0, schema_id.get_database_ref_id().database_id);
+        assert_eq!(0, schema_id.get_database_ref_id().unwrap().database_id);
     }
 
     #[test]
     fn test_enum_getter() {
         let mut data_type: DataType = DataType::default();
         data_type.type_name = data_type::TypeName::Double as i32;
-        assert_eq!(data_type::TypeName::Double, data_type.get_type_name());
+        assert_eq!(
+            data_type::TypeName::Double,
+            data_type.get_type_name().unwrap()
+        );
     }
 
     #[test]

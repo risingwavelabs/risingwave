@@ -47,13 +47,14 @@ pub(in crate) enum TaskState {
     Failed,
 }
 
-impl From<&ProstTaskId> for TaskId {
-    fn from(prost: &ProstTaskId) -> Self {
-        TaskId {
+impl TryFrom<&ProstTaskId> for TaskId {
+    type Error = RwError;
+    fn try_from(prost: &ProstTaskId) -> Result<Self> {
+        Ok(TaskId {
             task_id: prost.get_task_id(),
-            stage_id: prost.get_stage_id().get_stage_id(),
-            query_id: String::from(prost.get_stage_id().get_query_id().get_trace_id()),
-        }
+            stage_id: prost.get_stage_id()?.get_stage_id(),
+            query_id: String::from(prost.get_stage_id()?.get_query_id()?.get_trace_id()),
+        })
     }
 }
 
@@ -71,12 +72,13 @@ impl TaskId {
     }
 }
 
-impl From<&ProstSinkId> for TaskSinkId {
-    fn from(prost: &ProstSinkId) -> Self {
-        TaskSinkId {
-            task_id: TaskId::from(prost.get_task_id()),
+impl TryFrom<&ProstSinkId> for TaskSinkId {
+    type Error = RwError;
+    fn try_from(prost: &ProstSinkId) -> Result<Self> {
+        Ok(TaskSinkId {
+            task_id: TaskId::try_from(prost.get_task_id()?)?,
             sink_id: prost.get_sink_id(),
-        }
+        })
     }
 }
 
@@ -156,15 +158,15 @@ pub struct TaskExecution {
 }
 
 impl TaskExecution {
-    pub fn new(prost_tid: &ProstTaskId, plan: PlanFragment, env: BatchTaskEnv) -> Self {
-        TaskExecution {
-            task_id: TaskId::from(prost_tid),
+    pub fn new(prost_tid: &ProstTaskId, plan: PlanFragment, env: BatchTaskEnv) -> Result<Self> {
+        Ok(TaskExecution {
+            task_id: TaskId::try_from(prost_tid)?,
             plan,
             state: Mutex::new(TaskStatus::Pending),
             receivers: Mutex::new(Vec::new()),
             env,
             failure: Arc::new(Mutex::new(None)),
-        }
+        })
     }
 
     pub fn get_task_id(&self) -> &TaskId {
@@ -186,7 +188,7 @@ impl TaskExecution {
         )
         .build()?;
 
-        let (sender, receivers) = create_output_channel(self.plan.get_exchange_info())?;
+        let (sender, receivers) = create_output_channel(self.plan.get_exchange_info()?)?;
         self.receivers
             .lock()
             .unwrap()
@@ -231,7 +233,7 @@ impl TaskExecution {
     }
 
     pub fn get_task_sink(&self, sink_id: &ProstSinkId) -> Result<TaskSink> {
-        let task_id = TaskId::from(sink_id.get_task_id());
+        let task_id = TaskId::try_from(sink_id.get_task_id()?)?;
         let receiver = self.receivers.lock().unwrap()[sink_id.get_sink_id() as usize]
             .take()
             .ok_or_else(|| {
@@ -244,7 +246,7 @@ impl TaskExecution {
         let task_sink = TaskSink {
             task_manager: self.env.task_manager(),
             receiver,
-            sink_id: sink_id.into(),
+            sink_id: sink_id.try_into()?,
         };
         Ok(task_sink)
     }

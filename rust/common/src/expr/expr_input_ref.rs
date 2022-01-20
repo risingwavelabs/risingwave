@@ -39,10 +39,10 @@ impl<'a> TryFrom<&'a ExprNode> for InputRefExpression {
     type Error = RwError;
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
-        ensure!(prost.get_expr_type() == Type::InputRef);
+        ensure!(prost.get_expr_type()? == Type::InputRef);
 
-        let ret_type = DataTypeKind::from(prost.get_return_type());
-        if let RexNode::InputRef(input_ref_node) = prost.get_rex_node() {
+        let ret_type = DataTypeKind::from(prost.get_return_type()?);
+        if let RexNode::InputRef(input_ref_node) = prost.get_rex_node()? {
             Ok(Self {
                 return_type: ret_type,
                 idx: input_ref_node.column_idx as usize,

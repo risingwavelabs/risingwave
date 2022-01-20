@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use risingwave_common::error::tonic_err;
 use risingwave_common::try_match_expand;
 use risingwave_pb::meta::cluster_service_server::ClusterService;
 use risingwave_pb::meta::{
@@ -28,7 +29,7 @@ impl ClusterService for ClusterServiceImpl {
         request: Request<AddWorkerNodeRequest>,
     ) -> Result<Response<AddWorkerNodeResponse>, Status> {
         let req = request.into_inner();
-        let cluster_type = req.get_cluster_type();
+        let cluster_type = req.get_cluster_type().map_err(tonic_err)?;
         let host = try_match_expand!(req.host, Some, "AddWorkerNodeRequest::host is empty")
             .map_err(|e| e.to_grpc_status())?;
         let (worker_node, _added) = self
@@ -47,7 +48,7 @@ impl ClusterService for ClusterServiceImpl {
         request: Request<DeleteWorkerNodeRequest>,
     ) -> Result<Response<DeleteWorkerNodeResponse>, Status> {
         let req = request.into_inner();
-        let cluster_type = req.get_cluster_type();
+        let cluster_type = req.get_cluster_type().map_err(tonic_err)?;
         let node = try_match_expand!(req.node, Some, "DeleteWorkerNodeRequest::node is empty")
             .map_err(|e| e.to_grpc_status())?;
         let _ = self
@@ -63,7 +64,7 @@ impl ClusterService for ClusterServiceImpl {
         request: Request<ListAllNodesRequest>,
     ) -> Result<Response<ListAllNodesResponse>, Status> {
         let req = request.into_inner();
-        let cluster_type = req.get_cluster_type();
+        let cluster_type = req.get_cluster_type().map_err(tonic_err)?;
         let node_list = self
             .scm
             .list_worker_node(cluster_type)

@@ -2,6 +2,8 @@ use std::collections::{BTreeSet, HashMap};
 use std::ops::Deref;
 use std::sync::Arc;
 
+use risingwave_common::array::RwError;
+use risingwave_common::error::Result;
 use risingwave_pb::stream_plan::dispatcher::DispatcherType;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{Dispatcher, MergeNode, StreamActor, StreamNode};
@@ -118,16 +120,16 @@ impl StreamGraphBuilder {
     }
 
     /// Build final stream DAG with dependencies with current actor builders.
-    pub fn build(&self) -> Vec<StreamActor> {
+    pub fn build(&self) -> Result<Vec<StreamActor>> {
         self.actor_builders
             .values()
             .map(|builder| {
                 let mut actor = builder.build();
                 let upstream_actors = builder.get_upstream_actors();
-                actor.nodes = Some(self.build_inner(actor.get_nodes(), &upstream_actors, 0));
-                actor
+                actor.nodes = Some(self.build_inner(actor.get_nodes()?, &upstream_actors, 0)?);
+                Ok::<_, RwError>(actor)
             })
-            .collect::<Vec<_>>()
+            .collect::<Result<Vec<_>>>()
     }
 
     /// Build stream actor inside, two works will be done:
@@ -139,8 +141,8 @@ impl StreamGraphBuilder {
         stream_node: &StreamNode,
         upstream_actor_id: &[Vec<u32>],
         next_idx: usize,
-    ) -> StreamNode {
-        if let Node::ExchangeNode(_) = stream_node.get_node() {
+    ) -> Result<StreamNode> {
+        if let Node::ExchangeNode(_) = stream_node.get_node()? {
             self.build_inner(
                 stream_node.input.get(0).unwrap(),
                 upstream_actor_id,
@@ -150,7 +152,7 @@ impl StreamGraphBuilder {
             let mut new_stream_node = stream_node.clone();
             let mut next_idx_new = next_idx;
             for (idx, input) in stream_node.input.iter().enumerate() {
-                if let Node::ExchangeNode(exchange_node) = input.get_node() {
+                if let Node::ExchangeNode(exchange_node) = input.get_node()? {
                     assert!(next_idx_new < upstream_actor_id.len());
                     new_stream_node.input[idx] = StreamNode {
                         input: vec![],
@@ -167,10 +169,10 @@ impl StreamGraphBuilder {
                     next_idx_new += 1;
                 } else {
                     new_stream_node.input[idx] =
-                        self.build_inner(input, upstream_actor_id, next_idx_new);
+                        self.build_inner(input, upstream_actor_id, next_idx_new)?;
                 }
             }
-            new_stream_node
+            Ok(new_stream_node)
         }
     }
 }

@@ -155,10 +155,10 @@ impl Barrier {
         }
     }
 
-    pub fn from_protobuf(prost: &ProstBarrier) -> Self {
-        Barrier {
+    pub fn from_protobuf(prost: &ProstBarrier) -> Result<Self> {
+        Ok(Barrier {
             epoch: prost.get_epoch(),
-            mutation: match prost.get_mutation() {
+            mutation: match prost.get_mutation()? {
                 ProstMutation::Nothing(_) => None,
                 ProstMutation::Stop(stop) => {
                     Some(Mutation::Stop(HashSet::from_iter(stop.get_actors().clone())).into())
@@ -174,12 +174,12 @@ impl Barrier {
                     .into(),
                 ),
                 ProstMutation::Add(add) => Some(
-                    Mutation::AddOutput(add.actor_id, add.get_downstream_actors().info.clone())
+                    Mutation::AddOutput(add.actor_id, add.get_downstream_actors()?.info.clone())
                         .into(),
                 ),
             },
             span: None,
-        }
+        })
     }
 }
 
@@ -217,11 +217,13 @@ impl Message {
     }
 
     pub fn from_protobuf(prost: ProstStreamMessage) -> Result<Self> {
-        let res = match prost.get_stream_message() {
-            StreamMessage::StreamChunk(stream_chunk) => {
+        let res = match prost.get_stream_message()? {
+            StreamMessage::StreamChunk(ref stream_chunk) => {
                 Message::Chunk(StreamChunk::from_protobuf(stream_chunk)?)
             }
-            StreamMessage::Barrier(barrier) => Message::Barrier(Barrier::from_protobuf(barrier)),
+            StreamMessage::Barrier(ref barrier) => {
+                Message::Barrier(Barrier::from_protobuf(barrier)?)
+            }
         };
         Ok(res)
     }

@@ -23,8 +23,10 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
     /// 1. `SourceScanNode` whose definition can be shared by OLAP and Streaming
     /// 2. `SourceManager` whose definition can also be shared. But is it physically shared?
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        let stream_scan_node =
-            try_match_expand!(source.plan_node().get_node_body(), NodeBody::SourceScan)?;
+        let stream_scan_node = try_match_expand!(
+            source.plan_node().get_node_body().unwrap(),
+            NodeBody::SourceScan
+        )?;
 
         let table_id = TableId::from(&stream_scan_node.table_ref_id);
 

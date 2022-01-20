@@ -23,7 +23,7 @@ pub struct HashShuffleReceiver {
 fn generate_hash_values(chunk: &DataChunk, hash_info: &HashInfo) -> Result<Vec<usize>> {
     let output_count = hash_info.output_count as usize;
 
-    let hasher_builder = match hash_info.get_hash_method() {
+    let hasher_builder = match hash_info.get_hash_method()? {
         HashMethod::Crc32 => CRC32FastBuilder {},
     };
 

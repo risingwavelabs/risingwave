@@ -57,11 +57,11 @@ impl TryFrom<&Table> for TableCatalog {
     type Error = RwError;
 
     fn try_from(tb: &Table) -> Result<Self> {
-        let mut table_catalog = Self::new(tb.get_table_ref_id().table_id as u32);
+        let mut table_catalog = Self::new(tb.get_table_ref_id()?.table_id as u32);
         for col in &tb.column_descs {
             table_catalog.add_column(
                 &col.name,
-                ColumnDesc::new(col.get_column_type().into(), col.is_primary),
+                ColumnDesc::new(col.get_column_type()?.into(), col.is_primary),
             )?;
         }
         Ok(table_catalog)

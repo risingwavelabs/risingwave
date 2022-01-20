@@ -44,8 +44,10 @@ impl RowSeqScanExecutor {
 
 impl BoxedExecutorBuilder for RowSeqScanExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        let seq_scan_node =
-            try_match_expand!(source.plan_node().get_node_body(), NodeBody::RowSeqScan)?;
+        let seq_scan_node = try_match_expand!(
+            source.plan_node().get_node_body().unwrap(),
+            NodeBody::RowSeqScan
+        )?;
 
         let table_id = TableId::from(&seq_scan_node.table_ref_id);
 

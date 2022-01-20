@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
-use risingwave_common::util::addr::{get_host_port, is_local_address};
+use risingwave_common::util::addr::{is_local_address, to_socket_addr};
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::{ExchangeSource as ProstExchangeSource, Field as NodeField};
 
@@ -49,18 +49,11 @@ impl CreateSource for DefaultCreateSource {
         value: &ProstExchangeSource,
         task_id: TaskId,
     ) -> Result<Box<dyn ExchangeSource>> {
-        let peer_addr = get_host_port(
-            format!(
-                "{}:{}",
-                value.get_host().get_host(),
-                value.get_host().get_port()
-            )
-            .as_str(),
-        )?;
+        let peer_addr = to_socket_addr(value.get_host()?)?;
         if is_local_address(env.server_address(), &peer_addr) {
             debug!("Exchange locally [{:?}]", value.get_sink_id());
             return Ok(Box::new(LocalExchangeSource::create(
-                value.get_sink_id().into(),
+                value.get_sink_id()?.try_into()?,
                 env,
                 task_id,
             )?));
@@ -71,14 +64,18 @@ impl CreateSource for DefaultCreateSource {
             value.get_sink_id()
         );
         Ok(Box::new(
-            GrpcExchangeSource::create(peer_addr, task_id, value.get_sink_id().into()).await?,
+            GrpcExchangeSource::create(peer_addr, task_id, value.get_sink_id()?.try_into()?)
+                .await?,
         ))
     }
 }
 
 impl<CS: 'static + CreateSource> BoxedExecutorBuilder for GenericExchangeExecutor<CS> {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        let node = try_match_expand!(source.plan_node().get_node_body(), NodeBody::Exchange)?;
+        let node = try_match_expand!(
+            source.plan_node().get_node_body().unwrap(),
+            NodeBody::Exchange
+        )?;
 
         let server_addr = *source.env.server_address();
 

@@ -32,7 +32,7 @@ pub fn read_numeric_array<T: PrimitiveArrayItemType, R: PrimitiveValueReader<T>>
     );
 
     let mut builder = PrimitiveArrayBuilder::<T>::new(cardinality)?;
-    let bitmap: Bitmap = (array.get_null_bitmap()).try_into()?;
+    let bitmap: Bitmap = array.get_null_bitmap()?.try_into()?;
     let mut cursor = Cursor::new(buf);
     for not_null in bitmap.iter() {
         if not_null {
@@ -55,7 +55,7 @@ pub fn read_bool_array(array: &ProstArray, cardinality: usize) -> Result<ArrayRe
     let buf = array.get_values()[0].get_body().as_slice();
 
     let mut builder = BoolArrayBuilder::new(cardinality)?;
-    let bitmap: Bitmap = array.get_null_bitmap().try_into()?;
+    let bitmap: Bitmap = array.get_null_bitmap()?.try_into()?;
     let mut cursor = Cursor::new(buf);
     for not_null in bitmap.iter() {
         if not_null {
@@ -90,7 +90,7 @@ pub fn read_string_array<B: ArrayBuilder, R: VarSizedValueReader<B>>(
     let data_buf = array.get_values()[1].get_body().as_slice();
 
     let mut builder = B::new(cardinality)?;
-    let bitmap: Bitmap = (array.get_null_bitmap()).try_into()?;
+    let bitmap: Bitmap = array.get_null_bitmap()?.try_into()?;
     let mut offset_cursor = Cursor::new(offset_buff);
     let mut data_cursor = Cursor::new(data_buf);
     let mut prev_offset: i64 = -1;

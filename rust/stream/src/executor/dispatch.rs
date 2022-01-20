@@ -6,7 +6,7 @@ use futures::channel::mpsc::{channel, Sender};
 use futures::SinkExt;
 use risingwave_common::array::{Op, RwError};
 use risingwave_common::error::ErrorCode;
-use risingwave_common::util::addr::{get_host_port, is_local_address};
+use risingwave_common::util::addr::{is_local_address, to_socket_addr};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use tracing::event;
 
@@ -145,11 +145,9 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
                     for act in v.iter() {
                         let down_id = act.get_actor_id();
                         let up_down_ids = (actor_id, down_id);
-                        let host_addr = act.get_host();
-                        let downstream_addr =
-                            format!("{}:{}", host_addr.get_host(), host_addr.get_port());
+                        let downstream_addr = to_socket_addr(act.get_host()?)?;
 
-                        if is_local_address(&get_host_port(&downstream_addr)?, &self.context.addr) {
+                        if is_local_address(&downstream_addr, &self.context.addr) {
                             let tx = channel_pool_guard
                                 .get_mut(&(actor_id, down_id))
                                 .ok_or_else(|| {
@@ -188,10 +186,8 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
                 for downstream_actor_info in downstream_actor_infos {
                     let down_id = downstream_actor_info.get_actor_id();
                     let up_down_ids = (*actor_id, down_id);
-                    let host_addr = downstream_actor_info.get_host();
-                    let downstream_addr =
-                        format!("{}:{}", host_addr.get_host(), host_addr.get_port());
-                    if is_local_address(&get_host_port(&downstream_addr)?, &self.context.addr) {
+                    let downstream_addr = to_socket_addr(downstream_actor_info.get_host()?)?;
+                    if is_local_address(&downstream_addr, &self.context.addr) {
                         let tx = channel_pool_guard
                             .get_mut(&(*actor_id, down_id))
                             .ok_or_else(|| {

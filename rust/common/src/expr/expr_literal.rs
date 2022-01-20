@@ -127,7 +127,7 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
         ensure!(prost.expr_type == Type::ConstantValue as i32);
-        let ret_type = DataTypeKind::from(prost.get_return_type());
+        let ret_type = DataTypeKind::from(prost.get_return_type()?);
         if prost.rex_node.is_none() {
             return Ok(Self {
                 return_type: ret_type,
@@ -135,9 +135,9 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
             });
         }
 
-        if let RexNode::Constant(prost_value) = prost.get_rex_node() {
+        if let RexNode::Constant(prost_value) = prost.get_rex_node()? {
             // TODO: We need to unify these
-            let value = match prost.get_return_type().get_type_name() {
+            let value = match prost.get_return_type()?.get_type_name()? {
                 TypeName::Boolean => ScalarImpl::Bool(
                     i8::from_be_bytes(prost_value.get_body().as_slice().try_into().map_err(
                         |e| InternalError(format!("Failed to deserialize bool, reason: {:?}", e)),
@@ -194,13 +194,13 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
                     let bytes = prost_value.get_body();
                     ScalarImpl::Interval(make_interval(
                         bytes,
-                        prost.get_return_type().get_interval_type(),
+                        prost.get_return_type()?.get_interval_type()?,
                     )?)
                 }
                 _ => {
                     return Err(InternalError(format!(
                         "Unrecognized type name: {:?}",
-                        prost.get_return_type().get_type_name()
+                        prost.get_return_type()?.get_type_name()
                     ))
                     .into())
                 }

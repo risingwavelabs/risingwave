@@ -32,7 +32,7 @@ impl SchemaMetaManager for StoredCatalogManager {
     async fn create_schema(&self, mut schema: Schema) -> Result<Epoch> {
         let version = self.epoch_generator.generate()?;
         schema.version = version.into_inner();
-        let schema_ref_id = schema.get_schema_ref_id();
+        let schema_ref_id = schema.get_schema_ref_id()?;
 
         self.meta_store_ref
             .put_cf(

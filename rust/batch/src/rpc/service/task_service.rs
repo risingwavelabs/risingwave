@@ -30,9 +30,11 @@ impl TaskService for TaskServiceImpl {
     ) -> Result<Response<CreateTaskResponse>, Status> {
         let req = request.into_inner();
 
-        let res = self
-            .mgr
-            .fire_task(self.env.clone(), req.get_task_id(), req.get_plan().clone());
+        let res = self.mgr.fire_task(
+            self.env.clone(),
+            req.get_task_id().expect("no task id found"),
+            req.get_plan().expect("no plan found").clone(),
+        );
         match res {
             Ok(_) => Ok(Response::new(CreateTaskResponse { status: None })),
             Err(e) => {

@@ -57,7 +57,7 @@ impl Schema {
                 .into_iter()
                 .map(|col| {
                     Ok(Field {
-                        data_type: DataTypeKind::from(col.get_column_type()),
+                        data_type: DataTypeKind::from(col.get_column_type()?),
                         name: col.get_name().to_string(),
                     })
                 })
@@ -88,7 +88,9 @@ impl Field {
 
     pub fn from(prost_field: &ProstField) -> Self {
         Self {
-            data_type: DataTypeKind::from(prost_field.get_data_type()),
+            data_type: DataTypeKind::from(
+                prost_field.get_data_type().expect("data type not found"),
+            ),
             name: prost_field.get_name().clone(),
         }
     }

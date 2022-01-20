@@ -30,7 +30,7 @@ impl ColumnDesc {
 impl From<ProstColumnDesc> for ColumnDesc {
     fn from(col: ProstColumnDesc) -> Self {
         Self {
-            data_type: col.get_column_type().into(),
+            data_type: col.get_column_type().expect("column type not found").into(),
             is_primary: col.is_primary,
         }
     }

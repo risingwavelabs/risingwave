@@ -41,7 +41,10 @@ impl Executor for DropStreamExecutor {
 
 impl BoxedExecutorBuilder for DropStreamExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        let node = try_match_expand!(source.plan_node().get_node_body(), NodeBody::DropSource)?;
+        let node = try_match_expand!(
+            source.plan_node().get_node_body().unwrap(),
+            NodeBody::DropSource
+        )?;
 
         let table_id = TableId::from(&node.table_ref_id);
 

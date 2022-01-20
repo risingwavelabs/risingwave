@@ -41,7 +41,10 @@ impl CreateTableExecutor {
 
 impl BoxedExecutorBuilder for CreateTableExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        let node = try_match_expand!(source.plan_node().get_node_body(), NodeBody::CreateTable)?;
+        let node = try_match_expand!(
+            source.plan_node().get_node_body().unwrap(),
+            NodeBody::CreateTable
+        )?;
 
         let table_id = TableId::from(&node.table_ref_id);
 
@@ -50,7 +53,7 @@ impl BoxedExecutorBuilder for CreateTableExecutor {
             .iter()
             .map(|col| {
                 Ok(TableColumnDesc {
-                    data_type: DataTypeKind::from(col.get_column_type()),
+                    data_type: DataTypeKind::from(col.get_column_type()?),
                     column_id: col.get_column_id(),
                     name: col.get_name().to_string(),
                 })

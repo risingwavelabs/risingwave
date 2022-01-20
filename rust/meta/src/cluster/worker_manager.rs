@@ -44,7 +44,8 @@ impl WorkerNodeMetaManager for StoredClusterManager {
         match cluster
             .nodes
             .iter()
-            .position(|n| n.get_host().eq(&host_address.clone()))
+            // TODO: should use a hashmap here
+            .position(|n| n.get_host() == Ok(&host_address))
         {
             // If exist already, return its info(id) directly. Worker might be added duplicated cuz
             // reboot is quite normal for workers.

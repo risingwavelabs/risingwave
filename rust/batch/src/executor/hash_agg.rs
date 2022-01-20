@@ -107,8 +107,10 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
             .ok_or_else(|| ErrorCode::InternalError(String::from("")))?;
         let child = source.clone_for_plan(proto_child).build()?;
 
-        let hash_agg_node =
-            try_match_expand!(source.plan_node().get_node_body(), NodeBody::HashAgg)?;
+        let hash_agg_node = try_match_expand!(
+            source.plan_node().get_node_body().unwrap(),
+            NodeBody::HashAgg
+        )?;
 
         Self::deserialize(hash_agg_node, child, source.task_id.clone())
     }

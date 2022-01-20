@@ -184,14 +184,14 @@ impl<CS: 'static + CreateSource> Executor for MergeSortExchangeExecutorImpl<CS> 
 impl<CS: 'static + CreateSource> BoxedExecutorBuilder for MergeSortExchangeExecutorImpl<CS> {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
         let sort_merge_node = try_match_expand!(
-            source.plan_node().get_node_body(),
+            source.plan_node().get_node_body().unwrap(),
             NodeBody::MergeSortExchange
         )?;
 
         let server_addr = *source.env.server_address();
         let order_pairs = Arc::new(fetch_orders(sort_merge_node.get_column_orders()).unwrap());
 
-        let exchange_node = sort_merge_node.get_exchange_node();
+        let exchange_node = sort_merge_node.get_exchange_node()?;
         let proto_sources: Vec<ProstExchangeSource> = exchange_node.get_sources().to_vec();
         ensure!(!exchange_node.get_sources().is_empty());
         let fields = exchange_node

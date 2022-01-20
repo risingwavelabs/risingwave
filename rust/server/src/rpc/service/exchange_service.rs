@@ -33,12 +33,14 @@ impl ExchangeService for ExchangeServiceImpl {
         &self,
         request: Request<GetDataRequest>,
     ) -> std::result::Result<Response<Self::GetDataStream>, Status> {
+        use risingwave_common::error::tonic_err;
+
         let peer_addr = request
             .remote_addr()
             .ok_or_else(|| Status::unavailable("connection unestablished"))?;
         let req = request.into_inner();
         match self
-            .get_data_impl(peer_addr, req.get_sink_id().clone())
+            .get_data_impl(peer_addr, req.get_sink_id().map_err(tonic_err)?.clone())
             .await
         {
             Ok(resp) => Ok(resp),
@@ -88,7 +90,7 @@ impl ExchangeServiceImpl {
     ) -> Result<Response<<Self as ExchangeService>::GetDataStream>> {
         let (tx, rx) = tokio::sync::mpsc::channel(10);
 
-        let tsid = TaskSinkId::from(&pb_tsid);
+        let tsid = TaskSinkId::try_from(&pb_tsid)?;
         debug!("Serve exchange RPC from {} [{:?}]", peer_addr, tsid);
         let mut task_sink = self.mgr.take_sink(&pb_tsid)?;
         tokio::spawn(async move {

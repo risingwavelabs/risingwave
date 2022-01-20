@@ -33,6 +33,7 @@ rust/**/target_tarpaulin
 rust/proto/
 rust/prost/src/*.rs
 !rust/prost/src/lib.rs
+!rust/prost/src/imp.rs
 **/file_descriptor_set.bin
 # runtime log
 rust/log/

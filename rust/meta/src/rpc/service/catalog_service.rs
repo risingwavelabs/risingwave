@@ -1,3 +1,4 @@
+use risingwave_common::error::tonic_err;
 use risingwave_pb::meta::catalog_service_server::CatalogService;
 use risingwave_pb::meta::create_request::CatalogBody;
 use risingwave_pb::meta::drop_request::CatalogId;
@@ -51,7 +52,7 @@ impl CatalogService for CatalogServiceImpl {
     ) -> Result<Response<CreateResponse>, Status> {
         let req = request.into_inner();
         let id: i32;
-        let result = match req.get_catalog_body() {
+        let result = match req.get_catalog_body().map_err(tonic_err)? {
             CatalogBody::Database(database) => {
                 id = self
                     .id_gen_manager
@@ -68,7 +69,7 @@ impl CatalogService for CatalogServiceImpl {
                     .generate(IdCategory::Schema)
                     .await
                     .map_err(|e| e.to_grpc_status())?;
-                let mut schema_ref_id = schema.get_schema_ref_id().clone();
+                let mut schema_ref_id = schema.get_schema_ref_id().map_err(tonic_err)?.clone();
                 schema_ref_id.schema_id = id;
                 let mut schema = schema.clone();
                 schema.schema_ref_id = Some(schema_ref_id);
@@ -80,7 +81,7 @@ impl CatalogService for CatalogServiceImpl {
                     .generate(IdCategory::Table)
                     .await
                     .map_err(|e| e.to_grpc_status())?;
-                let mut table_ref_id = table.get_table_ref_id().clone();
+                let mut table_ref_id = table.get_table_ref_id().map_err(tonic_err)?.clone();
                 table_ref_id.table_id = id;
                 let mut table = table.clone();
                 table.table_ref_id = Some(table_ref_id);
@@ -101,7 +102,7 @@ impl CatalogService for CatalogServiceImpl {
     #[cfg(not(tarpaulin_include))]
     async fn drop(&self, request: Request<DropRequest>) -> Result<Response<DropResponse>, Status> {
         let req = request.into_inner();
-        let result = match req.get_catalog_id() {
+        let result = match req.get_catalog_id().map_err(tonic_err)? {
             CatalogId::DatabaseId(database_id) => self.cmr.drop_database(database_id).await,
             CatalogId::SchemaId(schema_id) => self.cmr.drop_schema(schema_id).await,
             CatalogId::TableId(table_id) => self.cmr.drop_table(table_id).await,

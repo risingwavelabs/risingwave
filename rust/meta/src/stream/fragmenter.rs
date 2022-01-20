@@ -58,23 +58,28 @@ impl StreamFragmenter {
         &mut self,
         stream_node: &StreamNode,
     ) -> Result<(Vec<StreamActor>, Vec<u32>)> {
-        self.generate_fragment_graph(stream_node);
+        self.generate_fragment_graph(stream_node)?;
         self.build_graph_from_fragment(self.fragment_graph.get_root_fragment(), vec![])
             .await?;
-        Ok((self.stream_graph.build(), self.source_actor_ids.clone()))
+        Ok((self.stream_graph.build()?, self.source_actor_ids.clone()))
     }
 
     /// Generate fragment DAG from input streaming plan by their dependency.
-    fn generate_fragment_graph(&mut self, stream_node: &StreamNode) {
+    fn generate_fragment_graph(&mut self, stream_node: &StreamNode) -> Result<()> {
         let root_fragment = self.new_stream_fragment(Arc::new(stream_node.clone()));
         self.fragment_graph.add_root_fragment(root_fragment.clone());
-        self.build_fragment(&root_fragment, stream_node);
+        self.build_fragment(&root_fragment, stream_node)?;
+        Ok(())
     }
 
     /// Build new fragment and link dependency with its parent fragment.
-    fn build_fragment(&mut self, parent_fragment: &StreamFragment, stream_node: &StreamNode) {
+    fn build_fragment(
+        &mut self,
+        parent_fragment: &StreamFragment,
+        stream_node: &StreamNode,
+    ) -> Result<()> {
         for node in stream_node.get_input() {
-            match node.get_node() {
+            match node.get_node()? {
                 Node::ExchangeNode(_) => {
                     let child_fragment = self.new_stream_fragment(Arc::new(node.clone()));
                     self.fragment_graph.add_fragment(child_fragment.clone());
@@ -82,19 +87,20 @@ impl StreamFragmenter {
                         parent_fragment.get_fragment_id(),
                         child_fragment.get_fragment_id(),
                     );
-                    self.build_fragment(&child_fragment, node);
+                    self.build_fragment(&child_fragment, node)?;
                 }
                 Node::TableSourceNode(_) => {
                     let _res = self
                         .fragment_graph
                         .set_source_fragment_by_id(parent_fragment.get_fragment_id());
-                    self.build_fragment(parent_fragment, node);
+                    self.build_fragment(parent_fragment, node)?;
                 }
                 _ => {
-                    self.build_fragment(parent_fragment, node);
+                    self.build_fragment(parent_fragment, node)?;
                 }
             }
         }
+        Ok(())
     }
 
     fn new_stream_fragment(&self, node: Arc<StreamNode>) -> StreamFragment {
@@ -145,8 +151,8 @@ impl StreamFragmenter {
 
             let node = current_fragment.get_node();
             let actor_ids = self.gen_actor_id(parallel_degree as i32).await?;
-            let dispatcher = match node.get_node() {
-                Node::ExchangeNode(exchange_node) => exchange_node.get_dispatcher(),
+            let dispatcher = match node.get_node()? {
+                Node::ExchangeNode(exchange_node) => exchange_node.get_dispatcher()?,
                 _ => {
                     return Err(RwError::from(InternalError(format!(
                         "{:?} should not found.",

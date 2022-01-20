@@ -60,7 +60,7 @@ impl StreamMetaManager for StoredStreamMetaManager {
     /// cf(table_actor): `table_ref_id` -> `TableActors`, defines table included actors.
     async fn add_actors_to_node(&self, location: &ActorLocation) -> Result<()> {
         self.fragment_lock.write().await;
-        let node = location.get_node().encode_to_vec();
+        let node = location.get_node()?.encode_to_vec();
         let actors = location.get_actors();
         let mut write_batch: Vec<(&str, Vec<u8>, Vec<u8>, Epoch)> = vec![];
         for f in actors {
@@ -219,7 +219,7 @@ mod test {
         let locations = meta_manager.load_all_actors().await?;
         assert_eq!(locations.len(), 1);
         let location = locations.get(0).unwrap();
-        assert_eq!(location.get_node().get_id(), 1);
+        assert_eq!(location.get_node().unwrap().get_id(), 1);
         assert_eq!(location.get_actors().len(), 5);
         assert_eq!(
             location
@@ -247,7 +247,7 @@ mod test {
         let locations = meta_manager.load_all_actors().await?;
         assert_eq!(locations.len(), 1);
         let location = locations.get(0).unwrap();
-        assert_eq!(location.get_node().get_id(), 1);
+        assert_eq!(location.get_node().unwrap().get_id(), 1);
         assert_eq!(location.get_actors().len(), 10);
         assert_eq!(
             location

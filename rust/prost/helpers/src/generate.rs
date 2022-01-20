@@ -78,8 +78,8 @@ pub fn implement(field: &Field) -> TokenStream2 {
         Some(enum_type) => {
             return quote! {
                 #[inline(always)]
-                pub fn #getter_fn_name(&self) -> #enum_type {
-                    #enum_type::from_i32(self.#field_name).unwrap()
+                pub fn #getter_fn_name(&self) -> std::result::Result<#enum_type, crate::ProstFieldNotFound> {
+                    #enum_type::from_i32(self.#field_name).ok_or_else(|| crate::ProstFieldNotFound(stringify!(#field_name)))
                 }
             };
         }
@@ -93,9 +93,8 @@ pub fn implement(field: &Field) -> TokenStream2 {
             let ty = extract_type_from_option(data_type);
             return quote! {
                 #[inline(always)]
-                pub fn #getter_fn_name(&self) -> &#ty {
-                    // TODO: unwrap can panic when option is None
-                    &self.#field_name.as_ref().unwrap()
+                pub fn #getter_fn_name(&self) -> std::result::Result<&#ty, crate::ProstFieldNotFound> {
+                    self.#field_name.as_ref().ok_or_else(|| crate::ProstFieldNotFound(stringify!(#field_name)))
                 }
             };
         } else if ["u32", "u64", "f32", "f64", "i32", "i64", "bool"]

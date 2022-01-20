@@ -28,7 +28,8 @@ impl BoxedExecutorBuilder for LimitExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_children().len() == 1);
 
-        let limit_node = try_match_expand!(source.plan_node().get_node_body(), NodeBody::Limit)?;
+        let limit_node =
+            try_match_expand!(source.plan_node().get_node_body().unwrap(), NodeBody::Limit)?;
 
         let limit = limit_node.get_limit() as usize;
         let offset = limit_node.get_offset() as usize;

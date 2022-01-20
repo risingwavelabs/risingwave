@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use risingwave_common::error::tonic_err;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerService;
 use risingwave_pb::meta::{
     ClusterType, CreateMaterializedViewRequest, CreateMaterializedViewResponse,
@@ -53,13 +54,17 @@ impl StreamManagerService for StreamServiceImpl {
         let mut fragmenter =
             StreamFragmenter::new(self.id_gen_manager_ref.clone(), worker_count as u32);
         let (mut graph, source_actor_ids) = fragmenter
-            .generate_graph(req.get_stream_node())
+            .generate_graph(req.get_stream_node().map_err(tonic_err)?)
             .await
             .map_err(|e| e.to_grpc_status())?;
 
         match self
             .sm
-            .create_materialized_view(req.get_table_ref_id(), &mut graph, source_actor_ids)
+            .create_materialized_view(
+                req.get_table_ref_id().map_err(tonic_err)?,
+                &mut graph,
+                source_actor_ids,
+            )
             .await
         {
             Ok(()) => Ok(Response::new(CreateMaterializedViewResponse {
@@ -84,7 +89,7 @@ impl StreamManagerService for StreamServiceImpl {
             .map_err(|e| e.to_grpc_status())?;
         match self
             .sm
-            .drop_materialized_view(req.get_table_ref_id(), epoch)
+            .drop_materialized_view(req.get_table_ref_id().map_err(tonic_err)?, epoch)
             .await
         {
             Ok(()) => Ok(Response::new(DropMaterializedViewResponse { status: None })),

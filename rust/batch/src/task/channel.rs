@@ -32,7 +32,7 @@ pub type BoxChanReceiver = Box<dyn ChanReceiver>;
 pub fn create_output_channel(
     shuffle: &ExchangeInfo,
 ) -> Result<(BoxChanSender, Vec<BoxChanReceiver>)> {
-    match shuffle.get_mode() {
+    match shuffle.get_mode()? {
         ShuffleDistributionMode::Single => Ok(new_fifo_channel()),
         ShuffleDistributionMode::Hash => Ok(new_hash_shuffle_channel(shuffle)),
         ShuffleDistributionMode::Broadcast => Ok(new_broadcast_channel(shuffle)),

@@ -1021,7 +1021,7 @@ impl HummockManager for DefaultHummockManager {
 
             // commit tables by moving them into level0
             let version_first_level = hummock_version.levels.first_mut().unwrap();
-            match version_first_level.get_level_type() {
+            match version_first_level.get_level_type()? {
                 LevelType::Overlapping => {
                     uncommitted_epoch
                         .table_ids

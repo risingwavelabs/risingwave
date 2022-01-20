@@ -32,7 +32,7 @@ impl TableMetaManager for StoredCatalogManager {
     async fn create_table(&self, mut table: Table) -> Result<Epoch> {
         let version = self.epoch_generator.generate()?;
         table.version = version.into_inner();
-        let table_ref_id = table.get_table_ref_id();
+        let table_ref_id = table.get_table_ref_id()?;
 
         self.meta_store_ref
             .put_cf(

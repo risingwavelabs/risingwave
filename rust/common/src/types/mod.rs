@@ -57,7 +57,7 @@ pub enum DataSize {
 
 impl From<&ProstDataType> for DataTypeKind {
     fn from(proto: &ProstDataType) -> DataTypeKind {
-        match proto.get_type_name() {
+        match proto.get_type_name().expect("unsupported type") {
             TypeName::Int16 => DataTypeKind::Int16,
             TypeName::Int32 => DataTypeKind::Int32,
             TypeName::Int64 => DataTypeKind::Int64,

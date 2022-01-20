@@ -39,8 +39,10 @@ impl BoxedExecutorBuilder for OrderByExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_children().len() == 1);
 
-        let order_by_node =
-            try_match_expand!(source.plan_node().get_node_body(), NodeBody::OrderBy)?;
+        let order_by_node = try_match_expand!(
+            source.plan_node().get_node_body().unwrap(),
+            NodeBody::OrderBy
+        )?;
 
         let order_pairs = fetch_orders(order_by_node.get_column_orders()).unwrap();
         if let Some(child_plan) = source.plan_node.get_children().get(0) {

@@ -56,8 +56,10 @@ impl BoxedExecutorBuilder for ProjectionExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_children().len() == 1);
 
-        let project_node =
-            try_match_expand!(source.plan_node().get_node_body(), NodeBody::Project)?;
+        let project_node = try_match_expand!(
+            source.plan_node().get_node_body().unwrap(),
+            NodeBody::Project
+        )?;
 
         let proto_child = source.plan_node.get_children().get(0).ok_or_else(|| {
             RwError::from(ErrorCode::InternalError(String::from(

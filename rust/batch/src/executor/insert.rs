@@ -167,7 +167,10 @@ impl Executor for InsertExecutor {
 
 impl BoxedExecutorBuilder for InsertExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        let insert_node = try_match_expand!(source.plan_node().get_node_body(), NodeBody::Insert)?;
+        let insert_node = try_match_expand!(
+            source.plan_node().get_node_body().unwrap(),
+            NodeBody::Insert
+        )?;
 
         let table_id = TableId::from(&insert_node.table_ref_id);
 

@@ -9,7 +9,7 @@ use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::expr::{build_from_prost as build_expr_from_prost, AggKind};
 use risingwave_common::types::DataTypeKind;
-use risingwave_common::util::addr::{get_host_port, is_local_address};
+use risingwave_common::util::addr::{is_local_address, to_socket_addr};
 use risingwave_common::util::sort_util::{
     build_from_prost as build_order_type_from_prost, fetch_orders,
 };
@@ -219,8 +219,8 @@ fn build_agg_call_from_prost(agg_call_proto: &expr::AggCall) -> Result<AggCall> 
         match args {
             [] => AggArgs::None,
             [arg] => AggArgs::Unary(
-                DataTypeKind::from(arg.get_type()),
-                arg.get_input().column_idx as usize,
+                DataTypeKind::from(arg.get_type()?),
+                arg.get_input()?.column_idx as usize,
             ),
             _ => {
                 return Err(RwError::from(ErrorCode::NotImplementedError(
@@ -230,9 +230,9 @@ fn build_agg_call_from_prost(agg_call_proto: &expr::AggCall) -> Result<AggCall> 
         }
     };
     Ok(AggCall {
-        kind: AggKind::try_from(agg_call_proto.get_type())?,
+        kind: AggKind::try_from(agg_call_proto.get_type()?)?,
         args,
-        return_type: DataTypeKind::from(agg_call_proto.get_return_type()),
+        return_type: DataTypeKind::from(agg_call_proto.get_return_type()?),
     })
 }
 
@@ -273,9 +273,9 @@ impl StreamManagerCore {
                             actor_id, down_id
                         )))
                     })?
-                    .get_host();
-                let downstream_addr = format!("{}:{}", host_addr.get_host(), host_addr.get_port());
-                if is_local_address(&get_host_port(&downstream_addr)?, &self.context.addr) {
+                    .get_host()?;
+                let downstream_addr = to_socket_addr(host_addr)?;
+                if is_local_address(&downstream_addr, &self.context.addr) {
                     // if this is a local downstream actor
                     let mut guard = self.context.lock_channel_pool();
                     let tx = guard
@@ -310,7 +310,7 @@ impl StreamManagerCore {
         assert_eq!(downstreams.len(), outputs.len());
 
         use stream_plan::dispatcher::DispatcherType::*;
-        let dispatcher: Box<dyn StreamConsumer> = match dispatcher.get_type() {
+        let dispatcher: Box<dyn StreamConsumer> = match dispatcher.get_type()? {
             Hash => {
                 assert!(!outputs.is_empty());
                 Box::new(DispatchExecutor::new(
@@ -392,7 +392,7 @@ impl StreamManagerCore {
         let executor_id = ((actor_id as u64) << 32) + node.get_node_id();
         let node_id = node.get_node_id().try_into().unwrap();
 
-        let executor: Result<Box<dyn Executor>> = match node.get_node() {
+        let executor: Result<Box<dyn Executor>> = match node.get_node()? {
             TableSourceNode(node) => {
                 let source_id = TableId::from(&node.table_ref_id);
                 let source_desc = source_manager.get_source(&source_id)?;
@@ -436,7 +436,7 @@ impl StreamManagerCore {
                 )))
             }
             FilterNode(filter_node) => {
-                let search_condition = build_expr_from_prost(filter_node.get_search_condition())?;
+                let search_condition = build_expr_from_prost(filter_node.get_search_condition()?)?;
                 Ok(Box::new(FilterExecutor::new(
                     input.remove(0),
                     search_condition,
@@ -578,7 +578,7 @@ impl StreamManagerCore {
 
                 let create_hash_join_executor =
                     for_all_join_types! { impl_create_hash_join_executor };
-                let join_type_proto = hash_join_node.get_join_type();
+                let join_type_proto = hash_join_node.get_join_type()?;
                 let executor = create_hash_join_executor(join_type_proto);
                 Ok(executor)
             }
@@ -734,7 +734,7 @@ impl StreamManagerCore {
                 if *up_id == 0 {
                     Ok(self.mock_source.1.take().unwrap())
                 } else {
-                    let host_addr = self
+                    let upstream_addr = self
                         .actor_infos
                         .get(up_id)
                         .ok_or_else(|| {
@@ -742,10 +742,8 @@ impl StreamManagerCore {
                                 "upstream actor not found in info table".into(),
                             ))
                         })?
-                        .get_host();
-                    let upstream_addr =
-                        format!("{}:{}", host_addr.get_host(), host_addr.get_port());
-                    let upstream_socket_addr = get_host_port(&upstream_addr)?;
+                        .get_host()?;
+                    let upstream_socket_addr = to_socket_addr(upstream_addr)?;
                     if !is_local_address(&upstream_socket_addr, &self.context.addr) {
                         // Get the sender for `RemoteInput` to forward received messages to
                         // receivers in `ReceiverExecutor` or
@@ -833,12 +831,12 @@ impl StreamManagerCore {
         for actor_id in actors {
             let actor_id = *actor_id;
             let actor = self.actors.remove(&actor_id).unwrap();
-            let executor = self.create_nodes(actor_id, actor.get_nodes(), env.clone())?;
+            let executor = self.create_nodes(actor_id, actor.get_nodes()?, env.clone())?;
             let identity = executor.identity().to_string();
             let executor = Box::new(TraceExecutor::new(executor, identity, 0, actor_id));
             let dispatcher = self.create_dispatcher(
                 executor,
-                actor.get_dispatcher(),
+                actor.get_dispatcher()?,
                 actor_id,
                 actor.get_downstream_actor_id(),
             )?;

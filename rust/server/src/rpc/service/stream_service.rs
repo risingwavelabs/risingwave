@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
+use risingwave_common::error::tonic_err;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BroadcastActorInfoTableResponse, BuildActorsRequest,
@@ -106,7 +107,8 @@ impl StreamService for StreamServiceImpl {
         request: Request<InjectBarrierRequest>,
     ) -> Result<Response<InjectBarrierResponse>, Status> {
         let req = request.into_inner();
-        let barrier = Barrier::from_protobuf(req.get_barrier());
+        let barrier =
+            Barrier::from_protobuf(req.get_barrier().map_err(tonic_err)?).map_err(tonic_err)?;
         self.mgr
             .send_barrier(&barrier)
             .map_err(|e| e.to_grpc_status())?;

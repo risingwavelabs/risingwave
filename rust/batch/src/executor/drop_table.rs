@@ -16,7 +16,10 @@ pub(super) struct DropTableExecutor {
 
 impl BoxedExecutorBuilder for DropTableExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        let node = try_match_expand!(source.plan_node().get_node_body(), NodeBody::DropTable)?;
+        let node = try_match_expand!(
+            source.plan_node().get_node_body().unwrap(),
+            NodeBody::DropTable
+        )?;
 
         let table_id = TableId::from(&node.table_ref_id);
 

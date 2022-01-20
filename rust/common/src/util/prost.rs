@@ -27,7 +27,7 @@ pub trait JsonFormatter {
 
 impl JsonFormatter for plan::PlanFragment {
     fn to_json(&self) -> Result<Value> {
-        self.get_root().to_json()
+        self.get_root()?.to_json()
     }
 }
 
@@ -40,7 +40,7 @@ struct JsonPlanNode {
 
 impl JsonFormatter for plan::PlanNode {
     fn to_json(&self) -> Result<Value> {
-        let body = match self.get_node_body() {
+        let body = match self.get_node_body()? {
             plan::plan_node::NodeBody::Exchange(x) => Some(x.to_json()?),
             _ => None,
         };

@@ -28,7 +28,7 @@ impl Column {
     }
 
     pub fn from_protobuf(col: &ProstColumn, cardinality: usize) -> Result<Self> {
-        let array = col.get_array();
+        let array = col.get_array()?;
         let array = match array.array_type() {
             ArrayType::Int16 => read_numeric_array::<i16, I16ValueReader>(array, cardinality)?,
             ArrayType::Int32 => read_numeric_array::<i32, I32ValueReader>(array, cardinality)?,

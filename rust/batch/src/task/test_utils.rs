@@ -23,18 +23,18 @@ use risingwave_storage::Table;
 use super::*;
 use crate::rpc::service::exchange::ExchangeWriter;
 
-fn get_num_sinks(plan: &PlanFragment) -> u32 {
-    match plan.get_exchange_info().get_mode() {
+fn get_num_sinks(plan: &PlanFragment) -> Result<u32> {
+    Ok(match plan.get_exchange_info()?.get_mode()? {
         DistributionMode::Single => 1,
-        DistributionMode::Hash => match plan.get_exchange_info().distribution {
+        DistributionMode::Hash => match plan.get_exchange_info()?.distribution {
             Some(Distribution::HashInfo(ref v)) => v.output_count,
             _ => exchange_info::HashInfo::default().output_count,
         },
-        DistributionMode::Broadcast => match plan.get_exchange_info().distribution {
+        DistributionMode::Broadcast => match plan.get_exchange_info()?.distribution {
             Some(Distribution::BroadcastInfo(ref v)) => v.count,
             _ => exchange_info::BroadcastInfo::default().count,
         },
-    }
+    })
 }
 
 /// Write the execution results into a buffer for testing.
@@ -97,7 +97,7 @@ impl TestRunner {
     ) -> Result<Vec<Vec<GetDataResponse>>> {
         let task_manager = self.env.task_manager();
         let mut res = Vec::new();
-        let sink_ids = 0..get_num_sinks(plan);
+        let sink_ids = 0..get_num_sinks(plan)?;
         for sink_id in sink_ids {
             let proto_sink_id = ProstSinkId {
                 task_id: Some(self.tid.clone()),
@@ -185,7 +185,9 @@ impl<'a> TableBuilder<'a> {
     pub async fn run(self) {
         let inserted_rows = self.tuples.len();
         let create = self.build_create_table_plan();
-        let insert = self.build_insert_values_plan();
+        let insert = self
+            .build_insert_values_plan()
+            .expect("failed to create insert plan");
         assert_eq!(self.runner.run(create).await.unwrap()[0].len(), 0);
         TestRunner::validate_insert_result(
             &self.runner.run(insert).await.unwrap()[0],
@@ -222,7 +224,7 @@ impl<'a> TableBuilder<'a> {
         }
     }
 
-    fn build_insert_values_plan(&self) -> PlanFragment {
+    fn build_insert_values_plan(&self) -> Result<PlanFragment> {
         let insert = InsertNode {
             table_ref_id: None,
             column_ids: vec![0; self.col_types.len()],
@@ -238,12 +240,14 @@ impl<'a> TableBuilder<'a> {
             .unwrap()
             .cells
             .iter()
-            .map(|cell| NodeField {
-                data_type: Some(cell.get_return_type().clone()),
-                name: String::new(),
+            .map(|cell| {
+                Ok(NodeField {
+                    data_type: Some(cell.get_return_type()?.clone()),
+                    name: String::new(),
+                })
             })
-            .collect::<Vec<_>>();
-        PlanFragment {
+            .collect::<Result<Vec<_>>>()?;
+        Ok(PlanFragment {
             root: Some(PlanNode {
                 children: vec![PlanNode {
                     children: vec![],
@@ -256,7 +260,7 @@ impl<'a> TableBuilder<'a> {
                 mode: 0,
                 distribution: None,
             }),
-        }
+        })
     }
 
     fn build_values(constants: Vec<ConstantValue>) -> ExprTuple {
@@ -451,18 +455,18 @@ impl ResultChecker {
             assert_eq!(actual.len(), 0);
         } else {
             assert_eq!(actual.len(), 1);
-            let chunk = actual.get(0).unwrap().get_record_batch();
+            let chunk = actual.get(0).unwrap().get_record_batch()?;
             assert_eq!(chunk.get_cardinality(), self.cardinality() as u32);
             assert_eq!(chunk.get_columns().len(), self.col_types.len());
 
             for i in 0..chunk.get_columns().len() {
                 let col = &chunk.get_columns()[i];
 
-                self.check_column_null_bitmap(col);
+                self.check_column_null_bitmap(col)?;
 
                 // TODO: Write an iterator for FixedWidthColumn
-                let value_width = Self::get_value_width(col);
-                let column_bytes = col.get_array().get_values()[0].get_body();
+                let value_width = Self::get_value_width(col)?;
+                let column_bytes = col.get_array()?.get_values()[0].get_body();
                 for j in 0..self.cardinality() {
                     let actual_value = &column_bytes[j * value_width..(j + 1) * value_width];
                     let expected_value = self.columns[i][j].get_body();
@@ -473,22 +477,23 @@ impl ResultChecker {
         Ok(())
     }
 
-    fn get_value_width(col: &Column) -> usize {
+    fn get_value_width(col: &Column) -> Result<usize> {
         use risingwave_pb::data::ArrayType;
-        match col.get_array().get_array_type() {
+        Ok(match col.get_array()?.get_array_type()? {
             ArrayType::Int32 => 4,
             ArrayType::Int64 => 8,
             _ => 0,
-        }
+        })
     }
 
     // We assume that currently no column is nullable.
-    fn check_column_null_bitmap(&self, col: &Column) {
-        let null_bytes = col.get_array().get_null_bitmap().get_body();
+    fn check_column_null_bitmap(&self, col: &Column) -> Result<()> {
+        let null_bytes = col.get_array()?.get_null_bitmap()?.get_body();
         assert_eq!(null_bytes.len(), self.cardinality());
         for b in null_bytes {
             // 0 for null. 1 for non-null.
             assert_eq!(b.clone(), 1u8);
         }
+        Ok(())
     }
 }

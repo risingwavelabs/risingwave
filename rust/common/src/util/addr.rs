@@ -1,6 +1,8 @@
 use std::net::SocketAddr;
 use std::str::FromStr;
 
+use risingwave_pb::common::HostAddress;
+
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 
@@ -14,6 +16,11 @@ pub fn is_local_address(server_addr: &SocketAddr, peer_addr: &SocketAddr) -> boo
 
 pub fn get_host_port(addr: &str) -> Result<SocketAddr> {
     SocketAddr::from_str(addr)
+        .map_err(|e| RwError::from(InternalError(format!("failed to resolve address: {}", e))))
+}
+
+pub fn to_socket_addr(addr: &HostAddress) -> Result<SocketAddr> {
+    addr.to_socket_addr()
         .map_err(|e| RwError::from(InternalError(format!("failed to resolve address: {}", e))))
 }
 

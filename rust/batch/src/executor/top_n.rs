@@ -74,7 +74,8 @@ impl BoxedExecutorBuilder for TopNExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_children().len() == 1);
 
-        let top_n_node = try_match_expand!(source.plan_node().get_node_body(), NodeBody::TopN)?;
+        let top_n_node =
+            try_match_expand!(source.plan_node().get_node_body().unwrap(), NodeBody::TopN)?;
 
         let order_pairs = fetch_orders(top_n_node.get_column_orders()).unwrap();
         if let Some(child_plan) = source.plan_node.get_children().get(0) {
