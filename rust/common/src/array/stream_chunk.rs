@@ -3,7 +3,7 @@ use std::hash::BuildHasher;
 use std::sync::Arc;
 
 use prost::DecodeError;
-use risingwave_pb::data::{Column as ProstColumn, Op as ProstOp, StreamChunk as ProstStreamChunk};
+use risingwave_pb::data::{Op as ProstOp, StreamChunk as ProstStreamChunk};
 
 use crate::array::column::Column;
 use crate::array::stream_chunk_iter::{RowRef, StreamChunkRefIter};
@@ -11,7 +11,6 @@ use crate::array::DataChunk;
 use crate::buffer::Bitmap;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::util::hash_util::finalize_hashers;
-use crate::util::prost::unpack_from_any;
 
 /// `Op` represents three operations in `StreamChunk`.
 ///
@@ -160,7 +159,7 @@ impl StreamChunk {
             columns: self
                 .columns
                 .iter()
-                .map(|col| Ok(unpack_from_any::<ProstColumn>(&col.to_protobuf()?).unwrap()))
+                .map(|col| col.to_protobuf())
                 .collect::<Result<Vec<_>>>()?,
         })
     }

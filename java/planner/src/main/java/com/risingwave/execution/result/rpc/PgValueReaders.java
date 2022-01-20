@@ -1,6 +1,5 @@
 package com.risingwave.execution.result.rpc;
 
-import com.google.protobuf.Any;
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
 import com.risingwave.execution.result.rpc.primitive.BooleanBufferReader;
@@ -19,41 +18,29 @@ import java.io.InputStream;
 import java.util.List;
 import javax.annotation.Nullable;
 
-/**
- * Postgres value readers
- */
+/** Postgres value readers */
 public class PgValueReaders {
-  public static PgValueReader create(Any column, TypeOid type) {
-    try {
-      if (column.is(Column.class)) {
-        Column unpackedColumn = column.unpack(Column.class);
-
-        switch (type) {
-          case SMALLINT:
-          case INT:
-          case BIGINT:
-          case FLOAT4:
-          case FLOAT8:
-          case BOOLEAN:
-          case DATE:
-          case TIME:
-          case TIMESTAMP:
-          case TIMESTAMPZ:
-            return createPrimitiveReader(unpackedColumn, type);
-          case CHAR_ARRAY:
-          case VARCHAR:
-          case DECIMAL:
-            return createStringReader(unpackedColumn, type);
-          default:
-            break;
-        }
-      }
-
-      throw new PgException(
-          PgErrorCode.INTERNAL_ERROR, "Unsupported column type: %s", column.getTypeUrl());
-    } catch (Exception e) {
-      throw new PgException(PgErrorCode.INTERNAL_ERROR, e);
+  public static PgValueReader create(Column column, TypeOid type) {
+    switch (type) {
+      case SMALLINT:
+      case INT:
+      case BIGINT:
+      case FLOAT4:
+      case FLOAT8:
+      case BOOLEAN:
+      case DATE:
+      case TIME:
+      case TIMESTAMP:
+      case TIMESTAMPZ:
+        return createPrimitiveReader(column, type);
+      case CHAR_ARRAY:
+      case VARCHAR:
+      case DECIMAL:
+        return createStringReader(column, type);
+      default:
+        break;
     }
+    throw new PgException(PgErrorCode.INTERNAL_ERROR, "Unsupported column: %s", column);
   }
 
   private static PgValueReader createStringReader(Column column, TypeOid type) {
@@ -77,9 +64,7 @@ public class PgValueReaders {
             Values::createDecimal, new LongBufferReader(offsetStream), dataStream, nullBitmap);
       default:
         throw new PgException(
-            PgErrorCode.INTERNAL_ERROR,
-            "Unsupported string column type: %s",
-            type.name());
+            PgErrorCode.INTERNAL_ERROR, "Unsupported string column type: %s", type.name());
     }
   }
 
@@ -130,7 +115,8 @@ public class PgValueReaders {
   protected static BooleanBufferReader getNullBitmap(Column columnCommon) {
     BooleanBufferReader nullBitmap = null;
     if (columnCommon.getArray().hasNullBitmap()) {
-      nullBitmap = new BooleanBufferReader(BufferReaders.decode(columnCommon.getArray().getNullBitmap()));
+      nullBitmap =
+          new BooleanBufferReader(BufferReaders.decode(columnCommon.getArray().getNullBitmap()));
     }
 
     return nullBitmap;

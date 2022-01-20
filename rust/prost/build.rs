@@ -42,7 +42,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Tweak the serde files so that they can be compiled in our project.
     // By adding a `use crate::module::*`
-    let rewrite_files = [proto_files, vec!["google.protobuf"]].concat();
+    let rewrite_files = proto_files;
     for serde_proto_file in &rewrite_files {
         let out_file = out_dir.join(format!("{}.serde.rs", serde_proto_file));
         let file_content = String::from_utf8(std::fs::read(&out_file)?)?;

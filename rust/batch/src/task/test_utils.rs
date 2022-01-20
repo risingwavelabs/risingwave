@@ -1,7 +1,6 @@
 use core::default::Default as CoreDefault;
 
 use itertools::Itertools;
-use prost::Message;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 use risingwave_common::util::downcast_arc;
@@ -457,12 +456,12 @@ impl ResultChecker {
             assert_eq!(chunk.get_columns().len(), self.col_types.len());
 
             for i in 0..chunk.get_columns().len() {
-                let col = Column::decode(&chunk.get_columns()[i].value[..]).unwrap();
+                let col = &chunk.get_columns()[i];
 
-                self.check_column_null_bitmap(&col);
+                self.check_column_null_bitmap(col);
 
                 // TODO: Write an iterator for FixedWidthColumn
-                let value_width = Self::get_value_width(&col);
+                let value_width = Self::get_value_width(col);
                 let column_bytes = col.get_array().get_values()[0].get_body();
                 for j in 0..self.cardinality() {
                     let actual_value = &column_bytes[j * value_width..(j + 1) * value_width];

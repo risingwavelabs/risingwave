@@ -1,5 +1,4 @@
 use risingwave_pb::data::{ArrayType, Column as ProstColumn};
-use risingwave_pb::google::protobuf::Any as ProstAny;
 
 use crate::array::column_proto_readers::{read_bool_array, read_numeric_array, read_string_array};
 use crate::array::value_reader::{
@@ -9,7 +8,6 @@ use crate::array::value_reader::{
 use crate::array::{ArrayImpl, ArrayRef, DecimalArrayBuilder, Utf8ArrayBuilder};
 use crate::error::Result;
 use crate::types::{OrderedF32, OrderedF64};
-use crate::util::prost::pack_to_any;
 
 /// Column is owned by `DataChunk`. It consists of logic data type and physical array
 /// implementation.
@@ -23,10 +21,10 @@ impl Column {
         Column { array }
     }
 
-    pub fn to_protobuf(&self) -> Result<ProstAny> {
+    pub fn to_protobuf(&self) -> Result<ProstColumn> {
         let array = self.array.to_protobuf()?;
         let column = ProstColumn { array: Some(array) };
-        Ok(pack_to_any(&column))
+        Ok(column)
     }
 
     pub fn from_protobuf(col: &ProstColumn, cardinality: usize) -> Result<Self> {
@@ -70,7 +68,6 @@ mod tests {
         Array, ArrayBuilder, BoolArray, BoolArrayBuilder, I32Array, I32ArrayBuilder, Utf8Array,
     };
     use crate::error::Result;
-    use crate::util::prost::unpack_from_any;
 
     // Convert a column to protobuf, then convert it back to column, and ensures the two are
     // identical.
@@ -86,9 +83,7 @@ mod tests {
             }
         }
         let col = Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())));
-        let col_proto = unpack_from_any::<ProstColumn>(&col.to_protobuf().unwrap()).unwrap();
-
-        let new_col = Column::from_protobuf(&col_proto, cardinality).unwrap();
+        let new_col = Column::from_protobuf(&col.to_protobuf()?, cardinality).unwrap();
         assert_eq!(new_col.array.len(), cardinality);
         let arr: &I32Array = new_col.array_ref().as_int32();
         arr.iter().enumerate().for_each(|(i, x)| {
@@ -113,9 +108,7 @@ mod tests {
             }
         }
         let col = Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())));
-        let col_proto = unpack_from_any::<ProstColumn>(&col.to_protobuf().unwrap()).unwrap();
-
-        let new_col = Column::from_protobuf(&col_proto, cardinality).unwrap();
+        let new_col = Column::from_protobuf(&col.to_protobuf()?, cardinality).unwrap();
         assert_eq!(new_col.array.len(), cardinality);
         let arr: &BoolArray = new_col.array_ref().into();
         arr.iter().enumerate().for_each(|(i, x)| match i % 3 {
@@ -138,8 +131,7 @@ mod tests {
             }
         }
         let col = Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())));
-        let col_proto = unpack_from_any::<ProstColumn>(&col.to_protobuf().unwrap()).unwrap();
-        let new_col = Column::from_protobuf(&col_proto, cardinality).unwrap();
+        let new_col = Column::from_protobuf(&col.to_protobuf()?, cardinality).unwrap();
         let arr: &Utf8Array = new_col.array_ref().as_utf8();
         arr.iter().enumerate().for_each(|(i, x)| {
             if i % 2 == 0 {

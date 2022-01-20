@@ -1,21 +1,6 @@
 #![allow(clippy::all)]
 
 #[rustfmt::skip]
-#[cfg(not(doctest))]
-#[path = "google.protobuf.rs"]
-mod google_protobuf;
-
-pub mod google {
-    pub mod protobuf {
-        #[cfg(doctest)]
-        pub use prost_types::Any;
-
-        #[cfg(not(doctest))]
-        pub use super::super::google_protobuf::*;
-    }
-}
-
-#[rustfmt::skip]
 pub mod common;
 #[rustfmt::skip]
 pub mod data;
@@ -61,11 +46,6 @@ pub mod stream_service_serde;
 #[rustfmt::skip]
 #[path = "hummock.serde.rs"]
 pub mod hummock_serde;
-
-#[rustfmt::skip]
-#[cfg(not(doctest))]
-#[path = "google.protobuf.serde.rs"]
-pub mod google_protobuf_serde;
 
 #[cfg(test)]
 mod tests {

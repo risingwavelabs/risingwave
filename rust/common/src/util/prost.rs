@@ -9,27 +9,6 @@ pub trait TypeUrl {
     fn type_url() -> &'static str;
 }
 
-pub fn pack_to_any<M>(msg: &M) -> risingwave_pb::google::protobuf::Any
-where
-    M: prost::Message + TypeUrl,
-{
-    risingwave_pb::google::protobuf::Any {
-        type_url: M::type_url().to_owned(),
-        value: msg.encode_to_vec(),
-    }
-}
-
-pub fn unpack_from_any<M>(msg: &risingwave_pb::google::protobuf::Any) -> Option<M>
-where
-    M: prost::Message + TypeUrl + Default,
-{
-    if msg.type_url == M::type_url() {
-        Some(M::decode(&msg.value[..]).ok()?)
-    } else {
-        None
-    }
-}
-
 impl TypeUrl for plan::ExchangeNode {
     fn type_url() -> &'static str {
         "type.googleapis.com/plan.ExchangeNode"

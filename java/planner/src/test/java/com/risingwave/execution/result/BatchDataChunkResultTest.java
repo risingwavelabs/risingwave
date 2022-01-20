@@ -2,7 +2,6 @@ package com.risingwave.execution.result;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
-import com.google.protobuf.Any;
 import com.google.protobuf.ByteString;
 import com.risingwave.common.datatype.RisingWaveTypeFactory;
 import com.risingwave.pgwire.database.PgResult;
@@ -14,7 +13,6 @@ import com.risingwave.proto.data.ArrayType;
 import com.risingwave.proto.data.Buffer;
 import com.risingwave.proto.data.Column;
 import com.risingwave.proto.data.DataChunk;
-import com.risingwave.proto.data.DataType;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
@@ -56,10 +54,10 @@ class BatchDataChunkResultTest {
   public void testSimpleRemoteBatchPlanResult() {
     ArrayList<GetDataResponse> taskDataList = new ArrayList<GetDataResponse>();
     RisingWaveTypeFactory typeFactory = RisingWaveTypeFactory.INSTANCE;
-    var relDataTypes = Lists.newArrayList(
-        typeFactory.createSqlType(SqlTypeName.INTEGER),
-        typeFactory.createSqlType(SqlTypeName.BOOLEAN)
-    );
+    var relDataTypes =
+        Lists.newArrayList(
+            typeFactory.createSqlType(SqlTypeName.INTEGER),
+            typeFactory.createSqlType(SqlTypeName.BOOLEAN));
     var fieldNames = Lists.newArrayList("col1", "col2");
     for (int i = 0; i < 4; ++i) {
       GetDataResponse data =
@@ -67,30 +65,31 @@ class BatchDataChunkResultTest {
               .setRecordBatch(
                   DataChunk.newBuilder()
                       .addColumns(
-                          Any.pack(
-                              Column.newBuilder()
-                                  .setArray(
-                                      Array.newBuilder().addValues(Buffer.newBuilder()
-                                          .setBody(
-                                              ByteString.copyFrom(
-                                                  ByteBuffer.allocate(4).putInt(i).array())))
-                                          .setArrayType(ArrayType.INT32)
-                                          .build())
-                                  .build()))
+                          Column.newBuilder()
+                              .setArray(
+                                  Array.newBuilder()
+                                      .addValues(
+                                          Buffer.newBuilder()
+                                              .setBody(
+                                                  ByteString.copyFrom(
+                                                      ByteBuffer.allocate(4).putInt(i).array())))
+                                      .setArrayType(ArrayType.INT32)
+                                      .build())
+                              .build())
                       .addColumns(
-                          Any.pack(
-                              Column.newBuilder()
-                                  .setArray(
-                                      Array.newBuilder()
-                                          .addValues(Buffer.newBuilder()
+                          Column.newBuilder()
+                              .setArray(
+                                  Array.newBuilder()
+                                      .addValues(
+                                          Buffer.newBuilder()
                                               .setBody(
                                                   ByteString.copyFrom(
                                                       ByteBuffer.allocate(2)
                                                           .put(Byte.parseByte(i % 2 + "", 2))
                                                           .array())))
-                                          .setArrayType(ArrayType.BOOL)
-                                          .build())
-                                  .build()))
+                                      .setArrayType(ArrayType.BOOL)
+                                      .build())
+                              .build())
                       .setCardinality(1))
               .build();
       taskDataList.add(data);

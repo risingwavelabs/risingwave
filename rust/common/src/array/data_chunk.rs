@@ -4,7 +4,7 @@ use std::hash::BuildHasher;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_pb::data::{Column as ProstColumn, DataChunk as ProstDataChunk};
+use risingwave_pb::data::DataChunk as ProstDataChunk;
 
 use crate::array::column::Column;
 use crate::array::data_chunk_iter::{DataChunkRefIter, RowRef};
@@ -13,7 +13,6 @@ use crate::buffer::Bitmap;
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 use crate::util::hash_util::finalize_hashers;
-use crate::util::prost::unpack_from_any;
 
 pub struct DataChunkBuilder {
     columns: Vec<Column>,
@@ -205,9 +204,8 @@ impl DataChunk {
     pub fn from_protobuf(proto: &ProstDataChunk) -> Result<Self> {
         let mut columns = vec![];
         for any_col in proto.get_columns() {
-            let col = unpack_from_any::<ProstColumn>(any_col).unwrap();
             let cardinality = proto.get_cardinality() as usize;
-            columns.push(Column::from_protobuf(&col, cardinality)?);
+            columns.push(Column::from_protobuf(any_col, cardinality)?);
         }
 
         let chunk = DataChunk::new(columns, None);
