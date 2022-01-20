@@ -111,7 +111,7 @@ impl StreamFragmenter {
     async fn gen_actor_id(&self, interval: i32) -> Result<u32> {
         Ok(self
             .id_gen_manager_ref
-            .generate_interval(IdCategory::Actor, interval)
+            .generate_interval::<{ IdCategory::Actor }>(interval)
             .await? as u32)
     }
 

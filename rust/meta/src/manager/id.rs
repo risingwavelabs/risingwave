@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 
@@ -99,17 +98,23 @@ impl IdGenerator for StoredIdGenerator {
     }
 }
 
-#[derive(PartialEq, Eq, Hash)]
-pub enum IdCategory {
-    Default = 0,
-    Database = 1,
-    Schema = 2,
-    Table = 3,
-    Actor = 4,
-    HummockContext = 5,
-    HummockSnapshot = 6,
-    Worker = 7,
-    HummockSSTableId = 8,
+type IdCategoryType = u8;
+
+// TODO: Use enum to replace this once [feature(adt_const_params)](https://github.com/rust-lang/rust/issues/44580) get completed.
+#[allow(non_snake_case, non_upper_case_globals)]
+pub mod IdCategory {
+    use super::IdCategoryType;
+
+    #[cfg(test)]
+    pub const Test: IdCategoryType = 0;
+    pub const Database: IdCategoryType = 1;
+    pub const Schema: IdCategoryType = 2;
+    pub const Table: IdCategoryType = 3;
+    pub const Worker: IdCategoryType = 4;
+    pub const Actor: IdCategoryType = 5;
+    pub const HummockContext: IdCategoryType = 6;
+    pub const HummockSnapshot: IdCategoryType = 7;
+    pub const HummockSSTableId: IdCategoryType = 8;
 }
 
 pub type IdGeneratorManagerRef = Arc<IdGeneratorManager>;
@@ -117,47 +122,74 @@ pub type IdGeneratorManagerRef = Arc<IdGeneratorManager>;
 /// [`IdGeneratorManager`] manages id generators in all categories,
 /// which defined as [`IdCategory`] in [`meta.proto`].
 pub struct IdGeneratorManager {
-    inner: HashMap<IdCategory, IdGeneratorRef>,
+    #[cfg(test)]
+    test: StoredIdGenerator,
+    database: StoredIdGenerator,
+    schema: StoredIdGenerator,
+    table: StoredIdGenerator,
+    worker: StoredIdGenerator,
+    actor: StoredIdGenerator,
+    hummock_context: StoredIdGenerator,
+    hummock_snapshot: StoredIdGenerator,
+    hummock_ss_table_id: StoredIdGenerator,
 }
 
 impl IdGeneratorManager {
     pub async fn new(meta_store_ref: MetaStoreRef) -> Self {
-        let mut inner = HashMap::new();
-        for (category, name, start) in [
-            (IdCategory::Default, "default", None),
-            (IdCategory::Database, "database", None),
-            (IdCategory::Schema, "schema", None),
-            (IdCategory::Table, "table", None),
-            (IdCategory::Worker, "worker", None),
-            (IdCategory::Actor, "actor", Some(1)),
-            (IdCategory::HummockContext, "hummock_context", Some(1)),
-            (IdCategory::HummockSnapshot, "hummock_snapshot", Some(1)),
-            (IdCategory::HummockSSTableId, "hummock_sstable", Some(1)),
-        ] {
-            inner.insert(
-                category,
-                Box::new(StoredIdGenerator::new(meta_store_ref.clone(), name, start).await)
-                    as IdGeneratorRef,
-            );
+        Self {
+            #[cfg(test)]
+            test: StoredIdGenerator::new(meta_store_ref.clone(), "test", None).await,
+            database: StoredIdGenerator::new(meta_store_ref.clone(), "database", None).await,
+            schema: StoredIdGenerator::new(meta_store_ref.clone(), "schema", None).await,
+            table: StoredIdGenerator::new(meta_store_ref.clone(), "table", None).await,
+            worker: StoredIdGenerator::new(meta_store_ref.clone(), "worker", None).await,
+            actor: StoredIdGenerator::new(meta_store_ref.clone(), "actor", Some(1)).await,
+            hummock_context: StoredIdGenerator::new(
+                meta_store_ref.clone(),
+                "hummock_context",
+                Some(1),
+            )
+            .await,
+            hummock_snapshot: StoredIdGenerator::new(
+                meta_store_ref.clone(),
+                "hummock_snapshot",
+                Some(1),
+            )
+            .await,
+            hummock_ss_table_id: StoredIdGenerator::new(
+                meta_store_ref.clone(),
+                "hummock_ss_table_id",
+                Some(1),
+            )
+            .await,
         }
+    }
 
-        // Return the manager.
-        IdGeneratorManager { inner }
+    const fn get<const C: IdCategoryType>(&self) -> &StoredIdGenerator {
+        match C {
+            #[cfg(test)]
+            IdCategory::Test => &self.test,
+            IdCategory::Database => &self.database,
+            IdCategory::Schema => &self.schema,
+            IdCategory::Table => &self.table,
+            IdCategory::Actor => &self.actor,
+            IdCategory::HummockContext => &self.hummock_context,
+            IdCategory::HummockSnapshot => &self.hummock_snapshot,
+            IdCategory::Worker => &self.worker,
+            IdCategory::HummockSSTableId => &self.hummock_ss_table_id,
+            _ => unreachable!(),
+        }
     }
 
     /// [`generate`] function generates id as `current_id`.
-    pub async fn generate(&self, category: IdCategory) -> Result<Id> {
-        self.inner.get(&category).unwrap().generate().await
+    pub async fn generate<const C: IdCategoryType>(&self) -> Result<Id> {
+        self.get::<C>().generate().await
     }
 
     /// [`generate_interval`] function generates ids as [`current_id`, `current_id` + interval), the
     /// next id will be `current_id` + interval.
-    pub async fn generate_interval(&self, category: IdCategory, interval: i32) -> Result<Id> {
-        self.inner
-            .get(&category)
-            .unwrap()
-            .generate_interval(interval)
-            .await
+    pub async fn generate_interval<const C: IdCategoryType>(&self, interval: i32) -> Result<Id> {
+        self.get::<C>().generate_interval(interval).await
     }
 }
 
@@ -239,7 +271,7 @@ mod tests {
         let manager = IdGeneratorManager::new(meta_store_ref.clone()).await;
         let ids = future::join_all((0..10000).map(|_i| {
             let manager = &manager;
-            async move { manager.generate(IdCategory::Default).await }
+            async move { manager.generate::<{ IdCategory::Test }>().await }
         }))
         .await
         .into_iter()
@@ -248,7 +280,7 @@ mod tests {
 
         let ids = future::join_all((0..10000).map(|_i| {
             let manager = &manager;
-            async move { manager.generate(IdCategory::Table).await }
+            async move { manager.generate::<{ IdCategory::Table }>().await }
         }))
         .await
         .into_iter()
@@ -257,7 +289,11 @@ mod tests {
 
         let ids = future::join_all((0..100).map(|_i| {
             let manager = &manager;
-            async move { manager.generate_interval(IdCategory::Actor, 9999).await }
+            async move {
+                manager
+                    .generate_interval::<{ IdCategory::Actor }>(9999)
+                    .await
+            }
         }))
         .await
         .into_iter()
@@ -266,7 +302,9 @@ mod tests {
         assert_eq!(ids, vec_expect);
 
         let manager = IdGeneratorManager::new(meta_store_ref).await;
-        let id = manager.generate_interval(IdCategory::Actor, 10).await?;
+        let id = manager
+            .generate_interval::<{ IdCategory::Actor }>(10)
+            .await?;
         assert_eq!(id, 1000001);
 
         Ok(())

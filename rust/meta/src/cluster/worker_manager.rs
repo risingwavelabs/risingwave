@@ -51,7 +51,10 @@ impl WorkerNodeMetaManager for StoredClusterManager {
             // reboot is quite normal for workers.
             Some(idx) => Ok((cluster.nodes.get(idx).unwrap().clone(), false)),
             None => {
-                let next_id = self.id_gen_manager_ref.generate(IdCategory::Worker).await?;
+                let next_id = self
+                    .id_gen_manager_ref
+                    .generate::<{ IdCategory::Worker }>()
+                    .await?;
                 let ret_node = WorkerNode {
                     id: next_id as u32,
                     host: Some(host_address.clone()),

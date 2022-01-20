@@ -56,7 +56,7 @@ impl CatalogService for CatalogServiceImpl {
             CatalogBody::Database(database) => {
                 id = self
                     .id_gen_manager
-                    .generate(IdCategory::Database)
+                    .generate::<{ IdCategory::Database }>()
                     .await
                     .map_err(|e| e.to_grpc_status())?;
                 let mut database = database.clone();
@@ -66,7 +66,7 @@ impl CatalogService for CatalogServiceImpl {
             CatalogBody::Schema(schema) => {
                 id = self
                     .id_gen_manager
-                    .generate(IdCategory::Schema)
+                    .generate::<{ IdCategory::Schema }>()
                     .await
                     .map_err(|e| e.to_grpc_status())?;
                 let mut schema_ref_id = schema.get_schema_ref_id().map_err(tonic_err)?.clone();
@@ -78,7 +78,7 @@ impl CatalogService for CatalogServiceImpl {
             CatalogBody::Table(table) => {
                 id = self
                     .id_gen_manager
-                    .generate(IdCategory::Table)
+                    .generate::<{ IdCategory::Table }>()
                     .await
                     .map_err(|e| e.to_grpc_status())?;
                 let mut table_ref_id = table.get_table_ref_id().map_err(tonic_err)?.clone();

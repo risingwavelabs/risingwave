@@ -649,7 +649,7 @@ impl HummockManager for DefaultHummockManager {
         let context_id = self
             .env
             .id_gen_manager_ref()
-            .generate(IdCategory::HummockContext)
+            .generate::<{ IdCategory::HummockContext }>()
             .await?;
         let new_context = HummockContext {
             identifier: context_id,
@@ -1111,7 +1111,7 @@ impl HummockManager for DefaultHummockManager {
         // TODO id_gen_manager generates u32, we need u64
         self.env
             .id_gen_manager_ref()
-            .generate(IdCategory::HummockSSTableId)
+            .generate::<{ IdCategory::HummockSSTableId }>()
             .await
             .map(|id| id as HummockSSTableId)
     }

@@ -43,7 +43,7 @@ impl StreamFragment {
     }
 }
 
-/// [`StreamFragmentGraph`] stores a fragment graph with a root fragment(id: [`fragment_id`]).
+/// [`StreamFragmentGraph`] stores a fragment graph with a root fragment(id: `fragment_id`).
 pub struct StreamFragmentGraph {
     /// represent the root fragment of the graph.
     fragment_id: u32,
