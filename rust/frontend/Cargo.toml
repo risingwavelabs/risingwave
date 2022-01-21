@@ -19,6 +19,7 @@ paste = "1"
 risingwave-pb = { path = "../prost" }
 risingwave_common = { path = "../common" }
 risingwave_meta = { path = "../meta" }
+risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_sqlparser = { path = "../sqlparser" }
 smallvec = { version = "1.6.1", features = ["serde"] }
 thiserror = "1"

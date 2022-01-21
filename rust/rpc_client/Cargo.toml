@@ -1,0 +1,9 @@
+[package]
+name = "risingwave_rpc_client"
+version = "0.1.1"
+edition = "2021"
+
+[dependencies]
+risingwave-pb = { path = "../prost" }
+risingwave_common = { path = "../common" }
+tonic = "0.6"

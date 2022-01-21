@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use risingwave_common::array::RwError;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_meta::rpc::meta_client::MetaClient;
+use risingwave_rpc_client::MetaClient;
 use risingwave_sqlparser::parser::Parser;
 
 use crate::catalog::catalog_service::{

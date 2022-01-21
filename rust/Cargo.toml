@@ -9,6 +9,7 @@ members = [
   "prost",
   "prost/helpers",
   "riselab",
+  "rpc_client",
   "server",
   "source",
   "sqlparser",

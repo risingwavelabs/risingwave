@@ -3,10 +3,10 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use risingwave_common::array::RwError;
 use risingwave_common::error::{Result, ToRwResult};
-use risingwave_meta::rpc::meta_client::MetaClient;
 use risingwave_pb::meta::drop_request::CatalogId;
 use risingwave_pb::meta::{Database, DropRequest, Schema, Table};
 use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
+use risingwave_rpc_client::MetaClient;
 
 use crate::catalog::database_catalog::DatabaseCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
@@ -447,9 +447,9 @@ mod tests {
             .is_none());
     }
 
-    use risingwave_meta::rpc::meta_client::MetaClient;
     use risingwave_meta::rpc::server::{rpc_serve, MetaStoreBackend};
     use risingwave_pb::meta::{GetCatalogRequest, Table};
+    use risingwave_rpc_client::MetaClient;
 
     #[tokio::test]
     async fn test_create_and_drop_table_remote() {

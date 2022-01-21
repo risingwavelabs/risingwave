@@ -40,6 +40,7 @@ risingwave-pb = { path = "../prost" }
 risingwave_batch = { path = "../batch" }
 risingwave_common = { path = "../common" }
 risingwave_meta = { path = "../meta" }
+risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_source = { path = "../source" }
 risingwave_storage = { path = "../storage" }
 risingwave_stream = { path = "../stream" }
