@@ -16,8 +16,6 @@
 
 #[macro_use]
 mod test_utils;
-#[cfg(feature = "bigdecimal")]
-use bigdecimal::BigDecimal;
 use risingwave_sqlparser::ast::Expr::{Identifier, MapAccess};
 use risingwave_sqlparser::ast::*;
 use risingwave_sqlparser::parser::ParserError;
@@ -699,10 +697,7 @@ fn parse_pg_regex_match_ops() {
 
 #[test]
 fn parse_map_access_expr() {
-    #[cfg(not(feature = "bigdecimal"))]
     let zero = "0".to_string();
-    #[cfg(feature = "bigdecimal")]
-    let zero = BigDecimal::parse_bytes(b"0", 10).unwrap();
     let sql = "SELECT foo[0] FROM foos";
     let select = verified_only_select(sql);
     assert_eq!(

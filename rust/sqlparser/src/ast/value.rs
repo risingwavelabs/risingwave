@@ -14,8 +14,6 @@
 use alloc::string::String;
 use core::fmt;
 
-#[cfg(feature = "bigdecimal")]
-use bigdecimal::BigDecimal;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -24,10 +22,7 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Value {
     /// Numeric literal
-    #[cfg(not(feature = "bigdecimal"))]
     Number(String, bool),
-    #[cfg(feature = "bigdecimal")]
-    Number(BigDecimal, bool),
     /// 'string value'
     SingleQuotedString(String),
     /// N'string value'

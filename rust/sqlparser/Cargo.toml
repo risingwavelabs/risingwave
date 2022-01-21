@@ -18,7 +18,6 @@ std = []
 json_example = ["serde_json", "serde"]
 
 [dependencies]
-bigdecimal = { version = "0.3", features = ["serde"], optional = true }
 itertools = "0.10"
 log = "0.4"
 risingwave_common = { path = "../common" }

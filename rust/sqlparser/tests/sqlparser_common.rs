@@ -509,13 +509,6 @@ fn parse_escaped_single_quote_string_predicate() {
 fn parse_number() {
     let expr = verified_expr("1.0");
 
-    #[cfg(feature = "bigdecimal")]
-    assert_eq!(
-        expr,
-        Expr::Value(Value::Number(bigdecimal::BigDecimal::from(1), false))
-    );
-
-    #[cfg(not(feature = "bigdecimal"))]
     assert_eq!(expr, Expr::Value(Value::Number("1.0".into(), false)));
 }
 
