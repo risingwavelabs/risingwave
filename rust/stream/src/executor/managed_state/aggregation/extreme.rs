@@ -174,7 +174,7 @@ where
         // If the top n cache becomes empty after applying the batch, we will merge data from
         // flush_buffer and state store when getting the output.
 
-        for (id, (op, key)) in ops.iter().zip(data_column.iter()).enumerate() {
+        for (id, (op, key)) in ops.iter().zip_eq(data_column.iter()).enumerate() {
             let visible = visibility.map(|x| x.is_set(id).unwrap()).unwrap_or(true);
             if !visible {
                 continue;

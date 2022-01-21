@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
+use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
@@ -108,7 +109,7 @@ pub async fn diff_executor_output(mut actual: BoxedExecutor, mut expect: BoxedEx
     expect
         .columns()
         .iter()
-        .zip(actual.columns().iter())
+        .zip_eq(actual.columns().iter())
         .for_each(|(c1, c2)| assert_eq!(c1.array().to_protobuf(), c2.array().to_protobuf()));
 
     is_data_chunk_eq(&expect, &actual)
@@ -125,6 +126,6 @@ fn is_data_chunk_eq(left: &DataChunk, right: &DataChunk) {
     );
 
     left.rows()
-        .zip(right.rows())
+        .zip_eq(right.rows())
         .for_each(|(row1, row2)| assert_eq!(row1, row2));
 }

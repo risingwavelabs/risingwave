@@ -206,7 +206,7 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
             states.may_mark_as_dirty().await?;
 
             // 3. Apply batch to each of the state (per agg_call)
-            for (agg_state, data) in states.managed_states.iter_mut().zip(all_agg_data.iter()) {
+            for (agg_state, data) in states.managed_states.iter_mut().zip_eq(all_agg_data.iter()) {
                 agg_state.apply_batch(&ops, Some(&vis_map), data).await?;
             }
         }
@@ -412,7 +412,7 @@ mod tests {
             let (data_chunk, ops) = chunk.into_parts();
             let rows = ops
                 .into_iter()
-                .zip(data_chunk.rows().map(Row::from))
+                .zip_eq(data_chunk.rows().map(Row::from))
                 .sorted()
                 .collect_vec();
             let expected_rows = [
@@ -497,7 +497,7 @@ mod tests {
             let (data_chunk, ops) = chunk.into_parts();
             let rows = ops
                 .into_iter()
-                .zip(data_chunk.rows().map(Row::from))
+                .zip_eq(data_chunk.rows().map(Row::from))
                 .sorted()
                 .collect_vec();
 
@@ -520,7 +520,7 @@ mod tests {
             let (data_chunk, ops) = chunk.into_parts();
             let rows = ops
                 .into_iter()
-                .zip(data_chunk.rows().map(Row::from))
+                .zip_eq(data_chunk.rows().map(Row::from))
                 .sorted()
                 .collect_vec();
 
@@ -602,7 +602,7 @@ mod tests {
             let (data_chunk, ops) = chunk.into_parts();
             let rows = ops
                 .into_iter()
-                .zip(data_chunk.rows().map(Row::from))
+                .zip_eq(data_chunk.rows().map(Row::from))
                 .sorted()
                 .collect_vec();
 
@@ -627,7 +627,7 @@ mod tests {
             let (data_chunk, ops) = chunk.into_parts();
             let rows = ops
                 .into_iter()
-                .zip(data_chunk.rows().map(Row::from))
+                .zip_eq(data_chunk.rows().map(Row::from))
                 .sorted()
                 .collect_vec();
             let expected_rows = [

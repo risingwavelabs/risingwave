@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use itertools::Itertools;
 use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
@@ -114,7 +115,6 @@ impl<S: StateStore> ManagedStringAggState<S> {
         if self.total_count == 0 {
             return;
         }
-        use itertools::Itertools;
         let res = self
             .cache
             .values()
@@ -154,7 +154,7 @@ impl<S: StateStore> ManagedExtremeState<S> for ManagedStringAggState<S> {
         self.sorted_arrays_serializer
             .order_based_scehmaed_serialize(data, &mut row_keys);
 
-        for (row_idx, (op, key_bytes)) in ops.iter().zip(row_keys.into_iter()).enumerate() {
+        for (row_idx, (op, key_bytes)) in ops.iter().zip_eq(row_keys.into_iter()).enumerate() {
             let visible = visibility
                 .map(|x| x.is_set(row_idx).unwrap())
                 .unwrap_or(true);
@@ -265,7 +265,7 @@ mod tests {
         let order_pairs = orderings
             .clone()
             .into_iter()
-            .zip(sort_key_indices.clone().into_iter())
+            .zip_eq(sort_key_indices.clone().into_iter())
             .collect::<Vec<_>>();
         let sort_key_serializer = OrderedArraysSerializer::new(order_pairs);
         let managed_state = ManagedStringAggState::new(

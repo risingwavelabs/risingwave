@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
 use risingwave_common::error::Result;
@@ -20,7 +21,7 @@ pub(crate) trait SourceChunkBuilder {
 
         for row in rows {
             row.iter()
-                .zip(&mut builders)
+                .zip_eq(&mut builders)
                 .try_for_each(|(datum, builder)| builder.append_datum(datum))?
         }
 

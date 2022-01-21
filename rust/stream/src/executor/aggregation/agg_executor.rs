@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilderImpl, ArrayImpl, Op, Row, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
@@ -112,7 +113,7 @@ impl<S: StateStore> AggState<S> {
 
                 for (builder, state) in builders[agg_call_offset..]
                     .iter_mut()
-                    .zip(self.managed_states.iter_mut())
+                    .zip_eq(self.managed_states.iter_mut())
                 {
                     let data = state.get_output().await?;
                     trace!("append_datum (0 -> N): {:?}", &data);
@@ -132,7 +133,7 @@ impl<S: StateStore> AggState<S> {
 
                 for (builder, state) in builders[agg_call_offset..]
                     .iter_mut()
-                    .zip(self.prev_states.as_ref().unwrap().iter())
+                    .zip_eq(self.prev_states.as_ref().unwrap().iter())
                 {
                     trace!("append_datum (N -> 0): {:?}", &state);
                     builder.append_datum(state)?;

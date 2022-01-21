@@ -97,7 +97,7 @@ pub trait ScannableTable: Sync + Send + Any + core::fmt::Debug {
             .collect::<Result<Vec<_>>>()?;
 
         while let Some(row) = iter.next().await? {
-            for (&index, builder) in indices.iter().zip(builders.iter_mut()) {
+            for (&index, builder) in indices.iter().zip_eq(builders.iter_mut()) {
                 builder.append_datum(&row.0[index])?;
             }
         }

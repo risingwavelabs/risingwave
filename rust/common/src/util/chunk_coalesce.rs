@@ -1,6 +1,8 @@
 use std::mem::swap;
 use std::sync::Arc;
 
+use itertools::Itertools;
+
 use crate::array::column::Column;
 use crate::array::{ArrayBuilderImpl, ArrayImpl, DataChunk, RowRef};
 use crate::error::Result;
@@ -123,7 +125,7 @@ impl DataChunkBuilder {
         ensure!(self.buffered_count < self.batch_size);
         self.ensure_builders()?;
 
-        for (array_builder, column_opt) in self.array_builders.iter_mut().zip(row) {
+        for (array_builder, column_opt) in self.array_builders.iter_mut().zip_eq(row) {
             match column_opt {
                 Some((array, row)) => array_builder.append_array_element(array, row)?,
                 None => array_builder.append_null()?,
@@ -157,7 +159,7 @@ impl DataChunkBuilder {
     fn append_one_row_ref_impl(&mut self, row_ref: RowRef<'_>) -> Result<()> {
         self.array_builders
             .iter_mut()
-            .zip(row_ref.0)
+            .zip_eq(row_ref.0)
             .try_for_each(|(array_builder, scalar)| array_builder.append_datum_ref(scalar))?;
         self.buffered_count += 1;
         Ok(())

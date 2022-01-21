@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use itertools::Itertools;
 use log::debug;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::common::{ActorInfo, WorkerNode};
@@ -138,7 +139,7 @@ impl StreamManager for DefaultStreamManager {
         sorted_actor_ids.extend(source_actor_ids.iter().cloned());
 
         let mut node_actors_map = HashMap::new();
-        for (node, actor) in nodes.iter().zip(sorted_actor_ids) {
+        for (node, actor) in nodes.iter().zip_eq(sorted_actor_ids) {
             node_actors_map
                 .entry(node.get_id())
                 .or_insert_with(Vec::new)
@@ -157,7 +158,7 @@ impl StreamManager for DefaultStreamManager {
 
         let actor_info = nodes
             .iter()
-            .zip(actor_ids.clone())
+            .zip_eq(actor_ids.clone())
             .map(|(n, f)| ActorInfo {
                 actor_id: f,
                 host: n.host.clone(),

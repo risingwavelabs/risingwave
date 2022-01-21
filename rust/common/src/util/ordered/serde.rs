@@ -123,6 +123,8 @@ pub fn serialize_cell(cell: &Datum) -> Result<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
+
     use super::*;
     use crate::array::{I16Array, Utf8Array};
     use crate::array_nonnull;
@@ -206,7 +208,7 @@ mod tests {
         let order_pairs = order_types
             .clone()
             .into_iter()
-            .zip(pk_indices.into_iter())
+            .zip_eq(pk_indices.into_iter())
             .collect::<Vec<_>>();
         let serializer = OrderedRowsSerializer::new(order_pairs);
         let schema = vec![DataTypeKind::Varchar, DataTypeKind::Int16];

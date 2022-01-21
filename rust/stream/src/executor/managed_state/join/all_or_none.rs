@@ -176,7 +176,11 @@ mod tests {
             managed_state.insert(row);
         }
 
-        for state in managed_state.iter().await.zip(col1.iter().zip(col2.iter())) {
+        for state in managed_state
+            .iter()
+            .await
+            .zip_eq(col1.iter().zip_eq(col2.iter()))
+        {
             let ((key, value), (d1, d2)) = state;
             assert_eq!(key.0[0], Some(ScalarImpl::Int64(*d1)));
             assert_eq!(value.0[0], Some(ScalarImpl::Int64(*d1)));

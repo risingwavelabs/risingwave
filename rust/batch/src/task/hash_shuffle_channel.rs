@@ -150,6 +150,7 @@ pub fn new_hash_shuffle_channel(shuffle: &ExchangeInfo) -> (BoxChanSender, Vec<B
 mod tests {
     use std::hash::BuildHasher;
 
+    use itertools::Itertools;
     use rand::Rng;
     use risingwave_common::util::hash_util::CRC32FastBuilder;
     use risingwave_pb::plan::exchange_info::hash_info::HashMethod;
@@ -215,7 +216,7 @@ mod tests {
                 })
                 .collect::<Vec<u32>>();
             let mut each_sink_output_columns = vec![vec![vec![]; num_columns]; num_sinks as usize];
-            hashes.iter().zip(rows.iter()).for_each(|(hash, row)| {
+            hashes.iter().zip_eq(rows.iter()).for_each(|(hash, row)| {
                 let output_columns = &mut each_sink_output_columns[*hash as usize];
                 for (col_idx, num) in row.iter().enumerate() {
                     output_columns[col_idx].push(*num);

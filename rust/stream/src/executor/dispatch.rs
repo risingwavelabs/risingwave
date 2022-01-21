@@ -4,6 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::channel::mpsc::{channel, Sender};
 use futures::SinkExt;
+use itertools::Itertools;
 use risingwave_common::array::{Op, RwError};
 use risingwave_common::error::ErrorCode;
 use risingwave_common::util::addr::{is_local_address, to_socket_addr};
@@ -352,7 +353,7 @@ impl DataDispatcher for HashDataDispatcher {
         let mut new_ops: Vec<Op> = Vec::with_capacity(ops.len());
         match visibility {
             None => {
-                hash_values.iter().zip(ops).for_each(|(hash, op)| {
+                hash_values.iter().zip_eq(ops).for_each(|(hash, op)| {
                     // get visibility map for every output chunk
                     for (output_idx, vis_map) in vis_maps.iter_mut().enumerate() {
                         vis_map.push(*hash == output_idx);
@@ -376,8 +377,11 @@ impl DataDispatcher for HashDataDispatcher {
                 });
             }
             Some(visibility) => {
-                hash_values.iter().zip(visibility.iter()).zip(ops).for_each(
-                    |((hash, visible), op)| {
+                hash_values
+                    .iter()
+                    .zip_eq(visibility.iter())
+                    .zip_eq(ops)
+                    .for_each(|((hash, visible), op)| {
                         for (output_idx, vis_map) in vis_maps.iter_mut().enumerate() {
                             vis_map.push(visible && *hash == output_idx);
                         }
@@ -398,8 +402,7 @@ impl DataDispatcher for HashDataDispatcher {
                         } else {
                             new_ops.push(op);
                         }
-                    },
-                );
+                    });
             }
         }
 
@@ -408,8 +411,8 @@ impl DataDispatcher for HashDataDispatcher {
         // individually output StreamChunk integrated with vis_map
         for ((vis_map, output), downstream) in vis_maps
             .into_iter()
-            .zip(self.outputs.iter_mut())
-            .zip(self.fragment_ids.iter())
+            .zip_eq(self.outputs.iter_mut())
+            .zip_eq(self.fragment_ids.iter())
         {
             let vis_map = vis_map.try_into().unwrap();
             // columns is not changed in this function
@@ -840,12 +843,12 @@ mod tests {
                 hasher.update(&bytes);
             }
             let output_idx = hasher.finish() as usize % num_outputs;
-            for (builder, val) in builders.iter_mut().zip(one_row.iter()) {
+            for (builder, val) in builders.iter_mut().zip_eq(one_row.iter()) {
                 builder.append(Some(*val)).unwrap();
             }
             output_cols[output_idx]
                 .iter_mut()
-                .zip(one_row.iter())
+                .zip_eq(one_row.iter())
                 .for_each(|(each_column, val)| each_column.push(*val));
             output_ops[output_idx].push(op);
         }
@@ -876,7 +879,7 @@ mod tests {
                 real_chunk
                     .columns()
                     .iter()
-                    .zip(output_cols[output_idx].iter())
+                    .zip_eq(output_cols[output_idx].iter())
                     .for_each(|(real_col, expect_col)| {
                         let real_vals = real_chunk
                             .visibility()

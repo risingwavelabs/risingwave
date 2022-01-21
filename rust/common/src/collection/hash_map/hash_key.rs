@@ -3,6 +3,8 @@ use std::default::Default;
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::io::{Cursor, Read};
 
+use itertools::Itertools;
+
 use crate::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk};
 use crate::error::Result;
 use crate::types::{Datum, Decimal, IntervalUnit, OrderedF32, OrderedF64, ScalarRef};
@@ -421,7 +423,7 @@ where
     A::RefItem<'a>: HashKeySerDe<'a>,
     S: HashKeySerializer,
 {
-    for (item, serializer) in array.iter().zip(serializers.iter_mut()) {
+    for (item, serializer) in array.iter().zip_eq(serializers.iter_mut()) {
         serializer.append(item)?;
     }
     Ok(())

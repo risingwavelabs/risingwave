@@ -1,5 +1,6 @@
 //! This module implements `StreamingRowCountAgg`.
 
+use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
@@ -70,7 +71,7 @@ impl StreamingAggStateImpl for StreamingRowCountAgg {
                 }
             }
             Some(visibility) => {
-                for (op, visible) in ops.iter().zip(visibility.iter()) {
+                for (op, visible) in ops.iter().zip_eq(visibility.iter()) {
                     if visible {
                         match op {
                             Op::Insert | Op::UpdateInsert => self.row_cnt += 1,

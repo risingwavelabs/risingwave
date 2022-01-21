@@ -2,6 +2,7 @@ use std::fmt;
 use std::hash::BuildHasher;
 use std::sync::Arc;
 
+use itertools::Itertools;
 use prost::DecodeError;
 use risingwave_pb::data::{Op as ProstOp, StreamChunk as ProstStreamChunk};
 
@@ -119,7 +120,7 @@ impl StreamChunk {
                     })
                     .collect::<Result<Vec<_>>>()?;
                 let mut ops = Vec::with_capacity(cardinality);
-                for (op, visible) in self.ops.into_iter().zip(visibility.iter()) {
+                for (op, visible) in self.ops.into_iter().zip_eq(visibility.iter()) {
                     if visible {
                         ops.push(op);
                     }

@@ -383,6 +383,7 @@ mod tests {
     use std::sync::Arc;
 
     use either::Either;
+    use itertools::Itertools;
     use risingwave_common::array;
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{ArrayBuilderImpl, DataChunk, F32Array, F64Array, I32Array};
@@ -444,7 +445,7 @@ mod tests {
         }
 
         left.rows()
-            .zip(right.rows())
+            .zip_eq(right.rows())
             .all(|(row1, row2)| row1 == row2)
     }
 

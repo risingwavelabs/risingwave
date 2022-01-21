@@ -165,7 +165,7 @@ mod tests {
             })
             .collect_vec();
         let array = helper_test_builder(v.clone());
-        let res = v.iter().zip(array.iter()).all(|(a, b)| *a == b);
+        let res = v.iter().zip_eq(array.iter()).all(|(a, b)| *a == b);
         assert!(res);
     }
 
@@ -205,7 +205,7 @@ mod tests {
         let hasher_builder = RandomXxHashBuilder64::default();
         let mut states = vec![hasher_builder.build_hasher(); ARR_LEN];
         vecs.iter().for_each(|v| {
-            v.iter().zip(&mut states).for_each(|(x, state)| match x {
+            v.iter().zip_eq(&mut states).for_each(|(x, state)| match x {
                 Some(inner) => inner.hash(state),
                 None => NULL_VAL_FOR_HASH.hash(state),
             })

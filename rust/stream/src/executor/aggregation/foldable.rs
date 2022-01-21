@@ -2,6 +2,7 @@
 
 use std::marker::PhantomData;
 
+use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
@@ -214,7 +215,7 @@ where
     ) -> Result<()> {
         match visibility {
             None => {
-                for (op, data) in ops.iter().zip(data.iter()) {
+                for (op, data) in ops.iter().zip_eq(data.iter()) {
                     match op {
                         Op::Insert | Op::UpdateInsert => {
                             self.result = S::accumulate(self.result.as_ref(), data)?
@@ -226,7 +227,9 @@ where
                 }
             }
             Some(visibility) => {
-                for ((visible, op), data) in visibility.iter().zip(ops.iter()).zip(data.iter()) {
+                for ((visible, op), data) in
+                    visibility.iter().zip_eq(ops.iter()).zip_eq(data.iter())
+                {
                     if visible {
                         match op {
                             Op::Insert | Op::UpdateInsert => {

@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
+use itertools::Itertools;
 use risingwave_common::array::{Row, RowDeserializer};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
@@ -46,7 +47,7 @@ impl<S: StateStore> MViewTable<S> {
     ) -> Self {
         let order_pairs = orderings
             .into_iter()
-            .zip(pk_columns.clone().into_iter())
+            .zip_eq(pk_columns.clone().into_iter())
             .collect::<Vec<_>>();
 
         Self {

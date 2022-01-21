@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::expr::expr_node::Type::InputRef;
@@ -6,7 +7,7 @@ use risingwave_pb::expr::{ExprNode, FunctionCall, InputRefExpr};
 
 pub fn make_expression(kind: Type, rets: &[TypeName], indices: &[i32]) -> ExprNode {
     let mut exprs = Vec::new();
-    for (idx, ret) in indices.iter().zip(rets.iter()) {
+    for (idx, ret) in indices.iter().zip_eq(rets.iter()) {
         exprs.push(make_input_ref(*idx, *ret));
     }
     let function_call = FunctionCall { children: exprs };

@@ -69,7 +69,7 @@ impl BatchQueryExecutor {
         while let Some(row) = iter.next().await.unwrap() {
             builders
                 .iter_mut()
-                .zip(row.0.iter())
+                .zip_eq(row.0.iter())
                 .for_each(|(builder, data)| builder.append_datum(data).unwrap());
             count += 1;
             if count >= self.batch_size {

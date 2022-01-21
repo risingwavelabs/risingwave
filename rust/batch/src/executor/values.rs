@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk, I32Array};
 use risingwave_common::catalog::{Field, Schema};
@@ -59,7 +60,7 @@ impl Executor for ValuesExecutor {
         let chunk_size = 1000;
         let end = std::cmp::min(chunk_size, self.rows.len());
         for row in self.rows.drain(0..end) {
-            for (mut expr, builder) in row.into_iter().zip(&mut array_builders) {
+            for (mut expr, builder) in row.into_iter().zip_eq(&mut array_builders) {
                 let out = expr.eval(&one_row_chunk)?;
                 builder.append_array(&out)?;
             }

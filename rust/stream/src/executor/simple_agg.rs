@@ -127,7 +127,7 @@ impl<S: StateStore> AggExecutor for SimpleAggExecutor<S> {
         states.may_mark_as_dirty().await?;
 
         // 3. Apply batch to each of the state (per agg_call)
-        for (agg_state, data) in states.managed_states.iter_mut().zip(all_agg_data.iter()) {
+        for (agg_state, data) in states.managed_states.iter_mut().zip_eq(all_agg_data.iter()) {
             agg_state
                 .apply_batch(&ops, visibility.as_ref(), data)
                 .await?;
@@ -283,7 +283,7 @@ mod tests {
             let (data_chunk, ops) = chunk.into_parts();
             let rows = ops
                 .into_iter()
-                .zip(data_chunk.rows().map(Row::from))
+                .zip_eq(data_chunk.rows().map(Row::from))
                 .collect_vec();
             let expected_rows = [(Op::Insert, row_nonnull![3_i64, 114_i64, 514_i64, 4_i64])];
 
@@ -299,7 +299,7 @@ mod tests {
             let (data_chunk, ops) = chunk.into_parts();
             let rows = ops
                 .into_iter()
-                .zip(data_chunk.rows().map(Row::from))
+                .zip_eq(data_chunk.rows().map(Row::from))
                 .collect_vec();
             let expected_rows = [
                 (
