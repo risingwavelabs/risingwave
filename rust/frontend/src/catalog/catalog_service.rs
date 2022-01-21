@@ -359,7 +359,7 @@ impl RemoteCatalogManager {
 mod tests {
 
     use risingwave_common::types::DataTypeKind;
-    use risingwave_common::util::addr::get_host_port;
+    use risingwave_meta::test_utils::LocalMeta;
     use risingwave_pb::plan::{ColumnDesc, TableRefId};
 
     use crate::catalog::catalog_service::{
@@ -447,24 +447,14 @@ mod tests {
             .is_none());
     }
 
-    use risingwave_meta::rpc::server::{rpc_serve, MetaStoreBackend};
     use risingwave_pb::meta::{GetCatalogRequest, Table};
-    use risingwave_rpc_client::MetaClient;
 
     #[tokio::test]
+    #[serial_test::serial]
     async fn test_create_and_drop_table_remote() {
-        let host = "127.0.0.1:9526";
-        let addr = get_host_port(host).unwrap();
-        // Run a meta node server.
-        let sled_root = tempfile::tempdir().unwrap();
-        let (_join_handle, _shutdown) = rpc_serve(
-            addr,
-            None,
-            None,
-            MetaStoreBackend::Sled(sled_root.path().to_path_buf()),
-        )
-        .await;
-        let mut meta_client = MetaClient::new(&format!("http://{}", addr)).await.unwrap();
+        let meta = LocalMeta::start_in_tempdir().await;
+
+        let mut meta_client = LocalMeta::create_client().await;
         let mut remote_catalog_manager = RemoteCatalogManager::new(meta_client.clone());
         remote_catalog_manager
             .create_database(DEFAULT_DATABASE_NAME)
@@ -562,5 +552,7 @@ mod tests {
                 assert_eq!(catalog.databases.len(), 0);
             })
             .unwrap();
+
+        meta.stop().await;
     }
 }

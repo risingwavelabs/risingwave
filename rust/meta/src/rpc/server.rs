@@ -33,12 +33,13 @@ pub enum MetaStoreBackend {
     Sled(std::path::PathBuf),
 }
 
-pub async fn rpc_serve_with_listener(
-    listener: TcpListener,
+pub async fn rpc_serve(
+    addr: SocketAddr,
     dashboard_addr: Option<SocketAddr>,
     hummock_config: Option<hummock::Config>,
     meta_store_backend: MetaStoreBackend,
 ) -> (JoinHandle<()>, UnboundedSender<()>) {
+    let listener = TcpListener::bind(addr).await.unwrap();
     let config = Arc::new(Config::default());
     let meta_store_ref: MetaStoreRef = match meta_store_backend {
         MetaStoreBackend::Mem => panic!("Use SledMetaStore instead"),
@@ -115,18 +116,6 @@ pub async fn rpc_serve_with_listener(
     });
 
     (join_handle, shutdown_send)
-}
-
-pub async fn rpc_serve(
-    addr: SocketAddr,
-    dashboard_addr: Option<SocketAddr>,
-    hummock_config: Option<hummock::Config>,
-    meta_store_backend: MetaStoreBackend,
-) -> (JoinHandle<()>, UnboundedSender<()>) {
-    let listener = TcpListener::bind(addr).await.unwrap();
-    let (join_handle, shutdown) =
-        rpc_serve_with_listener(listener, dashboard_addr, hummock_config, meta_store_backend).await;
-    (join_handle, shutdown)
 }
 
 #[cfg(test)]

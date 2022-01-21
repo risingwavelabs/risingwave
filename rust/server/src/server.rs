@@ -136,15 +136,16 @@ mod tests {
 
     async fn start_compute_node() -> (JoinHandle<()>, UnboundedSender<()>) {
         let args: [OsString; 0] = []; // No argument.
-        let opts = ComputeNodeOpts::parse_from(args);
+        let mut opts = ComputeNodeOpts::parse_from(args);
+        opts.meta_address = format!("http://{}", LocalMeta::meta_addr());
         let addr = get_host_port(opts.host.as_str()).unwrap();
         compute_node_serve(addr, opts).await
     }
 
     #[tokio::test]
+    #[serial_test::serial]
     async fn test_server_shutdown() {
-        let sled_root = tempfile::tempdir().unwrap();
-        let meta = LocalMeta::start(sled_root).await;
+        let meta = LocalMeta::start_in_tempdir().await;
         let (join, shutdown) = start_compute_node().await;
         shutdown.send(()).unwrap();
         join.await.unwrap();

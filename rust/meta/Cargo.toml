@@ -32,6 +32,7 @@ prost-types = "0.9"
 rdkafka = "0.28.0"
 risingwave-pb = { path = "../prost" }
 risingwave_common = { path = "../common" }
+risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_storage = { path = "../storage" }
 rust_decimal = "1"
 serde = { version = "1", features = ["derive"] }
@@ -53,6 +54,7 @@ uuid = { version = "0.8", features = ["v4"] }
 [dev-dependencies]
 assert_matches = "1"
 rand = "0.8"
+serial_test = "*"
 
 [[bin]]
 name = "meta-node"

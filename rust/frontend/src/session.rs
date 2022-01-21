@@ -1,9 +1,10 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use risingwave_common::array::RwError;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_rpc_client::MetaClient;
 use risingwave_sqlparser::parser::Parser;
+use tokio::sync::Mutex;
 
 use crate::catalog::catalog_service::{
     RemoteCatalogManager, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
@@ -88,6 +89,7 @@ impl Session for RwSession {
 mod tests {
 
     #[tokio::test]
+    #[serial_test::serial]
     async fn test_run_statement() {
         use std::ffi::OsString;
 
@@ -96,17 +98,17 @@ mod tests {
 
         use super::*;
 
-        let sled_root = tempfile::tempdir().unwrap();
-        let meta = LocalMeta::start(sled_root).await;
+        let meta = LocalMeta::start_in_tempdir().await;
         let args: [OsString; 0] = []; // No argument.
-        let opts = FrontendOpts::parse_from(args);
+        let mut opts = FrontendOpts::parse_from(args);
+        opts.meta_addr = format!("http://{}", LocalMeta::meta_addr());
         let mgr = RwSessionManager::new(opts.clone()).await.unwrap();
         // Check default database is created.
         assert!(mgr
             .env
             .catalog_manager
             .lock()
-            .unwrap()
+            .await
             .get_database(DEFAULT_DATABASE_NAME)
             .is_some());
         let session = mgr.connect();
