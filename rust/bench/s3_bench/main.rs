@@ -26,105 +26,6 @@ fn gen_obj(size: ByteSize) -> Vec<u8> {
     buffer
 }
 
-async fn put(cfg: &Config, client: &S3Client, name: String, obj: Vec<u8>) {
-    let req = PutObjectRequest {
-        bucket: cfg.bucket.clone().unwrap(),
-        key: name,
-        body: Some(obj.into()),
-        ..Default::default()
-    };
-    client.put_object(req).await.unwrap();
-}
-
-async fn multi_part_upload(
-    cfg: &Config,
-    client: &S3Client,
-    name: String,
-    obj: Vec<u8>,
-    part_size: ByteSize,
-) {
-    let t_create_multi_part_upload = Instant::now();
-    let req = CreateMultipartUploadRequest {
-        bucket: cfg.bucket.clone().unwrap(),
-        key: name.clone(),
-        ..Default::default()
-    };
-    let rsp = client.create_multipart_upload(req).await.unwrap();
-    let upload_id = rsp.upload_id.unwrap();
-    debug!(
-        "create multi part upload: {:?}",
-        t_create_multi_part_upload.elapsed()
-    );
-
-    let name_clone = name.clone();
-    let upload_id_clone = upload_id.clone();
-    let create_upload_part_req = move |part: Vec<u8>, part_number: i64| UploadPartRequest {
-        bucket: cfg.bucket.clone().unwrap(),
-        key: name_clone.clone(),
-        upload_id: upload_id_clone.clone(),
-        part_number,
-        body: Some(part.into()),
-        ..Default::default()
-    };
-
-    let t_partition = Instant::now();
-    let chunks = obj
-        .chunks(part_size.as_u64() as usize)
-        .into_iter()
-        .map(|chunk| chunk.to_owned())
-        .collect_vec();
-    debug!("partition obj: {:?}", t_partition.elapsed());
-
-    let t_multi_part_upload = Instant::now();
-    let futures = chunks
-        .into_iter()
-        .enumerate()
-        .map(|(i, part)| create_upload_part_req(part, (i + 1) as i64))
-        .map(|req| client.upload_part(req))
-        .collect_vec();
-    let completed_parts = future::try_join_all(futures)
-        .await
-        .unwrap()
-        .into_iter()
-        .enumerate()
-        .map(|(i, rsp)| CompletedPart {
-            e_tag: rsp.e_tag,
-            part_number: Some((i + 1) as i64),
-        })
-        .collect_vec();
-    debug!("multi part upload: {:?}", t_multi_part_upload.elapsed());
-
-    let t_complete_multi_part_upload = Instant::now();
-    let req = CompleteMultipartUploadRequest {
-        bucket: cfg.bucket.clone().unwrap(),
-        key: name.clone(),
-        upload_id: upload_id.clone(),
-        multipart_upload: Some(CompletedMultipartUpload {
-            parts: Some(completed_parts),
-        }),
-        ..Default::default()
-    };
-    client.complete_multipart_upload(req).await.unwrap();
-    debug!(
-        "complete multi part upload: {:?}",
-        t_complete_multi_part_upload.elapsed()
-    );
-}
-
-async fn get(cfg: &Config, client: &S3Client, name: String) {
-    let req = GetObjectRequest {
-        bucket: cfg.bucket.clone().unwrap(),
-        key: name.clone(),
-        ..Default::default()
-    };
-    let body = client.get_object(req).await.unwrap().body.unwrap();
-    let bytes = read_byte_stream(body).await;
-    debug!(
-        "read size: {}",
-        ByteSize::b(bytes as u64).to_string_as(true)
-    )
-}
-
 async fn read_byte_stream(stream: ByteStream) -> usize {
     let mut stream = stream.into_async_read();
     let mut buf = vec![0; READ_BUFFER_SIZE.as_u64() as usize];
@@ -138,7 +39,123 @@ async fn read_byte_stream(stream: ByteStream) -> usize {
     read
 }
 
-async fn multi_part_get(cfg: &Config, client: &S3Client, name: String, part_numbers: Vec<i64>) {
+async fn put(cfg: &Config, client: &S3Client, name: String, obj: Vec<u8>) -> Cost {
+    let t = Instant::now();
+    let bytes = obj.len();
+    let req = PutObjectRequest {
+        bucket: cfg.bucket.clone().unwrap(),
+        key: name,
+        body: Some(obj.into()),
+        ..Default::default()
+    };
+    let ttfb = t.elapsed();
+    client.put_object(req).await.unwrap();
+    let ttlb = t.elapsed();
+    Cost {
+        bytes,
+        ttfb,
+        ttlb,
+        ..Default::default()
+    }
+}
+
+async fn multi_part_upload(
+    cfg: &Config,
+    client: &S3Client,
+    name: String,
+    obj: Vec<u8>,
+    part_size: ByteSize,
+) -> Cost {
+    let t = Instant::now();
+    let bytes = obj.len();
+    let req = CreateMultipartUploadRequest {
+        bucket: cfg.bucket.clone().unwrap(),
+        key: name.clone(),
+        ..Default::default()
+    };
+    let rsp = client.create_multipart_upload(req).await.unwrap();
+    let upload_id = rsp.upload_id.unwrap();
+
+    let name_clone = name.clone();
+    let upload_id_clone = upload_id.clone();
+    let create_upload_part_req = move |part: Vec<u8>, part_number: i64| UploadPartRequest {
+        bucket: cfg.bucket.clone().unwrap(),
+        key: name_clone.clone(),
+        upload_id: upload_id_clone.clone(),
+        part_number,
+        body: Some(part.into()),
+        ..Default::default()
+    };
+
+    let chunks = obj
+        .chunks(part_size.as_u64() as usize)
+        .into_iter()
+        .map(|chunk| chunk.to_owned())
+        .collect_vec();
+
+    let futures = chunks
+        .into_iter()
+        .enumerate()
+        .map(|(i, part)| create_upload_part_req(part, (i + 1) as i64))
+        .map(|req| client.upload_part(req))
+        .collect_vec();
+    let ttfb = t.elapsed();
+    let completed_parts = future::try_join_all(futures)
+        .await
+        .unwrap()
+        .into_iter()
+        .enumerate()
+        .map(|(i, rsp)| CompletedPart {
+            e_tag: rsp.e_tag,
+            part_number: Some((i + 1) as i64),
+        })
+        .collect_vec();
+    let ttlb = t.elapsed();
+
+    let req = CompleteMultipartUploadRequest {
+        bucket: cfg.bucket.clone().unwrap(),
+        key: name.clone(),
+        upload_id: upload_id.clone(),
+        multipart_upload: Some(CompletedMultipartUpload {
+            parts: Some(completed_parts),
+        }),
+        ..Default::default()
+    };
+    client.complete_multipart_upload(req).await.unwrap();
+    Cost {
+        bytes,
+        ttfb,
+        ttlb,
+        ..Default::default()
+    }
+}
+
+async fn get(cfg: &Config, client: &S3Client, name: String) -> Cost {
+    let t = Instant::now();
+    let req = GetObjectRequest {
+        bucket: cfg.bucket.clone().unwrap(),
+        key: name.clone(),
+        ..Default::default()
+    };
+    let body = client.get_object(req).await.unwrap().body.unwrap();
+    let ttfb = t.elapsed();
+    let bytes = read_byte_stream(body).await;
+    let ttlb = t.elapsed();
+    Cost {
+        bytes,
+        ttfb,
+        ttlb,
+        ..Default::default()
+    }
+}
+
+async fn multi_part_get(
+    cfg: &Config,
+    client: &S3Client,
+    name: String,
+    part_numbers: Vec<i64>,
+) -> Cost {
+    let t = Instant::now();
     let create_part_get_req = move |part_number| GetObjectRequest {
         bucket: cfg.bucket.clone().unwrap(),
         key: name.clone(),
@@ -149,16 +166,36 @@ async fn multi_part_get(cfg: &Config, client: &S3Client, name: String, part_numb
         .into_iter()
         .map(create_part_get_req)
         .map(|req| client.get_object(req))
-        .map(|f| f.and_then(|rsp| async move { Ok(read_byte_stream(rsp.body.unwrap()).await) }))
+        .map(|f| {
+            f.and_then(
+                |rsp| async move { Ok((read_byte_stream(rsp.body.unwrap()).await, t.elapsed())) },
+            )
+        })
         .collect_vec();
-    let bytes: usize = future::try_join_all(futures).await.unwrap().iter().sum();
-    debug!(
-        "read size: {}",
-        ByteSize::b(bytes as u64).to_string_as(true)
-    )
+    let (bytes, ttfb) = future::try_join_all(futures)
+        .await
+        .unwrap()
+        .iter()
+        .fold((0, Duration::MAX), |(total_bytes, ttfb), (bytes, time)| {
+            (total_bytes + bytes, ttfb.min(*time))
+        });
+    let ttlb = t.elapsed();
+    Cost {
+        bytes,
+        ttfb,
+        ttlb,
+        ..Default::default()
+    }
 }
 
-async fn byte_range_get(cfg: &Config, client: &S3Client, name: String, start: u64, end: u64) {
+async fn byte_range_get(
+    cfg: &Config,
+    client: &S3Client,
+    name: String,
+    start: u64,
+    end: u64,
+) -> Cost {
+    let t = Instant::now();
     let req = GetObjectRequest {
         bucket: cfg.bucket.clone().unwrap(),
         key: name.clone(),
@@ -166,11 +203,15 @@ async fn byte_range_get(cfg: &Config, client: &S3Client, name: String, start: u6
         ..Default::default()
     };
     let body = client.get_object(req).await.unwrap().body.unwrap();
+    let ttfb = t.elapsed();
     let bytes = read_byte_stream(body).await;
-    debug!(
-        "read size: {}",
-        ByteSize::b(bytes as u64).to_string_as(true)
-    )
+    let ttlb = t.elapsed();
+    Cost {
+        bytes,
+        ttfb,
+        ttlb,
+        ..Default::default()
+    }
 }
 
 // Avoid regenerate objs in the same size with `rand`.
@@ -210,7 +251,7 @@ where
     deserializer.deserialize_any(StringVisitor)
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize)]
 #[serde(tag = "type", content = "args")]
 enum Case {
     Put {
@@ -244,59 +285,101 @@ enum Case {
     },
 }
 
+#[derive(Default)]
 struct Cost {
-    execution_time_min: Duration,
-    execution_time_max: Duration,
-    execution_time_avg: Duration,
-    execution_time_p50: Duration,
-    execution_time_p90: Duration,
-    execution_time_p99: Duration,
+    /// total bytes
+    bytes: usize,
+    /// time to first byte
+    ttfb: Duration,
+    /// time to last byte
+    ttlb: Duration,
+    /// time to live
+    ttl: Duration,
 }
 
-async fn exec<F, FB>(fb: FB) -> Duration
-where
-    F: Future,
-    FB: FnOnce() -> F + Clone,
-{
-    let start = Instant::now();
-    fb().await;
-    start.elapsed()
+struct Durations {
+    min: Duration,
+    max: Duration,
+    avg: Duration,
+    p50: Duration,
+    p90: Duration,
+    p99: Duration,
 }
 
-async fn iter_exec<F, FB>(fb: FB, iter_size: usize) -> Cost
-where
-    F: Future,
-    FB: FnOnce() -> F + Clone,
-{
-    let mut durations = stream::iter(0..iter_size)
-        .flat_map(|_| exec(fb.clone()).into_stream())
-        .collect::<Vec<_>>()
-        .await;
-    durations.sort();
-    Cost {
-        execution_time_min: durations.first().unwrap().to_owned(),
-        execution_time_max: durations.last().unwrap().to_owned(),
-        execution_time_avg: durations
-            .iter()
-            .sum::<Duration>()
-            .div(durations.len() as u32),
-        execution_time_p50: durations
-            .get((iter_size as i32 / 2 - 1) as usize)
-            .unwrap_or(&Duration::from_nanos(0))
-            .to_owned(),
-        execution_time_p90: durations
-            .get((iter_size as i32 / 10 * 9 - 1) as usize)
-            .unwrap_or(&Duration::from_nanos(0))
-            .to_owned(),
-        execution_time_p99: durations
-            .get((iter_size as i32 / 100 * 99 - 1) as usize)
-            .unwrap_or(&Duration::from_nanos(0))
-            .to_owned(),
+impl Durations {
+    fn gen(mut durations: Vec<Duration>) -> Durations {
+        durations.sort();
+        Durations {
+            min: durations.first().unwrap().to_owned(),
+            max: durations.last().unwrap().to_owned(),
+            avg: durations
+                .iter()
+                .sum::<Duration>()
+                .div(durations.len() as u32),
+            p50: durations
+                .get((durations.len() as i32 / 2 - 1) as usize)
+                .unwrap_or(&Duration::from_nanos(0))
+                .to_owned(),
+            p90: durations
+                .get((durations.len() as i32 / 10 * 9 - 1) as usize)
+                .unwrap_or(&Duration::from_nanos(0))
+                .to_owned(),
+            p99: durations
+                .get((durations.len() as i32 / 100 * 99 - 1) as usize)
+                .unwrap_or(&Duration::from_nanos(0))
+                .to_owned(),
+        }
     }
 }
 
-async fn run_case(case: Case, cfg: &Config, client: &S3Client, objs: &mut ObjPool) {
-    let (name, cost) = match case {
+struct Analysis {
+    bytes: ByteSize,
+    bandwidth: ByteSize,
+    rtts: Durations,
+    ttfbs: Durations,
+}
+
+async fn exec<F, FB>(fb: FB) -> Cost
+where
+    F: Future<Output = Cost>,
+    FB: FnOnce() -> F + Clone,
+{
+    let start = Instant::now();
+    let mut cost = fb().await;
+    cost.ttl = start.elapsed();
+    cost
+}
+
+async fn iter_exec<F, FB>(fb: FB, iter_size: usize) -> Analysis
+where
+    F: Future<Output = Cost>,
+    FB: FnOnce() -> F + Clone,
+{
+    let costs = stream::iter(0..iter_size)
+        .flat_map(|_| exec(fb.clone()).into_stream())
+        .collect::<Vec<_>>()
+        .await;
+    let bytes = ByteSize::b(costs[0].bytes as u64);
+    let ttls = Durations::gen(costs.iter().map(|cost| cost.ttl).collect_vec());
+    let ttfbs = Durations::gen(costs.iter().map(|cost| cost.ttfb).collect_vec());
+    // let ttlbs = Durations::gen(costs.iter().map(|cost| cost.ttlb).collect_vec());
+    let data_transfer_secs = costs
+        .iter()
+        .map(|cost| (cost.ttlb - cost.ttfb).as_secs_f64())
+        .collect_vec();
+    let data_transfer_sec_avg =
+        data_transfer_secs.iter().sum::<f64>() / data_transfer_secs.len() as f64;
+    let bandwidth = ByteSize::b(((costs[0].bytes as f64) / data_transfer_sec_avg) as u64);
+    Analysis {
+        bytes,
+        bandwidth,
+        rtts: ttls,
+        ttfbs,
+    }
+}
+
+async fn run_case(index: usize, case: Case, cfg: &Config, client: &S3Client, objs: &mut ObjPool) {
+    let (name, analysis) = match case.clone() {
         Case::Put {
             name,
             obj: obj_name,
@@ -361,28 +444,67 @@ async fn run_case(case: Case, cfg: &Config, client: &S3Client, objs: &mut ObjPoo
         0 => "-".to_owned(),
         _ => format!("{:.3?}", d),
     };
+    let d2s_with_case = |case: &Case, d: &Duration| match case {
+        Case::Put { .. } | Case::MultiPartGet { .. } => "-".to_owned(),
+        _ => d2s(d),
+    };
+    let data_with_name = [
+        ("name".to_owned(), format!("{} ({} iters)", name, cfg.iter)),
+        ("bytes".to_owned(), analysis.bytes.to_string_as(true)),
+        (
+            "bandwidth".to_owned(),
+            analysis.bandwidth.to_string_as(true),
+        ),
+        ("rtt-avg".to_owned(), d2s(&analysis.rtts.avg)),
+        ("rtt-min".to_owned(), d2s(&analysis.rtts.min)),
+        ("rtt-max".to_owned(), d2s(&analysis.rtts.max)),
+        ("rtt-p50".to_owned(), d2s(&analysis.rtts.p50)),
+        ("rtt-p90".to_owned(), d2s(&analysis.rtts.p90)),
+        ("rtt-p99".to_owned(), d2s(&analysis.rtts.p99)),
+        (
+            "ttfb-avg".to_owned(),
+            d2s_with_case(&case, &analysis.ttfbs.avg),
+        ),
+        (
+            "ttfb-min".to_owned(),
+            d2s_with_case(&case, &analysis.ttfbs.min),
+        ),
+        (
+            "ttfb-max".to_owned(),
+            d2s_with_case(&case, &analysis.ttfbs.max),
+        ),
+        (
+            "ttfb-p50".to_owned(),
+            d2s_with_case(&case, &analysis.ttfbs.p50),
+        ),
+        (
+            "ttfb-p90".to_owned(),
+            d2s_with_case(&case, &analysis.ttfbs.p90),
+        ),
+        (
+            "ttfb-p99".to_owned(),
+            d2s_with_case(&case, &analysis.ttfbs.p99),
+        ),
+    ];
     if cfg.format {
-        println!(
-            "{} ({} iters),{},{},{},{},{},{}",
-            name,
-            cfg.iter,
-            d2s(&cost.execution_time_avg),
-            d2s(&cost.execution_time_min),
-            d2s(&cost.execution_time_max),
-            d2s(&cost.execution_time_p50),
-            d2s(&cost.execution_time_p90),
-            d2s(&cost.execution_time_p99),
-        );
+        if index == 0 {
+            let names = data_with_name
+                .iter()
+                .map(|(name, _)| name.to_owned())
+                .collect_vec();
+            println!("{}", names.join(","));
+        }
+        let data = data_with_name
+            .iter()
+            .map(|(_, item)| item.to_owned())
+            .collect_vec();
+        println!("{}", data.join(","));
         return;
     }
-    println!("{} ({} iters)", name, cfg.iter);
-    println!("  lat-avg: {}", d2s(&cost.execution_time_avg));
-    println!("  lat-min: {}", d2s(&cost.execution_time_min));
-    println!("  lat-max: {}", d2s(&cost.execution_time_max));
-    println!("  lat-p50: {}", d2s(&cost.execution_time_p50));
-    println!("  lat-p90: {}", d2s(&cost.execution_time_p90));
-    println!("  lat-p99: {}", d2s(&cost.execution_time_p99));
-    println!();
+    for (name, item) in data_with_name {
+        println!("{}: {}", name, item);
+    }
+    println!()
 }
 
 fn read_cases(cfg: &Config) -> Vec<Case> {
@@ -443,13 +565,10 @@ async fn main() {
     let client = S3Client::new_with(HttpClient::new().unwrap(), provider, region);
     let mut objs = ObjPool::default();
 
-    let cases = read_cases(&cfg);
+    let mut cases = read_cases(&cfg);
 
-    if cfg.format {
-        println!("name,lat-avg,lat-min,lat-max,lat-p50,lat-p90,lat-p99")
-    }
-    for case in cases {
+    for (i, case) in cases.drain(..).enumerate() {
         debug!("running case: {:?}", case);
-        run_case(case, &cfg, &client, &mut objs).await;
+        run_case(i, case, &cfg, &client, &mut objs).await;
     }
 }
