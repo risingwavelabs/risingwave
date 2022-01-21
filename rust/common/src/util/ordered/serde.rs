@@ -1,6 +1,7 @@
 use std::cmp::Reverse;
 
 use bytes::BufMut;
+use itertools::Itertools;
 
 use super::OrderedDatum::{NormalOrder, ReversedOrder};
 use super::OrderedRow;
@@ -89,7 +90,7 @@ impl OrderedRowDeserializer {
     pub fn deserialize(&self, data: &[u8]) -> Result<OrderedRow> {
         let mut values = Vec::with_capacity(self.data_type_kinds.len());
         let mut deserializer = memcomparable::Deserializer::new(data);
-        for (data_type, order_type) in self.data_type_kinds.iter().zip(self.order_types.iter()) {
+        for (data_type, order_type) in self.data_type_kinds.iter().zip_eq(self.order_types.iter()) {
             deserializer.set_reverse(*order_type == OrderType::Descending);
             let datum = deserialize_datum_from(data_type, &mut deserializer)?;
             let datum = match order_type {

@@ -172,8 +172,9 @@ trait CompactableArray: Array {
 
 impl<A: Array> CompactableArray for A {
     fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Result<Self> {
+        use itertools::Itertools;
         let mut builder = A::Builder::new(cardinality)?;
-        for (elem, visible) in self.iter().zip(visibility.iter()) {
+        for (elem, visible) in self.iter().zip_eq(visibility.iter()) {
             if visible {
                 builder.append(elem)?;
             }
@@ -488,6 +489,8 @@ impl PartialEq for ArrayImpl {
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
+
     use super::*;
 
     fn filter<'a, A, F>(data: &'a A, pred: F) -> Result<A>
@@ -526,9 +529,8 @@ mod tests {
         T2: PrimitiveArrayItemType + AsPrimitive<T3>,
         T3: PrimitiveArrayItemType + CheckedAdd,
     {
-        assert_eq!(a.len(), b.len());
         let mut builder = PrimitiveArrayBuilder::<T3>::new(a.len())?;
-        for (a, b) in a.iter().zip(b.iter()) {
+        for (a, b) in a.iter().zip_eq(b.iter()) {
             let item = match (a, b) {
                 (Some(a), Some(b)) => Some(a.as_() + b.as_()),
                 _ => None,

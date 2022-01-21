@@ -493,7 +493,7 @@ impl HashKey for SerializedKey {
         ensure!(self.key.len() == array_builders.len());
         array_builders
             .iter_mut()
-            .zip(self.key)
+            .zip_eq(self.key)
             .try_for_each(|(array_builder, key)| array_builder.append_datum(&key))
     }
 

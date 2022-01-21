@@ -3,6 +3,8 @@ use std::ops::{BitAnd, BitOr, Not};
 use std::ptr::NonNull;
 use std::slice::{from_raw_parts, from_raw_parts_mut};
 
+use itertools::Itertools;
+
 use crate::alloc::{alloc_aligned, free_aligned};
 use crate::error::{ErrorCode, Result};
 use crate::types::NativeType;
@@ -89,11 +91,10 @@ impl Buffer {
     where
         F: Fn(u8, u8) -> u8,
     {
-        ensure!(left.len() == right.len());
         let ret: Vec<u8> = left
             .as_slice()
             .iter()
-            .zip(right.as_slice())
+            .zip_eq(right.as_slice())
             .map(|a| op(*a.0, *a.1))
             .collect();
 

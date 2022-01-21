@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 
+use itertools::Itertools;
 use risingwave_common::array::Op;
 use risingwave_common::array::Op::{UpdateDelete, UpdateInsert};
 use risingwave_common::error::ErrorCode::ProtocolError;
@@ -87,7 +88,7 @@ impl SourceParser for DebeziumJsonParser {
 
                 if filtered_before
                     .iter()
-                    .zip(&filtered_after)
+                    .zip_eq(&filtered_after)
                     .all(|((_, v1), (_, v2))| v1.eq(v2))
                 {
                     return Ok(Event {

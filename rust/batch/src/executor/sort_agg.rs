@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
@@ -113,22 +114,22 @@ impl Executor for SortAggExecutor {
             let groups = self
                 .sorted_groupers
                 .iter()
-                .zip(&group_arrays)
+                .zip_eq(&group_arrays)
                 .map(|(grouper, array)| grouper.split_groups(array))
                 .collect::<Result<Vec<EqGroups>>>()?;
             let groups = EqGroups::intersect(&groups);
 
             self.sorted_groupers
                 .iter_mut()
-                .zip(&group_arrays)
-                .zip(&mut group_builders)
+                .zip_eq(&group_arrays)
+                .zip_eq(&mut group_builders)
                 .try_for_each(|((grouper, array), builder)| {
                     grouper.update_and_output_with_sorted_groups(array, builder, &groups)
                 })?;
 
             self.agg_states
                 .iter_mut()
-                .zip(&mut array_builders)
+                .zip_eq(&mut array_builders)
                 .try_for_each(|(state, builder)| {
                     state.update_and_output_with_sorted_groups(&child_chunk, builder, &groups)
                 })?;
@@ -137,11 +138,11 @@ impl Executor for SortAggExecutor {
 
         self.sorted_groupers
             .iter()
-            .zip(&mut group_builders)
+            .zip_eq(&mut group_builders)
             .try_for_each(|(grouper, builder)| grouper.output(builder))?;
         self.agg_states
             .iter()
-            .zip(&mut array_builders)
+            .zip_eq(&mut array_builders)
             .try_for_each(|(state, builder)| state.output(builder))?;
 
         let columns = group_builders

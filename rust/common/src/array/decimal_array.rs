@@ -1,6 +1,7 @@
 use std::hash::{Hash, Hasher};
 use std::mem::size_of;
 
+use itertools::Itertools;
 use risingwave_pb::data::buffer::CompressionType;
 use risingwave_pb::data::{Array as ProstArray, ArrayType, Buffer};
 
@@ -52,7 +53,7 @@ impl Array for DecimalArray {
         let mut offset_buffer = Vec::<u8>::with_capacity(self.data.len() * size_of::<usize>());
         let mut data_buffer = Vec::<u8>::new();
         let mut offset = 0usize;
-        for (d, not_null) in self.data.iter().zip(self.null_bitmap().iter()) {
+        for (d, not_null) in self.data.iter().zip_eq(self.null_bitmap().iter()) {
             let s = d.to_string();
             let b = s.as_bytes();
             if not_null {
@@ -164,7 +165,7 @@ mod tests {
             builder.append(*i).unwrap();
         }
         let a = builder.finish().unwrap();
-        let res = v.iter().zip(a.iter()).all(|(a, b)| *a == b);
+        let res = v.iter().zip_eq(a.iter()).all(|(a, b)| *a == b);
         assert!(res);
     }
 
@@ -261,7 +262,7 @@ mod tests {
         let hasher_builder = RandomXxHashBuilder64::default();
         let mut states = vec![hasher_builder.build_hasher(); ARR_LEN];
         vecs.iter().for_each(|v| {
-            v.iter().zip(&mut states).for_each(|(x, state)| match x {
+            v.iter().zip_eq(&mut states).for_each(|(x, state)| match x {
                 Some(inner) => inner.hash(state),
                 None => NULL_VAL_FOR_HASH.hash(state),
             })

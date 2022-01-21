@@ -1,7 +1,7 @@
 use std::fmt;
 use std::sync::Arc;
 
-use itertools::multizip;
+use itertools::{multizip, Itertools};
 use paste::paste;
 
 /// Template macro to generate code for unary/binary/ternary expression.
@@ -63,7 +63,7 @@ macro_rules! gen_expr_normal {
           let mut output_array = <OA as Array>::Builder::new(data_chunk.capacity())?;
           Ok(Arc::new(match bitmap {
             Some(bitmap) => {
-              for (($([<v_ $arg:lower>], )*), visible) in multizip(($([<arr_ $arg:lower>].iter(), )*)).zip(bitmap.iter()) {
+              for (($([<v_ $arg:lower>], )*), visible) in multizip(($([<arr_ $arg:lower>].iter(), )*)).zip_eq(bitmap.iter()) {
                 if !visible {
                   continue;
                 }
@@ -163,7 +163,7 @@ macro_rules! gen_expr_bytes {
           let mut output_array = Utf8ArrayBuilder::new(data_chunk.capacity())?;
           Ok(Arc::new(match bitmap {
             Some(bitmap) => {
-              for (($([<v_ $arg:lower>], )*), visible) in multizip(($([<arr_ $arg:lower>].iter(), )*)).zip(bitmap.iter()) {
+              for (($([<v_ $arg:lower>], )*), visible) in multizip(($([<arr_ $arg:lower>].iter(), )*)).zip_eq(bitmap.iter()) {
                 if !visible {
                   continue;
                 }
@@ -265,7 +265,7 @@ macro_rules! gen_expr_nullable {
           let mut output_array = <OA as Array>::Builder::new(data_chunk.capacity())?;
           Ok(Arc::new(match bitmap {
             Some(bitmap) => {
-              for (($([<v_ $arg:lower>], )*), visible) in multizip(($([<arr_ $arg:lower>].iter(), )*)).zip(bitmap.iter()) {
+              for (($([<v_ $arg:lower>], )*), visible) in multizip(($([<arr_ $arg:lower>].iter(), )*)).zip_eq(bitmap.iter()) {
                 if !visible {
                   continue;
                 }

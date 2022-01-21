@@ -51,7 +51,7 @@ pub fn encode_chunk(chunk: &DataChunk, order_pairs: Arc<Vec<OrderPair>>) -> Arc<
 
     let mut encoded_chunk = vec![vec![]; chunk.capacity()];
     for encoded_column in encoded_columns {
-        for (encoded_row, data) in encoded_chunk.iter_mut().zip(encoded_column.0) {
+        for (encoded_row, data) in encoded_chunk.iter_mut().zip_eq(encoded_column.0) {
             encoded_row.extend(data);
         }
     }

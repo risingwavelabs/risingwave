@@ -257,7 +257,7 @@ impl DataChunk {
             let end_row_idx = start_row_idx + actual_acquire - 1;
             array_builders
                 .iter_mut()
-                .zip(chunks[chunk_idx].columns())
+                .zip_eq(chunks[chunk_idx].columns())
                 .try_for_each(|(builder, column)| {
                     let mut array_builder = column
                         .array_ref()

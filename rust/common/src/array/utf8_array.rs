@@ -2,6 +2,7 @@ use std::hash::{Hash, Hasher};
 use std::iter;
 use std::mem::size_of;
 
+use itertools::Itertools;
 use risingwave_pb::data::buffer::CompressionType;
 use risingwave_pb::data::{Array as ProstArray, ArrayType, Buffer};
 
@@ -49,7 +50,7 @@ impl Array for Utf8Array {
             // of null_bitmap is n, chain iterator of null_bitmap
             // with one single true here to push the end of offset
             // to offset_buffer
-            .zip(self.null_bitmap().iter().chain(iter::once(true)))
+            .zip_eq(self.null_bitmap().iter().chain(iter::once(true)))
             .fold(
                 Vec::<u8>::with_capacity(self.offset.len() * size_of::<usize>()),
                 |mut buffer, (offset, not_null)| {
@@ -383,7 +384,7 @@ mod tests {
         let hasher_builder = RandomXxHashBuilder64::default();
         let mut states = vec![hasher_builder.build_hasher(); ARR_LEN];
         vecs.iter().for_each(|v| {
-            v.iter().zip(&mut states).for_each(|(x, state)| match x {
+            v.iter().zip_eq(&mut states).for_each(|(x, state)| match x {
                 Some(inner) => inner.hash(state),
                 None => NULL_VAL_FOR_HASH.hash(state),
             })

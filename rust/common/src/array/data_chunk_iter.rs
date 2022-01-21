@@ -1,6 +1,8 @@
 use std::hash::Hash;
 use std::ops;
 
+use itertools::Itertools;
+
 use crate::array::DataChunk;
 use crate::types::{
     deserialize_datum_from, deserialize_datum_not_null_from, serialize_datum_into,
@@ -147,7 +149,7 @@ impl Row {
     ) -> Result<Vec<u8>, memcomparable::Error> {
         assert_eq!(self.0.len(), orders.len());
         let mut serializer = memcomparable::Serializer::new(vec![]);
-        for (order, datum) in orders.iter().zip(self.0.iter()) {
+        for (order, datum) in orders.iter().zip_eq(self.0.iter()) {
             serializer.set_reverse(*order == OrderType::Descending);
             serialize_datum_into(datum, &mut serializer)?;
         }

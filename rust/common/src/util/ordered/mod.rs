@@ -2,6 +2,7 @@ mod serde;
 
 use std::cmp::Reverse;
 
+use itertools::Itertools;
 use OrderedDatum::{NormalOrder, ReversedOrder};
 
 pub use self::serde::*;
@@ -22,11 +23,10 @@ pub struct OrderedRow(Vec<OrderedDatum>);
 
 impl OrderedRow {
     pub fn new(row: Row, order_types: &[OrderType]) -> Self {
-        assert_eq!(row.0.len(), order_types.len());
         OrderedRow(
             row.0
                 .into_iter()
-                .zip(order_types.iter())
+                .zip_eq(order_types.iter())
                 .map(|(datum, order_type)| match order_type {
                     OrderType::Ascending => NormalOrder(datum),
                     OrderType::Descending => ReversedOrder(Reverse(datum)),
