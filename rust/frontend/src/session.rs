@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
-use risingwave_common::array::RwError;
-use risingwave_common::error::{ErrorCode, Result};
+use pgwire::pg_response::PgResponse;
+use pgwire::pg_server::{Session, SessionManager};
+use risingwave_common::error::Result;
 use risingwave_rpc_client::MetaClient;
 use risingwave_sqlparser::parser::Parser;
 use tokio::sync::Mutex;
@@ -10,8 +11,6 @@ use crate::catalog::catalog_service::{
     RemoteCatalogManager, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
 };
 use crate::handler::handle;
-use crate::pgwire::pg_response::PgResponse;
-use crate::pgwire::pg_server::{Session, SessionManager};
 use crate::FrontendOpts;
 
 /// The global environment for the frontend server.
@@ -74,14 +73,17 @@ impl RwSessionManager {
 
 #[async_trait::async_trait]
 impl Session for RwSession {
-    async fn run_statement(&self, sql: &str) -> Result<PgResponse> {
+    async fn run_statement(
+        &self,
+        sql: &str,
+    ) -> std::result::Result<PgResponse, Box<dyn std::error::Error + Send + Sync>> {
         // Parse sql.
-        let mut stmts = Parser::parse_sql(sql)
-            .map_err(|e| RwError::from(ErrorCode::ParseError(Box::new(e))))?;
+        let mut stmts = Parser::parse_sql(sql)?;
         // With pgwire, there would be at most 1 statement in the vec.
         assert_eq!(stmts.len(), 1);
         let stmt = stmts.swap_remove(0);
-        handle(&self.env, stmt).await
+        let rsp = handle(&self.env, stmt).await?;
+        Ok(rsp)
     }
 }
 

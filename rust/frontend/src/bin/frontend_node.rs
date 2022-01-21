@@ -4,9 +4,9 @@ async fn main() {
     use std::sync::Arc;
 
     use clap::StructOpt;
-    use frontend::pgwire::pg_server::pg_serve;
     use frontend::session::RwSessionManager;
     use frontend::FrontendOpts;
+    use pgwire::pg_server::pg_serve;
 
     let opts: FrontendOpts = FrontendOpts::parse();
     log4rs::init_file(&opts.log4rs_config, Default::default()).unwrap();

@@ -1,16 +1,13 @@
-use std::io;
-use std::io::{IoSlice, Write};
+use std::io::{Error, ErrorKind, IoSlice, Result, Write};
 
 use byteorder::{BigEndian, ByteOrder};
 /// Part of code learned from https://github.com/zenithdb/zenith/blob/main/zenith_utils/src/pq_proto.rs.
 use bytes::{BufMut, Bytes, BytesMut};
-use risingwave_common::array::{Row, RwError};
-use risingwave_common::error::Result;
-use tokio::io::AsyncReadExt;
-use tokio::net::TcpStream;
+use tokio::io::{AsyncRead, AsyncReadExt};
 
-use crate::pgwire::pg_field_descriptor::PgFieldDescriptor;
-use crate::pgwire::pg_response::StatementType;
+use crate::pg_field_descriptor::PgFieldDescriptor;
+use crate::pg_response::StatementType;
+use crate::types::Row;
 
 /// Messages that can be sent from pg client to server. Implement `read`.
 pub enum FeMessage {
@@ -39,7 +36,7 @@ impl FeQueryMessage {
 
 impl FeMessage {
     /// Read one message from the stream.
-    pub async fn read(stream: &mut TcpStream) -> Result<FeMessage> {
+    pub async fn read(stream: &mut (impl AsyncRead + Unpin)) -> Result<FeMessage> {
         let val = &[stream.read_u8().await?];
         let tag = std::str::from_utf8(val).unwrap();
         let len = stream.read_i32().await?;
@@ -63,7 +60,7 @@ impl FeMessage {
 
 impl FeStartupMessage {
     /// Read startup message from the stream.
-    pub async fn read(stream: &mut TcpStream) -> Result<FeMessage> {
+    pub async fn read(stream: &mut (impl AsyncRead + Unpin)) -> Result<FeMessage> {
         let len = stream.read_i32().await?;
         let protocol_num = stream.read_i32().await?;
         let payload_len = len - 8;
@@ -94,7 +91,7 @@ pub enum BeMessage<'a> {
     ParameterStatus(BeParameterStatusMessage<'a>),
     ReadyForQuery,
     RowDescription(&'a [PgFieldDescriptor]),
-    ErrorResponse(RwError),
+    ErrorResponse(Box<dyn std::error::Error + Send + Sync>),
 }
 
 #[derive(Debug)]
@@ -199,12 +196,11 @@ impl<'a> BeMessage<'a> {
             BeMessage::DataRow(vals) => {
                 buf.put_u8(b'D');
                 write_body(buf, |buf| {
-                    buf.put_u16(vals.size() as u16); // num of cols
-                    for val_opt in &vals.0 {
+                    buf.put_u16(vals.len() as u16); // num of cols
+                    for val_opt in vals.values() {
                         if let Some(val) = val_opt {
-                            let val_data = val.to_string();
-                            buf.put_u32(val_data.len() as u32);
-                            buf.put_slice(val_data.as_bytes());
+                            buf.put_u32(val.len() as u32);
+                            buf.put_slice(val.as_bytes());
                         } else {
                             buf.put_i32(-1);
                         }
@@ -295,10 +291,7 @@ macro_rules! from_usize {
             #[inline]
             fn from_usize(x: usize) -> Result<$t> {
                 if x > <$t>::max_value() as usize {
-                    Err(
-                        io::Error::new(io::ErrorKind::InvalidInput, "value too large to transmit")
-                            .into(),
-                    )
+                    Err(Error::new(ErrorKind::InvalidInput, "value too large to transmit").into())
                 } else {
                     Ok(x as $t)
                 }
@@ -329,9 +322,10 @@ where
 /// Safe write of s into buf as cstring (String in the protocol).
 fn write_cstr(buf: &mut BytesMut, s: &[u8]) -> Result<()> {
     if s.contains(&0) {
-        return Err(
-            io::Error::new(io::ErrorKind::InvalidInput, "string contains embedded null").into(),
-        );
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "string contains embedded null",
+        ));
     }
     buf.put_slice(s);
     buf.put_u8(0);

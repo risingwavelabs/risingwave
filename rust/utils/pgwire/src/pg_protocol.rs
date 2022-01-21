@@ -1,23 +1,24 @@
+use std::io::Result;
 use std::sync::Arc;
 
 use bytes::BytesMut;
-use log::info;
-use risingwave_common::error::Result;
-use tokio::io::AsyncWriteExt;
-use tokio::net::TcpStream;
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 
-use super::pg_server::{Session, SessionManager};
-use crate::pgwire::pg_message::{
+use crate::pg_message::{
     BeCommandCompleteMessage, BeMessage, BeParameterStatusMessage, FeMessage, FeQueryMessage,
     FeStartupMessage,
 };
-use crate::pgwire::pg_response::PgResponse;
+use crate::pg_response::PgResponse;
+use crate::pg_server::{Session, SessionManager};
 
 /// The state machine for each psql connection.
 /// Read pg messages from tcp stream and write results back.
-pub struct PgProtocol {
+pub struct PgProtocol<S>
+where
+    S: AsyncWrite + AsyncRead + Unpin,
+{
     /// Used for write/read message in tcp connection.
-    stream: TcpStream,
+    stream: S,
     /// Write into buffer before flush to stream.
     buf_out: BytesMut,
     /// Current states of pg connection.
@@ -35,8 +36,11 @@ enum PgProtocolState {
     Regular,
 }
 
-impl PgProtocol {
-    pub fn new(stream: TcpStream, session_mgr: Arc<dyn SessionManager>) -> Self {
+impl<S> PgProtocol<S>
+where
+    S: AsyncWrite + AsyncRead + Unpin,
+{
+    pub fn new(stream: S, session_mgr: Arc<dyn SessionManager>) -> Self {
         Self {
             stream,
             is_terminate: false,

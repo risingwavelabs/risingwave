@@ -1,7 +1,7 @@
+use pgwire::pg_response::PgResponse;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::Statement;
 
-use crate::pgwire::pg_response::PgResponse;
 use crate::session::FrontendEnv;
 
 mod explain;

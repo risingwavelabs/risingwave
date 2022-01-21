@@ -1,0 +1,15 @@
+[package]
+name = "pgwire"
+version = "0.1.0"
+edition = "2021"
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+async-trait = "0.1"
+byteorder = "1.4"
+bytes = "1"
+log = "0.4"
+tokio = { version = "1", features = ["rt", "macros"] }
+
+[dev-dependencies]
+tokio-postgres = "0.7"

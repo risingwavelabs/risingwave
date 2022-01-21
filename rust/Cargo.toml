@@ -17,6 +17,7 @@ members = [
   "stream",
   "tests/regress",
   "utils/memcomparable",
+  "utils/pgwire",
 ]
 
 [profile.release]

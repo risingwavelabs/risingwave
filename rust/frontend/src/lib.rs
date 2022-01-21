@@ -6,8 +6,8 @@ pub mod binder;
 pub mod expr;
 pub mod handler;
 pub mod optimizer;
-pub mod pgwire;
 pub mod session;
+
 extern crate log;
 
 use clap::Parser;

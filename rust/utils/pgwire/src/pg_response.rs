@@ -1,8 +1,7 @@
 use std::fmt::Formatter;
 
-use risingwave_common::array::Row;
-
-use crate::pgwire::pg_field_descriptor::PgFieldDescriptor;
+use crate::pg_field_descriptor::PgFieldDescriptor;
+use crate::types::Row;
 /// Port from StatementType.java.
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -97,13 +96,11 @@ impl PgResponse {
 /// Helper to return a 1-row-1-col string at early stage of developement.
 impl From<String> for PgResponse {
     fn from(s: String) -> Self {
-        use risingwave_common::types::ScalarImpl;
-
-        use crate::pgwire::pg_field_descriptor::TypeOid;
+        use crate::pg_field_descriptor::TypeOid;
         PgResponse::new(
             StatementType::SELECT,
             1,
-            vec![Row::new(vec![Some(ScalarImpl::Utf8(s))])],
+            vec![Row::new(vec![Some(s)])],
             vec![PgFieldDescriptor::new(
                 "varchar".to_owned(),
                 TypeOid::Varchar,

@@ -1,11 +1,12 @@
+use std::error::Error;
+use std::io;
 use std::sync::Arc;
 
 use log::{error, info};
-use risingwave_common::error::Result;
 use tokio::net::{TcpListener, TcpStream};
 
-use super::pg_protocol::PgProtocol;
-use super::pg_response::PgResponse;
+use crate::pg_protocol::PgProtocol;
+use crate::pg_response::PgResponse;
 
 /// The interface for a database system behind pgwire protocol.
 /// We can mock it for testing purpose.
@@ -16,11 +17,11 @@ pub trait SessionManager: Send + Sync {
 /// A psql connection.
 #[async_trait::async_trait]
 pub trait Session: Send + Sync {
-    async fn run_statement(&self, sql: &str) -> Result<PgResponse>;
+    async fn run_statement(&self, sql: &str) -> Result<PgResponse, Box<dyn Error + Send + Sync>>;
 }
 
 /// Binds a Tcp listener at [`addr`]. Spawn a coroutine to serve every new connection.
-pub async fn pg_serve(addr: &str, session_mgr: Arc<dyn SessionManager>) -> Result<()> {
+pub async fn pg_serve(addr: &str, session_mgr: Arc<dyn SessionManager>) -> io::Result<()> {
     let listener = TcpListener::bind(addr).await.unwrap();
     // accept connections and process them, spawning a new thread for each one
     info!("Starting server at {}", addr);
@@ -56,18 +57,16 @@ async fn pg_serve_conn(socket: TcpStream, session_mgr: Arc<dyn SessionManager>) 
 
 #[cfg(test)]
 mod tests {
+    use std::error::Error;
     use std::sync::Arc;
 
-    use risingwave_common::array::{Row, RwError};
-    use risingwave_common::error::{ErrorCode, Result};
-    use risingwave_common::types::ScalarImpl;
-    use risingwave_sqlparser::parser::Parser;
     use tokio_postgres::{NoTls, SimpleQueryMessage};
 
     use super::{Session, SessionManager};
-    use crate::pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
-    use crate::pgwire::pg_response::{PgResponse, StatementType};
-    use crate::pgwire::pg_server::pg_serve;
+    use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
+    use crate::pg_response::{PgResponse, StatementType};
+    use crate::pg_server::pg_serve;
+    use crate::types::Row;
 
     struct TestSessionManager {}
 
@@ -81,18 +80,20 @@ mod tests {
 
     #[async_trait::async_trait]
     impl Session for TestSession {
-        async fn run_statement(&self, sql: &str) -> Result<PgResponse> {
-            let stmts = Parser::parse_sql(sql)
-                .map_err(|e| RwError::from(ErrorCode::ParseError(Box::new(e))))?;
+        async fn run_statement(
+            &self,
+            sql: &str,
+        ) -> Result<PgResponse, Box<dyn Error + Send + Sync>> {
+            // simulate an error
+            if sql.starts_with("SELECTA") {
+                return Err("parse error: invalid token: SELECTA".into());
+            }
             Ok(
                 // Returns a single-column single-row result, containing the sql string.
                 PgResponse::new(
                     StatementType::SELECT,
                     1,
-                    vec![Row::new(vec![Some(ScalarImpl::Utf8(format!(
-                        "{:?}",
-                        stmts
-                    )))])],
+                    vec![Row::new(vec![Some(sql.to_string())])],
                     vec![PgFieldDescriptor::new("sql".to_string(), TypeOid::Varchar)],
                 ),
             )
@@ -125,10 +126,7 @@ mod tests {
         for (idx, row) in ret.iter().enumerate() {
             if idx == 0 {
                 if let SimpleQueryMessage::Row(row_inner) = row {
-                    assert_eq!(
-                        row_inner.get(0),
-                        Some(format!("{:?}", Parser::parse_sql(query).unwrap()).as_str())
-                    );
+                    assert_eq!(row_inner.get(0), Some("SELECT * from t;"));
                 } else {
                     panic!("The first message should be row values")
                 }
