@@ -96,10 +96,7 @@ mod tests {
 
         let catalog_manager = frontend.session().env().catalog_mgr();
         let catalog_manager_guard = catalog_manager.lock().await;
-        let table = catalog_manager_guard
-            .get_table("dev", "dev", "t")
-            .await
-            .unwrap();
+        let table = catalog_manager_guard.get_table("dev", "dev", "t").unwrap();
         let columns = table
             .columns()
             .iter()

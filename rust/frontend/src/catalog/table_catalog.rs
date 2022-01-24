@@ -10,7 +10,7 @@ use crate::catalog::{ColumnId, TableId};
 pub struct TableCatalog {
     table_id: TableId,
     next_column_id: AtomicU32,
-    columns: Vec<(String, ColumnCatalog)>,
+    column_by_name: Vec<(String, ColumnCatalog)>,
     primary_keys: Vec<ColumnId>,
 }
 
@@ -19,7 +19,7 @@ impl TableCatalog {
         Self {
             table_id,
             next_column_id: AtomicU32::new(0),
-            columns: vec![],
+            column_by_name: vec![],
             primary_keys: vec![],
         }
     }
@@ -33,12 +33,13 @@ impl TableCatalog {
         if col_desc.is_primary() {
             self.primary_keys.push(col_catalog.id());
         }
-        self.columns.push((col_name.to_string(), col_catalog));
+        self.column_by_name
+            .push((col_name.to_string(), col_catalog));
         Ok(())
     }
 
     pub fn get_column_by_id(&self, col_id: ColumnId) -> Option<&ColumnCatalog> {
-        self.columns
+        self.column_by_name
             .get(col_id as usize)
             .map(|(_, col_catalog)| col_catalog)
     }
