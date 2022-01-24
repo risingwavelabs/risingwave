@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, Ordering};
 
 use risingwave_common::array::RwError;
 use risingwave_common::error::Result;
@@ -9,7 +8,6 @@ use crate::catalog::{CatalogError, DatabaseId, SchemaId};
 
 pub struct DatabaseCatalog {
     id: DatabaseId,
-    next_schema_id: AtomicU32,
     schema_by_name: HashMap<String, SchemaCatalog>,
 }
 
@@ -17,15 +15,8 @@ impl DatabaseCatalog {
     pub fn new(id: DatabaseId) -> Self {
         Self {
             id,
-            next_schema_id: AtomicU32::new(0),
             schema_by_name: HashMap::new(),
         }
-    }
-    pub fn create_schema_local(&mut self, schema_name: &str) -> Result<()> {
-        self.create_schema_with_id(
-            schema_name,
-            self.next_schema_id.fetch_add(1, Ordering::Relaxed),
-        )
     }
 
     pub fn create_schema_with_id(&mut self, schema_name: &str, schema_id: SchemaId) -> Result<()> {

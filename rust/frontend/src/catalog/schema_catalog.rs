@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::atomic::AtomicU32;
 
 use risingwave_common::array::RwError;
 use risingwave_common::error::Result;
@@ -10,7 +9,6 @@ use crate::catalog::{CatalogError, SchemaId};
 
 pub struct SchemaCatalog {
     schema_id: SchemaId,
-    next_table_id: AtomicU32,
     table_by_name: HashMap<String, TableCatalog>,
 }
 
@@ -18,7 +16,6 @@ impl SchemaCatalog {
     pub fn new(schema_id: SchemaId) -> Self {
         Self {
             schema_id,
-            next_table_id: AtomicU32::new(0),
             table_by_name: HashMap::new(),
         }
     }
