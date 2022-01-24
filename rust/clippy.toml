@@ -1,0 +1,3 @@
+disallowed-methods = [
+    { path = "std::iter::Iterator::zip", reason = "Please use Itertools::zip_eq instead." }
+]
