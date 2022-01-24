@@ -22,7 +22,7 @@ pub struct FrontendEnv {
 }
 
 impl FrontendEnv {
-    pub async fn init(opts: FrontendOpts) -> Result<Self> {
+    pub async fn init(opts: &FrontendOpts) -> Result<Self> {
         let meta_client = MetaClient::new(opts.meta_addr.clone().as_str()).await?;
         // Create default database when env init.
         let mut catalog_manager = RemoteCatalogManager::new(meta_client.clone());
@@ -49,6 +49,22 @@ impl FrontendEnv {
 
 pub struct RwSession {
     env: FrontendEnv,
+    database: String,
+}
+
+impl RwSession {
+    #[cfg(test)]
+    pub fn new(env: FrontendEnv, database: String) -> Self {
+        Self { env, database }
+    }
+
+    pub fn env(&self) -> &FrontendEnv {
+        &self.env
+    }
+
+    pub fn database(&self) -> &str {
+        &self.database
+    }
 }
 
 pub struct RwSessionManager {
@@ -59,12 +75,13 @@ impl SessionManager for RwSessionManager {
     fn connect(&self) -> Box<dyn Session> {
         Box::new(RwSession {
             env: self.env.clone(),
+            database: "dev".to_string(),
         })
     }
 }
 
 impl RwSessionManager {
-    pub async fn new(opts: FrontendOpts) -> Result<Self> {
+    pub async fn new(opts: &FrontendOpts) -> Result<Self> {
         Ok(Self {
             env: FrontendEnv::init(opts).await?,
         })
@@ -82,7 +99,7 @@ impl Session for RwSession {
         // With pgwire, there would be at most 1 statement in the vec.
         assert_eq!(stmts.len(), 1);
         let stmt = stmts.swap_remove(0);
-        let rsp = handle(&self.env, stmt).await?;
+        let rsp = handle(self, stmt).await?;
         Ok(rsp)
     }
 }
@@ -104,7 +121,7 @@ mod tests {
         let args: [OsString; 0] = []; // No argument.
         let mut opts = FrontendOpts::parse_from(args);
         opts.meta_addr = format!("http://{}", LocalMeta::meta_addr());
-        let mgr = RwSessionManager::new(opts.clone()).await.unwrap();
+        let mgr = RwSessionManager::new(&opts).await.unwrap();
         // Check default database is created.
         assert!(mgr
             .env

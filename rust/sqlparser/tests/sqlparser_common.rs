@@ -3704,16 +3704,15 @@ fn parse_create_source() {
         stmt,
         CreateSourceStatement {
             source_name: Ident::new("src".to_string()),
-            row_format: Ident::new("JSON".to_string()),
             if_not_exists: false,
             with_properties: WithProperties(vec![]),
-            row_schema_location: AstOption::None,
+            source_schema: SourceSchema::Json,
         }
     );
 
     let stmt = try_match_expand!(
     verified_stmt(
-      "CREATE SOURCE IF NOT EXISTS src WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001') ROW FORMAT JSON ROW SCHEMA LOCATION 'file://'",
+      "CREATE SOURCE IF NOT EXISTS src WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001') ROW FORMAT PROTOBUF MESSAGE 'Foo' ROW SCHEMA LOCATION 'file://'",
     ),
     Statement::CreateSource
   )
@@ -3722,7 +3721,6 @@ fn parse_create_source() {
         stmt,
         CreateSourceStatement {
             source_name: Ident::new("src".to_string()),
-            row_format: Ident::new("JSON".to_string()),
             if_not_exists: true,
             with_properties: WithProperties(vec![
                 SqlOption {
@@ -3734,9 +3732,10 @@ fn parse_create_source() {
                     value: Value::SingleQuotedString("localhost:1001".to_string()),
                 },
             ]),
-            row_schema_location: AstOption::Some(RowSchemaLocation {
-                value: AstString("file://".to_string())
-            }),
+            source_schema: SourceSchema::Protobuf(ProtobufSchema {
+                message_name: AstString("Foo".to_string()),
+                row_schema_location: AstString("file://".to_string()),
+            })
         }
     );
 }

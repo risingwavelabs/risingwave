@@ -11,6 +11,6 @@ async fn main() {
     let opts: FrontendOpts = FrontendOpts::parse();
     log4rs::init_file(&opts.log4rs_config, Default::default()).unwrap();
 
-    let session_mgr = Arc::new(RwSessionManager::new(opts.clone()).await.unwrap());
+    let session_mgr = Arc::new(RwSessionManager::new(&opts).await.unwrap());
     pg_serve(&opts.host, session_mgr).await.unwrap();
 }

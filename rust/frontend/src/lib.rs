@@ -9,6 +9,8 @@ pub mod optimizer;
 pub mod session;
 
 extern crate log;
+#[cfg(test)]
+mod test_utils;
 
 use clap::Parser;
 #[derive(Parser, Clone)]

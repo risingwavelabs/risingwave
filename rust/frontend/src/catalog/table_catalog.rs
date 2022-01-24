@@ -44,6 +44,10 @@ impl TableCatalog {
             .map(|(_, col_catalog)| col_catalog)
     }
 
+    pub fn columns(&self) -> &[(String, ColumnCatalog)] {
+        self.column_by_name.as_slice()
+    }
+
     pub fn id(&self) -> TableId {
         self.table_id
     }

@@ -14,7 +14,8 @@ pub trait SessionManager: Send + Sync {
     fn connect(&self) -> Box<dyn Session>;
 }
 
-/// A psql connection.
+/// A psql connection. Each connection binds with a database. Switching database will need to
+/// recreate another connection.
 #[async_trait::async_trait]
 pub trait Session: Send + Sync {
     async fn run_statement(&self, sql: &str) -> Result<PgResponse, Box<dyn Error + Send + Sync>>;

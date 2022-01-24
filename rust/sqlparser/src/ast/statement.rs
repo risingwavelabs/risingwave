@@ -1,4 +1,5 @@
 use core::fmt;
+use std::collections::HashMap;
 
 use itertools::Itertools;
 #[cfg(feature = "serde")]
@@ -50,8 +51,7 @@ macro_rules! impl_fmt_display {
 //   source_name: Ident,
 //   with_properties: AstOption<WithProperties>,
 //   [Keyword::ROW, Keyword::FORMAT],
-//   row_format: String,
-//   row_schema_location: AstOption<RowSchemaLocation>,
+//   source_schema: SourceSchema,
 // });
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -60,10 +60,76 @@ pub struct CreateSourceStatement {
     // Source name.
     pub source_name: Ident,
     pub with_properties: WithProperties,
-    // Row format.
-    pub row_format: Ident,
-    // Location of schema file.
-    pub row_schema_location: AstOption<RowSchemaLocation>,
+    pub source_schema: SourceSchema,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum SourceSchema {
+    Protobuf(ProtobufSchema), // Keyword::PROTOBUF ProtobufSchema
+    Json,                     // Keyword::JSON
+}
+
+impl ParseTo for SourceSchema {
+    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+        let schema = if p.parse_keywords(&[Keyword::JSON]) {
+            SourceSchema::Json
+        } else if p.parse_keywords(&[Keyword::PROTOBUF]) {
+            impl_parse_to!(protobuf_schema: ProtobufSchema, p);
+            SourceSchema::Protobuf(protobuf_schema)
+        } else {
+            return Err(ParserError::ParserError(
+                "expected JSON | PROTOBUF after ROW FORMAT".to_string(),
+            ));
+        };
+        Ok(schema)
+    }
+}
+
+impl fmt::Display for SourceSchema {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SourceSchema::Protobuf(protobuf_schema) => write!(f, "PROTOBUF {}", protobuf_schema),
+            SourceSchema::Json => write!(f, "JSON"),
+        }
+    }
+}
+
+// sql_grammar!(ProtobufSchema {
+//   [Keyword::MESSAGE],
+//   message_name: AstString,
+//   [Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION],
+//   row_schema_location: AstString,
+// });
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct ProtobufSchema {
+    pub message_name: AstString,
+    pub row_schema_location: AstString,
+}
+
+impl ParseTo for ProtobufSchema {
+    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+        impl_parse_to!([Keyword::MESSAGE], p);
+        impl_parse_to!(message_name: AstString, p);
+        impl_parse_to!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], p);
+        impl_parse_to!(row_schema_location: AstString, p);
+        Ok(Self {
+            message_name,
+            row_schema_location,
+        })
+    }
+}
+
+impl fmt::Display for ProtobufSchema {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut v: Vec<String> = vec![];
+        impl_fmt_display!([Keyword::MESSAGE], v);
+        impl_fmt_display!(message_name, v, self);
+        impl_fmt_display!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], v);
+        impl_fmt_display!(row_schema_location, v, self);
+        v.iter().join(" ").fmt(f)
+    }
 }
 
 impl ParseTo for CreateSourceStatement {
@@ -72,14 +138,12 @@ impl ParseTo for CreateSourceStatement {
         impl_parse_to!(source_name: Ident, p);
         impl_parse_to!(with_properties: WithProperties, p);
         impl_parse_to!([Keyword::ROW, Keyword::FORMAT], p);
-        impl_parse_to!(row_format: Ident, p);
-        impl_parse_to!(row_schema_location: AstOption<RowSchemaLocation>, p);
+        impl_parse_to!(source_schema: SourceSchema, p);
         Ok(Self {
             if_not_exists,
             source_name,
             with_properties,
-            row_format,
-            row_schema_location,
+            source_schema,
         })
     }
 }
@@ -91,8 +155,7 @@ impl fmt::Display for CreateSourceStatement {
         impl_fmt_display!(source_name, v, self);
         impl_fmt_display!(with_properties, v, self);
         impl_fmt_display!([Keyword::ROW, Keyword::FORMAT], v);
-        impl_fmt_display!(row_format, v, self);
-        impl_fmt_display!(row_schema_location, v, self);
+        impl_fmt_display!(source_schema, v, self);
         v.iter().join(" ").fmt(f)
     }
 }
@@ -124,6 +187,16 @@ impl fmt::Display for WithProperties {
         } else {
             Ok(())
         }
+    }
+}
+
+impl From<WithProperties> for HashMap<String, String> {
+    fn from(props: WithProperties) -> Self {
+        props
+            .0
+            .into_iter()
+            .map(|x| (x.name.value, format!("{}", x.value)))
+            .collect()
     }
 }
 
