@@ -801,12 +801,13 @@ impl HummockManager for DefaultHummockManager {
 
         // check whether the epoch is valid
         // TODO: return error instead of panic
-        if epoch <= hummock_version.max_committed_epoch {
-            panic!(
-                "Epoch {} <= max_committed_epoch {}",
-                epoch, hummock_version.max_committed_epoch
-            );
-        }
+        // TODO: the validation is temporarily disabled until transaction is integrated
+        // if epoch <= hummock_version.max_committed_epoch {
+        //   panic!(
+        //     "Epoch {} <= max_committed_epoch {}",
+        //     epoch, hummock_version.max_committed_epoch
+        //   );
+        // }
 
         // add tables
         tables
@@ -860,7 +861,15 @@ impl HummockManager for DefaultHummockManager {
         // visible in the snapshot.
         let version_id = inner_guard.get_current_version_id().await.unwrap();
         let version = inner_guard.get_version_data(version_id).await.unwrap();
-        let max_committed_epoch = version.max_committed_epoch;
+        // TODO #2336 Because e2e checkpoint is not ready yet, we temporarily return the maximum
+        // write_batch epoch to enable uncommitted read.
+        let max_committed_epoch = version
+            .uncommitted_epochs
+            .iter()
+            .map(|u| u.epoch)
+            .max()
+            .unwrap_or(INVALID_EPOCH);
+        // let max_committed_epoch = version.max_committed_epoch;
 
         let mut context_pinned_snapshot = inner_guard
             .get_pinned_snapshot_by_context(context_id)

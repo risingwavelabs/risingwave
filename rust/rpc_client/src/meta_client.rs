@@ -5,6 +5,7 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::try_match_expand;
 use risingwave_pb::common::HostAddress;
+use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::meta::catalog_service_client::CatalogServiceClient;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::create_request::CatalogBody;
@@ -24,6 +25,7 @@ pub struct MetaClient {
     pub cluster_client: ClusterServiceClient<Channel>,
     pub heartbeat_client: HeartbeatServiceClient<Channel>,
     pub catalog_client: CatalogServiceClient<Channel>,
+    pub hummock_client: HummockManagerServiceClient<Channel>,
 }
 
 impl MetaClient {
@@ -37,11 +39,13 @@ impl MetaClient {
             .to_rw_result_with(format!("failed to connect to {}", addr))?;
         let cluster_client = ClusterServiceClient::new(channel.clone());
         let heartbeat_client = HeartbeatServiceClient::new(channel.clone());
-        let catalog_client = CatalogServiceClient::new(channel);
+        let catalog_client = CatalogServiceClient::new(channel.clone());
+        let hummock_client = HummockManagerServiceClient::new(channel);
         Ok(Self {
             cluster_client,
             heartbeat_client,
             catalog_client,
+            hummock_client,
         })
     }
 

@@ -3,9 +3,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bytes::Bytes;
 use risingwave_common::error::{Result, RwError};
+use risingwave_rpc_client::MetaClient;
 
+use crate::hummock::hummock_meta_client::RPCHummockMetaClient;
 use crate::hummock::local_version_manager::LocalVersionManager;
-use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
 use crate::hummock::version_manager::VersionManager;
 use crate::hummock::HummockStateStore;
 use crate::memory::MemoryStateStore;
@@ -112,7 +113,7 @@ macro_rules! dispatch_state_store {
 }
 
 impl StateStoreImpl {
-    pub async fn from_str(s: &str) -> Result<Self> {
+    pub async fn from_str(s: &str, meta_client: MetaClient) -> Result<Self> {
         let store = match s {
             "in_memory" | "in-memory" => StateStoreImpl::shared_in_memory_store(),
             tikv if tikv.starts_with("tikv") => {
@@ -144,9 +145,7 @@ impl StateStoreImpl {
                         },
                         Arc::new(VersionManager::new()),
                         Arc::new(LocalVersionManager::new(object_client, remote_dir)),
-                        Arc::new(MockHummockMetaClient::new(Arc::new(
-                            MockHummockMetaService::new(),
-                        ))),
+                        Arc::new(RPCHummockMetaClient::new(meta_client)),
                     )
                     .await
                     .map_err(RwError::from)?,
@@ -175,9 +174,7 @@ impl StateStoreImpl {
                         },
                         Arc::new(VersionManager::new()),
                         Arc::new(LocalVersionManager::new(s3_store, remote_dir)),
-                        Arc::new(MockHummockMetaClient::new(Arc::new(
-                            MockHummockMetaService::new(),
-                        ))),
+                        Arc::new(RPCHummockMetaClient::new(meta_client)),
                     )
                     .await
                     .map_err(RwError::from)?,

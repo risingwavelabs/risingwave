@@ -38,7 +38,10 @@ pub async fn compute_node_serve(
 ) -> (JoinHandle<()>, UnboundedSender<()>) {
     let _config = load_config(&opts); // TODO: _config will be used by streaming env & batch env.
 
-    let state_store = StateStoreImpl::from_str(&opts.state_store).await.unwrap();
+    let meta_client = MetaClient::new(&opts.meta_address).await.unwrap();
+    let state_store = StateStoreImpl::from_str(&opts.state_store, meta_client.clone())
+        .await
+        .unwrap();
     let table_mgr = Arc::new(SimpleTableManager::new(state_store.clone()));
     let task_mgr = Arc::new(TaskManager::new());
     let stream_mgr = Arc::new(StreamManager::new(addr, state_store));
@@ -78,7 +81,6 @@ pub async fn compute_node_serve(
     }
 
     // After all services booted, register self to meta service
-    let meta_client = MetaClient::new(&opts.meta_address).await.unwrap();
     let worker_id = meta_client.register(addr).await.unwrap();
     stream_env.set_worker_id(worker_id);
 
