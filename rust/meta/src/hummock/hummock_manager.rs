@@ -3,7 +3,6 @@ use std::ops::Add;
 use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
-use async_trait::async_trait;
 use bytes::Bytes;
 use itertools::Itertools;
 use prost::Message;
@@ -44,64 +43,23 @@ impl Default for Config {
     }
 }
 
-#[async_trait]
-pub trait HummockManager: Sync + Send + 'static {
-    async fn create_hummock_context(&self) -> Result<HummockContext>;
-    async fn invalidate_hummock_context(&self, context_id: HummockContextId) -> Result<()>;
-    /// Extend the context's TTL
-    async fn refresh_hummock_context(&self, context_id: HummockContextId) -> Result<HummockTTL>;
-    /// Pin a version, so that all files at this version won't be deleted.
-    async fn pin_version(
-        &self,
-        context_id: HummockContextId,
-    ) -> Result<(HummockVersionId, HummockVersion)>;
-    async fn unpin_version(
-        &self,
-        context_id: HummockContextId,
-        pinned_version_id: HummockVersionId,
-    ) -> Result<()>;
-    /// Add some SSTs to manifest
-    async fn add_tables(
-        &self,
-        context_id: HummockContextId,
-        tables: Vec<SstableInfo>,
-        epoch: HummockEpoch,
-    ) -> Result<HummockVersionId>;
-    async fn pin_snapshot(&self, context_id: HummockContextId) -> Result<HummockSnapshot>;
-    async fn unpin_snapshot(
-        &self,
-        context_id: HummockContextId,
-        hummock_snapshot: HummockSnapshot,
-    ) -> Result<()>;
-    async fn get_compact_task(&self, context_id: HummockContextId) -> Result<CompactTask>;
-    async fn report_compact_task(
-        &self,
-        context_id: HummockContextId,
-        compact_task: CompactTask,
-        task_result: bool,
-    ) -> Result<()>;
-    async fn commit_epoch(&self, context_id: HummockContextId, epoch: HummockEpoch) -> Result<()>;
-    async fn abort_epoch(&self, context_id: HummockContextId, epoch: HummockEpoch) -> Result<()>;
-    async fn get_new_table_id(&self) -> Result<HummockSSTableId>;
-}
-
 const RESERVED_HUMMOCK_CONTEXT_ID: HummockContextId = -1;
 
-pub struct DefaultHummockManager {
+pub struct HummockManager {
     env: MetaSrvEnv,
     hummock_config: Config,
     // lock order: context_expires_at before compaction
     context_expires_at: RwLock<HashMap<HummockContextId, Instant>>,
     // lock order: compaction before inner
     compaction: Mutex<CompactionInner>,
-    inner: RwLock<DefaultHummockManagerInner>,
+    inner: RwLock<HummockManagerInner>,
 }
 
-pub(super) struct DefaultHummockManagerInner {
+pub(super) struct HummockManagerInner {
     env: MetaSrvEnv,
 }
 
-/// [`DefaultHummockManagerInner`] manages hummock meta data in meta store.
+/// [`HummockManagerInner`] manages hummock meta data in meta store.
 /// Table refers to `SSTable` in `HummockManager`.
 /// `cf(hummock_context)`: `HummockContextId` -> `HummockContext`
 /// `cf(hummock_version)`: `HummockVersionId` -> `HummockVersion`
@@ -111,9 +69,9 @@ pub(super) struct DefaultHummockManagerInner {
 /// `cf(hummock_deletion)`: `HummockVersionId` -> `HummockTablesToDelete`
 /// `cf(hummock_default)`: `hummock_version_id_key` -> `HummockVersionId`
 ///                        `hummock_compact_status_key` -> `CompactStatus`
-impl DefaultHummockManagerInner {
-    fn new(env: MetaSrvEnv) -> DefaultHummockManagerInner {
-        DefaultHummockManagerInner { env }
+impl HummockManagerInner {
+    fn new(env: MetaSrvEnv) -> HummockManagerInner {
+        HummockManagerInner { env }
     }
 
     async fn pick_few_tables(&self, table_ids: &[u64]) -> Result<Vec<SstableInfo>> {
@@ -487,7 +445,7 @@ impl DefaultHummockManagerInner {
     }
 }
 
-impl DefaultHummockManager {
+impl HummockManager {
     pub async fn new(
         env: MetaSrvEnv,
         hummock_config: Config,
@@ -496,7 +454,7 @@ impl DefaultHummockManager {
             env: env.clone(),
             hummock_config,
             context_expires_at: RwLock::new(HashMap::new()),
-            inner: RwLock::new(DefaultHummockManagerInner::new(env.clone())),
+            inner: RwLock::new(HummockManagerInner::new(env.clone())),
             compaction: Mutex::new(CompactionInner::new(env.clone())),
         });
 
@@ -641,11 +599,8 @@ impl DefaultHummockManager {
         }
         trx.commit().map_err(|e| e.into())
     }
-}
 
-#[async_trait]
-impl HummockManager for DefaultHummockManager {
-    async fn create_hummock_context(&self) -> Result<HummockContext> {
+    pub async fn create_hummock_context(&self) -> Result<HummockContext> {
         let context_id = self
             .env
             .id_gen_manager_ref()
@@ -672,7 +627,7 @@ impl HummockManager for DefaultHummockManager {
         }
     }
 
-    async fn invalidate_hummock_context(&self, context_id: HummockContextId) -> Result<()> {
+    pub async fn invalidate_hummock_context(&self, context_id: HummockContextId) -> Result<()> {
         {
             let mut guard = self.context_expires_at.write().await;
             if guard.remove(&context_id) == None {
@@ -687,7 +642,10 @@ impl HummockManager for DefaultHummockManager {
         self.commit_trx(&mut transaction, context_id).await
     }
 
-    async fn refresh_hummock_context(&self, context_id: HummockContextId) -> Result<HummockTTL> {
+    pub async fn refresh_hummock_context(
+        &self,
+        context_id: HummockContextId,
+    ) -> Result<HummockTTL> {
         let mut guard = self.context_expires_at.write().await;
         match guard.get_mut(&context_id) {
             Some(_) => {
@@ -702,7 +660,7 @@ impl HummockManager for DefaultHummockManager {
         }
     }
 
-    async fn pin_version(
+    pub async fn pin_version(
         &self,
         context_id: HummockContextId,
     ) -> Result<(HummockVersionId, HummockVersion)> {
@@ -726,7 +684,7 @@ impl HummockManager for DefaultHummockManager {
         Ok((version_id, hummock_version))
     }
 
-    async fn unpin_version(
+    pub async fn unpin_version(
         &self,
         context_id: HummockContextId,
         pinned_version_id: HummockVersionId,
@@ -745,7 +703,7 @@ impl HummockManager for DefaultHummockManager {
         self.commit_trx(&mut transaction, context_id).await
     }
 
-    async fn add_tables(
+    pub async fn add_tables(
         &self,
         context_id: HummockContextId,
         tables: Vec<SstableInfo>,
@@ -854,7 +812,7 @@ impl HummockManager for DefaultHummockManager {
         Ok(new_version_id)
     }
 
-    async fn pin_snapshot(&self, context_id: HummockContextId) -> Result<HummockSnapshot> {
+    pub async fn pin_snapshot(&self, context_id: HummockContextId) -> Result<HummockSnapshot> {
         let inner_guard = self.inner.write().await;
 
         // Use the max_committed_epoch in storage as the snapshot ts so only committed changes are
@@ -890,7 +848,7 @@ impl HummockManager for DefaultHummockManager {
         })
     }
 
-    async fn unpin_snapshot(
+    pub async fn unpin_snapshot(
         &self,
         context_id: HummockContextId,
         hummock_snapshot: HummockSnapshot,
@@ -909,7 +867,7 @@ impl HummockManager for DefaultHummockManager {
         self.commit_trx(&mut transaction, context_id).await
     }
 
-    async fn get_compact_task(&self, context_id: HummockContextId) -> Result<CompactTask> {
+    pub async fn get_compact_task(&self, context_id: HummockContextId) -> Result<CompactTask> {
         let watermark = self.inner.read().await.get_snapshot_low_watermark().await?;
         let compaction_guard = self.compaction.lock().await;
         let old_compact_status = compaction_guard.load_compact_status().await?;
@@ -923,7 +881,7 @@ impl HummockManager for DefaultHummockManager {
         Ok(compact_task)
     }
 
-    async fn report_compact_task(
+    pub async fn report_compact_task(
         &self,
         context_id: HummockContextId,
         compact_task: CompactTask,
@@ -1015,7 +973,11 @@ impl HummockManager for DefaultHummockManager {
         Ok(())
     }
 
-    async fn commit_epoch(&self, context_id: HummockContextId, epoch: HummockEpoch) -> Result<()> {
+    pub async fn commit_epoch(
+        &self,
+        context_id: HummockContextId,
+        epoch: HummockEpoch,
+    ) -> Result<()> {
         let inner_guard = self.inner.write().await;
         let version_id = inner_guard.get_current_version_id().await?;
         let mut hummock_version: HummockVersion = inner_guard.get_version_data(version_id).await?;
@@ -1072,7 +1034,11 @@ impl HummockManager for DefaultHummockManager {
         }
     }
 
-    async fn abort_epoch(&self, context_id: HummockContextId, epoch: HummockEpoch) -> Result<()> {
+    pub async fn abort_epoch(
+        &self,
+        context_id: HummockContextId,
+        epoch: HummockEpoch,
+    ) -> Result<()> {
         let inner_guard = self.inner.write().await;
         let version_id = inner_guard.get_current_version_id().await?;
         let mut hummock_version: HummockVersion = inner_guard.get_version_data(version_id).await?;
@@ -1116,7 +1082,7 @@ impl HummockManager for DefaultHummockManager {
         }
     }
 
-    async fn get_new_table_id(&self) -> Result<HummockSSTableId> {
+    pub async fn get_new_table_id(&self) -> Result<HummockSSTableId> {
         // TODO id_gen_manager generates u32, we need u64
         self.env
             .id_gen_manager_ref()

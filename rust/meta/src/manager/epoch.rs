@@ -32,7 +32,7 @@ impl Epoch {
 
     pub fn next(&self) -> Epoch {
         let physical_now = Epoch::physical_now();
-        if physical_now == self.physical_time() {
+        if physical_now <= self.physical_time() {
             Epoch(self.0 + 1)
         } else {
             Epoch(physical_now << EPOCH_PHYSICAL_SHIFT_BITS)

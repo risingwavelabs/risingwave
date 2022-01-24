@@ -26,7 +26,7 @@ use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
 use crate::rpc::service::hummock_service::HummockServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::storage::{MetaStoreRef, SledMetaStore};
-use crate::stream::{DefaultStreamManager, StoredStreamMetaManager};
+use crate::stream::{StoredStreamMetaManager, StreamManager};
 
 pub enum MetaStoreBackend {
     Mem,
@@ -52,7 +52,7 @@ pub async fn rpc_serve(
     let catalog_manager_ref = Arc::new(StoredCatalogManager::new(env.clone()));
     let cluster_manager = Arc::new(StoredClusterManager::new(env.clone()));
     let (hummock_manager, _) =
-        hummock::DefaultHummockManager::new(env.clone(), hummock_config.unwrap_or_default())
+        hummock::HummockManager::new(env.clone(), hummock_config.unwrap_or_default())
             .await
             .unwrap();
 
@@ -67,7 +67,7 @@ pub async fn rpc_serve(
                                                  // thread
     }
 
-    let stream_manager_ref = Arc::new(DefaultStreamManager::new(
+    let stream_manager_ref = Arc::new(StreamManager::new(
         env.clone(),
         stream_meta_manager,
         cluster_manager.clone(),

@@ -22,8 +22,8 @@ use crate::manager::{MetaSrvEnv, SINGLE_VERSION_EPOCH};
 async fn create_hummock_manager(
     env: MetaSrvEnv,
     hummock_config: &hummock::Config,
-) -> Result<(Arc<DefaultHummockManager>, JoinHandle<Result<()>>)> {
-    let (instance, join_handle) = DefaultHummockManager::new(env, hummock_config.clone()).await?;
+) -> Result<(Arc<HummockManager>, JoinHandle<Result<()>>)> {
+    let (instance, join_handle) = HummockManager::new(env, hummock_config.clone()).await?;
     Ok((instance, join_handle))
 }
 

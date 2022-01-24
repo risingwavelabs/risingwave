@@ -7,11 +7,11 @@ use tonic::{Request, Response, Status};
 use crate::hummock::HummockManager;
 
 pub struct HummockServiceImpl {
-    hummock_manager: Arc<dyn HummockManager>,
+    hummock_manager: Arc<HummockManager>,
 }
 
 impl HummockServiceImpl {
-    pub fn new(hummock_manager: Arc<dyn HummockManager>) -> Self {
+    pub fn new(hummock_manager: Arc<HummockManager>) -> Self {
         HummockServiceImpl { hummock_manager }
     }
 }

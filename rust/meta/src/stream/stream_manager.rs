@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use itertools::Itertools;
 use log::debug;
 use risingwave_common::error::{Result, ToRwResult};
@@ -22,29 +21,15 @@ use crate::cluster::StoredClusterManager;
 use crate::manager::{Epoch, MetaSrvEnv, StreamClientsRef};
 use crate::stream::{ScheduleCategory, Scheduler, StreamMetaManagerRef};
 
-#[async_trait]
-pub trait StreamManager: Sync + Send + 'static {
-    /// [`create_materialized_view`] creates materialized view using its stream actors. Stream
-    /// graph is generated in frontend, we only handle schedule and persistence here.
-    async fn create_materialized_view(
-        &self,
-        table_id: &TableRefId,
-        actors: &mut [StreamActor],
-        source_actor_ids: Vec<u32>,
-    ) -> Result<()>;
-    /// [`drop_materialized_view`] drops materialized view.
-    async fn drop_materialized_view(&self, table_id: &TableRefId, epoch: Epoch) -> Result<()>;
-}
+pub type StreamManagerRef = Arc<StreamManager>;
 
-pub type StreamManagerRef = Arc<dyn StreamManager>;
-
-pub struct DefaultStreamManager {
+pub struct StreamManager {
     smm: StreamMetaManagerRef,
     scheduler: Scheduler,
     clients: StreamClientsRef,
 }
 
-impl DefaultStreamManager {
+impl StreamManager {
     pub fn new(
         env: MetaSrvEnv,
         smm: StreamMetaManagerRef,
@@ -98,16 +83,13 @@ impl DefaultStreamManager {
             self.update_chain_upstream_actor_ids(child, table_actor_map);
         }
     }
-}
 
-#[async_trait]
-impl StreamManager for DefaultStreamManager {
     /// Create materialized view, it works as follows:
     /// 1. schedule the actors to nodes in the cluster.
     /// 2. broadcast the actor info table.
     /// 3. notify related nodes to update and build the actors.
     /// 4. store related meta data.
-    async fn create_materialized_view(
+    pub async fn create_materialized_view(
         &self,
         table_id: &TableRefId,
         actors: &mut [StreamActor],
@@ -229,7 +211,7 @@ impl StreamManager for DefaultStreamManager {
     /// 1. notify related node local stream manger to drop actor by inject barrier.
     /// 2. wait and collect drop state from local stream manager.
     /// 3. delete actor location and node/table actors info.
-    async fn drop_materialized_view(&self, table_id: &TableRefId, epoch: Epoch) -> Result<()> {
+    pub async fn drop_materialized_view(&self, table_id: &TableRefId, epoch: Epoch) -> Result<()> {
         let table_actors = self.smm.get_table_actors(table_id).await?;
         let mut node_actors = HashMap::new();
         let mut node_map = HashMap::new();
@@ -382,7 +364,7 @@ mod tests {
     }
 
     struct MockServices {
-        stream_manager: DefaultStreamManager,
+        stream_manager: StreamManager,
         meta_manager: Arc<StoredStreamMetaManager>,
         cluster_manager: Arc<StoredClusterManager>,
         state: Arc<FakeFragmentState>,
@@ -428,11 +410,8 @@ mod tests {
                 )
                 .await?;
 
-            let stream_manager = DefaultStreamManager::new(
-                env.clone(),
-                meta_manager.clone(),
-                cluster_manager.clone(),
-            );
+            let stream_manager =
+                StreamManager::new(env.clone(), meta_manager.clone(), cluster_manager.clone());
 
             Ok(Self {
                 stream_manager,

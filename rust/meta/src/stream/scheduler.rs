@@ -69,11 +69,7 @@ impl Scheduler {
             .collect::<Vec<_>>();
 
         let mut ret_list = match self.category {
-            ScheduleCategory::Simple => {
-                // Make rust analyzer happy.
-                let ret = vec![nodes.get(0).unwrap().clone(); actors.len()];
-                ret
-            }
+            ScheduleCategory::Simple => vec![nodes.get(0).unwrap().clone(); actors.len()],
             ScheduleCategory::RoundRobin => (0..actors.len())
                 .map(|i| nodes.get(i % nodes.len()).unwrap().clone())
                 .collect::<Vec<_>>(),
