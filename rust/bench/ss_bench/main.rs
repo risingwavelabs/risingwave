@@ -167,7 +167,7 @@ async fn run_op(store: impl StateStore, opts: &Opts) {
 ////     -h, --help                                           Print help information
 ///         --key-size <KEY_SIZE>                            [default: 10]
 ///         --kvs-per-batch <KVS_PER_BATCH>                  [default: 1000]
-///         --op <OP>
+///         --operations <OP>
 ///         --store <STORE>                                  [default: in-memory]
 ///         --table-size-mb <TABLE_SIZE_MB>                  [default: 256]
 ///         --value-size <VALUE_SIZE>                        [default: 10]

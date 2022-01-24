@@ -62,15 +62,8 @@ pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
     println!(
         "
     Point get
-      latency:
-        min: {},
-        mean: {},
-        p50: {},
-        p90: {},
-        p99: {},
-        max: {},
-        std_dev: {:.3};
+      {}
       QPS: {}",
-        stat.min, stat.mean, stat.p50, stat.p90, stat.p99, stat.max, stat.std_dev, qps
+        stat, qps
     );
 }

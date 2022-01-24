@@ -1,3 +1,5 @@
+use std::fmt::{Display, Formatter};
+
 pub(crate) fn time_to_str(time_nano: u128) -> String {
     match time_nano {
         nano_sec if time_nano < 1000 => format! {"{} nano sec", nano_sec},
@@ -17,6 +19,23 @@ pub(crate) struct LatencyStat {
     pub p99: String,
     pub max: String,
     pub std_dev: f64,
+}
+
+impl Display for LatencyStat {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "latency:
+        min: {},
+        mean: {},
+        p50: {},
+        p90: {},
+        p99: {},
+        max: {},
+        std_dev: {:.3};",
+            self.min, self.mean, self.p50, self.p90, self.p99, self.max, self.std_dev
+        )
+    }
 }
 
 impl LatencyStat {
