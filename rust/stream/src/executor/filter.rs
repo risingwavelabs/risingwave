@@ -1,6 +1,7 @@
 use std::fmt::{Debug, Formatter};
 
 use async_trait::async_trait;
+use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
@@ -67,20 +68,10 @@ impl SimpleExecutor for FilterExecutor {
     }
 
     fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<Message> {
-        let (ops, columns, visibility) = chunk.into_inner();
+        let chunk = chunk.compact()?;
 
-        let data_chunk = {
-            let data_chunk_builder = DataChunk::builder().columns(columns);
-            if let Some(visibility) = visibility {
-                data_chunk_builder.visibility(visibility).build()
-            } else {
-                data_chunk_builder.build()
-            }
-        };
-
-        // FIXME: unnecessary compact.
-        // See https://github.com/singularity-data/risingwave/issues/704
-        let data_chunk = data_chunk.compact()?;
+        let (ops, columns, _visibility) = chunk.into_inner();
+        let data_chunk = DataChunk::builder().columns(columns).build();
 
         let pred_output = self.expr.eval(&data_chunk)?;
 
@@ -100,7 +91,7 @@ impl SimpleExecutor for FilterExecutor {
         assert!(matches!(&*pred_output, ArrayImpl::Bool(_)));
 
         if let ArrayImpl::Bool(bool_array) = &*pred_output {
-            for (op, res) in ops.into_iter().zip(bool_array.iter()) {
+            for (op, res) in ops.into_iter().zip_eq(bool_array.iter()) {
                 // SAFETY: ops.len() == pred_output.len() == visibility.len()
                 let res = res.unwrap_or(false);
                 match op {

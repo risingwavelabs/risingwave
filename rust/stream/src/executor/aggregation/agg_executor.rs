@@ -106,7 +106,10 @@ impl<S: StateStore> AggState<S> {
                 new_ops.push(Op::Insert);
 
                 if let Some(key) = key {
-                    for (builder, datum) in builders.iter_mut().zip(key.0.iter()) {
+                    let key_length = key.0.len();
+                    for (builder, datum) in
+                        builders.iter_mut().take(key_length).zip_eq(key.0.iter())
+                    {
                         builder.append_datum(datum)?;
                     }
                 }
@@ -126,7 +129,10 @@ impl<S: StateStore> AggState<S> {
                 new_ops.push(Op::Delete);
 
                 if let Some(key) = key {
-                    for (builder, datum) in builders.iter_mut().zip(key.0.iter()) {
+                    let key_length = key.0.len();
+                    for (builder, datum) in
+                        builders.iter_mut().take(key_length).zip_eq(key.0.iter())
+                    {
                         builder.append_datum(datum)?;
                     }
                 }
@@ -146,7 +152,10 @@ impl<S: StateStore> AggState<S> {
                 new_ops.push(Op::UpdateInsert);
 
                 if let Some(key) = key {
-                    for (builder, datum) in builders.iter_mut().zip(key.0.iter()) {
+                    let key_length = key.0.len();
+                    for (builder, datum) in
+                        builders.iter_mut().take(key_length).zip_eq(key.0.iter())
+                    {
                         builder.append_datum(datum)?;
                         builder.append_datum(datum)?;
                     }

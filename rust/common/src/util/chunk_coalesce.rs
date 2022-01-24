@@ -75,7 +75,6 @@ impl DataChunkBuilder {
     ) -> Result<(Option<SlicedDataChunk>, Option<DataChunk>)> {
         self.ensure_builders()?;
 
-        let buffer_row_idx_iter = self.buffered_count..self.batch_size;
         let mut new_return_offset = input_chunk.offset;
         match input_chunk.data_chunk.visibility() {
             Some(vis) => {
@@ -92,12 +91,15 @@ impl DataChunkBuilder {
                 }
             }
             None => {
-                (input_chunk.offset..input_chunk.data_chunk.capacity())
-                    .zip(buffer_row_idx_iter)
-                    .try_for_each(|(input_row_idx, _output_row_idx)| {
-                        new_return_offset += 1;
-                        self.append_one_row_internal(&input_chunk.data_chunk, input_row_idx)
-                    })?;
+                let num_rows_to_append = std::cmp::min(
+                    self.batch_size - self.buffered_count,
+                    input_chunk.data_chunk.capacity() - input_chunk.offset,
+                );
+                let end_offset = input_chunk.offset + num_rows_to_append;
+                (input_chunk.offset..end_offset).try_for_each(|input_row_idx| {
+                    new_return_offset += 1;
+                    self.append_one_row_internal(&input_chunk.data_chunk, input_row_idx)
+                })?;
             }
         }
 
