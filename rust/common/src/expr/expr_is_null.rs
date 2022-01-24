@@ -106,16 +106,20 @@ mod tests {
 
     #[test]
     fn test_is_null() -> Result<()> {
-        let expr =
-            IsNullExpression::new(Box::new(InputRefExpression::new(DataTypeKind::Decimal, 0)));
+        let expr = IsNullExpression::new(Box::new(InputRefExpression::new(
+            DataTypeKind::decimal_default(),
+            0,
+        )));
         do_test(Box::new(expr), vec![false, false, true]).unwrap();
         Ok(())
     }
 
     #[test]
     fn test_is_not_null() -> Result<()> {
-        let expr =
-            IsNotNullExpression::new(Box::new(InputRefExpression::new(DataTypeKind::Decimal, 0)));
+        let expr = IsNotNullExpression::new(Box::new(InputRefExpression::new(
+            DataTypeKind::decimal_default(),
+            0,
+        )));
         do_test(Box::new(expr), vec![true, true, false]).unwrap();
         Ok(())
     }

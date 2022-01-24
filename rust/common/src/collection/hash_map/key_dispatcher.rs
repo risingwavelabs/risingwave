@@ -100,14 +100,14 @@ mod tests {
 
     fn all_data_types() -> Vec<DataTypeKind> {
         vec![
-            DataTypeKind::Boolean, // 0
-            DataTypeKind::Int16,   // 1
-            DataTypeKind::Int32,   // 2
-            DataTypeKind::Int64,   // 3
-            DataTypeKind::Float32, // 4
-            DataTypeKind::Float64, // 5
-            DataTypeKind::Decimal, // 6
-            DataTypeKind::Varchar, // 7
+            DataTypeKind::Boolean,           // 0
+            DataTypeKind::Int16,             // 1
+            DataTypeKind::Int32,             // 2
+            DataTypeKind::Int64,             // 3
+            DataTypeKind::Float32,           // 4
+            DataTypeKind::Float64,           // 5
+            DataTypeKind::decimal_default(), // 6
+            DataTypeKind::Varchar,           // 7
         ]
     }
 

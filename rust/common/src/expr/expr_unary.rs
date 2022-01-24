@@ -5,7 +5,6 @@ use risingwave_pb::expr::expr_node::Type as ProstType;
 /// For expression that only accept one value as input (e.g. CAST)
 use super::template::{UnaryBytesExpression, UnaryExpression};
 use crate::array::*;
-use crate::expr::data_types::*;
 use crate::expr::expr_is_null::{IsNotNullExpression, IsNullExpression};
 use crate::expr::pg_sleep::PgSleepExpression;
 use crate::expr::template::UnaryNullableExpression;
@@ -103,6 +102,8 @@ pub fn new_unary_expr(
     return_type: DataTypeKind,
     child_expr: BoxedExpression,
 ) -> BoxedExpression {
+    use crate::expr::data_types::*;
+
     match (expr_type, return_type, child_expr.return_type()) {
         // FIXME: We can not unify char and varchar because they are different in PG while share the
         // same logical type (String type) in our system (#2414).
@@ -146,7 +147,7 @@ pub fn new_unary_expr(
                 _phantom: PhantomData,
             })
         }
-        (ProstType::Cast, DataTypeKind::Decimal, DataTypeKind::Char) => {
+        (ProstType::Cast, DataTypeKind::Decimal { .. }, DataTypeKind::Char) => {
             Box::new(UnaryExpression::<Utf8Array, DecimalArray, _> {
                 expr_ia1: child_expr,
                 return_type,
@@ -255,7 +256,7 @@ pub fn new_unary_expr(
             func: upper,
             _phantom: PhantomData,
         }),
-        (ProstType::PgSleep, _, DataTypeKind::Decimal) => {
+        (ProstType::PgSleep, _, DataTypeKind::Decimal { .. }) => {
             Box::new(PgSleepExpression::new(child_expr))
         }
         (expr, ret, child) => {

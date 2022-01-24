@@ -5,7 +5,6 @@ use risingwave_pb::expr::expr_node::Type;
 use crate::array::{Array, BoolArray, DecimalArray, I32Array, I64Array, Utf8Array};
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
-use crate::expr::data_types::*;
 use crate::expr::template::BinaryExpression;
 use crate::expr::BoxedExpression;
 use crate::types::*;
@@ -265,6 +264,8 @@ pub fn new_binary_expr(
     l: BoxedExpression,
     r: BoxedExpression,
 ) -> BoxedExpression {
+    use crate::expr::data_types::*;
+
     match expr_type {
         Type::Equal => {
             gen_binary_expr_cmp! {gen_cmp_impl, general_eq, str_eq, l, r, ret}

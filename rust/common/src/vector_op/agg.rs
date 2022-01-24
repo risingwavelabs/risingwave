@@ -108,16 +108,18 @@ fn create_agg_state_unary(
     agg_type: &AggKind,
     return_type: DataTypeKind,
 ) -> Result<Box<dyn Aggregator>> {
+    use crate::expr::data_types::*;
+
     macro_rules! gen_arms {
-    [$(($agg:ident, $fn:expr, $in_type:ident, $in_arr:ty, $ret_type:ident, $ret_arr:ty)),* $(,)?] => {
+    [$(($agg:ident, $fn:expr, $in:tt, $ret:tt)),* $(,)?] => {
       match (
         input_type,
         agg_type,
         return_type,
       ) {
         $(
-        (DataTypeKind::$in_type, AggKind::$agg, DataTypeKind::$ret_type) => {
-          Box::new(GeneralAgg::<$in_arr, _, $ret_arr>::new(
+        ($in! { type_match_pattern }, AggKind::$agg, $ret! { type_match_pattern }) => {
+          Box::new(GeneralAgg::<$in! { type_array }, _, $ret! { type_array }>::new(
             return_type,
             input_col_idx,
             $fn,
@@ -137,39 +139,39 @@ fn create_agg_state_unary(
     };
   }
     let state: Box<dyn Aggregator> = gen_arms![
-        (Count, count, Int16, I16Array, Int64, I64Array),
-        (Count, count, Int32, I32Array, Int64, I64Array),
-        (Count, count, Int64, I64Array, Int64, I64Array),
-        (Count, count, Float32, F32Array, Int64, I64Array),
-        (Count, count, Float64, F64Array, Int64, I64Array),
-        (Count, count, Decimal, DecimalArray, Int64, I64Array),
-        (Count, count_str, Char, Utf8Array, Int64, I64Array),
-        (Count, count_str, Varchar, Utf8Array, Int64, I64Array),
-        (Count, count, Boolean, BoolArray, Int64, I64Array),
-        (Sum, sum, Int16, I16Array, Int64, I64Array),
-        (Sum, sum, Int32, I32Array, Int64, I64Array),
-        (Sum, sum, Int64, I64Array, Decimal, DecimalArray),
-        (Sum, sum, Float32, F32Array, Float32, F32Array),
-        (Sum, sum, Float64, F64Array, Float64, F64Array),
-        (Sum, sum, Decimal, DecimalArray, Decimal, DecimalArray),
-        (Min, min, Int16, I16Array, Int16, I16Array),
-        (Min, min, Int32, I32Array, Int32, I32Array),
-        (Min, min, Int64, I64Array, Int64, I64Array),
-        (Min, min, Float32, F32Array, Float32, F32Array),
-        (Min, min, Float64, F64Array, Float64, F64Array),
-        (Min, min, Decimal, DecimalArray, Decimal, DecimalArray),
-        (Min, min_str, Char, Utf8Array, Char, Utf8Array),
-        (Min, min_str, Varchar, Utf8Array, Varchar, Utf8Array),
-        (Max, max, Int16, I16Array, Int16, I16Array),
-        (Max, max, Int32, I32Array, Int32, I32Array),
-        (Max, max, Int64, I64Array, Int64, I64Array),
-        (Max, max, Float32, F32Array, Float32, F32Array),
-        (Max, max, Float64, F64Array, Float64, F64Array),
-        (Max, max, Decimal, DecimalArray, Decimal, DecimalArray),
-        (Max, max_str, Char, Utf8Array, Char, Utf8Array),
-        (Max, max_str, Varchar, Utf8Array, Varchar, Utf8Array),
+        (Count, count, int16, int64),
+        (Count, count, int32, int64),
+        (Count, count, int64, int64),
+        (Count, count, float32, int64),
+        (Count, count, float64, int64),
+        (Count, count, decimal, int64),
+        (Count, count_str, char, int64),
+        (Count, count_str, varchar, int64),
+        (Count, count, boolean, int64),
+        (Sum, sum, int16, int64),
+        (Sum, sum, int32, int64),
+        (Sum, sum, int64, decimal),
+        (Sum, sum, float32, float32),
+        (Sum, sum, float64, float64),
+        (Sum, sum, decimal, decimal),
+        (Min, min, int16, int16),
+        (Min, min, int32, int32),
+        (Min, min, int64, int64),
+        (Min, min, float32, float32),
+        (Min, min, float64, float64),
+        (Min, min, decimal, decimal),
+        (Min, min_str, char, char),
+        (Min, min_str, varchar, varchar),
+        (Max, max, int16, int16),
+        (Max, max, int32, int32),
+        (Max, max, int64, int64),
+        (Max, max, float32, float32),
+        (Max, max, float64, float64),
+        (Max, max, decimal, decimal),
+        (Max, max_str, char, char),
+        (Max, max_str, varchar, varchar),
         // Global Agg
-        (Sum, sum, Int64, I64Array, Int64, I64Array),
+        (Sum, sum, int64, int64),
     ];
     Ok(state)
 }
@@ -702,7 +704,7 @@ mod tests {
     #[test]
     fn test_create_agg_state() {
         let int64_type = DataTypeKind::Int64;
-        let decimal_type = DataTypeKind::Decimal;
+        let decimal_type = DataTypeKind::decimal_default();
         let bool_type = DataTypeKind::Boolean;
         let char_type = DataTypeKind::Char;
 
@@ -758,7 +760,7 @@ mod tests {
         let input = I64Array::from_slice(&[Some(1), Some(2), Some(3)])?;
         let agg_type = AggKind::Sum;
         let input_type = DataTypeKind::Int64;
-        let return_type = DataTypeKind::Decimal;
+        let return_type = DataTypeKind::decimal_default();
         let actual = eval_agg(
             input_type,
             Arc::new(input.into()),

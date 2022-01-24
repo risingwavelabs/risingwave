@@ -92,7 +92,7 @@ pub fn create_streaming_agg_state(
     datum: Option<Datum>,
 ) -> Result<Box<dyn StreamingAggStateImpl>> {
     macro_rules! gen_unary_agg_state_match {
-    ($agg_type_expr:expr, $input_type_expr:expr, $return_type_expr:expr, $datum: expr, [$(($agg_type:ident, $input_type_kind:ident, $return_type_kind:ident, $state_impl:ty)),*$(,)?]) => {
+    ($agg_type_expr:expr, $input_type_expr:expr, $return_type_expr:expr, $datum: expr, [$(($agg_type:ident, $input_type:ident, $return_type:ident, $state_impl:ty)),*$(,)?]) => {
       match (
         $agg_type_expr,
         $input_type_expr,
@@ -100,10 +100,10 @@ pub fn create_streaming_agg_state(
         $datum,
       ) {
         $(
-          (AggKind::$agg_type, DataTypeKind::$input_type_kind, DataTypeKind::$return_type_kind, Some(datum)) => {
+          (AggKind::$agg_type, $input_type! { type_match_pattern }, $return_type! { type_match_pattern }, Some(datum)) => {
             Box::new(<$state_impl>::try_from(datum)?)
           }
-          (AggKind::$agg_type, DataTypeKind::$input_type_kind, DataTypeKind::$return_type_kind, None) => {
+          (AggKind::$agg_type, $input_type! { type_match_pattern }, $return_type! { type_match_pattern }, None) => {
             Box::new(<$state_impl>::new())
           }
         )*
@@ -124,50 +124,50 @@ pub fn create_streaming_agg_state(
                 datum,
                 [
                     // Count
-                    (Count, Int64, Int64, StreamingCountAgg::<I64Array>),
-                    (Count, Int32, Int64, StreamingCountAgg::<I32Array>),
-                    (Count, Int16, Int64, StreamingCountAgg::<I16Array>),
-                    (Count, Float64, Int64, StreamingCountAgg::<F64Array>),
-                    (Count, Float32, Int64, StreamingCountAgg::<F32Array>),
-                    (Count, Decimal, Int64, StreamingCountAgg::<DecimalArray>),
-                    (Count, Boolean, Int64, StreamingCountAgg::<BoolArray>),
-                    (Count, Char, Int64, StreamingCountAgg::<Utf8Array>),
-                    (Count, Varchar, Int64, StreamingCountAgg::<Utf8Array>),
+                    (Count, int64, int64, StreamingCountAgg::<I64Array>),
+                    (Count, int32, int64, StreamingCountAgg::<I32Array>),
+                    (Count, int16, int64, StreamingCountAgg::<I16Array>),
+                    (Count, float64, int64, StreamingCountAgg::<F64Array>),
+                    (Count, float32, int64, StreamingCountAgg::<F32Array>),
+                    (Count, decimal, int64, StreamingCountAgg::<DecimalArray>),
+                    (Count, boolean, int64, StreamingCountAgg::<BoolArray>),
+                    (Count, char, int64, StreamingCountAgg::<Utf8Array>),
+                    (Count, varchar, int64, StreamingCountAgg::<Utf8Array>),
                     // Sum
-                    (Sum, Int64, Int64, StreamingSumAgg::<I64Array, I64Array>),
+                    (Sum, int64, int64, StreamingSumAgg::<I64Array, I64Array>),
                     (
                         Sum,
-                        Int64,
-                        Decimal,
+                        int64,
+                        decimal,
                         StreamingSumAgg::<DecimalArray, I64Array>
                     ),
-                    (Sum, Int32, Int64, StreamingSumAgg::<I64Array, I32Array>),
-                    (Sum, Int16, Int64, StreamingSumAgg::<I64Array, I16Array>),
-                    (Sum, Int32, Int32, StreamingSumAgg::<I32Array, I32Array>),
-                    (Sum, Int16, Int16, StreamingSumAgg::<I16Array, I16Array>),
-                    (Sum, Float32, Float64, StreamingSumAgg::<F64Array, F32Array>),
-                    (Sum, Float32, Float32, StreamingSumAgg::<F32Array, F32Array>),
-                    (Sum, Float64, Float64, StreamingSumAgg::<F64Array, F64Array>),
+                    (Sum, int32, int64, StreamingSumAgg::<I64Array, I32Array>),
+                    (Sum, int16, int64, StreamingSumAgg::<I64Array, I16Array>),
+                    (Sum, int32, int32, StreamingSumAgg::<I32Array, I32Array>),
+                    (Sum, int16, int16, StreamingSumAgg::<I16Array, I16Array>),
+                    (Sum, float32, float64, StreamingSumAgg::<F64Array, F32Array>),
+                    (Sum, float32, float32, StreamingSumAgg::<F32Array, F32Array>),
+                    (Sum, float64, float64, StreamingSumAgg::<F64Array, F64Array>),
                     (
                         Sum,
-                        Decimal,
-                        Decimal,
+                        decimal,
+                        decimal,
                         StreamingSumAgg::<DecimalArray, DecimalArray>
                     ),
                     // Min
-                    (Min, Int16, Int16, StreamingMinAgg::<I16Array>),
-                    (Min, Int32, Int32, StreamingMinAgg::<I32Array>),
-                    (Min, Int64, Int64, StreamingMinAgg::<I64Array>),
-                    (Min, Decimal, Decimal, StreamingMinAgg::<DecimalArray>),
-                    (Min, Float32, Float32, StreamingMinAgg::<F32Array>),
-                    (Min, Float64, Float64, StreamingMinAgg::<F64Array>),
+                    (Min, int16, int16, StreamingMinAgg::<I16Array>),
+                    (Min, int32, int32, StreamingMinAgg::<I32Array>),
+                    (Min, int64, int64, StreamingMinAgg::<I64Array>),
+                    (Min, decimal, decimal, StreamingMinAgg::<DecimalArray>),
+                    (Min, float32, float32, StreamingMinAgg::<F32Array>),
+                    (Min, float64, float64, StreamingMinAgg::<F64Array>),
                     // Max
-                    (Max, Int16, Int16, StreamingMaxAgg::<I16Array>),
-                    (Max, Int32, Int32, StreamingMaxAgg::<I32Array>),
-                    (Max, Int64, Int64, StreamingMaxAgg::<I64Array>),
-                    (Max, Decimal, Decimal, StreamingMaxAgg::<DecimalArray>),
-                    (Max, Float32, Float32, StreamingMaxAgg::<F32Array>),
-                    (Max, Float64, Float64, StreamingMaxAgg::<F64Array>),
+                    (Max, int16, int16, StreamingMaxAgg::<I16Array>),
+                    (Max, int32, int32, StreamingMaxAgg::<I32Array>),
+                    (Max, int64, int64, StreamingMaxAgg::<I64Array>),
+                    (Max, decimal, decimal, StreamingMaxAgg::<DecimalArray>),
+                    (Max, float32, float32, StreamingMaxAgg::<F32Array>),
+                    (Max, float64, float64, StreamingMaxAgg::<F64Array>),
                 ]
             )
         }

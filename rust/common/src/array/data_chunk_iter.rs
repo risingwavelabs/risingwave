@@ -253,7 +253,7 @@ mod tests {
             Ty::Int64,
             Ty::Float32,
             Ty::Float64,
-            Ty::Decimal,
+            Ty::decimal_default(),
             Ty::Interval,
         ]);
         let row1 = de.deserialize_not_null(&bytes).unwrap();
@@ -284,7 +284,7 @@ mod tests {
             Ty::Int64,
             Ty::Float32,
             Ty::Float64,
-            Ty::Decimal,
+            Ty::decimal_default(),
             Ty::Interval,
         ]);
         let row1 = de.deserialize(&bytes).unwrap();

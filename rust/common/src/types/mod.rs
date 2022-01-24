@@ -37,7 +37,7 @@ pub enum DataTypeKind {
     Int64,
     Float32,
     Float64,
-    Decimal,
+    Decimal { prec: u32, scale: u32 },
     Date,
     Char,
     Varchar,
@@ -70,7 +70,10 @@ impl From<&ProstDataType> for DataTypeKind {
             TypeName::Time => DataTypeKind::Time,
             TypeName::Timestamp => DataTypeKind::Timestamp,
             TypeName::Timestampz => DataTypeKind::Timestampz,
-            TypeName::Decimal => DataTypeKind::Decimal,
+            TypeName::Decimal => DataTypeKind::Decimal {
+                prec: proto.precision,
+                scale: proto.scale,
+            },
             TypeName::Interval => DataTypeKind::Interval,
             TypeName::Symbol => DataTypeKind::Varchar,
         }
@@ -87,7 +90,9 @@ impl DataTypeKind {
             DataTypeKind::Int64 => PrimitiveArrayBuilder::<i64>::new(capacity)?.into(),
             DataTypeKind::Float32 => PrimitiveArrayBuilder::<OrderedF32>::new(capacity)?.into(),
             DataTypeKind::Float64 => PrimitiveArrayBuilder::<OrderedF64>::new(capacity)?.into(),
-            DataTypeKind::Decimal => DecimalArrayBuilder::new(capacity)?.into(),
+            DataTypeKind::Decimal { prec: _, scale: _ } => {
+                DecimalArrayBuilder::new(capacity)?.into()
+            }
             DataTypeKind::Date => PrimitiveArrayBuilder::<i32>::new(capacity)?.into(),
             DataTypeKind::Char | DataTypeKind::Varchar => Utf8ArrayBuilder::new(capacity)?.into(),
             DataTypeKind::Time => PrimitiveArrayBuilder::<i64>::new(capacity)?.into(),
@@ -111,7 +116,7 @@ impl DataTypeKind {
             DataTypeKind::Time => TypeName::Time,
             DataTypeKind::Timestamp => TypeName::Timestamp,
             DataTypeKind::Timestampz => TypeName::Timestampz,
-            DataTypeKind::Decimal => TypeName::Decimal,
+            DataTypeKind::Decimal { .. } => TypeName::Decimal,
             DataTypeKind::Interval => TypeName::Interval,
         }
     }
@@ -135,7 +140,7 @@ impl DataTypeKind {
             DataTypeKind::Int64 => DataSize::Fixed(size_of::<i64>()),
             DataTypeKind::Float32 => DataSize::Fixed(size_of::<OrderedF32>()),
             DataTypeKind::Float64 => DataSize::Fixed(size_of::<OrderedF64>()),
-            DataTypeKind::Decimal => DataSize::Fixed(16),
+            DataTypeKind::Decimal { .. } => DataSize::Fixed(16),
             DataTypeKind::Char => DataSize::Variable,
             DataTypeKind::Varchar => DataSize::Variable,
             DataTypeKind::Date => DataSize::Fixed(size_of::<i32>()),
@@ -144,6 +149,10 @@ impl DataTypeKind {
             DataTypeKind::Timestampz => DataSize::Fixed(size_of::<i64>()),
             DataTypeKind::Interval => DataSize::Variable,
         }
+    }
+
+    pub fn decimal_default() -> DataTypeKind {
+        DataTypeKind::Decimal { prec: 20, scale: 6 }
     }
 }
 
@@ -301,10 +310,11 @@ pub fn deserialize_datum_from(
     ty: &DataTypeKind,
     deserializer: &mut memcomparable::Deserializer<impl Buf>,
 ) -> memcomparable::Result<Datum> {
-    match u8::deserialize(&mut *deserializer)? {
+    let null_tag = u8::deserialize(&mut *deserializer)?;
+    match null_tag {
         0 => Ok(None),
         1 => Ok(Some(ScalarImpl::deserialize(*ty, deserializer)?)),
-        _ => Err(memcomparable::Error::InvalidTagEncoding(*ty as _)),
+        _ => Err(memcomparable::Error::InvalidTagEncoding(null_tag as _)),
     }
 }
 
@@ -560,7 +570,7 @@ impl ScalarImpl {
             Ty::Float64 => Self::Float64(f64::deserialize(de)?.into()),
             Ty::Char | Ty::Varchar => Self::Utf8(String::deserialize(de)?),
             Ty::Boolean => Self::Bool(bool::deserialize(de)?),
-            Ty::Decimal => Self::Decimal({
+            Ty::Decimal { .. } => Self::Decimal({
                 let (mantissa, scale) = de.deserialize_decimal()?;
                 Decimal::from_i128_with_scale(mantissa, scale as u32)
             }),

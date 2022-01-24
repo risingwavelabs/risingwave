@@ -318,8 +318,8 @@ mod tests {
 
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(DataTypeKind::Decimal),
-                Field::new_without_name(DataTypeKind::Decimal),
+                Field::new_without_name(DataTypeKind::decimal_default()),
+                Field::new_without_name(DataTypeKind::decimal_default()),
             ],
         };
 
@@ -358,8 +358,8 @@ mod tests {
 
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(DataTypeKind::Decimal),
-                Field::new_without_name(DataTypeKind::Decimal),
+                Field::new_without_name(DataTypeKind::decimal_default()),
+                Field::new_without_name(DataTypeKind::decimal_default()),
             ],
         };
 

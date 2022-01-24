@@ -128,7 +128,7 @@ mod tests {
     async fn test_seq_scan_executor() -> Result<()> {
         let table_id = TableId::default();
         let schema = Schema {
-            fields: vec![Field::new_without_name(DataTypeKind::Decimal)],
+            fields: vec![Field::new_without_name(DataTypeKind::decimal_default())],
         };
         let table_columns = schema
             .fields
@@ -160,7 +160,7 @@ mod tests {
         seq_scan_executor.open().await.unwrap();
 
         let fields = &seq_scan_executor.schema().fields;
-        assert_eq!(fields[0].data_type, DataTypeKind::Decimal);
+        assert_eq!(fields[0].data_type, DataTypeKind::decimal_default());
 
         seq_scan_executor.open().await.unwrap();
 

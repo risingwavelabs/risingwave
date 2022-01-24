@@ -52,7 +52,7 @@ pub(crate) fn json_parse_value(
                 |v: f64| ScalarImpl::Float64(v.into())
             )
         }
-        DataTypeKind::Decimal => match value.and_then(|v| v.as_f64()) {
+        DataTypeKind::Decimal { .. } => match value.and_then(|v| v.as_f64()) {
             Some(v) => match Decimal::from_f64(v) {
                 Some(v) => Ok(ScalarImpl::Decimal(v)),
                 None => Err(RwError::from(InternalError(

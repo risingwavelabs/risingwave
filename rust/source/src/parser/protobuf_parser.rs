@@ -199,7 +199,7 @@ impl SourceParser for ProtobufParser {
         DataTypeKind::Float64 => {
           protobuf_match_type!(value, ScalarImpl::Float64, { I8, I16, I32, U8, U16, U32, F32, F64}, OrderedF64)
         }
-        DataTypeKind::Decimal => {
+        DataTypeKind::Decimal{ .. } => {
           protobuf_match_type!(value, ScalarImpl::Decimal, { I8, I16, I32, I64, U8, U16, U32, U64}, Decimal)
         }
         DataTypeKind::Char | DataTypeKind::Varchar => {
