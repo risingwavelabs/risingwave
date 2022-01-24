@@ -18,6 +18,7 @@ use risingwave_pb::plan::JoinType as JoinTypeProto;
 use risingwave_pb::{expr, stream_plan, stream_service};
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
 use tokio::sync::mpsc::unbounded_channel;
+use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
 use crate::executor::snapshot::BatchQueryExecutor;
@@ -30,6 +31,11 @@ pub const LOCAL_OUTPUT_CHANNEL_SIZE: usize = 16;
 pub type ConsumableChannelPair = (Option<Sender<Message>>, Option<Receiver<Message>>);
 pub type ConsumableChannelVecPair = (Vec<Sender<Message>>, Vec<Receiver<Message>>);
 pub type UpDownActorIds = (u32, u32);
+
+#[cfg(test)]
+lazy_static::lazy_static! {
+  pub static ref LOCAL_TEST_ADDR: SocketAddr = "127.0.0.1:2333".parse().unwrap();
+}
 
 /// Stores the data which may be modified from the data plane.
 pub struct SharedContext {
@@ -60,6 +66,8 @@ pub struct SharedContext {
     /// thus determining whether we should setup channel or rpc connection between
     /// two actors/actors.
     pub(crate) addr: SocketAddr,
+
+    pub(crate) barrier_manager: Mutex<LocalBarrierManager>,
 }
 
 impl SharedContext {
@@ -68,11 +76,27 @@ impl SharedContext {
             channel_pool: Mutex::new(HashMap::new()),
             receivers_for_exchange_service: Mutex::new(HashMap::new()),
             addr,
+            barrier_manager: Mutex::new(LocalBarrierManager::new()),
         }
     }
+
+    #[cfg(test)]
+    pub fn for_test() -> Self {
+        Self {
+            channel_pool: Mutex::new(HashMap::new()),
+            receivers_for_exchange_service: Mutex::new(HashMap::new()),
+            addr: *LOCAL_TEST_ADDR,
+            barrier_manager: Mutex::new(LocalBarrierManager::for_test()),
+        }
+    }
+
     #[inline]
     pub fn lock_channel_pool(&self) -> MutexGuard<HashMap<UpDownActorIds, ConsumableChannelPair>> {
         self.channel_pool.lock().unwrap()
+    }
+
+    pub fn lock_barrier_manager(&self) -> MutexGuard<LocalBarrierManager> {
+        self.barrier_manager.lock().unwrap()
     }
 
     #[inline]
@@ -97,8 +121,6 @@ pub struct StreamManagerCore {
     /// Stores all actor information.
     actors: HashMap<u32, stream_plan::StreamActor>,
 
-    barrier_manager: LocalBarrierManager,
-
     /// Mock source, `actor_id = 0`.
     /// TODO: remove this
     mock_source: ConsumableChannelPair,
@@ -113,20 +135,47 @@ pub struct StreamManager {
 }
 
 impl StreamManager {
-    pub fn new(addr: SocketAddr, state_store: StateStoreImpl) -> Self {
-        StreamManager {
-            core: Mutex::new(StreamManagerCore::new(addr, state_store)),
+    fn with_core(core: StreamManagerCore) -> Self {
+        Self {
+            core: Mutex::new(core),
         }
     }
 
-    #[cfg(test)]
-    pub fn with_in_memory_store(addr: SocketAddr) -> Self {
-        Self::new(addr, StateStoreImpl::shared_in_memory_store())
+    pub fn new(addr: SocketAddr, state_store: StateStoreImpl) -> Self {
+        Self::with_core(StreamManagerCore::new(addr, state_store))
     }
 
-    pub fn send_barrier(&self, barrier: &Barrier) -> Result<()> {
-        let mut core = self.core.lock().unwrap();
-        core.barrier_manager.send_barrier(barrier)
+    #[cfg(test)]
+    pub fn for_test() -> Self {
+        Self::with_core(StreamManagerCore::for_test())
+    }
+
+    /// Broadcast a barrier to all senders. Returns a receiver which will get notified when this
+    /// barrier is finished.
+    pub fn send_barrier(
+        &self,
+        barrier: &Barrier,
+        actor_ids_to_collect: impl IntoIterator<Item = u32>,
+    ) -> Result<oneshot::Receiver<()>> {
+        let core = self.core.lock().unwrap();
+        let mut barrier_manager = core.context.lock_barrier_manager();
+        let rx = barrier_manager
+            .send_barrier(barrier, actor_ids_to_collect)?
+            .expect("no rx for local mode");
+        Ok(rx)
+    }
+
+    /// Broadcast a barrier to all senders. Returns immediately, and caller won't be notified when
+    /// this barrier is finished.
+    #[cfg(test)]
+    pub fn send_barrier_for_test(&self, barrier: &Barrier) -> Result<()> {
+        use std::iter::empty;
+
+        let core = self.core.lock().unwrap();
+        let mut barrier_manager = core.context.lock_barrier_manager();
+        assert!(barrier_manager.is_local_mode());
+        barrier_manager.send_barrier(barrier, empty())?;
+        Ok(())
     }
 
     pub fn drop_actor(&self, actors: &[u32]) -> Result<()> {
@@ -238,17 +287,28 @@ fn build_agg_call_from_prost(agg_call_proto: &expr::AggCall) -> Result<AggCall> 
 
 impl StreamManagerCore {
     fn new(addr: SocketAddr, state_store: StateStoreImpl) -> Self {
+        Self::with_store_and_context(state_store, SharedContext::new(addr))
+    }
+
+    fn with_store_and_context(state_store: StateStoreImpl, context: SharedContext) -> Self {
         let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
 
         Self {
             handles: HashMap::new(),
-            context: Arc::new(SharedContext::new(addr)),
+            context: Arc::new(context),
             actor_infos: HashMap::new(),
             actors: HashMap::new(),
-            barrier_manager: LocalBarrierManager::new(),
             mock_source: (Some(tx), Some(rx)),
             state_store,
         }
+    }
+
+    #[cfg(test)]
+    fn for_test() -> Self {
+        Self::with_store_and_context(
+            StateStoreImpl::shared_in_memory_store(),
+            SharedContext::for_test(),
+        )
     }
 
     /// Create dispatchers with downstream information registered before
@@ -344,9 +404,14 @@ impl StreamManagerCore {
         Ok(dispatcher)
     }
 
-    fn send_conf_change_barrier(&mut self, mutation: Mutation) -> Result<()> {
-        self.barrier_manager
-            .send_barrier(&Barrier::new(0).with_mutation(mutation))
+    // TODO: all barriers should be triggered by meta service
+    fn send_conf_change_barrier(&mut self, _mutation: Mutation) -> Result<()> {
+        todo!("conf change barrier should be sent from meta, mv on mv is temporially not supported")
+        // self
+        //   .context
+        //   .lock_barrier_manager()
+        //   .send_barrier(&Barrier::new(0).with_mutation(mutation), vec![])?;
+        // Ok(())
     }
 
     /// Create a chain(tree) of nodes, with given `store`.
@@ -398,7 +463,9 @@ impl StreamManagerCore {
                 let source_desc = source_manager.get_source(&source_id)?;
 
                 let (sender, barrier_receiver) = unbounded_channel();
-                self.barrier_manager.register_sender(actor_id, sender);
+                self.context
+                    .lock_barrier_manager()
+                    .register_sender(actor_id, sender);
 
                 let column_ids = node.get_column_ids().to_vec();
                 let mut fields = Vec::with_capacity(column_ids.len());
@@ -843,7 +910,7 @@ impl StreamManagerCore {
 
             trace!("build actor: {:#?}", &dispatcher);
 
-            let actor = Actor::new(dispatcher, actor_id);
+            let actor = Actor::new(dispatcher, actor_id, self.context.clone());
             self.handles.insert(actor_id, tokio::spawn(actor.run()));
         }
 

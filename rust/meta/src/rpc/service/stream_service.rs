@@ -80,16 +80,10 @@ impl StreamManagerService for StreamServiceImpl {
         request: Request<DropMaterializedViewRequest>,
     ) -> Result<Response<DropMaterializedViewResponse>, Status> {
         let req = request.into_inner();
-        // TODO: make sure only one running epoch injected. This will be achieved in checkpoint
-        //  manager(or barrier manager), only mv related node will be inject stop barrier, other
-        //  nodes should inject nothing barrier. Thus all node will be in the same stabled epoch.
-        let epoch = self
-            .epoch_generator
-            .generate()
-            .map_err(|e| e.to_grpc_status())?;
+
         match self
             .sm
-            .drop_materialized_view(req.get_table_ref_id().map_err(tonic_err)?, epoch)
+            .drop_materialized_view(req.get_table_ref_id().map_err(tonic_err)?)
             .await
         {
             Ok(()) => Ok(Response::new(DropMaterializedViewResponse { status: None })),

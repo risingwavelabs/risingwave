@@ -1,17 +1,27 @@
+use std::sync::Arc;
+
 use risingwave_common::error::Result;
 use tracing_futures::Instrument;
 
 use super::{Mutation, StreamConsumer};
+use crate::task::SharedContext;
 
 /// `Actor` is the basic execution unit in the streaming framework.
 pub struct Actor {
     consumer: Box<dyn StreamConsumer>,
+
     id: u32,
+
+    context: Arc<SharedContext>,
 }
 
 impl Actor {
-    pub fn new(consumer: Box<dyn StreamConsumer>, id: u32) -> Self {
-        Self { consumer, id }
+    pub fn new(consumer: Box<dyn StreamConsumer>, id: u32, context: Arc<SharedContext>) -> Self {
+        Self {
+            consumer,
+            id,
+            context,
+        }
     }
 
     pub async fn run(mut self) -> Result<()> {
@@ -29,12 +39,20 @@ impl Actor {
             let message = self.consumer.next().instrument(span.clone()).await;
             match message {
                 Ok(Some(barrier)) => {
+                    // collect barriers to local barrier manager
+                    self.context
+                        .lock_barrier_manager()
+                        .collect(self.id, &barrier)?;
+
+                    // then stop this actor if asked
                     if let Some(Mutation::Stop(actors)) = barrier.mutation.as_deref() {
                         if actors.contains(&self.id) {
                             debug!("actor exit: {}", self.id);
                             break;
                         }
                     }
+
+                    // tracing related work
                     if let Some(ref span_parent) = barrier.span {
                         span = tracing::trace_span!(
                             parent: span_parent,
@@ -56,9 +74,7 @@ impl Actor {
                         );
                     }
                 }
-                Ok(None) => {
-                    continue;
-                }
+                Ok(None) => {}
                 Err(err) => {
                     warn!("Actor polling failed: {:?}", err);
                     return Err(err);

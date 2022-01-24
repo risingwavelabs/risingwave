@@ -13,7 +13,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::keyspace::Segment;
 use risingwave_storage::{Keyspace, StateStore};
 
-use super::{Mutation, PkIndicesRef};
+use super::PkIndicesRef;
 use crate::executor::managed_state::top_n::variants::*;
 use crate::executor::managed_state::top_n::ManagedTopNState;
 use crate::executor::{Executor, Message, PkIndices, StreamChunk};
@@ -36,15 +36,7 @@ pub(super) async fn top_n_executor_next(executor: &mut dyn TopNExecutorBase) -> 
     let msg = executor.input().next().await?;
     let res = match msg {
         Message::Chunk(chunk) => Ok(Message::Chunk(executor.apply_chunk(chunk).await?)),
-        Message::Barrier(barrier)
-            if barrier
-                .mutation
-                .as_deref()
-                .map(Mutation::is_stop)
-                .unwrap_or(false) =>
-        {
-            Ok(Message::Barrier(barrier))
-        }
+        Message::Barrier(barrier) if barrier.is_stop_mutation() => Ok(Message::Barrier(barrier)),
         Message::Barrier(barrier) => {
             executor.flush_data(barrier.epoch).await?;
             Ok(Message::Barrier(barrier))

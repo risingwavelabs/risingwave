@@ -118,7 +118,7 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
             }
             Message::Barrier(barrier) => {
                 self.update_outputs(&barrier).await?;
-                self.dispatch_barrier(barrier).await?;
+                self.inner.dispatch_barrier(barrier).await?;
             }
         };
         Ok(())
@@ -218,14 +218,6 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
             _ => Ok(()),
         }
     }
-
-    async fn dispatch_barrier(&mut self, barrier: Barrier) -> Result<()> {
-        let outputs = self.inner.get_outputs();
-        for output in outputs {
-            output.send(Message::Barrier(barrier.clone())).await?;
-        }
-        Ok(())
-    }
 }
 
 #[async_trait]
@@ -246,6 +238,15 @@ impl<Inner: DataDispatcher + Send + Sync + 'static> StreamConsumer for DispatchE
 #[async_trait]
 pub trait DataDispatcher: Debug + 'static {
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> Result<()>;
+    async fn dispatch_barrier(&mut self, barrier: Barrier) -> Result<()> {
+        // always broadcast barrier by default
+        let outputs = self.get_outputs();
+        for output in outputs {
+            output.send(Message::Barrier(barrier.clone())).await?;
+        }
+        Ok(())
+    }
+
     fn get_outputs(&mut self) -> &mut [Box<dyn Output>];
     fn update_outputs(&mut self, outputs: Vec<Box<dyn Output>>);
     fn add_outputs(&mut self, outputs: Vec<Box<dyn Output>>);
@@ -512,38 +513,44 @@ impl DataDispatcher for SimpleDispatcher {
     }
 }
 
-/// `SenderConsumer` consumes data from input executor and send it into a channel.
-#[derive(Debug)]
-pub struct SenderConsumer {
-    input: Box<dyn Executor>,
-    channel: Box<dyn Output>,
-}
+#[cfg(test)]
+mod sender_consumer {
+    use super::*;
+    /// `SenderConsumer` consumes data from input executor and send it into a channel.
+    #[derive(Debug)]
+    pub struct SenderConsumer {
+        input: Box<dyn Executor>,
+        channel: Box<dyn Output>,
+    }
 
-impl SenderConsumer {
-    pub fn new(input: Box<dyn Executor>, channel: Box<dyn Output>) -> Self {
-        Self { input, channel }
+    impl SenderConsumer {
+        pub fn new(input: Box<dyn Executor>, channel: Box<dyn Output>) -> Self {
+            Self { input, channel }
+        }
+    }
+
+    #[async_trait]
+    impl StreamConsumer for SenderConsumer {
+        async fn next(&mut self) -> Result<Option<Barrier>> {
+            let message = self.input.next().await?;
+            let barrier = if let Message::Barrier(ref barrier) = message {
+                Some(barrier.clone())
+            } else {
+                None
+            };
+            self.channel.send(message).await?;
+            Ok(barrier)
+        }
     }
 }
 
-#[async_trait]
-impl StreamConsumer for SenderConsumer {
-    async fn next(&mut self) -> Result<Option<Barrier>> {
-        let message = self.input.next().await?;
-        let barrier = if let Message::Barrier(ref barrier) = message {
-            Some(barrier.clone())
-        } else {
-            None
-        };
-        self.channel.send(message).await?;
-        Ok(barrier)
-    }
-}
+#[cfg(test)]
+pub use sender_consumer::SenderConsumer;
 
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
     use std::hash::{BuildHasher, Hasher};
-    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::sync::{Arc, Mutex};
 
     use itertools::Itertools;
@@ -555,6 +562,7 @@ mod tests {
 
     use super::*;
     use crate::executor::ReceiverExecutor;
+    use crate::task::LOCAL_TEST_ADDR;
 
     #[derive(Debug)]
     pub struct MockOutput {
@@ -681,6 +689,26 @@ mod tests {
         }
     }
 
+    fn helper_make_local_actor(actor_id: u32) -> ActorInfo {
+        ActorInfo {
+            actor_id,
+            host: Some(HostAddress {
+                host: LOCAL_TEST_ADDR.ip().to_string(),
+                port: LOCAL_TEST_ADDR.port() as i32,
+            }),
+        }
+    }
+
+    fn helper_make_remote_actor(actor_id: u32) -> ActorInfo {
+        ActorInfo {
+            actor_id,
+            host: Some(HostAddress {
+                host: "172.1.1.2".to_string(),
+                port: 2334,
+            }),
+        }
+    }
+
     #[tokio::test]
     async fn test_configuration_change() {
         let schema = Schema { fields: vec![] };
@@ -689,8 +717,7 @@ mod tests {
         let data_sink = Arc::new(Mutex::new(vec![]));
         let output = Box::new(MockOutput::new(data_sink));
         let actor_id = 233;
-        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 2333);
-        let ctx = Arc::new(SharedContext::new(addr));
+        let ctx = Arc::new(SharedContext::for_test());
 
         let mut executor = Box::new(DispatchExecutor::new(
             input,
@@ -703,27 +730,9 @@ mod tests {
         updates1.insert(
             actor_id,
             vec![
-                ActorInfo {
-                    actor_id: 234,
-                    host: Some(HostAddress {
-                        host: String::from("127.0.0.1"),
-                        port: 2333,
-                    }),
-                },
-                ActorInfo {
-                    actor_id: 235,
-                    host: Some(HostAddress {
-                        host: String::from("127.0.0.1"),
-                        port: 2333,
-                    }),
-                },
-                ActorInfo {
-                    actor_id: 238,
-                    host: Some(HostAddress {
-                        host: String::from("172.1.1.2"),
-                        port: 2334,
-                    }),
-                },
+                helper_make_local_actor(234),
+                helper_make_local_actor(235),
+                helper_make_remote_actor(238),
             ],
         );
         add_local_channels(ctx.clone(), vec![(233, 234), (233, 235)]);
@@ -741,16 +750,7 @@ mod tests {
         }
 
         let mut updates2: HashMap<u32, Vec<ActorInfo>> = HashMap::new();
-        updates2.insert(
-            actor_id,
-            vec![ActorInfo {
-                actor_id: 235,
-                host: Some(HostAddress {
-                    host: String::from("127.0.0.1"),
-                    port: 2333,
-                }),
-            }],
-        );
+        updates2.insert(actor_id, vec![helper_make_local_actor(235)]);
         add_local_channels(ctx.clone(), vec![(233, 235)]);
         let b2 = Barrier::new(0).with_mutation(Mutation::UpdateOutputs(updates2));
 
@@ -769,22 +769,7 @@ mod tests {
         tx.send(Message::Barrier(Barrier::new(0).with_mutation(
             Mutation::AddOutput(
                 233,
-                vec![
-                    ActorInfo {
-                        actor_id: 245,
-                        host: Some(HostAddress {
-                            host: String::from("127.0.0.1"),
-                            port: 2333,
-                        }),
-                    },
-                    ActorInfo {
-                        actor_id: 246,
-                        host: Some(HostAddress {
-                            host: String::from("172.1.1.2"),
-                            port: 2334,
-                        }),
-                    },
-                ],
+                vec![helper_make_local_actor(245), helper_make_remote_actor(246)],
             ),
         )))
         .await

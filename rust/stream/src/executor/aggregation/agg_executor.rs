@@ -11,7 +11,7 @@ use static_assertions::const_assert_eq;
 
 use super::AggCall;
 use crate::executor::managed_state::aggregation::ManagedStateImpl;
-use crate::executor::{Barrier, Executor, Message, Mutation, PkDataTypes};
+use crate::executor::{Barrier, Executor, Message, PkDataTypes};
 
 /// Hash key for [`HashAggExecutor`].
 pub type HashKey = Row;
@@ -231,13 +231,7 @@ pub async fn agg_executor_next<E: AggExecutor>(executor: &mut E) -> Result<Messa
         let msg = executor.input().next().await?;
         match msg {
             Message::Chunk(chunk) => executor.apply_chunk(chunk).await?,
-            Message::Barrier(barrier)
-                if barrier
-                    .mutation
-                    .as_deref()
-                    .map(Mutation::is_stop)
-                    .unwrap_or(false) =>
-            {
+            Message::Barrier(barrier) if barrier.is_stop_mutation() => {
                 return Ok(Message::Barrier(barrier));
             }
             Message::Barrier(barrier) => {

@@ -2,7 +2,6 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use futures::{SinkExt, StreamExt};
-use risingwave_common::util::addr::get_host_port;
 use risingwave_pb::common::{ActorInfo, HostAddress};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
@@ -17,14 +16,12 @@ use super::*;
 use crate::executor::{Barrier, Message, Mutation};
 use crate::task::env::StreamTaskEnv;
 
-const PORT: i32 = 2333;
-
 fn helper_make_local_actor(actor_id: u32) -> ActorInfo {
     ActorInfo {
         actor_id,
         host: Some(HostAddress {
-            host: "127.0.0.1".into(),
-            port: PORT,
+            host: LOCAL_TEST_ADDR.ip().to_string(),
+            port: LOCAL_TEST_ADDR.port() as i32,
         }),
     }
 }
@@ -44,8 +41,7 @@ fn helper_make_local_actor(actor_id: u32) -> ActorInfo {
 /// ```
 #[tokio::test]
 async fn test_stream_proto() {
-    let socket_addr = get_host_port(&format!("127.0.0.1:{}", PORT)).unwrap();
-    let stream_manager = StreamManager::with_in_memory_store(socket_addr);
+    let stream_manager = StreamManager::for_test();
     let info = [1, 3, 7, 11, 13, 233]
         .iter()
         .cloned()

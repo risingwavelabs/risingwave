@@ -6,7 +6,6 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, DataChunk, PrimitiveArrayBuilder, Row};
 use risingwave_common::catalog::{SchemaId, TableId};
 use risingwave_common::types::DataTypeKind;
-use risingwave_common::util::addr::get_host_port;
 use risingwave_common::util::downcast_arc;
 use risingwave_pb::common::{ActorInfo, HostAddress};
 use risingwave_pb::data::data_type::TypeName;
@@ -32,7 +31,7 @@ use risingwave_storage::table::{SimpleTableManager, TableManager};
 use risingwave_storage::{Table, TableColumnDesc};
 
 use crate::executor::{Barrier, MViewTable, Mutation};
-use crate::task::{StreamManager, StreamTaskEnv};
+use crate::task::{StreamManager, StreamTaskEnv, LOCAL_TEST_ADDR};
 
 fn make_int32_type_pb() -> DataType {
     DataType {
@@ -53,7 +52,6 @@ fn make_table_ref_id(id: i32) -> TableRefId {
 
 #[tokio::test]
 async fn test_stream_mv_proto() {
-    let port = 2333;
     // Build example proto for a stream executor chain.
     // TableSource -> Project -> Materialized View
     // Select v1 from T(v1,v2).
@@ -156,22 +154,21 @@ async fn test_stream_mv_proto() {
     let append_chunk = DataChunk::builder().columns(columns).build();
 
     // Build stream actor.
-    let socket_addr = get_host_port(&format!("127.0.0.1:{}", port)).unwrap();
-    let stream_manager = StreamManager::with_in_memory_store(socket_addr);
-    let env = StreamTaskEnv::new(table_manager.clone(), source_manager, socket_addr);
+    let stream_manager = StreamManager::for_test();
+    let env = StreamTaskEnv::new(table_manager.clone(), source_manager, *LOCAL_TEST_ADDR);
 
     let actor_info_proto = ActorInfo {
         actor_id: 1,
         host: Some(HostAddress {
-            host: "127.0.0.1".into(),
-            port,
+            host: LOCAL_TEST_ADDR.ip().to_string(),
+            port: LOCAL_TEST_ADDR.port() as i32,
         }),
     };
     let actor_info_proto2 = ActorInfo {
         actor_id: 233,
         host: Some(HostAddress {
-            host: "127.0.0.1".into(),
-            port,
+            host: LOCAL_TEST_ADDR.ip().to_string(),
+            port: LOCAL_TEST_ADDR.port() as i32,
         }),
     };
     let actor_info_table = BroadcastActorInfoTableRequest {
@@ -193,7 +190,7 @@ async fn test_stream_mv_proto() {
     // then we can send the stop barrier.
     tokio::time::sleep(Duration::from_millis(500)).await;
     stream_manager
-        .send_barrier(&Barrier::new(0).with_mutation(Mutation::Stop(HashSet::from([1]))))
+        .send_barrier_for_test(&Barrier::new(0).with_mutation(Mutation::Stop(HashSet::from([1]))))
         .unwrap();
     // TODO(MrCroxx): fix this
     // FIXME: use channel when testing hummock to make sure local state has already flushed.

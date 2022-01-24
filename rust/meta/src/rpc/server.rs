@@ -2,7 +2,6 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
-use risingwave_pb::meta::barrier_service_server::BarrierServiceServer;
 use risingwave_pb::meta::catalog_service_server::CatalogServiceServer;
 use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
 use risingwave_pb::meta::epoch_service_server::EpochServiceServer;
@@ -12,7 +11,6 @@ use tokio::net::TcpListener;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 
-use super::service::barrier_service::BarrierServiceImpl;
 use crate::barrier::BarrierManager;
 use crate::catalog::StoredCatalogManager;
 use crate::cluster::StoredClusterManager;
@@ -67,15 +65,10 @@ pub async fn rpc_serve(
                                                  // thread
     }
 
-    let stream_manager_ref = Arc::new(StreamManager::new(
-        env.clone(),
-        stream_meta_manager,
-        cluster_manager.clone(),
-    ));
-
     let barrier_manager_ref = Arc::new(BarrierManager::new(
         env.clone(),
         cluster_manager.clone(),
+        stream_meta_manager.clone(),
         epoch_generator_ref,
     ));
     {
@@ -84,13 +77,19 @@ pub async fn rpc_serve(
         tokio::spawn(async move { barrier_manager_ref.run().await.unwrap() });
     }
 
+    let stream_manager_ref = Arc::new(StreamManager::new(
+        env.clone(),
+        stream_meta_manager.clone(),
+        barrier_manager_ref,
+        cluster_manager.clone(),
+    ));
+
     let epoch_srv = EpochServiceImpl::new(env.clone());
     let heartbeat_srv = HeartbeatServiceImpl::new(catalog_manager_ref.clone());
     let catalog_srv = CatalogServiceImpl::new(catalog_manager_ref, env.clone());
     let cluster_srv = ClusterServiceImpl::new(cluster_manager.clone());
     let stream_srv = StreamServiceImpl::new(stream_manager_ref, cluster_manager, env);
     let hummock_srv = HummockServiceImpl::new(hummock_manager);
-    let barrier_srv = BarrierServiceImpl::new(barrier_manager_ref);
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
     let join_handle = tokio::spawn(async move {
@@ -101,7 +100,6 @@ pub async fn rpc_serve(
             .add_service(ClusterServiceServer::new(cluster_srv))
             .add_service(StreamManagerServiceServer::new(stream_srv))
             .add_service(HummockManagerServiceServer::new(hummock_srv))
-            .add_service(BarrierServiceServer::new(barrier_srv))
             .serve_with_incoming_shutdown(
                 tokio_stream::wrappers::TcpListenerStream::new(listener),
                 async move {

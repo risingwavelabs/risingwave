@@ -6,25 +6,26 @@ use log::debug;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::common::{ActorInfo, WorkerNode};
 use risingwave_pb::data::barrier::Mutation;
-use risingwave_pb::data::{Barrier, StopMutation};
+use risingwave_pb::data::StopMutation;
 use risingwave_pb::meta::{ActorLocation, TableActors};
 use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{StreamActor, StreamNode};
 use risingwave_pb::stream_service::{
-    BroadcastActorInfoTableRequest, BuildActorsRequest, DropActorsRequest, InjectBarrierRequest,
-    UpdateActorsRequest,
+    BroadcastActorInfoTableRequest, BuildActorsRequest, DropActorsRequest, UpdateActorsRequest,
 };
 use uuid::Uuid;
 
+use crate::barrier::BarrierManagerRef;
 use crate::cluster::StoredClusterManager;
-use crate::manager::{Epoch, MetaSrvEnv, StreamClientsRef};
+use crate::manager::{MetaSrvEnv, StreamClientsRef};
 use crate::stream::{ScheduleCategory, Scheduler, StreamMetaManagerRef};
 
 pub type StreamManagerRef = Arc<StreamManager>;
 
 pub struct StreamManager {
     smm: StreamMetaManagerRef,
+    barrier_manager_ref: BarrierManagerRef,
     scheduler: Scheduler,
     clients: StreamClientsRef,
 }
@@ -33,10 +34,12 @@ impl StreamManager {
     pub fn new(
         env: MetaSrvEnv,
         smm: StreamMetaManagerRef,
+        barrier_manager_ref: BarrierManagerRef,
         cluster_manager: Arc<StoredClusterManager>,
     ) -> Self {
         Self {
             smm,
+            barrier_manager_ref,
             scheduler: Scheduler::new(ScheduleCategory::RoundRobin, cluster_manager),
             clients: env.stream_clients_ref(),
         }
@@ -211,11 +214,21 @@ impl StreamManager {
     /// 1. notify related node local stream manger to drop actor by inject barrier.
     /// 2. wait and collect drop state from local stream manager.
     /// 3. delete actor location and node/table actors info.
-    pub async fn drop_materialized_view(&self, table_id: &TableRefId, epoch: Epoch) -> Result<()> {
+    pub async fn drop_materialized_view(&self, table_id: &TableRefId) -> Result<()> {
         let table_actors = self.smm.get_table_actors(table_id).await?;
+        let actor_ids = table_actors.actor_ids;
+
+        let mutation = Mutation::Stop(StopMutation {
+            actors: actor_ids.clone(),
+        });
+        // Note: This will wait for all reachable actors in the graph finishing this barrier.
+        self.barrier_manager_ref
+            .send_barrier_and_collect(mutation)
+            .await?;
+
         let mut node_actors = HashMap::new();
         let mut node_map = HashMap::new();
-        for id in table_actors.actor_ids {
+        for id in actor_ids {
             let node = self.smm.get_actor_node(id).await?;
             node_actors
                 .entry(node.get_id())
@@ -223,23 +236,10 @@ impl StreamManager {
                 .push(id);
             node_map.insert(node.get_id(), node);
         }
+
         for (node_id, actors) in node_actors {
             let client = self.clients.get(node_map.get(&node_id).unwrap()).await?;
             let request_id = Uuid::new_v4().to_string();
-            debug!("[{}]inject stop barrier at: {}", request_id, node_id);
-            client
-                .to_owned()
-                .inject_barrier(InjectBarrierRequest {
-                    request_id: request_id.clone(),
-                    barrier: Some(Barrier {
-                        epoch: epoch.into_inner(),
-                        mutation: Some(Mutation::Stop(StopMutation {
-                            actors: actors.clone(),
-                        })),
-                    }),
-                })
-                .await
-                .to_rw_result_with(format!("failed to connect to {}", node_id))?;
 
             debug!("[{}]drop actors: {:?}", request_id, actors);
             client
@@ -253,6 +253,7 @@ impl StreamManager {
                 .to_rw_result_with(format!("failed to connect to {}", node_id))?;
         }
 
+        // FIXME: `load_all_actors` can still find these actors.
         // TODO: add drop_actors interface, including drop node_actors/actor_node/table_actors.
         self.smm.drop_table_actors(table_id).await?;
 
@@ -285,6 +286,7 @@ mod tests {
     use tonic::{Request, Response, Status};
 
     use super::*;
+    use crate::barrier::BarrierManager;
     use crate::cluster::WorkerNodeMetaManager;
     use crate::manager::MetaSrvEnv;
     use crate::stream::{StoredStreamMetaManager, StreamMetaManager};
@@ -410,8 +412,19 @@ mod tests {
                 )
                 .await?;
 
-            let stream_manager =
-                StreamManager::new(env.clone(), meta_manager.clone(), cluster_manager.clone());
+            let barrier_manager_ref = Arc::new(BarrierManager::new(
+                env.clone(),
+                cluster_manager.clone(),
+                meta_manager.clone(),
+                env.epoch_generator_ref(),
+            ));
+
+            let stream_manager = StreamManager::new(
+                env.clone(),
+                meta_manager.clone(),
+                barrier_manager_ref,
+                cluster_manager.clone(),
+            );
 
             Ok(Self {
                 stream_manager,

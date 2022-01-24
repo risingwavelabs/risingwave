@@ -102,6 +102,10 @@ impl Barrier {
             ..self
         }
     }
+
+    pub fn is_stop_mutation(&self) -> bool {
+        self.mutation.as_ref().map(|m| m.is_stop()).unwrap_or(false)
+    }
 }
 
 impl PartialEq for Barrier {
@@ -288,6 +292,6 @@ async fn simple_executor_next<E: SimpleExecutor>(executor: &mut E) -> Result<Mes
 /// `StreamConsumer` is the last step in an actor
 #[async_trait]
 pub trait StreamConsumer: Send + Debug + 'static {
-    /// Run next stream chunk. returns whether the stream is terminated
+    /// Run next stream chunk, returns whether the chunk is a barrier.
     async fn next(&mut self) -> Result<Option<Barrier>>;
 }

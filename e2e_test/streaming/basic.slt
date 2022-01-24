@@ -67,6 +67,15 @@ select sum_v1, min_v1, max_v1, v3 from mv3 order by sum_v1;
 10 1 9 1
 
 statement ok
+drop materialized view mv1
+
+statement ok
+drop materialized view mv2
+
+statement ok
+drop materialized view mv3
+
+statement ok
 drop table t1
 
 statement ok
@@ -77,12 +86,3 @@ drop table t3
 
 statement ok
 drop table t4
-
-statement ok
-drop materialized view mv1
-
-statement ok
-drop materialized view mv2
-
-statement ok
-drop materialized view mv3

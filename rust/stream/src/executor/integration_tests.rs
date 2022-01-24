@@ -1,4 +1,3 @@
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Mutex};
 
 use approx::assert_relative_eq;
@@ -80,7 +79,8 @@ async fn test_merger_sum_aggr() {
         );
         let (tx, rx) = channel(16);
         let consumer = SenderConsumer::new(Box::new(aggregator), Box::new(ChannelOutput::new(tx)));
-        let actor = Actor::new(Box::new(consumer), 0);
+        let context = SharedContext::for_test().into();
+        let actor = Actor::new(Box::new(consumer), 0, context);
         (actor, rx)
     };
 
@@ -91,10 +91,7 @@ async fn test_merger_sum_aggr() {
     let mut inputs = vec![];
     let mut outputs = vec![];
 
-    let ctx = Arc::new(SharedContext::new(SocketAddr::new(
-        IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-        2333,
-    )));
+    let ctx = Arc::new(SharedContext::for_test());
 
     // create 17 local aggregation actors
     for _ in 0..17 {
@@ -117,7 +114,8 @@ async fn test_merger_sum_aggr() {
         0,
         ctx,
     );
-    let actor = Actor::new(Box::new(dispatcher), 0);
+    let context = SharedContext::for_test().into();
+    let actor = Actor::new(Box::new(dispatcher), 0, context);
     handles.push(tokio::spawn(actor.run()));
 
     // use a merge operator to collect data from dispatchers before sending them to aggregator
@@ -154,7 +152,8 @@ async fn test_merger_sum_aggr() {
     );
     let items = Arc::new(Mutex::new(vec![]));
     let consumer = MockConsumer::new(Box::new(projection), items.clone());
-    let actor = Actor::new(Box::new(consumer), 0);
+    let context = SharedContext::for_test().into();
+    let actor = Actor::new(Box::new(consumer), 0, context);
     handles.push(tokio::spawn(actor.run()));
 
     for j in 0..11 {
@@ -350,7 +349,8 @@ async fn test_tpch_q6() {
         );
         let (tx, rx) = channel(16);
         let consumer = SenderConsumer::new(Box::new(aggregator), Box::new(ChannelOutput::new(tx)));
-        let actor = Actor::new(Box::new(consumer), 0);
+        let context = SharedContext::for_test().into();
+        let actor = Actor::new(Box::new(consumer), 0, context);
         (actor, rx)
     };
 
@@ -360,10 +360,7 @@ async fn test_tpch_q6() {
     // input and output channels of the local aggregation actors
     let mut inputs = vec![];
     let mut outputs = vec![];
-    let ctx = Arc::new(SharedContext::new(SocketAddr::new(
-        IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-        2333,
-    )));
+    let ctx = Arc::new(SharedContext::for_test());
 
     // create 10 actors
     for _ in 0..10 {
@@ -383,7 +380,8 @@ async fn test_tpch_q6() {
         0,
         ctx.clone(),
     );
-    let actor = Actor::new(Box::new(dispatcher), 0);
+    let context = SharedContext::for_test().into();
+    let actor = Actor::new(Box::new(dispatcher), 0, context);
     handles.push(tokio::spawn(actor.run()));
 
     // use a merge operator to collect data from dispatchers before sending them to aggregator
@@ -420,7 +418,8 @@ async fn test_tpch_q6() {
 
     let items = Arc::new(Mutex::new(vec![]));
     let consumer = MockConsumer::new(Box::new(projection), items.clone());
-    let actor = Actor::new(Box::new(consumer), 0);
+    let context = SharedContext::for_test().into();
+    let actor = Actor::new(Box::new(consumer), 0, context);
 
     // start merger thread
     handles.push(tokio::spawn(actor.run()));

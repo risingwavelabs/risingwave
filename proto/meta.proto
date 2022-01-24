@@ -206,16 +206,3 @@ service ClusterService {
   rpc DeleteWorkerNode(DeleteWorkerNodeRequest) returns (DeleteWorkerNodeResponse);
   rpc ListAllNodes(ListAllNodesRequest) returns (ListAllNodesResponse);
 }
-
-// Below for barrier service.
-
-message CollectBarrierRequest {
-  repeated uint32 actor_id = 1;
-  uint64 epoch = 2;
-}
-
-message CollectBarrierResponse {}
-
-service BarrierService {
-  rpc CollectBarrier(CollectBarrierRequest) returns (CollectBarrierResponse);
-}
