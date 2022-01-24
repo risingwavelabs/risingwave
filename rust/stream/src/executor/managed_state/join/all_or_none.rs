@@ -8,21 +8,23 @@ use risingwave_common::types::DataTypeKind;
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
-use super::{PkType, ValueType};
+use super::*;
 use crate::executor::managed_state::flush_status::BtreeMapFlushStatus as FlushStatus;
 
-type AllOrNoneStateIter<'a> = btree_map::Iter<'a, Row, Row>;
+type AllOrNoneStateIter<'a> = btree_map::Iter<'a, PkType, StateValueType>;
 
-type AllOrNoneStateValues<'a> = btree_map::Values<'a, Row, Row>;
+type AllOrNoneStateValues<'a> = btree_map::Values<'a, PkType, StateValueType>;
+
+type AllOrNoneStateValuesMut<'a> = btree_map::ValuesMut<'a, PkType, StateValueType>;
 
 /// Manages a `BTreeMap` in memory for all entries. When evicted, `BTreeMap` does not hold any
 /// entries.
 pub struct AllOrNoneState<S: StateStore> {
     /// The full copy of the state. If evicted, it will be empty.
-    cached: BTreeMap<PkType, ValueType>,
+    cached: BTreeMap<PkType, StateValueType>,
 
     /// The actions that will be taken on next flush
-    flush_buffer: BTreeMap<PkType, FlushStatus<ValueType>>,
+    flush_buffer: BTreeMap<PkType, FlushStatus<StateValueType>>,
 
     /// Number of items in the state including the cache and state store.
     total_count: usize,
@@ -66,13 +68,17 @@ impl<S: StateStore> AllOrNoneState<S> {
         self.total_count > 0
     }
 
+    pub fn len(&self) -> usize {
+        self.total_count
+    }
+
     /// The state is dirty means there are unflush
     pub fn is_dirty(&self) -> bool {
         !self.flush_buffer.is_empty()
     }
 
     // Insert into the cache and flush buffer.
-    pub fn insert(&mut self, value: ValueType) {
+    pub fn insert(&mut self, value: StateValueType) {
         let pk = self
             .pk_indices
             .iter()
@@ -122,7 +128,7 @@ impl<S: StateStore> AllOrNoneState<S> {
         for (raw_key, raw_value) in all_data {
             let pk_deserializer = RowDeserializer::new(self.pk_data_types.clone());
             let key = pk_deserializer.deserialize_not_null(&raw_key).unwrap();
-            let deserializer = RowDeserializer::new(self.data_types.clone());
+            let deserializer = JoinRowDeserializer::new(self.data_types.clone());
             let value = deserializer.deserialize(&raw_value).unwrap();
             self.cached.insert(key, value);
         }
@@ -140,6 +146,13 @@ impl<S: StateStore> AllOrNoneState<S> {
             self.fetch_cache().await;
         }
         self.cached.values()
+    }
+
+    pub async fn values_mut(&mut self) -> AllOrNoneStateValuesMut<'_> {
+        if self.cache_evicted {
+            self.fetch_cache().await;
+        }
+        self.cached.values_mut()
     }
 }
 
@@ -173,7 +186,8 @@ mod tests {
 
         for row_ref in data_chunk.rows() {
             let row = row_ref.into();
-            managed_state.insert(row);
+            let join_row = JoinRow { row, degree: 0 };
+            managed_state.insert(join_row);
         }
 
         for state in managed_state
@@ -183,8 +197,9 @@ mod tests {
         {
             let ((key, value), (d1, d2)) = state;
             assert_eq!(key.0[0], Some(ScalarImpl::Int64(*d1)));
-            assert_eq!(value.0[0], Some(ScalarImpl::Int64(*d1)));
-            assert_eq!(value.0[1], Some(ScalarImpl::Int64(*d2)));
+            assert_eq!(value.row[0], Some(ScalarImpl::Int64(*d1)));
+            assert_eq!(value.row[1], Some(ScalarImpl::Int64(*d2)));
+            assert_eq!(value.degree, 0);
         }
 
         // flush to write batch and write to state store

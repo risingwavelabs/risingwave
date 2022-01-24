@@ -7,11 +7,12 @@ use itertools::Itertools;
 use risingwave_pb::data::DataChunk as ProstDataChunk;
 
 use crate::array::column::Column;
-use crate::array::data_chunk_iter::{DataChunkRefIter, RowRef};
+use crate::array::data_chunk_iter::{DataChunkRefIter, Row, RowRef};
 use crate::array::{ArrayBuilderImpl, ArrayImpl};
 use crate::buffer::Bitmap;
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
+use crate::types::DataTypeKind;
 use crate::util::hash_util::finalize_hashers;
 
 pub struct DataChunkBuilder {
@@ -89,6 +90,31 @@ impl DataChunk {
             visibility: None,
             cardinality,
         }
+    }
+
+    /// Build a `DataChunk` with rows.
+    pub fn from_rows(rows: &[Row], data_types: &[DataTypeKind]) -> Result<Self> {
+        let mut array_builders = data_types
+            .iter()
+            .map(|data_type| data_type.create_array_builder(1))
+            .collect::<Result<Vec<_>>>()?;
+
+        for row in rows {
+            for (datum, builder) in row.0.iter().zip_eq(array_builders.iter_mut()) {
+                builder.append_datum(datum)?;
+            }
+        }
+
+        let new_arrays = array_builders
+            .into_iter()
+            .map(|builder| builder.finish())
+            .collect::<Result<Vec<_>>>()?;
+
+        let new_columns = new_arrays
+            .into_iter()
+            .map(|array_impl| Column::new(Arc::new(array_impl)))
+            .collect::<Vec<_>>();
+        Ok(DataChunk::new(new_columns, None))
     }
 
     /// Return the next visible row index on or after `row_idx`.

@@ -55,6 +55,14 @@ impl<'a> RowRef<'a> {
         self.0.len()
     }
 
+    /// Get `Row` by slice of index from current row ref.
+    pub fn row_by_slice(&self, indices: &[usize]) -> Row {
+        Row(indices
+            .iter()
+            .map(|idx| self.0[*idx].to_owned_datum())
+            .collect_vec())
+    }
+
     /// Get value by slice of index from current row ref.
     pub fn value_by_slice(&self, idxs: &[usize]) -> RowRef<'_> {
         let mut row_vec = vec![];
@@ -122,6 +130,7 @@ impl Row {
     pub fn new(values: Vec<Datum>) -> Self {
         Self(values)
     }
+
     /// Serialize the row into a memcomparable bytes.
     ///
     /// All values are nullable. Each value will have 1 extra byte to indicate whether it is null.

@@ -14,6 +14,7 @@ mod pg_sleep;
 mod template;
 
 use std::convert::TryFrom;
+use std::slice;
 use std::sync::Arc;
 
 pub use agg::AggKind;
@@ -21,7 +22,7 @@ pub use expr_input_ref::InputRefExpression;
 pub use expr_literal::*;
 use risingwave_pb::expr::ExprNode;
 
-use crate::array::{ArrayRef, DataChunk};
+use crate::array::{ArrayRef, DataChunk, Row};
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
 use crate::expr::build_expr_from_prost::*;
@@ -71,6 +72,26 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
             prost.get_expr_type()
         ))
         .into()),
+    }
+}
+
+/// Simply wrap a row level expression as an array level expression
+pub struct RowExpression {
+    expr: BoxedExpression,
+}
+
+impl RowExpression {
+    pub fn new(expr: BoxedExpression) -> Self {
+        Self { expr }
+    }
+
+    pub fn eval(&mut self, row: &Row, data_types: &[DataTypeKind]) -> Result<ArrayRef> {
+        let input = DataChunk::from_rows(slice::from_ref(row), data_types)?;
+        self.expr.eval(&input)
+    }
+
+    fn return_type(&self) -> DataTypeKind {
+        self.expr.return_type()
     }
 }
 

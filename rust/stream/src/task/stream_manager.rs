@@ -626,6 +626,7 @@ impl StreamManagerCore {
                 pk_indices,
                 Keyspace::shared_executor_root(store.clone(), node_id),
                 executor_id,
+                None,
               )) as Box<dyn Executor>, )*
               _ => todo!("Join type {:?} not inplemented", typ),
             }

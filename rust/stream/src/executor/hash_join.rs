@@ -4,15 +4,18 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayBuilderImpl, DataChunk, Op, Row, RowRef, StreamChunk};
+use risingwave_common::array::{
+    Array, ArrayBuilderImpl, ArrayRef, DataChunk, Op, Row, RowRef, StreamChunk,
+};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
+use risingwave_common::expr::RowExpression;
 use risingwave_common::types::{DataTypeKind, ToOwnedDatum};
 use risingwave_storage::keyspace::Segment;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::barrier_align::{AlignedMessage, BarrierAligner};
-use super::managed_state::join::{create_hash_join_state, AllOrNoneState};
+use super::managed_state::join::*;
 use super::{Executor, Message, PkIndices, PkIndicesRef};
 
 /// The `JoinType` and `SideType` are to mimic a enum, because currently
@@ -104,8 +107,6 @@ impl StreamChunkBuilder {
         Ok(())
     }
 
-    // TODO: Remove this `data_types` when we replace columns with arrays
-    // https://github.com/singularity-data/risingwave/issues/1373
     fn finish(self) -> Result<StreamChunk> {
         let new_arrays = self
             .column_builders
@@ -146,7 +147,7 @@ const fn outer_side_null(join_type: JoinTypePrimitive, side_type: SideTypePrimit
 }
 
 type HashKeyType = Row;
-type HashValueItemType = Row;
+type HashValueItemType = StateValueType;
 type HashValueType<S> = AllOrNoneState<S>;
 
 pub struct JoinParams {
@@ -201,6 +202,8 @@ pub struct HashJoinExecutor<S: StateStore, const T: JoinTypePrimitive> {
     side_l: JoinSide<S>,
     /// The parameters of the right join executor
     side_r: JoinSide<S>,
+    /// Optional non-equi join conditions
+    cond: Option<RowExpression>,
     /// Debug info for the left executor
     debug_l: String,
     /// Debug info for the right executor
@@ -257,6 +260,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<S,
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
     pub fn new(
         input_l: Box<dyn Executor>,
@@ -266,6 +270,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
         pk_indices: PkIndices,
         keyspace: Keyspace<S>,
         executor_id: u64,
+        cond: Option<RowExpression>,
     ) -> Self {
         let debug_l = format!("{:#?}", &input_l);
         let debug_r = format!("{:#?}", &input_r);
@@ -322,6 +327,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
                 keyspace: ks_r,
             },
             pk_indices,
+            cond,
             debug_l,
             debug_r,
             identity: format!("HashJoinExecutor {:X}", executor_id),
@@ -356,11 +362,41 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
         Row(key)
     }
 
-    fn hash_value_item_from_row_ref(row: &RowRef) -> HashValueItemType {
+    fn row_from_row_ref(row: &RowRef) -> Row {
         let value = (0..row.size())
             .map(|idx| row[idx].to_owned_datum())
             .collect_vec();
         Row(value)
+    }
+
+    fn pk_from_row_ref(row: &RowRef, pk_indices: &[usize]) -> Row {
+        row.row_by_slice(pk_indices)
+    }
+
+    fn row_concat(
+        row_update: &RowRef<'_>,
+        update_start_pos: usize,
+        row_matched: &Row,
+        matched_start_pos: usize,
+    ) -> Row {
+        let mut new_row = vec![None; row_update.size() + row_matched.size()];
+        for i in 0..row_update.size() {
+            new_row[i + update_start_pos] = row_update[i].to_owned_datum();
+        }
+        for i in 0..row_matched.size() {
+            new_row[i + matched_start_pos] = row_matched[i].clone();
+        }
+        Row(new_row)
+    }
+
+    fn bool_from_array_ref(array_ref: ArrayRef) -> bool {
+        let bool_array = array_ref.as_ref().as_bool();
+        bool_array.value_at(0).unwrap_or_else(|| {
+            panic!(
+                "Some thing wrong with the expression result. Bool array: {:?}",
+                bool_array
+            )
+        })
     }
 
     async fn consume_chunk_left(&mut self, chunk: StreamChunk) -> Result<Message> {
@@ -408,67 +444,177 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
 
         for (row, op) in data_chunk.rows().zip_eq(ops.iter()) {
             let key = Self::hash_key_from_row_ref(&row, &side_update.key_indices);
-            let value = Self::hash_value_item_from_row_ref(&row);
+            let value = Self::row_from_row_ref(&row);
             let matched_rows = Self::hash_eq_match(&key, &mut side_match.ht);
-            let mut null_row_updated = false;
             if let Some(matched_rows) = matched_rows {
-                match *op {
-                    Op::Insert | Op::UpdateInsert => {
-                        let entry = side_update.ht.entry(key.clone());
-                        let entry_value = match entry {
-                            Entry::Occupied(entry) => entry.into_mut(),
-                            // if outer join and not its the first to insert, meaning there must be
-                            // corresponding nulls.
-                            Entry::Vacant(entry) => {
-                                if outer_side_null(T, SIDE) {
-                                    for matched_row in matched_rows.values().await {
-                                        stream_chunk_builder
-                                            .append_row_matched(Op::UpdateDelete, matched_row)?;
+                // if there are non-equi expressions
+                if let Some(ref mut cond) = self.cond {
+                    match *op {
+                        Op::Insert | Op::UpdateInsert => {
+                            let entry_value =
+                                side_update.ht.entry(key.clone()).or_insert_with(|| {
+                                    create_hash_join_state(
+                                        key,
+                                        &side_update.keyspace.clone(),
+                                        side_update.pk_indices.clone(),
+                                        side_update.col_types.clone(),
+                                    )
+                                });
+                            let mut degree = 0;
+                            for matched_row in matched_rows.values_mut().await {
+                                // TODO(yuhao-su): We should find a better way to eval the
+                                // expression without concat
+                                // two rows.
+                                let new_row = Self::row_concat(
+                                    &row,
+                                    side_update.start_pos,
+                                    &matched_row.row,
+                                    side_match.start_pos,
+                                );
+                                let cond_match = Self::bool_from_array_ref(
+                                    cond.eval(&new_row, &self.output_data_types)?,
+                                );
+                                println!("{:?}, match: {}", new_row, cond_match);
+                                if cond_match {
+                                    degree += 1;
+                                    if matched_row.is_zero_degree() && outer_side_null(T, SIDE) {
+                                        // if the matched_row does not have any current matches
+                                        stream_chunk_builder.append_row_matched(
+                                            Op::UpdateDelete,
+                                            &matched_row.row,
+                                        )?;
                                         stream_chunk_builder.append_row(
                                             Op::UpdateInsert,
                                             &row,
-                                            matched_row,
+                                            &matched_row.row,
+                                        )?;
+                                    } else {
+                                        // concat with the matched_row and append the new row
+                                        stream_chunk_builder.append_row(
+                                            *op,
+                                            &row,
+                                            &matched_row.row,
+                                        )?;
+                                    }
+                                    matched_row.inc_degree();
+                                } else {
+                                    // not matched
+                                    if outer_side_keep(T, SIDE) {
+                                        stream_chunk_builder.append_row_update(*op, &row)?;
+                                    }
+                                }
+                            }
+                            entry_value.insert(JoinRow::new(value, degree));
+                        }
+                        Op::Delete | Op::UpdateDelete => {
+                            if let Some(v) = side_update.ht.get_mut(&key) {
+                                // remove the row by it's primary key
+                                let pk = Self::pk_from_row_ref(&row, &side_update.pk_indices);
+                                v.remove(pk);
+
+                                for matched_row in matched_rows.values_mut().await {
+                                    let new_row = Self::row_concat(
+                                        &row,
+                                        side_update.start_pos,
+                                        &matched_row.row,
+                                        side_match.start_pos,
+                                    );
+                                    let expr_match = Self::bool_from_array_ref(
+                                        cond.eval(&new_row, &self.output_data_types)?,
+                                    );
+                                    if expr_match {
+                                        if matched_row.is_zero_degree() && outer_side_null(T, SIDE)
+                                        {
+                                            // if the matched_row does not have any current matches
+                                            stream_chunk_builder.append_row(
+                                                Op::UpdateDelete,
+                                                &row,
+                                                &matched_row.row,
+                                            )?;
+                                            stream_chunk_builder.append_row_matched(
+                                                Op::UpdateInsert,
+                                                &matched_row.row,
+                                            )?;
+                                        } else {
+                                            // concat with the matched_row and append the new row
+                                            stream_chunk_builder.append_row(
+                                                *op,
+                                                &row,
+                                                &matched_row.row,
+                                            )?;
+                                        }
+                                        matched_row.dec_degree();
+                                    } else {
+                                        // not matched
+                                        if outer_side_keep(T, SIDE) {
+                                            stream_chunk_builder.append_row_update(*op, &row)?;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    };
+                } else {
+                    let mut null_row_updated = false;
+                    match *op {
+                        Op::Insert | Op::UpdateInsert => {
+                            let entry = side_update.ht.entry(key.clone());
+                            // FIXME: when state is empty for the entry, the entry is not deleted.
+                            let entry_value = match entry {
+                                Entry::Occupied(entry) => entry.into_mut(),
+                                // if outer join and not its the first to insert, meaning there must
+                                // be corresponding nulls.
+                                Entry::Vacant(entry) => {
+                                    if outer_side_null(T, SIDE) {
+                                        for matched_row in matched_rows.values().await {
+                                            stream_chunk_builder.append_row_matched(
+                                                Op::UpdateDelete,
+                                                &matched_row.row,
+                                            )?;
+                                            stream_chunk_builder.append_row(
+                                                Op::UpdateInsert,
+                                                &row,
+                                                &matched_row.row,
+                                            )?;
+                                        }
+                                        null_row_updated = true;
+                                    };
+                                    entry.insert(create_hash_join_state(
+                                        key,
+                                        &side_update.keyspace.clone(),
+                                        side_update.pk_indices.clone(),
+                                        side_update.col_types.clone(),
+                                    ))
+                                }
+                            };
+                            entry_value.insert(JoinRow::new(value, matched_rows.len() as u64));
+                        }
+                        Op::Delete | Op::UpdateDelete => {
+                            if let Some(v) = side_update.ht.get_mut(&key) {
+                                let pk = Self::pk_from_row_ref(&row, &side_update.pk_indices);
+                                v.remove(pk);
+                                if outer_side_null(T, SIDE) && v.is_empty() {
+                                    for matched_row in matched_rows.values().await {
+                                        stream_chunk_builder.append_row(
+                                            Op::UpdateDelete,
+                                            &row,
+                                            &matched_row.row,
+                                        )?;
+                                        stream_chunk_builder.append_row_matched(
+                                            Op::UpdateInsert,
+                                            &matched_row.row,
                                         )?;
                                     }
                                     null_row_updated = true;
-                                };
-                                entry.insert(create_hash_join_state(
-                                    key,
-                                    &side_update.keyspace.clone(),
-                                    side_update.pk_indices.clone(),
-                                    side_update.col_types.clone(),
-                                ))
-                            }
-                        };
-                        entry_value.insert(value);
-                    }
-                    Op::Delete | Op::UpdateDelete => {
-                        if let Some(v) = side_update.ht.get_mut(&key) {
-                            let pk = Row(side_update
-                                .pk_indices
-                                .iter()
-                                .map(|idx| row[*idx].to_owned_datum())
-                                .collect_vec());
-                            v.remove(pk);
-                            if outer_side_null(T, SIDE) && v.is_empty() {
-                                for matched_row in matched_rows.values().await {
-                                    stream_chunk_builder.append_row(
-                                        Op::UpdateDelete,
-                                        &row,
-                                        matched_row,
-                                    )?;
-                                    stream_chunk_builder
-                                        .append_row_matched(Op::UpdateInsert, matched_row)?;
                                 }
-                                null_row_updated = true;
                             }
                         }
-                    }
-                };
-                if !outer_side_null(T, SIDE) || !null_row_updated {
-                    for matched_row in matched_rows.values().await {
-                        assert_eq!(matched_row.size(), side_match.col_types.len());
-                        stream_chunk_builder.append_row(*op, &row, matched_row)?;
+                    };
+                    if !outer_side_null(T, SIDE) || !null_row_updated {
+                        for matched_row in matched_rows.values().await {
+                            assert_eq!(matched_row.size(), side_match.col_types.len());
+                            stream_chunk_builder.append_row(*op, &row, &matched_row.row)?;
+                        }
                     }
                 }
             } else {
@@ -486,15 +632,11 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
                                     side_update.col_types.clone(),
                                 )
                             })
-                            .insert(value);
+                            .insert(JoinRow::new(value, 0));
                     }
                     Op::Delete | Op::UpdateDelete => {
                         if let Some(v) = side_update.ht.get_mut(&key) {
-                            let pk = Row(side_update
-                                .pk_indices
-                                .iter()
-                                .map(|idx| row[*idx].to_owned_datum())
-                                .collect_vec());
+                            let pk = Self::pk_from_row_ref(&row, &side_update.pk_indices);
                             v.remove(pk);
                         }
                     }
@@ -518,6 +660,9 @@ mod tests {
     use risingwave_common::array::*;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::column_nonnull;
+    use risingwave_common::expr::expr_binary_nonnull::new_binary_expr;
+    use risingwave_common::expr::{InputRefExpression, RowExpression};
+    use risingwave_pb::expr::expr_node::Type;
     use risingwave_storage::memory::MemoryStateStore;
     use tokio::sync::mpsc::unbounded_channel;
 
@@ -528,6 +673,18 @@ mod tests {
 
     fn create_in_memory_keyspace() -> Keyspace<MemoryStateStore> {
         Keyspace::executor_root(MemoryStateStore::new(), 0x2333)
+    }
+
+    fn create_cond() -> Option<RowExpression> {
+        let left_expr = InputRefExpression::new(DataTypeKind::Int64, 1);
+        let right_expr = InputRefExpression::new(DataTypeKind::Int64, 3);
+        let cond = new_binary_expr(
+            Type::LessThan,
+            DataTypeKind::Boolean,
+            Box::new(left_expr),
+            Box::new(right_expr),
+        );
+        Some(RowExpression::new(cond))
     }
 
     #[tokio::test]
@@ -590,6 +747,7 @@ mod tests {
             vec![],
             keyspace,
             1,
+            None,
         );
 
         // push the 1st left chunk
@@ -733,6 +891,7 @@ mod tests {
             vec![],
             keyspace,
             1,
+            None,
         );
 
         // push the 1st left chunk
@@ -904,6 +1063,7 @@ mod tests {
             vec![],
             keyspace,
             1,
+            None,
         );
 
         // push the 1st left chunk
@@ -1067,6 +1227,7 @@ mod tests {
             vec![],
             keyspace,
             1,
+            None,
         );
 
         // push the 1st left chunk
@@ -1210,6 +1371,7 @@ mod tests {
             vec![],
             keyspace,
             1,
+            None,
         );
 
         // push the 1st left chunk
@@ -1311,6 +1473,309 @@ mod tests {
                 chunk.column(3).array_ref().as_int64().iter().collect_vec(),
                 vec![Some(10), Some(10)]
             );
+        } else {
+            unreachable!();
+        }
+    }
+
+    #[tokio::test]
+    async fn test_streaming_hash_full_outer_join_with_nonequi_condition() {
+        let chunk_l1 = StreamChunk::new(
+            vec![Op::Insert, Op::Insert, Op::Insert],
+            vec![
+                column_nonnull! { I64Array, [1, 2, 3] },
+                column_nonnull! { I64Array, [4, 5, 6] },
+            ],
+            None,
+        );
+        let chunk_l2 = StreamChunk::new(
+            vec![Op::Insert, Op::Delete],
+            vec![
+                column_nonnull! { I64Array, [3, 3] },
+                column_nonnull! { I64Array, [8, 8] },
+            ],
+            Some((vec![true, true]).try_into().unwrap()),
+        );
+        let chunk_r1 = StreamChunk::new(
+            vec![Op::Insert, Op::Insert, Op::Insert],
+            vec![
+                column_nonnull! { I64Array, [2, 4, 3] },
+                column_nonnull! { I64Array, [6, 8, 4] },
+            ],
+            None,
+        );
+        let chunk_r2 = StreamChunk::new(
+            vec![Op::Insert, Op::Delete],
+            vec![
+                column_nonnull! { I64Array, [5, 5] },
+                column_nonnull! { I64Array, [10, 10] },
+            ],
+            Some((vec![true, true]).try_into().unwrap()),
+        );
+        let schema = Schema {
+            fields: vec![
+                Field::new_without_name(DataTypeKind::Int64),
+                Field::new_without_name(DataTypeKind::Int64),
+            ],
+        };
+
+        let (mut tx_l, rx_l) = unbounded_channel();
+        let (mut tx_r, rx_r) = unbounded_channel();
+
+        let source_l = MockAsyncSource::with_pk_indices(schema.clone(), rx_l, vec![0, 1]);
+        let source_r = MockAsyncSource::with_pk_indices(schema.clone(), rx_r, vec![0, 1]);
+
+        let keyspace = create_in_memory_keyspace();
+
+        let cond = create_cond();
+
+        let params_l = JoinParams::new(vec![0]);
+        let params_r = JoinParams::new(vec![0]);
+
+        let mut hash_join = HashJoinExecutor::<_, { JoinType::FullOuter }>::new(
+            Box::new(source_l),
+            Box::new(source_r),
+            params_l,
+            params_r,
+            vec![],
+            keyspace,
+            1,
+            cond,
+        );
+
+        // push the 1st left chunk
+        MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
+        if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
+            assert_eq!(chunk.ops(), vec![Op::Insert, Op::Insert, Op::Insert]);
+            assert_eq!(chunk.columns().len(), 4);
+            assert_eq!(
+                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
+                vec![Some(1), Some(2), Some(3)]
+            );
+            assert_eq!(
+                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
+                vec![Some(4), Some(5), Some(6)]
+            );
+            assert_eq!(
+                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
+                vec![None, None, None]
+            );
+            assert_eq!(
+                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
+                vec![None, None, None]
+            );
+        } else {
+            unreachable!();
+        }
+
+        // push the 2nd left chunk
+        MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l2]);
+        if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
+            assert_eq!(chunk.ops(), vec![Op::Insert, Op::Delete]);
+            assert_eq!(chunk.columns().len(), 4);
+            assert_eq!(
+                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
+                vec![Some(3), Some(3)]
+            );
+            assert_eq!(
+                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
+                vec![Some(8), Some(8)]
+            );
+            assert_eq!(
+                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
+                vec![None, None]
+            );
+            assert_eq!(
+                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
+                vec![None, None]
+            );
+        } else {
+            unreachable!();
+        }
+
+        // push the 1st right chunk
+        MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r1]);
+        if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
+            assert_eq!(
+                chunk.ops(),
+                vec![Op::UpdateDelete, Op::UpdateInsert, Op::Insert, Op::Insert]
+            );
+            assert_eq!(chunk.columns().len(), 4);
+            assert_eq!(
+                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
+                vec![Some(2), Some(2), None, None]
+            );
+            assert_eq!(
+                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
+                vec![Some(5), Some(5), None, None]
+            );
+            assert_eq!(
+                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
+                vec![None, Some(2), Some(4), Some(3)]
+            );
+            assert_eq!(
+                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
+                vec![None, Some(6), Some(8), Some(4)]
+            );
+        } else {
+            unreachable!();
+        }
+
+        // push the 2nd right chunk
+        MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r2]);
+        if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
+            assert_eq!(chunk.ops(), vec![Op::Insert, Op::Delete]);
+            assert_eq!(chunk.columns().len(), 4);
+            assert_eq!(
+                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
+                vec![None, None]
+            );
+            assert_eq!(
+                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
+                vec![None, None]
+            );
+            assert_eq!(
+                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
+                vec![Some(5), Some(5)]
+            );
+            assert_eq!(
+                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
+                vec![Some(10), Some(10)]
+            );
+        } else {
+            unreachable!();
+        }
+    }
+
+    async fn test_streaming_hash_inner_join_with_nonequi_condition() {
+        let chunk_l1 = StreamChunk::new(
+            vec![Op::Insert, Op::Insert, Op::Insert],
+            vec![
+                column_nonnull! { I64Array, [1, 2, 3] },
+                column_nonnull! { I64Array, [4, 10, 6] },
+            ],
+            None,
+        );
+        let chunk_l2 = StreamChunk::new(
+            vec![Op::Insert, Op::Delete],
+            vec![
+                column_nonnull! { I64Array, [3, 3] },
+                column_nonnull! { I64Array, [8, 8] },
+            ],
+            Some((vec![true, true]).try_into().unwrap()),
+        );
+        let chunk_r1 = StreamChunk::new(
+            vec![Op::Insert, Op::Insert, Op::Insert],
+            vec![
+                column_nonnull! { I64Array, [2, 4, 6] },
+                column_nonnull! { I64Array, [7, 8, 9] },
+            ],
+            None,
+        );
+        let chunk_r2 = StreamChunk::new(
+            vec![Op::Insert, Op::Insert],
+            vec![
+                column_nonnull! { I64Array, [3, 6] },
+                column_nonnull! { I64Array, [10, 11] },
+            ],
+            Some((vec![true, true]).try_into().unwrap()),
+        );
+        let schema = Schema {
+            fields: vec![
+                Field::new_without_name(DataTypeKind::Int64),
+                Field::new_without_name(DataTypeKind::Int64),
+            ],
+        };
+
+        let (mut tx_l, rx_l) = unbounded_channel();
+        let (mut tx_r, rx_r) = unbounded_channel();
+
+        let source_l = MockAsyncSource::with_pk_indices(schema.clone(), rx_l, vec![0, 1]);
+        let source_r = MockAsyncSource::with_pk_indices(schema.clone(), rx_r, vec![0, 1]);
+
+        let keyspace = create_in_memory_keyspace();
+
+        let params_l = JoinParams::new(vec![0]);
+        let params_r = JoinParams::new(vec![0]);
+
+        let cond = create_cond();
+
+        let mut hash_join = HashJoinExecutor::<_, { JoinType::Inner }>::new(
+            Box::new(source_l),
+            Box::new(source_r),
+            params_l,
+            params_r,
+            vec![],
+            keyspace,
+            1,
+            cond,
+        );
+
+        // push the 1st left chunk
+        MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
+        if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
+            assert_eq!(chunk.ops().len(), 0);
+            assert_eq!(chunk.columns().len(), 4);
+            for i in 0..4 {
+                assert_eq!(
+                    chunk.column(i).array_ref().as_int64().iter().collect_vec(),
+                    vec![]
+                );
+            }
+        } else {
+            unreachable!();
+        }
+
+        // push the 2nd left chunk
+        MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l2]);
+        if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
+            assert_eq!(chunk.ops().len(), 0);
+            assert_eq!(chunk.columns().len(), 4);
+            for i in 0..4 {
+                assert_eq!(
+                    chunk.column(i).array_ref().as_int64().iter().collect_vec(),
+                    vec![]
+                );
+            }
+        } else {
+            unreachable!();
+        }
+
+        // push the 1st right chunk
+        MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r1]);
+        if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
+            assert_eq!(chunk.ops(), vec![Op::Insert]);
+            assert_eq!(chunk.columns().len(), 4);
+            assert_eq!(
+                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
+                vec![Some(2)]
+            );
+            assert_eq!(
+                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
+                vec![Some(10)]
+            );
+            assert_eq!(
+                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
+                vec![Some(2)]
+            );
+            assert_eq!(
+                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
+                vec![Some(7)]
+            );
+        } else {
+            unreachable!();
+        }
+        // push the 2nd right chunk
+        MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r2]);
+        if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
+            assert_eq!(chunk.ops(), vec![]);
+            assert_eq!(chunk.columns().len(), 4);
+            for i in 0..4 {
+                assert_eq!(
+                    chunk.column(i).array_ref().as_int64().iter().collect_vec(),
+                    vec![]
+                );
+            }
         } else {
             unreachable!();
         }
