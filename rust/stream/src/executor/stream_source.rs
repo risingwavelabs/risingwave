@@ -12,6 +12,7 @@ use risingwave_common::error::Result;
 use risingwave_source::*;
 use tokio::sync::mpsc::UnboundedReceiver;
 
+use crate::executor::stream_source_stats::{StreamSourceStats, DEFAULT_STREAM_SOURCE_STATS};
 use crate::executor::{Executor, Message, PkIndices, PkIndicesRef};
 
 /// `StreamSourceExecutor` is a streaming source from external systems such as Kafka
@@ -29,6 +30,8 @@ pub struct StreamSourceExecutor {
 
     /// Identity string
     identity: String,
+    /// Stats for source
+    stats: Arc<StreamSourceStats>,
 }
 
 impl StreamSourceExecutor {
@@ -69,6 +72,7 @@ impl StreamSourceExecutor {
             next_row_id: AtomicU64::from(0u64),
             first_execution: true,
             identity: format!("StreamSourceExecutor {:X}", executor_id),
+            stats: DEFAULT_STREAM_SOURCE_STATS.clone(),
         })
     }
 
@@ -123,7 +127,7 @@ impl Executor for StreamSourceExecutor {
             if !matches!(self.source_desc.source.as_ref(), SourceImpl::Table(_) | SourceImpl::TableV2(_)) {
               chunk = self.refill_row_id_column(chunk);
             }
-
+            self.stats.output_rows_total.inc_by(chunk.cardinality() as u64);
             Ok(Message::Chunk(chunk))
           }
           message = self.barrier_receiver.recv() => {
