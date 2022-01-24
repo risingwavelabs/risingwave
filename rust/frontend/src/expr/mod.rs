@@ -9,12 +9,15 @@ mod agg_call;
 pub use agg_call::*;
 mod type_inference;
 pub use type_inference::*;
+mod utils;
+pub use utils::*;
 
 pub type ExprType = risingwave_pb::expr::expr_node::Type;
 
 /// the trait of bound exprssions
 pub trait BoundExpr {
     fn return_type(&self) -> DataTypeKind;
+    fn bound_expr(self) -> BoundExprImpl;
 }
 #[derive(Clone, Debug)]
 pub enum BoundExprImpl {
@@ -32,5 +35,8 @@ impl BoundExpr for BoundExprImpl {
             BoundExprImpl::FunctionCall(expr) => expr.return_type(),
             BoundExprImpl::AggCall(expr) => expr.return_type(),
         }
+    }
+    fn bound_expr(self) -> BoundExprImpl {
+        self
     }
 }

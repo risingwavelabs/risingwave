@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use paste::paste;
 
 use super::super::plan_node::*;
@@ -60,7 +58,7 @@ impl BatchToDistributed {
     }
 
     fn visit_batch_seq_scan(&mut self, scan: &BatchSeqScan) -> PlanRef {
-        Rc::new(scan.clone())
+        scan.clone().into_plan_ref()
     }
 
     fn visit_batch_hash_join(&mut self, join: &BatchHashJoin) -> PlanRef {
@@ -69,14 +67,14 @@ impl BatchToDistributed {
         let left = self.visit(
             join.left(),
             join.left_order_required(),
-            Distribution::HashShard(join.get_predicate().left_keys()),
+            Distribution::HashShard(join.predicate().left_keys()),
         );
         let right = self.visit(
             join.right(),
             join.right_order_required(),
-            Distribution::HashShard(join.get_predicate().right_keys()),
+            Distribution::HashShard(join.predicate().right_keys()),
         );
-        Rc::new(join.clone_with_left_right(left, right))
+        join.clone_with_left_right(left, right).into_plan_ref()
     }
     fn visit_batch_sort_merge_join(&mut self, _join: &BatchSortMergeJoin) -> PlanRef {
         todo!()

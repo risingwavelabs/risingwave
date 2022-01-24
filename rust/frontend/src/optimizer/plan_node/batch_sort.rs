@@ -2,54 +2,54 @@ use std::fmt;
 
 use risingwave_common::catalog::Schema;
 
-use super::{PlanRef, PlanTreeNodeUnary};
+use super::{IntoPlanRef, PlanRef, PlanTreeNodeUnary};
 use crate::optimizer::property::{Distribution, Order, WithDistribution, WithOrder, WithSchema};
 
 #[derive(Debug, Clone)]
 pub struct BatchSort {
-  order: Order,
-  input: PlanRef,
-  schema: Schema,
-  dist: Distribution,
+    order: Order,
+    input: PlanRef,
+    schema: Schema,
+    dist: Distribution,
 }
 impl BatchSort {
-  pub fn new(input: PlanRef, order: Order) -> Self {
-    let schema = input.schema().clone();
-    let dist = input.distribution();
-    BatchSort {
-      input,
-      order,
-      schema,
-      dist,
+    pub fn new(input: PlanRef, order: Order) -> Self {
+        let schema = input.schema().clone();
+        let dist = input.distribution();
+        BatchSort {
+            input,
+            order,
+            schema,
+            dist,
+        }
     }
-  }
 }
 impl fmt::Display for BatchSort {
-  fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
-    todo!()
-  }
+    fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
+        todo!()
+    }
 }
 impl PlanTreeNodeUnary for BatchSort {
-  fn input(&self) -> PlanRef {
-    self.input.clone()
-  }
-  fn clone_with_input(&self, input: PlanRef) -> Self {
-    Self::new(input, self.order.clone())
-  }
+    fn input(&self) -> PlanRef {
+        self.input.clone()
+    }
+    fn clone_with_input(&self, input: PlanRef) -> Self {
+        Self::new(input, self.order.clone())
+    }
 }
 impl_plan_tree_node_for_unary! {BatchSort}
 impl WithOrder for BatchSort {
-  fn order(&self) -> Order {
-    self.order.clone()
-  }
+    fn order(&self) -> Order {
+        self.order.clone()
+    }
 }
 impl WithDistribution for BatchSort {
-  fn distribution(&self) -> Distribution {
-    self.dist.clone()
-  }
+    fn distribution(&self) -> Distribution {
+        self.dist.clone()
+    }
 }
 impl WithSchema for BatchSort {
-  fn schema(&self) -> &Schema {
-    &self.schema
-  }
+    fn schema(&self) -> &Schema {
+        &self.schema
+    }
 }

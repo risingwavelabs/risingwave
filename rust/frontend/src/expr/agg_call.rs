@@ -32,4 +32,7 @@ impl BoundExpr for BoundAggCall {
     fn return_type(&self) -> DataTypeKind {
         self.return_type
     }
+    fn bound_expr(self) -> BoundExprImpl {
+        BoundExprImpl::AggCall(Box::new(self))
+    }
 }

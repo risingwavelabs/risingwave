@@ -1,6 +1,6 @@
 use risingwave_common::types::{DataTypeKind, Datum};
 
-use super::BoundExpr;
+use super::{BoundExpr, BoundExprImpl};
 use crate::expr::ExprType;
 #[derive(Clone, Debug)]
 pub struct BoundLiteral {
@@ -19,5 +19,8 @@ impl BoundLiteral {
 impl BoundExpr for BoundLiteral {
     fn return_type(&self) -> DataTypeKind {
         self.data_type
+    }
+    fn bound_expr(self) -> BoundExprImpl {
+        BoundExprImpl::Literal(Box::new(self))
     }
 }

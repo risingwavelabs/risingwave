@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use super::super::plan_node::*;
 use crate::optimizer::property::{Convention, Order};
 use crate::optimizer::PlanRef;
@@ -22,12 +20,10 @@ impl Distribution {
     }
     fn enforce(&self, plan: PlanRef, required_order: &Order) -> PlanRef {
         match plan.convention() {
-            Convention::Batch => Rc::new(BatchExchange::new(
-                plan,
-                required_order.clone(),
-                self.clone(),
-            )),
-            Convention::Stream => Rc::new(StreamExchange::new(plan, self.clone())),
+            Convention::Batch => {
+                BatchExchange::new(plan, required_order.clone(), self.clone()).into_plan_ref()
+            }
+            Convention::Stream => StreamExchange::new(plan, self.clone()).into_plan_ref(),
             _ => unreachable!(),
         }
     }

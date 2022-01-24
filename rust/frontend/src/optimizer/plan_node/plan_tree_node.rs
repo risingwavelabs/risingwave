@@ -113,7 +113,7 @@ macro_rules! impl_plan_tree_node_for_leaf {
                 inputs: &[crate::optimizer::PlanRef],
             ) -> crate::optimizer::PlanRef {
                 assert_eq!(inputs.len(), 0);
-                std::rc::Rc::new(self.clone())
+                self.clone().into_plan_ref()
             }
 
             fn inputs_distribution_required(
@@ -147,7 +147,7 @@ macro_rules! impl_plan_tree_node_for_unary {
                 inputs: &[crate::optimizer::PlanRef],
             ) -> crate::optimizer::PlanRef {
                 assert_eq!(inputs.len(), 1);
-                std::rc::Rc::new(self.clone_with_input(inputs[0].clone()))
+                self.clone_with_input(inputs[0].clone()).into_plan_ref()
             }
 
             fn inputs_distribution_required(
@@ -179,7 +179,8 @@ macro_rules! impl_plan_tree_node_for_binary {
                 inputs: &[crate::optimizer::PlanRef],
             ) -> crate::optimizer::PlanRef {
                 assert_eq!(inputs.len(), 2);
-                std::rc::Rc::new(self.clone_with_left_right(inputs[0].clone(), inputs[1].clone()))
+                self.clone_with_left_right(inputs[0].clone(), inputs[1].clone())
+                    .into_plan_ref()
             }
             fn inputs_distribution_required(
                 &self,

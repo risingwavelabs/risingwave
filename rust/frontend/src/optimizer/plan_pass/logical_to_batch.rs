@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use paste::paste;
 
 use super::super::plan_node::*;
@@ -51,34 +49,45 @@ impl LogicalToBatchPass {
 
 impl LogicalToBatchPass {
     for_logical_plan_nodes! {def_to_batch_visit_func}
+    fn visit_logical_agg(&mut self, _valuse: &LogicalAgg) -> PlanRef {
+        todo!()
+    }
+
+    fn visit_logical_values(&mut self, _valuse: &LogicalValues) -> PlanRef {
+        todo!()
+    }
+
+    fn visit_logical_filter(&mut self, _filter: &LogicalFilter) -> PlanRef {
+        todo!()
+    }
 
     fn visit_logical_project(&mut self, plan: &LogicalProject) -> PlanRef {
         let new_input = self.visit(plan.input(), Order::any());
         let new_logical = plan.clone_with_input(new_input);
-        Rc::new(BatchProject::new(new_logical))
+        BatchProject::new(new_logical).into_plan_ref()
     }
 
     fn visit_logical_scan(&mut self, _plan: &LogicalScan) -> PlanRef {
-        Rc::new(BatchSeqScan {})
+        BatchSeqScan {}.into_plan_ref()
     }
 
     fn visit_logical_join(&mut self, plan: &LogicalJoin) -> PlanRef {
-        if plan.get_predicate().is_equal_cond() {
+        if plan.predicate().is_equal_cond() {
             let new_left = self.visit(plan.left(), Order::any());
             let sort_join_required_order =
-                BatchSortMergeJoin::left_required_order(plan.get_predicate());
+                BatchSortMergeJoin::left_required_order(plan.predicate());
             if new_left.order().satisfies(&sort_join_required_order) {
                 let right_required_order = BatchSortMergeJoin::right_required_order_from_left_order(
                     new_left.order(),
-                    plan.get_predicate(),
+                    plan.predicate(),
                 );
                 let new_right = self.visit(plan.left(), right_required_order);
                 let new_logical = plan.clone_with_left_right(new_left, new_right);
-                return Rc::new(BatchSortMergeJoin::new(new_logical));
+                return BatchSortMergeJoin::new(new_logical).into_plan_ref();
             } else {
                 let new_right = self.visit(plan.left(), Order::any());
                 let new_logical = plan.clone_with_left_right(new_left, new_right);
-                return Rc::new(BatchHashJoin::new(new_logical));
+                return BatchHashJoin::new(new_logical).into_plan_ref();
             }
         }
         todo!(); // nestedLoopJoin

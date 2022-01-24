@@ -42,4 +42,7 @@ impl BoundExpr for BoundFunctionCall {
     fn return_type(&self) -> DataTypeKind {
         self.return_type
     }
+    fn bound_expr(self) -> BoundExprImpl {
+        BoundExprImpl::FunctionCall(Box::new(self))
+    }
 }

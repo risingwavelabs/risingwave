@@ -1,6 +1,6 @@
 use risingwave_common::types::DataTypeKind;
 
-use super::BoundExpr;
+use super::{BoundExpr, BoundExprImpl};
 use crate::expr::ExprType;
 #[derive(Clone)]
 pub struct BoundInputRef {
@@ -18,6 +18,9 @@ impl BoundInputRef {
 impl BoundExpr for BoundInputRef {
     fn return_type(&self) -> DataTypeKind {
         self.data_type
+    }
+    fn bound_expr(self) -> BoundExprImpl {
+        BoundExprImpl::InputRef(Box::new(self))
     }
 }
 impl std::fmt::Debug for BoundInputRef {

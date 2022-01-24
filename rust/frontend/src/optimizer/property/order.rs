@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use super::super::plan_node::*;
 use super::Convention;
 use crate::optimizer::PlanRef;
@@ -34,7 +32,7 @@ impl Order {
     }
     pub fn enforce(&self, plan: PlanRef) -> PlanRef {
         assert_eq!(plan.convention(), Convention::Batch);
-        Rc::new(BatchSort::new(plan, self.clone()))
+        BatchSort::new(plan, self.clone()).into_plan_ref()
     }
     pub fn satisfies(&self, _other: &Order) -> bool {
         todo!()

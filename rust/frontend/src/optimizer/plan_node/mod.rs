@@ -36,6 +36,8 @@ pub trait PlanNode:
     + WithOrder
     + WithDistribution
     + WithSchema
+    + ColPrunable
+    + IntoPlanRef
 {
     fn node_type(&self) -> PlanNodeType;
 }
@@ -57,8 +59,57 @@ impl dyn PlanNode {
 #[macro_use]
 mod plan_tree_node;
 pub use plan_tree_node::*;
+mod col_pruning;
+pub use col_pruning::*;
 mod join_predicate;
 pub use join_predicate::*;
+
+// SOME Intellisense DONT UNDERSTAND THIS.
+//
+// /// Define module for each plan node.
+// macro_rules! def_mod_and_use {
+//   ([], $( { $convention:ident, $name:ident }),*) => {
+//       $(paste! {
+//           mod [<$convention:snake _ $name:snake>];
+//           pub use [<$convention:snake _ $name:snake>]::[<$convention $name>];
+//       })*
+//   }
+// }
+// for_all_plan_nodes! {def_mod_and_use }
+
+mod batch_exchange;
+mod batch_hash_join;
+mod batch_project;
+mod batch_seq_scan;
+mod batch_sort;
+mod batch_sort_merge_join;
+mod logical_agg;
+mod logical_filter;
+mod logical_join;
+mod logical_project;
+mod logical_scan;
+mod logical_values;
+mod stream_exchange;
+mod stream_hash_join;
+mod stream_project;
+mod stream_table_source;
+pub use batch_exchange::BatchExchange;
+pub use batch_hash_join::BatchHashJoin;
+pub use batch_project::BatchProject;
+pub use batch_seq_scan::BatchSeqScan;
+pub use batch_sort::BatchSort;
+pub use batch_sort_merge_join::BatchSortMergeJoin;
+pub use logical_agg::LogicalAgg;
+pub use logical_filter::LogicalFilter;
+pub use logical_join::LogicalJoin;
+pub use logical_project::LogicalProject;
+pub use logical_scan::LogicalScan;
+pub use logical_values::LogicalValues;
+pub use stream_exchange::StreamExchange;
+pub use stream_hash_join::StreamHashJoin;
+pub use stream_project::StreamProject;
+pub use stream_table_source::StreamTableSource;
+
 /// [`for_all_plan_nodes`] includes all plan nodes. If you added a new plan node
 /// inside the project, be sure to add here and in its conventions like [`for_logical_plan_nodes`]
 ///
@@ -76,9 +127,12 @@ macro_rules! for_all_plan_nodes {
     ($macro:tt $(, $x:tt)*) => {
       $macro! {
           [$($x),*]
+          ,{ Logical, Agg}
+          ,{ Logical, Filter}
           ,{ Logical, Project}
           ,{ Logical, Scan}
           ,{ Logical, Join}
+          ,{ Logical, Values}
           // ,{ Logical, Sort} we don't need a LogicalSort, just require the Order
           ,{ Batch, Project}
           ,{ Batch, SeqScan}
@@ -99,9 +153,12 @@ macro_rules! for_logical_plan_nodes {
     ($macro:tt $(, $x:tt)*) => {
         $macro! {
             [$($x),*]
+            ,{ Logical, Agg}
+            ,{ Logical, Filter}
             ,{ Logical, Project}
             ,{ Logical, Scan}
             ,{ Logical, Join}
+            ,{ Logical, Values}
             // ,{ Logical, Sort} not sure if we will support Order by clause in subquery/view/MV
             // if we dont support thatk, we don't need LogicalSort, just require the Order at the top of query
         }
@@ -138,17 +195,6 @@ macro_rules! for_stream_plan_nodes {
     };
 }
 
-/// Define module for each plan node.
-macro_rules! def_mod_and_use {
-    ([], $( { $convention:ident, $name:ident }),*) => {
-        $(paste! {
-            mod [<$convention:snake _ $name:snake>];
-            pub use [<$convention:snake _ $name:snake>]::[<$convention $name>];
-        })*
-    }
-}
-for_all_plan_nodes! {def_mod_and_use }
-
 /// impl PlanNodeType fn for each node.
 macro_rules! enum_plan_node_type {
   ([], $( { $convention:ident, $name:ident }),*) => {
@@ -167,6 +213,27 @@ macro_rules! enum_plan_node_type {
   }
 }
 for_all_plan_nodes! {enum_plan_node_type }
+
+pub trait IntoPlanRef {
+    fn into_plan_ref(self) -> PlanRef;
+    fn clone_as_plan_ref(&self) -> PlanRef;
+}
+/// impl fn plan_ref for each node.
+macro_rules! impl_plan_ref {
+  ([], $( { $convention:ident, $name:ident }),*) => {
+    paste!{
+      $(impl IntoPlanRef for [<$convention $name>] {
+        fn into_plan_ref(self) -> PlanRef {
+          std::rc::Rc::new(self)
+        }
+        fn clone_as_plan_ref(&self) -> PlanRef{
+          self.clone().into_plan_ref()
+        }
+     })*
+    }
+  }
+}
+for_all_plan_nodes! {impl_plan_ref }
 
 /// impl plan node downcast fn for each node.
 macro_rules! impl_down_cast_fn {

@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use paste::paste;
 
 use super::super::plan_node::*;
@@ -53,15 +51,25 @@ impl LogicalToStreamPass {
 
 impl LogicalToStreamPass {
     for_logical_plan_nodes! {def_to_stream_visit_func}
+    fn visit_logical_agg(&mut self, _valuse: &LogicalAgg) -> PlanRef {
+        todo!()
+    }
+    fn visit_logical_values(&mut self, _valuse: &LogicalValues) -> PlanRef {
+        panic!("not support values in streaming plans");
+    }
+
+    fn visit_logical_filter(&mut self, _filter: &LogicalFilter) -> PlanRef {
+        todo!()
+    }
 
     fn visit_logical_project(&mut self, proj: &LogicalProject) -> PlanRef {
         let new_input = self.visit(proj.input(), Distribution::any());
         let new_logical = proj.clone_with_input(new_input);
-        Rc::new(StreamProject::new(new_logical))
+        StreamProject::new(new_logical).into_plan_ref()
     }
 
     fn visit_logical_scan(&mut self, _scan: &LogicalScan) -> PlanRef {
-        Rc::new(StreamTableSource {})
+        StreamTableSource {}.into_plan_ref()
     }
 
     fn visit_logical_join(&mut self, join: &LogicalJoin) -> PlanRef {
@@ -69,12 +77,12 @@ impl LogicalToStreamPass {
         // TODO: we have not Statistics to use broadcast join
         let left = self.visit(
             join.left(),
-            Distribution::HashShard(join.get_predicate().left_keys()),
+            Distribution::HashShard(join.predicate().left_keys()),
         );
         let right = self.visit(
             join.right(),
-            Distribution::HashShard(join.get_predicate().right_keys()),
+            Distribution::HashShard(join.predicate().right_keys()),
         );
-        Rc::new(StreamHashJoin::new(join.clone_with_left_right(left, right)))
+        StreamHashJoin::new(join.clone_with_left_right(left, right)).into_plan_ref()
     }
 }
