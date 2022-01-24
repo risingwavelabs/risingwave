@@ -12,7 +12,7 @@ use risingwave_common::error::ErrorCode;
 use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
 
-use crate::cluster::{StoredClusterManager, WorkerNodeMetaManager};
+use crate::cluster::StoredClusterManager;
 use crate::stream::{StoredStreamMetaManager, StreamMetaManager};
 
 #[derive(Clone)]

@@ -9,7 +9,7 @@ use risingwave_pb::meta::{
 };
 use tonic::{Request, Response, Status};
 
-use crate::cluster::{StoredClusterManager, WorkerNodeMetaManager};
+use crate::cluster::StoredClusterManager;
 
 #[derive(Clone)]
 pub struct ClusterServiceImpl {

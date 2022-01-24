@@ -14,7 +14,7 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex, RwLock};
 use uuid::Uuid;
 
-use crate::cluster::WorkerNodeMetaManager;
+use crate::cluster::StoredClusterManager;
 use crate::manager::{EpochGeneratorRef, MetaSrvEnv, StreamClientsRef};
 use crate::stream::StreamMetaManagerRef;
 
@@ -33,7 +33,7 @@ type Scheduled = (Mutation, Notifier);
 /// monotonic increasing epoch numbers. On compute nodes, [`LocalBarrierManager`] will serve these
 /// requests and dispatch them to source actors.
 pub struct BarrierManager {
-    cluster_manager: Arc<dyn WorkerNodeMetaManager>,
+    cluster_manager: Arc<StoredClusterManager>,
 
     stream_meta_manager: StreamMetaManagerRef,
 
@@ -56,7 +56,7 @@ impl BarrierManager {
     /// Create a new [`BarrierManager`].
     pub fn new(
         env: MetaSrvEnv,
-        cluster_manager: Arc<dyn WorkerNodeMetaManager>,
+        cluster_manager: Arc<StoredClusterManager>,
         stream_meta_manager: StreamMetaManagerRef,
         epoch_generator: EpochGeneratorRef,
     ) -> Self {

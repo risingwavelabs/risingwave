@@ -287,7 +287,6 @@ mod tests {
 
     use super::*;
     use crate::barrier::BarrierManager;
-    use crate::cluster::WorkerNodeMetaManager;
     use crate::manager::MetaSrvEnv;
     use crate::stream::{StoredStreamMetaManager, StreamMetaManager};
 

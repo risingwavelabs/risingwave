@@ -123,49 +123,43 @@ pub type IdGeneratorManagerRef = Arc<IdGeneratorManager>;
 /// which defined as [`IdCategory`] in [`meta.proto`].
 pub struct IdGeneratorManager {
     #[cfg(test)]
-    test: StoredIdGenerator,
-    database: StoredIdGenerator,
-    schema: StoredIdGenerator,
-    table: StoredIdGenerator,
-    worker: StoredIdGenerator,
-    actor: StoredIdGenerator,
-    hummock_context: StoredIdGenerator,
-    hummock_snapshot: StoredIdGenerator,
-    hummock_ss_table_id: StoredIdGenerator,
+    test: Arc<StoredIdGenerator>,
+    database: Arc<StoredIdGenerator>,
+    schema: Arc<StoredIdGenerator>,
+    table: Arc<StoredIdGenerator>,
+    worker: Arc<StoredIdGenerator>,
+    actor: Arc<StoredIdGenerator>,
+    hummock_context: Arc<StoredIdGenerator>,
+    hummock_snapshot: Arc<StoredIdGenerator>,
+    hummock_ss_table_id: Arc<StoredIdGenerator>,
 }
 
 impl IdGeneratorManager {
     pub async fn new(meta_store_ref: MetaStoreRef) -> Self {
         Self {
             #[cfg(test)]
-            test: StoredIdGenerator::new(meta_store_ref.clone(), "test", None).await,
-            database: StoredIdGenerator::new(meta_store_ref.clone(), "database", None).await,
-            schema: StoredIdGenerator::new(meta_store_ref.clone(), "schema", None).await,
-            table: StoredIdGenerator::new(meta_store_ref.clone(), "table", None).await,
-            worker: StoredIdGenerator::new(meta_store_ref.clone(), "worker", None).await,
-            actor: StoredIdGenerator::new(meta_store_ref.clone(), "actor", Some(1)).await,
-            hummock_context: StoredIdGenerator::new(
-                meta_store_ref.clone(),
-                "hummock_context",
-                Some(1),
-            )
-            .await,
-            hummock_snapshot: StoredIdGenerator::new(
-                meta_store_ref.clone(),
-                "hummock_snapshot",
-                Some(1),
-            )
-            .await,
-            hummock_ss_table_id: StoredIdGenerator::new(
-                meta_store_ref.clone(),
-                "hummock_ss_table_id",
-                Some(1),
-            )
-            .await,
+            test: Arc::new(StoredIdGenerator::new(meta_store_ref.clone(), "test", None).await),
+            database: Arc::new(
+                StoredIdGenerator::new(meta_store_ref.clone(), "database", None).await,
+            ),
+            schema: Arc::new(StoredIdGenerator::new(meta_store_ref.clone(), "schema", None).await),
+            table: Arc::new(StoredIdGenerator::new(meta_store_ref.clone(), "table", None).await),
+            worker: Arc::new(StoredIdGenerator::new(meta_store_ref.clone(), "worker", None).await),
+            actor: Arc::new(StoredIdGenerator::new(meta_store_ref.clone(), "actor", Some(1)).await),
+            hummock_context: Arc::new(
+                StoredIdGenerator::new(meta_store_ref.clone(), "hummock_context", Some(1)).await,
+            ),
+            hummock_snapshot: Arc::new(
+                StoredIdGenerator::new(meta_store_ref.clone(), "hummock_snapshot", Some(1)).await,
+            ),
+            hummock_ss_table_id: Arc::new(
+                StoredIdGenerator::new(meta_store_ref.clone(), "hummock_ss_table_id", Some(1))
+                    .await,
+            ),
         }
     }
 
-    const fn get<const C: IdCategoryType>(&self) -> &StoredIdGenerator {
+    const fn get<const C: IdCategoryType>(&self) -> &Arc<StoredIdGenerator> {
         match C {
             #[cfg(test)]
             IdCategory::Test => &self.test,

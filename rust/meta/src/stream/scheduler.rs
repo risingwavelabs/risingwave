@@ -7,7 +7,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::ClusterType;
 
-use crate::cluster::{StoredClusterManager, WorkerNodeMetaManager};
+use crate::cluster::StoredClusterManager;
 
 /// [`ScheduleCategory`] defines all supported categories.
 pub enum ScheduleCategory {

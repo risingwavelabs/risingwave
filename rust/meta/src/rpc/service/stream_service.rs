@@ -8,7 +8,7 @@ use risingwave_pb::meta::{
 };
 use tonic::{Request, Response, Status};
 
-use crate::cluster::{StoredClusterManager, WorkerNodeMetaManager};
+use crate::cluster::StoredClusterManager;
 use crate::manager::{EpochGeneratorRef, IdGeneratorManagerRef, MetaSrvEnv};
 use crate::stream::{StreamFragmenter, StreamManagerRef};
 
