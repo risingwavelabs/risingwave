@@ -3,6 +3,23 @@
 //! Each type macro will call the `$macro` with multiple parameters:
 //! * Patterns when being used in pattern match. e.g., `DataTypeKind::Decimal { .. }`.
 //! * Array types. e.g., `DecimalArray`.
+//!
+//! To understand how this datatype macros work, we write them in pseudo code:
+//!
+//! ```ignore
+//! fn boolean<T>(f: impl Fn(DataTypeKind, Array) -> T) -> T {
+//!   f(DataTypeKind::Boolean, BoolArray)
+//! }
+//!
+//! fn type_array(_: DataTypeKind, a: Array) -> Array {
+//!   a
+//! }
+//!
+//! boolean(type_array) // result = BoolArray
+//! ```
+//!
+//! Due to Rust's macro expand order, using this pattern could help the macro expand in an expected
+//! way.
 
 macro_rules! boolean {
     ($macro:tt) => {
