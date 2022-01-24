@@ -23,7 +23,10 @@ wait_server() {
 }
 
 echo "Starting single node zookeeper/kafka/mysql/debezium"
-docker compose -f "$SCRIPT_PATH"/docker-compose.yml up -d
+if ! docker compose -f "$SCRIPT_PATH"/docker-compose.yml up -d; then
+    # try docker-compose
+    docker-compose -f "$SCRIPT_PATH"/docker-compose.yml up -d
+fi
 
 echo "Waiting for zookeeper"
 wait_server 2181
