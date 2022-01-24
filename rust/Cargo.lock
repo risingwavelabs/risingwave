@@ -1215,6 +1215,16 @@ dependencies = [
 
 [[package]]
 name = "dashmap"
+version = "4.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e77a43b28d0668df09411cb0bc9a8c2adc40f9a048afe863e05fd43251e8e39c"
+dependencies = [
+ "cfg-if",
+ "num_cpus",
+]
+
+[[package]]
+name = "dashmap"
 version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b799062aaf67eb976af3bdca031ee6f846d2f0a5710ddbb0d2efee33f3cc4760"
@@ -2646,6 +2656,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "opentelemetry"
+version = "0.16.0"
+source = "git+https://github.com/open-telemetry/opentelemetry-rust.git?rev=542c28a#542c28a71b7a31fa2f9146565381b84e008cbd13"
+dependencies = [
+ "async-trait",
+ "crossbeam-channel",
+ "dashmap 4.0.2",
+ "fnv",
+ "futures 0.3.19",
+ "js-sys",
+ "lazy_static",
+ "percent-encoding",
+ "pin-project",
+ "rand 0.8.4",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+]
+
+[[package]]
 name = "opentelemetry-http"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2656,7 +2686,7 @@ dependencies = [
  "futures-util",
  "http",
  "isahc",
- "opentelemetry",
+ "opentelemetry 0.16.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -2669,7 +2699,7 @@ dependencies = [
  "http",
  "isahc",
  "lazy_static",
- "opentelemetry",
+ "opentelemetry 0.16.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "opentelemetry-http",
  "opentelemetry-semantic-conventions",
  "thiserror",
@@ -2678,12 +2708,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "opentelemetry-prometheus"
+version = "0.9.0"
+source = "git+https://github.com/open-telemetry/opentelemetry-rust.git?rev=542c28a#542c28a71b7a31fa2f9146565381b84e008cbd13"
+dependencies = [
+ "opentelemetry 0.16.0 (git+https://github.com/open-telemetry/opentelemetry-rust.git?rev=542c28a)",
+ "prometheus 0.13.0",
+ "protobuf",
+]
+
+[[package]]
 name = "opentelemetry-semantic-conventions"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ffeac823339e8b0f27b961f4385057bf9f97f2863bc745bd015fd6091f2270e9"
 dependencies = [
- "opentelemetry",
+ "opentelemetry 0.16.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -3596,7 +3636,7 @@ dependencies = [
  "log4rs",
  "memcomparable",
  "num-traits",
- "opentelemetry",
+ "opentelemetry 0.16.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "opentelemetry-jaeger",
  "paste",
  "prometheus 0.13.0",
@@ -3832,7 +3872,7 @@ dependencies = [
  "chrono",
  "clap",
  "crc32fast",
- "dashmap",
+ "dashmap 5.0.0",
  "either",
  "futures 0.3.19",
  "hyper",
@@ -4026,6 +4066,8 @@ dependencies = [
  "log",
  "memcomparable",
  "num-traits",
+ "opentelemetry 0.16.0 (git+https://github.com/open-telemetry/opentelemetry-rust.git?rev=542c28a)",
+ "opentelemetry-prometheus",
  "paste",
  "prometheus 0.13.0",
  "prost 0.9.0",
@@ -5198,7 +5240,7 @@ version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ffbf13a0f8b054a4e59df3a173b818e9c6177c02789871f2073977fd0062076"
 dependencies = [
- "opentelemetry",
+ "opentelemetry 0.16.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tracing",
  "tracing-core",
  "tracing-log",

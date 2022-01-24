@@ -22,6 +22,8 @@ lazy_static = "1"
 log = "0.4"
 memcomparable = { path = "../utils/memcomparable" }
 num-traits = "0.2"
+opentelemetry = { git = "https://github.com/open-telemetry/opentelemetry-rust.git" , rev = "542c28a", features = ["rt-tokio", "trace"] }
+opentelemetry-prometheus = { git = "https://github.com/open-telemetry/opentelemetry-rust.git" , rev = "542c28a"}
 paste = "1"
 prometheus = { version = "0.13", features = ["process"] }
 prost = "0.9"
