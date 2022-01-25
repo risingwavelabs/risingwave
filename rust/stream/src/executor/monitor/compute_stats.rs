@@ -7,7 +7,7 @@ pub struct ComputeStats {
 
 lazy_static::lazy_static! {
   pub static ref
-  DEFAULT_COMPUTER_STATS: Arc<ComputeStats> = Arc::new(ComputeStats::new());
+  DEFAULT_COMPUTE_STATS: Arc<ComputeStats> = Arc::new(ComputeStats::new());
 }
 
 impl Default for ComputeStats {

@@ -63,7 +63,7 @@
 						"mode": "palette-classic"
 					},
 					"custom": {
-						"axisLabel": "row/s",
+						"axisLabel": "rows/s",
 						"axisPlacement": "left",
 						"barAlignment": 0,
 						"drawStyle": "line",
@@ -113,7 +113,7 @@
 				"x": 0,
 				"y": 0
 			},
-			"id": 14,
+			"id": 16,
 			"options": {
 				"legend": {
 					"calcs": [],
@@ -131,13 +131,14 @@
 						"uid": "${DS_RISELAB-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "irate(actor_row_count[15s])/15",
+					"expr": "rate(stream_source_output_rows_counts[15s])/15",
+					"instant": false,
 					"interval": "",
 					"legendFormat": "",
 					"refId": "A"
 				}
 			],
-			"title": "actor throughtput",
+			"title": "source throughput",
 			"type": "timeseries"
 		},
 		{
@@ -147,8 +148,8 @@
 						"mode": "palette-classic"
 					},
 					"custom": {
-						"axisLabel": "",
-						"axisPlacement": "auto",
+						"axisLabel": "row/s",
+						"axisPlacement": "left",
 						"barAlignment": 0,
 						"drawStyle": "line",
 						"fillOpacity": 0,
@@ -189,32 +190,7 @@
 						]
 					}
 				},
-				"overrides": [
-					{
-						"__systemRef": "hideSeriesFrom",
-						"matcher": {
-							"id": "byNames",
-							"options": {
-								"mode": "exclude",
-								"names": [
-									"get_snapshot_latency"
-								],
-								"prefix": "All except:",
-								"readOnly": true
-							}
-						},
-						"properties": [
-							{
-								"id": "custom.hideFrom",
-								"value": {
-									"legend": false,
-									"tooltip": false,
-									"viz": true
-								}
-							}
-						]
-					}
-				]
+				"overrides": []
 			},
 			"gridPos": {
 				"h": 8,
@@ -222,7 +198,7 @@
 				"x": 12,
 				"y": 0
 			},
-			"id": 4,
+			"id": 14,
 			"options": {
 				"legend": {
 					"calcs": [],
@@ -240,85 +216,13 @@
 						"uid": "${DS_RISELAB-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "irate(state_store_get_snapshot_latency_sum[5s])",
+					"expr": "irate(stream_actor_row_count[15s])/15",
 					"interval": "",
-					"legendFormat": "get_snapshot_latency",
+					"legendFormat": "",
 					"refId": "A"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISELAB-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "irate(state_store_iter_next_latency_sum[5s])",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "iter_next_latency",
-					"refId": "B"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISELAB-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "irate(state_store_iter_next_latency_sum[5s])",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "iter_next_latency",
-					"refId": "C"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISELAB-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "irate(state_store_get_latency_sum[5s])",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "get_latency",
-					"refId": "D"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISELAB-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "irate(state_store_batch_write_add_l0_ssts_latency_sum[5s])",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "batch_write_add_l0_ssts_latency",
-					"refId": "E"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISELAB-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "irate(state_store_batch_write_build_table_latency_sum[5s])",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "batch_write_build_table_latency",
-					"refId": "F"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISELAB-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "irate(state_store_batched_write_latency_sum[5s])",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "batched_write_latency",
-					"refId": "G"
 				}
 			],
-			"title": "latency",
+			"title": "actor throughput",
 			"type": "timeseries"
 		},
 		{
@@ -524,7 +428,7 @@
 							"options": {
 								"mode": "exclude",
 								"names": [
-									"batched_write_size"
+									"get_snapshot_latency"
 								],
 								"prefix": "All except:",
 								"readOnly": true
@@ -549,7 +453,7 @@
 				"x": 12,
 				"y": 8
 			},
-			"id": 6,
+			"id": 4,
 			"options": {
 				"legend": {
 					"calcs": [],
@@ -567,9 +471,9 @@
 						"uid": "${DS_RISELAB-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "irate(state_store_get_key_size_sum[5s])",
+					"expr": "irate(state_store_get_snapshot_latency_sum[5s])",
 					"interval": "",
-					"legendFormat": "get_key_size",
+					"legendFormat": "get_snapshot_latency",
 					"refId": "A"
 				},
 				{
@@ -578,10 +482,10 @@
 						"uid": "${DS_RISELAB-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "irate(state_store_get_value_size_sum[5s])",
+					"expr": "irate(state_store_iter_next_latency_sum[5s])",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "get_value_size",
+					"legendFormat": "iter_next_latency",
 					"refId": "B"
 				},
 				{
@@ -590,14 +494,62 @@
 						"uid": "${DS_RISELAB-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "irate(state_store_batched_write_size_sum[5s])",
+					"expr": "irate(state_store_iter_next_latency_sum[5s])",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "batched_write_size",
+					"legendFormat": "iter_next_latency",
 					"refId": "C"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "${DS_RISELAB-PROMETHEUS}"
+					},
+					"exemplar": true,
+					"expr": "irate(state_store_get_latency_sum[5s])",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "get_latency",
+					"refId": "D"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "${DS_RISELAB-PROMETHEUS}"
+					},
+					"exemplar": true,
+					"expr": "irate(state_store_batch_write_add_l0_ssts_latency_sum[5s])",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "batch_write_add_l0_ssts_latency",
+					"refId": "E"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "${DS_RISELAB-PROMETHEUS}"
+					},
+					"exemplar": true,
+					"expr": "irate(state_store_batch_write_build_table_latency_sum[5s])",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "batch_write_build_table_latency",
+					"refId": "F"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "${DS_RISELAB-PROMETHEUS}"
+					},
+					"exemplar": true,
+					"expr": "irate(state_store_batched_write_latency_sum[5s])",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "batched_write_latency",
+					"refId": "G"
 				}
 			],
-			"title": "size",
+			"title": "latency",
 			"type": "timeseries"
 		},
 		{
@@ -818,15 +770,40 @@
 						]
 					}
 				},
-				"overrides": []
+				"overrides": [
+					{
+						"__systemRef": "hideSeriesFrom",
+						"matcher": {
+							"id": "byNames",
+							"options": {
+								"mode": "exclude",
+								"names": [
+									"batched_write_size"
+								],
+								"prefix": "All except:",
+								"readOnly": true
+							}
+						},
+						"properties": [
+							{
+								"id": "custom.hideFrom",
+								"value": {
+									"legend": false,
+									"tooltip": false,
+									"viz": true
+								}
+							}
+						]
+					}
+				]
 			},
 			"gridPos": {
-				"h": 9,
+				"h": 8,
 				"w": 12,
 				"x": 12,
 				"y": 16
 			},
-			"id": 2,
+			"id": 6,
 			"options": {
 				"legend": {
 					"calcs": [],
@@ -844,9 +821,9 @@
 						"uid": "${DS_RISELAB-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "irate(state_store_get_counts[5s])",
+					"expr": "irate(state_store_get_key_size_sum[5s])",
 					"interval": "",
-					"legendFormat": "get_counts",
+					"legendFormat": "get_key_size",
 					"refId": "A"
 				},
 				{
@@ -855,10 +832,10 @@
 						"uid": "${DS_RISELAB-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "irate(state_store_batched_write_counts[5s])",
+					"expr": "irate(state_store_get_value_size_sum[5s])",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "write_batch_count",
+					"legendFormat": "get_value_size",
 					"refId": "B"
 				},
 				{
@@ -867,38 +844,14 @@
 						"uid": "${DS_RISELAB-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "irate(state_store_iter_counts[5s])",
+					"expr": "irate(state_store_batched_write_size_sum[5s])",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "iter_counts",
+					"legendFormat": "batched_write_size",
 					"refId": "C"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISELAB-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "irate(state_store_iter_next_counts[5s])",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "iter_next_counts",
-					"refId": "D"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISELAB-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "irate(state_store_batched_write_tuple_counts[5s])",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "batched_write_kvpair_counts",
-					"refId": "E"
 				}
 			],
-			"title": "count",
+			"title": "size",
 			"type": "timeseries"
 		},
 		{
@@ -1057,9 +1010,141 @@
 			],
 			"title": "get",
 			"type": "timeseries"
+		},
+		{
+			"fieldConfig": {
+				"defaults": {
+					"color": {
+						"mode": "palette-classic"
+					},
+					"custom": {
+						"axisLabel": "",
+						"axisPlacement": "auto",
+						"barAlignment": 0,
+						"drawStyle": "line",
+						"fillOpacity": 0,
+						"gradientMode": "none",
+						"hideFrom": {
+							"legend": false,
+							"tooltip": false,
+							"viz": false
+						},
+						"lineInterpolation": "linear",
+						"lineWidth": 1,
+						"pointSize": 5,
+						"scaleDistribution": {
+							"type": "linear"
+						},
+						"showPoints": "auto",
+						"spanNulls": false,
+						"stacking": {
+							"group": "A",
+							"mode": "none"
+						},
+						"thresholdsStyle": {
+							"mode": "off"
+						}
+					},
+					"mappings": [],
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{
+								"color": "green",
+								"value": null
+							},
+							{
+								"color": "red",
+								"value": 80
+							}
+						]
+					}
+				},
+				"overrides": []
+			},
+			"gridPos": {
+				"h": 9,
+				"w": 12,
+				"x": 12,
+				"y": 24
+			},
+			"id": 2,
+			"options": {
+				"legend": {
+					"calcs": [],
+					"displayMode": "list",
+					"placement": "bottom"
+				},
+				"tooltip": {
+					"mode": "single"
+				}
+			},
+			"targets": [
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "${DS_RISELAB-PROMETHEUS}"
+					},
+					"exemplar": true,
+					"expr": "irate(state_store_get_counts[5s])",
+					"interval": "",
+					"legendFormat": "get_counts",
+					"refId": "A"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "${DS_RISELAB-PROMETHEUS}"
+					},
+					"exemplar": true,
+					"expr": "irate(state_store_batched_write_counts[5s])",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "write_batch_count",
+					"refId": "B"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "${DS_RISELAB-PROMETHEUS}"
+					},
+					"exemplar": true,
+					"expr": "irate(state_store_iter_counts[5s])",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "iter_counts",
+					"refId": "C"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "${DS_RISELAB-PROMETHEUS}"
+					},
+					"exemplar": true,
+					"expr": "irate(state_store_iter_next_counts[5s])",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "iter_next_counts",
+					"refId": "D"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "${DS_RISELAB-PROMETHEUS}"
+					},
+					"exemplar": true,
+					"expr": "irate(state_store_batched_write_tuple_counts[5s])",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "batched_write_kvpair_counts",
+					"refId": "E"
+				}
+			],
+			"title": "count",
+			"type": "timeseries"
 		}
 	],
-	"refresh": false,
+	"refresh": "",
 	"schemaVersion": 34,
 	"style": "dark",
 	"tags": [],
@@ -1074,6 +1159,6 @@
 	"timezone": "",
 	"title": "risingwave_dashboard",
 	"uid": "Ecy3uV1nz",
-	"version": 11,
+	"version": 19,
 	"weekStart": ""
 }

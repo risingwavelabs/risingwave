@@ -1,14 +1,14 @@
 use std::fmt::{Debug, Formatter};
 
 use async_trait::async_trait;
-use opentelemetry::metrics::MeterProvider;
+use opentelemetry::metrics::{Counter, MeterProvider};
 use opentelemetry::KeyValue;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use tracing::event;
 use tracing_futures::Instrument;
 
-use crate::executor::monitor::DEFAULT_COMPUTER_STATS;
+use crate::executor::monitor::DEFAULT_COMPUTE_STATS;
 use crate::executor::{Executor, Message, PkIndicesRef};
 
 /// Barrier event might quickly flush the log to millions of lines. Should enable this when you
@@ -31,6 +31,11 @@ pub struct TraceExecutor {
     input_pos: usize,
     /// Actor id
     actor_id: u32,
+
+    // monitor
+    /// attributes of the OpenTelemetry monitor
+    attributes: Vec<KeyValue>,
+    actor_row_count: Counter<u64>,
 }
 
 impl Debug for TraceExecutor {
@@ -48,11 +53,22 @@ impl TraceExecutor {
         input_pos: usize,
         actor_id: u32,
     ) -> Self {
+        let meter = DEFAULT_COMPUTE_STATS
+            .clone()
+            .prometheus_exporter
+            .provider()
+            .unwrap()
+            .meter("compute_monitor", None);
         Self {
             input,
             input_desc,
             input_pos,
             actor_id,
+            attributes: vec![KeyValue::new("actor_id", actor_id.to_string())],
+            actor_row_count: meter
+                .u64_counter("stream_actor_row_count")
+                .with_description("Total number of rows that have been ouput from each actor")
+                .init(),
         }
     }
 }
@@ -60,12 +76,6 @@ impl TraceExecutor {
 #[async_trait]
 impl Executor for TraceExecutor {
     async fn next(&mut self) -> Result<Message> {
-        let stats = DEFAULT_COMPUTER_STATS.clone();
-        let meter = stats
-            .prometheus_exporter
-            .provider()
-            .unwrap()
-            .meter("compute_monitor", None);
         let input_desc = self.input_desc.as_str();
         let input_pos = self.input_pos;
         let span_name = format!("{}_{}_next", input_desc, input_pos);
@@ -85,13 +95,8 @@ impl Executor for TraceExecutor {
                 match &message {
                     Message::Chunk(chunk) => {
                         if chunk.cardinality() > 0 {
-                            let attributes =
-                                vec![KeyValue::new("actor_id", self.actor_id.to_string())];
-                            let actor_row_count = meter
-                                .u64_counter("actor_row_count")
-                                .with_description("")
-                                .init();
-                            actor_row_count.add(chunk.cardinality() as u64, &attributes);
+                            self.actor_row_count
+                                .add(chunk.cardinality() as u64, &self.attributes);
                             event!(tracing::Level::TRACE, prev = %input_desc, msg = "chunk", "input = \n{:#?}", chunk);
                         }
                     }

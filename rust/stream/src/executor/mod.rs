@@ -56,7 +56,6 @@ mod top_n_appendonly;
 #[cfg(test)]
 mod integration_tests;
 
-mod stream_source_stats;
 #[cfg(test)]
 mod test_utils;
 

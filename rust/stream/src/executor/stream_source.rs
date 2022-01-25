@@ -3,6 +3,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use opentelemetry::metrics::{Counter, MeterProvider};
+use opentelemetry::KeyValue;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{
     ArrayBuilder, ArrayImpl, I64ArrayBuilder, InternalError, RwError, StreamChunk,
@@ -12,7 +14,7 @@ use risingwave_common::error::Result;
 use risingwave_source::*;
 use tokio::sync::mpsc::UnboundedReceiver;
 
-use crate::executor::stream_source_stats::{StreamSourceStats, DEFAULT_STREAM_SOURCE_STATS};
+use crate::executor::monitor::DEFAULT_COMPUTE_STATS;
 use crate::executor::{Executor, Message, PkIndices, PkIndicesRef};
 
 /// `StreamSourceExecutor` is a streaming source from external systems such as Kafka
@@ -30,8 +32,11 @@ pub struct StreamSourceExecutor {
 
     /// Identity string
     identity: String,
-    /// Stats for source
-    stats: Arc<StreamSourceStats>,
+
+    // monitor
+    /// attributes of the OpenTelemetry monitor
+    attributes: Vec<KeyValue>,
+    source_output_row_count: Counter<u64>,
 }
 
 impl StreamSourceExecutor {
@@ -60,7 +65,13 @@ impl StreamSourceExecutor {
                 Box::new(s.stream_reader(TableV2ReaderContext, column_ids.clone())?)
             }
         };
-
+        let source_identify = "Table_".to_string() + &source_id.table_id().to_string();
+        let meter = DEFAULT_COMPUTE_STATS
+            .clone()
+            .prometheus_exporter
+            .provider()
+            .unwrap()
+            .meter("stream_source_monitor", None);
         Ok(Self {
             source_id,
             source_desc,
@@ -72,7 +83,11 @@ impl StreamSourceExecutor {
             next_row_id: AtomicU64::from(0u64),
             first_execution: true,
             identity: format!("StreamSourceExecutor {:X}", executor_id),
-            stats: DEFAULT_STREAM_SOURCE_STATS.clone(),
+            attributes: vec![KeyValue::new("source_id", source_identify)],
+            source_output_row_count: meter
+                .u64_counter("stream_source_output_rows_counts")
+                .with_description("")
+                .init(),
         })
     }
 
@@ -113,7 +128,6 @@ impl Executor for StreamSourceExecutor {
             self.reader.open().await?;
             self.first_execution = false
         }
-
         // FIXME: may lose message
         tokio::select! {
           chunk = self.reader.next() => {
@@ -127,7 +141,7 @@ impl Executor for StreamSourceExecutor {
             if !matches!(self.source_desc.source.as_ref(), SourceImpl::Table(_) | SourceImpl::TableV2(_)) {
               chunk = self.refill_row_id_column(chunk);
             }
-            self.stats.output_rows_total.inc_by(chunk.cardinality() as u64);
+            self.source_output_row_count.add(chunk.cardinality() as u64, &self.attributes);
             Ok(Message::Chunk(chunk))
           }
           message = self.barrier_receiver.recv() => {
