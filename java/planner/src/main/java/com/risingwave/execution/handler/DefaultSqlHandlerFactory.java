@@ -6,6 +6,7 @@ import com.risingwave.common.exception.RisingWaveException;
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.sql.node.SqlCreateSource;
 import com.risingwave.sql.node.SqlCreateTableV2;
+import com.risingwave.sql.node.SqlFlush;
 import com.risingwave.sql.node.SqlShowParameters;
 import java.lang.reflect.Constructor;
 import java.util.Arrays;
@@ -59,6 +60,10 @@ public class DefaultSqlHandlerFactory implements SqlHandlerFactory {
 
     if (ast instanceof SqlCreateTableV2) {
       return new CreateTableV2Handler();
+    }
+
+    if (ast instanceof SqlFlush) {
+      return new FlushHandler();
     }
 
     Constructor<? extends SqlHandler> constructor = SQL_HANDLER_FACTORY.get(ast.getKind());

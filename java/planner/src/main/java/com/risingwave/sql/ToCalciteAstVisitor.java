@@ -15,73 +15,8 @@ import com.risingwave.common.datatype.StringType;
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
 import com.risingwave.planner.sql.RisingWaveOperatorTable;
-import com.risingwave.sql.node.SqlCreateSource;
-import com.risingwave.sql.node.SqlCreateTableV2;
-import com.risingwave.sql.node.SqlShowParameters;
-import com.risingwave.sql.node.SqlTableOption;
-import com.risingwave.sql.tree.AliasedRelation;
-import com.risingwave.sql.tree.AllColumns;
-import com.risingwave.sql.tree.ArithmeticExpression;
-import com.risingwave.sql.tree.AstVisitor;
-import com.risingwave.sql.tree.BetweenPredicate;
-import com.risingwave.sql.tree.BooleanComparisonExpression;
-import com.risingwave.sql.tree.BooleanLiteral;
-import com.risingwave.sql.tree.Cast;
-import com.risingwave.sql.tree.ColumnDefinition;
-import com.risingwave.sql.tree.ColumnType;
-import com.risingwave.sql.tree.ComparisonExpression;
-import com.risingwave.sql.tree.CreateSource;
-import com.risingwave.sql.tree.CreateTable;
-import com.risingwave.sql.tree.CreateTableV2;
-import com.risingwave.sql.tree.CreateView;
-import com.risingwave.sql.tree.DoubleLiteral;
-import com.risingwave.sql.tree.DropTable;
-import com.risingwave.sql.tree.DropView;
-import com.risingwave.sql.tree.ExistsPredicate;
-import com.risingwave.sql.tree.Explain;
-import com.risingwave.sql.tree.Expression;
-import com.risingwave.sql.tree.Extract;
-import com.risingwave.sql.tree.FunctionCall;
-import com.risingwave.sql.tree.GenericProperties;
-import com.risingwave.sql.tree.InListExpression;
-import com.risingwave.sql.tree.InPredicate;
-import com.risingwave.sql.tree.Insert;
-import com.risingwave.sql.tree.IntegerLiteral;
-import com.risingwave.sql.tree.IntervalLiteral;
-import com.risingwave.sql.tree.IsNotNullPredicate;
-import com.risingwave.sql.tree.IsNullPredicate;
-import com.risingwave.sql.tree.Join;
-import com.risingwave.sql.tree.JoinCriteria;
-import com.risingwave.sql.tree.JoinOn;
-import com.risingwave.sql.tree.JoinUsing;
-import com.risingwave.sql.tree.LikePredicate;
-import com.risingwave.sql.tree.LogicalBinaryExpression;
-import com.risingwave.sql.tree.LongLiteral;
-import com.risingwave.sql.tree.NaturalJoin;
-import com.risingwave.sql.tree.NegativeExpression;
-import com.risingwave.sql.tree.Node;
-import com.risingwave.sql.tree.NotExpression;
-import com.risingwave.sql.tree.NotNullColumnConstraint;
-import com.risingwave.sql.tree.NullLiteral;
-import com.risingwave.sql.tree.PrimaryKeyColumnConstraint;
-import com.risingwave.sql.tree.QualifiedName;
-import com.risingwave.sql.tree.QualifiedNameReference;
-import com.risingwave.sql.tree.Query;
-import com.risingwave.sql.tree.QuerySpecification;
-import com.risingwave.sql.tree.SearchedCaseExpression;
-import com.risingwave.sql.tree.SetStatement;
-import com.risingwave.sql.tree.ShowSessionParameter;
-import com.risingwave.sql.tree.SingleColumn;
-import com.risingwave.sql.tree.SortItem;
-import com.risingwave.sql.tree.Statement;
-import com.risingwave.sql.tree.StringLiteral;
-import com.risingwave.sql.tree.SubqueryExpression;
-import com.risingwave.sql.tree.Table;
-import com.risingwave.sql.tree.TableFunction;
-import com.risingwave.sql.tree.TableSubquery;
-import com.risingwave.sql.tree.Values;
-import com.risingwave.sql.tree.ValuesList;
-import com.risingwave.sql.tree.WhenClause;
+import com.risingwave.sql.node.*;
+import com.risingwave.sql.tree.*;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
@@ -142,6 +77,11 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
         sqlNodeListOf(Lists2.map(node.tableElements(), column -> column.accept(this, context)));
 
     return new SqlCreateTableV2(SqlParserPos.ZERO, false, ifNotExists, name, columnList, null);
+  }
+
+  @Override
+  public SqlNode visitFlush(Flush<?> node, Void context) {
+    return new SqlFlush(SqlParserPos.ZERO);
   }
 
   @Override

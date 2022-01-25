@@ -142,7 +142,7 @@ subprojects {
                 )
             }
             kotlin {
-                ktlint("0.37.2").userData(mapOf("indent_size" to "2"))
+                ktlint("0.37.2").userData(mapOf("indent_size" to "2", "disabled_rules" to "no-wildcard-imports"))
             }
         }
 

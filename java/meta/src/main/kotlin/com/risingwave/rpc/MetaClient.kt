@@ -1,19 +1,6 @@
 package com.risingwave.rpc
 
-import com.risingwave.proto.metanode.CreateMaterializedViewRequest
-import com.risingwave.proto.metanode.CreateMaterializedViewResponse
-import com.risingwave.proto.metanode.CreateRequest
-import com.risingwave.proto.metanode.CreateResponse
-import com.risingwave.proto.metanode.DropMaterializedViewRequest
-import com.risingwave.proto.metanode.DropMaterializedViewResponse
-import com.risingwave.proto.metanode.DropRequest
-import com.risingwave.proto.metanode.DropResponse
-import com.risingwave.proto.metanode.GetCatalogRequest
-import com.risingwave.proto.metanode.GetCatalogResponse
-import com.risingwave.proto.metanode.GetEpochRequest
-import com.risingwave.proto.metanode.GetEpochResponse
-import com.risingwave.proto.metanode.HeartbeatRequest
-import com.risingwave.proto.metanode.HeartbeatResponse
+import com.risingwave.proto.metanode.*
 
 /** A client connecting to meta node. */
 interface MetaClient {
@@ -30,4 +17,6 @@ interface MetaClient {
   fun createMaterializedView(request: CreateMaterializedViewRequest): CreateMaterializedViewResponse
 
   fun dropMaterializedView(request: DropMaterializedViewRequest): DropMaterializedViewResponse
+
+  fun flush(request: FlushRequest): FlushResponse
 }

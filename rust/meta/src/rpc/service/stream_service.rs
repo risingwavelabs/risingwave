@@ -2,15 +2,14 @@ use std::sync::Arc;
 
 use risingwave_common::error::tonic_err;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerService;
-use risingwave_pb::meta::{
-    ClusterType, CreateMaterializedViewRequest, CreateMaterializedViewResponse,
-    DropMaterializedViewRequest, DropMaterializedViewResponse,
-};
+use risingwave_pb::meta::*;
 use tonic::{Request, Response, Status};
 
 use crate::cluster::StoredClusterManager;
 use crate::manager::{EpochGeneratorRef, IdGeneratorManagerRef, MetaSrvEnv};
 use crate::stream::{StreamFragmenter, StreamManagerRef};
+
+pub type TonicResponse<T> = Result<Response<T>, Status>;
 
 #[derive(Clone)]
 pub struct StreamServiceImpl {
@@ -42,7 +41,7 @@ impl StreamManagerService for StreamServiceImpl {
     async fn create_materialized_view(
         &self,
         request: Request<CreateMaterializedViewRequest>,
-    ) -> Result<Response<CreateMaterializedViewResponse>, Status> {
+    ) -> TonicResponse<CreateMaterializedViewResponse> {
         let req = request.into_inner();
         let worker_count = self
             .cluster_manager
@@ -78,7 +77,7 @@ impl StreamManagerService for StreamServiceImpl {
     async fn drop_materialized_view(
         &self,
         request: Request<DropMaterializedViewRequest>,
-    ) -> Result<Response<DropMaterializedViewResponse>, Status> {
+    ) -> TonicResponse<DropMaterializedViewResponse> {
         let req = request.into_inner();
 
         match self
@@ -89,5 +88,10 @@ impl StreamManagerService for StreamServiceImpl {
             Ok(()) => Ok(Response::new(DropMaterializedViewResponse { status: None })),
             Err(e) => Err(e.to_grpc_status()),
         }
+    }
+
+    #[cfg(not(tarpaulin_include))]
+    async fn flush(&self, _request: Request<FlushRequest>) -> TonicResponse<FlushResponse> {
+        todo!()
     }
 }

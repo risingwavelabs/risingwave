@@ -92,7 +92,7 @@ statement
     | DROP FUNCTION (IF EXISTS)? name=qname
         '(' (functionArgument (',' functionArgument)*)? ')'                          #dropFunction
     | DROP USER (IF EXISTS)? name=ident                                              #dropUser
-    | DROP (MATERIALIZED)? VIEW (IF EXISTS)? name=qname                                            #dropView
+    | DROP (MATERIALIZED)? VIEW (IF EXISTS)? name=qname                              #dropView
     | DROP ANALYZER name=ident                                                       #dropAnalyzer
     | GRANT (priviliges=idents | ALL PRIVILEGES?)
         (ON clazz qnames)? TO users=idents                                           #grantPrivilege
@@ -104,6 +104,7 @@ statement
     | DEALLOCATE (PREPARE)? (ALL | prepStmt=stringLiteralOrIdentifierOrQname)        #deallocate
     | ANALYZE                                                                        #analyze
     | DISCARD (ALL | PLANS | SEQUENCES | TEMPORARY | TEMP)                           #discard
+    | FLUSH                                                                          #flush
     ;
 
 query:
@@ -697,7 +698,7 @@ nonReserved
     | CURRENT_SCHEMA | PROMOTE | CHARACTER | VARYING
     | DISCARD | PLANS | SEQUENCES | TEMPORARY | TEMP | METADATA
     | SOURCE | LOCATION | TRUE | FALSE
-    | TABLE_V2
+    | TABLE_V2 | FLUSH
     ;
 
 AUTHORIZATION: 'AUTHORIZATION';
@@ -970,6 +971,7 @@ METADATA: 'METADATA';
 LOCATION: 'LOCATION';
 
 TABLE_V2: 'TABLE_V2';
+FLUSH: 'FLUSH';
 
 EQ  : '=';
 NEQ : '<>' | '!=';

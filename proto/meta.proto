@@ -157,10 +157,15 @@ message DropMaterializedViewResponse {
   common.Status status = 1;
 }
 
+message FlushRequest {}
+
+message FlushResponse {}
+
 service StreamManagerService {
   // TODO: migration mv catalog creation/drop in.
   rpc CreateMaterializedView(CreateMaterializedViewRequest) returns (CreateMaterializedViewResponse);
   rpc DropMaterializedView(DropMaterializedViewRequest) returns (DropMaterializedViewResponse);
+  rpc Flush(FlushRequest) returns (FlushResponse);
 }
 
 // Below for cluster management.

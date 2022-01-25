@@ -2,24 +2,7 @@ package com.risingwave.rpc
 
 import com.risingwave.common.exception.PgErrorCode
 import com.risingwave.common.exception.PgException
-import com.risingwave.proto.metanode.CatalogServiceGrpc
-import com.risingwave.proto.metanode.CreateMaterializedViewRequest
-import com.risingwave.proto.metanode.CreateMaterializedViewResponse
-import com.risingwave.proto.metanode.CreateRequest
-import com.risingwave.proto.metanode.CreateResponse
-import com.risingwave.proto.metanode.DropMaterializedViewRequest
-import com.risingwave.proto.metanode.DropMaterializedViewResponse
-import com.risingwave.proto.metanode.DropRequest
-import com.risingwave.proto.metanode.DropResponse
-import com.risingwave.proto.metanode.EpochServiceGrpc
-import com.risingwave.proto.metanode.GetCatalogRequest
-import com.risingwave.proto.metanode.GetCatalogResponse
-import com.risingwave.proto.metanode.GetEpochRequest
-import com.risingwave.proto.metanode.GetEpochResponse
-import com.risingwave.proto.metanode.HeartbeatRequest
-import com.risingwave.proto.metanode.HeartbeatResponse
-import com.risingwave.proto.metanode.HeartbeatServiceGrpc
-import com.risingwave.proto.metanode.StreamManagerServiceGrpc
+import com.risingwave.proto.metanode.*
 import io.grpc.Channel
 import io.grpc.StatusRuntimeException
 import org.slf4j.LoggerFactory
@@ -101,6 +84,16 @@ class GrpcMetaClient(private val channel: Channel) : MetaClient {
     } catch (e: StatusRuntimeException) {
       LOGGER.warn("RPC failed: {}", e.status)
       throw rpcException("dropMaterializedView", e)
+    }
+  }
+
+  override fun flush(request: FlushRequest): FlushResponse {
+    val stub = StreamManagerServiceGrpc.newBlockingStub(channel)
+    try {
+      return stub.flush(request)
+    } catch (e: StatusRuntimeException) {
+      LOGGER.warn("RPC failed: {}", e.status)
+      throw rpcException("flush", e)
     }
   }
 }
