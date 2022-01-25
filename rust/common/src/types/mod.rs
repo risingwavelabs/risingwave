@@ -23,7 +23,7 @@ pub use interval::*;
 pub use ordered_float::IntoOrdered;
 use paste::paste;
 
-use crate::array::{ArrayBuilderImpl, PrimitiveArrayItemType};
+use crate::array::{ArrayBuilderImpl, PrimitiveArrayItemType, StructValue};
 
 pub type OrderedF32 = ordered_float::OrderedFloat<f32>;
 pub type OrderedF64 = ordered_float::OrderedFloat<f64>;
@@ -45,6 +45,7 @@ pub enum DataTypeKind {
     Timestamp,
     Timestampz,
     Interval,
+    Struct,
 }
 
 /// Number of bytes of one element in array of [`DataType`].
@@ -76,6 +77,7 @@ impl From<&ProstDataType> for DataTypeKind {
             },
             TypeName::Interval => DataTypeKind::Interval,
             TypeName::Symbol => DataTypeKind::Varchar,
+            TypeName::Struct => DataTypeKind::Struct,
         }
     }
 }
@@ -99,6 +101,7 @@ impl DataTypeKind {
             DataTypeKind::Timestamp => PrimitiveArrayBuilder::<i64>::new(capacity)?.into(),
             DataTypeKind::Timestampz => PrimitiveArrayBuilder::<i64>::new(capacity)?.into(),
             DataTypeKind::Interval => IntervalArrayBuilder::new(capacity)?.into(),
+            DataTypeKind::Struct => StructArrayBuilder::new(capacity)?.into(),
         })
     }
 
@@ -118,16 +121,15 @@ impl DataTypeKind {
             DataTypeKind::Timestampz => TypeName::Timestampz,
             DataTypeKind::Decimal { .. } => TypeName::Decimal,
             DataTypeKind::Interval => TypeName::Interval,
+            DataTypeKind::Struct => TypeName::Struct,
         }
     }
 
     pub fn to_protobuf(&self) -> Result<ProstDataType> {
         Ok(ProstDataType {
             type_name: self.prost_type_name() as i32,
-            precision: 0,
-            scale: 0,
             is_nullable: true,
-            interval_type: 0,
+            ..Default::default()
         })
     }
 
@@ -148,6 +150,7 @@ impl DataTypeKind {
             DataTypeKind::Timestamp => DataSize::Fixed(size_of::<i64>()),
             DataTypeKind::Timestampz => DataSize::Fixed(size_of::<i64>()),
             DataTypeKind::Interval => DataSize::Variable,
+            DataTypeKind::Struct => DataSize::Variable,
         }
     }
 
@@ -227,7 +230,8 @@ macro_rules! for_all_scalar_variants {
       { Utf8, utf8, String, &'scalar str },
       { Bool, bool, bool, bool },
       { Decimal, decimal, Decimal, Decimal  },
-      { Interval, interval, IntervalUnit, IntervalUnit }
+      { Interval, interval, IntervalUnit, IntervalUnit },
+      { Struct, struct, StructValue, StructValue }
     }
   };
 }
@@ -487,6 +491,7 @@ impl std::hash::Hash for ScalarImpl {
           Self::Utf8(s) => s.hash(state),
           Self::Decimal(decimal) => decimal.hash(state),
           Self::Interval(interval) => interval.hash(state),
+          Self::Struct(v) => v.hash(state),
         }
       };
     }
@@ -542,6 +547,7 @@ impl ScalarRefImpl<'_> {
             &Self::Bool(v) => v.serialize(ser)?,
             &Self::Decimal(v) => ser.serialize_decimal(v.mantissa(), v.scale() as u8)?,
             Self::Interval(v) => v.serialize(ser)?,
+            Self::Struct(v) => v.serialize(ser)?,
         };
         Ok(())
     }
@@ -577,6 +583,7 @@ impl ScalarImpl {
             Ty::Interval => Self::Interval(IntervalUnit::deserialize(de)?),
             Ty::Time | Ty::Timestamp | Ty::Timestampz => Self::Int64(i64::deserialize(de)?),
             Ty::Date => Self::Int32(i32::deserialize(de)?),
+            Ty::Struct => Self::Struct(StructValue::deserialize(de)?),
         })
     }
 }

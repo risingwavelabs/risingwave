@@ -26,6 +26,7 @@ enum DataTypeName {
     Timestamp,
     Timestampz,
     Interval,
+    Struct,
 }
 
 fn name_of(ty: &DataTypeKind) -> DataTypeName {
@@ -44,6 +45,7 @@ fn name_of(ty: &DataTypeKind) -> DataTypeName {
         DataTypeKind::Timestampz => DataTypeName::Timestampz,
         DataTypeKind::Decimal { .. } => DataTypeName::Decimal,
         DataTypeKind::Interval => DataTypeName::Interval,
+        DataTypeKind::Struct => DataTypeName::Struct,
     }
 }
 
@@ -68,6 +70,7 @@ pub fn infer_type(func_type: ExprType, inputs_type: Vec<DataTypeKind>) -> Option
         DataTypeName::Timestampz => DataTypeKind::Timestampz,
         DataTypeName::Decimal => DataTypeKind::decimal_default(),
         DataTypeName::Interval => DataTypeKind::Interval,
+        DataTypeName::Struct => DataTypeKind::Struct,
     })
 }
 

@@ -5,7 +5,7 @@ use std::io::{Cursor, Read};
 
 use itertools::Itertools;
 
-use crate::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk};
+use crate::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, StructValue};
 use crate::error::Result;
 use crate::types::{Datum, Decimal, IntervalUnit, OrderedF32, OrderedF64, ScalarRef};
 use crate::util::hash_util::CRC32FastBuilder;
@@ -284,6 +284,20 @@ impl<'a> HashKeySerDe<'a> for &'a str {
     /// This should never be called
     fn deserialize<R: Read>(_source: &mut R) -> Self {
         panic!("Should not serialize str for hash!")
+    }
+}
+
+impl<'a> HashKeySerDe<'_> for StructValue {
+    type S = Vec<u8>;
+
+    /// This should never be called
+    fn serialize(self) -> Self::S {
+        todo!()
+    }
+
+    /// This should never be called
+    fn deserialize<R: Read>(_source: &mut R) -> Self {
+        todo!()
     }
 }
 

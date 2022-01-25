@@ -51,6 +51,7 @@ message DataType {
     // Timestamp type with timezone
     TIMESTAMPZ = 13;
     SYMBOL = 14;
+    STRUCT = 15;
   }
   TypeName type_name = 1;
   // data length for char,

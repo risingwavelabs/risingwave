@@ -1,4 +1,5 @@
 use super::*;
+use crate::array::struct_array::StructValue;
 use crate::{for_all_native_types, for_all_scalar_variants};
 
 /// `ScalarPartialOrd` allows comparison between `Scalar` and `ScalarRef`.
@@ -49,6 +50,19 @@ impl Scalar for String {
 
     fn to_scalar_value(self) -> ScalarImpl {
         ScalarImpl::Utf8(self)
+    }
+}
+
+/// Implement `Scalar` for `StructValue`.
+impl Scalar for StructValue {
+    type ScalarRefType<'a> = StructValue;
+
+    fn as_scalar_ref(&self) -> StructValue {
+        *self
+    }
+
+    fn to_scalar_value(self) -> ScalarImpl {
+        ScalarImpl::Struct(self)
     }
 }
 
@@ -149,6 +163,15 @@ impl<'a> ScalarRef<'a> for IntervalUnit {
     type ScalarType = IntervalUnit;
 
     fn to_owned_scalar(&self) -> IntervalUnit {
+        *self
+    }
+}
+
+/// Implement `Scalar` for `StructValue`.
+impl<'a> ScalarRef<'a> for StructValue {
+    type ScalarType = StructValue;
+
+    fn to_owned_scalar(&self) -> StructValue {
         *self
     }
 }

@@ -10,7 +10,7 @@ use rand::prelude::Distribution;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 
-use crate::array::{Array, ArrayBuilder, ArrayRef};
+use crate::array::{Array, ArrayBuilder, ArrayRef, StructValue};
 use crate::types::{Decimal, IntervalUnit, NativeType, Scalar};
 
 pub trait RandValue {
@@ -52,6 +52,12 @@ impl RandValue for IntervalUnit {
 impl RandValue for bool {
     fn rand_value<R: Rng>(rand: &mut R) -> Self {
         rand.gen::<i32>() > 0
+    }
+}
+
+impl RandValue for StructValue {
+    fn rand_value<R: rand::Rng>(_rand: &mut R) -> Self {
+        StructValue {}
     }
 }
 

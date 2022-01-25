@@ -12,6 +12,7 @@ mod macros;
 mod primitive_array;
 pub mod stream_chunk;
 mod stream_chunk_iter;
+pub mod struct_array;
 mod utf8_array;
 mod value_reader;
 
@@ -29,6 +30,7 @@ use paste::paste;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayItemType};
 use risingwave_pb::data::Array as ProstArray;
 pub use stream_chunk::{Op, StreamChunk};
+pub use struct_array::{StructArray, StructArrayBuilder, StructValue};
 pub use utf8_array::*;
 
 use crate::array::iterator::ArrayImplIterator;
@@ -204,7 +206,8 @@ macro_rules! for_all_variants {
       { Utf8, utf8, Utf8Array, Utf8ArrayBuilder },
       { Bool, bool, BoolArray, BoolArrayBuilder },
       { Decimal, decimal, DecimalArray, DecimalArrayBuilder },
-      { Interval, interval, IntervalArray, IntervalArrayBuilder }
+      { Interval, interval, IntervalArray, IntervalArrayBuilder },
+      { Struct, struct, StructArray, StructArrayBuilder }
     }
   };
 }
@@ -247,6 +250,12 @@ impl From<Utf8Array> for ArrayImpl {
 impl From<IntervalArray> for ArrayImpl {
     fn from(arr: IntervalArray) -> Self {
         Self::Interval(arr)
+    }
+}
+
+impl From<StructArray> for ArrayImpl {
+    fn from(arr: StructArray) -> Self {
+        Self::Struct(arr)
     }
 }
 
