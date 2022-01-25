@@ -219,3 +219,6 @@ alias = "kill-playground"
 
 [tasks.k]
 alias = "kill-playground"
+
+[tasks.fill-kafka]
+command = "scripts/source/prepare_source.sh"
