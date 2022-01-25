@@ -28,7 +28,8 @@ create materialized view mv4 as select * from t1 order by t1.v2 DESC, t1.v3 ASC 
 statement ok
 create materialized view mv5 as select * from t1 order by t1.v2 DESC, t1.v3 ASC offset 1;
 
-sleep 1s
+statement ok
+flush;
 
 query IIIIIIII
 select * from mv1;
@@ -39,7 +40,8 @@ select * from mv1;
 statement ok
 insert into t1 values (3,4,4), (4,3,5);
 
-sleep 1s
+statement ok
+flush;
 
 query IIIIIIII
 select * from mv1;
@@ -79,7 +81,8 @@ select * from mv5;
 statement ok
 insert into t1 values (3,4,4), (4,3,5);
 
-sleep 1s
+statement ok
+flush;
 
 query IIII
 select * from mv2;

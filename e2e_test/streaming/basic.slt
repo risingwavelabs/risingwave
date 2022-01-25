@@ -28,7 +28,8 @@ create materialized view mv2 as select round(avg(v1), 1) as avg_v1, sum(v2) as s
 statement ok
 create materialized view mv3 as select sum(v1) as sum_v1, min(v1) as min_v1, max(v1) as max_v1 from t4 group by v3;
 
-sleep 1s
+statement ok
+flush;
 
 query III
 select v1, v2, v3 from mv1;
@@ -44,7 +45,8 @@ select avg_v1, sum_v2, count_v3 from mv2;
 statement ok
 insert into t1 values (3,4,4), (4,3,5);
 
-sleep 1s
+statement ok
+flush;
 
 query III
 select v1, v2, v3 from mv1;

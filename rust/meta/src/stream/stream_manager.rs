@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 
 use itertools::Itertools;
-use log::debug;
+use log::{debug, info};
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::common::{ActorInfo, WorkerNode};
 use risingwave_pb::data::barrier::Mutation;
@@ -256,6 +257,19 @@ impl StreamManager {
         // FIXME: `load_all_actors` can still find these actors.
         // TODO: add drop_actors interface, including drop node_actors/actor_node/table_actors.
         self.smm.drop_table_actors(table_id).await?;
+
+        Ok(())
+    }
+
+    /// Flush means waiting for the next barrier to finish.
+    pub async fn flush(&self) -> Result<()> {
+        let start = Instant::now();
+
+        info!("start barrier flush");
+        self.barrier_manager_ref.wait_for_next_barrier().await?;
+
+        let elapsed = Instant::now().duration_since(start);
+        info!("barrier flushed in {:?}", elapsed);
 
         Ok(())
     }

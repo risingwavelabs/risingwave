@@ -12,7 +12,8 @@ include ../../tpch/insert_supplier.slt.part
 include ./create_views.slt.part
 
 
-sleep 15s
+statement ok
+flush;
 
 
 include ./q1.slt.part

@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::iter::once;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -90,10 +91,6 @@ impl BarrierActorInfo {
             })
             .map(|a| a.actor_id)
     }
-
-    fn is_empty(&self) -> bool {
-        self.actor_map.is_empty()
-    }
 }
 
 #[derive(Debug, Default)]
@@ -103,6 +100,22 @@ struct Notifier {
 
     /// Get notified when scheduled barrier is collected / finished.
     collected: Option<oneshot::Sender<()>>,
+}
+
+impl Notifier {
+    /// Nofify when we are about to send a barrier.
+    fn notify_to_send(&mut self) {
+        if let Some(tx) = self.to_send.take() {
+            tx.send(()).ok();
+        }
+    }
+
+    /// Nofify when we have collected a barrier from all actors.
+    fn notify_collected(&mut self) {
+        if let Some(tx) = self.collected.take() {
+            tx.send(()).ok();
+        }
+    }
 }
 
 type Scheduled = (Mutation, Notifier);
@@ -124,6 +137,10 @@ pub struct BarrierManager {
 
     /// Used for the long-running loop to take scheduled barrier tasks.
     scheduled_barriers_rx: Mutex<Option<UnboundedReceiver<Scheduled>>>,
+
+    /// Extra notifiers will be taken in the start of next barrier loop, and got merged with the
+    /// notifier associated with the scheduled barrier.
+    extra_notifiers: Mutex<Vec<Notifier>>,
 }
 
 impl BarrierManager {
@@ -143,6 +160,7 @@ impl BarrierManager {
             clients: env.stream_clients_ref(),
             scheduled_barriers_tx: tx,
             scheduled_barriers_rx: Mutex::new(Some(rx)),
+            extra_notifiers: Mutex::new(Default::default()),
         }
     }
 
@@ -175,13 +193,14 @@ impl BarrierManager {
 
             let all_actors = self.stream_meta_manager.load_all_actors().await?;
             let info = BarrierActorInfo::resolve(all_actors);
-            if info.is_empty() {
-                continue;
-            }
 
-            let (mutation, mut notifier) = scheduled.unwrap_or_else(
+            let (mutation, notifier) = scheduled.unwrap_or_else(
         || (Mutation::Nothing(NothingMutation {}), Default::default()), // default periodic checkpoint barrier
       );
+            let extra_notifiers = std::mem::take(&mut *self.extra_notifiers.lock().await);
+            let mut notifiers = once(notifier)
+                .chain(extra_notifiers.into_iter())
+                .collect_vec();
 
             let epoch = self.epoch_generator.generate()?.into_inner();
 
@@ -226,15 +245,9 @@ impl BarrierManager {
                 }
             });
 
-            if let Some(tx) = notifier.to_send.take() {
-                tx.send(()).unwrap();
-            }
-
+            notifiers.iter_mut().for_each(Notifier::notify_to_send);
             try_join_all(collect_futures).await?; // wait all barriers collected
-
-            if let Some(tx) = notifier.collected.take() {
-                tx.send(()).unwrap();
-            }
+            notifiers.iter_mut().for_each(Notifier::notify_collected);
 
             // TODO: remove this workaround for stopped actors when meta store inconsistency is
             // fixed
@@ -246,26 +259,28 @@ impl BarrierManager {
 }
 
 impl BarrierManager {
-    /// Schedule a barrier and return immediately.
-    pub async fn schedule_barrier(&self, mutation: Mutation) -> Result<()> {
+    fn do_schedule(&self, mutation: Mutation, notifier: Notifier) -> Result<()> {
         self.scheduled_barriers_tx
-            .send((mutation, Default::default()))
+            .send((mutation, notifier))
             .unwrap();
         Ok(())
+    }
+
+    /// Schedule a barrier and return immediately.
+    pub async fn schedule_barrier(&self, mutation: Mutation) -> Result<()> {
+        self.do_schedule(mutation, Default::default())
     }
 
     /// Schedule a barrier and returns when it's sent.
     pub async fn send_barrier(&self, mutation: Mutation) -> Result<()> {
         let (tx, rx) = oneshot::channel();
-        self.scheduled_barriers_tx
-            .send((
-                mutation,
-                Notifier {
-                    to_send: Some(tx),
-                    ..Default::default()
-                },
-            ))
-            .unwrap();
+        self.do_schedule(
+            mutation,
+            Notifier {
+                to_send: Some(tx),
+                ..Default::default()
+            },
+        )?;
         rx.await.unwrap();
         Ok(())
     }
@@ -273,15 +288,25 @@ impl BarrierManager {
     /// Send a barrier, returns when it's collected / finished by all reachable actors in the graph.
     pub async fn send_barrier_and_collect(&self, mutation: Mutation) -> Result<()> {
         let (tx, rx) = oneshot::channel();
-        self.scheduled_barriers_tx
-            .send((
-                mutation,
-                Notifier {
-                    collected: Some(tx),
-                    ..Default::default()
-                },
-            ))
-            .unwrap();
+        self.do_schedule(
+            mutation,
+            Notifier {
+                collected: Some(tx),
+                ..Default::default()
+            },
+        )?;
+        rx.await.unwrap();
+        Ok(())
+    }
+
+    /// Wait for the next barrier to finish. Note that the barrier flowing in our stream graph is
+    /// ignored, if exists.
+    pub async fn wait_for_next_barrier(&self) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.extra_notifiers.lock().await.push(Notifier {
+            collected: Some(tx),
+            ..Default::default()
+        });
         rx.await.unwrap();
         Ok(())
     }

@@ -46,6 +46,8 @@ public class RemoteStreamManager implements StreamManager {
   public void flush() {
     FlushRequest.Builder builder = FlushRequest.newBuilder();
     FlushResponse response = metaClient.flush(builder.build());
-    throw new PgException(PgErrorCode.INTERNAL_ERROR, "Flush barrier failed");
+    if (response.getStatus().getCode() != Status.Code.OK) {
+      throw new PgException(PgErrorCode.INTERNAL_ERROR, "Drop materialized view failed");
+    }
   }
 }

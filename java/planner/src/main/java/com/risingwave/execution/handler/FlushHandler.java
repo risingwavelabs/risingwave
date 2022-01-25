@@ -22,7 +22,7 @@ public class FlushHandler implements SqlHandler {
     if (streamManager instanceof RemoteStreamManager) {
       RemoteStreamManager remoteStreamManager = (RemoteStreamManager) streamManager;
       remoteStreamManager.flush();
-      return new DdlResult(StatementType.OTHER, 0);
+      return new DdlResult(StatementType.FLUSH, 0);
     } else {
       throw new PgException(PgErrorCode.INTERNAL_ERROR, "Not available in local stream manager");
     }

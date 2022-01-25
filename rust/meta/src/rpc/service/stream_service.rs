@@ -91,7 +91,10 @@ impl StreamManagerService for StreamServiceImpl {
     }
 
     #[cfg(not(tarpaulin_include))]
-    async fn flush(&self, _request: Request<FlushRequest>) -> TonicResponse<FlushResponse> {
-        todo!()
+    async fn flush(&self, request: Request<FlushRequest>) -> TonicResponse<FlushResponse> {
+        let _req = request.into_inner();
+
+        self.sm.flush().await.map_err(|e| e.to_grpc_status())?;
+        Ok(Response::new(FlushResponse { status: None }))
     }
 }

@@ -4,7 +4,8 @@ create table_v2 t1v2 (v1 real not null, v2 int not null, v3 real not null);
 statement ok
 insert into t1v2 values (1,1,4), (5,1,4);
 
-sleep 1s
+statement ok
+flush;
 
 query RIR
 select * from _rw_source_t1v2;

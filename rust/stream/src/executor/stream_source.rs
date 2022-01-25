@@ -130,6 +130,8 @@ impl Executor for StreamSourceExecutor {
         }
         // FIXME: may lose message
         tokio::select! {
+          biased; // to ensure `FLUSH` run after any `INSERT`.
+
           chunk = self.reader.next() => {
             let mut chunk = chunk?;
 

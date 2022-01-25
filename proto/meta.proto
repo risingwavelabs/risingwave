@@ -159,7 +159,9 @@ message DropMaterializedViewResponse {
 
 message FlushRequest {}
 
-message FlushResponse {}
+message FlushResponse {
+  common.Status status = 1;
+}
 
 service StreamManagerService {
   // TODO: migration mv catalog creation/drop in.
