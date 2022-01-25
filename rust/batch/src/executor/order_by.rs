@@ -270,8 +270,8 @@ mod tests {
         let data_chunk = DataChunk::builder().columns([col0, col1].to_vec()).build();
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(DataTypeKind::Int32),
-                Field::new_without_name(DataTypeKind::Int32),
+                Field::unnamed(DataTypeKind::Int32),
+                Field::unnamed(DataTypeKind::Int32),
             ],
         };
         let mut mock_executor = MockExecutor::new(schema);
@@ -324,8 +324,8 @@ mod tests {
         let data_chunk = DataChunk::builder().columns([col0, col1].to_vec()).build();
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(DataTypeKind::Float32),
-                Field::new_without_name(DataTypeKind::Float64),
+                Field::unnamed(DataTypeKind::Float32),
+                Field::unnamed(DataTypeKind::Float64),
             ],
         };
         let mut mock_executor = MockExecutor::new(schema);
@@ -387,8 +387,8 @@ mod tests {
         let data_chunk = DataChunk::builder().columns([col0, col1].to_vec()).build();
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(DataTypeKind::Varchar),
-                Field::new_without_name(DataTypeKind::Varchar),
+                Field::unnamed(DataTypeKind::Varchar),
+                Field::unnamed(DataTypeKind::Varchar),
             ],
         };
         let mut mock_executor = MockExecutor::new(schema);
@@ -470,10 +470,10 @@ mod tests {
                 .build();
             let schema = Schema {
                 fields: vec![
-                    Field::new_without_name(DataTypeKind::Int16),
-                    Field::new_without_name(DataTypeKind::Boolean),
-                    Field::new_without_name(DataTypeKind::Float32),
-                    Field::new_without_name(DataTypeKind::Varchar),
+                    Field::unnamed(DataTypeKind::Int16),
+                    Field::unnamed(DataTypeKind::Boolean),
+                    Field::unnamed(DataTypeKind::Float32),
+                    Field::unnamed(DataTypeKind::Varchar),
                 ],
             };
             let mut mock_executor = MockExecutor::new(schema);

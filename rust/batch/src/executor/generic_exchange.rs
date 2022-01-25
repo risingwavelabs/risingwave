@@ -199,7 +199,7 @@ mod tests {
             source_creator: PhantomData,
             env: BatchTaskEnv::for_test(),
             schema: Schema {
-                fields: vec![Field::new_without_name(DataTypeKind::Int32)],
+                fields: vec![Field::unnamed(DataTypeKind::Int32)],
             },
             task_id: TaskId::default(),
             identity: format!("GenericExchangeExecutor{:?}", TaskId::default()),

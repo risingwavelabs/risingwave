@@ -97,7 +97,7 @@ async fn test_table_v2_materialize() -> Result<()> {
                 .iter()
                 .find(|c| c.column_id == column_id)
                 .unwrap();
-            fields.push(Field::new(column_desc.data_type, String::from("")));
+            fields.push(Field::unnamed(column_desc.data_type));
         }
         Schema::new(fields)
     };

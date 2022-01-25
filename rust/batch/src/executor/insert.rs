@@ -39,7 +39,7 @@ impl InsertExecutor {
             child,
             executed: false,
             schema: Schema {
-                fields: vec![Field::new_without_name(DataTypeKind::Int64)],
+                fields: vec![Field::unnamed(DataTypeKind::Int64)],
             },
             identity,
         }
@@ -220,8 +220,8 @@ mod tests {
         // Schema for mock executor.
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(DataTypeKind::Int64),
-                Field::new_without_name(DataTypeKind::Int64),
+                Field::unnamed(DataTypeKind::Int64),
+                Field::unnamed(DataTypeKind::Int64),
             ],
         };
         let mut mock_executor = MockExecutor::new(schema.clone());
@@ -229,9 +229,9 @@ mod tests {
         // Schema of first table
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(DataTypeKind::decimal_default()),
-                Field::new_without_name(DataTypeKind::decimal_default()),
-                Field::new_without_name(DataTypeKind::decimal_default()),
+                Field::unnamed(DataTypeKind::decimal_default()),
+                Field::unnamed(DataTypeKind::decimal_default()),
+                Field::unnamed(DataTypeKind::decimal_default()),
             ],
         };
 
@@ -267,7 +267,7 @@ mod tests {
             child: Box::new(mock_executor),
             executed: false,
             schema: Schema {
-                fields: vec![Field::new_without_name(DataTypeKind::Int64)],
+                fields: vec![Field::unnamed(DataTypeKind::Int64)],
             },
             identity: format!("InsertExecutor{:?}", TaskId::default()),
         };
@@ -341,7 +341,7 @@ mod tests {
             child: Box::new(mock_executor),
             executed: false,
             schema: Schema {
-                fields: vec![Field::new_without_name(DataTypeKind::Int64)],
+                fields: vec![Field::unnamed(DataTypeKind::Int64)],
             },
             identity: format!("InsertExecutor{:?}", TaskId::default()),
         };
@@ -395,7 +395,7 @@ mod tests {
             child: Box::new(mock_executor),
             executed: false,
             schema: Schema {
-                fields: vec![Field::new_without_name(DataTypeKind::Int64)],
+                fields: vec![Field::unnamed(DataTypeKind::Int64)],
             },
             identity: format!("InsertExecutor{:?}", TaskId::default()),
         };
@@ -478,8 +478,8 @@ mod tests {
         // Schema for mock executor.
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(DataTypeKind::Int64),
-                Field::new_without_name(DataTypeKind::Int64),
+                Field::unnamed(DataTypeKind::Int64),
+                Field::unnamed(DataTypeKind::Int64),
             ],
         };
         let mut mock_executor = MockExecutor::new(schema.clone());
@@ -487,9 +487,9 @@ mod tests {
         // Schema of first table
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(DataTypeKind::decimal_default()),
-                Field::new_without_name(DataTypeKind::decimal_default()),
-                Field::new_without_name(DataTypeKind::decimal_default()),
+                Field::unnamed(DataTypeKind::decimal_default()),
+                Field::unnamed(DataTypeKind::decimal_default()),
+                Field::unnamed(DataTypeKind::decimal_default()),
             ],
         };
 

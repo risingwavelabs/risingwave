@@ -99,7 +99,7 @@ impl ScannableTable for BummockTable {
         let schema = Schema::new(
             self.table_columns
                 .iter()
-                .map(|c| Field::new(c.data_type, c.name.clone()))
+                .map(|c| Field::with_name(c.data_type, c.name.clone()))
                 .collect(),
         );
 
@@ -290,8 +290,8 @@ mod tests {
 
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(DataTypeKind::decimal_default()),
-                Field::new_without_name(DataTypeKind::decimal_default()),
+                Field::unnamed(DataTypeKind::decimal_default()),
+                Field::unnamed(DataTypeKind::decimal_default()),
             ],
         };
 

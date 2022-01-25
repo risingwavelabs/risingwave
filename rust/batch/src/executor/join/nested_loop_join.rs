@@ -484,7 +484,7 @@ mod tests {
     fn test_convert_row_to_chunk() {
         let row = RowRef::new(vec![Some(ScalarRefImpl::Int32(3))]);
         let probe_side_schema = Schema {
-            fields: vec![Field::new_without_name(DataTypeKind::Int32)],
+            fields: vec![Field::unnamed(DataTypeKind::Int32)],
         };
         let probe_source = Box::new(MockExecutor::new(probe_side_schema.clone()));
         let build_source = Box::new(MockExecutor::new(probe_side_schema.clone()));
@@ -545,8 +545,8 @@ mod tests {
         fn create_left_executor(&self) -> BoxedExecutor {
             let schema = Schema {
                 fields: vec![
-                    Field::new_without_name(DataTypeKind::Int32),
-                    Field::new_without_name(DataTypeKind::Float32),
+                    Field::unnamed(DataTypeKind::Int32),
+                    Field::unnamed(DataTypeKind::Float32),
                 ],
             };
             let mut executor = MockExecutor::new(schema);
@@ -584,8 +584,8 @@ mod tests {
         fn create_right_executor(&self) -> BoxedExecutor {
             let schema = Schema {
                 fields: vec![
-                    Field::new_without_name(DataTypeKind::Int32),
-                    Field::new_without_name(DataTypeKind::Float64),
+                    Field::unnamed(DataTypeKind::Int32),
+                    Field::unnamed(DataTypeKind::Float64),
                 ],
             };
             let mut executor = MockExecutor::new(schema);

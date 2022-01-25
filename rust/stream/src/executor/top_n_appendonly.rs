@@ -328,8 +328,8 @@ mod tests {
     fn create_schema() -> Schema {
         Schema {
             fields: vec![
-                Field::new_without_name(DataTypeKind::Int64),
-                Field::new_without_name(DataTypeKind::Int64),
+                Field::unnamed(DataTypeKind::Int64),
+                Field::unnamed(DataTypeKind::Int64),
             ],
         }
     }

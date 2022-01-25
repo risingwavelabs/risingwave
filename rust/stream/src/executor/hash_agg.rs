@@ -354,7 +354,7 @@ mod tests {
             Some((vec![true, false, true]).try_into().unwrap()),
         );
         let schema = Schema {
-            fields: vec![Field::new_without_name(DataTypeKind::Int64)],
+            fields: vec![Field::unnamed(DataTypeKind::Int64)],
         };
         let mut source = MockSource::new(schema, PkIndices::new());
         source.push_chunks([chunk1].into_iter());
@@ -451,9 +451,9 @@ mod tests {
         );
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(DataTypeKind::Int64),
-                Field::new_without_name(DataTypeKind::Int64),
-                Field::new_without_name(DataTypeKind::Int64),
+                Field::unnamed(DataTypeKind::Int64),
+                Field::unnamed(DataTypeKind::Int64),
+                Field::unnamed(DataTypeKind::Int64),
             ],
         };
 
@@ -567,10 +567,10 @@ mod tests {
         );
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(DataTypeKind::Int64),
-                Field::new_without_name(DataTypeKind::Int64),
+                Field::unnamed(DataTypeKind::Int64),
+                Field::unnamed(DataTypeKind::Int64),
                 // primary key column
-                Field::new_without_name(DataTypeKind::Int64),
+                Field::unnamed(DataTypeKind::Int64),
             ],
         };
         let mut source = MockSource::new(schema, vec![2]); // pk

@@ -128,7 +128,7 @@ mod tests {
     async fn test_seq_scan_executor() -> Result<()> {
         let table_id = TableId::default();
         let schema = Schema {
-            fields: vec![Field::new_without_name(DataTypeKind::decimal_default())],
+            fields: vec![Field::unnamed(DataTypeKind::decimal_default())],
         };
         let table_columns = schema
             .fields

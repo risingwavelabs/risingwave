@@ -150,7 +150,7 @@ mod tests {
             .first()
             .ok_or_else(|| RwError::from(InternalError("Can't values empty rows!".to_string())))?
             .iter() // for each column
-            .map(|col| Field::new_without_name(col.return_type()))
+            .map(|col| Field::unnamed(col.return_type()))
             .collect::<Vec<Field>>();
         let mut values_executor = ValuesExecutor {
             rows: exprs,

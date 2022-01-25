@@ -32,7 +32,7 @@ impl BoxedExecutorBuilder for GenerateSeriesI32Executor {
             stop: node.stop,
             step: node.step,
             cur: node.start,
-            schema: Schema::new(vec![Field::new_without_name(DataTypeKind::Int32)]),
+            schema: Schema::new(vec![Field::unnamed(DataTypeKind::Int32)]),
             identity: format!("GenerateSeriesI32Executor{:?}", source.task_id),
         }))
     }
@@ -111,7 +111,7 @@ mod tests {
             stop,
             step,
             cur: start,
-            schema: Schema::new(vec![Field::new_without_name(DataTypeKind::Int32)]),
+            schema: Schema::new(vec![Field::unnamed(DataTypeKind::Int32)]),
             identity: format!("GenerateSeriesI32Executor{:?}", TaskId::default()),
         };
         let mut remained_values = ((stop - start) / step + 1) as usize;

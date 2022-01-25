@@ -74,7 +74,7 @@ impl HashAggExecutorBuilder {
             .iter()
             .cloned()
             .chain(agg_factories.iter().map(|e| e.get_return_type()))
-            .map(Field::new_without_name)
+            .map(Field::unnamed)
             .collect::<Vec<Field>>();
 
         let hash_key_kind = calc_hash_key_kind(&group_key_types);
@@ -269,9 +269,9 @@ mod tests {
                 .build(),
             Schema {
                 fields: vec![
-                    Field::new_without_name(t32),
-                    Field::new_without_name(t32),
-                    Field::new_without_name(t32),
+                    Field::unnamed(t32),
+                    Field::unnamed(t32),
+                    Field::unnamed(t32),
                 ],
             },
         );
@@ -302,9 +302,9 @@ mod tests {
 
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(t32),
-                Field::new_without_name(t32),
-                Field::new_without_name(t64),
+                Field::unnamed(t32),
+                Field::unnamed(t32),
+                Field::unnamed(t64),
             ],
         };
 
@@ -333,7 +333,7 @@ mod tests {
         let src_exec = MockExecutor::with_chunk(
             DataChunk::builder().columns(vec![Column::new(col)]).build(),
             Schema {
-                fields: vec![Field::new_without_name(t32)],
+                fields: vec![Field::unnamed(t32)],
             },
         );
 
@@ -355,7 +355,7 @@ mod tests {
             HashAggExecutorBuilder::deserialize(&agg_prost, Box::new(src_exec), TaskId::default())
                 .unwrap();
         let schema = Schema {
-            fields: vec![Field::new_without_name(t32)],
+            fields: vec![Field::unnamed(t32)],
         };
         let res = Arc::new(array_nonnull! { I64Array, [8] }.into());
 

@@ -343,8 +343,8 @@ mod tests {
         fn create_left_executor(&self) -> BoxedExecutor {
             let schema = Schema {
                 fields: vec![
-                    Field::new_without_name(DataTypeKind::Int32),
-                    Field::new_without_name(DataTypeKind::Float32),
+                    Field::unnamed(DataTypeKind::Int32),
+                    Field::unnamed(DataTypeKind::Float32),
                 ],
             };
             let mut executor = MockExecutor::new(schema);
@@ -382,8 +382,8 @@ mod tests {
         fn create_right_executor(&self) -> BoxedExecutor {
             let schema = Schema {
                 fields: vec![
-                    Field::new_without_name(DataTypeKind::Int32),
-                    Field::new_without_name(DataTypeKind::Float64),
+                    Field::unnamed(DataTypeKind::Int32),
+                    Field::unnamed(DataTypeKind::Float64),
                 ],
             };
             let mut executor = MockExecutor::new(schema);

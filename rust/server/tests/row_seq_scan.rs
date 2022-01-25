@@ -21,8 +21,8 @@ async fn test_row_seq_scan() -> Result<()> {
     let keyspace = Keyspace::executor_root(state_store, 0x42);
 
     let schema = Schema::new(vec![
-        Field::new(DataTypeKind::Int32, String::from("")),
-        Field::new(DataTypeKind::Int32, String::from("")),
+        Field::unnamed(DataTypeKind::Int32),
+        Field::unnamed(DataTypeKind::Int32),
     ]);
     let pk_columns = vec![0];
     let orderings = vec![OrderType::Ascending];

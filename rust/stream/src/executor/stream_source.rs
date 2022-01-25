@@ -239,9 +239,9 @@ mod tests {
 
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(rowid_type),
-                Field::new_without_name(col1_type),
-                Field::new_without_name(col2_type),
+                Field::unnamed(rowid_type),
+                Field::unnamed(col1_type),
+                Field::unnamed(col2_type),
             ],
         };
 
@@ -362,9 +362,9 @@ mod tests {
 
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(rowid_type),
-                Field::new_without_name(col1_type),
-                Field::new_without_name(col2_type),
+                Field::unnamed(rowid_type),
+                Field::unnamed(col1_type),
+                Field::unnamed(col2_type),
             ],
         };
 

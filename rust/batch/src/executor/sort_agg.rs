@@ -66,7 +66,7 @@ impl BoxedExecutorBuilder for SortAggExecutor {
             .iter()
             .map(|e| e.return_type())
             .chain(agg_states.iter().map(|e| e.return_type()))
-            .map(Field::new_without_name)
+            .map(Field::unnamed)
             .collect::<Vec<Field>>();
 
         Ok(Box::new(Self {
@@ -193,7 +193,7 @@ mod tests {
         let a = Arc::new(array_nonnull! { I32Array, [1, 2, 3] }.into());
         let chunk = DataChunk::builder().columns(vec![Column::new(a)]).build();
         let schema = Schema {
-            fields: vec![Field::new_without_name(DataTypeKind::Int32)],
+            fields: vec![Field::unnamed(DataTypeKind::Int32)],
         };
         let mut child = MockExecutor::new(schema);
         child.add(chunk);
@@ -221,7 +221,7 @@ mod tests {
             .iter()
             .map(|e| e.return_type())
             .chain(agg_states.iter().map(|e| e.return_type()))
-            .map(Field::new_without_name)
+            .map(Field::unnamed)
             .collect::<Vec<Field>>();
         let mut executor = SortAggExecutor {
             agg_states,
@@ -262,9 +262,9 @@ mod tests {
             .build();
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(DataTypeKind::Int32),
-                Field::new_without_name(DataTypeKind::Int32),
-                Field::new_without_name(DataTypeKind::Int32),
+                Field::unnamed(DataTypeKind::Int32),
+                Field::unnamed(DataTypeKind::Int32),
+                Field::unnamed(DataTypeKind::Int32),
             ],
         };
         let mut child = MockExecutor::new(schema);
@@ -317,7 +317,7 @@ mod tests {
             .iter()
             .map(|e| e.return_type())
             .chain(agg_states.iter().map(|e| e.return_type()))
-            .map(Field::new_without_name)
+            .map(Field::unnamed)
             .collect::<Vec<Field>>();
 
         let mut executor = SortAggExecutor {

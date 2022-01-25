@@ -75,11 +75,11 @@ impl Schema {
 }
 
 impl Field {
-    pub fn new(data_type: DataTypeKind, name: String) -> Self {
+    pub fn with_name(data_type: DataTypeKind, name: String) -> Self {
         Self { data_type, name }
     }
 
-    pub fn new_without_name(data_type: DataTypeKind) -> Self {
+    pub fn unnamed(data_type: DataTypeKind) -> Self {
         Self {
             data_type,
             name: String::new(),

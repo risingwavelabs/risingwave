@@ -152,7 +152,7 @@ mod tests {
         let mut executor = StreamScanExecutor {
             reader: Box::new(reader),
             done: false,
-            schema: Schema::new(vec![Field::new_without_name(DataTypeKind::Int32)]),
+            schema: Schema::new(vec![Field::unnamed(DataTypeKind::Int32)]),
             identity: format!("StreamScanExecutor{:?}", TaskId::default()),
         };
         executor.open().await.unwrap();

@@ -152,7 +152,7 @@ mod tests {
         )
         .unwrap();
         let schema = Schema {
-            fields: vec![Field::new_without_name(DataTypeKind::Int32)],
+            fields: vec![Field::unnamed(DataTypeKind::Int32)],
         };
         let mut mock_executor = MockExecutor::new(schema);
 
@@ -280,8 +280,8 @@ mod tests {
         let col1 = Column::new(Arc::new(visible_array.into()));
         let schema = Schema {
             fields: vec![
-                Field::new_without_name(DataTypeKind::Int32),
-                Field::new_without_name(DataTypeKind::Boolean),
+                Field::unnamed(DataTypeKind::Int32),
+                Field::unnamed(DataTypeKind::Boolean),
             ],
         };
         let mut mock_executor = MockExecutor::new(schema);
