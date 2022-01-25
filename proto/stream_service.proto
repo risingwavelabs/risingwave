@@ -50,7 +50,8 @@ message DropActorsResponse {
 message InjectBarrierRequest {
   string request_id = 1;
   data.Barrier barrier = 2;
-  repeated uint32 actor_ids_to_collect = 3;
+  repeated uint32 actor_ids_to_send = 3;
+  repeated uint32 actor_ids_to_collect = 4;
 }
 
 message InjectBarrierResponse {

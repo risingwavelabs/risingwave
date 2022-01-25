@@ -1,4 +1,3 @@
-use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
@@ -83,14 +82,31 @@ impl LocalBarrierManager {
     pub fn send_barrier(
         &mut self,
         barrier: &Barrier,
+        actor_ids_to_send: impl IntoIterator<Item = u32>,
         actor_ids_to_collect: impl IntoIterator<Item = u32>,
     ) -> Result<Option<oneshot::Receiver<()>>> {
-        let actor_ids_to_collect: HashSet<_> = actor_ids_to_collect.into_iter().collect();
+        let to_send = {
+            let mut to_send: HashSet<u32> = actor_ids_to_send.into_iter().collect();
+            match &self.state {
+                BarrierState::Local => {
+                    if to_send.is_empty() {
+                        to_send = self.senders.keys().cloned().collect()
+                    }
+                }
+                BarrierState::Managed(_) => {
+                    // There must be some actors to send to.
+                    assert!(!to_send.is_empty());
+                }
+            }
+            to_send
+        };
+        let to_collect: HashSet<u32> = actor_ids_to_collect.into_iter().collect();
+
         trace!(
             "send barrier {:?}, senders = {:?}, actor_ids_to_collect = {:?}",
             barrier,
-            self.senders.keys(),
-            actor_ids_to_collect
+            to_send,
+            to_collect
         );
 
         let rx = match &mut self.state {
@@ -100,36 +116,43 @@ impl LocalBarrierManager {
                 // There should be only one epoch / barrier at a time.
                 assert!(state.is_none());
                 // There must be some actors to collect from.
-                assert!(!actor_ids_to_collect.is_empty());
+                assert!(!to_collect.is_empty());
 
                 let (tx, rx) = oneshot::channel();
                 *state = Some(ManagedBarrierState {
                     epoch: barrier.epoch,
                     collect_notifier: tx,
-                    remaining_actors: actor_ids_to_collect,
+                    remaining_actors: to_collect,
                 });
 
                 Some(rx)
             }
         };
 
-        let mut barrier = barrier.clone();
+        let barrier = {
+            let mut barrier = barrier.clone();
+            if ENABLE_BARRIER_EVENT {
+                let receiver_ids = to_send.iter().cloned().join(", ");
+                // TODO: not a correct usage of span -- the span ends once it goes out of scope, but
+                // we still have events in the background.
+                let span = tracing::info_span!("send_barrier", epoch = barrier.epoch, mutation = ?barrier.mutation, receivers = %receiver_ids);
+                barrier.span = Some(span);
+            }
+            barrier
+        };
 
-        if ENABLE_BARRIER_EVENT {
-            let receiver_ids = self.senders.keys().cloned().join(", ");
-            // TODO: not a correct usage of span -- the span ends once it goes out of scope, but we
-            // still have events in the background.
-            let span = tracing::info_span!("send_barrier", epoch = barrier.epoch, mutation = ?barrier.mutation, receivers = %receiver_ids);
-            barrier.span = Some(span);
-        }
-
-        for sender in self.senders.values() {
+        for actor_id in to_send {
+            let sender = self
+                .senders
+                .get(&actor_id)
+                .unwrap_or_else(|| panic!("sender for actor {} does not exist", actor_id));
             sender.send(Message::Barrier(barrier.clone())).unwrap();
         }
 
         // Actors to stop should still accept this barrier, but won't get sent to in next times.
         if let Some(Mutation::Stop(actors)) = barrier.mutation.as_deref() {
             for actor in actors {
+                trace!("remove actor {} from senders", actor);
                 self.senders.remove(actor);
             }
         }
@@ -145,41 +168,29 @@ impl LocalBarrierManager {
 
             BarrierState::Managed(managed_state) => {
                 let current_epoch = managed_state.as_ref().map(|s| s.epoch);
-                let cmp = current_epoch
-                    .map(|current_epoch| barrier.epoch.cmp(&current_epoch))
-                    .unwrap_or(Ordering::Less);
+                if current_epoch != Some(barrier.epoch) {
+                    panic!(
+            "bad barrier with epoch {} from actor {}, while current epoch is {:?}, last epoch is {:?}",
+            barrier.epoch, actor_id, current_epoch, self.last_epoch
+          );
+                }
 
-                match cmp {
-                    Ordering::Less => {
-                        // TODO: there SHOULE BE no stale barriers in our system, this should panic.
-                        warn!(
-              "stale barrier with epoch {} from actor {}, while current epoch is {:?}, last epoch is {:?}",
-              barrier.epoch, actor_id, current_epoch, self.last_epoch
-            )
-                    }
-                    Ordering::Equal => {
-                        let state = managed_state.as_mut().unwrap();
-                        state.remaining_actors.remove(&actor_id);
+                let state = managed_state.as_mut().unwrap();
+                state.remaining_actors.remove(&actor_id);
 
-                        trace!(
-                            "collect barrier epoch {} from actor {}, remaining actors {:?}",
-                            barrier.epoch,
-                            actor_id,
-                            state.remaining_actors
-                        );
+                trace!(
+                    "collect barrier epoch {} from actor {}, remaining actors {:?}",
+                    barrier.epoch,
+                    actor_id,
+                    state.remaining_actors
+                );
 
-                        if state.remaining_actors.is_empty() {
-                            let state = managed_state.take().unwrap();
-                            self.last_epoch = Some(state.epoch);
-                            // Notify about barrier finishing.
-                            let tx = state.collect_notifier;
-                            tx.send(()).unwrap();
-                        }
-                    }
-                    Ordering::Greater => panic!(
-            "collected barrier with a larger epoch {} from actor {}, while current epoch is {:?}",
-            barrier.epoch, actor_id, current_epoch
-          ),
+                if state.remaining_actors.is_empty() {
+                    let state = managed_state.take().unwrap();
+                    self.last_epoch = Some(state.epoch);
+                    // Notify about barrier finishing.
+                    let tx = state.collect_notifier;
+                    tx.send(()).unwrap();
                 }
             }
         }
@@ -222,7 +233,10 @@ mod tests {
         // Send a barrier to all actors
         let epoch = 114514;
         let barrier = Barrier::new(epoch);
-        let mut collect_rx = manager.send_barrier(&barrier, actor_ids).unwrap().unwrap();
+        let mut collect_rx = manager
+            .send_barrier(&barrier, actor_ids.clone(), actor_ids)
+            .unwrap()
+            .unwrap();
 
         // Collect barriers from actors
         let collected_barriers = rxs

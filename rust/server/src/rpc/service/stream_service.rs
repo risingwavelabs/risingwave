@@ -112,7 +112,7 @@ impl StreamService for StreamServiceImpl {
 
         let rx = self
             .mgr
-            .send_barrier(&barrier, req.actor_ids_to_collect)
+            .send_barrier(&barrier, req.actor_ids_to_send, req.actor_ids_to_collect)
             .map_err(|e| e.to_grpc_status())?;
 
         // Wait for all actors finishing this barrier.
