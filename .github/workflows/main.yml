@@ -112,6 +112,7 @@ jobs:
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
+          ~/cargo-make/makers check-logs
       - name: e2e test 3-node
         run: |
           ~/cargo-make/makers clean-data
@@ -120,6 +121,7 @@ jobs:
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
+          ~/cargo-make/makers check-logs
       - uses: actions/upload-artifact@v2
         if: ${{ failure() }}
         name: Upload RiseLAB logs on failure (You may find it in artifacts)
