@@ -2,7 +2,7 @@ use std::fmt;
 
 use risingwave_common::catalog::Schema;
 
-use super::{IntoPlanRef, PlanRef, PlanTreeNodeUnary};
+use super::{IntoPlanRef, PlanRef, PlanTreeNodeUnary, ToDistributedBatch};
 use crate::optimizer::property::{Distribution, Order, WithDistribution, WithOrder, WithSchema};
 
 #[derive(Debug, Clone)]
@@ -50,5 +50,10 @@ impl WithDistribution for BatchExchange {
 impl WithSchema for BatchExchange {
     fn schema(&self) -> &Schema {
         &self.schema
+    }
+}
+impl ToDistributedBatch for BatchExchange {
+    fn to_distributed(&self) -> PlanRef {
+        unreachable!()
     }
 }

@@ -2,7 +2,9 @@ use std::fmt;
 
 use risingwave_common::catalog::Schema;
 
-use super::{IntoPlanRef, JoinPredicate, LogicalJoin, PlanRef, PlanTreeNodeBinary};
+use super::{
+    IntoPlanRef, JoinPredicate, LogicalJoin, PlanRef, PlanTreeNodeBinary, ToDistributedBatch,
+};
 use crate::optimizer::property::{
     Direction, FieldOrder, Order, WithDistribution, WithOrder, WithSchema,
 };
@@ -70,5 +72,10 @@ impl WithDistribution for BatchSortMergeJoin {}
 impl WithSchema for BatchSortMergeJoin {
     fn schema(&self) -> &Schema {
         self.logical.schema()
+    }
+}
+impl ToDistributedBatch for BatchSortMergeJoin {
+    fn to_distributed(&self) -> PlanRef {
+        todo!()
     }
 }

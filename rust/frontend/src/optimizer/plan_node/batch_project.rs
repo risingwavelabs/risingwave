@@ -2,8 +2,8 @@ use std::fmt;
 
 use risingwave_common::catalog::Schema;
 
-use super::{IntoPlanRef, LogicalProject, PlanRef, PlanTreeNodeUnary};
-use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
+use super::{IntoPlanRef, LogicalProject, PlanRef, PlanTreeNodeUnary, ToDistributedBatch};
+use crate::optimizer::property::{Distribution, WithDistribution, WithOrder, WithSchema};
 
 #[derive(Debug, Clone)]
 pub struct BatchProject {
@@ -33,5 +33,13 @@ impl WithDistribution for BatchProject {}
 impl WithSchema for BatchProject {
     fn schema(&self) -> &Schema {
         self.logical.schema()
+    }
+}
+impl ToDistributedBatch for BatchProject {
+    fn to_distributed(&self) -> PlanRef {
+        let new_input = self
+            .input()
+            .to_distributed_with_required(self.input_order_required(), Distribution::any());
+        self.clone_with_input(new_input).into_plan_ref()
     }
 }

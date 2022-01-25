@@ -3,9 +3,12 @@ use std::fmt;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 
-use super::{ColPrunable, IntoPlanRef, PlanRef, PlanTreeNodeUnary};
+use super::{
+    BatchProject, ColPrunable, IntoPlanRef, PlanRef, PlanTreeNodeUnary, StreamProject, ToBatch,
+    ToStream,
+};
 use crate::expr::{assert_input_ref, BoundExpr, BoundExprImpl};
-use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
+use crate::optimizer::property::{Distribution, WithDistribution, WithOrder, WithSchema};
 
 #[derive(Debug, Clone)]
 pub struct LogicalProject {
@@ -81,3 +84,20 @@ impl WithSchema for LogicalProject {
     }
 }
 impl ColPrunable for LogicalProject {}
+impl ToBatch for LogicalProject {
+    fn to_batch(&self) -> PlanRef {
+        let new_input = self.input().to_batch();
+        let new_logical = self.clone_with_input(new_input);
+        BatchProject::new(new_logical).into_plan_ref()
+    }
+}
+impl ToStream for LogicalProject {
+    fn to_stream_with_dist_required(&self, required_dist: Distribution) -> PlanRef {
+        let new_input = self.input().to_stream_with_dist_required(required_dist);
+        let new_logical = self.clone_with_input(new_input);
+        StreamProject::new(new_logical).into_plan_ref()
+    }
+    fn to_stream(&self) -> PlanRef {
+        self.to_stream_with_dist_required(Distribution::any())
+    }
+}

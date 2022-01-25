@@ -4,7 +4,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_common::types::DataTypeKind;
 
-use super::{ColPrunable, IntoPlanRef, PlanRef, PlanTreeNodeUnary};
+use super::{ColPrunable, IntoPlanRef, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
 use crate::expr::{assert_input_ref, to_conjunctions, BoundExpr, BoundExprImpl};
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 
@@ -57,3 +57,13 @@ impl WithSchema for LogicalFilter {
     }
 }
 impl ColPrunable for LogicalFilter {}
+impl ToBatch for LogicalFilter {
+    fn to_batch(&self) -> PlanRef {
+        todo!()
+    }
+}
+impl ToStream for LogicalFilter {
+    fn to_stream(&self) -> PlanRef {
+        todo!()
+    }
+}

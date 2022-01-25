@@ -2,7 +2,7 @@ use std::fmt;
 
 use risingwave_common::catalog::Schema;
 
-use super::IntoPlanRef;
+use super::{IntoPlanRef, PlanRef, ToDistributedBatch};
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 #[derive(Debug, Clone)]
 pub struct BatchSeqScan {
@@ -22,3 +22,8 @@ impl fmt::Display for BatchSeqScan {
 }
 impl WithOrder for BatchSeqScan {}
 impl WithDistribution for BatchSeqScan {}
+impl ToDistributedBatch for BatchSeqScan {
+    fn to_distributed(&self) -> PlanRef {
+        todo!()
+    }
+}

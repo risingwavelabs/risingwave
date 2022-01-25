@@ -2,7 +2,7 @@ use std::fmt;
 
 use risingwave_common::catalog::Schema;
 
-use super::{ColPrunable, IntoPlanRef};
+use super::{ColPrunable, IntoPlanRef, PlanRef, ToBatch, ToStream};
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 
 #[derive(Debug, Clone)]
@@ -24,3 +24,13 @@ impl fmt::Display for LogicalScan {
     }
 }
 impl ColPrunable for LogicalScan {}
+impl ToBatch for LogicalScan {
+    fn to_batch(&self) -> PlanRef {
+        todo!()
+    }
+}
+impl ToStream for LogicalScan {
+    fn to_stream(&self) -> PlanRef {
+        todo!()
+    }
+}

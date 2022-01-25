@@ -2,8 +2,10 @@ use std::fmt;
 
 use risingwave_common::catalog::Schema;
 
-use super::{IntoPlanRef, JoinPredicate, LogicalJoin, PlanRef, PlanTreeNodeBinary};
-use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
+use super::{
+    IntoPlanRef, JoinPredicate, LogicalJoin, PlanRef, PlanTreeNodeBinary, ToDistributedBatch,
+};
+use crate::optimizer::property::{Distribution, WithDistribution, WithOrder, WithSchema};
 
 #[derive(Debug, Clone)]
 pub struct BatchHashJoin {
@@ -42,5 +44,19 @@ impl WithDistribution for BatchHashJoin {}
 impl WithSchema for BatchHashJoin {
     fn schema(&self) -> &Schema {
         self.logical.schema()
+    }
+}
+impl ToDistributedBatch for BatchHashJoin {
+    fn to_distributed(&self) -> PlanRef {
+        let left = self.left().to_distributed_with_required(
+            self.left_order_required(),
+            Distribution::HashShard(self.predicate().left_keys()),
+        );
+        let right = self.right().to_distributed_with_required(
+            self.right_order_required(),
+            Distribution::HashShard(self.predicate().right_keys()),
+        );
+
+        self.clone_with_left_right(left, right).into_plan_ref()
     }
 }

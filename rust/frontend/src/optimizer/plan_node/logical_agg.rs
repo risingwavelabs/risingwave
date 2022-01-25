@@ -5,7 +5,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::expr::AggKind;
 use risingwave_common::types::DataTypeKind;
 
-use super::{ColPrunable, IntoPlanRef, PlanRef, PlanTreeNodeUnary};
+use super::{ColPrunable, IntoPlanRef, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
 use crate::expr::BoundExprImpl;
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 #[derive(Clone, Debug)]
@@ -126,3 +126,13 @@ impl WithSchema for LogicalAgg {
     }
 }
 impl ColPrunable for LogicalAgg {}
+impl ToBatch for LogicalAgg {
+    fn to_batch(&self) -> PlanRef {
+        todo!()
+    }
+}
+impl ToStream for LogicalAgg {
+    fn to_stream(&self) -> PlanRef {
+        todo!()
+    }
+}

@@ -6,12 +6,6 @@ mod plan_rewriter;
 pub use plan_rewriter::*;
 mod plan_visitor;
 pub use plan_visitor::*;
-mod logical_to_batch;
-pub use logical_to_batch::*;
-mod logical_to_stream;
-pub use logical_to_stream::*;
-mod batch_to_distributed;
-pub use batch_to_distributed::*;
 mod heuristic;
 pub use heuristic::*;
 

@@ -3,7 +3,7 @@ use std::fmt;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 
-use super::ColPrunable;
+use super::{ColPrunable, PlanRef, ToBatch, ToStream};
 use crate::expr::{BoundExpr, BoundExprImpl};
 use crate::optimizer::plan_node::IntoPlanRef;
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
@@ -48,3 +48,13 @@ impl fmt::Display for LogicalValues {
     }
 }
 impl ColPrunable for LogicalValues {}
+impl ToBatch for LogicalValues {
+    fn to_batch(&self) -> PlanRef {
+        todo!()
+    }
+}
+impl ToStream for LogicalValues {
+    fn to_stream(&self) -> PlanRef {
+        unimplemented!("Stream values executor is unimplemented!")
+    }
+}

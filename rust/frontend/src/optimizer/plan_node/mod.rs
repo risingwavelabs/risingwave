@@ -38,6 +38,9 @@ pub trait PlanNode:
     + WithSchema
     + ColPrunable
     + IntoPlanRef
+    + ToBatch
+    + ToStream
+    + ToDistributedBatch
 {
     fn node_type(&self) -> PlanNodeType;
 }
@@ -61,6 +64,8 @@ mod plan_tree_node;
 pub use plan_tree_node::*;
 mod col_pruning;
 pub use col_pruning::*;
+mod convert;
+pub use convert::*;
 mod join_predicate;
 pub use join_predicate::*;
 

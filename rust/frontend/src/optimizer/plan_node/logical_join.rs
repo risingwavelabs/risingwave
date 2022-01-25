@@ -4,9 +4,13 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataTypeKind;
 use risingwave_pb::plan::JoinType;
 
-use super::{ColPrunable, IntoPlanRef, JoinPredicate, PlanRef, PlanTreeNodeBinary};
+use super::{
+    ColPrunable, IntoPlanRef, JoinPredicate, PlanRef, PlanTreeNodeBinary, StreamHashJoin, ToBatch,
+    ToStream,
+};
 use crate::expr::{assert_input_ref, BoundExpr, BoundExprImpl};
-use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
+use crate::optimizer::plan_node::{BatchHashJoin, BatchSortMergeJoin};
+use crate::optimizer::property::{Distribution, Order, WithDistribution, WithOrder, WithSchema};
 
 #[derive(Debug, Clone)]
 pub struct LogicalJoin {
@@ -85,3 +89,43 @@ impl WithSchema for LogicalJoin {
     }
 }
 impl ColPrunable for LogicalJoin {}
+impl ToBatch for LogicalJoin {
+    fn to_batch_with_order_required(&self, _required_order: Order) -> PlanRef {
+        if self.predicate().is_equal_cond() {
+            // TODO: check if use SortMergeJoin could satisfy the required_order
+            let new_left = self.left().to_batch();
+            let sort_join_required_order =
+                BatchSortMergeJoin::left_required_order(self.predicate());
+            if new_left.order().satisfies(&sort_join_required_order) {
+                let right_required_order = BatchSortMergeJoin::right_required_order_from_left_order(
+                    new_left.order(),
+                    self.predicate(),
+                );
+                let new_right = self
+                    .left()
+                    .to_batch_with_order_required(right_required_order);
+                let new_logical = self.clone_with_left_right(new_left, new_right);
+                return BatchSortMergeJoin::new(new_logical).into_plan_ref();
+            } else {
+                let new_right = self.left().to_batch();
+                let new_logical = self.clone_with_left_right(new_left, new_right);
+                return BatchHashJoin::new(new_logical).into_plan_ref();
+            }
+        }
+        todo!(); // nestedLoopJoin
+    }
+    fn to_batch(&self) -> PlanRef {
+        self.to_batch_with_order_required(Order::any())
+    }
+}
+impl ToStream for LogicalJoin {
+    fn to_stream(&self) -> PlanRef {
+        let left = self
+            .left()
+            .to_stream_with_dist_required(Distribution::HashShard(self.predicate().left_keys()));
+        let right = self
+            .right()
+            .to_stream_with_dist_required(Distribution::HashShard(self.predicate().right_keys()));
+        StreamHashJoin::new(self.clone_with_left_right(left, right)).into_plan_ref()
+    }
+}
