@@ -117,9 +117,7 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
         Self: 'a;
 
     /// Owned type of item in array, which is reciprocal to `Self::RefItem`.
-  #[rustfmt::skip]
-  // rustfmt will incorrectly remove GAT lifetime.
-  type OwnedItem: Clone + std::fmt::Debug + for<'a> Scalar<ScalarRefType<'a> = Self::RefItem<'a>>;
+    type OwnedItem: Clone + std::fmt::Debug + for<'a> Scalar<ScalarRefType<'a> = Self::RefItem<'a>>;
 
     /// Corresponding builder of this array, which is reciprocal to `Array`.
     type Builder: ArrayBuilder<ArrayType = Self>;

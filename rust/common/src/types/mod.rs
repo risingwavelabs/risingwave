@@ -204,9 +204,7 @@ pub trait ScalarRef<'a>:
     Copy + std::fmt::Debug + 'a + TryFrom<ScalarRefImpl<'a>, Error = RwError> + Into<ScalarRefImpl<'a>>
 {
     /// `ScalarType` is the owned type of current `ScalarRef`.
-  #[rustfmt::skip]
-  // rustfmt will incorrectly remove GAT lifetime.
-  type ScalarType: Scalar<ScalarRefType<'a> = Self>;
+    type ScalarType: Scalar<ScalarRefType<'a> = Self>;
 
     /// Convert `ScalarRef` to an owned scalar.
     fn to_owned_scalar(&self) -> Self::ScalarType;
