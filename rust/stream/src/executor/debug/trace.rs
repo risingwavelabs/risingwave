@@ -8,8 +8,8 @@ use risingwave_common::error::Result;
 use tracing::event;
 use tracing_futures::Instrument;
 
-use super::{Executor, Message, PkIndicesRef};
 use crate::executor::monitor::DEFAULT_COMPUTER_STATS;
+use crate::executor::{Executor, Message, PkIndicesRef};
 
 /// Barrier event might quickly flush the log to millions of lines. Should enable this when you
 /// really want to debug.
@@ -116,6 +116,6 @@ impl Executor for TraceExecutor {
     }
 
     fn identity(&self) -> &str {
-        "TraceExecutor"
+        self.input.identity()
     }
 }

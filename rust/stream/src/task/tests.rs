@@ -223,7 +223,7 @@ async fn test_stream_proto() {
         assert!(matches!(
           sink.next().await.unwrap(),
           Message::Barrier(Barrier {
-            epoch: 0,
+            epoch: 114514,
             mutation,
             ..
           }) if mutation.as_deref().unwrap().is_stop()
@@ -247,7 +247,7 @@ async fn test_stream_proto() {
 
     tokio::time::timeout(
         timeout,
-        source.send(Message::Barrier(Barrier::new(0).with_mutation(
+        source.send(Message::Barrier(Barrier::new(114514).with_mutation(
             Mutation::Stop(HashSet::from([1, 3, 7, 11, 13, 233])),
         ))),
     )

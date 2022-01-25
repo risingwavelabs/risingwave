@@ -6,6 +6,7 @@ pub use actor::Actor;
 pub use aggregation::*;
 use async_trait::async_trait;
 pub use chain::*;
+pub use debug::*;
 pub use dispatch::*;
 pub use filter::*;
 pub use hash_agg::*;
@@ -27,18 +28,17 @@ use risingwave_pb::data::{
     Actors as MutationActors, AddMutation, Barrier as ProstBarrier, NothingMutation, StopMutation,
     StreamMessage as ProstStreamMessage, UpdateMutation,
 };
-pub use schema_check::*;
 pub use simple_agg::*;
 use smallvec::SmallVec;
 pub use stream_source::*;
 pub use top_n::*;
 pub use top_n_appendonly::*;
-pub use trace::*;
 
 mod actor;
 mod aggregation;
 mod barrier_align;
 mod chain;
+mod debug;
 mod dispatch;
 mod filter;
 mod hash_agg;
@@ -48,12 +48,10 @@ mod merge;
 mod monitor;
 mod mview;
 mod project;
-mod schema_check;
 mod simple_agg;
 mod stream_source;
 mod top_n;
 mod top_n_appendonly;
-mod trace;
 
 #[cfg(test)]
 mod integration_tests;

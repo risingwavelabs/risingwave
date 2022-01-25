@@ -6,22 +6,15 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use tracing::event;
 
-use super::{Executor, Message, PkIndicesRef};
+use crate::executor::{Executor, Message, PkIndicesRef};
 
 /// [`SchemaCheckExecutor`] checks the passing stream chunk against the expected schema.
 ///
 /// Note that currently this only checks the physical type (variant name).
+#[derive(Debug)]
 pub struct SchemaCheckExecutor {
-    /// The input of the current executor
+    /// The input of the current executor.
     input: Box<dyn Executor>,
-}
-
-impl Debug for SchemaCheckExecutor {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SchemaCheckExecutor")
-            .field("input", &self.input)
-            .finish()
-    }
 }
 
 impl SchemaCheckExecutor {
@@ -88,7 +81,7 @@ impl Executor for SchemaCheckExecutor {
     }
 
     fn identity(&self) -> &str {
-        "SchemaCheckExecutor"
+        self.input.identity()
     }
 }
 
