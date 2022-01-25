@@ -53,7 +53,8 @@ impl Actor {
                     }
 
                     // tracing related work
-                    if let Some(ref span_parent) = barrier.span {
+                    let span_parent = barrier.span;
+                    if !span_parent.is_none() {
                         span = tracing::trace_span!(
                             parent: span_parent,
                             "actor_poll",

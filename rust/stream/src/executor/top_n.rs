@@ -392,10 +392,7 @@ mod tests {
     fn create_source() -> Box<MockSource> {
         let mut chunks = create_stream_chunks();
         let schema = create_schema();
-        let default_barrier = Barrier {
-            epoch: 0,
-            ..Barrier::default()
-        };
+        let default_barrier = Barrier::new(0);
         Box::new(MockSource::with_messages(
             schema,
             PkIndices::new(),

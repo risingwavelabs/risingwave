@@ -68,11 +68,21 @@ pub enum Mutation {
     AddOutput(u32, Vec<ActorInfo>),
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct Barrier {
     pub epoch: u64,
     pub mutation: Option<Arc<Mutation>>,
-    pub span: Option<tracing::span::Span>,
+    pub span: tracing::Span,
+}
+
+impl Default for Barrier {
+    fn default() -> Self {
+        Self {
+            span: tracing::Span::none(),
+            epoch: 0,
+            mutation: None,
+        }
+    }
 }
 
 impl Barrier {
@@ -96,10 +106,7 @@ impl Barrier {
     // meta service.
     #[must_use]
     pub fn with_span(self, span: tracing::span::Span) -> Self {
-        Self {
-            span: Some(span),
-            ..self
-        }
+        Self { span, ..self }
     }
 
     pub fn is_stop_mutation(&self) -> bool {
@@ -182,7 +189,7 @@ impl Barrier {
                         .into(),
                 ),
             },
-            span: None,
+            span: tracing::Span::none(),
         })
     }
 }

@@ -35,7 +35,7 @@ pub struct LocalBarrierManager {
     senders: HashMap<u32, UnboundedSender<Message>>,
 
     /// Span of the current epoch.
-    span: Option<tracing::Span>,
+    span: tracing::Span,
 
     /// Current barrier collection state.
     state: BarrierState,
@@ -54,7 +54,7 @@ impl LocalBarrierManager {
     fn with_state(state: BarrierState) -> Self {
         Self {
             senders: HashMap::new(),
-            span: None,
+            span: tracing::Span::none(),
             state,
             last_epoch: None,
         }
@@ -136,7 +136,7 @@ impl LocalBarrierManager {
                 // TODO: not a correct usage of span -- the span ends once it goes out of scope, but
                 // we still have events in the background.
                 let span = tracing::info_span!("send_barrier", epoch = barrier.epoch, mutation = ?barrier.mutation, receivers = %receiver_ids);
-                barrier.span = Some(span);
+                barrier.span = span;
             }
             barrier
         };
