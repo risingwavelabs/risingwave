@@ -32,7 +32,7 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         &self,
         epoch: HummockEpoch,
         sstables: Vec<SstableInfo>,
-    ) -> HummockResult<HummockVersionId>;
+    ) -> HummockResult<()>;
 }
 
 pub struct RPCHummockMetaClient {
@@ -120,9 +120,8 @@ impl HummockMetaClient for RPCHummockMetaClient {
         &self,
         epoch: HummockEpoch,
         sstables: Vec<SstableInfo>,
-    ) -> HummockResult<HummockVersionId> {
-        let result = self
-            .meta_client
+    ) -> HummockResult<()> {
+        self.meta_client
             .to_owned()
             .hummock_client
             .add_tables(AddTablesRequest {
@@ -131,8 +130,7 @@ impl HummockMetaClient for RPCHummockMetaClient {
                 epoch,
             })
             .await
-            .map_err(HummockError::meta_error)?
-            .into_inner();
-        Ok(result.version_id)
+            .map_err(HummockError::meta_error)?;
+        Ok(())
     }
 }

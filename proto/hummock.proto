@@ -112,7 +112,6 @@ message AddTablesRequest {
 
 message AddTablesResponse {
   common.Status status = 1;
-  uint64 version_id = 2;
 }
 
 message RefreshHummockContextRequest {

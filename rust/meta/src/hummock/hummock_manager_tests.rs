@@ -38,10 +38,10 @@ async fn test_hummock_context_management() -> Result<()> {
     let env = MetaSrvEnv::for_test_with_sled(sled_root.path()).await;
     let (hummock_manager, ..) = create_hummock_manager(env, &hummock_config).await?;
     let context = hummock_manager.create_hummock_context().await?;
-    let invalidate = hummock_manager
+    hummock_manager
         .invalidate_hummock_context(context.identifier)
-        .await;
-    assert!(invalidate.is_ok());
+        .await
+        .unwrap();
 
     let context2 = hummock_manager.create_hummock_context().await?;
     // context still valid after sleeping ttl/2
@@ -50,10 +50,10 @@ async fn test_hummock_context_management() -> Result<()> {
         &2,
     )))
     .await;
-    let context2_refreshed = hummock_manager
+    hummock_manager
         .refresh_hummock_context(context2.identifier)
-        .await;
-    assert!(context2_refreshed.is_ok());
+        .await
+        .unwrap();
 
     // context timeout
     tokio::time::sleep(Duration::from_millis(
@@ -92,9 +92,10 @@ async fn test_hummock_pin_unpin() -> Result<()> {
     assert_eq!(0, version_id);
 
     for _ in 0..3 {
-        let pin_result = hummock_manager.pin_version(context.identifier).await;
-        assert!(pin_result.is_ok());
-        let (version_id_0, hummock_version) = pin_result.unwrap();
+        let (version_id_0, hummock_version) = hummock_manager
+            .pin_version(context.identifier)
+            .await
+            .unwrap();
         assert_eq!(version_id, version_id_0);
         assert_eq!(2, hummock_version.levels.len());
         assert_eq!(0, hummock_version.levels[0].table_ids.len());
@@ -102,10 +103,10 @@ async fn test_hummock_pin_unpin() -> Result<()> {
     }
 
     for _ in 0..3 {
-        let unpin_result = hummock_manager
+        hummock_manager
             .unpin_version(context.identifier, version_id)
-            .await;
-        assert!(unpin_result.is_ok());
+            .await
+            .unwrap();
     }
 
     let unpin_result = hummock_manager
@@ -117,15 +118,19 @@ async fn test_hummock_pin_unpin() -> Result<()> {
         ErrorCode::ItemNotFound(_)
     );
 
-    let pin_result = hummock_manager.pin_version(context.identifier).await;
-    assert!(pin_result.is_ok());
-
-    let pin_result = hummock_manager.pin_snapshot(context.identifier).await;
-    assert!(pin_result.is_ok());
-    assert!(hummock_manager
-        .unpin_snapshot(context.identifier, pin_result?)
+    hummock_manager
+        .pin_version(context.identifier)
         .await
-        .is_ok());
+        .unwrap();
+
+    let pin_result = hummock_manager
+        .pin_snapshot(context.identifier)
+        .await
+        .unwrap();
+    hummock_manager
+        .unpin_snapshot(context.identifier, pin_result)
+        .await
+        .unwrap();
 
     Ok(())
 }
@@ -201,16 +206,14 @@ async fn test_hummock_table() -> Result<()> {
     let epoch: u64 = 1;
     let mut table_id = 1;
     let original_tables = generate_test_tables(epoch, &mut table_id);
-    let result = hummock_manager
+    hummock_manager
         .add_tables(context.identifier, original_tables.clone(), epoch)
-        .await;
-    assert!(result.is_ok());
-    let version_id = result.unwrap();
-    assert_eq!(1, version_id);
-    let result = hummock_manager
+        .await
+        .unwrap();
+    hummock_manager
         .commit_epoch(context.identifier, epoch)
-        .await;
-    assert!(result.is_ok());
+        .await
+        .unwrap();
 
     // Confirm tables are successfully added
     let fetched_tables = env
@@ -224,9 +227,7 @@ async fn test_hummock_table() -> Result<()> {
         .collect();
     assert_eq!(original_tables, fetched_tables);
 
-    let (pinned_version_id, pinned_version) =
-        hummock_manager.pin_version(context.identifier).await?;
-    assert_eq!(version_id + 1, pinned_version_id);
+    let (_, pinned_version) = hummock_manager.pin_version(context.identifier).await?;
     assert_eq!(
         Ordering::Equal,
         pinned_version
@@ -247,14 +248,14 @@ async fn test_hummock_table() -> Result<()> {
     // TODO should use strong cases after compactor is ready so that real compact_tasks are
     // reported.
     let compact_task = hummock_manager.get_compact_task(context.identifier).await?;
-    assert!(hummock_manager
+    hummock_manager
         .report_compact_task(context.identifier, compact_task.clone(), true)
         .await
-        .is_ok());
-    assert!(hummock_manager
+        .unwrap();
+    hummock_manager
         .report_compact_task(context.identifier, compact_task.clone(), false)
         .await
-        .is_ok());
+        .unwrap();
 
     Ok(())
 }
@@ -280,10 +281,10 @@ async fn test_hummock_transaction() -> Result<()> {
     {
         // Add tables in epoch1
         let tables_in_epoch1 = generate_test_tables(epoch1, &mut table_id);
-        let result = hummock_manager
+        hummock_manager
             .add_tables(context.identifier, tables_in_epoch1.clone(), epoch1)
-            .await;
-        assert!(result.is_ok());
+            .await
+            .unwrap();
 
         // Get tables before committing epoch1. No tables should be returned.
         let (pinned_version_id, mut pinned_version) =
@@ -301,10 +302,10 @@ async fn test_hummock_transaction() -> Result<()> {
             .await?;
 
         // Commit epoch1
-        let result = hummock_manager
+        hummock_manager
             .commit_epoch(context.identifier, epoch1)
-            .await;
-        assert!(result.is_ok());
+            .await
+            .unwrap();
         committed_tables.extend(tables_in_epoch1.clone());
 
         // Get tables after committing epoch1. All tables committed in epoch1 should be returned
@@ -330,10 +331,10 @@ async fn test_hummock_transaction() -> Result<()> {
     {
         // Add tables in epoch2
         let tables_in_epoch2 = generate_test_tables(epoch2, &mut table_id);
-        let result = hummock_manager
+        hummock_manager
             .add_tables(context.identifier, tables_in_epoch2.clone(), epoch2)
-            .await;
-        assert!(result.is_ok());
+            .await
+            .unwrap();
 
         // Get tables before committing epoch2. tables_in_epoch1 should be returned and
         // tables_in_epoch2 should be invisible.
@@ -354,10 +355,10 @@ async fn test_hummock_transaction() -> Result<()> {
             .await?;
 
         // Commit epoch2
-        let result = hummock_manager
+        hummock_manager
             .commit_epoch(context.identifier, epoch2)
-            .await;
-        assert!(result.is_ok());
+            .await
+            .unwrap();
         committed_tables.extend(tables_in_epoch2);
 
         // Get tables after committing epoch2. tables_in_epoch1 and tables_in_epoch2 should be
@@ -384,15 +385,15 @@ async fn test_hummock_transaction() -> Result<()> {
     {
         // Add tables in epoch3 and epoch4
         let tables_in_epoch3 = generate_test_tables(epoch3, &mut table_id);
-        let result = hummock_manager
+        hummock_manager
             .add_tables(context.identifier, tables_in_epoch3.clone(), epoch3)
-            .await;
-        assert!(result.is_ok());
+            .await
+            .unwrap();
         let tables_in_epoch4 = generate_test_tables(epoch4, &mut table_id);
-        let result = hummock_manager
+        hummock_manager
             .add_tables(context.identifier, tables_in_epoch4.clone(), epoch4)
-            .await;
-        assert!(result.is_ok());
+            .await
+            .unwrap();
 
         // Get tables before committing epoch3 and epoch4. tables_in_epoch1 and tables_in_epoch2
         // should be returned
@@ -424,10 +425,10 @@ async fn test_hummock_transaction() -> Result<()> {
             .await?;
 
         // Abort epoch3
-        let result = hummock_manager
+        hummock_manager
             .abort_epoch(context.identifier, epoch3)
-            .await;
-        assert!(result.is_ok());
+            .await
+            .unwrap();
 
         // Get tables after aborting epoch3. tables_in_epoch1 and tables_in_epoch2 should be
         // returned
@@ -454,10 +455,10 @@ async fn test_hummock_transaction() -> Result<()> {
             .await?;
 
         // Commit epoch4
-        let result = hummock_manager
+        hummock_manager
             .commit_epoch(context.identifier, epoch4)
-            .await;
-        assert!(result.is_ok());
+            .await
+            .unwrap();
         committed_tables.extend(tables_in_epoch4);
 
         // Get tables after committing epoch4. tables_in_epoch1, tables_in_epoch2, tables_in_epoch4
@@ -487,8 +488,7 @@ async fn test_hummock_context_tracker_shutdown() -> Result<()> {
     let env = MetaSrvEnv::for_test_with_sled(sled_root).await;
     let (hummock_manager_ref, join_handle) = create_hummock_manager(env, &hummock_config).await?;
     drop(hummock_manager_ref);
-    let result = join_handle.await;
-    assert!(result.is_ok());
+    join_handle.await.unwrap().unwrap();
 
     Ok(())
 }

@@ -708,7 +708,7 @@ impl HummockManager {
         context_id: HummockContextId,
         tables: Vec<SstableInfo>,
         epoch: HummockEpoch,
-    ) -> Result<HummockVersionId> {
+    ) -> Result<()> {
         // TODO #2156 the types will be unified to prost
         let stats = tables
             .iter()
@@ -752,7 +752,8 @@ impl HummockManager {
             .iter()
             .any(|t| current_tables.iter().any(|ct| ct.id == t.id))
         {
-            panic!("Duplicate hummock table id when add_tables")
+            // Retry an add_tables request is OK if the original request has completed successfully.
+            return Ok(());
         }
         let old_version_id = inner_guard.get_current_version_id().await?;
         let mut hummock_version = inner_guard.get_version_data(old_version_id).await?;
@@ -809,7 +810,7 @@ impl HummockManager {
         // the trx contain update for both tables and compact_status
         self.commit_trx(&mut transaction, context_id).await?;
 
-        Ok(new_version_id)
+        Ok(())
     }
 
     pub async fn pin_snapshot(&self, context_id: HummockContextId) -> Result<HummockSnapshot> {

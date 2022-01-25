@@ -149,10 +149,7 @@ impl MockHummockMetaService {
             table_ids: request.tables.iter().map(|table| table.id).collect_vec(),
         });
         guard.versions.insert(new_version_id, greatest_version);
-        AddTablesResponse {
-            status: None,
-            version_id: new_version_id,
-        }
+        AddTablesResponse { status: None }
     }
 }
 

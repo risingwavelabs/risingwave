@@ -77,15 +77,12 @@ impl HummockMetaClient for MockHummockMetaClient {
         &self,
         epoch: HummockEpoch,
         sstables: Vec<SstableInfo>,
-    ) -> HummockResult<HummockVersionId> {
-        let version_id = self
-            .mock_hummock_meta_service
-            .add_tables(AddTablesRequest {
-                context_identifier: 0,
-                tables: sstables.to_vec(),
-                epoch,
-            })
-            .version_id;
-        Ok(version_id)
+    ) -> HummockResult<()> {
+        self.mock_hummock_meta_service.add_tables(AddTablesRequest {
+            context_identifier: 0,
+            tables: sstables.to_vec(),
+            epoch,
+        });
+        Ok(())
     }
 }

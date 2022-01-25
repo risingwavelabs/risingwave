@@ -111,10 +111,7 @@ impl HummockManagerService for HummockServiceImpl {
             .add_tables(req.context_identifier, req.tables, req.epoch)
             .await;
         match result {
-            Ok(version_id) => Ok(Response::new(AddTablesResponse {
-                status: None,
-                version_id,
-            })),
+            Ok(_) => Ok(Response::new(AddTablesResponse { status: None })),
             Err(e) => Err(e.to_grpc_status()),
         }
     }
