@@ -7,7 +7,7 @@ use futures::channel::mpsc::{channel, Receiver, Sender};
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::expr::{build_from_prost as build_expr_from_prost, AggKind};
+use risingwave_common::expr::{build_from_prost as build_expr_from_prost, AggKind, RowExpression};
 use risingwave_common::types::DataTypeKind;
 use risingwave_common::util::addr::{is_local_address, to_socket_addr};
 use risingwave_common::util::sort_util::{
@@ -609,6 +609,12 @@ impl StreamManagerCore {
                         .collect::<Vec<_>>(),
                 );
 
+                let condition = match hash_join_node.get_condition() {
+                    Ok(cond_prost) => Some(RowExpression::new(build_expr_from_prost(cond_prost)?)),
+                    Err(_) => None,
+                };
+                debug!("Join non-equi condition: {:?}", condition);
+
                 macro_rules! impl_create_hash_join_executor {
           ($( { $join_type_proto:ident, $join_type:ident } ),*) => {
             |typ| match typ {
@@ -620,7 +626,7 @@ impl StreamManagerCore {
                 pk_indices,
                 Keyspace::shared_executor_root(store.clone(), node_id),
                 executor_id,
-                None,
+                condition,
               )) as Box<dyn Executor>, )*
               _ => todo!("Join type {:?} not inplemented", typ),
             }
@@ -637,7 +643,6 @@ impl StreamManagerCore {
                         }
                     };
                 }
-
                 let create_hash_join_executor =
                     for_all_join_types! { impl_create_hash_join_executor };
                 let join_type_proto = hash_join_node.get_join_type()?;

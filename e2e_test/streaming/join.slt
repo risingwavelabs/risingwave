@@ -43,7 +43,7 @@ query IIIIIIII
 select * from mv2;
 ----
 1 4 2 0 NULL NULL NULL NULL
-2 3 3 1 NULL NULL NULL NULL      
+2 3 3 1 NULL NULL NULL NULL
 
 
 
@@ -65,8 +65,8 @@ flush;
 query IIIIII
 select v1, v2, v3, v10, v20, v30 from mv3;
 ----
-NULL NULL NULL 1 3 5     
-NULL NULL NULL 2 4 6    
+NULL NULL NULL 1 3 5
+NULL NULL NULL 2 4 6
 
 
 
@@ -99,6 +99,33 @@ NULL NULL NULL NULL 4 4 6 1
 1 4 2 0 NULL NULL NULL NULL
 2 3 3 1 NULL NULL NULL NULL
 
+
+
+statement ok
+create table t9 (v1 int not null, v2 int not null, v3 int not null);
+
+statement ok
+create table t10 (v1 int not null, v2 int not null, v3 int not null);
+
+statement ok
+create materialized view mv_full_outer_cond as select * from t9 FULL JOIN t10 ON t9.v1=t10.v1 and t9.v2 > t10.v2;
+
+statement ok
+insert into t9 values (1,4,2), (2,3,3);
+
+statement ok
+insert into t10 values (1,3,5), (2,4,6);
+
+statement ok
+flush;
+
+query IIIIIIII
+select * from mv_full_outer_cond;
+----
+NULL NULL NULL NULL 2 4 6 1
+1 4 2 0 1 3 5 0
+2 3 3 1 NULL NULL NULL NULL
+
 statement ok
 drop table t1
 
@@ -123,6 +150,11 @@ drop table t7
 statement ok
 drop table t8
 
+statement ok
+drop table t9
+
+statement ok
+drop table t10
 
 statement ok
 drop materialized view mv1
@@ -135,3 +167,6 @@ drop materialized view mv3
 
 statement ok
 drop materialized view mv4
+
+statement ok
+drop materialized view mv_full_outer_cond

@@ -1,12 +1,14 @@
 package com.risingwave.planner.rel.streaming.join;
 
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
-import static com.risingwave.planner.rel.physical.join.BatchJoinUtils.isEquiJoin;
+import static com.risingwave.planner.rel.physical.join.BatchJoinUtils.getNonequiCondition;
+import static com.risingwave.planner.rel.physical.join.BatchJoinUtils.hasEquiCondition;
 
 import com.risingwave.planner.metadata.RisingWaveRelMetadataQuery;
 import com.risingwave.planner.rel.common.dist.RwDistributions;
 import com.risingwave.planner.rel.logical.RwLogicalJoin;
 import com.risingwave.planner.rel.physical.join.BatchJoinUtils;
+import com.risingwave.planner.rel.serialization.RexToProtoSerializer;
 import com.risingwave.planner.rel.streaming.RisingWaveStreamingRel;
 import com.risingwave.planner.rel.streaming.RwStreamingRelVisitor;
 import com.risingwave.proto.streaming.plan.HashJoinNode;
@@ -54,6 +56,13 @@ public class RwStreamHashJoin extends Join implements RisingWaveStreamingRel {
     joinInfo.leftKeys.forEach(builder::addLeftKey);
 
     joinInfo.rightKeys.forEach(builder::addRightKey);
+
+    RexToProtoSerializer rexVisitor = new RexToProtoSerializer();
+
+    if (!joinInfo.nonEquiConditions.isEmpty()) {
+      var nonequiCondition = getNonequiCondition(getLeft(), getRight(), getCondition());
+      builder.setCondition(nonequiCondition.accept(rexVisitor));
+    }
 
     var hashJoinNode = builder.build();
 
@@ -103,7 +112,7 @@ public class RwStreamHashJoin extends Join implements RisingWaveStreamingRel {
     public boolean matches(RelOptRuleCall call) {
       var join = (RwLogicalJoin) call.rel(0);
       var joinInfo = join.analyzeCondition();
-      return isEquiJoin(joinInfo);
+      return hasEquiCondition(joinInfo);
     }
 
     @Override

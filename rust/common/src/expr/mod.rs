@@ -75,6 +75,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     }
 }
 
+#[derive(Debug)]
 /// Simply wrap a row level expression as an array level expression
 pub struct RowExpression {
     expr: BoxedExpression,
