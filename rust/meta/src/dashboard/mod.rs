@@ -4,13 +4,14 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use axum::extract::{Extension, Path};
-use axum::http::StatusCode;
+use axum::http::{Method, StatusCode};
 use axum::response::{Html, IntoResponse};
 use axum::routing::get;
 use axum::Router;
 use risingwave_common::error::ErrorCode;
 use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
+use tower_http::cors::{self, CorsLayer};
 
 use crate::cluster::StoredClusterManager;
 use crate::stream::{StoredStreamMetaManager, StreamMetaManager};
@@ -107,6 +108,12 @@ impl DashboardService {
                 ServiceBuilder::new()
                     .layer(AddExtensionLayer::new(srv.clone()))
                     .into_inner(),
+            )
+            .layer(
+                // TODO: allow wildcard CORS is dangerous! Should remove this in production.
+                CorsLayer::new()
+                    .allow_origin(cors::any())
+                    .allow_methods(vec![Method::GET, Method::POST, Method::PUT, Method::DELETE]),
             );
 
         axum::Server::bind(&srv.dashboard_addr)
