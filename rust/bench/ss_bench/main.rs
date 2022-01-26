@@ -159,23 +159,7 @@ async fn run_op(store: impl StateStore, opts: &Opts) {
 }
 
 /// This is used to bench the state store performance.
-///
-/// USAGE:
-/// ss-bench [OPTIONS] --operations <OPERATIONS>
-///
-/// OPTIONS:
-///         --block-size-kb <BLOCK_SIZE_KB>                  [default: 64]
-///         --bloom-false-positive <BLOOM_FALSE_POSITIVE>    [default: 0.1]
-///         --checksum-algo <CHECKSUM_ALGO>                  [default: crc32c]
-///         --duration <DURATION>                            [default: 10]
-////     -h, --help                                           Print help information
-///         --key-size <KEY_SIZE>                            [default: 10]
-///         --kvs-per-batch <KVS_PER_BATCH>                  [default: 1000]
-///         --operations <OPERATIONS>
-///         --store <STORE>                                  [default: in-memory]
-///         --table-size-mb <TABLE_SIZE_MB>                  [default: 256]
-///         --concurrency-num <CONCURRENCY_NUM>              [default: 1]
-///         --value-size <VALUE_SIZE>                        [default: 10]
+/// For usage, see: https://github.com/singularity-data/risingwave/blob/main/docs/developer/benchmark_tool/state_store.md
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
     let opts = Opts::parse();
