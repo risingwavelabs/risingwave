@@ -78,8 +78,8 @@ script = '''
 set -e
 rm -f "${PREFIX_BIN}/compute-node"
 rm -f "${PREFIX_BIN}/meta-node"
-ln -s "$(pwd)/rust/target/debug/compute-node" "${PREFIX_BIN}/compute-node"
-ln -s "$(pwd)/rust/target/debug/meta-node" "${PREFIX_BIN}/meta-node"
+ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/compute-node" "${PREFIX_BIN}/compute-node"
+ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/meta-node" "${PREFIX_BIN}/meta-node"
 '''
 
 [tasks.build-risingwave]
@@ -89,7 +89,7 @@ condition = { env_set = [ "ENABLE_BUILD_RUST" ] }
 script = '''
 #!@shell
 set -e
-cd rust && cargo build
+cd rust && cargo build --profile ${RISINGWAVE_BUILD_PROFILE}
 '''
 
 [tasks.build-frontend]
@@ -164,7 +164,7 @@ category = "RiseLAB - Start"
 dependencies = [
   "pre-start-playground"
 ]
-command = "rust/target/debug/playground"
+command = "rust/target/${BUILD_MODE_DIR}/playground"
 args = ["default"]
 description = "Start a RisingWave playground with 1 compute node, 1 meta node, 1 frontend, 1 minio, 1 prometheus"
 
@@ -173,7 +173,7 @@ category = "RiseLAB - Start"
 dependencies = [
   "pre-start-playground"
 ]
-command = "rust/target/debug/playground"
+command = "rust/target/${BUILD_MODE_DIR}/playground"
 args = ["ci-3node"]
 description = "Start a RisingWave playground with 3 compute nodes, 1 meta node, 1 frontend"
 
@@ -182,7 +182,7 @@ category = "RiseLAB - Start"
 dependencies = [
   "pre-start-playground"
 ]
-command = "rust/target/debug/playground"
+command = "rust/target/${BUILD_MODE_DIR}/playground"
 args = ["ci-streaming"]
 description = "Start a RisingWave playground with 1 compute node, 1 meta node, 1 frontend and 1 MinIO"
 
@@ -191,7 +191,7 @@ category = "RiseLAB - Start"
 dependencies = [
   "pre-start-playground"
 ]
-command = "rust/target/debug/playground"
+command = "rust/target/${BUILD_MODE_DIR}/playground"
 args = ["dev-compute-node"]
 description = "Start a RisingWave playground with 1 user-managed compute node, 1 meta node, 1 frontend, 1 minio, 1 prometheus"
 
@@ -200,7 +200,7 @@ category = "RiseLAB - Start"
 dependencies = [
   "pre-start-playground"
 ]
-command = "rust/target/debug/playground"
+command = "rust/target/${BUILD_MODE_DIR}/playground"
 args = ["dev-frontend"]
 description = "Start a RisingWave playground with 1 compute node, 1 meta node, 1 user managed frontend"
 

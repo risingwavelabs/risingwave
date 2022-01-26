@@ -14,6 +14,7 @@ pub enum Components {
     ComputeNodeAndMetaNode,
     Frontend,
     Tracing,
+    Release,
 }
 
 impl Components {
@@ -24,6 +25,7 @@ impl Components {
             Self::ComputeNodeAndMetaNode => "Build compute-node / meta-node",
             Self::Frontend => "Build frontend",
             Self::Tracing => "Enable tracing",
+            Self::Release => "Enable release mode",
         }
         .into()
     }
@@ -54,6 +56,10 @@ need to manually download and copy it to RiseLAB directory."
                 "
 Enable tracing for compute-node"
             }
+            Self::Release => {
+                "
+Build RisingWave in release mode"
+            }
         }
         .into()
     }
@@ -65,6 +71,7 @@ Enable tracing for compute-node"
             Self::ComputeNodeAndMetaNode => "ENABLE_BUILD_RUST",
             Self::Frontend => "ENABLE_BUILD_FRONTEND",
             Self::Tracing => "ENABLE_COMPUTE_TRACING",
+            Self::Release => "ENABLE_RELEASE_BUILD",
         }
         .into()
     }

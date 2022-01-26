@@ -11,6 +11,8 @@ PREFIX_LOG = "${PREFIX}/log"
 PREFIX_TMP = "${PREFIX}/tmp"
 
 HUMMOCK_PATH = "${PREFIX_DATA}/hummock"
+BUILD_MODE_DIR = { source = "${ENABLE_RELEASE_BUILD}", default_value = "debug", mapping = { "true" = "release" } }
+RISINGWAVE_BUILD_PROFILE = { source = "${ENABLE_RELEASE_BUILD}", default_value = "dev", mapping = { "true" = "release" } }
 
 [tasks.prepare-dir]
 private = true
