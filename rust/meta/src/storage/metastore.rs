@@ -94,6 +94,7 @@ pub enum OperationOption {
 }
 
 pub type MetaStoreRef = Arc<dyn MetaStore>;
+pub type BoxedTransaction = Box<dyn Transaction>;
 
 // TODO: introduce sled/etcd as storage engine here.
 #[derive(Clone)]

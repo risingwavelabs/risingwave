@@ -15,6 +15,7 @@ mod cluster;
 mod dashboard;
 mod hummock;
 mod manager;
+mod model;
 pub mod rpc;
 mod storage;
 mod stream;
