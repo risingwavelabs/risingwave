@@ -4,7 +4,6 @@ use bytes::{Bytes, BytesMut};
 use rand::distributions::Alphanumeric;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
-use risingwave_storage::StateStore;
 
 use crate::Opts;
 
@@ -65,11 +64,6 @@ impl Workload {
         batch.dedup_by(|(k1, _), (k2, _)| k1 == k2);
 
         Workload { batch, prefixes }
-    }
-
-    pub(crate) async fn del_batch(store: &impl StateStore, batch: Vec<(Bytes, Option<Bytes>)>) {
-        let del_batch = batch.into_iter().map(|(k, _)| (k, None)).collect();
-        store.ingest_batch(del_batch, get_epoch()).await.unwrap();
     }
 }
 

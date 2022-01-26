@@ -1,5 +1,8 @@
 use std::time::Instant;
 
+use bytes::Bytes;
+use futures::future;
+use itertools::Itertools;
 use rand::distributions::Uniform;
 use rand::prelude::{Distribution, StdRng};
 use rand::SeedableRng;
@@ -15,53 +18,56 @@ pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
         .ingest_batch(workload.batch.clone(), get_epoch())
         .await
         .unwrap();
+
+    // generate queried prefixes
     let mut rng = StdRng::seed_from_u64(233);
     let range = Uniform::from(0..workload.prefixes.len());
-    let scan_prefixes = (0..opts.iterations)
+    let prefix_num = (opts.iterations - opts.iterations % opts.concurrency_num) as usize;
+    let mut scan_prefixes = (0..prefix_num)
         .into_iter()
-        .map(|_| workload.prefixes[range.sample(&mut rng)].clone());
+        .map(|_| workload.prefixes[range.sample(&mut rng)].clone())
+        .collect_vec();
 
-    // ----- calculate QPS -----
-    let start = Instant::now();
-    for prefix in scan_prefixes {
-        store.scan(&prefix, None).await.unwrap();
-    }
-    let time_nano = start.elapsed().as_nanos();
-    let ops = workload.prefixes.len() as u128 * 1_000_000_000 / time_nano as u128;
-
-    // delete data
-    Workload::del_batch(store, workload.batch).await;
-
-    // ----- calculate latencies -----
-    // To avoid overheads of frequent time measurements in QPS calculation, we calculte latencies
-    // separately.
-    // To avoid cache, we re-ingest data.
-    let workload = Workload::new_sorted_workload(opts, Some(1));
-    store
-        .ingest_batch(workload.batch, get_epoch())
-        .await
-        .unwrap();
-    let scan_prefixes = (0..opts.iterations)
-        .into_iter()
-        .map(|_| workload.prefixes[range.sample(&mut rng)].clone());
-
-    let mut latencies = Vec::with_capacity(workload.prefixes.len());
-    for prefix in scan_prefixes {
-        let start = Instant::now();
-
-        store.scan(&prefix, None).await.unwrap();
-
-        let time_nano = start.elapsed().as_nanos();
-        latencies.push(time_nano);
+    // partitioned these prefixes for each concurrency
+    let mut grouped_prefixes = vec![vec![]; opts.concurrency_num as usize];
+    for (i, prefix) in scan_prefixes.drain(..).enumerate() {
+        grouped_prefixes[i % opts.concurrency_num as usize].push(prefix);
     }
 
+    // actual prefix scan process
+    let prefix_scan = |prefixes: Vec<Bytes>| async {
+        let mut latencies = vec![];
+        for prefix in prefixes {
+            let start = Instant::now();
+            store.scan(&prefix, None).await.unwrap();
+            let time_nano = start.elapsed().as_nanos();
+            latencies.push(time_nano);
+        }
+        latencies
+    };
+    let total_start = Instant::now();
+    let futures = grouped_prefixes
+        .drain(..)
+        .map(|prefixes| prefix_scan(prefixes))
+        .collect_vec();
+    let latencies_list: Vec<Vec<u128>> = future::join_all(futures).await;
+    let total_time_nano = total_start.elapsed().as_nanos();
+
+    // calculate metrics
+    let mut latencies = vec![];
+    for list in latencies_list {
+        for latency in list {
+            latencies.push(latency);
+        }
+    }
     let stat = LatencyStat::new(latencies);
+    let qps = prefix_num as u128 * 1_000_000_000 / total_time_nano as u128;
 
     println!(
         "
     Prefix scan
       {}
-      OPS: {}",
-        stat, ops
+      QPS: {}",
+        stat, qps
     );
 }

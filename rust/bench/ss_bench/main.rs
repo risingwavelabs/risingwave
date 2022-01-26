@@ -58,6 +58,10 @@ pub(crate) struct Opts {
 
     #[clap(long, default_value_t = 10)]
     iterations: u32,
+
+    // ----- concurrency  -----
+    #[clap(long, default_value_t = 1)]
+    concurrency_num: u32,
 }
 
 fn get_checksum_algo(algo: &str) -> ChecksumAlg {
@@ -157,7 +161,7 @@ async fn run_op(store: impl StateStore, opts: &Opts) {
 /// This is used to bench the state store performance.
 ///
 /// USAGE:
-/// ss-bench [OPTIONS] --op <OP>
+/// ss-bench [OPTIONS] --operations <OPERATIONS>
 ///
 /// OPTIONS:
 ///         --block-size-kb <BLOCK_SIZE_KB>                  [default: 64]
@@ -167,9 +171,10 @@ async fn run_op(store: impl StateStore, opts: &Opts) {
 ////     -h, --help                                           Print help information
 ///         --key-size <KEY_SIZE>                            [default: 10]
 ///         --kvs-per-batch <KVS_PER_BATCH>                  [default: 1000]
-///         --operations <OP>
+///         --operations <OPERATIONS>
 ///         --store <STORE>                                  [default: in-memory]
 ///         --table-size-mb <TABLE_SIZE_MB>                  [default: 256]
+///         --concurrency-num <CONCURRENCY_NUM>              [default: 1]
 ///         --value-size <VALUE_SIZE>                        [default: 10]
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {

@@ -1,5 +1,8 @@
 use std::time::Instant;
 
+use bytes::Bytes;
+use futures::future;
+use itertools::Itertools;
 use risingwave_storage::StateStore;
 
 use crate::utils::latency_stat::LatencyStat;
@@ -7,32 +10,49 @@ use crate::utils::workload::{get_epoch, Workload};
 use crate::Opts;
 
 pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
-    let batches: Vec<_> = (0..opts.iterations)
+    // TODO(sun ting): create an opetion for batch number. opts.iterations is ambiguous here.
+    let batch_num = (opts.iterations - opts.iterations % opts.concurrency_num) as usize;
+    let mut batches = (0..batch_num)
         .into_iter()
         .map(|i| Workload::new_sorted_workload(opts, Some(i as u64)).batch)
-        .collect();
+        .collect_vec();
 
-    let mut latencies = Vec::with_capacity(opts.iterations as usize);
-
-    // bench for multi iterations
-    for batch in batches {
-        let batch_clone = batch.clone();
-
-        // count time
-        let start = Instant::now();
-        store.ingest_batch(batch, get_epoch()).await.unwrap();
-        let time_nano = start.elapsed().as_nanos();
-        latencies.push(time_nano);
-
-        // clear content
-        Workload::del_batch(store, batch_clone).await;
+    // partitioned these batches for each concurrency
+    let mut grouped_batches = vec![vec![]; opts.concurrency_num as usize];
+    for (i, batch) in batches.drain(..).enumerate() {
+        grouped_batches[i % opts.concurrency_num as usize].push(batch);
     }
 
-    // calculate operation per second
-    let latency_sum = latencies.iter().sum::<u128>();
-    let ops = opts.kvs_per_batch as u128 * 1_000_000_000 * opts.iterations as u128 / latency_sum;
+    // actual batch ingestion process
+    let ingest_batch = |batches: Vec<Vec<(Bytes, Option<Bytes>)>>| async {
+        let mut latencies = vec![];
+        for batch in batches {
+            let start = Instant::now();
+            store.ingest_batch(batch, get_epoch()).await.unwrap();
+            let time_nano = start.elapsed().as_nanos();
+            latencies.push(time_nano);
+        }
+        latencies
+    };
 
+    let total_start = Instant::now();
+    let futures = grouped_batches
+        .drain(..)
+        .map(|batches| ingest_batch(batches))
+        .collect_vec();
+    let latencies_list: Vec<Vec<u128>> = future::join_all(futures).await;
+    let total_time_nano = total_start.elapsed().as_nanos();
+
+    // calculate metrics
+    let mut latencies = vec![];
+    for list in latencies_list {
+        for latency in list {
+            latencies.push(latency);
+        }
+    }
     let stat = LatencyStat::new(latencies);
+    // calculate operation per second
+    let ops = opts.kvs_per_batch as u128 * 1_000_000_000 * batch_num as u128 / total_time_nano;
 
     println!(
         "
