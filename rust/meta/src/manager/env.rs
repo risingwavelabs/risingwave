@@ -67,7 +67,8 @@ impl MetaSrvEnv {
     #[cfg(test)]
     pub async fn for_test_with_sled(sled_root: impl AsRef<std::path::Path>) -> Self {
         // change to sync after refactor `IdGeneratorManager::new` sync.
-        let meta_store = Arc::new(crate::storage::SledMetaStore::new(sled_root.as_ref()).unwrap());
+        let meta_store =
+            Arc::new(crate::storage::SledMetaStore::new(Some(sled_root.as_ref())).unwrap());
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let epoch_generator = Arc::new(MemEpochGenerator::new());
         let stream_clients = Arc::new(StreamClients::default());

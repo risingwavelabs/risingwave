@@ -29,6 +29,7 @@ use crate::stream::{StoredStreamMetaManager, StreamManager};
 pub enum MetaStoreBackend {
     Mem,
     Sled(std::path::PathBuf),
+    SledInMem,
 }
 
 pub async fn rpc_serve(
@@ -41,7 +42,10 @@ pub async fn rpc_serve(
     let config = Arc::new(Config::default());
     let meta_store_ref: MetaStoreRef = match meta_store_backend {
         MetaStoreBackend::Mem => panic!("Use SledMetaStore instead"),
-        MetaStoreBackend::Sled(db_path) => Arc::new(SledMetaStore::new(db_path.as_path()).unwrap()),
+        MetaStoreBackend::Sled(db_path) => {
+            Arc::new(SledMetaStore::new(Some(db_path.as_path())).unwrap())
+        }
+        MetaStoreBackend::SledInMem => Arc::new(SledMetaStore::new(None).unwrap()),
     };
     let epoch_generator_ref = Arc::new(MemEpochGenerator::new());
     let env = MetaSrvEnv::new(config, meta_store_ref, epoch_generator_ref.clone()).await;

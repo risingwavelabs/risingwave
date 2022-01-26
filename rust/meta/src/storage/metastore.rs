@@ -100,7 +100,7 @@ pub type BoxedTransaction = Box<dyn Transaction>;
 #[derive(Clone)]
 pub(crate) struct KeyWithVersion(Vec<u8>);
 
-// TODO refine the encoding
+// TODO use memcomparable encoding
 impl KeyWithVersion {
     const VERSION_BYTES: usize = 8_usize;
 

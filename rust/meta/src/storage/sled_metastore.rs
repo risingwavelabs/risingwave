@@ -33,9 +33,21 @@ pub struct SledMetaStore {
 /// for now because `SledMetaStore` is for testing purpose only and performance is not the major
 /// concern.
 impl SledMetaStore {
-    pub fn new(db_path: &std::path::Path) -> Result<SledMetaStore> {
-        let db =
-            sled::open(db_path).map_err(|e| crate::storage::Error::StorageError(e.to_string()))?;
+    pub fn new(db_path: Option<&std::path::Path>) -> Result<SledMetaStore> {
+        let db = match db_path {
+            None => sled::Config::default()
+                .mode(sled::Mode::HighThroughput)
+                .temporary(true)
+                .flush_every_ms(None)
+                .open()
+                .unwrap(),
+            Some(db_path) => sled::Config::default()
+                .mode(sled::Mode::HighThroughput)
+                .path(db_path)
+                .flush_every_ms(None)
+                .open()
+                .unwrap(),
+        };
         Ok(SledMetaStore {
             db: Arc::new(RwLock::new(db)),
         })
@@ -342,7 +354,6 @@ impl SledTransaction {
         }
         let composed_key = KeyWithVersion::compose_key_version(key, key_version);
         tx_db.insert(composed_key.as_slice(), value)?;
-        tx_db.flush();
         Ok(())
     }
 
@@ -372,7 +383,6 @@ impl SledTransaction {
             }
         }
 
-        tx_db.flush();
         Ok(())
     }
 
@@ -453,6 +463,7 @@ impl Transaction for SledTransaction {
                     // some preconditions are not met
                     return sled::transaction::abort(());
                 }
+                tx_db.flush();
                 Ok(())
             })
             .map_err(|e: TransactionError<()>| match e {
@@ -473,7 +484,7 @@ mod tests {
     #[tokio::test]
     async fn test_sled_metastore_basic() -> Result<()> {
         let sled_root = tempfile::tempdir().unwrap();
-        let meta_store = SledMetaStore::new(sled_root.path())?;
+        let meta_store = SledMetaStore::new(Some(sled_root.path()))?;
         let result = meta_store.get_impl(vec![("key1".as_bytes().to_vec(), vec![])])?;
         assert!(result.is_empty());
         let result = meta_store.put_impl(&[(
@@ -501,7 +512,7 @@ mod tests {
             "value2".as_bytes().to_vec(),
         )])?;
         drop(meta_store);
-        let meta_store = SledMetaStore::new(sled_root.path())?;
+        let meta_store = SledMetaStore::new(Some(sled_root.path()))?;
         let result = meta_store.get_impl(vec![("key2".as_bytes().to_vec(), vec![])]);
         assert_eq!(
             result.unwrap(),
@@ -567,7 +578,7 @@ mod tests {
     #[tokio::test]
     async fn test_sled_metastore_with_op_options() -> Result<()> {
         let sled_root = tempfile::tempdir().unwrap();
-        let meta_store = SledMetaStore::new(sled_root.path())?;
+        let meta_store = SledMetaStore::new(Some(sled_root.path()))?;
         // put with one kv
         meta_store.put_impl(&[(
             "key1".as_bytes().to_vec(),
@@ -729,7 +740,7 @@ mod tests {
     #[tokio::test]
     async fn test_sled_transaction() -> Result<()> {
         let sled_root = tempfile::tempdir().unwrap();
-        let meta_store = SledMetaStore::new(sled_root.path())?;
+        let meta_store = SledMetaStore::new(Some(sled_root.path()))?;
 
         let mut trx = meta_store.get_transaction();
         trx.add_preconditions(vec![]);
