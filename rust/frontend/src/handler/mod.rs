@@ -5,6 +5,7 @@ use risingwave_sqlparser::ast::Statement;
 use crate::session::RwSession;
 
 mod create_source;
+mod create_table;
 mod explain;
 
 pub(super) async fn handle(session: &RwSession, stmt: Statement) -> Result<PgResponse> {
@@ -13,6 +14,9 @@ pub(super) async fn handle(session: &RwSession, stmt: Statement) -> Result<PgRes
             statement, verbose, ..
         } => explain::handle_explain(*statement, verbose),
         Statement::CreateSource(stmt) => create_source::handle_create_source(session, stmt).await,
+        Statement::CreateTable { name, columns, .. } => {
+            create_table::handle_create_table(session, name, columns).await
+        }
         _ => Err(ErrorCode::NotImplementedError(format!("Unhandled ast: {:?}", stmt)).into()),
     }
 }
