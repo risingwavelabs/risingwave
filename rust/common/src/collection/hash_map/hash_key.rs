@@ -242,12 +242,12 @@ impl HashKeySerDe<'_> for Decimal {
     type S = [u8; 16];
 
     fn serialize(self) -> Self::S {
-        Decimal::serialize(&self.normalize())
+        Decimal::unordered_serialize(&self.normalize())
     }
 
     fn deserialize<R: Read>(source: &mut R) -> Self {
         let value = Self::read_fixed_size_bytes::<R, 16>(source);
-        Self::deserialize(value)
+        Self::unordered_deserialize(value)
     }
 }
 

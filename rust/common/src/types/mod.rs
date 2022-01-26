@@ -48,6 +48,9 @@ pub enum DataTypeKind {
     Struct,
 }
 
+const DECIMAL_DEFAULT_PRECISION: u32 = 20;
+const DECIMAL_DEFAULT_SCALE: u32 = 6;
+
 /// Number of bytes of one element in array of [`DataType`].
 pub enum DataSize {
     /// For types with fixed size, e.g. int, float.
@@ -155,7 +158,10 @@ impl DataTypeKind {
     }
 
     pub fn decimal_default() -> DataTypeKind {
-        DataTypeKind::Decimal { prec: 20, scale: 6 }
+        DataTypeKind::Decimal {
+            prec: DECIMAL_DEFAULT_PRECISION,
+            scale: DECIMAL_DEFAULT_SCALE,
+        }
     }
 }
 
@@ -543,7 +549,10 @@ impl ScalarRefImpl<'_> {
             &Self::Float64(v) => v.serialize(ser)?,
             &Self::Utf8(v) => v.serialize(ser)?,
             &Self::Bool(v) => v.serialize(ser)?,
-            &Self::Decimal(v) => ser.serialize_decimal(v.mantissa(), v.scale() as u8)?,
+            &Self::Decimal(v) => {
+                let (mantissa, scale) = v.mantissa_scale_for_serialization();
+                ser.serialize_decimal(mantissa, scale)?;
+            }
             Self::Interval(v) => v.serialize(ser)?,
             Self::Struct(v) => v.serialize(ser)?,
         };
@@ -576,7 +585,12 @@ impl ScalarImpl {
             Ty::Boolean => Self::Bool(bool::deserialize(de)?),
             Ty::Decimal { .. } => Self::Decimal({
                 let (mantissa, scale) = de.deserialize_decimal()?;
-                Decimal::from_i128_with_scale(mantissa, scale as u32)
+                match scale {
+                    -1 => Decimal::NegativeINF,
+                    29 => Decimal::PositiveINF,
+                    30 => Decimal::NaN,
+                    _ => Decimal::from_i128_with_scale(mantissa, scale as u32),
+                }
             }),
             Ty::Interval => Self::Interval(IntervalUnit::deserialize(de)?),
             Ty::Time | Ty::Timestamp | Ty::Timestampz => Self::Int64(i64::deserialize(de)?),
