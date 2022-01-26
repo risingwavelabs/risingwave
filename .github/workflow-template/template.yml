@@ -6,6 +6,7 @@ on:
 
 env:
   RUST_TOOLCHAIN: nightly-2022-01-13
+  CACHE_KEY_SUFFIX: v20220126
 
 jobs:
   frontend-check:
@@ -150,7 +151,6 @@ jobs:
     needs:
       - compute-node-build
       - frontend-check
-      - compute-node-test
     runs-on: ubuntu-latest
     timeout-minutes: 15 # NOTE: Increase this number when we have more tests.
     env:
@@ -294,8 +294,32 @@ jobs:
           directory: java
           flags: java
 
-  start-runner:
-    name: ec2-start
+  start-runner-a:
+    name: ec2-start-a
+    runs-on: ubuntu-latest
+    outputs:
+      label: ${{ steps.start-ec2-runner.outputs.label }}
+      ec2-instance-id: ${{ steps.start-ec2-runner.outputs.ec2-instance-id }}
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-2
+      - name: Start EC2 runner
+        id: start-ec2-runner
+        uses: machulav/ec2-github-runner@v2
+        with:
+          mode: start
+          github-token: ${{ secrets.WUTAO_PAT }}
+          ec2-image-id: ami-0e704ffdb6669cf91 # github-actions
+          ec2-instance-type: c5.4xlarge # 16 vCPU, 32 GB Memory, EBS
+          subnet-id: subnet-59743123 # default
+          security-group-id: sg-9ec32bfe # default (could have security issues)
+
+  start-runner-b:
+    name: ec2-start-b
     runs-on: ubuntu-latest
     outputs:
       label: ${{ steps.start-ec2-runner.outputs.label }}
@@ -319,10 +343,8 @@ jobs:
           security-group-id: sg-9ec32bfe # default (could have security issues)
 
   compute-node-build:
-    needs: start-runner # required to start the main job when the runner is ready
-    runs-on: ${{ needs.start-runner.outputs.label }} # run the job on the newly created runner
-    env:
-      CACHE_KEY_SUFFIX: v20220113 # change this to invalidate previous cache
+    needs: start-runner-a # required to start the main job when the runner is ready
+    runs-on: ${{ needs.start-runner-a.outputs.label }} # run the job on the newly created runner
     container:
       image: public.ecr.aws/x5u3w5h6/risingwave-build-env:latest
       options: --security-opt seccomp=unconfined
@@ -348,7 +370,6 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-            rust/target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ env.CACHE_KEY_SUFFIX }}-build
 
       - name: Install cargo-sort
@@ -402,11 +423,8 @@ jobs:
 
   compute-node-test:
     needs:
-      - start-runner # required to start the main job when the runner is ready
-      - compute-node-build
-    runs-on: ${{ needs.start-runner.outputs.label }} # run the job on the newly created runner
-    env:
-      CACHE_KEY_SUFFIX: v20220113 # change this to invalidate previous cache
+      - start-runner-b # required to start the main job when the runner is ready
+    runs-on: ${{ needs.start-runner-b.outputs.label }} # run the job on the newly created runner
     container:
       image: public.ecr.aws/x5u3w5h6/risingwave-build-env:latest
       options: --security-opt seccomp=unconfined
@@ -431,7 +449,6 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-            rust/target_tarpaulin/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ env.CACHE_KEY_SUFFIX }}-test
 
       - name: Install cargo-tarpaulin
@@ -495,7 +512,8 @@ jobs:
   stop-runner:
     name: ec2-stop
     needs:
-      - start-runner # required to get output from the start-runner job
+      - start-runner-a
+      - start-runner-b
       - compute-node-build
       - compute-node-test
       # The following workflows are not running on EC2, so we don't need to wait for it.
@@ -510,10 +528,19 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-2
-      - name: Stop EC2 runner
+      - name: Stop EC2 runner A
         uses: machulav/ec2-github-runner@v2
         with:
           mode: stop
           github-token: ${{ secrets.WUTAO_PAT }}
-          label: ${{ needs.start-runner.outputs.label }}
-          ec2-instance-id: ${{ needs.start-runner.outputs.ec2-instance-id }}
+          label: ${{ needs.start-runner-a.outputs.label }}
+          ec2-instance-id: ${{ needs.start-runner-a.outputs.ec2-instance-id }}
+        if: ${{ always() }}
+      - name: Stop EC2 runner B
+        uses: machulav/ec2-github-runner@v2
+        with:
+          mode: stop
+          github-token: ${{ secrets.WUTAO_PAT }}
+          label: ${{ needs.start-runner-b.outputs.label }}
+          ec2-instance-id: ${{ needs.start-runner-b.outputs.ec2-instance-id }}
+        if: ${{ always() }}
