@@ -40,7 +40,7 @@ select v1, v2, v3 from mv1;
 query RII
 select avg_v1, sum_v2, count_v3 from mv2;
 ----
-1.500000 7 2
+1.5 7 2
 
 statement ok
 insert into t1 values (3,4,4), (4,3,5);
@@ -59,7 +59,7 @@ select v1, v2, v3 from mv1;
 query RII
 select avg_v1, sum_v2, count_v3 from mv2;
 ----
-2.500000 14 4
+2.5 14 4
 
 query RRRR
 select sum_v1, min_v1, max_v1, v3 from mv3 order by sum_v1;

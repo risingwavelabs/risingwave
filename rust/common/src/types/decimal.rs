@@ -4,8 +4,6 @@ use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedRem, CheckedSub};
 pub use rust_decimal::prelude::{FromPrimitive, FromStr, ToPrimitive};
 use rust_decimal::{Decimal as RustDecimal, Error, RoundingStrategy};
 
-use crate::types::DECIMAL_DEFAULT_SCALE;
-
 #[derive(Debug, Copy, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]
 pub enum Decimal {
     Normalized(RustDecimal),
@@ -404,14 +402,6 @@ impl Decimal {
         }
     }
 
-    /// We remark that this function is used for serialization. And our serialization of decimal has
-    /// limitations: 1. We do not support dynamic decimal. Numeric without precision or scale is
-    /// treated as a Numeric with scale 6.
-    /// 2. For all decimals with static precision and scale, we still treat it as a Numeric with
-    /// scale 6. This is because right now our serialization does not require schema, so we
-    /// don't know what scale is. And the scale of `rust_decimal` cannot be fully trusted as the
-    /// change of scale during calculation may have unexpected behavior. So we still rescale the
-    /// decimal to a default scale before serialization.
     /// TODO: 1. test whether the decimal in rust, any crate, has the same behavior as PG.
     /// 2. support memcomparable encoding for dynamic decimal.
     pub fn mantissa_scale_for_serialization(&self) -> (i128, i8) {
@@ -420,11 +410,12 @@ impl Decimal {
         match self {
             Self::NegativeINF => (0, -1),
             Self::Normalized(d) => {
-                let mut standard_scale_d = *d;
-                standard_scale_d.rescale(DECIMAL_DEFAULT_SCALE);
-                assert_eq!(standard_scale_d.scale(), DECIMAL_DEFAULT_SCALE);
-                let mantissa = standard_scale_d.mantissa();
-                (mantissa, DECIMAL_DEFAULT_SCALE as i8)
+                // We remark that we do not dynamic numeric, i.e. the scale of all the numeric in
+                // the system is fixed. So we don't need to do any rescale, just use
+                // the `scale` of `rust_decimal`. However, it is possible that scale
+                // may overflow during calculation as `rust_decimal`'s max scale is
+                // 28.
+                (d.mantissa(), d.scale() as i8)
             }
             Self::PositiveINF => (0, 29),
             Self::NaN => (0, 30),
