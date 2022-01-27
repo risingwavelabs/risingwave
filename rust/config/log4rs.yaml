@@ -51,6 +51,8 @@ loggers:
     level: warn
   "tower":
     level: warn
+  "sled":
+    level: warn
   # For debug: enable trace logging as examples below
   # risingwave_stream::executor::hash_join:
   #   level: trace
