@@ -53,11 +53,11 @@ In addition, to satisfy various user cases, it supports different object storage
 
 After an SSTable is built, there are two files:
 
-- Meta (`.meta`) file: contains the index of the data file, including cheap index (min, max), Bloom filter and metadata for each block.
-- Data (`.sst`) file: contains all the blocks in the SSTable.
+- `Meta (.meta) file`: contains the index of the data file, including cheap index (min, max), Bloom filter and metadata for each block.
+- `Data (.sst) file`: contains all the blocks in the SSTable.
 
 After the two files are generated, they will be uploaded to the object storage backend. Currently, the following object storage backends are supported:
 
-- S3: used for production.
-- MinIO: used for integration test. MinIO is compatible with the S3 protocol.
-- In-Memory storage: used for unit test.
+- `S3`: used for production.
+- `MinIO`: used for integration test. MinIO is compatible with the S3 protocol.
+- `In-Memory storage`: used for unit test.

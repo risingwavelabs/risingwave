@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-mod operation;
+mod benchmarks;
 mod utils;
 
+use benchmarks::{get_random, prefix_scan_random, write_batch};
 use clap::Parser;
-use operation::{get_random, prefix_scan_random, write_batch};
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 use risingwave_storage::hummock::local_version_manager::LocalVersionManager;
@@ -19,15 +19,21 @@ use risingwave_storage::StateStore;
 
 #[derive(Parser, Debug)]
 pub(crate) struct Opts {
-    // ----- backend type parameters  -----
+    // ----- backend type  -----
     #[clap(long, default_value = "in-memory")]
     store: String,
 
-    // ----- operation type parameters  -----
+    // ----- benchmarks -----
     #[clap(long)]
-    operations: String,
+    benchmarks: String,
 
-    // ----- Hummock parameters  -----
+    #[clap(long, default_value_t = 10)]
+    iterations: u32,
+
+    #[clap(long, default_value_t = 1)]
+    concurrency_num: u32,
+
+    // ----- Hummock -----
     #[clap(long, default_value_t = 64)]
     block_size_kb: u32,
 
@@ -40,7 +46,7 @@ pub(crate) struct Opts {
     #[clap(long, default_value = "crc32c")]
     checksum_algo: String,
 
-    // ----- data parameters  -----
+    // ----- data -----
     #[clap(long, default_value_t = 10)]
     key_size: u32,
 
@@ -55,13 +61,6 @@ pub(crate) struct Opts {
 
     #[clap(long, default_value_t = 1000)]
     kvs_per_batch: u32,
-
-    #[clap(long, default_value_t = 10)]
-    iterations: u32,
-
-    // ----- concurrency  -----
-    #[clap(long, default_value_t = 1)]
-    concurrency_num: u32,
 }
 
 fn get_checksum_algo(algo: &str) -> ChecksumAlg {
@@ -148,7 +147,7 @@ async fn get_state_store_impl(opts: &Opts) -> Result<StateStoreImpl> {
 }
 
 async fn run_op(store: impl StateStore, opts: &Opts) {
-    for op in opts.operations.split(';') {
+    for op in opts.benchmarks.split(',') {
         match op {
             "writebatch" => write_batch::run(&store, opts).await,
             "getrandom" => get_random::run(&store, opts).await,

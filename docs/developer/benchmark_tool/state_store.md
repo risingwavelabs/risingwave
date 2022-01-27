@@ -4,7 +4,7 @@ ss_bench is used to benchmark the performance of the state store. In this doc, w
 
 ```shell
 ~/code/risingwave/rust: cargo run --bin ss-bench --\
- --operations "getrandom;prefixscanrandom;getrandom"\
+ --benchmarks "writebatch,prefixscanrandom,getrandom"\
  --kvs-per-batch 1000\
  --iterations 100\
  --concurrency-num 4
@@ -46,22 +46,22 @@ ss_bench is used to benchmark the performance of the state store. In this doc, w
 
 ### Hummock Configurations
 
-- `table-size-mb`
+- `--table-size-mb`
   
   - Size (MB) of an SSTable
   - Default value: 256
 
-- `block-size-kb`
+- `--block-size-kb`
   
   - Size (KB) of a block in an SSTable
   - Default value: 64
 
-- `bloom-false-positive`
+- `--bloom-false-positive`
   
   - Bloom Filter false positive rate
   - Default value: 0.1
 
-- `checksum-algo`
+- `--checksum-algo`
   
   - Checksum algorithm
   
@@ -70,49 +70,49 @@ ss_bench is used to benchmark the performance of the state store. In this doc, w
     - `crc32c`: default value
     - `xxhash`
 
-## Operations
+## Benchmarks
 
-### Number (`iterations`)
+### Number (`--iterations`)
 
-- The times that each operation has been executed
+- The times that each benchmark has been executed
 - Default value: 10
 
-### Concurrency Number (`concurrency-num`)
+### Concurrency Number (`--concurrency-num`)
 
-- The concurrency number of each operation
+- The concurrency number of each benchmark
 - Default value: 1
 
-### Type (`--operations`)
+### Benchmark Type (`--benchmarks`)
 
-- `writebatch` -- write `iterations` KV pairs in sequential key order in async mode
-- `getrandom` -- read `iterations` times in random order
-- `prefixscanrandom` -- prefix scan `iterations` times in random order
+- `writebatch`: write `iterations` KV pairs in sequential key order in async mode
+- `getrandom`: read `iterations` times in random order
+- `prefixscanrandom`: prefix scan `iterations` times in random order
 
-The operations could be a combination of multiple consequent operations. Example: `--operations "writebatch;prefixscanrandom;getrandom"`
+The benchmarks could be a combination of multiple consequent benchmarks. Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
 
 ## Batch Configurations
 
-- `key-size`
+- `--key-size`
   
   - The size (bytes) of the non-prefix part of a key
   - Default value: 10
 
-- `key-prefix-size`
+- `--key-prefix-size`
   
   - The size (bytes) of a prefix
   - Default value: 5
 
-- `key_prefix_frequency`
+- `--key-prefix-frequency`
   
   - The number of keys with some a prefix in a batch
   - Default value: 10
 
-- `value-size`
+- `--value-size`
   
   - The length (bytes) of a value in a KV pair
   - Default value: 10
 
-- `kvs-per-batch`
+- `--kvs-per-batch`
   
   - The number of KV pairs in a batch
   - Default value: 1000
