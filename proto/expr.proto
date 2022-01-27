@@ -61,7 +61,7 @@ message ExprNode {
   }
   Type expr_type = 1;
   data.DataType return_type = 3;
-  oneof RexNode {
+  oneof rex_node {
     InputRefExpr input_ref = 4;
     ConstantValue constant = 5;
     FunctionCall func_call = 6;

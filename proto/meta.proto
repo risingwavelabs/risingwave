@@ -62,7 +62,7 @@ service EpochService {
 
 message CreateRequest {
   uint32 node_id = 1;
-  oneof CatalogBody {
+  oneof catalog_body {
     Database database = 2;
     Schema schema = 3;
     Table table = 4;
@@ -77,7 +77,7 @@ message CreateResponse {
 
 message DropRequest {
   uint32 node_id = 1;
-  oneof CatalogId {
+  oneof catalog_id {
     plan.DatabaseRefId database_id = 2;
     plan.SchemaRefId schema_id = 3;
     plan.TableRefId table_id = 4;
@@ -117,7 +117,7 @@ message HeartbeatRequest {
 
 message HeartbeatResponse {
   common.Status status = 1;
-  oneof Body {
+  oneof body {
     Catalog catalog = 2;
   }
 }
@@ -175,9 +175,9 @@ service StreamManagerService {
 // Potentially we can add FE cluster into the cluster management as well.
 
 enum ClusterType {
-  Frontend = 0;
-  ComputeNode = 1;
-  Unknown = 2;
+  FRONTEND = 0;
+  COMPUTE_NODE = 1;
+  UNKNOWN = 2;
 }
 
 message AddWorkerNodeRequest {

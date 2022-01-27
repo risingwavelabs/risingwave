@@ -14,7 +14,7 @@ import com.risingwave.proto.plan.TableRefId;
 /** Protobuf static helpers. */
 public class MetaMessages {
   public static HeartbeatRequest buildHeartbeatRequest() {
-    return HeartbeatRequest.newBuilder().setClusterType(ClusterType.Frontend).build();
+    return HeartbeatRequest.newBuilder().setClusterType(ClusterType.FRONTEND).build();
   }
 
   public static CreateRequest buildCreateDatabaseRequest(Database database) {

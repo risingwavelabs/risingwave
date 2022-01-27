@@ -442,9 +442,9 @@ jobs:
         run: |
           prototool format -d
         working-directory: proto
-      - name: Lint protobuf (not enabled)
+      - name: Lint protobuf
         run: |
-          buf lint || true
+          buf lint
         working-directory: proto
   stop-runner:
     name: ec2-stop
