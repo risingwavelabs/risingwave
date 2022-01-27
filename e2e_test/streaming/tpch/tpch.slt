@@ -23,6 +23,7 @@ include ./q6.slt.part
 include ./q8.slt.part
 include ./q9.slt.part
 include ./q10.slt.part
+include ./q13.slt.part
 
 
 include ./drop_views.slt.part
