@@ -16,11 +16,13 @@ import java.util.stream.IntStream;
 import org.apache.calcite.rel.RelCollations;
 import org.apache.calcite.rel.RelDistribution;
 import org.apache.calcite.rel.RelFieldCollation;
+import org.apache.calcite.rel.core.AggregateCall;
 import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.rel.type.RelDataTypeFieldImpl;
 import org.apache.calcite.rex.RexInputRef;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.rex.RexShuttle;
+import org.apache.calcite.util.ImmutableBitSet;
 import org.apache.calcite.util.ImmutableIntList;
 import org.apache.calcite.util.mapping.IntPair;
 import org.apache.calcite.util.mapping.Mapping;
@@ -386,24 +388,65 @@ public class PrimaryKeyDerivationVisitor
   public RwStreamingRelVisitor.Result<PrimaryKeyIndicesAndPositionMap> visit(
       RwStreamAgg aggregate) {
     LOGGER.debug("visit RwStreamAgg");
-    // Although we don't need to go beyond Aggregate to find the primary key for materialized
-    // view(root),
-    // the downstream operator(aggregate, join) may need to know the primary key for themselves.
-    // Therefore, we still need to recursively go down.
     var input = (RisingWaveStreamingRel) aggregate.getInput(0);
     var p = input.accept(this);
     var groupSet = aggregate.getGroupSet();
+    var groupKeyIndices = groupSet.asList();
+    var positionMap = p.info.getPositionMap();
+    // We remark that since the position of input may change, we need to
+    // change the group set and the input ref index in aggregation function accordingly.
+
+    // Change the group set.
+    // We remark that group key indices and primary key indices are different.
+    // GroupKeyIndices is input ref indices of the input. So it should be changed by the
+    // postitionMap returned from its child.
+    // PrimaryKeyIndices has nothing to do with its child as this is an aggregate operator.
+    List<Integer> newPrimaryKeyIndices = new ArrayList<Integer>();
+    List<Integer> newGroupKeyIndices = new ArrayList<Integer>();
     // If the aggregate is a simple aggregate, we use all of its columns as primary key.
-    List<Integer> groupList = new ArrayList<Integer>();
     if (groupSet.isEmpty()) {
-      IntStream.range(0, aggregate.getRowType().getFieldCount()).forEachOrdered(groupList::add);
+      // If there are additional columns derived from its children, we don't need to care about
+      // them.
+      // So we still use the original field count.
+      IntStream.range(0, aggregate.getRowType().getFieldCount())
+          .forEachOrdered(newPrimaryKeyIndices::add);
     } else {
-      groupList = ImmutableList.copyOf(groupSet);
+      for (var groupKeyIndex : groupKeyIndices) {
+        var newGroupKeyIndex = positionMap.getOrDefault(groupKeyIndex, groupKeyIndex);
+        newGroupKeyIndices.add(newGroupKeyIndex);
+      }
+      IntStream.range(0, groupKeyIndices.size()).forEachOrdered(newPrimaryKeyIndices::add);
     }
+    LOGGER.debug("OldGroupKeyIndices:" + groupKeyIndices);
+    LOGGER.debug("NewGroupKeyIndices:" + newGroupKeyIndices);
+    LOGGER.debug("PrimaryKeyIndices:" + newPrimaryKeyIndices);
+
+    // Change the input ref index in each aggregate call.
+    var aggregateCalls = aggregate.getAggCallList();
+    var newAggregateCalls = new ArrayList<AggregateCall>();
+    for (var aggregateCall : aggregateCalls) {
+      var inputRefIndices = aggregateCall.getArgList();
+      List<Integer> newArgs = new ArrayList<>();
+      for (var index : inputRefIndices) {
+        var newIndex = positionMap.getOrDefault(index, index);
+        newArgs.add(newIndex);
+      }
+      var newAggregateCall = aggregateCall.copy(newArgs);
+      newAggregateCalls.add(newAggregateCall);
+    }
+    LOGGER.debug("OldAggregateCalls:" + aggregateCalls);
+    LOGGER.debug("NewAggregateCalls:" + newAggregateCalls);
     var info =
-        new PrimaryKeyIndicesAndPositionMap(ImmutableList.copyOf(groupList), ImmutableMap.of());
+        new PrimaryKeyIndicesAndPositionMap(
+            ImmutableList.copyOf(newPrimaryKeyIndices), ImmutableMap.of());
     RwStreamAgg newAggregate =
-        (RwStreamAgg) aggregate.copy(aggregate.getTraitSet(), List.of(p.node));
+        (RwStreamAgg)
+            aggregate.copy(
+                aggregate.getTraitSet(),
+                p.node,
+                ImmutableBitSet.of(newGroupKeyIndices),
+                aggregate.getGroupSets(),
+                newAggregateCalls);
     LOGGER.debug("leave RwStreamAgg");
     return new Result<>(newAggregate, info);
   }
