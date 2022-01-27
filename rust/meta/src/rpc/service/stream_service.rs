@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use risingwave_common::error::tonic_err;
+use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerService;
 use risingwave_pb::meta::*;
 use tonic::{Request, Response, Status};
@@ -45,8 +46,7 @@ impl StreamManagerService for StreamServiceImpl {
         let req = request.into_inner();
         let worker_count = self
             .cluster_manager
-            .list_worker_node(ClusterType::ComputeNode)
-            .await
+            .list_worker_node(WorkerType::ComputeNode)
             .map_err(|e| e.to_grpc_status())?
             .len();
 

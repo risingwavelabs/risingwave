@@ -178,7 +178,7 @@ impl StreamMetaManager for StoredStreamMetaManager {
 mod test {
     use std::collections::HashSet;
 
-    use risingwave_pb::common::{HostAddress, WorkerNode};
+    use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
     use risingwave_pb::stream_plan::StreamActor;
 
     use super::*;
@@ -207,6 +207,7 @@ mod test {
         let location = make_location(
             WorkerNode {
                 id: 1,
+                r#type: WorkerType::ComputeNode as i32,
                 host: Some(HostAddress {
                     host: "127.0.0.1".to_string(),
                     port: 9527,
@@ -234,6 +235,7 @@ mod test {
         let location = make_location(
             WorkerNode {
                 id: 1,
+                r#type: WorkerType::ComputeNode as i32,
                 host: Some(HostAddress {
                     host: "127.0.0.1".to_string(),
                     port: 9527,
@@ -262,6 +264,7 @@ mod test {
         let location = make_location(
             WorkerNode {
                 id: 2,
+                r#type: WorkerType::ComputeNode as i32,
                 host: Some(HostAddress {
                     host: "127.0.0.1".to_string(),
                     port: 9528,

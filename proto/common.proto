@@ -25,9 +25,16 @@ message ActorInfo {
   HostAddress host = 2;
 }
 
+enum WorkerType {
+  FRONTEND = 0;
+  COMPUTE_NODE = 1;
+  UNKNOWN = 2;
+}
+
 message WorkerNode {
   uint32 id = 1;
-  HostAddress host = 2;
+  WorkerType type = 2;
+  HostAddress host = 3;
 }
 
 // A cluster can be either a set of OLAP compute nodes, or a set of streaming compute nodes.

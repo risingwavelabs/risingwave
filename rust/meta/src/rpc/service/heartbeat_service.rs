@@ -1,8 +1,9 @@
 use risingwave_common::array::RwError;
 use risingwave_common::error::ErrorCode::ProtocolError;
+use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::heartbeat_response::Body;
 use risingwave_pb::meta::heartbeat_service_server::HeartbeatService;
-use risingwave_pb::meta::{ClusterType, HeartbeatRequest, HeartbeatResponse};
+use risingwave_pb::meta::{HeartbeatRequest, HeartbeatResponse};
 use tonic::{Request, Response, Status};
 
 use crate::catalog::CatalogManagerRef;
@@ -26,8 +27,8 @@ impl HeartbeatService for HeartbeatServiceImpl {
         request: Request<HeartbeatRequest>,
     ) -> Result<Response<HeartbeatResponse>, Status> {
         let req = request.into_inner();
-        match ClusterType::from_i32(req.cluster_type) {
-            Some(ClusterType::Frontend) => Ok(Response::new(HeartbeatResponse {
+        match WorkerType::from_i32(req.worker_type) {
+            Some(WorkerType::Frontend) => Ok(Response::new(HeartbeatResponse {
                 status: None,
                 body: Some(Body::Catalog(
                     self.cmr
@@ -36,7 +37,7 @@ impl HeartbeatService for HeartbeatServiceImpl {
                         .map_err(|e| e.to_grpc_status())?,
                 )),
             })),
-            Some(ClusterType::ComputeNode) => Ok(Response::new(HeartbeatResponse {
+            Some(WorkerType::ComputeNode) => Ok(Response::new(HeartbeatResponse {
                 status: None,
                 body: None,
             })),

@@ -1,197 +1,105 @@
-use std::sync::Arc;
+use std::hash::{Hash, Hasher};
 
-use prost::Message;
+use dashmap::mapref::entry::Entry;
+use dashmap::DashMap;
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_pb::common::{Cluster, HostAddress, WorkerNode};
-use risingwave_pb::meta::ClusterType;
+use risingwave_common::error::{Result, RwError};
+use risingwave_common::try_match_expand;
+use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 
-use crate::manager::{Config, IdCategory, IdGeneratorManagerRef, MetaSrvEnv, SINGLE_VERSION_EPOCH};
+use crate::manager::{IdCategory, IdGeneratorManagerRef, MetaSrvEnv};
+use crate::model::{MetadataModel, Worker};
 use crate::storage::MetaStoreRef;
 
 /// [`StoredClusterManager`] manager cluster/worker meta data in [`MetaStore`].
 pub struct StoredClusterManager {
     meta_store_ref: MetaStoreRef,
     id_gen_manager_ref: IdGeneratorManagerRef,
-    config: Arc<Config>,
+    workers: DashMap<WorkerKey, Worker>,
+}
+
+struct WorkerKey(HostAddress);
+
+impl PartialEq<Self> for WorkerKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.eq(&other.0)
+    }
+}
+impl Eq for WorkerKey {}
+
+impl Hash for WorkerKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.host.hash(state);
+        self.0.port.hash(state);
+    }
 }
 
 impl StoredClusterManager {
-    pub fn new(env: MetaSrvEnv) -> Self {
-        Self {
-            meta_store_ref: env.meta_store_ref(),
+    pub async fn new(env: MetaSrvEnv) -> Result<Self> {
+        let meta_store_ref = env.meta_store_ref();
+        let workers =
+            try_match_expand!(Worker::list(&meta_store_ref).await, Ok, "Worker::list fail")?;
+        let worker_map = DashMap::new();
+
+        workers.iter().for_each(|w| {
+            worker_map.insert(WorkerKey(w.key().unwrap()), w.clone());
+        });
+
+        Ok(Self {
+            meta_store_ref,
             id_gen_manager_ref: env.id_gen_manager_ref(),
-            config: env.config(),
-        }
-    }
-}
-
-impl StoredClusterManager {
-    pub async fn list_cluster(&self) -> Result<Vec<Cluster>> {
-        let clusters_pb = self
-            .meta_store_ref
-            .list_cf(self.config.get_cluster_cf())
-            .await?;
-
-        Ok(clusters_pb
-            .iter()
-            .map(|c| Cluster::decode(c.as_slice()).unwrap())
-            .collect::<Vec<_>>())
-    }
-
-    pub async fn get_cluster(&self, cluster_id: u32) -> Result<Cluster> {
-        let cluster_pb = self
-            .meta_store_ref
-            .get_cf(
-                self.config.get_cluster_cf(),
-                &cluster_id.to_be_bytes(),
-                SINGLE_VERSION_EPOCH,
-            )
-            .await?;
-
-        Ok(Cluster::decode(cluster_pb.as_slice())?)
-    }
-
-    pub async fn put_cluster(&self, cluster: Cluster) -> Result<()> {
-        self.meta_store_ref
-            .put_cf(
-                self.config.get_cluster_cf(),
-                &cluster.get_id().to_be_bytes(),
-                &cluster.encode_to_vec(),
-                SINGLE_VERSION_EPOCH,
-            )
-            .await
-    }
-
-    pub async fn delete_cluster(&self, cluster_id: u32) -> Result<()> {
-        self.meta_store_ref
-            .delete_cf(
-                self.config.get_cluster_cf(),
-                &cluster_id.to_be_bytes(),
-                SINGLE_VERSION_EPOCH,
-            )
-            .await
+            workers: worker_map,
+        })
     }
 
     pub async fn add_worker_node(
         &self,
         host_address: HostAddress,
-        cluster_type: ClusterType,
+        r#type: WorkerType,
     ) -> Result<(WorkerNode, bool)> {
-        let cluster_id = cluster_type as u32;
-        // FIXME: there's is a consistency problem between get/set, fix this after refactor
-        // metastore.
-        let mut cluster = match self.get_cluster(cluster_id).await {
-            Ok(cluster) => cluster,
-            Err(err) => {
-                if !matches!(err.inner(), ErrorCode::ItemNotFound(_)) {
-                    return Err(err);
-                }
-                Cluster {
-                    id: cluster_id,
-                    nodes: vec![],
-                    config: Default::default(),
-                }
-            }
-        };
-        match cluster
-            .nodes
-            .iter()
-            // TODO: should use a hashmap here
-            .position(|n| n.get_host() == Ok(&host_address))
-        {
-            // If exist already, return its info(id) directly. Worker might be added duplicated cuz
-            // reboot is quite normal for workers.
-            Some(idx) => Ok((cluster.nodes.get(idx).unwrap().clone(), false)),
-            None => {
-                let next_id = self
+        match self.workers.entry(WorkerKey(host_address.clone())) {
+            Entry::Occupied(o) => Ok((o.get().to_protobuf(), false)),
+            Entry::Vacant(v) => {
+                let id = self
                     .id_gen_manager_ref
                     .generate::<{ IdCategory::Worker }>()
                     .await?;
-                let ret_node = WorkerNode {
-                    id: next_id as u32,
-                    host: Some(host_address.clone()),
-                };
-                cluster.nodes.push(ret_node.clone());
-                let _res = self.put_cluster(cluster).await?;
-                Ok((ret_node, true))
+                let worker = Worker::from_protobuf(WorkerNode {
+                    id: id as u32,
+                    r#type: r#type as i32,
+                    host: Some(host_address),
+                });
+                worker.create(&self.meta_store_ref).await?;
+                Ok((v.insert(worker).to_protobuf(), true))
             }
         }
     }
 
-    pub async fn delete_worker_node(
-        &self,
-        node: WorkerNode,
-        cluster_type: ClusterType,
-    ) -> Result<()> {
-        let cluster_id = cluster_type as u32;
-        let cluster = self.get_cluster(cluster_id).await?;
-        let mut contained = false;
-        let mut new_worker_list = Vec::new();
-        cluster.nodes.into_iter().for_each(|e| {
-            let equal_check = e.eq(&node);
-            contained = contained || equal_check;
-            if !equal_check {
-                new_worker_list.push(e);
-            }
-        });
-
-        let new_cluster = Cluster {
-            id: cluster.id,
-            nodes: new_worker_list,
-            config: cluster.config,
-        };
-        let _res = self.put_cluster(new_cluster).await?;
-
-        match contained {
-            true => Ok(()),
-            false => Err(RwError::from(InternalError(
+    pub async fn delete_worker_node(&self, host_address: HostAddress) -> Result<()> {
+        match self.workers.remove(&WorkerKey(host_address.clone())) {
+            None => Err(RwError::from(InternalError(
                 "Worker node does not exist!".to_string(),
             ))),
+            Some(_) => Worker::delete(&self.meta_store_ref, &host_address).await,
         }
     }
 
-    pub async fn list_worker_node(&self, cluster_type: ClusterType) -> Result<Vec<WorkerNode>> {
-        let cluster_id = cluster_type as u32;
-        let cluster = self.get_cluster(cluster_id).await?;
-        Ok(cluster.nodes)
+    pub fn list_worker_node(&self, worker_type: WorkerType) -> Result<Vec<WorkerNode>> {
+        Ok(self
+            .workers
+            .iter()
+            .map(|entry| entry.value().to_protobuf())
+            .filter(|w| w.r#type == worker_type as i32)
+            .collect::<Vec<_>>())
     }
 }
 
 #[cfg(test)]
 mod tests {
-
-    use risingwave_pb::common::WorkerNode;
-
     use super::*;
 
     #[tokio::test]
     async fn test_cluster_manager() -> Result<()> {
-        let cluster_manager = StoredClusterManager::new(MetaSrvEnv::for_test().await);
-
-        assert!(cluster_manager.list_cluster().await.is_ok());
-        assert!(cluster_manager.get_cluster(0).await.is_err());
-
-        for i in 0..100 {
-            assert!(cluster_manager
-                .put_cluster(Cluster {
-                    id: i,
-                    nodes: vec![WorkerNode {
-                        id: i * 2,
-                        host: None
-                    }],
-                    config: Default::default()
-                })
-                .await
-                .is_ok());
-        }
-
-        let cluster = cluster_manager.get_cluster(10).await?;
-        assert_eq!(cluster.id, 10);
-        assert_eq!(cluster.nodes[0].id, 20);
-        let clusters = cluster_manager.list_cluster().await?;
-        assert_eq!(clusters.len(), 100);
-
         Ok(())
     }
 }

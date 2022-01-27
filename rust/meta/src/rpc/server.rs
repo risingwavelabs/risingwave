@@ -52,7 +52,7 @@ pub async fn rpc_serve(
 
     let stream_meta_manager = Arc::new(StoredStreamMetaManager::new(env.clone()));
     let catalog_manager_ref = Arc::new(StoredCatalogManager::new(env.clone()));
-    let cluster_manager = Arc::new(StoredClusterManager::new(env.clone()));
+    let cluster_manager = Arc::new(StoredClusterManager::new(env.clone()).await.unwrap());
     let (hummock_manager, _) =
         hummock::HummockManager::new(env.clone(), hummock_config.unwrap_or_default())
             .await

@@ -66,15 +66,14 @@ mod handlers {
     ) -> Result<Json<Vec<WorkerNode>>> {
         srv.add_test_data().await.map_err(err)?;
 
-        use risingwave_pb::meta::ClusterType;
+        use risingwave_pb::common::WorkerType;
         let result = srv
             .cluster_manager
             .list_worker_node(
-                ClusterType::from_i32(ty)
-                    .ok_or_else(|| anyhow!("invalid cluster type"))
+                WorkerType::from_i32(ty)
+                    .ok_or_else(|| anyhow!("invalid worker type"))
                     .map_err(err)?,
             ) // TODO: error handling
-            .await
             .map_err(err)?;
         Ok(result.into())
     }
@@ -131,8 +130,7 @@ impl DashboardService {
         self.has_test_data.store(true, Ordering::SeqCst);
 
         // TODO: remove adding test data
-        use risingwave_pb::common::HostAddress;
-        use risingwave_pb::meta::ClusterType;
+        use risingwave_pb::common::{HostAddress, WorkerType};
 
         // TODO: remove adding frontend register when frontend implement register.
         self.cluster_manager
@@ -141,7 +139,7 @@ impl DashboardService {
                     host: "127.0.0.1".to_string(),
                     port: 4567,
                 },
-                ClusterType::Frontend,
+                WorkerType::Frontend,
             )
             .await?;
 

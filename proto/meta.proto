@@ -112,7 +112,7 @@ service CatalogService {
 // Below for heartbeat.
 message HeartbeatRequest {
   uint32 node_id = 1;
-  ClusterType cluster_type = 2;
+  common.WorkerType worker_type = 2;
 }
 
 message HeartbeatResponse {
@@ -170,18 +170,8 @@ service StreamManagerService {
   rpc Flush(FlushRequest) returns (FlushResponse);
 }
 
-// Below for cluster management.
-// We assume only two clusters exist: OLAP, streaming.
-// Potentially we can add FE cluster into the cluster management as well.
-
-enum ClusterType {
-  FRONTEND = 0;
-  COMPUTE_NODE = 1;
-  UNKNOWN = 2;
-}
-
 message AddWorkerNodeRequest {
-  ClusterType cluster_type = 1;
+  common.WorkerType worker_type = 1;
   common.HostAddress host = 2;
 }
 
@@ -191,7 +181,7 @@ message AddWorkerNodeResponse {
 }
 
 message DeleteWorkerNodeRequest {
-  ClusterType cluster_type = 1;
+  common.WorkerType worker_type = 1;
   common.WorkerNode node = 2;
 }
 
@@ -200,7 +190,7 @@ message DeleteWorkerNodeResponse {
 }
 
 message ListAllNodesRequest {
-  ClusterType cluster_type = 1;
+  common.WorkerType worker_type = 1;
 }
 
 message ListAllNodesResponse {

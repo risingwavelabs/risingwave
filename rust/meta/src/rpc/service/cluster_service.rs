@@ -29,12 +29,12 @@ impl ClusterService for ClusterServiceImpl {
         request: Request<AddWorkerNodeRequest>,
     ) -> Result<Response<AddWorkerNodeResponse>, Status> {
         let req = request.into_inner();
-        let cluster_type = req.get_cluster_type().map_err(tonic_err)?;
+        let worker_type = req.get_worker_type().map_err(tonic_err)?;
         let host = try_match_expand!(req.host, Some, "AddWorkerNodeRequest::host is empty")
             .map_err(|e| e.to_grpc_status())?;
         let (worker_node, _added) = self
             .scm
-            .add_worker_node(host, cluster_type)
+            .add_worker_node(host, worker_type)
             .await
             .map_err(|e| e.to_grpc_status())?;
         Ok(Response::new(AddWorkerNodeResponse {
@@ -48,12 +48,17 @@ impl ClusterService for ClusterServiceImpl {
         request: Request<DeleteWorkerNodeRequest>,
     ) -> Result<Response<DeleteWorkerNodeResponse>, Status> {
         let req = request.into_inner();
-        let cluster_type = req.get_cluster_type().map_err(tonic_err)?;
         let node = try_match_expand!(req.node, Some, "DeleteWorkerNodeRequest::node is empty")
             .map_err(|e| e.to_grpc_status())?;
+        let host = try_match_expand!(
+            node.host,
+            Some,
+            "DeleteWorkerNodeRequest::node::host is empty"
+        )
+        .map_err(|e| e.to_grpc_status())?;
         let _ = self
             .scm
-            .delete_worker_node(node, cluster_type)
+            .delete_worker_node(host)
             .await
             .map_err(|e| e.to_grpc_status())?;
         Ok(Response::new(DeleteWorkerNodeResponse { status: None }))
@@ -64,11 +69,10 @@ impl ClusterService for ClusterServiceImpl {
         request: Request<ListAllNodesRequest>,
     ) -> Result<Response<ListAllNodesResponse>, Status> {
         let req = request.into_inner();
-        let cluster_type = req.get_cluster_type().map_err(tonic_err)?;
+        let worker_type = req.get_worker_type().map_err(tonic_err)?;
         let node_list = self
             .scm
-            .list_worker_node(cluster_type)
-            .await
+            .list_worker_node(worker_type)
             .map_err(|e| e.to_grpc_status())?;
         Ok(Response::new(ListAllNodesResponse {
             status: None,

@@ -4,8 +4,7 @@ use std::sync::Arc;
 
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
-use risingwave_pb::common::WorkerNode;
-use risingwave_pb::meta::ClusterType;
+use risingwave_pb::common::{WorkerNode, WorkerType};
 
 use crate::cluster::StoredClusterManager;
 
@@ -51,8 +50,7 @@ impl Scheduler {
     ) -> Result<Vec<WorkerNode>> {
         let nodes = self
             .cluster_manager
-            .list_worker_node(ClusterType::ComputeNode)
-            .await?;
+            .list_worker_node(WorkerType::ComputeNode)?;
         if nodes.is_empty() {
             return Err(InternalError("no available node exist".to_string()).into());
         }
@@ -100,7 +98,7 @@ mod test {
     #[tokio::test]
     async fn test_schedule() -> Result<()> {
         let env = MetaSrvEnv::for_test().await;
-        let cluster_manager = Arc::new(StoredClusterManager::new(env.clone()));
+        let cluster_manager = Arc::new(StoredClusterManager::new(env.clone()).await?);
         let actors = (0..15).collect::<Vec<u32>>();
         let source_actors = (20..30).collect::<Vec<u32>>();
         let source_actors2 = (20..40).collect::<Vec<u32>>();
@@ -111,27 +109,25 @@ mod test {
                         host: "127.0.0.1".to_string(),
                         port: i as i32,
                     },
-                    ClusterType::ComputeNode,
+                    WorkerType::ComputeNode,
                 )
                 .await?;
         }
+        let workers = cluster_manager.list_worker_node(WorkerType::ComputeNode)?;
 
         let simple_schedule = Scheduler::new(ScheduleCategory::Simple, cluster_manager.clone());
         let nodes = simple_schedule.schedule(&actors, &[]).await?;
         assert_eq!(nodes.len(), 15);
-        assert_eq!(
-            nodes.iter().map(|n| n.get_id()).collect::<Vec<u32>>(),
-            vec![0; 15]
-        );
+        assert!(nodes.iter().all(|n| n == workers.get(0).unwrap()));
 
         let round_bin_schedule =
             Scheduler::new(ScheduleCategory::RoundRobin, cluster_manager.clone());
         let nodes = round_bin_schedule.schedule(&actors, &[]).await?;
         assert_eq!(nodes.len(), 15);
-        assert_eq!(
-            nodes.iter().map(|n| n.get_id()).collect::<Vec<u32>>(),
-            vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4]
-        );
+        assert!(nodes
+            .iter()
+            .enumerate()
+            .all(|(idx, n)| n == workers.get(idx % 10).unwrap()));
 
         let hash_schedule = Scheduler::new(ScheduleCategory::Hash, cluster_manager.clone());
         let nodes = hash_schedule.schedule(&actors, &[]).await?;
@@ -143,29 +139,32 @@ mod test {
             .schedule(&actors, &source_actors)
             .await?;
         assert_eq!(nodes.len(), 25);
-        assert_eq!(
-            nodes.iter().map(|n| n.get_id()).collect::<Vec<u32>>(),
-            vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-        );
+        assert!(nodes[0..15]
+            .iter()
+            .enumerate()
+            .all(|(idx, n)| n == workers.get(idx % 10).unwrap()));
+        assert!(nodes[15..]
+            .iter()
+            .enumerate()
+            .all(|(idx, n)| n == workers.get(idx % 10).unwrap()));
 
         let simple_schedule2 = Scheduler::new(ScheduleCategory::Simple, cluster_manager.clone());
         let nodes = simple_schedule2.schedule(&actors, &source_actors).await?;
         assert_eq!(nodes.len(), 25);
-        assert_eq!(
-            nodes.iter().map(|n| n.get_id()).collect::<Vec<u32>>(),
-            vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-        );
+        assert!(nodes[0..15].iter().all(|n| n == workers.get(0).unwrap()));
+        assert!(nodes[15..]
+            .iter()
+            .enumerate()
+            .all(|(idx, n)| n == workers.get(idx % 10).unwrap()));
 
         let simple_schedule3 = Scheduler::new(ScheduleCategory::Simple, cluster_manager.clone());
         let nodes = simple_schedule3.schedule(&actors, &source_actors2).await?;
         assert_eq!(nodes.len(), 35);
-        assert_eq!(
-            nodes.iter().map(|n| n.get_id()).collect::<Vec<u32>>(),
-            vec![
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2,
-                3, 4, 5, 6, 7, 8, 9
-            ]
-        );
+        assert!(nodes[0..15].iter().all(|n| n == workers.get(0).unwrap()));
+        assert!(nodes[15..]
+            .iter()
+            .enumerate()
+            .all(|(idx, n)| n == workers.get(idx % 10).unwrap()));
 
         Ok(())
     }

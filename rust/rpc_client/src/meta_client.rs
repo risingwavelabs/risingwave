@@ -4,14 +4,14 @@ use std::time::Duration;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::try_match_expand;
-use risingwave_pb::common::HostAddress;
+use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::meta::catalog_service_client::CatalogServiceClient;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::create_request::CatalogBody;
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::{
-    AddWorkerNodeRequest, ClusterType, CreateRequest, Database, HeartbeatRequest, Schema, Table,
+    AddWorkerNodeRequest, CreateRequest, Database, HeartbeatRequest, Schema, Table,
 };
 use tonic::transport::{Channel, Endpoint};
 
@@ -56,7 +56,7 @@ impl MetaClient {
             port: addr.port() as i32,
         };
         let request = AddWorkerNodeRequest {
-            cluster_type: ClusterType::ComputeNode as i32,
+            worker_type: WorkerType::ComputeNode as i32,
             host: Some(host_address),
         };
         let resp = self
@@ -75,7 +75,7 @@ impl MetaClient {
     pub async fn send_heartbeat(&self, node_id: u32) -> Result<()> {
         let request = HeartbeatRequest {
             node_id,
-            cluster_type: ClusterType::ComputeNode as i32,
+            worker_type: WorkerType::ComputeNode as i32,
         };
         let _resp = self
             .heartbeat_client

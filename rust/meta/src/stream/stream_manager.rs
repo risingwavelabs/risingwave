@@ -284,8 +284,7 @@ mod tests {
     use std::time::Duration;
 
     use risingwave_common::error::{tonic_err, ErrorCode};
-    use risingwave_pb::common::HostAddress;
-    use risingwave_pb::meta::ClusterType;
+    use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::stream_plan::stream_node::Node;
     use risingwave_pb::stream_plan::*;
     use risingwave_pb::stream_service::stream_service_server::{
@@ -414,14 +413,14 @@ mod tests {
 
             let env = MetaSrvEnv::for_test().await;
             let meta_manager = Arc::new(StoredStreamMetaManager::new(env.clone()));
-            let cluster_manager = Arc::new(StoredClusterManager::new(env.clone()));
+            let cluster_manager = Arc::new(StoredClusterManager::new(env.clone()).await?);
             cluster_manager
                 .add_worker_node(
                     HostAddress {
                         host: host.to_string(),
                         port: port as i32,
                     },
-                    ClusterType::ComputeNode,
+                    WorkerType::ComputeNode,
                 )
                 .await?;
 

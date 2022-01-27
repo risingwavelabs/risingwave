@@ -1,6 +1,9 @@
 mod catalog;
+mod cluster;
 
 use async_trait::async_trait;
+pub use catalog::*;
+pub use cluster::*;
 use prost::Message;
 use risingwave_common::error::Result;
 
@@ -9,7 +12,7 @@ use crate::storage::MetaStoreRef;
 
 /// `MetadataModel` defines basic model operations in CRUD.
 #[async_trait]
-trait MetadataModel: Sized {
+pub trait MetadataModel: Sized {
     /// Serialized prost message type.
     type ProstType: Message + Default;
     /// Serialized key type.
