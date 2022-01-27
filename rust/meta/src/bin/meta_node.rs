@@ -1,6 +1,5 @@
 use clap::Parser;
 use log::info;
-use risingwave_common::util::addr::get_host_port;
 use risingwave_meta::rpc::server::{rpc_serve, MetaStoreBackend};
 
 #[derive(Parser)]
@@ -22,8 +21,8 @@ async fn main() {
     let opts: Opts = Opts::parse();
     log4rs::init_file(opts.log4rs_config, Default::default()).unwrap();
 
-    let addr = get_host_port(opts.host.as_str()).unwrap();
-    let dashboard_addr = get_host_port(opts.dashboard_host.as_str()).unwrap();
+    let addr = opts.host.parse().unwrap();
+    let dashboard_addr = opts.dashboard_host.parse().unwrap();
     info!("Starting meta server at {}", addr);
     let (join_handle, _shutdown_send) = rpc_serve(
         addr,

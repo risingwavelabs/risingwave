@@ -124,7 +124,6 @@ mod tests {
     use std::thread::sleep;
     use std::time::Duration;
 
-    use risingwave_common::util::addr::get_host_port;
     use risingwave_pb::data::{DataChunk, StreamMessage};
     use risingwave_pb::task_service::exchange_service_server::{
         ExchangeService, ExchangeServiceServer,
@@ -174,7 +173,7 @@ mod tests {
     async fn test_exchange_client() {
         let rpc_called = Arc::new(AtomicBool::new(false));
         let server_run = Arc::new(AtomicBool::new(false));
-        let addr = get_host_port("127.0.0.1:12345").unwrap();
+        let addr = "127.0.0.1:12345".parse().unwrap();
 
         // Start a server.
         let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
@@ -212,7 +211,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_unconnectable_node() {
-        let addr = get_host_port("127.0.0.1:1001").unwrap();
+        let addr = "127.0.0.1:1001".parse().unwrap();
         let res = GrpcExchangeSource::create(addr, TaskId::default(), TaskSinkId::default()).await;
         assert!(res.is_err());
     }

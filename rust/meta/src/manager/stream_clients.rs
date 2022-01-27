@@ -5,7 +5,6 @@ use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
-use risingwave_common::util::addr::to_socket_addr;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::stream_service::stream_service_client::StreamServiceClient;
 use tonic::transport::{Channel, Endpoint};
@@ -24,7 +23,7 @@ impl StreamClients {
         let client = match self.clients.entry(node.id) {
             Entry::Occupied(o) => o.get().to_owned(),
             Entry::Vacant(v) => {
-                let addr = to_socket_addr(node.get_host()?)?;
+                let addr = node.get_host()?.to_socket_addr()?;
                 let endpoint = Endpoint::from_shared(format!("http://{}", addr));
                 let client = StreamServiceClient::new(
                     endpoint

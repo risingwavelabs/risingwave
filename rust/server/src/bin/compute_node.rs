@@ -2,7 +2,6 @@ use clap::StructOpt;
 use log::info;
 use risingwave::server::compute_node_serve;
 use risingwave::ComputeNodeOpts;
-use risingwave_common::util::addr::get_host_port;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::prelude::*;
 
@@ -62,7 +61,7 @@ async fn main() {
     }
     info!("meta address: {}", opts.meta_address.clone());
 
-    let addr = get_host_port(opts.host.as_str()).unwrap();
+    let addr = opts.host.parse().unwrap();
     info!("Starting server at {}", addr);
 
     let (join_handle, _shutdown_send) = compute_node_serve(addr, opts).await;

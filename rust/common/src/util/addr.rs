@@ -1,10 +1,4 @@
 use std::net::SocketAddr;
-use std::str::FromStr;
-
-use risingwave_pb::common::HostAddress;
-
-use crate::error::ErrorCode::InternalError;
-use crate::error::{Result, RwError};
 
 pub fn is_local_address(server_addr: &SocketAddr, peer_addr: &SocketAddr) -> bool {
     let peer_ip = peer_addr.ip();
@@ -14,34 +8,14 @@ pub fn is_local_address(server_addr: &SocketAddr, peer_addr: &SocketAddr) -> boo
     false
 }
 
-pub fn get_host_port(addr: &str) -> Result<SocketAddr> {
-    SocketAddr::from_str(addr)
-        .map_err(|e| RwError::from(InternalError(format!("failed to resolve address: {}", e))))
-}
-
-pub fn to_socket_addr(addr: &HostAddress) -> Result<SocketAddr> {
-    addr.to_socket_addr()
-        .map_err(|e| RwError::from(InternalError(format!("failed to resolve address: {}", e))))
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::util::addr::{get_host_port, is_local_address};
-
-    #[test]
-    fn test_get_host_port() {
-        let addr = get_host_port("127.0.0.1:5688").unwrap();
-        assert_eq!(addr.ip().to_string(), "127.0.0.1".to_string());
-        assert_eq!(addr.port(), 5688);
-    }
+    use crate::util::addr::is_local_address;
 
     #[test]
     fn test_is_local_address() {
         let check_local = |a: &str, b: &str| {
-            assert!(is_local_address(
-                &get_host_port(a).unwrap(),
-                &get_host_port(b).unwrap()
-            ));
+            assert!(is_local_address(&a.parse().unwrap(), &b.parse().unwrap()));
         };
         check_local("127.0.0.1:3456", "0.0.0.0:3456");
         check_local("10.11.12.13:3456", "10.11.12.13:3456");

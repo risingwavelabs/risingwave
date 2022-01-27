@@ -278,12 +278,12 @@ impl StreamManager {
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
+    use std::net::SocketAddr;
     use std::sync::{Arc, Mutex};
     use std::thread::sleep;
     use std::time::Duration;
 
     use risingwave_common::error::{tonic_err, ErrorCode};
-    use risingwave_common::util::addr::get_host_port;
     use risingwave_pb::common::HostAddress;
     use risingwave_pb::meta::ClusterType;
     use risingwave_pb::stream_plan::stream_node::Node;
@@ -388,8 +388,8 @@ mod tests {
     }
 
     impl MockServices {
-        async fn start(host: &str, port: i32) -> Result<Self> {
-            let addr = get_host_port(&format!("{}:{}", host, port)).unwrap();
+        async fn start(host: &str, port: u16) -> Result<Self> {
+            let addr = SocketAddr::new(host.parse().unwrap(), port);
             let state = Arc::new(FakeFragmentState {
                 actor_streams: Mutex::new(HashMap::new()),
                 actor_ids: Mutex::new(HashSet::new()),
@@ -419,7 +419,7 @@ mod tests {
                 .add_worker_node(
                     HostAddress {
                         host: host.to_string(),
-                        port,
+                        port: port as i32,
                     },
                     ClusterType::ComputeNode,
                 )

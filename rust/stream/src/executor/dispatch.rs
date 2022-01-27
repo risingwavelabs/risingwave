@@ -7,7 +7,7 @@ use futures::SinkExt;
 use itertools::Itertools;
 use risingwave_common::array::{Op, RwError};
 use risingwave_common::error::ErrorCode;
-use risingwave_common::util::addr::{is_local_address, to_socket_addr};
+use risingwave_common::util::addr::is_local_address;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use tracing::event;
 
@@ -146,7 +146,7 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
                     for act in v.iter() {
                         let down_id = act.get_actor_id();
                         let up_down_ids = (actor_id, down_id);
-                        let downstream_addr = to_socket_addr(act.get_host()?)?;
+                        let downstream_addr = act.get_host()?.to_socket_addr()?;
 
                         if is_local_address(&downstream_addr, &self.context.addr) {
                             let tx = channel_pool_guard
@@ -187,7 +187,7 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
                 for downstream_actor_info in downstream_actor_infos {
                     let down_id = downstream_actor_info.get_actor_id();
                     let up_down_ids = (*actor_id, down_id);
-                    let downstream_addr = to_socket_addr(downstream_actor_info.get_host()?)?;
+                    let downstream_addr = downstream_actor_info.get_host()?.to_socket_addr()?;
                     if is_local_address(&downstream_addr, &self.context.addr) {
                         let tx = channel_pool_guard
                             .get_mut(&(*actor_id, down_id))

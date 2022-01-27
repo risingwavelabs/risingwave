@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
-use risingwave_common::util::addr::{is_local_address, to_socket_addr};
+use risingwave_common::util::addr::is_local_address;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::{ExchangeSource as ProstExchangeSource, Field as NodeField};
 
@@ -49,7 +49,7 @@ impl CreateSource for DefaultCreateSource {
         value: &ProstExchangeSource,
         task_id: TaskId,
     ) -> Result<Box<dyn ExchangeSource>> {
-        let peer_addr = to_socket_addr(value.get_host()?)?;
+        let peer_addr = value.get_host()?.to_socket_addr()?;
         if is_local_address(env.server_address(), &peer_addr) {
             debug!("Exchange locally [{:?}]", value.get_sink_id());
             return Ok(Box::new(LocalExchangeSource::create(

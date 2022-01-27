@@ -147,6 +147,12 @@ impl From<std::io::Error> for RwError {
     }
 }
 
+impl From<std::net::AddrParseError> for RwError {
+    fn from(addr_parse_error: std::net::AddrParseError) -> Self {
+        ErrorCode::InternalError(format!("failed to resolve address: {}", addr_parse_error)).into()
+    }
+}
+
 impl Debug for RwError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(

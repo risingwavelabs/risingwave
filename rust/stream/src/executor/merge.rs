@@ -285,7 +285,6 @@ mod tests {
     use futures::SinkExt;
     use itertools::Itertools;
     use risingwave_common::array::{Op, StreamChunk};
-    use risingwave_common::util::addr::get_host_port;
     use risingwave_pb::task_service::exchange_service_server::{
         ExchangeService, ExchangeServiceServer,
     };
@@ -414,7 +413,7 @@ mod tests {
     async fn test_stream_exchange_client() {
         let rpc_called = Arc::new(AtomicBool::new(false));
         let server_run = Arc::new(AtomicBool::new(false));
-        let addr = get_host_port("127.0.0.1:12346").unwrap();
+        let addr = "127.0.0.1:12346".parse().unwrap();
 
         // Start a server.
         let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();

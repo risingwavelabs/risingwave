@@ -122,13 +122,11 @@ pub async fn rpc_serve(
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::util::addr::get_host_port;
-
     use crate::rpc::server::{rpc_serve, MetaStoreBackend};
 
     #[tokio::test]
     async fn test_server_shutdown() {
-        let addr = get_host_port("127.0.0.1:9527").unwrap();
+        let addr = "127.0.0.1:9527".parse().unwrap();
         let sled_root = tempfile::tempdir().unwrap();
         let (join_handle, shutdown_send) = rpc_serve(
             addr,

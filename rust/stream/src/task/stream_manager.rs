@@ -9,7 +9,7 @@ use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::expr::{build_from_prost as build_expr_from_prost, AggKind, RowExpression};
 use risingwave_common::types::DataTypeKind;
-use risingwave_common::util::addr::{is_local_address, to_socket_addr};
+use risingwave_common::util::addr::is_local_address;
 use risingwave_common::util::sort_util::{
     build_from_prost as build_order_type_from_prost, fetch_orders,
 };
@@ -335,7 +335,7 @@ impl StreamManagerCore {
                         )))
                     })?
                     .get_host()?;
-                let downstream_addr = to_socket_addr(host_addr)?;
+                let downstream_addr = host_addr.to_socket_addr()?;
                 if is_local_address(&downstream_addr, &self.context.addr) {
                     // if this is a local downstream actor
                     let mut guard = self.context.lock_channel_pool();
@@ -822,7 +822,7 @@ impl StreamManagerCore {
                             ))
                         })?
                         .get_host()?;
-                    let upstream_socket_addr = to_socket_addr(upstream_addr)?;
+                    let upstream_socket_addr = upstream_addr.to_socket_addr()?;
                     if !is_local_address(&upstream_socket_addr, &self.context.addr) {
                         // Get the sender for `RemoteInput` to forward received messages to
                         // receivers in `ReceiverExecutor` or
