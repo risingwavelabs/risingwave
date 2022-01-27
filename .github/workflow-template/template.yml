@@ -305,6 +305,7 @@ jobs:
           directory: java
           flags: java
 
+  # Start 2 runners (a/b) to run build and test in parallel. 
   start-runner-a:
     name: ec2-start-a
     runs-on: ubuntu-latest
@@ -324,7 +325,7 @@ jobs:
         with:
           mode: start
           github-token: ${{ secrets.WUTAO_PAT }}
-          ec2-image-id: ami-0e704ffdb6669cf91 # github-actions
+          ec2-image-id: ami-05a99cf0eb100c377 # github-actions (60gb gp3 ssd)
           ec2-instance-type: c5.4xlarge # 16 vCPU, 32 GB Memory, EBS
           subnet-id: subnet-59743123 # default
           security-group-id: sg-9ec32bfe # default (could have security issues)
@@ -348,7 +349,7 @@ jobs:
         with:
           mode: start
           github-token: ${{ secrets.WUTAO_PAT }}
-          ec2-image-id: ami-0e704ffdb6669cf91 # github-actions
+          ec2-image-id: ami-05a99cf0eb100c377 # github-actions (60gb gp3 ssd)
           ec2-instance-type: c5.4xlarge # 16 vCPU, 32 GB Memory, EBS
           subnet-id: subnet-59743123 # default
           security-group-id: sg-9ec32bfe # default (could have security issues)
