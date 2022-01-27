@@ -89,7 +89,7 @@ impl StreamFragmenter {
                     );
                     self.build_fragment(&child_fragment, node)?;
                 }
-                Node::TableSourceNode(_) => {
+                Node::SourceNode(_) => {
                     let _res = self
                         .fragment_graph
                         .set_source_fragment_by_id(parent_fragment.get_fragment_id());

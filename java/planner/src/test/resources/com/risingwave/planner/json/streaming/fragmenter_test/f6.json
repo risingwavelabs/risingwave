@@ -2,7 +2,7 @@
   "actorId": 6,
   "nodes": {
     "pkIndices": [2],
-    "tableSourceNode": {
+    "sourceNode": {
       "tableRefId": {
         "schemaRefId": {
           "databaseRefId": {

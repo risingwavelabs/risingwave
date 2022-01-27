@@ -12,8 +12,8 @@ import com.risingwave.planner.rel.common.dist.RwDistributionTrait;
 import com.risingwave.planner.rel.common.dist.RwDistributions;
 import com.risingwave.planner.rel.logical.RwLogicalScan;
 import com.risingwave.proto.plan.TableRefId;
+import com.risingwave.proto.streaming.plan.SourceNode;
 import com.risingwave.proto.streaming.plan.StreamNode;
-import com.risingwave.proto.streaming.plan.TableSourceNode;
 import com.risingwave.rpc.Messages;
 import java.util.Collections;
 import java.util.List;
@@ -63,19 +63,17 @@ public class RwStreamTableSource extends TableScan implements RisingWaveStreamin
   public StreamNode serialize() {
     TableRefId tableRefId = Messages.getTableRefId(tableId);
 
-    TableSourceNode.Builder tableSourceNodeBuilder =
-        TableSourceNode.newBuilder()
+    SourceNode.Builder tableSourceNodeBuilder =
+        SourceNode.newBuilder()
             .setTableRefId(tableRefId)
             .setSourceType(
-                this.isSource
-                    ? TableSourceNode.SourceType.SOURCE
-                    : TableSourceNode.SourceType.TABLE);
+                this.isSource ? SourceNode.SourceType.SOURCE : SourceNode.SourceType.TABLE);
 
     columnIds.forEach(c -> tableSourceNodeBuilder.addColumnIds(c.getValue()));
     var primaryKeyIndices =
         ((RisingWaveRelMetadataQuery) getCluster().getMetadataQuery()).getPrimaryKeyIndices(this);
     return StreamNode.newBuilder()
-        .setTableSourceNode(tableSourceNodeBuilder.build())
+        .setSourceNode(tableSourceNodeBuilder.build())
         .addAllPkIndices(primaryKeyIndices)
         .build();
   }

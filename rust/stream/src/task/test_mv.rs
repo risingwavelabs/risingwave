@@ -19,10 +19,10 @@ use risingwave_pb::plan::{
     ColumnDesc, ColumnOrder, DatabaseRefId, OrderType, SchemaRefId, TableRefId,
 };
 use risingwave_pb::stream_plan::dispatcher::DispatcherType;
+use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_pb::stream_plan::stream_node::Node;
-use risingwave_pb::stream_plan::table_source_node::SourceType;
 use risingwave_pb::stream_plan::{
-    Dispatcher, MViewNode, ProjectNode, StreamActor, StreamNode, TableSourceNode,
+    Dispatcher, MViewNode, ProjectNode, SourceNode, StreamActor, StreamNode,
 };
 use risingwave_pb::stream_service::BroadcastActorInfoTableRequest;
 use risingwave_source::{MemSourceManager, SourceManager};
@@ -57,7 +57,7 @@ async fn test_stream_mv_proto() {
     // TableSource -> Project -> Materialized View
     // Select v1 from T(v1,v2).
     let source_proto = StreamNode {
-        node: Some(Node::TableSourceNode(TableSourceNode {
+        node: Some(Node::SourceNode(SourceNode {
             table_ref_id: Some(make_table_ref_id(0)),
             column_ids: vec![0, 1],
             source_type: SourceType::Table as i32,

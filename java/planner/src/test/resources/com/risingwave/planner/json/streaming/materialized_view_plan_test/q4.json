@@ -5,7 +5,7 @@
       "pkIndices": [0, 1, 2],
       "input": [{
         "pkIndices": [2],
-        "tableSourceNode": {
+        "sourceNode": {
           "tableRefId": {
             "schemaRefId": {
               "databaseRefId": {

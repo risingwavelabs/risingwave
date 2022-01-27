@@ -12,11 +12,11 @@ use risingwave_pb::plan::{
     ColumnDesc, ColumnOrder, DatabaseRefId, OrderType, SchemaRefId, TableRefId,
 };
 use risingwave_pb::stream_plan::dispatcher::DispatcherType;
+use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_pb::stream_plan::stream_node::Node;
-use risingwave_pb::stream_plan::table_source_node::SourceType;
 use risingwave_pb::stream_plan::{
-    Dispatcher, ExchangeNode, FilterNode, MViewNode, ProjectNode, SimpleAggNode, StreamNode,
-    TableSourceNode,
+    Dispatcher, ExchangeNode, FilterNode, MViewNode, ProjectNode, SimpleAggNode, SourceNode,
+    StreamNode,
 };
 
 use crate::manager::MetaSrvEnv;
@@ -101,8 +101,8 @@ fn make_column_order(idx: i32) -> ColumnOrder {
 fn make_stream_node() -> StreamNode {
     let table_ref_id = make_table_ref_id(1);
     // table source node
-    let table_source_node = StreamNode {
-        node: Some(Node::TableSourceNode(TableSourceNode {
+    let source_node = StreamNode {
+        node: Some(Node::SourceNode(SourceNode {
             table_ref_id: Some(table_ref_id),
             column_ids: vec![1, 2, 0],
             source_type: SourceType::Table as i32,
@@ -124,7 +124,7 @@ fn make_stream_node() -> StreamNode {
                 make_column_desc(0, TypeName::Int64),
             ],
         })),
-        input: vec![table_source_node],
+        input: vec![source_node],
         pk_indices: vec![2],
         node_id: 1,
     };
@@ -278,7 +278,7 @@ async fn test_fragmenter() -> Result<()> {
                         .collect::<HashSet<_>>(),
                 );
             }
-            Node::TableSourceNode(_) => {
+            Node::SourceNode(_) => {
                 source_node_cnt += 1;
                 assert_eq!(source_node_cnt, 1);
             }
@@ -350,7 +350,7 @@ async fn test_fragmenter_case2() -> Result<()> {
                         .collect::<HashSet<_>>(),
                 );
             }
-            Node::TableSourceNode(_) => {
+            Node::SourceNode(_) => {
                 source_node_cnt += 1;
                 assert_eq!(source_node_cnt, 1);
             }

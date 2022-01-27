@@ -449,7 +449,7 @@ impl StreamManagerCore {
         let node_id = node.get_node_id().try_into().unwrap();
 
         let executor: Result<Box<dyn Executor>> = match node.get_node()? {
-            TableSourceNode(node) => {
+            SourceNode(node) => {
                 let source_id = TableId::from(&node.table_ref_id);
                 let source_desc = source_manager.get_source(&source_id)?;
 

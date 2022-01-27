@@ -85,7 +85,7 @@ impl BarrierActorInfo {
                 head_nodes.iter().any(|node| {
                     matches!(
                         node.get_node().unwrap(),
-                        risingwave_pb::stream_plan::stream_node::Node::TableSourceNode(_)
+                        risingwave_pb::stream_plan::stream_node::Node::SourceNode(_)
                     )
                 })
             })
