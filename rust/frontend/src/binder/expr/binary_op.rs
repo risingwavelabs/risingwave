@@ -15,6 +15,10 @@ impl Binder {
         let bound_right = self.bind_expr(right)?;
         let func_type = match op {
             BinaryOperator::Plus => ExprType::Add,
+            BinaryOperator::Minus => ExprType::Subtract,
+            BinaryOperator::Multiply => ExprType::Multiply,
+            BinaryOperator::Divide => ExprType::Divide,
+            BinaryOperator::Modulo => ExprType::Modulus,
             _ => return Err(ErrorCode::NotImplementedError(format!("{:?}", op)).into()),
         };
         let desc = format!(

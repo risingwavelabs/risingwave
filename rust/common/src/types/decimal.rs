@@ -354,6 +354,26 @@ impl Decimal {
             _ => 0,
         }
     }
+
+    /// TODO: handle nan and inf
+    /// There are maybe better solution here.
+    pub fn precision(&self) -> u32 {
+        match &self {
+            Decimal::Normalized(decimal) => {
+                let s = decimal.to_string();
+                let mut res = s.len();
+                if s.find('.').is_some() {
+                    res -= 1;
+                }
+                if s.find('-').is_some() {
+                    res -= 1;
+                }
+                res as u32
+            }
+            _ => 0,
+        }
+    }
+
     pub fn new(num: i64, scale: u32) -> Self {
         Self::Normalized(RustDecimal::new(num, scale))
     }

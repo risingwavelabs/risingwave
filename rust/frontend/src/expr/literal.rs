@@ -2,7 +2,7 @@ use risingwave_common::types::{DataTypeKind, Datum};
 
 use super::{BoundExpr, BoundExprImpl};
 use crate::expr::ExprType;
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct BoundLiteral {
     #[allow(dead_code)]
     data: Datum,
