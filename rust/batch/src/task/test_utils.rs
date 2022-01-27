@@ -209,6 +209,8 @@ impl<'a> TableBuilder<'a> {
                 })
                 .collect_vec(),
             v2: false,
+            is_materialized_view: false,
+            ..Default::default()
         };
 
         PlanFragment {

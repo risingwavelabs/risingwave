@@ -99,6 +99,11 @@ message CreateTableNode {
   // Other fields not included yet:
   // primarykey_col_ids, dist_type, distkey_col_id, append_only
 
+  // We re-use the CreateTableNode for creating materialized views.
+  bool is_materialized_view = 4;
+  TableRefId associated_table_ref_id = 5;
+  repeated int32 pk_indices = 6;
+  repeated plan.ColumnOrder column_orders = 7;
 }
 
 enum OrderType {

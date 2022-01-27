@@ -175,8 +175,9 @@ impl<S: StateStore> TableIter for MViewTableIter<S> {
                     if restored == 0 {
                         pk_buf = cur_pk_buf.to_owned();
                     } else if pk_buf != cur_pk_buf {
-                        // previous item is incomplete
-                        return Err(ErrorCode::InternalError("incomplete item".to_owned()).into());
+                        return Err(
+                            ErrorCode::InternalError("primary key incorrect".to_owned()).into()
+                        );
                     }
 
                     row_bytes.extend_from_slice(&value);
@@ -191,7 +192,9 @@ impl<S: StateStore> TableIter for MViewTableIter<S> {
                 // no more item
                 None if restored == 0 => return Ok(None),
                 // current item is incomplete
-                None => return Err(ErrorCode::InternalError("incomplete item".to_owned()).into()),
+                None => {
+                    return Err(ErrorCode::InternalError("incomplete item".to_owned()).into());
+                }
             }
         }
         let row_deserializer = RowDeserializer::new(self.schema.data_types());

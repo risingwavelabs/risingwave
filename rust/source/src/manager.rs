@@ -174,10 +174,9 @@ impl SourceManager for MemSourceManager {
 
     fn get_source(&self, table_id: &TableId) -> Result<SourceDesc> {
         let sources = self.get_sources()?;
-        sources
-            .get(table_id)
-            .cloned()
-            .ok_or_else(|| InternalError(format!("Table id not exists: {:?}", table_id)).into())
+        sources.get(table_id).cloned().ok_or_else(|| {
+            InternalError(format!("Get source table id not exists: {:?}", table_id)).into()
+        })
     }
 
     fn register_associated_materialized_view(

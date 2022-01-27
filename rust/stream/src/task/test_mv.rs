@@ -7,6 +7,7 @@ use risingwave_common::array::{ArrayBuilder, DataChunk, PrimitiveArrayBuilder, R
 use risingwave_common::catalog::{SchemaId, TableId};
 use risingwave_common::types::DataTypeKind;
 use risingwave_common::util::downcast_arc;
+use risingwave_common::util::sort_util::OrderType as SortType;
 use risingwave_pb::common::{ActorInfo, HostAddress};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
@@ -93,7 +94,7 @@ async fn test_stream_mv_proto() {
         node: Some(Node::MviewNode(MViewNode {
             table_ref_id: Some(make_table_ref_id(1)),
             associated_table_ref_id: None,
-            column_descs: vec![column_desc],
+            column_descs: vec![column_desc.clone()],
             pk_indices: vec![0],
             column_orders: vec![ColumnOrder {
                 order_type: OrderType::Ascending as i32,
@@ -134,6 +135,16 @@ async fn test_stream_mv_proto() {
         .create_table_source(
             &table_id,
             downcast_arc::<BummockTable>(table.into_any()).unwrap(),
+        )
+        .unwrap();
+
+    // Create materialized view in the table manager in advance.
+    table_manager
+        .create_materialized_view(
+            &TableId::new(SchemaId::default(), 1),
+            &[column_desc],
+            vec![0],
+            vec![SortType::Ascending],
         )
         .unwrap();
 

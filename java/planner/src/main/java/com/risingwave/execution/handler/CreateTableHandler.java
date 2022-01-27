@@ -1,7 +1,6 @@
 package com.risingwave.execution.handler;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.ColumnDesc;
 import com.risingwave.catalog.ColumnEncoding;
 import com.risingwave.catalog.CreateTableInfo;
@@ -11,6 +10,7 @@ import com.risingwave.common.datatype.RisingWaveDataType;
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
 import com.risingwave.execution.context.ExecutionContext;
+import com.risingwave.execution.handler.serializer.TableNodeSerializer;
 import com.risingwave.execution.result.DdlResult;
 import com.risingwave.pgwire.msg.StatementType;
 import com.risingwave.planner.sql.SqlConverter;
@@ -18,10 +18,7 @@ import com.risingwave.proto.common.Status;
 import com.risingwave.proto.computenode.CreateTaskRequest;
 import com.risingwave.proto.computenode.CreateTaskResponse;
 import com.risingwave.proto.computenode.GetDataRequest;
-import com.risingwave.proto.plan.CreateTableNode;
-import com.risingwave.proto.plan.ExchangeInfo;
 import com.risingwave.proto.plan.PlanFragment;
-import com.risingwave.proto.plan.PlanNode;
 import com.risingwave.proto.plan.TaskSinkId;
 import com.risingwave.rpc.ComputeClient;
 import com.risingwave.rpc.ComputeClientManager;
@@ -54,32 +51,6 @@ public class CreateTableHandler implements SqlHandler {
     return new DdlResult(StatementType.CREATE_TABLE, 0);
   }
 
-  private static PlanFragment serialize(TableCatalog table) {
-    TableCatalog.TableId tableId = table.getId();
-    CreateTableNode.Builder createTableNodeBuilder = CreateTableNode.newBuilder();
-    for (ColumnCatalog c : table.getAllColumns(true)) {
-      var columnDesc =
-          com.risingwave.proto.plan.ColumnDesc.newBuilder()
-              .setName(c.getName())
-              .setEncoding(com.risingwave.proto.plan.ColumnDesc.ColumnEncodingType.RAW)
-              .setColumnType(c.getDesc().getDataType().getProtobufType())
-              .setIsPrimary(table.getPrimaryKeyColumnIds().contains(c.getId().getValue()))
-              .setColumnId(c.getId().getValue())
-              .build();
-      createTableNodeBuilder.addColumnDescs(columnDesc);
-    }
-    createTableNodeBuilder.setV2(false);
-    createTableNodeBuilder.setTableRefId(Messages.getTableRefId(tableId));
-    CreateTableNode creatTableNode = createTableNodeBuilder.build();
-
-    ExchangeInfo exchangeInfo =
-        ExchangeInfo.newBuilder().setMode(ExchangeInfo.DistributionMode.SINGLE).build();
-
-    PlanNode rootNode = PlanNode.newBuilder().setCreateTable(creatTableNode).build();
-
-    return PlanFragment.newBuilder().setRoot(rootNode).setExchangeInfo(exchangeInfo).build();
-  }
-
   @VisibleForTesting
   protected PlanFragment execute(SqlNode ast, ExecutionContext context) {
     SqlCreateTable sql = (SqlCreateTable) ast;
@@ -104,6 +75,6 @@ public class CreateTableHandler implements SqlHandler {
     CreateTableInfo tableInfo = createTableInfoBuilder.build();
     // Build a plan distribute to compute node.
     TableCatalog table = context.getCatalogService().createTable(schemaName, tableInfo);
-    return serialize(table);
+    return TableNodeSerializer.createProtoFromCatalog(table, false, null);
   }
 }

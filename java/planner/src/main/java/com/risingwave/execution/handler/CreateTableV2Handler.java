@@ -1,7 +1,6 @@
 package com.risingwave.execution.handler;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.ColumnDesc;
 import com.risingwave.catalog.ColumnEncoding;
 import com.risingwave.catalog.CreateMaterializedViewInfo;
@@ -13,6 +12,7 @@ import com.risingwave.common.datatype.RisingWaveDataType;
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
 import com.risingwave.execution.context.ExecutionContext;
+import com.risingwave.execution.handler.serializer.TableNodeSerializer;
 import com.risingwave.execution.result.DdlResult;
 import com.risingwave.pgwire.msg.StatementType;
 import com.risingwave.planner.planner.streaming.StreamPlanner;
@@ -24,10 +24,7 @@ import com.risingwave.proto.common.Status;
 import com.risingwave.proto.computenode.CreateTaskRequest;
 import com.risingwave.proto.computenode.CreateTaskResponse;
 import com.risingwave.proto.computenode.GetDataRequest;
-import com.risingwave.proto.plan.CreateTableNode;
-import com.risingwave.proto.plan.ExchangeInfo;
 import com.risingwave.proto.plan.PlanFragment;
-import com.risingwave.proto.plan.PlanNode;
 import com.risingwave.proto.plan.TableRefId;
 import com.risingwave.proto.plan.TaskSinkId;
 import com.risingwave.proto.streaming.plan.StreamNode;
@@ -46,6 +43,7 @@ import org.slf4j.LoggerFactory;
 
 /** Handler of <code>CREATE TABLE_V2</code> statement */
 public class CreateTableV2Handler implements SqlHandler {
+  private static final Logger log = LoggerFactory.getLogger(CreateTableV2Handler.class);
   private TableCatalog.TableId tableId;
   private String name;
   private String sourceName;
@@ -63,9 +61,6 @@ public class CreateTableV2Handler implements SqlHandler {
   }
 
   // Create Materialize View
-
-  private static final Logger log = LoggerFactory.getLogger(CreateTableV2Handler.class);
-
   public DdlResult handleCreateMv(SqlNode ast, ExecutionContext context) {
     SqlCreateMaterializedView createMaterializedView = (SqlCreateMaterializedView) ast;
     String tableName = createMaterializedView.name.getSimple();
@@ -84,16 +79,36 @@ public class CreateTableV2Handler implements SqlHandler {
           "An alias name must be specified for an aggregation function");
     }
 
-    // Bind stream plan with materialized view catalog.
+    // Register the view on catalog.
     TableCatalog catalog = convertPlanToCatalog(tableName, plan, context);
+
+    // Bind stream plan with materialized view catalog.
     var streamingPlan = plan.getStreamingPlan();
     streamingPlan.setTableId(catalog.getId());
     streamingPlan.setAssociatedTableId(tableId); // associated streaming task to the table
+
+    // Send the create MV requests to compute nodes.
+    PlanFragment planFragment =
+        TableNodeSerializer.createProtoFromCatalog(catalog, false, streamingPlan);
+    ComputeClientManager clientManager = context.getComputeClientManager();
+    for (var node : context.getWorkerNodeManager().allNodes()) {
+      ComputeClient client = clientManager.getOrCreate(node);
+      CreateTaskRequest createTaskRequest = Messages.buildCreateTaskRequest(planFragment);
+      log.info("Send request to:" + node.getRpcEndPoint().toString());
+      log.info("Create task request:\n" + Messages.jsonFormat(createTaskRequest));
+      CreateTaskResponse createTaskResponse = client.createTask(createTaskRequest);
+      if (createTaskResponse.getStatus().getCode() != Status.Code.OK) {
+        throw new PgException(PgErrorCode.INTERNAL_ERROR, "Create Task failed");
+      }
+      TaskSinkId taskSinkId = Messages.buildTaskSinkId(createTaskRequest.getTaskId());
+      client.getData(GetDataRequest.newBuilder().setSinkId(taskSinkId).build());
+    }
+
+    // Send the create MV request meta.
     StreamManager streamManager = context.getStreamManager();
     StreamNode streamNode = StreamingPlanSerializer.serialize(plan.getStreamingPlan());
     log.debug("stream node ser:\n" + Messages.jsonFormat(streamNode));
     TableRefId tableRefId = Messages.getTableRefId(catalog.getId());
-
     streamManager.createMaterializedView(streamNode, tableRefId);
     return new DdlResult(StatementType.CREATE_MATERIALIZED_VIEW, 0);
   }
@@ -141,6 +156,8 @@ public class CreateTableV2Handler implements SqlHandler {
     for (var node : context.getWorkerNodeManager().allNodes()) {
       ComputeClient client = clientManager.getOrCreate(node);
       CreateTaskRequest createTaskRequest = Messages.buildCreateTaskRequest(planFragment);
+      log.info("Send request to:" + node.getRpcEndPoint().toString());
+      log.info("Create task request:\n" + Messages.jsonFormat(createTaskRequest));
       CreateTaskResponse createTaskResponse = client.createTask(createTaskRequest);
       if (createTaskResponse.getStatus().getCode() != Status.Code.OK) {
         throw new PgException(PgErrorCode.INTERNAL_ERROR, "Create Task failed");
@@ -150,31 +167,6 @@ public class CreateTableV2Handler implements SqlHandler {
     }
 
     return new DdlResult(StatementType.CREATE_TABLE, 0);
-  }
-
-  private PlanFragment serialize(TableCatalog table) {
-    tableId = table.getId(); // store the table id
-    CreateTableNode.Builder createTableNodeBuilder = CreateTableNode.newBuilder();
-    for (ColumnCatalog c : table.getAllColumnsV2()) {
-      var columnDesc =
-          com.risingwave.proto.plan.ColumnDesc.newBuilder()
-              .setEncoding(com.risingwave.proto.plan.ColumnDesc.ColumnEncodingType.RAW)
-              .setColumnType(c.getDesc().getDataType().getProtobufType())
-              .setIsPrimary(table.getPrimaryKeyColumnIds().contains(c.getId().getValue()))
-              .setColumnId(c.getId().getValue())
-              .build();
-      createTableNodeBuilder.addColumnDescs(columnDesc);
-    }
-    createTableNodeBuilder.setV2(true);
-    createTableNodeBuilder.setTableRefId(Messages.getTableRefId(tableId));
-    CreateTableNode creatTableNode = createTableNodeBuilder.build();
-
-    ExchangeInfo exchangeInfo =
-        ExchangeInfo.newBuilder().setMode(ExchangeInfo.DistributionMode.SINGLE).build();
-
-    PlanNode rootNode = PlanNode.newBuilder().setCreateTable(creatTableNode).build();
-
-    return PlanFragment.newBuilder().setRoot(rootNode).setExchangeInfo(exchangeInfo).build();
   }
 
   @VisibleForTesting
@@ -203,6 +195,7 @@ public class CreateTableV2Handler implements SqlHandler {
     CreateTableInfo tableInfo = createTableInfoBuilder.build();
     // Build a plan distribute to compute node.
     TableCatalog table = context.getCatalogService().createTable(schemaName, tableInfo);
-    return serialize(table);
+    tableId = table.getId();
+    return TableNodeSerializer.createProtoFromCatalog(table, true, null);
   }
 }

@@ -173,6 +173,10 @@ public class RwStreamMaterializedView extends SingleRel implements RisingWaveStr
     this.associatedTableId = tableId;
   }
 
+  public TableCatalog.TableId getAssociatedTableId() {
+    return this.associatedTableId;
+  }
+
   /** Explain */
   @Override
   public RelWriter explainTerms(RelWriter pw) {

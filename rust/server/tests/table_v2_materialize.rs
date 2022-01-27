@@ -9,12 +9,15 @@ use risingwave_common::array::{Array, DataChunk, F64Array};
 use risingwave_common::array_nonnull;
 use risingwave_common::catalog::{Field, Schema, SchemaId, TableId};
 use risingwave_common::error::Result;
-use risingwave_common::types::{DataTypeKind, IntoOrdered};
+use risingwave_common::types::IntoOrdered;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_pb::data::data_type::TypeName;
+use risingwave_pb::data::DataType;
+use risingwave_pb::plan::ColumnDesc;
 use risingwave_source::{MemSourceManager, SourceManager};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::{SimpleTableManager, TableManager};
-use risingwave_storage::{Keyspace, StateStoreImpl, TableColumnDesc};
+use risingwave_storage::{Keyspace, StateStoreImpl};
 use risingwave_stream::executor::{
     Barrier, Executor as StreamExecutor, MaterializeExecutor, Message, PkIndices,
     StreamSourceExecutor,
@@ -69,9 +72,23 @@ async fn test_table_v2_materialize() -> Result<()> {
     let source_manager = Arc::new(MemSourceManager::new());
     let table_manager = Arc::new(SimpleTableManager::new(store));
     let source_table_id = TableId::default();
-    let column_descs = vec![
-        TableColumnDesc::new_without_name(233, DataTypeKind::Float64), // data column
-        TableColumnDesc::new_without_name(0, DataTypeKind::Int64),     // row id column
+    let table_columns = vec![
+        ColumnDesc {
+            column_type: Some(DataType {
+                type_name: TypeName::Double as i32,
+                ..Default::default()
+            }),
+            column_id: 233_i32,
+            ..Default::default()
+        },
+        ColumnDesc {
+            column_type: Some(DataType {
+                type_name: TypeName::Int64 as i32,
+                ..Default::default()
+            }),
+            column_id: 0_i32,
+            ..Default::default()
+        },
     ];
 
     // Create table v2 using `CreateTableExecutor`
@@ -79,7 +96,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         source_table_id.clone(),
         table_manager.clone(),
         source_manager.clone(),
-        column_descs,
+        table_columns,
         format!("CreateTableExecutorV2 {:?}", TaskId::default()),
     );
     // Execute
