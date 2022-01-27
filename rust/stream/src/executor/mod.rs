@@ -227,7 +227,7 @@ impl Message {
         Ok(prost_stream_msg)
     }
 
-    pub fn from_protobuf(prost: ProstStreamMessage) -> Result<Self> {
+    pub fn from_protobuf(prost: &ProstStreamMessage) -> Result<Self> {
         let res = match prost.get_stream_message()? {
             StreamMessage::StreamChunk(ref stream_chunk) => {
                 Message::Chunk(StreamChunk::from_protobuf(stream_chunk)?)

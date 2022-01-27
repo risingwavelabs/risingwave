@@ -8,9 +8,8 @@ use futures::{SinkExt, StreamExt};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::ToRwResult;
-use risingwave_pb::data::StreamMessage;
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
-use risingwave_pb::task_service::GetStreamRequest;
+use risingwave_pb::task_service::{GetStreamRequest, GetStreamResponse};
 use tonic::transport::{Channel, Endpoint};
 use tonic::{Request, Streaming};
 use tracing_futures::Instrument;
@@ -22,7 +21,7 @@ use crate::task::UpDownActorIds;
 /// Receive data from `gRPC` and forwards to `MergerExecutor`/`ReceiverExecutor`
 pub struct RemoteInput {
     client: ExchangeServiceClient<Channel>,
-    stream: Streaming<StreamMessage>,
+    stream: Streaming<GetStreamResponse>,
     sender: Sender<Message>,
 
     /// Address of the remote endpoint.
@@ -73,7 +72,11 @@ impl RemoteInput {
                 None => break,
                 Some(data_res) => match data_res {
                     Ok(stream_msg) => {
-                        let msg_res = Message::from_protobuf(stream_msg);
+                        let msg_res = Message::from_protobuf(
+                            stream_msg
+                                .get_message()
+                                .expect("no message in stream response!"),
+                        );
                         match msg_res {
                             Ok(msg) => {
                                 let _ = self.sender.send(msg).await;
@@ -285,6 +288,7 @@ mod tests {
     use futures::SinkExt;
     use itertools::Itertools;
     use risingwave_common::array::{Op, StreamChunk};
+    use risingwave_pb::data::StreamMessage;
     use risingwave_pb::task_service::exchange_service_server::{
         ExchangeService, ExchangeServiceServer,
     };
@@ -369,7 +373,7 @@ mod tests {
     #[async_trait::async_trait]
     impl ExchangeService for FakeExchangeService {
         type GetDataStream = ReceiverStream<std::result::Result<GetDataResponse, Status>>;
-        type GetStreamStream = ReceiverStream<std::result::Result<StreamMessage, Status>>;
+        type GetStreamStream = ReceiverStream<std::result::Result<GetStreamResponse, Status>>;
 
         async fn get_data(
             &self,
@@ -386,10 +390,14 @@ mod tests {
             self.rpc_called.store(true, Ordering::SeqCst);
             // send stream_chunk
             let stream_chunk = StreamChunk::default().to_protobuf().unwrap();
-            tx.send(Ok(StreamMessage {
-                stream_message: Some(
-                    risingwave_pb::data::stream_message::StreamMessage::StreamChunk(stream_chunk),
-                ),
+            tx.send(Ok(GetStreamResponse {
+                message: Some(StreamMessage {
+                    stream_message: Some(
+                        risingwave_pb::data::stream_message::StreamMessage::StreamChunk(
+                            stream_chunk,
+                        ),
+                    ),
+                }),
             }))
             .await
             .unwrap();
@@ -398,10 +406,14 @@ mod tests {
                 epoch: 12345,
                 ..Barrier::default()
             };
-            tx.send(Ok(StreamMessage {
-                stream_message: Some(risingwave_pb::data::stream_message::StreamMessage::Barrier(
-                    barrier.to_protobuf(),
-                )),
+            tx.send(Ok(GetStreamResponse {
+                message: Some(StreamMessage {
+                    stream_message: Some(
+                        risingwave_pb::data::stream_message::StreamMessage::Barrier(
+                            barrier.to_protobuf(),
+                        ),
+                    ),
+                }),
             }))
             .await
             .unwrap();

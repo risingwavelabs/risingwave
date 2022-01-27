@@ -36,7 +36,7 @@ message SstableMeta {
 message Checksum {
   enum Algorithm {
     CRC32C = 0;
-    XXHash64 = 1;
+    XX_HASH64 = 1;
   }
   // For storing type of Checksum algorithm used
   Algorithm algo = 1;
@@ -44,8 +44,8 @@ message Checksum {
 }
 
 enum LevelType {
-  Nonoverlapping = 0;
-  Overlapping = 1;
+  NONOVERLAPPING = 0;
+  OVERLAPPING = 1;
 }
 
 message Level {

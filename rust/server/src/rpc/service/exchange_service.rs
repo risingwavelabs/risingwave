@@ -6,10 +6,11 @@ use futures::StreamExt;
 use risingwave_batch::rpc::service::exchange::GrpcExchangeWriter;
 use risingwave_batch::task::{TaskManager, TaskSinkId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_pb::data::StreamMessage;
 use risingwave_pb::plan::TaskSinkId as ProtoTaskSinkId;
 use risingwave_pb::task_service::exchange_service_server::ExchangeService;
-use risingwave_pb::task_service::{GetDataRequest, GetDataResponse, GetStreamRequest};
+use risingwave_pb::task_service::{
+    GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse,
+};
 use risingwave_stream::executor::Message;
 use risingwave_stream::task::StreamManager;
 use tokio_stream::wrappers::ReceiverStream;
@@ -26,7 +27,7 @@ type ExchangeDataStream = ReceiverStream<std::result::Result<GetDataResponse, St
 #[async_trait::async_trait]
 impl ExchangeService for ExchangeServiceImpl {
     type GetDataStream = ExchangeDataStream;
-    type GetStreamStream = ReceiverStream<std::result::Result<StreamMessage, Status>>;
+    type GetStreamStream = ReceiverStream<std::result::Result<GetStreamResponse, Status>>;
 
     #[cfg(not(tarpaulin_include))]
     async fn get_data(
@@ -126,7 +127,9 @@ impl ExchangeServiceImpl {
                     None => break,
                     Some(msg) => {
                         let res = match msg.to_protobuf() {
-                            Ok(stream_msg) => Ok(stream_msg),
+                            Ok(stream_msg) => Ok(GetStreamResponse {
+                                message: Some(stream_msg),
+                            }),
                             Err(e) => Err(e.to_grpc_status()),
                         };
                         let _ = match tx.send(res).await.map_err(|e| {

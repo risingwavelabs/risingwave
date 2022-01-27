@@ -124,11 +124,13 @@ mod tests {
     use std::thread::sleep;
     use std::time::Duration;
 
-    use risingwave_pb::data::{DataChunk, StreamMessage};
+    use risingwave_pb::data::DataChunk;
     use risingwave_pb::task_service::exchange_service_server::{
         ExchangeService, ExchangeServiceServer,
     };
-    use risingwave_pb::task_service::{GetDataRequest, GetDataResponse, GetStreamRequest};
+    use risingwave_pb::task_service::{
+        GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse,
+    };
     use tokio_stream::wrappers::ReceiverStream;
     use tonic::{Request, Response, Status};
 
@@ -142,7 +144,7 @@ mod tests {
     #[async_trait::async_trait]
     impl ExchangeService for FakeExchangeService {
         type GetDataStream = ReceiverStream<Result<GetDataResponse, Status>>;
-        type GetStreamStream = ReceiverStream<std::result::Result<StreamMessage, Status>>;
+        type GetStreamStream = ReceiverStream<std::result::Result<GetStreamResponse, Status>>;
 
         async fn get_data(
             &self,
