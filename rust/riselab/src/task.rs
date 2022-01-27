@@ -32,7 +32,7 @@ pub use self::prometheus_service::*;
 pub use self::task_configure_grpc_node::*;
 pub use self::task_configure_minio::*;
 use crate::util::{complete_spin, get_program_args, get_program_name};
-use crate::wait_tcp::{wait_tcp, wait_tcp_available};
+use crate::wait_tcp::{wait_http, wait_tcp, wait_tcp_available};
 
 pub trait Task: 'static + Send {
     /// Execute the task
@@ -132,6 +132,18 @@ where
 
     pub fn wait_tcp(&mut self, server: impl AsRef<str>) -> anyhow::Result<()> {
         wait_tcp(
+            server,
+            &mut self.log,
+            self.status_file.as_ref().unwrap(),
+            self.id.as_ref().unwrap(),
+            Some(Duration::from_secs(30)),
+            true,
+        )?;
+        Ok(())
+    }
+
+    pub fn wait_http(&mut self, server: impl AsRef<str>) -> anyhow::Result<()> {
+        wait_http(
             server,
             &mut self.log,
             self.status_file.as_ref().unwrap(),

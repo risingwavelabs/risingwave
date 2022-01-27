@@ -40,7 +40,8 @@ impl Task for ConfigureMinioTask {
             "{}:{}",
             self.config.console_address, self.config.console_port
         );
-        ctx.wait_tcp(&minio_address)?;
+        let health_check_addr = format!("http://{}/minio/health/live", minio_address);
+        ctx.wait_http(&health_check_addr)?;
 
         ctx.pb.set_message("configure...");
 
