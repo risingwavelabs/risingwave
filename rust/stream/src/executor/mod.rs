@@ -261,8 +261,13 @@ pub trait Executor: Send + Debug + 'static {
             .collect()
     }
 
-    /// Identity string of the executor
+    /// Identity string of the executor.
     fn identity(&self) -> &str;
+
+    /// Clears the in-memory cache of the executor. It's no-op by default.
+    fn clear_cache(&mut self) -> Result<()> {
+        Ok(())
+    }
 }
 
 pub type PkIndices = Vec<usize>;

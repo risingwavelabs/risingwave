@@ -88,6 +88,10 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             identity: format!("SimpleAggExecutor {:X}", executor_id),
         }
     }
+
+    fn is_dirty(&self) -> bool {
+        self.states.as_ref().map(|s| s.is_dirty()).unwrap_or(false)
+    }
 }
 
 #[async_trait]
@@ -194,6 +198,15 @@ impl<S: StateStore> Executor for SimpleAggExecutor<S> {
 
     fn identity(&self) -> &str {
         self.identity.as_str()
+    }
+
+    fn clear_cache(&mut self) -> Result<()> {
+        assert!(
+            !self.is_dirty(),
+            "cannot clear cache while states of simple agg are dirty"
+        );
+        self.states.take();
+        Ok(())
     }
 }
 

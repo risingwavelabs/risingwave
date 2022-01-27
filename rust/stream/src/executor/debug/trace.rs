@@ -3,13 +3,12 @@ use std::fmt::{Debug, Formatter};
 use async_trait::async_trait;
 use opentelemetry::metrics::{Counter, MeterProvider};
 use opentelemetry::KeyValue;
-use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use tracing::event;
 use tracing_futures::Instrument;
 
 use crate::executor::monitor::DEFAULT_COMPUTE_STATS;
-use crate::executor::{Executor, Message, PkIndicesRef};
+use crate::executor::{Executor, Message};
 
 /// Barrier event might quickly flush the log to millions of lines. Should enable this when you
 /// really want to debug.
@@ -74,7 +73,7 @@ impl TraceExecutor {
 }
 
 #[async_trait]
-impl Executor for TraceExecutor {
+impl super::DebugExecutor for TraceExecutor {
     async fn next(&mut self) -> Result<Message> {
         let input_desc = self.input_desc.as_str();
         let input_pos = self.input_pos;
@@ -112,15 +111,11 @@ impl Executor for TraceExecutor {
         }
     }
 
-    fn schema(&self) -> &Schema {
-        self.input.schema()
+    fn input(&self) -> &dyn Executor {
+        self.input.as_ref()
     }
 
-    fn pk_indices(&self) -> PkIndicesRef {
-        self.input.pk_indices()
-    }
-
-    fn identity(&self) -> &str {
-        self.input.identity()
+    fn input_mut(&mut self) -> &mut dyn Executor {
+        self.input.as_mut()
     }
 }

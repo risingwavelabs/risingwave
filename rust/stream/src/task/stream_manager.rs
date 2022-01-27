@@ -420,6 +420,7 @@ impl StreamManagerCore {
         &mut self,
         actor_id: u32,
         node: &stream_plan::StreamNode,
+        input_pos: usize,
         env: StreamTaskEnv,
         store: impl StateStore,
     ) -> Result<Box<dyn Executor>> {
@@ -430,9 +431,10 @@ impl StreamManagerCore {
         let mut input: Vec<Box<dyn Executor>> = node
             .input
             .iter()
-            .map(|input| self.create_nodes_inner(actor_id, input, env.clone(), store.clone()))
             .enumerate()
-            .map(|(input_pos, input)| Self::wrap_executor_for_debug(input?, actor_id, input_pos))
+            .map(|(input_pos, input)| {
+                self.create_nodes_inner(actor_id, input, input_pos, env.clone(), store.clone())
+            })
             .try_collect()?;
 
         let table_manager = env.table_manager();
@@ -756,7 +758,7 @@ impl StreamManagerCore {
             )))),
         };
 
-        let executor = executor?;
+        let executor = Self::wrap_executor_for_debug(executor?, actor_id, input_pos)?;
         Ok(executor)
     }
 
@@ -768,12 +770,12 @@ impl StreamManagerCore {
         env: StreamTaskEnv,
     ) -> Result<Box<dyn Executor>> {
         dispatch_state_store!(self.state_store.clone(), store, {
-            self.create_nodes_inner(actor_id, node, env, store)
+            self.create_nodes_inner(actor_id, node, 0, env, store)
         })
     }
 
     fn wrap_executor_for_debug(
-        executor: Box<dyn Executor>,
+        mut executor: Box<dyn Executor>,
         actor_id: u32,
         input_pos: usize,
     ) -> Result<Box<dyn Executor>> {
@@ -783,11 +785,15 @@ impl StreamManagerCore {
         let identity = executor.identity().to_string();
 
         // Trace
-        let executor = Box::new(TraceExecutor::new(executor, identity, input_pos, actor_id));
+        executor = Box::new(TraceExecutor::new(executor, identity, input_pos, actor_id));
         // Schema check
-        let executor = Box::new(SchemaCheckExecutor::new(executor));
+        executor = Box::new(SchemaCheckExecutor::new(executor));
         // Epoch check
-        let executor = Box::new(EpochCheckExecutor::new(executor));
+        executor = Box::new(EpochCheckExecutor::new(executor));
+        // Cache clear
+        if std::env::var(CACHE_CLEAR_ENABLED_ENV_VAR_KEY).is_ok() {
+            executor = Box::new(CacheClearExecutor::new(executor));
+        }
 
         Ok(executor)
     }
@@ -904,10 +910,7 @@ impl StreamManagerCore {
         for actor_id in actors {
             let actor_id = *actor_id;
             let actor = self.actors.remove(&actor_id).unwrap();
-
             let executor = self.create_nodes(actor_id, actor.get_nodes()?, env.clone())?;
-            let executor = Self::wrap_executor_for_debug(executor, actor_id, 0)?;
-
             let dispatcher = self.create_dispatcher(
                 executor,
                 actor.get_dispatcher()?,

@@ -1,10 +1,9 @@
 use std::fmt::Debug;
 
 use async_trait::async_trait;
-use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 
-use crate::executor::{Executor, Message, PkIndicesRef};
+use crate::executor::{Executor, Message};
 
 #[derive(Debug)]
 pub struct EpochCheckExecutor {
@@ -25,7 +24,7 @@ impl EpochCheckExecutor {
 }
 
 #[async_trait]
-impl Executor for EpochCheckExecutor {
+impl super::DebugExecutor for EpochCheckExecutor {
     async fn next(&mut self) -> Result<Message> {
         let message = self.input.next().await?;
 
@@ -51,16 +50,12 @@ impl Executor for EpochCheckExecutor {
         Ok(message)
     }
 
-    fn schema(&self) -> &Schema {
-        self.input.schema()
+    fn input(&self) -> &dyn Executor {
+        self.input.as_ref()
     }
 
-    fn pk_indices(&self) -> PkIndicesRef {
-        self.input.pk_indices()
-    }
-
-    fn identity(&self) -> &str {
-        self.input.identity()
+    fn input_mut(&mut self) -> &mut dyn Executor {
+        self.input.as_mut()
     }
 }
 

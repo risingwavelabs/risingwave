@@ -138,6 +138,10 @@ impl<S: StateStore> HashAggExecutor<S> {
 
         Ok(result)
     }
+
+    fn is_dirty(&self) -> bool {
+        self.state_map.values().any(|state| state.is_dirty())
+    }
 }
 
 #[async_trait]
@@ -259,7 +263,7 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
         // evict cache to target capacity
         // In current implementation, we need to fetch the RowCount from the state store once a key
         // is deleted and added again. We should find a way to eliminate this extra fetch.
-        debug_assert!(self.state_map.values().all(|state| !state.is_dirty()));
+        assert!(!self.is_dirty());
         self.state_map.evict_to_target_cap();
 
         let columns: Vec<Column> = builders
@@ -306,6 +310,15 @@ impl<S: StateStore> Executor for HashAggExecutor<S> {
 
     fn identity(&self) -> &str {
         self.identity.as_str()
+    }
+
+    fn clear_cache(&mut self) -> Result<()> {
+        assert!(
+            !self.is_dirty(),
+            "cannot clear cache while states of hash agg are dirty"
+        );
+        self.state_map.clear();
+        Ok(())
     }
 }
 

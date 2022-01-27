@@ -2,11 +2,10 @@ use std::fmt::Debug;
 
 use async_trait::async_trait;
 use itertools::Itertools;
-use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use tracing::event;
 
-use crate::executor::{Executor, Message, PkIndicesRef};
+use crate::executor::{Executor, Message};
 
 /// [`SchemaCheckExecutor`] checks the passing stream chunk against the expected schema.
 ///
@@ -24,7 +23,7 @@ impl SchemaCheckExecutor {
 }
 
 #[async_trait]
-impl Executor for SchemaCheckExecutor {
+impl super::DebugExecutor for SchemaCheckExecutor {
     async fn next(&mut self) -> Result<Message> {
         let message = self.input.next().await?;
 
@@ -72,16 +71,12 @@ impl Executor for SchemaCheckExecutor {
         Ok(message)
     }
 
-    fn schema(&self) -> &Schema {
-        self.input.schema()
+    fn input(&self) -> &dyn Executor {
+        self.input.as_ref()
     }
 
-    fn pk_indices(&self) -> PkIndicesRef {
-        self.input.pk_indices()
-    }
-
-    fn identity(&self) -> &str {
-        self.input.identity()
+    fn input_mut(&mut self) -> &mut dyn Executor {
+        self.input.as_mut()
     }
 }
 
@@ -89,7 +84,7 @@ impl Executor for SchemaCheckExecutor {
 mod tests {
     use assert_matches::assert_matches;
     use risingwave_common::array::{F64Array, I64Array, Op, StreamChunk};
-    use risingwave_common::catalog::Field;
+    use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataTypeKind;
 
     use super::*;
