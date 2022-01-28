@@ -10,6 +10,15 @@ use crate::error::Result;
 use crate::types::{Datum, Decimal, IntervalUnit, OrderedF32, OrderedF64, ScalarRef};
 use crate::util::hash_util::CRC32FastBuilder;
 
+/// This file contains implementation for hash key serialization for
+/// hash-agg, hash-join, and perhaps other hash-based operators.
+///
+/// There may be multiple columns in one row being combined and encoded into
+/// one single hash key.
+/// For example, `SELECT sum(t.a) FROM t GROUP BY t.b, t.c`, the hash keys
+/// are encoded from both `t.b, t.c`. If t.b="abc", t.c=1, the hashkey may be
+/// encoded in certain format of ("abc", 1).
+
 /// Max element count in [`FixedSizeKeyWithHashCode`]
 pub const MAX_FIXED_SIZE_KEY_ELEMENTS: usize = 8;
 
@@ -26,7 +35,7 @@ pub trait HashKeyDeserializer {
     fn deserialize<'a, D: HashKeySerDe<'a>>(&'a mut self) -> Result<Option<D>>;
 }
 
-pub trait HashKeySerDe<'a>: ScalarRef<'a> + Default {
+pub trait HashKeySerDe<'a>: ScalarRef<'a> {
     type S: AsRef<[u8]>;
     fn serialize(self) -> Self::S;
     fn deserialize<R: Read>(source: &mut R) -> Self;
@@ -330,25 +339,22 @@ impl<const N: usize> HashKeySerializer for FixedSizeKeySerializer<N> {
 
     fn append<'a, D: HashKeySerDe<'a>>(&mut self, data: Option<D>) -> Result<()> {
         ensure!(self.null_bitmap_idx < 8);
-        let data = match data {
+        match data {
             Some(v) => {
                 let mask = 1u8 << self.null_bitmap_idx;
                 self.null_bitmap |= mask;
-                v.serialize()
+                let data = v.serialize();
+                let ret = data.as_ref();
+                ensure!(self.left_size() >= ret.len());
+                self.buffer[self.data_len..(self.data_len + ret.len())].copy_from_slice(ret);
+                self.data_len += ret.len();
             }
             None => {
                 let mask = !(1u8 << self.null_bitmap_idx);
                 self.null_bitmap &= mask;
-                D::default().serialize()
             }
         };
-
         self.null_bitmap_idx += 1;
-
-        let ret = data.as_ref();
-        ensure!(self.left_size() >= ret.len());
-        self.buffer[self.data_len..(self.data_len + ret.len())].copy_from_slice(ret);
-        self.data_len += ret.len();
         Ok(())
     }
 
@@ -380,13 +386,13 @@ impl<const N: usize> HashKeyDeserializer for FixedSizeKeyDeserializer<N> {
 
     fn deserialize<'a, D: HashKeySerDe<'a>>(&mut self) -> Result<Option<D>> {
         ensure!(self.null_bitmap_idx < 8);
-        let value = D::deserialize(&mut self.cursor);
         let mask = 1u8 << self.null_bitmap_idx;
         let is_null = (self.null_bitmap & mask) == 0u8;
         self.null_bitmap_idx += 1;
         if is_null {
             Ok(None)
         } else {
+            let value = D::deserialize(&mut self.cursor);
             Ok(Some(value))
         }
     }
@@ -528,7 +534,7 @@ mod tests {
     use crate::array::column::Column;
     use crate::array::{
         ArrayRef, BoolArray, DataChunk, DecimalArray, F32Array, F64Array, I16Array, I32Array,
-        I64Array, Utf8Array,
+        I32ArrayBuilder, I64Array, Utf8Array,
     };
     use crate::collection::hash_map::{
         HashKey, Key128, Key16, Key256, Key32, Key64, KeySerialized, PrecomputedBuildHasher,
@@ -544,13 +550,13 @@ mod tests {
         let seed = 10244021u64;
         let columns = vec![
             Column::new(seed_rand_array_ref::<BoolArray>(capacity, seed)),
-            Column::new(seed_rand_array_ref::<I16Array>(capacity, seed)),
-            Column::new(seed_rand_array_ref::<I32Array>(capacity, seed)),
-            Column::new(seed_rand_array_ref::<I64Array>(capacity, seed)),
-            Column::new(seed_rand_array_ref::<F32Array>(capacity, seed)),
-            Column::new(seed_rand_array_ref::<F64Array>(capacity, seed)),
-            Column::new(seed_rand_array_ref::<DecimalArray>(capacity, seed)),
-            Column::new(seed_rand_array_ref::<Utf8Array>(capacity, seed)),
+            Column::new(seed_rand_array_ref::<I16Array>(capacity, seed + 1)),
+            Column::new(seed_rand_array_ref::<I32Array>(capacity, seed + 2)),
+            Column::new(seed_rand_array_ref::<I64Array>(capacity, seed + 3)),
+            Column::new(seed_rand_array_ref::<F32Array>(capacity, seed + 4)),
+            Column::new(seed_rand_array_ref::<F64Array>(capacity, seed + 5)),
+            Column::new(seed_rand_array_ref::<DecimalArray>(capacity, seed + 6)),
+            Column::new(seed_rand_array_ref::<Utf8Array>(capacity, seed + 7)),
         ];
 
         DataChunk::try_from(columns).expect("Failed to create data chunk")
@@ -710,5 +716,36 @@ mod tests {
     #[test]
     fn test_decimal_hash_key_serialization() {
         do_test::<Key128, _>(vec![0], generate_decimal_test_data);
+    }
+
+    // Simple test to ensure a row <None, Some(2)> will be seralized and restored
+    // losslessly.
+    #[test]
+    fn test_simple_hash_key_nullable_serde() {
+        let keys = Key64::build(
+            &[0, 1],
+            &DataChunk::builder()
+                .columns(vec![
+                    Column::new(Arc::new(array! { I32Array, [Some(1), None] }.into())),
+                    Column::new(Arc::new(array! { I32Array, [None, Some(2)] }.into())),
+                ])
+                .build(),
+        )
+        .unwrap();
+
+        let mut array_builders = [0, 1]
+            .iter()
+            .map(|_| ArrayBuilderImpl::Int32(I32ArrayBuilder::new(2).unwrap()))
+            .collect();
+
+        keys.into_iter()
+            .for_each(|k| k.deserialize_to_builders(&mut array_builders).unwrap());
+
+        let array = array_builders.pop().unwrap().finish().unwrap();
+        let i32_vec = array
+            .iter()
+            .map(|opt| opt.map(|s| s.into_int32()))
+            .collect_vec();
+        assert_eq!(i32_vec, vec![None, Some(2)]);
     }
 }

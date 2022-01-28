@@ -329,13 +329,13 @@ impl DataChunk {
 
     pub fn get_hash_values<H: BuildHasher>(
         &self,
-        keys: &[usize],
+        column_idxes: &[usize],
         hasher_builder: H,
     ) -> Result<Vec<u64>> {
         let mut states = Vec::with_capacity(self.cardinality());
         states.resize_with(self.cardinality(), || hasher_builder.build_hasher());
-        for key in keys {
-            let array = self.column_at(*key)?.array();
+        for column_idx in column_idxes {
+            let array = self.column_at(*column_idx)?.array();
             array.hash_vec(&mut states);
         }
         Ok(finalize_hashers(&mut states))
