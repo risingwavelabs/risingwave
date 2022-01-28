@@ -28,7 +28,8 @@ impl FrontendService {
         let mut cmd = Command::new("java");
         cmd.arg("-cp")
             .arg(Path::new(&prefix_bin).join("risingwave-fe-runnable.jar"))
-            .arg("-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=0.0.0.0:5005")
+            // Enable JRE remote debugging functionality
+            .arg("-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=127.0.0.1:5005")
             .arg(format!(
                 "-Dlogback.configurationFile={}",
                 Path::new(&prefix_config)

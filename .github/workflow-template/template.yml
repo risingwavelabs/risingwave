@@ -7,6 +7,7 @@ on:
 env:
   RUST_TOOLCHAIN: nightly-2022-01-13
   CACHE_KEY_SUFFIX: v20220126
+  CARGO_TERM_COLOR: always
 
 jobs:
   frontend-check:
@@ -139,7 +140,7 @@ jobs:
           ~/cargo-make/makers k
           ~/cargo-make/makers check-logs
 
-      - name: e2e test 3-node
+      - name: e2e test batch 3-node
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-3node
@@ -192,16 +193,6 @@ jobs:
           java-version: "11"
           distribution: "adopt"
 
-      - name: Cache Gradle packages
-        uses: actions/cache@v2
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
-
       # Install latest postgresql client, our tests requires 14.1+
       - name: Install postgres client
         run: |
@@ -228,20 +219,15 @@ jobs:
           name: risingwave_regress_test
           path: ./rust/target/debug
 
-      - name: Build java frontend
-        run: make java_build
+      - uses: actions/download-artifact@v2
+        name: Download frontend binary
+        with:
+          name: risingwave-fe-runnable.jar
+          path: ./java/pgserver/build/libs
 
       - name: Run tests on Postgresql
         run: |
           sqllogictest -p ${{ env.PG_PORT }} './e2e_test/batch/**/*.slt'
-
-      - name: Run 3-node end-to-end tests (batch)
-        run: |
-          sleep 5
-          chmod +x ./rust/target/debug/compute-node
-          chmod +x ./rust/target/debug/meta-node
-          ./scripts/start_cluster.sh 3
-          sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/batch/**/*.slt'
 
       - name: Run 3-node regress tests (batch)
         run: |
@@ -256,22 +242,6 @@ jobs:
             --input `pwd`/tests/regress/data \
             --output `pwd`/tests/regress/output \
             --schedule `pwd`/tests/regress/data/schedule
-
-      - name: Run single-node end-to-end tests (streaming)
-        run: |
-          sleep 5
-          chmod +x ./rust/target/debug/compute-node
-          chmod +x ./rust/target/debug/meta-node
-          ./scripts/start_cluster.sh 1
-          sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/streaming/**/*.slt'
-
-      # - name: Run 3-node end-to-end tests (streaming)
-      #   run: |
-      #     sleep 5
-      #     chmod +x ./rust/target/debug/compute-node
-      #     chmod +x ./rust/target/debug/meta-node
-      #     ./scripts/start_cluster.sh 3
-      #     sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/streaming/**/*.slt'
 
       - name: Run single-node end-to-end tests (source)
         run: |
@@ -292,18 +262,9 @@ jobs:
         if: ${{ failure() }}
         run: ./scripts/dump_cluster_logs.sh
 
-      - name: Collect Java coverages
-        if: ${{ success() }}
+      - name: Kill clusters
         run: |
           ./scripts/kill_cluster.sh
-          cd java && ./gradlew test jacocoE2eReport
-
-      - uses: codecov/codecov-action@v2
-        if: ${{ success() }}
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          directory: java
-          flags: java
 
   # Start 2 runners (a/b) to run build and test in parallel. 
   start-runner-a:

@@ -18,7 +18,7 @@ coverage:
         target: auto # compared with the coverage from the base commit
         threshold: 0.1% # allow the coverage to drop by 0.1% and posting a success status
 comment:
-  # do not comment until 3 builds collected (java & rust & e2e)
-  after_n_builds: 3
+  # do not comment until 2 builds collected (java & rust)
+  after_n_builds: 2
 ignore:
   - "rust/riselab"
