@@ -3,9 +3,7 @@ use std::sync::Arc;
 use super::variants::*;
 use crate::hummock::cloud::gen_remote_sstable;
 use crate::hummock::key::{key_with_epoch, user_key, Epoch};
-use crate::hummock::{
-    HummockResult, HummockValue, SSTable, SSTableBuilder, SSTableBuilderOptions, REMOTE_DIR,
-};
+use crate::hummock::{HummockResult, HummockValue, SSTable, SSTableBuilder, SSTableBuilderOptions};
 use crate::object::{InMemObjectStore, ObjectStore};
 
 pub trait IndexMapper: Fn(u64, usize) -> Vec<u8> + Send + Sync + 'static {}
@@ -284,6 +282,7 @@ pub async fn gen_test_sstable_base(
     opts: SSTableBuilderOptions,
     idx_mapping: impl Fn(usize) -> usize,
 ) -> SSTable {
+    const REMOTE_DIR: &str = "test";
     let mut b = SSTableBuilder::new(opts);
 
     for i in 0..TEST_KEYS_COUNT {

@@ -192,7 +192,7 @@ impl LocalVersionManager {
                         meta: get_sst_meta(self.obj_client.clone(), &self.remote_dir, *table_id)
                             .await?,
                         obj_client: self.obj_client.clone(),
-                        data_path: get_sst_data_path(&self.remote_dir, *table_id).to_owned(),
+                        data_path: get_sst_data_path(&self.remote_dir, *table_id),
                     });
                     self.add_sstable_to_cache(fetched_sstable.clone());
                     fetched_sstable

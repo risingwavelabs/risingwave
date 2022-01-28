@@ -253,7 +253,7 @@ mod tests {
     use crate::hummock::key::{prev_key, user_key};
     use crate::hummock::sstable::{SSTable, SSTableIterator};
     use crate::hummock::value::HummockValue;
-    use crate::hummock::{ReverseSSTableIterator, SSTableBuilder, REMOTE_DIR};
+    use crate::hummock::{ReverseSSTableIterator, SSTableBuilder};
     use crate::object::{InMemObjectStore, ObjectStore};
 
     #[tokio::test]
@@ -792,6 +792,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_reverse_user_chaos() {
+        const REMOTE_DIR: &str = "test";
         // We first generate the key value pairs.
         let mut rng = thread_rng();
         let mut truth: BTreeMap<Vec<u8>, BTreeMap<Epoch, HummockValue<Vec<u8>>>> = BTreeMap::new();
@@ -896,6 +897,7 @@ mod tests {
 
     // key=[table, idx, epoch], value
     async fn add_kv_pair(kv_pairs: Vec<(u64, usize, u64, HummockValue<Vec<u8>>)>) -> SSTable {
+        const REMOTE_DIR: &str = "test";
         let mut b = SSTableBuilder::new(default_builder_opt_for_test());
         for kv in kv_pairs {
             b.add(key_range_test_key(kv.0, kv.1, kv.2).as_slice(), kv.3);

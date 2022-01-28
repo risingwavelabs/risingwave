@@ -206,11 +206,12 @@ mod tests {
     use super::super::{SSTableBuilder, SSTableBuilderOptions};
     use super::*;
     use crate::hummock::cloud::gen_remote_sstable;
-    use crate::hummock::{HummockValue, REMOTE_DIR};
+    use crate::hummock::HummockValue;
     use crate::object::{InMemObjectStore, ObjectStore};
 
     #[tokio::test]
     async fn basic_test() {
+        const REMOTE_DIR: &str = "test";
         let opt = SSTableBuilderOptions {
             bloom_false_positive: 0.0,
             block_size: 16384,

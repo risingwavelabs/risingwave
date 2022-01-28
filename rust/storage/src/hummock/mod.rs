@@ -64,9 +64,6 @@ pub type HummockEpoch = u64;
 pub const INVALID_EPOCH: HummockEpoch = 0;
 pub const INVALID_VERSION: HummockVersionId = 0;
 
-// TODO #2648 make it configurable
-pub static REMOTE_DIR: &str = "/test/";
-
 #[derive(Default, Debug, Clone)]
 pub struct HummockOptions {
     /// target size of the SSTable
