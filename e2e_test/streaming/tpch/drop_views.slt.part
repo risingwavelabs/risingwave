@@ -11,6 +11,9 @@ statement ok
 drop table tpch_q6;
 
 statement ok
+drop table tpch_q7;
+
+statement ok
 drop table tpch_q8;
 
 statement ok
