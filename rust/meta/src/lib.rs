@@ -10,7 +10,6 @@
 #![feature(binary_heap_drain_sorted)]
 
 mod barrier;
-mod catalog;
 mod cluster;
 mod dashboard;
 mod hummock;

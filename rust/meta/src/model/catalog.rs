@@ -1,8 +1,6 @@
 use prost::Message;
 use risingwave_common::error::Result;
-use risingwave_pb::meta::{
-    Catalog as ProstCatalog, Database as ProstDatabase, Schema as ProstSchema, Table as ProstTable,
-};
+use risingwave_pb::meta::{Catalog as ProstCatalog, Database, Schema, Table};
 use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
 
 use crate::manager::Epoch;
@@ -16,16 +14,12 @@ const SCHEMA_CF_NAME: &str = "cf/schema";
 /// Column family name for database.
 const DATABASE_CF_NAME: &str = "cf/database";
 
-pub struct Database(ProstDatabase);
-pub struct Schema(ProstSchema);
-/// TODO: for mv on mv, we still need to record mv dependency, as `ref_count`.
-pub struct Table(ProstTable);
 pub struct Catalog(ProstCatalog);
 
 macro_rules! impl_model_for_catalog {
-    ($name:ident, $cf:ident, $prost_ty:ty, $key_ty:ty, $key_fn:ident) => {
+    ($name:ident, $cf:ident, $key_ty:ty, $key_fn:ident) => {
         impl MetadataModel for $name {
-            type ProstType = $prost_ty;
+            type ProstType = Self;
             type KeyType = $key_ty;
 
             fn cf_name() -> String {
@@ -33,19 +27,19 @@ macro_rules! impl_model_for_catalog {
             }
 
             fn to_protobuf(&self) -> Self::ProstType {
-                self.0.clone()
+                self.clone()
             }
 
             fn from_protobuf(prost: Self::ProstType) -> Self {
-                Self(prost)
+                prost
             }
 
             fn key(&self) -> Result<Self::KeyType> {
-                Ok(self.0.$key_fn()?.clone())
+                Ok(self.$key_fn()?.clone())
             }
 
             fn version(&self) -> Epoch {
-                Epoch::from(self.0.version)
+                Epoch::from(self.version)
             }
         }
     };
@@ -54,26 +48,17 @@ macro_rules! impl_model_for_catalog {
 impl_model_for_catalog!(
     Database,
     DATABASE_CF_NAME,
-    ProstDatabase,
     DatabaseRefId,
     get_database_ref_id
 );
-impl_model_for_catalog!(
-    Schema,
-    SCHEMA_CF_NAME,
-    ProstSchema,
-    SchemaRefId,
-    get_schema_ref_id
-);
-impl_model_for_catalog!(
-    Table,
-    TABLE_CF_NAME,
-    ProstTable,
-    TableRefId,
-    get_table_ref_id
-);
+impl_model_for_catalog!(Schema, SCHEMA_CF_NAME, SchemaRefId, get_schema_ref_id);
+impl_model_for_catalog!(Table, TABLE_CF_NAME, TableRefId, get_table_ref_id);
 
 impl Catalog {
+    pub fn inner(&self) -> ProstCatalog {
+        self.0.clone()
+    }
+
     pub async fn get(store: &MetaStoreRef) -> Result<Self> {
         let catalog_pb = store
             .list_batch_cf(vec![DATABASE_CF_NAME, SCHEMA_CF_NAME, TABLE_CF_NAME])
@@ -85,19 +70,19 @@ impl Catalog {
                 .get(0)
                 .unwrap()
                 .iter()
-                .map(|d| ProstDatabase::decode(d.as_slice()).unwrap())
+                .map(|d| Database::decode(d.as_slice()).unwrap())
                 .collect::<Vec<_>>(),
             schemas: catalog_pb
                 .get(1)
                 .unwrap()
                 .iter()
-                .map(|d| ProstSchema::decode(d.as_slice()).unwrap())
+                .map(|d| Schema::decode(d.as_slice()).unwrap())
                 .collect::<Vec<_>>(),
             tables: catalog_pb
                 .get(2)
                 .unwrap()
                 .iter()
-                .map(|d| ProstTable::decode(d.as_slice()).unwrap())
+                .map(|d| Table::decode(d.as_slice()).unwrap())
                 .collect::<Vec<_>>(),
         }))
     }
@@ -122,11 +107,11 @@ mod tests {
         );
 
         future::join_all((0..100).map(|i| async move {
-            Database::from_protobuf(ProstDatabase {
+            Database {
                 database_ref_id: Some(DatabaseRefId { database_id: i }),
                 database_name: format!("database_{}", i),
                 version: i as u64,
-            })
+            }
             .create(store)
             .await
         }))
@@ -143,8 +128,8 @@ mod tests {
             )
             .await?;
             assert_eq!(
-                database.to_protobuf(),
-                ProstDatabase {
+                database,
+                Database {
                     database_ref_id: Some(DatabaseRefId { database_id: i }),
                     database_name: format!("database_{}", i),
                     version: i as u64,
@@ -152,11 +137,11 @@ mod tests {
             );
         }
 
-        Database::from_protobuf(ProstDatabase {
+        Database {
             database_ref_id: Some(DatabaseRefId { database_id: 0 }),
             database_name: "database_0".to_string(),
             version: 101,
-        })
+        }
         .create(store)
         .await?;
 

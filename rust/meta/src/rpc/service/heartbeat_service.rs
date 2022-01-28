@@ -6,16 +6,20 @@ use risingwave_pb::meta::heartbeat_service_server::HeartbeatService;
 use risingwave_pb::meta::{HeartbeatRequest, HeartbeatResponse};
 use tonic::{Request, Response, Status};
 
-use crate::catalog::CatalogManagerRef;
+use crate::manager::MetaSrvEnv;
+use crate::model::Catalog;
+use crate::storage::MetaStoreRef;
 
 #[derive(Clone)]
 pub struct HeartbeatServiceImpl {
-    cmr: CatalogManagerRef,
+    meta_store_ref: MetaStoreRef,
 }
 
 impl HeartbeatServiceImpl {
-    pub fn new(cmr: CatalogManagerRef) -> Self {
-        HeartbeatServiceImpl { cmr }
+    pub fn new(env: MetaSrvEnv) -> Self {
+        HeartbeatServiceImpl {
+            meta_store_ref: env.meta_store_ref(),
+        }
     }
 }
 
@@ -31,10 +35,10 @@ impl HeartbeatService for HeartbeatServiceImpl {
             Some(WorkerType::Frontend) => Ok(Response::new(HeartbeatResponse {
                 status: None,
                 body: Some(Body::Catalog(
-                    self.cmr
-                        .get_catalog()
+                    Catalog::get(&self.meta_store_ref)
                         .await
-                        .map_err(|e| e.to_grpc_status())?,
+                        .map_err(|e| e.to_grpc_status())?
+                        .inner(),
                 )),
             })),
             Some(WorkerType::ComputeNode) => Ok(Response::new(HeartbeatResponse {

@@ -12,7 +12,6 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 
 use crate::barrier::BarrierManager;
-use crate::catalog::StoredCatalogManager;
 use crate::cluster::StoredClusterManager;
 use crate::dashboard::DashboardService;
 use crate::hummock;
@@ -51,7 +50,6 @@ pub async fn rpc_serve(
     let env = MetaSrvEnv::new(config, meta_store_ref, epoch_generator_ref.clone()).await;
 
     let stream_meta_manager = Arc::new(StoredStreamMetaManager::new(env.clone()));
-    let catalog_manager_ref = Arc::new(StoredCatalogManager::new(env.clone()));
     let cluster_manager = Arc::new(StoredClusterManager::new(env.clone()).await.unwrap());
     let (hummock_manager, _) =
         hummock::HummockManager::new(env.clone(), hummock_config.unwrap_or_default())
@@ -89,8 +87,8 @@ pub async fn rpc_serve(
     ));
 
     let epoch_srv = EpochServiceImpl::new(env.clone());
-    let heartbeat_srv = HeartbeatServiceImpl::new(catalog_manager_ref.clone());
-    let catalog_srv = CatalogServiceImpl::new(catalog_manager_ref, env.clone());
+    let heartbeat_srv = HeartbeatServiceImpl::new(env.clone());
+    let catalog_srv = CatalogServiceImpl::new(env.clone());
     let cluster_srv = ClusterServiceImpl::new(cluster_manager.clone());
     let stream_srv = StreamServiceImpl::new(stream_manager_ref, cluster_manager, env);
     let hummock_srv = HummockServiceImpl::new(hummock_manager);

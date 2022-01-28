@@ -3,25 +3,29 @@ use risingwave_pb::meta::catalog_service_server::CatalogService;
 use risingwave_pb::meta::create_request::CatalogBody;
 use risingwave_pb::meta::drop_request::CatalogId;
 use risingwave_pb::meta::{
-    CreateRequest, CreateResponse, DropRequest, DropResponse, GetCatalogRequest, GetCatalogResponse,
+    CreateRequest, CreateResponse, Database, DropRequest, DropResponse, GetCatalogRequest,
+    GetCatalogResponse, Schema, Table,
 };
 use risingwave_pb::plan::DatabaseRefId;
 use tonic::{Request, Response, Status};
 
-use crate::catalog::CatalogManagerRef;
-use crate::manager::{IdCategory, IdGeneratorManagerRef, MetaSrvEnv};
+use crate::manager::{EpochGeneratorRef, IdCategory, IdGeneratorManagerRef, MetaSrvEnv};
+use crate::model::{Catalog, MetadataModel};
+use crate::storage::MetaStoreRef;
 
 #[derive(Clone)]
 pub struct CatalogServiceImpl {
-    cmr: CatalogManagerRef,
+    meta_store_ref: MetaStoreRef,
     id_gen_manager: IdGeneratorManagerRef,
+    epoch_generator: EpochGeneratorRef,
 }
 
 impl CatalogServiceImpl {
-    pub fn new(cmr: CatalogManagerRef, env: MetaSrvEnv) -> Self {
+    pub fn new(env: MetaSrvEnv) -> Self {
         CatalogServiceImpl {
-            cmr,
+            meta_store_ref: env.meta_store_ref(),
             id_gen_manager: env.id_gen_manager_ref(),
+            epoch_generator: env.epoch_generator_ref(),
         }
     }
 }
@@ -37,10 +41,10 @@ impl CatalogService for CatalogServiceImpl {
         Ok(Response::new(GetCatalogResponse {
             status: None,
             catalog: Some(
-                self.cmr
-                    .get_catalog()
+                Catalog::get(&self.meta_store_ref)
                     .await
-                    .map_err(|e| e.to_grpc_status())?,
+                    .map_err(|e| e.to_grpc_status())?
+                    .inner(),
             ),
         }))
     }
@@ -51,6 +55,10 @@ impl CatalogService for CatalogServiceImpl {
         request: Request<CreateRequest>,
     ) -> Result<Response<CreateResponse>, Status> {
         let req = request.into_inner();
+        let version = self
+            .epoch_generator
+            .generate()
+            .map_err(|e| e.to_grpc_status())?;
         let id: i32;
         let result = match req.get_catalog_body().map_err(tonic_err)? {
             CatalogBody::Database(database) => {
@@ -61,7 +69,8 @@ impl CatalogService for CatalogServiceImpl {
                     .map_err(|e| e.to_grpc_status())?;
                 let mut database = database.clone();
                 database.database_ref_id = Some(DatabaseRefId { database_id: id });
-                self.cmr.create_database(database).await
+                database.version = version.into_inner();
+                database.create(&self.meta_store_ref).await
             }
             CatalogBody::Schema(schema) => {
                 id = self
@@ -73,7 +82,8 @@ impl CatalogService for CatalogServiceImpl {
                 schema_ref_id.schema_id = id;
                 let mut schema = schema.clone();
                 schema.schema_ref_id = Some(schema_ref_id);
-                self.cmr.create_schema(schema).await
+                schema.version = version.into_inner();
+                schema.create(&self.meta_store_ref).await
             }
             CatalogBody::Table(table) => {
                 id = self
@@ -85,15 +95,16 @@ impl CatalogService for CatalogServiceImpl {
                 table_ref_id.table_id = id;
                 let mut table = table.clone();
                 table.table_ref_id = Some(table_ref_id);
-                self.cmr.create_table(table).await
+                table.version = version.into_inner();
+                table.create(&self.meta_store_ref).await
             }
         };
 
         match result {
-            Ok(epoch) => Ok(Response::new(CreateResponse {
+            Ok(_) => Ok(Response::new(CreateResponse {
                 status: None,
                 id,
-                version: epoch.into_inner(),
+                version: version.into_inner(),
             })),
             Err(e) => Err(e.to_grpc_status()),
         }
@@ -103,9 +114,11 @@ impl CatalogService for CatalogServiceImpl {
     async fn drop(&self, request: Request<DropRequest>) -> Result<Response<DropResponse>, Status> {
         let req = request.into_inner();
         let result = match req.get_catalog_id().map_err(tonic_err)? {
-            CatalogId::DatabaseId(database_id) => self.cmr.drop_database(database_id).await,
-            CatalogId::SchemaId(schema_id) => self.cmr.drop_schema(schema_id).await,
-            CatalogId::TableId(table_id) => self.cmr.drop_table(table_id).await,
+            CatalogId::DatabaseId(database_id) => {
+                Database::delete(&self.meta_store_ref, database_id).await
+            }
+            CatalogId::SchemaId(schema_id) => Schema::delete(&self.meta_store_ref, schema_id).await,
+            CatalogId::TableId(table_id) => Table::delete(&self.meta_store_ref, table_id).await,
         };
 
         match result {
