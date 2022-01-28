@@ -26,3 +26,6 @@ select T1.v3 from T as T1, T as T2 where T1.v1 = T2.v1 and T1.v2 = T2.v2;
 
 statement ok
 drop table T
+
+statement ok
+SET enable_hashjoin to on;

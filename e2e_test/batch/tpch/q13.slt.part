@@ -1,0 +1,49 @@
+query II
+select
+	c_count,
+	count(*) as custdist
+from
+	(
+		select
+			c_custkey,
+			count(o_orderkey)
+		from
+			customer left outer join orders on
+				c_custkey = o_custkey
+				and o_comment not like '%:1%:2%'
+		group by
+			c_custkey
+	) as c_orders (c_custkey, c_count)
+group by
+	c_count
+order by
+	custdist desc,
+	c_count desc;
+----
+0 50
+16 8
+17 7
+14 6
+12 6
+20 5
+13 5
+10 5
+9 5
+26 4
+23 4
+22 4
+21 4
+19 4
+11 4
+8 4
+7 4
+6 4
+24 3
+15 3
+4 3
+18 2
+5 2
+30 1
+29 1
+28 1
+3 1
