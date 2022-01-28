@@ -456,9 +456,15 @@ fn max_str<'a>(r: Option<&'a str>, i: Option<&'a str>) -> Option<&'a str> {
     max(r, i)
 }
 
+/// create table t(v1 int);
+/// insert into t values (null);
+/// select count(*) from t; gives 1.
+/// select count(v1) from t; gives 0.
+/// select sum(v1) from t; gives null
 fn count<T>(result: Option<i64>, input: Option<T>) -> Option<i64> {
     match (result, input) {
-        (_, None) => result,
+        (None, None) => Some(0),
+        (Some(r), None) => Some(r),
         (None, Some(_)) => Some(1),
         (Some(r), Some(_)) => Some(r + 1),
     }
@@ -834,21 +840,31 @@ mod tests {
 
     #[test]
     fn vec_count_int32() -> Result<()> {
+        let test_case = |input: ArrayImpl, expected: &[Option<i64>]| -> Result<()> {
+            let agg_type = AggKind::Count;
+            let input_type = DataTypeKind::Int32;
+            let return_type = DataTypeKind::Int64;
+            let actual = eval_agg(
+                input_type,
+                Arc::new(input),
+                &agg_type,
+                return_type,
+                ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0)?),
+            )?;
+            let actual = actual.as_int64();
+            let actual = actual.iter().collect::<Vec<_>>();
+            assert_eq!(actual, expected);
+            Ok(())
+        };
         let input = I32Array::from_slice(&[Some(1), Some(2), Some(3)]).unwrap();
-        let agg_type = AggKind::Count;
-        let input_type = DataTypeKind::Int32;
-        let return_type = DataTypeKind::Int64;
-        let actual = eval_agg(
-            input_type,
-            Arc::new(input.into()),
-            &agg_type,
-            return_type,
-            ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0)?),
-        )?;
-        let actual = actual.as_int64();
-        let actual = actual.iter().collect::<Vec<_>>();
-        assert_eq!(actual, &[Some(3)]);
-        Ok(())
+        let expected = &[Some(3)];
+        test_case(input.into(), expected)?;
+        let input = I32Array::from_slice(&[]).unwrap();
+        let expected = &[None];
+        test_case(input.into(), expected)?;
+        let input = I32Array::from_slice(&[None]).unwrap();
+        let expected = &[Some(0)];
+        test_case(input.into(), expected)
     }
 
     #[test]
