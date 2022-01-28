@@ -841,19 +841,21 @@ order by
 RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[1 DESC, 0 DESC]])
   RwBatchSort(sort0=[$1], sort1=[$0], dir0=[DESC], dir1=[DESC])
     RwBatchHashAgg(group=[{0}], custdist=[$SUM0($1)])
-      RwBatchHashAgg(group=[{0}], custdist=[COUNT()])
-        RwBatchProject(c_count=[$1])
-          RwBatchHashAgg(group=[{0}], EXPR$1=[$SUM0($1)])
-            RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
-              RwBatchHashAgg(group=[{0}], EXPR$1=[COUNT($1)])
-                RwBatchProject(c_custkey=[$0], o_orderkey=[$1])
-                  RwBatchHashJoin(condition=[=($0, $2)], joinType=[left])
-                    RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
-                      RwBatchTableScan(table=[[test_schema, customer]], columns=[c_custkey])
-                    RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[1]}], collation=[[]])
-                      RwBatchProject(o_orderkey=[$0], o_custkey=[$1])
-                        RwBatchFilter(condition=[NOT(LIKE($2, '%express%packages%'))])
-                          RwBatchTableScan(table=[[test_schema, orders]], columns=[o_orderkey,o_custkey,o_comment])]]>
+      RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+        RwBatchHashAgg(group=[{0}], custdist=[COUNT()])
+          RwBatchProject(c_count=[$1])
+            RwBatchHashAgg(group=[{0}], EXPR$1=[$SUM0($1)])
+              RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                RwBatchHashAgg(group=[{0}], EXPR$1=[COUNT($1)])
+                  RwBatchProject(c_custkey=[$0], o_orderkey=[$1])
+                    RwBatchHashJoin(condition=[=($0, $2)], joinType=[left])
+                      RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
+                        RwBatchTableScan(table=[[test_schema, customer]], columns=[c_custkey])
+                      RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[1]}], collation=[[]])
+                        RwBatchProject(o_orderkey=[$0], o_custkey=[$1])
+                          RwBatchFilter(condition=[NOT(LIKE($2, '%express%packages%'))])
+                            RwBatchTableScan(table=[[test_schema, orders]], columns=[o_orderkey,o_custkey,o_comment])]]>
+
         </Resource>
     </TestCase>
     <TestCase name="q14">
