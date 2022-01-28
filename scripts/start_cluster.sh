@@ -28,7 +28,7 @@ wait_server() {
 start_compute_node() {
     log_dir="../log/compute-node-$1.out"
     echo "Starting compute-node 0.0.0.0:$1 with state store $STATE_STORE... logging to $log_dir"
-    nohup ./target/debug/compute-node --log4rs-config config/log4rs.yaml --host "0.0.0.0:$1" --state-store "$STATE_STORE" > "$log_dir" &
+    nohup ./target/debug/compute-node  --host "0.0.0.0:$1" --state-store "$STATE_STORE" > "$log_dir" &
     wait_server "$1"
 }
 
@@ -48,7 +48,7 @@ start_frontend() {
 start_meta_node() {
     log_dir="../log/meta.out"
     echo "Starting meta service ... logging to $log_dir"
-    nohup ./target/debug/meta-node --log4rs-config config/log4rs.yaml > "$log_dir" &
+    nohup ./target/debug/meta-node > "$log_dir" &
     wait_server 5690
 }
 

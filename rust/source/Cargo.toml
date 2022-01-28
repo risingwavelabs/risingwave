@@ -28,7 +28,6 @@ rdkafka = { version = "0.28", features = ["cmake-build"] }
 risingwave-pb = { path = "../prost" }
 risingwave_common = { path = "../common" }
 risingwave_storage = { path = "../storage" }
-rust_decimal = "1"
 serde = { version = "1", features = ["derive"] }
 serde-protobuf = "0.8"
 serde-value = "0.7"

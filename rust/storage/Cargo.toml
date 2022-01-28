@@ -34,7 +34,6 @@ risingwave_rpc_client = { path = "../rpc_client" }
 rocksdb = { git = "https://github.com/tikv/rust-rocksdb.git", rev = "fa83ff19", features = ["encryption", "static_libcpp"], optional = true }
 rusoto_core = "0.47"
 rusoto_s3 = "0.47"
-rust_decimal = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_with = "1"

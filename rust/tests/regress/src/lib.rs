@@ -24,7 +24,8 @@ pub(crate) use schedule::*;
 /// Exit code of this process
 pub async fn regress_main() -> i32 {
     let opts = Opts::parse();
-    log4rs::init_file(opts.log4rs_config_path(), Default::default()).unwrap();
+
+    env_logger::init();
 
     match run_schedules(opts).await {
         Ok(_) => {

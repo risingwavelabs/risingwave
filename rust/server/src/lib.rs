@@ -28,10 +28,6 @@ use clap::Parser;
 /// Command-line arguments for compute-node.
 #[derive(Parser, Debug)]
 pub struct ComputeNodeOpts {
-    // The custom log4rs config file.
-    #[clap(long, default_value = "config/log4rs.yaml")]
-    pub log4rs_config: String,
-
     #[clap(long, default_value = "127.0.0.1:5688")]
     pub host: String,
 

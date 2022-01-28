@@ -15,7 +15,6 @@ dyn-clone = "1.0.4"
 itertools = "0.10"
 lazy_static = "1"
 log = "0.4"
-log4rs = "1"
 paste = "1"
 pgwire = { path = "../utils/pgwire" }
 risingwave-pb = { path = "../prost" }
@@ -29,6 +28,8 @@ smallvec = { version = "1.6.1", features = ["serde"] }
 thiserror = "1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"] }
 tonic = "0.6"
+tracing = "0.1"
+tracing-subscriber = "0.3"
 
 [dev-dependencies]
 serial_test = "*"

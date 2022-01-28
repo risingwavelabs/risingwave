@@ -206,7 +206,7 @@ jobs:
           chmod +x ./rust/target/debug/risingwave_regress_test
           ./scripts/start_cluster.sh 3
           psql --version
-          cd rust && target/debug/risingwave_regress_test -h 127.0.0.1 \
+          RUST_LOG=info cd rust && target/debug/risingwave_regress_test -h 127.0.0.1 \
             -p ${{ env.RW_PORT }} \
             --input `pwd`/tests/regress/data \
             --output `pwd`/tests/regress/output \

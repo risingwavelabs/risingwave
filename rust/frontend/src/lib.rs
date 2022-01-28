@@ -15,10 +15,6 @@ mod test_utils;
 use clap::Parser;
 #[derive(Parser, Clone)]
 pub struct FrontendOpts {
-    // The custom log4rs config file.
-    #[clap(long, default_value = "config/log4rs.yaml")]
-    pub log4rs_config: String,
-
     #[clap(long, default_value = "127.0.0.1:4566")]
     pub host: String,
 

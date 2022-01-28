@@ -27,12 +27,8 @@ impl Task for MetaNodeService {
         ctx.service(self);
         ctx.pb.set_message("starting...");
 
-        let prefix_config = env::var("PREFIX_CONFIG")?;
-
         let mut cmd = self.meta_node()?;
-        cmd.arg("--log4rs-config")
-            .arg(Path::new(&prefix_config).join("log4rs.yaml"))
-            .arg("--host")
+        cmd.arg("--host")
             .arg(format!("{}:{}", self.config.address, self.config.port))
             .arg("--dashboard-host")
             .arg(format!(

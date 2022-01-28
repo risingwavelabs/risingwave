@@ -27,7 +27,6 @@ risingwave-pb = { path = "../prost" }
 risingwave_common = { path = "../common" }
 risingwave_source = { path = "../source" }
 risingwave_storage = { path = "../storage" }
-rust_decimal = "1"
 serde = { version = "1", features = ["derive"] }
 serde-value = "0.7"
 serde_json = "1"

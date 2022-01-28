@@ -9,6 +9,7 @@ use tracing_subscriber::prelude::*;
 
 /// Configure log targets for all `RisingWave` crates. When new crates are added and TRACE level
 /// logs are needed, add them here.
+#[allow(dead_code)]
 fn configure_risingwave_targets(targets: filter::Targets) -> filter::Targets {
     targets
         .with_target("risingwave_stream", Level::TRACE)

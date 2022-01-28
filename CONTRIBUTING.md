@@ -54,28 +54,26 @@ It will start processes in the background. After testing, you can run the follow
 
 ## Monitoring
 
-RisingWave internally records performance counters and statistics. Currently they can be enabled and explored with following steps:
-
-```shell
-./compute-node [--other-startup-options] --metrics-level 1
-```
-
-After compute node gets started, [Prometheus](https://github.com/prometheus/prometheus) can be used to pull metrics from compute node's endpoint by using:
-
-```shell
-./prometheus --config.file=rust/storage/src/metrics/prometheus.yml
-```
-
-By now, you can get the time-seris metrics provided by `Prometheus` through `curl` or visiting the website (`http://localhost:9090`):
-
-```shell
-curl http://localhost:9090/metrics
-```
-Furthermore, [Grafana](https://prometheus.io/docs/visualization/grafana/) can be used to provide better visualization of the metrics. After following the official instructions by Grafana, you can use browser to visit `http://localhost:3000/` to get the metrics dashboard.
+Uncomment `grafana` and `prometheus` services in `riselab.yml`, and you can view the metrics.
 
 ## Tracing
 
-Compute node supports streaming tracing. To enable this, either enable `tracing` functionality in `RiseLAB` by `./riselab configure`, or pass `--enable-tracing` to the `compute-node` binary.
+Compute node supports streaming tracing. Simply uncomment `jaeger` service in `riselab.yml`.
+
+## Dashboard
+
+You may use RisingWave Dashboard to see actors in the system. It will be started along with meta node.
+
+## Logging
+
+The Java frontend uses `logback.xml` to configure its logging config.
+
+The Rust components use `tokio-tracing` to handle both logging and tracing. The default log level is set as:
+
+* Third-party libraries: warn
+* Other libraries: debug
+
+If you need to adjust log levels, simply change the logging filters in `compute_node.rs` and `meta_node.rs`.
 
 ## Code Formatting
 

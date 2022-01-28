@@ -19,11 +19,10 @@ crc32fast = "1"
 dashmap = "5"
 either = "1"
 futures = "0.3"
-hyper = "0.14.16"
+hyper = "0.14"
 itertools = "0.10"
 lazy_static = "1"
 log = "0.4"
-log4rs = "1"
 memcomparable = { path = "../utils/memcomparable" }
 num-integer = "0.1"
 num-traits = "0.2"
@@ -35,7 +34,6 @@ risingwave-pb = { path = "../prost" }
 risingwave_common = { path = "../common" }
 risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_storage = { path = "../storage" }
-rust_decimal = "1"
 serde = { version = "1", features = ["derive"] }
 serde-value = "0.7"
 serde_derive = "1"
@@ -50,6 +48,8 @@ tokio-stream = { version = "0.1", features = ["net"] }
 tonic = "0.6"
 tower = { version = "0.4", features = ["util", "load-shed"] }
 tower-http = { version = "0.2", features = ["add-extension", "cors"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
 uuid = { version = "0.8", features = ["v4"] }
 
 [dev-dependencies]

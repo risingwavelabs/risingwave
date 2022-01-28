@@ -31,9 +31,7 @@ impl Task for ComputeNodeService {
 
         let mut cmd = self.compute_node()?;
 
-        cmd.arg("--log4rs-config")
-            .arg(Path::new(&prefix_config).join("log4rs.yaml"))
-            .arg("--config-path")
+        cmd.arg("--config-path")
             .arg(Path::new(&prefix_config).join("risingwave.toml"))
             .arg("--host")
             .arg(format!("{}:{}", self.config.address, self.config.port))
