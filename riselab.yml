@@ -30,7 +30,6 @@ riselab:
     # - use: prometheus
     # - use: grafana
     # If you want to enable tracing, uncomment the following line.
-    # Note that you also need to enable tracing in `./riselab configure`
     # - use: jaeger
 
   # `dev-compute-node` have the same settings as default except the the compute node will be started by user.
