@@ -17,4 +17,5 @@ include ./q9.slt.part
 include ./q10.slt.part
 include ./q11.slt.part
 include ./q13.slt.part
+include ./q14.slt.part
 include ../../tpch/drop_tables.slt.part
