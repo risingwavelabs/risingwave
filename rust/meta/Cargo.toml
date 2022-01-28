@@ -9,7 +9,6 @@ async-recursion = "0.2"
 async-stream = "0.3"
 async-trait = "0.1"
 axum = "0.4"
-backtrace = "0.3"
 bincode = "1.3.3"
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
@@ -28,8 +27,6 @@ num-integer = "0.1"
 num-traits = "0.2"
 paste = "1"
 prost = "0.9"
-prost-types = "0.9"
-rdkafka = "0.28.0"
 risingwave-pb = { path = "../prost" }
 risingwave_common = { path = "../common" }
 risingwave_rpc_client = { path = "../rpc_client" }

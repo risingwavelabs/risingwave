@@ -7,7 +7,6 @@ edition = "2021"
 anyhow = "1"
 async-stream = "0.3"
 async-trait = "0.1"
-backtrace = "0.3"
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 chrono = "0.4"
@@ -45,8 +44,9 @@ tokio-retry = "0.3"
 tokio-stream = "0.1"
 tonic = "0.6"
 tracing = "0.1"
-tracing-futures = "0.2"
 twox-hash = "1"
+
+[dev-dependencies]
 uuid = { version = "0.8", features = ["v4"] }
 
 [features]

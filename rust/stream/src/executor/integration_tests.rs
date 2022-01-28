@@ -5,7 +5,7 @@ use futures::channel::mpsc::channel;
 use futures::SinkExt;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::Op::*;
-use risingwave_common::array::{I64Array, Op, *};
+use risingwave_common::array::*;
 use risingwave_common::catalog::Field;
 use risingwave_common::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_common::expr::expr_binary_nullable::new_nullable_binary_expr;
@@ -14,7 +14,7 @@ use risingwave_common::expr::*;
 use risingwave_common::types::*;
 use risingwave_pb::expr::expr_node::Type;
 
-use super::{ReceiverExecutor, *};
+use super::*;
 use crate::executor::test_utils::create_in_memory_keyspace;
 use crate::task::SharedContext;
 

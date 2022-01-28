@@ -68,8 +68,6 @@ pub struct AppendOnlyTopNExecutor<S: StateStore> {
     /// another set stores the elements in the range of `[offset, offset+limit)`.
     managed_lower_state: ManagedTopNState<S, TOP_N_MAX>,
     managed_higher_state: ManagedTopNState<S, TOP_N_MAX>,
-    /// The keyspace to operate on.
-    keyspace: Keyspace<S>,
     /// Marks whether this is first-time execution. If yes, we need to fill in the cache from
     /// storage.
     first_execution: bool,
@@ -132,7 +130,6 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
                 0,
             ),
             pk_indices,
-            keyspace,
             first_execution: true,
             identity: format!("AppendOnlyTopNExecutor {:X}", executor_id),
         }

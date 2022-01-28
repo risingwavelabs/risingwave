@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::str::FromStr;
 
 use futures_retry::{ErrorHandler, FutureRetry, RetryPolicy};
@@ -13,18 +12,15 @@ use rusoto_s3::{
     S3Client, S3,
 };
 use tokio::io::AsyncReadExt;
-use tokio::sync::Mutex;
 
 use super::{BlockLocation, ObjectMetadata};
 use crate::object::{Bytes, ObjectStore};
 
 /// Implement object store on S3.
 pub struct S3ObjectStore {
-    connection_info: Option<ConnectionInfo>,
     // None is reserved for to-be-apperaed connection pool
     client: Option<S3Client>,
     bucket: String,
-    object: Mutex<HashMap<String, Bytes>>,
 }
 
 #[derive(Clone, Default)]
@@ -253,23 +249,19 @@ impl ObjectStore for S3ObjectStore {
 impl S3ObjectStore {
     pub fn new(conn_info: ConnectionInfo, bucket: String) -> Self {
         Self {
-            connection_info: Some(conn_info.clone()),
             client: Some(S3Client::new_with(
                 HttpClient::new().expect("Failed to create HTTP client"),
                 StaticProvider::from(AwsCredentials::from(conn_info.clone())),
                 Region::from_str(conn_info.region.as_ref()).unwrap(),
             )),
             bucket,
-            object: Mutex::new(HashMap::new()),
         }
     }
 
     pub fn new_with_s3_client(client: S3Client, bucket: String) -> Self {
         Self {
-            connection_info: None,
             client: Some(client),
             bucket,
-            object: Mutex::new(HashMap::new()),
         }
     }
 

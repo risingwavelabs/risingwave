@@ -1897,9 +1897,9 @@ checksum = "c4a1e36c821dbe04574f602848a19f742f4fb3c98d40449f11bcad18d6b17421"
 
 [[package]]
 name = "httpmock"
-version = "0.6.5"
+version = "0.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a24a520a3193799852cc4baf0d8356d7578a8847dfc5603d087529f099661e42"
+checksum = "c159c4fc205e6c1a9b325cb7ec135d13b5f47188ce175dabb76ec847f331d9bd"
 dependencies = [
  "assert-json-diff",
  "async-object-pool",
@@ -1914,13 +1914,13 @@ dependencies = [
  "lazy_static",
  "levenshtein",
  "log",
- "qstring",
  "regex",
  "serde",
  "serde_json",
  "serde_regex",
  "similar",
  "tokio",
+ "url",
 ]
 
 [[package]]
@@ -2141,9 +2141,9 @@ dependencies = [
 
 [[package]]
 name = "lalrpop"
-version = "0.19.6"
+version = "0.19.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b15174f1c529af5bf1283c3bc0058266b483a67156f79589fab2a25e23cf8988"
+checksum = "852b75a095da6b69da8c5557731c3afd06525d4f655a4fc1c799e2ec8bc4dce4"
 dependencies = [
  "ascii-canvas",
  "atty",
@@ -2164,9 +2164,9 @@ dependencies = [
 
 [[package]]
 name = "lalrpop-util"
-version = "0.19.6"
+version = "0.19.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3e58cce361efcc90ba8a0a5f982c741ff86b603495bb15a998412e957dcd278"
+checksum = "d6d265705249fe209280676d8f68887859fa42e1d34f342fc05bd47726a5e188"
 dependencies = [
  "regex",
 ]
@@ -3331,15 +3331,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "qstring"
-version = "0.7.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d464fae65fff2680baf48019211ce37aaec0c78e9264c84a3e484717f965104e"
-dependencies = [
- "percent-encoding",
-]
-
-[[package]]
 name = "quote"
 version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3620,7 +3611,6 @@ dependencies = [
  "anyhow",
  "async-stream",
  "async-trait",
- "backtrace",
  "byteorder",
  "bytes",
  "chrono",
@@ -3696,7 +3686,6 @@ dependencies = [
  "anyhow",
  "async-stream",
  "async-trait",
- "backtrace",
  "byteorder",
  "bytes",
  "chrono",
@@ -3765,7 +3754,6 @@ dependencies = [
  "anyhow",
  "async-stream",
  "async-trait",
- "backtrace",
  "byteorder",
  "bytes",
  "chrono",
@@ -3808,7 +3796,6 @@ dependencies = [
  "aws-smithy-http",
  "aws-smithy-types 0.32.0",
  "aws-types",
- "backtrace",
  "byteorder",
  "bytes",
  "chrono",
@@ -3826,9 +3813,7 @@ dependencies = [
  "num-traits",
  "paste",
  "prost 0.9.0",
- "prost-types 0.9.0",
  "protobuf",
- "protobuf-codegen-pure",
  "pulsar",
  "rand 0.8.4",
  "rdkafka 0.28.0",
@@ -3836,8 +3821,6 @@ dependencies = [
  "risingwave_common",
  "risingwave_storage",
  "serde",
- "serde-protobuf",
- "serde-value",
  "serde_derive",
  "serde_json",
  "serde_with",
@@ -3863,7 +3846,6 @@ dependencies = [
  "async-stream",
  "async-trait",
  "axum",
- "backtrace",
  "bincode",
  "byteorder",
  "bytes",
@@ -3882,9 +3864,7 @@ dependencies = [
  "num-traits",
  "paste",
  "prost 0.9.0",
- "prost-types 0.9.0",
  "rand 0.8.4",
- "rdkafka 0.28.0",
  "risingwave-pb",
  "risingwave_common",
  "risingwave_rpc_client",
@@ -3998,7 +3978,6 @@ dependencies = [
  "anyhow",
  "async-stream",
  "async-trait",
- "backtrace",
  "byteorder",
  "bytes",
  "chrono",
@@ -4036,7 +4015,6 @@ dependencies = [
  "tokio-stream",
  "tonic",
  "tracing",
- "tracing-futures",
  "twox-hash",
  "uuid",
 ]
@@ -4050,7 +4028,6 @@ dependencies = [
  "assert_matches",
  "async-stream",
  "async-trait",
- "backtrace",
  "byteorder",
  "bytes",
  "chrono",

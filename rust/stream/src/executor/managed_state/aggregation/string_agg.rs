@@ -57,6 +57,8 @@ pub struct ManagedStringAggState<S: StateStore> {
 
 impl<S: StateStore> ManagedStringAggState<S> {
     /// Create a managed string agg state based on `Keyspace`.
+    // TODO: enable string agg state
+    #[allow(dead_code)]
     pub async fn new(
         keyspace: Keyspace<S>,
         row_count: usize,

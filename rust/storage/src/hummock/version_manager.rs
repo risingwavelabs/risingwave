@@ -162,9 +162,13 @@ pub struct VersionManager {
     compact_status: Mutex<CompactStatus>,
 
     /// Notify the vacuum to apply changes from one version.
+    #[allow(dead_code)]
+    // TODO: enable vaccum
     tx: tokio::sync::mpsc::UnboundedSender<()>,
 
     /// Receiver of the vacuum.
+    #[allow(dead_code)]
+    // TODO: enable vaccum
     rx: PLMutex<Option<tokio::sync::mpsc::UnboundedReceiver<()>>>,
 
     /// Max epoch version manager has seen in SST tables.

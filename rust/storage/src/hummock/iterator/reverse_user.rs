@@ -34,6 +34,7 @@ pub struct ReverseUserIterator {
 
 impl ReverseUserIterator {
     /// Create [`UserIterator`] with maximum epoch.
+    #[cfg(test)]
     pub(crate) fn new(
         iterator: ReverseMergeIterator,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),

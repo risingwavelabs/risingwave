@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::collections::HashMap;
 use std::ops::Add;
 use std::sync::{Arc, Weak};

@@ -364,6 +364,7 @@ where
     A::OwnedItem: Ord,
 {
     #[cfg(test)]
+    #[allow(dead_code)]
     pub async fn iterate_store(&self) -> Result<Vec<(A::OwnedItem, ExtremePk)>> {
         let all_data = self.keyspace.scan_strip_prefix(None).await?;
         let mut result = vec![];
@@ -380,6 +381,7 @@ where
     }
 
     #[cfg(test)]
+    #[allow(dead_code)]
     pub async fn iterate_topn_cache(&self) -> Result<Vec<(A::OwnedItem, ExtremePk)>> {
         Ok(self.top_n.iter().map(|(k, _)| k.clone()).collect())
     }

@@ -112,7 +112,8 @@ mod test {
     use async_trait::async_trait;
     use risingwave_common::array::{Array, I32Array, Op, RwError, StreamChunk};
     use risingwave_common::catalog::Schema;
-    use risingwave_common::error::ErrorCode;
+    use risingwave_common::column_nonnull;
+    use risingwave_common::error::{ErrorCode, Result};
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType;
     use risingwave_pb::plan::column_desc::ColumnEncodingType;
@@ -121,7 +122,6 @@ mod test {
     use super::ChainExecutor;
     use crate::executor::test_utils::MockSource;
     use crate::executor::{Executor, Message, PkIndices, PkIndicesRef};
-    use crate::risingwave_common::error::Result;
 
     #[derive(Debug)]
     struct MockSnapshot(MockSource);

@@ -73,6 +73,7 @@ impl<S: StateStore> AllOrNoneState<S> {
     }
 
     /// The state is dirty means there are unflush
+    #[allow(dead_code)]
     pub fn is_dirty(&self) -> bool {
         !self.flush_buffer.is_empty()
     }
@@ -134,6 +135,7 @@ impl<S: StateStore> AllOrNoneState<S> {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn iter(&mut self) -> AllOrNoneStateIter<'_> {
         if self.cache_evicted {
             self.fetch_cache().await;
@@ -165,6 +167,7 @@ mod tests {
 
     use super::*;
 
+    #[tokio::test]
     async fn test_managed_all_or_none_state() {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);

@@ -1,4 +1,4 @@
-use super::{HummockResult, HummockValue, SSTableIterator};
+use super::{HummockResult, HummockValue};
 
 mod concat;
 pub use concat::*;
@@ -19,8 +19,6 @@ pub use user::*;
 pub(crate) mod test_utils;
 
 use async_trait::async_trait;
-
-use crate::hummock::ReverseSSTableIterator;
 
 /// `HummockIterator` defines the interface of all iterators, including `SSTableIterator`,
 /// `MergeIterator`, `UserIterator` and `ConcatIterator`.
@@ -89,19 +87,6 @@ pub trait HummockIterator: Send + Sync {
     ///   function. This function WON'T return an `Err` if invalid. You should check `is_valid`
     ///   before starting iteration.
     async fn seek(&mut self, key: &[u8]) -> HummockResult<()>;
-}
-
-pub enum HummockIteratorImpl {
-    SSTable(SSTableIterator),
-    ReverseTable(ReverseSSTableIterator),
-    Concat(Box<ConcatIterator>),
-    ReverseConcat(ReverseConcatIterator),
-    Merge(MergeIterator),
-    ReverseMerge(ReverseMergeIterator),
-    #[cfg(test)]
-    Test(test_utils::TestIterator),
-    #[cfg(test)]
-    ReverseTest(test_utils::ReverseTestIterator),
 }
 
 pub type BoxedHummockIterator = Box<dyn HummockIterator>;

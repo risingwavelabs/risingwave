@@ -1,4 +1,5 @@
 #![allow(clippy::mutable_key_type)]
+#![allow(dead_code)]
 
 use std::collections::BTreeMap;
 use std::vec::Drain;

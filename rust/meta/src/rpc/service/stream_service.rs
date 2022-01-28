@@ -18,6 +18,8 @@ pub struct StreamServiceImpl {
 
     id_gen_manager_ref: IdGeneratorManagerRef,
     cluster_manager: Arc<StoredClusterManager>,
+
+    #[allow(dead_code)]
     epoch_generator: EpochGeneratorRef,
 }
 

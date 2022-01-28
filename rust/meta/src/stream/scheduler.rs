@@ -11,9 +11,11 @@ use crate::cluster::StoredClusterManager;
 /// [`ScheduleCategory`] defines all supported categories.
 pub enum ScheduleCategory {
     /// `Simple` always schedules the first node in cluster.
+    #[allow(dead_code)]
     Simple = 1,
     /// `RoundRobin` schedules node in cluster with round robin.
     RoundRobin = 2,
+    #[allow(dead_code)]
     /// `Hash` schedules node using hash(actor_id) as its index.
     Hash = 3,
 }

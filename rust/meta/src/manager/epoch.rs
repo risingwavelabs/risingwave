@@ -8,10 +8,6 @@ use risingwave_common::error::Result;
 /// Epoch keeping for some specific key types.
 pub(crate) const SINGLE_VERSION_EPOCH: Epoch = Epoch(0);
 
-pub(crate) const MAX_NAMING_EPOCH: Epoch = Epoch(50);
-
-pub const MIN_EPOCH: Epoch = Epoch(0);
-pub const MAX_EPOCH: Epoch = Epoch(u64::MAX);
 pub const EPOCH_PHYSICAL_SHIFT_BITS: u8 = 16;
 
 #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Hash, Debug)]

@@ -3,6 +3,7 @@ use std::fmt::Debug;
 use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::error::Result;
+use risingwave_common::for_all_variants;
 use tracing::event;
 
 use crate::executor::{Executor, Message};
@@ -85,6 +86,7 @@ mod tests {
     use assert_matches::assert_matches;
     use risingwave_common::array::{F64Array, I64Array, Op, StreamChunk};
     use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::column_nonnull;
     use risingwave_common::types::DataTypeKind;
 
     use super::*;

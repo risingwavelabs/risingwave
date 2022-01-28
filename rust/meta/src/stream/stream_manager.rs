@@ -338,6 +338,7 @@ mod tests {
     struct MockServices {
         stream_manager: StreamManager,
         meta_manager: Arc<StoredStreamMetaManager>,
+        #[allow(dead_code)]
         cluster_manager: Arc<StoredClusterManager>,
         state: Arc<FakeFragmentState>,
         join_handle: JoinHandle<()>,

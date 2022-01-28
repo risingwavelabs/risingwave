@@ -2,6 +2,7 @@ use crate::hummock::iterator::concat_inner::ConcatIteratorInner;
 use crate::hummock::ReverseSSTableIterator;
 
 /// Reversely iterates on multiple non-overlapping tables.
+#[allow(dead_code)]
 pub type ReverseConcatIterator = ConcatIteratorInner<ReverseSSTableIterator>;
 
 /// Mirror the tests used for `SSTableIterator`

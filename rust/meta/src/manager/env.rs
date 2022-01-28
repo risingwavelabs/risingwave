@@ -86,6 +86,7 @@ impl MetaSrvEnv {
         self.config.clone()
     }
 
+    #[allow(dead_code)]
     pub fn meta_store(&self) -> &dyn MetaStore {
         &*self.meta_store
     }

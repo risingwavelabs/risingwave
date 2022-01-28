@@ -108,6 +108,7 @@ pub struct HummockStorage {
     options: Arc<HummockOptions>,
 
     // TODO #2648 remove this once compactor is refactored
+    #[allow(dead_code)]
     version_manager: Arc<VersionManager>,
 
     local_version_manager: Arc<LocalVersionManager>,
@@ -118,6 +119,7 @@ pub struct HummockStorage {
     tx: mpsc::UnboundedSender<()>,
 
     /// Receiver of the compactor.
+    #[allow(dead_code)]
     rx: Arc<PLMutex<Option<mpsc::UnboundedReceiver<()>>>>,
 
     stop_compact_tx: mpsc::UnboundedSender<()>,

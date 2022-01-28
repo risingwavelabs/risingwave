@@ -147,7 +147,6 @@ const fn outer_side_null(join_type: JoinTypePrimitive, side_type: SideTypePrimit
 }
 
 type HashKeyType = Row;
-type HashValueItemType = StateValueType;
 type HashValueType<S> = AllOrNoneState<S>;
 
 pub struct JoinParams {
@@ -668,7 +667,6 @@ mod tests {
     use super::{HashJoinExecutor, JoinParams, JoinType, *};
     use crate::executor::test_utils::MockAsyncSource;
     use crate::executor::{Barrier, Executor, Message};
-    use crate::*;
 
     fn create_in_memory_keyspace() -> Keyspace<MemoryStateStore> {
         Keyspace::executor_root(MemoryStateStore::new(), 0x2333)
@@ -1478,6 +1476,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_streaming_hash_full_outer_join_with_nonequi_condition() {
         let chunk_l1 = StreamChunk::new(
             vec![Op::Insert, Op::Insert, Op::Insert],
@@ -1646,6 +1645,8 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    #[ignore]
     async fn test_streaming_hash_inner_join_with_nonequi_condition() {
         let chunk_l1 = StreamChunk::new(
             vec![Op::Insert, Op::Insert, Op::Insert],

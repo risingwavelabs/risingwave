@@ -1,5 +1,7 @@
 //! The implementation for bummock columnar storage.
 
+#![allow(dead_code)]
+
 pub use rg::*;
 pub use table::*;
 

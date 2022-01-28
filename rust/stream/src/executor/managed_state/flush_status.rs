@@ -39,6 +39,7 @@ macro_rules! impl_flush_status {
       }
     }
 
+    #[allow(dead_code)]
     pub fn as_option(&self) -> Option<&T> {
       match self {
         Self::DeleteInsert(value) | Self::Insert(value) => Some(value),

@@ -24,6 +24,7 @@ pub enum Operation {
 
 /// Preconditions are checked in the beginning of a transaction
 pub enum Precondition {
+    #[allow(dead_code)]
     KeyExists {
         key: Key,
         /// If version is None, a default global version is used.

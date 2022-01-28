@@ -1,3 +1,6 @@
+// TODO: remove this after remote channel is actually used.
+#![allow(dead_code)]
+
 use std::net::SocketAddr;
 use std::time::Duration;
 

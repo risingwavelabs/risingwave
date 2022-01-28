@@ -137,6 +137,8 @@ pub struct MViewTableIter<S: StateStore> {
     inner: S::Iter,
     prefix: Vec<u8>,
     schema: Schema,
+    // TODO: why pk_columns is not used??
+    #[allow(dead_code)]
     pk_columns: Vec<usize>,
 }
 

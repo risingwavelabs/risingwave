@@ -17,14 +17,6 @@ pub async fn get_sst_meta(
     )
 }
 
-pub async fn get_sst_data(
-    obj_client: Arc<dyn ObjectStore>,
-    remote_dir: &str,
-    sstable_id: u64,
-) -> HummockResult<Vec<u8>> {
-    get_object_store_file(obj_client, &get_sst_data_path(remote_dir, sstable_id)).await
-}
-
 /// Upload table to remote object storage and return the URL
 pub async fn gen_remote_sstable(
     obj_client: Arc<dyn ObjectStore>,

@@ -157,7 +157,6 @@ mod tests {
 
     use crate::executor::test_utils::MockSource;
     use crate::executor::{Executor, FilterExecutor, Message, PkIndices};
-    use crate::*;
 
     #[tokio::test]
     async fn test_filter() {

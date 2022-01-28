@@ -150,7 +150,6 @@ mod tests {
 
     use crate::executor::test_utils::*;
     use crate::executor::*;
-    use crate::*;
 
     #[tokio::test]
     async fn test_sink() {

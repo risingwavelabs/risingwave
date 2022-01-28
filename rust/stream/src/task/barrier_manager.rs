@@ -20,6 +20,7 @@ struct ManagedBarrierState {
 enum BarrierState {
     /// `Local` mode should be only used for tests. In this mode, barriers are not managed or
     /// collected, and there's no way to know whether or when a barrier is finished.
+    #[allow(dead_code)]
     Local,
 
     /// In `Managed` mode, barriers are sent and collected according to the request from meta
@@ -35,6 +36,7 @@ pub struct LocalBarrierManager {
     senders: HashMap<u32, UnboundedSender<Message>>,
 
     /// Span of the current epoch.
+    #[allow(dead_code)]
     span: tracing::Span,
 
     /// Current barrier collection state.

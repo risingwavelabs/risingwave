@@ -60,6 +60,7 @@ type Scheduled = (Command, Notifier);
 /// store, some actions like "drop materialized view" or "create mv on mv" must be done in barrier
 /// manager transactionally using [`Command`].
 pub struct BarrierManager {
+    #[allow(dead_code)]
     cluster_manager: Arc<StoredClusterManager>,
 
     stream_meta_manager: StreamMetaManagerRef,
@@ -198,11 +199,13 @@ impl BarrierManager {
     }
 
     /// Schedule a command and return immediately.
+    #[allow(dead_code)]
     pub async fn schedule_command(&self, command: Command) -> Result<()> {
         self.do_schedule(command, Default::default())
     }
 
     /// Schedule a command and return when its coresponding barrier is about to sent.
+    #[allow(dead_code)]
     pub async fn issue_command(&self, command: Command) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.do_schedule(

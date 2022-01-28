@@ -35,7 +35,6 @@ impl DirectedUserIterator {
         }
     }
 
-    #[allow(dead_code)]
     pub async fn rewind(&mut self) -> HummockResult<()> {
         match self {
             Self::Forward(ref mut iter) => iter.rewind().await,
@@ -43,6 +42,7 @@ impl DirectedUserIterator {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn seek(&mut self, user_key: &[u8]) -> HummockResult<()> {
         match self {
             Self::Forward(ref mut iter) => iter.seek(user_key).await,
@@ -84,7 +84,7 @@ pub struct UserIterator {
 // TODO: decide whether this should also impl `HummockIterator`
 impl UserIterator {
     /// Create [`UserIterator`] with maximum epoch.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn new(
         iterator: MergeIterator,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),

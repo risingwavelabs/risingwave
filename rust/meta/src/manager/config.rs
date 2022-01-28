@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 /// Column family name for table.
 const TABLE_CF_NAME: &str = "cf/table";
 /// Column family name for schema.

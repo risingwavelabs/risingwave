@@ -120,6 +120,7 @@ impl std::fmt::Debug for MockAsyncSource {
 }
 
 impl MockAsyncSource {
+    #[allow(dead_code)]
     pub fn new(schema: Schema, rx: UnboundedReceiver<Message>) -> Self {
         Self {
             schema,

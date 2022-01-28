@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 #![warn(clippy::disallowed_methods)]
 #![warn(clippy::doc_markdown)]
 #![warn(clippy::explicit_into_iter_loop)]

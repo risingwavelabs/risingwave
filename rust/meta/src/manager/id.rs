@@ -23,8 +23,6 @@ pub trait IdGenerator: Sync + Send + 'static {
     }
 }
 
-pub type IdGeneratorRef = Box<dyn IdGenerator>;
-
 /// [`StoredIdGenerator`] implements id generator using metastore.
 pub struct StoredIdGenerator {
     meta_store_ref: MetaStoreRef,

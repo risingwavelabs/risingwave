@@ -1,5 +1,8 @@
 //! Hummock state store's SST builder, format and iterator
 
+// TODO: enable checksum
+#![allow(dead_code)]
+
 // Copyright 2021 TiKV Project Authors. Licensed under Apache-2.0.
 
 mod block_iterator;

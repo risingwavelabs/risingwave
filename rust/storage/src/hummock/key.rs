@@ -145,10 +145,6 @@ impl<'a> FullKey<&'a [u8]> {
 }
 
 impl FullKey<Vec<u8>> {
-    fn from(full_key: Vec<u8>) -> Self {
-        Self(full_key)
-    }
-
     pub fn from_user_key(user_key: Vec<u8>, epoch: u64) -> Self {
         Self(key_with_epoch(user_key, epoch))
     }

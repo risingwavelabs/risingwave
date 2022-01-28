@@ -558,6 +558,7 @@ mod tests {
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, I64Array, Op};
     use risingwave_common::buffer::Bitmap;
     use risingwave_common::catalog::Schema;
+    use risingwave_common::column_nonnull;
     use risingwave_pb::common::{ActorInfo, HostAddress};
 
     use super::*;

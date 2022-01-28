@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use bytes::Bytes;
 use itertools::{EitherOrBoth, Itertools};
 use risingwave_common::error::Result;

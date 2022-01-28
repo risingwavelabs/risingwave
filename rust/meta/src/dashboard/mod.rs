@@ -26,13 +26,6 @@ pub struct DashboardService {
 
 pub type Service = Arc<DashboardService>;
 
-async fn handle_error(error: anyhow::Error) -> (StatusCode, String) {
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        format!("Internal error: {:?}", error),
-    )
-}
-
 mod handlers {
     use axum::Json;
     use risingwave_pb::common::WorkerNode;

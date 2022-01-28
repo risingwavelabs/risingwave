@@ -20,6 +20,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
 use risingwave_common::expr::AggKind;
 use risingwave_common::types::{DataTypeKind, Datum};
+use risingwave_common::*;
 pub use row_count::*;
 
 /// `StreamingSumAgg` sums data of the same type.

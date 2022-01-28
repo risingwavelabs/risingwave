@@ -37,6 +37,7 @@ impl StreamActorBuilder {
         self.actor_id
     }
 
+    #[allow(dead_code)]
     pub fn set_simple_dispatcher(&mut self) {
         self.dispatcher = Some(Dispatcher {
             r#type: DispatcherType::Simple as i32,
@@ -44,6 +45,7 @@ impl StreamActorBuilder {
         })
     }
 
+    #[allow(dead_code)]
     pub fn set_hash_dispatcher(&mut self, column_idx: i32) {
         self.dispatcher = Some(Dispatcher {
             r#type: DispatcherType::Hash as i32,

@@ -123,7 +123,6 @@ mod tests {
 
     use crate::executor::test_utils::MockSource;
     use crate::executor::{Executor, Message, PkIndices, ProjectExecutor};
-    use crate::*;
 
     #[tokio::test]
     async fn test_projection() {
