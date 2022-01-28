@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -59,7 +60,8 @@ impl StreamMetaManager for StoredStreamMetaManager {
     ///
     /// cf(table_actor): `table_ref_id` -> `TableActors`, defines table included actors.
     async fn add_actors_to_node(&self, location: &ActorLocation) -> Result<()> {
-        self.fragment_lock.write().await;
+        let _ = self.fragment_lock.write().await;
+
         let node = location.get_node()?.encode_to_vec();
         let actors = location.get_actors();
         let mut write_batch: Vec<(&str, Vec<u8>, Vec<u8>, Epoch)> = vec![];
@@ -110,7 +112,8 @@ impl StreamMetaManager for StoredStreamMetaManager {
     }
 
     async fn load_all_actors(&self) -> Result<Vec<ActorLocation>> {
-        self.fragment_lock.read().await;
+        let _ = self.fragment_lock.read().await;
+
         let locations_pb = self
             .meta_store_ref
             .list_cf(self.config.get_node_actor_cf())
@@ -123,7 +126,8 @@ impl StreamMetaManager for StoredStreamMetaManager {
     }
 
     async fn get_actor_node(&self, actor_id: u32) -> Result<WorkerNode> {
-        self.fragment_lock.read().await;
+        let _ = self.fragment_lock.read().await;
+
         let node_pb = self
             .meta_store_ref
             .get_cf(
@@ -137,7 +141,8 @@ impl StreamMetaManager for StoredStreamMetaManager {
     }
 
     async fn add_table_actors(&self, table_id: &TableRefId, actors: &TableActors) -> Result<()> {
-        self.fragment_lock.write().await;
+        let _ = self.fragment_lock.write().await;
+
         self.meta_store_ref
             .put_cf(
                 self.config.get_table_actor_cf(),
@@ -149,7 +154,8 @@ impl StreamMetaManager for StoredStreamMetaManager {
     }
 
     async fn get_table_actors(&self, table_id: &TableRefId) -> Result<TableActors> {
-        self.fragment_lock.read().await;
+        let _ = self.fragment_lock.read().await;
+
         let actors_pb = self
             .meta_store_ref
             .get_cf(
@@ -162,15 +168,74 @@ impl StreamMetaManager for StoredStreamMetaManager {
         Ok(TableActors::decode(actors_pb.as_slice())?)
     }
 
+    // TODO: update `actor_cf`
     async fn drop_table_actors(&self, table_id: &TableRefId) -> Result<()> {
-        self.fragment_lock.write().await;
+        let _ = self.fragment_lock.write().await;
+
+        let table_actors = {
+            let actors_pb = self
+                .meta_store_ref
+                .get_cf(
+                    self.config.get_table_actor_cf(),
+                    &table_id.encode_to_vec(),
+                    SINGLE_VERSION_EPOCH,
+                )
+                .await?;
+
+            TableActors::decode(actors_pb.as_slice())?
+        };
+
+        let mut node_to_actors: HashMap<_, HashSet<_>> = HashMap::new();
+
+        for actor_id in table_actors.actor_ids {
+            let node_pb = self
+                .meta_store_ref
+                .get_cf(
+                    self.config.get_actor_cf(),
+                    actor_id.to_be_bytes().as_ref(),
+                    SINGLE_VERSION_EPOCH,
+                )
+                .await?;
+
+            node_to_actors.entry(node_pb).or_default().insert(actor_id);
+        }
+
+        for (node_pb, actors) in node_to_actors {
+            let actor_location_pb = self
+                .meta_store_ref
+                .get_cf(
+                    self.config.get_node_actor_cf(),
+                    &node_pb,
+                    SINGLE_VERSION_EPOCH,
+                )
+                .await?;
+
+            let mut actor_location = ActorLocation::decode(actor_location_pb.as_slice())?;
+            actor_location
+                .actors
+                .retain(|a| !actors.contains(&a.actor_id));
+
+            // Delete these actors in `node_actor` cf.
+            self.meta_store_ref
+                .put_cf(
+                    self.config.get_node_actor_cf(),
+                    &node_pb,
+                    &actor_location.encode_to_vec(),
+                    SINGLE_VERSION_EPOCH,
+                )
+                .await?;
+        }
+
+        // Delete this table in `table_actor` cf.
         self.meta_store_ref
             .delete_cf(
                 self.config.get_table_actor_cf(),
                 &table_id.encode_to_vec(),
                 SINGLE_VERSION_EPOCH,
             )
-            .await
+            .await?;
+
+        Ok(())
     }
 }
 
@@ -305,6 +370,20 @@ mod test {
             table_id: 0,
         };
         let actor_ids = (0..5).collect::<Vec<u32>>();
+
+        meta_manager
+            .add_actors_to_node(&make_location(
+                WorkerNode {
+                    id: 114514,
+                    r#type: WorkerType::ComputeNode as i32,
+                    host: Some(HostAddress {
+                        host: "127.0.0.1".to_string(),
+                        port: 8888,
+                    }),
+                },
+                actor_ids.clone(),
+            ))
+            .await?;
 
         meta_manager
             .add_table_actors(

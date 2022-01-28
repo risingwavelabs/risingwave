@@ -6,18 +6,16 @@ use itertools::Itertools;
 use log::{debug, info};
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::common::{ActorInfo, WorkerNode};
-use risingwave_pb::data::barrier::Mutation;
-use risingwave_pb::data::StopMutation;
 use risingwave_pb::meta::{ActorLocation, TableActors};
 use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{StreamActor, StreamNode};
 use risingwave_pb::stream_service::{
-    BroadcastActorInfoTableRequest, BuildActorsRequest, DropActorsRequest, UpdateActorsRequest,
+    BroadcastActorInfoTableRequest, BuildActorsRequest, UpdateActorsRequest,
 };
 use uuid::Uuid;
 
-use crate::barrier::BarrierManagerRef;
+use crate::barrier::{BarrierManagerRef, Command};
 use crate::cluster::StoredClusterManager;
 use crate::manager::{MetaSrvEnv, StreamClientsRef};
 use crate::stream::{ScheduleCategory, Scheduler, StreamMetaManagerRef};
@@ -211,52 +209,12 @@ impl StreamManager {
         Ok(())
     }
 
-    /// Drop materialized view, it works as follows:
-    /// 1. notify related node local stream manger to drop actor by inject barrier.
-    /// 2. wait and collect drop state from local stream manager.
-    /// 3. delete actor location and node/table actors info.
+    /// Droping materialized view is done by barrier manager. Check
+    /// [`Command::DropMaterializedView`] for details.
     pub async fn drop_materialized_view(&self, table_id: &TableRefId) -> Result<()> {
-        let table_actors = self.smm.get_table_actors(table_id).await?;
-        let actor_ids = table_actors.actor_ids;
-
-        let mutation = Mutation::Stop(StopMutation {
-            actors: actor_ids.clone(),
-        });
-        // Note: This will wait for all reachable actors in the graph finishing this barrier.
         self.barrier_manager_ref
-            .send_barrier_and_collect(mutation)
+            .run_command(Command::DropMaterializedView(table_id.clone()))
             .await?;
-
-        let mut node_actors = HashMap::new();
-        let mut node_map = HashMap::new();
-        for id in actor_ids {
-            let node = self.smm.get_actor_node(id).await?;
-            node_actors
-                .entry(node.get_id())
-                .or_insert_with(Vec::new)
-                .push(id);
-            node_map.insert(node.get_id(), node);
-        }
-
-        for (node_id, actors) in node_actors {
-            let client = self.clients.get(node_map.get(&node_id).unwrap()).await?;
-            let request_id = Uuid::new_v4().to_string();
-
-            debug!("[{}]drop actors: {:?}", request_id, actors);
-            client
-                .to_owned()
-                .drop_actors(DropActorsRequest {
-                    request_id,
-                    table_ref_id: Some(table_id.clone()),
-                    actor_ids: actors,
-                })
-                .await
-                .to_rw_result_with(format!("failed to connect to {}", node_id))?;
-        }
-
-        // FIXME: `load_all_actors` can still find these actors.
-        // TODO: add drop_actors interface, including drop node_actors/actor_node/table_actors.
-        self.smm.drop_table_actors(table_id).await?;
 
         Ok(())
     }

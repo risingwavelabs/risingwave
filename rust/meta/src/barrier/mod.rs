@@ -1,4 +1,3 @@
-use std::collections::{HashMap, HashSet};
 use std::iter::once;
 use std::sync::Arc;
 use std::time::Duration;
@@ -7,91 +6,22 @@ use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::array::RwError;
 use risingwave_common::error::{Result, ToRwResult};
-use risingwave_pb::common::WorkerNode;
-use risingwave_pb::data::barrier::Mutation;
-use risingwave_pb::data::{Barrier, NothingMutation, StopMutation};
-use risingwave_pb::meta::ActorLocation;
-use risingwave_pb::stream_plan::{StreamActor, StreamNode};
+use risingwave_pb::data::Barrier;
 use risingwave_pb::stream_service::InjectBarrierRequest;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
 use uuid::Uuid;
 
+pub use self::command::Command;
+use self::command::CommandContext;
+use self::info::BarrierActorInfo;
 use crate::cluster::StoredClusterManager;
 use crate::manager::{EpochGeneratorRef, MetaSrvEnv, StreamClientsRef};
 use crate::stream::StreamMetaManagerRef;
 
-struct BarrierActorInfo {
-    /// node_id => node
-    node_map: HashMap<u32, WorkerNode>,
-
-    /// node_id => actors
-    actor_map: HashMap<u32, Vec<StreamActor>>,
-}
-
-impl BarrierActorInfo {
-    // TODO: we may resolve this info as graph updating, instead of doing it every time we want to
-    // send a barrier
-    fn resolve(all_actors: impl IntoIterator<Item = ActorLocation>) -> Self {
-        let all_actors = all_actors.into_iter().collect_vec();
-
-        let node_map = all_actors
-            .iter()
-            .map(|location| location.node.as_ref().unwrap())
-            .map(|node| (node.id, node.clone()))
-            .collect::<HashMap<_, _>>();
-
-        let actor_map = {
-            let mut actor_map: HashMap<u32, Vec<_>> = HashMap::new();
-            for location in all_actors {
-                let node_id = location.node.unwrap().id;
-                let actors = actor_map.entry(node_id).or_default();
-                actors.extend(location.actors);
-            }
-            actor_map
-        };
-
-        Self {
-            node_map,
-            actor_map,
-        }
-    }
-
-    // TODO: should only collect from reachable actors, for mv on mv
-    fn actor_ids_to_collect(&self, node_id: &u32) -> impl Iterator<Item = u32> {
-        let actors = self.actor_map.get(node_id).unwrap().clone();
-        actors.into_iter().map(|a| a.actor_id)
-    }
-
-    fn actor_ids_to_send(&self, node_id: &u32) -> impl Iterator<Item = u32> {
-        fn resolve_head_node<'a>(node: &'a StreamNode, head_nodes: &mut Vec<&'a StreamNode>) {
-            if node.input.is_empty() {
-                head_nodes.push(node);
-            } else {
-                for node in &node.input {
-                    resolve_head_node(node, head_nodes);
-                }
-            }
-        }
-
-        let actors = self.actor_map.get(node_id).unwrap().clone();
-
-        actors
-            .into_iter()
-            .filter(|actor| {
-                let mut head_nodes = vec![];
-                resolve_head_node(actor.get_nodes().unwrap(), &mut head_nodes);
-                head_nodes.iter().any(|node| {
-                    matches!(
-                        node.get_node().unwrap(),
-                        risingwave_pb::stream_plan::stream_node::Node::SourceNode(_)
-                    )
-                })
-            })
-            .map(|a| a.actor_id)
-    }
-}
+mod command;
+mod info;
 
 #[derive(Debug, Default)]
 struct Notifier {
@@ -118,11 +48,17 @@ impl Notifier {
     }
 }
 
-type Scheduled = (Mutation, Notifier);
+type Scheduled = (Command, Notifier);
 
 /// [`BarrierManager`] sends barriers to all registered compute nodes and collect them, with
 /// monotonic increasing epoch numbers. On compute nodes, [`LocalBarrierManager`] will serve these
 /// requests and dispatch them to source actors.
+///
+/// Configuration change in our system is achieved by the mutation in the barrier. Thus,
+/// [`BarrierManager`] provides a set of interfaces like a state machine, accepting [`Command`] that
+/// carries info to build [`Mutation`]. To keep the consistency between barrier manager and meta
+/// store, some actions like "drop materialized view" or "create mv on mv" must be done in barrier
+/// manager transactionally using [`Command`].
 pub struct BarrierManager {
     cluster_manager: Arc<StoredClusterManager>,
 
@@ -173,10 +109,6 @@ impl BarrierManager {
             .take()
             .expect("barrier manager can only run once");
 
-        // A workaround to avoid sending to or collecting from stopped actors.
-        // TODO: remove this when inconsistency of stream meta manager after drop mv is fixed
-        let mut stopped_actors: HashSet<u32> = Default::default();
-
         let mut min_interval = tokio::time::interval(Duration::from_millis(100));
 
         loop {
@@ -187,6 +119,7 @@ impl BarrierManager {
             }
             .unwrap();
 
+            // Only wait for minimal interval if no command is scheduled.
             if scheduled.is_none() {
                 min_interval.tick().await;
             }
@@ -194,42 +127,45 @@ impl BarrierManager {
             let all_actors = self.stream_meta_manager.load_all_actors().await?;
             let info = BarrierActorInfo::resolve(all_actors);
 
-            let (mutation, notifier) = scheduled.unwrap_or_else(
-        || (Mutation::Nothing(NothingMutation {}), Default::default()), // default periodic checkpoint barrier
-      );
-            let extra_notifiers = std::mem::take(&mut *self.extra_notifiers.lock().await);
-            let mut notifiers = once(notifier)
-                .chain(extra_notifiers.into_iter())
-                .collect_vec();
+            let (command_context, mut notifiers) = {
+                let (command, notifier) = scheduled.unwrap_or_else(
+                    || (Command::checkpoint(), Default::default()), /* default periodic
+                                                                     * checkpoint barrier */
+                );
+                let extra_notifiers = std::mem::take(&mut *self.extra_notifiers.lock().await);
+                let notifiers = once(notifier)
+                    .chain(extra_notifiers.into_iter())
+                    .collect_vec();
+                let context = CommandContext::new(
+                    self.stream_meta_manager.clone(),
+                    self.clients.clone(),
+                    &info,
+                    command,
+                );
+                (context, notifiers)
+            };
+
+            let mutation = command_context.to_mutation().await?;
 
             let epoch = self.epoch_generator.generate()?.into_inner();
 
             let collect_futures = info.node_map.iter().filter_map(|(node_id, node)| {
-                let mutation = mutation.clone();
-
-                // TODO: remove the filter when inconsistency of stream meta manager after drop mv
-                // is fixeds
-                let actor_ids_to_send = info
-                    .actor_ids_to_send(node_id)
-                    .filter(|id| !stopped_actors.contains(id))
-                    .collect_vec();
-                let actor_ids_to_collect = info
-                    .actor_ids_to_collect(node_id)
-                    .filter(|id| !stopped_actors.contains(id))
-                    .collect_vec();
+                let actor_ids_to_send = info.actor_ids_to_send(node_id).collect_vec();
+                let actor_ids_to_collect = info.actor_ids_to_collect(node_id).collect_vec();
 
                 if actor_ids_to_collect.is_empty() || actor_ids_to_send.is_empty() {
                     // No need to send barrier for this node.
                     None
                 } else {
+                    let mutation = mutation.clone();
+                    let request_id = Uuid::new_v4().to_string();
+                    let barrier = Barrier {
+                        epoch,
+                        mutation: Some(mutation),
+                    };
+
                     async move {
                         let mut client = self.clients.get(node).await?;
-
-                        let request_id = Uuid::new_v4().to_string();
-                        let barrier = Barrier {
-                            epoch,
-                            mutation: Some(mutation),
-                        };
 
                         let request = InjectBarrierRequest {
                             request_id,
@@ -247,35 +183,30 @@ impl BarrierManager {
 
             notifiers.iter_mut().for_each(Notifier::notify_to_send);
             try_join_all(collect_futures).await?; // wait all barriers collected
+            command_context.post_collect().await?; // do some post stuffs
             notifiers.iter_mut().for_each(Notifier::notify_collected);
-
-            // TODO: remove this workaround for stopped actors when meta store inconsistency is
-            // fixed
-            if let Mutation::Stop(StopMutation { actors }) = &mutation {
-                stopped_actors.extend(actors);
-            }
         }
     }
 }
 
 impl BarrierManager {
-    fn do_schedule(&self, mutation: Mutation, notifier: Notifier) -> Result<()> {
+    fn do_schedule(&self, command: Command, notifier: Notifier) -> Result<()> {
         self.scheduled_barriers_tx
-            .send((mutation, notifier))
+            .send((command, notifier))
             .unwrap();
         Ok(())
     }
 
-    /// Schedule a barrier and return immediately.
-    pub async fn schedule_barrier(&self, mutation: Mutation) -> Result<()> {
-        self.do_schedule(mutation, Default::default())
+    /// Schedule a command and return immediately.
+    pub async fn schedule_command(&self, command: Command) -> Result<()> {
+        self.do_schedule(command, Default::default())
     }
 
-    /// Schedule a barrier and returns when it's sent.
-    pub async fn send_barrier(&self, mutation: Mutation) -> Result<()> {
+    /// Schedule a command and return when its coresponding barrier is about to sent.
+    pub async fn issue_command(&self, command: Command) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.do_schedule(
-            mutation,
+            command,
             Notifier {
                 to_send: Some(tx),
                 ..Default::default()
@@ -285,11 +216,11 @@ impl BarrierManager {
         Ok(())
     }
 
-    /// Send a barrier, returns when it's collected / finished by all reachable actors in the graph.
-    pub async fn send_barrier_and_collect(&self, mutation: Mutation) -> Result<()> {
+    /// Run a command and return when it's completely finished.
+    pub async fn run_command(&self, command: Command) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         self.do_schedule(
-            mutation,
+            command,
             Notifier {
                 collected: Some(tx),
                 ..Default::default()
