@@ -615,7 +615,7 @@ impl StreamManagerCore {
                     Ok(cond_prost) => Some(RowExpression::new(build_expr_from_prost(cond_prost)?)),
                     Err(_) => None,
                 };
-                debug!("Join non-equi condition: {:?}", condition);
+                trace!("Join non-equi condition: {:?}", condition);
 
                 macro_rules! impl_create_hash_join_executor {
           ($( { $join_type_proto:ident, $join_type:ident } ),*) => {

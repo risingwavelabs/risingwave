@@ -22,7 +22,6 @@ isahc = "1" # isahc is the http client used for tracing. Always set it as the sa
 itertools = "0.10"
 lazy_static = "1"
 log = "0.4"
-log4rs = "1"
 memcomparable = { path = "../utils/memcomparable" }
 num-traits = "0.2"
 opentelemetry = { version = "0.16", features = ["rt-tokio", "trace"] }

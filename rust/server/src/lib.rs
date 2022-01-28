@@ -51,7 +51,7 @@ pub struct ComputeNodeOpts {
     #[clap(long, default_value = "")]
     pub config_path: String,
 
-    /// Use `tokio-tracing` instead of `log4rs` for observability.
+    /// Enable reporting tracing information to jaeger
     #[clap(long)]
-    pub enable_tracing: bool,
+    pub enable_jaeger_tracing: bool,
 }

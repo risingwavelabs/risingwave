@@ -474,7 +474,6 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
                                 let cond_match = Self::bool_from_array_ref(
                                     cond.eval(&new_row, &self.output_data_types)?,
                                 );
-                                println!("{:?}, match: {}", new_row, cond_match);
                                 if cond_match {
                                     degree += 1;
                                     if matched_row.is_zero_degree() && outer_side_null(T, SIDE) {

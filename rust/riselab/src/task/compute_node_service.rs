@@ -49,15 +49,7 @@ impl Task for ComputeNodeService {
         match provide_jaeger.len() {
             0 => {}
             1 => {
-                if let Ok(data) = env::var("ENABLE_COMPUTE_TRACING") {
-                    if data == "true" {
-                        cmd.arg("--enable-tracing");
-                    }
-                } else {
-                    return Err(anyhow!(
-                        "Jaeger requires tracing to be enabled in ./riselab configure"
-                    ));
-                }
+                cmd.arg("--enable-jaeger-tracing");
             }
             other_size => {
                 return Err(anyhow!(
