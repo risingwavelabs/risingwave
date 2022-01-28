@@ -1497,7 +1497,7 @@ dependencies = [
 
 [[package]]
 name = "frontend"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "async-trait",
  "bit-set",
@@ -3587,7 +3587,7 @@ dependencies = [
 
 [[package]]
 name = "riselab"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "bytes",
@@ -3606,7 +3606,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -3681,7 +3681,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_batch"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -3749,7 +3749,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_common"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -3784,7 +3784,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_connector"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -3838,7 +3838,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_meta"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -3904,7 +3904,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_rpc_client"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "risingwave-pb",
  "risingwave_common",
@@ -3913,7 +3913,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_source"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -3960,7 +3960,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_sqlparser"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "itertools 0.10.3",
  "log",
@@ -3973,7 +3973,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_storage"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -4021,7 +4021,7 @@ dependencies = [
 
 [[package]]
 name = "risingwave_stream"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "approx",
