@@ -41,8 +41,9 @@ rust_test_no_run:
 # Note: "--skip-clean" must be used along with "CARGO_TARGET_DIR=..."
 # See also https://github.com/xd009642/tarpaulin/issues/777
 rust_test_with_coverage:
-	cd rust && RUSTFLAGS=-Dwarnings CARGO_TARGET_DIR=target_tarpaulin cargo tarpaulin --workspace \
-	  --exclude risingwave-pb --exclude-files tests/* --out Xml --skip-clean --run-types Doctests Tests
+	cd rust && RUSTFLAGS=-Dwarnings CARGO_TARGET_DIR=target/tarpaulin cargo tarpaulin --workspace \
+	  --exclude risingwave-pb --exclude-files tests/* --out Xml --force-clean --run-types Doctests Tests \
+	  -- --report-time -Z unstable-options
 
 rust_build:
 	cd rust && cargo build
