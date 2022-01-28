@@ -21,18 +21,13 @@ pub struct SeqScanExecutor {
 }
 
 impl SeqScanExecutor {
-    pub fn new(
-        table: ScannableTableRef,
-        column_ids: Vec<i32>,
-        schema: Schema,
-        identity: String,
-    ) -> Self {
+    pub fn new(table: ScannableTableRef, column_ids: Vec<i32>, schema: Schema) -> Self {
         Self {
             table,
             column_ids,
             schema,
             snapshot: Default::default(),
-            identity,
+            identity: "SeqScanExecutor".to_string(),
         }
     }
 }
@@ -66,14 +61,7 @@ impl BoxedExecutorBuilder for SeqScanExecutor {
                 .collect::<Result<Vec<Field>>>()?,
         );
 
-        let identity = format!("SeqScanExecutor{:?}", source.task_id);
-
-        Ok(Box::new(Self::new(
-            table_ref,
-            column_ids.to_vec(),
-            schema,
-            identity,
-        )))
+        Ok(Box::new(Self::new(table_ref, column_ids.to_vec(), schema)))
     }
 }
 
@@ -121,7 +109,6 @@ mod tests {
     use risingwave_storage::{Table, TableColumnDesc};
 
     use super::*;
-    use crate::task::TaskId;
     use crate::*;
 
     #[tokio::test]
@@ -155,7 +142,7 @@ mod tests {
             column_ids: vec![0],
             schema,
             snapshot: VecDeque::new(),
-            identity: format!("SeqScanExecutor{:?}", TaskId::default()),
+            identity: "SeqScanExecutor".to_string(),
         };
         seq_scan_executor.open().await.unwrap();
 

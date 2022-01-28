@@ -143,7 +143,7 @@ impl<K> HashAggExecutor<K> {
             group_key_types: builder.group_key_types,
             result: None,
             schema: builder.schema,
-            identity: format!("HashAggExecutor{:?}", builder.task_id),
+            identity: "HashAggExecutor".to_string(),
         }
     }
 }

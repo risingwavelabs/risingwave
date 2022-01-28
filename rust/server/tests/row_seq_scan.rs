@@ -4,7 +4,6 @@ extern crate risingwave;
 extern crate risingwave_batch;
 
 use risingwave_batch::executor::{Executor, RowSeqScanExecutor};
-use risingwave_batch::task::TaskId;
 use risingwave_common::array::{Array, Row};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
@@ -45,7 +44,6 @@ async fn test_row_seq_scan() -> Result<()> {
         schema.fields.iter().map(|field| field.data_type).collect(),
         vec![0, 1],
         schema,
-        format!("RowSeqScanExecutor{:?}", TaskId::default()),
     );
 
     let epoch: u64 = 0;

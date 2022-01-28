@@ -83,7 +83,7 @@ impl BoxedExecutorBuilder for ProjectionExecutor {
             expr: project_exprs,
             child: child_node,
             schema: Schema { fields },
-            identity: format!("ProjectionExecutor{:?}", source.task_id),
+            identity: "ProjectionExecutor".to_string(),
         }))
     }
 }
@@ -98,7 +98,6 @@ mod tests {
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
-    use crate::task::TaskId;
     use crate::*;
 
     #[tokio::test]
@@ -128,7 +127,7 @@ mod tests {
             expr: expr_vec,
             child: Box::new(mock_executor),
             schema: Schema { fields },
-            identity: format!("ProjectionExecutor{:?}", TaskId::default()),
+            identity: "ProjectionExecutor".to_string(),
         };
         proj_executor.open().await.unwrap();
 

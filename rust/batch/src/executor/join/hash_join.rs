@@ -396,7 +396,6 @@ mod tests {
     use crate::executor::join::JoinType;
     use crate::executor::test_utils::MockExecutor;
     use crate::executor::BoxedExecutor;
-    use crate::task::TaskId;
 
     struct DataChunkMerger {
         data_types: Vec<DataTypeKind>,
@@ -637,7 +636,7 @@ mod tests {
                 right_child,
                 params,
                 schema,
-                format!("HashJoinExecutor{:?}", TaskId::default()),
+                "HashJoinExecutor".to_string(),
             )) as BoxedExecutor
         }
 

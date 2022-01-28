@@ -92,7 +92,7 @@ impl<CS: 'static + CreateSource> BoxedExecutorBuilder for GenericExchangeExecuto
             current_source: None,
             schema: Schema { fields },
             task_id: source.task_id.clone(),
-            identity: format!("GenericExchangeExecutor{:?}", source.task_id),
+            identity: "GenericExchangeExecutor".to_string(),
         }))
     }
 }
@@ -202,7 +202,7 @@ mod tests {
                 fields: vec![Field::unnamed(DataTypeKind::Int32)],
             },
             task_id: TaskId::default(),
-            identity: format!("GenericExchangeExecutor{:?}", TaskId::default()),
+            identity: "GenericExchangeExecutor".to_string(),
         };
 
         let mut chunks: usize = 0;

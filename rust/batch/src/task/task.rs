@@ -10,6 +10,7 @@ use risingwave_pb::plan::{
 };
 use risingwave_pb::task_service::task_info::TaskStatus;
 use risingwave_pb::task_service::GetDataResponse;
+use tracing_futures::Instrument;
 
 use crate::executor::{BoxedExecutor, ExecutorBuilder};
 use crate::rpc::service::exchange::ExchangeWriter;
@@ -204,7 +205,15 @@ impl TaskExecution {
             let join_handle = tokio::spawn(async move {
                 // We should only pass a reference of sender to execution because we should only
                 // close it after task error has been set.
-                if let Err(e) = TaskExecution::try_execute(exec, &mut sender).await {
+                if let Err(e) = TaskExecution::try_execute(exec, &mut sender)
+                    .instrument(tracing::trace_span!(
+                      "batch_execute",
+                      task_id = ?task_id.task_id,
+                      stage_id = ?task_id.stage_id,
+                      query_id = ?task_id.query_id,
+                    ))
+                    .await
+                {
                     // Prints the entire backtrace of error.
                     error!("Execution failed [{:?}]: {:?}", &task_id, &e);
                     *failure.lock().unwrap() = Some(e);

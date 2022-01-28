@@ -213,7 +213,7 @@ impl<CS: 'static + CreateSource> BoxedExecutorBuilder for MergeSortExchangeExecu
             schema: Schema { fields },
             first_execution: true,
             task_id: source.task_id.clone(),
-            identity: format!("MergeSortExchangeExecutor{:?}", source.task_id),
+            identity: "MergeSortExchangeExecutor".to_string(),
         }))
     }
 }
@@ -289,7 +289,7 @@ mod tests {
             },
             first_execution: true,
             task_id: TaskId::default(),
-            identity: format!("MergeSortExchangeExecutor{:?}", TaskId::default()),
+            identity: "MergeSortExchangeExecutor".to_string(),
         };
 
         let res = executor.next().await.unwrap();

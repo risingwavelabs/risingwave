@@ -84,7 +84,7 @@ impl BoxedExecutorBuilder for TopNExecutor {
                 child,
                 order_pairs,
                 top_n_node.get_limit() as usize,
-                format!("TopNExecutor{:?}", source.task_id),
+                "TopNExecutor".to_string(),
             )));
         }
         Err(InternalError("TopN must have one child".to_string()).into())
@@ -157,7 +157,6 @@ mod tests {
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
-    use crate::task::TaskId;
 
     fn create_column(vec: &[Option<i32>]) -> Result<Column> {
         let array = PrimitiveArray::from_slice(vec).map(|x| Arc::new(x.into()))?;
@@ -193,7 +192,7 @@ mod tests {
             Box::new(mock_executor),
             order_pairs,
             2usize,
-            format!("TopNExecutor{:?}", TaskId::default()),
+            "TopNExecutor".to_string(),
         );
         let fields = &top_n_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataTypeKind::Int32);

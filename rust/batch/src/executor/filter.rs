@@ -109,7 +109,7 @@ impl BoxedExecutorBuilder for FilterExecutor {
                 child,
                 chunk_builder,
                 last_input: None,
-                identity: format!("FilterExecutor{:?}", source.task_id),
+                identity: "FilterExecutor".to_string(),
             }));
         }
         Err(InternalError("Filter must have one children".to_string()).into())
@@ -133,7 +133,6 @@ mod tests {
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
-    use crate::task::TaskId;
 
     #[tokio::test]
     async fn test_filter_executor() {
@@ -158,7 +157,7 @@ mod tests {
             child: Box::new(mock_executor),
             chunk_builder,
             last_input: None,
-            identity: format!("FilterExecutor{:?}", TaskId::default()),
+            identity: "FilterExecutor".to_string(),
         };
         let fields = &filter_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataTypeKind::Int32);

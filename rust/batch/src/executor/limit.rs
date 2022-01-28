@@ -42,7 +42,7 @@ impl BoxedExecutorBuilder for LimitExecutor {
                 offset,
                 skipped: 0,
                 returned: 0,
-                identity: format!("LimitExecutor{:?}", source.task_id),
+                identity: "LimitExecutor".to_string(),
             }));
         }
         Err(InternalError("Limit must have one child".to_string()).into())
@@ -130,7 +130,6 @@ mod tests {
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
-    use crate::task::TaskId;
 
     fn create_column(vec: &[Option<i32>]) -> Result<Column> {
         let array = PrimitiveArray::from_slice(vec).map(|x| Arc::new(x.into()))?;
@@ -168,7 +167,7 @@ mod tests {
             offset,
             skipped: 0,
             returned: 0,
-            identity: format!("LimitExecutor{:?}", TaskId::default()),
+            identity: "LimitExecutor".to_string(),
         };
         let fields = &limit_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataTypeKind::Int32);
@@ -307,7 +306,7 @@ mod tests {
             offset,
             skipped: 0,
             returned: 0,
-            identity: format!("LimitExecutor{:?}", TaskId::default()),
+            identity: "LimitExecutor".to_string(),
         };
         limit_executor.open().await.unwrap();
 

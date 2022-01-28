@@ -74,7 +74,7 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
             reader,
             done: false,
             schema: Schema { fields },
-            identity: format!("StreamScanExecutor{:?}", source.task_id),
+            identity: "StreamScanExecutor".to_string(),
         }))
     }
 }
@@ -122,7 +122,6 @@ mod tests {
     use risingwave_common::types::DataTypeKind;
 
     use super::*;
-    use crate::task::TaskId;
 
     struct MockSourceReader {}
 
@@ -153,7 +152,7 @@ mod tests {
             reader: Box::new(reader),
             done: false,
             schema: Schema::new(vec![Field::unnamed(DataTypeKind::Int32)]),
-            identity: format!("StreamScanExecutor{:?}", TaskId::default()),
+            identity: "StreamScanExecutor".to_string(),
         };
         executor.open().await.unwrap();
 

@@ -76,7 +76,7 @@ impl BoxedExecutorBuilder for CreateTableExecutor {
             source_manager: source.global_task_env().source_manager_ref(),
             table_columns: node.column_descs.clone(),
             v2: node.v2,
-            identity: format!("CreateTableExecutor{:?}", source.task_id),
+            identity: "CreateTableExecutor".to_string(),
             is_materialized_view: node.is_materialized_view,
             associated_table_id,
             pk_indices: pks,

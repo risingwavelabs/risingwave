@@ -115,7 +115,7 @@ impl BoxedExecutorBuilder for ValuesExecutor {
         Ok(Box::new(Self {
             rows,
             schema: Schema { fields },
-            identity: format!("ValuesExecutor{:?}", source.task_id),
+            identity: "ValuesExecutor".to_string(),
         }))
     }
 }
@@ -127,7 +127,6 @@ mod tests {
     use risingwave_common::types::{DataTypeKind, ScalarImpl};
 
     use super::*;
-    use crate::task::TaskId;
 
     #[tokio::test]
     async fn test_values_executor() -> Result<()> {
@@ -155,7 +154,7 @@ mod tests {
         let mut values_executor = ValuesExecutor {
             rows: exprs,
             schema: Schema { fields },
-            identity: format!("ValuesExecutor{:?}", TaskId::default()),
+            identity: "ValuesExecutor".to_string(),
         };
         values_executor.open().await.unwrap();
 

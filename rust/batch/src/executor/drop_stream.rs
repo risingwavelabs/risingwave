@@ -52,7 +52,7 @@ impl BoxedExecutorBuilder for DropStreamExecutor {
             table_id,
             source_manager: source.global_task_env().source_manager_ref(),
             schema: Schema { fields: vec![] },
-            identity: format!("DropStreamExecutor{:?}", source.task_id),
+            identity: "DropStreamExecutor".to_string(),
         }))
     }
 }

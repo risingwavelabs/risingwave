@@ -3,7 +3,6 @@ use std::sync::Arc;
 use risingwave_batch::executor::{
     CreateTableExecutor, Executor as BatchExecutor, InsertExecutor, SeqScanExecutor,
 };
-use risingwave_batch::task::TaskId;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{Array, DataChunk, F64Array};
 use risingwave_common::array_nonnull;
@@ -31,11 +30,11 @@ struct SingleChunkExecutor {
 }
 
 impl SingleChunkExecutor {
-    pub fn new(chunk: DataChunk, schema: Schema, identity: String) -> Self {
+    pub fn new(chunk: DataChunk, schema: Schema) -> Self {
         Self {
             chunk: Some(chunk),
             schema,
-            identity,
+            identity: "SingleChunkExecutor".to_string(),
         }
     }
 }
@@ -97,7 +96,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         table_manager.clone(),
         source_manager.clone(),
         table_columns,
-        format!("CreateTableExecutorV2 {:?}", TaskId::default()),
+        "CreateTableExecutorV2 ".to_string(),
     );
     // Execute
     create_table.open().await?;
@@ -154,16 +153,11 @@ async fn test_table_v2_materialize() -> Result<()> {
         array_nonnull! { F64Array, [1.14, 5.14] }.into(),
     ))];
     let chunk = DataChunk::builder().columns(columns.clone()).build();
-    let insert_inner = SingleChunkExecutor::new(
-        chunk,
-        all_schema,
-        format!("SingleChunkExecutor{:?}", TaskId::default()),
-    );
+    let insert_inner = SingleChunkExecutor::new(chunk, all_schema);
     let mut insert = InsertExecutor::new(
         mview_id.clone(),
         source_manager.clone(),
         Box::new(insert_inner),
-        format!("InsertExecutor{:?}", TaskId::default()),
     );
 
     insert.open().await?;
@@ -175,12 +169,8 @@ async fn test_table_v2_materialize() -> Result<()> {
     let data_column_ids = vec![233];
     let data_schema = get_schema(&data_column_ids);
 
-    let mut scan = SeqScanExecutor::new(
-        table.clone(),
-        data_column_ids.clone(),
-        data_schema.clone(),
-        format!("SeqScanExecutor{:?}", TaskId::default()),
-    );
+    let mut scan =
+        SeqScanExecutor::new(table.clone(), data_column_ids.clone(), data_schema.clone());
     scan.open().await?;
     let c = scan.next().await?.unwrap();
     assert_eq!(c.cardinality(), 0);
@@ -211,12 +201,8 @@ async fn test_table_v2_materialize() -> Result<()> {
     ));
 
     // Scan the table again, we are able to get the data now!
-    let mut scan = SeqScanExecutor::new(
-        table.clone(),
-        data_column_ids.clone(),
-        data_schema.clone(),
-        format!("SeqScanExecutor{:?}", TaskId::default()),
-    );
+    let mut scan =
+        SeqScanExecutor::new(table.clone(), data_column_ids.clone(), data_schema.clone());
     scan.open().await?;
     let c = scan.next().await?.unwrap();
     let col_data = c.columns()[0].array_ref().as_float64();

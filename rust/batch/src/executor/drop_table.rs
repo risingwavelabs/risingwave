@@ -27,7 +27,7 @@ impl BoxedExecutorBuilder for DropTableExecutor {
             table_id,
             table_manager: source.global_task_env().table_manager_ref(),
             schema: Schema { fields: vec![] },
-            identity: format!("DropTableExecutor{:?}", source.task_id),
+            identity: "DropTableExecutor".to_string(),
         }))
     }
 }

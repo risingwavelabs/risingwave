@@ -283,7 +283,7 @@ impl BoxedExecutorBuilder for SortMergeJoinExecutor {
                             build_table_source,
                             probe_key_idxs,
                             build_key_idxs,
-                            format!("SortMergeJoinExecutor{:?}", source.task_id),
+                            "SortMergeJoinExecutor".to_string(),
                         )))
                     }
                     _ => unimplemented!("Do not support {:?} join type now.", join_type),
@@ -308,7 +308,6 @@ mod tests {
     use crate::executor::join::JoinType;
     use crate::executor::test_utils::{diff_executor_output, MockExecutor};
     use crate::executor::BoxedExecutor;
-    use crate::task::TaskId;
 
     struct TestFixture {
         left_types: Vec<DataTypeKind>,
@@ -456,7 +455,7 @@ mod tests {
                 RowLevelIter::new(right_child),
                 vec![0],
                 vec![0],
-                format!("SortMergeJoinExecutor{:?}", TaskId::default()),
+                "SortMergeJoinExecutor".to_string(),
             ))
         }
 

@@ -33,7 +33,7 @@ impl BoxedExecutorBuilder for GenerateSeriesI32Executor {
             step: node.step,
             cur: node.start,
             schema: Schema::new(vec![Field::unnamed(DataTypeKind::Int32)]),
-            identity: format!("GenerateSeriesI32Executor{:?}", source.task_id),
+            identity: "GenerateSeriesI32Executor".to_string(),
         }))
     }
 }
@@ -96,7 +96,6 @@ mod tests {
     use risingwave_common::try_match_expand;
 
     use super::*;
-    use crate::task::TaskId;
 
     #[tokio::test]
     async fn test_generate_series() {
@@ -112,7 +111,7 @@ mod tests {
             step,
             cur: start,
             schema: Schema::new(vec![Field::unnamed(DataTypeKind::Int32)]),
-            identity: format!("GenerateSeriesI32Executor{:?}", TaskId::default()),
+            identity: "GenerateSeriesI32Executor".to_string(),
         };
         let mut remained_values = ((stop - start) / step + 1) as usize;
         while remained_values > 0 {

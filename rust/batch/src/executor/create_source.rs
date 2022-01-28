@@ -132,7 +132,7 @@ impl BoxedExecutorBuilder for CreateSourceExecutor {
             schema_location: schema_location.clone(),
             parser: None,
             row_id_index,
-            identity: format!("CreateSourceExecutor{:?}", source.task_id),
+            identity: "CreateSourceExecutor".to_string(),
         }))
     }
 }

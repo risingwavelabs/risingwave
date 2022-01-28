@@ -57,7 +57,7 @@ impl BoxedExecutorBuilder for OrderByExecutor {
                 encoded_keys: vec![],
                 encodable: false,
                 disable_encoding: false,
-                identity: format!("OrderByExecutor{:?}", source.task_id),
+                identity: "OrderByExecutor".to_string(),
             }));
         }
         Err(InternalError("OrderBy must have one child".to_string()).into())
@@ -225,7 +225,6 @@ mod tests {
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
-    use crate::task::TaskId;
 
     fn create_column_i32(vec: &[Option<i32>]) -> Result<Column> {
         let array = PrimitiveArray::from_slice(vec).map(|x| Arc::new(x.into()))?;
@@ -298,7 +297,7 @@ mod tests {
             encoded_keys: vec![],
             encodable: false,
             disable_encoding: false,
-            identity: format!("OrderByExecutor{:?}", TaskId::default()),
+            identity: "OrderByExecutor".to_string(),
         };
         let fields = &order_by_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataTypeKind::Int32);
@@ -352,7 +351,7 @@ mod tests {
             encoded_keys: vec![],
             encodable: false,
             disable_encoding: false,
-            identity: format!("OrderByExecutor{:?}", TaskId::default()),
+            identity: "OrderByExecutor".to_string(),
         };
         let fields = &order_by_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataTypeKind::Float32);
@@ -415,7 +414,7 @@ mod tests {
             encoded_keys: vec![],
             encodable: false,
             disable_encoding: false,
-            identity: format!("OrderByExecutor{:?}", TaskId::default()),
+            identity: "OrderByExecutor".to_string(),
         };
         let fields = &order_by_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataTypeKind::Varchar);
@@ -510,7 +509,7 @@ mod tests {
                 encoded_keys: vec![],
                 encodable: false,
                 disable_encoding: !enable_encoding,
-                identity: format!("OrderByExecutor{:?}", TaskId::default()),
+                identity: "OrderByExecutor".to_string(),
             };
             let future = order_by_executor.open();
             tokio_test::block_on(future).unwrap();
