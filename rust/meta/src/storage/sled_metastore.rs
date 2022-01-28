@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
@@ -75,95 +75,50 @@ impl SledMetaStore {
                     }
                 }
             }
-            let mut is_point_read_greatest_version = false;
-            if target_key_version.is_none() && key_prefix.is_none() {
-                // get the greatest version for the key
-                key_prefix = Some(&key);
-                is_point_read_greatest_version = true;
-            }
-            match key_prefix {
-                Some(prefix) => {
-                    // range read, or point read the greatest version
-                    let prefix_matched_kvs = db_guard
-                        .scan_prefix(prefix)
-                        .map(|r| {
-                            r.map_err(|e| {
-                                RwError::from(crate::storage::Error::StorageError(e.to_string()))
-                            })
-                        })
-                        .collect::<Result<Vec<(IVec, IVec)>>>()?
-                        .into_iter()
-                        .map(|(k, v)| {
-                            KeyValue::new(
-                                KeyWithVersion::get_key(&k),
-                                v.to_vec(),
-                                KeyWithVersion::get_version(&k).into_inner(),
-                            )
-                        })
-                        .collect_vec();
-                    let kvs: Vec<KeyValue> = match target_key_version {
-                        Some(key_version) => {
-                            // get all kvs with the specified key_version
-                            prefix_matched_kvs
-                                .into_iter()
-                                .filter(|kv| {
-                                    prefix.len() <= kv.key().len() && kv.version() == *key_version
-                                })
-                                .collect()
-                        }
-                        None => {
-                            // get all kvs with their greatest versions
-                            let mut greatest_version: HashMap<Key, KeyValueVersion> =
-                                HashMap::new();
-                            prefix_matched_kvs.iter().for_each(|kv| {
-                                if (is_point_read_greatest_version && *kv.key() != key)
-                                    || prefix.len() > kv.key().len()
-                                {
-                                    return;
-                                }
-                                match greatest_version.get(kv.key()) {
-                                    Some(cur_version) => {
-                                        if *cur_version < kv.version() {
-                                            greatest_version.insert(kv.key().clone(), kv.version());
-                                        }
-                                    }
-                                    None => {
-                                        greatest_version.insert(kv.key().clone(), kv.version());
-                                    }
-                                }
-                            });
-                            prefix_matched_kvs
-                                .into_iter()
-                                .filter(|kv| match greatest_version.get(kv.key()) {
-                                    Some(version) => *version == kv.version(),
-                                    None => false,
-                                })
-                                .collect()
-                        }
-                    };
-                    batch_result.extend(kvs);
+            let (range_start, range_end) = {
+                if key_prefix.is_none() {
+                    KeyWithVersion::point_lookup_key_range(key.as_slice())
+                } else {
+                    KeyWithVersion::range_lookup_key_range(key_prefix.as_ref().unwrap())
+                }
+            };
+
+            // 1. Get all matched kvs with all versions
+            let matched_keys = db_guard
+                .range(range_start.as_slice()..range_end.as_slice())
+                .map(|r| {
+                    r.map_err(|e| RwError::from(crate::storage::Error::StorageError(e.to_string())))
+                })
+                .collect::<Result<Vec<(IVec, IVec)>>>()?
+                .into_iter()
+                .map(|(k, v)| {
+                    let (key, version) = KeyWithVersion::deserialize(k.as_ref()).unwrap();
+                    KeyValue::new(key, v.to_vec(), version)
+                });
+            // 2. Select kvs with target version
+            let mut matched_versions = match target_key_version {
+                Some(key_version) => {
+                    // Get all kvs with the specified key_version
+                    matched_keys
+                        .filter(|kv| kv.version() == *key_version)
+                        .collect_vec()
                 }
                 None => {
-                    // point read
-                    let kvs = match target_key_version {
-                        Some(key_version) => {
-                            // get the kv with the specified key_version
-                            let result = db_guard
-                                .get(KeyWithVersion::compose_key_version(&key, *key_version))
-                                .map_err(|e| crate::storage::Error::StorageError(e.to_string()))?
-                                .map(|iv| iv.to_vec());
-                            match result {
-                                Some(item) => vec![KeyValue::new(key, item, *key_version)],
-                                None => vec![],
+                    // Get all kvs with their greatest versions. Entries with the same key are
+                    // already ordered by version desc.
+                    let mut seen: HashSet<Key> = HashSet::new();
+                    matched_keys
+                        .filter(|kv| {
+                            if seen.contains(kv.key()) {
+                                return false;
                             }
-                        }
-                        None => {
-                            panic!()
-                        }
-                    };
-                    batch_result.extend(kvs);
+                            seen.insert(kv.key().to_owned());
+                            true
+                        })
+                        .collect_vec()
                 }
-            }
+            };
+            batch_result.append(matched_versions.as_mut());
         }
         Ok(batch_result)
     }
@@ -352,7 +307,7 @@ impl SledTransaction {
                 key_version = *version;
             }
         }
-        let composed_key = KeyWithVersion::compose_key_version(key, key_version);
+        let composed_key = KeyWithVersion::serialize(key, key_version);
         tx_db.insert(composed_key.as_slice(), value)?;
         Ok(())
     }
@@ -374,7 +329,7 @@ impl SledTransaction {
         match key_version {
             Some(version) => {
                 // delete specified version
-                let composed_key = KeyWithVersion::compose_key_version(key, version);
+                let composed_key = KeyWithVersion::serialize(key, version);
                 tx_db.remove(composed_key.as_slice())?;
             }
             None => {
@@ -393,7 +348,7 @@ impl SledTransaction {
     ) -> std::result::Result<bool, sled::transaction::UnabortableTransactionError> {
         match precondition {
             Precondition::KeyExists { key, version } => {
-                let composed_key = KeyWithVersion::compose_key_version(
+                let composed_key = KeyWithVersion::serialize(
                     key,
                     version.unwrap_or(SINGLE_VERSION_EPOCH.into_inner()),
                 );
@@ -427,21 +382,12 @@ impl Transaction for SledTransaction {
                 }
                 // Version is not specified, so perform a range delete.
                 let mut batch = Batch::default();
+                let (start_range, end_range) = KeyWithVersion::point_lookup_key_range(key);
                 db_guard
-                    .scan_prefix(key)
+                    .range(start_range.as_slice()..end_range.as_slice())
                     .collect::<std::result::Result<Vec<(IVec, IVec)>, sled::Error>>()?
                     .into_iter()
-                    .map(|(k, v)| {
-                        KeyValue::new(
-                            KeyWithVersion::get_key(&k),
-                            v.to_vec(),
-                            KeyWithVersion::get_version(&k).into_inner(),
-                        )
-                    })
-                    .filter(|kv| kv.key() == key)
-                    .for_each(|kv| {
-                        batch.remove(KeyWithVersion::compose_key_version(kv.key(), kv.version()))
-                    });
+                    .for_each(|(k, _)| batch.remove(k));
                 operations_meta[index] = Some(batch);
             }
         }
@@ -603,6 +549,11 @@ mod tests {
                 118,
                 "value2_medium_version".as_bytes().to_vec(),
             ),
+            (
+                "key222".as_bytes().to_vec(),
+                150,
+                "value222".as_bytes().to_vec(),
+            ),
         ])?;
 
         // get the kv with greatest version
@@ -640,13 +591,13 @@ mod tests {
 
         // Key with specified version doesn't exist. There is no kvs with the same key.
         let result = meta_store.get_impl(vec![(
-            "key0".as_bytes().to_vec(),
+            "key".as_bytes().to_vec(),
             vec![OperationOption::WithVersion(118)],
         )])?;
         assert!(result.is_empty());
 
         // Key with greatest version doesn't exist. There is no kvs with the same key.
-        let result = meta_store.get_impl(vec![("key0".as_bytes().to_vec(), vec![])])?;
+        let result = meta_store.get_impl(vec![("key".as_bytes().to_vec(), vec![])])?;
         assert!(result.is_empty());
 
         // get kvs prefixed by specified string with greatest version
@@ -666,6 +617,11 @@ mod tests {
                     "key2".as_bytes().to_vec(),
                     "value2_greatest_version".as_bytes().to_vec(),
                     121
+                ),
+                KeyValue::new(
+                    "key222".as_bytes().to_vec(),
+                    "value222".as_bytes().to_vec(),
+                    150,
                 )
             ],
             result

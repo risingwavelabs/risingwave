@@ -96,58 +96,65 @@ pub enum OperationOption {
 pub type MetaStoreRef = Arc<dyn MetaStore>;
 pub type BoxedTransaction = Box<dyn Transaction>;
 
-// TODO: introduce sled/etcd as storage engine here.
-#[derive(Clone)]
-pub(crate) struct KeyWithVersion(Vec<u8>);
+// TODO: introduce etcd as storage engine here.
 
-// TODO use memcomparable encoding
+pub(crate) struct KeyWithVersion {}
+
 impl KeyWithVersion {
-    const VERSION_BYTES: usize = 8_usize;
-
-    pub fn compose(key: &[u8], version: KeyValueVersion) -> KeyWithVersion {
-        KeyWithVersion(KeyWithVersion::compose_key_version(key, version))
+    /// The serialized result contains two parts
+    /// 1. The key part, which is in memcomparable format.
+    /// 2. The version part, which is the bitwise inversion of the given version.
+    pub fn serialize(key: &[u8], version: KeyValueVersion) -> Vec<u8> {
+        KeyWithVersion::serialize_key(key)
+            .into_iter()
+            .chain((KeyValueVersion::MAX - version).to_be_bytes().into_iter())
+            .collect()
     }
 
-    pub fn into_inner(self) -> Vec<u8> {
-        self.0
+    /// This range will match entries whose key is the given `key`.
+    /// Versions won't be filtered out.
+    pub fn point_lookup_key_range(key: &[u8]) -> (Vec<u8>, Vec<u8>) {
+        let start = KeyWithVersion::serialize_key(key);
+        let mut end = start.to_owned();
+        *end.last_mut().unwrap() = 1;
+        (start, end)
     }
 
-    pub fn inner(&self) -> &Vec<u8> {
-        &self.0
+    /// This range will match entries whose key is prefixed by the given `key`.
+    /// Versions won't be filtered out.
+    pub fn range_lookup_key_range(key: &[u8]) -> (Vec<u8>, Vec<u8>) {
+        let start = KeyWithVersion::serialize_key(key);
+        let mut next_key = key.to_vec();
+        if next_key.is_empty() || *next_key.last().unwrap() == u8::MAX {
+            next_key.push(0u8);
+        } else {
+            *next_key.last_mut().unwrap() += 1;
+        }
+        let end = KeyWithVersion::serialize_key(&next_key);
+        (start, end)
     }
 
-    pub fn key(&self) -> Vec<u8> {
-        KeyWithVersion::get_key(&self.0)
+    /// Get the key part in memcomparable format.
+    fn serialize_key(key: &[u8]) -> Vec<u8> {
+        memcomparable::to_vec(&key).unwrap()
     }
 
-    pub fn version(&self) -> Epoch {
-        KeyWithVersion::get_version(&self.0)
-    }
-
-    pub fn next_key(&self) -> Vec<u8> {
-        let mut key = self.key();
-        let len = key.len();
-        key[len - 1] += 1;
-        key
-    }
-
-    // caller should ensure `vec` is valid
-    pub fn get_key(vec: &impl AsRef<[u8]>) -> Vec<u8> {
-        vec.as_ref()[..vec.as_ref().len() - KeyWithVersion::VERSION_BYTES].to_vec()
-    }
-
-    // caller should ensure `vec` is valid
-    pub fn get_version(vec: &impl AsRef<[u8]>) -> Epoch {
-        u64::from_be_bytes(
-            vec.as_ref()[vec.as_ref().len() - KeyWithVersion::VERSION_BYTES..]
-                .try_into()
-                .unwrap(),
-        )
-        .into()
-    }
-
-    pub fn compose_key_version(key: &[u8], version: KeyValueVersion) -> Vec<u8> {
-        [key, version.to_be_bytes().as_slice()].concat()
+    pub fn deserialize(key_with_version: &[u8]) -> Option<(Key, KeyValueVersion)> {
+        let version_field_size = std::mem::size_of::<KeyValueVersion>();
+        if key_with_version.len() <= version_field_size {
+            return None;
+        }
+        let key_slice = &key_with_version[..key_with_version.len() - version_field_size];
+        let key = match memcomparable::from_slice::<Vec<u8>>(key_slice) {
+            Ok(key) => key,
+            Err(_) => return None,
+        };
+        let version =
+            match key_with_version[key_with_version.len() - version_field_size..].try_into() {
+                Ok(version) => KeyValueVersion::MAX - u64::from_be_bytes(version),
+                Err(_) => return None,
+            };
+        Some((key, version))
     }
 }
 
@@ -416,14 +423,36 @@ mod tests {
 
     #[test]
     fn test_key_with_version() -> Result<()> {
-        let key1 = KeyWithVersion::compose(b"key-1", 1);
-        let key2 = KeyWithVersion::compose(b"key-2", 2);
-        assert_eq!(key1.key(), b"key-1".as_slice().to_vec());
-        assert_eq!(key2.key(), b"key-2".as_slice().to_vec());
-        assert_eq!(key1.version().into_inner(), 1);
-        assert_eq!(key2.version().into_inner(), 2);
-        assert_eq!(key1.next_key(), b"key-2".as_slice().to_vec());
-        assert_eq!(key2.next_key(), b"key-3".as_slice().to_vec());
+        let composed_key1 = KeyWithVersion::serialize(b"key-1", 1);
+        let composed_key2 = KeyWithVersion::serialize(b"key-2", 2);
+        let (key1, version1) = KeyWithVersion::deserialize(&composed_key1).unwrap();
+        let (key2, version2) = KeyWithVersion::deserialize(&composed_key2).unwrap();
+        assert_eq!(key1, b"key-1".as_slice().to_vec());
+        assert_eq!(key2, b"key-2".as_slice().to_vec());
+        assert_eq!(version1, 1);
+        assert_eq!(version2, 2);
+
+        let key = vec![0x1, 0x2, 0xfe];
+        assert_eq!(
+            KeyWithVersion::serialize_key(&key),
+            vec![1, 0x1, 1, 0x2, 1, 0xfe, 0]
+        );
+        let (start, end) = KeyWithVersion::point_lookup_key_range(&key);
+        assert_eq!(
+            (start, end),
+            (
+                vec![1, 0x1, 1, 0x2, 1, 0xfe, 0],
+                vec![1, 0x1, 1, 0x2, 1, 0xfe, 1]
+            )
+        );
+        let (start, end) = KeyWithVersion::range_lookup_key_range(&key);
+        assert_eq!(
+            (start, end),
+            (
+                vec![1, 0x1, 1, 0x2, 1, 0xfe, 0],
+                vec![1, 0x1, 1, 0x2, 1, 0xff, 0]
+            )
+        );
 
         Ok(())
     }

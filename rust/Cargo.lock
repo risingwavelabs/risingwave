@@ -3881,6 +3881,7 @@ dependencies = [
  "lazy_static",
  "log",
  "log4rs",
+ "memcomparable",
  "num-integer",
  "num-traits",
  "paste",
