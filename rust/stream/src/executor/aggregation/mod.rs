@@ -93,28 +93,28 @@ pub fn create_streaming_agg_state(
     datum: Option<Datum>,
 ) -> Result<Box<dyn StreamingAggStateImpl>> {
     macro_rules! gen_unary_agg_state_match {
-    ($agg_type_expr:expr, $input_type_expr:expr, $return_type_expr:expr, $datum: expr, [$(($agg_type:ident, $input_type:ident, $return_type:ident, $state_impl:ty)),*$(,)?]) => {
-      match (
-        $agg_type_expr,
-        $input_type_expr,
-        $return_type_expr,
-        $datum,
-      ) {
-        $(
-          (AggKind::$agg_type, $input_type! { type_match_pattern }, $return_type! { type_match_pattern }, Some(datum)) => {
-            Box::new(<$state_impl>::try_from(datum)?)
-          }
-          (AggKind::$agg_type, $input_type! { type_match_pattern }, $return_type! { type_match_pattern }, None) => {
-            Box::new(<$state_impl>::new())
-          }
-        )*
-        (other_agg, other_input, other_return, _) => panic!(
-          "streaming state not implemented: {:?} {:?} {:?}",
-          other_agg, other_input, other_return
-        )
-      }
+        ($agg_type_expr:expr, $input_type_expr:expr, $return_type_expr:expr, $datum: expr, [$(($agg_type:ident, $input_type:ident, $return_type:ident, $state_impl:ty)),*$(,)?]) => {
+            match (
+                $agg_type_expr,
+                $input_type_expr,
+                $return_type_expr,
+                $datum,
+            ) {
+                $(
+                    (AggKind::$agg_type, $input_type! { type_match_pattern }, $return_type! { type_match_pattern }, Some(datum)) => {
+                        Box::new(<$state_impl>::try_from(datum)?)
+                    }
+                    (AggKind::$agg_type, $input_type! { type_match_pattern }, $return_type! { type_match_pattern }, None) => {
+                        Box::new(<$state_impl>::new())
+                    }
+                )*
+                (other_agg, other_input, other_return, _) => panic!(
+                    "streaming state not implemented: {:?} {:?} {:?}",
+                    other_agg, other_input, other_return
+                )
+            }
+        }
     }
-  }
 
     let state: Box<dyn StreamingAggStateImpl> = match input_types {
         [input_type] => {

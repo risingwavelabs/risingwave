@@ -225,32 +225,32 @@ pub trait IntoPlanRef {
 }
 /// impl fn plan_ref for each node.
 macro_rules! impl_plan_ref {
-  ([], $( { $convention:ident, $name:ident }),*) => {
-    paste!{
-      $(impl IntoPlanRef for [<$convention $name>] {
-        fn into_plan_ref(self) -> PlanRef {
-          std::rc::Rc::new(self)
+    ([], $( { $convention:ident, $name:ident }),*) => {
+        paste!{
+            $(impl IntoPlanRef for [<$convention $name>] {
+                fn into_plan_ref(self) -> PlanRef {
+                    std::rc::Rc::new(self)
+                }
+                fn clone_as_plan_ref(&self) -> PlanRef{
+                    self.clone().into_plan_ref()
+                }
+            })*
         }
-        fn clone_as_plan_ref(&self) -> PlanRef{
-          self.clone().into_plan_ref()
-        }
-     })*
     }
-  }
 }
 for_all_plan_nodes! {impl_plan_ref }
 
 /// impl plan node downcast fn for each node.
 macro_rules! impl_down_cast_fn {
-  ([], $( { $convention:ident, $name:ident }),*) => {
-    paste!{
-      #[allow(unused)]
-      impl dyn PlanNode {
-        $( pub fn [< as_$convention:snake _ $name:snake>](&self) -> Option<&[<$convention $name>]> {
-          self.downcast_ref::<[<$convention $name>]>()
-        } )*
-      }
+    ([], $( { $convention:ident, $name:ident }),*) => {
+        paste!{
+            #[allow(unused)]
+            impl dyn PlanNode {
+                $( pub fn [< as_$convention:snake _ $name:snake>](&self) -> Option<&[<$convention $name>]> {
+                    self.downcast_ref::<[<$convention $name>]>()
+                } )*
+            }
+        }
     }
-  }
 }
 for_all_plan_nodes! {impl_down_cast_fn }
