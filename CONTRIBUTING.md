@@ -1,6 +1,6 @@
 Thanks for your interest in contributing to RisingWave! Contributions of many kinds are encouraged and most welcome.
 
-If you have questions, please [create a Github issue](https://github.com/singularity-data/risingwave/issues/new/choose).
+If you have questions, please [create a Github issue](https://github.com/singularity-data/risingwave-dev/issues/new/choose).
 
 There are some tips for you.
 
@@ -135,7 +135,7 @@ For example, a PR title could be:
 - `refactor: modify executor protobuf package path`
 - `feat(execution): enable comparison between nullable data arrays`, where `(execution)` means that this PR mainly focuses on the execution component.
 
-You may also check out our previous PRs in the [PR list](https://github.com/singularity-data/risingwave/pulls).
+You may also check out our previous PRs in the [PR list](https://github.com/singularity-data/risingwave-dev/pulls).
 
 ## Pull Request Description
 

@@ -158,7 +158,7 @@ async fn run_op(store: impl StateStore, opts: &Opts) {
 }
 
 /// This is used to bench the state store performance.
-/// For usage, see: https://github.com/singularity-data/risingwave/blob/main/docs/developer/benchmark_tool/state_store.md
+/// For usage, see: https://github.com/singularity-data/risingwave-dev/blob/main/docs/developer/benchmark_tool/state_store.md
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
     let opts = Opts::parse();
