@@ -1,0 +1,4 @@
+query R
+select avg_yearly from tpch_q17;
+----
+386.1428571428571429
