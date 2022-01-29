@@ -58,7 +58,9 @@ Uncomment `grafana` and `prometheus` services in `riselab.yml`, and you can view
 
 ## Tracing
 
-Compute node supports streaming tracing. Simply uncomment `jaeger` service in `riselab.yml`.
+Compute node supports streaming tracing. Tracing is not enabled by default, and you will need to
+use `./riselab configure` to enable tracing components. After that, simply uncomment `jaeger`
+service in `riselab.yml`.
 
 ## Dashboard
 

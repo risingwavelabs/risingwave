@@ -11,9 +11,9 @@ use itertools::Itertools;
 pub enum Components {
     MinIO,
     PrometheusAndGrafana,
+    Tracing,
     ComputeNodeAndMetaNode,
     Frontend,
-    Tracing,
     Release,
 }
 
