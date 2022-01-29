@@ -2,7 +2,7 @@
 
 [![Slack](https://badgen.net/badge/Slack/Join%20RisingWave/0abd59?icon=slack)](https://join.slack.com/t/risingwave-community/shared_invite/zt-120rft0mr-d8uGk3d~NZiZAQWPnElOfw)
 [![CI](https://github.com/singularity-data/risingwave-dev/actions/workflows/main.yml/badge.svg)](https://github.com/singularity-data/risingwave-dev/actions/workflows/main.yml)
-[![codecov](https://codecov.io/gh/singularity-data/risingwave-dev/branch/main/graph/badge.svg?token=C5ZX0L0GWK)](https://codecov.io/gh/singularity-data/risingwave-dev)
+[![codecov](https://codecov.io/gh/singularity-data/risingwave/branch/main/graph/badge.svg?token=C5ZX0L0GWK)](https://codecov.io/gh/singularity-data/risingwave)
 
 ## Download
 Run:
