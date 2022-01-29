@@ -1,4 +1,4 @@
-<!-- Following the [contributing guidelines](https://github.com/singularity-data/risingwave/blob/main/CONTRIBUTING.md) will make it easier for us to review and accept your PR. -->
+<!-- Following the [contributing guidelines](https://github.com/singularity-data/risingwave-dev/blob/main/CONTRIBUTING.md) will make it easier for us to review and accept your PR. -->
 
 ## What's changed and what's your intention?
 
