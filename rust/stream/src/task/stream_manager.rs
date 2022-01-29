@@ -969,7 +969,7 @@ impl StreamManagerCore {
     }
 
     /// `drop_actor` is invoked by the leader node via RPC once the stop barrier arrives at the
-    ///    sink. All the actors in the actors should stop themselves before this method is invoked.
+    /// sink. All the actors in the actors should stop themselves before this method is invoked.
     fn drop_actor(&mut self, actor_id: u32) {
         let handle = self.handles.remove(&actor_id).unwrap();
         let mut channel_pool_guard = self.context.lock_channel_pool();
