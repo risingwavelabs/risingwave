@@ -191,7 +191,7 @@ impl StreamChunk {
         keys: &[usize],
         hasher_builder: H,
     ) -> Result<Vec<u64>> {
-        let mut states = Vec::with_capacity(self.capacity()); 
+        let mut states = vec![]; 
         states.resize_with(self.capacity(), || hasher_builder.build_hasher());
         for key in keys {
             let array = self.columns[*key].array();
