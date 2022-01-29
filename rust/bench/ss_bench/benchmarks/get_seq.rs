@@ -11,6 +11,7 @@ use crate::{Opts, WorkloadType};
 
 pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
     let batch = Workload::new(opts, WorkloadType::GetSeq, None).batch;
+    dbg!(&batch);
     store
         .ingest_batch(batch.clone(), get_epoch())
         .await

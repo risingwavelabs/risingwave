@@ -121,6 +121,7 @@ impl Workload {
 
         // --- get keys ---
         let mut keys = Vec::with_capacity(opts.kvs_per_batch as usize);
+        // FIXME: keys in a key_space should be continous
         let user_key = vec![b'\0'; opts.key_size as usize];
         for i in 0..opts.kvs_per_batch as u64 {
             let user_key = next_key(&user_key);
@@ -133,6 +134,9 @@ impl Workload {
 
             keys.push(key.freeze());
         }
+
+        dbg!(keys.len());
+        dbg!(&keys);
 
         (prefixes, keys)
     }
