@@ -14,6 +14,7 @@ pub struct LogicalValues {
 }
 
 impl LogicalValues {
+    /// Create a LogicalValues node. Used internally by optimizer.
     pub fn new(rows: Vec<Vec<BoundExprImpl>>, schema: Schema) -> Self {
         for exprs in &rows {
             for (i, expr) in exprs.iter().enumerate() {
@@ -23,9 +24,10 @@ impl LogicalValues {
         Self { rows, schema }
     }
 
-    /// this function will check each expressions satisfy the schema
-    pub fn create(_rows: Vec<Vec<BoundExprImpl>>, _schema: Schema) -> Result<Self> {
-        todo!()
+    /// Create a LogicalValues node. Used by planner.
+    pub fn create(rows: Vec<Vec<BoundExprImpl>>, schema: Schema) -> Result<Self> {
+        // No additional checks after binder.
+        Ok(Self::new(rows, schema))
     }
 
     /// Get a reference to the logical values's rows.
