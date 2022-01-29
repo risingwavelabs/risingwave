@@ -1,11 +1,11 @@
 use std::str::FromStr;
 
-use chrono::{Datelike, NaiveDate, NaiveDateTime};
+use chrono::{NaiveDate, NaiveDateTime};
 use rust_decimal::Decimal;
 
-use crate::types::{IntervalUnit, OrderedF32, OrderedF64};
+use crate::types::{IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, OrderedF32, OrderedF64};
 use crate::vector_op::arithmetic_op::*;
-use crate::vector_op::cast::{date_to_timestamp, UNIX_EPOCH_DAYS};
+use crate::vector_op::cast::date_to_timestamp;
 use crate::vector_op::cmp::*;
 use crate::vector_op::conjunction::*;
 #[test]
@@ -81,37 +81,34 @@ fn test_arithmetic() {
             < f64::EPSILON
     );
     assert_eq!(
-        date_interval_add::<i32, i32, i64>(
-            NaiveDate::from_ymd(1994, 1, 1).num_days_from_ce() - UNIX_EPOCH_DAYS,
+        date_interval_add::<NaiveDateWrapper, IntervalUnit, NaiveDateTimeWrapper>(
+            NaiveDateWrapper::new(NaiveDate::from_ymd(1994, 1, 1)),
             IntervalUnit::from_month(12)
         )
         .unwrap(),
-        NaiveDateTime::parse_from_str("1995-1-1 0:0:0", "%Y-%m-%d %H:%M:%S")
-            .unwrap()
-            .timestamp_nanos()
-            / 1000
+        NaiveDateTimeWrapper::new(
+            NaiveDateTime::parse_from_str("1995-1-1 0:0:0", "%Y-%m-%d %H:%M:%S").unwrap()
+        )
     );
     assert_eq!(
-        interval_date_add::<i32, i32, i64>(
+        interval_date_add::<IntervalUnit, NaiveDateWrapper, NaiveDateTimeWrapper>(
             IntervalUnit::from_month(12),
-            NaiveDate::from_ymd(1994, 1, 1).num_days_from_ce() - UNIX_EPOCH_DAYS,
+            NaiveDateWrapper::new(NaiveDate::from_ymd(1994, 1, 1))
         )
         .unwrap(),
-        NaiveDateTime::parse_from_str("1995-1-1 0:0:0", "%Y-%m-%d %H:%M:%S")
-            .unwrap()
-            .timestamp_nanos()
-            / 1000
+        NaiveDateTimeWrapper::new(
+            NaiveDateTime::parse_from_str("1995-1-1 0:0:0", "%Y-%m-%d %H:%M:%S").unwrap()
+        )
     );
     assert_eq!(
-        date_interval_sub::<i32, i32, i64>(
-            NaiveDate::from_ymd(1994, 1, 1).num_days_from_ce() - UNIX_EPOCH_DAYS,
+        date_interval_sub::<NaiveDateWrapper, IntervalUnit, NaiveDateTimeWrapper>(
+            NaiveDateWrapper::new(NaiveDate::from_ymd(1994, 1, 1)),
             IntervalUnit::from_month(12)
         )
         .unwrap(),
-        NaiveDateTime::parse_from_str("1993-1-1 0:0:0", "%Y-%m-%d %H:%M:%S")
-            .unwrap()
-            .timestamp_nanos()
-            / 1000
+        NaiveDateTimeWrapper::new(
+            NaiveDateTime::parse_from_str("1993-1-1 0:0:0", "%Y-%m-%d %H:%M:%S").unwrap()
+        )
     );
 }
 
@@ -152,11 +149,9 @@ fn test_conjunction() {
 #[test]
 fn test_cast() {
     assert_eq!(
-        date_to_timestamp(NaiveDate::from_ymd(1994, 1, 1).num_days_from_ce() - UNIX_EPOCH_DAYS)
-            .unwrap(),
-        NaiveDateTime::parse_from_str("1994-1-1 0:0:0", "%Y-%m-%d %H:%M:%S")
-            .unwrap()
-            .timestamp_nanos()
-            / 1000
+        date_to_timestamp(NaiveDateWrapper::new(NaiveDate::from_ymd(1994, 1, 1))).unwrap(),
+        NaiveDateTimeWrapper::new(
+            NaiveDateTime::parse_from_str("1994-1-1 0:0:0", "%Y-%m-%d %H:%M:%S").unwrap()
+        )
     )
 }

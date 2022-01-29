@@ -3,7 +3,6 @@ use std::sync::{Arc, Mutex};
 
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::util::{json_to_pretty_string, JsonFormatter};
 use risingwave_pb::plan::{
     PlanFragment, QueryId as ProstQueryId, StageId as ProstStageId, TaskId as ProstTaskId,
     TaskSinkId as ProstSinkId,
@@ -179,7 +178,7 @@ impl TaskExecution {
         debug!(
             "Prepare executing plan [{:?}]: {}",
             self.task_id,
-            json_to_pretty_string(&self.plan.to_json()?)?
+            serde_json::to_string_pretty(self.plan.get_root()?).unwrap()
         );
         *self.state.lock().unwrap() = TaskStatus::Running;
         let exec = ExecutorBuilder::new(
