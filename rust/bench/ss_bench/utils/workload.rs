@@ -128,11 +128,11 @@ impl Workload {
             assert_ne!(user_key.len(), 0);
 
             // keys in a keyspace should be sequential
-            for i in 0..prefix_num as usize {
+            for prefix in &prefixes {
                 let mut key =
                     BytesMut::with_capacity((opts.key_prefix_size + opts.key_size) as usize);
                 // make sure prefixes are evenly distributed
-                key.extend_from_slice(&prefixes[i]);
+                key.extend_from_slice(prefix);
                 key.extend_from_slice(user_key.as_ref());
 
                 keys.push(key.freeze());
