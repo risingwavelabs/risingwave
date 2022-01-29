@@ -103,8 +103,8 @@ impl KeyWithVersion {
     /// The serialized result contains two parts
     /// 1. The key part, which is in memcomparable format.
     /// 2. The version part, which is the bitwise inversion of the given version.
-    pub fn serialize(key: &[u8], version: KeyValueVersion) -> Vec<u8> {
-        KeyWithVersion::serialize_key(key)
+    pub fn serialize(key: impl AsRef<[u8]>, version: KeyValueVersion) -> Vec<u8> {
+        KeyWithVersion::serialize_key(key.as_ref())
             .into_iter()
             .chain((KeyValueVersion::MAX - version).to_be_bytes().into_iter())
             .collect()
@@ -112,8 +112,9 @@ impl KeyWithVersion {
 
     /// This range will match entries whose key is the given `key`.
     /// Versions won't be filtered out.
-    pub fn point_lookup_key_range(key: &[u8]) -> (Vec<u8>, Vec<u8>) {
-        let start = KeyWithVersion::serialize_key(key);
+    pub fn point_lookup_key_range(key: impl AsRef<[u8]>) -> (Vec<u8>, Vec<u8>) {
+        assert!(!key.as_ref().is_empty());
+        let start = KeyWithVersion::serialize_key(key.as_ref());
         let mut end = start.to_owned();
         *end.last_mut().unwrap() = 1;
         (start, end)
@@ -121,38 +122,37 @@ impl KeyWithVersion {
 
     /// This range will match entries whose key is prefixed by the given `key`.
     /// Versions won't be filtered out.
-    pub fn range_lookup_key_range(key: &[u8]) -> (Vec<u8>, Vec<u8>) {
-        let start = KeyWithVersion::serialize_key(key);
-        let mut next_key = key.to_vec();
-        if next_key.is_empty() || *next_key.last().unwrap() == u8::MAX {
-            next_key.push(0u8);
-        } else {
-            *next_key.last_mut().unwrap() += 1;
-        }
-        let end = KeyWithVersion::serialize_key(&next_key);
+    pub fn range_lookup_key_range(key: impl AsRef<[u8]>) -> (Vec<u8>, Vec<u8>) {
+        assert!(!key.as_ref().is_empty());
+        let start = KeyWithVersion::serialize_key(key.as_ref());
+        let mut end = start.to_owned();
+        *end.last_mut().unwrap() = 2;
         (start, end)
     }
 
     /// Get the key part in memcomparable format.
-    fn serialize_key(key: &[u8]) -> Vec<u8> {
-        memcomparable::to_vec(&key).unwrap()
+    fn serialize_key(key: impl AsRef<[u8]>) -> Vec<u8> {
+        memcomparable::to_vec(&key.as_ref()).unwrap()
     }
 
-    pub fn deserialize(key_with_version: &[u8]) -> Option<(Key, KeyValueVersion)> {
+    pub fn deserialize(key_with_version: impl AsRef<[u8]>) -> Option<(Key, KeyValueVersion)> {
         let version_field_size = std::mem::size_of::<KeyValueVersion>();
-        if key_with_version.len() <= version_field_size {
+        if key_with_version.as_ref().len() <= version_field_size {
             return None;
         }
-        let key_slice = &key_with_version[..key_with_version.len() - version_field_size];
+        let key_slice =
+            &key_with_version.as_ref()[..key_with_version.as_ref().len() - version_field_size];
         let key = match memcomparable::from_slice::<Vec<u8>>(key_slice) {
             Ok(key) => key,
             Err(_) => return None,
         };
-        let version =
-            match key_with_version[key_with_version.len() - version_field_size..].try_into() {
-                Ok(version) => KeyValueVersion::MAX - u64::from_be_bytes(version),
-                Err(_) => return None,
-            };
+        let version = match key_with_version.as_ref()
+            [key_with_version.as_ref().len() - version_field_size..]
+            .try_into()
+        {
+            Ok(version) => KeyValueVersion::MAX - u64::from_be_bytes(version),
+            Err(_) => return None,
+        };
         Some((key, version))
     }
 }
@@ -450,8 +450,15 @@ mod tests {
             (start, end),
             (
                 vec![1, 0x1, 1, 0x2, 1, 0xfe, 0],
-                vec![1, 0x1, 1, 0x2, 1, 0xff, 0]
+                vec![1, 0x1, 1, 0x2, 1, 0xfe, 2]
             )
+        );
+
+        let key = vec![0x01, 0xff];
+        let (start, end) = KeyWithVersion::range_lookup_key_range(&key);
+        assert_eq!(
+            (start, end),
+            (vec![1, 0x01, 1, 0xff, 0], vec![1, 0x01, 1, 0xff, 2])
         );
 
         Ok(())

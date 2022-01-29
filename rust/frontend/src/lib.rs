@@ -6,6 +6,7 @@ pub mod binder;
 pub mod expr;
 pub mod handler;
 pub mod optimizer;
+pub mod planner;
 pub mod session;
 
 extern crate log;

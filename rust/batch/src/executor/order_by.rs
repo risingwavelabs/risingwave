@@ -178,7 +178,20 @@ impl Executor for OrderByExecutor {
                 let _ = gen_match!(
                     builder,
                     chunk_arr,
-                    [Int16, Int32, Int64, Float32, Float64, Utf8, Bool, Decimal]
+                    [
+                        Int16,
+                        Int32,
+                        Int64,
+                        Float32,
+                        Float64,
+                        Utf8,
+                        Bool,
+                        Decimal,
+                        Interval,
+                        NaiveDate,
+                        NaiveTime,
+                        NaiveDateTime
+                    ]
                 );
             }
             chunk_size += 1;

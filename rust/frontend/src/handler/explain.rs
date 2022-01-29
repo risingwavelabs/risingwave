@@ -1,14 +1,20 @@
 use pgwire::pg_response::PgResponse;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::Statement;
 
 use crate::binder::Binder;
+use crate::planner::Planner;
 
 pub(super) fn handle_explain(stmt: Statement, _verbose: bool) -> Result<PgResponse> {
     // bind, plan, optimize, and serialize here
     let mut binder = Binder::new();
     let bound = binder.bind(stmt)?;
-    Ok(format!("{:?}", bound).into())
+    let mut planner = Planner::new();
+    let plan = planner.plan(bound)?;
+    let mut output = String::new();
+    plan.explain(0, &mut output)
+        .map_err(|e| ErrorCode::InternalError(e.to_string()))?;
+    Ok(output.into())
 }
 
 #[cfg(test)]

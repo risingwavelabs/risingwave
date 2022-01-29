@@ -108,7 +108,7 @@ pub fn new_unary_expr(
         // FIXME: We can not unify char and varchar because they are different in PG while share the
         // same logical type (String type) in our system (#2414).
         (ProstType::Cast, DataTypeKind::Date, DataTypeKind::Char) => {
-            Box::new(UnaryExpression::<Utf8Array, I32Array, _> {
+            Box::new(UnaryExpression::<Utf8Array, NaiveDateArray, _> {
                 expr_ia1: child_expr,
                 return_type,
                 func: str_to_date,
@@ -116,7 +116,7 @@ pub fn new_unary_expr(
             })
         }
         (ProstType::Cast, DataTypeKind::Time, DataTypeKind::Char) => {
-            Box::new(UnaryExpression::<Utf8Array, I64Array, _> {
+            Box::new(UnaryExpression::<Utf8Array, NaiveTimeArray, _> {
                 expr_ia1: child_expr,
                 return_type,
                 func: str_to_time,
@@ -124,7 +124,7 @@ pub fn new_unary_expr(
             })
         }
         (ProstType::Cast, DataTypeKind::Timestamp, DataTypeKind::Char) => {
-            Box::new(UnaryExpression::<Utf8Array, I64Array, _> {
+            Box::new(UnaryExpression::<Utf8Array, NaiveDateTimeArray, _> {
                 expr_ia1: child_expr,
                 return_type,
                 func: str_to_timestamp,
@@ -303,6 +303,7 @@ pub fn new_rtrim_expr(expr_ia1: BoxedExpression, return_type: DataTypeKind) -> B
 
 #[cfg(test)]
 mod tests {
+    use chrono::NaiveDate;
     use itertools::Itertools;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType;
@@ -313,13 +314,13 @@ mod tests {
     use crate::array::column::Column;
     use crate::array::*;
     use crate::expr::test_utils::{make_expression, make_input_ref};
-    use crate::types::Scalar;
+    use crate::types::{NaiveDateWrapper, Scalar};
     use crate::vector_op::cast::{date_to_timestamp, str_to_i16};
 
     #[test]
     fn test_unary() {
         test_unary_bool::<BoolArray, _>(|x| !x, Type::Not);
-        test_unary_date::<I64Array, _>(|x| date_to_timestamp(x).unwrap(), Type::Cast);
+        test_unary_date::<NaiveDateTimeArray, _>(|x| date_to_timestamp(x).unwrap(), Type::Cast);
         test_str_to_int16::<I16Array, _>(|x| str_to_i16(x).unwrap());
     }
 
@@ -452,14 +453,15 @@ mod tests {
         A: Array,
         for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
         for<'a> <A as Array>::RefItem<'a>: PartialEq,
-        F: Fn(i32) -> <A as Array>::OwnedItem,
+        F: Fn(NaiveDateWrapper) -> <A as Array>::OwnedItem,
     {
-        let mut input = Vec::<Option<i32>>::new();
+        let mut input = Vec::<Option<NaiveDateWrapper>>::new();
         let mut target = Vec::<Option<<A as Array>::OwnedItem>>::new();
         for i in 0..100 {
             if i % 2 == 0 {
-                input.push(Some(i));
-                target.push(Some(f(i)));
+                let date = NaiveDateWrapper::new(NaiveDate::from_num_days_from_ce(i));
+                input.push(Some(date));
+                target.push(Some(f(date)));
             } else {
                 input.push(None);
                 target.push(None);
@@ -467,7 +469,7 @@ mod tests {
         }
 
         let col1 = Column::new(
-            I32Array::from_slice(&input)
+            NaiveDateArray::from_slice(&input)
                 .map(|x| Arc::new(x.into()))
                 .unwrap(),
         );

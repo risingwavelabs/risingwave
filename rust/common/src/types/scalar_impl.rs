@@ -113,6 +113,30 @@ impl Scalar for bool {
     }
 }
 
+impl ScalarPartialOrd for IntervalUnit {
+    fn scalar_cmp(&self, other: Self::ScalarRefType<'_>) -> Option<std::cmp::Ordering> {
+        self.partial_cmp(&other)
+    }
+}
+
+impl ScalarPartialOrd for NaiveDateWrapper {
+    fn scalar_cmp(&self, other: Self::ScalarRefType<'_>) -> Option<std::cmp::Ordering> {
+        self.partial_cmp(&other)
+    }
+}
+
+impl ScalarPartialOrd for NaiveTimeWrapper {
+    fn scalar_cmp(&self, other: Self::ScalarRefType<'_>) -> Option<std::cmp::Ordering> {
+        self.partial_cmp(&other)
+    }
+}
+
+impl ScalarPartialOrd for NaiveDateTimeWrapper {
+    fn scalar_cmp(&self, other: Self::ScalarRefType<'_>) -> Option<std::cmp::Ordering> {
+        self.partial_cmp(&other)
+    }
+}
+
 /// Implement `Scalar` and `ScalarRef` for `String`.
 /// `String` could be converted to `&str`.
 impl<'a> ScalarRef<'a> for bool {
@@ -136,7 +160,7 @@ impl Scalar for Decimal {
     }
 }
 
-/// Implement `Scalar` for `Decimal`.
+/// Implement `ScalarRef` for `Decimal`.
 impl<'a> ScalarRef<'a> for Decimal {
     type ScalarType = Decimal;
 
@@ -158,11 +182,77 @@ impl Scalar for IntervalUnit {
     }
 }
 
-/// Implement `Scalar` for `IntervalUnit`.
+/// Implement `ScalarRef` for `IntervalUnit`.
 impl<'a> ScalarRef<'a> for IntervalUnit {
     type ScalarType = IntervalUnit;
 
     fn to_owned_scalar(&self) -> IntervalUnit {
+        *self
+    }
+}
+
+/// Implement `Scalar` for `NaiveDateWrapper`.
+impl Scalar for NaiveDateWrapper {
+    type ScalarRefType<'a> = NaiveDateWrapper;
+
+    fn as_scalar_ref(&self) -> NaiveDateWrapper {
+        *self
+    }
+
+    fn to_scalar_value(self) -> ScalarImpl {
+        ScalarImpl::NaiveDate(self)
+    }
+}
+
+/// Implement `ScalarRef` for `NaiveDateWrapper`.
+impl<'a> ScalarRef<'a> for NaiveDateWrapper {
+    type ScalarType = NaiveDateWrapper;
+
+    fn to_owned_scalar(&self) -> NaiveDateWrapper {
+        *self
+    }
+}
+
+/// Implement `Scalar` for `NaiveDateTimeWrapper`.
+impl Scalar for NaiveDateTimeWrapper {
+    type ScalarRefType<'a> = NaiveDateTimeWrapper;
+
+    fn as_scalar_ref(&self) -> NaiveDateTimeWrapper {
+        *self
+    }
+
+    fn to_scalar_value(self) -> ScalarImpl {
+        ScalarImpl::NaiveDateTime(self)
+    }
+}
+
+/// Implement `ScalarRef` for `NaiveDateTimeWrapper`.
+impl<'a> ScalarRef<'a> for NaiveDateTimeWrapper {
+    type ScalarType = NaiveDateTimeWrapper;
+
+    fn to_owned_scalar(&self) -> NaiveDateTimeWrapper {
+        *self
+    }
+}
+
+/// Implement `Scalar` for `NaiveTimeWrapper`.
+impl Scalar for NaiveTimeWrapper {
+    type ScalarRefType<'a> = NaiveTimeWrapper;
+
+    fn as_scalar_ref(&self) -> NaiveTimeWrapper {
+        *self
+    }
+
+    fn to_scalar_value(self) -> ScalarImpl {
+        ScalarImpl::NaiveTime(self)
+    }
+}
+
+/// Implement `ScalarRef` for `NaiveTimeWrapper`.
+impl<'a> ScalarRef<'a> for NaiveTimeWrapper {
+    type ScalarType = NaiveTimeWrapper;
+
+    fn to_owned_scalar(&self) -> NaiveTimeWrapper {
         *self
     }
 }

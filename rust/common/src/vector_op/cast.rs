@@ -2,12 +2,14 @@ use core::convert::From;
 use std::any::type_name;
 use std::str::FromStr;
 
-use chrono::{DateTime, Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
+use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime};
 use num_traits::ToPrimitive;
 
 use crate::error::ErrorCode::{InternalError, InvalidInputSyntax, ParseError};
 use crate::error::{Result, RwError};
-use crate::types::{Decimal, OrderedF32, OrderedF64};
+use crate::types::{
+    Decimal, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, OrderedF32, OrderedF64,
+};
 
 /// The same as `NaiveDate::from_ymd(1970, 1, 1).num_days_from_ce()`.
 /// Minus this magic number to store the number of days since 1970-01-01.
@@ -51,10 +53,11 @@ pub fn str_to_str(n: &str) -> Result<String> {
 }
 
 #[inline(always)]
-pub fn str_to_date(elem: &str) -> Result<i32> {
-    NaiveDate::parse_from_str(elem, "%Y-%m-%d")
-        .map(|ret| ret.num_days_from_ce() - UNIX_EPOCH_DAYS)
-        .map_err(|e| RwError::from(ParseError(Box::new(e))))
+pub fn str_to_date(elem: &str) -> Result<NaiveDateWrapper> {
+    Ok(NaiveDateWrapper::new(
+        NaiveDate::parse_from_str(elem, "%Y-%m-%d")
+            .map_err(|e| RwError::from(ParseError(Box::new(e))))?,
+    ))
 }
 
 #[inline(always)]
@@ -63,18 +66,19 @@ pub fn str_to_decimal(elem: &str) -> Result<Decimal> {
 }
 
 #[inline(always)]
-pub fn str_to_time(elem: &str) -> Result<i64> {
-    NaiveTime::parse_from_str(elem, "%H:%M:%S")
-        // FIXME: add support for precision in microseconds.
-        .map(|ret| ret.num_seconds_from_midnight() as i64 * 1000 * 1000)
-        .map_err(|e| RwError::from(ParseError(Box::new(e))))
+pub fn str_to_time(elem: &str) -> Result<NaiveTimeWrapper> {
+    Ok(NaiveTimeWrapper::new(
+        NaiveTime::parse_from_str(elem, "%H:%M:%S")
+            .map_err(|e| RwError::from(ParseError(Box::new(e))))?,
+    ))
 }
 
 #[inline(always)]
-pub fn str_to_timestamp(elem: &str) -> Result<i64> {
-    NaiveDateTime::parse_from_str(elem, "%Y-%m-%d %H:%M:%S")
-        .map(|ret| ret.timestamp_nanos() / 1000)
-        .map_err(|e| RwError::from(ParseError(Box::new(e))))
+pub fn str_to_timestamp(elem: &str) -> Result<NaiveDateTimeWrapper> {
+    Ok(NaiveDateTimeWrapper::new(
+        NaiveDateTime::parse_from_str(elem, "%Y-%m-%d %H:%M:%S")
+            .map_err(|e| RwError::from(ParseError(Box::new(e))))?,
+    ))
 }
 
 #[inline(always)]
@@ -112,8 +116,8 @@ pub fn str_to_i64(elem: &str) -> Result<i64> {
 }
 
 #[inline(always)]
-pub fn date_to_timestamp(elem: i32) -> Result<i64> {
-    Ok((elem as i64) * 24 * 60 * 60 * 1000 * 1000)
+pub fn date_to_timestamp(elem: NaiveDateWrapper) -> Result<NaiveDateTimeWrapper> {
+    Ok(NaiveDateTimeWrapper::new(elem.0.and_hms(0, 0, 0)))
 }
 
 // Due to the orphan rule, some data can't implement TryFrom trait for basic type.

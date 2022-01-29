@@ -86,6 +86,7 @@ ss_bench is used to benchmark the performance of the state store. In this doc, w
 
 - `writebatch`: write `iterations` KV pairs in sequential key order in async mode
 - `getrandom`: read `iterations` times in random order
+- `getseq`: read `iterations` times in sequential order
 - `prefixscanrandom`: prefix scan `iterations` times in random order
 
 The benchmarks could be a combination of multiple consequent benchmarks. Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`

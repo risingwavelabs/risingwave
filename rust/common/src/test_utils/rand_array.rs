@@ -4,6 +4,7 @@
 
 use std::sync::Arc;
 
+use chrono::{Datelike, NaiveTime};
 use num_traits::FromPrimitive;
 use rand::distributions::Standard;
 use rand::prelude::Distribution;
@@ -11,7 +12,10 @@ use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 
 use crate::array::{Array, ArrayBuilder, ArrayRef, StructValue};
-use crate::types::{Decimal, IntervalUnit, NativeType, Scalar};
+use crate::types::{
+    Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, NativeType,
+    Scalar,
+};
 
 pub trait RandValue {
     fn rand_value<R: Rng>(rand: &mut R) -> Self;
@@ -46,6 +50,35 @@ impl RandValue for IntervalUnit {
         let days = (rand.gen::<u32>() % 200) as i32;
         let ms = (rand.gen::<u64>() % 100000) as i64;
         IntervalUnit::new(months, days, ms)
+    }
+}
+
+impl RandValue for NaiveDateWrapper {
+    fn rand_value<R: Rng>(rand: &mut R) -> Self {
+        let max_day = chrono::MAX_DATE.num_days_from_ce();
+        let min_day = chrono::MIN_DATE.num_days_from_ce();
+        let days = (rand.gen::<u32>() % (max_day - min_day) as u32) as i32 + min_day;
+        NaiveDateWrapper::new_with_days(days).unwrap()
+    }
+}
+
+impl RandValue for NaiveTimeWrapper {
+    fn rand_value<R: Rng>(rand: &mut R) -> Self {
+        let hour = rand.gen::<u32>() % 24;
+        let min = rand.gen::<u32>() % 60;
+        let sec = rand.gen::<u32>() % 60;
+        let nano = rand.gen::<u32>() % 1_000_000_000;
+        NaiveTimeWrapper::new(NaiveTime::from_hms_nano(hour, min, sec, nano))
+    }
+}
+
+impl RandValue for NaiveDateTimeWrapper {
+    fn rand_value<R: Rng>(rand: &mut R) -> Self {
+        NaiveDateTimeWrapper::new(
+            NaiveDateWrapper::rand_value(rand)
+                .0
+                .and_time(NaiveTimeWrapper::rand_value(rand).0),
+        )
     }
 }
 

@@ -2,15 +2,18 @@ use std::io::{Cursor, Read};
 use std::sync::Arc;
 
 use byteorder::{BigEndian, ReadBytesExt};
+use paste::paste;
 use risingwave_pb::data::Array as ProstArray;
 
 use crate::array::value_reader::{PrimitiveValueReader, VarSizedValueReader};
 use crate::array::{
-    ArrayBuilder, ArrayRef, BoolArrayBuilder, PrimitiveArrayBuilder, PrimitiveArrayItemType,
+    ArrayBuilder, ArrayRef, BoolArrayBuilder, NaiveDateArrayBuilder, NaiveDateTimeArrayBuilder,
+    NaiveTimeArrayBuilder, PrimitiveArrayBuilder, PrimitiveArrayItemType,
 };
 use crate::buffer::Bitmap;
 use crate::error::ErrorCode::InternalError;
-use crate::error::Result;
+use crate::error::{Result, RwError};
+use crate::types::{NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper};
 
 // TODO: Use techniques like apache arrow flight RPC to eliminate deserialization.
 // https://arrow.apache.org/docs/format/Flight.html
@@ -46,29 +49,78 @@ pub fn read_numeric_array<T: PrimitiveArrayItemType, R: PrimitiveValueReader<T>>
     Ok(Arc::new(arr.into()))
 }
 
-pub fn read_bool_array(array: &ProstArray, cardinality: usize) -> Result<ArrayRef> {
-    ensure!(
-        array.get_values().len() == 1,
-        "Must have only 1 buffer in a bool array"
-    );
+fn read_bool(cursor: &mut Cursor<&[u8]>) -> Result<bool> {
+    let v = cursor
+        .read_u8()
+        .map_err(|e| InternalError(format!("Failed to read u8 from bool buffer: {}", e)))?;
+    Ok(v != 0)
+}
 
-    let buf = array.get_values()[0].get_body().as_slice();
-
-    let mut builder = BoolArrayBuilder::new(cardinality)?;
-    let bitmap: Bitmap = array.get_null_bitmap()?.try_into()?;
-    let mut cursor = Cursor::new(buf);
-    for not_null in bitmap.iter() {
-        if not_null {
-            let v = cursor
-                .read_u8()
-                .map_err(|e| InternalError(format!("Failed to read u8 from bool buffer: {}", e)))?;
-            builder.append(Some(v != 0))?;
-        } else {
-            builder.append(None)?;
-        }
+fn read_naivedate(cursor: &mut Cursor<&[u8]>) -> Result<NaiveDateWrapper> {
+    match cursor.read_i32::<BigEndian>() {
+        Ok(days) => NaiveDateWrapper::from_protobuf(days),
+        Err(e) => Err(RwError::from(InternalError(format!(
+            "Failed to read i32 from NaiveDate buffer: {}",
+            e
+        )))),
     }
-    let arr = builder.finish()?;
-    Ok(Arc::new(arr.into()))
+}
+
+fn read_naivetime(cursor: &mut Cursor<&[u8]>) -> Result<NaiveTimeWrapper> {
+    match cursor.read_i64::<BigEndian>() {
+        Ok(t) => NaiveTimeWrapper::from_protobuf(t),
+        Err(e) => Err(RwError::from(InternalError(format!(
+            "Failed to read i64 from NaiveTime buffer: {}",
+            e
+        )))),
+    }
+}
+
+fn read_naivedatetime(cursor: &mut Cursor<&[u8]>) -> Result<NaiveDateTimeWrapper> {
+    match cursor.read_i64::<BigEndian>() {
+        Ok(t) => NaiveDateTimeWrapper::from_protobuf(t),
+        Err(e) => Err(RwError::from(InternalError(format!(
+            "Failed to read i64 from NaiveDateTime buffer: {}",
+            e
+        )))),
+    }
+}
+
+macro_rules! read_one_value_array {
+    ($({ $type:ident, $builder:ty }),*) => {
+      paste! {
+        $(
+          pub fn [<read_ $type:lower _array>](array: &ProstArray, cardinality: usize) -> Result<ArrayRef> {
+            ensure!(
+              array.get_values().len() == 1,
+              "Must have only 1 buffer in a {} array", stringify!($type)
+            );
+
+            let buf = array.get_values()[0].get_body().as_slice();
+
+            let mut builder = $builder::new(cardinality)?;
+            let bitmap: Bitmap = array.get_null_bitmap()?.try_into()?;
+            let mut cursor = Cursor::new(buf);
+            for not_null in bitmap.iter() {
+              if not_null {
+                builder.append(Some([<read_ $type:lower>](&mut cursor)?))?;
+              } else {
+                builder.append(None)?;
+              }
+            }
+            let arr = builder.finish()?;
+            Ok(Arc::new(arr.into()))
+          }
+        )*
+      }
+    };
+}
+
+read_one_value_array! {
+    { bool, BoolArrayBuilder },
+    { NaiveDate, NaiveDateArrayBuilder },
+    { NaiveTime, NaiveTimeArrayBuilder },
+    { NaiveDateTime, NaiveDateTimeArrayBuilder }
 }
 
 fn read_offset(offset_cursor: &mut Cursor<&[u8]>) -> Result<i64> {

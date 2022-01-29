@@ -73,6 +73,9 @@ enum ArrayType {
   UTF8 = 5;
   BOOL = 6;
   DECIMAL = 7;
+  DATE = 8;
+  TIME = 9;
+  TIMESTAMP = 10;
 }
 
 message Array {
