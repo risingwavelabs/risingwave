@@ -7,14 +7,14 @@ use risingwave_storage::StateStore;
 
 use crate::utils::latency_stat::LatencyStat;
 use crate::utils::workload::{get_epoch, Workload};
-use crate::Opts;
+use crate::{Opts, WorkloadType};
 
 pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
     // TODO(sun ting): create an opetion for batch number. opts.iterations is ambiguous here.
     let batch_num = (opts.iterations - opts.iterations % opts.concurrency_num) as usize;
     let mut batches = (0..batch_num)
         .into_iter()
-        .map(|i| Workload::new_sorted_workload(opts, Some(i as u64)).batch)
+        .map(|i| Workload::new(opts, WorkloadType::WriteBatch, Some(i as u64)).batch)
         .collect_vec();
 
     // partitioned these batches for each concurrency

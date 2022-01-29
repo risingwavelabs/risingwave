@@ -10,10 +10,10 @@ use risingwave_storage::StateStore;
 
 use crate::utils::latency_stat::LatencyStat;
 use crate::utils::workload::{get_epoch, Workload};
-use crate::Opts;
+use crate::{Opts, WorkloadType};
 
 pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
-    let workload = Workload::new_sorted_workload(opts, Some(0));
+    let workload = Workload::new(opts, WorkloadType::PrefixScanRandom, None);
     store
         .ingest_batch(workload.batch.clone(), get_epoch())
         .await
