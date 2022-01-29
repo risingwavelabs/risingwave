@@ -11,13 +11,13 @@ use crate::executor::*;
 /// `row_nonnull` builds a `Row` with concrete values.
 /// TODO: add macro row!, which requires a new trait `ToScalarValue`.
 macro_rules! row_nonnull {
-  [$( $value:expr ),*] => {
-    {
-      use risingwave_common::types::Scalar;
-      use risingwave_common::array::Row;
-      Row(vec![$(Some($value.to_scalar_value()), )*])
-    }
-  };
+    [$( $value:expr ),*] => {
+        {
+            use risingwave_common::types::Scalar;
+            use risingwave_common::array::Row;
+            Row(vec![$(Some($value.to_scalar_value()), )*])
+        }
+    };
 }
 
 pub struct MockSource {
