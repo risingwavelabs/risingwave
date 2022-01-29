@@ -87,7 +87,9 @@ fn make_column_order(idx: i32) -> ColumnOrder {
 /// ```sql
 /// create materialized view `T_distributed` as select sum(v1)+1 as V from t where v1>v2
 /// ```
+///
 /// plan:
+///
 /// ```ignore
 ///     RwStreamMaterializedView(name=[t_distributed])
 ///           RwStreamProject(v=[+($STREAM_NULL_BY_ROW_COUNT($0, $1), 1)], $f0=[$0], $f1=[$1])

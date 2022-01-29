@@ -136,59 +136,47 @@ impl StreamFragmenter {
         let root_fragment = self.fragment_graph.get_root_fragment();
         let mut current_actor_ids = vec![];
         let current_fragment_id = current_fragment.get_fragment_id();
-        if false {
-            // Fragment on the root, generate an actor without dispatcher.
-            let actor_id = self.gen_actor_id(1).await?;
-            let mut actor_builder = StreamActorBuilder::new(actor_id, current_fragment.get_node());
-            // Set `Broadcast` dispatcher for root fragment (means no dispatcher).
-            actor_builder.set_simple_dispatcher();
-
-            // Add actor. No dependency needed.
-            current_actor_ids.push(actor_id);
-            self.stream_graph.add_actor(actor_builder);
+        let parallel_degree = if current_fragment.is_singleton() {
+            1
+        } else if self.fragment_graph.has_downstream(current_fragment_id) {
+            // Fragment in the middle.
+            // Generate one or multiple actors and connect them to the next fragment.
+            // Currently, we assume the parallel degree is at least 4, and grows linearly with
+            // more worker nodes added.
+            max(self.worker_count * 2, PARALLEL_DEGREE_LOW_BOUND)
         } else {
-            let parallel_degree = if current_fragment.is_singleton() {
-                1
-            } else if self.fragment_graph.has_downstream(current_fragment_id) {
-                // Fragment in the middle.
-                // Generate one or multiple actors and connect them to the next fragment.
-                // Currently, we assume the parallel degree is at least 4, and grows linearly with
-                // more worker nodes added.
-                max(self.worker_count * 2, PARALLEL_DEGREE_LOW_BOUND)
-            } else {
-                // Fragment on the source.
-                self.worker_count
-            };
+            // Fragment on the source.
+            self.worker_count
+        };
 
-            let node = current_fragment.get_node();
-            let actor_ids = self.gen_actor_id(parallel_degree as i32).await?;
-            let blackhole_dispatcher = Dispatcher {
-                r#type: DispatcherType::Broadcast as i32,
-                ..Default::default()
-            };
-            let dispatcher = if current_fragment_id == root_fragment.get_fragment_id() {
-                &blackhole_dispatcher
-            } else {
-                match node.get_node()? {
-                    Node::ExchangeNode(exchange_node) => exchange_node.get_dispatcher()?,
-                    _ => {
-                        return Err(RwError::from(InternalError(format!(
-                            "{:?} should not found.",
-                            node.get_node()
-                        ))));
-                    }
+        let node = current_fragment.get_node();
+        let actor_ids = self.gen_actor_id(parallel_degree as i32).await?;
+        let blackhole_dispatcher = Dispatcher {
+            r#type: DispatcherType::Broadcast as i32,
+            ..Default::default()
+        };
+        let dispatcher = if current_fragment_id == root_fragment.get_fragment_id() {
+            &blackhole_dispatcher
+        } else {
+            match node.get_node()? {
+                Node::ExchangeNode(exchange_node) => exchange_node.get_dispatcher()?,
+                _ => {
+                    return Err(RwError::from(InternalError(format!(
+                        "{:?} should not found.",
+                        node.get_node()
+                    ))));
                 }
-            };
-            for id in actor_ids..actor_ids + parallel_degree {
-                let mut actor_builder = StreamActorBuilder::new(id, node.clone());
-                actor_builder.set_dispatcher(dispatcher.clone());
-                self.stream_graph.add_actor(actor_builder);
-                current_actor_ids.push(id);
+            }
+        };
+        for id in actor_ids..actor_ids + parallel_degree {
+            let mut actor_builder = StreamActorBuilder::new(id, node.clone());
+            actor_builder.set_dispatcher(dispatcher.clone());
+            self.stream_graph.add_actor(actor_builder);
+            current_actor_ids.push(id);
 
-                // If the current fragment is table source, then add the id to the source id list.
-                if current_fragment.is_table_source_fragment() {
-                    self.source_actor_ids.push(id);
-                }
+            // If the current fragment is table source, then add the id to the source id list.
+            if current_fragment.is_table_source_fragment() {
+                self.source_actor_ids.push(id);
             }
         }
 
