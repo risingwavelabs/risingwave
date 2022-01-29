@@ -1,13 +1,13 @@
 # RisingWave
 
 [![Slack](https://badgen.net/badge/Slack/Join%20RisingWave/0abd59?icon=slack)](https://join.slack.com/t/risingwave-community/shared_invite/zt-120rft0mr-d8uGk3d~NZiZAQWPnElOfw)
-[![CI](https://github.com/singularity-data/risingwave/actions/workflows/main.yml/badge.svg)](https://github.com/singularity-data/risingwave/actions/workflows/main.yml)
+[![CI](https://github.com/singularity-data/risingwave-dev/actions/workflows/main.yml/badge.svg)](https://github.com/singularity-data/risingwave-dev/actions/workflows/main.yml)
 [![codecov](https://codecov.io/gh/singularity-data/risingwave/branch/main/graph/badge.svg?token=C5ZX0L0GWK)](https://codecov.io/gh/singularity-data/risingwave)
 
 ## Download
 Run:
 ```shell
-git clone https://github.com/singularity-data/risingwave.git
+git clone https://github.com/singularity-data/risingwave-dev.git
 ```
 
 ## Environment
@@ -142,7 +142,7 @@ psql -h localhost -p 4567 -d dev
 Now you can use the Postgres shell to try out your SQL command!
 
 ## Contributing
-Thanks for your interest in contributing to the project, please refer to the [CONTRIBUTING.md](https://github.com/singularity-data/risingwave/blob/main/CONTRIBUTING.md).
+Thanks for your interest in contributing to the project, please refer to the [CONTRIBUTING.md](https://github.com/singularity-data/risingwave-dev/blob/main/CONTRIBUTING.md).
 
 ## Toolchain
 Currently, we are using nightly toolchain `nightly-2022-01-13`. If anyone needs to upgrade
