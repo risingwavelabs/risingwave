@@ -69,7 +69,7 @@ impl StoredClusterManager {
                     r#type: r#type as i32,
                     host: Some(host_address),
                 });
-                worker.create(&self.meta_store_ref).await?;
+                worker.insert(&self.meta_store_ref).await?;
                 Ok((v.insert(worker).to_protobuf(), true))
             }
         }

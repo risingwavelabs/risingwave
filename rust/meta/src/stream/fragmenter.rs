@@ -1,4 +1,5 @@
 use std::cmp::max;
+use std::collections::BTreeMap;
 use std::ops::Deref;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
@@ -7,8 +8,10 @@ use async_recursion::async_recursion;
 use risingwave_common::array::RwError;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
+use risingwave_pb::meta::table_fragments::fragment::FragmentType;
+use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::stream_plan::stream_node::Node;
-use risingwave_pb::stream_plan::{StreamActor, StreamNode};
+use risingwave_pb::stream_plan::StreamNode;
 
 use crate::manager::{IdCategory, IdGeneratorManagerRef};
 use crate::stream::graph::{
@@ -31,9 +34,6 @@ pub struct StreamFragmenter {
     id_gen_manager_ref: IdGeneratorManagerRef,
     /// worker count, used to init actor parallelization.
     worker_count: u32,
-
-    /// the list of ids of all source actors.
-    source_actor_ids: Vec<u32>,
 }
 
 impl StreamFragmenter {
@@ -44,7 +44,6 @@ impl StreamFragmenter {
             stream_graph: StreamGraphBuilder::new(),
             id_gen_manager_ref,
             worker_count,
-            source_actor_ids: Vec::new(),
         }
     }
 
@@ -57,11 +56,26 @@ impl StreamFragmenter {
     pub async fn generate_graph(
         &mut self,
         stream_node: &StreamNode,
-    ) -> Result<(Vec<StreamActor>, Vec<u32>)> {
+    ) -> Result<BTreeMap<u32, Fragment>> {
         self.generate_fragment_graph(stream_node)?;
         self.build_graph_from_fragment(self.fragment_graph.get_root_fragment(), vec![])
             .await?;
-        Ok((self.stream_graph.build()?, self.source_actor_ids.clone()))
+
+        let stream_graph = self.stream_graph.build()?;
+        stream_graph
+            .iter()
+            .map(|(&fragment_id, actors)| {
+                Ok::<_, RwError>((
+                    fragment_id,
+                    Fragment {
+                        fragment_id,
+                        fragment_type: self.fragment_graph.get_fragment_type_by_id(fragment_id)?
+                            as i32,
+                        actors: actors.clone(),
+                    },
+                ))
+            })
+            .collect::<Result<BTreeMap<u32, Fragment>>>()
     }
 
     /// Generate fragment DAG from input streaming plan by their dependency.
@@ -78,21 +92,24 @@ impl StreamFragmenter {
         parent_fragment: &StreamFragment,
         stream_node: &StreamNode,
     ) -> Result<()> {
+        let fragment_id = parent_fragment.get_fragment_id();
+        if let Some(Node::MviewNode(_)) = stream_node.node {
+            self.fragment_graph
+                .set_fragment_type_by_id(fragment_id, FragmentType::Sink)?;
+        }
+
         for node in stream_node.get_input() {
             match node.get_node()? {
                 Node::ExchangeNode(_) => {
                     let child_fragment = self.new_stream_fragment(Arc::new(node.clone()));
                     self.fragment_graph.add_fragment(child_fragment.clone());
-                    self.fragment_graph.link_child(
-                        parent_fragment.get_fragment_id(),
-                        child_fragment.get_fragment_id(),
-                    );
+                    self.fragment_graph
+                        .link_child(fragment_id, child_fragment.get_fragment_id());
                     self.build_fragment(&child_fragment, node)?;
                 }
                 Node::SourceNode(_) => {
-                    let _res = self
-                        .fragment_graph
-                        .set_source_fragment_by_id(parent_fragment.get_fragment_id());
+                    self.fragment_graph
+                        .set_fragment_type_by_id(fragment_id, FragmentType::Source)?;
                     self.build_fragment(parent_fragment, node)?;
                 }
                 _ => {
@@ -129,7 +146,8 @@ impl StreamFragmenter {
         if current_fragment_id == root_fragment.get_fragment_id() {
             // Fragment on the root, generate an actor without dispatcher.
             let actor_id = self.gen_actor_id(1).await?;
-            let mut actor_builder = StreamActorBuilder::new(actor_id, current_fragment.get_node());
+            let mut actor_builder =
+                StreamActorBuilder::new(actor_id, current_fragment_id, current_fragment.get_node());
             // Set `Broadcast` dispatcher for root fragment (means no dispatcher).
             actor_builder.set_broadcast_dispatcher();
 
@@ -162,15 +180,11 @@ impl StreamFragmenter {
             };
             for id in actor_ids..actor_ids + parallel_degree {
                 let stream_node = node.deref().clone();
-                let mut actor_builder = StreamActorBuilder::new(id, Arc::new(stream_node));
+                let mut actor_builder =
+                    StreamActorBuilder::new(id, current_fragment_id, Arc::new(stream_node));
                 actor_builder.set_dispatcher(dispatcher.clone());
                 self.stream_graph.add_actor(actor_builder);
                 current_actor_ids.push(id);
-
-                // If the current fragment is table source, then add the id to the source id list.
-                if current_fragment.is_table_source_fragment() {
-                    self.source_actor_ids.push(id);
-                }
             }
         }
 

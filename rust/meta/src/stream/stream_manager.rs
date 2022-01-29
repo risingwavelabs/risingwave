@@ -2,9 +2,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
+use dashmap::DashMap;
 use itertools::Itertools;
 use log::{debug, info};
+use risingwave_common::catalog::TableId;
 use risingwave_common::error::{Result, ToRwResult};
+use risingwave_common::try_match_expand;
 use risingwave_pb::common::{ActorInfo, WorkerNode};
 use risingwave_pb::meta::{ActorLocation, TableActors};
 use risingwave_pb::plan::TableRefId;
@@ -18,30 +21,49 @@ use uuid::Uuid;
 use crate::barrier::{BarrierManagerRef, Command};
 use crate::cluster::StoredClusterManager;
 use crate::manager::{MetaSrvEnv, StreamClientsRef};
+use crate::model::{MetadataModel, TableFragments};
+use crate::storage::MetaStoreRef;
 use crate::stream::{ScheduleCategory, Scheduler, StreamMetaManagerRef};
 
 pub type StreamManagerRef = Arc<StreamManager>;
 
 pub struct StreamManager {
     smm: StreamMetaManagerRef,
+
+    meta_store_ref: MetaStoreRef,
+    table_fragments: DashMap<TableId, TableFragments>,
+
     barrier_manager_ref: BarrierManagerRef,
     scheduler: Scheduler,
     clients: StreamClientsRef,
 }
 
 impl StreamManager {
-    pub fn new(
+    pub async fn new(
         env: MetaSrvEnv,
         smm: StreamMetaManagerRef,
         barrier_manager_ref: BarrierManagerRef,
         cluster_manager: Arc<StoredClusterManager>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self> {
+        let meta_store_ref = env.meta_store_ref();
+        let table_fragments = try_match_expand!(
+            TableFragments::list(&meta_store_ref).await,
+            Ok,
+            "TableFragments::list fail"
+        )?;
+        let table_map = DashMap::new();
+        for table_fragment in table_fragments {
+            table_map.insert(table_fragment.table_id(), table_fragment);
+        }
+
+        Ok(Self {
             smm,
+            meta_store_ref,
+            table_fragments: table_map,
             barrier_manager_ref,
             scheduler: Scheduler::new(ScheduleCategory::RoundRobin, cluster_manager),
             clients: env.stream_clients_ref(),
-        }
+        })
     }
 
     fn search_chain_table_ref_ids(&self, stream_node: &StreamNode) -> Vec<TableRefId> {
@@ -395,7 +417,8 @@ mod tests {
                 meta_manager.clone(),
                 barrier_manager_ref,
                 cluster_manager.clone(),
-            );
+            )
+            .await?;
 
             Ok(Self {
                 stream_manager,

@@ -79,12 +79,16 @@ pub async fn rpc_serve(
         tokio::spawn(async move { barrier_manager_ref.run().await.unwrap() });
     }
 
-    let stream_manager_ref = Arc::new(StreamManager::new(
-        env.clone(),
-        stream_meta_manager.clone(),
-        barrier_manager_ref,
-        cluster_manager.clone(),
-    ));
+    let stream_manager_ref = Arc::new(
+        StreamManager::new(
+            env.clone(),
+            stream_meta_manager.clone(),
+            barrier_manager_ref,
+            cluster_manager.clone(),
+        )
+        .await
+        .unwrap(),
+    );
 
     let epoch_srv = EpochServiceImpl::new(env.clone());
     let heartbeat_srv = HeartbeatServiceImpl::new(env.clone());
