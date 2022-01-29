@@ -26,11 +26,11 @@ impl Workload {
             WriteBatch | GetRandom | PrefixScanRandom | DeleteRandom => {
                 Self::new_random_keys(opts, base_seed)
             }
-            GetSequential | DeleteSequential => Self::new_sequential_keys(opts),
+            GetSeq | DeleteSeq => Self::new_sequential_keys(opts),
         };
 
         let values = match workload_type {
-            DeleteRandom | DeleteSequential => vec![None; keys.len()],
+            DeleteRandom | DeleteSeq => vec![None; keys.len()],
             _ => Self::new_values(opts, base_seed),
         };
 

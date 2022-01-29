@@ -3,7 +3,7 @@ use std::sync::Arc;
 mod benchmarks;
 mod utils;
 
-use benchmarks::{get_random, prefix_scan_random, write_batch};
+use benchmarks::*;
 use clap::Parser;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
@@ -21,10 +21,10 @@ use risingwave_storage::StateStore;
 enum WorkloadType {
     WriteBatch = 0,
     GetRandom = 1,
-    GetSequential = 2,
+    GetSeq = 2,
     PrefixScanRandom = 3,
     DeleteRandom = 4,
-    DeleteSequential = 5,
+    DeleteSeq = 5,
 }
 
 #[derive(Parser, Debug)]
@@ -161,6 +161,7 @@ async fn run_benchmarks(store: impl StateStore, opts: &Opts) {
         match benchmark {
             "writebatch" => write_batch::run(&store, opts).await,
             "getrandom" => get_random::run(&store, opts).await,
+            "getseq" => get_seq::run(&store, opts).await,
             "prefixscanrandom" => prefix_scan_random::run(&store, opts).await,
             other => unimplemented!("operation \"{}\" is not supported.", other),
         }
