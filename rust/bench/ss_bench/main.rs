@@ -17,6 +17,16 @@ use risingwave_storage::rocksdb_local::RocksDBStateStore;
 use risingwave_storage::tikv::TikvStateStore;
 use risingwave_storage::StateStore;
 
+#[allow(dead_code)]
+enum WorkloadType {
+    WriteBatch = 0,
+    GetRandom = 1,
+    GetSequential = 2,
+    PrefixScanRandom = 3,
+    DeleteRandom = 4,
+    DeleteSequential = 5,
+}
+
 #[derive(Parser, Debug)]
 pub(crate) struct Opts {
     // ----- backend type  -----
@@ -146,9 +156,9 @@ async fn get_state_store_impl(opts: &Opts) -> Result<StateStoreImpl> {
     Ok(instance)
 }
 
-async fn run_op(store: impl StateStore, opts: &Opts) {
-    for op in opts.benchmarks.split(',') {
-        match op {
+async fn run_benchmarks(store: impl StateStore, opts: &Opts) {
+    for benchmark in opts.benchmarks.split(',') {
+        match benchmark {
             "writebatch" => write_batch::run(&store, opts).await,
             "getrandom" => get_random::run(&store, opts).await,
             "prefixscanrandom" => prefix_scan_random::run(&store, opts).await,
@@ -157,8 +167,8 @@ async fn run_op(store: impl StateStore, opts: &Opts) {
     }
 }
 
-/// This is used to bench the state store performance.
-/// For usage, see: https://github.com/singularity-data/risingwave-dev/blob/main/docs/developer/benchmark_tool/state_store.md
+/// This is used to benchmark the state store performance.
+/// For usage, see: https://github.com/singularity-data/risingwave/blob/main/docs/developer/benchmark_tool/state_store.md
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
     let opts = Opts::parse();
@@ -174,9 +184,9 @@ async fn main() {
     };
 
     match state_store {
-        StateStoreImpl::Hummock(store) => run_op(store, &opts).await,
-        StateStoreImpl::Memory(store) => run_op(store, &opts).await,
-        StateStoreImpl::RocksDB(store) => run_op(store, &opts).await,
-        StateStoreImpl::Tikv(store) => run_op(store, &opts).await,
+        StateStoreImpl::Hummock(store) => run_benchmarks(store, &opts).await,
+        StateStoreImpl::Memory(store) => run_benchmarks(store, &opts).await,
+        StateStoreImpl::RocksDB(store) => run_benchmarks(store, &opts).await,
+        StateStoreImpl::Tikv(store) => run_benchmarks(store, &opts).await,
     };
 }

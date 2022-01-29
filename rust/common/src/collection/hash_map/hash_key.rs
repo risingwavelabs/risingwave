@@ -465,12 +465,12 @@ where
 impl ArrayImpl {
     fn serialize_to_hash_key<S: HashKeySerializer>(&self, serializers: &mut Vec<S>) -> Result<()> {
         macro_rules! impl_all_serialize_to_hash_key {
-      ([$self:ident, $serializers: ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-        match $self {
-          $( Self::$variant_name(inner) => serialize_array_to_hash_key(inner, $serializers), )*
+            ([$self:ident, $serializers: ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+                match $self {
+                    $( Self::$variant_name(inner) => serialize_array_to_hash_key(inner, $serializers), )*
+                }
+            };
         }
-      };
-    }
         for_all_variants! { impl_all_serialize_to_hash_key, self, serializers }
     }
 }
@@ -481,12 +481,12 @@ impl ArrayBuilderImpl {
         deserializer: &mut S,
     ) -> Result<()> {
         macro_rules! impl_all_deserialize_from_hash_key {
-      ([$self:ident, $deserializer: ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-        match $self {
-          $( Self::$variant_name(inner) => deserialize_array_element_from_hash_key(inner, $deserializer), )*
+            ([$self:ident, $deserializer: ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+                match $self {
+                    $( Self::$variant_name(inner) => deserialize_array_element_from_hash_key(inner, $deserializer), )*
+                }
+            };
         }
-      };
-    }
         for_all_variants! { impl_all_deserialize_from_hash_key, self, deserializer }
     }
 }
@@ -700,13 +700,13 @@ mod tests {
 
     fn generate_decimal_test_data() -> DataChunk {
         let columns = vec![Column::new(Arc::new(
-            array! { DecimalArray,
-              [Some(Decimal::from_str("1.2").unwrap()),
-               None,
-               Some(Decimal::from_str("1.200").unwrap()),
-               Some(Decimal::from_str("0.00").unwrap()),
-               Some(Decimal::from_str("0.0").unwrap())]
-            }
+            array! { DecimalArray, [
+                Some(Decimal::from_str("1.2").unwrap()),
+                None,
+                Some(Decimal::from_str("1.200").unwrap()),
+                Some(Decimal::from_str("0.00").unwrap()),
+                Some(Decimal::from_str("0.0").unwrap())
+            ]}
             .into(),
         ) as ArrayRef)];
 

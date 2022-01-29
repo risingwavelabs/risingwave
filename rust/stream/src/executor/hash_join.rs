@@ -1476,7 +1476,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_streaming_hash_full_outer_join_with_nonequi_condition() {
         let chunk_l1 = StreamChunk::new(
             vec![Op::Insert, Op::Insert, Op::Insert],
@@ -1646,7 +1645,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_streaming_hash_inner_join_with_nonequi_condition() {
         let chunk_l1 = StreamChunk::new(
             vec![Op::Insert, Op::Insert, Op::Insert],
@@ -1744,30 +1742,6 @@ mod tests {
         // push the 1st right chunk
         MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r1]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
-            assert_eq!(chunk.ops(), vec![Op::Insert]);
-            assert_eq!(chunk.columns().len(), 4);
-            assert_eq!(
-                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
-                vec![Some(2)]
-            );
-            assert_eq!(
-                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
-                vec![Some(10)]
-            );
-            assert_eq!(
-                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
-                vec![Some(2)]
-            );
-            assert_eq!(
-                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
-                vec![Some(7)]
-            );
-        } else {
-            unreachable!();
-        }
-        // push the 2nd right chunk
-        MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r2]);
-        if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
             assert_eq!(chunk.ops(), vec![]);
             assert_eq!(chunk.columns().len(), 4);
             for i in 0..4 {
@@ -1776,6 +1750,31 @@ mod tests {
                     vec![]
                 );
             }
+        } else {
+            unreachable!();
+        }
+
+        // push the 2nd right chunk
+        MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r2]);
+        if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
+            assert_eq!(chunk.ops(), vec![Op::Insert]);
+            assert_eq!(chunk.columns().len(), 4);
+            assert_eq!(
+                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
+                vec![Some(3)]
+            );
+            assert_eq!(
+                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
+                vec![Some(6)]
+            );
+            assert_eq!(
+                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
+                vec![Some(3)]
+            );
+            assert_eq!(
+                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
+                vec![Some(10)]
+            );
         } else {
             unreachable!();
         }
