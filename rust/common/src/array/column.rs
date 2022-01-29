@@ -69,11 +69,16 @@ impl Column {
 mod tests {
     use std::sync::Arc;
 
+    use num_traits::FromPrimitive;
+
     use super::*;
     use crate::array::{
-        Array, ArrayBuilder, BoolArray, BoolArrayBuilder, I32Array, I32ArrayBuilder, Utf8Array,
+        Array, ArrayBuilder, BoolArray, BoolArrayBuilder, DecimalArray, I32Array, I32ArrayBuilder,
+        NaiveDateArray, NaiveDateArrayBuilder, NaiveDateTimeArray, NaiveDateTimeArrayBuilder,
+        NaiveTimeArray, NaiveTimeArrayBuilder, Utf8Array,
     };
     use crate::error::Result;
+    use crate::types::{Decimal, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper};
 
     // Convert a column to protobuf, then convert it back to column, and ensures the two are
     // identical.
@@ -142,6 +147,127 @@ mod tests {
         arr.iter().enumerate().for_each(|(i, x)| {
             if i % 2 == 0 {
                 assert_eq!("abc", x.unwrap());
+            } else {
+                assert!(x.is_none());
+            }
+        });
+        Ok(())
+    }
+
+    #[test]
+    fn test_decimal_protobuf_conversion() -> Result<()> {
+        let cardinality = 2048;
+        let mut builder = DecimalArrayBuilder::new(cardinality).unwrap();
+        for i in 0..cardinality {
+            if i % 2 == 0 {
+                builder.append(Decimal::from_usize(i)).unwrap();
+            } else {
+                builder.append(None).unwrap();
+            }
+        }
+        let col = Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())));
+        let new_col = Column::from_protobuf(&col.to_protobuf()?, cardinality).unwrap();
+        assert_eq!(new_col.array.len(), cardinality);
+        let arr: &DecimalArray = new_col.array_ref().as_decimal();
+        arr.iter().enumerate().for_each(|(i, x)| {
+            if i % 2 == 0 {
+                assert_eq!(Decimal::from_usize(i).unwrap(), x.unwrap());
+            } else {
+                assert!(x.is_none());
+            }
+        });
+        Ok(())
+    }
+
+    #[test]
+    fn test_naivedate_protobuf_conversion() -> Result<()> {
+        let cardinality = 2048;
+        let mut builder = NaiveDateArrayBuilder::new(cardinality).unwrap();
+        for i in 0..cardinality {
+            if i % 2 == 0 {
+                builder
+                    .append(NaiveDateWrapper::new_with_days(i as i32).ok())
+                    .unwrap();
+            } else {
+                builder.append(None).unwrap();
+            }
+        }
+        let col = Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())));
+        let new_col = Column::from_protobuf(&col.to_protobuf()?, cardinality).unwrap();
+        assert_eq!(new_col.array.len(), cardinality);
+        let arr: &NaiveDateArray = new_col.array_ref().as_naivedate();
+        arr.iter().enumerate().for_each(|(i, x)| {
+            if i % 2 == 0 {
+                assert_eq!(
+                    NaiveDateWrapper::new_with_days(i as i32).ok().unwrap(),
+                    x.unwrap()
+                );
+            } else {
+                assert!(x.is_none());
+            }
+        });
+        Ok(())
+    }
+
+    #[test]
+    fn test_naivetime_protobuf_conversion() -> Result<()> {
+        let cardinality = 2048;
+        let mut builder = NaiveTimeArrayBuilder::new(cardinality).unwrap();
+        for i in 0..cardinality {
+            if i % 2 == 0 {
+                builder
+                    .append(NaiveTimeWrapper::new_with_secs_nano(i as u32, i as u32 * 1000).ok())
+                    .unwrap();
+            } else {
+                builder.append(None).unwrap();
+            }
+        }
+        let col = Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())));
+        let new_col = Column::from_protobuf(&col.to_protobuf()?, cardinality).unwrap();
+        assert_eq!(new_col.array.len(), cardinality);
+        let arr: &NaiveTimeArray = new_col.array_ref().as_naivetime();
+        arr.iter().enumerate().for_each(|(i, x)| {
+            if i % 2 == 0 {
+                assert_eq!(
+                    NaiveTimeWrapper::new_with_secs_nano(i as u32, i as u32 * 1000)
+                        .ok()
+                        .unwrap(),
+                    x.unwrap()
+                );
+            } else {
+                assert!(x.is_none());
+            }
+        });
+        Ok(())
+    }
+
+    #[test]
+    fn test_naivedatetime_protobuf_conversion() -> Result<()> {
+        let cardinality = 2048;
+        let mut builder = NaiveDateTimeArrayBuilder::new(cardinality).unwrap();
+        for i in 0..cardinality {
+            if i % 2 == 0 {
+                builder
+                    .append(
+                        NaiveDateTimeWrapper::new_with_secs_nsecs(i as i64, i as u32 * 1000).ok(),
+                    )
+                    .unwrap();
+            } else {
+                builder.append(None).unwrap();
+            }
+        }
+        let col = Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())));
+        let new_col = Column::from_protobuf(&col.to_protobuf()?, cardinality).unwrap();
+        assert_eq!(new_col.array.len(), cardinality);
+        let arr: &NaiveDateTimeArray = new_col.array_ref().as_naivedatetime();
+        arr.iter().enumerate().for_each(|(i, x)| {
+            if i % 2 == 0 {
+                assert_eq!(
+                    NaiveDateTimeWrapper::new_with_secs_nsecs(i as i64, i as u32 * 1000)
+                        .ok()
+                        .unwrap(),
+                    x.unwrap()
+                );
             } else {
                 assert!(x.is_none());
             }

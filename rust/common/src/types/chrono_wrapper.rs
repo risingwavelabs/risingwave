@@ -79,7 +79,8 @@ impl NaiveDateWrapper {
         ))
     }
 
-    /// Converted to the number of days since 1970.1.1 for compatibility with existing code.
+    /// Converted to the number of days since 1970.1.1 for compatibility with existing Java
+    /// frontend. TODO: Save days directly when using Rust frontend.
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize> {
         output
             .write(&(self.0.num_days_from_ce() - UNIX_EPOCH_DAYS).to_be_bytes())
@@ -100,7 +101,8 @@ impl NaiveTimeWrapper {
         ))
     }
 
-    /// Converted to microsecond timestamps for compatibility with existing code.
+    /// Converted to microsecond timestamps for compatibility with existing Java frontend.
+    /// TODO: Save nanoseconds directly when using Rust frontend.
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize> {
         output
             .write(
@@ -129,7 +131,9 @@ impl NaiveDateTimeWrapper {
     }
 
     /// Although `NaiveDateTime` takes 12 bytes, we drop 4 bytes in protobuf encoding.
-    /// Converted to microsecond timestamps for compatibility with existing code.
+    /// Converted to microsecond timestamps for compatibility with existing Java frontend.
+    /// TODO: Consider another way to save when using Rust frontend. Nanosecond timestamp can only
+    /// represent about 584 years
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize> {
         output
             .write(&(self.0.timestamp_nanos() / 1000).to_be_bytes())

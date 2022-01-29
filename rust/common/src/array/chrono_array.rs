@@ -156,3 +156,49 @@ impl NaiveTimeArray {
         ArrayType::Time
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use itertools::Itertools;
+
+    use super::*;
+
+    #[test]
+    fn test_naivedate_builder() {
+        let v = (0..1000)
+            .map(NaiveDateWrapper::new_with_days)
+            .map(|x| x.ok())
+            .collect_vec();
+        let mut builder = NaiveDateArrayBuilder::new(0).unwrap();
+        for i in &v {
+            builder.append(*i).unwrap();
+        }
+        let a = builder.finish().unwrap();
+        let res = v.iter().zip_eq(a.iter()).all(|(a, b)| *a == b);
+        assert!(res)
+    }
+
+    #[test]
+    fn test_naivedate_array_to_protobuf() {
+        let input = vec![
+            NaiveDateWrapper::new_with_days(12345).ok(),
+            None,
+            NaiveDateWrapper::new_with_days(67890).ok(),
+        ];
+
+        let array = NaiveDateArray::from_slice(&input).unwrap();
+        let buffers = array.to_protobuf().unwrap().values;
+
+        assert_eq!(buffers.len(), 1);
+
+        let output_buffer = input.iter().fold(Vec::new(), |mut v, d| match d {
+            Some(d) => {
+                d.to_protobuf(&mut v).unwrap();
+                v
+            }
+            None => v,
+        });
+
+        assert_eq!(buffers[0].get_body(), &output_buffer);
+    }
+}

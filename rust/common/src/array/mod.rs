@@ -210,9 +210,9 @@ macro_rules! for_all_variants {
             { Bool, bool, BoolArray, BoolArrayBuilder },
             { Decimal, decimal, DecimalArray, DecimalArrayBuilder },
             { Interval, interval, IntervalArray, IntervalArrayBuilder },
-            { NaiveDate, naive_date, NaiveDateArray, NaiveDateArrayBuilder },
-            { NaiveDateTime, naive_date_time, NaiveDateTimeArray, NaiveDateTimeArrayBuilder },
-            { NaiveTime, naive_time, NaiveTimeArray, NaiveTimeArrayBuilder },
+            { NaiveDate, naivedate, NaiveDateArray, NaiveDateArrayBuilder },
+            { NaiveDateTime, naivedatetime, NaiveDateTimeArray, NaiveDateTimeArrayBuilder },
+            { NaiveTime, naivetime, NaiveTimeArray, NaiveTimeArrayBuilder },
             { Struct, struct, StructArray, StructArrayBuilder }
         }
     };

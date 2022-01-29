@@ -238,9 +238,9 @@ macro_rules! for_all_scalar_variants {
       { Bool, bool, bool, bool },
       { Decimal, decimal, Decimal, Decimal  },
       { Interval, interval, IntervalUnit, IntervalUnit },
-      { NaiveDate, naive_date, NaiveDateWrapper, NaiveDateWrapper },
-      { NaiveDateTime, naive_date_time, NaiveDateTimeWrapper, NaiveDateTimeWrapper },
-      { NaiveTime, naive_time, NaiveTimeWrapper, NaiveTimeWrapper },
+      { NaiveDate, naivedate, NaiveDateWrapper, NaiveDateWrapper },
+      { NaiveDateTime, naivedatetime, NaiveDateTimeWrapper, NaiveDateTimeWrapper },
+      { NaiveTime, naivetime, NaiveTimeWrapper, NaiveTimeWrapper },
       { Struct, struct, StructValue, StructValue }
     }
   };
@@ -501,9 +501,9 @@ impl std::hash::Hash for ScalarImpl {
           Self::Utf8(s) => s.hash(state),
           Self::Decimal(decimal) => decimal.hash(state),
           Self::Interval(interval) => interval.hash(state),
-          Self::NaiveDate(naive_date) => naive_date.hash(state),
-          Self::NaiveDateTime(naive_date_time) => naive_date_time.hash(state),
-          Self::NaiveTime(naive_time) => naive_time.hash(state),
+          Self::NaiveDate(naivedate) => naivedate.hash(state),
+          Self::NaiveDateTime(naivedatetime) => naivedatetime.hash(state),
+          Self::NaiveTime(naivetime) => naivetime.hash(state),
           Self::Struct(v) => v.hash(state),
         }
       };

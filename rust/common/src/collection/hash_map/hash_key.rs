@@ -593,7 +593,7 @@ mod tests {
     use crate::array::column::Column;
     use crate::array::{
         ArrayRef, BoolArray, DataChunk, DecimalArray, F32Array, F64Array, I16Array, I32Array,
-        I32ArrayBuilder, I64Array, Utf8Array,
+        I32ArrayBuilder, I64Array, NaiveDateArray, NaiveDateTimeArray, NaiveTimeArray, Utf8Array,
     };
     use crate::collection::hash_map::{
         HashKey, Key128, Key16, Key256, Key32, Key64, KeySerialized, PrecomputedBuildHasher,
@@ -616,6 +616,12 @@ mod tests {
             Column::new(seed_rand_array_ref::<F64Array>(capacity, seed + 5)),
             Column::new(seed_rand_array_ref::<DecimalArray>(capacity, seed + 6)),
             Column::new(seed_rand_array_ref::<Utf8Array>(capacity, seed + 7)),
+            Column::new(seed_rand_array_ref::<NaiveDateArray>(capacity, seed + 8)),
+            Column::new(seed_rand_array_ref::<NaiveTimeArray>(capacity, seed + 9)),
+            Column::new(seed_rand_array_ref::<NaiveDateTimeArray>(
+                capacity,
+                seed + 10,
+            )),
         ];
 
         DataChunk::try_from(columns).expect("Failed to create data chunk")
