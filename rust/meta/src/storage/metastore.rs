@@ -9,7 +9,7 @@ use risingwave_common::error::{ErrorCode, Result};
 
 use crate::manager::Epoch;
 use crate::storage::transaction::Transaction;
-use crate::storage::{Key, KeyValueVersion, Operation, Precondition, Value};
+use crate::storage::{Key, KeyValueVersion, Value};
 
 pub const DEFAULT_COLUMN_FAMILY: &str = "default";
 
@@ -35,9 +35,6 @@ impl KeyValue {
 
     pub fn key(&self) -> &Key {
         &self.key
-    }
-    pub fn value(&self) -> &Value {
-        &self.value
     }
     pub fn version(&self) -> KeyValueVersion {
         self.version
@@ -66,8 +63,10 @@ pub trait MetaStore: Sync + Send + 'static {
     async fn delete_cf(&self, cf: &str, key: &[u8], version: Epoch) -> Result<()>;
     async fn delete_all_cf(&self, cf: &str, key: &[u8]) -> Result<()>;
 
-    /// `get_transaction` return a transaction. See Transaction trait for detail.
-    fn get_transaction(&self) -> Box<dyn Transaction>;
+    fn get_transaction(&self) -> Transaction {
+        Transaction::new()
+    }
+    async fn commit_transaction(&self, trx: &mut Transaction) -> Result<()>;
 }
 
 // Error of metastore
@@ -86,11 +85,6 @@ impl From<Error> for RwError {
             }
         }
     }
-}
-
-pub enum OperationOption {
-    WithPrefix(),
-    WithVersion(KeyValueVersion),
 }
 
 pub type MetaStoreRef = Arc<dyn MetaStore>;
@@ -295,24 +289,11 @@ impl MetaStore for MemStore {
         Ok(())
     }
 
-    fn get_transaction(&self) -> Box<dyn Transaction> {
-        Box::new(MemTransaction {})
-    }
-}
-
-/// We should use `SledMetaStore` now. `MemStore` won't be functioning any more until
-/// `MemTransaction` is implemented.
-struct MemTransaction {}
-impl Transaction for MemTransaction {
-    fn add_preconditions(&mut self, _preconditions: Vec<Precondition>) {
+    fn get_transaction(&self) -> Transaction {
         unimplemented!()
     }
 
-    fn add_operations(&mut self, _operations: Vec<Operation>) {
-        unimplemented!()
-    }
-
-    fn commit(&self) -> std::result::Result<(), Error> {
+    async fn commit_transaction(&self, _trx: &mut Transaction) -> Result<()> {
         unimplemented!()
     }
 }
@@ -325,10 +306,6 @@ impl ColumnFamilyUtils {
             .try_into()
             .expect("prefix length out of u8 range");
         [&[prefix_len], prefix, key].concat()
-    }
-    pub fn get_cf_from_prefixed_key(prefixed_key: &[u8]) -> Vec<u8> {
-        let prefix_len = prefixed_key[0] as usize;
-        prefixed_key[1..prefix_len as usize + 1].to_vec()
     }
 }
 
