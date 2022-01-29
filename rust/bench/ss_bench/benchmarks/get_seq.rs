@@ -11,7 +11,6 @@ use crate::{Opts, WorkloadType};
 
 pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
     let batch = Workload::new(opts, WorkloadType::GetSeq, None).batch;
-    dbg!(&batch);
     store
         .ingest_batch(batch.clone(), get_epoch())
         .await
@@ -19,6 +18,7 @@ pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
 
     // generate queried point get key
     let key_num = (opts.iterations - opts.iterations % opts.concurrency_num) as usize;
+    dbg!(key_num);
     let mut get_keys = (0..key_num)
         .into_iter()
         .map(|i| batch[i].0.clone())

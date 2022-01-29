@@ -35,7 +35,6 @@ impl Workload {
         };
 
         let mut batch = keys.into_iter().zip(values.into_iter()).collect_vec();
-
         batch.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
         // As duplication rate is low, ignore filling data after deduplicating.
         batch.dedup_by(|(k1, _), (k2, _)| k1 == k2);
@@ -111,32 +110,34 @@ impl Workload {
         let prefix_num = (opts.kvs_per_batch + opts.key_prefix_frequency - 1) as u64
             / opts.key_prefix_frequency as u64;
         let mut prefixes = Vec::with_capacity(prefix_num as usize);
-        let prefix = vec![b'\0'; opts.key_prefix_size as usize];
+        let mut prefix = vec![b'\x00'; opts.key_prefix_size as usize];
         for _ in 0..prefix_num as u64 {
-            let prefix = next_key(&prefix);
+             prefix = next_key(&prefix);
             // ensure next prefix exist
             assert_ne!(prefix.len(), 0);
-            prefixes.push(Bytes::from(prefix));
+            prefixes.push(Bytes::from(prefix.clone()));
         }
 
         // --- get keys ---
         let mut keys = Vec::with_capacity(opts.kvs_per_batch as usize);
-        // FIXME: keys in a key_space should be continous
-        let user_key = vec![b'\0'; opts.key_size as usize];
-        for i in 0..opts.kvs_per_batch as u64 {
-            let user_key = next_key(&user_key);
+        let mut user_key = vec![b'\x00'; opts.key_size as usize];
+
+        for _ in 0..opts.key_prefix_frequency as u64 {
+            user_key = next_key(&user_key);
             // ensure next key exist
             assert_ne!(user_key.len(), 0);
-            let mut key = BytesMut::with_capacity((opts.key_prefix_size + opts.key_size) as usize);
-            // make sure prefixes are evenly distributed
-            key.extend_from_slice(&prefixes[i as usize % prefixes.len()]);
-            key.extend_from_slice(user_key.as_ref());
 
-            keys.push(key.freeze());
+            // keys in a keyspace should be continous
+            for i in 0..prefix_num as usize {
+                let mut key =
+                    BytesMut::with_capacity((opts.key_prefix_size + opts.key_size) as usize);
+                // make sure prefixes are evenly distributed
+                key.extend_from_slice(&prefixes[i]);
+                key.extend_from_slice(user_key.as_ref());
+
+                keys.push(key.freeze());
+            }
         }
-
-        dbg!(keys.len());
-        dbg!(&keys);
 
         (prefixes, keys)
     }
