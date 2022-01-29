@@ -1,11 +1,15 @@
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::Values;
 
 use crate::binder::Binder;
-use crate::expr::BoundExprImpl;
+use crate::expr::{BoundExpr as _, BoundExprImpl};
 
 #[derive(Debug)]
-pub struct BoundValues(pub Vec<Vec<BoundExprImpl>>);
+pub struct BoundValues {
+    pub rows: Vec<Vec<BoundExprImpl>>,
+    pub schema: Schema,
+}
 
 impl Binder {
     pub(super) fn bind_values(&mut self, values: Values) -> Result<BoundValues> {
@@ -13,8 +17,13 @@ impl Binder {
         let bound = vec2d
             .into_iter()
             .map(|vec| vec.into_iter().map(|expr| self.bind_expr(expr)).collect())
-            .collect::<Result<_>>()?;
+            .collect::<Result<Vec<Vec<_>>>>()?;
         // calc row type and insert casts here
-        Ok(BoundValues(bound))
+        let types = bound[0].iter().map(|expr| expr.return_type());
+        let schema = Schema::new(types.map(Field::unnamed).collect());
+        Ok(BoundValues {
+            rows: bound,
+            schema,
+        })
     }
 }

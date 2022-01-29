@@ -43,8 +43,8 @@ impl WithOrder for LogicalValues {}
 impl WithDistribution for LogicalValues {}
 
 impl fmt::Display for LogicalValues {
-    fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
-        todo!()
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self)
     }
 }
 impl ColPrunable for LogicalValues {}
