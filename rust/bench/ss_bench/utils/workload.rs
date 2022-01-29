@@ -112,7 +112,7 @@ impl Workload {
         let mut prefixes = Vec::with_capacity(prefix_num as usize);
         let mut prefix = vec![b'\0'; opts.key_prefix_size as usize];
         for _ in 0..prefix_num as u64 {
-             prefix = next_key(&prefix);
+            prefix = next_key(&prefix);
             // ensure next prefix exist
             assert_ne!(prefix.len(), 0);
             prefixes.push(Bytes::from(prefix.clone()));
@@ -127,7 +127,7 @@ impl Workload {
             // ensure next key exist
             assert_ne!(user_key.len(), 0);
 
-            // keys in a keyspace should be continous
+            // keys in a keyspace should be sequential
             for i in 0..prefix_num as usize {
                 let mut key =
                     BytesMut::with_capacity((opts.key_prefix_size + opts.key_size) as usize);
