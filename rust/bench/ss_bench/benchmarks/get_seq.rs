@@ -3,9 +3,6 @@ use std::time::Instant;
 use bytes::Bytes;
 use futures::future;
 use itertools::Itertools;
-use rand::distributions::Uniform;
-use rand::prelude::{Distribution, StdRng};
-use rand::SeedableRng;
 use risingwave_storage::StateStore;
 
 use crate::utils::latency_stat::LatencyStat;
@@ -13,19 +10,17 @@ use crate::utils::workload::{get_epoch, Workload};
 use crate::{Opts, WorkloadType};
 
 pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
-    let batch = Workload::new(opts, WorkloadType::GetRandom, None).batch;
+    let batch = Workload::new(opts, WorkloadType::GetSeq, None).batch;
     store
         .ingest_batch(batch.clone(), get_epoch())
         .await
         .unwrap();
 
     // generate queried point get key
-    let mut rng = StdRng::seed_from_u64(233);
-    let range = Uniform::from(0..opts.kvs_per_batch as usize);
     let key_num = (opts.iterations - opts.iterations % opts.concurrency_num) as usize;
     let mut get_keys = (0..key_num)
         .into_iter()
-        .map(|_| batch[range.sample(&mut rng)].0.clone())
+        .map(|i| batch[i].0.clone())
         .collect_vec();
 
     // partitioned these keys for each concurrency
@@ -62,7 +57,7 @@ pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
 
     println!(
         "
-    getrandom
+    getseq
       {}
       QPS: {}",
         stat, qps

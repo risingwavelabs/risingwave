@@ -65,7 +65,7 @@ pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
 
     println!(
         "
-    Prefix scan
+    prefixscanrandom
       {}
       QPS: {}",
         stat, qps

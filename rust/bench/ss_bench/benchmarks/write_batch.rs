@@ -56,7 +56,7 @@ pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
 
     println!(
         "
-    Batch ingestion
+    writebatch
       {}
       KV ingestion OPS: {}",
         stat, ops
