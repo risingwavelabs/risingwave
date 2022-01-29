@@ -11,6 +11,7 @@ use itertools::Itertools;
 pub enum Components {
     MinIO,
     PrometheusAndGrafana,
+    Tracing,
     ComputeNodeAndMetaNode,
     Frontend,
     Release,
@@ -23,6 +24,7 @@ impl Components {
             Self::PrometheusAndGrafana => "Prometheus / Grafana",
             Self::ComputeNodeAndMetaNode => "Build compute-node / meta-node",
             Self::Frontend => "Build frontend",
+            Self::Tracing => "Tracing / Jaeger",
             Self::Release => "Enable release mode",
         }
         .into()
@@ -50,6 +52,11 @@ to RiseLAB directory."
 Required if you want to build frontend. Otherwise you will
 need to manually download and copy it to RiseLAB directory."
             }
+            Self::Tracing => {
+                "
+Required if you want to use tracing. This option will help
+you download Jaeger."
+            }
             Self::Release => {
                 "
 Build RisingWave in release mode"
@@ -64,6 +71,7 @@ Build RisingWave in release mode"
             Self::PrometheusAndGrafana => "ENABLE_PROMETHEUS_GRAFANA",
             Self::ComputeNodeAndMetaNode => "ENABLE_BUILD_RUST",
             Self::Frontend => "ENABLE_BUILD_FRONTEND",
+            Self::Tracing => "ENABLE_COMPUTE_TRACING",
             Self::Release => "ENABLE_RELEASE_BUILD",
         }
         .into()
