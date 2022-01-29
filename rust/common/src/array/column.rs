@@ -1,6 +1,9 @@
 use risingwave_pb::data::{ArrayType, Column as ProstColumn};
 
-use crate::array::column_proto_readers::{read_bool_array, read_numeric_array, read_string_array};
+use crate::array::column_proto_readers::{
+    read_bool_array, read_naivedate_array, read_naivedatetime_array, read_naivetime_array,
+    read_numeric_array, read_string_array,
+};
 use crate::array::value_reader::{
     DecimalValueReader, F32ValueReader, F64ValueReader, I16ValueReader, I32ValueReader,
     I64ValueReader, Utf8ValueReader,
@@ -46,6 +49,9 @@ impl Column {
             ArrayType::Decimal => {
                 read_string_array::<DecimalArrayBuilder, DecimalValueReader>(array, cardinality)?
             }
+            ArrayType::Date => read_naivedate_array(array, cardinality)?,
+            ArrayType::Time => read_naivetime_array(array, cardinality)?,
+            ArrayType::Timestamp => read_naivedatetime_array(array, cardinality)?,
         };
         Ok(Self { array })
     }

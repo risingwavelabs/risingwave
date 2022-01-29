@@ -68,6 +68,8 @@ impl<B: Buf> MaybeFlip<B> {
     def_method!(get_u32, u32);
     def_method!(get_u64, u64);
     def_method!(get_i8, i8);
+    def_method!(get_i32, i32);
+    def_method!(get_i64, i64);
     def_method!(get_i128, i128);
 
     fn copy_to_slice(&mut self, dst: &mut [u8]) {
@@ -462,6 +464,26 @@ impl<B: Buf> Deserializer<B> {
         let scale = self.input.get_i8();
         let mantissa = self.input.get_i128() ^ (1 << 127);
         Ok((mantissa, scale))
+    }
+
+    /// Deserialize a NaiveDateWrapper value. Returns `days`.
+    pub fn deserialize_naivedate(&mut self) -> Result<i32> {
+        let days = self.input.get_i32();
+        Ok(days)
+    }
+
+    /// Deserialize a NaiveTimeWrapper value. Returns `(secs, nano)`.
+    pub fn deserialize_naivetime(&mut self) -> Result<(u32, u32)> {
+        let secs = self.input.get_u32();
+        let nano = self.input.get_u32();
+        Ok((secs, nano))
+    }
+
+    /// Deserialize a NaiveDateTimeWrapper value. Returns `(secs, nsecs)`.
+    pub fn deserialize_naivedatetime(&mut self) -> Result<(i64, u32)> {
+        let secs = self.input.get_i64();
+        let nsecs = self.input.get_u32();
+        Ok((secs, nsecs))
     }
 }
 

@@ -57,6 +57,8 @@ impl<B: BufMut> MaybeFlip<B> {
     def_method!(put_u32, u32);
     def_method!(put_u64, u64);
     def_method!(put_i8, i8);
+    def_method!(put_i32, i32);
+    def_method!(put_i64, i64);
     def_method!(put_i128, i128);
 
     fn put_slice(&mut self, src: &[u8]) {
@@ -431,6 +433,34 @@ impl<B: BufMut> Serializer<B> {
         // https://github.com/pingcap/tidb/blob/fec2938c1379270bf9939822c1abfe3d7244c174/types/mydecimal.go#L1133
         self.output.put_i8(scale);
         self.output.put_i128(mantissa ^ (1 << 127));
+        Ok(())
+    }
+
+    /// Serialize a NaiveDateWrapper value.
+    ///
+    /// - `days`: From `chrono::Datelike::num_days_from_ce()`.
+    pub fn serialize_naivedate(&mut self, days: i32) -> Result<()> {
+        self.output.put_i32(days);
+        Ok(())
+    }
+
+    /// Serialize a NaiveTimeWrapper value.
+    ///
+    /// - `secs`: From `chrono::Timelike::num_seconds_from_midnight()`.
+    /// - `nano`: From `chrono::Timelike::nanosecond()`.
+    pub fn serialize_naivetime(&mut self, secs: u32, nano: u32) -> Result<()> {
+        self.output.put_u32(secs);
+        self.output.put_u32(nano);
+        Ok(())
+    }
+
+    /// Serialize a NaiveDateTimeWrapper value.
+    ///
+    /// - `secs`: From `chrono::naive::NaiveDateTime::timestamp()`.
+    /// - `nsecs`: From `chrono::naive::NaiveDateTime::timestamp_subsec_nanos()`.
+    pub fn serialize_naivedatetime(&mut self, secs: i64, nsecs: u32) -> Result<()> {
+        self.output.put_i64(secs);
+        self.output.put_u32(nsecs);
         Ok(())
     }
 }

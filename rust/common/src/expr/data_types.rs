@@ -110,7 +110,7 @@ macro_rules! date {
     ($macro:tt) => {
         $macro! {
           $crate::types::DataTypeKind::Date,
-          $crate::array::I32Array
+          $crate::array::NaiveDateArray
         }
     };
 }
@@ -146,7 +146,7 @@ macro_rules! time {
     ($macro:tt) => {
         $macro! {
           $crate::types::DataTypeKind::Time,
-          $crate::array::I64Array
+          $crate::array::NaiveTimeArray
         }
     };
 }
@@ -159,7 +159,7 @@ macro_rules! timestamp {
     ($macro:tt) => {
         $macro! {
           $crate::types::DataTypeKind::Timestamp,
-          $crate::array::I64Array
+          $crate::array::NaiveDateTimeArray
         }
     };
 }

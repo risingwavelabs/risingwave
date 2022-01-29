@@ -213,7 +213,7 @@ impl SourceParser for ProtobufParser {
               _ => None,
             }
             _ => None,
-          }).map(ScalarImpl::Int32)
+          }).map(ScalarImpl::NaiveDate)
         }
         _ => unimplemented!(),
       }
@@ -397,7 +397,9 @@ mod tests {
         assert!(data[2].eq(&Some(ScalarImpl::Utf8("test city".to_string()))));
         assert!(data[3].eq(&Some(ScalarImpl::Int64(456))));
         assert!(data[4].eq(&Some(ScalarImpl::Float32(1.2345.into()))));
-        assert!(data[5].eq(&Some(ScalarImpl::Int32(str_to_date("2021-01-01").unwrap()))))
+        assert!(data[5].eq(&Some(ScalarImpl::NaiveDate(
+            str_to_date("2021-01-01").unwrap()
+        ))))
     }
 
     #[test]

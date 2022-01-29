@@ -189,7 +189,7 @@ async fn test_merger_sum_aggr() {
     assert_eq!(array.value_at(array.len() - 1), Some((0..10).sum()));
 }
 
-fn str_to_timestamp(elem: &str) -> i64 {
+fn str_to_timestamp(elem: &str) -> NaiveDateTimeWrapper {
     use risingwave_common::vector_op::cast::str_to_timestamp;
     str_to_timestamp(elem).unwrap()
 }
@@ -463,7 +463,9 @@ async fn test_tpch_q6() {
             vec![op; 10],
             vec![
                 Column::new(Arc::new(
-                    I64Array::from_slice(d_shipdate.as_slice()).unwrap().into(),
+                    NaiveDateTimeArray::from_slice(d_shipdate.as_slice())
+                        .unwrap()
+                        .into(),
                 )),
                 Column::new(Arc::new(
                     F64Array::from_slice(d_discount.as_slice()).unwrap().into(),

@@ -68,7 +68,7 @@ pub(crate) fn json_parse_value(
         DataTypeKind::Date => match value.and_then(|v| v.as_str()) {
             None => Err(RwError::from(InternalError("parse error".to_string()))),
             Some(date_str) => match str_to_date(date_str) {
-                Ok(date) => Ok(ScalarImpl::Int32(date as i32)),
+                Ok(date) => Ok(ScalarImpl::NaiveDate(date)),
                 Err(e) => Err(e),
             },
         },

@@ -123,7 +123,9 @@ mod tests {
         assert!(row[5].eq(&Some(ScalarImpl::Float32(1.23.into()))));
         assert!(row[6].eq(&Some(ScalarImpl::Float64(1.2345.into()))));
         assert!(row[7].eq(&Some(ScalarImpl::Utf8("varchar".to_string()))));
-        assert!(row[8].eq(&Some(ScalarImpl::Int32(str_to_date("2021-01-01").unwrap()))));
+        assert!(row[8].eq(&Some(ScalarImpl::NaiveDate(
+            str_to_date("2021-01-01").unwrap()
+        ))));
 
         let payload = r#"{"i32":1}"#.as_bytes();
         let result = parser.parse(payload, &descs);

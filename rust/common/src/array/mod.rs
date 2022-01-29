@@ -1,6 +1,7 @@
 //! `Array` defines all in-memory representations of vectorized execution framework.
 
 mod bool_array;
+mod chrono_array;
 pub mod column;
 mod column_proto_readers;
 mod data_chunk;
@@ -21,6 +22,10 @@ use std::hash::Hasher;
 use std::sync::Arc;
 
 pub use bool_array::{BoolArray, BoolArrayBuilder};
+pub use chrono_array::{
+    NaiveDateArray, NaiveDateArrayBuilder, NaiveDateTimeArray, NaiveDateTimeArrayBuilder,
+    NaiveTimeArray, NaiveTimeArrayBuilder,
+};
 pub use data_chunk::{DataChunk, DataChunkRef};
 pub use data_chunk_iter::{Row, RowDeserializer, RowRef};
 pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
@@ -205,6 +210,9 @@ macro_rules! for_all_variants {
       { Bool, bool, BoolArray, BoolArrayBuilder },
       { Decimal, decimal, DecimalArray, DecimalArrayBuilder },
       { Interval, interval, IntervalArray, IntervalArrayBuilder },
+      { NaiveDate, naive_date, NaiveDateArray, NaiveDateArrayBuilder },
+      { NaiveDateTime, naive_date_time, NaiveDateTimeArray, NaiveDateTimeArrayBuilder },
+      { NaiveTime, naive_time, NaiveTimeArray, NaiveTimeArrayBuilder },
       { Struct, struct, StructArray, StructArrayBuilder }
     }
   };
@@ -248,6 +256,24 @@ impl From<Utf8Array> for ArrayImpl {
 impl From<IntervalArray> for ArrayImpl {
     fn from(arr: IntervalArray) -> Self {
         Self::Interval(arr)
+    }
+}
+
+impl From<NaiveDateArray> for ArrayImpl {
+    fn from(arr: NaiveDateArray) -> Self {
+        Self::NaiveDate(arr)
+    }
+}
+
+impl From<NaiveDateTimeArray> for ArrayImpl {
+    fn from(arr: NaiveDateTimeArray) -> Self {
+        Self::NaiveDateTime(arr)
+    }
+}
+
+impl From<NaiveTimeArray> for ArrayImpl {
+    fn from(arr: NaiveTimeArray) -> Self {
+        Self::NaiveTime(arr)
     }
 }
 

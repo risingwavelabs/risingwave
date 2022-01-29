@@ -14,10 +14,13 @@ pub use native_type::*;
 use risingwave_pb::data::data_type::TypeName;
 pub use scalar_impl::*;
 
+mod chrono_wrapper;
 mod decimal;
 pub mod interval;
 
 mod ordered_float;
+use chrono::{Datelike, Timelike};
+pub use chrono_wrapper::{NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper};
 pub use decimal::Decimal;
 pub use interval::*;
 pub use ordered_float::IntoOrdered;
@@ -98,10 +101,10 @@ impl DataTypeKind {
             DataTypeKind::Decimal { prec: _, scale: _ } => {
                 DecimalArrayBuilder::new(capacity)?.into()
             }
-            DataTypeKind::Date => PrimitiveArrayBuilder::<i32>::new(capacity)?.into(),
+            DataTypeKind::Date => NaiveDateArrayBuilder::new(capacity)?.into(),
             DataTypeKind::Char | DataTypeKind::Varchar => Utf8ArrayBuilder::new(capacity)?.into(),
-            DataTypeKind::Time => PrimitiveArrayBuilder::<i64>::new(capacity)?.into(),
-            DataTypeKind::Timestamp => PrimitiveArrayBuilder::<i64>::new(capacity)?.into(),
+            DataTypeKind::Time => NaiveTimeArrayBuilder::new(capacity)?.into(),
+            DataTypeKind::Timestamp => NaiveDateTimeArrayBuilder::new(capacity)?.into(),
             DataTypeKind::Timestampz => PrimitiveArrayBuilder::<i64>::new(capacity)?.into(),
             DataTypeKind::Interval => IntervalArrayBuilder::new(capacity)?.into(),
             DataTypeKind::Struct => StructArrayBuilder::new(capacity)?.into(),
@@ -235,6 +238,9 @@ macro_rules! for_all_scalar_variants {
       { Bool, bool, bool, bool },
       { Decimal, decimal, Decimal, Decimal  },
       { Interval, interval, IntervalUnit, IntervalUnit },
+      { NaiveDate, naive_date, NaiveDateWrapper, NaiveDateWrapper },
+      { NaiveDateTime, naive_date_time, NaiveDateTimeWrapper, NaiveDateTimeWrapper },
+      { NaiveTime, naive_time, NaiveTimeWrapper, NaiveTimeWrapper },
       { Struct, struct, StructValue, StructValue }
     }
   };
@@ -495,6 +501,9 @@ impl std::hash::Hash for ScalarImpl {
           Self::Utf8(s) => s.hash(state),
           Self::Decimal(decimal) => decimal.hash(state),
           Self::Interval(interval) => interval.hash(state),
+          Self::NaiveDate(naive_date) => naive_date.hash(state),
+          Self::NaiveDateTime(naive_date_time) => naive_date_time.hash(state),
+          Self::NaiveTime(naive_time) => naive_time.hash(state),
           Self::Struct(v) => v.hash(state),
         }
       };
@@ -554,6 +563,13 @@ impl ScalarRefImpl<'_> {
                 ser.serialize_decimal(mantissa, scale)?;
             }
             Self::Interval(v) => v.serialize(ser)?,
+            &Self::NaiveDate(v) => ser.serialize_naivedate(v.0.num_days_from_ce())?,
+            &Self::NaiveDateTime(v) => {
+                ser.serialize_naivedatetime(v.0.timestamp(), v.0.timestamp_subsec_nanos())?
+            }
+            &Self::NaiveTime(v) => {
+                ser.serialize_naivetime(v.0.num_seconds_from_midnight(), v.0.nanosecond())?
+            }
             Self::Struct(v) => v.serialize(ser)?,
         };
         Ok(())
@@ -593,8 +609,19 @@ impl ScalarImpl {
                 }
             }),
             Ty::Interval => Self::Interval(IntervalUnit::deserialize(de)?),
-            Ty::Time | Ty::Timestamp | Ty::Timestampz => Self::Int64(i64::deserialize(de)?),
-            Ty::Date => Self::Int32(i32::deserialize(de)?),
+            Ty::Time => Self::NaiveTime({
+                let (secs, nano) = de.deserialize_naivetime()?;
+                NaiveTimeWrapper::new_with_secs_nano(secs, nano)?
+            }),
+            Ty::Timestamp => Self::NaiveDateTime({
+                let (secs, nsecs) = de.deserialize_naivedatetime()?;
+                NaiveDateTimeWrapper::new_with_secs_nsecs(secs, nsecs)?
+            }),
+            Ty::Timestampz => Self::Int64(i64::deserialize(de)?),
+            Ty::Date => Self::NaiveDate({
+                let days = de.deserialize_naivedate()?;
+                NaiveDateWrapper::new_with_days(days)?
+            }),
             Ty::Struct => Self::Struct(StructValue::deserialize(de)?),
         })
     }
