@@ -31,7 +31,7 @@ impl CompactionInner {
 
     pub async fn load_compact_status(&self) -> Result<CompactStatus> {
         self.env
-            .meta_store_ref()
+            .meta_store()
             .get_cf(
                 self.env.config().get_hummock_default_cf(),
                 self.env
@@ -46,7 +46,7 @@ impl CompactionInner {
 
     pub fn save_compact_status_in_transaction(
         &self,
-        trx: &mut Box<dyn Transaction>,
+        trx: &mut Transaction,
         compact_status: &CompactStatus,
     ) {
         trx.add_operations(vec![Operation::Put(
@@ -58,7 +58,7 @@ impl CompactionInner {
                 self.env.config().get_hummock_default_cf().as_bytes(),
             ),
             bincode::serialize(&compact_status).unwrap(),
-            vec![],
+            None,
         )]);
     }
 
