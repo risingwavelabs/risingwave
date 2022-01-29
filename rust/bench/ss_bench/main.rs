@@ -37,7 +37,7 @@ pub(crate) struct Opts {
     #[clap(long)]
     benchmarks: String,
 
-    #[clap(long, default_value_t = 1000)]
+    #[clap(long, default_value_t = 10)]
     iterations: u32,
 
     #[clap(long, default_value_t = 1)]

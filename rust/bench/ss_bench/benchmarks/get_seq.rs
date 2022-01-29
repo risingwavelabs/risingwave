@@ -18,7 +18,6 @@ pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
 
     // generate queried point get key
     let key_num = (opts.iterations - opts.iterations % opts.concurrency_num) as usize;
-    dbg!(key_num);
     let mut get_keys = (0..key_num)
         .into_iter()
         .map(|i| batch[i].0.clone())

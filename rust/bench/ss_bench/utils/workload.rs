@@ -110,7 +110,7 @@ impl Workload {
         let prefix_num = (opts.kvs_per_batch + opts.key_prefix_frequency - 1) as u64
             / opts.key_prefix_frequency as u64;
         let mut prefixes = Vec::with_capacity(prefix_num as usize);
-        let mut prefix = vec![b'\x00'; opts.key_prefix_size as usize];
+        let mut prefix = vec![b'\0'; opts.key_prefix_size as usize];
         for _ in 0..prefix_num as u64 {
              prefix = next_key(&prefix);
             // ensure next prefix exist
@@ -120,7 +120,7 @@ impl Workload {
 
         // --- get keys ---
         let mut keys = Vec::with_capacity(opts.kvs_per_batch as usize);
-        let mut user_key = vec![b'\x00'; opts.key_size as usize];
+        let mut user_key = vec![b'\0'; opts.key_size as usize];
 
         for _ in 0..opts.key_prefix_frequency as u64 {
             user_key = next_key(&user_key);
