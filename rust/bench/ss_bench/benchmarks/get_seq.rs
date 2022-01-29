@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use bytes::Bytes;
 use futures::future;
-use itertools::Itertools; 
+use itertools::Itertools;
 use risingwave_storage::StateStore;
 
 use crate::utils::latency_stat::LatencyStat;
