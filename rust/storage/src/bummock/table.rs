@@ -183,7 +183,7 @@ impl BummockTable {
             mem_dirty_segs: RwLock::new(Vec::new()),
             staged_segs: Vec::with_capacity(0), // empty before introducing IO next time
             partitioned_segs: Vec::with_capacity(0), /* empty before introducing compaction next
-                                                      * time */
+                                                 * time */
             current_tuple_id: AtomicU64::new(0),
             rwlock: Arc::new(RwLock::new(1)),
         }
