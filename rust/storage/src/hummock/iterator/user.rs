@@ -8,12 +8,12 @@ use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
 use crate::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
 
-pub enum DirectedUserIterator {
-    Forward(UserIterator),
-    Backward(ReverseUserIterator),
+pub enum DirectedUserIterator<'a> {
+    Forward(UserIterator<'a>),
+    Backward(ReverseUserIterator<'a>),
 }
 
-impl DirectedUserIterator {
+impl DirectedUserIterator<'_> {
     pub async fn next(&mut self) -> HummockResult<()> {
         match self {
             Self::Forward(ref mut iter) => iter.next().await,
@@ -59,9 +59,9 @@ impl DirectedUserIterator {
 }
 
 /// [`UserIterator`] can be used by user directly.
-pub struct UserIterator {
+pub struct UserIterator<'a> {
     /// Inner table iterator.
-    iterator: MergeIterator,
+    iterator: MergeIterator<'a>,
 
     /// Last user key
     last_key: Vec<u8>,
@@ -81,12 +81,12 @@ pub struct UserIterator {
     stats: Arc<StateStoreStats>,
 }
 
-// TODO: decide whether this should also impl `HummockIterator`
-impl UserIterator {
+// TODO: decide wheher this should also impl `HummockIterator`
+impl<'a> UserIterator<'a> {
     /// Create [`UserIterator`] with maximum epoch.
     #[cfg(test)]
     pub(crate) fn new(
-        iterator: MergeIterator,
+        iterator: MergeIterator<'a>,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
     ) -> Self {
         Self::new_with_epoch(iterator, key_range, Epoch::MAX)
@@ -94,7 +94,7 @@ impl UserIterator {
 
     /// Create [`UserIterator`] with given `read_epoch`.
     pub(crate) fn new_with_epoch(
-        iterator: MergeIterator,
+        iterator: MergeIterator<'a>,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
     ) -> Self {

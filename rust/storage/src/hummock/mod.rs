@@ -1,5 +1,6 @@
 //! Hummock is the state store of the streaming system.
 
+use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
@@ -33,7 +34,7 @@ use compactor::{Compactor, SubCompactContext};
 pub use error::*;
 use parking_lot::Mutex as PLMutex;
 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
-use risingwave_pb::hummock::{KeyRange, SstableInfo};
+use risingwave_pb::hummock::{KeyRange, LevelType, SstableInfo};
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -41,11 +42,14 @@ use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_retry::RetryIf;
 use value::*;
 
-use self::iterator::UserIterator;
-use self::key::{user_key, FullKey};
+use self::iterator::{
+    BoxedHummockIterator, ConcatIterator, HummockIterator, MergeIterator, ReverseMergeIterator,
+    UserIterator,
+};
+use self::key::{key_with_epoch, user_key, FullKey};
 use self::multi_builder::CapacitySplitTableBuilder;
-use self::snapshot::HummockSnapshot;
 pub use self::state_store::*;
+use self::utils::bloom_filter_sstables;
 use self::version_manager::VersionManager;
 use super::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
 use crate::hummock::hummock_meta_client::{HummockMetaClient, RetryableError};
@@ -189,28 +193,69 @@ impl HummockStorage {
         Ok(instance)
     }
 
-    async fn get_snapshot(&self) -> HummockResult<HummockSnapshot> {
-        let timer = self.stats.get_snapshot_latency.start_timer();
-        let epoch = u64::MAX;
-        let res = HummockSnapshot::new(epoch, self.local_version_manager.clone());
-        timer.observe_duration();
-        Ok(res)
-    }
-
     pub fn get_options(&self) -> Arc<HummockOptions> {
         self.options.clone()
     }
 
-    /// Get the latest value of a specified `key`.
+    /// Get the value of a specified `key`.
+    /// The result is based on a snapshot corresponding to the given `epoch`.
     ///
     /// If `Ok(Some())` is returned, the key is found. If `Ok(None)` is returned,
     /// the key is not found. If `Err()` is returned, the searching for the key
     /// failed due to other non-EOF errors.
-    pub async fn get(&self, key: &[u8]) -> HummockResult<Option<Vec<u8>>> {
+    pub async fn get(&self, key: &[u8], epoch: u64) -> HummockResult<Option<Vec<u8>>> {
         self.stats.get_counts.inc();
         self.stats.get_key_size.observe(key.len() as f64);
         let timer = self.stats.get_latency.start_timer();
-        let value = self.get_snapshot().await?.get(key).await?;
+
+        let mut table_iters: Vec<BoxedHummockIterator> = Vec::new();
+
+        let version = self.local_version_manager.get_scoped_local_version();
+
+        for level in &version.merged_version() {
+            match level.level_type() {
+                LevelType::Overlapping => {
+                    let tables = bloom_filter_sstables(
+                        self.local_version_manager
+                            .pick_few_tables(&level.table_ids)
+                            .await?,
+                        key,
+                    )?;
+                    table_iters.extend(
+                        tables.into_iter().map(|table| {
+                            Box::new(SSTableIterator::new(table)) as BoxedHummockIterator
+                        }),
+                    )
+                }
+                LevelType::Nonoverlapping => {
+                    let tables = bloom_filter_sstables(
+                        self.local_version_manager
+                            .pick_few_tables(&level.table_ids)
+                            .await?,
+                        key,
+                    )?;
+                    table_iters.push(Box::new(ConcatIterator::new(tables)))
+                }
+            }
+        }
+
+        let mut it = MergeIterator::new(table_iters);
+
+        // Use `MergeIterator` to seek for they key with latest version to
+        // get the latest key.
+        it.seek(&key_with_epoch(key.to_vec(), epoch)).await?;
+
+        // Iterator has seeked passed the borders.
+        if !it.is_valid() {
+            return Ok(None);
+        }
+
+        // Iterator gets us the key, we tell if it's the key we want
+        // or key next to it.
+        let value = match user_key(it.key()) == key {
+            true => it.value().into_put_value().map(|x| x.to_vec()),
+            false => None,
+        };
         timer.observe_duration();
         self.stats
             .get_value_size
@@ -220,28 +265,121 @@ impl HummockStorage {
     }
 
     /// Return an iterator that scan from the begin key to the end key
-    pub async fn range_scan<R, B>(&self, key_range: R) -> HummockResult<UserIterator>
+    /// The result is based on a snapshot corresponding to the given `epoch`.
+    pub async fn range_scan<R, B>(
+        &'_ self,
+        key_range: R,
+        epoch: u64,
+    ) -> HummockResult<UserIterator<'_>>
     where
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
     {
         self.stats.range_scan_counts.inc();
 
-        self.get_snapshot().await?.range_scan(key_range).await
+        // self.get_snapshot().await?.range_scan(key_range).await
+
+        let version = self.local_version_manager.get_scoped_local_version();
+
+        // Filter out tables that overlap with given `key_range`
+        let overlapped_tables = self
+            .local_version_manager
+            .tables(&version.merged_version())
+            .await?
+            .into_iter()
+            .filter(|t| {
+                let table_start = user_key(t.meta.smallest_key.as_slice());
+                let table_end = user_key(t.meta.largest_key.as_slice());
+
+                //        RANGE
+                // TABLE
+                let too_left = match key_range.start_bound() {
+                    Included(range_start) => range_start.as_ref() > table_end,
+                    Excluded(_) => unimplemented!("excluded begin key is not supported"),
+                    Unbounded => false,
+                };
+                // RANGE
+                //        TABLE
+                let too_right = match key_range.end_bound() {
+                    Included(range_end) => range_end.as_ref() < table_start,
+                    Excluded(range_end) => range_end.as_ref() <= table_start,
+                    Unbounded => false,
+                };
+
+                !too_left && !too_right
+            });
+
+        let table_iters =
+            overlapped_tables.map(|t| Box::new(SSTableIterator::new(t)) as BoxedHummockIterator);
+        let mi = MergeIterator::new(table_iters);
+
+        // TODO: avoid this clone
+        Ok(UserIterator::new_with_epoch(
+            mi,
+            (
+                key_range.start_bound().map(|b| b.as_ref().to_owned()),
+                key_range.end_bound().map(|b| b.as_ref().to_owned()),
+            ),
+            epoch,
+        ))
     }
 
     /// Return a reversed iterator that scans from the end key to the begin key
-    pub async fn reverse_range_scan<R, B>(&self, key_range: R) -> HummockResult<ReverseUserIterator>
+    /// The result is based on a snapshot corresponding to the given `epoch`.
+    pub async fn reverse_range_scan<R, B>(
+        &self,
+        key_range: R,
+        epoch: u64,
+    ) -> HummockResult<ReverseUserIterator<'_>>
     where
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
     {
         self.stats.range_scan_counts.inc();
 
-        self.get_snapshot()
+        let version = self.local_version_manager.get_scoped_local_version();
+
+        // Filter out tables that overlap with given `key_range`
+        let overlapped_tables = self
+            .local_version_manager
+            .tables(&version.merged_version())
             .await?
-            .reverse_range_scan(key_range)
-            .await
+            .into_iter()
+            .filter(|t| {
+                let table_start = user_key(t.meta.smallest_key.as_slice());
+                let table_end = user_key(t.meta.largest_key.as_slice());
+
+                //        RANGE
+                // TABLE
+                let too_left = match key_range.end_bound() {
+                    Included(range_start) => range_start.as_ref() > table_end,
+                    Excluded(range_start) => range_start.as_ref() >= table_end,
+                    Unbounded => false,
+                };
+                // RANGE
+                //        TABLE
+                let too_right = match key_range.start_bound() {
+                    Included(range_end) => range_end.as_ref() < table_start,
+                    Excluded(_) => unimplemented!("excluded end key is not supported"),
+                    Unbounded => false,
+                };
+
+                !too_left && !too_right
+            });
+
+        let reverse_table_iters = overlapped_tables
+            .map(|t| Box::new(ReverseSSTableIterator::new(t)) as BoxedHummockIterator);
+        let reverse_merge_iterator = ReverseMergeIterator::new(reverse_table_iters);
+
+        // TODO: avoid this clone
+        Ok(ReverseUserIterator::new_with_epoch(
+            reverse_merge_iterator,
+            (
+                key_range.end_bound().map(|b| b.as_ref().to_owned()),
+                key_range.start_bound().map(|b| b.as_ref().to_owned()),
+            ),
+            epoch,
+        ))
     }
 
     /// Write batch to storage. The batch should be:

@@ -115,7 +115,9 @@ impl<S: StateStore> SourceStateHandler<S> {
     ///
     /// The function returns a collection of tuple (epoch, state).
     pub async fn restore_states(&self, state_identifier: String) -> Result<Vec<(u64, Bytes)>> {
-        let scan_rs = self.keyspace.scan_strip_prefix(Option::None).await;
+        // TODO: do we need snapshot read here?
+        let epoch = u64::MAX;
+        let scan_rs = self.keyspace.scan_strip_prefix(Option::None, epoch).await;
         let mut restore_values = Vec::new();
         match scan_rs {
             Ok(scan_list) => {
@@ -263,11 +265,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_take_snapshot() {
+        let current_epoch = 1000;
         let state_store_handler = SourceStateHandler::new(new_test_keyspace());
         let _rs = take_snapshot_and_get_states(state_store_handler.clone()).await;
         let stored_states = state_store_handler
             .keyspace
-            .scan(Option::None)
+            .scan(Option::None, current_epoch)
             .await
             .unwrap();
         assert_ne!(0, stored_states.len());

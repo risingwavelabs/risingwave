@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::ops::Bound::*;
 use std::ops::RangeBounds;
 use std::sync::Arc;
@@ -78,7 +80,7 @@ impl HummockSnapshot {
         }
     }
 
-    pub async fn range_scan<R, B>(&self, key_range: R) -> HummockResult<UserIterator>
+    pub async fn range_scan<R, B>(&'_ self, key_range: R) -> HummockResult<UserIterator<'_>>
     where
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
@@ -131,7 +133,10 @@ impl HummockSnapshot {
     /// Since `Range` always includes `start`, so if we want to scan from `end_key`(inclusive) to
     /// `begin_key`(either inclusive or exclusive), we construct a range that is [``end_key``,
     /// ``start_key``]
-    pub async fn reverse_range_scan<R, B>(&self, key_range: R) -> HummockResult<ReverseUserIterator>
+    pub async fn reverse_range_scan<R, B>(
+        &'_ self,
+        key_range: R,
+    ) -> HummockResult<ReverseUserIterator<'_>>
     where
         R: RangeBounds<B>,
         B: AsRef<[u8]>,

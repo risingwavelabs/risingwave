@@ -44,37 +44,38 @@ async fn test_mview_table() {
     state.delete(Row(vec![Some(2_i32.into()), Some(22_i32.into())]));
     state.flush(epoch).await.unwrap();
 
+    let epoch = u64::MAX;
     let cell_1_0 = table
-        .get(Row(vec![Some(1_i32.into()), Some(11_i32.into())]), 0)
+        .get(Row(vec![Some(1_i32.into()), Some(11_i32.into())]), 0, epoch)
         .await
         .unwrap();
     assert!(cell_1_0.is_some());
     assert_eq!(*cell_1_0.unwrap().unwrap().as_int32(), 1);
     let cell_1_1 = table
-        .get(Row(vec![Some(1_i32.into()), Some(11_i32.into())]), 1)
+        .get(Row(vec![Some(1_i32.into()), Some(11_i32.into())]), 1, epoch)
         .await
         .unwrap();
     assert!(cell_1_1.is_some());
     assert_eq!(*cell_1_1.unwrap().unwrap().as_int32(), 11);
     let cell_1_2 = table
-        .get(Row(vec![Some(1_i32.into()), Some(11_i32.into())]), 2)
+        .get(Row(vec![Some(1_i32.into()), Some(11_i32.into())]), 2, epoch)
         .await
         .unwrap();
     assert!(cell_1_2.is_some());
     assert_eq!(*cell_1_2.unwrap().unwrap().as_int32(), 111);
 
     let cell_2_0 = table
-        .get(Row(vec![Some(2_i32.into()), Some(22_i32.into())]), 0)
+        .get(Row(vec![Some(2_i32.into()), Some(22_i32.into())]), 0, epoch)
         .await
         .unwrap();
     assert!(cell_2_0.is_none());
     let cell_2_1 = table
-        .get(Row(vec![Some(2_i32.into()), Some(22_i32.into())]), 1)
+        .get(Row(vec![Some(2_i32.into()), Some(22_i32.into())]), 1, epoch)
         .await
         .unwrap();
     assert!(cell_2_1.is_none());
     let cell_2_2 = table
-        .get(Row(vec![Some(2_i32.into()), Some(22_i32.into())]), 2)
+        .get(Row(vec![Some(2_i32.into()), Some(22_i32.into())]), 2, epoch)
         .await
         .unwrap();
     assert!(cell_2_2.is_none());
@@ -125,6 +126,7 @@ async fn test_mview_table_for_string() {
     ]));
     state.flush(epoch).await.unwrap();
 
+    let epoch = u64::MAX;
     let cell_1_0 = table
         .get(
             Row(vec![
@@ -132,6 +134,7 @@ async fn test_mview_table_for_string() {
                 Some("11".to_string().into()),
             ]),
             0,
+            epoch,
         )
         .await
         .unwrap();
@@ -147,6 +150,7 @@ async fn test_mview_table_for_string() {
                 Some("11".to_string().into()),
             ]),
             1,
+            epoch,
         )
         .await
         .unwrap();
@@ -162,6 +166,7 @@ async fn test_mview_table_for_string() {
                 Some("11".to_string().into()),
             ]),
             2,
+            epoch,
         )
         .await
         .unwrap();
@@ -178,6 +183,7 @@ async fn test_mview_table_for_string() {
                 Some("22".to_string().into()),
             ]),
             0,
+            epoch,
         )
         .await
         .unwrap();
@@ -189,6 +195,7 @@ async fn test_mview_table_for_string() {
                 Some("22".to_string().into()),
             ]),
             1,
+            epoch,
         )
         .await
         .unwrap();
@@ -200,6 +207,7 @@ async fn test_mview_table_for_string() {
                 Some("22".to_string().into()),
             ]),
             2,
+            epoch,
         )
         .await
         .unwrap();
@@ -242,7 +250,8 @@ async fn test_mview_table_iter() {
     state.delete(Row(vec![Some(2_i32.into()), Some(22_i32.into())]));
     state.flush(epoch).await.unwrap();
 
-    let mut iter = table.iter().await.unwrap();
+    let epoch = u64::MAX;
+    let mut iter = table.iter(epoch).await.unwrap();
 
     let res = iter.next().await.unwrap();
     assert!(res.is_some());
@@ -345,8 +354,8 @@ async fn test_multi_mview_table_iter() {
     state_1.flush(epoch).await.unwrap();
     state_2.flush(epoch).await.unwrap();
 
-    let mut iter_1 = table_1.iter().await.unwrap();
-    let mut iter_2 = table_2.iter().await.unwrap();
+    let mut iter_1 = table_1.iter(epoch).await.unwrap();
+    let mut iter_2 = table_2.iter(epoch).await.unwrap();
 
     let res_1_1 = iter_1.next().await.unwrap();
     assert!(res_1_1.is_some());

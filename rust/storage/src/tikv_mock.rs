@@ -1,3 +1,5 @@
+use std::ops::RangeBounds;
+
 use async_trait::async_trait;
 use bytes::Bytes;
 use risingwave_common::error::Result;
@@ -15,13 +17,22 @@ impl TikvStateStore {
 }
 #[async_trait]
 impl StateStore for TikvStateStore {
-    type Iter = TikvStateStoreIter;
+    type Iter<'a> = TikvStateStoreIter;
 
-    async fn get(&self, _key: &[u8]) -> Result<Option<Bytes>> {
+    async fn get(&self, _key: &[u8], _epoch: u64) -> Result<Option<Bytes>> {
         unimplemented!()
     }
 
-    async fn scan(&self, _prefix: &[u8], _limit: Option<usize>) -> Result<Vec<(Bytes, Bytes)>> {
+    async fn scan<R, B>(
+        &self,
+        _key_range: R,
+        _limit: Option<usize>,
+        _epoch: u64,
+    ) -> Result<Vec<(Bytes, Bytes)>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]>,
+    {
         unimplemented!()
     }
 
@@ -33,7 +44,11 @@ impl StateStore for TikvStateStore {
         unimplemented!()
     }
 
-    async fn iter(&self, _prefix: &[u8]) -> Result<Self::Iter> {
+    async fn iter<R, B>(&self, _key_range: R, _epoch: u64) -> Result<Self::Iter<'_>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]>,
+    {
         unimplemented!()
     }
 }
@@ -48,7 +63,7 @@ impl TikvStateStoreIter {
 
 #[async_trait]
 impl StateStoreIter for TikvStateStoreIter {
-    async fn next(&mut self) -> Result<Option<Self::Item>> {
+    async fn next(&'_ mut self) -> Result<Option<Self::Item>> {
         unimplemented!()
     }
 

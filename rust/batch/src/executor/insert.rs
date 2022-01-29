@@ -186,6 +186,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Bound;
     use std::sync::Arc;
 
     use risingwave_common::array::{Array, I64Array};
@@ -566,7 +567,14 @@ mod tests {
 
         // There's nothing in store since `TableSourceV2` has no side effect.
         // Data will be materialized in associated streaming task.
-        let store_content = store.scan(&[], None).await?;
+        let epoch = u64::MAX;
+        let store_content = store
+            .scan(
+                (Bound::<Vec<u8>>::Unbounded, Bound::<Vec<u8>>::Unbounded),
+                None,
+                epoch,
+            )
+            .await?;
         assert!(store_content.is_empty());
 
         // First insertion test ends.

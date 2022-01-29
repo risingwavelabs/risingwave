@@ -1,7 +1,7 @@
 use super::variants::FORWARD;
 use crate::hummock::iterator::merge_inner::MergeIteratorInner;
 
-pub type MergeIterator = MergeIteratorInner<FORWARD>;
+pub type MergeIterator<'a> = MergeIteratorInner<'a, FORWARD>;
 
 #[cfg(test)]
 mod test {
