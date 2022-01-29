@@ -18,6 +18,8 @@ pub(super) struct FilterExecutor {
     chunk_builder: DataChunkBuilder,
     last_input: Option<SlicedDataChunk>,
     identity: String,
+    /// FIXME: This is a quick fix as later we would use generator to limit chunk size.
+    child_can_be_nexted: bool,
 }
 
 #[async_trait::async_trait]
@@ -71,18 +73,24 @@ impl Executor for FilterExecutor {
 impl FilterExecutor {
     /// Fetch one chunk from child.
     async fn fetch_one_chunk(&mut self) -> Result<Option<DataChunk>> {
-        if let Some(data_chunk) = self.child.next().await? {
-            let data_chunk = data_chunk.compact()?;
-            let vis_array = self.expr.eval(&data_chunk)?;
-            return if let Bool(vis) = vis_array.as_ref() {
-                let vis = vis.try_into()?;
-                let data_chunk = data_chunk.with_visibility(vis);
-                Ok(Some(data_chunk))
-            } else {
-                Err(InternalError("Filter can only receive bool array".to_string()).into())
-            };
-        } else {
-            Ok(None)
+        match self.child_can_be_nexted {
+            true => {
+                if let Some(data_chunk) = self.child.next().await? {
+                    let data_chunk = data_chunk.compact()?;
+                    let vis_array = self.expr.eval(&data_chunk)?;
+                    return if let Bool(vis) = vis_array.as_ref() {
+                        let vis = vis.try_into()?;
+                        let data_chunk = data_chunk.with_visibility(vis);
+                        Ok(Some(data_chunk))
+                    } else {
+                        Err(InternalError("Filter can only receive bool array".to_string()).into())
+                    };
+                } else {
+                    self.child_can_be_nexted = false;
+                    Ok(None)
+                }
+            }
+            false => Ok(None),
         }
     }
 }
@@ -110,6 +118,7 @@ impl BoxedExecutorBuilder for FilterExecutor {
                 chunk_builder,
                 last_input: None,
                 identity: "FilterExecutor".to_string(),
+                child_can_be_nexted: true,
             }));
         }
         Err(InternalError("Filter must have one children".to_string()).into())
@@ -120,6 +129,7 @@ impl BoxedExecutorBuilder for FilterExecutor {
 mod tests {
     use std::sync::Arc;
 
+    use assert_matches::assert_matches;
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{Array, DataChunk, PrimitiveArray};
     use risingwave_common::catalog::{Field, Schema};
@@ -136,8 +146,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_filter_executor() {
-        let col1 = create_column(&[Some(2), Some(2)]).unwrap();
-        let col2 = create_column(&[Some(1), Some(2)]).unwrap();
+        let col1 = create_column(&[Some(2), Some(2), Some(4), Some(3)]).unwrap();
+        let col2 = create_column(&[Some(1), Some(2), Some(1), Some(3)]).unwrap();
         let data_chunk = DataChunk::builder().columns([col1, col2].to_vec()).build();
         let schema = Schema {
             fields: vec![
@@ -148,30 +158,39 @@ mod tests {
         let mut mock_executor = MockExecutor::new(schema);
         mock_executor.add(data_chunk);
         let expr = make_expression(Type::Equal);
-        let chunk_builder = DataChunkBuilder::new(
-            mock_executor.schema().data_types(),
-            DEFAULT_CHUNK_BUFFER_SIZE,
-        );
+        let chunk_builder = DataChunkBuilder::new(mock_executor.schema().data_types(), 1);
         let mut filter_executor = FilterExecutor {
             expr: build_from_prost(&expr).unwrap(),
             child: Box::new(mock_executor),
             chunk_builder,
             last_input: None,
             identity: "FilterExecutor".to_string(),
+            child_can_be_nexted: true,
         };
         let fields = &filter_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataTypeKind::Int32);
         assert_eq!(fields[1].data_type, DataTypeKind::Int32);
         filter_executor.open().await.unwrap();
         let res = filter_executor.next().await.unwrap();
+        assert_matches!(res, Some(_));
         if let Some(res) = res {
             let col1 = res.column_at(0).unwrap();
             let array = col1.array();
             let col1 = array.as_int32();
             assert_eq!(col1.len(), 1);
-        } else {
-            panic!("Filter executor returned no data!")
+            assert_eq!(col1.value_at(0), Some(2));
         }
+        let res = filter_executor.next().await.unwrap();
+        assert_matches!(res, Some(_));
+        if let Some(res) = res {
+            let col1 = res.column_at(0).unwrap();
+            let array = col1.array();
+            let col1 = array.as_int32();
+            assert_eq!(col1.len(), 1);
+            assert_eq!(col1.value_at(0), Some(3));
+        }
+        let res = filter_executor.next().await.unwrap();
+        assert_matches!(res, None);
         filter_executor.close().await.unwrap();
     }
 
