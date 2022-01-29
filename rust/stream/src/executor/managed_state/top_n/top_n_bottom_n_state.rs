@@ -320,6 +320,15 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         // We don't retain `n` elements as we have a all-or-nothing policy for now.
         Ok(())
     }
+
+    pub fn clear_cache(&mut self) {
+        assert!(
+            !self.is_dirty(),
+            "cannot clear cache while top n bottom n state is dirty"
+        );
+        self.top_n.clear();
+        self.bottom_n.clear();
+    }
 }
 
 /// Test-related methods

@@ -164,6 +164,14 @@ impl<S: StateStore> Executor for AppendOnlyTopNExecutor<S> {
     fn identity(&self) -> &str {
         self.identity.as_str()
     }
+
+    fn clear_cache(&mut self) -> Result<()> {
+        self.managed_lower_state.clear_cache();
+        self.managed_higher_state.clear_cache();
+        self.first_execution = true;
+
+        Ok(())
+    }
 }
 
 #[async_trait]
