@@ -131,16 +131,16 @@ impl ProtobufParser {
 }
 
 macro_rules! protobuf_match_type {
-  ($value:expr, $target_scalar_type:path, { $($serde_type:tt),* }, $target_type:tt) => {
-    $value.and_then(|v| match v {
-      $(Value::$serde_type(b) => Some($target_type::from(b)), )*
-      Value::Option(Some(boxed_value)) => match *boxed_value {
-        $(Value::$serde_type(b) => Some($target_type::from(b)), )*
-        _ => None,
-      },
-      _ => None,
-    }).map($target_scalar_type)
-  };
+    ($value:expr, $target_scalar_type:path, { $($serde_type:tt),* }, $target_type:tt) => {
+        $value.and_then(|v| match v {
+            $(Value::$serde_type(b) => Some($target_type::from(b)), )*
+            Value::Option(Some(boxed_value)) => match *boxed_value {
+                $(Value::$serde_type(b) => Some($target_type::from(b)), )*
+                _ => None,
+            },
+            _ => None,
+        }).map($target_scalar_type)
+    };
 }
 
 /// Maps a protobuf field type to a DB column type.
@@ -172,52 +172,52 @@ impl SourceParser for ProtobufParser {
         };
 
         let row = columns.iter().map(|column| {
-      if column.skip_parse {
-        return None;
-      }
-
-      let key = Value::String(column.name.clone());
-
-      // Use `remove` instead of `get` to take the ownership of the value
-      let value = map.remove(&key);
-      match column.data_type {
-        DataTypeKind::Boolean => {
-          protobuf_match_type!(value, ScalarImpl::Bool, { Bool }, bool)
-        }
-        DataTypeKind::Int16 => {
-          protobuf_match_type!(value, ScalarImpl::Int16, { I8, I16, U8 }, i16)
-        },
-        DataTypeKind::Int32 => {
-          protobuf_match_type!(value, ScalarImpl::Int32, { I8, I16, I32, U8, U16 }, i32)
-        }
-        DataTypeKind::Int64 => {
-          protobuf_match_type!(value, ScalarImpl::Int64, { I8, I16, I32, I64, U8, U16, U32 }, i64)
-        }
-        DataTypeKind::Float32 => {
-          protobuf_match_type!(value, ScalarImpl::Float32, { I8, I16, U8, U16, F32 }, OrderedF32)
-        }
-        DataTypeKind::Float64 => {
-          protobuf_match_type!(value, ScalarImpl::Float64, { I8, I16, I32, U8, U16, U32, F32, F64}, OrderedF64)
-        }
-        DataTypeKind::Decimal{ .. } => {
-          protobuf_match_type!(value, ScalarImpl::Decimal, { I8, I16, I32, I64, U8, U16, U32, U64}, Decimal)
-        }
-        DataTypeKind::Char | DataTypeKind::Varchar => {
-          protobuf_match_type!(value, ScalarImpl::Utf8, { String }, String)
-        }
-        DataTypeKind::Date => {
-          value.and_then(|v| match v {
-            Value::String(b) => str_to_date(&b).ok(),
-            Value::Option(Some(boxed_value)) => match *boxed_value {
-              Value::String(b) => str_to_date(&b).ok(),
-              _ => None,
+            if column.skip_parse {
+                return None;
             }
-            _ => None,
-          }).map(ScalarImpl::NaiveDate)
-        }
-        _ => unimplemented!(),
-      }
-    }).collect::<Vec<Datum>>();
+
+            let key = Value::String(column.name.clone());
+
+            // Use `remove` instead of `get` to take the ownership of the value
+            let value = map.remove(&key);
+            match column.data_type {
+                DataTypeKind::Boolean => {
+                    protobuf_match_type!(value, ScalarImpl::Bool, { Bool }, bool)
+                }
+                DataTypeKind::Int16 => {
+                    protobuf_match_type!(value, ScalarImpl::Int16, { I8, I16, U8 }, i16)
+                },
+                DataTypeKind::Int32 => {
+                    protobuf_match_type!(value, ScalarImpl::Int32, { I8, I16, I32, U8, U16 }, i32)
+                }
+                DataTypeKind::Int64 => {
+                    protobuf_match_type!(value, ScalarImpl::Int64, { I8, I16, I32, I64, U8, U16, U32 }, i64)
+                }
+                DataTypeKind::Float32 => {
+                    protobuf_match_type!(value, ScalarImpl::Float32, { I8, I16, U8, U16, F32 }, OrderedF32)
+                }
+                DataTypeKind::Float64 => {
+                    protobuf_match_type!(value, ScalarImpl::Float64, { I8, I16, I32, U8, U16, U32, F32, F64}, OrderedF64)
+                }
+                DataTypeKind::Decimal{ .. } => {
+                    protobuf_match_type!(value, ScalarImpl::Decimal, { I8, I16, I32, I64, U8, U16, U32, U64}, Decimal)
+                }
+                DataTypeKind::Char | DataTypeKind::Varchar => {
+                    protobuf_match_type!(value, ScalarImpl::Utf8, { String }, String)
+                }
+                DataTypeKind::Date => {
+                    value.and_then(|v| match v {
+                        Value::String(b) => str_to_date(&b).ok(),
+                        Value::Option(Some(boxed_value)) => match *boxed_value {
+                            Value::String(b) => str_to_date(&b).ok(),
+                            _ => None,
+                        }
+                        _ => None,
+                    }).map(ScalarImpl::NaiveDate)
+                }
+                _ => unimplemented!(),
+            }
+        }).collect::<Vec<Datum>>();
 
         Ok(Event {
             ops: vec![Op::Insert],
@@ -310,12 +310,12 @@ mod tests {
         };
 
         let hash = hashmap!(
-          "id" => Value::Option(Some(Box::new(Value::I32(123)))),
-          "address" => Value::Option(Some(Box::new(Value::String("test address".to_string())))),
-          "city" => Value::Option(Some(Box::new(Value::String("test city".to_string())))),
-          "zipcode" => Value::Option(Some(Box::new(Value::I64(456)))),
-          "rate" => Value::Option(Some(Box::new(Value::F32(1.2345)))),
-          "date" => Value::Option(Some(Box::new(Value::String("2021-01-01".to_string()))))
+            "id" => Value::Option(Some(Box::new(Value::I32(123)))),
+            "address" => Value::Option(Some(Box::new(Value::String("test address".to_string())))),
+            "city" => Value::Option(Some(Box::new(Value::String("test city".to_string())))),
+            "zipcode" => Value::Option(Some(Box::new(Value::I64(456)))),
+            "rate" => Value::Option(Some(Box::new(Value::F32(1.2345)))),
+            "date" => Value::Option(Some(Box::new(Value::String("2021-01-01".to_string()))))
         );
 
         let keys = hash

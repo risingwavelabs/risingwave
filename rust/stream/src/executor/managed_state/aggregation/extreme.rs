@@ -407,34 +407,34 @@ pub async fn create_streaming_extreme_state<S: StateStore>(
     }
 
     macro_rules! match_new_extreme_state {
-    ($( { $( $kind:pat_param )|+, $array:ty } ),* $(,)?) => {{
-      use DataTypeKind::*;
-      use risingwave_common::array::*;
+        ($( { $( $kind:pat_param )|+, $array:ty } ),* $(,)?) => {{
+            use DataTypeKind::*;
+            use risingwave_common::array::*;
 
-      match (agg_call.kind, agg_call.return_type) {
-        $(
-          (AggKind::Max, $( $kind )|+) => Ok(Box::new(
-            ManagedMaxState::<_, $array>::new(keyspace, agg_call.return_type, top_n_count, row_count, pk_data_types).await?,
-          )),
-          (AggKind::Min, $( $kind )|+) => Ok(Box::new(
-            ManagedMinState::<_, $array>::new(keyspace, agg_call.return_type, top_n_count, row_count, pk_data_types).await?,
-          )),
-        )*
-        (kind, return_type) => unimplemented!("unsupported extreme agg, kind: {:?}, return type: {:?}", kind, return_type),
-      }
-    }};
-  }
+            match (agg_call.kind, agg_call.return_type) {
+                $(
+                    (AggKind::Max, $( $kind )|+) => Ok(Box::new(
+                        ManagedMaxState::<_, $array>::new(keyspace, agg_call.return_type, top_n_count, row_count, pk_data_types).await?,
+                    )),
+                    (AggKind::Min, $( $kind )|+) => Ok(Box::new(
+                        ManagedMinState::<_, $array>::new(keyspace, agg_call.return_type, top_n_count, row_count, pk_data_types).await?,
+                    )),
+                )*
+                (kind, return_type) => unimplemented!("unsupported extreme agg, kind: {:?}, return type: {:?}", kind, return_type),
+            }
+        }};
+    }
 
     match_new_extreme_state!(
-      {Boolean, BoolArray},
-      {Int64, I64Array},
-      {Int32, I32Array},
-      {Int16, I16Array},
-      {Float64, F64Array},
-      {Float32, F32Array},
-      {Decimal{ .. }, DecimalArray},
-      {Char | Varchar, Utf8Array},
-      {Interval, IntervalArray},
+        { Boolean, BoolArray },
+        { Int64, I64Array },
+        { Int32, I32Array },
+        { Int16, I16Array },
+        { Float64, F64Array },
+        { Float32, F32Array },
+        { Decimal { .. }, DecimalArray },
+        { Char | Varchar, Utf8Array },
+        { Interval, IntervalArray },
     )
 }
 

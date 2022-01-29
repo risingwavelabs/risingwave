@@ -198,35 +198,35 @@ impl<A: Array> CompactableArray for A {
 /// See the following implementations for example.
 #[macro_export]
 macro_rules! for_all_variants {
-  ($macro:tt $(, $x:tt)*) => {
-    $macro! {
-      [$($x),*],
-      { Int16, int16, I16Array, I16ArrayBuilder },
-      { Int32, int32, I32Array, I32ArrayBuilder },
-      { Int64, int64, I64Array, I64ArrayBuilder },
-      { Float32, float32, F32Array, F32ArrayBuilder },
-      { Float64, float64, F64Array, F64ArrayBuilder },
-      { Utf8, utf8, Utf8Array, Utf8ArrayBuilder },
-      { Bool, bool, BoolArray, BoolArrayBuilder },
-      { Decimal, decimal, DecimalArray, DecimalArrayBuilder },
-      { Interval, interval, IntervalArray, IntervalArrayBuilder },
-      { NaiveDate, naive_date, NaiveDateArray, NaiveDateArrayBuilder },
-      { NaiveDateTime, naive_date_time, NaiveDateTimeArray, NaiveDateTimeArrayBuilder },
-      { NaiveTime, naive_time, NaiveTimeArray, NaiveTimeArrayBuilder },
-      { Struct, struct, StructArray, StructArrayBuilder }
-    }
-  };
+    ($macro:tt $(, $x:tt)*) => {
+        $macro! {
+            [$($x),*],
+            { Int16, int16, I16Array, I16ArrayBuilder },
+            { Int32, int32, I32Array, I32ArrayBuilder },
+            { Int64, int64, I64Array, I64ArrayBuilder },
+            { Float32, float32, F32Array, F32ArrayBuilder },
+            { Float64, float64, F64Array, F64ArrayBuilder },
+            { Utf8, utf8, Utf8Array, Utf8ArrayBuilder },
+            { Bool, bool, BoolArray, BoolArrayBuilder },
+            { Decimal, decimal, DecimalArray, DecimalArrayBuilder },
+            { Interval, interval, IntervalArray, IntervalArrayBuilder },
+            { NaiveDate, naive_date, NaiveDateArray, NaiveDateArrayBuilder },
+            { NaiveDateTime, naive_date_time, NaiveDateTimeArray, NaiveDateTimeArrayBuilder },
+            { NaiveTime, naive_time, NaiveTimeArray, NaiveTimeArrayBuilder },
+            { Struct, struct, StructArray, StructArrayBuilder }
+        }
+    };
 }
 
 /// Define `ArrayImpl` with macro.
 macro_rules! array_impl_enum {
-  ([], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-    /// `ArrayImpl` embeds all possible array in `array` module.
-    #[derive(Debug)]
-    pub enum ArrayImpl {
-      $( $variant_name($array) ),*
-    }
-  };
+    ([], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+        /// `ArrayImpl` embeds all possible array in `array` module.
+        #[derive(Debug)]
+        pub enum ArrayImpl {
+            $( $variant_name($array) ),*
+        }
+    };
 }
 
 impl<T: PrimitiveArrayItemType> From<PrimitiveArray<T>> for ArrayImpl {
@@ -292,206 +292,206 @@ for_all_variants! { array_impl_enum }
 /// * `&ArrayImpl -> &Array` with `From` trait.
 /// * `ArrayBuilder -> ArrayBuilderImpl` with `From` trait.
 macro_rules! impl_convert {
-  ([], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-    $(
-      paste! {
-        impl ArrayImpl {
-          pub fn [<as_ $suffix_name>](&self) -> &$array {
-            match self {
-              Self::$variant_name(ref array) => array,
-              other_array => panic!("cannot convert ArrayImpl::{} to concrete type {}", other_array.get_ident(), stringify!($variant_name))
-            }
-          }
+    ([], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+        $(
+            paste! {
+                impl ArrayImpl {
+                    pub fn [<as_ $suffix_name>](&self) -> &$array {
+                        match self {
+                            Self::$variant_name(ref array) => array,
+                            other_array => panic!("cannot convert ArrayImpl::{} to concrete type {}", other_array.get_ident(), stringify!($variant_name))
+                        }
+                    }
 
-          pub fn [<into_ $suffix_name>](self) -> $array {
-            match self {
-              Self::$variant_name(array) => array,
-              other_array =>  panic!("cannot convert ArrayImpl::{} to concrete type {}", other_array.get_ident(), stringify!($variant_name))
-            }
-          }
-        }
+                    pub fn [<into_ $suffix_name>](self) -> $array {
+                        match self {
+                            Self::$variant_name(array) => array,
+                            other_array =>    panic!("cannot convert ArrayImpl::{} to concrete type {}", other_array.get_ident(), stringify!($variant_name))
+                        }
+                    }
+                }
 
-        impl <'a> From<&'a ArrayImpl> for &'a $array {
-          fn from(array: &'a ArrayImpl) -> Self {
-            match array {
-              ArrayImpl::$variant_name(inner) => inner,
-              other_array => panic!("cannot convert ArrayImpl::{} to concrete type {}", other_array.get_ident(), stringify!($variant_name))
-            }
-          }
-        }
+                impl <'a> From<&'a ArrayImpl> for &'a $array {
+                    fn from(array: &'a ArrayImpl) -> Self {
+                        match array {
+                            ArrayImpl::$variant_name(inner) => inner,
+                            other_array => panic!("cannot convert ArrayImpl::{} to concrete type {}", other_array.get_ident(), stringify!($variant_name))
+                        }
+                    }
+                }
 
-        impl From<$builder> for ArrayBuilderImpl {
-          fn from(builder: $builder) -> Self {
-            Self::$variant_name(builder)
-          }
-        }
-      }
-    )*
-  };
+                impl From<$builder> for ArrayBuilderImpl {
+                    fn from(builder: $builder) -> Self {
+                        Self::$variant_name(builder)
+                    }
+                }
+            }
+        )*
+    };
 }
 
 for_all_variants! { impl_convert }
 
 /// Define `ArrayImplBuilder` with macro.
 macro_rules! array_builder_impl_enum {
-  ([], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-    /// `ArrayBuilderImpl` embeds all possible array in `array` module.
-    #[derive(Debug)]
-    pub enum ArrayBuilderImpl {
-      $( $variant_name($builder) ),*
-    }
-  };
+    ([], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+        /// `ArrayBuilderImpl` embeds all possible array in `array` module.
+        #[derive(Debug)]
+        pub enum ArrayBuilderImpl {
+            $( $variant_name($builder) ),*
+        }
+    };
 }
 
 for_all_variants! { array_builder_impl_enum }
 
 /// Implements all `ArrayBuilder` functions with `for_all_variant`.
 macro_rules! impl_array_builder {
-  ([], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-    impl ArrayBuilderImpl {
-      pub fn append_array(&mut self, other: &ArrayImpl) -> Result<()> {
-        match self {
-          $( Self::$variant_name(inner) => inner.append_array(other.into()), )*
-        }
-      }
+    ([], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+        impl ArrayBuilderImpl {
+            pub fn append_array(&mut self, other: &ArrayImpl) -> Result<()> {
+                match self {
+                    $( Self::$variant_name(inner) => inner.append_array(other.into()), )*
+                }
+            }
 
-      pub fn append_null(&mut self) -> Result<()> {
-        match self {
-          $( Self::$variant_name(inner) => inner.append(None), )*
-        }
-      }
+            pub fn append_null(&mut self) -> Result<()> {
+                match self {
+                    $( Self::$variant_name(inner) => inner.append(None), )*
+                }
+            }
 
-      /// Append a datum, return error while type not match.
-      pub fn append_datum(&mut self, datum: &Datum) -> Result<()> {
-        match datum {
-          None => self.append_null(),
-          Some(ref scalar) => match (self, scalar) {
-            $( (Self::$variant_name(inner), ScalarImpl::$variant_name(v)) => inner.append(Some(v.as_scalar_ref())), )*
-            _ => Err(RwError::from(InternalError("Invalid datum type".to_string()))),
-          },
-        }
-      }
+            /// Append a datum, return error while type not match.
+            pub fn append_datum(&mut self, datum: &Datum) -> Result<()> {
+                match datum {
+                    None => self.append_null(),
+                    Some(ref scalar) => match (self, scalar) {
+                        $( (Self::$variant_name(inner), ScalarImpl::$variant_name(v)) => inner.append(Some(v.as_scalar_ref())), )*
+                        _ => Err(RwError::from(InternalError("Invalid datum type".to_string()))),
+                    },
+                }
+            }
 
-      /// Append a datum ref, return error while type not match.
-      pub fn append_datum_ref(&mut self, datum_ref: DatumRef<'_>) -> Result<()> {
-        match datum_ref {
-          None => self.append_null(),
-          Some(scalar_ref) => match (self, scalar_ref) {
-            $( (Self::$variant_name(inner), ScalarRefImpl::$variant_name(v)) => inner.append(Some(v)), )*
-            (this_builder, this_scalar_ref) => Err(RwError::from(InternalError(format!(
-              "Failed to append datum, array builder type: {}, scalar ref type: {}",
-              this_builder.get_ident(),
-              this_scalar_ref.get_ident())
-            ))),
-          },
-        }
-      }
+            /// Append a datum ref, return error while type not match.
+            pub fn append_datum_ref(&mut self, datum_ref: DatumRef<'_>) -> Result<()> {
+                match datum_ref {
+                    None => self.append_null(),
+                    Some(scalar_ref) => match (self, scalar_ref) {
+                        $( (Self::$variant_name(inner), ScalarRefImpl::$variant_name(v)) => inner.append(Some(v)), )*
+                        (this_builder, this_scalar_ref) => Err(RwError::from(InternalError(format!(
+                            "Failed to append datum, array builder type: {}, scalar ref type: {}",
+                            this_builder.get_ident(),
+                            this_scalar_ref.get_ident())
+                        ))),
+                    },
+                }
+            }
 
-      pub fn append_array_element(&mut self, other: &ArrayImpl, idx: usize) -> Result<()> {
-        match self {
-          $( Self::$variant_name(inner) => inner.append_array_element(other.into(), idx), )*
-        }
-      }
+            pub fn append_array_element(&mut self, other: &ArrayImpl, idx: usize) -> Result<()> {
+                match self {
+                    $( Self::$variant_name(inner) => inner.append_array_element(other.into(), idx), )*
+                }
+            }
 
-      pub fn finish(self) -> Result<ArrayImpl> {
-        match self {
-          $( Self::$variant_name(inner) => Ok(inner.finish()?.into()), )*
-        }
-      }
+            pub fn finish(self) -> Result<ArrayImpl> {
+                match self {
+                    $( Self::$variant_name(inner) => Ok(inner.finish()?.into()), )*
+                }
+            }
 
-      pub fn get_ident(&self) -> &'static str {
-        match self {
-          $( Self::$variant_name(_) => stringify!($variant_name), )*
+            pub fn get_ident(&self) -> &'static str {
+                match self {
+                    $( Self::$variant_name(_) => stringify!($variant_name), )*
+                }
+            }
         }
-      }
     }
-  }
 }
 
 for_all_variants! { impl_array_builder }
 
 /// Implements all `Array` functions with `for_all_variant`.
 macro_rules! impl_array {
-  ([], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-    impl ArrayImpl {
-      /// Number of items in array.
-      pub fn len(&self) -> usize {
-        match self {
-          $( Self::$variant_name(inner) => inner.len(), )*
+    ([], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+        impl ArrayImpl {
+            /// Number of items in array.
+            pub fn len(&self) -> usize {
+                match self {
+                    $( Self::$variant_name(inner) => inner.len(), )*
+                }
+            }
+
+            pub fn is_empty(&self) -> bool {
+                self.len() == 0
+            }
+
+            /// Get the null `Bitmap` of the array.
+            pub fn null_bitmap(&self) -> &Bitmap {
+                match self {
+                    $( Self::$variant_name(inner) => inner.null_bitmap(), )*
+                }
+            }
+
+            pub fn to_protobuf(&self) -> Result<ProstArray> {
+                match self {
+                    $( Self::$variant_name(inner) => inner.to_protobuf(), )*
+                }
+            }
+
+            pub fn hash_at<H: Hasher>(&self, idx: usize, state: &mut H) {
+                match self {
+                    $( Self::$variant_name(inner) => inner.hash_at(idx, state), )*
+                }
+            }
+
+            pub fn hash_vec<H: Hasher>(&self, hashers: &mut Vec<H>) {
+                match self {
+                    $( Self::$variant_name(inner) => inner.hash_vec( hashers), )*
+                }
+            }
+
+            /// Select some elements from `Array` based on `visibility` bitmap.
+            pub fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Result<Self> {
+                match self {
+                    $( Self::$variant_name(inner) => Ok(inner.compact(visibility, cardinality)?.into()), )*
+                }
+            }
+
+            pub fn get_ident(&self) -> &'static str {
+                match self {
+                    $( Self::$variant_name(_) => stringify!($variant_name), )*
+                }
+            }
+
+            /// Get the enum-wrapped `Datum` out of the `Array`.
+            pub fn datum_at(&self, idx: usize) -> Datum {
+                match self {
+                    $( Self::$variant_name(inner) => inner
+                        .value_at(idx)
+                        .map(|item| item.to_owned_scalar().to_scalar_value()), )*
+                }
+            }
+
+            /// If the array only have one single element, convert it to `Datum`.
+            pub fn to_datum(&self) -> Datum {
+                assert_eq!(self.len(), 1);
+                self.datum_at(0)
+            }
+
+            /// Get the enum-wrapped `ScalarRefImpl` out of the `Array`.
+            pub fn value_at(&self, idx: usize) -> DatumRef<'_> {
+                match self {
+                    $( Self::$variant_name(inner) => inner.value_at(idx).map(ScalarRefImpl::$variant_name), )*
+                }
+            }
+
+            pub fn create_builder(&self, capacity: usize) -> Result<ArrayBuilderImpl> {
+                match self {
+                    $( Self::$variant_name(inner) => inner.create_builder(capacity), )*
+                }
+            }
         }
-      }
-
-      pub fn is_empty(&self) -> bool {
-        self.len() == 0
-      }
-
-      /// Get the null `Bitmap` of the array.
-      pub fn null_bitmap(&self) -> &Bitmap {
-        match self {
-          $( Self::$variant_name(inner) => inner.null_bitmap(), )*
-        }
-      }
-
-      pub fn to_protobuf(&self) -> Result<ProstArray> {
-        match self {
-          $( Self::$variant_name(inner) => inner.to_protobuf(), )*
-        }
-      }
-
-      pub fn hash_at<H: Hasher>(&self, idx: usize, state: &mut H) {
-        match self {
-          $( Self::$variant_name(inner) => inner.hash_at(idx, state), )*
-        }
-      }
-
-      pub fn hash_vec<H: Hasher>(&self, hashers: &mut Vec<H>) {
-        match self {
-          $( Self::$variant_name(inner) => inner.hash_vec( hashers), )*
-        }
-      }
-
-      /// Select some elements from `Array` based on `visibility` bitmap.
-      pub fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Result<Self> {
-        match self {
-          $( Self::$variant_name(inner) => Ok(inner.compact(visibility, cardinality)?.into()), )*
-        }
-      }
-
-      pub fn get_ident(&self) -> &'static str {
-        match self {
-          $( Self::$variant_name(_) => stringify!($variant_name), )*
-        }
-      }
-
-      /// Get the enum-wrapped `Datum` out of the `Array`.
-      pub fn datum_at(&self, idx: usize) -> Datum {
-        match self {
-          $( Self::$variant_name(inner) => inner
-            .value_at(idx)
-            .map(|item| item.to_owned_scalar().to_scalar_value()), )*
-        }
-      }
-
-      /// If the array only have one single element, convert it to `Datum`.
-      pub fn to_datum(&self) -> Datum {
-        assert_eq!(self.len(), 1);
-        self.datum_at(0)
-      }
-
-      /// Get the enum-wrapped `ScalarRefImpl` out of the `Array`.
-      pub fn value_at(&self, idx: usize) -> DatumRef<'_> {
-        match self {
-          $( Self::$variant_name(inner) => inner.value_at(idx).map(ScalarRefImpl::$variant_name), )*
-        }
-      }
-
-      pub fn create_builder(&self, capacity: usize) -> Result<ArrayBuilderImpl> {
-        match self {
-          $( Self::$variant_name(inner) => inner.create_builder(capacity), )*
-        }
-      }
     }
-  }
 }
 
 for_all_variants! { impl_array }

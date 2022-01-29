@@ -16,42 +16,42 @@ pub trait ParseTo: Sized {
 }
 
 macro_rules! impl_parse_to {
-  () => {};
-  ($field:ident : $field_type:ty, $parser:ident) => {
-    let $field = <$field_type>::parse_to($parser)?;
-  };
-  ($field:ident => [$($arr:tt)+], $parser:ident) => {
-    let $field = $parser.parse_keywords(&[$($arr)+]);
-  };
-  ([$($arr:tt)+], $parser:ident) => {
-    $parser.expect_keywords(&[$($arr)+])?;
-  };
+    () => {};
+    ($field:ident : $field_type:ty, $parser:ident) => {
+        let $field = <$field_type>::parse_to($parser)?;
+    };
+    ($field:ident => [$($arr:tt)+], $parser:ident) => {
+        let $field = $parser.parse_keywords(&[$($arr)+]);
+    };
+    ([$($arr:tt)+], $parser:ident) => {
+        $parser.expect_keywords(&[$($arr)+])?;
+    };
 }
 
 macro_rules! impl_fmt_display {
-  () => {};
-  ($field:ident, $v:ident, $self:ident) => {{
-    let s = format!("{}", $self.$field);
-    if !s.is_empty() {
-      $v.push(s);
-    }
-  }};
-  ($field:ident => [$($arr:tt)+], $v:ident, $self:ident) => {
-    if $self.$field {
-      $v.push(format!("{}", AstVec([$($arr)+].to_vec())));
-    }
-  };
-  ([$($arr:tt)+], $v:ident) => {
-    $v.push(format!("{}", AstVec([$($arr)+].to_vec())));
-  };
+    () => {};
+    ($field:ident, $v:ident, $self:ident) => {{
+        let s = format!("{}", $self.$field);
+        if !s.is_empty() {
+            $v.push(s);
+        }
+    }};
+    ($field:ident => [$($arr:tt)+], $v:ident, $self:ident) => {
+        if $self.$field {
+            $v.push(format!("{}", AstVec([$($arr)+].to_vec())));
+        }
+    };
+    ([$($arr:tt)+], $v:ident) => {
+        $v.push(format!("{}", AstVec([$($arr)+].to_vec())));
+    };
 }
 
 // sql_grammar!(CreateSourceStatement {
-//   if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS],
-//   source_name: Ident,
-//   with_properties: AstOption<WithProperties>,
-//   [Keyword::ROW, Keyword::FORMAT],
-//   source_schema: SourceSchema,
+//     if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS],
+//     source_name: Ident,
+//     with_properties: AstOption<WithProperties>,
+//     [Keyword::ROW, Keyword::FORMAT],
+//     source_schema: SourceSchema,
 // });
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -96,10 +96,10 @@ impl fmt::Display for SourceSchema {
 }
 
 // sql_grammar!(ProtobufSchema {
-//   [Keyword::MESSAGE],
-//   message_name: AstString,
-//   [Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION],
-//   row_schema_location: AstString,
+//     [Keyword::MESSAGE],
+//     message_name: AstString,
+//     [Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION],
+//     row_schema_location: AstString,
 // });
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -134,7 +134,7 @@ impl fmt::Display for ProtobufSchema {
 
 impl ParseTo for CreateSourceStatement {
     fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
-        impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS],  p);
+        impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS],    p);
         impl_parse_to!(source_name: Ident, p);
         impl_parse_to!(with_properties: WithProperties, p);
         impl_parse_to!([Keyword::ROW, Keyword::FORMAT], p);
@@ -285,10 +285,10 @@ pub struct DropStatement {
 }
 
 // sql_grammar!(DropStatement {
-//   object_type: ObjectType,
-//   if_exists => [Keyword::IF, Keyword::EXISTS],
-//   name: ObjectName,
-//   drop_mode: AstOption<DropMode>,
+//     object_type: ObjectType,
+//     if_exists => [Keyword::IF, Keyword::EXISTS],
+//     name: ObjectName,
+//     drop_mode: AstOption<DropMode>,
 // });
 impl ParseTo for DropStatement {
     fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {

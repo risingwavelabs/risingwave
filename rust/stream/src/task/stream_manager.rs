@@ -34,7 +34,7 @@ pub type UpDownActorIds = (u32, u32);
 
 #[cfg(test)]
 lazy_static::lazy_static! {
-  pub static ref LOCAL_TEST_ADDR: SocketAddr = "127.0.0.1:2333".parse().unwrap();
+    pub static ref LOCAL_TEST_ADDR: SocketAddr = "127.0.0.1:2333".parse().unwrap();
 }
 
 /// Stores the data which may be modified from the data plane.
@@ -52,8 +52,8 @@ pub struct SharedContext {
     /// 2. The RPC client at the downstream actor forwards received `Message` to one channel in
     /// `ReceiverExecutor` or `MergerExecutor`.
     /// 3. The RPC `Output` at the upstream actor forwards received `Message` to
-    /// `ExchangeServiceImpl`.    The channel servers as a buffer because `ExchangeServiceImpl` is
-    /// on the server-side and we will    also introduce backpressure.
+    /// `ExchangeServiceImpl`.        The channel servers as a buffer because `ExchangeServiceImpl`
+    /// is on the server-side and we will        also introduce backpressure.
     pub(crate) channel_pool: Mutex<HashMap<UpDownActorIds, ConsumableChannelPair>>,
 
     /// The receiver is on the other side of rpc `Output`. The `ExchangeServiceImpl` take it
@@ -409,9 +409,9 @@ impl StreamManagerCore {
     fn send_conf_change_barrier(&mut self, _mutation: Mutation) -> Result<()> {
         todo!("conf change barrier should be sent from meta, mv on mv is temporially not supported")
         // self
-        //   .context
-        //   .lock_barrier_manager()
-        //   .send_barrier(&Barrier::new(0).with_mutation(mutation), vec![])?;
+        //     .context
+        //     .lock_barrier_manager()
+        //     .send_barrier(&Barrier::new(0).with_mutation(mutation), vec![])?;
         // Ok(())
     }
 
@@ -618,30 +618,30 @@ impl StreamManagerCore {
                 trace!("Join non-equi condition: {:?}", condition);
 
                 macro_rules! impl_create_hash_join_executor {
-          ($( { $join_type_proto:ident, $join_type:ident } ),*) => {
-            |typ| match typ {
-              $( JoinTypeProto::$join_type_proto => Box::new(HashJoinExecutor::<_, { JoinType::$join_type }>::new(
-                source_l,
-                source_r,
-                params_l,
-                params_r,
-                pk_indices,
-                Keyspace::shared_executor_root(store.clone(), node_id),
-                executor_id,
-                condition,
-              )) as Box<dyn Executor>, )*
-              _ => todo!("Join type {:?} not inplemented", typ),
-            }
-          }
-        }
+                    ($( { $join_type_proto:ident, $join_type:ident } ),*) => {
+                        |typ| match typ {
+                            $( JoinTypeProto::$join_type_proto => Box::new(HashJoinExecutor::<_, { JoinType::$join_type }>::new(
+                                source_l,
+                                source_r,
+                                params_l,
+                                params_r,
+                                pk_indices,
+                                Keyspace::shared_executor_root(store.clone(), node_id),
+                                executor_id,
+                                condition,
+                            )) as Box<dyn Executor>, )*
+                            _ => todo!("Join type {:?} not inplemented", typ),
+                        }
+                    }
+                }
 
                 macro_rules! for_all_join_types {
                     ($macro:tt) => {
                         $macro! {
-                          { Inner, Inner },
-                          { LeftOuter, LeftOuter },
-                          { RightOuter, RightOuter },
-                          { FullOuter, FullOuter }
+                            { Inner, Inner },
+                            { LeftOuter, LeftOuter },
+                            { RightOuter, RightOuter },
+                            { FullOuter, FullOuter }
                         }
                     };
                 }
@@ -969,7 +969,7 @@ impl StreamManagerCore {
     }
 
     /// `drop_actor` is invoked by the leader node via RPC once the stop barrier arrives at the
-    ///  sink. All the actors in the actors should stop themselves before this method is invoked.
+    /// sink. All the actors in the actors should stop themselves before this method is invoked.
     fn drop_actor(&mut self, actor_id: u32) {
         let handle = self.handles.remove(&actor_id).unwrap();
         let mut channel_pool_guard = self.context.lock_channel_pool();
