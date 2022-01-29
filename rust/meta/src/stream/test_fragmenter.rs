@@ -85,7 +85,8 @@ fn make_column_order(idx: i32) -> ColumnOrder {
 
 /// [`make_stream_node`] build a plan represent in `StreamNode` for SQL as follow:
 /// ```sql
-/// create materialized view `T_distributed` as select sum(v1)+1 as V from t where v1>v2
+/// create table t (v1 int, v2 int);
+/// create materialized view T_distributed as select sum(v1)+1 as V from t where v1>v2;
 /// ```
 ///
 /// plan:
@@ -117,7 +118,7 @@ fn make_stream_node() -> StreamNode {
     let exchange_node = StreamNode {
         node: Some(Node::ExchangeNode(ExchangeNode {
             dispatcher: Some(Dispatcher {
-                r#type: DispatcherType::Simple as i32,
+                r#type: DispatcherType::Hash as i32,
                 column_idx: 0,
             }),
             input_column_descs: vec![

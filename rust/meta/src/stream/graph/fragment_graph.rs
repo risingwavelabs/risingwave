@@ -109,17 +109,4 @@ impl StreamFragmentGraph {
     pub fn get_fragment_by_id(&self, fragment_id: u32) -> Option<StreamFragment> {
         self.fragments.get(&fragment_id).cloned()
     }
-
-    pub fn set_source_fragment_by_id(&mut self, fragment_id: u32) -> Result<()> {
-        ensure!(
-            self.fragments.contains_key(&fragment_id),
-            "fragment id not exist!"
-        );
-        self.fragments
-            .get_mut(&fragment_id)
-            .unwrap()
-            .set_as_table_source_fragment();
-
-        Ok(())
-    }
 }

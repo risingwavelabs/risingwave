@@ -67,50 +67,63 @@ impl StreamFragmenter {
     /// Generate fragment DAG from input streaming plan by their dependency.
     fn generate_fragment_graph(&mut self, stream_node: &StreamNode) -> Result<()> {
         let mut root_fragment = self.new_stream_fragment(Arc::new(stream_node.clone()));
-        let is_singleton = self.build_fragment(&root_fragment, stream_node)?;
+        let (is_singleton, is_source) = self.build_fragment(&root_fragment, stream_node)?;
         root_fragment.set_singleton(is_singleton);
+        if is_source {
+            root_fragment.set_as_table_source_fragment();
+        }
         self.fragment_graph.add_root_fragment(root_fragment.clone());
         Ok(())
     }
 
     /// Build new fragment and link dependency with its parent fragment.
-    /// Return whether the parent should be singleton.
+    /// Return two flags.
+    /// The first flag indicates that whether the parent should be singleton.
+    /// The second flag indicates that whether the parent is a source.
     // TODO: Should we store the concurrency in StreamFragment directly?
     fn build_fragment(
         &mut self,
         parent_fragment: &StreamFragment,
         stream_node: &StreamNode,
-    ) -> Result<bool> {
+    ) -> Result<(bool, bool)> {
         let mut is_singleton = false;
+        let mut is_source = false;
         for node in stream_node.get_input() {
-            is_singleton |= match node.get_node()? {
+            let (is_singleton1, is_source1) = match node.get_node()? {
                 Node::ExchangeNode(exchange_node) => {
                     let mut child_fragment = self.new_stream_fragment(Arc::new(node.clone()));
-                    let child_is_singleton = self.build_fragment(&child_fragment, node)?;
+                    let (child_is_singleton, child_is_source) =
+                        self.build_fragment(&child_fragment, node)?;
                     child_fragment.set_singleton(child_is_singleton);
+                    if child_is_source {
+                        child_fragment.set_as_table_source_fragment();
+                    }
                     self.fragment_graph.add_fragment(child_fragment.clone());
                     self.fragment_graph.link_child(
                         parent_fragment.get_fragment_id(),
                         child_fragment.get_fragment_id(),
                     );
-                    exchange_node.get_dispatcher()?.get_type()? == DispatcherType::Simple
+                    (
+                        exchange_node.get_dispatcher()?.get_type()? == DispatcherType::Simple,
+                        false,
+                    )
                 }
                 Node::SourceNode(_) => {
-                    let _res = self
-                        .fragment_graph
-                        .set_source_fragment_by_id(parent_fragment.get_fragment_id());
-                    self.build_fragment(parent_fragment, node)?
+                    let (parent_is_singleton, _) = self.build_fragment(parent_fragment, node)?;
+                    (parent_is_singleton, true)
                 }
                 Node::TopNNode(_) => {
-                    self.build_fragment(parent_fragment, node)?;
+                    let (_, child_is_source) = self.build_fragment(parent_fragment, node)?;
                     // TODO: Force singleton for TopN as a workaround.
                     // We should implement two phase TopN.
-                    true
+                    (true, child_is_source)
                 }
                 _ => self.build_fragment(parent_fragment, node)?,
-            }
+            };
+            is_singleton |= is_singleton1;
+            is_source |= is_source1;
         }
-        Ok(is_singleton)
+        Ok((is_singleton, is_source))
     }
 
     fn new_stream_fragment(&self, node: Arc<StreamNode>) -> StreamFragment {
