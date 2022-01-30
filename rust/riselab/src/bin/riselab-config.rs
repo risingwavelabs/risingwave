@@ -7,7 +7,7 @@ use dialoguer::MultiSelect;
 use enum_iterator::IntoEnumIterator;
 use itertools::Itertools;
 
-#[derive(Clone, Debug, IntoEnumIterator, PartialEq)]
+#[derive(Clone, Copy, Debug, IntoEnumIterator, PartialEq)]
 pub enum Components {
     MinIO,
     PrometheusAndGrafana,
@@ -76,9 +76,18 @@ Build RisingWave in release mode"
         }
         .into()
     }
+
+    pub fn default_enabled() -> &'static [Self] {
+        &[
+            Self::MinIO,
+            Self::PrometheusAndGrafana,
+            Self::ComputeNodeAndMetaNode,
+            Self::Frontend,
+        ]
+    }
 }
 
-fn configure() -> Result<Vec<usize>> {
+fn configure() -> Result<Vec<Components>> {
     println!("=== Configure RiseLAB ===");
     println!();
     println!("RiseLAB includes several components. You can select the ones you need, so as to reduce build time.");
@@ -91,14 +100,10 @@ fn configure() -> Result<Vec<usize>> {
     );
     println!();
 
-    let default_enabled = vec![
-        Components::MinIO,
-        Components::PrometheusAndGrafana,
-        Components::ComputeNodeAndMetaNode,
-        Components::Frontend,
-    ];
+    let all_components = Components::into_enum_iter().collect_vec();
 
-    let items = Components::into_enum_iter()
+    let items = all_components
+        .iter()
         .map(|c| {
             (
                 format!(
@@ -111,15 +116,19 @@ fn configure() -> Result<Vec<usize>> {
                     )
                     .dim()
                 ),
-                default_enabled.contains(&c),
+                Components::default_enabled().contains(c),
             )
         })
         .collect_vec();
 
-    let chosen: Vec<usize> = MultiSelect::new()
+    let chosen_indices: Vec<usize> = MultiSelect::new()
         .items_checked(&items)
         .interact_opt()?
         .ok_or_else(|| anyhow!("no selection made"))?;
+    let chosen = chosen_indices
+        .into_iter()
+        .map(|i| all_components[i])
+        .collect_vec();
 
     Ok(chosen)
 }
@@ -136,7 +145,7 @@ fn main() -> Result<()> {
 
     let chosen = if let Some(true) = std::env::args().nth(2).map(|x| x == "--default") {
         println!("Using default config");
-        (0..Components::into_enum_iter().len()).collect_vec()
+        Components::default_enabled().to_vec()
     } else {
         configure()?
     };
@@ -153,10 +162,8 @@ fn main() -> Result<()> {
     );
 
     writeln!(file, "RISELAB_CONFIGURED=true")?;
-    for (idx, item) in Components::into_enum_iter().enumerate() {
-        if chosen.contains(&idx) {
-            writeln!(file, "{}=true", item.env())?;
-        }
+    for component in chosen {
+        writeln!(file, "{}=true", component.env())?;
     }
 
     file.flush()?;
