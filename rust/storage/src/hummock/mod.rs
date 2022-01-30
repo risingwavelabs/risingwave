@@ -18,7 +18,6 @@ pub mod key_range;
 mod level_handler;
 pub mod local_version_manager;
 pub mod mock;
-mod snapshot;
 #[cfg(test)]
 mod snapshot_tests;
 mod state_store;
