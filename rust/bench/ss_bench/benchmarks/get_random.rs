@@ -22,8 +22,7 @@ pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
     // generate queried point get key
     let mut rng = StdRng::seed_from_u64(233);
     let range = Uniform::from(0..opts.batch_size as usize);
-    let key_num = (opts.iterations - opts.iterations % opts.concurrency_num) as usize;
-    let mut get_keys = (0..key_num)
+    let mut get_keys = (0..opts.reads)
         .into_iter()
         .map(|_| batch[range.sample(&mut rng)].0.clone())
         .collect_vec();
@@ -58,7 +57,7 @@ pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
         }
     }
     let stat = LatencyStat::new(latencies);
-    let qps = key_num as u128 * 1_000_000_000 / total_time_nano as u128;
+    let qps = get_keys.len() as u128 * 1_000_000_000 / total_time_nano as u128;
 
     println!(
         "

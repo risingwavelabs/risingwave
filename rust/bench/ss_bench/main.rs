@@ -33,16 +33,6 @@ pub(crate) struct Opts {
     #[clap(long, default_value = "in-memory")]
     store: String,
 
-    // ----- benchmarks -----
-    #[clap(long)]
-    benchmarks: String,
-
-    #[clap(long, default_value_t = 10)]
-    iterations: u32,
-
-    #[clap(long, default_value_t = 1)]
-    concurrency_num: u32,
-
     // ----- Hummock -----
     #[clap(long, default_value_t = 64)]
     block_size_kb: u32,
@@ -56,20 +46,40 @@ pub(crate) struct Opts {
     #[clap(long, default_value = "crc32c")]
     checksum_algo: String,
 
-    // ----- data -----
-    #[clap(long, default_value_t = 10)]
+    // ----- benchmarks -----
+    #[clap(long)]
+    benchmarks: String,
+
+    #[clap(long, default_value_t = 1)]
+    concurrency_num: u32,
+
+    // ----- operation number -----
+    #[clap(long, default_value_t = 1000000)]
+    num: i64,
+
+    #[clap(long, default_value_t = -1)]
+    writes: i64,
+
+    #[clap(long, default_value_t = -1)]
+    deletes: i64,
+
+    #[clap(long, default_value_t = -1)]
+    reads: i64,
+
+    // ----- single batch -----
+    #[clap(long, default_value_t = 16)]
     key_size: u32,
 
     #[clap(long, default_value_t = 5)]
     key_prefix_size: u32,
 
     #[clap(long, default_value_t = 10)]
-    key_prefix_frequency: u32,
+    keys_per_prefix: u32,
 
-    #[clap(long, default_value_t = 10)]
+    #[clap(long, default_value_t = 100)]
     value_size: u32,
 
-    #[clap(long, default_value_t = 1000)]
+    #[clap(long, default_value_t = 1)]
     batch_size: u32,
 }
 
@@ -168,13 +178,27 @@ async fn run_benchmarks(store: impl StateStore, opts: &Opts) {
     }
 }
 
+fn preprocess_options(opts: &mut Opts) {
+    if opts.reads < 0 {
+        opts.reads = opts.num;
+    }
+    if opts.writes < 0 {
+        opts.writes = opts.num;
+    }
+    if opts.deletes < 0 {
+        opts.deletes = opts.num;
+    }
+}
+
 /// This is used to benchmark the state store performance.
 /// For usage, see: https://github.com/singularity-data/risingwave-dev/blob/main/docs/developer/benchmark_tool/state_store.md
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
-    let opts = Opts::parse();
+    let mut opts = Opts::parse();
 
-    println!("Input configurations: {:?}", &opts);
+    println!("Configurations before preprocess:\n {:?}", &opts);
+    preprocess_options(&mut opts);
+    println!("Configurations after preprocess:\n {:?}", &opts);
 
     let state_store = match get_state_store_impl(&opts).await {
         Ok(state_store_impl) => state_store_impl,

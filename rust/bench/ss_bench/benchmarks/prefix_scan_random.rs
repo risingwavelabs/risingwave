@@ -22,8 +22,7 @@ pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
     // generate queried prefixes
     let mut rng = StdRng::seed_from_u64(233);
     let range = Uniform::from(0..workload.prefixes.len());
-    let prefix_num = (opts.iterations - opts.iterations % opts.concurrency_num) as usize;
-    let mut scan_prefixes = (0..prefix_num)
+    let mut scan_prefixes = (0..opts.reads)
         .into_iter()
         .map(|_| workload.prefixes[range.sample(&mut rng)].clone())
         .collect_vec();
@@ -61,7 +60,7 @@ pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
         }
     }
     let stat = LatencyStat::new(latencies);
-    let qps = prefix_num as u128 * 1_000_000_000 / total_time_nano as u128;
+    let qps = scan_prefixes.len() as u128 * 1_000_000_000 / total_time_nano as u128;
 
     println!(
         "

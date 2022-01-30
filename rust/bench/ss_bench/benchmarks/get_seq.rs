@@ -17,8 +17,7 @@ pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
         .unwrap();
 
     // generate queried point get key
-    let key_num = (opts.iterations - opts.iterations % opts.concurrency_num) as usize;
-    let mut get_keys = (0..key_num)
+    let mut get_keys = (0..opts.reads as usize)
         .into_iter()
         .map(|i| batch[i].0.clone())
         .collect_vec();
@@ -53,7 +52,7 @@ pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
         }
     }
     let stat = LatencyStat::new(latencies);
-    let qps = key_num as u128 * 1_000_000_000 / total_time_nano as u128;
+    let qps = get_keys.len() as u128 * 1_000_000_000 / total_time_nano as u128;
 
     println!(
         "

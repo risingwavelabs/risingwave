@@ -10,9 +10,7 @@ use crate::utils::workload::{get_epoch, Workload};
 use crate::{Opts, WorkloadType};
 
 pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
-    // TODO(sun ting): create an opetion for batch number. opts.iterations is ambiguous here.
-    let batch_num = (opts.iterations - opts.iterations % opts.concurrency_num) as usize;
-    let mut batches = (0..batch_num)
+    let mut batches = (0..opts.writes)
         .into_iter()
         .map(|i| Workload::new(opts, WorkloadType::WriteBatch, Some(i as u64)).batch)
         .collect_vec();
@@ -52,7 +50,7 @@ pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
     }
     let stat = LatencyStat::new(latencies);
     // calculate operation per second
-    let ops = opts.batch_size as u128 * 1_000_000_000 * batch_num as u128 / total_time_nano;
+    let ops = opts.batch_size as u128 * 1_000_000_000 * batches.len() as u128 / total_time_nano;
 
     println!(
         "
