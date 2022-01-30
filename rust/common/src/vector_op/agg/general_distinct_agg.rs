@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::marker::PhantomData;
 
 use crate::array::*;
@@ -7,7 +8,13 @@ use crate::vector_op::agg::aggregator::Aggregator;
 use crate::vector_op::agg::functions::RTFn;
 use crate::vector_op::agg::general_sorted_grouper::EqGroups;
 
-pub struct GeneralAgg<T, F, R>
+/// Where the actual aggregation happens.
+///
+/// This is for aggregation function with distinct keyword.
+/// For example, select count(distinct c1) from t;
+///
+/// For aggregation without distinct keyword, please refer to `GeneralAgg`
+pub struct GeneralDistinctAgg<T, F, R>
 where
     T: Array,
     F: Send + for<'a> RTFn<'a, T, R>,
@@ -17,9 +24,10 @@ where
     input_col_idx: usize,
     result: Option<R::OwnedItem>,
     f: F,
+    exists: HashSet<Datum>,
     _phantom: PhantomData<T>,
 }
-impl<T, F, R> GeneralAgg<T, F, R>
+impl<T, F, R> GeneralDistinctAgg<T, F, R>
 where
     T: Array,
     F: Send + for<'a> RTFn<'a, T, R>,
@@ -31,29 +39,42 @@ where
             input_col_idx,
             result: None,
             f,
+            exists: HashSet::new(),
             _phantom: PhantomData,
         }
     }
-    pub(super) fn update_with_scalar_concrete(&mut self, input: &T, row_id: usize) -> Result<()> {
-        self.result = (self.f)(
-            self.result.as_ref().map(|x| x.as_scalar_ref()),
-            input.value_at(row_id),
-        )
-        .map(|x| x.to_owned_scalar());
+
+    fn update_with_scalar_concrete(&mut self, input: &T, row_id: usize) -> Result<()> {
+        let value = input
+            .value_at(row_id)
+            .map(|scalar_ref| scalar_ref.to_owned_scalar().to_scalar_value());
+        if self.exists.insert(value) {
+            self.result = (self.f)(
+                self.result.as_ref().map(|x| x.as_scalar_ref()),
+                input.value_at(row_id),
+            )
+            .map(|x| x.to_owned_scalar());
+        }
         Ok(())
     }
-    pub(super) fn update_concrete(&mut self, input: &T) -> Result<()> {
+
+    fn update_concrete(&mut self, input: &T) -> Result<()> {
         let r = input
             .iter()
+            .filter(|scalar_ref| {
+                self.exists.insert(
+                    scalar_ref.map(|scalar_ref| scalar_ref.to_owned_scalar().to_scalar_value()),
+                )
+            })
             .fold(self.result.as_ref().map(|x| x.as_scalar_ref()), &mut self.f)
             .map(|x| x.to_owned_scalar());
         self.result = r;
         Ok(())
     }
-    pub(super) fn output_concrete(&self, builder: &mut R::Builder) -> Result<()> {
+    fn output_concrete(&self, builder: &mut R::Builder) -> Result<()> {
         builder.append(self.result.as_ref().map(|x| x.as_scalar_ref()))
     }
-    pub(super) fn update_and_output_with_sorted_groups_concrete(
+    fn update_and_output_with_sorted_groups_concrete(
         &mut self,
         input: &T,
         builder: &mut R::Builder,
@@ -67,7 +88,10 @@ where
                 builder.append(cur)?;
                 cur = None;
             }
-            cur = (self.f)(cur, v);
+            let scalar_impl = v.map(|scalar_ref| scalar_ref.to_owned_scalar().to_scalar_value());
+            if self.exists.insert(scalar_impl) {
+                cur = (self.f)(cur, v);
+            }
         }
         self.result = cur.map(|x| x.to_owned_scalar());
         Ok(())
@@ -76,7 +100,7 @@ where
 
 macro_rules! impl_aggregator {
     ($input:ty, $input_variant:ident, $result:ty, $result_variant:ident) => {
-        impl<F> Aggregator for GeneralAgg<$input, F, $result>
+        impl<F> Aggregator for GeneralDistinctAgg<$input, F, $result>
         where
             F: 'static + Send + for<'a> RTFn<'a, $input, $result>,
         {
@@ -179,15 +203,15 @@ mod tests {
         let input_chunk = DataChunk::builder()
             .columns(vec![Column::new(input)])
             .build();
-        let mut agg_state = create_agg_state_unary(input_type, 0, agg_type, return_type, false)?;
+        let mut agg_state = create_agg_state_unary(input_type, 0, agg_type, return_type, true)?;
         agg_state.update(&input_chunk)?;
         agg_state.output(&mut builder)?;
         builder.finish()
     }
 
     #[test]
-    fn vec_sum_int32() -> Result<()> {
-        let input = I32Array::from_slice(&[Some(1), Some(2), Some(3)]).unwrap();
+    fn vec_distinct_sum_int32() -> Result<()> {
+        let input = I32Array::from_slice(&[Some(1), Some(1), Some(3)]).unwrap();
         let agg_type = AggKind::Sum;
         let input_type = DataType::Int32;
         let return_type = DataType::Int64;
@@ -200,13 +224,13 @@ mod tests {
         )?;
         let actual = actual.as_int64();
         let actual = actual.iter().collect::<Vec<_>>();
-        assert_eq!(actual, &[Some(6)]);
+        assert_eq!(actual, &[Some(4)]);
         Ok(())
     }
 
     #[test]
-    fn vec_sum_int64() -> Result<()> {
-        let input = I64Array::from_slice(&[Some(1), Some(2), Some(3)])?;
+    fn vec_distinct_sum_int64() -> Result<()> {
+        let input = I64Array::from_slice(&[Some(1), Some(1), Some(3)])?;
         let agg_type = AggKind::Sum;
         let input_type = DataType::Int64;
         let return_type = DataType::decimal_default();
@@ -219,12 +243,12 @@ mod tests {
         )?;
         let actual: &DecimalArray = (&actual).into();
         let actual = actual.iter().collect::<Vec<Option<Decimal>>>();
-        assert_eq!(actual, vec![Some(Decimal::from(6))]);
+        assert_eq!(actual, vec![Some(Decimal::from(4))]);
         Ok(())
     }
 
     #[test]
-    fn vec_min_float32() -> Result<()> {
+    fn vec_distinct_min_float32() -> Result<()> {
         let input =
             F32Array::from_slice(&[Some(1.0.into()), Some(2.0.into()), Some(3.0.into())]).unwrap();
         let agg_type = AggKind::Min;
@@ -244,7 +268,7 @@ mod tests {
     }
 
     #[test]
-    fn vec_min_char() -> Result<()> {
+    fn vec_distinct_min_char() -> Result<()> {
         let input = Utf8Array::from_slice(&[Some("b"), Some("aa")])?;
         let agg_type = AggKind::Min;
         let input_type = DataType::Char;
@@ -263,7 +287,7 @@ mod tests {
     }
 
     #[test]
-    fn vec_max_char() -> Result<()> {
+    fn vec_distinct_max_char() -> Result<()> {
         let input = Utf8Array::from_slice(&[Some("b"), Some("aa")])?;
         let agg_type = AggKind::Max;
         let input_type = DataType::Varchar;
@@ -282,7 +306,7 @@ mod tests {
     }
 
     #[test]
-    fn vec_count_int32() -> Result<()> {
+    fn vec_distinct_count_int32() -> Result<()> {
         let test_case = |input: ArrayImpl, expected: &[Option<i64>]| -> Result<()> {
             let agg_type = AggKind::Count;
             let input_type = DataType::Int32;
@@ -299,8 +323,8 @@ mod tests {
             assert_eq!(actual, expected);
             Ok(())
         };
-        let input = I32Array::from_slice(&[Some(1), Some(2), Some(3)]).unwrap();
-        let expected = &[Some(3)];
+        let input = I32Array::from_slice(&[Some(1), Some(1), Some(3)]).unwrap();
+        let expected = &[Some(2)];
         test_case(input.into(), expected)?;
         let input = I32Array::from_slice(&[]).unwrap();
         let expected = &[None];
