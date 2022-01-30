@@ -26,6 +26,7 @@ pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
         .into_iter()
         .map(|_| batch[dist.sample(&mut rng)].0.clone())
         .collect_vec();
+    let get_keys_len = get_keys.len();
 
     // partitioned these keys for each concurrency
     let mut grouped_keys = vec![vec![]; opts.concurrency_num as usize];
@@ -57,7 +58,7 @@ pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
         }
     }
     let stat = LatencyStat::new(latencies);
-    let qps = get_keys.len() as u128 * 1_000_000_000 / total_time_nano as u128;
+    let qps = get_keys_len as u128 * 1_000_000_000 / total_time_nano as u128;
 
     println!(
         "

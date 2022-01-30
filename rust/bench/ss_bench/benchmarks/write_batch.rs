@@ -14,6 +14,7 @@ pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
         .into_iter()
         .map(|i| Workload::new(opts, WorkloadType::WriteBatch, Some(i as u64)).batch)
         .collect_vec();
+        let batches_len = batches.len();
 
     // partitioned these batches for each concurrency
     let mut grouped_batches = vec![vec![]; opts.concurrency_num as usize];
@@ -50,7 +51,7 @@ pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
     }
     let stat = LatencyStat::new(latencies);
     // calculate operation per second
-    let ops = opts.batch_size as u128 * 1_000_000_000 * batches.len() as u128 / total_time_nano;
+    let ops = opts.batch_size as u128 * 1_000_000_000 * batches_len as u128 / total_time_nano;
 
     println!(
         "
