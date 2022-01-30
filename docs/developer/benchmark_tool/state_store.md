@@ -91,11 +91,12 @@ Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
 ### Operation Number
 
 - `--num`
+
   - Number of key/values to place in database
   - Default: 1000000
 
 - `--writes`
-  
+
   - Number of written batches. If negative, do `--num` reads.
   - Default: -1
 
