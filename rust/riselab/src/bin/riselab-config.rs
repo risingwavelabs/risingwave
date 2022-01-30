@@ -72,7 +72,7 @@ Build RisingWave in release mode"
             Self::ComputeNodeAndMetaNode => "ENABLE_BUILD_RUST",
             Self::Frontend => "ENABLE_BUILD_FRONTEND",
             Self::Tracing => "ENABLE_COMPUTE_TRACING",
-            Self::Release => "ENABLE_RELEASE_BUILD",
+            Self::Release => "ENABLE_RELEASE_PROFILE",
         }
         .into()
     }
