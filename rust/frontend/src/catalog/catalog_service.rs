@@ -1,9 +1,8 @@
 use std::collections::HashMap;
 
 use risingwave_common::array::RwError;
-use risingwave_common::error::{Result, ToRwResult};
-use risingwave_pb::meta::drop_request::CatalogId;
-use risingwave_pb::meta::{Database, DropRequest, Schema, Table};
+use risingwave_common::error::Result;
+use risingwave_pb::meta::{Database, Schema, Table};
 use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
 use risingwave_rpc_client::MetaClient;
 
@@ -228,21 +227,14 @@ impl CatalogConnector {
             .ok_or_else(|| RwError::from(CatalogError::NotFound("table", table_name.to_string())))?
             .id() as i32;
 
-        let ddl_request = DropRequest {
-            node_id: 0,
-            catalog_id: Some(CatalogId::TableId(TableRefId {
-                schema_ref_id: Some(SchemaRefId {
-                    database_ref_id: Some(DatabaseRefId { database_id }),
-                    schema_id,
-                }),
-                table_id,
-            })),
+        let table_ref_id = TableRefId {
+            schema_ref_id: Some(SchemaRefId {
+                database_ref_id: Some(DatabaseRefId { database_id }),
+                schema_id,
+            }),
+            table_id,
         };
-        self.meta_client
-            .catalog_client
-            .drop(ddl_request)
-            .await
-            .to_rw_result_with("drop table from meta failed")?;
+        self.meta_client.drop_table(table_ref_id).await?;
         // Drop table locally.
         self.catalog_cache
             .drop_table(db_name, schema_name, table_name)
@@ -264,18 +256,11 @@ impl CatalogConnector {
             })?
             .id() as i32;
 
-        let ddl_request = DropRequest {
-            node_id: 0,
-            catalog_id: Some(CatalogId::SchemaId(SchemaRefId {
-                database_ref_id: Some(DatabaseRefId { database_id }),
-                schema_id,
-            })),
+        let schema_ref_id=SchemaRefId {
+            database_ref_id: Some(DatabaseRefId { database_id }),
+            schema_id,
         };
-        self.meta_client
-            .catalog_client
-            .drop(ddl_request)
-            .await
-            .to_rw_result_with("drop schema from meta failed")?;
+        self.meta_client.drop_schema(schema_ref_id).await?;
         // Drop schema locally.
         self.catalog_cache
             .drop_schema(db_name, schema_name)
@@ -289,15 +274,8 @@ impl CatalogConnector {
             .get_database(db_name)
             .ok_or_else(|| RwError::from(CatalogError::NotFound("database", db_name.to_string())))?
             .id() as i32;
-        let ddl_request = DropRequest {
-            node_id: 0,
-            catalog_id: Some(CatalogId::DatabaseId(DatabaseRefId { database_id })),
-        };
-        self.meta_client
-            .catalog_client
-            .drop(ddl_request)
-            .await
-            .to_rw_result_with("drop database from meta failed")?;
+        let database_ref_id=DatabaseRefId { database_id };
+        self.meta_client.drop_database(database_ref_id).await?;
         // Drop database locally.
         self.catalog_cache.drop_database(db_name).unwrap();
         Ok(())

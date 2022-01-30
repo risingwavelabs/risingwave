@@ -9,10 +9,12 @@ use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServic
 use risingwave_pb::meta::catalog_service_client::CatalogServiceClient;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::create_request::CatalogBody;
+use risingwave_pb::meta::drop_request::CatalogId;
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::{
-    AddWorkerNodeRequest, CreateRequest, Database, HeartbeatRequest, Schema, Table,
+    AddWorkerNodeRequest, CreateRequest, DropRequest, Database, HeartbeatRequest, Schema, Table,
 };
+use risingwave_pb::plan::{TableRefId, SchemaRefId, DatabaseRefId};
 use tonic::transport::{Channel, Endpoint};
 
 type DatabaseId = i32;
@@ -112,4 +114,31 @@ impl MetaClient {
             .into_inner();
         Ok(resp.id)
     }
+
+  pub async fn drop_table(&self, table_ref_id: TableRefId) -> Result<()> {
+    self.drop_catalog_id(CatalogId::TableId(table_ref_id)).await
+  }
+
+  pub async fn drop_schema(&self, schema_ref_id: SchemaRefId) -> Result<()> {
+    self.drop_catalog_id(CatalogId::SchemaId(schema_ref_id)).await
+  }
+
+  pub async fn drop_database(&self, database_ref_id: DatabaseRefId) -> Result<()> {
+    self.drop_catalog_id(CatalogId::DatabaseId(database_ref_id)).await
+  }
+
+  async fn drop_catalog_id(&self, catalog_id: CatalogId) -> Result<()> {
+    let request = DropRequest {
+      catalog_id: Some(catalog_id),
+      ..Default::default()
+    };
+    let _resp = self
+      .catalog_client
+      .to_owned()
+      .drop(request)
+      .await
+      .to_rw_result()?
+      .into_inner();
+    Ok(())
+  }
 }
