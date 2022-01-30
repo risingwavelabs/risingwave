@@ -50,8 +50,6 @@ pub(crate) struct Opts {
     #[clap(long)]
     benchmarks: String,
 
-    operations: Vec<String>,
-
     #[clap(long, default_value_t = 1)]
     concurrency_num: u32,
 
@@ -169,7 +167,7 @@ async fn get_state_store_impl(opts: &Opts) -> Result<StateStoreImpl> {
 }
 
 async fn run_operations(store: impl StateStore, opts: &Opts) {
-    for operation in &opts.operations {
+    for operation in opts.benchmarks.split(',') {
         match operation.as_ref() {
             "writebatch" => write_batch::run(&store, opts).await,
             "getrandom" => get_random::run(&store, opts).await,
@@ -181,8 +179,6 @@ async fn run_operations(store: impl StateStore, opts: &Opts) {
 }
 
 fn preprocess_options(opts: &mut Opts) {
-    opts.operations = opts.benchmarks.split(',').map(|s| s.to_string()).collect();
-
     if opts.reads < 0 {
         opts.reads = opts.num;
     }
@@ -191,7 +187,7 @@ fn preprocess_options(opts: &mut Opts) {
     }
 
     // check illegal configurations
-    for operation in &opts.operations {
+    for operation in opts.benchmarks.split(',') {
         if operation == "getseq" {
             // TODO(sun ting): eliminate this limitation
             if opts.batch_size < opts.reads as u32 {
