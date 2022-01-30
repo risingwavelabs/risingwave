@@ -256,7 +256,7 @@ impl CatalogConnector {
             })?
             .id() as i32;
 
-        let schema_ref_id=SchemaRefId {
+        let schema_ref_id = SchemaRefId {
             database_ref_id: Some(DatabaseRefId { database_id }),
             schema_id,
         };
@@ -274,7 +274,7 @@ impl CatalogConnector {
             .get_database(db_name)
             .ok_or_else(|| RwError::from(CatalogError::NotFound("database", db_name.to_string())))?
             .id() as i32;
-        let database_ref_id=DatabaseRefId { database_id };
+        let database_ref_id = DatabaseRefId { database_id };
         self.meta_client.drop_database(database_ref_id).await?;
         // Drop database locally.
         self.catalog_cache.drop_database(db_name).unwrap();
