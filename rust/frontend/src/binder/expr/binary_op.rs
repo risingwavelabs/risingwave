@@ -2,7 +2,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{BinaryOperator, Expr};
 
 use crate::binder::Binder;
-use crate::expr::{BoundExpr as _, BoundFunctionCall, ExprType};
+use crate::expr::{Expr as _, ExprType, FunctionCall};
 
 impl Binder {
     pub(super) fn bind_binary_op(
@@ -10,7 +10,7 @@ impl Binder {
         left: Expr,
         op: BinaryOperator,
         right: Expr,
-    ) -> Result<BoundFunctionCall> {
+    ) -> Result<FunctionCall> {
         let bound_left = self.bind_expr(left)?;
         let bound_right = self.bind_expr(right)?;
         let func_type = match op {
@@ -27,7 +27,7 @@ impl Binder {
             op,
             bound_right.return_type(),
         );
-        BoundFunctionCall::new(func_type, vec![bound_left, bound_right])
+        FunctionCall::new(func_type, vec![bound_left, bound_right])
             .ok_or_else(|| ErrorCode::NotImplementedError(desc).into())
     }
 }

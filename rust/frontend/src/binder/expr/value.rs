@@ -3,13 +3,13 @@ use risingwave_common::types::{DataTypeKind, Decimal, ScalarImpl};
 use risingwave_sqlparser::ast::Value;
 
 use crate::binder::Binder;
-use crate::expr::BoundLiteral;
+use crate::expr::Literal;
 
 impl Binder {
-    pub(super) fn bind_value(&mut self, value: Value) -> Result<BoundLiteral> {
+    pub(super) fn bind_value(&mut self, value: Value) -> Result<Literal> {
         match value {
             Value::Number(s, b) => self.bind_number(s, b),
-            Value::SingleQuotedString(s) => Ok(BoundLiteral::new(
+            Value::SingleQuotedString(s) => Ok(Literal::new(
                 Some(ScalarImpl::Utf8(s)),
                 DataTypeKind::Varchar,
             )),
@@ -17,7 +17,7 @@ impl Binder {
         }
     }
 
-    fn bind_number(&mut self, s: String, _b: bool) -> Result<BoundLiteral> {
+    fn bind_number(&mut self, s: String, _b: bool) -> Result<Literal> {
         let (data, data_type) = if let Ok(int_32) = s.parse::<i32>() {
             (Some(ScalarImpl::Int32(int_32)), DataTypeKind::Int32)
         } else if let Ok(int_64) = s.parse::<i64>() {
@@ -34,7 +34,7 @@ impl Binder {
                 DataTypeKind::Decimal { prec, scale },
             )
         };
-        Ok(BoundLiteral::new(data, data_type))
+        Ok(Literal::new(data, data_type))
     }
 }
 
@@ -80,7 +80,7 @@ mod tests {
         for i in 0..values.len() {
             let value = Value::Number(String::from(values[i]), false);
             let res = binder.bind_value(value).unwrap();
-            let ans = BoundLiteral::new(data[i].clone(), data_type[i]);
+            let ans = Literal::new(data[i].clone(), data_type[i]);
             assert_eq!(res, ans);
         }
     }

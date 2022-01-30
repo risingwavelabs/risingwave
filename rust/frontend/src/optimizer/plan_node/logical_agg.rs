@@ -6,7 +6,7 @@ use risingwave_common::expr::AggKind;
 use risingwave_common::types::DataTypeKind;
 
 use super::{ColPrunable, IntoPlanRef, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
-use crate::expr::BoundExprImpl;
+use crate::expr::ExprImpl;
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 #[derive(Clone, Debug)]
 pub struct PlanAggCall {
@@ -76,9 +76,9 @@ impl LogicalAgg {
     /// LogicalProject-LogicalAgg-LogicalProject-input
     #[allow(unused_variables)]
     pub fn create(
-        select_exprs: Vec<BoundExprImpl>,
+        select_exprs: Vec<ExprImpl>,
         select_alias: Vec<Option<String>>,
-        group_exprs: Vec<BoundExprImpl>,
+        group_exprs: Vec<ExprImpl>,
         input: PlanRef,
     ) -> PlanRef {
         todo!()

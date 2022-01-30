@@ -7,7 +7,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::expr::{build_from_prost, BoxedExpression};
 use risingwave_common::vector_op::agg::{
-    self, AggStateFactory, BoxedAggState, BoxedSortedGrouper, EqGroups,
+    create_sorted_grouper, AggStateFactory, BoxedAggState, BoxedSortedGrouper, EqGroups,
 };
 use risingwave_pb::plan::plan_node::NodeBody;
 
@@ -59,7 +59,7 @@ impl BoxedExecutorBuilder for SortAggExecutor {
 
         let sorted_groupers = group_exprs
             .iter()
-            .map(|e| agg::create_sorted_grouper(e.return_type()))
+            .map(|e| create_sorted_grouper(e.return_type()))
             .collect::<Result<Vec<BoxedSortedGrouper>>>()?;
 
         let fields = group_exprs
@@ -308,7 +308,7 @@ mod tests {
             .collect::<Result<Vec<BoxedExpression>>>()?;
         let sorted_groupers = group_exprs
             .iter()
-            .map(|e| agg::create_sorted_grouper(e.return_type()))
+            .map(|e| create_sorted_grouper(e.return_type()))
             .collect::<Result<Vec<BoxedSortedGrouper>>>()?;
 
         let agg_states = vec![s];
