@@ -3,10 +3,10 @@ ss_bench is used to benchmark the performance of the state store. In this doc, w
 # Usage Example
 
 ```shell
-~/code/risingwave/rust: cargo run --bin ss-bench --\
- --benchmarks "writebatch,prefixscanrandom,getrandom"\
- --batch-size 1000
- --reads 10000\
+~/code/risingwave/rust: cargo run --bin ss-bench -- \
+ --benchmarks "writebatch,getseq,getrandom,prefixscanrandom" \
+ --batch-size 1000 \
+ --reads 500 \
  --concurrency-num 4
 ```
 
@@ -14,7 +14,7 @@ ss_bench is used to benchmark the performance of the state store. In this doc, w
 
 ## State Store
 
-### Backend Type  (`--store`)
+### Backend Types  (`--store`)
 
 - `In-memory`
   
@@ -70,14 +70,14 @@ ss_bench is used to benchmark the performance of the state store. In this doc, w
     - `crc32c`: default
     - `xxhash`
 
-## Benchmarks
+## Operations
 
 ### Concurrency Number (`--concurrency-num`)
 
-- The concurrency number of each benchmark. Workloads of each concurrency are almost the same.
+- The concurrency number of each operation. Workloads of each concurrency are almost the same.
 - Default: 1
 
-### Benchmark Type (`--benchmarks`)
+### Operation Types (`--benchmarks`)
 
 Comma-separated list of operations to run in the specified order. Following operations are supported:
 
@@ -88,17 +88,12 @@ Comma-separated list of operations to run in the specified order. Following oper
 
 Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
 
-### Operation Number
+### Operation Numbers
 
 - `--num`
 
   - Number of key/values to place in database
   - Default: 1000000
-
-- `--writes`
-
-  - Number of **written batches**. If negative, do `--num` reads.
-  - Default: -1
 
 - `--deletes`
 
@@ -110,7 +105,17 @@ Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
   - Number of read keys. If negative, do `--num` reads.
   - Default: -1
 
+- `--write_batches`
+
+  - Number of **written batches**..
+  - Default: 100
+
 ## Single Batch
+
+- `--batch-size`
+  
+  - Number of key/values in a batch
+  - Default: 100
 
 - `--key-size`
   
@@ -131,11 +136,6 @@ Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
   
   - Size (bytes) of each value
   - Default: 100
-
-- `--batch-size`
-  
-  - Number of key/values in a batch
-  - Default: 1
 
 # Metrics
 
