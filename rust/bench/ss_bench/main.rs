@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
-mod benchmarks;
+mod operations;
 mod utils;
 
-use benchmarks::*;
+use operations::*;
 use clap::Parser;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
@@ -50,6 +50,8 @@ pub(crate) struct Opts {
     #[clap(long)]
     benchmarks: String,
 
+    operations: Vec<String>,
+
     #[clap(long, default_value_t = 1)]
     concurrency_num: u32,
 
@@ -58,15 +60,18 @@ pub(crate) struct Opts {
     num: i64,
 
     #[clap(long, default_value_t = -1)]
-    writes: i64,
-
-    #[clap(long, default_value_t = -1)]
     deletes: i64,
 
     #[clap(long, default_value_t = -1)]
     reads: i64,
 
+    #[clap(long, default_value_t = 100)]
+    write_batches: u64,
+
     // ----- single batch -----
+    #[clap(long, default_value_t = 100)]
+    batch_size: u32,
+
     #[clap(long, default_value_t = 16)]
     key_size: u32,
 
@@ -78,9 +83,6 @@ pub(crate) struct Opts {
 
     #[clap(long, default_value_t = 100)]
     value_size: u32,
-
-    #[clap(long, default_value_t = 1)]
-    batch_size: u32,
 }
 
 fn get_checksum_algo(algo: &str) -> ChecksumAlg {
@@ -166,9 +168,9 @@ async fn get_state_store_impl(opts: &Opts) -> Result<StateStoreImpl> {
     Ok(instance)
 }
 
-async fn run_benchmarks(store: impl StateStore, opts: &Opts) {
-    for benchmark in opts.benchmarks.split(',') {
-        match benchmark {
+async fn run_operations(store: impl StateStore, opts: &Opts) {
+    for operation in &opts.operations {
+        match operation.as_ref() {
             "writebatch" => write_batch::run(&store, opts).await,
             "getrandom" => get_random::run(&store, opts).await,
             "getseq" => get_seq::run(&store, opts).await,
@@ -179,14 +181,25 @@ async fn run_benchmarks(store: impl StateStore, opts: &Opts) {
 }
 
 fn preprocess_options(opts: &mut Opts) {
+    opts.operations = opts.benchmarks.split(',').map(|s| s.to_string()).collect();
+
     if opts.reads < 0 {
         opts.reads = opts.num;
     }
-    if opts.writes < 0 {
-        opts.writes = opts.num;
-    }
     if opts.deletes < 0 {
         opts.deletes = opts.num;
+    }
+
+    // check illegal configurations
+    for operation in &opts.operations {
+        match operation.as_ref() {   
+            "getseq" => { 
+                if opts.batch_size < opts.reads as u32 {
+                    panic!("In sequential mode, `batch_size` should be greater than or equal to `reads`");
+                }
+            },
+            _ => (),
+        }
     }
 }
 
@@ -209,9 +222,9 @@ async fn main() {
     };
 
     match state_store {
-        StateStoreImpl::Hummock(store) => run_benchmarks(store, &opts).await,
-        StateStoreImpl::Memory(store) => run_benchmarks(store, &opts).await,
-        StateStoreImpl::RocksDB(store) => run_benchmarks(store, &opts).await,
-        StateStoreImpl::Tikv(store) => run_benchmarks(store, &opts).await,
+        StateStoreImpl::Hummock(store) => run_operations(store, &opts).await,
+        StateStoreImpl::Memory(store) => run_operations(store, &opts).await,
+        StateStoreImpl::RocksDB(store) => run_operations(store, &opts).await,
+        StateStoreImpl::Tikv(store) => run_operations(store, &opts).await,
     };
 }

@@ -26,6 +26,7 @@ pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
         .into_iter()
         .map(|_| workload.prefixes[dist.sample(&mut rng)].clone())
         .collect_vec();
+    let scan_prefixes_len = scan_prefixes.len();
 
     // partitioned these prefixes for each concurrency
     let mut grouped_prefixes = vec![vec![]; opts.concurrency_num as usize];
@@ -60,7 +61,7 @@ pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
         }
     }
     let stat = LatencyStat::new(latencies);
-    let qps = scan_prefixes.len() as u128 * 1_000_000_000 / total_time_nano as u128;
+    let qps = scan_prefixes_len as u128 * 1_000_000_000 / total_time_nano as u128;
 
     println!(
         "
