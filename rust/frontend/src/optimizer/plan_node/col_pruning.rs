@@ -2,7 +2,7 @@ use bit_set::BitSet;
 use paste::paste;
 
 use super::*;
-use crate::expr::{BoundExpr, BoundExprImpl, BoundInputRef};
+use crate::expr::{Expr, ExprImpl, InputRef};
 use crate::optimizer::property::WithSchema;
 use crate::{for_batch_plan_nodes, for_stream_plan_nodes};
 
@@ -11,9 +11,9 @@ pub trait ColPrunable: WithSchema + IntoPlanRef {
     /// transform the plan node to only output the required columns ordered by index number.
     fn prune_col(&self, required_cols: BitSet) -> PlanRef {
         let schema = self.schema();
-        let exprs: Vec<BoundExprImpl> = required_cols
+        let exprs: Vec<ExprImpl> = required_cols
             .iter()
-            .map(|i| BoundInputRef::new(i, schema.fields()[i].data_type()).bound_expr())
+            .map(|i| InputRef::new(i, schema.fields()[i].data_type()).bound_expr())
             .collect();
         let alias = vec![None; required_cols.len()];
         LogicalProject::create(self.clone_as_plan_ref(), exprs, alias)

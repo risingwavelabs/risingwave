@@ -3,11 +3,11 @@ use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::Values;
 
 use crate::binder::Binder;
-use crate::expr::{BoundExpr as _, BoundExprImpl};
+use crate::expr::{Expr as _, ExprImpl};
 
 #[derive(Debug)]
 pub struct BoundValues {
-    pub rows: Vec<Vec<BoundExprImpl>>,
+    pub rows: Vec<Vec<ExprImpl>>,
     pub schema: Schema,
 }
 
