@@ -18,7 +18,7 @@ pub(super) struct FilterExecutor {
     chunk_builder: DataChunkBuilder,
     last_input: Option<SlicedDataChunk>,
     identity: String,
-    /// FIXME: This is a quick fix as later we would use generator to limit chunk size.
+    // FIXME: This is a quick fix as later we would use generator to limit chunk size.
     child_can_be_nexted: bool,
 }
 
