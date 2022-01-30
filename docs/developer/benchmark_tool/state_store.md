@@ -46,15 +46,15 @@ ss_bench is used to benchmark the performance of the state store. In this doc, w
 
 ### Hummock Configurations
 
-- `--block-size-kb`
-  
-  - Size (KB) of a block in an SSTable
-  - Default value: 64
-
 - `--table-size-mb`
   
   - Size (MB) of an SSTable
   - Default value: 256
+
+- `--block-size-kb`
+  
+  - Size (KB) of a block in an SSTable
+  - Default value: 64
 
 - `--bloom-false-positive`
   
@@ -74,16 +74,16 @@ ss_bench is used to benchmark the performance of the state store. In this doc, w
 
 ### Concurrency Number (`--concurrency-num`)
 
-- The concurrency number of each benchmark
+- The concurrency number of each benchmark. Workloads of each concurrency are almost the same.
 - Default value: 1
 
 ### Benchmark Type (`--benchmarks`)
 
-Comma-separated list of operations to run in the specified order. Following benchmarks are supported:
+Comma-separated list of operations to run in the specified order. Following operations are supported:
 
 - `writebatch`: write N key/values in sequential key order in async mode
 - `getrandom`: read N times in random order
-- `getseq`: read N times in sequential order
+- `getseq`: read N times sequentially
 - `prefixscanrandom`: prefix scan N times in random order
 
 Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
@@ -97,7 +97,7 @@ Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
 
 - `--writes`
 
-  - Number of written batches. If negative, do `--num` reads.
+  - Number of **written batches**. If negative, do `--num` reads.
   - Default: -1
 
 - `--deletes`
@@ -114,12 +114,12 @@ Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
 
 - `--key-size`
   
-  - The size (bytes) of the non-prefix part of a key
+  - Size (bytes) of each user_key (non-prefix part of a key)
   - Default: 16
 
 - `--key-prefix-size`
   
-  - The size (bytes) of a prefix
+  - Size (bytes) of each prefix
   - Default: 5
 
 - `--keys_per_prefix`
@@ -129,12 +129,12 @@ Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
 
 - `--value-size`
   
-  - The length (bytes) of a value in a key/value
+  - Size (bytes) of each value
   - Default: 100
 
 - `--batch-size`
   
-  - The number of key/values in a batch
+  - Number of key/values in a batch
   - Default: 1
 
 # Metrics

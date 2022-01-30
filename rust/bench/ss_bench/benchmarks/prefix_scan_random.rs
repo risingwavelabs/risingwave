@@ -21,10 +21,10 @@ pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
 
     // generate queried prefixes
     let mut rng = StdRng::seed_from_u64(233);
-    let range = Uniform::from(0..workload.prefixes.len());
+    let dist = Uniform::from(0..workload.prefixes.len());
     let mut scan_prefixes = (0..opts.reads)
         .into_iter()
-        .map(|_| workload.prefixes[range.sample(&mut rng)].clone())
+        .map(|_| workload.prefixes[dist.sample(&mut rng)].clone())
         .collect_vec();
 
     // partitioned these prefixes for each concurrency

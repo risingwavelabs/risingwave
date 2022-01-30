@@ -21,10 +21,10 @@ pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
 
     // generate queried point get key
     let mut rng = StdRng::seed_from_u64(233);
-    let range = Uniform::from(0..opts.batch_size as usize);
+    let dist = Uniform::from(0..opts.batch_size as usize);
     let mut get_keys = (0..opts.reads)
         .into_iter()
-        .map(|_| batch[range.sample(&mut rng)].0.clone())
+        .map(|_| batch[dist.sample(&mut rng)].0.clone())
         .collect_vec();
 
     // partitioned these keys for each concurrency

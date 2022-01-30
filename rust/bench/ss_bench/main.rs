@@ -34,11 +34,11 @@ pub(crate) struct Opts {
     store: String,
 
     // ----- Hummock -----
-    #[clap(long, default_value_t = 64)]
-    block_size_kb: u32,
-
     #[clap(long, default_value_t = 256)]
     table_size_mb: u32,
+
+    #[clap(long, default_value_t = 64)]
+    block_size_kb: u32,
 
     #[clap(long, default_value_t = 0.1)]
     bloom_false_positive: f64,
