@@ -168,7 +168,7 @@ async fn get_state_store_impl(opts: &Opts) -> Result<StateStoreImpl> {
 
 async fn run_operations(store: impl StateStore, opts: &Opts) {
     for operation in opts.benchmarks.split(',') {
-        match operation.as_ref() {
+        match operation {
             "writebatch" => write_batch::run(&store, opts).await,
             "getrandom" => get_random::run(&store, opts).await,
             "getseq" => get_seq::run(&store, opts).await,
