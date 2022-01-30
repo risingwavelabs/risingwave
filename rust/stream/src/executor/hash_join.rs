@@ -186,6 +186,20 @@ impl<S: StateStore> std::fmt::Debug for JoinSide<S> {
     }
 }
 
+impl<S: StateStore> JoinSide<S> {
+    fn is_dirty(&self) -> bool {
+        self.ht.values().any(|state| state.is_dirty())
+    }
+
+    fn clear_cache(&mut self) {
+        assert!(
+            !self.is_dirty(),
+            "cannot clear cache while join side is dirty"
+        );
+        self.ht.clear();
+    }
+}
+
 /// `HashJoinExecutor` takes two input streams and runs equal hash join on them.
 /// The output columns are the concatenation of left and right columns.
 pub struct HashJoinExecutor<S: StateStore, const T: JoinTypePrimitive> {
@@ -256,6 +270,13 @@ impl<S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<S,
 
     fn identity(&self) -> &str {
         self.identity.as_str()
+    }
+
+    fn clear_cache(&mut self) -> Result<()> {
+        self.side_l.clear_cache();
+        self.side_r.clear_cache();
+
+        Ok(())
     }
 }
 
