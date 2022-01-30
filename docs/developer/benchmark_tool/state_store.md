@@ -6,7 +6,7 @@ ss_bench is used to benchmark the performance of the state store. In this doc, w
 ~/code/risingwave/rust: cargo run --bin ss-bench --\
  --benchmarks "writebatch,prefixscanrandom,getrandom"\
  --kvs-per-batch 1000\
- --iterations 100\
+ --reads 10000\
  --concurrency-num 4
 ```
 
@@ -14,7 +14,7 @@ ss_bench is used to benchmark the performance of the state store. In this doc, w
 
 ## State Store
 
-### Type  (`--store`)
+### Backend Type  (`--store`)
 
 - `In-memory`
   
@@ -46,15 +46,15 @@ ss_bench is used to benchmark the performance of the state store. In this doc, w
 
 ### Hummock Configurations
 
-- `--table-size-mb`
-  
-  - Size (MB) of an SSTable
-  - Default value: 256
-
 - `--block-size-kb`
   
   - Size (KB) of a block in an SSTable
   - Default value: 64
+
+- `--table-size-mb`
+  
+  - Size (MB) of an SSTable
+  - Default value: 256
 
 - `--bloom-false-positive`
   
@@ -72,11 +72,6 @@ ss_bench is used to benchmark the performance of the state store. In this doc, w
 
 ## Benchmarks
 
-### Number (`--iterations`)
-
-- The times that each benchmark has been executed
-- Default value: 10
-
 ### Concurrency Number (`--concurrency-num`)
 
 - The concurrency number of each benchmark
@@ -86,10 +81,10 @@ ss_bench is used to benchmark the performance of the state store. In this doc, w
 
 Comma-separated list of operations to run in the specified order. Following benchmarks are supported:
 
-- `writebatch`: write `iterations` key/values in sequential key order in async mode
-- `getrandom`: read `iterations` times in random order
-- `getseq`: read `iterations` times in sequential order
-- `prefixscanrandom`: prefix scan `iterations` times in random order
+- `writebatch`: write N key/values in sequential key order in async mode
+- `getrandom`: read N times in random order
+- `getseq`: read N times in sequential order
+- `prefixscanrandom`: prefix scan N times in random order
 
 Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
 
@@ -99,47 +94,47 @@ Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
   - Number of key/values to place in database
   - Default: 1000000
 
-- `--deletes`
-
-  - Number of delete operations to do. If negative, do `--num` deletions.
-  - Default: -1
-
 - `--writes`
   
-  - Number of write operations to do. If negative, do `--num` reads.
+  - Number of written batches. If negative, do `--num` reads.
+  - Default: -1
+
+- `--deletes`
+
+  - Number of deleted keys. If negative, do `--num` deletions.
   - Default: -1
 
 - `--reads`
 
-  - Number of read operations to do. If negative, do `--num` reads.
+  - Number of read keys. If negative, do `--num` reads.
   - Default: -1
 
-## Batch Configurations
+## Single Batch
 
 - `--key-size`
   
   - The size (bytes) of the non-prefix part of a key
-  - Default: 10
+  - Default: 16
 
 - `--key-prefix-size`
   
   - The size (bytes) of a prefix
   - Default: 5
 
-- `--key-prefix-frequency`
+- `--keys_per_prefix`
   
-  - The number of keys with some a prefix in a batch
+  - Control **average** number of keys generated per prefix
   - Default: 10
 
 - `--value-size`
   
   - The length (bytes) of a value in a key/value
-  - Default: 10
+  - Default: 100
 
 - `--batch-size`
   
   - The number of key/values in a batch
-  - Default: 1000
+  - Default: 1
 
 # Metrics
 
