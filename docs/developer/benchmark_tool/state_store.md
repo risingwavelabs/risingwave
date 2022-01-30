@@ -113,7 +113,7 @@ Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
 ## Single Batch
 
 - `--batch-size`
-  
+
   - Number of key/values in a batch
   - Default: 100
 
