@@ -171,30 +171,37 @@ async fn test_meta_store_transaction(meta_store: &dyn MetaStore) -> Result<()> {
     Ok(())
 }
 
-async fn test_meta_store_overlapped_key(meta_store: &dyn MetaStore) -> Result<()> {
+async fn test_meta_store_keys_share_prefix(meta_store: &dyn MetaStore) -> Result<()> {
     let cf = "test_overlapped_key_cf";
     let batch = vec![
         (
             cf,
             "key1".as_bytes().to_owned(),
             "value1".as_bytes().to_owned(),
-            SINGLE_VERSION_EPOCH,
+            Epoch::from(1),
         ),
         (
             cf,
             "key11".as_bytes().to_owned(),
             "value11".as_bytes().to_owned(),
-            SINGLE_VERSION_EPOCH,
+            Epoch::from(1),
+        ),
+        (
+            cf,
+            "key11".as_bytes().to_owned(),
+            "value11".as_bytes().to_owned(),
+            Epoch::from(2),
         ),
         (
             cf,
             "key111".as_bytes().to_owned(),
             "value111".as_bytes().to_owned(),
-            SINGLE_VERSION_EPOCH,
+            Epoch::from(1),
         ),
     ];
     meta_store.put_batch_cf(batch.clone()).await.unwrap();
     assert_eq!(3, meta_store.list_cf(cf).await.unwrap().len());
+    // keys share the same prefix are not affected
     meta_store.delete_all_cf(cf, &batch[1].1).await.unwrap();
     assert_eq!(2, meta_store.list_cf(cf).await.unwrap().len());
     for (cf, key, _, _) in &batch {
@@ -244,7 +251,7 @@ async fn test_meta_store_overlapped_cf(meta_store: &dyn MetaStore) -> Result<()>
 async fn test_mem_store() -> Result<()> {
     let store = MemStore::new();
     test_meta_store_basic(&store).await.unwrap();
-    test_meta_store_overlapped_key(&store).await.unwrap();
+    test_meta_store_keys_share_prefix(&store).await.unwrap();
     test_meta_store_overlapped_cf(&store).await.unwrap();
     Ok(())
 }
@@ -254,7 +261,7 @@ async fn test_sled_store() -> Result<()> {
     let store = SledMetaStore::new(None).unwrap();
     test_meta_store_basic(&store).await.unwrap();
     test_meta_store_transaction(&store).await.unwrap();
-    test_meta_store_overlapped_key(&store).await.unwrap();
+    test_meta_store_keys_share_prefix(&store).await.unwrap();
     test_meta_store_overlapped_cf(&store).await.unwrap();
     Ok(())
 }

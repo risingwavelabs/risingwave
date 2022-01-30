@@ -125,13 +125,13 @@ impl SledMetaStore {
     /// refer to `Operation::Put`
     async fn put_impl(&self, kvs: &[(Key, KeyValueVersion, Value)]) -> Result<()> {
         let mut trx = self.get_transaction();
-        for (key, version, value) in kvs.iter() {
-            trx.add_operations(vec![Operation::Put(
-                key.to_vec(),
-                value.to_vec(),
-                Some(*version),
-            )]);
-        }
+        trx.add_operations(
+            kvs.iter()
+                .map(|(key, version, value)| {
+                    Operation::Put(key.to_owned(), value.to_owned(), Some(*version))
+                })
+                .collect_vec(),
+        );
         self.commit_transaction(&mut trx).await
     }
 
