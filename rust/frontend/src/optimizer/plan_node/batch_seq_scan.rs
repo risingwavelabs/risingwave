@@ -4,13 +4,23 @@ use risingwave_common::catalog::Schema;
 
 use super::{IntoPlanRef, PlanRef, ToDistributedBatch};
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
+use crate::optimizer::plan_node::LogicalScan;
+
 #[derive(Debug, Clone)]
 pub struct BatchSeqScan {
-    // TODO(catalog)
+    logical: LogicalScan
 }
 impl WithSchema for BatchSeqScan {
     fn schema(&self) -> &Schema {
-        todo!()
+        self.logical.schema()
+    }
+}
+
+impl BatchSeqScan {
+    pub fn new(logical: LogicalScan) -> Self {
+        Self {
+            logical
+        }
     }
 }
 
@@ -24,6 +34,6 @@ impl WithOrder for BatchSeqScan {}
 impl WithDistribution for BatchSeqScan {}
 impl ToDistributedBatch for BatchSeqScan {
     fn to_distributed(&self) -> PlanRef {
-        todo!()
+        self.clone().into_plan_ref()
     }
 }

@@ -4,7 +4,7 @@ use risingwave_common::error::ErrorCode;
 use thiserror::Error;
 
 pub(crate) mod catalog_service;
-mod column_catalog;
+pub(crate) mod column_catalog;
 mod database_catalog;
 mod schema_catalog;
 mod table_catalog;
