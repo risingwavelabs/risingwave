@@ -3684,6 +3684,7 @@ name = "risingwave_batch"
 version = "0.1.2"
 dependencies = [
  "anyhow",
+ "assert_matches",
  "async-stream",
  "async-trait",
  "byteorder",
