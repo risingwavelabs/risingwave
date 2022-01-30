@@ -1,4 +1,4 @@
-ss_bench is used to benchmark the performance of the state store. In this doc, we first show a usage example and then describe each provided parameter.
+`ss_bench` is used to benchmark the performance of the state store. In this doc, we first show a usage example and then describe each provided parameter.
 
 # Usage Example
 
@@ -74,17 +74,17 @@ ss_bench is used to benchmark the performance of the state store. In this doc, w
 
 ### Concurrency Number (`--concurrency-num`)
 
-- The concurrency number of each operation. Workloads of each concurrency are almost the same.
+- Concurrency number of each operation. Workloads of each concurrency are almost the same.
 - Default: 1
 
 ### Operation Types (`--benchmarks`)
 
 Comma-separated list of operations to run in the specified order. Following operations are supported:
 
-- `writebatch`: write N key/values in sequential key order in async mode
-- `getrandom`: read N times in random order
-- `getseq`: read N times sequentially
-- `prefixscanrandom`: prefix scan N times in random order
+- `writebatch`: write N key/values in sequential key order in async mode.
+- `getrandom`: read N times in random order.
+- `getseq`: read N times sequentially.
+- `prefixscanrandom`: prefix scan N times in random order.
 
 Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
 
@@ -92,7 +92,7 @@ Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
 
 - `--num`
 
-  - Number of key/values to place in database
+  - Number of key/values to place in database.
   - Default: 1000000
 
 - `--deletes`
@@ -107,34 +107,34 @@ Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
 
 - `--write_batches`
 
-  - Number of **written batches**..
+  - Number of **written batches**.
   - Default: 100
 
 ## Single Batch
 
 - `--batch-size`
 
-  - Number of key/values in a batch
+  - Number of key/values in a batch.
   - Default: 100
 
 - `--key-size`
   
-  - Size (bytes) of each user_key (non-prefix part of a key)
+  - Size (bytes) of each user_key (non-prefix part of a key).
   - Default: 16
 
 - `--key-prefix-size`
   
-  - Size (bytes) of each prefix
+  - Size (bytes) of each prefix.
   - Default: 5
 
 - `--keys_per_prefix`
   
-  - Control **average** number of keys generated per prefix
+  - Control **average** number of keys generated per prefix.
   - Default: 10
 
 - `--value-size`
   
-  - Size (bytes) of each value
+  - Size (bytes) of each value.
   - Default: 100
 
 # Metrics
