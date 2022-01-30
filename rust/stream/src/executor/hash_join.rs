@@ -162,6 +162,7 @@ impl JoinParams {
 
 struct JoinSide<S: StateStore> {
     /// Store all data from a one side stream
+    // TODO: use `EvictableHashMap`.
     ht: HashMap<HashKeyType, HashValueType<S>>,
     /// Indices of the join key columns
     key_indices: Vec<usize>,
@@ -192,13 +193,10 @@ impl<S: StateStore> JoinSide<S> {
         self.ht.values().any(|state| state.is_dirty())
     }
 
-    #[allow(dead_code)]
     fn clear_cache(&mut self) {
-        assert!(
-            !self.is_dirty(),
-            "cannot clear cache while join side is dirty"
-        );
-        self.ht.clear();
+        // TODO: should clear the hashmap entirely after cache eviction of hash join is fixed,
+        // instead of clear cache for all states.
+        self.ht.values_mut().for_each(|s| s.clear_cache());
     }
 }
 
@@ -275,9 +273,8 @@ impl<S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<S,
     }
 
     fn clear_cache(&mut self) -> Result<()> {
-        // FIXME: clearing cache on `JoinSide` makes the result incorrect.
-        // self.side_l.clear_cache();
-        // self.side_r.clear_cache();
+        self.side_l.clear_cache();
+        self.side_r.clear_cache();
 
         Ok(())
     }
@@ -609,13 +606,14 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
                                     ))
                                 }
                             };
-                            entry_value.insert(JoinRow::new(value, matched_rows.len() as u64));
+                            entry_value
+                                .insert(JoinRow::new(value, matched_rows.len().await as u64));
                         }
                         Op::Delete | Op::UpdateDelete => {
                             if let Some(v) = side_update.ht.get_mut(&key) {
                                 let pk = Self::pk_from_row_ref(&row, &side_update.pk_indices);
                                 v.remove(pk);
-                                if outer_side_null(T, SIDE) && v.is_empty() {
+                                if outer_side_null(T, SIDE) && v.is_empty().await {
                                     for matched_row in matched_rows.values().await {
                                         stream_chunk_builder.append_row(
                                             Op::UpdateDelete,
@@ -641,6 +639,9 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
                 }
             } else {
                 // if there are no matched rows, just update the hash table
+                //
+                // FIXME: matched rows can still be there but just evicted from the memory cache, we
+                // should handle this!
                 match *op {
                     Op::Insert | Op::UpdateInsert => {
                         side_update

@@ -27,7 +27,7 @@ pub struct AllOrNoneState<S: StateStore> {
     flush_buffer: BTreeMap<PkType, FlushStatus<StateValueType>>,
 
     /// Number of items in the state including the cache and state store.
-    total_count: usize,
+    total_count: isize,
 
     /// Data types of the sort column
     data_types: Vec<DataTypeKind>,
@@ -60,12 +60,15 @@ impl<S: StateStore> AllOrNoneState<S> {
         }
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.total_count > 0
+    pub async fn is_empty(&mut self) -> bool {
+        self.len().await == 0
     }
 
-    pub fn len(&self) -> usize {
-        self.total_count
+    pub async fn len(&mut self) -> usize {
+        if self.cached.is_none() {
+            self.fetch_cache().await.unwrap();
+        }
+        self.total_count as usize
     }
 
     /// The state is dirty means there are unflush
@@ -82,9 +85,11 @@ impl<S: StateStore> AllOrNoneState<S> {
             .map(|idx| value[*idx].clone())
             .collect_vec();
         let pk = Row(pk);
+
         if let Some(cached) = self.cached.as_mut() {
             cached.insert(pk.clone(), value.clone());
         }
+        // If no cache maintained, only update the flush buffer.
         self.total_count += 1;
         FlushStatus::do_insert(self.flush_buffer.entry(pk), value);
     }
@@ -123,6 +128,8 @@ impl<S: StateStore> AllOrNoneState<S> {
         assert!(self.cached.is_none());
 
         let all_data = self.keyspace.scan_strip_prefix(None).await?;
+
+        // Fetch cached states.
         let mut cached = BTreeMap::new();
         for (raw_key, raw_value) in all_data {
             let pk_deserializer = RowDeserializer::new(self.pk_data_types.clone());
@@ -132,9 +139,29 @@ impl<S: StateStore> AllOrNoneState<S> {
             cached.insert(key, value);
         }
 
-        self.total_count = cached.len();
+        // Apply current flush buffer to cached states.
+        for (pk, row) in &self.flush_buffer {
+            match row.as_option() {
+                Some(row) => {
+                    cached.insert(pk.clone(), row.clone());
+                }
+                None => {
+                    cached.remove(pk);
+                }
+            }
+        }
+
+        self.total_count = cached.len() as isize;
         self.cached = Some(cached);
         Ok(())
+    }
+
+    pub fn clear_cache(&mut self) {
+        assert!(
+            !self.is_dirty(),
+            "cannot clear cache while all or none state is dirty"
+        );
+        self.cached = None;
     }
 
     #[allow(dead_code)]
