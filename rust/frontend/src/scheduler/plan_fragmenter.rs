@@ -1,13 +1,13 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use risingwave_common::error::Result;
 use uuid::Uuid;
 
 use crate::optimizer::plan_node::{BatchExchange, PlanNodeType, PlanTreeNode, PlanTreeNodeUnary};
-use crate::optimizer::PlanRef;
 use crate::optimizer::property::Distribution;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use crate::optimizer::PlanRef;
 
 type StageId = u64;
 
@@ -26,7 +26,7 @@ struct QueryStage {
     pub id: StageId,
     root: PlanRef,
     // Fill exchange source to augment phase.
-    exchange_source: HashMap<StageId, QueryStage>
+    exchange_source: HashMap<StageId, QueryStage>,
 }
 
 type QueryStageRef = Arc<QueryStage>;
@@ -58,16 +58,14 @@ impl StageGraphBuilder {
             if self.parent_edges.get(stage_id).is_none() {
                 self.parent_edges.insert(*stage_id, HashSet::new());
             }
-
-        };
-
+        }
 
         StageGraph {
             id: 0,
             stages: self.stages,
             child_edges: self.child_edges,
             parent_edges: self.parent_edges,
-            exchangeId2Stage: self.exchangeId2Stage
+            exchangeId2Stage: self.exchangeId2Stage,
         }
     }
 
@@ -124,7 +122,11 @@ impl BatchPlanFragmenter {
     fn new_query_stage(&mut self, node: PlanRef, dist: Distribution) -> QueryStageRef {
         let next_stage_id = self.next_stage_id;
         self.next_stage_id += 1;
-        let stage = Arc::new(QueryStage {id: next_stage_id, root: node.clone(), exchange_source: HashMap::new()});
+        let stage = Arc::new(QueryStage {
+            id: next_stage_id,
+            root: node.clone(),
+            exchange_source: HashMap::new(),
+        });
         self.stage_graph_builder.add_node(stage.clone());
         stage
     }
@@ -157,27 +159,41 @@ impl BatchPlanFragmenter {
 
 #[cfg(test)]
 mod tests {
-    use crate::scheduler::plan_fragmenter::BatchPlanFragmenter;
-    use crate::optimizer::plan_node::{BatchSeqScan, BatchExchange, BatchHashJoin, LogicalJoin, JoinPredicate};
-    use crate::optimizer::plan_node::IntoPlanRef;
-    use crate::optimizer::property::{Order, Distribution};
-    use risingwave_pb::plan::JoinType;
     use risingwave_common::catalog::Schema;
+    use risingwave_pb::plan::JoinType;
+
+    use crate::optimizer::plan_node::{
+        BatchExchange, BatchHashJoin, BatchSeqScan, IntoPlanRef, JoinPredicate, LogicalJoin,
+    };
+    use crate::optimizer::property::{Distribution, Order};
+    use crate::scheduler::plan_fragmenter::BatchPlanFragmenter;
 
     #[test]
     fn test_fragmenter() {
         // Construct a Hash Join with Exchange node.
-        let batch_plan_node = BatchSeqScan {schema: Schema::default()}.into_plan_ref();
-        let batch_exchange_node1 = BatchExchange::new(batch_plan_node.clone(), Order::default(), Distribution::Any).into_plan_ref();
-        let batch_exchange_node2 = BatchExchange::new(batch_plan_node.clone(), Order::default(), Distribution::Any).into_plan_ref();
+        let batch_plan_node = BatchSeqScan {
+            schema: Schema::default(),
+        }
+        .into_plan_ref();
+        let batch_exchange_node1 =
+            BatchExchange::new(batch_plan_node.clone(), Order::default(), Distribution::Any)
+                .into_plan_ref();
+        let batch_exchange_node2 =
+            BatchExchange::new(batch_plan_node.clone(), Order::default(), Distribution::Any)
+                .into_plan_ref();
         let hash_join_node = BatchHashJoin::new(LogicalJoin::new(
             batch_exchange_node1.clone(),
             batch_exchange_node2.clone(),
             JoinType::Inner,
-            JoinPredicate::new_empty()
-        )).into_plan_ref();
-        let batch_exchange_node3 = BatchExchange::new(hash_join_node.clone(), Order::default(), Distribution::Single).into_plan_ref();
-
+            JoinPredicate::new_empty(),
+        ))
+        .into_plan_ref();
+        let batch_exchange_node3 = BatchExchange::new(
+            hash_join_node.clone(),
+            Order::default(),
+            Distribution::Single,
+        )
+        .into_plan_ref();
 
         // Break the plan node into fragments.
         let fragmenter = BatchPlanFragmenter::default();
@@ -191,6 +207,5 @@ mod tests {
         assert_eq!(query.stages.child_edges.get(&1).unwrap().len(), 2);
         assert_eq!(query.stages.child_edges.get(&2).unwrap().len(), 0);
         assert_eq!(query.stages.child_edges.get(&3).unwrap().len(), 0);
-
     }
 }

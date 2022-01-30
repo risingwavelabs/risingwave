@@ -21,7 +21,7 @@ impl JoinPredicate {
     pub fn new_empty() -> Self {
         JoinPredicate {
             other_conds: vec![],
-            keys: vec![]
+            keys: vec![],
         }
     }
 

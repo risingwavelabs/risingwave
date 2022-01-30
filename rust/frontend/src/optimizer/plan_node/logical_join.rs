@@ -26,7 +26,12 @@ impl fmt::Display for LogicalJoin {
     }
 }
 impl LogicalJoin {
-    pub(crate) fn new(left: PlanRef, right: PlanRef, join_type: JoinType, predicate: JoinPredicate) -> Self {
+    pub(crate) fn new(
+        left: PlanRef,
+        right: PlanRef,
+        join_type: JoinType,
+        predicate: JoinPredicate,
+    ) -> Self {
         let schema = Self::derive_schema(left.schema(), right.schema(), join_type);
 
         let left_cols_num = left.schema().fields.len();
@@ -60,8 +65,16 @@ impl LogicalJoin {
         let predicate = JoinPredicate::create(left_cols_num, on_clause);
         Self::new(left, right, join_type, predicate).into_plan_ref()
     }
-    fn derive_schema(_left: &Schema, _right: &Schema, _join_type: JoinType) -> Schema {
-        Schema::default()
+    fn derive_schema(left: &Schema, right: &Schema, join_type: JoinType) -> Schema {
+        let mut new_fields = Vec::<Fields>::with_capacity(left.fields.len() + right.fields.len());
+        match join_type {
+            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
+                new_fields.extend_from_slice(&left.fields);
+                new_fields.extend_from_slice(&right.fields);
+                Schema { fields: new_fields }
+            }
+            _ => unimplemented!(),
+        }
     }
     pub fn predicate(&self) -> &JoinPredicate {
         &self.predicate
