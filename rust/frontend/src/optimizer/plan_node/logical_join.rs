@@ -8,7 +8,7 @@ use super::{
     ColPrunable, IntoPlanRef, JoinPredicate, PlanRef, PlanTreeNodeBinary, StreamHashJoin, ToBatch,
     ToStream,
 };
-use crate::expr::{assert_input_ref, BoundExpr, BoundExprImpl};
+use crate::expr::{assert_input_ref, Expr, ExprImpl};
 use crate::optimizer::plan_node::{BatchHashJoin, BatchSortMergeJoin};
 use crate::optimizer::property::{Distribution, Order, WithDistribution, WithOrder, WithSchema};
 
@@ -54,7 +54,7 @@ impl LogicalJoin {
         left: PlanRef,
         right: PlanRef,
         join_type: JoinType,
-        on_clause: BoundExprImpl,
+        on_clause: ExprImpl,
     ) -> PlanRef {
         let left_cols_num = left.schema().fields.len();
         let predicate = JoinPredicate::create(left_cols_num, on_clause);

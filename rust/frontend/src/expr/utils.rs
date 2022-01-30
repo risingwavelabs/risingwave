@@ -1,11 +1,11 @@
 use bit_set::BitSet;
 
-use super::BoundExprImpl;
+use super::ExprImpl;
 use crate::expr::ExprType;
 
-fn to_conjunctions_inner(expr: BoundExprImpl, rets: &mut Vec<BoundExprImpl>) {
+fn to_conjunctions_inner(expr: ExprImpl, rets: &mut Vec<ExprImpl>) {
     match expr {
-        BoundExprImpl::FunctionCall(func_call) if func_call.get_expr_type() == ExprType::And => {
+        ExprImpl::FunctionCall(func_call) if func_call.get_expr_type() == ExprType::And => {
             let (_, exprs) = func_call.decompose();
             for expr in exprs.into_iter() {
                 to_conjunctions_inner(expr, rets);
@@ -17,7 +17,7 @@ fn to_conjunctions_inner(expr: BoundExprImpl, rets: &mut Vec<BoundExprImpl>) {
 
 /// give a bool expression, and transform it to Conjunctive form. e.g. given expression is
 /// (expr1 AND expr2 AND expr3) the function will return Vec[expr1, expr2, expr3].
-pub fn to_conjunctions(expr: BoundExprImpl) -> Vec<BoundExprImpl> {
+pub fn to_conjunctions(expr: ExprImpl) -> Vec<ExprImpl> {
     let mut rets = vec![];
     to_conjunctions_inner(expr, &mut rets);
     // TODO: extract common factors fromm the conjunctions with OR expression.
@@ -26,12 +26,12 @@ pub fn to_conjunctions(expr: BoundExprImpl) -> Vec<BoundExprImpl> {
 }
 
 /// give a expression, and get all columns in its input_ref expressions.
-pub fn get_col_refs(_expr: &BoundExprImpl) -> BitSet {
+pub fn get_col_refs(_expr: &ExprImpl) -> BitSet {
     todo!()
 }
 /// give a expression, and check all columns in its input_ref expressions less than the input
 /// column number.
-pub fn assert_input_ref(expr: &BoundExprImpl, input_col_num: usize) {
+pub fn assert_input_ref(expr: &ExprImpl, input_col_num: usize) {
     let cols = get_col_refs(expr);
     for col in cols.iter() {
         assert!(col < input_col_num);
