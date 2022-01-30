@@ -204,7 +204,9 @@ macro_rules! for_stream_plan_nodes {
 macro_rules! enum_plan_node_type {
   ([], $( { $convention:ident, $name:ident }),*) => {
     paste!{
+
       /// each enum value represent a PlanNode struct type, help us to dispatch and downcast
+      #[derive(PartialEq)]
       pub enum PlanNodeType{
         $(  [<$convention $name>] ),*
       }

@@ -26,7 +26,7 @@ impl fmt::Display for LogicalJoin {
     }
 }
 impl LogicalJoin {
-    fn new(left: PlanRef, right: PlanRef, join_type: JoinType, predicate: JoinPredicate) -> Self {
+    pub(crate) fn new(left: PlanRef, right: PlanRef, join_type: JoinType, predicate: JoinPredicate) -> Self {
         let schema = Self::derive_schema(left.schema(), right.schema(), join_type);
 
         let left_cols_num = left.schema().fields.len();
@@ -61,7 +61,7 @@ impl LogicalJoin {
         Self::new(left, right, join_type, predicate).into_plan_ref()
     }
     fn derive_schema(_left: &Schema, _right: &Schema, _join_type: JoinType) -> Schema {
-        todo!()
+        Schema::default()
     }
     pub fn predicate(&self) -> &JoinPredicate {
         &self.predicate

@@ -16,6 +16,15 @@ impl JoinPredicate {
     pub fn new(other_conds: Vec<ExprImpl>, keys: Vec<(usize, usize)>) -> Self {
         JoinPredicate { other_conds, keys }
     }
+
+    /// Construct a empty predicate. Condition always true -- do not filter rows.
+    pub fn new_empty() -> Self {
+        JoinPredicate {
+            other_conds: vec![],
+            keys: vec![]
+        }
+    }
+
     /// `create` will analyze the on clause condition and construct a `JoinPredicate`.
     /// e.g.
     /// ```sql
