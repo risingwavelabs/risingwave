@@ -3,8 +3,8 @@ use std::sync::Arc;
 mod operations;
 mod utils;
 
-use operations::*;
 use clap::Parser;
+use operations::*;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 use risingwave_storage::hummock::local_version_manager::LocalVersionManager;
@@ -192,13 +192,13 @@ fn preprocess_options(opts: &mut Opts) {
 
     // check illegal configurations
     for operation in &opts.operations {
-        match operation.as_ref() {   
-            "getseq" => { 
-                if opts.batch_size < opts.reads as u32 {
-                    panic!("In sequential mode, `batch_size` should be greater than or equal to `reads`");
-                }
-            },
-            _ => (),
+        if operation == "getseq" {
+            // TODO(sun ting): eliminate this limitation
+            if opts.batch_size < opts.reads as u32 {
+                panic!(
+                    "In sequential mode, `batch_size` should be greater than or equal to `reads`"
+                );
+            }
         }
     }
 }
