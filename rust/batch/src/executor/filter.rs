@@ -73,24 +73,23 @@ impl Executor for FilterExecutor {
 impl FilterExecutor {
     /// Fetch one chunk from child.
     async fn fetch_one_chunk(&mut self) -> Result<Option<DataChunk>> {
-        match self.child_can_be_nexted {
-            true => {
-                if let Some(data_chunk) = self.child.next().await? {
-                    let data_chunk = data_chunk.compact()?;
-                    let vis_array = self.expr.eval(&data_chunk)?;
-                    return if let Bool(vis) = vis_array.as_ref() {
-                        let vis = vis.try_into()?;
-                        let data_chunk = data_chunk.with_visibility(vis);
-                        Ok(Some(data_chunk))
-                    } else {
-                        Err(InternalError("Filter can only receive bool array".to_string()).into())
-                    };
+        if self.child_can_be_nexted {
+            if let Some(data_chunk) = self.child.next().await? {
+                let data_chunk = data_chunk.compact()?;
+                let vis_array = self.expr.eval(&data_chunk)?;
+                return if let Bool(vis) = vis_array.as_ref() {
+                    let vis = vis.try_into()?;
+                    let data_chunk = data_chunk.with_visibility(vis);
+                    Ok(Some(data_chunk))
                 } else {
-                    self.child_can_be_nexted = false;
-                    Ok(None)
-                }
+                    Err(InternalError("Filter can only receive bool array".to_string()).into())
+                };
+            } else {
+                self.child_can_be_nexted = false;
+                Ok(None)
             }
-            false => Ok(None),
+        } else {
+            Ok(None)
         }
     }
 }
