@@ -19,7 +19,7 @@ ss_bench is used to benchmark the performance of the state store. In this doc, w
 - `In-memory`
   
   - Format: `in-memory`(or `in_memory`)
-  - Default value
+  - Default
 
 - `Hummock+MinIO`
   
@@ -49,17 +49,17 @@ ss_bench is used to benchmark the performance of the state store. In this doc, w
 - `--table-size-mb`
   
   - Size (MB) of an SSTable
-  - Default value: 256
+  - Default: 256
 
 - `--block-size-kb`
   
   - Size (KB) of a block in an SSTable
-  - Default value: 64
+  - Default: 64
 
 - `--bloom-false-positive`
   
   - Bloom Filter false positive rate
-  - Default value: 0.1
+  - Default: 0.1
 
 - `--checksum-algo`
   
@@ -67,7 +67,7 @@ ss_bench is used to benchmark the performance of the state store. In this doc, w
   
   - Options:
     
-    - `crc32c`: default value
+    - `crc32c`: default
     - `xxhash`
 
 ## Benchmarks
@@ -75,7 +75,7 @@ ss_bench is used to benchmark the performance of the state store. In this doc, w
 ### Concurrency Number (`--concurrency-num`)
 
 - The concurrency number of each benchmark. Workloads of each concurrency are almost the same.
-- Default value: 1
+- Default: 1
 
 ### Benchmark Type (`--benchmarks`)
 
