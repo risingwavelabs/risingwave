@@ -5,7 +5,7 @@ ss_bench is used to benchmark the performance of the state store. In this doc, w
 ```shell
 ~/code/risingwave/rust: cargo run --bin ss-bench --\
  --benchmarks "writebatch,prefixscanrandom,getrandom"\
- --kvs-per-batch 1000\
+ --batch-size 1000
  --reads 10000\
  --concurrency-num 4
 ```
