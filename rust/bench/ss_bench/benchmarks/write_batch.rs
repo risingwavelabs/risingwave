@@ -52,7 +52,7 @@ pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
     }
     let stat = LatencyStat::new(latencies);
     // calculate operation per second
-    let ops = opts.kvs_per_batch as u128 * 1_000_000_000 * batch_num as u128 / total_time_nano;
+    let ops = opts.batch_size as u128 * 1_000_000_000 * batch_num as u128 / total_time_nano;
 
     println!(
         "

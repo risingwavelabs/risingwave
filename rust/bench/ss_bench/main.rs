@@ -70,7 +70,7 @@ pub(crate) struct Opts {
     value_size: u32,
 
     #[clap(long, default_value_t = 1000)]
-    kvs_per_batch: u32,
+    batch_size: u32,
 }
 
 fn get_checksum_algo(algo: &str) -> ChecksumAlg {

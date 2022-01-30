@@ -21,7 +21,7 @@ pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
 
     // generate queried point get key
     let mut rng = StdRng::seed_from_u64(233);
-    let range = Uniform::from(0..opts.kvs_per_batch as usize);
+    let range = Uniform::from(0..opts.batch_size as usize);
     let key_num = (opts.iterations - opts.iterations % opts.concurrency_num) as usize;
     let mut get_keys = (0..key_num)
         .into_iter()

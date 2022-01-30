@@ -84,39 +84,62 @@ ss_bench is used to benchmark the performance of the state store. In this doc, w
 
 ### Benchmark Type (`--benchmarks`)
 
-- `writebatch`: write `iterations` KV pairs in sequential key order in async mode
+Comma-separated list of operations to run in the specified order. Following benchmarks are supported:
+
+- `writebatch`: write `iterations` key/values in sequential key order in async mode
 - `getrandom`: read `iterations` times in random order
 - `getseq`: read `iterations` times in sequential order
 - `prefixscanrandom`: prefix scan `iterations` times in random order
 
-The benchmarks could be a combination of multiple consequent benchmarks. Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
+Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
+
+### Operation Number
+
+- `--num`
+  - Number of key/values to place in database
+  - Default: 1000000
+
+- `--deletes`
+
+  - Number of delete operations to do. If negative, do `--num` deletions.
+  - Default: -1
+
+- `--writes`
+  
+  - Number of write operations to do. If negative, do `--num` reads.
+  - Default: -1
+
+- `--reads`
+
+  - Number of read operations to do. If negative, do `--num` reads.
+  - Default: -1
 
 ## Batch Configurations
 
 - `--key-size`
   
   - The size (bytes) of the non-prefix part of a key
-  - Default value: 10
+  - Default: 10
 
 - `--key-prefix-size`
   
   - The size (bytes) of a prefix
-  - Default value: 5
+  - Default: 5
 
 - `--key-prefix-frequency`
   
   - The number of keys with some a prefix in a batch
-  - Default value: 10
+  - Default: 10
 
 - `--value-size`
   
-  - The length (bytes) of a value in a KV pair
-  - Default value: 10
+  - The length (bytes) of a value in a key/value
+  - Default: 10
 
-- `--kvs-per-batch`
+- `--batch-size`
   
-  - The number of KV pairs in a batch
-  - Default value: 1000
+  - The number of key/values in a batch
+  - Default: 1000
 
 # Metrics
 
