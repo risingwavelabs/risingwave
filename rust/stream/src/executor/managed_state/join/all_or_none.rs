@@ -20,17 +20,14 @@ type AllOrNoneStateValuesMut<'a> = btree_map::ValuesMut<'a, PkType, StateValueTy
 /// Manages a `BTreeMap` in memory for all entries. When evicted, `BTreeMap` does not hold any
 /// entries.
 pub struct AllOrNoneState<S: StateStore> {
-    /// The full copy of the state. If evicted, it will be empty.
-    cached: BTreeMap<PkType, StateValueType>,
+    /// The full copy of the state. If evicted, it will be `None`.
+    cached: Option<BTreeMap<PkType, StateValueType>>,
 
     /// The actions that will be taken on next flush
     flush_buffer: BTreeMap<PkType, FlushStatus<StateValueType>>,
 
     /// Number of items in the state including the cache and state store.
     total_count: usize,
-
-    /// if the cache are evicted
-    cache_evicted: bool,
 
     /// Data types of the sort column
     data_types: Vec<DataTypeKind>,
@@ -53,10 +50,9 @@ impl<S: StateStore> AllOrNoneState<S> {
     ) -> Self {
         let pk_data_types = pk_indices.iter().map(|idx| data_types[*idx]).collect_vec();
         Self {
-            cached: BTreeMap::new(),
+            cached: None,
             flush_buffer: BTreeMap::new(),
             total_count: 0,
-            cache_evicted: false,
             data_types,
             pk_data_types,
             pk_indices,
@@ -86,16 +82,16 @@ impl<S: StateStore> AllOrNoneState<S> {
             .map(|idx| value[*idx].clone())
             .collect_vec();
         let pk = Row(pk);
-        if !self.cache_evicted {
-            self.cached.insert(pk.clone(), value.clone());
+        if let Some(cached) = self.cached.as_mut() {
+            cached.insert(pk.clone(), value.clone());
         }
         self.total_count += 1;
         FlushStatus::do_insert(self.flush_buffer.entry(pk), value);
     }
 
     pub fn remove(&mut self, pk: PkType) {
-        if !self.cache_evicted {
-            self.cached.remove(&pk);
+        if let Some(cached) = self.cached.as_mut() {
+            cached.remove(&pk);
         }
         // If no cache maintained, only update the flush buffer.
         self.total_count -= 1;
@@ -123,38 +119,44 @@ impl<S: StateStore> AllOrNoneState<S> {
     }
 
     // Fetch cache from the state store.
-    async fn fetch_cache(&mut self) {
-        let all_data = self.keyspace.scan_strip_prefix(None).await.unwrap();
+    async fn fetch_cache(&mut self) -> Result<()> {
+        assert!(self.cached.is_none());
 
+        let all_data = self.keyspace.scan_strip_prefix(None).await?;
+        let mut cached = BTreeMap::new();
         for (raw_key, raw_value) in all_data {
             let pk_deserializer = RowDeserializer::new(self.pk_data_types.clone());
-            let key = pk_deserializer.deserialize_not_null(&raw_key).unwrap();
+            let key = pk_deserializer.deserialize_not_null(&raw_key)?;
             let deserializer = JoinRowDeserializer::new(self.data_types.clone());
-            let value = deserializer.deserialize(&raw_value).unwrap();
-            self.cached.insert(key, value);
+            let value = deserializer.deserialize(&raw_value)?;
+            cached.insert(key, value);
         }
+
+        self.total_count = cached.len();
+        self.cached = Some(cached);
+        Ok(())
     }
 
     #[allow(dead_code)]
     pub async fn iter(&mut self) -> AllOrNoneStateIter<'_> {
-        if self.cache_evicted {
-            self.fetch_cache().await;
+        if self.cached.is_none() {
+            self.fetch_cache().await.unwrap();
         }
-        self.cached.iter()
+        self.cached.as_ref().unwrap().iter()
     }
 
     pub async fn values(&mut self) -> AllOrNoneStateValues<'_> {
-        if self.cache_evicted {
-            self.fetch_cache().await;
+        if self.cached.is_none() {
+            self.fetch_cache().await.unwrap();
         }
-        self.cached.values()
+        self.cached.as_ref().unwrap().values()
     }
 
     pub async fn values_mut(&mut self) -> AllOrNoneStateValuesMut<'_> {
-        if self.cache_evicted {
-            self.fetch_cache().await;
+        if self.cached.is_none() {
+            self.fetch_cache().await.unwrap();
         }
-        self.cached.values_mut()
+        self.cached.as_mut().unwrap().values_mut()
     }
 }
 
