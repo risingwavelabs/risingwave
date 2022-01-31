@@ -143,6 +143,15 @@ impl<S: StateStore> Executor for TopNExecutor<S> {
     fn identity(&self) -> &str {
         self.identity.as_str()
     }
+
+    fn clear_cache(&mut self) -> Result<()> {
+        self.managed_lowest_state.clear_cache();
+        self.managed_middle_state.clear_cache();
+        self.managed_highest_state.clear_cache();
+        self.first_execution = true;
+
+        Ok(())
+    }
 }
 
 #[async_trait]
