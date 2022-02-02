@@ -52,3 +52,28 @@ impl SplitEnumerator for KinesisSplitEnumerator {
             .collect())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aws_sdk_kinesis::Region;
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_kinesis_split_enumerator() -> Result<()> {
+        let stream_name = "kinesis_test_stream".to_string();
+        let config = aws_config::from_env()
+            .region(Region::new("cn-north-1"))
+            .load()
+            .await;
+        let client = aws_sdk_kinesis::Client::new(&config);
+        let mut enumerator = KinesisSplitEnumerator {
+            stream_name,
+            client,
+        };
+        let list_splits_resp = enumerator.list_splits().await?;
+        // println!("{:#?}", list_splits_resp);
+        assert_eq!(list_splits_resp.len(), 4);
+        Ok(())
+    }
+}
