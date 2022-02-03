@@ -55,8 +55,9 @@ impl SplitEnumerator for KinesisSplitEnumerator {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use aws_sdk_kinesis::Region;
+
+    use super::*;
 
     #[tokio::test]
     #[ignore]
