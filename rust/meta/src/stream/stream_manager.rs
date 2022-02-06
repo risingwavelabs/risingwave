@@ -149,7 +149,15 @@ impl StreamManager {
             })
             .collect::<Vec<_>>();
 
-        for (node_id, actors) in node_actors_map {
+        // Debug usage: print the actor dependencies in log.
+        actors.iter().for_each(|e| {
+            debug!(
+                "actor {} with downstreams: {:?}",
+                e.actor_id, e.downstream_actor_id
+            );
+        });
+
+        for (node_id, actors) in node_actors_map.clone() {
             let node = node_map.get(&node_id).unwrap();
 
             let client = self.clients.get(node).await?;
@@ -177,6 +185,19 @@ impl StreamManager {
                 .await
                 .to_rw_result_with(format!("failed to connect to {}", node_id))?;
 
+            self.smm
+                .add_actors_to_node(&ActorLocation {
+                    node: Some(node.clone()),
+                    actors: stream_actors,
+                })
+                .await?;
+        }
+
+        for (node_id, actors) in node_actors_map {
+            let node = node_map.get(&node_id).unwrap();
+
+            let client = self.clients.get(node).await?;
+
             let request_id = Uuid::new_v4().to_string();
             debug!("[{}]build actors: {:?}", request_id, actors);
             client
@@ -187,13 +208,6 @@ impl StreamManager {
                 })
                 .await
                 .to_rw_result_with(format!("failed to connect to {}", node_id))?;
-
-            self.smm
-                .add_actors_to_node(&ActorLocation {
-                    node: Some(node.clone()),
-                    actors: stream_actors,
-                })
-                .await?;
         }
 
         self.smm
