@@ -58,7 +58,7 @@ message ExprNode {
     IS_NULL = 219;
     IS_NOT_NULL = 220;
     // Unary operators
-    Neg = 221;
+    NEG = 221;
     STREAM_NULL_BY_ROW_COUNT = 1000;
   }
   Type expr_type = 1;

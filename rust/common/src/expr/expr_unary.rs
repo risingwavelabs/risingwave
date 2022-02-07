@@ -98,6 +98,11 @@ macro_rules! gen_cast {
   };
 }
 
+/// This macro helps to create neg expression.
+/// It receives all the types that impl `CheckedNeg` trait.
+/// * `$child`: child expression
+/// * `$ret`: return expression
+/// * `$input`: input type
 macro_rules! gen_neg_impl {
     ($child:expr, $ret:expr, $($input:tt),*) => {
         match $child.return_type() {
