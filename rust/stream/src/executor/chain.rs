@@ -140,7 +140,7 @@ mod test {
 
     use super::ChainExecutor;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::{Executor, Message, PkIndices, PkIndicesRef};
+    use crate::executor::{Barrier, Executor, Message, PkIndices, PkIndicesRef};
 
     #[derive(Debug)]
     struct MockSnapshot(MockSource);
@@ -218,20 +218,22 @@ mod test {
                 ),
             ],
         ));
-        let second = Box::new(MockSource::with_chunks(
+
+        let second = Box::new(MockSource::with_messages(
             schema.clone(),
             PkIndices::new(),
             vec![
-                StreamChunk::new(
+                Message::Barrier(Barrier::new(0)),
+                Message::Chunk(StreamChunk::new(
                     vec![Op::Insert],
                     vec![column_nonnull! { I32Array, [3] }],
                     None,
-                ),
-                StreamChunk::new(
+                )),
+                Message::Chunk(StreamChunk::new(
                     vec![Op::Insert],
                     vec![column_nonnull! { I32Array, [4] }],
                     None,
-                ),
+                )),
             ],
         ));
 
