@@ -6,12 +6,14 @@ use aws_sdk_kinesis::error::GetRecordsError;
 use aws_sdk_kinesis::model::ShardIteratorType;
 use aws_sdk_kinesis::output::GetRecordsOutput;
 use aws_sdk_kinesis::{Client as kinesis_client, DateTime, SdkError};
+use bytes::Bytes;
 use futures::executor::block_on;
 
 use crate::base::SourceReader;
 use crate::kinesis::config::AwsConfigInfo;
 use crate::kinesis::source::message::KinesisMessage;
 use crate::kinesis::split::{KinesisOffset, KinesisSplit};
+use crate::state::SourceState;
 
 pub struct KinesisSplitReader {
     client: kinesis_client,
@@ -181,6 +183,22 @@ impl KinesisSplitReader {
 
         Ok(())
     }
+
+    fn get_state(&self) -> KinesisSplitReaderState {
+        KinesisSplitReaderState::new(
+            self.stream_name.clone(),
+            self.shard_id.clone(),
+            self.latest_sequence_num.clone(),
+        )
+    }
+
+    async fn restore_from_state(&mut self, state: KinesisSplitReaderState) -> Result<()> {
+        self.stream_name = state.stream_name;
+        self.shard_id = state.shard_id;
+        self.latest_sequence_num = state.sequence_number;
+
+        self.renew_shard_iter().await
+    }
 }
 
 fn is_stopping(cur_seq_num: &str, split: &KinesisSplit) -> bool {
@@ -192,5 +210,63 @@ fn is_stopping(cur_seq_num: &str, split: &KinesisSplit) -> bool {
             false
         }
         _ => true,
+    }
+}
+
+#[derive(Debug, Clone)]
+struct KinesisSplitReaderState {
+    stream_name: String,
+    shard_id: String,
+    sequence_number: String,
+}
+
+impl KinesisSplitReaderState {
+    fn new(stream_name: String, shard_id: String, sequence_number: String) -> Self {
+        Self {
+            stream_name,
+            shard_id,
+            sequence_number,
+        }
+    }
+}
+
+impl SourceState for KinesisSplitReaderState {
+    fn identifier(&self) -> String {
+        [
+            self.stream_name.clone(),
+            "|".to_string(),
+            self.shard_id.clone(),
+        ]
+        .concat()
+    }
+
+    fn encode(&self) -> bytes::Bytes {
+        let bytes = self.sequence_number.as_bytes();
+        Bytes::copy_from_slice(&(*bytes).clone())
+    }
+
+    fn decode(&self, values: bytes::Bytes) -> Self {
+        let sequence_number = String::from_utf8(values.to_vec()).unwrap();
+        Self::new(
+            self.stream_name.clone(),
+            self.shard_id.clone(),
+            sequence_number,
+        )
+    }
+}
+
+mod tests {
+
+    #[test]
+    fn test_state_encode() {
+        let mock_state = KinesisSplitReaderState::new(
+            "mock_stream".to_string(),
+            "mock_shard".to_string(),
+            "1234567890987654321".to_string(),
+        );
+        let sequence_number = mock_state.sequence_number.clone();
+        let encoded = mock_state.encode();
+        let restored = mock_state.decode(encoded);
+        assert_eq!(sequence_number, restored.sequence_number);
     }
 }
