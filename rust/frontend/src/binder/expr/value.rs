@@ -1,5 +1,5 @@
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::{DataTypeKind, Decimal, ScalarImpl};
+use risingwave_common::types::{DataType, Decimal, ScalarImpl};
 use risingwave_sqlparser::ast::Value;
 
 use crate::binder::Binder;
@@ -11,7 +11,7 @@ impl Binder {
             Value::Number(s, b) => self.bind_number(s, b),
             Value::SingleQuotedString(s) => Ok(Literal::new(
                 Some(ScalarImpl::Utf8(s)),
-                DataTypeKind::Varchar,
+                DataType::Varchar,
             )),
             _ => Err(ErrorCode::NotImplementedError(format!("{:?}", value)).into()),
         }
@@ -19,9 +19,9 @@ impl Binder {
 
     fn bind_number(&mut self, s: String, _b: bool) -> Result<Literal> {
         let (data, data_type) = if let Ok(int_32) = s.parse::<i32>() {
-            (Some(ScalarImpl::Int32(int_32)), DataTypeKind::Int32)
+            (Some(ScalarImpl::Int32(int_32)), DataType::Int32)
         } else if let Ok(int_64) = s.parse::<i64>() {
-            (Some(ScalarImpl::Int64(int_64)), DataTypeKind::Int64)
+            (Some(ScalarImpl::Int64(int_64)), DataType::Int64)
         } else {
             // Notice: when the length of decimal exceeds 29(>= 30), it will be rounded up.
             let decimal = s
@@ -31,7 +31,7 @@ impl Binder {
             let prec = decimal.precision();
             (
                 Some(ScalarImpl::Decimal(decimal)),
-                DataTypeKind::Decimal { prec, scale },
+                DataType::Decimal { prec, scale },
             )
         };
         Ok(Literal::new(data, data_type))
@@ -69,12 +69,12 @@ mod tests {
             Some(ScalarImpl::Decimal(Decimal::from_str("-0.01").unwrap())),
         ];
         let data_type = vec![
-            DataTypeKind::Int32,
-            DataTypeKind::Int64,
-            DataTypeKind::Decimal { prec: 15, scale: 6 },
-            DataTypeKind::Decimal { prec: 24, scale: 0 },
-            DataTypeKind::Decimal { prec: 7, scale: 6 },
-            DataTypeKind::Decimal { prec: 3, scale: 2 },
+            DataType::Int32,
+            DataType::Int64,
+            DataType::Decimal { prec: 15, scale: 6 },
+            DataType::Decimal { prec: 24, scale: 0 },
+            DataType::Decimal { prec: 7, scale: 6 },
+            DataType::Decimal { prec: 3, scale: 2 },
         ];
 
         for i in 0..values.len() {

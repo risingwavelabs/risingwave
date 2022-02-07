@@ -12,7 +12,7 @@ use risingwave_common::collection::hash_map::{
     Key256, Key32, Key64, KeySerialized, PrecomputedBuildHasher,
 };
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 use risingwave_common::vector_op::agg::{AggStateFactory, BoxedAggState};
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::HashAggNode;
@@ -40,7 +40,7 @@ pub(super) struct HashAggExecutorBuilder {
     agg_factories: Vec<AggStateFactory>,
     group_key_columns: Vec<usize>,
     child: BoxedExecutor,
-    group_key_types: Vec<DataTypeKind>,
+    group_key_types: Vec<DataType>,
     schema: Schema,
     task_id: TaskId,
 }
@@ -128,7 +128,7 @@ pub(super) struct HashAggExecutor<K> {
     /// the aggregated result set
     result: Option<DataChunk>,
     /// the data types of key columns
-    group_key_types: Vec<DataTypeKind>,
+    group_key_types: Vec<DataType>,
     schema: Schema,
     identity: String,
 }
@@ -256,8 +256,8 @@ mod tests {
         let key2_col = Arc::new(array_nonnull! { I32Array, [1,1,0,1,0,0,1,1] }.into());
         let sum_col = Arc::new(array_nonnull! { I32Array,  [1,1,1,2,1,2,3,2] }.into());
 
-        let t32 = DataTypeKind::Int32;
-        let t64 = DataTypeKind::Int64;
+        let t32 = DataType::Int32;
+        let t64 = DataType::Int64;
 
         let src_exec = MockExecutor::with_chunk(
             DataChunk::builder()
@@ -329,7 +329,7 @@ mod tests {
     #[tokio::test]
     async fn execute_count_star() {
         let col = Arc::new(array_nonnull! { I32Array, [0,1,0,1,1,0,1,0] }.into());
-        let t32 = DataTypeKind::Int32;
+        let t32 = DataType::Int32;
         let src_exec = MockExecutor::with_chunk(
             DataChunk::builder().columns(vec![Column::new(col)]).build(),
             Schema {

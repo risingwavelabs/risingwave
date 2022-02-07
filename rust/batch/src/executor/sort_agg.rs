@@ -175,7 +175,7 @@ mod tests {
     use risingwave_common::array_nonnull;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::expr::build_from_prost;
-    use risingwave_common::types::DataTypeKind;
+    use risingwave_common::types::DataType;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType;
     use risingwave_pb::expr::agg_call::{Arg, Type};
@@ -192,7 +192,7 @@ mod tests {
         let a = Arc::new(array_nonnull! { I32Array, [1, 2, 3] }.into());
         let chunk = DataChunk::builder().columns(vec![Column::new(a)]).build();
         let schema = Schema {
-            fields: vec![Field::unnamed(DataTypeKind::Int32)],
+            fields: vec![Field::unnamed(DataType::Int32)],
         };
         let mut child = MockExecutor::new(schema);
         child.add(chunk);
@@ -261,9 +261,9 @@ mod tests {
             .build();
         let schema = Schema {
             fields: vec![
-                Field::unnamed(DataTypeKind::Int32),
-                Field::unnamed(DataTypeKind::Int32),
-                Field::unnamed(DataTypeKind::Int32),
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Int32),
             ],
         };
         let mut child = MockExecutor::new(schema);
@@ -331,9 +331,9 @@ mod tests {
 
         executor.open().await?;
         let fields = &executor.schema().fields;
-        assert_eq!(fields[0].data_type, DataTypeKind::Int32);
-        assert_eq!(fields[1].data_type, DataTypeKind::Int32);
-        assert_eq!(fields[2].data_type, DataTypeKind::Int64);
+        assert_eq!(fields[0].data_type, DataType::Int32);
+        assert_eq!(fields[1].data_type, DataType::Int32);
+        assert_eq!(fields[2].data_type, DataType::Int64);
         let o = executor.next().await?.unwrap();
         if executor.next().await?.is_some() {
             panic!("simple agg should have no more than 1 output.");

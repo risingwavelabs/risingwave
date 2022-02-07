@@ -12,10 +12,10 @@ use crate::expr::expr_unary::{
     new_length_default, new_ltrim_expr, new_rtrim_expr, new_trim_expr, new_unary_expr,
 };
 use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
-use crate::types::DataTypeKind;
+use crate::types::DataType;
 
-fn get_return_type_and_children(prost: &ExprNode) -> Result<(Vec<ExprNode>, DataTypeKind)> {
-    let ret_type = DataTypeKind::from(prost.get_return_type()?);
+fn get_return_type_and_children(prost: &ExprNode) -> Result<(Vec<ExprNode>, DataType)> {
+    let ret_type = DataType::from(prost.get_return_type()?);
     if let RexNode::FuncCall(func_call) = prost.get_rex_node()? {
         Ok((func_call.get_children().to_vec(), ret_type))
     } else {
@@ -152,7 +152,7 @@ pub fn build_case_expr(prost: &ExprNode) -> Result<BoxedExpression> {
         let then_index = i * 2 + 1;
         let when_expr = expr_build_from_prost(&children[when_index])?;
         let then_expr = expr_build_from_prost(&children[then_index])?;
-        if when_expr.return_type() != DataTypeKind::Boolean {
+        if when_expr.return_type() != DataType::Boolean {
             return Err(RwError::from(ErrorCode::ProtocolError(
                 "the return type of when clause and condition not match".to_string(),
             )));

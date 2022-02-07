@@ -1,4 +1,4 @@
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 
 use super::{infer_type, Expr, ExprImpl};
 use crate::expr::ExprType;
@@ -6,7 +6,7 @@ use crate::expr::ExprType;
 #[derive(Clone, Debug)]
 pub struct FunctionCall {
     func_type: ExprType,
-    return_type: DataTypeKind,
+    return_type: DataType,
     inputs: Vec<ExprImpl>,
 }
 impl FunctionCall {
@@ -22,7 +22,7 @@ impl FunctionCall {
     pub fn new_with_return_type(
         func_type: ExprType,
         inputs: Vec<ExprImpl>,
-        return_type: DataTypeKind,
+        return_type: DataType,
     ) -> Self {
         FunctionCall {
             func_type,
@@ -39,7 +39,7 @@ impl FunctionCall {
     }
 }
 impl Expr for FunctionCall {
-    fn return_type(&self) -> DataTypeKind {
+    fn return_type(&self) -> DataType {
         self.return_type
     }
     fn bound_expr(self) -> ExprImpl {

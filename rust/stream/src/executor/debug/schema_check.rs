@@ -87,7 +87,7 @@ mod tests {
     use risingwave_common::array::{F64Array, I64Array, Op, StreamChunk};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::column_nonnull;
-    use risingwave_common::types::DataTypeKind;
+    use risingwave_common::types::DataType;
 
     use super::*;
     use crate::executor::test_utils::MockSource;
@@ -104,8 +104,8 @@ mod tests {
         );
         let schema = Schema {
             fields: vec![
-                Field::unnamed(DataTypeKind::Int64),
-                Field::unnamed(DataTypeKind::Float64),
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Float64),
             ],
         };
 
@@ -131,8 +131,8 @@ mod tests {
         );
         let schema = Schema {
             fields: vec![
-                Field::unnamed(DataTypeKind::Int64),
-                Field::unnamed(DataTypeKind::Float64),
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Float64),
             ],
         };
 

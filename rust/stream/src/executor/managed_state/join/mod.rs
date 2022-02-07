@@ -3,7 +3,7 @@ use std::ops::Index;
 
 pub use all_or_none::AllOrNoneState;
 use risingwave_common::array::Row;
-use risingwave_common::types::{deserialize_datum_from, serialize_datum_into, DataTypeKind, Datum};
+use risingwave_common::types::{deserialize_datum_from, serialize_datum_into, DataType, Datum};
 use risingwave_storage::keyspace::Segment;
 use risingwave_storage::{Keyspace, StateStore};
 use serde::{Deserialize, Serialize};
@@ -59,12 +59,12 @@ impl JoinRow {
 
 /// Deserializer of the `JoinRow`.
 pub struct JoinRowDeserializer {
-    data_type_kinds: Vec<DataTypeKind>,
+    data_type_kinds: Vec<DataType>,
 }
 
 impl JoinRowDeserializer {
     /// Creates a new `RowDeserializer` with row schema.
-    pub fn new(schema: Vec<DataTypeKind>) -> Self {
+    pub fn new(schema: Vec<DataType>) -> Self {
         JoinRowDeserializer {
             data_type_kinds: schema,
         }
@@ -94,7 +94,7 @@ pub fn create_hash_join_state<S: StateStore>(
     key: PkType,
     keyspace: &Keyspace<S>,
     pk_indices: Vec<usize>,
-    data_types: Vec<DataTypeKind>,
+    data_types: Vec<DataType>,
 ) -> AllOrNoneState<S> {
     // TODO: in pure in-memory engine, we should not do this serialization.
     let key_encoded = key.serialize().unwrap();

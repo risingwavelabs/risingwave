@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::vec;
 
 use itertools::iproduct;
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 
 use crate::expr::ExprType;
 
@@ -29,48 +29,48 @@ enum DataTypeName {
     Struct,
 }
 
-fn name_of(ty: &DataTypeKind) -> DataTypeName {
+fn name_of(ty: &DataType) -> DataTypeName {
     match ty {
-        DataTypeKind::Int16 => DataTypeName::Int16,
-        DataTypeKind::Int32 => DataTypeName::Int32,
-        DataTypeKind::Int64 => DataTypeName::Int64,
-        DataTypeKind::Float32 => DataTypeName::Float32,
-        DataTypeKind::Float64 => DataTypeName::Float64,
-        DataTypeKind::Boolean => DataTypeName::Boolean,
-        DataTypeKind::Char => DataTypeName::Char,
-        DataTypeKind::Varchar => DataTypeName::Varchar,
-        DataTypeKind::Date => DataTypeName::Date,
-        DataTypeKind::Time => DataTypeName::Time,
-        DataTypeKind::Timestamp => DataTypeName::Timestamp,
-        DataTypeKind::Timestampz => DataTypeName::Timestampz,
-        DataTypeKind::Decimal { .. } => DataTypeName::Decimal,
-        DataTypeKind::Interval => DataTypeName::Interval,
-        DataTypeKind::Struct => DataTypeName::Struct,
+        DataType::Int16 => DataTypeName::Int16,
+        DataType::Int32 => DataTypeName::Int32,
+        DataType::Int64 => DataTypeName::Int64,
+        DataType::Float32 => DataTypeName::Float32,
+        DataType::Float64 => DataTypeName::Float64,
+        DataType::Boolean => DataTypeName::Boolean,
+        DataType::Char => DataTypeName::Char,
+        DataType::Varchar => DataTypeName::Varchar,
+        DataType::Date => DataTypeName::Date,
+        DataType::Time => DataTypeName::Time,
+        DataType::Timestamp => DataTypeName::Timestamp,
+        DataType::Timestampz => DataTypeName::Timestampz,
+        DataType::Decimal { .. } => DataTypeName::Decimal,
+        DataType::Interval => DataTypeName::Interval,
+        DataType::Struct => DataTypeName::Struct,
     }
 }
 
 /// Infers the return type of a function. Returns `None` if the function with specified data types
 /// is not supported on backend.
-pub fn infer_type(func_type: ExprType, inputs_type: Vec<DataTypeKind>) -> Option<DataTypeKind> {
+pub fn infer_type(func_type: ExprType, inputs_type: Vec<DataType>) -> Option<DataType> {
     // With our current simplified type system, where all types are nullable and not parameterized
     // by things like length or precision, the inference can be done with a map lookup.
     let input_type_names = inputs_type.iter().map(name_of).collect();
     infer_type_name(func_type, input_type_names).map(|type_name| match type_name {
-        DataTypeName::Int16 => DataTypeKind::Int16,
-        DataTypeName::Int32 => DataTypeKind::Int32,
-        DataTypeName::Int64 => DataTypeKind::Int64,
-        DataTypeName::Float32 => DataTypeKind::Float32,
-        DataTypeName::Float64 => DataTypeKind::Float64,
-        DataTypeName::Boolean => DataTypeKind::Boolean,
-        DataTypeName::Char => DataTypeKind::Char,
-        DataTypeName::Varchar => DataTypeKind::Varchar,
-        DataTypeName::Date => DataTypeKind::Date,
-        DataTypeName::Time => DataTypeKind::Time,
-        DataTypeName::Timestamp => DataTypeKind::Timestamp,
-        DataTypeName::Timestampz => DataTypeKind::Timestampz,
-        DataTypeName::Decimal => DataTypeKind::decimal_default(),
-        DataTypeName::Interval => DataTypeKind::Interval,
-        DataTypeName::Struct => DataTypeKind::Struct,
+        DataTypeName::Int16 => DataType::Int16,
+        DataTypeName::Int32 => DataType::Int32,
+        DataTypeName::Int64 => DataType::Int64,
+        DataTypeName::Float32 => DataType::Float32,
+        DataTypeName::Float64 => DataType::Float64,
+        DataTypeName::Boolean => DataType::Boolean,
+        DataTypeName::Char => DataType::Char,
+        DataTypeName::Varchar => DataType::Varchar,
+        DataTypeName::Date => DataType::Date,
+        DataTypeName::Time => DataType::Time,
+        DataTypeName::Timestamp => DataType::Timestamp,
+        DataTypeName::Timestampz => DataType::Timestampz,
+        DataTypeName::Decimal => DataType::decimal_default(),
+        DataTypeName::Interval => DataType::Interval,
+        DataTypeName::Struct => DataType::Struct,
     })
 }
 
@@ -231,21 +231,21 @@ mod tests {
 
     fn test_simple_infer_type(
         func_type: ExprType,
-        inputs_type: Vec<DataTypeKind>,
-        expected_type_name: DataTypeKind,
+        inputs_type: Vec<DataType>,
+        expected_type_name: DataType,
     ) {
         let ret = infer_type(func_type, inputs_type).unwrap();
         assert_eq!(ret, expected_type_name);
     }
 
-    fn test_infer_type_not_exist(func_type: ExprType, inputs_type: Vec<DataTypeKind>) {
+    fn test_infer_type_not_exist(func_type: ExprType, inputs_type: Vec<DataType>) {
         let ret = infer_type(func_type, inputs_type);
         assert_eq!(ret, None);
     }
 
     #[test]
     fn test_arithmetics() {
-        use DataTypeKind::*;
+        use DataType::*;
         let atm_exprs = vec![
             ExprType::Add,
             ExprType::Subtract,
@@ -253,7 +253,7 @@ mod tests {
             ExprType::Divide,
             ExprType::Modulus,
         ];
-        let decimal_type = DataTypeKind::decimal_default();
+        let decimal_type = DataType::decimal_default();
         let num_promote_table = vec![
             (Int16, Int16, Int16),
             (Int16, Int32, Int32),
@@ -316,16 +316,16 @@ mod tests {
             ExprType::Not,
         ];
         let num_types = vec![
-            DataTypeKind::Int16,
-            DataTypeKind::Int32,
-            DataTypeKind::Int64,
-            DataTypeKind::Float32,
-            DataTypeKind::Float64,
-            DataTypeKind::decimal_default(),
+            DataType::Int16,
+            DataType::Int32,
+            DataType::Int64,
+            DataType::Float32,
+            DataType::Float64,
+            DataType::decimal_default(),
         ];
 
         for (expr, num_t) in iproduct!(exprs, num_types) {
-            test_infer_type_not_exist(expr, vec![num_t, DataTypeKind::Boolean]);
+            test_infer_type_not_exist(expr, vec![num_t, DataType::Boolean]);
         }
     }
 }

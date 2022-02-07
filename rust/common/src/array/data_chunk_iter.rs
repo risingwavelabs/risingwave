@@ -6,7 +6,7 @@ use itertools::Itertools;
 use crate::array::DataChunk;
 use crate::types::{
     deserialize_datum_from, deserialize_datum_not_null_from, serialize_datum_into,
-    serialize_datum_not_null_into, DataTypeKind, Datum, DatumRef, ToOwnedDatum,
+    serialize_datum_not_null_into, DataType, Datum, DatumRef, ToOwnedDatum,
 };
 use crate::util::sort_util::OrderType;
 
@@ -184,12 +184,12 @@ impl Row {
 
 /// Deserializer of the `Row`.
 pub struct RowDeserializer {
-    data_type_kinds: Vec<DataTypeKind>,
+    data_type_kinds: Vec<DataType>,
 }
 
 impl RowDeserializer {
     /// Creates a new `RowDeserializer` with row schema.
-    pub fn new(schema: Vec<DataTypeKind>) -> Self {
+    pub fn new(schema: Vec<DataType>) -> Self {
         RowDeserializer {
             data_type_kinds: schema,
         }
@@ -236,7 +236,7 @@ impl RowDeserializer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{DataTypeKind as Ty, IntervalUnit, ScalarImpl};
+    use crate::types::{DataType as Ty, IntervalUnit, ScalarImpl};
 
     #[test]
     fn row_memcomparable_encode_decode_not_null() {

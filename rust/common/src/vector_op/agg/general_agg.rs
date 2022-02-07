@@ -13,7 +13,7 @@ where
     F: Send + for<'a> RTFn<'a, T, R>,
     R: Array,
 {
-    return_type: DataTypeKind,
+    return_type: DataType,
     input_col_idx: usize,
     result: Option<R::OwnedItem>,
     f: F,
@@ -25,7 +25,7 @@ where
     F: Send + for<'a> RTFn<'a, T, R>,
     R: Array,
 {
-    pub fn new(return_type: DataTypeKind, input_col_idx: usize, f: F) -> Self {
+    pub fn new(return_type: DataType, input_col_idx: usize, f: F) -> Self {
         Self {
             return_type,
             input_col_idx,
@@ -99,7 +99,7 @@ macro_rules! impl_aggregator {
         where
             F: 'static + Send + for<'a> RTFn<'a, $input, $result>,
         {
-            fn return_type(&self) -> DataTypeKind {
+            fn return_type(&self) -> DataType {
                 self.return_type.clone()
             }
             fn update_with_row(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
@@ -251,10 +251,10 @@ mod tests {
     use crate::vector_op::agg::aggregator::create_agg_state_unary;
 
     fn eval_agg(
-        input_type: DataTypeKind,
+        input_type: DataType,
         input: ArrayRef,
         agg_type: &AggKind,
-        return_type: DataTypeKind,
+        return_type: DataType,
         mut builder: ArrayBuilderImpl,
     ) -> Result<ArrayImpl> {
         let input_chunk = DataChunk::builder()
@@ -268,10 +268,10 @@ mod tests {
 
     #[test]
     fn test_create_agg_state() {
-        let int64_type = DataTypeKind::Int64;
-        let decimal_type = DataTypeKind::decimal_default();
-        let bool_type = DataTypeKind::Boolean;
-        let char_type = DataTypeKind::Char;
+        let int64_type = DataType::Int64;
+        let decimal_type = DataType::decimal_default();
+        let bool_type = DataType::Boolean;
+        let char_type = DataType::Char;
 
         macro_rules! test_create {
             ($input_type:expr, $agg:ident, $return_type:expr, $expected:ident) => {
@@ -305,8 +305,8 @@ mod tests {
     fn vec_sum_int32() -> Result<()> {
         let input = I32Array::from_slice(&[Some(1), Some(2), Some(3)]).unwrap();
         let agg_type = AggKind::Sum;
-        let input_type = DataTypeKind::Int32;
-        let return_type = DataTypeKind::Int64;
+        let input_type = DataType::Int32;
+        let return_type = DataType::Int64;
         let actual = eval_agg(
             input_type,
             Arc::new(input.into()),
@@ -324,8 +324,8 @@ mod tests {
     fn vec_sum_int64() -> Result<()> {
         let input = I64Array::from_slice(&[Some(1), Some(2), Some(3)])?;
         let agg_type = AggKind::Sum;
-        let input_type = DataTypeKind::Int64;
-        let return_type = DataTypeKind::decimal_default();
+        let input_type = DataType::Int64;
+        let return_type = DataType::decimal_default();
         let actual = eval_agg(
             input_type,
             Arc::new(input.into()),
@@ -344,8 +344,8 @@ mod tests {
         let input =
             F32Array::from_slice(&[Some(1.0.into()), Some(2.0.into()), Some(3.0.into())]).unwrap();
         let agg_type = AggKind::Min;
-        let input_type = DataTypeKind::Float32;
-        let return_type = DataTypeKind::Float32;
+        let input_type = DataType::Float32;
+        let return_type = DataType::Float32;
         let actual = eval_agg(
             input_type,
             Arc::new(input.into()),
@@ -363,8 +363,8 @@ mod tests {
     fn vec_min_char() -> Result<()> {
         let input = Utf8Array::from_slice(&[Some("b"), Some("aa")])?;
         let agg_type = AggKind::Min;
-        let input_type = DataTypeKind::Char;
-        let return_type = DataTypeKind::Char;
+        let input_type = DataType::Char;
+        let return_type = DataType::Char;
         let actual = eval_agg(
             input_type,
             Arc::new(input.into()),
@@ -382,8 +382,8 @@ mod tests {
     fn vec_max_char() -> Result<()> {
         let input = Utf8Array::from_slice(&[Some("b"), Some("aa")])?;
         let agg_type = AggKind::Max;
-        let input_type = DataTypeKind::Varchar;
-        let return_type = DataTypeKind::Varchar;
+        let input_type = DataType::Varchar;
+        let return_type = DataType::Varchar;
         let actual = eval_agg(
             input_type,
             Arc::new(input.into()),
@@ -401,8 +401,8 @@ mod tests {
     fn vec_count_int32() -> Result<()> {
         let test_case = |input: ArrayImpl, expected: &[Option<i64>]| -> Result<()> {
             let agg_type = AggKind::Count;
-            let input_type = DataTypeKind::Int32;
-            let return_type = DataTypeKind::Int64;
+            let input_type = DataType::Int32;
+            let return_type = DataType::Int64;
             let actual = eval_agg(
                 input_type,
                 Arc::new(input),

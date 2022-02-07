@@ -8,7 +8,7 @@ use super::OrderedRow;
 use crate::array::{ArrayImpl, Row};
 use crate::error::Result;
 use crate::types::{
-    deserialize_datum_from, serialize_datum_into, serialize_datum_ref_into, DataTypeKind, Datum,
+    deserialize_datum_from, serialize_datum_into, serialize_datum_ref_into, DataType, Datum,
 };
 use crate::util::sort_util::OrderType;
 
@@ -74,12 +74,12 @@ impl OrderedRowsSerializer {
 /// Deserializer of the `Row`.
 #[derive(Clone)]
 pub struct OrderedRowDeserializer {
-    data_type_kinds: Vec<DataTypeKind>,
+    data_type_kinds: Vec<DataType>,
     order_types: Vec<OrderType>,
 }
 
 impl OrderedRowDeserializer {
-    pub fn new(schema: Vec<DataTypeKind>, order_types: Vec<OrderType>) -> Self {
+    pub fn new(schema: Vec<DataType>, order_types: Vec<OrderType>) -> Self {
         assert_eq!(schema.len(), order_types.len());
         Self {
             data_type_kinds: schema,
@@ -212,7 +212,7 @@ mod tests {
             .zip_eq(pk_indices.into_iter())
             .collect::<Vec<_>>();
         let serializer = OrderedRowsSerializer::new(order_pairs);
-        let schema = vec![DataTypeKind::Varchar, DataTypeKind::Int16];
+        let schema = vec![DataType::Varchar, DataType::Int16];
         let row1 = Row(vec![Some(Utf8("abc".to_string())), Some(Int16(5))]);
         let row2 = Row(vec![Some(Utf8("abd".to_string())), Some(Int16(5))]);
         let row3 = Row(vec![Some(Utf8("abc".to_string())), Some(Int16(6))]);

@@ -4,7 +4,7 @@ use itertools::Itertools;
 use risingwave_common::array::data_chunk_iter::RowDeserializer;
 use risingwave_common::array::Row;
 use risingwave_common::error::Result;
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -30,10 +30,10 @@ pub struct AllOrNoneState<S: StateStore> {
     total_count: isize,
 
     /// Data types of the sort column
-    data_types: Vec<DataTypeKind>,
+    data_types: Vec<DataType>,
 
     /// Data types of primary keys
-    pk_data_types: Vec<DataTypeKind>,
+    pk_data_types: Vec<DataType>,
 
     /// Indices of primary keys
     pk_indices: Vec<usize>,
@@ -45,7 +45,7 @@ pub struct AllOrNoneState<S: StateStore> {
 impl<S: StateStore> AllOrNoneState<S> {
     pub fn new(
         keyspace: Keyspace<S>,
-        data_types: Vec<DataTypeKind>,
+        data_types: Vec<DataType>,
         pk_indices: Vec<usize>,
     ) -> Self {
         let pk_data_types = pk_indices.iter().map(|idx| data_types[*idx]).collect_vec();
@@ -202,7 +202,7 @@ mod tests {
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
         let mut managed_state = AllOrNoneState::new(
             keyspace,
-            vec![DataTypeKind::Int64, DataTypeKind::Int64],
+            vec![DataType::Int64, DataType::Int64],
             vec![0],
         );
         assert!(!managed_state.is_dirty());

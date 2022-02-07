@@ -33,7 +33,7 @@ pub type OrderedF64 = ordered_float::OrderedFloat<f64>;
 
 // TODO(eric): rename to `DataType` once migration done
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
-pub enum DataTypeKind {
+pub enum DataType {
     Boolean,
     Int16,
     Int32,
@@ -62,72 +62,72 @@ pub enum DataSize {
     Variable,
 }
 
-impl From<&ProstDataType> for DataTypeKind {
-    fn from(proto: &ProstDataType) -> DataTypeKind {
+impl From<&ProstDataType> for DataType {
+    fn from(proto: &ProstDataType) -> DataType {
         match proto.get_type_name().expect("unsupported type") {
-            TypeName::Int16 => DataTypeKind::Int16,
-            TypeName::Int32 => DataTypeKind::Int32,
-            TypeName::Int64 => DataTypeKind::Int64,
-            TypeName::Float => DataTypeKind::Float32,
-            TypeName::Double => DataTypeKind::Float64,
-            TypeName::Boolean => DataTypeKind::Boolean,
-            TypeName::Char => DataTypeKind::Char,
-            TypeName::Varchar => DataTypeKind::Varchar,
-            TypeName::Date => DataTypeKind::Date,
-            TypeName::Time => DataTypeKind::Time,
-            TypeName::Timestamp => DataTypeKind::Timestamp,
-            TypeName::Timestampz => DataTypeKind::Timestampz,
-            TypeName::Decimal => DataTypeKind::Decimal {
+            TypeName::Int16 => DataType::Int16,
+            TypeName::Int32 => DataType::Int32,
+            TypeName::Int64 => DataType::Int64,
+            TypeName::Float => DataType::Float32,
+            TypeName::Double => DataType::Float64,
+            TypeName::Boolean => DataType::Boolean,
+            TypeName::Char => DataType::Char,
+            TypeName::Varchar => DataType::Varchar,
+            TypeName::Date => DataType::Date,
+            TypeName::Time => DataType::Time,
+            TypeName::Timestamp => DataType::Timestamp,
+            TypeName::Timestampz => DataType::Timestampz,
+            TypeName::Decimal => DataType::Decimal {
                 prec: proto.precision,
                 scale: proto.scale,
             },
-            TypeName::Interval => DataTypeKind::Interval,
-            TypeName::Symbol => DataTypeKind::Varchar,
-            TypeName::Struct => DataTypeKind::Struct,
+            TypeName::Interval => DataType::Interval,
+            TypeName::Symbol => DataType::Varchar,
+            TypeName::Struct => DataType::Struct,
         }
     }
 }
 
-impl DataTypeKind {
+impl DataType {
     pub fn create_array_builder(&self, capacity: usize) -> Result<ArrayBuilderImpl> {
         use crate::array::*;
         Ok(match self {
-            DataTypeKind::Boolean => BoolArrayBuilder::new(capacity)?.into(),
-            DataTypeKind::Int16 => PrimitiveArrayBuilder::<i16>::new(capacity)?.into(),
-            DataTypeKind::Int32 => PrimitiveArrayBuilder::<i32>::new(capacity)?.into(),
-            DataTypeKind::Int64 => PrimitiveArrayBuilder::<i64>::new(capacity)?.into(),
-            DataTypeKind::Float32 => PrimitiveArrayBuilder::<OrderedF32>::new(capacity)?.into(),
-            DataTypeKind::Float64 => PrimitiveArrayBuilder::<OrderedF64>::new(capacity)?.into(),
-            DataTypeKind::Decimal { prec: _, scale: _ } => {
+            DataType::Boolean => BoolArrayBuilder::new(capacity)?.into(),
+            DataType::Int16 => PrimitiveArrayBuilder::<i16>::new(capacity)?.into(),
+            DataType::Int32 => PrimitiveArrayBuilder::<i32>::new(capacity)?.into(),
+            DataType::Int64 => PrimitiveArrayBuilder::<i64>::new(capacity)?.into(),
+            DataType::Float32 => PrimitiveArrayBuilder::<OrderedF32>::new(capacity)?.into(),
+            DataType::Float64 => PrimitiveArrayBuilder::<OrderedF64>::new(capacity)?.into(),
+            DataType::Decimal { prec: _, scale: _ } => {
                 DecimalArrayBuilder::new(capacity)?.into()
             }
-            DataTypeKind::Date => NaiveDateArrayBuilder::new(capacity)?.into(),
-            DataTypeKind::Char | DataTypeKind::Varchar => Utf8ArrayBuilder::new(capacity)?.into(),
-            DataTypeKind::Time => NaiveTimeArrayBuilder::new(capacity)?.into(),
-            DataTypeKind::Timestamp => NaiveDateTimeArrayBuilder::new(capacity)?.into(),
-            DataTypeKind::Timestampz => PrimitiveArrayBuilder::<i64>::new(capacity)?.into(),
-            DataTypeKind::Interval => IntervalArrayBuilder::new(capacity)?.into(),
-            DataTypeKind::Struct => StructArrayBuilder::new(capacity)?.into(),
+            DataType::Date => NaiveDateArrayBuilder::new(capacity)?.into(),
+            DataType::Char | DataType::Varchar => Utf8ArrayBuilder::new(capacity)?.into(),
+            DataType::Time => NaiveTimeArrayBuilder::new(capacity)?.into(),
+            DataType::Timestamp => NaiveDateTimeArrayBuilder::new(capacity)?.into(),
+            DataType::Timestampz => PrimitiveArrayBuilder::<i64>::new(capacity)?.into(),
+            DataType::Interval => IntervalArrayBuilder::new(capacity)?.into(),
+            DataType::Struct => StructArrayBuilder::new(capacity)?.into(),
         })
     }
 
     fn prost_type_name(&self) -> TypeName {
         match self {
-            DataTypeKind::Int16 => TypeName::Int16,
-            DataTypeKind::Int32 => TypeName::Int32,
-            DataTypeKind::Int64 => TypeName::Int64,
-            DataTypeKind::Float32 => TypeName::Float,
-            DataTypeKind::Float64 => TypeName::Double,
-            DataTypeKind::Boolean => TypeName::Boolean,
-            DataTypeKind::Char => TypeName::Char,
-            DataTypeKind::Varchar => TypeName::Varchar,
-            DataTypeKind::Date => TypeName::Date,
-            DataTypeKind::Time => TypeName::Time,
-            DataTypeKind::Timestamp => TypeName::Timestamp,
-            DataTypeKind::Timestampz => TypeName::Timestampz,
-            DataTypeKind::Decimal { .. } => TypeName::Decimal,
-            DataTypeKind::Interval => TypeName::Interval,
-            DataTypeKind::Struct => TypeName::Struct,
+            DataType::Int16 => TypeName::Int16,
+            DataType::Int32 => TypeName::Int32,
+            DataType::Int64 => TypeName::Int64,
+            DataType::Float32 => TypeName::Float,
+            DataType::Float64 => TypeName::Double,
+            DataType::Boolean => TypeName::Boolean,
+            DataType::Char => TypeName::Char,
+            DataType::Varchar => TypeName::Varchar,
+            DataType::Date => TypeName::Date,
+            DataType::Time => TypeName::Time,
+            DataType::Timestamp => TypeName::Timestamp,
+            DataType::Timestampz => TypeName::Timestampz,
+            DataType::Decimal { .. } => TypeName::Decimal,
+            DataType::Interval => TypeName::Interval,
+            DataType::Struct => TypeName::Struct,
         }
     }
 
@@ -142,26 +142,26 @@ impl DataTypeKind {
     pub fn data_size(&self) -> DataSize {
         use std::mem::size_of;
         match self {
-            DataTypeKind::Boolean => DataSize::Variable,
-            DataTypeKind::Int16 => DataSize::Fixed(size_of::<i16>()),
-            DataTypeKind::Int32 => DataSize::Fixed(size_of::<i32>()),
-            DataTypeKind::Int64 => DataSize::Fixed(size_of::<i64>()),
-            DataTypeKind::Float32 => DataSize::Fixed(size_of::<OrderedF32>()),
-            DataTypeKind::Float64 => DataSize::Fixed(size_of::<OrderedF64>()),
-            DataTypeKind::Decimal { .. } => DataSize::Fixed(16),
-            DataTypeKind::Char => DataSize::Variable,
-            DataTypeKind::Varchar => DataSize::Variable,
-            DataTypeKind::Date => DataSize::Fixed(size_of::<i32>()),
-            DataTypeKind::Time => DataSize::Fixed(size_of::<i64>()),
-            DataTypeKind::Timestamp => DataSize::Fixed(size_of::<i64>()),
-            DataTypeKind::Timestampz => DataSize::Fixed(size_of::<i64>()),
-            DataTypeKind::Interval => DataSize::Variable,
-            DataTypeKind::Struct => DataSize::Variable,
+            DataType::Boolean => DataSize::Variable,
+            DataType::Int16 => DataSize::Fixed(size_of::<i16>()),
+            DataType::Int32 => DataSize::Fixed(size_of::<i32>()),
+            DataType::Int64 => DataSize::Fixed(size_of::<i64>()),
+            DataType::Float32 => DataSize::Fixed(size_of::<OrderedF32>()),
+            DataType::Float64 => DataSize::Fixed(size_of::<OrderedF64>()),
+            DataType::Decimal { .. } => DataSize::Fixed(16),
+            DataType::Char => DataSize::Variable,
+            DataType::Varchar => DataSize::Variable,
+            DataType::Date => DataSize::Fixed(size_of::<i32>()),
+            DataType::Time => DataSize::Fixed(size_of::<i64>()),
+            DataType::Timestamp => DataSize::Fixed(size_of::<i64>()),
+            DataType::Timestampz => DataSize::Fixed(size_of::<i64>()),
+            DataType::Interval => DataSize::Variable,
+            DataType::Struct => DataSize::Variable,
         }
     }
 
-    pub fn decimal_default() -> DataTypeKind {
-        DataTypeKind::Decimal {
+    pub fn decimal_default() -> DataType {
+        DataType::Decimal {
             prec: DECIMAL_DEFAULT_PRECISION,
             scale: DECIMAL_DEFAULT_SCALE,
         }
@@ -321,7 +321,7 @@ pub fn serialize_datum_not_null_into(
 
 // TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions.
 pub fn deserialize_datum_from(
-    ty: &DataTypeKind,
+    ty: &DataType,
     deserializer: &mut memcomparable::Deserializer<impl Buf>,
 ) -> memcomparable::Result<Datum> {
     let null_tag = u8::deserialize(&mut *deserializer)?;
@@ -334,7 +334,7 @@ pub fn deserialize_datum_from(
 
 // TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions.
 pub fn deserialize_datum_not_null_from(
-    ty: DataTypeKind,
+    ty: DataType,
     deserializer: &mut memcomparable::Deserializer<impl Buf>,
 ) -> memcomparable::Result<Datum> {
     Ok(Some(ScalarImpl::deserialize(ty, deserializer)?))
@@ -587,10 +587,10 @@ impl ScalarImpl {
 
     /// Deserialize the scalar.
     pub fn deserialize(
-        ty: DataTypeKind,
+        ty: DataType,
         de: &mut memcomparable::Deserializer<impl Buf>,
     ) -> memcomparable::Result<Self> {
-        use DataTypeKind as Ty;
+        use DataType as Ty;
         Ok(match ty {
             Ty::Int16 => Self::Int16(i16::deserialize(de)?),
             Ty::Int32 => Self::Int32(i32::deserialize(de)?),
@@ -671,7 +671,7 @@ mod tests {
         fn deserialize(data: Vec<u8>) -> OrderedF32 {
             let mut deserializer = memcomparable::Deserializer::new(data.as_slice());
             let datum =
-                deserialize_datum_not_null_from(DataTypeKind::Float32, &mut deserializer).unwrap();
+                deserialize_datum_not_null_from(DataType::Float32, &mut deserializer).unwrap();
             datum.unwrap().try_into().unwrap()
         }
 

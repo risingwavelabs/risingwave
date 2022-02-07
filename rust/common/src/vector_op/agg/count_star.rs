@@ -5,12 +5,12 @@ use crate::vector_op::agg::aggregator::Aggregator;
 use crate::vector_op::agg::general_sorted_grouper::EqGroups;
 
 pub struct CountStar {
-    return_type: DataTypeKind,
+    return_type: DataType,
     result: usize,
 }
 
 impl CountStar {
-    pub fn new(return_type: DataTypeKind, result: usize) -> Self {
+    pub fn new(return_type: DataType, result: usize) -> Self {
         Self {
             return_type,
             result,
@@ -19,7 +19,7 @@ impl CountStar {
 }
 
 impl Aggregator for CountStar {
-    fn return_type(&self) -> DataTypeKind {
+    fn return_type(&self) -> DataType {
         self.return_type
     }
     fn update(&mut self, input: &DataChunk) -> Result<()> {

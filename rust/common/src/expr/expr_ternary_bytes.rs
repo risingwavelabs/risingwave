@@ -4,7 +4,7 @@ use std::marker::PhantomData;
 use crate::array::{I32Array, Utf8Array};
 use crate::expr::template::TernaryBytesExpression;
 use crate::expr::BoxedExpression;
-use crate::types::DataTypeKind;
+use crate::types::DataType;
 use crate::vector_op::replace::replace;
 use crate::vector_op::substr::substr_start_for;
 
@@ -12,7 +12,7 @@ pub fn new_substr_start_end(
     items: BoxedExpression,
     off: BoxedExpression,
     len: BoxedExpression,
-    return_type: DataTypeKind,
+    return_type: DataType,
 ) -> BoxedExpression {
     Box::new(TernaryBytesExpression::<Utf8Array, I32Array, I32Array, _> {
         expr_ia1: items,
@@ -28,7 +28,7 @@ pub fn new_replace_expr(
     s: BoxedExpression,
     from_str: BoxedExpression,
     to_str: BoxedExpression,
-    return_type: DataTypeKind,
+    return_type: DataType,
 ) -> BoxedExpression {
     Box::new(
         TernaryBytesExpression::<Utf8Array, Utf8Array, Utf8Array, _> {
@@ -92,12 +92,12 @@ mod tests {
             let is_negative_len = matches!(len, Some(ScalarImpl::Int32(len_i32)) if len_i32 < 0);
             let mut expr = new_substr_start_end(
                 Box::new(LiteralExpression::new(
-                    DataTypeKind::Char,
+                    DataType::Char,
                     Some(ScalarImpl::from(String::from(text))),
                 )),
-                Box::new(LiteralExpression::new(DataTypeKind::Int32, start)),
-                Box::new(LiteralExpression::new(DataTypeKind::Int32, len)),
-                DataTypeKind::Char,
+                Box::new(LiteralExpression::new(DataType::Int32, start)),
+                Box::new(LiteralExpression::new(DataType::Int32, len)),
+                DataType::Char,
             );
             let res = expr.eval(&DataChunk::new_dummy(1));
             if is_negative_len {
@@ -128,18 +128,18 @@ mod tests {
         for (text, pattern, replacement, expected) in cases {
             let mut expr = new_replace_expr(
                 Box::new(LiteralExpression::new(
-                    DataTypeKind::Char,
+                    DataType::Char,
                     Some(ScalarImpl::from(String::from(text))),
                 )),
                 Box::new(LiteralExpression::new(
-                    DataTypeKind::Char,
+                    DataType::Char,
                     Some(ScalarImpl::from(String::from(pattern))),
                 )),
                 Box::new(LiteralExpression::new(
-                    DataTypeKind::Char,
+                    DataType::Char,
                     Some(ScalarImpl::from(String::from(replacement))),
                 )),
-                DataTypeKind::Char,
+                DataType::Char,
             );
             let res = expr.eval(&DataChunk::new_dummy(1)).unwrap();
             assert_eq!(
