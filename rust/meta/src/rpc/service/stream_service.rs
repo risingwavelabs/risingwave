@@ -61,20 +61,8 @@ impl StreamManagerService for StreamServiceImpl {
             .await
             .map_err(|e| e.to_grpc_status())?;
 
-        // TODO: use table_fragments as create_materialized_view param.
         let table_fragments = TableFragments::new(TableId::from(&req.table_ref_id), graph);
-        let mut actors = table_fragments.actors();
-        let source_actor_ids = table_fragments.source_actor_ids();
-
-        match self
-            .sm
-            .create_materialized_view(
-                req.get_table_ref_id().map_err(tonic_err)?,
-                &mut actors,
-                source_actor_ids,
-            )
-            .await
-        {
+        match self.sm.create_materialized_view(table_fragments).await {
             Ok(()) => Ok(Response::new(CreateMaterializedViewResponse {
                 status: None,
             })),

@@ -6,6 +6,7 @@ use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::array::RwError;
 use risingwave_common::error::{Result, ToRwResult};
+use risingwave_pb::common::WorkerType;
 use risingwave_pb::data::Barrier;
 use risingwave_pb::stream_service::InjectBarrierRequest;
 use tokio::sync::mpsc::error::TryRecvError;
@@ -18,7 +19,7 @@ use self::command::CommandContext;
 use self::info::BarrierActorInfo;
 use crate::cluster::StoredClusterManager;
 use crate::manager::{EpochGeneratorRef, MetaSrvEnv, StreamClientsRef};
-use crate::stream::StreamMetaManagerRef;
+use crate::stream::FragmentManagerRef;
 
 mod command;
 mod info;
@@ -33,14 +34,14 @@ struct Notifier {
 }
 
 impl Notifier {
-    /// Nofify when we are about to send a barrier.
+    /// Notify when we are about to send a barrier.
     fn notify_to_send(&mut self) {
         if let Some(tx) = self.to_send.take() {
             tx.send(()).ok();
         }
     }
 
-    /// Nofify when we have collected a barrier from all actors.
+    /// Notify when we have collected a barrier from all actors.
     fn notify_collected(&mut self) {
         if let Some(tx) = self.collected.take() {
             tx.send(()).ok();
@@ -60,10 +61,9 @@ type Scheduled = (Command, Notifier);
 /// store, some actions like "drop materialized view" or "create mv on mv" must be done in barrier
 /// manager transactionally using [`Command`].
 pub struct BarrierManager {
-    #[allow(dead_code)]
     cluster_manager: Arc<StoredClusterManager>,
 
-    stream_meta_manager: StreamMetaManagerRef,
+    fragment_manager: FragmentManagerRef,
 
     epoch_generator: EpochGeneratorRef,
 
@@ -85,14 +85,14 @@ impl BarrierManager {
     pub fn new(
         env: MetaSrvEnv,
         cluster_manager: Arc<StoredClusterManager>,
-        stream_meta_manager: StreamMetaManagerRef,
+        fragment_manager: FragmentManagerRef,
         epoch_generator: EpochGeneratorRef,
     ) -> Self {
         let (tx, rx) = unbounded_channel();
 
         Self {
             cluster_manager,
-            stream_meta_manager,
+            fragment_manager,
             epoch_generator,
             clients: env.stream_clients_ref(),
             scheduled_barriers_tx: tx,
@@ -125,8 +125,12 @@ impl BarrierManager {
                 min_interval.tick().await;
             }
 
-            let all_actors = self.stream_meta_manager.load_all_actors().await?;
-            let info = BarrierActorInfo::resolve(all_actors);
+            let all_nodes = self
+                .cluster_manager
+                .list_worker_node(WorkerType::ComputeNode)?;
+            let all_actor_infos = self.fragment_manager.load_all_actors()?;
+
+            let info = BarrierActorInfo::resolve(&all_nodes, all_actor_infos);
 
             let (command_context, mut notifiers) = {
                 let (command, notifier) = scheduled.unwrap_or_else(
@@ -138,7 +142,7 @@ impl BarrierManager {
                     .chain(extra_notifiers.into_iter())
                     .collect_vec();
                 let context = CommandContext::new(
-                    self.stream_meta_manager.clone(),
+                    self.fragment_manager.clone(),
                     self.clients.clone(),
                     &info,
                     command,

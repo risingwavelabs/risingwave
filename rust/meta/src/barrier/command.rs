@@ -1,9 +1,9 @@
-use std::collections::HashSet;
+
 
 use futures::future::try_join_all;
-use itertools::Itertools;
 use log::debug;
 use risingwave_common::array::RwError;
+use risingwave_common::catalog::TableId;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::data::barrier::Mutation;
 use risingwave_pb::data::{NothingMutation, StopMutation};
@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 use super::info::BarrierActorInfo;
 use crate::manager::StreamClientsRef;
-use crate::stream::StreamMetaManagerRef;
+use crate::stream::FragmentManagerRef;
 
 /// [`Command`] is the action of [`BarrierManager`]. For different commands, we'll build different
 /// barriers to send, and may do different stuffs after the barrier is collected.
@@ -38,7 +38,7 @@ impl Command {
 /// [`CommandContext`] is used for generating barrier and doing post stuffs according to the given
 /// [`Command`].
 pub struct CommandContext<'a> {
-    stream_meta_manager: StreamMetaManagerRef,
+    fragment_manager: FragmentManagerRef,
 
     clients: StreamClientsRef,
 
@@ -51,13 +51,13 @@ pub struct CommandContext<'a> {
 
 impl<'a> CommandContext<'a> {
     pub fn new(
-        stream_meta_manager: StreamMetaManagerRef,
+        fragment_manager: FragmentManagerRef,
         clients: StreamClientsRef,
         info: &'a BarrierActorInfo,
         command: Command,
     ) -> Self {
         Self {
-            stream_meta_manager,
+            fragment_manager,
             clients,
             info,
             command,
@@ -72,9 +72,12 @@ impl CommandContext<'_> {
             Command::Plain(mutation) => mutation.clone(),
 
             Command::DropMaterializedView(table_id) => {
-                let table_actors = self.stream_meta_manager.get_table_actors(table_id).await?;
+                let table_actors = self
+                    .fragment_manager
+                    .get_table_actor_ids(&TableId::from(&Some(table_id.clone())))
+                    .await?;
                 Mutation::Stop(StopMutation {
-                    actors: table_actors.actor_ids,
+                    actors: table_actors,
                 })
             }
         };
@@ -87,31 +90,25 @@ impl CommandContext<'_> {
         match &self.command {
             Command::Plain(_) => {}
 
-            Command::DropMaterializedView(table_id) => {
-                let table_actors = self.stream_meta_manager.get_table_actors(table_id).await?;
-                let actor_ids: HashSet<_> = table_actors.actor_ids.into_iter().collect();
-
+            Command::DropMaterializedView(table_ref_id) => {
                 // Tell compute nodes to drop actors.
-                let futures = self.info.node_map.iter().map(|(node_id, node)| {
-                    let node_actor_ids = self
-                        .info
-                        .actor_map
-                        .get(node_id)
-                        .unwrap()
-                        .iter()
-                        .map(|a| a.actor_id)
-                        .filter(|id| actor_ids.contains(id))
-                        .collect_vec();
+                let table_id = TableId::from(&Some(table_ref_id.clone()));
+                let node_actors = self
+                    .fragment_manager
+                    .get_table_node_actors(&table_id)
+                    .await?;
+                let futures = node_actors.iter().map(|(node_id, actors)| {
+                    let node = self.info.node_map.get(node_id).unwrap();
                     let request_id = Uuid::new_v4().to_string();
 
                     async move {
                         let mut client = self.clients.get(node).await?;
 
-                        debug!("[{}]drop actors: {:?}", request_id, node_actor_ids);
+                        debug!("[{}]drop actors: {:?}", request_id, actors.clone());
                         let request = DropActorsRequest {
                             request_id,
-                            table_ref_id: Some(table_id.clone()),
-                            actor_ids: node_actor_ids,
+                            table_ref_id: Some(table_ref_id.to_owned()),
+                            actor_ids: actors.to_owned(),
                         };
                         client.drop_actors(request).await.to_rw_result()?;
 
@@ -121,8 +118,10 @@ impl CommandContext<'_> {
 
                 try_join_all(futures).await?;
 
-                // Drop actor info in meta store.
-                self.stream_meta_manager.drop_table_actors(table_id).await?;
+                // Drop fragment info in meta store.
+                self.fragment_manager
+                    .drop_table_fragments(&table_id)
+                    .await?;
             }
         }
 
