@@ -14,13 +14,13 @@ use tower_http::add_extension::AddExtensionLayer;
 use tower_http::cors::{self, CorsLayer};
 
 use crate::cluster::StoredClusterManager;
-use crate::stream::{StoredStreamMetaManager, StreamMetaManager};
+use crate::stream::FragmentManager;
 
 #[derive(Clone)]
 pub struct DashboardService {
     pub dashboard_addr: SocketAddr,
     pub cluster_manager: Arc<StoredClusterManager>,
-    pub stream_meta_manager: Arc<StoredStreamMetaManager>,
+    pub fragment_manager: Arc<FragmentManager>,
     pub has_test_data: Arc<AtomicBool>,
 }
 
@@ -74,11 +74,22 @@ mod handlers {
     pub async fn list_actors(
         Extension(srv): Extension<Service>,
     ) -> Result<Json<Vec<ActorLocation>>> {
-        let actors = srv
-            .stream_meta_manager
-            .load_all_actors()
-            .await
+        use risingwave_pb::common::WorkerType;
+
+        // TODO: use new method instead of building `ActorLocation`.
+        let node_actors = srv.fragment_manager.load_all_node_actors().map_err(err)?;
+        let nodes = srv
+            .cluster_manager
+            .list_worker_node(WorkerType::ComputeNode)
             .map_err(err)?;
+        let actors = nodes
+            .iter()
+            .map(|node| ActorLocation {
+                node: Some(node.clone()),
+                actors: node_actors.get(&node.id).unwrap().clone(),
+            })
+            .collect::<Vec<_>>();
+
         Ok(Json(actors))
     }
 }

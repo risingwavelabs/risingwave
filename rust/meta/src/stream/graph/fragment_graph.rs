@@ -1,6 +1,9 @@
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
+use risingwave_common::error::Result;
+use risingwave_common::{ensure, gen_error};
+use risingwave_pb::meta::table_fragments::fragment::FragmentType;
 use risingwave_pb::stream_plan::StreamNode;
 
 /// [`StreamFragment`] represent a fragment node in fragment DAG.
@@ -12,8 +15,8 @@ pub struct StreamFragment {
     /// root stream node in this fragment.
     node: Arc<StreamNode>,
 
-    /// mark whether this fragment is of table source.
-    is_table_source_fragment: bool,
+    /// type of this fragment.
+    fragment_type: FragmentType,
 
     /// mark whether this fragment should only have one actor.
     is_singleton: bool,
@@ -24,7 +27,7 @@ impl StreamFragment {
         Self {
             fragment_id,
             node,
-            is_table_source_fragment: false,
+            fragment_type: FragmentType::Others,
             is_singleton: false,
         }
     }
@@ -37,12 +40,8 @@ impl StreamFragment {
         self.node.clone()
     }
 
-    pub fn set_as_table_source_fragment(&mut self) {
-        self.is_table_source_fragment = true;
-    }
-
-    pub fn is_table_source_fragment(&self) -> bool {
-        self.is_table_source_fragment
+    pub fn set_fragment_type(&mut self, fragment_type: FragmentType) {
+        self.fragment_type = fragment_type;
     }
 
     pub fn is_singleton(&self) -> bool {
@@ -106,5 +105,13 @@ impl StreamFragmentGraph {
 
     pub fn get_fragment_by_id(&self, fragment_id: u32) -> Option<StreamFragment> {
         self.fragments.get(&fragment_id).cloned()
+    }
+
+    pub fn get_fragment_type_by_id(&self, fragment_id: u32) -> Result<FragmentType> {
+        ensure!(
+            self.fragments.contains_key(&fragment_id),
+            "fragment id not exist!"
+        );
+        Ok(self.fragments.get(&fragment_id).unwrap().fragment_type)
     }
 }
