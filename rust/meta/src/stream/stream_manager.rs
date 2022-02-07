@@ -44,18 +44,22 @@ impl StreamManager {
         }
     }
 
-    fn search_chain_table_ref_ids(&self, stream_node: &StreamNode) -> Vec<TableRefId> {
-        let mut table_ref_ids = vec![];
+    /// Lookup [`table_ref_id`] required by [`ChainNode`]. After fragmented, there is at most one
+    /// [`ChainNode`] per actor.
+    fn search_chain_table_ref_ids(&self, stream_node: &StreamNode) -> Option<TableRefId> {
         if let Node::ChainNode(chain) = stream_node.node.as_ref().unwrap() {
-            table_ref_ids.push(chain.table_ref_id.clone().unwrap());
+            return Some(chain.table_ref_id.clone().unwrap());
         }
         for child in &stream_node.input {
-            table_ref_ids.extend(self.search_chain_table_ref_ids(child));
+            if let Some(table_ref_id) = self.search_chain_table_ref_ids(child) {
+                return Some(table_ref_id);
+            }
         }
-        table_ref_ids
+        None
     }
 
     async fn lookup_actor_ids(&self, table_ref_ids: Vec<TableRefId>) -> Result<HashMap<i32, u32>> {
+        // TODO(MrCroxx): We can get all table related actor ids in one request.
         let mut result = HashMap::default();
         for table_ref_id in table_ref_ids {
             // TODO(MrCroxx): A create materialized view plan will be split into multiple stages.
@@ -94,16 +98,47 @@ impl StreamManager {
     pub async fn create_materialized_view(
         &self,
         table_id: &TableRefId,
-        actors: &mut [StreamActor],
+        mut actors: Vec<StreamActor>,
         source_actor_ids: Vec<u32>,
     ) -> Result<()> {
+        // TODO(MrCroxx): refine this mess after mv on mv can RUN.
+
+        // actor id (with chain node) => table ref id required by chain node
+        let chain_actors = actors
+            .iter()
+            .map(|actor| {
+                (
+                    actor.actor_id,
+                    self.search_chain_table_ref_ids(actor.nodes.as_ref().unwrap()),
+                )
+            })
+            .filter(|(_, o)| o.is_some())
+            .map(|(actor_id, o)| (actor_id, o.unwrap()))
+            .collect_vec();
+        // table id => actor id that table locates
+        let table_actor_map = self
+            .lookup_actor_ids(
+                chain_actors
+                    .iter()
+                    .map(|(_, table_ref_id)| table_ref_id.clone())
+                    .collect_vec(),
+            )
+            .await?;
         // Fill `upstream_actor_id` of [`ChainNode`].
-        for actor in actors.iter_mut() {
-            let stream_node = actor.nodes.as_mut().unwrap();
-            let table_ref_ids = self.search_chain_table_ref_ids(stream_node);
-            let table_actor_map = self.lookup_actor_ids(table_ref_ids).await?;
-            self.update_chain_upstream_actor_ids(stream_node, &table_actor_map);
+        for actor in &mut actors {
+            self.update_chain_upstream_actor_ids(actor.nodes.as_mut().unwrap(), &table_actor_map);
         }
+        let up_down_ids = chain_actors
+            .iter()
+            .map(|(actor_id, table_ref_id)| {
+                (
+                    *table_actor_map
+                        .get(&table_ref_id.table_id)
+                        .expect("table id not exists"),
+                    *actor_id,
+                )
+            })
+            .collect_vec();
 
         // Divide all actors into source and non-source actors.
         let actor_ids = actors.iter().map(|a| a.actor_id).collect::<Vec<_>>();
@@ -140,7 +175,7 @@ impl StreamManager {
             .map(|f| (f.actor_id, f.clone()))
             .collect::<HashMap<u32, StreamActor>>();
 
-        let actor_info = nodes
+        let actor_infos = nodes
             .iter()
             .zip_eq(actor_ids.clone())
             .map(|(n, f)| ActorInfo {
@@ -149,6 +184,26 @@ impl StreamManager {
             })
             .collect::<Vec<_>>();
 
+        let actor_info_map = actor_infos
+            .iter()
+            .map(|info| (info.actor_id, info.clone()))
+            .collect::<HashMap<u32, ActorInfo>>();
+
+        let dispatches = up_down_ids
+            .iter()
+            .map(|(up_id, down_id)| {
+                (
+                    *up_id,
+                    vec![actor_info_map
+                        .get(down_id)
+                        .expect("downstream actor info not exist")
+                        .clone()],
+                )
+            })
+            .collect::<HashMap<u32, Vec<ActorInfo>>>();
+
+        let mut actor_locations = Vec::with_capacity(actors.len());
+
         for (node_id, actors) in node_actors_map {
             let node = node_map.get(&node_id).unwrap();
 
@@ -156,7 +211,7 @@ impl StreamManager {
             client
                 .to_owned()
                 .broadcast_actor_info_table(BroadcastActorInfoTableRequest {
-                    info: actor_info.clone(),
+                    info: actor_infos.clone(),
                 })
                 .await
                 .to_rw_result_with(format!("failed to connect to {}", node_id))?;
@@ -188,22 +243,22 @@ impl StreamManager {
                 .await
                 .to_rw_result_with(format!("failed to connect to {}", node_id))?;
 
-            self.smm
-                .add_actors_to_node(&ActorLocation {
-                    node: Some(node.clone()),
-                    actors: stream_actors,
-                })
-                .await?;
+            actor_locations.push(ActorLocation {
+                node: Some(node.clone()),
+                actors: stream_actors,
+            });
         }
 
-        self.smm
-            .add_table_actors(
-                &table_id.clone(),
-                &TableActors {
+        self.barrier_manager_ref
+            .run_command(Command::CreateMaterializedView {
+                table_id: table_id.clone(),
+                table_actors: TableActors {
                     table_ref_id: Some(table_id.clone()),
                     actor_ids,
                 },
-            )
+                actor_locations,
+                dispatches,
+            })
             .await?;
 
         Ok(())
@@ -393,9 +448,12 @@ mod tests {
             let stream_manager = StreamManager::new(
                 env.clone(),
                 meta_manager.clone(),
-                barrier_manager_ref,
+                barrier_manager_ref.clone(),
                 cluster_manager.clone(),
             );
+
+            // TODO: join barrier service back to local thread
+            tokio::spawn(async move { barrier_manager_ref.run().await.unwrap() });
 
             Ok(Self {
                 stream_manager,
@@ -421,7 +479,7 @@ mod tests {
             schema_ref_id: None,
             table_id: 0,
         };
-        let mut actors = (0..5)
+        let actors = (0..5)
             .map(|i| StreamActor {
                 actor_id: i,
                 // A dummy node to avoid panic.
@@ -446,7 +504,7 @@ mod tests {
 
         services
             .stream_manager
-            .create_materialized_view(&table_ref_id, &mut actors, vec![])
+            .create_materialized_view(&table_ref_id, actors.clone(), vec![])
             .await?;
 
         for actor in actors.clone() {
@@ -558,12 +616,12 @@ mod tests {
 
         services
             .stream_manager
-            .create_materialized_view(&table_ref_id_1, &mut [actor_1], vec![])
+            .create_materialized_view(&table_ref_id_1, vec![actor_1], vec![])
             .await?;
 
         services
             .stream_manager
-            .create_materialized_view(&table_ref_id_2, &mut [actor_2], vec![])
+            .create_materialized_view(&table_ref_id_2, vec![actor_2], vec![])
             .await?;
 
         let stored_actor_2 = services

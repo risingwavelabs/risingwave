@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use futures::future::try_join_all;
 use itertools::Itertools;
+use log::trace;
 use risingwave_common::array::RwError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::data::Barrier;
@@ -153,6 +154,10 @@ impl BarrierManager {
             let collect_futures = info.node_map.iter().filter_map(|(node_id, node)| {
                 let actor_ids_to_send = info.actor_ids_to_send(node_id).collect_vec();
                 let actor_ids_to_collect = info.actor_ids_to_collect(node_id).collect_vec();
+
+                trace!("mutation: {:#?}", mutation);
+                trace!("to send: {:?}", actor_ids_to_send);
+                trace!("to collect: {:?}", actor_ids_to_collect);
 
                 if actor_ids_to_collect.is_empty() || actor_ids_to_send.is_empty() {
                     // No need to send barrier for this node.
