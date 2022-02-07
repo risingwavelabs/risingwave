@@ -20,7 +20,7 @@ use risingwave_common::array::{ArrayImpl, DataChunk, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::data::barrier::Mutation as ProstMutation;
 use risingwave_pb::data::stream_message::StreamMessage;
@@ -65,7 +65,7 @@ pub trait ExprFn = Fn(&DataChunk) -> Result<Bitmap> + Send + Sync + 'static;
 pub enum Mutation {
     Stop(HashSet<u32>),
     UpdateOutputs(HashMap<u32, Vec<ActorInfo>>),
-    AddOutput(u32, Vec<ActorInfo>),
+    AddOutput(HashMap<u32, Vec<ActorInfo>>),
 }
 
 #[derive(Debug, Clone)]
@@ -139,9 +139,9 @@ impl Barrier {
                 Some(Mutation::Stop(actors)) => Some(ProstMutation::Stop(StopMutation {
                     actors: actors.iter().cloned().collect::<Vec<_>>(),
                 })),
-                Some(Mutation::UpdateOutputs(update)) => {
+                Some(Mutation::UpdateOutputs(updates)) => {
                     Some(ProstMutation::Update(UpdateMutation {
-                        actors: update
+                        actors: updates
                             .iter()
                             .map(|(&f, actors)| {
                                 (
@@ -154,14 +154,19 @@ impl Barrier {
                             .collect(),
                     }))
                 }
-                Some(Mutation::AddOutput(actor_id, downstream_actors)) => {
-                    Some(ProstMutation::Add(AddMutation {
-                        actor_id: *actor_id,
-                        downstream_actors: Some(MutationActors {
-                            info: downstream_actors.clone(),
-                        }),
-                    }))
-                }
+                Some(Mutation::AddOutput(adds)) => Some(ProstMutation::Add(AddMutation {
+                    actors: adds
+                        .iter()
+                        .map(|(&id, actors)| {
+                            (
+                                id,
+                                MutationActors {
+                                    info: actors.clone(),
+                                },
+                            )
+                        })
+                        .collect(),
+                })),
             },
         }
     }
@@ -184,9 +189,14 @@ impl Barrier {
                     )
                     .into(),
                 ),
-                ProstMutation::Add(add) => Some(
-                    Mutation::AddOutput(add.actor_id, add.get_downstream_actors()?.info.clone())
-                        .into(),
+                ProstMutation::Add(adds) => Some(
+                    Mutation::AddOutput(
+                        adds.actors
+                            .iter()
+                            .map(|(&id, actors)| (id, actors.get_info().clone()))
+                            .collect::<HashMap<u32, Vec<ActorInfo>>>(),
+                    )
+                    .into(),
                 ),
             },
             span: tracing::Span::none(),
@@ -272,7 +282,7 @@ pub trait Executor: Send + Debug + 'static {
 
 pub type PkIndices = Vec<usize>;
 pub type PkIndicesRef<'a> = &'a [usize];
-pub type PkDataTypes = SmallVec<[DataTypeKind; 1]>;
+pub type PkDataTypes = SmallVec<[DataType; 1]>;
 
 /// Get inputs by given `pk_indices` from `columns`.
 pub fn pk_input_arrays<'a>(pk_indices: PkIndicesRef, columns: &'a [Column]) -> Vec<&'a ArrayImpl> {

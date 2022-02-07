@@ -10,6 +10,7 @@ use crate::expr::pg_sleep::PgSleepExpression;
 use crate::expr::template::UnaryNullableExpression;
 use crate::expr::BoxedExpression;
 use crate::types::*;
+use crate::vector_op::arithmetic_op::general_neg;
 use crate::vector_op::cast::*;
 use crate::vector_op::cmp::{is_false, is_not_false, is_not_true, is_true};
 use crate::vector_op::conjunction;
@@ -97,9 +98,49 @@ macro_rules! gen_cast {
   };
 }
 
+/// This macro helps to create neg expression.
+/// It receives all the types that impl `CheckedNeg` trait.
+/// * `$child`: child expression
+/// * `$ret`: return expression
+/// * `$input`: input type
+macro_rules! gen_neg_impl {
+    ($child:expr, $ret:expr, $($input:tt),*) => {
+        match $child.return_type() {
+            $(
+                $input! {type_match_pattern} => {
+                    Box::new(UnaryExpression::<$input! {type_array}, $input! {type_array}, _> {
+                        expr_ia1: $child,
+                        return_type: $ret,
+                        func: general_neg,
+                        _phantom: PhantomData,
+                    })
+                }
+            ),*
+            _ => {
+                unimplemented!("Neg is not supported on {:?}", $child.return_type())
+            }
+        }
+    };
+}
+
+macro_rules! gen_neg {
+    ($child:tt, $ret:tt) => {
+        gen_neg_impl! {
+            $child,
+            $ret,
+            int16,
+            int32,
+            int64,
+            float32,
+            float64,
+            decimal
+        }
+    };
+}
+
 pub fn new_unary_expr(
     expr_type: ProstType,
-    return_type: DataTypeKind,
+    return_type: DataType,
     child_expr: BoxedExpression,
 ) -> BoxedExpression {
     use crate::expr::data_types::*;
@@ -107,7 +148,7 @@ pub fn new_unary_expr(
     match (expr_type, return_type, child_expr.return_type()) {
         // FIXME: We can not unify char and varchar because they are different in PG while share the
         // same logical type (String type) in our system (#2414).
-        (ProstType::Cast, DataTypeKind::Date, DataTypeKind::Char) => {
+        (ProstType::Cast, DataType::Date, DataType::Char) => {
             Box::new(UnaryExpression::<Utf8Array, NaiveDateArray, _> {
                 expr_ia1: child_expr,
                 return_type,
@@ -115,7 +156,7 @@ pub fn new_unary_expr(
                 _phantom: PhantomData,
             })
         }
-        (ProstType::Cast, DataTypeKind::Time, DataTypeKind::Char) => {
+        (ProstType::Cast, DataType::Time, DataType::Char) => {
             Box::new(UnaryExpression::<Utf8Array, NaiveTimeArray, _> {
                 expr_ia1: child_expr,
                 return_type,
@@ -123,7 +164,7 @@ pub fn new_unary_expr(
                 _phantom: PhantomData,
             })
         }
-        (ProstType::Cast, DataTypeKind::Timestamp, DataTypeKind::Char) => {
+        (ProstType::Cast, DataType::Timestamp, DataType::Char) => {
             Box::new(UnaryExpression::<Utf8Array, NaiveDateTimeArray, _> {
                 expr_ia1: child_expr,
                 return_type,
@@ -131,7 +172,7 @@ pub fn new_unary_expr(
                 _phantom: PhantomData,
             })
         }
-        (ProstType::Cast, DataTypeKind::Timestampz, DataTypeKind::Char) => {
+        (ProstType::Cast, DataType::Timestampz, DataType::Char) => {
             Box::new(UnaryExpression::<Utf8Array, I64Array, _> {
                 expr_ia1: child_expr,
                 return_type,
@@ -139,7 +180,7 @@ pub fn new_unary_expr(
                 _phantom: PhantomData,
             })
         }
-        (ProstType::Cast, DataTypeKind::Boolean, DataTypeKind::Char) => {
+        (ProstType::Cast, DataType::Boolean, DataType::Char) => {
             Box::new(UnaryExpression::<Utf8Array, BoolArray, _> {
                 expr_ia1: child_expr,
                 return_type,
@@ -147,7 +188,7 @@ pub fn new_unary_expr(
                 _phantom: PhantomData,
             })
         }
-        (ProstType::Cast, DataTypeKind::Decimal { .. }, DataTypeKind::Char) => {
+        (ProstType::Cast, DataType::Decimal { .. }, DataType::Char) => {
             Box::new(UnaryExpression::<Utf8Array, DecimalArray, _> {
                 expr_ia1: child_expr,
                 return_type,
@@ -155,7 +196,7 @@ pub fn new_unary_expr(
                 _phantom: PhantomData,
             })
         }
-        (ProstType::Cast, DataTypeKind::Float32, DataTypeKind::Char) => {
+        (ProstType::Cast, DataType::Float32, DataType::Char) => {
             Box::new(UnaryExpression::<Utf8Array, F32Array, _> {
                 expr_ia1: child_expr,
                 return_type,
@@ -163,7 +204,7 @@ pub fn new_unary_expr(
                 _phantom: PhantomData,
             })
         }
-        (ProstType::Cast, DataTypeKind::Float64, DataTypeKind::Char) => {
+        (ProstType::Cast, DataType::Float64, DataType::Char) => {
             Box::new(UnaryExpression::<Utf8Array, F64Array, _> {
                 expr_ia1: child_expr,
                 return_type,
@@ -171,7 +212,7 @@ pub fn new_unary_expr(
                 _phantom: PhantomData,
             })
         }
-        (ProstType::Cast, DataTypeKind::Int16, DataTypeKind::Char) => {
+        (ProstType::Cast, DataType::Int16, DataType::Char) => {
             Box::new(UnaryExpression::<Utf8Array, I16Array, _> {
                 expr_ia1: child_expr,
                 return_type,
@@ -179,7 +220,7 @@ pub fn new_unary_expr(
                 _phantom: PhantomData,
             })
         }
-        (ProstType::Cast, DataTypeKind::Int32, DataTypeKind::Char) => {
+        (ProstType::Cast, DataType::Int32, DataType::Char) => {
             Box::new(UnaryExpression::<Utf8Array, I32Array, _> {
                 expr_ia1: child_expr,
                 return_type,
@@ -187,7 +228,7 @@ pub fn new_unary_expr(
                 _phantom: PhantomData,
             })
         }
-        (ProstType::Cast, DataTypeKind::Int64, DataTypeKind::Char) => {
+        (ProstType::Cast, DataType::Int64, DataType::Char) => {
             Box::new(UnaryExpression::<Utf8Array, I64Array, _> {
                 expr_ia1: child_expr,
                 return_type,
@@ -195,7 +236,7 @@ pub fn new_unary_expr(
                 _phantom: PhantomData,
             })
         }
-        (ProstType::Cast, DataTypeKind::Char, DataTypeKind::Char) => {
+        (ProstType::Cast, DataType::Char, DataType::Char) => {
             Box::new(UnaryExpression::<Utf8Array, Utf8Array, _> {
                 expr_ia1: child_expr,
                 return_type,
@@ -203,7 +244,7 @@ pub fn new_unary_expr(
                 _phantom: PhantomData,
             })
         }
-        (ProstType::Cast, DataTypeKind::Varchar, DataTypeKind::Char) => {
+        (ProstType::Cast, DataType::Varchar, DataType::Char) => {
             Box::new(UnaryExpression::<Utf8Array, Utf8Array, _> {
                 expr_ia1: child_expr,
                 return_type,
@@ -256,7 +297,10 @@ pub fn new_unary_expr(
             func: upper,
             _phantom: PhantomData,
         }),
-        (ProstType::PgSleep, _, DataTypeKind::Decimal { .. }) => {
+        (ProstType::Neg, _, _) => {
+            gen_neg! { child_expr, return_type }
+        }
+        (ProstType::PgSleep, _, DataType::Decimal { .. }) => {
             Box::new(PgSleepExpression::new(child_expr))
         }
         (expr, ret, child) => {
@@ -265,7 +309,7 @@ pub fn new_unary_expr(
     }
 }
 
-pub fn new_length_default(expr_ia1: BoxedExpression, return_type: DataTypeKind) -> BoxedExpression {
+pub fn new_length_default(expr_ia1: BoxedExpression, return_type: DataType) -> BoxedExpression {
     Box::new(UnaryExpression::<Utf8Array, I64Array, _> {
         expr_ia1,
         return_type,
@@ -274,7 +318,7 @@ pub fn new_length_default(expr_ia1: BoxedExpression, return_type: DataTypeKind) 
     })
 }
 
-pub fn new_trim_expr(expr_ia1: BoxedExpression, return_type: DataTypeKind) -> BoxedExpression {
+pub fn new_trim_expr(expr_ia1: BoxedExpression, return_type: DataType) -> BoxedExpression {
     Box::new(UnaryBytesExpression::<Utf8Array, _> {
         expr_ia1,
         return_type,
@@ -283,7 +327,7 @@ pub fn new_trim_expr(expr_ia1: BoxedExpression, return_type: DataTypeKind) -> Bo
     })
 }
 
-pub fn new_ltrim_expr(expr_ia1: BoxedExpression, return_type: DataTypeKind) -> BoxedExpression {
+pub fn new_ltrim_expr(expr_ia1: BoxedExpression, return_type: DataType) -> BoxedExpression {
     Box::new(UnaryBytesExpression::<Utf8Array, _> {
         expr_ia1,
         return_type,
@@ -292,7 +336,7 @@ pub fn new_ltrim_expr(expr_ia1: BoxedExpression, return_type: DataTypeKind) -> B
     })
 }
 
-pub fn new_rtrim_expr(expr_ia1: BoxedExpression, return_type: DataTypeKind) -> BoxedExpression {
+pub fn new_rtrim_expr(expr_ia1: BoxedExpression, return_type: DataType) -> BoxedExpression {
     Box::new(UnaryBytesExpression::<Utf8Array, _> {
         expr_ia1,
         return_type,
@@ -353,6 +397,46 @@ mod tests {
             return_type: Some(return_type),
             rex_node: Some(RexNode::FuncCall(FunctionCall {
                 children: vec![make_input_ref(0, TypeName::Int16)],
+            })),
+        };
+        let mut vec_executor = build_from_prost(&expr).unwrap();
+        let res = vec_executor.eval(&data_chunk).unwrap();
+        let arr: &I32Array = res.as_ref().into();
+        for (idx, item) in arr.iter().enumerate() {
+            let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
+            assert_eq!(x, item);
+        }
+    }
+
+    #[test]
+    fn test_neg() {
+        let mut input = Vec::<Option<i32>>::new();
+        let mut target = Vec::<Option<i32>>::new();
+
+        input.push(Some(1));
+        input.push(Some(0));
+        input.push(Some(-1));
+
+        target.push(Some(-1));
+        target.push(Some(0));
+        target.push(Some(1));
+
+        let col1 = Column::new(
+            I32Array::from_slice(&input)
+                .map(|x| Arc::new(x.into()))
+                .unwrap(),
+        );
+        let data_chunk = DataChunk::builder().columns(vec![col1]).build();
+        let return_type = DataType {
+            type_name: TypeName::Int32 as i32,
+            is_nullable: false,
+            ..Default::default()
+        };
+        let expr = ExprNode {
+            expr_type: Type::Neg as i32,
+            return_type: Some(return_type),
+            rex_node: Some(RexNode::FuncCall(FunctionCall {
+                children: vec![make_input_ref(0, TypeName::Int32)],
             })),
         };
         let mut vec_executor = build_from_prost(&expr).unwrap();

@@ -4,24 +4,24 @@ use itertools::Itertools;
 
 use crate::array::{ArrayImpl, DataChunk};
 use crate::error::Result;
-use crate::types::{serialize_datum_ref_into, DataTypeKind};
+use crate::types::{serialize_datum_ref_into, DataType};
 use crate::util::sort_util::{OrderPair, OrderType};
 
 struct EncodedColumn(pub Vec<Vec<u8>>);
 
 /// This function is used to check whether we can perform encoding on this type.
 /// TODO: based on `memcomparable`, we may support more data type in the future.
-pub fn is_type_encodable(t: DataTypeKind) -> bool {
+pub fn is_type_encodable(t: DataType) -> bool {
     matches!(
         t,
-        DataTypeKind::Boolean
-            | DataTypeKind::Int16
-            | DataTypeKind::Int32
-            | DataTypeKind::Int64
-            | DataTypeKind::Float32
-            | DataTypeKind::Float64
-            | DataTypeKind::Varchar
-            | DataTypeKind::Char
+        DataType::Boolean
+            | DataType::Int16
+            | DataType::Int32
+            | DataType::Int64
+            | DataType::Float32
+            | DataType::Float64
+            | DataType::Varchar
+            | DataType::Char
     )
 }
 

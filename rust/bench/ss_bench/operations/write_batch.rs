@@ -10,38 +10,35 @@ use crate::utils::workload::{get_epoch, Workload};
 use crate::{Opts, WorkloadType};
 
 pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
-    let batch = Workload::new(opts, WorkloadType::GetSeq, None).batch;
-    store
-        .ingest_batch(batch.clone(), get_epoch())
-        .await
-        .unwrap();
-
-    // generate queried point get key
-    let key_num = (opts.iterations - opts.iterations % opts.concurrency_num) as usize;
-    let mut get_keys = (0..key_num)
+    let mut batches = (0..opts.write_batches)
         .into_iter()
-        .map(|i| batch[i].0.clone())
+        .map(|i| Workload::new(opts, WorkloadType::WriteBatch, Some(i as u64)).batch)
         .collect_vec();
+    let batches_len = batches.len();
 
-    // partitioned these keys for each concurrency
-    let mut grouped_keys = vec![vec![]; opts.concurrency_num as usize];
-    for (i, key) in get_keys.drain(..).enumerate() {
-        grouped_keys[i % opts.concurrency_num as usize].push(key);
+    // partitioned these batches for each concurrency
+    let mut grouped_batches = vec![vec![]; opts.concurrency_num as usize];
+    for (i, batch) in batches.drain(..).enumerate() {
+        grouped_batches[i % opts.concurrency_num as usize].push(batch);
     }
 
-    // actual point get process
-    let get = |keys: Vec<Bytes>| async {
+    // actual batch ingestion process
+    let ingest_batch = |batches: Vec<Vec<(Bytes, Option<Bytes>)>>| async {
         let mut latencies = vec![];
-        for key in keys {
+        for batch in batches {
             let start = Instant::now();
-            store.get(&key).await.unwrap();
+            store.ingest_batch(batch, get_epoch()).await.unwrap();
             let time_nano = start.elapsed().as_nanos();
             latencies.push(time_nano);
         }
         latencies
     };
+
     let total_start = Instant::now();
-    let futures = grouped_keys.drain(..).map(|keys| get(keys)).collect_vec();
+    let futures = grouped_batches
+        .drain(..)
+        .map(|batches| ingest_batch(batches))
+        .collect_vec();
     let latencies_list: Vec<Vec<u128>> = future::join_all(futures).await;
     let total_time_nano = total_start.elapsed().as_nanos();
 
@@ -53,13 +50,14 @@ pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
         }
     }
     let stat = LatencyStat::new(latencies);
-    let qps = key_num as u128 * 1_000_000_000 / total_time_nano as u128;
+    // calculate operation per second
+    let ops = opts.batch_size as u128 * 1_000_000_000 * batches_len as u128 / total_time_nano;
 
     println!(
         "
-    getseq
+    writebatch
       {}
-      QPS: {}",
-        stat, qps
+      KV ingestion OPS: {}",
+        stat, ops
     );
 }

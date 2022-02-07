@@ -3,25 +3,25 @@ use std::sync::Arc;
 use crate::array::{ArrayBuilder, ArrayImpl, ArrayRef, BoolArrayBuilder, DataChunk};
 use crate::error::Result;
 use crate::expr::{BoxedExpression, Expression};
-use crate::types::DataTypeKind;
+use crate::types::DataType;
 
 #[derive(Debug)]
 pub struct IsNullExpression {
     child: BoxedExpression,
-    return_type: DataTypeKind,
+    return_type: DataType,
 }
 
 #[derive(Debug)]
 pub struct IsNotNullExpression {
     child: BoxedExpression,
-    return_type: DataTypeKind,
+    return_type: DataType,
 }
 
 impl IsNullExpression {
     pub(crate) fn new(child: BoxedExpression) -> Self {
         Self {
             child,
-            return_type: DataTypeKind::Boolean,
+            return_type: DataType::Boolean,
         }
     }
 }
@@ -30,13 +30,13 @@ impl IsNotNullExpression {
     pub(crate) fn new(child: BoxedExpression) -> Self {
         Self {
             child,
-            return_type: DataTypeKind::Boolean,
+            return_type: DataType::Boolean,
         }
     }
 }
 
 impl Expression for IsNullExpression {
-    fn return_type(&self) -> DataTypeKind {
+    fn return_type(&self) -> DataType {
         self.return_type
     }
 
@@ -53,7 +53,7 @@ impl Expression for IsNullExpression {
 }
 
 impl Expression for IsNotNullExpression {
-    fn return_type(&self) -> DataTypeKind {
+    fn return_type(&self) -> DataType {
         self.return_type
     }
 
@@ -79,7 +79,7 @@ mod tests {
     use crate::error::Result;
     use crate::expr::expr_is_null::{IsNotNullExpression, IsNullExpression};
     use crate::expr::{BoxedExpression, InputRefExpression};
-    use crate::types::{DataTypeKind, Decimal};
+    use crate::types::{DataType, Decimal};
 
     fn do_test(mut expr: BoxedExpression, expected_result: Vec<bool>) -> Result<()> {
         let input_array = {
@@ -107,7 +107,7 @@ mod tests {
     #[test]
     fn test_is_null() -> Result<()> {
         let expr = IsNullExpression::new(Box::new(InputRefExpression::new(
-            DataTypeKind::decimal_default(),
+            DataType::decimal_default(),
             0,
         )));
         do_test(Box::new(expr), vec![false, false, true]).unwrap();
@@ -117,7 +117,7 @@ mod tests {
     #[test]
     fn test_is_not_null() -> Result<()> {
         let expr = IsNotNullExpression::new(Box::new(InputRefExpression::new(
-            DataTypeKind::decimal_default(),
+            DataType::decimal_default(),
             0,
         )));
         do_test(Box::new(expr), vec![true, true, false]).unwrap();

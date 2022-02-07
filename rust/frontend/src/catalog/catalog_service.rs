@@ -305,7 +305,7 @@ impl CatalogConnector {
 #[cfg(test)]
 mod tests {
 
-    use risingwave_common::types::DataTypeKind;
+    use risingwave_common::types::DataType;
     use risingwave_meta::test_utils::LocalMeta;
     use risingwave_pb::plan::ColumnDesc;
 
@@ -313,7 +313,7 @@ mod tests {
         CatalogConnector, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
     };
 
-    fn create_test_table(test_table_name: &str, columns: Vec<(String, DataTypeKind)>) -> Table {
+    fn create_test_table(test_table_name: &str, columns: Vec<(String, DataType)>) -> Table {
         let column_descs = columns
             .iter()
             .map(|c| ColumnDesc {
@@ -358,8 +358,8 @@ mod tests {
         let table = create_test_table(
             test_table_name,
             vec![
-                ("v1".to_string(), DataTypeKind::Int32),
-                ("v2".to_string(), DataTypeKind::Int32),
+                ("v1".to_string(), DataType::Int32),
+                ("v2".to_string(), DataType::Int32),
             ],
         );
         catalog_mgr

@@ -7,7 +7,7 @@ use super::BoxedExpression;
 use crate::array::{BoolArray, DecimalArray, F32Array, F64Array, I16Array, I32Array, I64Array};
 use crate::error::Result;
 use crate::expr::template::BinaryNullableExpression;
-use crate::types::DataTypeKind;
+use crate::types::DataType;
 use crate::vector_op::conjunction::{and, or};
 
 // TODO: consider implement it using generic function.
@@ -43,23 +43,23 @@ fn stream_null_by_row_count<T1>(l: Option<i64>, r: Option<T1>) -> Result<Option<
 
 pub fn new_nullable_binary_expr(
     expr_type: Type,
-    ret: DataTypeKind,
+    ret: DataType,
     l: BoxedExpression,
     r: BoxedExpression,
 ) -> BoxedExpression {
     match expr_type {
         Type::StreamNullByRowCount => match l.return_type() {
-            DataTypeKind::Int64 => match r.return_type() {
-                DataTypeKind::Boolean => gen_stream_null_by_row_count_expr!(l, r, ret, BoolArray),
-                DataTypeKind::Int16 => gen_stream_null_by_row_count_expr!(l, r, ret, I16Array),
-                DataTypeKind::Int32 => gen_stream_null_by_row_count_expr!(l, r, ret, I32Array),
-                DataTypeKind::Int64 => gen_stream_null_by_row_count_expr!(l, r, ret, I64Array),
-                DataTypeKind::Float32 => gen_stream_null_by_row_count_expr!(l, r, ret, F32Array),
-                DataTypeKind::Float64 => gen_stream_null_by_row_count_expr!(l, r, ret, F64Array),
-                DataTypeKind::Decimal { .. } => {
+            DataType::Int64 => match r.return_type() {
+                DataType::Boolean => gen_stream_null_by_row_count_expr!(l, r, ret, BoolArray),
+                DataType::Int16 => gen_stream_null_by_row_count_expr!(l, r, ret, I16Array),
+                DataType::Int32 => gen_stream_null_by_row_count_expr!(l, r, ret, I32Array),
+                DataType::Int64 => gen_stream_null_by_row_count_expr!(l, r, ret, I64Array),
+                DataType::Float32 => gen_stream_null_by_row_count_expr!(l, r, ret, F32Array),
+                DataType::Float64 => gen_stream_null_by_row_count_expr!(l, r, ret, F64Array),
+                DataType::Decimal { .. } => {
                     gen_stream_null_by_row_count_expr!(l, r, ret, DecimalArray)
                 }
-                DataTypeKind::Date => gen_stream_null_by_row_count_expr!(l, r, ret, DecimalArray),
+                DataType::Date => gen_stream_null_by_row_count_expr!(l, r, ret, DecimalArray),
                 _ => {
                     unimplemented!(
                         "The output type isn't supported by stream_null_by_row_count function."

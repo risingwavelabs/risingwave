@@ -8,7 +8,7 @@ use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
 use risingwave_common::types::{
-    deserialize_datum_not_null_from, serialize_datum_not_null_into, DataTypeKind, Datum, ScalarImpl,
+    deserialize_datum_not_null_from, serialize_datum_not_null_into, DataType, Datum, ScalarImpl,
 };
 use risingwave_common::util::ordered::OrderedArraysSerializer;
 use risingwave_storage::write_batch::WriteBatch;
@@ -84,6 +84,15 @@ impl<S: StateStore> ManagedStringAggState<S> {
     pub fn get_row_count(&self) -> usize {
         self.total_count
     }
+
+    #[allow(dead_code)]
+    pub fn clear_cache(&mut self) {
+        assert!(
+            !self.is_dirty(),
+            "cannot clear cache while string agg state is dirty"
+        );
+        self.cache.clear();
+    }
 }
 
 impl<S: StateStore> ManagedStringAggState<S> {
@@ -97,7 +106,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
             // We only need to deserialize the value, and keep the key as bytes.
             let mut deserializer = memcomparable::Deserializer::new(&raw_value[..]);
             let value =
-                deserialize_datum_not_null_from(DataTypeKind::Char, &mut deserializer)?.unwrap();
+                deserialize_datum_not_null_from(DataType::Char, &mut deserializer)?.unwrap();
             let value_string: String = value.into_utf8();
             self.cache.insert(
                 raw_key,

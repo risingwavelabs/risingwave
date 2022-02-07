@@ -125,13 +125,13 @@ impl SledMetaStore {
     /// refer to `Operation::Put`
     async fn put_impl(&self, kvs: &[(Key, KeyValueVersion, Value)]) -> Result<()> {
         let mut trx = self.get_transaction();
-        for (key, version, value) in kvs.iter() {
-            trx.add_operations(vec![Operation::Put(
-                key.to_vec(),
-                value.to_vec(),
-                Some(*version),
-            )]);
-        }
+        trx.add_operations(
+            kvs.iter()
+                .map(|(key, version, value)| {
+                    Operation::Put(key.to_owned(), value.to_owned(), Some(*version))
+                })
+                .collect_vec(),
+        );
         self.commit_transaction(&mut trx).await
     }
 
@@ -666,64 +666,6 @@ mod tests {
         let result = meta_store.get_impl_flatten(&[("key2".as_bytes().to_vec(), None, false)])?;
         assert!(result.is_empty());
 
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_sled_transaction() -> Result<()> {
-        let sled_root = tempfile::tempdir().unwrap();
-        let meta_store = SledMetaStore::new(Some(sled_root.path()))?;
-
-        let mut trx = meta_store.get_transaction();
-        trx.add_operations(vec![
-            Operation::Put(
-                "key1".as_bytes().to_vec(),
-                "value1".as_bytes().to_vec(),
-                Some(10),
-            ),
-            Operation::Put(
-                "key11".as_bytes().to_vec(),
-                "value11".as_bytes().to_vec(),
-                Some(10),
-            ),
-        ]);
-        meta_store.commit_transaction(&mut trx).await?;
-        let mut result =
-            meta_store.get_impl_flatten(&[("key1".as_bytes().to_vec(), None, true)])?;
-        result.sort_by_key(|kv| kv.key().clone());
-        // the operations are executed
-        assert_eq!(
-            vec![
-                KeyValue::new("key1".as_bytes().to_vec(), "value1".as_bytes().to_vec(), 10),
-                KeyValue::new(
-                    "key11".as_bytes().to_vec(),
-                    "value11".as_bytes().to_vec(),
-                    10
-                )
-            ],
-            result
-        );
-
-        let mut trx = meta_store.get_transaction();
-        trx.add_preconditions(vec![Precondition::KeyExists {
-            key: "key111".as_bytes().to_vec(),
-            version: None,
-        }]);
-        trx.add_operations(vec![Operation::Put(
-            "key1111".as_bytes().to_vec(),
-            "value1111".as_bytes().to_vec(),
-            Some(15),
-        )]);
-
-        let expected = ErrorCode::InternalError(String::from("transaction aborted"));
-        assert_eq!(
-            meta_store
-                .commit_transaction(&mut trx)
-                .await
-                .unwrap_err()
-                .inner(),
-            &expected
-        );
         Ok(())
     }
 }

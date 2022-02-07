@@ -3,9 +3,6 @@ use std::time::Instant;
 use bytes::Bytes;
 use futures::future;
 use itertools::Itertools;
-use rand::distributions::Uniform;
-use rand::prelude::{Distribution, StdRng};
-use rand::SeedableRng;
 use risingwave_storage::StateStore;
 
 use crate::utils::latency_stat::LatencyStat;
@@ -13,20 +10,18 @@ use crate::utils::workload::{get_epoch, Workload};
 use crate::{Opts, WorkloadType};
 
 pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
-    let batch = Workload::new(opts, WorkloadType::GetRandom, None).batch;
+    let batch = Workload::new(opts, WorkloadType::GetSeq, None).batch;
     store
         .ingest_batch(batch.clone(), get_epoch())
         .await
         .unwrap();
 
     // generate queried point get key
-    let mut rng = StdRng::seed_from_u64(233);
-    let range = Uniform::from(0..opts.kvs_per_batch as usize);
-    let key_num = (opts.iterations - opts.iterations % opts.concurrency_num) as usize;
-    let mut get_keys = (0..key_num)
+    let mut get_keys = (0..opts.reads as usize)
         .into_iter()
-        .map(|_| batch[range.sample(&mut rng)].0.clone())
+        .map(|i| batch[i].0.clone())
         .collect_vec();
+    let get_keys_len = get_keys.len();
 
     // partitioned these keys for each concurrency
     let mut grouped_keys = vec![vec![]; opts.concurrency_num as usize];
@@ -58,11 +53,11 @@ pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
         }
     }
     let stat = LatencyStat::new(latencies);
-    let qps = key_num as u128 * 1_000_000_000 / total_time_nano as u128;
+    let qps = get_keys_len as u128 * 1_000_000_000 / total_time_nano as u128;
 
     println!(
         "
-    getrandom
+    getseq
       {}
       QPS: {}",
         stat, qps

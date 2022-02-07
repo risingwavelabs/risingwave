@@ -5,12 +5,12 @@ use std::time::Duration;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, DataChunk, PrimitiveArrayBuilder, Row};
 use risingwave_common::catalog::{SchemaId, TableId};
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 use risingwave_common::util::downcast_arc;
 use risingwave_common::util::sort_util::OrderType as SortType;
 use risingwave_pb::common::{ActorInfo, HostAddress};
 use risingwave_pb::data::data_type::TypeName;
-use risingwave_pb::data::DataType;
+use risingwave_pb::data::DataType as ProstDataType;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type::InputRef;
 use risingwave_pb::expr::{ExprNode, InputRefExpr};
@@ -34,8 +34,8 @@ use risingwave_storage::{Table, TableColumnDesc};
 use crate::executor::{Barrier, MViewTable, Mutation};
 use crate::task::{StreamManager, StreamTaskEnv, LOCAL_TEST_ADDR};
 
-fn make_int32_type_pb() -> DataType {
-    DataType {
+fn make_int32_type_pb() -> ProstDataType {
+    ProstDataType {
         type_name: TypeName::Int32 as i32,
         ..Default::default()
     }
@@ -72,7 +72,7 @@ async fn test_stream_mv_proto() {
         rex_node: Some(RexNode::InputRef(InputRefExpr { column_idx: 0 })),
     };
     let column_desc = ColumnDesc {
-        column_type: Some(DataType {
+        column_type: Some(ProstDataType {
             type_name: TypeName::Int32 as i32,
             ..Default::default()
         }),
@@ -99,7 +99,7 @@ async fn test_stream_mv_proto() {
             column_orders: vec![ColumnOrder {
                 order_type: OrderType::Ascending as i32,
                 input_ref: Some(InputRefExpr { column_idx: 0 }),
-                return_type: Some(DataType {
+                return_type: Some(ProstDataType {
                     type_name: TypeName::Int32 as i32,
                     ..Default::default()
                 }),
@@ -124,8 +124,8 @@ async fn test_stream_mv_proto() {
     let source_manager = Arc::new(MemSourceManager::new());
     let table_id = TableId::default();
     let table_columns = vec![
-        TableColumnDesc::new_without_name(0, DataTypeKind::Int32),
-        TableColumnDesc::new_without_name(1, DataTypeKind::Int32),
+        TableColumnDesc::new_without_name(0, DataType::Int32),
+        TableColumnDesc::new_without_name(1, DataType::Int32),
     ];
     let table = table_manager
         .create_table(&table_id, table_columns)

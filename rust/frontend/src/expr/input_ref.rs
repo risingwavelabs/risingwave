@@ -1,29 +1,29 @@
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 
-use super::{BoundExpr, BoundExprImpl};
+use super::{Expr, ExprImpl};
 use crate::expr::ExprType;
 #[derive(Clone)]
-pub struct BoundInputRef {
+pub struct InputRef {
     index: usize,
-    data_type: DataTypeKind,
+    data_type: DataType,
 }
-impl BoundInputRef {
-    pub fn new(index: usize, data_type: DataTypeKind) -> Self {
-        BoundInputRef { index, data_type }
+impl InputRef {
+    pub fn new(index: usize, data_type: DataType) -> Self {
+        InputRef { index, data_type }
     }
     pub fn get_expr_type(&self) -> ExprType {
         ExprType::InputRef
     }
 }
-impl BoundExpr for BoundInputRef {
-    fn return_type(&self) -> DataTypeKind {
+impl Expr for InputRef {
+    fn return_type(&self) -> DataType {
         self.data_type
     }
-    fn bound_expr(self) -> BoundExprImpl {
-        BoundExprImpl::InputRef(Box::new(self))
+    fn bound_expr(self) -> ExprImpl {
+        ExprImpl::InputRef(Box::new(self))
     }
 }
-impl std::fmt::Debug for BoundInputRef {
+impl std::fmt::Debug for InputRef {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self.index)
     }

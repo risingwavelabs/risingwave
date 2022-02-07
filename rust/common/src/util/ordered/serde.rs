@@ -8,7 +8,7 @@ use super::OrderedRow;
 use crate::array::{ArrayImpl, Row};
 use crate::error::Result;
 use crate::types::{
-    deserialize_datum_from, serialize_datum_into, serialize_datum_ref_into, DataTypeKind, Datum,
+    deserialize_datum_from, serialize_datum_into, serialize_datum_ref_into, DataType, Datum,
 };
 use crate::util::sort_util::OrderType;
 
@@ -74,23 +74,23 @@ impl OrderedRowsSerializer {
 /// Deserializer of the `Row`.
 #[derive(Clone)]
 pub struct OrderedRowDeserializer {
-    data_type_kinds: Vec<DataTypeKind>,
+    data_types: Vec<DataType>,
     order_types: Vec<OrderType>,
 }
 
 impl OrderedRowDeserializer {
-    pub fn new(schema: Vec<DataTypeKind>, order_types: Vec<OrderType>) -> Self {
+    pub fn new(schema: Vec<DataType>, order_types: Vec<OrderType>) -> Self {
         assert_eq!(schema.len(), order_types.len());
         Self {
-            data_type_kinds: schema,
+            data_types: schema,
             order_types,
         }
     }
 
     pub fn deserialize(&self, data: &[u8]) -> Result<OrderedRow> {
-        let mut values = Vec::with_capacity(self.data_type_kinds.len());
+        let mut values = Vec::with_capacity(self.data_types.len());
         let mut deserializer = memcomparable::Deserializer::new(data);
-        for (data_type, order_type) in self.data_type_kinds.iter().zip_eq(self.order_types.iter()) {
+        for (data_type, order_type) in self.data_types.iter().zip_eq(self.order_types.iter()) {
             deserializer.set_reverse(*order_type == OrderType::Descending);
             let datum = deserialize_datum_from(data_type, &mut deserializer)?;
             let datum = match order_type {
@@ -212,7 +212,7 @@ mod tests {
             .zip_eq(pk_indices.into_iter())
             .collect::<Vec<_>>();
         let serializer = OrderedRowsSerializer::new(order_pairs);
-        let schema = vec![DataTypeKind::Varchar, DataTypeKind::Int16];
+        let schema = vec![DataType::Varchar, DataType::Int16];
         let row1 = Row(vec![Some(Utf8("abc".to_string())), Some(Int16(5))]);
         let row2 = Row(vec![Some(Utf8("abd".to_string())), Some(Int16(5))]);
         let row3 = Row(vec![Some(Utf8("abc".to_string())), Some(Int16(6))]);

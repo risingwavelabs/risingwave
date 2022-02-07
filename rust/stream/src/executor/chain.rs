@@ -7,6 +7,7 @@ use super::{Executor, Message, PkIndicesRef};
 
 #[derive(Debug)]
 enum ChainState {
+    Init,
     ReadingSnapshot,
     ReadingMView,
 }
@@ -34,7 +35,7 @@ impl ChainExecutor {
         Self {
             snapshot,
             mview,
-            state: ChainState::ReadingSnapshot,
+            state: ChainState::Init,
             schema,
             column_idxs,
         }
@@ -58,30 +59,48 @@ impl ChainExecutor {
         }
     }
 
+    /// Read next message from mview side.
     async fn read_mview(&mut self) -> Result<Message> {
         let msg = self.mview.next().await?;
         self.mapping(msg)
     }
+
+    /// Read next message from snapshot side and update chain state if snapshot side reach EOF.
     async fn read_snapshot(&mut self) -> Result<Message> {
-        let msg = self.snapshot.next().await?;
-        self.mapping(msg)
+        let msg = self.snapshot.next().await;
+        match msg {
+            Err(e) => {
+                // TODO: Refactor this once we find a better way to know the upstream is done.
+                if let ErrorCode::EOF = e.inner() {
+                    self.state = ChainState::ReadingMView;
+                    return self.read_mview().await;
+                }
+                Err(e)
+            }
+            Ok(msg) => self.mapping(msg),
+        }
     }
-    async fn switch_and_read_mview(&mut self) -> Result<Message> {
-        self.state = ChainState::ReadingMView;
-        return self.read_mview().await;
+
+    async fn init(&mut self) -> Result<Message> {
+        match self.read_mview().await? {
+            // The first message should be a barrier with conf change from mview side.
+            // Swallow it and get its barrier for snapshot read.
+            Message::Chunk(_) => Err(ErrorCode::InternalError(
+                "the first message received by chain node should be a barrier".to_owned(),
+            )
+            .into()),
+            Message::Barrier(_barrier) => {
+                // TODO(MrCroxx): take the epoch of the barrier.
+                self.state = ChainState::ReadingSnapshot;
+                return self.read_snapshot().await;
+            }
+        }
     }
+
     async fn next_inner(&mut self) -> Result<Message> {
         match &self.state {
-            ChainState::ReadingSnapshot => match self.read_snapshot().await {
-                Err(e) => {
-                    // TODO: Refactor this once we find a better way to know the upstream is done.
-                    if let ErrorCode::EOF = e.inner() {
-                        return self.switch_and_read_mview().await;
-                    }
-                    Err(e)
-                }
-                Ok(msg) => Ok(msg),
-            },
+            ChainState::Init => self.init().await,
+            ChainState::ReadingSnapshot => self.read_snapshot().await,
             ChainState::ReadingMView => self.read_mview().await,
         }
     }
@@ -121,7 +140,7 @@ mod test {
 
     use super::ChainExecutor;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::{Executor, Message, PkIndices, PkIndicesRef};
+    use crate::executor::{Barrier, Executor, Message, PkIndices, PkIndicesRef};
 
     #[derive(Debug)]
     struct MockSnapshot(MockSource);
@@ -199,20 +218,22 @@ mod test {
                 ),
             ],
         ));
-        let second = Box::new(MockSource::with_chunks(
+
+        let second = Box::new(MockSource::with_messages(
             schema.clone(),
             PkIndices::new(),
             vec![
-                StreamChunk::new(
+                Message::Barrier(Barrier::new(0)),
+                Message::Chunk(StreamChunk::new(
                     vec![Op::Insert],
                     vec![column_nonnull! { I32Array, [3] }],
                     None,
-                ),
-                StreamChunk::new(
+                )),
+                Message::Chunk(StreamChunk::new(
                     vec![Op::Insert],
                     vec![column_nonnull! { I32Array, [4] }],
                     None,
-                ),
+                )),
             ],
         ));
 

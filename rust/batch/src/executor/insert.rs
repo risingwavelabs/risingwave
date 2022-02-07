@@ -7,7 +7,7 @@ use risingwave_common::array::{
 };
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_source::{Source, SourceImpl, SourceManagerRef, SourceWriter};
 
@@ -34,7 +34,7 @@ impl InsertExecutor {
             child,
             executed: false,
             schema: Schema {
-                fields: vec![Field::unnamed(DataTypeKind::Int64)],
+                fields: vec![Field::unnamed(DataType::Int64)],
             },
             identity: "InsertExecutor".to_string(),
         }
@@ -191,7 +191,7 @@ mod tests {
     use risingwave_common::array::{Array, I64Array};
     use risingwave_common::catalog::{Field, Schema, SchemaId};
     use risingwave_common::column_nonnull;
-    use risingwave_common::types::DataTypeKind;
+    use risingwave_common::types::DataType;
     use risingwave_common::util::downcast_arc;
     use risingwave_source::{
         MemSourceManager, SourceManager, StreamSourceReader, TableV2ReaderContext,
@@ -213,8 +213,8 @@ mod tests {
         // Schema for mock executor.
         let schema = Schema {
             fields: vec![
-                Field::unnamed(DataTypeKind::Int64),
-                Field::unnamed(DataTypeKind::Int64),
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
             ],
         };
         let mut mock_executor = MockExecutor::new(schema.clone());
@@ -222,9 +222,9 @@ mod tests {
         // Schema of first table
         let schema = Schema {
             fields: vec![
-                Field::unnamed(DataTypeKind::decimal_default()),
-                Field::unnamed(DataTypeKind::decimal_default()),
-                Field::unnamed(DataTypeKind::decimal_default()),
+                Field::unnamed(DataType::decimal_default()),
+                Field::unnamed(DataType::decimal_default()),
+                Field::unnamed(DataType::decimal_default()),
             ],
         };
 
@@ -260,13 +260,13 @@ mod tests {
             child: Box::new(mock_executor),
             executed: false,
             schema: Schema {
-                fields: vec![Field::unnamed(DataTypeKind::Int64)],
+                fields: vec![Field::unnamed(DataType::Int64)],
             },
             identity: "InsertExecutor".to_string(),
         };
         insert_executor.open().await.unwrap();
         let fields = &insert_executor.schema().fields;
-        assert_eq!(fields[0].data_type, DataTypeKind::Int64);
+        assert_eq!(fields[0].data_type, DataType::Int64);
         let result = insert_executor.next().await?.unwrap();
         insert_executor.close().await.unwrap();
         assert_eq!(
@@ -334,13 +334,13 @@ mod tests {
             child: Box::new(mock_executor),
             executed: false,
             schema: Schema {
-                fields: vec![Field::unnamed(DataTypeKind::Int64)],
+                fields: vec![Field::unnamed(DataType::Int64)],
             },
             identity: "InsertExecutor".to_string(),
         };
         insert_executor.open().await.unwrap();
         let fields = &insert_executor.schema().fields;
-        assert_eq!(fields[0].data_type, DataTypeKind::Int64);
+        assert_eq!(fields[0].data_type, DataType::Int64);
         let result = insert_executor.next().await?.unwrap();
         insert_executor.close().await.unwrap();
         assert_eq!(
@@ -388,7 +388,7 @@ mod tests {
             child: Box::new(mock_executor),
             executed: false,
             schema: Schema {
-                fields: vec![Field::unnamed(DataTypeKind::Int64)],
+                fields: vec![Field::unnamed(DataType::Int64)],
             },
             identity: "InsertExecutor".to_string(),
         };
@@ -402,7 +402,7 @@ mod tests {
 
         insert_executor.open().await.unwrap();
         let fields = &insert_executor.schema().fields;
-        assert_eq!(fields[0].data_type, DataTypeKind::Int64);
+        assert_eq!(fields[0].data_type, DataType::Int64);
         let result = insert_executor.next().await?.unwrap();
         insert_executor.close().await.unwrap();
         assert_eq!(
@@ -471,8 +471,8 @@ mod tests {
         // Schema for mock executor.
         let schema = Schema {
             fields: vec![
-                Field::unnamed(DataTypeKind::Int64),
-                Field::unnamed(DataTypeKind::Int64),
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
             ],
         };
         let mut mock_executor = MockExecutor::new(schema.clone());
@@ -480,9 +480,9 @@ mod tests {
         // Schema of first table
         let schema = Schema {
             fields: vec![
-                Field::unnamed(DataTypeKind::decimal_default()),
-                Field::unnamed(DataTypeKind::decimal_default()),
-                Field::unnamed(DataTypeKind::decimal_default()),
+                Field::unnamed(DataType::decimal_default()),
+                Field::unnamed(DataType::decimal_default()),
+                Field::unnamed(DataType::decimal_default()),
             ],
         };
 
@@ -516,7 +516,7 @@ mod tests {
         );
         insert_executor.open().await.unwrap();
         let fields = &insert_executor.schema().fields;
-        assert_eq!(fields[0].data_type, DataTypeKind::Int64);
+        assert_eq!(fields[0].data_type, DataType::Int64);
         let result = insert_executor.next().await?.unwrap();
         insert_executor.close().await.unwrap();
         assert_eq!(

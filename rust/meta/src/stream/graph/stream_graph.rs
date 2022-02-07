@@ -53,6 +53,7 @@ impl StreamActorBuilder {
         })
     }
 
+    #[allow(dead_code)]
     pub fn set_broadcast_dispatcher(&mut self) {
         self.dispatcher = Some(Dispatcher {
             r#type: DispatcherType::Broadcast as i32,
@@ -82,20 +83,14 @@ impl StreamActorBuilder {
 /// [`StreamGraphBuilder`] build a stream graph with root with id `root_actor`. It will do some
 /// injection here to achieve dependencies. See `build_inner` for more details.
 pub struct StreamGraphBuilder {
-    root_actor: u32,
     actor_builders: HashMap<u32, StreamActorBuilder>,
 }
 
 impl StreamGraphBuilder {
     pub fn new() -> Self {
         Self {
-            root_actor: 0,
             actor_builders: HashMap::new(),
         }
-    }
-
-    pub fn set_root_actor(&mut self, id: u32) {
-        self.root_actor = id;
     }
 
     /// Insert new generated actor.

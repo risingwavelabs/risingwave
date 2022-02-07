@@ -1,5 +1,4 @@
 use std::cmp::max;
-use std::ops::Deref;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
@@ -7,8 +6,9 @@ use async_recursion::async_recursion;
 use risingwave_common::array::RwError;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
+use risingwave_pb::stream_plan::dispatcher::DispatcherType;
 use risingwave_pb::stream_plan::stream_node::Node;
-use risingwave_pb::stream_plan::{StreamActor, StreamNode};
+use risingwave_pb::stream_plan::{Dispatcher, StreamActor, StreamNode};
 
 use crate::manager::{IdCategory, IdGeneratorManagerRef};
 use crate::stream::graph::{
@@ -66,41 +66,64 @@ impl StreamFragmenter {
 
     /// Generate fragment DAG from input streaming plan by their dependency.
     fn generate_fragment_graph(&mut self, stream_node: &StreamNode) -> Result<()> {
-        let root_fragment = self.new_stream_fragment(Arc::new(stream_node.clone()));
+        let mut root_fragment = self.new_stream_fragment(Arc::new(stream_node.clone()));
+        let (is_singleton, is_source) = self.build_fragment(&root_fragment, stream_node)?;
+        root_fragment.set_singleton(is_singleton);
+        if is_source {
+            root_fragment.set_as_table_source_fragment();
+        }
         self.fragment_graph.add_root_fragment(root_fragment.clone());
-        self.build_fragment(&root_fragment, stream_node)?;
         Ok(())
     }
 
     /// Build new fragment and link dependency with its parent fragment.
+    /// Return two flags.
+    /// The first flag indicates that whether the parent should be singleton.
+    /// The second flag indicates that whether the parent is a source.
+    // TODO: Should we store the concurrency in StreamFragment directly?
     fn build_fragment(
         &mut self,
         parent_fragment: &StreamFragment,
         stream_node: &StreamNode,
-    ) -> Result<()> {
+    ) -> Result<(bool, bool)> {
+        let mut is_singleton = false;
+        let mut is_source = false;
         for node in stream_node.get_input() {
-            match node.get_node()? {
-                Node::ExchangeNode(_) => {
-                    let child_fragment = self.new_stream_fragment(Arc::new(node.clone()));
+            let (is_singleton1, is_source1) = match node.get_node()? {
+                Node::ExchangeNode(exchange_node) => {
+                    let mut child_fragment = self.new_stream_fragment(Arc::new(node.clone()));
+                    let (child_is_singleton, child_is_source) =
+                        self.build_fragment(&child_fragment, node)?;
+                    child_fragment.set_singleton(child_is_singleton);
+                    if child_is_source {
+                        child_fragment.set_as_table_source_fragment();
+                    }
                     self.fragment_graph.add_fragment(child_fragment.clone());
                     self.fragment_graph.link_child(
                         parent_fragment.get_fragment_id(),
                         child_fragment.get_fragment_id(),
                     );
-                    self.build_fragment(&child_fragment, node)?;
+                    (
+                        exchange_node.get_dispatcher()?.get_type()? == DispatcherType::Simple,
+                        false,
+                    )
                 }
                 Node::SourceNode(_) => {
-                    let _res = self
-                        .fragment_graph
-                        .set_source_fragment_by_id(parent_fragment.get_fragment_id());
-                    self.build_fragment(parent_fragment, node)?;
+                    let (parent_is_singleton, _) = self.build_fragment(parent_fragment, node)?;
+                    (parent_is_singleton, true)
                 }
-                _ => {
-                    self.build_fragment(parent_fragment, node)?;
+                Node::TopNNode(_) => {
+                    let (_, child_is_source) = self.build_fragment(parent_fragment, node)?;
+                    // TODO: Force singleton for TopN as a workaround.
+                    // We should implement two phase TopN.
+                    (true, child_is_source)
                 }
-            }
+                _ => self.build_fragment(parent_fragment, node)?,
+            };
+            is_singleton |= is_singleton1;
+            is_source |= is_source1;
         }
-        Ok(())
+        Ok((is_singleton, is_source))
     }
 
     fn new_stream_fragment(&self, node: Arc<StreamNode>) -> StreamFragment {
@@ -126,32 +149,29 @@ impl StreamFragmenter {
         let root_fragment = self.fragment_graph.get_root_fragment();
         let mut current_actor_ids = vec![];
         let current_fragment_id = current_fragment.get_fragment_id();
-        if current_fragment_id == root_fragment.get_fragment_id() {
-            // Fragment on the root, generate an actor without dispatcher.
-            let actor_id = self.gen_actor_id(1).await?;
-            let mut actor_builder = StreamActorBuilder::new(actor_id, current_fragment.get_node());
-            // Set `Broadcast` dispatcher for root fragment (means no dispatcher).
-            actor_builder.set_broadcast_dispatcher();
-
-            // Add actor. No dependency needed.
-            current_actor_ids.push(actor_id);
-            self.stream_graph.add_actor(actor_builder);
-            self.stream_graph.set_root_actor(actor_id);
+        let parallel_degree = if current_fragment.is_singleton() {
+            1
+        } else if self.fragment_graph.has_downstream(current_fragment_id) {
+            // Fragment in the middle.
+            // Generate one or multiple actors and connect them to the next fragment.
+            // Currently, we assume the parallel degree is at least 4, and grows linearly with
+            // more worker nodes added.
+            max(self.worker_count * 2, PARALLEL_DEGREE_LOW_BOUND)
         } else {
-            let parallel_degree = if self.fragment_graph.has_downstream(current_fragment_id) {
-                // Fragment in the middle.
-                // Generate one or multiple actors and connect them to the next fragment.
-                // Currently, we assume the parallel degree is at least 4, and grows linearly with
-                // more worker nodes added.
-                max(self.worker_count * 2, PARALLEL_DEGREE_LOW_BOUND)
-            } else {
-                // Fragment on the source.
-                self.worker_count
-            };
+            // Fragment on the source.
+            self.worker_count
+        };
 
-            let node = current_fragment.get_node();
-            let actor_ids = self.gen_actor_id(parallel_degree as i32).await?;
-            let dispatcher = match node.get_node()? {
+        let node = current_fragment.get_node();
+        let actor_ids = self.gen_actor_id(parallel_degree as i32).await?;
+        let blackhole_dispatcher = Dispatcher {
+            r#type: DispatcherType::Broadcast as i32,
+            ..Default::default()
+        };
+        let dispatcher = if current_fragment_id == root_fragment.get_fragment_id() {
+            &blackhole_dispatcher
+        } else {
+            match node.get_node()? {
                 Node::ExchangeNode(exchange_node) => exchange_node.get_dispatcher()?,
                 _ => {
                     return Err(RwError::from(InternalError(format!(
@@ -159,18 +179,17 @@ impl StreamFragmenter {
                         node.get_node()
                     ))));
                 }
-            };
-            for id in actor_ids..actor_ids + parallel_degree {
-                let stream_node = node.deref().clone();
-                let mut actor_builder = StreamActorBuilder::new(id, Arc::new(stream_node));
-                actor_builder.set_dispatcher(dispatcher.clone());
-                self.stream_graph.add_actor(actor_builder);
-                current_actor_ids.push(id);
+            }
+        };
+        for id in actor_ids..actor_ids + parallel_degree {
+            let mut actor_builder = StreamActorBuilder::new(id, node.clone());
+            actor_builder.set_dispatcher(dispatcher.clone());
+            self.stream_graph.add_actor(actor_builder);
+            current_actor_ids.push(id);
 
-                // If the current fragment is table source, then add the id to the source id list.
-                if current_fragment.is_table_source_fragment() {
-                    self.source_actor_ids.push(id);
-                }
+            // If the current fragment is table source, then add the id to the source id list.
+            if current_fragment.is_table_source_fragment() {
+                self.source_actor_ids.push(id);
             }
         }
 

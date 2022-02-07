@@ -43,6 +43,7 @@ twox-hash = "1"
 url = "2"
 
 [dev-dependencies]
+assert_matches = "1"
 rand = "0.8"
 tempfile = "3"
 tokio-test = "0.4"

@@ -1,16 +1,16 @@
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 
-use super::{infer_type, BoundExpr, BoundExprImpl};
+use super::{infer_type, Expr, ExprImpl};
 use crate::expr::ExprType;
 
 #[derive(Clone, Debug)]
-pub struct BoundFunctionCall {
+pub struct FunctionCall {
     func_type: ExprType,
-    return_type: DataTypeKind,
-    inputs: Vec<BoundExprImpl>,
+    return_type: DataType,
+    inputs: Vec<ExprImpl>,
 }
-impl BoundFunctionCall {
-    pub fn new(func_type: ExprType, inputs: Vec<BoundExprImpl>) -> Option<Self> {
+impl FunctionCall {
+    pub fn new(func_type: ExprType, inputs: Vec<ExprImpl>) -> Option<Self> {
         let return_type = infer_type(
             func_type,
             inputs.iter().map(|expr| expr.return_type()).collect(),
@@ -21,28 +21,28 @@ impl BoundFunctionCall {
     /// used for expressions like cast
     pub fn new_with_return_type(
         func_type: ExprType,
-        inputs: Vec<BoundExprImpl>,
-        return_type: DataTypeKind,
+        inputs: Vec<ExprImpl>,
+        return_type: DataType,
     ) -> Self {
-        BoundFunctionCall {
+        FunctionCall {
             func_type,
             return_type,
             inputs,
         }
     }
 
-    pub fn decompose(self) -> (ExprType, Vec<BoundExprImpl>) {
+    pub fn decompose(self) -> (ExprType, Vec<ExprImpl>) {
         (self.func_type, self.inputs)
     }
     pub fn get_expr_type(&self) -> ExprType {
         self.func_type
     }
 }
-impl BoundExpr for BoundFunctionCall {
-    fn return_type(&self) -> DataTypeKind {
+impl Expr for FunctionCall {
+    fn return_type(&self) -> DataType {
         self.return_type
     }
-    fn bound_expr(self) -> BoundExprImpl {
-        BoundExprImpl::FunctionCall(Box::new(self))
+    fn bound_expr(self) -> ExprImpl {
+        ExprImpl::FunctionCall(Box::new(self))
     }
 }

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use risingwave_common::array::{Row, RowDeserializer};
 use risingwave_common::error::Result;
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::*;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -32,8 +32,8 @@ pub struct ManagedTopNState<S: StateStore, const TOP_N_TYPE: usize> {
     top_n_count: Option<usize>,
     /// The keyspace to operate on.
     keyspace: Keyspace<S>,
-    /// `DataTypeKind`s use for deserializing `Row`.
-    data_types: Vec<DataTypeKind>,
+    /// `DataType`s use for deserializing `Row`.
+    data_types: Vec<DataType>,
     /// For deserializing `OrderedRow`.
     ordered_row_deserializer: OrderedRowDeserializer,
     /// epoch
@@ -45,7 +45,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         top_n_count: Option<usize>,
         total_count: usize,
         keyspace: Keyspace<S>,
-        data_types: Vec<DataTypeKind>,
+        data_types: Vec<DataType>,
         ordered_row_deserializer: OrderedRowDeserializer,
         epoch: u64,
     ) -> Self {
@@ -384,6 +384,14 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         self.retain_top_n();
         Ok(())
     }
+
+    pub fn clear_cache(&mut self) {
+        assert!(
+            !self.is_dirty(),
+            "cannot clear cache while top n state is dirty"
+        );
+        self.top_n.clear();
+    }
 }
 
 /// Test-related methods
@@ -396,7 +404,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::types::DataTypeKind;
+    use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::{Keyspace, StateStore};
@@ -409,7 +417,7 @@ mod tests {
     fn create_managed_top_n_state<S: StateStore, const TOP_N_TYPE: usize>(
         store: &S,
         row_count: usize,
-        data_types: Vec<DataTypeKind>,
+        data_types: Vec<DataType>,
         order_types: Vec<OrderType>,
     ) -> ManagedTopNState<S, TOP_N_TYPE> {
         let ordered_row_deserializer = OrderedRowDeserializer::new(data_types.clone(), order_types);
@@ -427,7 +435,7 @@ mod tests {
     #[tokio::test]
     async fn test_managed_top_n_state() {
         let store = MemoryStateStore::new();
-        let data_types = vec![DataTypeKind::Varchar, DataTypeKind::Int64];
+        let data_types = vec![DataType::Varchar, DataType::Int64];
         let order_types = vec![OrderType::Descending, OrderType::Ascending];
 
         let mut managed_state = create_managed_top_n_state::<_, TOP_N_MAX>(

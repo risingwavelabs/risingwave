@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-mod benchmarks;
+mod operations;
 mod utils;
 
-use benchmarks::*;
 use clap::Parser;
+use operations::*;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 use risingwave_storage::hummock::local_version_manager::LocalVersionManager;
@@ -33,22 +33,12 @@ pub(crate) struct Opts {
     #[clap(long, default_value = "in-memory")]
     store: String,
 
-    // ----- benchmarks -----
-    #[clap(long)]
-    benchmarks: String,
-
-    #[clap(long, default_value_t = 10)]
-    iterations: u32,
-
-    #[clap(long, default_value_t = 1)]
-    concurrency_num: u32,
-
     // ----- Hummock -----
-    #[clap(long, default_value_t = 64)]
-    block_size_kb: u32,
-
     #[clap(long, default_value_t = 256)]
     table_size_mb: u32,
+
+    #[clap(long, default_value_t = 64)]
+    block_size_kb: u32,
 
     #[clap(long, default_value_t = 0.1)]
     bloom_false_positive: f64,
@@ -56,21 +46,41 @@ pub(crate) struct Opts {
     #[clap(long, default_value = "crc32c")]
     checksum_algo: String,
 
-    // ----- data -----
-    #[clap(long, default_value_t = 10)]
+    // ----- benchmarks -----
+    #[clap(long)]
+    benchmarks: String,
+
+    #[clap(long, default_value_t = 1)]
+    concurrency_num: u32,
+
+    // ----- operation number -----
+    #[clap(long, default_value_t = 1000000)]
+    num: i64,
+
+    #[clap(long, default_value_t = -1)]
+    deletes: i64,
+
+    #[clap(long, default_value_t = -1)]
+    reads: i64,
+
+    #[clap(long, default_value_t = 100)]
+    write_batches: u64,
+
+    // ----- single batch -----
+    #[clap(long, default_value_t = 100)]
+    batch_size: u32,
+
+    #[clap(long, default_value_t = 16)]
     key_size: u32,
 
     #[clap(long, default_value_t = 5)]
     key_prefix_size: u32,
 
     #[clap(long, default_value_t = 10)]
-    key_prefix_frequency: u32,
+    keys_per_prefix: u32,
 
-    #[clap(long, default_value_t = 10)]
+    #[clap(long, default_value_t = 100)]
     value_size: u32,
-
-    #[clap(long, default_value_t = 1000)]
-    kvs_per_batch: u32,
 }
 
 fn get_checksum_algo(algo: &str) -> ChecksumAlg {
@@ -156,9 +166,9 @@ async fn get_state_store_impl(opts: &Opts) -> Result<StateStoreImpl> {
     Ok(instance)
 }
 
-async fn run_benchmarks(store: impl StateStore, opts: &Opts) {
-    for benchmark in opts.benchmarks.split(',') {
-        match benchmark {
+async fn run_operations(store: impl StateStore, opts: &Opts) {
+    for operation in opts.benchmarks.split(',') {
+        match operation {
             "writebatch" => write_batch::run(&store, opts).await,
             "getrandom" => get_random::run(&store, opts).await,
             "getseq" => get_seq::run(&store, opts).await,
@@ -168,13 +178,36 @@ async fn run_benchmarks(store: impl StateStore, opts: &Opts) {
     }
 }
 
+fn preprocess_options(opts: &mut Opts) {
+    if opts.reads < 0 {
+        opts.reads = opts.num;
+    }
+    if opts.deletes < 0 {
+        opts.deletes = opts.num;
+    }
+
+    // check illegal configurations
+    for operation in opts.benchmarks.split(',') {
+        if operation == "getseq" {
+            // TODO(sun ting): eliminate this limitation
+            if opts.batch_size < opts.reads as u32 {
+                panic!(
+                    "In sequential mode, `batch_size` should be greater than or equal to `reads`"
+                );
+            }
+        }
+    }
+}
+
 /// This is used to benchmark the state store performance.
 /// For usage, see: https://github.com/singularity-data/risingwave-dev/blob/main/docs/developer/benchmark_tool/state_store.md
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
-    let opts = Opts::parse();
+    let mut opts = Opts::parse();
 
-    println!("Input configurations: {:?}", &opts);
+    println!("Configurations before preprocess:\n {:?}", &opts);
+    preprocess_options(&mut opts);
+    println!("Configurations after preprocess:\n {:?}", &opts);
 
     let state_store = match get_state_store_impl(&opts).await {
         Ok(state_store_impl) => state_store_impl,
@@ -185,9 +218,9 @@ async fn main() {
     };
 
     match state_store {
-        StateStoreImpl::Hummock(store) => run_benchmarks(store, &opts).await,
-        StateStoreImpl::Memory(store) => run_benchmarks(store, &opts).await,
-        StateStoreImpl::RocksDB(store) => run_benchmarks(store, &opts).await,
-        StateStoreImpl::Tikv(store) => run_benchmarks(store, &opts).await,
+        StateStoreImpl::Hummock(store) => run_operations(store, &opts).await,
+        StateStoreImpl::Memory(store) => run_operations(store, &opts).await,
+        StateStoreImpl::RocksDB(store) => run_operations(store, &opts).await,
+        StateStoreImpl::Tikv(store) => run_operations(store, &opts).await,
     };
 }

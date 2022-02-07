@@ -22,11 +22,14 @@ impl Workload {
     pub(crate) fn new(opts: &Opts, workload_type: WorkloadType, seed: Option<u64>) -> Workload {
         let base_seed = seed.unwrap_or(233);
 
+        // get ceil result
+        let prefix_num =
+            (opts.batch_size + opts.keys_per_prefix - 1) as u64 / opts.keys_per_prefix as u64;
         let (prefixes, keys) = match workload_type {
             WriteBatch | GetRandom | PrefixScanRandom | DeleteRandom => {
-                Self::new_random_keys(opts, base_seed)
+                Self::new_random_keys(opts, base_seed, prefix_num)
             }
-            GetSeq | DeleteSeq => Self::new_sequential_keys(opts),
+            GetSeq | DeleteSeq => Self::new_sequential_keys(opts, prefix_num),
         };
 
         let values = match workload_type {
@@ -44,7 +47,7 @@ impl Workload {
 
     fn new_values(opts: &Opts, base_seed: u64) -> Vec<Option<Bytes>> {
         let str_dist = Uniform::new_inclusive(0, 255);
-        let value_num = opts.kvs_per_batch as u64;
+        let value_num = opts.batch_size as u64;
         (0..value_num)
             .into_iter()
             .map(|i| {
@@ -60,11 +63,8 @@ impl Workload {
             .collect()
     }
 
-    fn new_random_keys(opts: &Opts, base_seed: u64) -> (Prefixes, Keys) {
+    fn new_random_keys(opts: &Opts, base_seed: u64, prefix_num: u64) -> (Prefixes, Keys) {
         // --- get prefixes ---
-        // get ceil result
-        let prefix_num = (opts.kvs_per_batch + opts.key_prefix_frequency - 1) as u64
-            / opts.key_prefix_frequency as u64;
         let str_dist = Uniform::new_inclusive(0, 255);
 
         let prefixes = (0..prefix_num)
@@ -82,7 +82,7 @@ impl Workload {
             .collect_vec();
 
         // --- get keys ---
-        let keys = (0..opts.kvs_per_batch as u64)
+        let keys = (0..opts.batch_size as u64)
             .into_iter()
             .map(|i| {
                 // set random seed to make bench reproducable
@@ -104,11 +104,8 @@ impl Workload {
         (prefixes, keys)
     }
 
-    fn new_sequential_keys(opts: &Opts) -> (Prefixes, Keys) {
+    fn new_sequential_keys(opts: &Opts, prefix_num: u64) -> (Prefixes, Keys) {
         // --- get prefixes ---
-        // get ceil result
-        let prefix_num = (opts.kvs_per_batch + opts.key_prefix_frequency - 1) as u64
-            / opts.key_prefix_frequency as u64;
         let mut prefixes = Vec::with_capacity(prefix_num as usize);
         let mut prefix = vec![b'\0'; opts.key_prefix_size as usize];
         for _ in 0..prefix_num as u64 {
@@ -119,10 +116,10 @@ impl Workload {
         }
 
         // --- get keys ---
-        let mut keys = Vec::with_capacity(opts.kvs_per_batch as usize);
+        let mut keys = Vec::with_capacity(opts.batch_size as usize);
         let mut user_key = vec![b'\0'; opts.key_size as usize];
 
-        for _ in 0..opts.key_prefix_frequency as u64 {
+        for _ in 0..opts.keys_per_prefix as u64 {
             user_key = next_key(&user_key);
             // ensure next key exist
             assert_ne!(user_key.len(), 0);

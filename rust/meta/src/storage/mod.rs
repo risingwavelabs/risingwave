@@ -1,5 +1,7 @@
 mod metastore;
 mod sled_metastore;
+#[cfg(test)]
+mod tests;
 mod transaction;
 
 pub type Key = Vec<u8>;

@@ -1,14 +1,14 @@
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 use risingwave_pb::plan::JoinType;
 
 use super::{
     ColPrunable, IntoPlanRef, JoinPredicate, PlanRef, PlanTreeNodeBinary, StreamHashJoin, ToBatch,
     ToStream,
 };
-use crate::expr::{assert_input_ref, BoundExpr, BoundExprImpl};
+use crate::expr::{assert_input_ref, Expr, ExprImpl};
 use crate::optimizer::plan_node::{BatchHashJoin, BatchSortMergeJoin};
 use crate::optimizer::property::{Distribution, Order, WithDistribution, WithOrder, WithSchema};
 
@@ -32,7 +32,7 @@ impl LogicalJoin {
         let left_cols_num = left.schema().fields.len();
         let input_col_num = left_cols_num + right.schema().fields.len();
         for cond in predicate.other_conds() {
-            assert_eq!(cond.return_type(), DataTypeKind::Boolean);
+            assert_eq!(cond.return_type(), DataType::Boolean);
             assert_input_ref(cond, input_col_num);
         }
         for (k1, k2) in predicate.equal_keys() {
@@ -54,7 +54,7 @@ impl LogicalJoin {
         left: PlanRef,
         right: PlanRef,
         join_type: JoinType,
-        on_clause: BoundExprImpl,
+        on_clause: ExprImpl,
     ) -> PlanRef {
         let left_cols_num = left.schema().fields.len();
         let predicate = JoinPredicate::create(left_cols_num, on_clause);

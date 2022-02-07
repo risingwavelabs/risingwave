@@ -2,23 +2,23 @@ use std::fmt;
 
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 
 use super::{ColPrunable, IntoPlanRef, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
-use crate::expr::{assert_input_ref, to_conjunctions, BoundExpr, BoundExprImpl};
+use crate::expr::{assert_input_ref, to_conjunctions, Expr, ExprImpl};
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 
 #[derive(Debug, Clone)]
 pub struct LogicalFilter {
     /// condition bool expressions, linked with AND conjunction
-    conds: Vec<BoundExprImpl>,
+    conds: Vec<ExprImpl>,
     input: PlanRef,
     schema: Schema,
 }
 impl LogicalFilter {
-    fn new(input: PlanRef, conds: Vec<BoundExprImpl>) -> Self {
+    fn new(input: PlanRef, conds: Vec<ExprImpl>) -> Self {
         for cond in &conds {
-            assert_eq!(cond.return_type(), DataTypeKind::Boolean);
+            assert_eq!(cond.return_type(), DataType::Boolean);
             assert_input_ref(cond, input.schema().fields().len());
         }
         let schema = input.schema().clone();
@@ -30,7 +30,7 @@ impl LogicalFilter {
     }
 
     /// the function will check if the cond is bool expression
-    pub fn create(input: PlanRef, cond: BoundExprImpl) -> Result<PlanRef> {
+    pub fn create(input: PlanRef, cond: ExprImpl) -> Result<PlanRef> {
         let conds = to_conjunctions(cond);
         Ok(Self::new(input, conds).into_plan_ref())
     }

@@ -143,6 +143,15 @@ impl<S: StateStore> Executor for TopNExecutor<S> {
     fn identity(&self) -> &str {
         self.identity.as_str()
     }
+
+    fn clear_cache(&mut self) -> Result<()> {
+        self.managed_lowest_state.clear_cache();
+        self.managed_middle_state.clear_cache();
+        self.managed_highest_state.clear_cache();
+        self.first_execution = true;
+
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -332,7 +341,7 @@ mod tests {
     use risingwave_common::array::{Array, I64Array};
     use risingwave_common::catalog::Field;
     use risingwave_common::column_nonnull;
-    use risingwave_common::types::DataTypeKind;
+    use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
 
     use super::*;
@@ -385,8 +394,8 @@ mod tests {
     fn create_schema() -> Schema {
         Schema {
             fields: vec![
-                Field::unnamed(DataTypeKind::Int64),
-                Field::unnamed(DataTypeKind::Int64),
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
             ],
         }
     }

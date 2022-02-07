@@ -48,7 +48,7 @@ do
   echo "=== Dump log file $out_file ==="
   echo "==="
   echo ""
-  cat "$out_file"
+  cat "$out_file" | tail -n 100
 done
 '''
 

@@ -3,7 +3,7 @@ use itertools::Itertools;
 use crate::array::{ArrayRef, DataChunk};
 use crate::error::Result;
 use crate::expr::{BoxedExpression, Expression};
-use crate::types::DataTypeKind;
+use crate::types::DataType;
 
 #[derive(Debug)]
 pub struct WhenClause {
@@ -19,14 +19,14 @@ impl WhenClause {
 
 #[derive(Debug)]
 pub struct CaseExpression {
-    return_type: DataTypeKind,
+    return_type: DataType,
     when_clauses: Vec<WhenClause>,
     else_clause: Option<BoxedExpression>,
 }
 
 impl CaseExpression {
     pub fn new(
-        return_type: DataTypeKind,
+        return_type: DataType,
         when_clauses: Vec<WhenClause>,
         else_clause: Option<BoxedExpression>,
     ) -> Self {
@@ -39,7 +39,7 @@ impl CaseExpression {
 }
 
 impl Expression for CaseExpression {
-    fn return_type(&self) -> DataTypeKind {
+    fn return_type(&self) -> DataType {
         self.return_type
     }
 
@@ -98,26 +98,23 @@ mod tests {
 
     #[test]
     fn test_searched_case() {
-        let ret_type = DataTypeKind::Float32;
+        let ret_type = DataType::Float32;
         // when x <= 2 then 3.1
         let when_clauses = vec![WhenClause::new(
             new_binary_expr(
                 Type::LessThanOrEqual,
-                DataTypeKind::Boolean,
-                Box::new(InputRefExpression::new(DataTypeKind::Int32, 0)),
-                Box::new(LiteralExpression::new(
-                    DataTypeKind::Float32,
-                    Some(2f32.into()),
-                )),
+                DataType::Boolean,
+                Box::new(InputRefExpression::new(DataType::Int32, 0)),
+                Box::new(LiteralExpression::new(DataType::Float32, Some(2f32.into()))),
             ),
             Box::new(LiteralExpression::new(
-                DataTypeKind::Float32,
+                DataType::Float32,
                 Some(3.1f32.into()),
             )),
         )];
         // else 4.1
         let els = Box::new(LiteralExpression::new(
-            DataTypeKind::Float32,
+            DataType::Float32,
             Some(4.1f32.into()),
         ));
         let mut searched_case_expr = CaseExpression::new(ret_type, when_clauses, Some(els));
@@ -133,20 +130,17 @@ mod tests {
 
     #[test]
     fn test_without_else() {
-        let ret_type = DataTypeKind::Float32;
+        let ret_type = DataType::Float32;
         // when x <= 3 then 3.1
         let when_clauses = vec![WhenClause::new(
             new_binary_expr(
                 Type::LessThanOrEqual,
-                DataTypeKind::Boolean,
-                Box::new(InputRefExpression::new(DataTypeKind::Int32, 0)),
-                Box::new(LiteralExpression::new(
-                    DataTypeKind::Float32,
-                    Some(3f32.into()),
-                )),
+                DataType::Boolean,
+                Box::new(InputRefExpression::new(DataType::Int32, 0)),
+                Box::new(LiteralExpression::new(DataType::Float32, Some(3f32.into()))),
             ),
             Box::new(LiteralExpression::new(
-                DataTypeKind::Float32,
+                DataType::Float32,
                 Some(3.1f32.into()),
             )),
         )];
