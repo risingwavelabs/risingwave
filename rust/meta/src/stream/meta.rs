@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use itertools::Itertools;
 use prost::Message;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::common::WorkerNode;
@@ -27,6 +28,13 @@ pub trait StreamMetaManager: Sync + Send + 'static {
     async fn get_table_actors(&self, table_id: &TableRefId) -> Result<TableActors>;
     /// [`drop_table_actors`] drops table actors info, used when `Drop MV`.
     async fn drop_table_actors(&self, table_id: &TableRefId) -> Result<()>;
+    /// [`add_materialized_view_actors`] stores materialized view associated actor ids.
+    async fn add_materialized_view_actors(
+        &self,
+        table_id: &TableRefId,
+        actor_ids: &[u32],
+    ) -> Result<()>;
+    async fn get_materialized_view_actors(&self, table_id: &TableRefId) -> Result<Vec<u32>>;
 }
 
 pub type StreamMetaManagerRef = Arc<dyn StreamMetaManager>;
@@ -237,6 +245,44 @@ impl StreamMetaManager for StoredStreamMetaManager {
 
         Ok(())
     }
+
+    async fn add_materialized_view_actors(
+        &self,
+        table_id: &TableRefId,
+        actor_ids: &[u32],
+    ) -> Result<()> {
+        self.meta_store_ref
+            .put_cf(
+                self.config.get_materialized_view_actors_cf(),
+                &table_id.encode_to_vec(),
+                &actor_ids
+                    .iter()
+                    .map(|id| id.to_be_bytes())
+                    .fold(vec![], |mut v, x| {
+                        v.extend(x);
+                        v
+                    }),
+                SINGLE_VERSION_EPOCH,
+            )
+            .await?;
+        Ok(())
+    }
+
+    async fn get_materialized_view_actors(&self, table_id: &TableRefId) -> Result<Vec<u32>> {
+        let bytes = self
+            .meta_store_ref
+            .get_cf(
+                self.config.get_materialized_view_actors_cf(),
+                &table_id.encode_to_vec(),
+                SINGLE_VERSION_EPOCH,
+            )
+            .await?;
+        let ids = bytes
+            .chunks(4)
+            .map(|chunk| u32::from_be_bytes(chunk.try_into().unwrap()))
+            .collect_vec();
+        Ok(ids)
+    }
 }
 
 #[cfg(test)]
@@ -402,6 +448,24 @@ mod test {
         let res = meta_manager.get_table_actors(&table_ref_id).await;
         assert!(res.is_err());
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_materialized_view_actors() -> Result<()> {
+        let meta_manager = StoredStreamMetaManager::new(MetaSrvEnv::for_test().await);
+        let table_ref_id = TableRefId {
+            schema_ref_id: None,
+            table_id: 0,
+        };
+        let actor_ids = vec![1, 2, 3, 4, 5];
+        meta_manager
+            .add_materialized_view_actors(&table_ref_id, &actor_ids[..])
+            .await?;
+        let stored_actor_ids = meta_manager
+            .get_materialized_view_actors(&table_ref_id)
+            .await?;
+        assert_eq!(actor_ids, stored_actor_ids);
         Ok(())
     }
 }
