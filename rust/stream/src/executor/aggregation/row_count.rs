@@ -5,7 +5,7 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
-use risingwave_common::types::{DataTypeKind, Datum, ScalarImpl};
+use risingwave_common::types::{DataType, Datum, ScalarImpl};
 
 use super::StreamingAggStateImpl;
 
@@ -43,8 +43,8 @@ impl StreamingRowCountAgg {
         I64ArrayBuilder::new(capacity).map(|builder| builder.into())
     }
 
-    pub fn return_type() -> DataTypeKind {
-        DataTypeKind::Int64
+    pub fn return_type() -> DataType {
+        DataType::Int64
     }
 }
 

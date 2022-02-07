@@ -1,7 +1,7 @@
 use std::slice;
 
 use risingwave_common::expr::AggKind;
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 
 /// An aggregation function may accept 0, 1 or 2 arguments.
 #[derive(Clone, Debug)]
@@ -9,14 +9,14 @@ pub enum AggArgs {
     /// `None` is used for aggregation function accepts 0 arguments, such as [`AggKind::RowCount`].
     None,
     /// `Unary` is used for aggregation function accepts 1 argument, such as [`AggKind::Sum`].
-    Unary(DataTypeKind, usize),
+    Unary(DataType, usize),
     /// `Binary` is used for aggregation function accepts 2 arguments.
-    Binary([DataTypeKind; 2], [usize; 2]),
+    Binary([DataType; 2], [usize; 2]),
 }
 
 impl AggArgs {
     /// return the types of arguments.
-    pub fn arg_types(&self) -> &[DataTypeKind] {
+    pub fn arg_types(&self) -> &[DataType] {
         use AggArgs::*;
         match self {
             None => Default::default(),
@@ -44,5 +44,5 @@ pub struct AggCall {
     /// Arguments of aggregation function input.
     pub args: AggArgs,
     /// The return type of aggregation function.
-    pub return_type: DataTypeKind,
+    pub return_type: DataType,
 }

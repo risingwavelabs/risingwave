@@ -1,4 +1,4 @@
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 mod input_ref;
 pub use input_ref::*;
 mod literal;
@@ -16,7 +16,7 @@ pub type ExprType = risingwave_pb::expr::expr_node::Type;
 
 /// the trait of bound exprssions
 pub trait Expr {
-    fn return_type(&self) -> DataTypeKind;
+    fn return_type(&self) -> DataType;
     fn bound_expr(self) -> ExprImpl;
 }
 #[derive(Clone, Debug)]
@@ -28,7 +28,7 @@ pub enum ExprImpl {
     AggCall(Box<AggCall>),
 }
 impl Expr for ExprImpl {
-    fn return_type(&self) -> DataTypeKind {
+    fn return_type(&self) -> DataType {
         match self {
             ExprImpl::InputRef(expr) => expr.return_type(),
             ExprImpl::Literal(expr) => expr.return_type(),

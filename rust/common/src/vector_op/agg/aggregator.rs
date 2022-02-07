@@ -10,7 +10,7 @@ use crate::vector_op::agg::general_sorted_grouper::EqGroups;
 
 /// An `Aggregator` supports `update` data and `output` result.
 pub trait Aggregator: Send + 'static {
-    fn return_type(&self) -> DataTypeKind;
+    fn return_type(&self) -> DataType;
 
     /// `update` the aggregator with a row with type checked at runtime.
     fn update_with_row(&mut self, input: &DataChunk, row_id: usize) -> Result<()>;
@@ -42,19 +42,19 @@ pub type BoxedAggState = Box<dyn Aggregator>;
 
 pub struct AggStateFactory {
     // When agg func is count(*), the args is empty and input type is None.
-    input_type: Option<DataTypeKind>,
+    input_type: Option<DataType>,
     input_col_idx: usize,
     agg_kind: AggKind,
-    return_type: DataTypeKind,
+    return_type: DataType,
 }
 
 impl AggStateFactory {
     pub fn new(prost: &AggCall) -> Result<Self> {
-        let return_type = DataTypeKind::from(prost.get_return_type()?);
+        let return_type = DataType::from(prost.get_return_type()?);
         let agg_kind = AggKind::try_from(prost.get_type()?)?;
         match &prost.get_args()[..] {
             [ref arg] => {
-                let input_type = DataTypeKind::from(arg.get_type()?);
+                let input_type = DataType::from(arg.get_type()?);
                 let input_col_idx = arg.get_input()?.get_column_idx() as usize;
                 Ok(Self {
                     input_type: Some(input_type),
@@ -64,7 +64,7 @@ impl AggStateFactory {
                 })
             }
             [] => match (&agg_kind, return_type) {
-                (AggKind::Count, DataTypeKind::Int64) => Ok(Self {
+                (AggKind::Count, DataType::Int64) => Ok(Self {
                     input_type: None,
                     input_col_idx: 0,
                     agg_kind,
@@ -95,16 +95,16 @@ impl AggStateFactory {
         }
     }
 
-    pub fn get_return_type(&self) -> DataTypeKind {
+    pub fn get_return_type(&self) -> DataType {
         self.return_type
     }
 }
 
 pub fn create_agg_state_unary(
-    input_type: DataTypeKind,
+    input_type: DataType,
     input_col_idx: usize,
     agg_type: &AggKind,
-    return_type: DataTypeKind,
+    return_type: DataType,
 ) -> Result<Box<dyn Aggregator>> {
     use crate::expr::data_types::*;
 
@@ -180,10 +180,10 @@ mod tests {
     use crate::array::column::Column;
 
     fn eval_agg(
-        input_type: DataTypeKind,
+        input_type: DataType,
         input: ArrayRef,
         agg_type: &AggKind,
-        return_type: DataTypeKind,
+        return_type: DataType,
         mut builder: ArrayBuilderImpl,
     ) -> Result<ArrayImpl> {
         let input_chunk = DataChunk::builder()

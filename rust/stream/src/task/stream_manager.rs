@@ -8,7 +8,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::expr::{build_from_prost as build_expr_from_prost, AggKind, RowExpression};
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 use risingwave_common::util::addr::is_local_address;
 use risingwave_common::util::sort_util::{
     build_from_prost as build_order_type_from_prost, fetch_orders,
@@ -199,7 +199,7 @@ fn build_agg_call_from_prost(agg_call_proto: &expr::AggCall) -> Result<AggCall> 
         match args {
             [] => AggArgs::None,
             [arg] => AggArgs::Unary(
-                DataTypeKind::from(arg.get_type()?),
+                DataType::from(arg.get_type()?),
                 arg.get_input()?.column_idx as usize,
             ),
             _ => {
@@ -212,7 +212,7 @@ fn build_agg_call_from_prost(agg_call_proto: &expr::AggCall) -> Result<AggCall> 
     Ok(AggCall {
         kind: AggKind::try_from(agg_call_proto.get_type()?)?,
         args,
-        return_type: DataTypeKind::from(agg_call_proto.get_return_type()?),
+        return_type: DataType::from(agg_call_proto.get_return_type()?),
     })
 }
 

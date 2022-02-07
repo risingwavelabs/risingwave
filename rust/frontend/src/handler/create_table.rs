@@ -1,9 +1,9 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 use risingwave_pb::meta::Table;
 use risingwave_pb::plan::ColumnDesc;
-use risingwave_sqlparser::ast::{ColumnDef, DataType, ObjectName};
+use risingwave_sqlparser::ast::{ColumnDef, DataType as AstDataType, ObjectName};
 
 use crate::catalog::catalog_service::DEFAULT_SCHEMA_NAME;
 use crate::session::RwSession;
@@ -16,20 +16,20 @@ fn columns_to_prost(columns: &[ColumnDef]) -> Result<Vec<ColumnDesc>> {
             Ok(ColumnDesc {
                 column_id: idx as i32,
                 name: col.name.to_string(),
-                column_type: Some(convert_data_type_kind(&col.data_type).to_protobuf()?),
+                column_type: Some(convert_data_type(&col.data_type).to_protobuf()?),
                 ..Default::default()
             })
         })
         .collect::<Result<_>>()
 }
 
-fn convert_data_type_kind(data_type: &DataType) -> DataTypeKind {
+fn convert_data_type(data_type: &AstDataType) -> DataType {
     match data_type {
-        DataType::SmallInt(_) => DataTypeKind::Int16,
-        DataType::Int(_) => DataTypeKind::Int32,
-        DataType::BigInt(_) => DataTypeKind::Int64,
-        DataType::Float(_) => DataTypeKind::Float32,
-        DataType::Double => DataTypeKind::Float64,
+        AstDataType::SmallInt(_) => DataType::Int16,
+        AstDataType::Int(_) => DataType::Int32,
+        AstDataType::BigInt(_) => DataType::Int64,
+        AstDataType::Float(_) => DataType::Float32,
+        AstDataType::Double => DataType::Float64,
         _ => unimplemented!("Unsupported data type {:?} in create table", data_type),
     }
 }
@@ -64,7 +64,7 @@ pub(super) async fn handle_create_table(
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::types::DataTypeKind;
+    use risingwave_common::types::DataType;
     use risingwave_meta::test_utils::LocalMeta;
 
     use crate::catalog::catalog_service::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
@@ -87,15 +87,15 @@ mod tests {
             .columns()
             .iter()
             .map(|(col_name, col)| (col_name.clone(), col.data_type()))
-            .collect::<Vec<(String, DataTypeKind)>>();
+            .collect::<Vec<(String, DataType)>>();
         assert_eq!(
             columns,
             vec![
-                ("v1".to_string(), DataTypeKind::Int16),
-                ("v2".to_string(), DataTypeKind::Int32),
-                ("v3".to_string(), DataTypeKind::Int64),
-                ("v4".to_string(), DataTypeKind::Float32),
-                ("v5".to_string(), DataTypeKind::Float64),
+                ("v1".to_string(), DataType::Int16),
+                ("v2".to_string(), DataType::Int32),
+                ("v3".to_string(), DataType::Int64),
+                ("v4".to_string(), DataType::Float32),
+                ("v5".to_string(), DataType::Float64),
             ]
         );
 

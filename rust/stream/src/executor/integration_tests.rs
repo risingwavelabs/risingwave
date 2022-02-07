@@ -55,7 +55,7 @@ async fn test_merger_sum_aggr() {
     // `make_actor` build an actor to do local aggregation
     let make_actor = |input_rx| {
         let schema = Schema {
-            fields: vec![Field::unnamed(DataTypeKind::Int64)],
+            fields: vec![Field::unnamed(DataType::Int64)],
         };
         let input = ReceiverExecutor::new(schema, vec![], input_rx);
         // for the local aggregator, we need two states: row count and sum
@@ -65,12 +65,12 @@ async fn test_merger_sum_aggr() {
                 AggCall {
                     kind: AggKind::RowCount,
                     args: AggArgs::None,
-                    return_type: DataTypeKind::Int64,
+                    return_type: DataType::Int64,
                 },
                 AggCall {
                     kind: AggKind::Sum,
-                    args: AggArgs::Unary(DataTypeKind::Int64, 0),
-                    return_type: DataTypeKind::Int64,
+                    args: AggArgs::Unary(DataType::Int64, 0),
+                    return_type: DataType::Int64,
                 },
             ],
             create_in_memory_keyspace(),
@@ -105,7 +105,7 @@ async fn test_merger_sum_aggr() {
     // create a round robin dispatcher, which dispatches messages to the actors
     let (mut input, rx) = channel(16);
     let schema = Schema {
-        fields: vec![Field::unnamed(DataTypeKind::Int64)],
+        fields: vec![Field::unnamed(DataType::Int64)],
     };
     let receiver_op = ReceiverExecutor::new(schema.clone(), vec![], rx);
     let dispatcher = DispatchExecutor::new(
@@ -127,13 +127,13 @@ async fn test_merger_sum_aggr() {
         vec![
             AggCall {
                 kind: AggKind::Sum,
-                args: AggArgs::Unary(DataTypeKind::Int64, 0),
-                return_type: DataTypeKind::Int64,
+                args: AggArgs::Unary(DataType::Int64, 0),
+                return_type: DataType::Int64,
             },
             AggCall {
                 kind: AggKind::Sum,
-                args: AggArgs::Unary(DataTypeKind::Int64, 1),
-                return_type: DataTypeKind::Int64,
+                args: AggArgs::Unary(DataType::Int64, 1),
+                return_type: DataType::Int64,
             },
         ],
         create_in_memory_keyspace(),
@@ -146,7 +146,7 @@ async fn test_merger_sum_aggr() {
         vec![],
         vec![
             // TODO: use the new streaming_if_null expression here, and add `None` tests
-            Box::new(InputRefExpression::new(DataTypeKind::Int64, 1)),
+            Box::new(InputRefExpression::new(DataType::Int64, 1)),
         ],
         3,
     );
@@ -196,97 +196,82 @@ fn str_to_timestamp(elem: &str) -> NaiveDateTimeWrapper {
 
 fn make_tpchq6_expr() -> (BoxedExpression, BoxedExpression) {
     let const_1994_01_01 = LiteralExpression::new(
-        DataTypeKind::Char,
+        DataType::Char,
         Some(ScalarImpl::Utf8("1994-01-01 00:00:00".to_string())),
     );
     let const_1995_01_01 = LiteralExpression::new(
-        DataTypeKind::Char,
+        DataType::Char,
         Some(ScalarImpl::Utf8("1995-01-01 00:00:00".to_string())),
     );
-    let const_0_05 = LiteralExpression::new(
-        DataTypeKind::Float64,
-        Some(ScalarImpl::Float64(0.05.into())),
-    );
-    let const_0_07 = LiteralExpression::new(
-        DataTypeKind::Float64,
-        Some(ScalarImpl::Float64(0.07.into())),
-    );
-    let const_24 = LiteralExpression::new(DataTypeKind::Int32, Some(ScalarImpl::Int32(24)));
-    let t_shipdate = DataTypeKind::Timestamp;
+    let const_0_05 =
+        LiteralExpression::new(DataType::Float64, Some(ScalarImpl::Float64(0.05.into())));
+    let const_0_07 =
+        LiteralExpression::new(DataType::Float64, Some(ScalarImpl::Float64(0.07.into())));
+    let const_24 = LiteralExpression::new(DataType::Int32, Some(ScalarImpl::Int32(24)));
+    let t_shipdate = DataType::Timestamp;
     let l_shipdate = InputRefExpression::new(t_shipdate, 0);
     let l_shipdate_2 = InputRefExpression::new(t_shipdate, 0);
-    let t_discount = DataTypeKind::Float64;
+    let t_discount = DataType::Float64;
     let l_discount = InputRefExpression::new(t_discount, 1);
     let l_discount_2 = InputRefExpression::new(t_discount, 1);
     let l_discount_3 = InputRefExpression::new(t_discount, 1);
-    let t_quantity = DataTypeKind::Float64;
+    let t_quantity = DataType::Float64;
     let l_quantity = InputRefExpression::new(t_quantity, 2);
-    let t_extended_price = DataTypeKind::Float64;
+    let t_extended_price = DataType::Float64;
     let l_extended_price = InputRefExpression::new(t_extended_price, 3);
 
-    let l_shipdate_geq_cast = new_unary_expr(
-        Type::Cast,
-        DataTypeKind::Timestamp,
-        Box::new(const_1994_01_01),
-    );
+    let l_shipdate_geq_cast =
+        new_unary_expr(Type::Cast, DataType::Timestamp, Box::new(const_1994_01_01));
 
-    let l_shipdate_le_cast = new_unary_expr(
-        Type::Cast,
-        DataTypeKind::Timestamp,
-        Box::new(const_1995_01_01),
-    );
+    let l_shipdate_le_cast =
+        new_unary_expr(Type::Cast, DataType::Timestamp, Box::new(const_1995_01_01));
 
     let l_shipdate_geq = new_binary_expr(
         Type::GreaterThanOrEqual,
-        DataTypeKind::Boolean,
+        DataType::Boolean,
         Box::new(l_shipdate),
         l_shipdate_geq_cast,
     );
 
     let l_shipdate_le = new_binary_expr(
         Type::LessThanOrEqual,
-        DataTypeKind::Boolean,
+        DataType::Boolean,
         Box::new(l_shipdate_2),
         l_shipdate_le_cast,
     );
 
     let l_discount_geq = new_binary_expr(
         Type::GreaterThanOrEqual,
-        DataTypeKind::Boolean,
+        DataType::Boolean,
         Box::new(l_discount),
         Box::new(const_0_05),
     );
 
     let l_discount_leq = new_binary_expr(
         Type::LessThanOrEqual,
-        DataTypeKind::Boolean,
+        DataType::Boolean,
         Box::new(l_discount_2),
         Box::new(const_0_07),
     );
 
     let l_quantity_le = new_binary_expr(
         Type::LessThan,
-        DataTypeKind::Boolean,
+        DataType::Boolean,
         Box::new(l_quantity),
         Box::new(const_24),
     );
 
-    let and = new_nullable_binary_expr(
-        Type::And,
-        DataTypeKind::Boolean,
-        l_shipdate_geq,
-        l_shipdate_le,
-    );
+    let and = new_nullable_binary_expr(Type::And, DataType::Boolean, l_shipdate_geq, l_shipdate_le);
 
-    let and = new_nullable_binary_expr(Type::And, DataTypeKind::Boolean, and, l_discount_geq);
+    let and = new_nullable_binary_expr(Type::And, DataType::Boolean, and, l_discount_geq);
 
-    let and = new_nullable_binary_expr(Type::And, DataTypeKind::Boolean, and, l_discount_leq);
+    let and = new_nullable_binary_expr(Type::And, DataType::Boolean, and, l_discount_leq);
 
-    let and = new_nullable_binary_expr(Type::And, DataTypeKind::Boolean, and, l_quantity_le);
+    let and = new_nullable_binary_expr(Type::And, DataType::Boolean, and, l_quantity_le);
 
     let multiply = new_binary_expr(
         Type::Multiply,
-        DataTypeKind::Float64,
+        DataType::Float64,
         Box::new(l_extended_price),
         Box::new(l_discount_3),
     );
@@ -313,10 +298,10 @@ fn make_tpchq6_expr() -> (BoxedExpression, BoxedExpression) {
 async fn test_tpch_q6() {
     let schema = Schema {
         fields: vec![
-            Field::with_name(DataTypeKind::Timestamp, String::from("l_shipdate")),
-            Field::with_name(DataTypeKind::Float64, String::from("l_discount")),
-            Field::with_name(DataTypeKind::Float64, String::from("l_quantity")),
-            Field::with_name(DataTypeKind::Float64, String::from("l_extendedprice")),
+            Field::with_name(DataType::Timestamp, String::from("l_shipdate")),
+            Field::with_name(DataType::Float64, String::from("l_discount")),
+            Field::with_name(DataType::Float64, String::from("l_quantity")),
+            Field::with_name(DataType::Float64, String::from("l_extendedprice")),
         ],
     };
 
@@ -335,12 +320,12 @@ async fn test_tpch_q6() {
                 AggCall {
                     kind: AggKind::RowCount,
                     args: AggArgs::None,
-                    return_type: DataTypeKind::Int64,
+                    return_type: DataType::Int64,
                 },
                 AggCall {
                     kind: AggKind::Sum,
-                    args: AggArgs::Unary(DataTypeKind::Float64, 0),
-                    return_type: DataTypeKind::Float64,
+                    args: AggArgs::Unary(DataType::Float64, 0),
+                    return_type: DataType::Float64,
                 },
             ],
             create_in_memory_keyspace(),
@@ -393,13 +378,13 @@ async fn test_tpch_q6() {
         vec![
             AggCall {
                 kind: AggKind::Sum,
-                args: AggArgs::Unary(DataTypeKind::Int64, 0),
-                return_type: DataTypeKind::Int64,
+                args: AggArgs::Unary(DataType::Int64, 0),
+                return_type: DataType::Int64,
             },
             AggCall {
                 kind: AggKind::Sum,
-                args: AggArgs::Unary(DataTypeKind::Float64, 1),
-                return_type: DataTypeKind::Float64,
+                args: AggArgs::Unary(DataType::Float64, 1),
+                return_type: DataType::Float64,
             },
         ],
         create_in_memory_keyspace(),
@@ -411,7 +396,7 @@ async fn test_tpch_q6() {
         vec![],
         vec![
             // TODO: use the new streaming_if_null expression here, and add `None` tests
-            Box::new(InputRefExpression::new(DataTypeKind::Float64, 1)),
+            Box::new(InputRefExpression::new(DataType::Float64, 1)),
         ],
         5,
     );

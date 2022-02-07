@@ -152,7 +152,7 @@ mod tests {
     use risingwave_common::column_nonnull;
     use risingwave_common::expr::expr_binary_nonnull::new_binary_expr;
     use risingwave_common::expr::InputRefExpression;
-    use risingwave_common::types::DataTypeKind;
+    use risingwave_common::types::DataType;
     use risingwave_pb::expr::expr_node::Type;
 
     use crate::executor::test_utils::MockSource;
@@ -187,17 +187,17 @@ mod tests {
         );
         let schema = Schema {
             fields: vec![
-                Field::unnamed(DataTypeKind::Int64),
-                Field::unnamed(DataTypeKind::Int64),
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
             ],
         };
         let source = MockSource::with_chunks(schema, PkIndices::new(), vec![chunk1, chunk2]);
 
-        let left_expr = InputRefExpression::new(DataTypeKind::Int64, 0);
-        let right_expr = InputRefExpression::new(DataTypeKind::Int64, 1);
+        let left_expr = InputRefExpression::new(DataType::Int64, 0);
+        let right_expr = InputRefExpression::new(DataType::Int64, 1);
         let test_expr = new_binary_expr(
             Type::GreaterThan,
-            DataTypeKind::Boolean,
+            DataType::Boolean,
             Box::new(left_expr),
             Box::new(right_expr),
         );

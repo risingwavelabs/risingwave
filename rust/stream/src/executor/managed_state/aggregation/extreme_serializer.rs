@@ -2,8 +2,8 @@ use std::marker::PhantomData;
 
 use risingwave_common::error::Result;
 use risingwave_common::types::{
-    deserialize_datum_from, deserialize_datum_not_null_from, serialize_datum_into, DataTypeKind,
-    Datum, Scalar, ScalarImpl,
+    deserialize_datum_from, deserialize_datum_not_null_from, serialize_datum_into, DataType, Datum,
+    Scalar, ScalarImpl,
 };
 use smallvec::SmallVec;
 
@@ -24,15 +24,15 @@ pub mod variants {
 /// The serializer will encode original key and pks one by one. If `EXTREME_TYPE == EXTREME_MAX`,
 /// we will flip the bits of the whole encoded data (including pks).
 pub struct ExtremeSerializer<K: Scalar, const EXTREME_TYPE: usize> {
-    pub data_type_kind: DataTypeKind,
+    pub data_type: DataType,
     pub pk_data_types: PkDataTypes,
     _phantom: PhantomData<K>,
 }
 
 impl<K: Scalar, const EXTREME_TYPE: usize> ExtremeSerializer<K, EXTREME_TYPE> {
-    pub fn new(data_type_kind: DataTypeKind, pk_data_types: PkDataTypes) -> Self {
+    pub fn new(data_type: DataType, pk_data_types: PkDataTypes) -> Self {
         Self {
-            data_type_kind,
+            data_type,
             pk_data_types,
             _phantom: PhantomData,
         }
@@ -78,7 +78,7 @@ impl<K: Scalar, const EXTREME_TYPE: usize> ExtremeSerializer<K, EXTREME_TYPE> {
         deserializer.set_reverse(self.is_reversed_order());
 
         // 1. key
-        let _key = deserialize_datum_not_null_from(self.data_type_kind, &mut deserializer)?;
+        let _key = deserialize_datum_not_null_from(self.data_type, &mut deserializer)?;
 
         // 2. pk
         let mut pk = ExtremePk::with_capacity(self.pk_data_types.len());
@@ -114,8 +114,8 @@ mod tests {
 
         for pk_length in pk_length_cases {
             let s = ExtremeSerializer::<OrderedF64, EXTREME_TYPE>::new(
-                DataTypeKind::Float64,
-                smallvec![DataTypeKind::Int64; pk_length],
+                DataType::Float64,
+                smallvec![DataType::Int64; pk_length],
             );
             let pk = (0..pk_length)
                 .map(|x| (x as i64).to_scalar_value().into())
