@@ -3,12 +3,12 @@ use std::fmt;
 use risingwave_common::catalog::Schema;
 
 use super::{IntoPlanRef, PlanRef, ToDistributedBatch};
-use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 use crate::optimizer::plan_node::LogicalScan;
+use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 
 #[derive(Debug, Clone)]
 pub struct BatchSeqScan {
-    logical: LogicalScan
+    logical: LogicalScan,
 }
 impl WithSchema for BatchSeqScan {
     fn schema(&self) -> &Schema {
@@ -18,9 +18,7 @@ impl WithSchema for BatchSeqScan {
 
 impl BatchSeqScan {
     pub fn new(logical: LogicalScan) -> Self {
-        Self {
-            logical
-        }
+        Self { logical }
     }
 }
 

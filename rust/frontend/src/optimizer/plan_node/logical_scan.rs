@@ -3,16 +3,17 @@ use std::fmt;
 use risingwave_common::catalog::Schema;
 
 use super::{ColPrunable, IntoPlanRef, PlanRef, ToBatch, ToStream};
-use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
-use crate::catalog::{TableId, ColumnId};
-use crate::optimizer::plan_node::BatchSeqScan;
 use crate::catalog::column_catalog::ColumnCatalog;
+use crate::catalog::TableId;
+use crate::optimizer::plan_node::BatchSeqScan;
+use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct LogicalScan {
     table_id: TableId,
     columns: Vec<ColumnCatalog>,
-    schema: Schema
+    schema: Schema,
 }
 impl WithSchema for LogicalScan {
     fn schema(&self) -> &Schema {
