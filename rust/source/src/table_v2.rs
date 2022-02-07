@@ -201,7 +201,7 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::array::{Array, I64Array, Op};
     use risingwave_common::column_nonnull;
-    use risingwave_common::types::DataTypeKind;
+    use risingwave_common::types::DataType;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::mview::MViewTable;
     use risingwave_storage::Keyspace;
@@ -213,7 +213,7 @@ mod tests {
         let keyspace = Keyspace::table_root(store, &Default::default());
         let table = Arc::new(MViewTable::new_batch(
             keyspace,
-            vec![TableColumnDesc::new_without_name(0, DataTypeKind::Int64)],
+            vec![TableColumnDesc::new_without_name(0, DataType::Int64)],
         ));
 
         TableSourceV2::new(table)

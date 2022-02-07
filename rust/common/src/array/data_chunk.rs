@@ -12,7 +12,7 @@ use crate::array::{ArrayBuilderImpl, ArrayImpl};
 use crate::buffer::Bitmap;
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
-use crate::types::DataTypeKind;
+use crate::types::DataType;
 use crate::util::hash_util::finalize_hashers;
 
 pub struct DataChunkBuilder {
@@ -93,7 +93,7 @@ impl DataChunk {
     }
 
     /// Build a `DataChunk` with rows.
-    pub fn from_rows(rows: &[Row], data_types: &[DataTypeKind]) -> Result<Self> {
+    pub fn from_rows(rows: &[Row], data_types: &[DataType]) -> Result<Self> {
         let mut array_builders = data_types
             .iter()
             .map(|data_type| data_type.create_array_builder(1))

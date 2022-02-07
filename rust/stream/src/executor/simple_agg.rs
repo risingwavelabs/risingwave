@@ -251,10 +251,10 @@ mod tests {
         );
         let schema = Schema {
             fields: vec![
-                Field::unnamed(DataTypeKind::Int64),
-                Field::unnamed(DataTypeKind::Int64),
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
                 // primary key column`
-                Field::unnamed(DataTypeKind::Int64),
+                Field::unnamed(DataType::Int64),
             ],
         };
 
@@ -269,22 +269,22 @@ mod tests {
             AggCall {
                 kind: AggKind::RowCount,
                 args: AggArgs::None,
-                return_type: DataTypeKind::Int64,
+                return_type: DataType::Int64,
             },
             AggCall {
                 kind: AggKind::Sum,
-                args: AggArgs::Unary(DataTypeKind::Int64, 0),
-                return_type: DataTypeKind::Int64,
+                args: AggArgs::Unary(DataType::Int64, 0),
+                return_type: DataType::Int64,
             },
             AggCall {
                 kind: AggKind::Sum,
-                args: AggArgs::Unary(DataTypeKind::Int64, 1),
-                return_type: DataTypeKind::Int64,
+                args: AggArgs::Unary(DataType::Int64, 1),
+                return_type: DataType::Int64,
             },
             AggCall {
                 kind: AggKind::Min,
-                args: AggArgs::Unary(DataTypeKind::Int64, 0),
-                return_type: DataTypeKind::Int64,
+                args: AggArgs::Unary(DataType::Int64, 0),
+                return_type: DataType::Int64,
             },
         ];
 

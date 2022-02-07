@@ -133,9 +133,8 @@ mod tests {
     use risingwave_common::array::{Array, DataChunk, PrimitiveArray};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::expr::build_from_prost;
-    use risingwave_common::types::DataTypeKind;
+    use risingwave_common::types::DataType;
     use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::DataType;
     use risingwave_pb::expr::expr_node::Type::InputRef;
     use risingwave_pb::expr::expr_node::{RexNode, Type};
     use risingwave_pb::expr::{ExprNode, FunctionCall, InputRefExpr};
@@ -150,8 +149,8 @@ mod tests {
         let data_chunk = DataChunk::builder().columns([col1, col2].to_vec()).build();
         let schema = Schema {
             fields: vec![
-                Field::unnamed(DataTypeKind::Int32),
-                Field::unnamed(DataTypeKind::Int32),
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Int32),
             ],
         };
         let mut mock_executor = MockExecutor::new(schema);
@@ -167,8 +166,8 @@ mod tests {
             child_can_be_nexted: true,
         };
         let fields = &filter_executor.schema().fields;
-        assert_eq!(fields[0].data_type, DataTypeKind::Int32);
-        assert_eq!(fields[1].data_type, DataTypeKind::Int32);
+        assert_eq!(fields[0].data_type, DataType::Int32);
+        assert_eq!(fields[1].data_type, DataType::Int32);
         filter_executor.open().await.unwrap();
         let res = filter_executor.next().await.unwrap();
         assert_matches!(res, Some(_));
@@ -216,7 +215,7 @@ mod tests {
     fn make_inputref(idx: i32) -> ExprNode {
         ExprNode {
             expr_type: InputRef as i32,
-            return_type: Some(DataType {
+            return_type: Some(risingwave_pb::data::DataType {
                 type_name: TypeName::Int32 as i32,
                 ..Default::default()
             }),

@@ -94,7 +94,7 @@ macro_rules! gen_cmp_impl {
 macro_rules! gen_binary_expr_cmp {
     ($macro:tt, $general_f:ident, $str_f:ident, $l:expr, $r:expr, $ret:expr) => {
         match ($l.return_type(), $r.return_type()) {
-            (DataTypeKind::Varchar, DataTypeKind::Varchar) => {
+            (DataType::Varchar, DataType::Varchar) => {
                 Box::new(BinaryExpression::<Utf8Array, Utf8Array, BoolArray, _> {
                     expr_ia1: $l,
                     expr_ia2: $r,
@@ -103,7 +103,7 @@ macro_rules! gen_binary_expr_cmp {
                     _phantom: PhantomData,
                 })
             }
-            (DataTypeKind::Varchar, DataTypeKind::Char) => {
+            (DataType::Varchar, DataType::Char) => {
                 Box::new(BinaryExpression::<Utf8Array, Utf8Array, BoolArray, _> {
                     expr_ia1: $l,
                     expr_ia2: $r,
@@ -112,7 +112,7 @@ macro_rules! gen_binary_expr_cmp {
                     _phantom: PhantomData,
                 })
             }
-            (DataTypeKind::Char, DataTypeKind::Char) => {
+            (DataType::Char, DataType::Char) => {
                 Box::new(BinaryExpression::<Utf8Array, Utf8Array, BoolArray, _> {
                     expr_ia1: $l,
                     expr_ia2: $r,
@@ -234,24 +234,18 @@ macro_rules! gen_binary_expr_atm {
     };
 }
 
-fn build_extract_expr(
-    ret: DataTypeKind,
-    l: BoxedExpression,
-    r: BoxedExpression,
-) -> BoxedExpression {
+fn build_extract_expr(ret: DataType, l: BoxedExpression, r: BoxedExpression) -> BoxedExpression {
     match r.return_type() {
-        DataTypeKind::Date => {
-            Box::new(
-                BinaryExpression::<Utf8Array, NaiveDateArray, DecimalArray, _> {
-                    expr_ia1: l,
-                    expr_ia2: r,
-                    return_type: ret,
-                    func: extract_from_date,
-                    _phantom: PhantomData,
-                },
-            )
-        }
-        DataTypeKind::Timestamp => {
+        DataType::Date => Box::new(
+            BinaryExpression::<Utf8Array, NaiveDateArray, DecimalArray, _> {
+                expr_ia1: l,
+                expr_ia2: r,
+                return_type: ret,
+                func: extract_from_date,
+                _phantom: PhantomData,
+            },
+        ),
+        DataType::Timestamp => {
             Box::new(
                 BinaryExpression::<Utf8Array, NaiveDateTimeArray, DecimalArray, _> {
                     expr_ia1: l,
@@ -270,7 +264,7 @@ fn build_extract_expr(
 
 pub fn new_binary_expr(
     expr_type: Type,
-    ret: DataTypeKind,
+    ret: DataType,
     l: BoxedExpression,
     r: BoxedExpression,
 ) -> BoxedExpression {
@@ -337,7 +331,7 @@ pub fn new_binary_expr(
 pub fn new_like_default(
     expr_ia1: BoxedExpression,
     expr_ia2: BoxedExpression,
-    return_type: DataTypeKind,
+    return_type: DataType,
 ) -> BoxedExpression {
     Box::new(BinaryExpression::<Utf8Array, Utf8Array, BoolArray, _> {
         expr_ia1,
@@ -351,7 +345,7 @@ pub fn new_like_default(
 pub fn new_position_expr(
     expr_ia1: BoxedExpression,
     expr_ia2: BoxedExpression,
-    return_type: DataTypeKind,
+    return_type: DataType,
 ) -> BoxedExpression {
     Box::new(BinaryExpression::<Utf8Array, Utf8Array, I32Array, _> {
         expr_ia1,

@@ -83,15 +83,15 @@ pub trait SortedGrouper: Send + 'static {
 }
 pub type BoxedSortedGrouper = Box<dyn SortedGrouper>;
 
-pub fn create_sorted_grouper(input_type: DataTypeKind) -> Result<BoxedSortedGrouper> {
+pub fn create_sorted_grouper(input_type: DataType) -> Result<BoxedSortedGrouper> {
     match input_type {
-        // DataTypeKind::Int16 => Ok(Box::new(GeneralSortedGrouper::<I16Array>::new())),
-        // DataTypeKind::Int32 => Ok(Box::new(GeneralSortedGrouper::<I32Array>::new())),
-        DataTypeKind::Int32 => Ok(Box::new(GeneralSortedGrouper::<I32Array> {
+        // DataType::Int16 => Ok(Box::new(GeneralSortedGrouper::<I16Array>::new())),
+        // DataType::Int32 => Ok(Box::new(GeneralSortedGrouper::<I32Array>::new())),
+        DataType::Int32 => Ok(Box::new(GeneralSortedGrouper::<I32Array> {
             ongoing: false,
             group_value: None,
         })),
-        // DataTypeKind::Int64 => Ok(Box::new(GeneralSortedGrouper::new::<I64Array>())),
+        // DataType::Int64 => Ok(Box::new(GeneralSortedGrouper::new::<I64Array>())),
         unimpl_input => todo!("unsupported sorted grouper: input={:?}", unimpl_input),
     }
 }
@@ -216,7 +216,6 @@ mod tests {
     use std::sync::Arc;
 
     use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::DataType;
     use risingwave_pb::expr::agg_call::Type;
     use risingwave_pb::expr::AggCall;
 
@@ -270,7 +269,7 @@ mod tests {
             group_value: None,
         };
         let mut g1_builder = I32ArrayBuilder::new(0)?;
-        let mut a = GeneralAgg::<I32Array, _, I64Array>::new(DataTypeKind::Int64, 0, sum);
+        let mut a = GeneralAgg::<I32Array, _, I64Array>::new(DataType::Int64, 0, sum);
         let mut a_builder = I64ArrayBuilder::new(0)?;
 
         let g0_input = I32Array::from_slice(&[Some(1), Some(1), Some(3)]).unwrap();
@@ -321,7 +320,7 @@ mod tests {
         let prost = AggCall {
             r#type: Type::Count as i32,
             args: vec![],
-            return_type: Some(DataType {
+            return_type: Some(risingwave_pb::data::DataType {
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),

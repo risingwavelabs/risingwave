@@ -8,7 +8,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_common::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
 use risingwave_pb::plan::plan_node::NodeBody;
 
@@ -41,7 +41,7 @@ pub struct NestedLoopJoinExecutor {
     /// during join probing. Flush it in begin of execution.
     last_chunk: Option<SlicedDataChunk>,
     /// The data type of probe side. Cache to avoid copy too much.
-    probe_side_schema: Vec<DataTypeKind>,
+    probe_side_schema: Vec<DataType>,
     /// Row-level iteration of probe side.
     probe_side_source: RowLevelIter,
     /// The table used for look up matched rows.
@@ -437,7 +437,7 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::expr::expr_binary_nonnull::new_binary_expr;
     use risingwave_common::expr::InputRefExpression;
-    use risingwave_common::types::{DataTypeKind, ScalarRefImpl};
+    use risingwave_common::types::{DataType, ScalarRefImpl};
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
     use risingwave_pb::expr::expr_node::Type;
 
@@ -483,14 +483,14 @@ mod tests {
     fn test_convert_row_to_chunk() {
         let row = RowRef::new(vec![Some(ScalarRefImpl::Int32(3))]);
         let probe_side_schema = Schema {
-            fields: vec![Field::unnamed(DataTypeKind::Int32)],
+            fields: vec![Field::unnamed(DataType::Int32)],
         };
         let probe_source = Box::new(MockExecutor::new(probe_side_schema.clone()));
         let build_source = Box::new(MockExecutor::new(probe_side_schema.clone()));
         // Note that only probe side schema of this executor is meaningful. All other fields are
         // meaningless. They are just used to pass Rust checker.
         let source = NestedLoopJoinExecutor {
-            join_expr: Box::new(InputRefExpression::new(DataTypeKind::Int32, 0)),
+            join_expr: Box::new(InputRefExpression::new(DataType::Int32, 0)),
             join_type: JoinType::Inner,
             state: NestedLoopJoinState::Build,
             chunk_builder: DataChunkBuilder::new_with_default_size(probe_side_schema.data_types()),
@@ -512,8 +512,8 @@ mod tests {
     }
 
     struct TestFixture {
-        left_types: Vec<DataTypeKind>,
-        right_types: Vec<DataTypeKind>,
+        left_types: Vec<DataType>,
+        right_types: Vec<DataType>,
         join_type: JoinType,
     }
 
@@ -535,8 +535,8 @@ mod tests {
     impl TestFixture {
         fn with_join_type(join_type: JoinType) -> Self {
             Self {
-                left_types: vec![DataTypeKind::Int32, DataTypeKind::Float32],
-                right_types: vec![DataTypeKind::Int32, DataTypeKind::Float64],
+                left_types: vec![DataType::Int32, DataType::Float32],
+                right_types: vec![DataType::Int32, DataType::Float64],
                 join_type,
             }
         }
@@ -544,8 +544,8 @@ mod tests {
         fn create_left_executor(&self) -> BoxedExecutor {
             let schema = Schema {
                 fields: vec![
-                    Field::unnamed(DataTypeKind::Int32),
-                    Field::unnamed(DataTypeKind::Float32),
+                    Field::unnamed(DataType::Int32),
+                    Field::unnamed(DataType::Float32),
                 ],
             };
             let mut executor = MockExecutor::new(schema);
@@ -583,8 +583,8 @@ mod tests {
         fn create_right_executor(&self) -> BoxedExecutor {
             let schema = Schema {
                 fields: vec![
-                    Field::unnamed(DataTypeKind::Int32),
-                    Field::unnamed(DataTypeKind::Float64),
+                    Field::unnamed(DataType::Int32),
+                    Field::unnamed(DataType::Float64),
                 ],
             };
             let mut executor = MockExecutor::new(schema);
@@ -654,9 +654,9 @@ mod tests {
             Box::new(NestedLoopJoinExecutor {
                 join_expr: new_binary_expr(
                     Type::Equal,
-                    DataTypeKind::Boolean,
-                    Box::new(InputRefExpression::new(DataTypeKind::Int32, 0)),
-                    Box::new(InputRefExpression::new(DataTypeKind::Int32, 2)),
+                    DataType::Boolean,
+                    Box::new(InputRefExpression::new(DataType::Int32, 0)),
+                    Box::new(InputRefExpression::new(DataType::Int32, 2)),
                 ),
                 join_type,
                 state: NestedLoopJoinState::Build,

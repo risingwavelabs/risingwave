@@ -12,7 +12,7 @@ use crate::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk};
 use crate::error::ErrorCode::InternalError;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::Expression;
-use crate::types::{DataTypeKind, Datum, Decimal, IntervalUnit, Scalar, ScalarImpl};
+use crate::types::{DataType, Datum, Decimal, IntervalUnit, Scalar, ScalarImpl};
 
 macro_rules! array_impl_literal_append {
   ([$arr_builder: ident, $literal: ident, $cardinality: ident], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
@@ -32,12 +32,12 @@ macro_rules! array_impl_literal_append {
 
 #[derive(Debug)]
 pub struct LiteralExpression {
-    return_type: DataTypeKind,
+    return_type: DataType,
     literal: Datum,
 }
 
 impl Expression for LiteralExpression {
-    fn return_type(&self) -> DataTypeKind {
+    fn return_type(&self) -> DataType {
         self.return_type
     }
 
@@ -65,20 +65,20 @@ where
     Ok(())
 }
 
-fn literal_type_match(return_type: DataTypeKind, literal: Option<&ScalarImpl>) -> bool {
+fn literal_type_match(return_type: DataType, literal: Option<&ScalarImpl>) -> bool {
     match literal {
         Some(datum) => {
             matches!(
                 (return_type, datum),
-                (DataTypeKind::Boolean, ScalarImpl::Bool(_))
-                    | (DataTypeKind::Int16, ScalarImpl::Int16(_))
-                    | (DataTypeKind::Int32, ScalarImpl::Int32(_))
-                    | (DataTypeKind::Int64, ScalarImpl::Int64(_))
-                    | (DataTypeKind::Float32, ScalarImpl::Float32(_))
-                    | (DataTypeKind::Float64, ScalarImpl::Float64(_))
-                    | (DataTypeKind::Date, ScalarImpl::Int32(_))
-                    | (DataTypeKind::Char, ScalarImpl::Utf8(_))
-                    | (DataTypeKind::Varchar, ScalarImpl::Utf8(_))
+                (DataType::Boolean, ScalarImpl::Bool(_))
+                    | (DataType::Int16, ScalarImpl::Int16(_))
+                    | (DataType::Int32, ScalarImpl::Int32(_))
+                    | (DataType::Int64, ScalarImpl::Int64(_))
+                    | (DataType::Float32, ScalarImpl::Float32(_))
+                    | (DataType::Float64, ScalarImpl::Float64(_))
+                    | (DataType::Date, ScalarImpl::Int32(_))
+                    | (DataType::Char, ScalarImpl::Utf8(_))
+                    | (DataType::Varchar, ScalarImpl::Utf8(_))
             )
         }
         None => true,
@@ -109,7 +109,7 @@ fn make_interval(bytes: &[u8], ty: IntervalType) -> Result<IntervalUnit> {
 }
 
 impl LiteralExpression {
-    pub fn new(return_type: DataTypeKind, literal: Datum) -> Self {
+    pub fn new(return_type: DataType, literal: Datum) -> Self {
         assert!(literal_type_match(return_type, literal.as_ref()));
         LiteralExpression {
             return_type,
@@ -127,7 +127,7 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
         ensure!(prost.expr_type == Type::ConstantValue as i32);
-        let ret_type = DataTypeKind::from(prost.get_return_type()?);
+        let ret_type = DataType::from(prost.get_return_type()?);
         if prost.rex_node.is_none() {
             return Ok(Self {
                 return_type: ret_type,
@@ -223,7 +223,7 @@ mod tests {
     use std::sync::Arc;
 
     use risingwave_pb::data::data_type::IntervalType;
-    use risingwave_pb::data::DataType;
+    use risingwave_pb::data::DataType as ProstDataType;
     use risingwave_pb::expr::expr_node::Type;
     use risingwave_pb::expr::{ConstantValue, ExprNode};
 
@@ -324,7 +324,7 @@ mod tests {
     fn make_expression(bytes: Option<Vec<u8>>, data_type: TypeName) -> ExprNode {
         ExprNode {
             expr_type: Type::ConstantValue as i32,
-            return_type: Some(DataType {
+            return_type: Some(ProstDataType {
                 type_name: data_type as i32,
                 interval_type: IntervalType::Month as i32,
                 ..Default::default()
