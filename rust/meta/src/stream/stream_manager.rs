@@ -214,7 +214,19 @@ impl StreamManager {
 
         let mut actor_locations = Vec::with_capacity(actors.len());
 
-        for (node_id, actors) in node_actors_map {
+        // Debug usage: print the actor dependencies in log.
+        actors.iter().for_each(|e| {
+            debug!(
+                "actor {} with downstreams: {:?}",
+                e.actor_id, e.downstream_actor_id
+            );
+        });
+
+        // We send RPC request in two stages.
+        // The first stage does 2 things: broadcast actor info, and send local actor ids to
+        // different WorkerNodes. Such that each WorkerNode knows the overall actor
+        // allocation, but not actually builds it. We initialize all channels in this stage.
+        for (node_id, actors) in node_actors_map.clone() {
             let node = node_map.get(&node_id).unwrap();
 
             let client = self.clients.get(node).await?;
@@ -242,6 +254,18 @@ impl StreamManager {
                 .await
                 .to_rw_result_with(format!("failed to connect to {}", node_id))?;
 
+            actor_locations.push(ActorLocation {
+                node: Some(node.clone()),
+                actors: stream_actors,
+            });
+        }
+
+        // In the second stage, each [`WorkerNode`] builds local actors and connect them with
+        // channels.
+        for (node_id, actors) in node_actors_map {
+            let node = node_map.get(&node_id).unwrap();
+
+            let client = self.clients.get(node).await?;
             let request_id = Uuid::new_v4().to_string();
             debug!("[{}]build actors: {:?}", request_id, actors);
             client
@@ -252,11 +276,6 @@ impl StreamManager {
                 })
                 .await
                 .to_rw_result_with(format!("failed to connect to {}", node_id))?;
-
-            actor_locations.push(ActorLocation {
-                node: Some(node.clone()),
-                actors: stream_actors,
-            });
         }
 
         self.barrier_manager_ref

@@ -260,7 +260,7 @@ impl StreamManagerCore {
                     .get(down_id)
                     .ok_or_else(|| {
                         RwError::from(ErrorCode::InternalError(format!(
-                            "channel between {} and {} does not exist",
+                            "create dispatcher error: channel between {} and {} does not exist",
                             actor_id, down_id
                         )))
                     })?
@@ -273,7 +273,7 @@ impl StreamManagerCore {
                         .get_mut(&(actor_id, *down_id))
                         .ok_or_else(|| {
                             RwError::from(ErrorCode::InternalError(format!(
-                                "channel between {} and {} does not exist",
+                                "create dispatcher error: local channel between {} and {} does not exist",
                                 actor_id, down_id
                             )))
                         })?
@@ -281,7 +281,7 @@ impl StreamManagerCore {
                         .take()
                         .ok_or_else(|| {
                             RwError::from(ErrorCode::InternalError(format!(
-                                "sender from {} to {} does no exist",
+                                "create dispatcher error: sender from {} to {} does no exist",
                                 actor_id, down_id
                             )))
                         })?;
@@ -728,7 +728,7 @@ impl StreamManagerCore {
                             .get_mut(&(*up_id, actor_id))
                             .ok_or_else(|| {
                                 RwError::from(ErrorCode::InternalError(format!(
-                                    "channel between {} and {} does not exist",
+                                    "create merger error: remote channel between {} and {} does not exist",
                                     up_id, actor_id
                                 )))
                             })?
@@ -736,7 +736,7 @@ impl StreamManagerCore {
                             .take()
                             .ok_or_else(|| {
                                 RwError::from(ErrorCode::InternalError(format!(
-                                    "sender from {} to {} does no exist",
+                                    "create merger error: remote sender from {} to {} does no exist",
                                     up_id, actor_id
                                 )))
                             })?;
@@ -762,7 +762,7 @@ impl StreamManagerCore {
                         .get_mut(&(*up_id, actor_id))
                         .ok_or_else(|| {
                             RwError::from(ErrorCode::InternalError(format!(
-                                "channel between {} and {} does not exist",
+                                "create merger error: channel between {} and {} does not exist",
                                 up_id, actor_id
                             )))
                         })?
@@ -770,7 +770,7 @@ impl StreamManagerCore {
                         .take()
                         .ok_or_else(|| {
                             RwError::from(ErrorCode::InternalError(format!(
-                                "receiver from {} to {} does no exist",
+                                "create merger error: receiver from {} to {} does no exist",
                                 up_id, actor_id
                             )))
                         })?)
