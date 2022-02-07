@@ -61,14 +61,10 @@ impl StreamFragmentGraph {
         self.fragments.get(&self.fragment_id).unwrap().clone()
     }
 
-    pub fn add_root_fragment(&mut self, stream_fragment: StreamFragment) {
-        self.fragment_id = stream_fragment.fragment_id;
-        self.fragments
-            .insert(stream_fragment.fragment_id, stream_fragment);
-    }
-
-    #[allow(dead_code)]
-    pub fn add_fragment(&mut self, stream_fragment: StreamFragment) {
+    pub fn add_fragment(&mut self, stream_fragment: StreamFragment, is_root: bool) {
+        if is_root {
+            self.fragment_id = stream_fragment.fragment_id;
+        }
         self.fragments
             .insert(stream_fragment.fragment_id, stream_fragment);
     }

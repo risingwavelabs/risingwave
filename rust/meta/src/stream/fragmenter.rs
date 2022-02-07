@@ -66,15 +66,19 @@ impl StreamFragmenter {
 
     /// Generate fragment DAG from input streaming plan by their dependency.
     fn generate_fragment_graph(&mut self, stream_node: &StreamNode) -> Result<()> {
-        self.build_root_fragment(stream_node)?;
+        self.build_and_add_fragment(stream_node, true)?;
         Ok(())
     }
 
-    /// Use the given `stream_node` to create and add a root fragment.
-    fn build_root_fragment(&mut self, stream_node: &StreamNode) -> Result<StreamFragment> {
+    /// Use the given `stream_node` to create a fragment and add it to graph.
+    fn build_and_add_fragment(
+        &mut self,
+        stream_node: &StreamNode,
+        is_root: bool,
+    ) -> Result<StreamFragment> {
         let mut fragment = self.new_stream_fragment(Arc::new(stream_node.clone()));
         self.build_fragment(&mut fragment, stream_node)?;
-        self.fragment_graph.add_root_fragment(fragment.clone());
+        self.fragment_graph.add_fragment(fragment.clone(), is_root);
         Ok(fragment)
     }
 
@@ -90,7 +94,7 @@ impl StreamFragmenter {
             match child_node.get_node()? {
                 Node::ExchangeNode(exchange_node) => {
                     // Build another root fragment for this node.
-                    let child_fragment = self.build_root_fragment(child_node)?;
+                    let child_fragment = self.build_and_add_fragment(child_node, false)?;
                     self.fragment_graph.link_child(
                         current_fragment.get_fragment_id(),
                         child_fragment.get_fragment_id(),
