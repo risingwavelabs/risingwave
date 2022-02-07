@@ -10,6 +10,9 @@ insert into t1 values (1), (null), (2);
 statement ok
 insert into t2 values (1), (null), (2);
 
+statement ok
+flush;
+
 query II rowsort
 select * from t1, t2 where t1.v1 < t2.v1 or t1.v1 > t2.v1;
 ----
@@ -75,6 +78,9 @@ INSERT INTO J2_TBL VALUES
     (0, NULL),
     (NULL, NULL),
     (NULL, 0);
+
+statement ok
+flush;
 
 query IITII rowsort
 SELECT *

@@ -4,6 +4,9 @@ create table t (v1 int not null, v2 int not null, v3 int not null)
 statement ok
 insert into t values (1,4,2), (2,3,3), (3,4,4), (4,3,5)
 
+statement ok
+flush;
+
 query III rowsort
 select * from t
 ----
@@ -161,6 +164,9 @@ insert into t values ('false', false, 2);
 statement ok
 insert into t values ('null', null, 3);
 
+statement ok
+flush;
+
 query TBI
 select * from t order by v3 desc;
 ----
@@ -196,6 +202,9 @@ insert into t values
     ('1989-01-01', '23:48:17', '1989-01-01 23:48:17'),
     ('2019-05-12', '10:20:48', '2019-05-12 10:20:48')
 
+statement ok
+flush;
+
 query TTT
 select * from t
 ----
@@ -212,6 +221,9 @@ create table t (v1 int not null, v2 char(8) not null)
 
 statement ok
 insert into t values (1,'1'), (2,'22'), (3,'333'), (4,'4444')
+
+statement ok
+flush;
 
 query IT
 select * from t
@@ -248,6 +260,9 @@ create table t (v1 numeric not null, v2 int not null)
 statement ok
 insert into t values (12345.01234, 1), (2.02, 2), (3.03, 3), (4.04, 4)
 
+statement ok
+flush;
+
 query RI
 select * from t
 ----
@@ -271,6 +286,9 @@ create table t (v1 numeric(10, 5) not null, v2 int not null)
 statement ok
 insert into t values (12345.01234, 1), (12345, 2), (3.03, 3), (4.04, 4)
 
+statement ok
+flush;
+
 query RI
 select * from t
 ----
@@ -292,6 +310,9 @@ create table t (v1 int, v2 int not null)
 
 statement ok
 insert into t values(1, 2), (null, 2), (null, 2)
+
+statement ok
+flush;
 
 query II
 select * from t
@@ -315,6 +336,9 @@ create table t (v1 boolean)
 statement ok
 insert into t values (true), (false), (true)
 
+statement ok
+flush;
+
 query B
 select * from t
 ----
@@ -332,6 +356,9 @@ create table t (v1 int)
 statement ok
 insert into t values (-1), (-2)
 
+statement ok
+flush;
+
 query I
 select * from t where v1 < -1
 ----
@@ -346,6 +373,9 @@ create table t (v1 int)
 
 statement ok
 insert into t values (2147483647), (1)
+
+statement ok
+flush;
 
 query I
 select sum(v1) from t
@@ -373,6 +403,9 @@ create table t (v1 varchar);
 statement ok
 insert into t values ('foo'), (NULL), ('bar'), (NULL);
 
+statement ok
+flush;
+
 query T
 select * from t;
 ----
@@ -394,6 +427,9 @@ create table t (v1 numeric(10, 3));
 
 statement ok
 insert into t values (1.123), (NULL), (2.234), (NULL);
+
+statement ok
+flush;
 
 query R
 select * from t;

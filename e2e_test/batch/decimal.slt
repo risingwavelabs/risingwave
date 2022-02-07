@@ -4,6 +4,9 @@ create table t (v1 numeric not null, v2 numeric)
 statement ok
 insert into t values (1.1987, 4.6543), (2.22, 3.3), (1.165, 1.15)
 
+statement ok
+flush;
+
 query RRR
 select round(v1, 2), round(v2, 1), round(v1, -1) from t
 ----
