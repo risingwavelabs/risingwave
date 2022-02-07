@@ -58,19 +58,14 @@ impl StreamManager {
         None
     }
 
-    async fn lookup_actor_ids(&self, table_ref_ids: Vec<TableRefId>) -> Result<HashMap<i32, u32>> {
-        // TODO(MrCroxx): We can get all table related actor ids in one request.
+    async fn lookup_actor_ids(
+        &self,
+        table_ref_ids: Vec<TableRefId>,
+    ) -> Result<HashMap<i32, Vec<u32>>> {
         let mut result = HashMap::default();
         for table_ref_id in table_ref_ids {
-            // TODO(MrCroxx): A create materialized view plan will be split into multiple stages.
-            // Currently, we simply assume that MView lays on the actor with min actor id. We need
-            // an interface in [`StreamMetaManager`] to query the actor id of the MView
-            // node.
-            let table_actors = self.smm.get_table_actors(&table_ref_id).await?;
-            result.insert(
-                table_ref_id.table_id,
-                *table_actors.actor_ids.iter().min().unwrap(),
-            );
+            let table_actors = self.smm.get_materialized_view_actors(&table_ref_id).await?;
+            result.insert(table_ref_id.table_id, table_actors);
         }
         Ok(result)
     }
@@ -78,12 +73,13 @@ impl StreamManager {
     fn update_chain_upstream_actor_ids(
         &self,
         stream_node: &mut StreamNode,
-        table_actor_map: &HashMap<i32, u32>,
+        table_actor_map: &HashMap<i32, Vec<u32>>,
     ) {
         if let Node::ChainNode(chain) = stream_node.node.as_mut().unwrap() {
-            chain.upstream_actor_id = *table_actor_map
+            chain.upstream_actor_ids = table_actor_map
                 .get(&chain.table_ref_id.as_ref().unwrap().table_id)
-                .expect("table id not exists");
+                .expect("table id not exists")
+                .clone();
         }
         for child in &mut stream_node.input {
             self.update_chain_upstream_actor_ids(child, table_actor_map);
@@ -103,6 +99,16 @@ impl StreamManager {
     ) -> Result<()> {
         // TODO(MrCroxx): refine this mess after mv on mv can RUN.
 
+        let mview_actors = actors
+            .iter()
+            .filter(|actor| {
+                matches!(
+                    actor.nodes.as_ref().unwrap().node.as_ref().unwrap(),
+                    Node::MviewNode(_)
+                )
+            })
+            .map(|actor| actor.actor_id)
+            .collect_vec();
         // actor id (with chain node) => table ref id required by chain node
         let chain_actors = actors
             .iter()
@@ -132,13 +138,17 @@ impl StreamManager {
             .iter()
             .map(|(actor_id, table_ref_id)| {
                 (
-                    *table_actor_map
+                    table_actor_map
                         .get(&table_ref_id.table_id)
-                        .expect("table id not exists"),
+                        .expect("table id not exists")
+                        .clone(),
                     *actor_id,
                 )
             })
-            .collect_vec();
+            .fold(vec![], |mut v, (actor_ids, table_ref_id)| {
+                v.extend(actor_ids.iter().map(|&actor_id| (actor_id, table_ref_id)));
+                v
+            });
 
         // Divide all actors into source and non-source actors.
         let actor_ids = actors.iter().map(|a| a.actor_id).collect::<Vec<_>>();
@@ -256,6 +266,7 @@ impl StreamManager {
                     table_ref_id: Some(table_id.clone()),
                     actor_ids,
                 },
+                mview_actors,
                 actor_locations,
                 dispatches,
             })
@@ -602,7 +613,7 @@ mod tests {
                     node_id: 3,
                     node: Some(Node::ChainNode(ChainNode {
                         table_ref_id: Some(table_ref_id_1.clone()),
-                        upstream_actor_id: 0,
+                        upstream_actor_ids: vec![0],
                         pk_indices: vec![],
                         column_ids: vec![],
                     })),
@@ -643,7 +654,7 @@ mod tests {
             .as_ref()
             .unwrap()
         {
-            assert_eq!(chain.upstream_actor_id, 1);
+            assert_eq!(chain.upstream_actor_ids, vec![1]);
         } else {
             return Err(ErrorCode::UnknownError("chain node is expected".to_owned()).into());
         }

@@ -33,6 +33,7 @@ pub enum Command {
     CreateMaterializedView {
         table_id: TableRefId,
         table_actors: TableActors,
+        mview_actors: Vec<u32>,
         actor_locations: Vec<ActorLocation>,
         dispatches: HashMap<u32, Vec<ActorInfo>>,
     },
@@ -152,6 +153,7 @@ impl CommandContext<'_> {
             Command::CreateMaterializedView {
                 table_id,
                 table_actors,
+                mview_actors,
                 actor_locations,
                 ..
             } => {
@@ -160,6 +162,9 @@ impl CommandContext<'_> {
                         .add_actors_to_node(actor_location)
                         .await?;
                 }
+                self.stream_meta_manager
+                    .add_materialized_view_actors(table_id, mview_actors)
+                    .await?;
                 self.stream_meta_manager
                     .add_table_actors(table_id, table_actors)
                     .await?;
