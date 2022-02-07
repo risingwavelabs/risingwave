@@ -179,17 +179,13 @@ pub fn create_streaming_agg_state(
                 (AggKind::RowCount, DataType::Int64, Some(datum)) => {
                     Box::new(StreamingRowCountAgg::with_row_cnt(datum))
                 }
-                (AggKind::RowCount, DataType::Int64, None) => {
-                    Box::new(StreamingRowCountAgg::new())
-                }
+                (AggKind::RowCount, DataType::Int64, None) => Box::new(StreamingRowCountAgg::new()),
                 // According to the function header comments and the link, Count(*) == RowCount
                 // `StreamingCountAgg` does not count `NULL`, so we use `StreamingRowCountAgg` here.
                 (AggKind::Count, DataType::Int64, Some(datum)) => {
                     Box::new(StreamingRowCountAgg::with_row_cnt(datum))
                 }
-                (AggKind::Count, DataType::Int64, None) => {
-                    Box::new(StreamingRowCountAgg::new())
-                }
+                (AggKind::Count, DataType::Int64, None) => Box::new(StreamingRowCountAgg::new()),
                 _ => unimplemented!(),
             }
         }

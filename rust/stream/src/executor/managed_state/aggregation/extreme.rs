@@ -8,8 +8,8 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
 use risingwave_common::expr::AggKind;
 use risingwave_common::types::{
-    deserialize_datum_not_null_from, serialize_datum_not_null_into, DataType, Datum,
-    ScalarImpl, ScalarRef,
+    deserialize_datum_not_null_from, serialize_datum_not_null_into, DataType, Datum, ScalarImpl,
+    ScalarRef,
 };
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};

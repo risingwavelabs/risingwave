@@ -98,9 +98,7 @@ impl DataType {
             DataType::Int64 => PrimitiveArrayBuilder::<i64>::new(capacity)?.into(),
             DataType::Float32 => PrimitiveArrayBuilder::<OrderedF32>::new(capacity)?.into(),
             DataType::Float64 => PrimitiveArrayBuilder::<OrderedF64>::new(capacity)?.into(),
-            DataType::Decimal { prec: _, scale: _ } => {
-                DecimalArrayBuilder::new(capacity)?.into()
-            }
+            DataType::Decimal { prec: _, scale: _ } => DecimalArrayBuilder::new(capacity)?.into(),
             DataType::Date => NaiveDateArrayBuilder::new(capacity)?.into(),
             DataType::Char | DataType::Varchar => Utf8ArrayBuilder::new(capacity)?.into(),
             DataType::Time => NaiveTimeArrayBuilder::new(capacity)?.into(),

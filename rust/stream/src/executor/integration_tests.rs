@@ -203,14 +203,10 @@ fn make_tpchq6_expr() -> (BoxedExpression, BoxedExpression) {
         DataType::Char,
         Some(ScalarImpl::Utf8("1995-01-01 00:00:00".to_string())),
     );
-    let const_0_05 = LiteralExpression::new(
-        DataType::Float64,
-        Some(ScalarImpl::Float64(0.05.into())),
-    );
-    let const_0_07 = LiteralExpression::new(
-        DataType::Float64,
-        Some(ScalarImpl::Float64(0.07.into())),
-    );
+    let const_0_05 =
+        LiteralExpression::new(DataType::Float64, Some(ScalarImpl::Float64(0.05.into())));
+    let const_0_07 =
+        LiteralExpression::new(DataType::Float64, Some(ScalarImpl::Float64(0.07.into())));
     let const_24 = LiteralExpression::new(DataType::Int32, Some(ScalarImpl::Int32(24)));
     let t_shipdate = DataType::Timestamp;
     let l_shipdate = InputRefExpression::new(t_shipdate, 0);
@@ -224,17 +220,11 @@ fn make_tpchq6_expr() -> (BoxedExpression, BoxedExpression) {
     let t_extended_price = DataType::Float64;
     let l_extended_price = InputRefExpression::new(t_extended_price, 3);
 
-    let l_shipdate_geq_cast = new_unary_expr(
-        Type::Cast,
-        DataType::Timestamp,
-        Box::new(const_1994_01_01),
-    );
+    let l_shipdate_geq_cast =
+        new_unary_expr(Type::Cast, DataType::Timestamp, Box::new(const_1994_01_01));
 
-    let l_shipdate_le_cast = new_unary_expr(
-        Type::Cast,
-        DataType::Timestamp,
-        Box::new(const_1995_01_01),
-    );
+    let l_shipdate_le_cast =
+        new_unary_expr(Type::Cast, DataType::Timestamp, Box::new(const_1995_01_01));
 
     let l_shipdate_geq = new_binary_expr(
         Type::GreaterThanOrEqual,
@@ -271,12 +261,7 @@ fn make_tpchq6_expr() -> (BoxedExpression, BoxedExpression) {
         Box::new(const_24),
     );
 
-    let and = new_nullable_binary_expr(
-        Type::And,
-        DataType::Boolean,
-        l_shipdate_geq,
-        l_shipdate_le,
-    );
+    let and = new_nullable_binary_expr(Type::And, DataType::Boolean, l_shipdate_geq, l_shipdate_le);
 
     let and = new_nullable_binary_expr(Type::And, DataType::Boolean, and, l_discount_geq);
 

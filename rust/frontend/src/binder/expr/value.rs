@@ -9,10 +9,9 @@ impl Binder {
     pub(super) fn bind_value(&mut self, value: Value) -> Result<Literal> {
         match value {
             Value::Number(s, b) => self.bind_number(s, b),
-            Value::SingleQuotedString(s) => Ok(Literal::new(
-                Some(ScalarImpl::Utf8(s)),
-                DataType::Varchar,
-            )),
+            Value::SingleQuotedString(s) => {
+                Ok(Literal::new(Some(ScalarImpl::Utf8(s)), DataType::Varchar))
+            }
             _ => Err(ErrorCode::NotImplementedError(format!("{:?}", value)).into()),
         }
     }

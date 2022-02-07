@@ -43,11 +43,7 @@ pub struct AllOrNoneState<S: StateStore> {
 }
 
 impl<S: StateStore> AllOrNoneState<S> {
-    pub fn new(
-        keyspace: Keyspace<S>,
-        data_types: Vec<DataType>,
-        pk_indices: Vec<usize>,
-    ) -> Self {
+    pub fn new(keyspace: Keyspace<S>, data_types: Vec<DataType>, pk_indices: Vec<usize>) -> Self {
         let pk_data_types = pk_indices.iter().map(|idx| data_types[*idx]).collect_vec();
         Self {
             cached: None,
@@ -200,11 +196,8 @@ mod tests {
     async fn test_managed_all_or_none_state() {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
-        let mut managed_state = AllOrNoneState::new(
-            keyspace,
-            vec![DataType::Int64, DataType::Int64],
-            vec![0],
-        );
+        let mut managed_state =
+            AllOrNoneState::new(keyspace, vec![DataType::Int64, DataType::Int64], vec![0]);
         assert!(!managed_state.is_dirty());
         let columns = vec![
             column_nonnull! { I64Array, [3, 2, 1] },
