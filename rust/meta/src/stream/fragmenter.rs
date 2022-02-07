@@ -161,6 +161,8 @@ impl StreamFragmenter {
             // Fragment on the source.
             self.worker_count
         };
+        // TODO(MrCroxx): remove this
+        let parallel_degree = 1;
 
         let node = current_fragment.get_node();
         let actor_ids = self.gen_actor_id(parallel_degree as i32).await?;
