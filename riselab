@@ -2,4 +2,4 @@
 
 echo "riselab script will be deprecated soon -- please use risedev instead."
 
-./risedev $@
+./risedev "$@"
