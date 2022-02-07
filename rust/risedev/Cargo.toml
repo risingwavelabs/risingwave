@@ -1,6 +1,6 @@
 [package]
 edition = "2021"
-name = "riselab"
+name = "risedev"
 version = "0.1.2"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

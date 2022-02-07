@@ -10,11 +10,11 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use console::style;
 use indicatif::{MultiProgress, ProgressBar};
-use riselab::util::complete_spin;
-use riselab::{
+use risedev::util::complete_spin;
+use risedev::{
     ComputeNodeService, ConfigExpander, ConfigureTmuxTask, EnsureStopService, ExecuteContext,
     FrontendService, GrafanaService, JaegerService, MetaNodeService, MinioService,
-    PrometheusService, ServiceConfig, Task, RISELAB_SESSION_NAME,
+    PrometheusService, ServiceConfig, Task, RISEDEV_SESSION_NAME,
 };
 use tempfile::tempdir;
 use yaml_rust::YamlEmitter;
@@ -33,7 +33,7 @@ impl ProgressManager {
 
     /// Create a new progress bar from task
     pub fn new_progress(&mut self) -> ProgressBar {
-        let pb = riselab::util::new_spinner();
+        let pb = risedev::util::new_spinner();
         if let Some(ref mut insert) = self.insert {
             self.mp.insert(*insert, pb.clone());
             *insert += 1;
@@ -70,7 +70,7 @@ fn task_main(
         .write(true)
         .create(true)
         .truncate(true)
-        .open(Path::new(&log_path).join("riselab.log"))?;
+        .open(Path::new(&log_path).join("risedev.log"))?;
 
     let status_dir = Arc::new(tempdir()?);
 
@@ -118,7 +118,7 @@ fn task_main(
                 let mut service = MinioService::new(c.clone())?;
                 service.execute(&mut ctx)?;
 
-                let mut task = riselab::ConfigureMinioTask::new(c.clone())?;
+                let mut task = risedev::ConfigureMinioTask::new(c.clone())?;
                 task.execute(&mut ctx)?;
             }
             ServiceConfig::Prometheus(c) => {
@@ -126,7 +126,7 @@ fn task_main(
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
                 let mut service = PrometheusService::new(c.clone())?;
                 service.execute(&mut ctx)?;
-                let mut task = riselab::ConfigureGrpcNodeTask::new(c.port, false)?;
+                let mut task = risedev::ConfigureGrpcNodeTask::new(c.port, false)?;
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("api http://{}:{}/", c.address, c.port));
@@ -137,7 +137,7 @@ fn task_main(
                 let mut service = ComputeNodeService::new(c.clone())?;
                 service.execute(&mut ctx)?;
 
-                let mut task = riselab::ConfigureGrpcNodeTask::new(c.port, c.user_managed)?;
+                let mut task = risedev::ConfigureGrpcNodeTask::new(c.port, c.user_managed)?;
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("api grpc://{}:{}/", c.address, c.port));
@@ -147,7 +147,7 @@ fn task_main(
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
                 let mut service = MetaNodeService::new(c.clone())?;
                 service.execute(&mut ctx)?;
-                let mut task = riselab::ConfigureGrpcNodeTask::new(c.port, c.user_managed)?;
+                let mut task = risedev::ConfigureGrpcNodeTask::new(c.port, c.user_managed)?;
                 task.execute(&mut ctx)?;
                 ctx.pb.set_message(format!(
                     "api grpc://{}:{}/, dashboard http://{}:{}/",
@@ -159,7 +159,7 @@ fn task_main(
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
                 let mut service = FrontendService::new(c.clone())?;
                 service.execute(&mut ctx)?;
-                let mut task = riselab::ConfigureGrpcNodeTask::new(c.port, c.user_managed)?;
+                let mut task = risedev::ConfigureGrpcNodeTask::new(c.port, c.user_managed)?;
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("api postgres://{}:{}/", c.address, c.port));
@@ -169,7 +169,7 @@ fn task_main(
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
                 let mut service = GrafanaService::new(c.clone())?;
                 service.execute(&mut ctx)?;
-                let mut task = riselab::ConfigureGrpcNodeTask::new(c.port, false)?;
+                let mut task = risedev::ConfigureGrpcNodeTask::new(c.port, false)?;
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("dashboard http://{}:{}/", c.address, c.port));
@@ -179,7 +179,7 @@ fn task_main(
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
                 let mut service = JaegerService::new(c.clone())?;
                 service.execute(&mut ctx)?;
-                let mut task = riselab::ConfigureGrpcNodeTask::new(c.dashboard_port, false)?;
+                let mut task = risedev::ConfigureGrpcNodeTask::new(c.dashboard_port, false)?;
                 task.execute(&mut ctx)?;
                 ctx.pb.set_message(format!(
                     "dashboard http://{}:{}/",
@@ -197,25 +197,25 @@ fn task_main(
 }
 
 fn main() -> Result<()> {
-    let riselab_config = {
+    let risedev_config = {
         let mut content = String::new();
-        File::open("riselab.yml")?.read_to_string(&mut content)?;
+        File::open("risedev.yml")?.read_to_string(&mut content)?;
         content
     };
-    let riselab_config = ConfigExpander::expand(&riselab_config)?;
+    let risedev_config = ConfigExpander::expand(&risedev_config)?;
     {
         let mut out_str = String::new();
         let mut emitter = YamlEmitter::new(&mut out_str);
-        emitter.dump(&riselab_config)?;
+        emitter.dump(&risedev_config)?;
         std::fs::write(
-            Path::new(&env::var("PREFIX_CONFIG")?).join("riselab-expanded.yml"),
+            Path::new(&env::var("PREFIX_CONFIG")?).join("risedev-expanded.yml"),
             &out_str,
         )?;
     }
     let task_name = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "default".to_string());
-    let (steps, services) = ConfigExpander::select(&riselab_config, &task_name)?;
+    let (steps, services) = ConfigExpander::select(&risedev_config, &task_name)?;
 
     let mut manager = ProgressManager::new();
     // Always create a progress before calling `task_main`. Otherwise the progress bar won't be
@@ -252,7 +252,7 @@ fn main() -> Result<()> {
             println!("\nPRO TIPS:");
             println!(
                 "* Run {} to attach to the tmux console.",
-                style(format!("tmux a -t {}", RISELAB_SESSION_NAME))
+                style(format!("tmux a -t {}", RISEDEV_SESSION_NAME))
                     .blue()
                     .bold()
             );
@@ -265,8 +265,8 @@ fn main() -> Result<()> {
             );
             println!(
                 "* Run {} or {} to kill cluster.",
-                style("./riselab kill").blue().bold(),
-                style("./riselab k").blue().bold()
+                style("./risedev kill").blue().bold(),
+                style("./risedev k").blue().bold()
             );
 
             Ok(())
@@ -277,7 +277,7 @@ fn main() -> Result<()> {
                 "please refer to logs for more information {}",
                 env::var("PREFIX_LOG")?
             );
-            println!("* Run `./riselab kill` or `./riselab k` to clean up cluster.");
+            println!("* Run `./risedev kill` or `./risedev k` to clean up cluster.");
             println!("---");
             println!();
             println!();

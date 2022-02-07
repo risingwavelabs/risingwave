@@ -40,9 +40,9 @@ engine, storage engine and meta service.
 - The `e2e_test` folder contains the latest end-to-end test cases.
 
 
-### RiseLAB
+### RiseDev
 
-RiseLAB is the new tool for developing RisingWave. You'll need to install tmux (>= 3.2a) beforehand.
+RiseDev is the new tool for developing RisingWave. You'll need to install tmux (>= 3.2a) beforehand.
 
 ```
 brew install tmux wget
@@ -51,10 +51,10 @@ brew install tmux wget
 Then, simply run:
 
 ```
-./riselab d # shortcut for ./riselab dev
-./riselab ci-streaming
-./riselab ci-3node
-./riselab dev-compute-node # compute node will need to be started by you
+./risedev d # shortcut for ./risedev dev
+./risedev ci-streaming
+./risedev ci-3node
+./risedev dev-compute-node # compute node will need to be started by you
 ```
 
 Everything will be set for you.
@@ -62,16 +62,16 @@ Everything will be set for you.
 To stop the playground,
 
 ```
-./riselab k # shortcut for ./riselab kill
+./risedev k # shortcut for ./risedev kill
 ```
 
-And you can configure components for RiseLAB.
+And you can configure components for RiseDev.
 
 ```
-./riselab configure
+./risedev configure
 ```
 
-For more information, refer to `README.md` under `rust/riselab`.
+For more information, refer to `README.md` under `rust/risedev`.
 
 ### Dashboard
 

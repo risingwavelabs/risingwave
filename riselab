@@ -1,16 +1,5 @@
 #!/bin/bash
 
-if [ -z "$(which cargo-make)" ]; then
-    echo "Installing cargo-make..."
-    cargo install cargo-make --version "^0.35"
-fi
+echo "riselab script will be deprecated soon -- please use risedev instead."
 
-touch riselab-components.user.env
-
-if [ $# -eq 0 ] || [ "$1" == "-h" ] || [ "$1" ==  "--help" ]; then
-    cargo make --list-all-steps
-    exit 0
-fi
-
-cargo make configure-if-not-configured
-cargo make "$@"
+./risedev "$@"

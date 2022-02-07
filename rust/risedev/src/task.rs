@@ -49,7 +49,7 @@ pub struct ExecuteContext<W>
 where
     W: std::io::Write,
 {
-    /// Global log file object. (aka. riselab.log)
+    /// Global log file object. (aka. risedev.log)
     pub log: W,
 
     /// Progress bar on screen.
@@ -57,7 +57,7 @@ where
 
     /// The directory for checking status.
     ///
-    /// RiseLAB will instruct every task to output their status to a file in temporary folder. By
+    /// RiseDev will instruct every task to output their status to a file in temporary folder. By
     /// checking this file, we can know whether a task has early exited.
     pub status_dir: Arc<TempDir>,
 
@@ -177,7 +177,7 @@ where
         cmd.arg("new-window")
             // Set target name
             .arg("-t")
-            .arg(RISELAB_SESSION_NAME)
+            .arg(RISEDEV_SESSION_NAME)
             // Switch to background window
             .arg("-d")
             // Set session name for this window

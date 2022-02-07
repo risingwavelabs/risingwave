@@ -21,4 +21,4 @@ comment:
   # do not comment until 2 builds collected (java & rust)
   after_n_builds: 2
 ignore:
-  - "rust/riselab"
+  - "rust/risedev"
