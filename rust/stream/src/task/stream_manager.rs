@@ -615,7 +615,6 @@ impl StreamManagerCore {
                 let table_id = TableId::from(&chain_node.table_ref_id);
                 let table = table_manager.get_table(&table_id)?;
                 let snapshot = Box::new(BatchQueryExecutor::new(table.clone(), pk_indices));
-                let up_ids = chain_node.upstream_actor_id.clone();
                 let pk_indices = chain_node
                     .pk_indices
                     .iter()
@@ -625,7 +624,7 @@ impl StreamManagerCore {
                 let mview = self.create_merge_node(
                     actor_id,
                     upstream_schema.clone(),
-                    &up_ids[..],
+                    &chain_node.upstream_actor_ids,
                     pk_indices,
                 )?;
 
@@ -890,7 +889,7 @@ impl StreamManagerCore {
             // Create channel based on upstream actor id for [`ChainNode`], check if upstream
             // exists.
             let mut guard = self.context.lock_channel_pool();
-            for upstream_actor_id in &chain.upstream_actor_id {
+            for upstream_actor_id in &chain.upstream_actor_ids {
                 if !self.actor_infos.contains_key(upstream_actor_id) {
                     return Err(ErrorCode::InternalError(format!(
                         "chain upstream actor {} not exists",

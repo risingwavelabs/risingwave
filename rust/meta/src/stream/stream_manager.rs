@@ -76,7 +76,7 @@ impl StreamManager {
         table_actor_map: &HashMap<i32, Vec<u32>>,
     ) {
         if let Node::ChainNode(chain) = stream_node.node.as_mut().unwrap() {
-            chain.upstream_actor_id = table_actor_map
+            chain.upstream_actor_ids = table_actor_map
                 .get(&chain.table_ref_id.as_ref().unwrap().table_id)
                 .expect("table id not exists")
                 .clone();
@@ -146,12 +146,7 @@ impl StreamManager {
                 )
             })
             .fold(vec![], |mut v, (actor_ids, table_ref_id)| {
-                v.extend(
-                    actor_ids
-                        .iter()
-                        .map(|&actor_id| (actor_id, table_ref_id))
-                        .collect_vec(),
-                );
+                v.extend(actor_ids.iter().map(|&actor_id| (actor_id, table_ref_id)));
                 v
             });
 
@@ -618,7 +613,7 @@ mod tests {
                     node_id: 3,
                     node: Some(Node::ChainNode(ChainNode {
                         table_ref_id: Some(table_ref_id_1.clone()),
-                        upstream_actor_id: vec![0],
+                        upstream_actor_ids: vec![0],
                         pk_indices: vec![],
                         column_ids: vec![],
                     })),
@@ -659,7 +654,7 @@ mod tests {
             .as_ref()
             .unwrap()
         {
-            assert_eq!(chain.upstream_actor_id, vec![1]);
+            assert_eq!(chain.upstream_actor_ids, vec![1]);
         } else {
             return Err(ErrorCode::UnknownError("chain node is expected".to_owned()).into());
         }

@@ -257,11 +257,8 @@ impl StreamMetaManager for StoredStreamMetaManager {
                 &table_id.encode_to_vec(),
                 &actor_ids
                     .iter()
-                    .map(|id| id.to_be_bytes())
-                    .fold(vec![], |mut v, x| {
-                        v.extend(x);
-                        v
-                    }),
+                    .flat_map(|id| id.to_be_bytes())
+                    .collect_vec(),
                 SINGLE_VERSION_EPOCH,
             )
             .await?;
