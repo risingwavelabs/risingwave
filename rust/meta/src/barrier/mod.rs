@@ -138,7 +138,6 @@ impl BarrierManager {
                 let notifiers = once(notifier)
                     .chain(extra_notifiers.into_iter())
                     .collect_vec();
-
                 let context = CommandContext::new(
                     self.stream_meta_manager.clone(),
                     self.clients.clone(),
