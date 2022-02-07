@@ -66,68 +66,61 @@ impl StreamFragmenter {
 
     /// Generate fragment DAG from input streaming plan by their dependency.
     fn generate_fragment_graph(&mut self, stream_node: &StreamNode) -> Result<()> {
-        let mut root_fragment = self.new_stream_fragment(Arc::new(stream_node.clone()));
-        let (is_singleton, is_source) = self.build_fragment(&root_fragment, stream_node)?;
-        root_fragment.set_singleton(is_singleton);
-        if is_source {
-            root_fragment.set_as_table_source_fragment();
-        }
-        self.fragment_graph.add_root_fragment(root_fragment.clone());
+        self.build_root_fragment(stream_node)?;
         Ok(())
     }
 
-    /// Build new fragment and link dependency with its parent fragment.
-    /// Return two flags.
-    /// The first flag indicates that whether the parent should be singleton.
-    /// The second flag indicates that whether the parent is a source.
+    /// Use the given `stream_node` to create and add a root fragment.
+    fn build_root_fragment(&mut self, stream_node: &StreamNode) -> Result<StreamFragment> {
+        let mut fragment = self.new_stream_fragment(Arc::new(stream_node.clone()));
+        self.visit_fragment(&mut fragment, stream_node)?;
+        self.fragment_graph.add_root_fragment(fragment.clone());
+        Ok(fragment)
+    }
+
+    /// Build new fragment and link dependency with its parent (current) fragment, update
+    /// `is_singleton` and `is_table_source` properties for current fragment.
     // TODO: Should we store the concurrency in StreamFragment directly?
-    fn build_fragment(
+    fn visit_fragment(
         &mut self,
-        parent_fragment: &StreamFragment,
-        stream_node: &StreamNode,
-    ) -> Result<(bool, bool)> {
-        let mut is_singleton = false;
-        let mut is_source = false;
-        for node in stream_node.get_input() {
-            let (is_singleton1, is_source1) = match node.get_node()? {
+        current_fragment: &mut StreamFragment,
+        node: &StreamNode,
+    ) -> Result<()> {
+        for child_node in node.get_input() {
+            match child_node.get_node()? {
                 Node::ExchangeNode(exchange_node) => {
-                    let mut child_fragment = self.new_stream_fragment(Arc::new(node.clone()));
-                    let (child_is_singleton, child_is_source) =
-                        self.build_fragment(&child_fragment, node)?;
-                    child_fragment.set_singleton(child_is_singleton);
-                    if child_is_source {
-                        child_fragment.set_as_table_source_fragment();
-                    }
-                    self.fragment_graph.add_fragment(child_fragment.clone());
+                    // Build another root fragment for this node.
+                    let child_fragment = self.build_root_fragment(child_node)?;
                     self.fragment_graph.link_child(
-                        parent_fragment.get_fragment_id(),
+                        current_fragment.get_fragment_id(),
                         child_fragment.get_fragment_id(),
                     );
-                    (
-                        exchange_node.get_dispatcher()?.get_type()? == DispatcherType::Simple,
-                        false,
-                    )
+
+                    let is_simple_dispatcher =
+                        exchange_node.get_dispatcher()?.get_type()? == DispatcherType::Simple;
+                    current_fragment.is_singleton |= is_simple_dispatcher;
                 }
+
                 Node::SourceNode(_) => {
-                    let (parent_is_singleton, _) = self.build_fragment(parent_fragment, node)?;
-                    (parent_is_singleton, true)
+                    self.visit_fragment(current_fragment, child_node)?;
+                    current_fragment.is_table_source_fragment = true;
                 }
                 Node::TopNNode(_) => {
-                    let (_, child_is_source) = self.build_fragment(parent_fragment, node)?;
+                    self.visit_fragment(current_fragment, child_node)?;
                     // TODO: Force singleton for TopN as a workaround.
                     // We should implement two phase TopN.
-                    (true, child_is_source)
+                    current_fragment.is_singleton = true;
                 }
-                _ => self.build_fragment(parent_fragment, node)?,
+                _ => self.visit_fragment(current_fragment, child_node)?,
             };
-            is_singleton |= is_singleton1;
-            is_source |= is_source1;
         }
-        Ok((is_singleton, is_source))
+
+        Ok(())
     }
 
     fn new_stream_fragment(&self, node: Arc<StreamNode>) -> StreamFragment {
-        StreamFragment::new(self.next_fragment_id.fetch_add(1, Ordering::Relaxed), node)
+        let id = self.next_fragment_id.fetch_add(1, Ordering::Relaxed);
+        StreamFragment::new(id, node)
     }
 
     /// Generate actor id from id generator.
@@ -149,7 +142,7 @@ impl StreamFragmenter {
         let root_fragment = self.fragment_graph.get_root_fragment();
         let mut current_actor_ids = vec![];
         let current_fragment_id = current_fragment.get_fragment_id();
-        let parallel_degree = if current_fragment.is_singleton() {
+        let parallel_degree = if current_fragment.is_singleton {
             1
         } else if self.fragment_graph.has_downstream(current_fragment_id) {
             // Fragment in the middle.
@@ -181,6 +174,7 @@ impl StreamFragmenter {
                 }
             }
         };
+
         for id in actor_ids..actor_ids + parallel_degree {
             let mut actor_builder = StreamActorBuilder::new(id, node.clone());
             actor_builder.set_dispatcher(dispatcher.clone());
@@ -188,7 +182,7 @@ impl StreamFragmenter {
             current_actor_ids.push(id);
 
             // If the current fragment is table source, then add the id to the source id list.
-            if current_fragment.is_table_source_fragment() {
+            if current_fragment.is_table_source_fragment {
                 self.source_actor_ids.push(id);
             }
         }

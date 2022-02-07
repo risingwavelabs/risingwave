@@ -13,10 +13,10 @@ pub struct StreamFragment {
     node: Arc<StreamNode>,
 
     /// mark whether this fragment is of table source.
-    is_table_source_fragment: bool,
+    pub(crate) is_table_source_fragment: bool,
 
     /// mark whether this fragment should only have one actor.
-    is_singleton: bool,
+    pub(crate) is_singleton: bool,
 }
 
 impl StreamFragment {
@@ -35,22 +35,6 @@ impl StreamFragment {
 
     pub fn get_node(&self) -> Arc<StreamNode> {
         self.node.clone()
-    }
-
-    pub fn set_as_table_source_fragment(&mut self) {
-        self.is_table_source_fragment = true;
-    }
-
-    pub fn is_table_source_fragment(&self) -> bool {
-        self.is_table_source_fragment
-    }
-
-    pub fn is_singleton(&self) -> bool {
-        self.is_singleton
-    }
-
-    pub fn set_singleton(&mut self, is_singleton: bool) {
-        self.is_singleton = is_singleton;
     }
 }
 
@@ -83,6 +67,7 @@ impl StreamFragmentGraph {
             .insert(stream_fragment.fragment_id, stream_fragment);
     }
 
+    #[allow(dead_code)]
     pub fn add_fragment(&mut self, stream_fragment: StreamFragment) {
         self.fragments
             .insert(stream_fragment.fragment_id, stream_fragment);
