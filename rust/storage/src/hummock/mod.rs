@@ -266,7 +266,7 @@ impl HummockStorage {
     /// Return an iterator that scan from the begin key to the end key
     /// The result is based on a snapshot corresponding to the given `epoch`.
     pub async fn range_scan<R, B>(
-        &'_ self,
+        &self,
         key_range: R,
         epoch: u64,
     ) -> HummockResult<UserIterator<'_>>

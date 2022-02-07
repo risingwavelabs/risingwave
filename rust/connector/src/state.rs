@@ -270,7 +270,7 @@ mod tests {
         let _rs = take_snapshot_and_get_states(state_store_handler.clone()).await;
         let stored_states = state_store_handler
             .keyspace
-            .scan(Option::None, current_epoch)
+            .scan(None, current_epoch)
             .await
             .unwrap();
         assert_ne!(0, stored_states.len());

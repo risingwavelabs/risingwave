@@ -63,7 +63,7 @@ impl TikvStateStoreIter {
 
 #[async_trait]
 impl StateStoreIter for TikvStateStoreIter {
-    async fn next(&'_ mut self) -> Result<Option<Self::Item>> {
+    async fn next(&mut self) -> Result<Option<Self::Item>> {
         unimplemented!()
     }
 

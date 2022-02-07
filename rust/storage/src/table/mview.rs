@@ -158,8 +158,8 @@ pub struct MViewTableIter<S: StateStore> {
     next_idx: usize,
     /// A bool to indicate whether there are more data to fetch from state store
     done: bool,
-    /// Cached result after the iteration completes or fails
-    res: Result<Option<Row>>,
+    /// Cached error messages after the iteration completes or fails
+    err_msg: Option<String>,
     /// A epoch representing the read snapshot
     epoch: u64,
 }
@@ -173,13 +173,14 @@ impl<'a, S: StateStore> MViewTableIter<S> {
             buf: vec![],
             next_idx: 0,
             done: false,
-            res: Ok(None),
+            err_msg: None,
             epoch,
         }
     }
 
     async fn consume_more(&mut self) -> Result<()> {
         // TODO: adjustable limit
+        assert!(self.next_idx == self.buf.len());
         let limit: usize = 100;
         if self.buf.is_empty() {
             self.buf = self.keyspace.scan(Some(limit), self.epoch).await?
@@ -198,7 +199,10 @@ impl<'a, S: StateStore> MViewTableIter<S> {
 impl<S: StateStore> TableIter for MViewTableIter<S> {
     async fn next(&mut self) -> Result<Option<Row>> {
         if self.done {
-            return self.res.clone();
+            match &self.err_msg {
+                Some(e) => return Err(ErrorCode::InternalError(e.clone()).into()),
+                None => return Ok(None),
+            }
         }
 
         let mut pk_buf = vec![];
@@ -220,16 +224,18 @@ impl<S: StateStore> TableIter for MViewTableIter<S> {
                     } else {
                         // current item is incomplete
                         self.done = true;
-                        self.res =
-                            Err(ErrorCode::InternalError("incomplete item".to_owned()).into());
-                        return self.res.clone();
+                        self.err_msg = Some(String::from("incomplete item"));
+                        return Err(ErrorCode::InternalError(
+                            self.err_msg.as_ref().unwrap().clone(),
+                        )
+                        .into());
                     }
                 }
             };
 
             self.next_idx += 1;
 
-            log::trace!(
+            tracing::trace!(
                 "scanned key = {:?}, value = {:?}",
                 bytes::Bytes::copy_from_slice(key),
                 bytes::Bytes::copy_from_slice(value)
