@@ -113,6 +113,7 @@ jobs:
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
+          ~/cargo-make/makers logs
           ~/cargo-make/makers check-logs
       - name: e2e test w/ Hummock w/o cache
         run: |
@@ -122,6 +123,7 @@ jobs:
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
+          ~/cargo-make/makers logs
           ~/cargo-make/makers check-logs
       - name: e2e test batch 3-node
         run: |
@@ -131,7 +133,11 @@ jobs:
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
+          ~/cargo-make/makers logs
           ~/cargo-make/makers check-logs
+      - name: Dump last 100 lines of logs on failure
+        if: ${{ failure() }}
+        run: ~/cargo-make/makers logs
       - uses: actions/upload-artifact@v2
         if: ${{ failure() }}
         name: Upload RiseLAB logs on failure (You may find it in artifacts)
