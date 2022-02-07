@@ -172,9 +172,9 @@ impl LocalBarrierManager {
                 let current_epoch = managed_state.as_ref().map(|s| s.epoch);
                 if current_epoch != Some(barrier.epoch) {
                     panic!(
-            "bad barrier with epoch {} from actor {}, while current epoch is {:?}, last epoch is {:?}",
-            barrier.epoch, actor_id, current_epoch, self.last_epoch
-          );
+                        "bad barrier with epoch {} from actor {}, while current epoch is {:?}, last epoch is {:?}",
+                        barrier.epoch, actor_id, current_epoch, self.last_epoch
+                    );
                 }
 
                 let state = managed_state.as_mut().unwrap();

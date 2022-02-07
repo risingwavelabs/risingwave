@@ -40,7 +40,7 @@ use core::str::FromStr;
 
 pub use num_traits::Float;
 use num_traits::{
-    AsPrimitive, Bounded, CheckedAdd, CheckedDiv, CheckedMul, CheckedRem, CheckedSub,
+    AsPrimitive, Bounded, CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub,
     FromPrimitive, Num, NumCast, One, Signed, ToPrimitive, Zero,
 };
 
@@ -408,6 +408,15 @@ where
 {
     fn checked_rem(&self, v: &Self) -> Option<Self> {
         Some(self.rem(*v))
+    }
+}
+
+impl<T> CheckedNeg for OrderedFloat<T>
+where
+    T: Float,
+{
+    fn checked_neg(&self) -> Option<Self> {
+        Some(self.neg())
     }
 }
 

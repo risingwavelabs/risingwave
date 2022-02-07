@@ -49,7 +49,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
 
     match prost.get_expr_type()? {
         Cast | Upper | Not | PgSleep | IsTrue | IsNotTrue | IsFalse | IsNotFalse | IsNull
-        | IsNotNull => build_unary_expr_prost(prost),
+        | IsNotNull | Neg => build_unary_expr_prost(prost),
         Equal | NotEqual | LessThan | LessThanOrEqual | GreaterThan | GreaterThanOrEqual => {
             build_binary_expr_prost(prost)
         }
