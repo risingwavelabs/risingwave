@@ -33,6 +33,7 @@ import com.risingwave.rpc.ComputeClientManager;
 import com.risingwave.rpc.Messages;
 import com.risingwave.scheduler.streaming.StreamManager;
 import com.risingwave.sql.parser.SqlParser;
+import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.ddl.SqlColumnDeclaration;
 import org.apache.calcite.sql.ddl.SqlCreateMaterializedView;
@@ -42,6 +43,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /** Handler of <code>CREATE TABLE_V2</code> statement */
+@HandlerSignature(sqlKinds = {SqlKind.CREATE_TABLE})
 public class CreateTableV2Handler implements SqlHandler {
   private static final Logger log = LoggerFactory.getLogger(CreateTableV2Handler.class);
   private TableCatalog.TableId tableId;

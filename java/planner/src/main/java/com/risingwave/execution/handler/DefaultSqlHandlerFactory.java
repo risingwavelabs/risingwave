@@ -5,7 +5,6 @@ import com.risingwave.common.error.ExecutionError;
 import com.risingwave.common.exception.RisingWaveException;
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.sql.node.SqlCreateSource;
-import com.risingwave.sql.node.SqlCreateTableV2;
 import com.risingwave.sql.node.SqlFlush;
 import com.risingwave.sql.node.SqlShowParameters;
 import java.lang.reflect.Constructor;
@@ -56,10 +55,6 @@ public class DefaultSqlHandlerFactory implements SqlHandlerFactory {
     // TODO(Bowen): Use operator name to find the handler
     if (ast instanceof SqlShowParameters) {
       return new ShowParameterHandler();
-    }
-
-    if (ast instanceof SqlCreateTableV2) {
-      return new CreateTableV2Handler();
     }
 
     if (ast instanceof SqlFlush) {
