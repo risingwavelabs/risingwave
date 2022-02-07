@@ -57,6 +57,7 @@ fn make_sum_aggcall(idx: i32) -> AggCall {
             type_name: TypeName::Int64 as i32,
             ..Default::default()
         }),
+        distinct: false,
     }
 }
 

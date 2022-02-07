@@ -1,6 +1,8 @@
 mod aggregator;
 mod count_star;
+mod functions;
 mod general_agg;
+mod general_distinct_agg;
 mod general_sorted_grouper;
 
 pub use aggregator::{AggStateFactory, BoxedAggState};
