@@ -38,6 +38,11 @@ wait_until_container_healthy() {
 if command -v docker-compose; then
     echo "Starting single node zookeeper/kafka/mysql/debezium"
     docker-compose -f "$SCRIPT_PATH"/docker-compose.yml up -d
+
+    cd "$SCRIPT_PATH" 
+    mkdir ../logs 
+    docker-compose logs -f > ../logs/docker-compose.log & 
+    cd -
 else
     echo "This script requires docker-compose, please follow docker install instructions (https://docs.docker.com/compose/install/)."
     exit 1
