@@ -69,7 +69,6 @@ impl StreamManager {
     ) -> Result<()> {
         let table_id = table_ref_id.table_id;
         if let Entry::Vacant(e) = table_sink_map.entry(table_id) {
-            // TODO(MrCroxx): Currently we assume table only have one actor for MView layer.
             let sink_actors = try_match_expand!(
                 self.fragment_manager_ref
                     .get_table_sink_actor_ids(&TableId::from(&Some(table_ref_id.clone())))
@@ -240,7 +239,7 @@ impl StreamManager {
         Ok(())
     }
 
-    /// Droping materialized view is done by barrier manager. Check
+    /// Dropping materialized view is done by barrier manager. Check
     /// [`Command::DropMaterializedView`] for details.
     pub async fn drop_materialized_view(&self, table_id: &TableRefId) -> Result<()> {
         self.barrier_manager_ref
