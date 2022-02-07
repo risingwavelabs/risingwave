@@ -117,14 +117,14 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
                 self.inner.dispatch_data(chunk).await?;
             }
             Message::Barrier(barrier) => {
-                self.update_outputs(&barrier).await?;
+                self.mutate_outputs(&barrier).await?;
                 self.inner.dispatch_barrier(barrier).await?;
             }
         };
         Ok(())
     }
 
-    async fn update_outputs(&mut self, barrier: &Barrier) -> Result<()> {
+    async fn mutate_outputs(&mut self, barrier: &Barrier) -> Result<()> {
         match barrier.mutation.as_deref() {
             Some(Mutation::UpdateOutputs(updates)) => {
                 if let Some((_, v)) = updates.get_key_value(&self.actor_id) {
@@ -176,43 +176,42 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
                 }
                 Ok(())
             }
-            Some(Mutation::AddOutput(actor_id, downstream_actor_infos)) => {
-                if self.actor_id != *actor_id {
-                    return Ok(());
-                }
-                let mut channel_pool_guard = self.context.channel_pool.lock().unwrap();
-                let mut exchange_pool_guard =
-                    self.context.receivers_for_exchange_service.lock().unwrap();
-                let mut outputs_to_add = Vec::with_capacity(downstream_actor_infos.len());
-                for downstream_actor_info in downstream_actor_infos {
-                    let down_id = downstream_actor_info.get_actor_id();
-                    let up_down_ids = (*actor_id, down_id);
-                    let downstream_addr = downstream_actor_info.get_host()?.to_socket_addr()?;
-                    if is_local_address(&downstream_addr, &self.context.addr) {
-                        let tx = channel_pool_guard
-                            .get_mut(&(*actor_id, down_id))
-                            .ok_or_else(|| {
-                                RwError::from(ErrorCode::InternalError(format!(
-                                    "channel between {} and {} does not exist",
-                                    actor_id, down_id
-                                )))
-                            })?
-                            .0
-                            .take()
-                            .ok_or_else(|| {
-                                RwError::from(ErrorCode::InternalError(format!(
-                                    "sender from {} to {} does no exist",
-                                    actor_id, down_id
-                                )))
-                            })?;
-                        outputs_to_add.push(Box::new(ChannelOutput::new(tx)) as Box<dyn Output>)
-                    } else {
-                        let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-                        exchange_pool_guard.insert(up_down_ids, rx);
-                        outputs_to_add.push(Box::new(RemoteOutput::new(tx)) as Box<dyn Output>)
+            Some(Mutation::AddOutput(adds)) => {
+                if let Some(downstream_actor_infos) = adds.get(&self.actor_id) {
+                    let mut channel_pool_guard = self.context.channel_pool.lock().unwrap();
+                    let mut exchange_pool_guard =
+                        self.context.receivers_for_exchange_service.lock().unwrap();
+                    let mut outputs_to_add = Vec::with_capacity(downstream_actor_infos.len());
+                    for downstream_actor_info in downstream_actor_infos {
+                        let down_id = downstream_actor_info.get_actor_id();
+                        let up_down_ids = (self.actor_id, down_id);
+                        let downstream_addr = downstream_actor_info.get_host()?.to_socket_addr()?;
+                        if is_local_address(&downstream_addr, &self.context.addr) {
+                            let tx = channel_pool_guard
+                                .get_mut(&(self.actor_id, down_id))
+                                .ok_or_else(|| {
+                                    RwError::from(ErrorCode::InternalError(format!(
+                                        "channel between {} and {} does not exist",
+                                        self.actor_id, down_id
+                                    )))
+                                })?
+                                .0
+                                .take()
+                                .ok_or_else(|| {
+                                    RwError::from(ErrorCode::InternalError(format!(
+                                        "sender from {} to {} does no exist",
+                                        self.actor_id, down_id
+                                    )))
+                                })?;
+                            outputs_to_add.push(Box::new(ChannelOutput::new(tx)) as Box<dyn Output>)
+                        } else {
+                            let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
+                            exchange_pool_guard.insert(up_down_ids, rx);
+                            outputs_to_add.push(Box::new(RemoteOutput::new(tx)) as Box<dyn Output>)
+                        }
                     }
+                    self.inner.add_outputs(outputs_to_add);
                 }
-                self.inner.add_outputs(outputs_to_add);
                 Ok(())
             }
             _ => Ok(()),
@@ -768,10 +767,14 @@ mod tests {
         add_local_channels(ctx.clone(), vec![(233, 245)]);
         add_remote_channels(ctx.clone(), 233, vec![246]);
         tx.send(Message::Barrier(Barrier::new(0).with_mutation(
-            Mutation::AddOutput(
-                233,
-                vec![helper_make_local_actor(245), helper_make_remote_actor(246)],
-            ),
+            Mutation::AddOutput({
+                let mut actors = HashMap::default();
+                actors.insert(
+                    233,
+                    vec![helper_make_local_actor(245), helper_make_remote_actor(246)],
+                );
+                actors
+            }),
         )))
         .await
         .unwrap();
