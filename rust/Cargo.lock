@@ -3586,7 +3586,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "riselab"
+name = "risedev"
 version = "0.1.2"
 dependencies = [
  "anyhow",

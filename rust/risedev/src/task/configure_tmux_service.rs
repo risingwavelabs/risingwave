@@ -8,7 +8,7 @@ use crate::{ExecuteContext, Task};
 
 pub struct ConfigureTmuxTask;
 
-pub const RISELAB_SESSION_NAME: &str = "riselab";
+pub const RISEDEV_SESSION_NAME: &str = "risedev";
 
 impl ConfigureTmuxTask {
     pub fn new() -> Result<Self> {
@@ -37,7 +37,7 @@ impl Task for ConfigureTmuxTask {
         let mut cmd = self.tmux();
         cmd.arg("list-windows")
             .arg("-t")
-            .arg(RISELAB_SESSION_NAME)
+            .arg(RISEDEV_SESSION_NAME)
             .arg("-F")
             .arg("#{pane_pid} #{window_name}");
         if let Ok(output) = ctx.run_command(cmd) {
@@ -57,7 +57,7 @@ impl Task for ConfigureTmuxTask {
         }
 
         let mut cmd = self.tmux();
-        cmd.arg("kill-session").arg("-t").arg(RISELAB_SESSION_NAME);
+        cmd.arg("kill-session").arg("-t").arg(RISEDEV_SESSION_NAME);
         ctx.run_command(cmd).ok();
 
         ctx.pb.set_message("creating new session...");
@@ -66,7 +66,7 @@ impl Task for ConfigureTmuxTask {
         cmd.arg("new-session")
             .arg("-d")
             .arg("-s")
-            .arg(RISELAB_SESSION_NAME)
+            .arg(RISEDEV_SESSION_NAME)
             .arg("-c")
             .arg(Path::new(&prefix_path))
             .arg(Path::new(&prefix_bin).join("welcome.sh"));
@@ -76,7 +76,7 @@ impl Task for ConfigureTmuxTask {
         ctx.complete_spin();
 
         ctx.pb
-            .set_message(format!("session {}", RISELAB_SESSION_NAME));
+            .set_message(format!("session {}", RISEDEV_SESSION_NAME));
 
         Ok(())
     }
