@@ -31,7 +31,6 @@ use crate::array::{ArrayBuilderImpl, PrimitiveArrayItemType, StructValue};
 pub type OrderedF32 = ordered_float::OrderedFloat<f32>;
 pub type OrderedF64 = ordered_float::OrderedFloat<f64>;
 
-// TODO(eric): rename to `DataType` once migration done
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
 pub enum DataType {
     Boolean,
