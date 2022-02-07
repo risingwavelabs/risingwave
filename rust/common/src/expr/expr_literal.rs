@@ -223,7 +223,7 @@ mod tests {
     use std::sync::Arc;
 
     use risingwave_pb::data::data_type::IntervalType;
-    use risingwave_pb::data::DataType;
+    use risingwave_pb::data::DataType as ProstDataType;
     use risingwave_pb::expr::expr_node::Type;
     use risingwave_pb::expr::{ConstantValue, ExprNode};
 
@@ -324,7 +324,7 @@ mod tests {
     fn make_expression(bytes: Option<Vec<u8>>, data_type: TypeName) -> ExprNode {
         ExprNode {
             expr_type: Type::ConstantValue as i32,
-            return_type: Some(DataType {
+            return_type: Some(ProstDataType {
                 type_name: data_type as i32,
                 interval_type: IntervalType::Month as i32,
                 ..Default::default()

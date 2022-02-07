@@ -3,7 +3,7 @@ use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_pb::meta::Table;
 use risingwave_pb::plan::ColumnDesc;
-use risingwave_sqlparser::ast::{ColumnDef, DataType, ObjectName};
+use risingwave_sqlparser::ast::{ColumnDef, DataType as AstDataType, ObjectName};
 
 use crate::catalog::catalog_service::DEFAULT_SCHEMA_NAME;
 use crate::session::RwSession;
@@ -23,13 +23,13 @@ fn columns_to_prost(columns: &[ColumnDef]) -> Result<Vec<ColumnDesc>> {
         .collect::<Result<_>>()
 }
 
-fn convert_data_type(data_type: &DataType) -> DataType {
+fn convert_data_type(data_type: &AstDataType) -> DataType {
     match data_type {
-        DataType::SmallInt(_) => DataType::Int16,
-        DataType::Int(_) => DataType::Int32,
-        DataType::BigInt(_) => DataType::Int64,
-        DataType::Float(_) => DataType::Float32,
-        DataType::Double => DataType::Float64,
+        AstDataType::SmallInt(_) => DataType::Int16,
+        AstDataType::Int(_) => DataType::Int32,
+        AstDataType::BigInt(_) => DataType::Int64,
+        AstDataType::Float(_) => DataType::Float32,
+        AstDataType::Double => DataType::Float64,
         _ => unimplemented!("Unsupported data type {:?} in create table", data_type),
     }
 }

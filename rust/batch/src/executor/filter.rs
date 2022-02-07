@@ -135,7 +135,6 @@ mod tests {
     use risingwave_common::expr::build_from_prost;
     use risingwave_common::types::DataType;
     use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::DataType;
     use risingwave_pb::expr::expr_node::Type::InputRef;
     use risingwave_pb::expr::expr_node::{RexNode, Type};
     use risingwave_pb::expr::{ExprNode, FunctionCall, InputRefExpr};
@@ -216,7 +215,7 @@ mod tests {
     fn make_inputref(idx: i32) -> ExprNode {
         ExprNode {
             expr_type: InputRef as i32,
-            return_type: Some(DataType {
+            return_type: Some(risingwave_pb::data::DataType {
                 type_name: TypeName::Int32 as i32,
                 ..Default::default()
             }),

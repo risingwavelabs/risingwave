@@ -177,7 +177,7 @@ mod tests {
     use std::vec;
 
     use risingwave_pb::data::data_type::{IntervalType, TypeName};
-    use risingwave_pb::data::DataType;
+    use risingwave_pb::data::DataType as ProstDataType;
     use risingwave_pb::expr::expr_node::{RexNode, Type};
     use risingwave_pb::expr::{ConstantValue, ExprNode, FunctionCall};
 
@@ -189,7 +189,7 @@ mod tests {
             children: vec![
                 ExprNode {
                     expr_type: Type::ConstantValue as i32,
-                    return_type: Some(DataType {
+                    return_type: Some(ProstDataType {
                         type_name: TypeName::Boolean as i32,
                         precision: 0,
                         scale: 0,
@@ -200,7 +200,7 @@ mod tests {
                 },
                 ExprNode {
                     expr_type: Type::ConstantValue as i32,
-                    return_type: Some(DataType {
+                    return_type: Some(ProstDataType {
                         type_name: TypeName::Int32 as i32,
                         precision: 0,
                         scale: 0,
@@ -213,7 +213,7 @@ mod tests {
         };
         let p = ExprNode {
             expr_type: Type::Case as i32,
-            return_type: Some(DataType {
+            return_type: Some(ProstDataType {
                 type_name: TypeName::Int32 as i32,
                 precision: 0,
                 scale: 0,
@@ -229,7 +229,7 @@ mod tests {
     fn test_build_extract_expr() {
         let left = ExprNode {
             expr_type: Type::ConstantValue as i32,
-            return_type: Some(DataType {
+            return_type: Some(ProstDataType {
                 type_name: TypeName::Symbol as i32,
                 precision: 11,
                 scale: 0,
@@ -242,7 +242,7 @@ mod tests {
         };
         let right_date = ExprNode {
             expr_type: Type::ConstantValue as i32,
-            return_type: Some(DataType {
+            return_type: Some(ProstDataType {
                 type_name: TypeName::Date as i32,
                 precision: 0,
                 scale: 0,
@@ -253,7 +253,7 @@ mod tests {
         };
         let right_time = ExprNode {
             expr_type: Type::ConstantValue as i32,
-            return_type: Some(DataType {
+            return_type: Some(ProstDataType {
                 type_name: TypeName::Timestamp as i32,
                 precision: 0,
                 scale: 0,
@@ -265,7 +265,7 @@ mod tests {
 
         let expr = ExprNode {
             expr_type: Type::Extract as i32,
-            return_type: Some(DataType {
+            return_type: Some(ProstDataType {
                 type_name: TypeName::Int64 as i32,
                 precision: 0,
                 scale: 0,
@@ -279,7 +279,7 @@ mod tests {
         assert!(build_binary_expr_prost(&expr).is_ok());
         let expr = ExprNode {
             expr_type: Type::Extract as i32,
-            return_type: Some(DataType {
+            return_type: Some(ProstDataType {
                 type_name: TypeName::Int64 as i32,
                 precision: 0,
                 scale: 0,

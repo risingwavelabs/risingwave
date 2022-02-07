@@ -177,7 +177,7 @@ mod tests {
     use risingwave_common::expr::build_from_prost;
     use risingwave_common::types::DataType;
     use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::DataType;
+    use risingwave_pb::data::DataType as ProstDataType;
     use risingwave_pb::expr::agg_call::{Arg, Type};
     use risingwave_pb::expr::expr_node::RexNode;
     use risingwave_pb::expr::expr_node::Type::InputRef;
@@ -201,12 +201,12 @@ mod tests {
             r#type: Type::Sum as i32,
             args: vec![Arg {
                 input: Some(InputRefExpr { column_idx: 0 }),
-                r#type: Some(DataType {
+                r#type: Some(ProstDataType {
                     type_name: TypeName::Int32 as i32,
                     ..Default::default()
                 }),
             }],
-            return_type: Some(DataType {
+            return_type: Some(ProstDataType {
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
@@ -281,12 +281,12 @@ mod tests {
             r#type: Type::Sum as i32,
             args: vec![Arg {
                 input: Some(InputRefExpr { column_idx: 0 }),
-                r#type: Some(DataType {
+                r#type: Some(ProstDataType {
                     type_name: TypeName::Int32 as i32,
                     ..Default::default()
                 }),
             }],
-            return_type: Some(DataType {
+            return_type: Some(ProstDataType {
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
@@ -298,7 +298,7 @@ mod tests {
             .map(|idx| {
                 build_from_prost(&ExprNode {
                     expr_type: InputRef as i32,
-                    return_type: Some(DataType {
+                    return_type: Some(ProstDataType {
                         type_name: TypeName::Int32 as i32,
                         ..Default::default()
                     }),
