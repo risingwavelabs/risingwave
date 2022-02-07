@@ -16,14 +16,14 @@ fn columns_to_prost(columns: &[ColumnDef]) -> Result<Vec<ColumnDesc>> {
             Ok(ColumnDesc {
                 column_id: idx as i32,
                 name: col.name.to_string(),
-                column_type: Some(convert_data_type_kind(&col.data_type).to_protobuf()?),
+                column_type: Some(convert_data_type(&col.data_type).to_protobuf()?),
                 ..Default::default()
             })
         })
         .collect::<Result<_>>()
 }
 
-fn convert_data_type_kind(data_type: &DataType) -> DataType {
+fn convert_data_type(data_type: &DataType) -> DataType {
     match data_type {
         DataType::SmallInt(_) => DataType::Int16,
         DataType::Int(_) => DataType::Int32,

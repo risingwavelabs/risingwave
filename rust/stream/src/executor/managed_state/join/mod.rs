@@ -59,23 +59,21 @@ impl JoinRow {
 
 /// Deserializer of the `JoinRow`.
 pub struct JoinRowDeserializer {
-    data_type_kinds: Vec<DataType>,
+    data_types: Vec<DataType>,
 }
 
 impl JoinRowDeserializer {
     /// Creates a new `RowDeserializer` with row schema.
     pub fn new(schema: Vec<DataType>) -> Self {
-        JoinRowDeserializer {
-            data_type_kinds: schema,
-        }
+        JoinRowDeserializer { data_types: schema }
     }
 
     /// Deserialize the row from a memcomparable bytes.
     pub fn deserialize(&self, data: &[u8]) -> Result<JoinRow, memcomparable::Error> {
         let mut values = vec![];
-        values.reserve(self.data_type_kinds.len());
+        values.reserve(self.data_types.len());
         let mut deserializer = memcomparable::Deserializer::new(data);
-        for &ty in &self.data_type_kinds {
+        for &ty in &self.data_types {
             values.push(deserialize_datum_from(&ty, &mut deserializer)?);
         }
         let degree = u64::deserialize(&mut deserializer)?;

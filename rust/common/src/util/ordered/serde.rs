@@ -74,7 +74,7 @@ impl OrderedRowsSerializer {
 /// Deserializer of the `Row`.
 #[derive(Clone)]
 pub struct OrderedRowDeserializer {
-    data_type_kinds: Vec<DataType>,
+    data_types: Vec<DataType>,
     order_types: Vec<OrderType>,
 }
 
@@ -82,15 +82,15 @@ impl OrderedRowDeserializer {
     pub fn new(schema: Vec<DataType>, order_types: Vec<OrderType>) -> Self {
         assert_eq!(schema.len(), order_types.len());
         Self {
-            data_type_kinds: schema,
+            data_types: schema,
             order_types,
         }
     }
 
     pub fn deserialize(&self, data: &[u8]) -> Result<OrderedRow> {
-        let mut values = Vec::with_capacity(self.data_type_kinds.len());
+        let mut values = Vec::with_capacity(self.data_types.len());
         let mut deserializer = memcomparable::Deserializer::new(data);
-        for (data_type, order_type) in self.data_type_kinds.iter().zip_eq(self.order_types.iter()) {
+        for (data_type, order_type) in self.data_types.iter().zip_eq(self.order_types.iter()) {
             deserializer.set_reverse(*order_type == OrderType::Descending);
             let datum = deserialize_datum_from(data_type, &mut deserializer)?;
             let datum = match order_type {
