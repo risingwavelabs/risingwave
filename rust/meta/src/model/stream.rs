@@ -16,6 +16,7 @@ const TABLE_FRAGMENTS_CF_NAME: &str = "cf/table_fragments";
 
 /// We store whole fragments in a single column family as follow:
 /// `table_id` => `TableFragments`.
+#[derive(Debug, Clone)]
 pub struct TableFragments {
     /// The table id.
     table_id: TableId,
@@ -149,12 +150,6 @@ impl TableFragments {
     pub fn sink_actor_ids(&self) -> Vec<u32> {
         Self::filter_actor_ids(self, FragmentType::Sink)
     }
-
-    /// Returns the actor locations.
-    pub fn actor_locations(&self) -> &BTreeMap<u32, u32> {
-        &self.actor_locations
-    }
-
     /// Returns actor locations group by node id.
     pub fn node_actors(&self) -> BTreeMap<u32, Vec<u32>> {
         let mut actors = BTreeMap::default();

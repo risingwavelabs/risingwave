@@ -132,8 +132,7 @@ message UpdateMutation {
 }
 
 message AddMutation {
-  uint32 actor_id = 1;
-  Actors downstream_actors = 2;
+  map<uint32, Actors> actors = 1;
 }
 
 message Barrier {

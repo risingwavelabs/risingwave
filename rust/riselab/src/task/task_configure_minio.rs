@@ -1,7 +1,8 @@
 use std::env;
 use std::process::Command;
+use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
 use super::{ExecuteContext, Task};
 use crate::MinioConfig;
@@ -45,15 +46,28 @@ impl Task for ConfigureMinioTask {
 
         ctx.pb.set_message("configure...");
 
-        let mut cmd = self.mcli();
-        cmd.arg("alias")
-            .arg("set")
-            .arg(HUMMOCK_REMOTE_NAME)
-            .arg(format!("http://{}", minio_address))
-            .arg(&self.config.root_user)
-            .arg(&self.config.root_password);
+        let mut last_result = Err(anyhow!("unreachable"));
 
-        ctx.run_command(cmd)?;
+        // Wait for server to be configured, otherwise there might be `Server uninitialized` error.
+
+        for _ in 0..10 {
+            let mut cmd = self.mcli();
+            cmd.arg("alias")
+                .arg("set")
+                .arg(HUMMOCK_REMOTE_NAME)
+                .arg(format!("http://{}", minio_address))
+                .arg(&self.config.root_user)
+                .arg(&self.config.root_password);
+
+            last_result = ctx.run_command(cmd);
+            if last_result.is_ok() {
+                break;
+            }
+
+            std::thread::sleep(Duration::from_millis(50));
+        }
+
+        last_result?;
 
         let mut cmd = self.mcli();
         cmd.arg("admin")

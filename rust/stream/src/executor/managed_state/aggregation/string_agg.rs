@@ -84,6 +84,15 @@ impl<S: StateStore> ManagedStringAggState<S> {
     pub fn get_row_count(&self) -> usize {
         self.total_count
     }
+
+    #[allow(dead_code)]
+    pub fn clear_cache(&mut self) {
+        assert!(
+            !self.is_dirty(),
+            "cannot clear cache while string agg state is dirty"
+        );
+        self.cache.clear();
+    }
 }
 
 impl<S: StateStore> ManagedStringAggState<S> {

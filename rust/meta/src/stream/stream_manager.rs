@@ -1,3 +1,4 @@
+use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::Instant;
@@ -8,7 +9,6 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::{ensure, gen_error, try_match_expand};
 use risingwave_pb::common::{ActorInfo, WorkerNode};
-use risingwave_pb::meta::table_fragments::State;
 use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::StreamNode;
@@ -48,35 +48,36 @@ impl StreamManager {
         })
     }
 
-    fn search_chain_table_ref_ids(&self, stream_node: &StreamNode) -> Vec<TableRefId> {
-        let mut table_ref_ids = vec![];
+    /// Lookup [`table_ref_id`] required by [`ChainNode`]. After fragmented, there is at most one
+    /// [`ChainNode`] per actor.
+    fn search_chain_table_ref_ids(&self, stream_node: &StreamNode) -> Option<TableRefId> {
         if let Node::ChainNode(chain) = stream_node.node.as_ref().unwrap() {
-            table_ref_ids.push(chain.table_ref_id.clone().unwrap());
+            return Some(chain.table_ref_id.clone().unwrap());
         }
         for child in &stream_node.input {
-            table_ref_ids.extend(self.search_chain_table_ref_ids(child));
+            if let Some(table_ref_id) = self.search_chain_table_ref_ids(child) {
+                return Some(table_ref_id);
+            }
         }
-        table_ref_ids
+        None
     }
 
     async fn lookup_actor_ids(
         &self,
-        table_ref_ids: Vec<TableRefId>,
+        table_ref_id: &TableRefId,
         table_sink_map: &mut HashMap<i32, u32>,
     ) -> Result<()> {
-        for table_ref_id in table_ref_ids {
-            let table_id = table_ref_id.table_id;
-            if let std::collections::hash_map::Entry::Vacant(e) = table_sink_map.entry(table_id) {
-                // TODO(august): Currently we assume table only have one actor for MView layer.
-                let sink_actors = try_match_expand!(
-                    self.fragment_manager_ref
-                        .get_table_sink_actor_ids(&TableId::from(&Some(table_ref_id)))
-                        .await,
-                    Ok
-                )?;
-                ensure!(!sink_actors.is_empty());
-                e.insert(*sink_actors.get(0).unwrap());
-            }
+        let table_id = table_ref_id.table_id;
+        if let Entry::Vacant(e) = table_sink_map.entry(table_id) {
+            // TODO(MrCroxx): Currently we assume table only have one actor for MView layer.
+            let sink_actors = try_match_expand!(
+                self.fragment_manager_ref
+                    .get_table_sink_actor_ids(&TableId::from(&Some(table_ref_id.clone())))
+                    .await,
+                Ok
+            )?;
+            ensure!(!sink_actors.is_empty());
+            e.insert(*sink_actors.get(0).unwrap());
         }
         Ok(())
     }
@@ -90,19 +91,35 @@ impl StreamManager {
         &self,
         mut table_fragments: TableFragments,
     ) -> Result<()> {
-        let _table_id = table_fragments.table_id();
+        // TODO(MrCroxx): refine this mess after mv on mv can RUN.
         let mut actors = table_fragments.actors();
         let actor_ids = table_fragments.actor_ids();
         let source_actor_ids = table_fragments.source_actor_ids();
+
         // Fill `upstream_actor_id` of [`ChainNode`].
         let mut table_sink_map = HashMap::default();
+        let mut chain_actors = vec![];
         for actor in &mut actors {
             let stream_node = actor.nodes.as_mut().unwrap();
-            let table_ref_ids = self.search_chain_table_ref_ids(stream_node);
-            self.lookup_actor_ids(table_ref_ids, &mut table_sink_map)
-                .await?;
+            let table_ref_id = self.search_chain_table_ref_ids(stream_node);
+            if let Some(table_ref_id) = table_ref_id {
+                self.lookup_actor_ids(&table_ref_id, &mut table_sink_map)
+                    .await?;
+                chain_actors.push((actor.actor_id, table_ref_id));
+            }
         }
         table_fragments.update_chain_upstream_actor_ids(&table_sink_map)?;
+        let up_down_ids = chain_actors
+            .iter()
+            .map(|(actor_id, table_ref_id)| {
+                (
+                    *table_sink_map
+                        .get(&table_ref_id.table_id)
+                        .expect("table id not exists"),
+                    *actor_id,
+                )
+            })
+            .collect_vec();
 
         // Divide all actors into source and non-source actors.
         let non_source_actor_ids = actor_ids
@@ -138,14 +155,32 @@ impl StreamManager {
             .map(|n| (n.get_id(), n.clone()))
             .collect::<HashMap<u32, WorkerNode>>();
 
-        let actor_info = nodes
+        let actor_infos = nodes
             .iter()
             .zip_eq(actor_ids.clone())
-            .map(|(n, f)| ActorInfo {
-                actor_id: f,
+            .map(|(n, actor_id)| ActorInfo {
+                actor_id,
                 host: n.host.clone(),
             })
-            .collect::<Vec<_>>();
+            .collect_vec();
+
+        let actor_info_map = actor_infos
+            .iter()
+            .map(|actor_info| (actor_info.actor_id, actor_info.clone()))
+            .collect::<HashMap<u32, ActorInfo>>();
+
+        let dispatches = up_down_ids
+            .iter()
+            .map(|(up_id, down_id)| {
+                (
+                    *up_id,
+                    vec![actor_info_map
+                        .get(down_id)
+                        .expect("downstream actor info not exist")
+                        .clone()],
+                )
+            })
+            .collect::<HashMap<u32, Vec<ActorInfo>>>();
 
         for (node_id, actors) in node_actors_map {
             let node = node_map.get(&node_id).unwrap();
@@ -154,14 +189,14 @@ impl StreamManager {
             client
                 .to_owned()
                 .broadcast_actor_info_table(BroadcastActorInfoTableRequest {
-                    info: actor_info.clone(),
+                    info: actor_infos.clone(),
                 })
                 .await
                 .to_rw_result_with(format!("failed to connect to {}", node_id))?;
 
             let stream_actors = actors
                 .iter()
-                .map(|f| actor_map.get(f).cloned().unwrap())
+                .map(|actor_id| actor_map.get(actor_id).cloned().unwrap())
                 .collect::<Vec<_>>();
 
             let request_id = Uuid::new_v4().to_string();
@@ -186,12 +221,16 @@ impl StreamManager {
                 .await
                 .to_rw_result_with(format!("failed to connect to {}", node_id))?;
         }
-        // TODO: should be triggered by barrier manager when migrate MV create to barrier cmd, and
-        //  `update_state` should also moves to fragment_manager to keep consistency.
-        table_fragments.update_state(State::Created);
 
+        // Add table fragments to meta store with state: `State::Creating`.
         self.fragment_manager_ref
-            .add_table_fragments(table_fragments)
+            .add_table_fragments(table_fragments.clone())
+            .await?;
+        self.barrier_manager_ref
+            .run_command(Command::CreateMaterializedView {
+                table_fragments,
+                dispatches,
+            })
             .await?;
 
         Ok(())
@@ -321,7 +360,10 @@ mod tests {
             &self,
             _request: Request<InjectBarrierRequest>,
         ) -> std::result::Result<Response<InjectBarrierResponse>, Status> {
-            panic!("not implemented")
+            Ok(Response::new(InjectBarrierResponse {
+                request_id: "".to_string(),
+                status: None,
+            }))
         }
     }
 
@@ -382,10 +424,13 @@ mod tests {
             let stream_manager = StreamManager::new(
                 env.clone(),
                 fragment_manager.clone(),
-                barrier_manager_ref,
+                barrier_manager_ref.clone(),
                 cluster_manager.clone(),
             )
             .await?;
+
+            // TODO: join barrier service back to local thread
+            tokio::spawn(async move { barrier_manager_ref.run().await.unwrap() });
 
             Ok(Self {
                 stream_manager,

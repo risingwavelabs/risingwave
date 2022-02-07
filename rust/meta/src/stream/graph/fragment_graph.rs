@@ -7,15 +7,19 @@ use risingwave_pb::meta::table_fragments::fragment::FragmentType;
 use risingwave_pb::stream_plan::StreamNode;
 
 /// [`StreamFragment`] represent a fragment node in fragment DAG.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct StreamFragment {
     /// the allocated fragment id.
     fragment_id: u32,
+
     /// root stream node in this fragment.
     node: Arc<StreamNode>,
 
     /// type of this fragment.
     fragment_type: FragmentType,
+
+    /// mark whether this fragment should only have one actor.
+    is_singleton: bool,
 }
 
 impl StreamFragment {
@@ -24,6 +28,7 @@ impl StreamFragment {
             fragment_id,
             node,
             fragment_type: FragmentType::Others,
+            is_singleton: false,
         }
     }
 
@@ -37,6 +42,14 @@ impl StreamFragment {
 
     pub fn set_fragment_type(&mut self, fragment_type: FragmentType) {
         self.fragment_type = fragment_type;
+    }
+
+    pub fn is_singleton(&self) -> bool {
+        self.is_singleton
+    }
+
+    pub fn set_singleton(&mut self, is_singleton: bool) {
+        self.is_singleton = is_singleton;
     }
 }
 
@@ -92,23 +105,6 @@ impl StreamFragmentGraph {
 
     pub fn get_fragment_by_id(&self, fragment_id: u32) -> Option<StreamFragment> {
         self.fragments.get(&fragment_id).cloned()
-    }
-
-    pub fn set_fragment_type_by_id(
-        &mut self,
-        fragment_id: u32,
-        fragment_type: FragmentType,
-    ) -> Result<()> {
-        ensure!(
-            self.fragments.contains_key(&fragment_id),
-            "fragment id not exist!"
-        );
-        self.fragments
-            .get_mut(&fragment_id)
-            .unwrap()
-            .set_fragment_type(fragment_type);
-
-        Ok(())
     }
 
     pub fn get_fragment_type_by_id(&self, fragment_id: u32) -> Result<FragmentType> {

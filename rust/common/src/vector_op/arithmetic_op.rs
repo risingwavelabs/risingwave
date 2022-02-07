@@ -4,7 +4,7 @@ use std::convert::TryInto;
 use std::fmt::Debug;
 
 use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime};
-use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedRem, CheckedSub};
+use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub};
 
 use crate::error::ErrorCode::{InternalError, NumericValueOutOfRange};
 use crate::error::{Result, RwError};
@@ -73,6 +73,14 @@ where
         Some(c) => Ok(c),
         None => Err(RwError::from(NumericValueOutOfRange)),
     })
+}
+
+#[inline(always)]
+pub fn general_neg<T1: CheckedNeg>(expr: T1) -> Result<T1> {
+    match expr.checked_neg() {
+        Some(expr) => Ok(expr),
+        None => Err(RwError::from(NumericValueOutOfRange)),
+    }
 }
 
 #[inline(always)]

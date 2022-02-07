@@ -384,6 +384,14 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         self.retain_top_n();
         Ok(())
     }
+
+    pub fn clear_cache(&mut self) {
+        assert!(
+            !self.is_dirty(),
+            "cannot clear cache while top n state is dirty"
+        );
+        self.top_n.clear();
+    }
 }
 
 /// Test-related methods

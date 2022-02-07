@@ -21,7 +21,7 @@ impl SourceMessage for KinesisMessage {
 }
 
 impl KinesisMessage {
-    fn new(shard_id: String, message: Record) -> Self {
+    pub fn new(shard_id: String, message: Record) -> Self {
         KinesisMessage {
             shard_id,
             sequence_number: message.sequence_number.unwrap(),

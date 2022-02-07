@@ -15,28 +15,28 @@ pub use utils::*;
 pub type ExprType = risingwave_pb::expr::expr_node::Type;
 
 /// the trait of bound exprssions
-pub trait BoundExpr {
+pub trait Expr {
     fn return_type(&self) -> DataTypeKind;
-    fn bound_expr(self) -> BoundExprImpl;
+    fn bound_expr(self) -> ExprImpl;
 }
 #[derive(Clone, Debug)]
-pub enum BoundExprImpl {
+pub enum ExprImpl {
     // ColumnRef(Box<BoundColumnRef>), might be used in binder.
-    InputRef(Box<BoundInputRef>),
-    Literal(Box<BoundLiteral>),
-    FunctionCall(Box<BoundFunctionCall>),
-    AggCall(Box<BoundAggCall>),
+    InputRef(Box<InputRef>),
+    Literal(Box<Literal>),
+    FunctionCall(Box<FunctionCall>),
+    AggCall(Box<AggCall>),
 }
-impl BoundExpr for BoundExprImpl {
+impl Expr for ExprImpl {
     fn return_type(&self) -> DataTypeKind {
         match self {
-            BoundExprImpl::InputRef(expr) => expr.return_type(),
-            BoundExprImpl::Literal(expr) => expr.return_type(),
-            BoundExprImpl::FunctionCall(expr) => expr.return_type(),
-            BoundExprImpl::AggCall(expr) => expr.return_type(),
+            ExprImpl::InputRef(expr) => expr.return_type(),
+            ExprImpl::Literal(expr) => expr.return_type(),
+            ExprImpl::FunctionCall(expr) => expr.return_type(),
+            ExprImpl::AggCall(expr) => expr.return_type(),
         }
     }
-    fn bound_expr(self) -> BoundExprImpl {
+    fn bound_expr(self) -> ExprImpl {
         self
     }
 }

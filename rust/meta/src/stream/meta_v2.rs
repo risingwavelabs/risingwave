@@ -49,7 +49,7 @@ impl FragmentManager {
 
     pub async fn add_table_fragments(&self, table_fragment: TableFragments) -> Result<()> {
         match self.table_fragments.entry(table_fragment.table_id()) {
-            Entry::Occupied(_o) => Err(RwError::from(InternalError(
+            Entry::Occupied(_) => Err(RwError::from(InternalError(
                 "table_fragment already exist!".to_string(),
             ))),
             Entry::Vacant(v) => {
@@ -57,6 +57,20 @@ impl FragmentManager {
                 v.insert(table_fragment);
                 Ok(())
             }
+        }
+    }
+
+    pub async fn update_table_fragments(&self, table_fragment: TableFragments) -> Result<()> {
+        match self.table_fragments.entry(table_fragment.table_id()) {
+            Entry::Occupied(mut entry) => {
+                table_fragment.insert(&self.meta_store_ref).await?;
+                entry.insert(table_fragment);
+
+                Ok(())
+            }
+            Entry::Vacant(_) => Err(RwError::from(InternalError(
+                "table_fragment not exist!".to_string(),
+            ))),
         }
     }
 

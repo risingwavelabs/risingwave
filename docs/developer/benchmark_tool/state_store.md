@@ -1,12 +1,12 @@
-ss_bench is used to benchmark the performance of the state store. In this doc, we first show a usage example and then describe each provided parameter.
+`ss_bench` is used to benchmark the performance of the state store. In this doc, we first show a usage example and then describe each provided parameter.
 
 # Usage Example
 
 ```shell
-~/code/risingwave/rust: cargo run --bin ss-bench --\
- --benchmarks "writebatch,prefixscanrandom,getrandom"\
- --kvs-per-batch 1000\
- --iterations 100\
+~/code/risingwave/rust: cargo run --bin ss-bench -- \
+ --benchmarks "writebatch,getseq,getrandom,prefixscanrandom" \
+ --batch-size 1000 \
+ --reads 500 \
  --concurrency-num 4
 ```
 
@@ -14,12 +14,12 @@ ss_bench is used to benchmark the performance of the state store. In this doc, w
 
 ## State Store
 
-### Type  (`--store`)
+### Backend Types  (`--store`)
 
 - `In-memory`
   
   - Format: `in-memory`(or `in_memory`)
-  - Default value
+  - Default
 
 - `Hummock+MinIO`
   
@@ -49,17 +49,17 @@ ss_bench is used to benchmark the performance of the state store. In this doc, w
 - `--table-size-mb`
   
   - Size (MB) of an SSTable
-  - Default value: 256
+  - Default: 256
 
 - `--block-size-kb`
   
   - Size (KB) of a block in an SSTable
-  - Default value: 64
+  - Default: 64
 
 - `--bloom-false-positive`
   
   - Bloom Filter false positive rate
-  - Default value: 0.1
+  - Default: 0.1
 
 - `--checksum-algo`
   
@@ -67,56 +67,75 @@ ss_bench is used to benchmark the performance of the state store. In this doc, w
   
   - Options:
     
-    - `crc32c`: default value
+    - `crc32c`: default
     - `xxhash`
 
-## Benchmarks
-
-### Number (`--iterations`)
-
-- The times that each benchmark has been executed
-- Default value: 10
+## Operations
 
 ### Concurrency Number (`--concurrency-num`)
 
-- The concurrency number of each benchmark
-- Default value: 1
+- Concurrency number of each operation. Workloads of each concurrency are almost the same.
+- Default: 1
 
-### Benchmark Type (`--benchmarks`)
+### Operation Types (`--benchmarks`)
 
-- `writebatch`: write `iterations` KV pairs in sequential key order in async mode
-- `getrandom`: read `iterations` times in random order
-- `getseq`: read `iterations` times in sequential order
-- `prefixscanrandom`: prefix scan `iterations` times in random order
+Comma-separated list of operations to run in the specified order. Following operations are supported:
 
-The benchmarks could be a combination of multiple consequent benchmarks. Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
+- `writebatch`: write N key/values in sequential key order in async mode.
+- `getrandom`: read N times in random order.
+- `getseq`: read N times sequentially.
+- `prefixscanrandom`: prefix scan N times in random order.
 
-## Batch Configurations
+Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
+
+### Operation Numbers
+
+- `--num`
+
+  - Number of key/values to place in database.
+  - Default: 1000000
+
+- `--deletes`
+
+  - Number of deleted keys. If negative, do `--num` deletions.
+  - Default: -1
+
+- `--reads`
+
+  - Number of read keys. If negative, do `--num` reads.
+  - Default: -1
+
+- `--write_batches`
+
+  - Number of **written batches**.
+  - Default: 100
+
+## Single Batch
+
+- `--batch-size`
+
+  - Number of key/values in a batch.
+  - Default: 100
 
 - `--key-size`
   
-  - The size (bytes) of the non-prefix part of a key
-  - Default value: 10
+  - Size (bytes) of each user_key (non-prefix part of a key).
+  - Default: 16
 
 - `--key-prefix-size`
   
-  - The size (bytes) of a prefix
-  - Default value: 5
+  - Size (bytes) of each prefix.
+  - Default: 5
 
-- `--key-prefix-frequency`
+- `--keys_per_prefix`
   
-  - The number of keys with some a prefix in a batch
-  - Default value: 10
+  - Control **average** number of keys generated per prefix.
+  - Default: 10
 
 - `--value-size`
   
-  - The length (bytes) of a value in a KV pair
-  - Default value: 10
-
-- `--kvs-per-batch`
-  
-  - The number of KV pairs in a batch
-  - Default value: 1000
+  - Size (bytes) of each value.
+  - Default: 100
 
 # Metrics
 

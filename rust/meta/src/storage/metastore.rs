@@ -9,7 +9,7 @@ use risingwave_common::error::{ErrorCode, Result};
 
 use crate::manager::Epoch;
 use crate::storage::transaction::Transaction;
-use crate::storage::{Key, KeyValueVersion, Operation, Precondition, Value};
+use crate::storage::{Key, KeyValueVersion, Value};
 
 pub const DEFAULT_COLUMN_FAMILY: &str = "default";
 
@@ -35,9 +35,6 @@ impl KeyValue {
 
     pub fn key(&self) -> &Key {
         &self.key
-    }
-    pub fn value(&self) -> &Value {
-        &self.value
     }
     pub fn version(&self) -> KeyValueVersion {
         self.version
@@ -66,8 +63,10 @@ pub trait MetaStore: Sync + Send + 'static {
     async fn delete_cf(&self, cf: &str, key: &[u8], version: Epoch) -> Result<()>;
     async fn delete_all_cf(&self, cf: &str, key: &[u8]) -> Result<()>;
 
-    /// `get_transaction` return a transaction. See Transaction trait for detail.
-    fn get_transaction(&self) -> Box<dyn Transaction>;
+    fn get_transaction(&self) -> Transaction {
+        Transaction::new()
+    }
+    async fn commit_transaction(&self, trx: &mut Transaction) -> Result<()>;
 }
 
 // Error of metastore
@@ -86,11 +85,6 @@ impl From<Error> for RwError {
             }
         }
     }
-}
-
-pub enum OperationOption {
-    WithPrefix(),
-    WithVersion(KeyValueVersion),
 }
 
 pub type MetaStoreRef = Arc<dyn MetaStore>;
@@ -295,24 +289,7 @@ impl MetaStore for MemStore {
         Ok(())
     }
 
-    fn get_transaction(&self) -> Box<dyn Transaction> {
-        Box::new(MemTransaction {})
-    }
-}
-
-/// We should use `SledMetaStore` now. `MemStore` won't be functioning any more until
-/// `MemTransaction` is implemented.
-struct MemTransaction {}
-impl Transaction for MemTransaction {
-    fn add_preconditions(&mut self, _preconditions: Vec<Precondition>) {
-        unimplemented!()
-    }
-
-    fn add_operations(&mut self, _operations: Vec<Operation>) {
-        unimplemented!()
-    }
-
-    fn commit(&self) -> std::result::Result<(), Error> {
+    async fn commit_transaction(&self, _trx: &mut Transaction) -> Result<()> {
         unimplemented!()
     }
 }
@@ -326,100 +303,13 @@ impl ColumnFamilyUtils {
             .expect("prefix length out of u8 range");
         [&[prefix_len], prefix, key].concat()
     }
-    pub fn get_cf_from_prefixed_key(prefixed_key: &[u8]) -> Vec<u8> {
-        let prefix_len = prefixed_key[0] as usize;
-        prefixed_key[1..prefix_len as usize + 1].to_vec()
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::str;
+    use risingwave_common::error::Result;
 
-    use super::*;
-
-    #[tokio::test]
-    async fn test_memory_store() -> Result<()> {
-        let store = Box::new(MemStore::new());
-        let (k, v, version) = (b"key_1", b"value_1", Epoch::from(1));
-        assert!(store.put(k, v, version).await.is_ok());
-        let val = store.get(k, version).await.unwrap();
-        assert_eq!(val.as_slice(), v);
-        let val = store
-            .get_cf(DEFAULT_COLUMN_FAMILY, k, version)
-            .await
-            .unwrap();
-        assert_eq!(val.as_slice(), v);
-        assert!(store.get_cf("test_cf", k, version).await.is_err());
-
-        assert!(store.put_cf("test_cf", k, v, version).await.is_ok());
-        let val = store.get_cf("test_cf", k, version).await.unwrap();
-        assert_eq!(val.as_slice(), v);
-
-        assert!(store.delete(k, version).await.is_ok());
-        assert_eq!(store.list().await.unwrap().len(), 0);
-
-        assert!(store.delete_cf("test_cf", k, version).await.is_ok());
-        assert_eq!(store.list_cf("test_cf").await.unwrap().len(), 0);
-
-        let batch_values: Vec<(Vec<u8>, Vec<u8>, Epoch)> = vec![
-            (b"key_1".to_vec(), b"value_1".to_vec(), Epoch::from(2)),
-            (b"key_2".to_vec(), b"value_2".to_vec(), Epoch::from(2)),
-            (b"key_3".to_vec(), b"value_3".to_vec(), Epoch::from(2)),
-        ];
-        assert!(store.put_batch(batch_values).await.is_ok());
-
-        let batch_values: Vec<(&str, Vec<u8>, Vec<u8>, Epoch)> = vec![
-            (
-                "test_cf",
-                b"key_1".to_vec(),
-                b"value_1".to_vec(),
-                Epoch::from(2),
-            ),
-            (
-                "test_cf",
-                b"key_2".to_vec(),
-                b"value_2".to_vec(),
-                Epoch::from(2),
-            ),
-        ];
-        assert!(store.put_batch_cf(batch_values).await.is_ok());
-
-        assert_eq!(store.list().await.unwrap().len(), 3);
-        assert_eq!(store.list_cf("test_cf").await.unwrap().len(), 2);
-        assert_eq!(
-            store
-                .list_batch_cf(vec!["test_cf", DEFAULT_COLUMN_FAMILY])
-                .await
-                .unwrap()
-                .len(),
-            2
-        );
-
-        assert!(store
-            .put(b"key_3", b"value_3_new", Epoch::from(3))
-            .await
-            .is_ok());
-        let mut values = store.list().await.unwrap();
-        values.sort();
-        let expected: Vec<Vec<u8>> = vec![
-            b"value_1".to_vec(),
-            b"value_2".to_vec(),
-            b"value_3_new".to_vec(),
-        ];
-        assert_eq!(values, expected);
-
-        assert!(store.delete_all(b"key_1").await.is_ok());
-        assert!(store.delete_all(b"key_2").await.is_ok());
-        assert!(store.delete_all(b"key_3").await.is_ok());
-        assert_eq!(store.list().await.unwrap().len(), 0);
-
-        assert!(store.delete_all_cf("test_cf", b"key_1").await.is_ok());
-        assert!(store.delete_all_cf("test_cf", b"key_2").await.is_ok());
-        assert_eq!(store.list_cf("test_cf").await.unwrap().len(), 0);
-
-        Ok(())
-    }
+    use crate::storage::KeyWithVersion;
 
     #[test]
     fn test_key_with_version() -> Result<()> {

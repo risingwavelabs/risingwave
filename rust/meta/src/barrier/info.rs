@@ -1,9 +1,6 @@
 use std::collections::HashMap;
 
-
 use risingwave_pb::common::WorkerNode;
-
-
 
 use crate::stream::ActorInfos;
 
@@ -35,15 +32,15 @@ impl BarrierActorInfo {
     }
 
     // TODO: should only collect from reachable actors, for mv on mv
-    pub fn actor_ids_to_collect(&self, node_id: &u32) -> impl Iterator<Item = u32> {
-        self.actor_map.get(node_id).unwrap().clone().into_iter()
+    pub fn actor_ids_to_collect(&self, node_id: &u32) -> Option<impl Iterator<Item = u32>> {
+        self.actor_map
+            .get(node_id)
+            .map(|actor_ids| actor_ids.clone().into_iter())
     }
 
-    pub fn actor_ids_to_send(&self, node_id: &u32) -> impl Iterator<Item = u32> {
+    pub fn actor_ids_to_send(&self, node_id: &u32) -> Option<impl Iterator<Item = u32>> {
         self.actor_map_to_send
             .get(node_id)
-            .unwrap()
-            .clone()
-            .into_iter()
+            .map(|actor_ids| actor_ids.clone().into_iter())
     }
 }

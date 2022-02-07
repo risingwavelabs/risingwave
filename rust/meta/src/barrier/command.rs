@@ -1,18 +1,21 @@
-
+use std::collections::HashMap;
 
 use futures::future::try_join_all;
 use log::debug;
 use risingwave_common::array::RwError;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{Result, ToRwResult};
+use risingwave_pb::common::ActorInfo;
 use risingwave_pb::data::barrier::Mutation;
-use risingwave_pb::data::{NothingMutation, StopMutation};
+use risingwave_pb::data::{Actors, AddMutation, NothingMutation, StopMutation};
+use risingwave_pb::meta::table_fragments::State;
 use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_service::DropActorsRequest;
 use uuid::Uuid;
 
 use super::info::BarrierActorInfo;
 use crate::manager::StreamClientsRef;
+use crate::model::TableFragments;
 use crate::stream::FragmentManagerRef;
 
 /// [`Command`] is the action of [`BarrierManager`]. For different commands, we'll build different
@@ -27,6 +30,11 @@ pub enum Command {
     /// After the barrier is collected, it notifies the local stream manager of compute nodes to
     /// drop actors, and then delete the info from meta store.
     DropMaterializedView(TableRefId),
+
+    CreateMaterializedView {
+        table_fragments: TableFragments,
+        dispatches: HashMap<u32, Vec<ActorInfo>>,
+    },
 }
 
 impl Command {
@@ -80,6 +88,21 @@ impl CommandContext<'_> {
                     actors: table_actors,
                 })
             }
+
+            Command::CreateMaterializedView { dispatches, .. } => {
+                let actors = dispatches
+                    .iter()
+                    .map(|(&up_actor_id, down_actor_infos)| {
+                        (
+                            up_actor_id,
+                            Actors {
+                                info: down_actor_infos.to_vec(),
+                            },
+                        )
+                    })
+                    .collect::<HashMap<u32, Actors>>();
+                Mutation::Add(AddMutation { actors })
+            }
         };
 
         Ok(mutation)
@@ -121,6 +144,16 @@ impl CommandContext<'_> {
                 // Drop fragment info in meta store.
                 self.fragment_manager
                     .drop_table_fragments(&table_id)
+                    .await?;
+            }
+
+            Command::CreateMaterializedView {
+                table_fragments, ..
+            } => {
+                let mut table_fragments = table_fragments.clone();
+                table_fragments.update_state(State::Created);
+                self.fragment_manager
+                    .update_table_fragments(table_fragments)
                     .await?;
             }
         }
