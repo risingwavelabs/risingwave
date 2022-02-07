@@ -73,7 +73,7 @@ impl StreamFragmenter {
     /// Use the given `stream_node` to create and add a root fragment.
     fn build_root_fragment(&mut self, stream_node: &StreamNode) -> Result<StreamFragment> {
         let mut fragment = self.new_stream_fragment(Arc::new(stream_node.clone()));
-        self.visit_fragment(&mut fragment, stream_node)?;
+        self.build_fragment(&mut fragment, stream_node)?;
         self.fragment_graph.add_root_fragment(fragment.clone());
         Ok(fragment)
     }
@@ -81,7 +81,7 @@ impl StreamFragmenter {
     /// Build new fragment and link dependency with its parent (current) fragment, update
     /// `is_singleton` and `is_table_source` properties for current fragment.
     // TODO: Should we store the concurrency in StreamFragment directly?
-    fn visit_fragment(
+    fn build_fragment(
         &mut self,
         current_fragment: &mut StreamFragment,
         node: &StreamNode,
@@ -102,16 +102,16 @@ impl StreamFragmenter {
                 }
 
                 Node::SourceNode(_) => {
-                    self.visit_fragment(current_fragment, child_node)?;
+                    self.build_fragment(current_fragment, child_node)?;
                     current_fragment.is_table_source_fragment = true;
                 }
                 Node::TopNNode(_) => {
-                    self.visit_fragment(current_fragment, child_node)?;
+                    self.build_fragment(current_fragment, child_node)?;
                     // TODO: Force singleton for TopN as a workaround.
                     // We should implement two phase TopN.
                     current_fragment.is_singleton = true;
                 }
-                _ => self.visit_fragment(current_fragment, child_node)?,
+                _ => self.build_fragment(current_fragment, child_node)?,
             };
         }
 
