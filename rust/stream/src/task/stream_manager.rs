@@ -405,16 +405,6 @@ impl StreamManagerCore {
         Ok(dispatcher)
     }
 
-    // TODO: all barriers should be triggered by meta service
-    fn send_conf_change_barrier(&mut self, _mutation: Mutation) -> Result<()> {
-        todo!("conf change barrier should be sent from meta, mv on mv is temporially not supported")
-        // self
-        //     .context
-        //     .lock_barrier_manager()
-        //     .send_barrier(&Barrier::new(0).with_mutation(mutation), vec![])?;
-        // Ok(())
-    }
-
     /// Create a chain(tree) of nodes, with given `store`.
     fn create_nodes_inner(
         &mut self,
@@ -727,11 +717,6 @@ impl StreamManagerCore {
                     rx,
                 ));
 
-                // TODO(MrCroxx): ConfChange should be triggered by meta when it's done.
-                self.send_conf_change_barrier(Mutation::AddOutput(
-                    chain_node.upstream_actor_id,
-                    vec![self.actor_infos.get(&actor_id).unwrap().to_owned()],
-                ))?;
                 // TODO(MrCroxx): Use column_descs to get idx after mv planner can generate stable
                 // column_ids. Now simply treat column_id as column_idx.
                 let column_idxs: Vec<usize> = chain_node

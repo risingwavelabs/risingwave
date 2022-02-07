@@ -1,12 +1,14 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use futures::future::try_join_all;
 use itertools::Itertools;
 use log::debug;
 use risingwave_common::array::RwError;
 use risingwave_common::error::{Result, ToRwResult};
+use risingwave_pb::common::ActorInfo;
 use risingwave_pb::data::barrier::Mutation;
-use risingwave_pb::data::{NothingMutation, StopMutation};
+use risingwave_pb::data::{Actors, AddMutation, NothingMutation, StopMutation};
+use risingwave_pb::meta::{ActorLocation, TableActors};
 use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_service::DropActorsRequest;
 use uuid::Uuid;
@@ -27,6 +29,13 @@ pub enum Command {
     /// After the barrier is collected, it notifies the local stream manager of compute nodes to
     /// drop actors, and then delete the info from meta store.
     DropMaterializedView(TableRefId),
+
+    CreateMaterializedView {
+        table_id: TableRefId,
+        table_actors: TableActors,
+        actor_locations: Vec<ActorLocation>,
+        dispatches: HashMap<u32, Vec<ActorInfo>>,
+    },
 }
 
 impl Command {
@@ -77,6 +86,21 @@ impl CommandContext<'_> {
                     actors: table_actors.actor_ids,
                 })
             }
+
+            Command::CreateMaterializedView { dispatches, .. } => {
+                let actors = dispatches
+                    .iter()
+                    .map(|(&up_actor_id, down_actor_infos)| {
+                        (
+                            up_actor_id,
+                            Actors {
+                                info: down_actor_infos.to_vec(),
+                            },
+                        )
+                    })
+                    .collect::<HashMap<u32, Actors>>();
+                Mutation::Add(AddMutation { actors })
+            }
         };
 
         Ok(mutation)
@@ -123,6 +147,22 @@ impl CommandContext<'_> {
 
                 // Drop actor info in meta store.
                 self.stream_meta_manager.drop_table_actors(table_id).await?;
+            }
+
+            Command::CreateMaterializedView {
+                table_id,
+                table_actors,
+                actor_locations,
+                ..
+            } => {
+                for actor_location in actor_locations {
+                    self.stream_meta_manager
+                        .add_actors_to_node(actor_location)
+                        .await?;
+                }
+                self.stream_meta_manager
+                    .add_table_actors(table_id, table_actors)
+                    .await?;
             }
         }
 
