@@ -75,16 +75,17 @@ impl StreamManagerService for StreamServiceImpl {
         &self,
         request: Request<DropMaterializedViewRequest>,
     ) -> TonicResponse<DropMaterializedViewResponse> {
-        let req = request.into_inner();
+        let _req = request.into_inner();
 
-        match self
-            .sm
-            .drop_materialized_view(req.get_table_ref_id().map_err(tonic_err)?)
-            .await
-        {
-            Ok(()) => Ok(Response::new(DropMaterializedViewResponse { status: None })),
-            Err(e) => Err(e.to_grpc_status()),
-        }
+        // match self
+        //     .sm
+        //     .drop_materialized_view(req.get_table_ref_id().map_err(tonic_err)?)
+        //     .await
+        // {
+        //     Ok(()) => Ok(Response::new(DropMaterializedViewResponse { status: None })),
+        //     Err(e) => Err(e.to_grpc_status()),
+        // }
+        Ok(Response::new(DropMaterializedViewResponse { status: None }))
     }
 
     #[cfg(not(tarpaulin_include))]
