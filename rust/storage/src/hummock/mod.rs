@@ -4,7 +4,6 @@ use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use num_traits::ToPrimitive;
 
 mod sstable;
 pub use sstable::*;
@@ -191,15 +190,11 @@ impl HummockStorage {
     }
 
     async fn get_snapshot(&self) -> HummockResult<HummockSnapshot> {
-        let timer = self.get_stats_ref().get_snapshot_latency.start_timer();
+        let timer = self.stats.get_snapshot_latency.start_timer();
         let epoch = self.hummock_meta_client().pin_snapshot().await?;
         let res = HummockSnapshot::new(epoch, self.local_version_manager.clone());
         timer.observe_duration();
         Ok(res)
-    }
-
-    pub fn get_stats_ref(&self) -> &StateStoreStats {
-        self.stats.as_ref()
     }
 
     pub fn get_options(&self) -> Arc<HummockOptions> {
@@ -212,11 +207,11 @@ impl HummockStorage {
     /// the key is not found. If `Err()` is returned, the searching for the key
     /// failed due to other non-EOF errors.
     pub async fn get(&self, key: &[u8]) -> HummockResult<Option<Vec<u8>>> {
-        self.get_stats_ref().get_counts.inc();
-        self.get_stats_ref().get_key_size.observe(key.len() as f64);
+        self.stats.get_counts.inc();
+        self.stats.get_key_size.observe(key.len() as f64);
 
         let value = self.get_snapshot().await?.get(key).await?;
-        self.get_stats_ref()
+        self.stats
             .get_value_size
             .observe((value.as_ref().map(|x| x.len()).unwrap_or(0) + 1) as f64);
 
@@ -229,7 +224,7 @@ impl HummockStorage {
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
     {
-        self.get_stats_ref().range_scan_counts.inc();
+        self.stats.range_scan_counts.inc();
 
         self.get_snapshot().await?.range_scan(key_range).await
     }
@@ -240,7 +235,7 @@ impl HummockStorage {
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
     {
-        self.get_stats_ref().range_scan_counts.inc();
+        self.stats.range_scan_counts.inc();
 
         self.get_snapshot()
             .await?
@@ -264,10 +259,7 @@ impl HummockStorage {
     ) -> HummockResult<()> {
         let get_id_and_builder = || async {
             let id = self.hummock_meta_client().get_new_table_id().await?;
-            let timer = self
-                .get_stats_ref()
-                .batch_write_build_table_latency
-                .start_timer();
+            let timer = self.stats.batch_write_build_table_latency.start_timer();
             let builder = Self::get_builder(&self.options);
             timer.observe_duration();
             Ok((id, builder))
@@ -276,6 +268,10 @@ impl HummockStorage {
 
         // TODO: do not generate epoch if `kv_pairs` is empty
         for (k, v) in kv_pairs {
+            let res = k.is_empty();
+            if k.is_empty() {
+                continue;
+            }
             builder.add_user_key(k, v, epoch).await?;
         }
 
@@ -305,10 +301,7 @@ impl HummockStorage {
         }
 
         // Add all tables at once.
-        let timer = self
-            .get_stats_ref()
-            .batch_write_add_l0_latency
-            .start_timer();
+        let timer = self.stats.batch_write_add_l0_latency.start_timer();
         self.hummock_meta_client()
             .add_tables(
                 epoch,
@@ -327,11 +320,8 @@ impl HummockStorage {
             .await?;
         timer.observe_duration();
         // Update statistics if needed.
-        self.get_stats_ref()
-            .put_bytes
-            .inc_by(total_size.to_u64().unwrap());
+        self.stats.put_bytes.inc_by(total_size.try_into().unwrap());
 
-        // TODO: should we use unwrap() ?
         // Notify the compactor
         self.tx.send(()).ok();
 
