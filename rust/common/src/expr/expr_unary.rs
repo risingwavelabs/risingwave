@@ -10,6 +10,7 @@ use crate::expr::pg_sleep::PgSleepExpression;
 use crate::expr::template::UnaryNullableExpression;
 use crate::expr::BoxedExpression;
 use crate::types::*;
+use crate::vector_op::arithmetic_op::general_neg;
 use crate::vector_op::cast::*;
 use crate::vector_op::cmp::{is_false, is_not_false, is_not_true, is_true};
 use crate::vector_op::conjunction;
@@ -95,6 +96,46 @@ macro_rules! gen_cast {
       { date, timestamp, date_to_timestamp }
     }
   };
+}
+
+/// This macro helps to create neg expression.
+/// It receives all the types that impl `CheckedNeg` trait.
+/// * `$child`: child expression
+/// * `$ret`: return expression
+/// * `$input`: input type
+macro_rules! gen_neg_impl {
+    ($child:expr, $ret:expr, $($input:tt),*) => {
+        match $child.return_type() {
+            $(
+                $input! {type_match_pattern} => {
+                    Box::new(UnaryExpression::<$input! {type_array}, $input! {type_array}, _> {
+                        expr_ia1: $child,
+                        return_type: $ret,
+                        func: general_neg,
+                        _phantom: PhantomData,
+                    })
+                }
+            ),*
+            _ => {
+                unimplemented!("Neg is not supported on {:?}", $child.return_type())
+            }
+        }
+    };
+}
+
+macro_rules! gen_neg {
+    ($child:tt, $ret:tt) => {
+        gen_neg_impl! {
+            $child,
+            $ret,
+            int16,
+            int32,
+            int64,
+            float32,
+            float64,
+            decimal
+        }
+    };
 }
 
 pub fn new_unary_expr(
@@ -256,6 +297,9 @@ pub fn new_unary_expr(
             func: upper,
             _phantom: PhantomData,
         }),
+        (ProstType::Neg, _, _) => {
+            gen_neg! { child_expr, return_type }
+        }
         (ProstType::PgSleep, _, DataTypeKind::Decimal { .. }) => {
             Box::new(PgSleepExpression::new(child_expr))
         }
@@ -353,6 +397,46 @@ mod tests {
             return_type: Some(return_type),
             rex_node: Some(RexNode::FuncCall(FunctionCall {
                 children: vec![make_input_ref(0, TypeName::Int16)],
+            })),
+        };
+        let mut vec_executor = build_from_prost(&expr).unwrap();
+        let res = vec_executor.eval(&data_chunk).unwrap();
+        let arr: &I32Array = res.as_ref().into();
+        for (idx, item) in arr.iter().enumerate() {
+            let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
+            assert_eq!(x, item);
+        }
+    }
+
+    #[test]
+    fn test_neg() {
+        let mut input = Vec::<Option<i32>>::new();
+        let mut target = Vec::<Option<i32>>::new();
+
+        input.push(Some(1));
+        input.push(Some(0));
+        input.push(Some(-1));
+
+        target.push(Some(-1));
+        target.push(Some(0));
+        target.push(Some(1));
+
+        let col1 = Column::new(
+            I32Array::from_slice(&input)
+                .map(|x| Arc::new(x.into()))
+                .unwrap(),
+        );
+        let data_chunk = DataChunk::builder().columns(vec![col1]).build();
+        let return_type = DataType {
+            type_name: TypeName::Int32 as i32,
+            is_nullable: false,
+            ..Default::default()
+        };
+        let expr = ExprNode {
+            expr_type: Type::Neg as i32,
+            return_type: Some(return_type),
+            rex_node: Some(RexNode::FuncCall(FunctionCall {
+                children: vec![make_input_ref(0, TypeName::Int32)],
             })),
         };
         let mut vec_executor = build_from_prost(&expr).unwrap();
