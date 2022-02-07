@@ -242,7 +242,7 @@ impl SourceState for KinesisSplitReaderState {
 
     fn encode(&self) -> bytes::Bytes {
         let bytes = self.sequence_number.as_bytes();
-        Bytes::copy_from_slice(&(*bytes).clone())
+        Bytes::copy_from_slice(<&[u8]>::clone(&bytes))
     }
 
     fn decode(&self, values: bytes::Bytes) -> Self {
@@ -255,8 +255,9 @@ impl SourceState for KinesisSplitReaderState {
     }
 }
 
+#[cfg(test)]
 mod tests {
-
+    use super::*;
     #[test]
     fn test_state_encode() {
         let mock_state = KinesisSplitReaderState::new(
