@@ -24,7 +24,7 @@ wait_server() {
 
 if command -v docker-compose ; then 
     echo "Starting single node zookeeper/kafka/mysql/debezium"
-    docker-compose -f "$SCRIPT_PATH"/docker-compose.yml up > "../log/docker-compose.out" 2>&1
+    docker-compose -f "$SCRIPT_PATH"/docker-compose.yml up > "../log/docker-compose.out" 2>&1 &
 else
     echo "This script requires docker-compose, please follow docker install instructions (https://docs.docker.com/compose/install/)."
     exit 1
