@@ -35,32 +35,32 @@ make sqllogictest
 To run end-to-end tests with multiple compute-nodes, run the script:
 
 ```shell
-./riselab ci-3node
+./risedev ci-3node
 sqllogictest -p 4567 -d dev './e2e_test/**/*.slt'
 ```
 
 To run end-to-end tests with state store, run the script:
 
 ```shell
-./riselab ci-streaming
+./risedev ci-streaming
 sqllogictest -p 4567 -d dev './e2e_test/**/*.slt'
 ```
 
 It will start processes in the background. After testing, you can run the following scriptto clean-up:
 
 ```shell
-./riselab k
+./risedev k
 ```
 
 ## Monitoring
 
-Uncomment `grafana` and `prometheus` services in `riselab.yml`, and you can view the metrics.
+Uncomment `grafana` and `prometheus` services in `risedev.yml`, and you can view the metrics.
 
 ## Tracing
 
 Compute node supports streaming tracing. Tracing is not enabled by default, and you will need to
-use `./riselab configure` to enable tracing components. After that, simply uncomment `jaeger`
-service in `riselab.yml`.
+use `./risedev configure` to enable tracing components. After that, simply uncomment `jaeger`
+service in `risedev.yml`.
 
 ## Dashboard
 

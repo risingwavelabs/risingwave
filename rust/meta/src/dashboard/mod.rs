@@ -92,9 +92,7 @@ impl DashboardService {
             .route("/api/actors", get(list_actors))
             .route(
                 "/",
-                get(|| async {
-                    Html::from(std::str::from_utf8(include_bytes!("index.html")).unwrap())
-                }),
+                get(|| async { Html::from(include_str!("index.html")) }),
             )
             .layer(
                 ServiceBuilder::new()
