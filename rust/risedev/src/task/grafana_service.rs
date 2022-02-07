@@ -48,7 +48,7 @@ impl Task for GrafanaService {
                 .join("conf")
                 .join("provisioning")
                 .join("datasources")
-                .join("riselab-prometheus.yml"),
+                .join("risedev-prometheus.yml"),
             &GrafanaGen.gen_datasource_yml(&self.config)?,
         )?;
 

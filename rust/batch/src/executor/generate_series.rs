@@ -4,7 +4,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, DataChunk, I32ArrayBuilder};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_pb::plan::plan_node::NodeBody;
 
@@ -32,7 +32,7 @@ impl BoxedExecutorBuilder for GenerateSeriesI32Executor {
             stop: node.stop,
             step: node.step,
             cur: node.start,
-            schema: Schema::new(vec![Field::unnamed(DataTypeKind::Int32)]),
+            schema: Schema::new(vec![Field::unnamed(DataType::Int32)]),
             identity: "GenerateSeriesI32Executor".to_string(),
         }))
     }
@@ -110,7 +110,7 @@ mod tests {
             stop,
             step,
             cur: start,
-            schema: Schema::new(vec![Field::unnamed(DataTypeKind::Int32)]),
+            schema: Schema::new(vec![Field::unnamed(DataType::Int32)]),
             identity: "GenerateSeriesI32Executor".to_string(),
         };
         let mut remained_values = ((stop - start) / step + 1) as usize;

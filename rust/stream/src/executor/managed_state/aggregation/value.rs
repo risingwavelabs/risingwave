@@ -105,7 +105,7 @@ impl<S: StateStore> ManagedValueState<S> {
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::{I64Array, Op};
-    use risingwave_common::types::{DataTypeKind, ScalarImpl};
+    use risingwave_common::types::{DataType, ScalarImpl};
 
     use super::*;
     use crate::executor::test_utils::create_in_memory_keyspace;
@@ -114,8 +114,8 @@ mod tests {
     fn create_test_count_state() -> AggCall {
         AggCall {
             kind: risingwave_common::expr::AggKind::Count,
-            args: AggArgs::Unary(DataTypeKind::Int64, 0),
-            return_type: DataTypeKind::Int64,
+            args: AggArgs::Unary(DataType::Int64, 0),
+            return_type: DataType::Int64,
         }
     }
 

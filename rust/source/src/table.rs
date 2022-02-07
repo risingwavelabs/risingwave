@@ -265,7 +265,7 @@ mod tests {
     use risingwave_common::array::{Array, I64Array, Op};
     use risingwave_common::catalog::TableId;
     use risingwave_common::column_nonnull;
-    use risingwave_common::types::DataTypeKind;
+    use risingwave_common::types::DataType;
     use risingwave_storage::{Table, TableColumnDesc};
 
     use super::*;
@@ -274,7 +274,7 @@ mod tests {
     async fn test_table_source() {
         let table = Arc::new(BummockTable::new(
             &TableId::default(),
-            vec![TableColumnDesc::new_without_name(0, DataTypeKind::Int64)],
+            vec![TableColumnDesc::new_without_name(0, DataType::Int64)],
         ));
 
         // Some existing data

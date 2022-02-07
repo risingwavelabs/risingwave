@@ -28,21 +28,21 @@ impl ConfigExpander {
         let global_config = config
             .as_hash()
             .ok_or_else(|| anyhow!("expect config to be a hashmap"))?;
-        let riselab_section = global_config
-            .get(&Yaml::String("riselab".to_string()))
-            .ok_or_else(|| anyhow!("expect `riselab` section"))?;
-        let riselab_section = riselab_section
+        let risedev_section = global_config
+            .get(&Yaml::String("risedev".to_string()))
+            .ok_or_else(|| anyhow!("expect `risedev` section"))?;
+        let risedev_section = risedev_section
             .as_hash()
-            .ok_or_else(|| anyhow!("expect `riselab` section to be a hashmap"))?;
+            .ok_or_else(|| anyhow!("expect `risedev` section to be a hashmap"))?;
         let template_section = global_config
             .get(&Yaml::String("template".to_string()))
-            .ok_or_else(|| anyhow!("expect `riselab` section"))?;
-        let riselab_section: Vec<(Yaml, Yaml)> = riselab_section
+            .ok_or_else(|| anyhow!("expect `risedev` section"))?;
+        let risedev_section: Vec<(Yaml, Yaml)> = risedev_section
             .iter()
             .map(|(k, v)| {
                 let k = k
                     .as_str()
-                    .ok_or_else(|| anyhow!("expect `riselab` section to use string key"))?;
+                    .ok_or_else(|| anyhow!("expect `risedev` section to use string key"))?;
                 let mut use_expander = UseExpander::new(template_section)?;
                 let v = use_expander.visit(v.clone())?;
                 let mut dollar_expander = DollarExpander::new();
@@ -54,19 +54,19 @@ impl ConfigExpander {
                 Ok::<_, anyhow::Error>((Yaml::String(k.to_string()), v))
             })
             .try_collect()?;
-        let riselab_section = yaml::Hash::from_iter(riselab_section.into_iter());
+        let risedev_section = yaml::Hash::from_iter(risedev_section.into_iter());
 
-        Ok(Yaml::Hash(riselab_section))
+        Ok(Yaml::Hash(risedev_section))
     }
 
     pub fn select(
-        riselab_section: &Yaml,
+        risedev_section: &Yaml,
         name: &str,
     ) -> Result<(Vec<String>, HashMap<String, ServiceConfig>)> {
-        let riselab_section = riselab_section
+        let risedev_section = risedev_section
             .as_hash()
-            .ok_or_else(|| anyhow!("expect riselab section to be a hashmap"))?;
-        let scene = riselab_section
+            .ok_or_else(|| anyhow!("expect risedev section to be a hashmap"))?;
+        let scene = risedev_section
             .get(&Yaml::String(name.to_string()))
             .ok_or_else(|| anyhow!("{} not found", name))?;
         let steps = scene

@@ -10,7 +10,7 @@ use risingwave_common::array::{
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_common::expr::RowExpression;
-use risingwave_common::types::{DataTypeKind, ToOwnedDatum};
+use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_storage::keyspace::Segment;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -54,7 +54,7 @@ struct StreamChunkBuilder {
 impl StreamChunkBuilder {
     fn new(
         capacity: usize,
-        data_types: &[DataTypeKind],
+        data_types: &[DataType],
         update_start_pos: usize,
         matched_start_pos: usize,
     ) -> Result<Self> {
@@ -169,7 +169,7 @@ struct JoinSide<S: StateStore> {
     /// The primary key indices of this side, used for state store
     pk_indices: Vec<usize>,
     /// The date type of each columns to join on
-    col_types: Vec<DataTypeKind>,
+    col_types: Vec<DataType>,
     /// The start position for the side in output new columns
     start_pos: usize,
     /// The join side operates on this keyspace.
@@ -206,7 +206,7 @@ pub struct HashJoinExecutor<S: StateStore, const T: JoinTypePrimitive> {
     /// Barrier aligner that combines two input streams and aligns their barriers
     aligner: BarrierAligner,
     /// the data types of the formed new columns
-    output_data_types: Vec<DataTypeKind>,
+    output_data_types: Vec<DataType>,
     /// The schema of the hash join executor
     schema: Schema,
     /// The primary key indices of the schema
@@ -698,11 +698,11 @@ mod tests {
     }
 
     fn create_cond() -> Option<RowExpression> {
-        let left_expr = InputRefExpression::new(DataTypeKind::Int64, 1);
-        let right_expr = InputRefExpression::new(DataTypeKind::Int64, 3);
+        let left_expr = InputRefExpression::new(DataType::Int64, 1);
+        let right_expr = InputRefExpression::new(DataType::Int64, 3);
         let cond = new_binary_expr(
             Type::LessThan,
-            DataTypeKind::Boolean,
+            DataType::Boolean,
             Box::new(left_expr),
             Box::new(right_expr),
         );
@@ -745,8 +745,8 @@ mod tests {
         );
         let schema = Schema {
             fields: vec![
-                Field::unnamed(DataTypeKind::Int64),
-                Field::unnamed(DataTypeKind::Int64),
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
             ],
         };
 
@@ -889,8 +889,8 @@ mod tests {
         );
         let schema = Schema {
             fields: vec![
-                Field::unnamed(DataTypeKind::Int64),
-                Field::unnamed(DataTypeKind::Int64),
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
             ],
         };
 
@@ -1061,8 +1061,8 @@ mod tests {
         );
         let schema = Schema {
             fields: vec![
-                Field::unnamed(DataTypeKind::Int64),
-                Field::unnamed(DataTypeKind::Int64),
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
             ],
         };
 
@@ -1225,8 +1225,8 @@ mod tests {
         );
         let schema = Schema {
             fields: vec![
-                Field::unnamed(DataTypeKind::Int64),
-                Field::unnamed(DataTypeKind::Int64),
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
             ],
         };
 
@@ -1369,8 +1369,8 @@ mod tests {
         );
         let schema = Schema {
             fields: vec![
-                Field::unnamed(DataTypeKind::Int64),
-                Field::unnamed(DataTypeKind::Int64),
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
             ],
         };
 
@@ -1536,8 +1536,8 @@ mod tests {
         );
         let schema = Schema {
             fields: vec![
-                Field::unnamed(DataTypeKind::Int64),
-                Field::unnamed(DataTypeKind::Int64),
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
             ],
         };
 
@@ -1705,8 +1705,8 @@ mod tests {
         );
         let schema = Schema {
             fields: vec![
-                Field::unnamed(DataTypeKind::Int64),
-                Field::unnamed(DataTypeKind::Int64),
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
             ],
         };
 

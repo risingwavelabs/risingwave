@@ -1,9 +1,10 @@
 use std::str::FromStr;
 
 use chrono::{NaiveDate, NaiveDateTime};
-use rust_decimal::Decimal;
 
-use crate::types::{IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, OrderedF32, OrderedF64};
+use crate::types::{
+    Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, OrderedF32, OrderedF64,
+};
 use crate::vector_op::arithmetic_op::*;
 use crate::vector_op::cast::date_to_timestamp;
 use crate::vector_op::cmp::*;
@@ -30,11 +31,16 @@ fn test_arithmetic() {
         general_mod::<Decimal, i32, Decimal>(Decimal::from_str("2.0").unwrap(), 2).unwrap(),
         Decimal::from_str("0").unwrap()
     );
+    assert_eq!(
+        general_neg::<Decimal>(Decimal::from_str("1.0").unwrap()).unwrap(),
+        Decimal::from_str("-1.0").unwrap()
+    );
     assert_eq!(general_add::<i16, i32, i32>(1i16, 1i32).unwrap(), 2i32);
     assert_eq!(general_sub::<i16, i32, i32>(1i16, 1i32).unwrap(), 0i32);
     assert_eq!(general_mul::<i16, i32, i32>(1i16, 1i32).unwrap(), 1i32);
     assert_eq!(general_div::<i16, i32, i32>(1i16, 1i32).unwrap(), 1i32);
     assert_eq!(general_mod::<i16, i32, i32>(1i16, 1i32).unwrap(), 0i32);
+    assert_eq!(general_neg::<i16>(1i16).unwrap(), -1i16);
 
     assert_eq!(
         general_add::<Decimal, f32, Decimal>(Decimal::from_str("1.0").unwrap(), -1f32).unwrap(),
@@ -79,6 +85,10 @@ fn test_arithmetic() {
             .unwrap()
             .abs()
             < f64::EPSILON
+    );
+    assert_eq!(
+        general_neg::<OrderedF32>(1f32.into()).unwrap(),
+        OrderedF32::from(-1f32)
     );
     assert_eq!(
         date_interval_add::<NaiveDateWrapper, IntervalUnit, NaiveDateTimeWrapper>(

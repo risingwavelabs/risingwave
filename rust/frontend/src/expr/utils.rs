@@ -1,4 +1,4 @@
-use bit_set::BitSet;
+use fixedbitset::FixedBitSet;
 
 use super::ExprImpl;
 use crate::expr::ExprType;
@@ -26,14 +26,14 @@ pub fn to_conjunctions(expr: ExprImpl) -> Vec<ExprImpl> {
 }
 
 /// give a expression, and get all columns in its input_ref expressions.
-pub fn get_col_refs(_expr: &ExprImpl) -> BitSet {
+pub fn get_col_refs(_expr: &ExprImpl) -> FixedBitSet {
     todo!()
 }
 /// give a expression, and check all columns in its input_ref expressions less than the input
 /// column number.
 pub fn assert_input_ref(expr: &ExprImpl, input_col_num: usize) {
     let cols = get_col_refs(expr);
-    for col in cols.iter() {
+    for col in cols.ones() {
         assert!(col < input_col_num);
     }
 }

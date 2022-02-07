@@ -10,7 +10,7 @@ use risingwave_common::collection::hash_map::{
     Key256, Key32, Key64, KeySerialized,
 };
 use risingwave_common::error::Result;
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_pb::plan::plan_node::NodeBody;
 
@@ -32,18 +32,18 @@ pub(super) struct EquiJoinParams {
     /// Column indexes of left keys in equi join, e.g., the column indexes of `b1` and `b3` in `b`.
     left_key_columns: Vec<usize>,
     /// Data types of left keys in equi join, e.g., the column types of `b1` and `b3` in `b`.
-    left_key_types: Vec<DataTypeKind>,
+    left_key_types: Vec<DataType>,
     /// Column indexes of right keys in equi join, e.g., the column indexes of `a1` and `a3` in
     /// `a`.
     right_key_columns: Vec<usize>,
     /// Data types of right keys in equi join, e.g., the column types of `a1` and `a3` in `a`.
-    right_key_types: Vec<DataTypeKind>,
+    right_key_types: Vec<DataType>,
     /// Column indexes of outputs in equi join, e.g. the column indexes of `a1`, `a2`, `b1`, `b2`.
     /// [`Either::Left`] is used to mark left side input, and [`Either::Right`] is used to mark
     /// right side input.
     output_columns: Vec<Either<usize, usize>>,
     /// Column types of outputs in equi join, e.g. the column types of `a1`, `a2`, `b1`, `b2`.
-    output_data_types: Vec<DataTypeKind>,
+    output_data_types: Vec<DataType>,
     /// Data chunk buffer size
     batch_size: usize,
 }
@@ -103,7 +103,7 @@ impl EquiJoinParams {
     }
 
     #[inline(always)]
-    pub(super) fn output_types(&self) -> &[DataTypeKind] {
+    pub(super) fn output_types(&self) -> &[DataType] {
         &self.output_data_types
     }
 
@@ -390,7 +390,7 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::collection::hash_map::Key32;
     use risingwave_common::error::Result;
-    use risingwave_common::types::DataTypeKind;
+    use risingwave_common::types::DataType;
 
     use crate::executor::join::hash_join::{EquiJoinParams, HashJoinExecutor};
     use crate::executor::join::JoinType;
@@ -398,12 +398,12 @@ mod tests {
     use crate::executor::BoxedExecutor;
 
     struct DataChunkMerger {
-        data_types: Vec<DataTypeKind>,
+        data_types: Vec<DataType>,
         array_builders: Vec<ArrayBuilderImpl>,
     }
 
     impl DataChunkMerger {
-        fn new(data_types: Vec<DataTypeKind>) -> Result<Self> {
+        fn new(data_types: Vec<DataType>) -> Result<Self> {
             let array_builders = data_types
                 .iter()
                 .map(|data_type| data_type.create_array_builder(1024))
@@ -449,8 +449,8 @@ mod tests {
     }
 
     struct TestFixture {
-        left_types: Vec<DataTypeKind>,
-        right_types: Vec<DataTypeKind>,
+        left_types: Vec<DataType>,
+        right_types: Vec<DataType>,
         join_type: JoinType,
     }
 
@@ -473,16 +473,16 @@ mod tests {
     impl TestFixture {
         fn with_join_type(join_type: JoinType) -> Self {
             Self {
-                left_types: vec![DataTypeKind::Int32, DataTypeKind::Float32],
-                right_types: vec![DataTypeKind::Int32, DataTypeKind::Float64],
+                left_types: vec![DataType::Int32, DataType::Float32],
+                right_types: vec![DataType::Int32, DataType::Float64],
                 join_type,
             }
         }
         fn create_left_executor(&self) -> BoxedExecutor {
             let schema = Schema {
                 fields: vec![
-                    Field::unnamed(DataTypeKind::Int32),
-                    Field::unnamed(DataTypeKind::Float32),
+                    Field::unnamed(DataType::Int32),
+                    Field::unnamed(DataType::Float32),
                 ],
             };
             let mut executor = MockExecutor::new(schema);
@@ -521,8 +521,8 @@ mod tests {
         fn create_right_executor(&self) -> BoxedExecutor {
             let schema = Schema {
                 fields: vec![
-                    Field::unnamed(DataTypeKind::Int32),
-                    Field::unnamed(DataTypeKind::Float64),
+                    Field::unnamed(DataType::Int32),
+                    Field::unnamed(DataType::Float64),
                 ],
             };
             let mut executor = MockExecutor::new(schema);
@@ -587,7 +587,7 @@ mod tests {
             }
         }
 
-        fn output_data_types(&self) -> Vec<DataTypeKind> {
+        fn output_data_types(&self) -> Vec<DataType> {
             let output_columns = self.output_columns();
 
             output_columns
@@ -596,7 +596,7 @@ mod tests {
                     Either::Left(idx) => self.left_types[*idx],
                     Either::Right(idx) => self.right_types[*idx],
                 })
-                .collect::<Vec<DataTypeKind>>()
+                .collect::<Vec<DataType>>()
         }
 
         fn create_join_executor(&self) -> BoxedExecutor {
@@ -655,14 +655,14 @@ mod tests {
                 | JoinType::LeftOuter
                 | JoinType::RightOuter
                 | JoinType::FullOuter => {
-                    assert_eq!(fields[0].data_type, DataTypeKind::Float32);
-                    assert_eq!(fields[1].data_type, DataTypeKind::Float64);
+                    assert_eq!(fields[0].data_type, DataType::Float32);
+                    assert_eq!(fields[1].data_type, DataType::Float64);
                 }
                 JoinType::LeftAnti | JoinType::LeftSemi => {
-                    assert_eq!(fields[0].data_type, DataTypeKind::Float32)
+                    assert_eq!(fields[0].data_type, DataType::Float32)
                 }
                 JoinType::RightAnti | JoinType::RightSemi => {
-                    assert_eq!(fields[0].data_type, DataTypeKind::Float64)
+                    assert_eq!(fields[0].data_type, DataType::Float64)
                 }
             };
 

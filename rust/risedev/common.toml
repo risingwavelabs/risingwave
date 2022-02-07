@@ -29,17 +29,17 @@ mkdir "${PREFIX_LOG}"
 mkdir "${HUMMOCK_PATH}"
 '''
 
-[tasks.check-riselab-configured]
+[tasks.check-risedev-configured]
 private = true
-condition = { env_not_set = [ "RISELAB_CONFIGURED" ] }
+condition = { env_not_set = [ "RISEDEV_CONFIGURED" ] }
 script = '''
 #!@shell
 set -e
-echo "RiseLAB is not configured, please run ./riselab configure"
+echo "RiseDev is not configured, please run ./risedev configure"
 exit 1
 '''
 
 [tasks.prepare]
 category = "Misc"
 description = "Create .risingwave folder for storing temporary files and data"
-dependencies = ["prepare-dir", "check-riselab-configured"]
+dependencies = ["prepare-dir", "check-risedev-configured"]

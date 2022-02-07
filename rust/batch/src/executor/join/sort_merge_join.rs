@@ -302,7 +302,7 @@ mod tests {
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{DataChunk, F32Array, F64Array, I32Array};
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::DataTypeKind;
+    use risingwave_common::types::DataType;
 
     use crate::executor::join::sort_merge_join::{RowLevelIter, SortMergeJoinExecutor};
     use crate::executor::join::JoinType;
@@ -310,8 +310,8 @@ mod tests {
     use crate::executor::BoxedExecutor;
 
     struct TestFixture {
-        left_types: Vec<DataTypeKind>,
-        right_types: Vec<DataTypeKind>,
+        left_types: Vec<DataType>,
+        right_types: Vec<DataType>,
         join_type: JoinType,
     }
 
@@ -333,8 +333,8 @@ mod tests {
     impl TestFixture {
         fn with_join_type(join_type: JoinType) -> Self {
             Self {
-                left_types: vec![DataTypeKind::Int32, DataTypeKind::Float32],
-                right_types: vec![DataTypeKind::Int32, DataTypeKind::Float64],
+                left_types: vec![DataType::Int32, DataType::Float32],
+                right_types: vec![DataType::Int32, DataType::Float64],
                 join_type,
             }
         }
@@ -342,8 +342,8 @@ mod tests {
         fn create_left_executor(&self) -> BoxedExecutor {
             let schema = Schema {
                 fields: vec![
-                    Field::unnamed(DataTypeKind::Int32),
-                    Field::unnamed(DataTypeKind::Float32),
+                    Field::unnamed(DataType::Int32),
+                    Field::unnamed(DataType::Float32),
                 ],
             };
             let mut executor = MockExecutor::new(schema);
@@ -381,8 +381,8 @@ mod tests {
         fn create_right_executor(&self) -> BoxedExecutor {
             let schema = Schema {
                 fields: vec![
-                    Field::unnamed(DataTypeKind::Int32),
-                    Field::unnamed(DataTypeKind::Float64),
+                    Field::unnamed(DataType::Int32),
+                    Field::unnamed(DataType::Float64),
                 ],
             };
             let mut executor = MockExecutor::new(schema);

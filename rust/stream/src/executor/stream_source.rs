@@ -185,7 +185,7 @@ mod tests {
     use risingwave_common::array::{ArrayImpl, I32Array, I64Array, Op, StreamChunk, Utf8Array};
     use risingwave_common::array_nonnull;
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::DataTypeKind;
+    use risingwave_common::types::DataType;
     use risingwave_source::*;
     use risingwave_storage::bummock::BummockTable;
     use risingwave_storage::TableColumnDesc;
@@ -198,9 +198,9 @@ mod tests {
     async fn test_table_source() -> Result<()> {
         let table_id = TableId::default();
 
-        let rowid_type = DataTypeKind::Int64;
-        let col1_type = DataTypeKind::Int32;
-        let col2_type = DataTypeKind::Varchar;
+        let rowid_type = DataType::Int64;
+        let col1_type = DataType::Int32;
+        let col2_type = DataType::Varchar;
 
         let table_columns = vec![
             TableColumnDesc {
@@ -333,9 +333,9 @@ mod tests {
     async fn test_table_dropped() -> Result<()> {
         let table_id = TableId::default();
 
-        let rowid_type = DataTypeKind::Int64;
-        let col1_type = DataTypeKind::Int32;
-        let col2_type = DataTypeKind::Varchar;
+        let rowid_type = DataType::Int64;
+        let col1_type = DataType::Int32;
+        let col2_type = DataType::Varchar;
 
         let table_columns = vec![
             TableColumnDesc {
