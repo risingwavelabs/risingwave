@@ -268,10 +268,6 @@ impl HummockStorage {
 
         // TODO: do not generate epoch if `kv_pairs` is empty
         for (k, v) in kv_pairs {
-            let res = k.is_empty();
-            if k.is_empty() {
-                continue;
-            }
             builder.add_user_key(k, v, epoch).await?;
         }
 
