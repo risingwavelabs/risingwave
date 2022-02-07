@@ -151,7 +151,7 @@ impl TableFragments {
         Self::filter_actor_ids(self, FragmentType::Sink)
     }
     /// Returns actor locations group by node id.
-    pub fn node_actors(&self) -> BTreeMap<u32, Vec<u32>> {
+    pub fn node_actor_ids(&self) -> BTreeMap<u32, Vec<u32>> {
         let mut actors = BTreeMap::default();
         self.actor_locations
             .iter()
@@ -161,6 +161,22 @@ impl TableFragments {
                     .or_insert_with(Vec::new)
                     .push(actor_id);
             });
+
+        actors
+    }
+
+    /// Returns the actors group by node id.
+    pub fn node_actors(&self) -> BTreeMap<u32, Vec<StreamActor>> {
+        let mut actors = BTreeMap::default();
+        self.fragments.values().for_each(|fragment| {
+            fragment.actors.iter().for_each(|actor| {
+                let node_id = self.actor_locations[&actor.actor_id];
+                actors
+                    .entry(node_id)
+                    .or_insert_with(Vec::new)
+                    .push(actor.clone());
+            })
+        });
 
         actors
     }
