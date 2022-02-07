@@ -26,13 +26,13 @@ use crate::array::{ArrayRef, DataChunk, Row};
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
 use crate::expr::build_expr_from_prost::*;
-use crate::types::DataTypeKind;
+use crate::types::DataType;
 
 pub type ExpressionRef = Arc<dyn Expression>;
 
 /// Instance of an expression
 pub trait Expression: std::fmt::Debug + Sync + Send {
-    fn return_type(&self) -> DataTypeKind;
+    fn return_type(&self) -> DataType;
 
     /// Evaluate the expression
     ///
@@ -86,12 +86,12 @@ impl RowExpression {
         Self { expr }
     }
 
-    pub fn eval(&mut self, row: &Row, data_types: &[DataTypeKind]) -> Result<ArrayRef> {
+    pub fn eval(&mut self, row: &Row, data_types: &[DataType]) -> Result<ArrayRef> {
         let input = DataChunk::from_rows(slice::from_ref(row), data_types)?;
         self.expr.eval(&input)
     }
 
-    fn return_type(&self) -> DataTypeKind {
+    fn return_type(&self) -> DataType {
         self.expr.return_type()
     }
 }

@@ -1,12 +1,12 @@
 use risingwave_common::expr::AggKind;
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 
 use super::{Expr, ExprImpl};
 
 #[derive(Clone, Debug)]
 pub struct AggCall {
     agg_kind: AggKind,
-    return_type: DataTypeKind,
+    return_type: DataType,
     inputs: Vec<ExprImpl>,
 }
 impl AggCall {
@@ -29,7 +29,7 @@ impl AggCall {
     }
 }
 impl Expr for AggCall {
-    fn return_type(&self) -> DataTypeKind {
+    fn return_type(&self) -> DataType {
         self.return_type
     }
     fn bound_expr(self) -> ExprImpl {

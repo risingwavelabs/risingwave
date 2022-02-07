@@ -7,7 +7,7 @@ use risingwave_batch::executor::{Executor, RowSeqScanExecutor};
 use risingwave_common::array::{Array, Row};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::Keyspace;
@@ -20,8 +20,8 @@ async fn test_row_seq_scan() -> Result<()> {
     let keyspace = Keyspace::executor_root(state_store, 0x42);
 
     let schema = Schema::new(vec![
-        Field::unnamed(DataTypeKind::Int32),
-        Field::unnamed(DataTypeKind::Int32),
+        Field::unnamed(DataType::Int32),
+        Field::unnamed(DataType::Int32),
     ]);
     let pk_columns = vec![0];
     let orderings = vec![OrderType::Ascending];

@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use risingwave_common::array::{DataChunk, DataChunkRef};
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::Result;
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_storage::bummock::BummockResult;
 use risingwave_storage::table::ScannableTableRef;
@@ -54,7 +54,7 @@ impl BoxedExecutorBuilder for SeqScanExecutor {
                 .iter()
                 .map(|f| {
                     Ok(Field {
-                        data_type: DataTypeKind::from(f.get_data_type()?),
+                        data_type: DataType::from(f.get_data_type()?),
                         name: f.get_name().clone(),
                     })
                 })
@@ -103,7 +103,7 @@ mod tests {
     use risingwave_common::array::{Array, I64Array};
     use risingwave_common::catalog::Field;
     use risingwave_common::column_nonnull;
-    use risingwave_common::types::DataTypeKind;
+    use risingwave_common::types::DataType;
     use risingwave_storage::bummock::BummockTable;
     use risingwave_storage::table::ScannableTable;
     use risingwave_storage::{Table, TableColumnDesc};
@@ -115,7 +115,7 @@ mod tests {
     async fn test_seq_scan_executor() -> Result<()> {
         let table_id = TableId::default();
         let schema = Schema {
-            fields: vec![Field::unnamed(DataTypeKind::decimal_default())],
+            fields: vec![Field::unnamed(DataType::decimal_default())],
         };
         let table_columns = schema
             .fields
@@ -147,7 +147,7 @@ mod tests {
         seq_scan_executor.open().await.unwrap();
 
         let fields = &seq_scan_executor.schema().fields;
-        assert_eq!(fields[0].data_type, DataTypeKind::decimal_default());
+        assert_eq!(fields[0].data_type, DataType::decimal_default());
 
         seq_scan_executor.open().await.unwrap();
 

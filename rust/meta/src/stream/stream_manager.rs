@@ -65,7 +65,7 @@ impl StreamManager {
     async fn lookup_actor_ids(
         &self,
         table_ref_id: &TableRefId,
-        table_sink_map: &mut HashMap<i32, u32>,
+        table_sink_map: &mut HashMap<i32, Vec<u32>>,
     ) -> Result<()> {
         let table_id = table_ref_id.table_id;
         if let Entry::Vacant(e) = table_sink_map.entry(table_id) {
@@ -77,7 +77,7 @@ impl StreamManager {
                 Ok
             )?;
             ensure!(!sink_actors.is_empty());
-            e.insert(*sink_actors.get(0).unwrap());
+            e.insert(sink_actors);
         }
         Ok(())
     }
@@ -97,7 +97,7 @@ impl StreamManager {
         let source_actor_ids = table_fragments.source_actor_ids();
 
         // Fill `upstream_actor_id` of [`ChainNode`].
-        let mut table_sink_map = HashMap::default();
+        let mut table_sink_map = HashMap::new();
         let mut chain_actors = vec![];
         for actor in &mut actors {
             let stream_node = actor.nodes.as_mut().unwrap();
@@ -113,13 +113,17 @@ impl StreamManager {
             .iter()
             .map(|(actor_id, table_ref_id)| {
                 (
-                    *table_sink_map
+                    table_sink_map
                         .get(&table_ref_id.table_id)
-                        .expect("table id not exists"),
+                        .expect("table id not exists")
+                        .clone(),
                     *actor_id,
                 )
             })
-            .collect_vec();
+            .fold(vec![], |mut v, (actor_ids, table_ref_id)| {
+                v.extend(actor_ids.iter().map(|&actor_id| (actor_id, table_ref_id)));
+                v
+            });
 
         // Divide all actors into source and non-source actors.
         let non_source_actor_ids = actor_ids
@@ -594,7 +598,7 @@ mod tests {
                             node_id: 3,
                             node: Some(Node::ChainNode(ChainNode {
                                 table_ref_id: Some(table_ref_id_1.clone()),
-                                upstream_actor_id: 0,
+                                upstream_actor_ids: vec![0],
                                 ..Default::default()
                             })),
                             ..Default::default()
@@ -637,7 +641,7 @@ mod tests {
             .as_ref()
             .unwrap()
         {
-            assert_eq!(chain.upstream_actor_id, 1);
+            assert_eq!(chain.upstream_actor_ids, vec![1]);
         } else {
             return Err(ErrorCode::UnknownError("chain node is expected".to_owned()).into());
         }

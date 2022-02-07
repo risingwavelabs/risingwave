@@ -8,7 +8,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::expr::{build_from_prost as build_expr_from_prost, AggKind, RowExpression};
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 use risingwave_common::util::addr::is_local_address;
 use risingwave_common::util::sort_util::{
     build_from_prost as build_order_type_from_prost, fetch_orders,
@@ -199,7 +199,7 @@ fn build_agg_call_from_prost(agg_call_proto: &expr::AggCall) -> Result<AggCall> 
         match args {
             [] => AggArgs::None,
             [arg] => AggArgs::Unary(
-                DataTypeKind::from(arg.get_type()?),
+                DataType::from(arg.get_type()?),
                 arg.get_input()?.column_idx as usize,
             ),
             _ => {
@@ -212,7 +212,7 @@ fn build_agg_call_from_prost(agg_call_proto: &expr::AggCall) -> Result<AggCall> 
     Ok(AggCall {
         kind: AggKind::try_from(agg_call_proto.get_type()?)?,
         args,
-        return_type: DataTypeKind::from(agg_call_proto.get_return_type()?),
+        return_type: DataType::from(agg_call_proto.get_return_type()?),
     })
 }
 
@@ -615,37 +615,18 @@ impl StreamManagerCore {
                 let table_id = TableId::from(&chain_node.table_ref_id);
                 let table = table_manager.get_table(&table_id)?;
                 let snapshot = Box::new(BatchQueryExecutor::new(table.clone(), pk_indices));
-                let up_id = chain_node.upstream_actor_id;
-                let rx = {
-                    let mut guard = self.context.lock_channel_pool();
-                    guard
-                        .get_mut(&(up_id, actor_id))
-                        .ok_or_else(|| {
-                            RwError::from(ErrorCode::InternalError(format!(
-                                "chain node: channel between {} and {} does not exist",
-                                up_id, actor_id
-                            )))
-                        })?
-                        .1
-                        .take()
-                        .ok_or_else(|| {
-                            RwError::from(ErrorCode::InternalError(format!(
-                                "chain node: receiver from {} to {} does no exist",
-                                up_id, actor_id
-                            )))
-                        })?
-                };
                 let pk_indices = chain_node
                     .pk_indices
                     .iter()
                     .map(|x| *x as usize)
                     .collect_vec();
                 let upstream_schema = table.schema().into_owned();
-                let mview = Box::new(ReceiverExecutor::new(
+                let mview = self.create_merge_node(
+                    actor_id,
                     upstream_schema.clone(),
+                    &chain_node.upstream_actor_ids,
                     pk_indices,
-                    rx,
-                ));
+                )?;
 
                 // TODO(MrCroxx): Use column_descs to get idx after mv planner can generate stable
                 // column_ids. Now simply treat column_id as column_idx.
@@ -907,17 +888,19 @@ impl StreamManagerCore {
         {
             // Create channel based on upstream actor id for [`ChainNode`], check if upstream
             // exists.
-            if !self.actor_infos.contains_key(&chain.upstream_actor_id) {
-                return Err(ErrorCode::InternalError(format!(
-                    "chain upstream actor {} not exists",
-                    chain.upstream_actor_id
-                ))
-                .into());
-            }
-            let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-            let up_down_ids = (chain.upstream_actor_id, actor_id);
             let mut guard = self.context.lock_channel_pool();
-            guard.insert(up_down_ids, (Some(tx), Some(rx)));
+            for upstream_actor_id in &chain.upstream_actor_ids {
+                if !self.actor_infos.contains_key(upstream_actor_id) {
+                    return Err(ErrorCode::InternalError(format!(
+                        "chain upstream actor {} not exists",
+                        upstream_actor_id
+                    ))
+                    .into());
+                }
+                let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
+                let up_down_ids = (*upstream_actor_id, actor_id);
+                guard.insert(up_down_ids, (Some(tx), Some(rx)));
+            }
         }
         for child in &stream_node.input {
             self.build_channel_for_chain_node(actor_id, child)?;

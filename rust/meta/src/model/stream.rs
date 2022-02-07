@@ -209,13 +209,17 @@ impl TableFragments {
     /// Update chain upstream actor ids.
     pub fn update_chain_upstream_actor_ids(
         &mut self,
-        table_sink_map: &HashMap<i32, u32>,
+        table_sink_map: &HashMap<i32, Vec<u32>>,
     ) -> Result<()> {
-        fn resolve_update_inner(stream_node: &mut StreamNode, table_sink_map: &HashMap<i32, u32>) {
+        fn resolve_update_inner(
+            stream_node: &mut StreamNode,
+            table_sink_map: &HashMap<i32, Vec<u32>>,
+        ) {
             if let Node::ChainNode(chain) = stream_node.node.as_mut().unwrap() {
-                chain.upstream_actor_id = *table_sink_map
+                chain.upstream_actor_ids = table_sink_map
                     .get(&chain.table_ref_id.as_ref().unwrap().table_id)
-                    .expect("table id not exists");
+                    .expect("table id not exists")
+                    .clone();
             }
             for child in &mut stream_node.input {
                 resolve_update_inner(child, table_sink_map)

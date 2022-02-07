@@ -1,4 +1,4 @@
-riselab:
+risedev:
   # The CI-3node configuration will start 3 compute nodes, 1 meta node, 1 frontend.
   ci-3node:
     - use: meta-node
@@ -37,7 +37,7 @@ riselab:
     - use: minio
     - use: meta-node
     - use: compute-node
-      # If user-managed is true, developers should start the compute-node, and RiseLAB will wait for its start.
+      # If user-managed is true, developers should start the compute-node, and RiseDev will wait for its start.
       user-managed: true
     - use: prometheus
     - use: frontend
@@ -47,10 +47,10 @@ riselab:
     - use: meta-node
     - use: compute-node
     - use: frontend
-      # If user-managed is true, developers should start the frontend, and RiseLAB will wait for its start.
+      # If user-managed is true, developers should start the frontend, and RiseDev will wait for its start.
       user-managed: true
 
-# The `use` field specified in the above `riselab` section will refer to the templates below.
+# The `use` field specified in the above `risedev` section will refer to the templates below.
 template:
   minio:
     # Listen address of MinIO s3 endpoint
@@ -193,4 +193,4 @@ template:
     dashboard-port: 16680
 
     # Jaeger has a lot of ports open, and we don't want to make this config more complex.
-    # So we keep the default value of jaeger instead of making it part of RiseLAB config.
+    # So we keep the default value of jaeger instead of making it part of RiseDev config.

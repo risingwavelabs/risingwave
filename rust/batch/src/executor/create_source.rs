@@ -5,7 +5,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 use risingwave_pb::plan::create_source_node::RowFormatType;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_source::parser::JSONParser;
@@ -80,7 +80,7 @@ impl BoxedExecutorBuilder for CreateSourceExecutor {
             .map(|(idx, c)| {
                 Ok(SourceColumnDesc {
                     name: c.name.clone(),
-                    data_type: DataTypeKind::from(c.get_column_type()?),
+                    data_type: DataType::from(c.get_column_type()?),
                     column_id: c.column_id,
                     skip_parse: idx as i32 == row_id_index,
                     is_primary: c.is_primary,

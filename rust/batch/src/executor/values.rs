@@ -124,7 +124,7 @@ impl BoxedExecutorBuilder for ValuesExecutor {
 mod tests {
     use risingwave_common::array::Array;
     use risingwave_common::expr::LiteralExpression;
-    use risingwave_common::types::{DataTypeKind, ScalarImpl};
+    use risingwave_common::types::{DataType, ScalarImpl};
 
     use super::*;
 
@@ -132,15 +132,15 @@ mod tests {
     async fn test_values_executor() -> Result<()> {
         let exprs = vec![vec![
             Box::new(LiteralExpression::new(
-                DataTypeKind::Int16,
+                DataType::Int16,
                 Some(ScalarImpl::Int16(1)),
             )) as BoxedExpression,
             Box::new(LiteralExpression::new(
-                DataTypeKind::Int32,
+                DataType::Int32,
                 Some(ScalarImpl::Int32(2)),
             )),
             Box::new(LiteralExpression::new(
-                DataTypeKind::Int64,
+                DataType::Int64,
                 Some(ScalarImpl::Int64(3)),
             )),
         ]];
@@ -159,9 +159,9 @@ mod tests {
         values_executor.open().await.unwrap();
 
         let fields = &values_executor.schema().fields;
-        assert_eq!(fields[0].data_type, DataTypeKind::Int16);
-        assert_eq!(fields[1].data_type, DataTypeKind::Int32);
-        assert_eq!(fields[2].data_type, DataTypeKind::Int64);
+        assert_eq!(fields[0].data_type, DataType::Int16);
+        assert_eq!(fields[1].data_type, DataType::Int32);
+        assert_eq!(fields[2].data_type, DataType::Int64);
 
         values_executor.open().await.unwrap();
         let result = values_executor.next().await?.unwrap();

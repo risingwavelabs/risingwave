@@ -6,7 +6,7 @@ use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_storage::table::{ScannableTable, TableIterRef};
 
@@ -17,7 +17,7 @@ pub struct RowSeqScanExecutor {
     table: Arc<dyn ScannableTable>,
     /// An iterator to scan StateStore.
     iter: Option<TableIterRef>,
-    data_types: Vec<DataTypeKind>,
+    data_types: Vec<DataType>,
     column_ids: Vec<usize>,
     schema: Schema,
     identity: String,
@@ -26,7 +26,7 @@ pub struct RowSeqScanExecutor {
 impl RowSeqScanExecutor {
     pub fn new(
         table: Arc<dyn ScannableTable>,
-        data_types: Vec<DataTypeKind>,
+        data_types: Vec<DataType>,
         column_ids: Vec<usize>,
         schema: Schema,
     ) -> Self {

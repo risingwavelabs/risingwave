@@ -4,13 +4,13 @@ use std::marker::PhantomData;
 use crate::array::{I32Array, Utf8Array};
 use crate::expr::template::BinaryBytesExpression;
 use crate::expr::BoxedExpression;
-use crate::types::DataTypeKind;
+use crate::types::DataType;
 use crate::vector_op::substr::*;
 
 pub fn new_substr_start(
     expr_ia1: BoxedExpression,
     expr_ia2: BoxedExpression,
-    return_type: DataTypeKind,
+    return_type: DataType,
 ) -> BoxedExpression {
     Box::new(BinaryBytesExpression::<Utf8Array, I32Array, _> {
         expr_ia1,
@@ -24,7 +24,7 @@ pub fn new_substr_start(
 pub fn new_substr_for(
     expr_ia1: BoxedExpression,
     expr_ia2: BoxedExpression,
-    return_type: DataTypeKind,
+    return_type: DataType,
 ) -> BoxedExpression {
     Box::new(BinaryBytesExpression::<Utf8Array, I32Array, _> {
         expr_ia1,
@@ -43,14 +43,14 @@ mod tests {
     use crate::types::{Datum, ScalarImpl};
 
     fn create_str_i32_binary_expr(
-        f: fn(BoxedExpression, BoxedExpression, DataTypeKind) -> BoxedExpression,
+        f: fn(BoxedExpression, BoxedExpression, DataType) -> BoxedExpression,
         str_arg: Datum,
         i32_arg: Datum,
     ) -> BoxedExpression {
         f(
-            Box::new(LiteralExpression::new(DataTypeKind::Char, str_arg)),
-            Box::new(LiteralExpression::new(DataTypeKind::Int32, i32_arg)),
-            DataTypeKind::Char,
+            Box::new(LiteralExpression::new(DataType::Char, str_arg)),
+            Box::new(LiteralExpression::new(DataType::Int32, i32_arg)),
+            DataType::Char,
         )
     }
 

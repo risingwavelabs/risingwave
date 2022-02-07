@@ -35,7 +35,7 @@ impl Components {
             Self::MinIO => {
                 "
 Required by Hummock state store.
-(Also required by ./riselab dev)"
+(Also required by ./risedev dev)"
             }
             Self::PrometheusAndGrafana => {
                 "
@@ -45,12 +45,12 @@ Required if you want to view metrics."
                 "
 Required if you want to build compute-node and meta-node.
 Otherwise you will need to manually download and copy it
-to RiseLAB directory."
+to RiseDev directory."
             }
             Self::Frontend => {
                 "
 Required if you want to build frontend. Otherwise you will
-need to manually download and copy it to RiseLAB directory."
+need to manually download and copy it to RiseDev directory."
             }
             Self::Tracing => {
                 "
@@ -88,9 +88,9 @@ Build RisingWave in release mode"
 }
 
 fn configure() -> Result<Vec<Components>> {
-    println!("=== Configure RiseLAB ===");
+    println!("=== Configure RiseDev ===");
     println!();
-    println!("RiseLAB includes several components. You can select the ones you need, so as to reduce build time.");
+    println!("RiseDev includes several components. You can select the ones you need, so as to reduce build time.");
     println!();
     println!(
         "Use {} to navigate, and use {} to select. Press {} to continue.",
@@ -139,7 +139,7 @@ fn main() -> Result<()> {
         .ok_or_else(|| anyhow!("expect argv[1] to be component env file path"))?;
 
     println!(
-        "RiseLAB component config not found, generating {}",
+        "RiseDev component config not found, generating {}",
         file_path
     );
 
@@ -161,7 +161,7 @@ fn main() -> Result<()> {
             .context(format!("failed to open component config at {}", file_path))?,
     );
 
-    writeln!(file, "RISELAB_CONFIGURED=true")?;
+    writeln!(file, "RISEDEV_CONFIGURED=true")?;
     for component in chosen {
         writeln!(file, "{}=true", component.env())?;
     }
