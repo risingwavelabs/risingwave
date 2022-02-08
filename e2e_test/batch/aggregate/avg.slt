@@ -4,6 +4,9 @@ create table t(v1 smallint, v2 int, v3 bigint, v4 numeric, v5 real, v6 double pr
 statement ok
 insert into t values (1, 1, 1, 1, 1, 1), (2, 2, 2, 2, 2, 2)
 
+statement ok
+flush;
+
 query RRRRRR
 select round(avg(v1), 1), round(avg(v2), 1), round(avg(v3), 1), round(avg(v4), 1), avg(v5), avg(v6) from t
 ----

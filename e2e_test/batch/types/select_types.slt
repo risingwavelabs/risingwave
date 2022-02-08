@@ -105,6 +105,9 @@ insert into t values ('hello')
 # statement ok
 # insert into t values ("hello")
 
+statement ok
+flush;
+
 query T
 select * from t;
 ----

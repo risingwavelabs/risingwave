@@ -29,4 +29,7 @@ statement ok
 insert into f values (1.2), (null)
 
 statement ok
+flush;
+
+statement ok
 drop table f
