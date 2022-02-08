@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 
 use futures::channel::mpsc::{channel, Receiver, Sender};
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::expr::{build_from_prost as build_expr_from_prost, AggKind, RowExpression};
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 use risingwave_common::util::addr::is_local_address;
 use risingwave_common::util::sort_util::{
     build_from_prost as build_order_type_from_prost, fetch_orders,
@@ -23,7 +23,7 @@ use tokio::task::JoinHandle;
 
 use crate::executor::snapshot::BatchQueryExecutor;
 use crate::executor::*;
-use crate::task::{LocalBarrierManager, StreamTaskEnv};
+use crate::task::{SharedContext, StreamTaskEnv};
 
 /// Default capacity of channel if two actors are on the same node
 pub const LOCAL_OUTPUT_CHANNEL_SIZE: usize = 16;
@@ -35,76 +35,6 @@ pub type UpDownActorIds = (u32, u32);
 #[cfg(test)]
 lazy_static::lazy_static! {
     pub static ref LOCAL_TEST_ADDR: SocketAddr = "127.0.0.1:2333".parse().unwrap();
-}
-
-/// Stores the data which may be modified from the data plane.
-pub struct SharedContext {
-    /// Stores the senders and receivers for later `Processor`'s use.
-    ///
-    /// Each actor has several senders and several receivers. Senders and receivers are created
-    /// during `update_actors`. Upon `build_actorss`, all these channels will be taken out and
-    /// built into the executors and outputs.
-    /// One sender or one receiver can be uniquely determined by the upstream and downstream actor
-    /// id.
-    ///
-    /// There are three cases that we need local channels to pass around messages:
-    /// 1. pass `Message` between two local actors
-    /// 2. The RPC client at the downstream actor forwards received `Message` to one channel in
-    /// `ReceiverExecutor` or `MergerExecutor`.
-    /// 3. The RPC `Output` at the upstream actor forwards received `Message` to
-    /// `ExchangeServiceImpl`.        The channel servers as a buffer because `ExchangeServiceImpl`
-    /// is on the server-side and we will        also introduce backpressure.
-    pub(crate) channel_pool: Mutex<HashMap<UpDownActorIds, ConsumableChannelPair>>,
-
-    /// The receiver is on the other side of rpc `Output`. The `ExchangeServiceImpl` take it
-    /// when it receives request for streaming data from downstream clients.
-    pub(crate) receivers_for_exchange_service: Mutex<HashMap<UpDownActorIds, Receiver<Message>>>,
-
-    /// Stores the local address
-    ///
-    /// It is used to test whether an actor is local or not,
-    /// thus determining whether we should setup channel or rpc connection between
-    /// two actors/actors.
-    pub(crate) addr: SocketAddr,
-
-    pub(crate) barrier_manager: Mutex<LocalBarrierManager>,
-}
-
-impl SharedContext {
-    pub fn new(addr: SocketAddr) -> Self {
-        Self {
-            channel_pool: Mutex::new(HashMap::new()),
-            receivers_for_exchange_service: Mutex::new(HashMap::new()),
-            addr,
-            barrier_manager: Mutex::new(LocalBarrierManager::new()),
-        }
-    }
-
-    #[cfg(test)]
-    pub fn for_test() -> Self {
-        Self {
-            channel_pool: Mutex::new(HashMap::new()),
-            receivers_for_exchange_service: Mutex::new(HashMap::new()),
-            addr: *LOCAL_TEST_ADDR,
-            barrier_manager: Mutex::new(LocalBarrierManager::for_test()),
-        }
-    }
-
-    #[inline]
-    pub fn lock_channel_pool(&self) -> MutexGuard<HashMap<UpDownActorIds, ConsumableChannelPair>> {
-        self.channel_pool.lock().unwrap()
-    }
-
-    pub fn lock_barrier_manager(&self) -> MutexGuard<LocalBarrierManager> {
-        self.barrier_manager.lock().unwrap()
-    }
-
-    #[inline]
-    pub fn lock_receivers_for_exchange_service(
-        &self,
-    ) -> MutexGuard<HashMap<UpDownActorIds, Receiver<Message>>> {
-        self.receivers_for_exchange_service.lock().unwrap()
-    }
 }
 
 pub struct StreamManagerCore {
@@ -269,7 +199,7 @@ fn build_agg_call_from_prost(agg_call_proto: &expr::AggCall) -> Result<AggCall> 
         match args {
             [] => AggArgs::None,
             [arg] => AggArgs::Unary(
-                DataTypeKind::from(arg.get_type()?),
+                DataType::from(arg.get_type()?),
                 arg.get_input()?.column_idx as usize,
             ),
             _ => {
@@ -282,7 +212,7 @@ fn build_agg_call_from_prost(agg_call_proto: &expr::AggCall) -> Result<AggCall> 
     Ok(AggCall {
         kind: AggKind::try_from(agg_call_proto.get_type()?)?,
         args,
-        return_type: DataTypeKind::from(agg_call_proto.get_return_type()?),
+        return_type: DataType::from(agg_call_proto.get_return_type()?),
     })
 }
 
@@ -403,16 +333,6 @@ impl StreamManagerCore {
             }
         };
         Ok(dispatcher)
-    }
-
-    // TODO: all barriers should be triggered by meta service
-    fn send_conf_change_barrier(&mut self, _mutation: Mutation) -> Result<()> {
-        todo!("conf change barrier should be sent from meta, mv on mv is temporially not supported")
-        // self
-        //     .context
-        //     .lock_barrier_manager()
-        //     .send_barrier(&Barrier::new(0).with_mutation(mutation), vec![])?;
-        // Ok(())
     }
 
     /// Create a chain(tree) of nodes, with given `store`.
@@ -695,43 +615,19 @@ impl StreamManagerCore {
                 let table_id = TableId::from(&chain_node.table_ref_id);
                 let table = table_manager.get_table(&table_id)?;
                 let snapshot = Box::new(BatchQueryExecutor::new(table.clone(), pk_indices));
-                let up_id = chain_node.upstream_actor_id;
-                let rx = {
-                    let mut guard = self.context.lock_channel_pool();
-                    guard
-                        .get_mut(&(up_id, actor_id))
-                        .ok_or_else(|| {
-                            RwError::from(ErrorCode::InternalError(format!(
-                                "chain node: channel between {} and {} does not exist",
-                                up_id, actor_id
-                            )))
-                        })?
-                        .1
-                        .take()
-                        .ok_or_else(|| {
-                            RwError::from(ErrorCode::InternalError(format!(
-                                "chain node: receiver from {} to {} does no exist",
-                                up_id, actor_id
-                            )))
-                        })?
-                };
                 let pk_indices = chain_node
                     .pk_indices
                     .iter()
                     .map(|x| *x as usize)
                     .collect_vec();
                 let upstream_schema = table.schema().into_owned();
-                let mview = Box::new(ReceiverExecutor::new(
+                let mview = self.create_merge_node(
+                    actor_id,
                     upstream_schema.clone(),
+                    &chain_node.upstream_actor_ids,
                     pk_indices,
-                    rx,
-                ));
+                )?;
 
-                // TODO(MrCroxx): ConfChange should be triggered by meta when it's done.
-                self.send_conf_change_barrier(Mutation::AddOutput(
-                    chain_node.upstream_actor_id,
-                    vec![self.actor_infos.get(&actor_id).unwrap().to_owned()],
-                ))?;
                 // TODO(MrCroxx): Use column_descs to get idx after mv planner can generate stable
                 // column_ids. Now simply treat column_id as column_idx.
                 let column_idxs: Vec<usize> = chain_node
@@ -992,17 +888,19 @@ impl StreamManagerCore {
         {
             // Create channel based on upstream actor id for [`ChainNode`], check if upstream
             // exists.
-            if !self.actor_infos.contains_key(&chain.upstream_actor_id) {
-                return Err(ErrorCode::InternalError(format!(
-                    "chain upstream actor {} not exists",
-                    chain.upstream_actor_id
-                ))
-                .into());
-            }
-            let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-            let up_down_ids = (chain.upstream_actor_id, actor_id);
             let mut guard = self.context.lock_channel_pool();
-            guard.insert(up_down_ids, (Some(tx), Some(rx)));
+            for upstream_actor_id in &chain.upstream_actor_ids {
+                if !self.actor_infos.contains_key(upstream_actor_id) {
+                    return Err(ErrorCode::InternalError(format!(
+                        "chain upstream actor {} not exists",
+                        upstream_actor_id
+                    ))
+                    .into());
+                }
+                let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
+                let up_down_ids = (*upstream_actor_id, actor_id);
+                guard.insert(up_down_ids, (Some(tx), Some(rx)));
+            }
         }
         for child in &stream_node.input {
             self.build_channel_for_chain_node(actor_id, child)?;

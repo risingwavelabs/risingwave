@@ -10,7 +10,7 @@ use crate::array::{
 };
 use crate::error::Result;
 use crate::expr::{BoxedExpression, Expression};
-use crate::types::{option_as_scalar_ref, DataTypeKind, Scalar};
+use crate::types::{option_as_scalar_ref, DataType, Scalar};
 
 macro_rules! gen_expr_normal {
   ($ty_name:ident,$($arg:ident),*) => {
@@ -23,7 +23,7 @@ macro_rules! gen_expr_normal {
         // pub the fields in super mod, so that we can construct it directly.
         // FIXME: make private while new function available.
         $(pub(super) [<expr_ $arg:lower>]: BoxedExpression,)*
-        pub(super) return_type: DataTypeKind,
+        pub(super) return_type: DataType,
         pub(super) func: F,
         pub(super) _phantom: std::marker::PhantomData<($($arg, )* OA)>,
       }
@@ -49,7 +49,7 @@ macro_rules! gen_expr_normal {
         $(for<'a> &'a $arg: std::convert::From<&'a ArrayImpl>,)*
         for<'a> &'a OA: std::convert::From<&'a ArrayImpl>,
       {
-        fn return_type(&self) -> DataTypeKind {
+        fn return_type(&self) -> DataType {
           self.return_type
         }
 
@@ -101,7 +101,7 @@ macro_rules! gen_expr_normal {
         // Check issues #742.
         fn new(
           $([<expr_ $arg:lower>]: BoxedExpression, )*
-          return_type: DataTypeKind,
+          return_type: DataType,
           func: F,
         ) -> Self {
           Self {
@@ -126,7 +126,7 @@ macro_rules! gen_expr_bytes {
         // pub the fields in super mod, so that we can construct it directly.
         // FIXME: make private while new function available.
         $(pub(super) [<expr_ $arg:lower>]: BoxedExpression,)*
-        pub(super) return_type: DataTypeKind,
+        pub(super) return_type: DataType,
         pub(super) func: F,
         pub(super) _phantom: std::marker::PhantomData<($($arg, )*)>,
       }
@@ -149,7 +149,7 @@ macro_rules! gen_expr_bytes {
       where
         $(for<'a> &'a $arg: std::convert::From<&'a ArrayImpl>,)*
       {
-        fn return_type(&self) -> DataTypeKind {
+        fn return_type(&self) -> DataType {
           self.return_type
         }
 
@@ -198,7 +198,7 @@ macro_rules! gen_expr_bytes {
       > $ty_name<$($arg, )* F> {
         fn new(
           $([<expr_ $arg:lower>]: BoxedExpression, )*
-          return_type: DataTypeKind,
+          return_type: DataType,
           func: F,
         ) -> Self {
           Self {
@@ -225,7 +225,7 @@ macro_rules! gen_expr_nullable {
         // pub the fields in super mod, so that we can construct it directly.
         // FIXME: make private while new function available.
         $(pub(super) [<expr_ $arg:lower>]: BoxedExpression,)*
-        pub(super) return_type: DataTypeKind,
+        pub(super) return_type: DataType,
         pub(super) func: F,
         pub(super) _phantom: std::marker::PhantomData<($($arg, )* OA)>,
       }
@@ -251,7 +251,7 @@ macro_rules! gen_expr_nullable {
         $(for<'a> &'a $arg: std::convert::From<&'a ArrayImpl>,)*
         for<'a> &'a OA: std::convert::From<&'a ArrayImpl>,
       {
-        fn return_type(&self) -> DataTypeKind {
+        fn return_type(&self) -> DataType {
           self.return_type
         }
 
@@ -293,7 +293,7 @@ macro_rules! gen_expr_nullable {
         // Check issues #742.
         fn new(
           $([<expr_ $arg:lower>]: BoxedExpression, )*
-          return_type: DataTypeKind,
+          return_type: DataType,
           func: F,
         ) -> Self {
           Self {

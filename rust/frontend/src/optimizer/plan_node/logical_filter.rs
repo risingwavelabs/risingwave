@@ -2,7 +2,7 @@ use std::fmt;
 
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 
 use super::{ColPrunable, IntoPlanRef, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
 use crate::expr::{assert_input_ref, to_conjunctions, Expr, ExprImpl};
@@ -18,7 +18,7 @@ pub struct LogicalFilter {
 impl LogicalFilter {
     fn new(input: PlanRef, conds: Vec<ExprImpl>) -> Self {
         for cond in &conds {
-            assert_eq!(cond.return_type(), DataTypeKind::Boolean);
+            assert_eq!(cond.return_type(), DataType::Boolean);
             assert_input_ref(cond, input.schema().fields().len());
         }
         let schema = input.schema().clone();

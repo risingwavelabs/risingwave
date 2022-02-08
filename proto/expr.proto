@@ -57,6 +57,8 @@ message ExprNode {
     IS_NOT_FALSE = 218;
     IS_NULL = 219;
     IS_NOT_NULL = 220;
+    // Unary operators
+    NEG = 221;
     STREAM_NULL_BY_ROW_COUNT = 1000;
   }
   Type expr_type = 1;
@@ -101,4 +103,5 @@ message AggCall {
   Type type = 1;
   repeated Arg args = 2;
   data.DataType return_type = 3;
+  bool distinct = 4;
 }

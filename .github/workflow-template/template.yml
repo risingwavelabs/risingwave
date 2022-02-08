@@ -86,23 +86,23 @@ jobs:
       - uses: actions/download-artifact@v2
         name: Download playground binary
         with:
-          name: playground
+          name: risedev-playground
           path: ./rust/target/debug
 
       - name: Adjust permission
         run: |
           chmod +x ./.risingwave/bin/meta-node
           chmod +x ./.risingwave/bin/compute-node
-          chmod +x ./rust/target/debug/playground
+          chmod +x ./rust/target/debug/risedev-playground
 
       - name: Install required components
         run: |
           sudo apt-get update -yy
           sudo apt-get install --upgrade -yy tmux postgresql
 
-      - name: Generate RiseLAB CI config
+      - name: Generate RiseDev CI config
         run: |
-          cp riselab-components.ci.env riselab-components.user.env
+          cp risedev-components.ci.env risedev-components.user.env
 
       - name: Download sqllogictest
         run: |
@@ -115,10 +115,10 @@ jobs:
           unzip ~/cargo-make-v0.35.7-x86_64-unknown-linux-musl.zip -d ~
           mv ~/cargo-make-v0.35.7-x86_64-unknown-linux-musl ~/cargo-make
 
-      - name: Prepare RiseLAB playground
+      - name: Prepare RiseDev playground
         run: ~/cargo-make/makers pre-start-playground
 
-      - name: e2e test w/ Hummock # Note: RiseLAB cluster cannot be used to run e2e coverage unless we rebuild frontend in this workflow
+      - name: e2e test w/ Hummock # Note: RiseDev cluster cannot be used to run e2e coverage unless we rebuild frontend in this workflow
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-streaming
@@ -127,6 +127,7 @@ jobs:
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
+          ~/cargo-make/makers logs
           ~/cargo-make/makers check-logs
 
       - name: e2e test w/ Hummock w/o cache
@@ -138,6 +139,7 @@ jobs:
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
+          ~/cargo-make/makers logs
           ~/cargo-make/makers check-logs
 
       - name: e2e test batch 3-node
@@ -149,14 +151,19 @@ jobs:
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
+          ~/cargo-make/makers logs
           ~/cargo-make/makers check-logs
+
+      - name: Dump last 100 lines of logs on failure
+        if: ${{ failure() }}
+        run: ~/cargo-make/makers logs
 
       - uses: actions/upload-artifact@v2
         if: ${{ failure() }}
-        name: Upload RiseLAB logs on failure (You may find it in artifacts)
+        name: Upload RiseDev logs on failure (You may find it in artifacts)
         with:
           path: .risingwave/log/
-          name: riselab-logs
+          name: risedev-logs
 
   end-to-end:
     name: e2e-test
@@ -266,7 +273,7 @@ jobs:
         run: |
           ./scripts/kill_cluster.sh
 
-  # Start 2 runners (a/b) to run build and test in parallel. 
+  # Start 2 runners (a/b) to run build and test in parallel.
   start-runner-a:
     name: ec2-start-a
     runs-on: ubuntu-latest
@@ -389,10 +396,10 @@ jobs:
 
       - uses: actions/upload-artifact@v2
         with:
-          name: playground
+          name: risedev-playground
           if-no-files-found: error
           path: |
-            rust/target/debug/playground
+            rust/target/debug/risedev-playground
 
   compute-node-test:
     needs:

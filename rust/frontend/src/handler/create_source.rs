@@ -50,7 +50,7 @@ pub(super) async fn handle_create_source(
 mod tests {
     use std::io::Write;
 
-    use risingwave_common::types::DataTypeKind;
+    use risingwave_common::types::DataType;
     use risingwave_meta::test_utils::LocalMeta;
     use tempfile::NamedTempFile;
 
@@ -101,14 +101,14 @@ mod tests {
             .columns()
             .iter()
             .map(|(col_name, col)| (col_name.clone(), col.data_type()))
-            .collect::<Vec<(String, DataTypeKind)>>();
+            .collect::<Vec<(String, DataType)>>();
         assert_eq!(
             columns,
             vec![
-                ("id".to_string(), DataTypeKind::Int32),
-                ("city".to_string(), DataTypeKind::Varchar),
-                ("zipcode".to_string(), DataTypeKind::Int64),
-                ("rate".to_string(), DataTypeKind::Float32),
+                ("id".to_string(), DataType::Int32),
+                ("city".to_string(), DataType::Varchar),
+                ("zipcode".to_string(), DataType::Int64),
+                ("rate".to_string(), DataType::Float32),
             ]
         );
 

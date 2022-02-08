@@ -94,7 +94,7 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::column_nonnull;
     use risingwave_common::expr::InputRefExpression;
-    use risingwave_common::types::DataTypeKind;
+    use risingwave_common::types::DataType;
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
@@ -106,13 +106,13 @@ mod tests {
         let col2 = column_nonnull! {I32Array, [7, 8, 66666, 4, 3]};
         let chunk = DataChunk::builder().columns(vec![col1, col2]).build();
 
-        let expr1 = InputRefExpression::new(DataTypeKind::Int32, 0);
+        let expr1 = InputRefExpression::new(DataType::Int32, 0);
         let expr_vec = vec![Box::new(expr1) as BoxedExpression];
 
         let schema = Schema {
             fields: vec![
-                Field::unnamed(DataTypeKind::Int32),
-                Field::unnamed(DataTypeKind::Int32),
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Int32),
             ],
         };
         let mut mock_executor = MockExecutor::new(schema);
@@ -132,7 +132,7 @@ mod tests {
         proj_executor.open().await.unwrap();
 
         let fields = &proj_executor.schema().fields;
-        assert_eq!(fields[0].data_type, DataTypeKind::Int32);
+        assert_eq!(fields[0].data_type, DataType::Int32);
 
         let result_chunk = proj_executor.next().await?.unwrap();
         proj_executor.close().await.unwrap();

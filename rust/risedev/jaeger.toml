@@ -16,7 +16,7 @@ script = '''
 #!@shell
 set -e
 if [ -d "${PREFIX_BIN}/jaeger" ]; then
-    if [ -f "${PREFIX_BIN}/jaeger/RISELAB-VERSION-${JAEGER_VERSION}" ]; then
+    if [ -f "${PREFIX_BIN}/jaeger/RISEDEV-VERSION-${JAEGER_VERSION}" ]; then
         exit 0
     fi
 fi
@@ -26,5 +26,5 @@ tar -xf "${JAEGER_DOWNLOAD_PATH}" -C "${PREFIX_TMP}"
 rm -rf "${PREFIX_BIN}/jaeger"
 mv "${PREFIX_TMP}/${JAEGER_RELEASE}" "${PREFIX_BIN}/jaeger"
 rm "${JAEGER_DOWNLOAD_PATH}"
-touch "${PREFIX_BIN}/jaeger/RISELAB-VERSION-${JAEGER_VERSION}"
+touch "${PREFIX_BIN}/jaeger/RISEDEV-VERSION-${JAEGER_VERSION}"
 '''

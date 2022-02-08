@@ -1,7 +1,7 @@
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::error::Result;
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 use risingwave_common::util::downcast_arc;
 use risingwave_common::util::sort_util::fetch_orders;
 use risingwave_pb::plan::plan_node::NodeBody;
@@ -96,7 +96,7 @@ impl Executor for CreateTableExecutor {
             .iter()
             .map(|col| {
                 Ok(TableColumnDesc {
-                    data_type: DataTypeKind::from(col.get_column_type()?),
+                    data_type: DataType::from(col.get_column_type()?),
                     column_id: col.get_column_id(),
                     name: col.get_name().to_string(),
                 })

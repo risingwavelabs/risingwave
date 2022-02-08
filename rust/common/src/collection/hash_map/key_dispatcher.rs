@@ -1,7 +1,7 @@
 use crate::collection::hash_map::hash_key::HashKey;
 use crate::collection::hash_map::HashKeyKind::{Key128, Key16, Key256, Key32, Key64};
 use crate::collection::hash_map::MAX_FIXED_SIZE_KEY_ELEMENTS;
-use crate::types::{DataSize, DataTypeKind};
+use crate::types::{DataSize, DataType};
 
 /// An enum to help to dynamically dispatch [`HashKey`] template.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -41,7 +41,7 @@ pub trait HashKeyDispatcher<K: HashKey> {
 /// 4. Any column's serialized format can't be used for equality check.
 ///
 /// Otherwise we choose smallest [`FixedSizeKey`] whose size can hold all data types.
-pub fn calc_hash_key_kind(data_types: &[DataTypeKind]) -> HashKeyKind {
+pub fn calc_hash_key_kind(data_types: &[DataType]) -> HashKeyKind {
     if data_types.len() > MAX_FIXED_SIZE_KEY_ELEMENTS {
         return HashKeyKind::KeySerialized;
     }
@@ -96,18 +96,18 @@ pub use hash_key_dispatch;
 mod tests {
 
     use crate::collection::hash_map::{calc_hash_key_kind, HashKeyKind};
-    use crate::types::DataTypeKind;
+    use crate::types::DataType;
 
-    fn all_data_types() -> Vec<DataTypeKind> {
+    fn all_data_types() -> Vec<DataType> {
         vec![
-            DataTypeKind::Boolean,           // 0
-            DataTypeKind::Int16,             // 1
-            DataTypeKind::Int32,             // 2
-            DataTypeKind::Int64,             // 3
-            DataTypeKind::Float32,           // 4
-            DataTypeKind::Float64,           // 5
-            DataTypeKind::decimal_default(), // 6
-            DataTypeKind::Varchar,           // 7
+            DataType::Boolean,           // 0
+            DataType::Int16,             // 1
+            DataType::Int32,             // 2
+            DataType::Int64,             // 3
+            DataType::Float32,           // 4
+            DataType::Float64,           // 5
+            DataType::decimal_default(), // 6
+            DataType::Varchar,           // 7
         ]
     }
 
@@ -117,7 +117,7 @@ mod tests {
         let input_types = input_indices
             .iter()
             .map(|idx| all_types[*idx])
-            .collect::<Vec<DataTypeKind>>();
+            .collect::<Vec<DataType>>();
 
         let calculated_kind = calc_hash_key_kind(&input_types);
         assert_eq!(expected, calculated_kind);
