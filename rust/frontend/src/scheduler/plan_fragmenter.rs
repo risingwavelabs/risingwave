@@ -94,7 +94,7 @@ impl StageGraphBuilder {
         };
 
         let parent_ids = self.parent_edges.get_mut(&child_id);
-        // If the child id do not exist, create a new sets contain the parent ids. Otherwise just
+        // If the child id does not exist, create a new set containing the parent ids. Otherwise just
         // insert.
         match parent_ids {
             Some(parent_ids) => {
