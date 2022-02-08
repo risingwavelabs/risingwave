@@ -1,11 +1,13 @@
 mod catalog;
 mod cluster;
+mod stream;
 
 use async_trait::async_trait;
 pub use catalog::*;
 pub use cluster::*;
 use prost::Message;
 use risingwave_common::error::Result;
+pub use stream::*;
 
 use crate::manager::{Epoch, SINGLE_VERSION_EPOCH};
 use crate::storage::MetaStoreRef;
@@ -44,8 +46,8 @@ pub trait MetadataModel: Sized {
             .collect::<Vec<_>>())
     }
 
-    /// `create` create a new record in meta store.
-    async fn create(&self, store: &MetaStoreRef) -> Result<()> {
+    /// `insert` insert a new record in meta store, replaced it if the record already exist.
+    async fn insert(&self, store: &MetaStoreRef) -> Result<()> {
         store
             .put_cf(
                 &Self::cf_name(),

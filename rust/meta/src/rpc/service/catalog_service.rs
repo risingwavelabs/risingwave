@@ -70,7 +70,7 @@ impl CatalogService for CatalogServiceImpl {
                 let mut database = database.clone();
                 database.database_ref_id = Some(DatabaseRefId { database_id: id });
                 database.version = version.into_inner();
-                database.create(&self.meta_store_ref).await
+                database.insert(&self.meta_store_ref).await
             }
             CatalogBody::Schema(schema) => {
                 id = self
@@ -83,7 +83,7 @@ impl CatalogService for CatalogServiceImpl {
                 let mut schema = schema.clone();
                 schema.schema_ref_id = Some(schema_ref_id);
                 schema.version = version.into_inner();
-                schema.create(&self.meta_store_ref).await
+                schema.insert(&self.meta_store_ref).await
             }
             CatalogBody::Table(table) => {
                 id = self
@@ -96,7 +96,7 @@ impl CatalogService for CatalogServiceImpl {
                 let mut table = table.clone();
                 table.table_ref_id = Some(table_ref_id);
                 table.version = version.into_inner();
-                table.create(&self.meta_store_ref).await
+                table.insert(&self.meta_store_ref).await
             }
         };
 

@@ -11,6 +11,6 @@ EOF
 
 echo
 
-echo " ---------- Welcome to RiseLAB! ----------"
+echo " ---------- Welcome to RiseDev! ----------"
 
 "$SHELL"

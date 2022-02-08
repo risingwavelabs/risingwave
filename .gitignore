@@ -48,5 +48,5 @@ log/
 .risingwave/
 
 # generated files
-
+risedev-components.user.env
 riselab-components.user.env
