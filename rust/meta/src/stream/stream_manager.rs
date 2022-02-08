@@ -471,7 +471,7 @@ mod tests {
                             ..Default::default()
                         },
                     )),
-                    node_id: 1,
+                    operator_id: 1,
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -567,7 +567,7 @@ mod tests {
                 actors: vec![StreamActor {
                     actor_id: 1,
                     nodes: Some(StreamNode {
-                        node_id: 1,
+                        operator_id: 1,
                         node: Some(Node::MviewNode(MViewNode {
                             table_ref_id: Some(table_ref_id_1.clone()),
                             ..Default::default()
@@ -588,13 +588,13 @@ mod tests {
                 actors: vec![StreamActor {
                     actor_id: 2,
                     nodes: Some(StreamNode {
-                        node_id: 2,
+                        operator_id: 2,
                         node: Some(Node::MviewNode(MViewNode {
                             table_ref_id: Some(table_ref_id_2.clone()),
                             ..Default::default()
                         })),
                         input: vec![StreamNode {
-                            node_id: 3,
+                            operator_id: 3,
                             node: Some(Node::ChainNode(ChainNode {
                                 table_ref_id: Some(table_ref_id_1.clone()),
                                 upstream_actor_ids: vec![0],
