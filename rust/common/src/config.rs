@@ -20,9 +20,9 @@ pub struct ComputeNodeConfig {
     #[serde(default)]
     server: ServerConfig,
 
-    // Below for OLAP.
+    // Below for batch query.
     #[serde(default)]
-    olap: OlapConfig,
+    batch: BatchConfig,
 
     // Below for streaming.
     #[serde(default)]
@@ -47,11 +47,11 @@ impl Default for ServerConfig {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-struct OlapConfig {
+struct BatchConfig {
     chunk_size: u32,
 }
 
-impl Default for OlapConfig {
+impl Default for BatchConfig {
     fn default() -> Self {
         Self {
             chunk_size: DEFAULT_CHUNK_SIZE,
@@ -93,8 +93,8 @@ impl ComputeNodeConfig {
         self.server.heartbeat_interval
     }
 
-    pub fn olap_chunk_size(&self) -> u32 {
-        self.olap.chunk_size
+    pub fn batch_chunk_size(&self) -> u32 {
+        self.batch.chunk_size
     }
 
     pub fn streaming_chunk_size(&self) -> u32 {
