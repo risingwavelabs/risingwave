@@ -5,6 +5,7 @@ use std::time::Duration;
 use hyper::body::HttpBody;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Client, Request, Response, Server};
+use lazy_static::lazy_static;
 use prometheus::{Encoder, Registry, TextEncoder};
 
 async fn prometheus_service(
@@ -23,9 +24,14 @@ async fn prometheus_service(
     Ok(response)
 }
 
+lazy_static::lazy_static! {
+    pub static ref
+    DEFAULT_BENCH_STATS: Arc<StateStoreStats> = Arc::new(StateStoreStats::new(prometheus::default_registry()));
+}
+
 pub(crate) async fn print_statistics() {
     let make_svc = make_service_fn(move |_| {
-        let registry = prometheus::default_registry();
+        let registry = DEFAULT_BENCH_STATS.clone();
         async move {
             Ok::<_, Infallible>(service_fn(move |req: Request<Body>| async move {
                 prometheus_service(req, registry).await

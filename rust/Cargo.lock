@@ -3736,6 +3736,7 @@ dependencies = [
  "futures 0.3.19",
  "hyper",
  "itertools 0.10.3",
+ "lazy_static",
  "log",
  "prometheus 0.13.0",
  "rand 0.8.4",
