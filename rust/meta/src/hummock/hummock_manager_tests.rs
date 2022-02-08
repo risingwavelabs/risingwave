@@ -1,7 +1,5 @@
 use std::cmp::Ordering;
 
-
-
 use assert_matches::assert_matches;
 use itertools::Itertools;
 use prost::Message;

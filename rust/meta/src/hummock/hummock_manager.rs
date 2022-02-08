@@ -1,14 +1,8 @@
 #![allow(dead_code)]
 
-
-
-
-
-
 use bytes::Bytes;
 use itertools::Itertools;
 use prost::Message;
-
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::hummock::{
     CompactTask, HummockContextPinnedSnapshot, HummockContextPinnedVersion, HummockSnapshot,
@@ -16,11 +10,9 @@ use risingwave_pb::hummock::{
 };
 use risingwave_storage::hummock::key_range::KeyRange;
 use risingwave_storage::hummock::{
-    HummockContextId, HummockEpoch, HummockError, HummockSSTableId, HummockVersionId,
-    INVALID_EPOCH,
+    HummockContextId, HummockEpoch, HummockError, HummockSSTableId, HummockVersionId, INVALID_EPOCH,
 };
 use tokio::sync::{Mutex, RwLock};
-
 
 use crate::hummock::compaction::{CompactStatus, CompactionInner};
 use crate::hummock::level_handler::{LevelHandler, SSTableStat};
