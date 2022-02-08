@@ -20,8 +20,7 @@ pub struct MViewTable<S: StateStore> {
 
     schema: Schema,
 
-    /// This field is `Some` only if the table is created for batch table.
-    column_descs: Option<Vec<TableColumnDesc>>,
+    column_descs: Vec<TableColumnDesc>,
 
     pk_columns: Vec<usize>,
 
@@ -50,10 +49,21 @@ impl<S: StateStore> MViewTable<S> {
             .zip_eq(pk_columns.clone().into_iter())
             .collect::<Vec<_>>();
 
+        let column_descs = schema
+            .fields()
+            .iter()
+            .enumerate()
+            .map(|(column_index, f)| {
+                // For materialized view, column id is exactly the index, so we perform conversion
+                // here.
+                TableColumnDesc::new_without_name(column_index as i32, f.data_type.clone())
+            })
+            .collect_vec();
+
         Self {
             keyspace,
             schema,
-            column_descs: None,
+            column_descs,
             pk_columns,
             sort_key_serializer: OrderedRowsSerializer::new(order_pairs),
         }
@@ -77,7 +87,7 @@ impl<S: StateStore> MViewTable<S> {
         Self {
             keyspace,
             schema,
-            column_descs: Some(column_descs),
+            column_descs,
             pk_columns,
             sort_key_serializer: OrderedRowsSerializer::new(order_pairs),
         }
@@ -223,10 +233,6 @@ where
     }
 
     fn column_descs(&self) -> Cow<[TableColumnDesc]> {
-        Cow::Borrowed(
-            self.column_descs
-                .as_ref()
-                .expect("table is created for materialized view"),
-        )
+        Cow::Borrowed(&self.column_descs)
     }
 }
