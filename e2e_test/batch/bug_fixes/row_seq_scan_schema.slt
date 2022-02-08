@@ -1,0 +1,21 @@
+statement ok
+create table t (v1 int not null, v2 int not null, v3 int not null);
+
+statement ok
+insert into t values (1,4,2), (2,3,3), (3,4,4), (4,3,5);
+
+statement ok
+create materialized view mv as select * from t;
+
+query III rowsort
+select v1, v2, v3 from mv;
+----
+1 4 2
+2 3 3
+3 4 4
+4 3 5
+
+query II rowsort
+select v1, v2 from mv where v1 = 1;
+----
+1 4
