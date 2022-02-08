@@ -190,6 +190,13 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Log in to the Container registry
+        uses: docker/login-action@f054a8b539a109f9f41c372932f1ae047eff08c9
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.GHCR_ACTOR }}
+          password: ${{ secrets.WUTAO_PAT }}
+
       # For source testing.
       - name: Setup kafka cluster
         run: ./scripts/source/prepare_source.sh
