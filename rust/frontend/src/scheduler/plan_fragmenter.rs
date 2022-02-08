@@ -79,7 +79,7 @@ impl StageGraphBuilder {
     /// parent.
     pub fn link_to_child(&mut self, parent_id: StageId, exchange_id: u64, child_id: StageId) {
         let child_ids = self.child_edges.get_mut(&parent_id);
-        // If the parent id do not exist, create a new sets contain the child ids. Otherwise just
+        // If the parent id does not exist, create a new set containing the child ids. Otherwise just
         // insert.
         match child_ids {
             Some(childs) => {
