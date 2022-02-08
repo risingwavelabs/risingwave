@@ -37,17 +37,13 @@ impl TikvStateStore {
             })
             .await
     }
-
-    pub fn get_stats_ref(&self) -> &StateStoreStats {
-        self.stats.as_ref()
-    }
 }
 #[async_trait]
 impl StateStore for TikvStateStore {
     type Iter = TikvStateStoreIter;
 
     async fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
-        self.get_stats_ref().get_counts.inc();
+        self.stats.get_counts.inc();
         let mut txn = self.client().await.begin_optimistic().await.unwrap();
         let res = txn
             .get(key.to_owned())

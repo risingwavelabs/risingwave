@@ -221,7 +221,8 @@ mod tests {
 
     use super::*;
     use crate::array::column::Column;
-    use crate::vector_op::agg::general_agg::{sum, GeneralAgg};
+    use crate::vector_op::agg::functions::*;
+    use crate::vector_op::agg::general_agg::GeneralAgg;
     use crate::vector_op::agg::AggStateFactory;
 
     #[test]
@@ -324,6 +325,7 @@ mod tests {
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
+            distinct: false,
         };
         let mut a = AggStateFactory::new(&prost)
             .unwrap()

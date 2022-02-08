@@ -195,7 +195,7 @@ impl<K: HashKey + Send + Sync> Executor for HashAggExecutor<K> {
             .collect::<Result<Vec<_>>>()?;
 
         for (key, states) in mem::take(&mut self.groups) {
-            key.deserialize_to_builders(&mut group_builders)?;
+            key.deserialize_to_builders(&mut group_builders[..])?;
             states
                 .into_iter()
                 .zip_eq(&mut agg_builders)
@@ -289,6 +289,7 @@ mod tests {
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
+            distinct: false,
         };
 
         let agg_prost = HashAggNode {
@@ -344,6 +345,7 @@ mod tests {
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
+            distinct: false,
         };
 
         let agg_prost = HashAggNode {

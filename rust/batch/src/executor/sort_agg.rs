@@ -210,6 +210,7 @@ mod tests {
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
+            distinct: false,
         };
 
         let s = AggStateFactory::new(&prost)?.create_agg_state()?;
@@ -290,6 +291,7 @@ mod tests {
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
+            distinct: false,
         };
 
         let s = AggStateFactory::new(&prost)?.create_agg_state()?;

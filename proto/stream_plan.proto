@@ -40,7 +40,7 @@ message MViewNode {
 
 message ChainNode {
   plan.TableRefId table_ref_id = 1;
-  uint32 upstream_actor_id = 2;
+  repeated uint32 upstream_actor_ids = 2;
   repeated int32 pk_indices = 3;
   repeated int32 column_ids = 4;
 }
