@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use risingwave_common::array::RwError;
 use risingwave_common::error::Result;
@@ -9,7 +9,7 @@ use crate::catalog::{ColumnId, TableId};
 
 pub struct TableCatalog {
     table_id: TableId,
-    next_column_id: AtomicU32,
+    next_column_id: AtomicU64,
     column_by_name: Vec<(String, ColumnCatalog)>,
     primary_keys: Vec<ColumnId>,
 }
@@ -18,7 +18,7 @@ impl TableCatalog {
     pub fn new(table_id: TableId) -> Self {
         Self {
             table_id,
-            next_column_id: AtomicU32::new(0),
+            next_column_id: AtomicU64::new(0),
             column_by_name: vec![],
             primary_keys: vec![],
         }
@@ -52,7 +52,7 @@ impl TableCatalog {
         self.table_id
     }
 
-    pub fn get_pks(&self) -> Vec<u32> {
+    pub fn get_pks(&self) -> Vec<u64> {
         self.primary_keys.clone()
     }
 }
@@ -61,7 +61,7 @@ impl TryFrom<&Table> for TableCatalog {
     type Error = RwError;
 
     fn try_from(tb: &Table) -> Result<Self> {
-        let mut table_catalog = Self::new(tb.get_table_ref_id()?.table_id as u32);
+        let mut table_catalog = Self::new(tb.get_table_ref_id()?.table_id as u64);
         for col in &tb.column_descs {
             table_catalog.add_column(
                 &col.name,
