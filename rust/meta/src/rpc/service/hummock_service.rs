@@ -1,4 +1,4 @@
-use std::sync::Arc;
+
 
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
 use risingwave_pb::hummock::*;
@@ -7,66 +7,17 @@ use tonic::{Request, Response, Status};
 use crate::hummock::HummockManager;
 
 pub struct HummockServiceImpl {
-    hummock_manager: Arc<HummockManager>,
+    hummock_manager: HummockManager,
 }
 
 impl HummockServiceImpl {
-    pub fn new(hummock_manager: Arc<HummockManager>) -> Self {
+    pub fn new(hummock_manager: HummockManager) -> Self {
         HummockServiceImpl { hummock_manager }
     }
 }
 
 #[async_trait::async_trait]
 impl HummockManagerService for HummockServiceImpl {
-    async fn create_hummock_context(
-        &self,
-        _request: Request<CreateHummockContextRequest>,
-    ) -> Result<Response<CreateHummockContextResponse>, tonic::Status> {
-        let result = self.hummock_manager.create_hummock_context().await;
-        match result {
-            Ok(hummock_context) => Ok(Response::new(CreateHummockContextResponse {
-                status: None,
-                hummock_context: Some(hummock_context),
-            })),
-            Err(e) => Err(e.to_grpc_status()),
-        }
-    }
-
-    async fn invalidate_hummock_context(
-        &self,
-        request: Request<InvalidateHummockContextRequest>,
-    ) -> Result<Response<InvalidateHummockContextResponse>, tonic::Status> {
-        let req = request.into_inner();
-        let result = self
-            .hummock_manager
-            .invalidate_hummock_context(req.context_identifier)
-            .await;
-        match result {
-            Ok(()) => Ok(Response::new(InvalidateHummockContextResponse {
-                status: None,
-            })),
-            Err(e) => Err(e.to_grpc_status()),
-        }
-    }
-
-    async fn refresh_hummock_context(
-        &self,
-        request: Request<RefreshHummockContextRequest>,
-    ) -> Result<Response<RefreshHummockContextResponse>, tonic::Status> {
-        let req = request.into_inner();
-        let result = self
-            .hummock_manager
-            .refresh_hummock_context(req.context_identifier)
-            .await;
-        match result {
-            Ok(ttl) => Ok(Response::new(RefreshHummockContextResponse {
-                status: None,
-                ttl,
-            })),
-            Err(e) => Err(e.to_grpc_status()),
-        }
-    }
-
     async fn pin_version(
         &self,
         request: Request<PinVersionRequest>,
@@ -114,20 +65,6 @@ impl HummockManagerService for HummockServiceImpl {
             Ok(_) => Ok(Response::new(AddTablesResponse { status: None })),
             Err(e) => Err(e.to_grpc_status()),
         }
-    }
-
-    async fn add_table_watermark(
-        &self,
-        _request: Request<AddTableWatermarkRequest>,
-    ) -> Result<Response<AddTableWatermarkResponse>, Status> {
-        todo!()
-    }
-
-    async fn remove_table_watermark(
-        &self,
-        _request: Request<RemoveTableWatermarkRequest>,
-    ) -> Result<Response<RemoveTableWatermarkResponse>, Status> {
-        todo!()
     }
 
     async fn get_compaction_tasks(

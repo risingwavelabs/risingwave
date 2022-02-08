@@ -18,8 +18,6 @@ const FRAGMENT_CF_NAME: &str = "cf/actor";
 const MATERIALIZED_VIEW_ACTORS_CF: &str = "cf/materialized_view_actors";
 /// Epoch state key, we store epoch state in default column family.
 const EPOCH_STATE_KEY: &str = "epoch_state";
-/// Column family name for hummock context.
-const HUMMOCK_CONTEXT_CF_NAME: &str = "cf/hummock_context";
 /// Column family name for hummock version.
 const HUMMOCK_VERSION_CF_NAME: &str = "cf/hummock_version";
 /// Column family name for hummock table.
@@ -52,7 +50,6 @@ pub struct Config {
     epoch_state_key: String,
 
     hummock_default_cf: String,
-    hummock_context_cf: String,
     hummock_version_cf: String,
     hummock_table_cf: String,
     hummock_deletion_cf: String,
@@ -135,9 +132,6 @@ impl Config {
         self.epoch_state_key.as_str()
     }
 
-    pub fn get_hummock_context_cf(&self) -> &str {
-        &self.hummock_context_cf
-    }
     pub fn get_hummock_version_cf(&self) -> &str {
         &self.hummock_version_cf
     }
@@ -176,7 +170,6 @@ impl Default for Config {
             cluster_state_cf: CLUSTER_CF_NAME.to_owned(),
             actor_cf: FRAGMENT_CF_NAME.to_string(),
             materialized_view_actors_cf: MATERIALIZED_VIEW_ACTORS_CF.to_owned(),
-            hummock_context_cf: HUMMOCK_CONTEXT_CF_NAME.to_owned(),
             hummock_version_cf: HUMMOCK_VERSION_CF_NAME.to_owned(),
             hummock_table_cf: HUMMOCK_TABLE_CF_NAME.to_owned(),
             hummock_default_cf: HUMMOCK_DEFAULT_CF_NAME.to_owned(),

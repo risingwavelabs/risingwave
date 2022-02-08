@@ -51,7 +51,7 @@ pub async fn rpc_serve(
 
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
     let cluster_manager = Arc::new(StoredClusterManager::new(env.clone()).await.unwrap());
-    let (hummock_manager, _) =
+    let hummock_manager =
         hummock::HummockManager::new(env.clone(), hummock_config.unwrap_or_default())
             .await
             .unwrap();
