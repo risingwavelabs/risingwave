@@ -76,10 +76,16 @@ enum ArrayType {
   DATE = 8;
   TIME = 9;
   TIMESTAMP = 10;
+  STRUCT = 11;
+}
+
+message ArrayMeta {
+  ArrayType array_type = 1;
+  repeated ArrayMeta children = 2;
 }
 
 message Array {
-  ArrayType array_type = 1;
+  ArrayMeta meta = 1; 
   Buffer null_bitmap = 2;
   repeated Buffer values = 3;
 }

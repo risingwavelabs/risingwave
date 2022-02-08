@@ -2,7 +2,7 @@ use std::hash::{Hash, Hasher};
 use std::mem::size_of;
 
 use risingwave_pb::data::buffer::CompressionType;
-use risingwave_pb::data::{Array as ProstArray, ArrayType, Buffer};
+use risingwave_pb::data::{Array as ProstArray, ArrayMeta, ArrayType, Buffer};
 
 use super::{Array, ArrayBuilder, ArrayIterator, NULL_VAL_FOR_HASH};
 use crate::array::ArrayBuilderImpl;
@@ -63,7 +63,10 @@ impl Array for BoolArray {
         Ok(ProstArray {
             null_bitmap: Some(null_bitmap),
             values: vec![values],
-            array_type: ArrayType::Bool as i32,
+            meta: Some(ArrayMeta {
+                array_type: ArrayType::Bool as i32,
+                children: vec![],
+            }),
         })
     }
 

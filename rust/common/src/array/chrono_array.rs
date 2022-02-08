@@ -2,7 +2,7 @@ use std::hash::{Hash, Hasher};
 use std::mem::size_of;
 
 use risingwave_pb::data::buffer::CompressionType;
-use risingwave_pb::data::{Array as ProstArray, ArrayType, Buffer};
+use risingwave_pb::data::{Array as ProstArray, ArrayMeta, ArrayType, Buffer};
 
 use crate::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayIterator, NULL_VAL_FOR_HASH};
 use crate::buffer::{Bitmap, BitmapBuilder};
@@ -66,7 +66,10 @@ macro_rules! get_chrono_array {
                     Ok(ProstArray {
                         null_bitmap: Some(null_bitmap),
                         values: vec![buffer],
-                        array_type: Self::get_array_type() as i32,
+                        meta: Some(ArrayMeta {
+                            array_type: Self::get_array_type() as i32,
+                            children: vec![],
+                        }),
                     })
                 }
 

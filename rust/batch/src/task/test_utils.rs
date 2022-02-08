@@ -481,7 +481,7 @@ impl ResultChecker {
 
     fn get_value_width(col: &Column) -> Result<usize> {
         use risingwave_pb::data::ArrayType;
-        Ok(match col.get_array()?.get_array_type()? {
+        Ok(match col.get_array()?.get_meta().unwrap().get_array_type()? {
             ArrayType::Int32 => 4,
             ArrayType::Int64 => 8,
             _ => 0,

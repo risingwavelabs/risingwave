@@ -32,7 +32,7 @@ impl Column {
 
     pub fn from_protobuf(col: &ProstColumn, cardinality: usize) -> Result<Self> {
         let array = col.get_array()?;
-        let array = match array.array_type() {
+        let array = match array.get_meta()?.array_type() {
             ArrayType::Int16 => read_numeric_array::<i16, I16ValueReader>(array, cardinality)?,
             ArrayType::Int32 => read_numeric_array::<i32, I32ValueReader>(array, cardinality)?,
             ArrayType::Int64 => read_numeric_array::<i64, I64ValueReader>(array, cardinality)?,
@@ -52,6 +52,7 @@ impl Column {
             ArrayType::Date => read_naivedate_array(array, cardinality)?,
             ArrayType::Time => read_naivetime_array(array, cardinality)?,
             ArrayType::Timestamp => read_naivedatetime_array(array, cardinality)?,
+            ArrayType::Struct => todo!(),
         };
         Ok(Self { array })
     }

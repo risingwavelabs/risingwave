@@ -4,7 +4,7 @@ use std::mem::size_of;
 
 use itertools::Itertools;
 use risingwave_pb::data::buffer::CompressionType;
-use risingwave_pb::data::{Array as ProstArray, ArrayType, Buffer};
+use risingwave_pb::data::{Array as ProstArray, ArrayMeta, ArrayType, Buffer};
 
 use super::{Array, ArrayBuilder, ArrayIterator, NULL_VAL_FOR_HASH};
 use crate::array::ArrayBuilderImpl;
@@ -80,7 +80,10 @@ impl Array for Utf8Array {
         Ok(ProstArray {
             null_bitmap: Some(null_bitmap),
             values,
-            array_type: ArrayType::Utf8 as i32,
+            meta: Some(ArrayMeta {
+                array_type: ArrayType::Utf8 as i32,
+                children: vec![],
+            }),
         })
     }
 
