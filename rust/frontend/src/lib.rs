@@ -8,7 +8,7 @@ pub mod handler;
 pub mod optimizer;
 pub mod planner;
 pub mod session;
-
+pub mod utils;
 extern crate log;
 #[cfg(test)]
 mod test_utils;
