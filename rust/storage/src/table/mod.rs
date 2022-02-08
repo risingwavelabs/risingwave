@@ -70,35 +70,32 @@ pub trait ScannableTable: Sync + Send + Any + core::fmt::Debug {
     /// Open and return an iterator.
     async fn iter(&self) -> Result<TableIterRef>;
 
-    /// Scan data of specified column ids
-    ///
-    /// In future, it will accept `predicates` for interested filtering conditions.
-    ///
-    /// This default implementation using iterator is not efficient, which project `column_ids` row
-    /// by row. If the underlying storage is a column store, we may implement this function
-    /// specifically.
-    async fn get_data_by_columns(&self, column_ids: &[i32]) -> Result<BummockResult> {
-        let indices = column_ids
-            .iter()
-            .map(|id| {
-                self.column_descs()
-                    .iter()
-                    .position(|c| c.column_id == *id)
-                    .expect("column id not exists")
-            })
-            .collect_vec();
-
-        let mut iter = self.iter().await?;
-
+    /// Collect data chunk with the target `chunk_size` from the given `iter`, projected on
+    /// `indices`. If there's no more data, return `None`.
+    async fn collect_from_iter(
+        &self,
+        iter: &mut TableIterRef,
+        indices: &[usize],
+        chunk_size: Option<usize>,
+    ) -> Result<Option<DataChunk>> {
         let schema = self.schema();
         let mut builders = indices
             .iter()
-            .map(|i| schema.fields()[*i].data_type().create_array_builder(0))
+            .map(|i| {
+                schema.fields()[*i]
+                    .data_type()
+                    .create_array_builder(chunk_size.unwrap_or(0))
+            })
             .collect::<Result<Vec<_>>>()?;
 
-        while let Some(row) = iter.next().await? {
-            for (&index, builder) in indices.iter().zip_eq(builders.iter_mut()) {
-                builder.append_datum(&row.0[index])?;
+        for _ in 0..chunk_size.unwrap_or(usize::MAX) {
+            match iter.next().await? {
+                Some(row) => {
+                    for (&index, builder) in indices.iter().zip_eq(builders.iter_mut()) {
+                        builder.append_datum(&row.0[index])?;
+                    }
+                }
+                None => break,
             }
         }
 
@@ -108,7 +105,27 @@ pub trait ScannableTable: Sync + Send + Any + core::fmt::Debug {
             .try_collect()?;
         let chunk = DataChunk::builder().columns(columns).build();
 
-        Ok(BummockResult::Data(vec![Arc::new(chunk)]))
+        if chunk.cardinality() == 0 {
+            Ok(None)
+        } else {
+            Ok(Some(chunk))
+        }
+    }
+
+    /// Scan data of specified column ids
+    ///
+    /// In future, it will accept `predicates` for interested filtering conditions.
+    ///
+    /// This default implementation using iterator is not efficient, which project `column_ids` row
+    /// by row. If the underlying storage is a column store, we may implement this function
+    /// specifically.
+    async fn get_data_by_columns(&self, column_ids: &[i32]) -> Result<BummockResult> {
+        let indices = self.column_indices(column_ids);
+        let mut iter = self.iter().await?;
+        match self.collect_from_iter(&mut iter, &indices, None).await? {
+            Some(chunk) => Ok(BummockResult::Data(vec![chunk.into()])),
+            None => Ok(BummockResult::DataEof),
+        }
     }
 
     fn into_any(self: Arc<Self>) -> Arc<dyn Any + Sync + Send>;
@@ -116,6 +133,19 @@ pub trait ScannableTable: Sync + Send + Any + core::fmt::Debug {
     fn schema(&self) -> Cow<Schema>;
 
     fn column_descs(&self) -> Cow<[TableColumnDesc]>;
+
+    /// Get column indices for given `column_ids`.
+    fn column_indices(&self, column_ids: &[i32]) -> Vec<usize> {
+        column_ids
+            .iter()
+            .map(|id| {
+                self.column_descs()
+                    .iter()
+                    .position(|c| c.column_id == *id)
+                    .expect("column id not exists")
+            })
+            .collect()
+    }
 }
 
 /// Reference of a `TableManager`.
