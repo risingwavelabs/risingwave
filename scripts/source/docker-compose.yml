@@ -2,7 +2,7 @@ version: '3'
 
 services:
   zookeeper:
-    image: ghcr.io/confluentinc/cp-zookeeper:7.0.1
+    image: ghcr.io/singularity-data/cp-zookeeper:7.0.1
     hostname: zookeeper
     container_name: zookeeper
     ports:
