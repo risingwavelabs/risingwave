@@ -66,7 +66,7 @@ impl LogicalJoin {
         Self::new(left, right, join_type, predicate).into_plan_ref()
     }
     fn derive_schema(left: &Schema, right: &Schema, join_type: JoinType) -> Schema {
-        let mut new_fields = Vec::<Fields>::with_capacity(left.fields.len() + right.fields.len());
+        let mut new_fields = Vec::with_capacity(left.fields.len() + right.fields.len());
         match join_type {
             JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
                 new_fields.extend_from_slice(&left.fields);

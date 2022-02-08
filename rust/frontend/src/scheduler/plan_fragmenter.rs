@@ -1,11 +1,10 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use risingwave_common::error::Result;
 use uuid::Uuid;
 
-use crate::optimizer::plan_node::{BatchExchange, PlanNodeType, PlanTreeNode, PlanTreeNodeUnary};
+use crate::optimizer::plan_node::{BatchExchange, PlanNodeType, PlanTreeNode};
 use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
 
@@ -18,6 +17,7 @@ struct BatchPlanFragmenter {
 }
 
 struct Query {
+    /// Query id should always be unique.
     query_id: Uuid,
     stages: StageGraph,
 }
@@ -25,8 +25,10 @@ struct Query {
 struct QueryStage {
     pub id: StageId,
     root: PlanRef,
-    // Fill exchange source to augment phase.
+    /// Fill exchange source to augment phase.
+    /// TODO(Bowen): Introduce augment phase to fill in exchange node info (#73).
     exchange_source: HashMap<StageId, QueryStage>,
+    distribution: Distribution,
 }
 
 type QueryStageRef = Arc<QueryStage>;
@@ -35,9 +37,13 @@ type QueryStageRef = Arc<QueryStage>;
 struct StageGraph {
     id: StageId,
     stages: HashMap<StageId, QueryStageRef>,
+    /// Traverse from top to down. Used in split plan into stages.
     child_edges: HashMap<StageId, HashSet<StageId>>,
+    /// Traverse from down to top. Used in schedule each stage.
     parent_edges: HashMap<StageId, HashSet<StageId>>,
-    exchangeId2Stage: HashMap<u64, StageId>,
+    /// Indicates which stage the exchange exeuctor is running on.
+    /// Look up child stage for exchange source so that parent stage knows where to pull data.
+    exchange_id_to_stage: HashMap<u64, StageId>,
 }
 
 #[derive(Default)]
@@ -45,12 +51,12 @@ struct StageGraphBuilder {
     stages: HashMap<StageId, QueryStageRef>,
     child_edges: HashMap<StageId, HashSet<StageId>>,
     parent_edges: HashMap<StageId, HashSet<StageId>>,
-    exchangeId2Stage: HashMap<u64, StageId>,
+    exchange_id_to_stage: HashMap<u64, StageId>,
 }
 
 impl StageGraphBuilder {
     pub fn build(mut self, stage_id: StageId) -> StageGraph {
-        for (stage_id, _graph) in &self.stages {
+        for stage_id in self.stages.keys() {
             if self.child_edges.get(stage_id).is_none() {
                 self.child_edges.insert(*stage_id, HashSet::new());
             }
@@ -61,17 +67,20 @@ impl StageGraphBuilder {
         }
 
         StageGraph {
-            id: 0,
+            id: stage_id,
             stages: self.stages,
             child_edges: self.child_edges,
             parent_edges: self.parent_edges,
-            exchangeId2Stage: self.exchangeId2Stage,
+            exchange_id_to_stage: self.exchange_id_to_stage,
         }
     }
 
-    /// Link parent stage and child stage. They are split by exchange
+    /// Link parent stage and child stage. Maintain the mappings of parent -> child and child ->
+    /// parent.
     pub fn link_to_child(&mut self, parent_id: StageId, exchange_id: u64, child_id: StageId) {
         let child_ids = self.child_edges.get_mut(&parent_id);
+        // If the parent id do not exist, create a new sets contain the child ids. Otherwise just
+        // insert.
         match child_ids {
             Some(childs) => {
                 childs.insert(child_id);
@@ -85,6 +94,8 @@ impl StageGraphBuilder {
         };
 
         let parent_ids = self.parent_edges.get_mut(&child_id);
+        // If the child id do not exist, create a new sets contain the parent ids. Otherwise just
+        // insert.
         match parent_ids {
             Some(parent_ids) => {
                 parent_ids.insert(parent_id);
@@ -96,7 +107,7 @@ impl StageGraphBuilder {
                 self.parent_edges.insert(child_id, parents);
             }
         };
-        self.exchangeId2Stage.insert(exchange_id, child_id);
+        self.exchange_id_to_stage.insert(exchange_id, child_id);
     }
 
     pub fn add_node(&mut self, stage: QueryStageRef) {
@@ -105,10 +116,7 @@ impl StageGraphBuilder {
 }
 
 impl BatchPlanFragmenter {
-    pub fn new() -> Self {
-        Default::default()
-    }
-
+    /// Split the plan node into each stages, based on exchange node.
     pub fn split(mut self, batch_node: PlanRef) -> Result<Query> {
         let root_stage_graph = self.new_query_stage(batch_node.clone(), Distribution::Any);
         self.build_stage(&root_stage_graph, batch_node.clone());
@@ -119,21 +127,22 @@ impl BatchPlanFragmenter {
         })
     }
 
-    fn new_query_stage(&mut self, node: PlanRef, dist: Distribution) -> QueryStageRef {
+    fn new_query_stage(&mut self, node: PlanRef, distribution: Distribution) -> QueryStageRef {
         let next_stage_id = self.next_stage_id;
         self.next_stage_id += 1;
         let stage = Arc::new(QueryStage {
             id: next_stage_id,
             root: node.clone(),
             exchange_source: HashMap::new(),
+            distribution,
         });
         self.stage_graph_builder.add_node(stage.clone());
         stage
     }
 
-    /// Based on current stage, use stage graph builder to recursively build the DAG plan.
-    /// Splits the plan by exchange node.
-    /// Children under pipeline-breaker separately forms a stage (aka plan fragment).
+    /// Based on current stage, use stage graph builder to recursively build the DAG plan (splits
+    /// the plan by exchange node.). Children under pipeline-breaker separately forms a stage
+    /// (aka plan fragment).
     fn build_stage(&mut self, cur_stage: &QueryStage, node: PlanRef) {
         // NOTE: The breaker's children will not be logically removed after plan slicing,
         // but their serialized plan will ignore the children. Therefore, the compute-node
@@ -143,7 +152,6 @@ impl BatchPlanFragmenter {
             for child_node in exchange_node.inputs() {
                 // If plan node is a exchange node, for each inputs (child), new a query stage and
                 // link with current stage.
-                let child_node = exchange_node.input();
                 let child_query_stage = self.new_query_stage(node.clone(), Distribution::Any);
                 self.stage_graph_builder
                     .link_to_child(cur_stage.id, 0, child_query_stage.id);
@@ -159,7 +167,7 @@ impl BatchPlanFragmenter {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::catalog::Schema;
+
     use risingwave_pb::plan::JoinType;
 
     use crate::optimizer::plan_node::{
@@ -171,10 +179,7 @@ mod tests {
     #[test]
     fn test_fragmenter() {
         // Construct a Hash Join with Exchange node.
-        let batch_plan_node = BatchSeqScan {
-            schema: Schema::default(),
-        }
-        .into_plan_ref();
+        let batch_plan_node = BatchSeqScan::default().into_plan_ref();
         let batch_exchange_node1 =
             BatchExchange::new(batch_plan_node.clone(), Order::default(), Distribution::Any)
                 .into_plan_ref();
@@ -202,7 +207,6 @@ mod tests {
         assert_eq!(query.stages.id, 0);
         assert_eq!(query.stages.stages.len(), 4);
         // Introduce operator id to uncomment
-        // assert_eq!(query.stages.exchangeId2Stage.len(), 3);
         assert_eq!(query.stages.child_edges.get(&0).unwrap().len(), 1);
         assert_eq!(query.stages.child_edges.get(&1).unwrap().len(), 2);
         assert_eq!(query.stages.child_edges.get(&2).unwrap().len(), 0);
