@@ -26,6 +26,7 @@ use alloc::{
 };
 use core::fmt;
 
+use itertools::Itertools;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -365,7 +366,7 @@ impl fmt::Display for Expr {
                 if let Some(operand) = operand {
                     write!(f, " {}", operand)?;
                 }
-                for (c, r) in conditions.iter().zip(results) {
+                for (c, r) in conditions.iter().zip_eq(results) {
                     write!(f, " WHEN {} THEN {}", c, r)?;
                 }
 

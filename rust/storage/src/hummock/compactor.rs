@@ -63,7 +63,7 @@ impl Compactor {
 
         let mut vec_futures = Vec::with_capacity(num_sub);
 
-        for (kr_idx, kr) in (&compact_task.splits).iter().enumerate() {
+        for (kr_idx, kr) in compact_task.splits.iter().enumerate() {
             let mut output_needing_vacuum = vec![];
 
             let iter = MergeIterator::new(
