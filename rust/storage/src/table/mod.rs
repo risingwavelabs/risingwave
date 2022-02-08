@@ -70,6 +70,8 @@ pub trait ScannableTable: Sync + Send + Any + core::fmt::Debug {
     /// Open and return an iterator.
     async fn iter(&self) -> Result<TableIterRef>;
 
+    /// Collect data chunk with the target `chunk_size` from the given `iter`, projected on
+    /// `indices`. If there's no more data, return `None`.
     async fn collect_from_iter(
         &self,
         iter: &mut TableIterRef,
@@ -132,6 +134,7 @@ pub trait ScannableTable: Sync + Send + Any + core::fmt::Debug {
 
     fn column_descs(&self) -> Cow<[TableColumnDesc]>;
 
+    /// Get column indices for given `column_ids`.
     fn column_indices(&self, column_ids: &[i32]) -> Vec<usize> {
         column_ids
             .iter()
