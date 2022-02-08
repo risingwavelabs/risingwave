@@ -7,7 +7,8 @@
  --benchmarks "writebatch,getseq,getrandom,prefixscanrandom" \
  --batch-size 1000 \
  --reads 500 \
- --concurrency-num 4
+ --concurrency-num 4 \
+ statistics
 ```
 
 # Parameters
@@ -136,6 +137,11 @@ Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
   
   - Size (bytes) of each value.
   - Default: 100
+
+# Flag
+
+- `statistics`
+  - Detailed statistics of storage backend
 
 # Metrics
 

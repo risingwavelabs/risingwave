@@ -17,6 +17,8 @@ use risingwave_storage::rocksdb_local::RocksDBStateStore;
 use risingwave_storage::tikv::TikvStateStore;
 use risingwave_storage::StateStore;
 
+use crate::utils::monitor_statistics::print_statistics;
+
 #[allow(dead_code)]
 enum WorkloadType {
     WriteBatch = 0,
@@ -81,6 +83,10 @@ pub(crate) struct Opts {
 
     #[clap(long, default_value_t = 100)]
     value_size: u32,
+
+    // ----- flag -----
+    #[clap(parse(from_flag))]
+    statistics: bool,
 }
 
 fn get_checksum_algo(algo: &str) -> ChecksumAlg {
@@ -223,4 +229,8 @@ async fn main() {
         StateStoreImpl::RocksDB(store) => run_operations(store, &opts).await,
         StateStoreImpl::Tikv(store) => run_operations(store, &opts).await,
     };
+
+    if opts.statistics {
+        print_statistics().await;
+    }
 }
