@@ -75,7 +75,7 @@ impl Array for StructArray {
         todo!()
     }
 
-    fn hash_vec<H: std::hash::Hasher>(&self, _hashers: &mut Vec<H>) {}
+    fn hash_vec<H: std::hash::Hasher>(&self, _hashers: &mut [H]) {}
 
     fn is_empty(&self) -> bool {
         self.len() == 0

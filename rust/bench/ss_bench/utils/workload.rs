@@ -37,7 +37,7 @@ impl Workload {
             _ => Self::new_values(opts, base_seed),
         };
 
-        let mut batch = keys.into_iter().zip(values.into_iter()).collect_vec();
+        let mut batch = keys.into_iter().zip_eq(values.into_iter()).collect_vec();
         batch.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
         // As duplication rate is low, ignore filling data after deduplicating.
         batch.dedup_by(|(k1, _), (k2, _)| k1 == k2);
