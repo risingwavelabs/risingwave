@@ -172,8 +172,7 @@ async fn test_table_v2_materialize() -> Result<()> {
     let mut scan =
         SeqScanExecutor::new(table.clone(), data_column_ids.clone(), data_schema.clone());
     scan.open().await?;
-    let c = scan.next().await?.unwrap();
-    assert_eq!(c.cardinality(), 0);
+    assert!(scan.next().await?.is_none());
 
     // Poll `Materialize`, should output the same stream chunk
     let message = materialize.next().await?;
