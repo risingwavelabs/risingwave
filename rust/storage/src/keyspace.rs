@@ -61,17 +61,17 @@ impl<S: StateStore> Keyspace<S> {
     /// Create a shared root [`Keyspace`] for all executors in the same node.
     ///
     /// By design, all executors in the same node should share the same keyspace in order to support
-    /// scaling out, and ensure not to overlap with each other. So we use `node_id` here.
+    /// scaling out, and ensure not to overlap with each other. So we use `operator_id` here.
     ///
     /// Note: when using shared keyspace, be caution to scan the keyspace since states of other
     /// executors might be scanned as well.
-    pub fn shared_executor_root(store: S, node_id: u32) -> Self {
+    pub fn shared_executor_root(store: S, operator_id: u32) -> Self {
         let mut root = Self {
             store,
             prefix: Vec::with_capacity(5),
         };
         root.push(Segment::root(b's'));
-        root.push(Segment::u32(node_id));
+        root.push(Segment::u32(operator_id));
         root
     }
 
