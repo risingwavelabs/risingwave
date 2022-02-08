@@ -58,7 +58,7 @@ pub struct Keyspace<S: StateStore> {
 }
 
 impl<S: StateStore> Keyspace<S> {
-    /// Create a shared root [`Keyspace`] for all executors in the same node.
+    /// Create a shared root [`Keyspace`] for all executors of the same operator.
     ///
     /// By design, all executors of the same operator should share the same keyspace in order to support
     /// scaling out, and ensure not to overlap with each other. So we use `operator_id` here.
