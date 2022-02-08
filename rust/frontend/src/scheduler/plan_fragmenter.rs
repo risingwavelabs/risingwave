@@ -19,12 +19,12 @@ struct BatchPlanFragmenter {
 struct Query {
     /// Query id should always be unique.
     query_id: Uuid,
-    stages: StageGraph,
+    stage_graph: StageGraph,
 }
 
 struct QueryStage {
     pub id: StageId,
-    root: PlanRef,
+    pub root: PlanRef,
     /// Fill exchange source to augment phase.
     /// TODO(Bowen): Introduce augment phase to fill in exchange node info (#73).
     exchange_source: HashMap<StageId, QueryStage>,
@@ -118,11 +118,11 @@ impl StageGraphBuilder {
 impl BatchPlanFragmenter {
     /// Split the plan node into each stages, based on exchange node.
     pub fn split(mut self, batch_node: PlanRef) -> Result<Query> {
-        let root_stage_graph = self.new_query_stage(batch_node.clone(), Distribution::Any);
+        let root_stage_graph = self.new_query_stage(batch_node.clone(), batch_node.distribution());
         self.build_stage(&root_stage_graph, batch_node.clone());
         let stage_graph = self.stage_graph_builder.build(root_stage_graph.id);
         Ok(Query {
-            stages: stage_graph,
+            stage_graph,
             query_id: Uuid::new_v4(),
         })
     }
@@ -152,13 +152,16 @@ impl BatchPlanFragmenter {
             for child_node in exchange_node.inputs() {
                 // If plan node is a exchange node, for each inputs (child), new a query stage and
                 // link with current stage.
-                let child_query_stage = self.new_query_stage(node.clone(), Distribution::Any);
+                let child_query_stage =
+                    self.new_query_stage(child_node.clone(), child_node.distribution());
+                // TODO(Bowen): replace mock exchange id 0 to real operator id (#67).
                 self.stage_graph_builder
                     .link_to_child(cur_stage.id, 0, child_query_stage.id);
                 self.build_stage(&child_query_stage, child_node);
             }
         } else {
             for child_node in node.inputs() {
+                // All child nodes still belongs to current stage if no exchange.
                 self.build_stage(cur_stage, child_node);
             }
         }
@@ -172,6 +175,7 @@ mod tests {
 
     use crate::optimizer::plan_node::{
         BatchExchange, BatchHashJoin, BatchSeqScan, IntoPlanRef, JoinPredicate, LogicalJoin,
+        PlanNodeType,
     };
     use crate::optimizer::property::{Distribution, Order};
     use crate::scheduler::plan_fragmenter::BatchPlanFragmenter;
@@ -179,6 +183,12 @@ mod tests {
     #[test]
     fn test_fragmenter() {
         // Construct a Hash Join with Exchange node.
+        // Logical plan:
+        //
+        //    HashJoin
+        //     /    \
+        //   Scan  Scan
+        //
         let batch_plan_node = BatchSeqScan::default().into_plan_ref();
         let batch_exchange_node1 =
             BatchExchange::new(batch_plan_node.clone(), Order::default(), Distribution::Any)
@@ -204,12 +214,29 @@ mod tests {
         let fragmenter = BatchPlanFragmenter::default();
         let query = fragmenter.split(batch_exchange_node3).unwrap();
 
-        assert_eq!(query.stages.id, 0);
-        assert_eq!(query.stages.stages.len(), 4);
-        // Introduce operator id to uncomment
-        assert_eq!(query.stages.child_edges.get(&0).unwrap().len(), 1);
-        assert_eq!(query.stages.child_edges.get(&1).unwrap().len(), 2);
-        assert_eq!(query.stages.child_edges.get(&2).unwrap().len(), 0);
-        assert_eq!(query.stages.child_edges.get(&3).unwrap().len(), 0);
+        assert_eq!(query.stage_graph.id, 0);
+        assert_eq!(query.stage_graph.stages.len(), 4);
+
+        // Check the mappings of child edges.
+        assert_eq!(query.stage_graph.child_edges.get(&0).unwrap().len(), 1);
+        assert_eq!(query.stage_graph.child_edges.get(&1).unwrap().len(), 2);
+        assert_eq!(query.stage_graph.child_edges.get(&2).unwrap().len(), 0);
+        assert_eq!(query.stage_graph.child_edges.get(&3).unwrap().len(), 0);
+
+        // Check the mappings of parent edges.
+        assert_eq!(query.stage_graph.parent_edges.get(&0).unwrap().len(), 0);
+        assert_eq!(query.stage_graph.parent_edges.get(&1).unwrap().len(), 1);
+        assert_eq!(query.stage_graph.parent_edges.get(&2).unwrap().len(), 1);
+        assert_eq!(query.stage_graph.parent_edges.get(&3).unwrap().len(), 1);
+
+        // Check plan node in each stages.
+        let root_exchange = query.stage_graph.stages.get(&0).unwrap();
+        assert_eq!(root_exchange.root.node_type(), PlanNodeType::BatchExchange);
+        let join_node = query.stage_graph.stages.get(&1).unwrap();
+        assert_eq!(join_node.root.node_type(), PlanNodeType::BatchHashJoin);
+        let scan_node1 = query.stage_graph.stages.get(&2).unwrap();
+        assert_eq!(scan_node1.root.node_type(), PlanNodeType::BatchSeqScan);
+        let scan_node2 = query.stage_graph.stages.get(&3).unwrap();
+        assert_eq!(scan_node2.root.node_type(), PlanNodeType::BatchSeqScan);
     }
 }

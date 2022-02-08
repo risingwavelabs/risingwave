@@ -206,7 +206,7 @@ macro_rules! enum_plan_node_type {
     paste!{
 
       /// each enum value represent a PlanNode struct type, help us to dispatch and downcast
-      #[derive(PartialEq)]
+      #[derive(PartialEq, Debug)]
       pub enum PlanNodeType{
         $(  [<$convention $name>] ),*
       }
