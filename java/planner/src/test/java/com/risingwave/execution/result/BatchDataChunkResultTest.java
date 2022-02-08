@@ -9,6 +9,7 @@ import com.risingwave.pgwire.msg.StatementType;
 import com.risingwave.pgwire.types.PgValue;
 import com.risingwave.proto.computenode.GetDataResponse;
 import com.risingwave.proto.data.Array;
+import com.risingwave.proto.data.ArrayMeta;
 import com.risingwave.proto.data.ArrayType;
 import com.risingwave.proto.data.Buffer;
 import com.risingwave.proto.data.Column;
@@ -73,7 +74,10 @@ class BatchDataChunkResultTest {
                                               .setBody(
                                                   ByteString.copyFrom(
                                                       ByteBuffer.allocate(4).putInt(i).array())))
-                                      .setArrayType(ArrayType.INT32)
+                                      .setMeta(
+                                          ArrayMeta.newBuilder()
+                                              .setArrayType(ArrayType.INT32)
+                                              .build())
                                       .build())
                               .build())
                       .addColumns(
@@ -87,7 +91,10 @@ class BatchDataChunkResultTest {
                                                       ByteBuffer.allocate(2)
                                                           .put(Byte.parseByte(i % 2 + "", 2))
                                                           .array())))
-                                      .setArrayType(ArrayType.BOOL)
+                                      .setMeta(
+                                          ArrayMeta.newBuilder()
+                                              .setArrayType(ArrayType.BOOL)
+                                              .build())
                                       .build())
                               .build())
                       .setCardinality(1))

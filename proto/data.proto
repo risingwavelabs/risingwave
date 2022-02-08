@@ -85,7 +85,7 @@ message ArrayMeta {
 }
 
 message Array {
-  ArrayMeta meta = 1; 
+  ArrayMeta meta = 1;
   Buffer null_bitmap = 2;
   repeated Buffer values = 3;
 }
