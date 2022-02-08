@@ -27,7 +27,11 @@ impl RowSeqScanExecutor {
     pub const DEFAULT_CHUNK_SIZE: usize = 1024;
 
     pub fn new(table: Arc<dyn ScannableTable>, column_ids: Vec<i32>, chunk_size: usize) -> Self {
-        let column_indices = table.column_indices(&column_ids);
+        // Currently row_id for table_v2 is totally a mess, we override this function to match the
+        // behavior of column ids of mviews.
+        // FIXME: remove this hack
+        let column_indices = column_ids.iter().map(|&id| id as usize).collect_vec();
+        // let column_indices = table.column_indices(&column_ids);
 
         let table_schema = table.schema();
         let schema = Schema::new(
