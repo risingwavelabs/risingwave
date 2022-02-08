@@ -54,8 +54,7 @@ impl<S: StateStore> MViewTable<S> {
             .iter()
             .enumerate()
             .map(|(column_index, f)| {
-                // For materialized view, column id is exactly the index, so we perform conversion
-                // here.
+                // For mview, column id is exactly the index, so we perform conversion here.
                 TableColumnDesc::new_without_name(column_index as i32, f.data_type)
             })
             .collect_vec();
