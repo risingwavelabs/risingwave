@@ -50,6 +50,7 @@ pub(super) async fn handle_create_source(
 mod tests {
     use std::io::Write;
 
+    use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
     use risingwave_meta::test_utils::LocalMeta;
     use tempfile::NamedTempFile;
@@ -97,20 +98,14 @@ mod tests {
         let catalog_manager = frontend.session().env().catalog_mgr();
         let catalog_manager_guard = catalog_manager.lock().await;
         let table = catalog_manager_guard.get_table("dev", "dev", "t").unwrap();
-        let columns = table
-            .columns()
-            .iter()
-            .map(|(col_name, col)| (col_name.clone(), col.data_type()))
-            .collect::<Vec<(String, DataType)>>();
-        assert_eq!(
-            columns,
-            vec![
-                ("id".to_string(), DataType::Int32),
-                ("city".to_string(), DataType::Varchar),
-                ("zipcode".to_string(), DataType::Int64),
-                ("rate".to_string(), DataType::Float32),
-            ]
-        );
+        let columns_schema = table.columns_schema();
+        let expected_schema = Schema::new(vec![
+            Field::with_name(DataType::Int32, "id".to_string()),
+            Field::with_name(DataType::Varchar, "city".to_string()),
+            Field::with_name(DataType::Int64, "zipcode".to_string()),
+            Field::with_name(DataType::Float32, "rate".to_string()),
+        ]);
+        assert_eq!(columns_schema, &expected_schema);
 
         meta.stop().await;
     }

@@ -64,6 +64,7 @@ pub(super) async fn handle_create_table(
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
     use risingwave_meta::test_utils::LocalMeta;
 
@@ -83,21 +84,15 @@ mod tests {
         let table = catalog_manager_guard
             .get_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "t")
             .unwrap();
-        let columns = table
-            .columns()
-            .iter()
-            .map(|(col_name, col)| (col_name.clone(), col.data_type()))
-            .collect::<Vec<(String, DataType)>>();
-        assert_eq!(
-            columns,
-            vec![
-                ("v1".to_string(), DataType::Int16),
-                ("v2".to_string(), DataType::Int32),
-                ("v3".to_string(), DataType::Int64),
-                ("v4".to_string(), DataType::Float32),
-                ("v5".to_string(), DataType::Float64),
-            ]
-        );
+        let columns_schema = table.columns_schema();
+        let expected_schema = Schema::new(vec![
+            Field::with_name(DataType::Int16, "v1".to_string()),
+            Field::with_name(DataType::Int32, "v2".to_string()),
+            Field::with_name(DataType::Int64, "v3".to_string()),
+            Field::with_name(DataType::Float32, "v4".to_string()),
+            Field::with_name(DataType::Float64, "v5".to_string()),
+        ]);
+        assert_eq!(columns_schema, &expected_schema);
 
         meta.stop().await;
     }
