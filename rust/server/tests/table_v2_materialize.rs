@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use risingwave_batch::executor::{
-    CreateTableExecutor, Executor as BatchExecutor, InsertExecutor, SeqScanExecutor,
+    CreateTableExecutor, Executor as BatchExecutor, InsertExecutor, RowSeqScanExecutor,
 };
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{Array, DataChunk, F64Array};
@@ -72,20 +72,22 @@ async fn test_table_v2_materialize() -> Result<()> {
     let table_manager = Arc::new(SimpleTableManager::new(store));
     let source_table_id = TableId::default();
     let table_columns = vec![
+        // data
         ColumnDesc {
             column_type: Some(DataType {
                 type_name: TypeName::Double as i32,
                 ..Default::default()
             }),
-            column_id: 233_i32,
+            column_id: 0,
             ..Default::default()
         },
+        // row id
         ColumnDesc {
             column_type: Some(DataType {
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
-            column_id: 0_i32,
+            column_id: 1,
             ..Default::default()
         },
     ];
@@ -96,7 +98,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         table_manager.clone(),
         source_manager.clone(),
         table_columns,
-        "CreateTableExecutorV2 ".to_string(),
+        "CreateTableExecutorV2".to_string(),
     );
     // Execute
     create_table.open().await?;
@@ -124,7 +126,7 @@ async fn test_table_v2_materialize() -> Result<()> {
     source_manager.register_associated_materialized_view(&source_table_id, &mview_id)?;
 
     // Create a `StreamSourceExecutor` to read the changes
-    let all_column_ids = vec![233, 0];
+    let all_column_ids = vec![0, 1];
     let all_schema = get_schema(&all_column_ids);
     let (barrier_tx, barrier_rx) = unbounded_channel();
     let stream_source = StreamSourceExecutor::new(
@@ -132,7 +134,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         source_desc.clone(),
         all_column_ids.clone(),
         all_schema.clone(),
-        PkIndices::from([0]),
+        PkIndices::from([1]),
         barrier_rx,
         1,
     )?;
@@ -143,7 +145,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         Box::new(stream_source),
         keyspace.clone(),
         all_schema.clone(),
-        vec![0],
+        vec![1],
         vec![OrderType::Ascending],
         2,
     );
@@ -166,11 +168,9 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     // Since we have not polled `Materialize`, we cannot scan anything from this table
     let table = table_manager.get_table(&mview_id)?;
-    let data_column_ids = vec![233];
-    let data_schema = get_schema(&data_column_ids);
+    let data_column_ids = vec![0];
 
-    let mut scan =
-        SeqScanExecutor::new(table.clone(), data_column_ids.clone(), data_schema.clone());
+    let mut scan = RowSeqScanExecutor::new(table.clone(), data_column_ids.clone(), 1024);
     scan.open().await?;
     assert!(scan.next().await?.is_none());
 
@@ -200,11 +200,11 @@ async fn test_table_v2_materialize() -> Result<()> {
     ));
 
     // Scan the table again, we are able to get the data now!
-    let mut scan =
-        SeqScanExecutor::new(table.clone(), data_column_ids.clone(), data_schema.clone());
+    let mut scan = RowSeqScanExecutor::new(table.clone(), data_column_ids.clone(), 1024);
     scan.open().await?;
     let c = scan.next().await?.unwrap();
     let col_data = c.columns()[0].array_ref().as_float64();
+    assert_eq!(col_data.len(), 2);
     assert_eq!(col_data.value_at(0).unwrap(), 1.14.into_ordered());
     assert_eq!(col_data.value_at(1).unwrap(), 5.14.into_ordered());
 

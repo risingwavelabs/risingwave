@@ -10,9 +10,6 @@ use risingwave_storage::table::{ScannableTable, TableIterRef};
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::executor::{Executor, ExecutorBuilder};
 
-// TODO: decide the chunk size for row seq scan
-const CHUNK_SIZE: usize = 1;
-
 /// Executor that scans data from row table
 pub struct RowSeqScanExecutor {
     table: Arc<dyn ScannableTable>,
@@ -20,12 +17,16 @@ pub struct RowSeqScanExecutor {
     iter: Option<TableIterRef>,
     column_ids: Vec<i32>,
     column_indices: Vec<usize>,
+    chunk_size: usize,
     schema: Schema,
     identity: String,
 }
 
 impl RowSeqScanExecutor {
-    pub fn new(table: Arc<dyn ScannableTable>, column_ids: Vec<i32>) -> Self {
+    // TODO: decide the chunk size for row seq scan
+    pub const DEFAULT_CHUNK_SIZE: usize = 1024;
+
+    pub fn new(table: Arc<dyn ScannableTable>, column_ids: Vec<i32>, chunk_size: usize) -> Self {
         let column_indices = table.column_indices(&column_ids);
 
         let table_schema = table.schema();
@@ -41,6 +42,7 @@ impl RowSeqScanExecutor {
             iter: None,
             column_ids,
             column_indices,
+            chunk_size,
             schema,
             identity: "RowSeqScanExecutor".to_string(),
         }
@@ -63,7 +65,11 @@ impl BoxedExecutorBuilder for RowSeqScanExecutor {
 
         let column_ids = seq_scan_node.get_column_ids().clone();
 
-        Ok(Box::new(Self::new(table, column_ids)))
+        Ok(Box::new(Self::new(
+            table,
+            column_ids,
+            Self::DEFAULT_CHUNK_SIZE,
+        )))
     }
 }
 
@@ -78,7 +84,7 @@ impl Executor for RowSeqScanExecutor {
         let iter = self.iter.as_mut().expect("executor not open");
 
         self.table
-            .collect_from_iter(iter, &self.column_indices, Some(CHUNK_SIZE))
+            .collect_from_iter(iter, &self.column_indices, Some(self.chunk_size))
             .await
     }
 
