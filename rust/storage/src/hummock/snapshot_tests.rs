@@ -37,7 +37,7 @@ async fn gen_and_upload_table(
     }
     let (data, meta) = b.finish();
     // get remote table
-    let table = gen_remote_sstable(obj_client, table_id, data, meta, remote_dir)
+    let table = gen_remote_sstable(obj_client, table_id, data, meta, remote_dir, None)
         .await
         .unwrap();
     hummock_meta_client
@@ -91,7 +91,11 @@ macro_rules! assert_count_reverse_range_scan {
 async fn test_snapshot() {
     let remote_dir = "/test";
     let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
-    let vm = Arc::new(LocalVersionManager::new(obj_client.clone(), remote_dir));
+    let vm = Arc::new(LocalVersionManager::new(
+        obj_client.clone(),
+        remote_dir,
+        None,
+    ));
     let mock_hummock_meta_service = Arc::new(MockHummockMetaService::new());
     let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
         mock_hummock_meta_service.clone(),
@@ -154,7 +158,11 @@ async fn test_snapshot() {
 async fn test_snapshot_range_scan() {
     let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
     let remote_dir = "/test";
-    let vm = Arc::new(LocalVersionManager::new(obj_client.clone(), remote_dir));
+    let vm = Arc::new(LocalVersionManager::new(
+        obj_client.clone(),
+        remote_dir,
+        None,
+    ));
     let mock_hummock_meta_service = Arc::new(MockHummockMetaService::new());
     let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
         mock_hummock_meta_service.clone(),
@@ -195,7 +203,11 @@ async fn test_snapshot_range_scan() {
 async fn test_snapshot_reverse_range_scan() {
     let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
     let remote_dir = "/test";
-    let vm = Arc::new(LocalVersionManager::new(obj_client.clone(), remote_dir));
+    let vm = Arc::new(LocalVersionManager::new(
+        obj_client.clone(),
+        remote_dir,
+        None,
+    ));
     let mock_hummock_meta_service = Arc::new(MockHummockMetaService::new());
     let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
         mock_hummock_meta_service.clone(),

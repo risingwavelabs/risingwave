@@ -38,6 +38,7 @@ async fn test_prometheus_endpoint_hummock() {
     let local_version_manager = Arc::new(LocalVersionManager::new(
         object_client.clone(),
         &hummock_options.remote_dir,
+        None,
     ));
     let hummock_storage = HummockStorage::new(
         object_client,
@@ -118,6 +119,7 @@ async fn test_basic() {
     let local_version_manager = Arc::new(LocalVersionManager::new(
         object_client.clone(),
         &hummock_options.remote_dir,
+        None,
     ));
     let hummock_storage = HummockStorage::new(
         object_client,
@@ -273,6 +275,7 @@ async fn test_reload_storage() {
     let local_version_manager = Arc::new(LocalVersionManager::new(
         mem_objstore.clone(),
         &hummock_options.remote_dir,
+        None,
     ));
     let hummock_meta_client = Arc::new(MockHummockMetaClient::new(Arc::new(
         MockHummockMetaService::new(),

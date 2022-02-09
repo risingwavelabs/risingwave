@@ -12,6 +12,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::error::Result;
 use risingwave_storage::{Keyspace, StateStore};
+use tracing_futures::Instrument;
 
 use super::aggregation::{AggState, HashKey};
 use super::{
@@ -200,6 +201,7 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
                         &self.keyspace,
                         input_pk_data_types.clone(),
                     )
+                    .instrument(tracing::trace_span!("fetch_state", key=?key))
                     .await?;
                     self.state_map.put(key.to_owned(), state);
                 }
