@@ -103,7 +103,10 @@ impl StreamFragmentGraph {
         self.child_edges.contains_key(&fragment_id)
     }
 
-    pub fn get_downstream_fragments(&self, fragment_id: FragmentId) -> Option<BTreeSet<FragmentId>> {
+    pub fn get_downstream_fragments(
+        &self,
+        fragment_id: FragmentId,
+    ) -> Option<BTreeSet<FragmentId>> {
         self.child_edges.get(&fragment_id).cloned()
     }
 
