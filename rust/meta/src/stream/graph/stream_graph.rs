@@ -81,6 +81,7 @@ impl StreamActorBuilder {
     pub fn build(&self) -> StreamActor {
         StreamActor {
             actor_id: self.actor_id,
+            fragment_id: self.fragment_id,
             nodes: Some(self.nodes.deref().clone()),
             dispatcher: self.dispatcher.clone(),
             downstream_actor_id: self.downstream_actors.iter().copied().collect(),

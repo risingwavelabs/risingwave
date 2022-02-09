@@ -66,13 +66,13 @@ impl<S: StateStore> Keyspace<S> {
     ///
     /// Note: when using shared keyspace, be caution to scan the keyspace since states of other
     /// executors might be scanned as well.
-    pub fn shared_executor_root(store: S, operator_id: u32) -> Self {
+    pub fn shared_executor_root(store: S, operator_id: u64) -> Self {
         let mut root = Self {
             store,
-            prefix: Vec::with_capacity(5),
+            prefix: Vec::with_capacity(9),
         };
         root.push(Segment::root(b's'));
-        root.push(Segment::u32(operator_id));
+        root.push(Segment::u64(operator_id));
         root
     }
 
