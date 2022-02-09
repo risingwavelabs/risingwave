@@ -12,12 +12,16 @@ pub use set_expr::BoundSetExpr;
 pub use statement::BoundStatement;
 pub use values::BoundValues;
 
-pub struct Binder {}
+use crate::session::RwSession;
 
-impl Binder {
-    #[allow(clippy::new_without_default)]
-    pub fn new() -> Binder {
-        Binder {}
+pub struct Binder<'session> {
+    #[allow(dead_code)]
+    session: &'session RwSession,
+}
+
+impl Binder<'_> {
+    pub fn new(session: &RwSession) -> Binder {
+        Binder { session }
     }
     pub async fn bind(&mut self, stmt: Statement) -> Result<BoundStatement> {
         self.bind_statement(stmt).await

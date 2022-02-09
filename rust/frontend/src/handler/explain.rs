@@ -4,10 +4,15 @@ use risingwave_sqlparser::ast::Statement;
 
 use crate::binder::Binder;
 use crate::planner::Planner;
+use crate::session::RwSession;
 
-pub(super) async fn handle_explain(stmt: Statement, _verbose: bool) -> Result<PgResponse> {
+pub(super) async fn handle_explain(
+    session: &RwSession,
+    stmt: Statement,
+    _verbose: bool,
+) -> Result<PgResponse> {
     // bind, plan, optimize, and serialize here
-    let mut binder = Binder::new();
+    let mut binder = Binder::new(session);
     let bound = binder.bind(stmt).await?;
     let mut planner = Planner::new();
     let plan = planner.plan(bound)?;
@@ -22,15 +27,21 @@ mod tests {
     use risingwave_sqlparser::parser::Parser;
 
     #[tokio::test]
+    #[serial_test::serial]
     async fn test_handle_explain() {
+        let meta = risingwave_meta::test_utils::LocalMeta::start_in_tempdir().await;
+        let frontend = crate::test_utils::LocalFrontend::new().await;
         let sql = "values (11, 22), (33+(1+2), 44);";
         let stmt = Parser::parse_sql(sql).unwrap().into_iter().next().unwrap();
-        let result = super::handle_explain(stmt, false).await.unwrap();
+        let result = super::handle_explain(frontend.session(), stmt, false)
+            .await
+            .unwrap();
         let row = result.iter().next().unwrap();
         let s = row[0].as_ref().unwrap();
         assert!(s.contains("11"));
         assert!(s.contains("22"));
         assert!(s.contains("33"));
         assert!(s.contains("44"));
+        meta.stop().await;
     }
 }

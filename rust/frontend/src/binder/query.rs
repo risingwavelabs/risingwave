@@ -10,7 +10,7 @@ pub struct BoundQuery {
     pub body: BoundSetExpr,
 }
 
-impl Binder {
+impl Binder<'_> {
     pub(super) async fn bind_query(&mut self, query: Query) -> Result<BoundQuery> {
         Ok(BoundQuery {
             body: self.bind_set_expr(query.body).await?,

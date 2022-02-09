@@ -4,7 +4,7 @@ use risingwave_sqlparser::ast::{BinaryOperator, Expr};
 use crate::binder::Binder;
 use crate::expr::{Expr as _, ExprType, FunctionCall};
 
-impl Binder {
+impl Binder<'_> {
     pub(super) fn bind_binary_op(
         &mut self,
         left: Expr,

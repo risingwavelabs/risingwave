@@ -7,7 +7,7 @@ use crate::expr::ExprImpl;
 mod binary_op;
 mod value;
 
-impl Binder {
+impl Binder<'_> {
     pub(super) fn bind_expr(&mut self, expr: Expr) -> Result<ExprImpl> {
         match expr {
             Expr::Value(v) => Ok(ExprImpl::Literal(Box::new(self.bind_value(v)?))),

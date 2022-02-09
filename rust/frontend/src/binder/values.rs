@@ -11,7 +11,7 @@ pub struct BoundValues {
     pub schema: Schema,
 }
 
-impl Binder {
+impl Binder<'_> {
     pub(super) fn bind_values(&mut self, values: Values) -> Result<BoundValues> {
         let vec2d = values.0;
         let bound = vec2d

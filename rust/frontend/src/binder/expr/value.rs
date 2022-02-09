@@ -5,7 +5,7 @@ use risingwave_sqlparser::ast::Value;
 use crate::binder::Binder;
 use crate::expr::Literal;
 
-impl Binder {
+impl Binder<'_> {
     pub(super) fn bind_value(&mut self, value: Value) -> Result<Literal> {
         match value {
             Value::Number(s, b) => self.bind_number(s, b),
@@ -40,13 +40,16 @@ impl Binder {
 #[cfg(test)]
 mod tests {
 
-    #[test]
-    fn test_bind_value() {
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_bind_value() {
         use std::str::FromStr;
 
         use super::*;
 
-        let mut binder = Binder {};
+        let meta = risingwave_meta::test_utils::LocalMeta::start_in_tempdir().await;
+        let frontend = crate::test_utils::LocalFrontend::new().await;
+        let mut binder = Binder::new(frontend.session());
         let values = vec![
             "1",
             "111111111111111",
@@ -82,5 +85,6 @@ mod tests {
             let ans = Literal::new(data[i].clone(), data_type[i]);
             assert_eq!(res, ans);
         }
+        meta.stop().await;
     }
 }
