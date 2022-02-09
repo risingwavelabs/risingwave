@@ -236,7 +236,7 @@ mod tests {
         let (blocks, meta) = b.finish();
 
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
-        let table = gen_remote_sstable(obj_client, 0, blocks, meta, REMOTE_DIR)
+        let table = gen_remote_sstable(obj_client, 0, blocks, meta, REMOTE_DIR, None)
             .await
             .unwrap();
 

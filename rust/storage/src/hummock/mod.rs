@@ -191,7 +191,7 @@ impl HummockStorage {
 
     async fn get_snapshot(&self) -> HummockResult<HummockSnapshot> {
         let timer = self.stats.get_snapshot_latency.start_timer();
-        let epoch = self.hummock_meta_client().pin_snapshot().await?;
+        let epoch = u64::MAX;
         let res = HummockSnapshot::new(epoch, self.local_version_manager.clone());
         timer.observe_duration();
         Ok(res)
@@ -285,6 +285,7 @@ impl HummockStorage {
                     blocks,
                     meta,
                     self.options.remote_dir.as_str(),
+                    Some(self.local_version_manager.block_cache.clone()),
                 )
                 .await?;
                 tables.push(table);
