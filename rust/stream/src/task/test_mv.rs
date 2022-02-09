@@ -111,6 +111,7 @@ async fn test_stream_mv_proto() {
     };
     let actor_proto = StreamActor {
         actor_id: 1,
+        fragment_id: 1,
         nodes: Some(mview_proto),
         dispatcher: Some(Dispatcher {
             r#type: DispatcherType::Simple as i32,

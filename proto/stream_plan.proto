@@ -121,8 +121,9 @@ message Dispatcher {
 // A StreamActor is a running fragment of the overall stream graph,
 message StreamActor {
   uint32 actor_id = 1;
-  StreamNode nodes = 2;
-  Dispatcher dispatcher = 3;
+  uint32 fragment_id = 2;
+  StreamNode nodes = 3;
+  Dispatcher dispatcher = 4;
   // Number of downstreams decides how many endpoints a dispatcher should dispatch.
-  repeated uint32 downstream_actor_id = 4;
+  repeated uint32 downstream_actor_id = 5;
 }
