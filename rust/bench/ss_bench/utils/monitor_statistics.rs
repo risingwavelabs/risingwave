@@ -2,7 +2,7 @@ use prometheus::core::{AtomicU64, Collector, GenericCounter, Metric};
 use prometheus::Histogram;
 use risingwave_storage::monitor::DEFAULT_STATE_STORE_STATS;
 
-fn proc_histogram(histogram: Histogram) {
+fn proc_histogram(histogram: &Histogram) {
     let metric = histogram.metric();
     let metric_str = format!("{:#?}", metric);
     let str_lines = metric_str.split('\n').collect::<Vec<&str>>();
@@ -63,42 +63,42 @@ fn proc_histogram(histogram: Histogram) {
         _ => buckets[buckets.len() - 1].1,
     };
 
-    let desc = histogram.desc()[0].fq_name.clone();
+    let desc = &histogram.desc()[0].fq_name;
 
     println!("{desc} P50 : {p50} P95 : {p95} P99 : {p99} P100 : {p100} COUNT : {sample_count} SUM : {sample_sum}");
 }
 
-fn proc_counter(counter: GenericCounter<AtomicU64>) {
-    let desc = counter.desc()[0].fq_name.clone();
+fn proc_counter(counter: &GenericCounter<AtomicU64>) {
+    let desc = &counter.desc()[0].fq_name;
     let metric = counter.metric().get_gauge().get_value();
     println!("{desc} COUNT : {metric}");
 }
 
-pub(crate) async fn print_statistics() {
+pub(crate) fn print_statistics() {
     println!("STATISTICS:");
 
     let stat = DEFAULT_STATE_STORE_STATS.clone();
 
     // ----- TODO(Ting Sun): use macro to simplify the implementation -----
-    proc_counter(stat.get_bytes.clone());
-    proc_counter(stat.get_counts.clone());
-    proc_counter(stat.put_bytes.clone());
-    proc_counter(stat.range_scan_counts.clone());
-    proc_counter(stat.batched_write_counts.clone());
-    proc_counter(stat.batch_write_tuple_counts.clone());
-    proc_counter(stat.iter_counts.clone());
-    proc_counter(stat.iter_next_counts.clone());
+    proc_counter(&stat.get_bytes);
+    proc_counter(&stat.get_counts);
+    proc_counter(&stat.put_bytes);
+    proc_counter(&stat.range_scan_counts);
+    proc_counter(&stat.batched_write_counts);
+    proc_counter(&stat.batch_write_tuple_counts);
+    proc_counter(&stat.iter_counts);
+    proc_counter(&stat.iter_next_counts);
 
-    proc_histogram(stat.get_latency.clone());
-    proc_histogram(stat.get_key_size.clone());
-    proc_histogram(stat.get_value_size.clone());
-    proc_histogram(stat.get_snapshot_latency.clone());
-    proc_histogram(stat.batch_write_latency.clone());
-    proc_histogram(stat.batch_write_size.clone());
-    proc_histogram(stat.batch_write_build_table_latency.clone());
-    proc_histogram(stat.batch_write_add_l0_latency.clone());
-    proc_histogram(stat.iter_seek_latency.clone());
-    proc_histogram(stat.iter_next_latency.clone());
+    proc_histogram(&stat.get_latency);
+    proc_histogram(&stat.get_key_size);
+    proc_histogram(&stat.get_value_size);
+    proc_histogram(&stat.get_snapshot_latency);
+    proc_histogram(&stat.batch_write_latency);
+    proc_histogram(&stat.batch_write_size);
+    proc_histogram(&stat.batch_write_build_table_latency);
+    proc_histogram(&stat.batch_write_add_l0_latency);
+    proc_histogram(&stat.iter_seek_latency);
+    proc_histogram(&stat.iter_next_latency);
 
     println!();
 }

@@ -240,6 +240,6 @@ async fn main() {
     };
 
     if opts.statistics {
-        print_statistics().await;
+        print_statistics();
     }
 }
