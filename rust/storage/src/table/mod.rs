@@ -88,22 +88,30 @@ pub trait ScannableTable: Sync + Send + Any + core::fmt::Debug {
             })
             .collect::<Result<Vec<_>>>()?;
 
+        let mut row_count = 0;
         for _ in 0..chunk_size.unwrap_or(usize::MAX) {
             match iter.next().await? {
                 Some(row) => {
                     for (&index, builder) in indices.iter().zip_eq(builders.iter_mut()) {
                         builder.append_datum(&row.0[index])?;
                     }
+                    row_count += 1;
                 }
                 None => break,
             }
         }
 
-        let columns: Vec<Column> = builders
-            .into_iter()
-            .map(|builder| builder.finish().map(|a| Column::new(Arc::new(a))))
-            .try_collect()?;
-        let chunk = DataChunk::builder().columns(columns).build();
+        let chunk = if indices.is_empty() {
+            // Generate some dummy data to ensure a correct cardinality, which might be used by
+            // count(*).
+            DataChunk::new_dummy(row_count)
+        } else {
+            let columns: Vec<Column> = builders
+                .into_iter()
+                .map(|builder| builder.finish().map(|a| Column::new(Arc::new(a))))
+                .try_collect()?;
+            DataChunk::builder().columns(columns).build()
+        };
 
         if chunk.cardinality() == 0 {
             Ok(None)
