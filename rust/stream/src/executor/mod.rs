@@ -45,7 +45,7 @@ mod hash_agg;
 mod hash_join;
 mod managed_state;
 mod merge;
-mod monitor;
+pub mod monitor;
 mod mview;
 mod project;
 mod simple_agg;
