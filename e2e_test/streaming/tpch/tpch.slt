@@ -1,4 +1,6 @@
 include ../../tpch/create_tables.slt.part
+include ./create_views.slt.part
+
 include ../../tpch/insert_customer.slt.part
 include ../../tpch/insert_lineitem.slt.part
 include ../../tpch/insert_nation.slt.part
@@ -7,9 +9,6 @@ include ../../tpch/insert_part.slt.part
 include ../../tpch/insert_partsupp.slt.part
 include ../../tpch/insert_region.slt.part
 include ../../tpch/insert_supplier.slt.part
-
-
-include ./create_views.slt.part
 
 
 statement ok
