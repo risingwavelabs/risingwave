@@ -19,6 +19,7 @@ use crate::vector_op::ltrim::ltrim;
 use crate::vector_op::rtrim::rtrim;
 use crate::vector_op::trim::trim;
 use crate::vector_op::upper::upper;
+use crate::vector_op::lower::lower;
 
 /// This macro helps to create cast expression.
 /// It receives all the combinations of `gen_cast` and generates corresponding match cases
@@ -295,6 +296,12 @@ pub fn new_unary_expr(
             expr_ia1: child_expr,
             return_type,
             func: upper,
+            _phantom: PhantomData,
+        }),
+        (ProstType::Lower, _, _) => Box::new(UnaryBytesExpression::<Utf8Array, _> {
+            expr_ia1: child_expr,
+            return_type,
+            func: lower,
             _phantom: PhantomData,
         }),
         (ProstType::Neg, _, _) => {

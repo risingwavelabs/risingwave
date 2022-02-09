@@ -17,6 +17,7 @@ pub mod rtrim;
 pub mod substr;
 pub mod trim;
 pub mod upper;
+pub mod lower;
 
 #[cfg(test)]
 mod tests;
