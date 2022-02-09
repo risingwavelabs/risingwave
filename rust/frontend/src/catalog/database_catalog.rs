@@ -41,7 +41,7 @@ impl DatabaseCatalog {
         self.schema_by_name.get_mut(schema)
     }
 
-    pub fn id(&self) -> u32 {
+    pub fn id(&self) -> u64 {
         self.id
     }
 }

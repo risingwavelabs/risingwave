@@ -103,4 +103,5 @@ message AggCall {
   Type type = 1;
   repeated Arg args = 2;
   data.DataType return_type = 3;
+  bool distinct = 4;
 }

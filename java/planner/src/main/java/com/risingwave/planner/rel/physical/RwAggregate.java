@@ -67,6 +67,7 @@ public abstract class RwAggregate extends Aggregate {
     var builder = AggCall.newBuilder();
     builder.setType(SQL_TO_AGG_CALL.get(call.getAggregation().kind));
     builder.setReturnType(((RisingWaveDataType) call.getType()).getProtobufType());
+    builder.setDistinct(call.isDistinct());
     for (int column : call.getArgList()) {
       var type = input.getRowType().getFieldList().get(column).getType();
       var arg =
