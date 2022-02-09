@@ -6,7 +6,7 @@ use fixedbitset::FixedBitSet;
 /// `ColIndexMapping` is used in optimizer to and rewirte expressions and porperties associating
 /// with column index
 pub trait ColIndexMapping {
-    /// panic if the input index is out of source
+    /// panic if the input index is illegal
     fn map(&self, index: usize) -> usize;
 }
 pub type BoxedColIndexMapping = Box<dyn ColIndexMapping>;
