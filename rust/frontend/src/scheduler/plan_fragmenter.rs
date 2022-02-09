@@ -10,10 +10,18 @@ use crate::optimizer::PlanRef;
 
 type StageId = u64;
 
-#[derive(Default)]
 struct BatchPlanFragmenter {
     stage_graph_builder: StageGraphBuilder,
     next_stage_id: u64,
+}
+
+impl BatchPlanFragmenter {
+    pub fn new() -> Self {
+        Self {
+            stage_graph_builder: StageGraphBuilder::new(),
+            next_stage_id: 0,
+        }
+    }
 }
 
 struct Query {
@@ -33,7 +41,6 @@ struct QueryStage {
 
 type QueryStageRef = Arc<QueryStage>;
 
-#[derive(Default)]
 struct StageGraph {
     id: StageId,
     stages: HashMap<StageId, QueryStageRef>,
@@ -41,12 +48,11 @@ struct StageGraph {
     child_edges: HashMap<StageId, HashSet<StageId>>,
     /// Traverse from down to top. Used in schedule each stage.
     parent_edges: HashMap<StageId, HashSet<StageId>>,
-    /// Indicates which stage the exchange exeuctor is running on.
+    /// Indicates which stage the exchange executor is running on.
     /// Look up child stage for exchange source so that parent stage knows where to pull data.
     exchange_id_to_stage: HashMap<u64, StageId>,
 }
 
-#[derive(Default)]
 struct StageGraphBuilder {
     stages: HashMap<StageId, QueryStageRef>,
     child_edges: HashMap<StageId, HashSet<StageId>>,
@@ -55,6 +61,15 @@ struct StageGraphBuilder {
 }
 
 impl StageGraphBuilder {
+    pub fn new() -> Self {
+        Self {
+            stages: HashMap::new(),
+            child_edges: HashMap::new(),
+            parent_edges: HashMap::new(),
+            exchange_id_to_stage: HashMap::new(),
+        }
+    }
+
     pub fn build(mut self, stage_id: StageId) -> StageGraph {
         for stage_id in self.stages.keys() {
             if self.child_edges.get(stage_id).is_none() {
@@ -77,10 +92,14 @@ impl StageGraphBuilder {
 
     /// Link parent stage and child stage. Maintain the mappings of parent -> child and child ->
     /// parent.
+    ///
+    /// # Arguments
+    ///
+    /// * `exchange_id` - The operator id of exchange executor.
     pub fn link_to_child(&mut self, parent_id: StageId, exchange_id: u64, child_id: StageId) {
         let child_ids = self.child_edges.get_mut(&parent_id);
-        // If the parent id does not exist, create a new set containing the child ids. Otherwise just
-        // insert.
+        // If the parent id does not exist, create a new set containing the child ids. Otherwise
+        // just insert.
         match child_ids {
             Some(childs) => {
                 childs.insert(child_id);
@@ -94,8 +113,8 @@ impl StageGraphBuilder {
         };
 
         let parent_ids = self.parent_edges.get_mut(&child_id);
-        // If the child id does not exist, create a new set containing the parent ids. Otherwise just
-        // insert.
+        // If the child id does not exist, create a new set containing the parent ids. Otherwise
+        // just insert.
         match parent_ids {
             Some(parent_ids) => {
                 parent_ids.insert(parent_id);
@@ -190,12 +209,18 @@ mod tests {
         //   Scan  Scan
         //
         let batch_plan_node = BatchSeqScan::default().into_plan_ref();
-        let batch_exchange_node1 =
-            BatchExchange::new(batch_plan_node.clone(), Order::default(), Distribution::Any)
-                .into_plan_ref();
-        let batch_exchange_node2 =
-            BatchExchange::new(batch_plan_node.clone(), Order::default(), Distribution::Any)
-                .into_plan_ref();
+        let batch_exchange_node1 = BatchExchange::new(
+            batch_plan_node.clone(),
+            Order::default(),
+            Distribution::Shard,
+        )
+        .into_plan_ref();
+        let batch_exchange_node2 = BatchExchange::new(
+            batch_plan_node.clone(),
+            Order::default(),
+            Distribution::Shard,
+        )
+        .into_plan_ref();
         let hash_join_node = BatchHashJoin::new(LogicalJoin::new(
             batch_exchange_node1.clone(),
             batch_exchange_node2.clone(),
@@ -211,7 +236,7 @@ mod tests {
         .into_plan_ref();
 
         // Break the plan node into fragments.
-        let fragmenter = BatchPlanFragmenter::default();
+        let fragmenter = BatchPlanFragmenter::new();
         let query = fragmenter.split(batch_exchange_node3).unwrap();
 
         assert_eq!(query.stage_graph.id, 0);
