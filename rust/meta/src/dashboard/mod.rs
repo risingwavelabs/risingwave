@@ -85,7 +85,7 @@ mod handlers {
             .iter()
             .map(|node| ActorLocation {
                 node: Some(node.clone()),
-                actors: node_actors.get(&node.id).unwrap().clone(),
+                actors: node_actors.get(&node.id).cloned().unwrap_or(vec![]),
             })
             .collect::<Vec<_>>();
 
