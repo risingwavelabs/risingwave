@@ -11,9 +11,9 @@ pub struct BoundQuery {
 }
 
 impl Binder {
-    pub(super) fn bind_query(&mut self, query: Query) -> Result<BoundQuery> {
+    pub(super) async fn bind_query(&mut self, query: Query) -> Result<BoundQuery> {
         Ok(BoundQuery {
-            body: self.bind_set_expr(query.body)?,
+            body: self.bind_set_expr(query.body).await?,
         })
     }
 }

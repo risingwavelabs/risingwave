@@ -19,7 +19,7 @@ impl Binder {
     pub fn new() -> Binder {
         Binder {}
     }
-    pub fn bind(&mut self, stmt: Statement) -> Result<BoundStatement> {
-        self.bind_statement(stmt)
+    pub async fn bind(&mut self, stmt: Statement) -> Result<BoundStatement> {
+        self.bind_statement(stmt).await
     }
 }

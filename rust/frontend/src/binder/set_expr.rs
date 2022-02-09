@@ -11,7 +11,7 @@ pub enum BoundSetExpr {
 }
 
 impl Binder {
-    pub(super) fn bind_set_expr(&mut self, set_expr: SetExpr) -> Result<BoundSetExpr> {
+    pub(super) async fn bind_set_expr(&mut self, set_expr: SetExpr) -> Result<BoundSetExpr> {
         match set_expr {
             SetExpr::Values(v) => Ok(BoundSetExpr::Values(Box::new(self.bind_values(v)?))),
             _ => Err(ErrorCode::NotImplementedError(format!("{:?}", set_expr)).into()),
