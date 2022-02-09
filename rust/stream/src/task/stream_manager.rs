@@ -123,22 +123,8 @@ impl StreamManager {
 
     pub fn take_receiver(&self, ids: UpDownActorIds) -> Result<Receiver<Message>> {
         let core = self.core.lock().unwrap();
-        let mut guard = core.context.lock_channel_pool_for_exchange_service();
-        guard
-            .remove(&ids)
-            .ok_or_else(|| {
-                RwError::from(ErrorCode::InternalError(format!(
-                    "No receivers for rpc output from {} to {}",
-                    ids.0, ids.1
-                )))
-            })?
-            .1
-            .ok_or_else(|| {
-                RwError::from(ErrorCode::InternalError(format!(
-                    "sender from {} to {} does no exist",
-                    ids.0, ids.1,
-                )))
-            })
+        core.context
+            .get_receiver_from_exchange_channel_pool_by_ids(&ids)
     }
 
     pub fn update_actors(&self, actors: &[stream_plan::StreamActor]) -> Result<()> {
@@ -272,23 +258,9 @@ impl StreamManagerCore {
                 let downstream_addr = host_addr.to_socket_addr()?;
                 if is_local_address(&downstream_addr, &self.context.addr) {
                     // if this is a local downstream actor
-                    let mut guard = self.context.lock_channel_pool();
-                    let tx = guard
-                        .get_mut(&(actor_id, *down_id))
-                        .ok_or_else(|| {
-                            RwError::from(ErrorCode::InternalError(format!(
-                                "create dispatcher error: local channel between {} and {} does not exist",
-                                actor_id, down_id
-                            )))
-                        })?
-                        .0
-                        .take()
-                        .ok_or_else(|| {
-                            RwError::from(ErrorCode::InternalError(format!(
-                                "create dispatcher error: sender from {} to {} does no exist",
-                                actor_id, down_id
-                            )))
-                        })?;
+                    let tx = self
+                        .context
+                        .get_sender_from_local_channel_pool_by_ids(&(actor_id, *down_id))?;
                     Ok(Box::new(ChannelOutput::new(tx)) as Box<dyn Output>)
                 } else {
                     // This channel is used for `RpcOutput` and `ExchangeServiceImpl`.
@@ -296,7 +268,7 @@ impl StreamManagerCore {
                     // later, `ExchangeServiceImpl` comes to get it
                     let mut guard = self.context.lock_channel_pool_for_exchange_service();
 
-                    guard.insert(up_down_ids, (Some(tx.clone()),Some(rx)));
+                    guard.insert(up_down_ids, (Some(tx.clone()), Some(rx)));
                     Ok(Box::new(RemoteOutput::new(tx)) as Box<dyn Output>)
                 }
             })
@@ -728,23 +700,9 @@ impl StreamManagerCore {
                         // Get the sender for `RemoteInput` to forward received messages to
                         // receivers in `ReceiverExecutor` or
                         // `MergerExecutor`.
-                        let mut guard = self.context.lock_channel_pool();
-                        let sender = guard
-                            .get_mut(&(*up_id, actor_id))
-                            .ok_or_else(|| {
-                                RwError::from(ErrorCode::InternalError(format!(
-                                    "create merger error: remote channel between {} and {} does not exist",
-                                    up_id, actor_id
-                                )))
-                            })?
-                            .0
-                            .take()
-                            .ok_or_else(|| {
-                                RwError::from(ErrorCode::InternalError(format!(
-                                    "create merger error: remote sender from {} to {} does no exist",
-                                    up_id, actor_id
-                                )))
-                            })?;
+                        let sender = self
+                            .context
+                            .get_sender_from_local_channel_pool_by_ids(&(*up_id, actor_id))?;
                         // spawn the `RemoteInput`
                         let up_id = *up_id;
                         tokio::spawn(async move {
@@ -762,23 +720,9 @@ impl StreamManagerCore {
                             }
                         });
                     }
-                    let mut guard = self.context.lock_channel_pool();
-                    Ok(guard
-                        .get_mut(&(*up_id, actor_id))
-                        .ok_or_else(|| {
-                            RwError::from(ErrorCode::InternalError(format!(
-                                "create merger error: channel between {} and {} does not exist",
-                                up_id, actor_id
-                            )))
-                        })?
-                        .1
-                        .take()
-                        .ok_or_else(|| {
-                            RwError::from(ErrorCode::InternalError(format!(
-                                "create merger error: receiver from {} to {} does no exist",
-                                up_id, actor_id
-                            )))
-                        })?)
+                    Ok(self
+                        .context
+                        .get_receiver_from_local_channel_pool_by_ids(&(*up_id, actor_id))?)
                 }
             })
             .collect::<Result<Vec<_>>>()?;

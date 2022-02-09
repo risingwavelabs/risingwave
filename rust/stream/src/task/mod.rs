@@ -3,6 +3,7 @@ use std::net::SocketAddr;
 use std::sync::{Mutex, MutexGuard};
 
 use futures::channel::mpsc::{Receiver, Sender};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 
 use crate::executor::Message;
 
@@ -95,5 +96,97 @@ impl SharedContext {
         &self,
     ) -> MutexGuard<HashMap<UpDownActorIds, ConsumableChannelPair>> {
         self.channel_pool_for_exchange_service.lock().unwrap()
+    }
+
+    #[inline]
+    pub fn get_sender_from_local_channel_pool_by_ids(
+        &self,
+        ids: &UpDownActorIds,
+    ) -> Result<Sender<Message>> {
+        self.lock_channel_pool()
+            .get_mut(ids)
+            .ok_or_else(|| {
+                RwError::from(ErrorCode::InternalError(format!(
+                    "channel between {} and {} does not exist",
+                    ids.0, ids.1
+                )))
+            })?
+            .0
+            .take()
+            .ok_or_else(|| {
+                RwError::from(ErrorCode::InternalError(format!(
+                    "receiver from {} to {} does no exist",
+                    ids.0, ids.1
+                )))
+            })
+    }
+
+    #[inline]
+    pub fn get_receiver_from_local_channel_pool_by_ids(
+        &self,
+        ids: &UpDownActorIds,
+    ) -> Result<Receiver<Message>> {
+        self.lock_channel_pool()
+            .get_mut(ids)
+            .ok_or_else(|| {
+                RwError::from(ErrorCode::InternalError(format!(
+                    "channel between {} and {} does not exist",
+                    ids.0, ids.1
+                )))
+            })?
+            .1
+            .take()
+            .ok_or_else(|| {
+                RwError::from(ErrorCode::InternalError(format!(
+                    "receiver from {} to {} does no exist",
+                    ids.0, ids.1
+                )))
+            })
+    }
+
+    #[inline]
+    pub fn get_sender_from_exchange_channel_pool_by_ids(
+        &self,
+        ids: &UpDownActorIds,
+    ) -> Result<Sender<Message>> {
+        self.lock_channel_pool_for_exchange_service()
+            .get_mut(ids)
+            .ok_or_else(|| {
+                RwError::from(ErrorCode::InternalError(format!(
+                    "channel between {} and {} does not exist",
+                    ids.0, ids.1
+                )))
+            })?
+            .0
+            .take()
+            .ok_or_else(|| {
+                RwError::from(ErrorCode::InternalError(format!(
+                    "receiver from {} to {} does no exist",
+                    ids.0, ids.1
+                )))
+            })
+    }
+
+    #[inline]
+    pub fn get_receiver_from_exchange_channel_pool_by_ids(
+        &self,
+        ids: &UpDownActorIds,
+    ) -> Result<Receiver<Message>> {
+        self.lock_channel_pool_for_exchange_service()
+            .get_mut(ids)
+            .ok_or_else(|| {
+                RwError::from(ErrorCode::InternalError(format!(
+                    "channel between {} and {} does not exist",
+                    ids.0, ids.1
+                )))
+            })?
+            .1
+            .take()
+            .ok_or_else(|| {
+                RwError::from(ErrorCode::InternalError(format!(
+                    "receiver from {} to {} does no exist",
+                    ids.0, ids.1
+                )))
+            })
     }
 }
