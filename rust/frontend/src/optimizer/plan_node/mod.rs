@@ -94,6 +94,7 @@ mod logical_join;
 mod logical_limit;
 mod logical_project;
 mod logical_scan;
+mod logical_topn;
 mod logical_values;
 mod stream_exchange;
 mod stream_hash_join;
@@ -111,6 +112,7 @@ pub use logical_join::LogicalJoin;
 pub use logical_limit::LogicalLimit;
 pub use logical_project::LogicalProject;
 pub use logical_scan::LogicalScan;
+pub use logical_topn::LogicalTopN;
 pub use logical_values::LogicalValues;
 pub use stream_exchange::StreamExchange;
 pub use stream_hash_join::StreamHashJoin;
@@ -141,6 +143,7 @@ macro_rules! for_all_plan_nodes {
           ,{ Logical, Join}
           ,{ Logical, Values}
           ,{ Logical, Limit}
+          ,{ Logical, TopN}
           // ,{ Logical, Sort} we don't need a LogicalSort, just require the Order
           ,{ Batch, Project}
           ,{ Batch, SeqScan}
@@ -168,6 +171,7 @@ macro_rules! for_logical_plan_nodes {
             ,{ Logical, Join}
             ,{ Logical, Values}
             ,{ Logical, Limit}
+            ,{ Logical, TopN}
             // ,{ Logical, Sort} not sure if we will support Order by clause in subquery/view/MV
             // if we dont support thatk, we don't need LogicalSort, just require the Order at the top of query
         }
