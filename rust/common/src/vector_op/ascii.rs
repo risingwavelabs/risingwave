@@ -2,10 +2,7 @@ use crate::error::Result;
 
 #[inline(always)]
 pub fn ascii(s: &str) -> Result<i32> {
-    if s.len() == 0 {
-        return Ok(0);
-    }
-    Ok(s.bytes().nth(0).unwrap() as i32)
+    Ok(s.as_bytes().get(0).map(|x| *x as i32).unwrap_or(0))
 }
 
 #[cfg(test)]
