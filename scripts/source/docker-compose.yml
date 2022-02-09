@@ -47,7 +47,7 @@ services:
     tty: true
 
   mysql:
-    image: ghcr.io/singularity-data/example-mysql:latest  # debezium/example-mysql:1.8.0.Final
+    image: ghcr.io/singularity-data/debezium-example-mysql:1.8.0.Final
     hostname: mysql
     container_name: mysql
     ports:
@@ -58,7 +58,7 @@ services:
      - MYSQL_PASSWORD=mysqlpw
 
   debezium:
-    image: ghcr.io/singularity-data/connect:latest  # debezium/connect:1.8.0.Final
+    image: ghcr.io/singularity-data/debezium-connect:1.8.0.Final
     hostname: debezium
     container_name: debezium
     ports:
