@@ -134,7 +134,7 @@ impl<S: StateStore> Keyspace<S> {
         self.store.scan(range, limit, epoch).await
     }
 
-    /// Scan `limit` keys from the keyspace using a exclusive `start_key` and get their values. If
+    /// Scan `limit` keys from the keyspace using a inclusive `start_key` and get their values. If
     /// `limit` is None, all keys of the given prefix will be scanned.
     /// The returned values are based on a snapshot corresponding to the given `epoch`
     pub async fn scan_with_start_key(
@@ -149,7 +149,7 @@ impl<S: StateStore> Keyspace<S> {
             start_key,
             self.prefix
         );
-        let range = next_key(start_key.as_slice())..next_key(self.prefix.as_slice());
+        let range = start_key..next_key(self.prefix.as_slice());
         self.store.scan(range, limit, epoch).await
     }
 

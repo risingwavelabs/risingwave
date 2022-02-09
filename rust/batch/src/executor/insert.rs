@@ -568,13 +568,8 @@ mod tests {
         // There's nothing in store since `TableSourceV2` has no side effect.
         // Data will be materialized in associated streaming task.
         let epoch = u64::MAX;
-        let store_content = store
-            .scan(
-                (Bound::<Vec<u8>>::Unbounded, Bound::<Vec<u8>>::Unbounded),
-                None,
-                epoch,
-            )
-            .await?;
+        let full_range = (Bound::<Vec<u8>>::Unbounded, Bound::<Vec<u8>>::Unbounded);
+        let store_content = store.scan(full_range, None, epoch).await?;
         assert!(store_content.is_empty());
 
         // First insertion test ends.

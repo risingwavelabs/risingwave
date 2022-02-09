@@ -11,6 +11,7 @@ use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 
 use super::TableIterRef;
+use crate::hummock::key::next_key;
 use crate::table::{ScannableTable, TableIter};
 use crate::{Keyspace, StateStore, TableColumnDesc};
 
@@ -185,9 +186,10 @@ impl<'a, S: StateStore> MViewTableIter<S> {
         if self.buf.is_empty() {
             self.buf = self.keyspace.scan(Some(limit), self.epoch).await?
         } else {
+            let next_key = next_key(self.buf.last().unwrap().0.to_vec().as_slice());
             self.buf = self
                 .keyspace
-                .scan_with_start_key(self.buf.last().unwrap().0.to_vec(), Some(limit), self.epoch)
+                .scan_with_start_key(next_key, Some(limit), self.epoch)
                 .await?
         }
         self.next_idx = 0;
