@@ -10,6 +10,7 @@ pub mod like;
 
 pub mod position;
 
+pub mod ascii;
 pub mod ltrim;
 pub mod replace;
 pub mod round;

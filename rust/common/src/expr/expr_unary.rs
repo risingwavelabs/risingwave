@@ -11,6 +11,7 @@ use crate::expr::template::UnaryNullableExpression;
 use crate::expr::BoxedExpression;
 use crate::types::*;
 use crate::vector_op::arithmetic_op::general_neg;
+use crate::vector_op::ascii::ascii;
 use crate::vector_op::cast::*;
 use crate::vector_op::cmp::{is_false, is_not_false, is_not_true, is_true};
 use crate::vector_op::conjunction;
@@ -341,6 +342,15 @@ pub fn new_rtrim_expr(expr_ia1: BoxedExpression, return_type: DataType) -> Boxed
         expr_ia1,
         return_type,
         func: rtrim,
+        _phantom: PhantomData,
+    })
+}
+
+pub fn new_ascii_expr(expr_ia1: BoxedExpression, return_type: DataType) -> BoxedExpression {
+    Box::new(UnaryExpression::<Utf8Array, I32Array, _> {
+        expr_ia1,
+        return_type,
+        func: ascii,
         _phantom: PhantomData,
     })
 }

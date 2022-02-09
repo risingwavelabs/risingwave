@@ -13,12 +13,14 @@ message ExprNode {
     INVALID = 0;
     INPUT_REF = 1;
     CONSTANT_VALUE = 2;
+
     // arithmetics operators
     ADD = 3;
     SUBTRACT = 4;
     MULTIPLY = 5;
     DIVIDE = 6;
     MODULUS = 7;
+
     // comparison operators
     EQUAL = 8;
     NOT_EQUAL = 9;
@@ -26,13 +28,16 @@ message ExprNode {
     LESS_THAN_OR_EQUAL = 11;
     GREATER_THAN = 12;
     GREATER_THAN_OR_EQUAL = 13;
+
     // logical operators
     AND = 21;
     OR = 22;
     NOT = 23;
+
     // date functions
     EXTRACT = 101;
     PG_SLEEP = 102;
+
     // other functions
     CAST = 201;
     SUBSTR = 202;
@@ -50,17 +55,21 @@ message ExprNode {
     // ROUND(numeric) -> numeric
     // ROUND(double precision) -> double precision
     ROUND = 214;
+    ASCII = 215;
+
     // Boolean comparison
-    IS_TRUE = 215;
-    IS_NOT_TRUE = 216;
-    IS_FALSE = 217;
-    IS_NOT_FALSE = 218;
-    IS_NULL = 219;
-    IS_NOT_NULL = 220;
+    IS_TRUE = 301;
+    IS_NOT_TRUE = 302;
+    IS_FALSE = 303;
+    IS_NOT_FALSE = 304;
+    IS_NULL = 305;
+    IS_NOT_NULL = 306;
+
     // Unary operators
-    NEG = 221;
+    NEG = 401;
     STREAM_NULL_BY_ROW_COUNT = 1000;
   }
+
   Type expr_type = 1;
   data.DataType return_type = 3;
   oneof rex_node {
