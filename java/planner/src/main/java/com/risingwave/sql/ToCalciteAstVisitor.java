@@ -459,7 +459,8 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
   @Override
   protected SqlNode visitDoubleLiteral(DoubleLiteral node, Void context) {
     // TODO: Optimize this
-    String value = BigDecimal.valueOf(node.getValue()).toString();
+    BigDecimal decimal = new BigDecimal(node.getValueString());
+    String value = decimal.toString();
     return SqlLiteral.createExactNumeric(value, SqlParserPos.ZERO);
   }
 

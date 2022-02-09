@@ -4,15 +4,15 @@ use risingwave_common::error::ErrorCode;
 use thiserror::Error;
 
 pub(crate) mod catalog_service;
-mod column_catalog;
+pub(crate) mod column_catalog;
 mod database_catalog;
 mod schema_catalog;
 mod table_catalog;
 
-pub(crate) type DatabaseId = u32;
-pub(crate) type SchemaId = u32;
-pub(crate) type TableId = u32;
-pub(crate) type ColumnId = u32;
+pub(crate) type DatabaseId = u64;
+pub(crate) type SchemaId = u64;
+pub(crate) type TableId = u64;
+pub(crate) type ColumnId = u64;
 
 #[derive(Error, Debug)]
 pub enum CatalogError {

@@ -1,8 +1,7 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::ops::Deref;
 use std::sync::Arc;
 
-use risingwave_common::array::RwError;
 use risingwave_common::error::Result;
 use risingwave_pb::stream_plan::dispatcher::DispatcherType;
 use risingwave_pb::stream_plan::stream_node::Node;
@@ -12,6 +11,8 @@ use risingwave_pb::stream_plan::{Dispatcher, MergeNode, StreamActor, StreamNode}
 pub struct StreamActorBuilder {
     /// actor id field.
     actor_id: u32,
+    /// associated fragment id.
+    fragment_id: u32,
     /// associated stream node.
     nodes: Arc<StreamNode>,
     /// dispatcher category.
@@ -23,9 +24,10 @@ pub struct StreamActorBuilder {
 }
 
 impl StreamActorBuilder {
-    pub fn new(actor_id: u32, node: Arc<StreamNode>) -> Self {
+    pub fn new(actor_id: u32, fragment_id: u32, node: Arc<StreamNode>) -> Self {
         Self {
             actor_id,
+            fragment_id,
             nodes: node,
             dispatcher: None,
             downstream_actors: BTreeSet::new(),
@@ -35,6 +37,10 @@ impl StreamActorBuilder {
 
     pub fn get_id(&self) -> u32 {
         self.actor_id
+    }
+
+    pub fn get_fragment_id(&self) -> u32 {
+        self.fragment_id
     }
 
     #[allow(dead_code)]
@@ -80,16 +86,16 @@ impl StreamActorBuilder {
     }
 }
 
-/// [`StreamGraphBuilder`] build a stream graph with root with id `root_actor`. It will do some
-/// injection here to achieve dependencies. See `build_inner` for more details.
+/// [`StreamGraphBuilder`] build a stream graph. It will do some injection here to achieve
+/// dependencies. See `build_inner` for more details.
 pub struct StreamGraphBuilder {
-    actor_builders: HashMap<u32, StreamActorBuilder>,
+    actor_builders: BTreeMap<u32, StreamActorBuilder>,
 }
 
 impl StreamGraphBuilder {
     pub fn new() -> Self {
         Self {
-            actor_builders: HashMap::new(),
+            actor_builders: BTreeMap::new(),
         }
     }
 
@@ -117,16 +123,18 @@ impl StreamGraphBuilder {
     }
 
     /// Build final stream DAG with dependencies with current actor builders.
-    pub fn build(&self) -> Result<Vec<StreamActor>> {
-        self.actor_builders
-            .values()
-            .map(|builder| {
-                let mut actor = builder.build();
-                let upstream_actors = builder.get_upstream_actors();
-                actor.nodes = Some(self.build_inner(actor.get_nodes()?, &upstream_actors, 0)?);
-                Ok::<_, RwError>(actor)
-            })
-            .collect::<Result<Vec<_>>>()
+    pub fn build(&self) -> Result<HashMap<u32, Vec<StreamActor>>> {
+        let mut graph = HashMap::new();
+        for builder in self.actor_builders.values() {
+            let mut actor = builder.build();
+            let upstream_actors = builder.get_upstream_actors();
+            actor.nodes = Some(self.build_inner(actor.get_nodes()?, &upstream_actors, 0)?);
+            graph
+                .entry(builder.get_fragment_id())
+                .or_insert(vec![])
+                .push(actor);
+        }
+        Ok(graph)
     }
 
     /// Build stream actor inside, two works will be done:
@@ -161,7 +169,7 @@ impl StreamGraphBuilder {
                                 .unwrap(),
                             input_column_descs: exchange_node.get_input_column_descs().clone(),
                         })),
-                        node_id: input.node_id,
+                        operator_id: input.operator_id,
                     };
                     next_idx_new += 1;
                 } else {

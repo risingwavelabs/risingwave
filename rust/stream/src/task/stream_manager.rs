@@ -367,9 +367,10 @@ impl StreamManagerCore {
             .map(|idx| *idx as usize)
             .collect::<Vec<_>>();
 
-        // We assume that the node_id of different instances from the same RelNode will be the same.
-        let executor_id = ((actor_id as u64) << 32) + node.get_node_id();
-        let node_id = node.get_node_id().try_into().unwrap();
+        // We assume that the operator_id of different instances from the same RelNode will be the
+        // same.
+        let executor_id = ((actor_id as u64) << 32) + node.get_operator_id();
+        let operator_id = node.get_operator_id().try_into().unwrap();
 
         let executor: Result<Box<dyn Executor>> = match node.get_node()? {
             SourceNode(node) => {
@@ -459,7 +460,7 @@ impl StreamManagerCore {
                     input.remove(0),
                     agg_calls,
                     keys,
-                    Keyspace::shared_executor_root(store.clone(), node_id),
+                    Keyspace::shared_executor_root(store.clone(), operator_id),
                     pk_indices,
                     executor_id,
                 )))
@@ -547,7 +548,7 @@ impl StreamManagerCore {
                                 params_l,
                                 params_r,
                                 pk_indices,
-                                Keyspace::shared_executor_root(store.clone(), node_id),
+                                Keyspace::shared_executor_root(store.clone(), operator_id),
                                 executor_id,
                                 condition,
                             )) as Box<dyn Executor>, )*
