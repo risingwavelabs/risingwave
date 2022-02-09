@@ -1,4 +1,4 @@
-use crate::expr::{get_col_refs, to_conjunctions, ExprImpl};
+use crate::expr::{to_conjunctions, ExprImpl};
 #[derive(Debug, Clone)]
 /// the join predicate used in optimizer
 pub struct JoinPredicate {
@@ -43,9 +43,7 @@ impl JoinPredicate {
     #[allow(unused_variables)]
     pub fn create(left_cols_num: usize, on_clause: ExprImpl) -> Self {
         let conds = to_conjunctions(on_clause);
-        for cond in conds {
-            let cols = get_col_refs(&cond);
-        }
+        for cond in conds {}
         todo!()
     }
 
