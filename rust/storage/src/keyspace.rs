@@ -69,7 +69,7 @@ impl<S: StateStore> Keyspace<S> {
     pub fn shared_executor_root(store: S, operator_id: u64) -> Self {
         let mut root = Self {
             store,
-            prefix: Vec::with_capacity(5),
+            prefix: Vec::with_capacity(9),
         };
         root.push(Segment::root(b's'));
         root.push(Segment::u64(operator_id));
