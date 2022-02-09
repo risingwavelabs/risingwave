@@ -18,8 +18,8 @@ pub(super) async fn handle(session: &RwSession, stmt: Statement) -> Result<PgRes
         Statement::CreateTable { name, columns, .. } => {
             create_table::handle_create_table(session, name, columns).await
         }
-        Statement::Drop(DropStatement) => {
-            let table_object_name = ObjectName(vec![DropStatement.name]);
+        Statement::Drop(drop_statement) => {
+            let table_object_name = ObjectName(vec![drop_statement.name]);
             drop_table::handle_drop_table(session, table_object_name).await
         }
         _ => Err(ErrorCode::NotImplementedError(format!("Unhandled ast: {:?}", stmt)).into()),
