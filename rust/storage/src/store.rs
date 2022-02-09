@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use moka::future::Cache;
 use risingwave_common::error::{Result, RwError};
 use risingwave_rpc_client::MetaClient;
 
@@ -144,7 +145,13 @@ impl StateStoreImpl {
                             checksum_algo: ChecksumAlg::Crc32c,
                         },
                         Arc::new(VersionManager::new()),
-                        Arc::new(LocalVersionManager::new(object_client, remote_dir)),
+                        Arc::new(LocalVersionManager::new(
+                            object_client,
+                            remote_dir,
+                            // TODO: configurable block cache in config
+                            // 1GB block cache (65536 blocks * 64KB block)
+                            Some(Arc::new(Cache::new(65536))),
+                        )),
                         Arc::new(RPCHummockMetaClient::new(meta_client)),
                     )
                     .await
@@ -173,7 +180,7 @@ impl StateStoreImpl {
                             checksum_algo: ChecksumAlg::Crc32c,
                         },
                         Arc::new(VersionManager::new()),
-                        Arc::new(LocalVersionManager::new(s3_store, remote_dir)),
+                        Arc::new(LocalVersionManager::new(s3_store, remote_dir, None)),
                         Arc::new(RPCHummockMetaClient::new(meta_client)),
                     )
                     .await

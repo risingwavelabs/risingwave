@@ -191,7 +191,7 @@ impl HummockStorage {
 
     async fn get_snapshot(&self) -> HummockResult<HummockSnapshot> {
         let timer = self.stats.get_snapshot_latency.start_timer();
-        let epoch = self.hummock_meta_client().pin_snapshot().await?;
+        let epoch = u64::MAX;
         let res = HummockSnapshot::new(epoch, self.local_version_manager.clone());
         timer.observe_duration();
         Ok(res)
@@ -209,8 +209,9 @@ impl HummockStorage {
     pub async fn get(&self, key: &[u8]) -> HummockResult<Option<Vec<u8>>> {
         self.stats.get_counts.inc();
         self.stats.get_key_size.observe(key.len() as f64);
-
+        let timer = self.stats.get_latency.start_timer();
         let value = self.get_snapshot().await?.get(key).await?;
+        timer.observe_duration();
         self.stats
             .get_value_size
             .observe((value.as_ref().map(|x| x.len()).unwrap_or(0) + 1) as f64);
@@ -284,6 +285,7 @@ impl HummockStorage {
                     blocks,
                     meta,
                     self.options.remote_dir.as_str(),
+                    Some(self.local_version_manager.block_cache.clone()),
                 )
                 .await?;
                 tables.push(table);
