@@ -483,18 +483,18 @@
     $(`#actor-wrapper-${operatorId}`).css("height", `${gHeight / 16}rem`)
   }
 
-  fetch('http://127.0.0.1:5691/api/clusters/0')
+  fetch('/api/clusters/0')
     .then(response => response.json())
     .then(data => data.forEach(
       data => $("#clusters").append(cluster("Frontend", data))))
-  fetch('http://127.0.0.1:5691/api/clusters/1')
+  fetch('/api/clusters/1')
     .then(response => response.json())
     .then(data => data.forEach(
       data => $("#clusters").append(cluster("Compute Node", data))))
   $("#clusters").append(cluster("Meta Node", { host: { host: "127.0.0.1", port: "2333" } }))
 
   const loadActors = () => {
-    fetch('http://127.0.0.1:5691/api/actors')
+    fetch('/api/actors')
       .then(response => response.json())
       .then(data => data.forEach(
         (data, operatorId) => {
