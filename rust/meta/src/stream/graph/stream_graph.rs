@@ -169,7 +169,7 @@ impl StreamGraphBuilder {
                                 .unwrap(),
                             input_column_descs: exchange_node.get_input_column_descs().clone(),
                         })),
-                        node_id: input.node_id,
+                        operator_id: input.operator_id,
                     };
                     next_idx_new += 1;
                 } else {

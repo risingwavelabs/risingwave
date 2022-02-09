@@ -22,7 +22,7 @@ public class StreamingPlanSerializer {
     // For now, we use the Calcite generated RelNode id as a temporary solution.
     // This means that operator is neither unique across multiple frontend, nor unique w.r.t
     // frontend fail-overs.
-    builder.setNodeId(root.getId());
+    builder.setOperatorId(root.getId());
     // Recursively add serialized input.
     root.getInputs().forEach(input -> builder.addInput(serialize((RisingWaveStreamingRel) input)));
     return builder.build();
