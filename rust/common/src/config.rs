@@ -46,8 +46,14 @@ impl Default for ServerConfig {
     }
 }
 
+impl ServerConfig {
+    pub fn heartbeat_interval(&self) -> u32 {
+        self.heartbeat_interval
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
-struct BatchConfig {
+pub struct BatchConfig {
     chunk_size: u32,
 }
 
@@ -59,8 +65,14 @@ impl Default for BatchConfig {
     }
 }
 
+impl BatchConfig {
+    pub fn chunk_size(&self) -> u32 {
+        self.chunk_size
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
-struct StreamingConfig {
+pub struct StreamingConfig {
     chunk_size: u32,
 }
 
@@ -69,6 +81,12 @@ impl Default for StreamingConfig {
         Self {
             chunk_size: DEFAULT_CHUNK_SIZE,
         }
+    }
+}
+
+impl StreamingConfig {
+    pub fn chunk_size(&self) -> u32 {
+        self.chunk_size
     }
 }
 
@@ -88,27 +106,17 @@ impl Default for HummockConfig {
     }
 }
 
-impl ComputeNodeConfig {
-    pub fn heartbeat_interval(&self) -> u32 {
-        self.server.heartbeat_interval
-    }
-
-    pub fn batch_chunk_size(&self) -> u32 {
-        self.batch.chunk_size
-    }
-
-    pub fn streaming_chunk_size(&self) -> u32 {
-        self.streaming.chunk_size
-    }
-
+impl HummockConfig {
     pub fn sst_size(&self) -> u32 {
-        self.hummock.sst_size
+        self.sst_size
     }
 
-    pub fn hummock_block_size(&self) -> u32 {
-        self.hummock.block_size
+    pub fn block_size(&self) -> u32 {
+        self.block_size
     }
+}
 
+impl ComputeNodeConfig {
     pub fn init(path: PathBuf) -> Result<ComputeNodeConfig> {
         let config_str = fs::read_to_string(path.clone()).map_err(|e| {
             RwError::from(InternalError(format!(
@@ -123,6 +131,7 @@ impl ComputeNodeConfig {
     }
 }
 
+#[cfg(test)]
 mod tests {
 
     #[test]
