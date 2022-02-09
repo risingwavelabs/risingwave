@@ -32,10 +32,6 @@ impl RocksDBStateStore {
             .get_or_init(|| async { RocksDBStorage::new(&self.db_path).await })
             .await
     }
-
-    pub fn get_stats_ref(&self) -> &StateStoreStats {
-        self.stats.as_ref()
-    }
 }
 
 #[async_trait]
@@ -43,7 +39,7 @@ impl StateStore for RocksDBStateStore {
     type Iter = RocksDBStateStoreIter;
 
     async fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
-        self.get_stats_ref().get_counts.inc();
+        self.stats.get_counts.inc();
         self.storage().await.get(key).await
     }
 

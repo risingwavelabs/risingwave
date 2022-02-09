@@ -52,10 +52,6 @@ impl MemoryStateStore {
         Ok(())
     }
 
-    pub fn get_stats_ref(&self) -> &StateStoreStats {
-        self.stats.as_ref()
-    }
-
     async fn scan_inner(&self, prefix: &[u8], limit: Option<usize>) -> Result<Vec<(Bytes, Bytes)>> {
         let mut data = vec![];
         if limit == Some(0) {
@@ -104,15 +100,15 @@ impl StateStore for MemoryStateStore {
     type Iter = MemoryStateStoreIter;
 
     async fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
-        self.get_stats_ref().get_counts.inc();
-        let timer = self.get_stats_ref().get_latency.start_timer();
+        self.stats.get_counts.inc();
+        let timer = self.stats.get_latency.start_timer();
         let inner = self.inner.lock().await;
         let res = inner.get(key).cloned();
         timer.observe_duration();
 
-        self.get_stats_ref().get_key_size.observe(key.len() as f64);
+        self.stats.get_key_size.observe(key.len() as f64);
         if res.is_some() {
-            self.get_stats_ref()
+            self.stats
                 .get_value_size
                 .observe(size_of_val(res.as_ref().unwrap()) as f64);
         }

@@ -1,26 +1,25 @@
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use risingwave_common::array::RwError;
 use risingwave_common::error::Result;
 use risingwave_pb::meta::Table;
 
 use crate::catalog::column_catalog::{ColumnCatalog, ColumnDesc};
-use crate::catalog::{ColumnId, TableId};
+use crate::catalog::{CatalogError, TableId};
 
 pub struct TableCatalog {
     table_id: TableId,
-    next_column_id: AtomicU32,
-    column_by_name: Vec<(String, ColumnCatalog)>,
-    primary_keys: Vec<ColumnId>,
+    next_column_id: AtomicU64,
+    column_by_name: HashMap<String, ColumnCatalog>,
 }
 
 impl TableCatalog {
     pub fn new(table_id: TableId) -> Self {
         Self {
             table_id,
-            next_column_id: AtomicU32::new(0),
-            column_by_name: vec![],
-            primary_keys: vec![],
+            next_column_id: AtomicU64::new(0),
+            column_by_name: HashMap::new(),
         }
     }
 
@@ -28,32 +27,25 @@ impl TableCatalog {
         let col_catalog = ColumnCatalog::new(
             self.next_column_id.fetch_add(1, Ordering::Relaxed),
             col_name.to_string(),
-            col_desc.clone(),
+            col_desc,
         );
-        if col_desc.is_primary() {
-            self.primary_keys.push(col_catalog.id());
-        }
         self.column_by_name
-            .push((col_name.to_string(), col_catalog));
+            .try_insert(col_name.to_string(), col_catalog)
+            .map_err(|_| RwError::from(CatalogError::Duplicated("column", col_name.to_string())))?;
         Ok(())
     }
 
-    pub fn get_column_by_id(&self, col_id: ColumnId) -> Option<&ColumnCatalog> {
-        self.column_by_name
-            .get(col_id as usize)
-            .map(|(_, col_catalog)| col_catalog)
+    /// Used by binder to do column name resolving: column name to column id.
+    pub fn get_column_by_name(&self, col_name: &str) -> Option<&ColumnCatalog> {
+        self.column_by_name.get(col_name)
     }
 
-    pub fn columns(&self) -> &[(String, ColumnCatalog)] {
-        self.column_by_name.as_slice()
+    pub fn columns(&self) -> &HashMap<String, ColumnCatalog> {
+        &self.column_by_name
     }
 
     pub fn id(&self) -> TableId {
         self.table_id
-    }
-
-    pub fn get_pks(&self) -> Vec<u32> {
-        self.primary_keys.clone()
     }
 }
 
@@ -61,12 +53,9 @@ impl TryFrom<&Table> for TableCatalog {
     type Error = RwError;
 
     fn try_from(tb: &Table) -> Result<Self> {
-        let mut table_catalog = Self::new(tb.get_table_ref_id()?.table_id as u32);
+        let mut table_catalog = Self::new(tb.get_table_ref_id()?.table_id as u64);
         for col in &tb.column_descs {
-            table_catalog.add_column(
-                &col.name,
-                ColumnDesc::new(col.get_column_type()?.into(), col.is_primary),
-            )?;
+            table_catalog.add_column(&col.name, ColumnDesc::new(col.get_column_type()?.into()))?;
         }
         Ok(table_catalog)
     }

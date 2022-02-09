@@ -2,17 +2,20 @@ use std::collections::HashMap;
 
 use risingwave_pb::common::WorkerNode;
 
+use crate::cluster::NodeId;
+use crate::model::ActorId;
 use crate::stream::ActorInfos;
 
 /// [`BarrierActorInfo`] resolves the actor info read from meta store for [`BarrierManager`].
 pub struct BarrierActorInfo {
     /// node_id => node
-    pub node_map: HashMap<u32, WorkerNode>,
+    pub node_map: HashMap<NodeId, WorkerNode>,
 
     /// node_id => actors
-    pub actor_map: HashMap<u32, Vec<u32>>,
+    pub actor_map: HashMap<NodeId, Vec<ActorId>>,
+
     /// node_id => source actors
-    pub actor_map_to_send: HashMap<u32, Vec<u32>>,
+    pub actor_map_to_send: HashMap<NodeId, Vec<ActorId>>,
 }
 
 impl BarrierActorInfo {
@@ -32,13 +35,13 @@ impl BarrierActorInfo {
     }
 
     // TODO: should only collect from reachable actors, for mv on mv
-    pub fn actor_ids_to_collect(&self, node_id: &u32) -> Option<impl Iterator<Item = u32>> {
+    pub fn actor_ids_to_collect(&self, node_id: &NodeId) -> Option<impl Iterator<Item = ActorId>> {
         self.actor_map
             .get(node_id)
             .map(|actor_ids| actor_ids.clone().into_iter())
     }
 
-    pub fn actor_ids_to_send(&self, node_id: &u32) -> Option<impl Iterator<Item = u32>> {
+    pub fn actor_ids_to_send(&self, node_id: &NodeId) -> Option<impl Iterator<Item = ActorId>> {
         self.actor_map_to_send
             .get(node_id)
             .map(|actor_ids| actor_ids.clone().into_iter())

@@ -27,6 +27,11 @@ impl AggCall {
     pub fn agg_kind(&self) -> AggKind {
         self.agg_kind.clone()
     }
+
+    /// Get a reference to the agg call's inputs.
+    pub fn inputs(&self) -> &[ExprImpl] {
+        self.inputs.as_ref()
+    }
 }
 impl Expr for AggCall {
     fn return_type(&self) -> DataType {

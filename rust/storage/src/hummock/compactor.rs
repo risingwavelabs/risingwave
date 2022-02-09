@@ -3,7 +3,6 @@ use std::sync::Arc;
 use bytes::BytesMut;
 use futures::stream::{self, StreamExt};
 
-use super::cloud::gen_remote_sstable;
 use super::iterator::{ConcatIterator, HummockIterator, MergeIterator};
 use super::key::{get_epoch, Epoch, FullKey};
 use super::key_range::KeyRange;
@@ -14,6 +13,7 @@ use super::{
     HummockError, HummockOptions, HummockResult, HummockStorage, HummockValue, SSTable,
     SSTableIterator, VersionManager,
 };
+use crate::hummock::cloud::gen_remote_sstable;
 use crate::object::ObjectStore;
 
 pub struct SubCompactContext {
@@ -63,7 +63,7 @@ impl Compactor {
 
         let mut vec_futures = Vec::with_capacity(num_sub);
 
-        for (kr_idx, kr) in (&compact_task.splits).iter().enumerate() {
+        for (kr_idx, kr) in compact_task.splits.iter().enumerate() {
             let mut output_needing_vacuum = vec![];
 
             let iter = MergeIterator::new(
@@ -221,6 +221,8 @@ impl Compactor {
                 blocks,
                 meta,
                 context.options.remote_dir.as_str(),
+                // Will panic in production mode
+                None,
             )
             .await?;
             local_sorted_output_ssts.push(table);
@@ -296,7 +298,7 @@ mod tests {
                     checksum_algo: ChecksumAlg::Crc32c,
                 },
                 Arc::new(VersionManager::new()),
-                Arc::new(LocalVersionManager::new(object_client, remote_dir)),
+                Arc::new(LocalVersionManager::new(object_client, remote_dir, None)),
                 Arc::new(MockHummockMetaClient::new(Arc::new(
                     MockHummockMetaService::new(),
                 ))),
@@ -481,6 +483,7 @@ mod tests {
         let local_version_manager = Arc::new(LocalVersionManager::new(
             object_client.clone(),
             &options.remote_dir,
+            None,
         ));
         let target_table_size = options.sstable_size;
         let hummock_meta_client = Arc::new(MockHummockMetaClient::new(Arc::new(

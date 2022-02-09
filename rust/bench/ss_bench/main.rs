@@ -4,6 +4,7 @@ mod operations;
 mod utils;
 
 use clap::Parser;
+use moka::future::Cache;
 use operations::*;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
@@ -128,7 +129,11 @@ async fn get_state_store_impl(opts: &Opts) -> Result<StateStoreImpl> {
                         checksum_algo: get_checksum_algo(opts.checksum_algo.as_ref()),
                     },
                     Arc::new(VersionManager::new()),
-                    Arc::new(LocalVersionManager::new(object_client, remote_dir)),
+                    Arc::new(LocalVersionManager::new(
+                        object_client,
+                        remote_dir,
+                        Some(Arc::new(Cache::new(65536))),
+                    )),
                     Arc::new(MockHummockMetaClient::new(Arc::new(
                         MockHummockMetaService::new(),
                     ))),
@@ -155,7 +160,11 @@ async fn get_state_store_impl(opts: &Opts) -> Result<StateStoreImpl> {
                         checksum_algo: get_checksum_algo(opts.checksum_algo.as_ref()),
                     },
                     Arc::new(VersionManager::new()),
-                    Arc::new(LocalVersionManager::new(s3_store, remote_dir)),
+                    Arc::new(LocalVersionManager::new(
+                        s3_store,
+                        remote_dir,
+                        Some(Arc::new(Cache::new(65536))),
+                    )),
                     Arc::new(MockHummockMetaClient::new(Arc::new(
                         MockHummockMetaService::new(),
                     ))),

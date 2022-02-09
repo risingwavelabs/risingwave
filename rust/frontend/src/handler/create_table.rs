@@ -64,6 +64,8 @@ pub(super) async fn handle_create_table(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use risingwave_common::types::DataType;
     use risingwave_meta::test_utils::LocalMeta;
 
@@ -87,18 +89,14 @@ mod tests {
             .columns()
             .iter()
             .map(|(col_name, col)| (col_name.clone(), col.data_type()))
-            .collect::<Vec<(String, DataType)>>();
-        assert_eq!(
-            columns,
-            vec![
-                ("v1".to_string(), DataType::Int16),
-                ("v2".to_string(), DataType::Int32),
-                ("v3".to_string(), DataType::Int64),
-                ("v4".to_string(), DataType::Float32),
-                ("v5".to_string(), DataType::Float64),
-            ]
-        );
-
+            .collect::<HashMap<String, DataType>>();
+        let mut expected_map = HashMap::new();
+        expected_map.insert("v1".to_string(), DataType::Int16);
+        expected_map.insert("v2".to_string(), DataType::Int32);
+        expected_map.insert("v3".to_string(), DataType::Int64);
+        expected_map.insert("v4".to_string(), DataType::Float32);
+        expected_map.insert("v5".to_string(), DataType::Float64);
+        assert_eq!(columns, expected_map);
         meta.stop().await;
     }
 }

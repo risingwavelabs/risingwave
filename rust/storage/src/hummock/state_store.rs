@@ -47,10 +47,10 @@ impl StateStore for HummockStateStore {
     }
 
     async fn iter(&self, prefix: &[u8]) -> Result<Self::Iter> {
-        let timer = self.storage.get_stats_ref().iter_seek_latency.start_timer();
+        let timer = self.storage.stats.iter_seek_latency.start_timer();
         let range = prefix.to_owned()..next_key(prefix);
         let inner = self.storage.range_scan(range).await?;
-        self.storage.get_stats_ref().iter_counts.inc();
+        self.storage.stats.iter_counts.inc();
         let mut res = DirectedUserIterator::Forward(inner);
         res.rewind().await?;
         timer.observe_duration();

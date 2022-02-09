@@ -7,19 +7,11 @@ use crate::catalog::ColumnId;
 #[derive(Debug, Clone)]
 pub struct ColumnDesc {
     data_type: DataType,
-    is_primary: bool,
 }
 
 impl ColumnDesc {
-    pub fn new(data_type: DataType, is_primary: bool) -> Self {
-        ColumnDesc {
-            data_type,
-            is_primary,
-        }
-    }
-
-    pub fn is_primary(&self) -> bool {
-        self.is_primary
+    pub fn new(data_type: DataType) -> Self {
+        ColumnDesc { data_type }
     }
 
     pub fn data_type(&self) -> DataType {
@@ -31,7 +23,6 @@ impl From<ProstColumnDesc> for ColumnDesc {
     fn from(col: ProstColumnDesc) -> Self {
         Self {
             data_type: col.get_column_type().expect("column type not found").into(),
-            is_primary: col.is_primary,
         }
     }
 }
@@ -59,10 +50,6 @@ impl ColumnCatalog {
 
     pub fn data_type(&self) -> DataType {
         self.desc.data_type
-    }
-
-    pub fn is_primary(&self) -> bool {
-        self.desc.is_primary()
     }
 
     pub fn col_desc_ref(&self) -> &ColumnDesc {
