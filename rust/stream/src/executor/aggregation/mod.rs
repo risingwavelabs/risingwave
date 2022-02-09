@@ -71,6 +71,8 @@ pub trait StreamingAggStateImpl: Any + std::fmt::Debug + DynClone + Send + Sync 
 
     /// Get the builder of the state output
     fn new_builder(&self) -> ArrayBuilderImpl;
+
+    fn reset(&mut self);
 }
 
 dyn_clone::clone_trait_object!(StreamingAggStateImpl);
