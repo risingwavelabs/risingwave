@@ -9,7 +9,8 @@ fn proc_histogram(histogram: Histogram) {
     let mut sample_count = 0;
     let mut sample_sum = 0.0;
     // We get metrics in buckets by parsing the fmt string.
-    // This method is not elegant, but we cannot find a better way since the interface is not provided.
+    // This method is not elegant, but we cannot find a better way since the interface is not
+    // provided.
     let mut buckets = Vec::new();
     let mut i = 0;
     while i < str_lines.len() {
@@ -75,7 +76,7 @@ fn proc_counter(counter: GenericCounter<AtomicU64>) {
 
 pub(crate) async fn print_statistics() {
     println!("STATISTICS:");
-    
+
     let stat = DEFAULT_STATE_STORE_STATS.clone();
 
     // ----- TODO(Ting Sun): use macro to simplify the implementation -----
