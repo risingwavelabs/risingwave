@@ -18,24 +18,24 @@ const DEFAULT_BLOCK_SIZE: u32 = 1024;
 pub struct ComputeNodeConfig {
     // For connection
     #[serde(default)]
-    server: ServerConfig,
+    pub server: ServerConfig,
 
     // Below for batch query.
     #[serde(default)]
-    batch: BatchConfig,
+    pub batch: BatchConfig,
 
     // Below for streaming.
     #[serde(default)]
-    streaming: StreamingConfig,
+    pub streaming: StreamingConfig,
 
     // Below for Hummock.
     #[serde(default)]
-    hummock: HummockConfig,
+    pub hummock: HummockConfig,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-struct ServerConfig {
-    heartbeat_interval: u32,
+pub struct ServerConfig {
+    pub heartbeat_interval: u32,
 }
 
 impl Default for ServerConfig {
@@ -46,15 +46,9 @@ impl Default for ServerConfig {
     }
 }
 
-impl ServerConfig {
-    pub fn heartbeat_interval(&self) -> u32 {
-        self.heartbeat_interval
-    }
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BatchConfig {
-    chunk_size: u32,
+    pub chunk_size: u32,
 }
 
 impl Default for BatchConfig {
@@ -65,15 +59,9 @@ impl Default for BatchConfig {
     }
 }
 
-impl BatchConfig {
-    pub fn chunk_size(&self) -> u32 {
-        self.chunk_size
-    }
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StreamingConfig {
-    chunk_size: u32,
+    pub chunk_size: u32,
 }
 
 impl Default for StreamingConfig {
@@ -84,17 +72,11 @@ impl Default for StreamingConfig {
     }
 }
 
-impl StreamingConfig {
-    pub fn chunk_size(&self) -> u32 {
-        self.chunk_size
-    }
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
-struct HummockConfig {
-    sst_size: u32,
+pub struct HummockConfig {
+    pub sst_size: u32,
 
-    block_size: u32,
+    pub block_size: u32,
 }
 
 impl Default for HummockConfig {
@@ -103,16 +85,6 @@ impl Default for HummockConfig {
             sst_size: DEFAULT_SST_SIZE,
             block_size: DEFAULT_BLOCK_SIZE,
         }
-    }
-}
-
-impl HummockConfig {
-    pub fn sst_size(&self) -> u32 {
-        self.sst_size
-    }
-
-    pub fn block_size(&self) -> u32 {
-        self.block_size
     }
 }
 
@@ -139,9 +111,9 @@ mod tests {
         use super::*;
 
         let cfg = ComputeNodeConfig::default();
-        assert_eq!(cfg.heartbeat_interval(), DEFAULT_HEARTBEAT_INTERVAL);
+        assert_eq!(cfg.server.heartbeat_interval, DEFAULT_HEARTBEAT_INTERVAL);
 
         let cfg: ComputeNodeConfig = toml::from_str("").unwrap();
-        assert_eq!(cfg.hummock_block_size(), DEFAULT_BLOCK_SIZE);
+        assert_eq!(cfg.hummock.block_size, DEFAULT_BLOCK_SIZE);
     }
 }
