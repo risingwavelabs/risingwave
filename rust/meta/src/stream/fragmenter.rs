@@ -14,6 +14,7 @@ use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{Dispatcher, StreamNode};
 
 use crate::manager::{IdCategory, IdGeneratorManagerRef};
+use crate::model::{ActorId, FragmentId};
 use crate::stream::graph::{
     StreamActorBuilder, StreamFragment, StreamFragmentGraph, StreamGraphBuilder,
 };
@@ -56,7 +57,7 @@ impl StreamFragmenter {
     pub async fn generate_graph(
         &mut self,
         stream_node: &StreamNode,
-    ) -> Result<BTreeMap<u32, Fragment>> {
+    ) -> Result<BTreeMap<FragmentId, Fragment>> {
         self.generate_fragment_graph(stream_node)?;
         self.build_graph_from_fragment(self.fragment_graph.get_root_fragment(), vec![])
             .await?;
@@ -75,7 +76,7 @@ impl StreamFragmenter {
                     },
                 ))
             })
-            .collect::<Result<BTreeMap<u32, Fragment>>>()
+            .collect::<Result<BTreeMap<_, _>>>()
     }
 
     /// Generate fragment DAG from input streaming plan by their dependency.
@@ -152,11 +153,11 @@ impl StreamFragmenter {
     }
 
     /// Generate actor id from id generator.
-    async fn gen_actor_id(&self, interval: i32) -> Result<u32> {
+    async fn gen_actor_id(&self, parallel_degree: u32) -> Result<ActorId> {
         Ok(self
             .id_gen_manager_ref
-            .generate_interval::<{ IdCategory::Actor }>(interval)
-            .await? as u32)
+            .generate_interval::<{ IdCategory::Actor }>(parallel_degree as i32)
+            .await? as _)
     }
 
     /// Build stream graph from fragment graph recursively. Setup dispatcher in actor and generate
@@ -165,7 +166,7 @@ impl StreamFragmenter {
     async fn build_graph_from_fragment(
         &mut self,
         current_fragment: StreamFragment,
-        last_fragment_actors: Vec<u32>,
+        last_fragment_actors: Vec<ActorId>,
     ) -> Result<()> {
         let root_fragment = self.fragment_graph.get_root_fragment();
         let mut current_actor_ids = vec![];
@@ -184,7 +185,7 @@ impl StreamFragmenter {
         };
 
         let node = current_fragment.get_node();
-        let actor_ids = self.gen_actor_id(parallel_degree as i32).await?;
+        let actor_ids = self.gen_actor_id(parallel_degree).await?;
         let blackhole_dispatcher = Dispatcher {
             r#type: DispatcherType::Broadcast as i32,
             ..Default::default()

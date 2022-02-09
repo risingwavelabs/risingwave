@@ -11,6 +11,8 @@ use crate::manager::{IdCategory, IdGeneratorManagerRef, MetaSrvEnv};
 use crate::model::{MetadataModel, Worker};
 use crate::storage::MetaStoreRef;
 
+pub type NodeId = u32;
+
 /// [`StoredClusterManager`] manager cluster/worker meta data in [`MetaStore`].
 pub struct StoredClusterManager {
     meta_store_ref: MetaStoreRef,

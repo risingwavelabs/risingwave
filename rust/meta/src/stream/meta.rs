@@ -11,8 +11,9 @@ use risingwave_common::try_match_expand;
 use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_plan::StreamActor;
 
+use crate::cluster::NodeId;
 use crate::manager::MetaSrvEnv;
-use crate::model::{MetadataModel, TableFragments};
+use crate::model::{ActorId, MetadataModel, TableFragments};
 use crate::storage::MetaStoreRef;
 
 pub struct FragmentManager {
@@ -22,9 +23,10 @@ pub struct FragmentManager {
 
 pub struct ActorInfos {
     /// node_id => actor_ids
-    pub actor_maps: HashMap<u32, Vec<u32>>,
+    pub actor_maps: HashMap<NodeId, Vec<ActorId>>,
+
     /// all reachable source actors
-    pub source_actor_maps: HashMap<u32, Vec<u32>>,
+    pub source_actor_maps: HashMap<NodeId, Vec<ActorId>>,
 }
 
 pub type FragmentManagerRef = Arc<FragmentManager>;
@@ -113,7 +115,7 @@ impl FragmentManager {
         })
     }
 
-    pub fn load_all_node_actors(&self) -> Result<HashMap<u32, Vec<StreamActor>>> {
+    pub fn load_all_node_actors(&self) -> Result<HashMap<NodeId, Vec<StreamActor>>> {
         let mut actor_maps = HashMap::new();
         self.table_fragments.iter().for_each(|entry| {
             entry
@@ -132,7 +134,7 @@ impl FragmentManager {
     pub async fn get_table_node_actors(
         &self,
         table_id: &TableId,
-    ) -> Result<BTreeMap<u32, Vec<u32>>> {
+    ) -> Result<BTreeMap<NodeId, Vec<ActorId>>> {
         match self.table_fragments.get(table_id) {
             Some(table_fragment) => Ok(table_fragment.node_actor_ids()),
             None => Err(RwError::from(InternalError(
@@ -141,7 +143,7 @@ impl FragmentManager {
         }
     }
 
-    pub async fn get_table_actor_ids(&self, table_id: &TableId) -> Result<Vec<u32>> {
+    pub async fn get_table_actor_ids(&self, table_id: &TableId) -> Result<Vec<ActorId>> {
         match self.table_fragments.get(table_id) {
             Some(table_fragment) => Ok(table_fragment.actor_ids()),
             None => Err(RwError::from(InternalError(
@@ -150,7 +152,7 @@ impl FragmentManager {
         }
     }
 
-    pub async fn get_table_sink_actor_ids(&self, table_id: &TableId) -> Result<Vec<u32>> {
+    pub async fn get_table_sink_actor_ids(&self, table_id: &TableId) -> Result<Vec<ActorId>> {
         match self.table_fragments.get(table_id) {
             Some(table_fragment) => Ok(table_fragment.sink_actor_ids()),
             None => Err(RwError::from(InternalError(
