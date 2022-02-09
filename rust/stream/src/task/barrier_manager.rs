@@ -190,9 +190,15 @@ impl LocalBarrierManager {
                 if state.remaining_actors.is_empty() {
                     let state = managed_state.take().unwrap();
                     self.last_epoch = Some(state.epoch);
+
                     // Notify about barrier finishing.
                     let tx = state.collect_notifier;
-                    tx.send(()).unwrap();
+                    if tx.send(()).is_err() {
+                        warn!(
+                            "failed to notify barrier collection with epoch {}: rx is dropped",
+                            state.epoch
+                        )
+                    }
                 }
             }
         }

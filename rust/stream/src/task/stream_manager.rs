@@ -338,6 +338,7 @@ impl StreamManagerCore {
     /// Create a chain(tree) of nodes, with given `store`.
     fn create_nodes_inner(
         &mut self,
+        fragment_id: u32,
         actor_id: u32,
         node: &stream_plan::StreamNode,
         input_pos: usize,
@@ -353,7 +354,14 @@ impl StreamManagerCore {
             .iter()
             .enumerate()
             .map(|(input_pos, input)| {
-                self.create_nodes_inner(actor_id, input, input_pos, env.clone(), store.clone())
+                self.create_nodes_inner(
+                    fragment_id,
+                    actor_id,
+                    input,
+                    input_pos,
+                    env.clone(),
+                    store.clone(),
+                )
             })
             .try_collect()?;
 
@@ -366,9 +374,10 @@ impl StreamManagerCore {
             .map(|idx| *idx as usize)
             .collect::<Vec<_>>();
 
-        // We assume that the node_id of different instances from the same RelNode will be the same.
-        let executor_id = ((actor_id as u64) << 32) + node.get_node_id();
-        let node_id = node.get_node_id().try_into().unwrap();
+        // We assume that the operator_id of different instances from the same RelNode will be the
+        // same.
+        let executor_id = ((actor_id as u64) << 32) + node.get_operator_id();
+        let operator_id = ((fragment_id as u64) << 32) + node.get_operator_id();
 
         let executor: Result<Box<dyn Executor>> = match node.get_node()? {
             SourceNode(node) => {
@@ -458,7 +467,7 @@ impl StreamManagerCore {
                     input.remove(0),
                     agg_calls,
                     keys,
-                    Keyspace::shared_executor_root(store.clone(), node_id),
+                    Keyspace::shared_executor_root(store.clone(), operator_id),
                     pk_indices,
                     executor_id,
                 )))
@@ -546,11 +555,11 @@ impl StreamManagerCore {
                                 params_l,
                                 params_r,
                                 pk_indices,
-                                Keyspace::shared_executor_root(store.clone(), node_id),
+                                Keyspace::shared_executor_root(store.clone(), operator_id),
                                 executor_id,
                                 condition,
                             )) as Box<dyn Executor>, )*
-                            _ => todo!("Join type {:?} not inplemented", typ),
+                            _ => todo!("Join type {:?} not implemented", typ),
                         }
                     }
                 }
@@ -661,12 +670,13 @@ impl StreamManagerCore {
     /// Create a chain(tree) of nodes and return the head executor.
     fn create_nodes(
         &mut self,
+        fragment_id: u32,
         actor_id: u32,
         node: &stream_plan::StreamNode,
         env: StreamTaskEnv,
     ) -> Result<Box<dyn Executor>> {
         dispatch_state_store!(self.state_store.clone(), store, {
-            self.create_nodes_inner(actor_id, node, 0, env, store)
+            self.create_nodes_inner(fragment_id, actor_id, node, 0, env, store)
         })
     }
 
@@ -806,7 +816,8 @@ impl StreamManagerCore {
         for actor_id in actors {
             let actor_id = *actor_id;
             let actor = self.actors.remove(&actor_id).unwrap();
-            let executor = self.create_nodes(actor_id, actor.get_nodes()?, env.clone())?;
+            let executor =
+                self.create_nodes(actor.fragment_id, actor_id, actor.get_nodes()?, env.clone())?;
             let dispatcher = self.create_dispatcher(
                 executor,
                 actor.get_dispatcher()?,

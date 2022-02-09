@@ -18,9 +18,9 @@ use risingwave_pb::stream_service::{
 use uuid::Uuid;
 
 use crate::barrier::{BarrierManagerRef, Command};
-use crate::cluster::StoredClusterManager;
+use crate::cluster::{NodeId, StoredClusterManager};
 use crate::manager::{MetaSrvEnv, StreamClientsRef};
-use crate::model::TableFragments;
+use crate::model::{ActorId, TableFragments, TableRawId};
 use crate::stream::{FragmentManagerRef, ScheduleCategory, Scheduler};
 
 pub type StreamManagerRef = Arc<StreamManager>;
@@ -65,7 +65,7 @@ impl StreamManager {
     async fn lookup_actor_ids(
         &self,
         table_ref_id: &TableRefId,
-        table_sink_map: &mut HashMap<i32, Vec<u32>>,
+        table_sink_map: &mut HashMap<TableRawId, Vec<ActorId>>,
     ) -> Result<()> {
         let table_id = table_ref_id.table_id;
         if let Entry::Vacant(e) = table_sink_map.entry(table_id) {
@@ -156,7 +156,7 @@ impl StreamManager {
         let node_map = nodes
             .iter()
             .map(|n| (n.get_id(), n.clone()))
-            .collect::<HashMap<u32, WorkerNode>>();
+            .collect::<HashMap<NodeId, WorkerNode>>();
 
         let actor_infos = nodes
             .iter()
@@ -170,7 +170,7 @@ impl StreamManager {
         let actor_info_map = actor_infos
             .iter()
             .map(|actor_info| (actor_info.actor_id, actor_info.clone()))
-            .collect::<HashMap<u32, ActorInfo>>();
+            .collect::<HashMap<ActorId, ActorInfo>>();
 
         let dispatches = up_down_ids
             .iter()
@@ -183,7 +183,7 @@ impl StreamManager {
                         .clone()],
                 )
             })
-            .collect::<HashMap<u32, Vec<ActorInfo>>>();
+            .collect::<HashMap<ActorId, Vec<ActorInfo>>>();
 
         for (node_id, actors) in node_actors_map {
             let node = node_map.get(&node_id).unwrap();
@@ -294,9 +294,9 @@ mod tests {
     use crate::stream::FragmentManager;
 
     struct FakeFragmentState {
-        actor_streams: Mutex<HashMap<u32, StreamActor>>,
-        actor_ids: Mutex<HashSet<u32>>,
-        actor_infos: Mutex<HashMap<u32, HostAddress>>,
+        actor_streams: Mutex<HashMap<ActorId, StreamActor>>,
+        actor_ids: Mutex<HashSet<ActorId>>,
+        actor_infos: Mutex<HashMap<ActorId, HostAddress>>,
     }
 
     struct FakeStreamService {
@@ -471,7 +471,7 @@ mod tests {
                             ..Default::default()
                         },
                     )),
-                    node_id: 1,
+                    operator_id: 1,
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -567,7 +567,7 @@ mod tests {
                 actors: vec![StreamActor {
                     actor_id: 1,
                     nodes: Some(StreamNode {
-                        node_id: 1,
+                        operator_id: 1,
                         node: Some(Node::MviewNode(MViewNode {
                             table_ref_id: Some(table_ref_id_1.clone()),
                             ..Default::default()
@@ -588,13 +588,13 @@ mod tests {
                 actors: vec![StreamActor {
                     actor_id: 2,
                     nodes: Some(StreamNode {
-                        node_id: 2,
+                        operator_id: 2,
                         node: Some(Node::MviewNode(MViewNode {
                             table_ref_id: Some(table_ref_id_2.clone()),
                             ..Default::default()
                         })),
                         input: vec![StreamNode {
-                            node_id: 3,
+                            operator_id: 3,
                             node: Some(Node::ChainNode(ChainNode {
                                 table_ref_id: Some(table_ref_id_1.clone()),
                                 upstream_actor_ids: vec![0],

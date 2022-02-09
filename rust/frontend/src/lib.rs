@@ -7,6 +7,7 @@ pub mod expr;
 pub mod handler;
 pub mod optimizer;
 pub mod planner;
+mod scheduler;
 pub mod session;
 pub mod utils;
 extern crate log;
