@@ -84,6 +84,7 @@ pub use join_predicate::*;
 
 mod batch_exchange;
 mod batch_hash_join;
+mod batch_limit;
 mod batch_project;
 mod batch_seq_scan;
 mod batch_sort;
@@ -102,6 +103,7 @@ mod stream_project;
 mod stream_table_source;
 pub use batch_exchange::BatchExchange;
 pub use batch_hash_join::BatchHashJoin;
+pub use batch_limit::BatchLimit;
 pub use batch_project::BatchProject;
 pub use batch_seq_scan::BatchSeqScan;
 pub use batch_sort::BatchSort;
@@ -151,6 +153,7 @@ macro_rules! for_all_plan_nodes {
           ,{ Batch, SortMergeJoin}
           ,{ Batch, Sort}
           ,{ Batch, Exchange}
+          ,{ Batch, Limit}
           ,{ Stream, Project}
           ,{ Stream, TableSource}
           ,{ Stream, HashJoin}
@@ -187,6 +190,7 @@ macro_rules! for_batch_plan_nodes {
             ,{ Batch, Project}
             ,{ Batch, SeqScan}
             ,{ Batch, HashJoin}
+            ,{ Batch, Limit}
             ,{ Batch, SortMergeJoin}
             ,{ Batch, Sort}
             ,{ Batch, Exchange}

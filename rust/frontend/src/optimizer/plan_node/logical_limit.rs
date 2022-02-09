@@ -2,7 +2,7 @@ use std::fmt;
 
 use risingwave_common::catalog::Schema;
 
-use super::{ColPrunable, IntoPlanRef, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use super::{BatchLimit, ColPrunable, IntoPlanRef, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 
 #[derive(Debug, Clone)]
@@ -53,11 +53,13 @@ impl WithSchema for LogicalLimit {
 impl ColPrunable for LogicalLimit {}
 impl ToBatch for LogicalLimit {
     fn to_batch(&self) -> PlanRef {
-        todo!()
+        let new_input = self.input().to_batch();
+        let new_logical = self.clone_with_input(new_input);
+        BatchLimit::new(new_logical).into_plan_ref()
     }
 }
 impl ToStream for LogicalLimit {
     fn to_stream(&self) -> PlanRef {
-        todo!()
+        panic!("there is no limit stream operator");
     }
 }
