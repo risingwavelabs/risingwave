@@ -1,4 +1,8 @@
 #![allow(dead_code)]
+
+use std::vec;
+
+use fixedbitset::FixedBitSet;
 pub trait ColIndexMapping {
     /// panic if the input index is out of source
     fn map(&self, index: usize) -> usize;
@@ -19,6 +23,30 @@ impl ColIndexMapping for CompositeMapping {
         self.mapping2.map(self.mapping1.map(index))
     }
 }
+
+struct ColPruneMapping {
+    map: Vec<Option<usize>>,
+}
+impl ColIndexMapping for ColPruneMapping {
+    fn map(&self, index: usize) -> usize {
+        self.map[index].unwrap()
+    }
+}
+impl ColPruneMapping {
+    fn with_remaining_columns(cols: &FixedBitSet) -> Self {
+        let mut map = vec![None; cols.len()];
+        for (tar, src) in cols.ones().enumerate() {
+            map[src] = Some(tar);
+        }
+        ColPruneMapping { map }
+    }
+    fn with_removed_columns(cols: &FixedBitSet) -> Self {
+        let mut cols = cols.clone();
+        cols.toggle_range(..);
+        Self::with_remaining_columns(&cols)
+    }
+}
+
 struct AddMapping {
     delta: usize,
 }
