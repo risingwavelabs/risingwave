@@ -155,6 +155,7 @@ mod tests {
             rows: exprs,
             schema: Schema { fields },
             identity: "ValuesExecutor".to_string(),
+            chunk_size: 1000,
         };
         values_executor.open().await.unwrap();
 
