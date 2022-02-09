@@ -153,7 +153,7 @@ pub struct MViewTableIter<S: StateStore> {
     // TODO: why pk_columns is not used??
     #[allow(dead_code)]
     pk_columns: Vec<usize>,
-    /// A buffer to store prefetched kv paris from state store
+    /// A buffer to store prefetched kv pairs from state store
     buf: Vec<(Bytes, Bytes)>,
     /// The idx into `buf` for the next item
     next_idx: usize,

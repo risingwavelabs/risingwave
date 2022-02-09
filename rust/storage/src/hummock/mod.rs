@@ -240,7 +240,7 @@ impl HummockStorage {
 
         let mut it = MergeIterator::new(table_iters);
 
-        // Use `MergeIterator` to seek for they key with latest version to
+        // Use `MergeIterator` to seek for the key with latest version to
         // get the latest key.
         it.seek(&key_with_epoch(key.to_vec(), epoch)).await?;
 
