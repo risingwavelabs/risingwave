@@ -3,6 +3,8 @@
 use std::vec;
 
 use fixedbitset::FixedBitSet;
+/// `ColIndexMapping` is used in optimizer to and rewirte expressions and porperties associating
+/// with column index
 pub trait ColIndexMapping {
     /// panic if the input index is out of source
     fn map(&self, index: usize) -> usize;
