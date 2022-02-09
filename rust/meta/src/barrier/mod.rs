@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use futures::future::try_join_all;
 use itertools::Itertools;
-use log::trace;
+use log::{trace, warn};
 use risingwave_common::array::RwError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::common::WorkerType;
@@ -152,6 +152,7 @@ impl BarrierManager {
             };
 
             let mutation = command_context.to_mutation().await?;
+            warn!("mutation: {:#?}", mutation);
 
             let epoch = self.epoch_generator.generate()?.into_inner();
 

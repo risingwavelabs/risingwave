@@ -183,7 +183,12 @@ impl LocalBarrierManager {
                     "collect barrier epoch {} from actor {}, remaining actors {:?}",
                     barrier.epoch,
                     actor_id,
-                    state.remaining_actors
+                    state
+                        .remaining_actors
+                        .clone()
+                        .into_iter()
+                        .sorted()
+                        .collect_vec()
                 );
 
                 if state.remaining_actors.is_empty() {
