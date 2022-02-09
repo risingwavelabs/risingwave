@@ -188,7 +188,7 @@ pub fn new_unary_expr(
                 _phantom: PhantomData,
             })
         }
-        (ProstType::Cast, DataType::Decimal { .. }, DataType::Char) => {
+        (ProstType::Cast, DataType::Decimal, DataType::Char) => {
             Box::new(UnaryExpression::<Utf8Array, DecimalArray, _> {
                 expr_ia1: child_expr,
                 return_type,
@@ -300,9 +300,7 @@ pub fn new_unary_expr(
         (ProstType::Neg, _, _) => {
             gen_neg! { child_expr, return_type }
         }
-        (ProstType::PgSleep, _, DataType::Decimal { .. }) => {
-            Box::new(PgSleepExpression::new(child_expr))
-        }
+        (ProstType::PgSleep, _, DataType::Decimal) => Box::new(PgSleepExpression::new(child_expr)),
         (expr, ret, child) => {
             unimplemented!("The expression {:?}({:?}) ->{:?} using vectorized expression framework is not supported yet!", expr, child, ret)
         }
