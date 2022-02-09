@@ -1,6 +1,6 @@
 use std::hash::{BuildHasher, Hasher};
 
-pub fn finalize_hashers<H: Hasher>(hashers: &mut Vec<H>) -> Vec<u64> {
+pub fn finalize_hashers<H: Hasher>(hashers: &mut [H]) -> Vec<u64> {
     return hashers
         .iter()
         .map(|hasher| hasher.finish())

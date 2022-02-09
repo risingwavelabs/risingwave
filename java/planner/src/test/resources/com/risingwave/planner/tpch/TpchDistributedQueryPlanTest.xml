@@ -738,7 +738,7 @@ RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], col
                       RwBatchFilter(condition=[=($1, CAST('ARGENTINA'):CHAR(25) NOT NULL)])
                         RwBatchTableScan(table=[[test_schema, nation]], columns=[n_nationkey,n_name])
         RwBatchExchange(distribution=[RwDistributionTrait{type=BROADCAST_DISTRIBUTED, keys=[]}], collation=[[]])
-          RwBatchProject(EXPR$0=[*($0, 0.00010:DECIMAL(6,5))])
+          RwBatchProject(EXPR$0=[*($0, 0.0001000000:DECIMAL(11,10))])
             RwBatchSortAgg(group=[{}], agg#0=[SUM($0)])
               RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
                 RwBatchSortAgg(group=[{}], agg#0=[SUM($0)])
@@ -878,7 +878,7 @@ where
         </Resource>
         <Resource name="distributed">
             <![CDATA[
-RwBatchProject(promo_revenue=[/(*(100.0:DECIMAL(4,1), $0), $1)])
+RwBatchProject(promo_revenue=[/(*(100.00:DECIMAL(5,2), $0), $1)])
   RwBatchSortAgg(group=[{}], agg#0=[SUM($0)], agg#1=[SUM($1)])
     RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
       RwBatchSortAgg(group=[{}], agg#0=[SUM($0)], agg#1=[SUM($1)])
@@ -1509,7 +1509,7 @@ RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], col
                           RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
                             RwBatchSortAgg(group=[{}], agg#0=[SUM($0)], agg#1=[COUNT($0)])
                               RwBatchProject(c_acctbal=[$1])
-                                RwBatchFilter(condition=[AND(>($1, 0.0), OR(=(SUBSTRING($0, 1, 2), '30'), =(SUBSTRING($0, 1, 2), '24'), =(SUBSTRING($0, 1, 2), '31'), =(SUBSTRING($0, 1, 2), '38'), =(SUBSTRING($0, 1, 2), '25'), =(SUBSTRING($0, 1, 2), '34'), =(SUBSTRING($0, 1, 2), '37')))])
+                                RwBatchFilter(condition=[AND(>($1, 0.00), OR(=(SUBSTRING($0, 1, 2), '30'), =(SUBSTRING($0, 1, 2), '24'), =(SUBSTRING($0, 1, 2), '31'), =(SUBSTRING($0, 1, 2), '38'), =(SUBSTRING($0, 1, 2), '25'), =(SUBSTRING($0, 1, 2), '34'), =(SUBSTRING($0, 1, 2), '37')))])
                                   RwBatchTableScan(table=[[test_schema, customer]], columns=[c_phone,c_acctbal])
                 RwBatchHashAgg(group=[{0}], agg#0=[MIN($1)])
                   RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])

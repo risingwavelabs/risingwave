@@ -23,16 +23,24 @@ package com.risingwave.sql.tree;
 
 import static java.util.Objects.requireNonNull;
 
+/** DoubleLiteral */
 public class DoubleLiteral extends Literal {
 
   private final double value;
 
+  private final String valueStr;
+
   public DoubleLiteral(String value) {
+    this.valueStr = value;
     this.value = Double.parseDouble(requireNonNull(value, "value is null"));
   }
 
   public double getValue() {
     return value;
+  }
+
+  public String getValueString() {
+    return valueStr;
   }
 
   @Override

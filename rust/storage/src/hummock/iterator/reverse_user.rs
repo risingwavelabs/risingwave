@@ -723,6 +723,7 @@ mod tests {
             meta: table.meta.clone(),
             obj_client: table.obj_client.clone(),
             data_path: table.data_path.clone(),
+            block_cache: table.block_cache.clone(),
         }
     }
 
@@ -842,7 +843,7 @@ mod tests {
         let (data, meta) = b.finish();
         // get remote table
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
-        let table = gen_remote_sstable(obj_client, 0, data, meta, REMOTE_DIR)
+        let table = gen_remote_sstable(obj_client, 0, data, meta, REMOTE_DIR, None)
             .await
             .unwrap();
 
@@ -906,7 +907,7 @@ mod tests {
         let (data, meta) = b.finish();
         // get remote table
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
-        gen_remote_sstable(obj_client, 0, data, meta, REMOTE_DIR)
+        gen_remote_sstable(obj_client, 0, data, meta, REMOTE_DIR, None)
             .await
             .unwrap()
     }
