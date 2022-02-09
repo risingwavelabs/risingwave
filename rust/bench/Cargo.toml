@@ -9,9 +9,7 @@ bytesize = { version = "1", features = ["serde"] }
 clap = { version = "3", features = ["derive"] }
 env_logger = "0.9"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-hyper = "0.14"
 itertools = "0.10"
-lazy_static = "1"
 log = "0.4"
 prometheus = { version = "0.13", features = ["process"] }
 rand = "0.8"
