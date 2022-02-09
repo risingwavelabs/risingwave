@@ -1,6 +1,6 @@
 use pgwire::pg_response::PgResponse;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_sqlparser::ast::{ColumnDef, DataType as AstDataType, ObjectName, Statement};
+use risingwave_sqlparser::ast::{ObjectName, Statement};
 
 use crate::session::RwSession;
 
