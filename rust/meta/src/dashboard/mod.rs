@@ -76,7 +76,6 @@ mod handlers {
     ) -> Result<Json<Vec<ActorLocation>>> {
         use risingwave_pb::common::WorkerType;
 
-        // TODO: use new method instead of building `ActorLocation`.
         let node_actors = srv.fragment_manager.load_all_node_actors().map_err(err)?;
         let nodes = srv
             .cluster_manager
