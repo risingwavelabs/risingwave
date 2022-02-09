@@ -29,6 +29,7 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", 
 tonic = "0.6"
 tracing = "0.1"
 tracing-subscriber = "0.3"
+uuid = "0.8"
 
 [dev-dependencies]
 serial_test = "*"

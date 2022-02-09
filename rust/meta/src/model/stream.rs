@@ -9,7 +9,9 @@ use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{StreamActor, StreamNode};
 
-use crate::model::MetadataModel;
+use super::{ActorId, FragmentId};
+use crate::cluster::NodeId;
+use crate::model::{MetadataModel, TableRawId};
 
 /// Column family name for table fragments.
 const TABLE_FRAGMENTS_CF_NAME: &str = "cf/table_fragments";
@@ -23,9 +25,9 @@ pub struct TableFragments {
     /// The table state.
     state: State,
     /// The table fragments.
-    fragments: BTreeMap<u32, Fragment>,
+    fragments: BTreeMap<FragmentId, Fragment>,
     /// The actor location.
-    actor_locations: BTreeMap<u32, u32>,
+    actor_locations: BTreeMap<ActorId, NodeId>,
 }
 
 impl MetadataModel for TableFragments {
@@ -71,7 +73,7 @@ impl MetadataModel for TableFragments {
 }
 
 impl TableFragments {
-    pub fn new(table_id: TableId, fragments: BTreeMap<u32, Fragment>) -> Self {
+    pub fn new(table_id: TableId, fragments: BTreeMap<FragmentId, Fragment>) -> Self {
         Self {
             table_id,
             state: State::Creating,
@@ -81,7 +83,7 @@ impl TableFragments {
     }
 
     /// Set the actor locations.
-    pub fn set_locations(&mut self, actor_locations: BTreeMap<u32, u32>) {
+    pub fn set_locations(&mut self, actor_locations: BTreeMap<ActorId, NodeId>) {
         self.actor_locations = actor_locations;
     }
 
@@ -101,7 +103,7 @@ impl TableFragments {
     }
 
     /// Returns actor ids associated with this table.
-    pub fn actor_ids(&self) -> Vec<u32> {
+    pub fn actor_ids(&self) -> Vec<ActorId> {
         let mut actors = vec![];
         self.fragments.values().for_each(|fragment| {
             actors.extend(
@@ -109,7 +111,7 @@ impl TableFragments {
                     .actors
                     .iter()
                     .map(|actor| actor.actor_id)
-                    .collect::<Vec<u32>>(),
+                    .collect::<Vec<_>>(),
             )
         });
         actors
@@ -125,7 +127,7 @@ impl TableFragments {
     }
 
     /// Returns the actor ids with the given fragment type.
-    fn filter_actor_ids(&self, fragment_type: FragmentType) -> Vec<u32> {
+    fn filter_actor_ids(&self, fragment_type: FragmentType) -> Vec<ActorId> {
         let mut actors = vec![];
         self.fragments.values().for_each(|fragment| {
             if fragment.fragment_type == fragment_type as i32 {
@@ -134,7 +136,7 @@ impl TableFragments {
                         .actors
                         .iter()
                         .map(|actor| actor.actor_id)
-                        .collect::<Vec<u32>>(),
+                        .collect::<Vec<_>>(),
                 )
             }
         });
@@ -142,16 +144,17 @@ impl TableFragments {
     }
 
     /// Returns source actor ids.
-    pub fn source_actor_ids(&self) -> Vec<u32> {
+    pub fn source_actor_ids(&self) -> Vec<ActorId> {
         Self::filter_actor_ids(self, FragmentType::Source)
     }
 
     /// Returns sink actor ids.
-    pub fn sink_actor_ids(&self) -> Vec<u32> {
+    pub fn sink_actor_ids(&self) -> Vec<ActorId> {
         Self::filter_actor_ids(self, FragmentType::Sink)
     }
+
     /// Returns actor locations group by node id.
-    pub fn node_actor_ids(&self) -> BTreeMap<u32, Vec<u32>> {
+    pub fn node_actor_ids(&self) -> BTreeMap<NodeId, Vec<ActorId>> {
         let mut actors = BTreeMap::default();
         self.actor_locations
             .iter()
@@ -166,7 +169,7 @@ impl TableFragments {
     }
 
     /// Returns the actors group by node id.
-    pub fn node_actors(&self) -> BTreeMap<u32, Vec<StreamActor>> {
+    pub fn node_actors(&self) -> BTreeMap<NodeId, Vec<StreamActor>> {
         let mut actors = BTreeMap::default();
         self.fragments.values().for_each(|fragment| {
             fragment.actors.iter().for_each(|actor| {
@@ -181,7 +184,7 @@ impl TableFragments {
         actors
     }
 
-    pub fn node_source_actors(&self) -> BTreeMap<u32, Vec<u32>> {
+    pub fn node_source_actors(&self) -> BTreeMap<NodeId, Vec<ActorId>> {
         let mut actors = BTreeMap::default();
         let source_actor_ids = self.source_actor_ids();
         source_actor_ids.iter().for_each(|&actor_id| {
@@ -196,7 +199,7 @@ impl TableFragments {
     }
 
     /// Returns actor map: `actor_id` => `StreamActor`.
-    pub fn actor_map(&self) -> HashMap<u32, StreamActor> {
+    pub fn actor_map(&self) -> HashMap<ActorId, StreamActor> {
         let mut actor_map = HashMap::default();
         self.fragments.values().for_each(|fragment| {
             fragment.actors.iter().for_each(|actor| {
@@ -209,11 +212,11 @@ impl TableFragments {
     /// Update chain upstream actor ids.
     pub fn update_chain_upstream_actor_ids(
         &mut self,
-        table_sink_map: &HashMap<i32, Vec<u32>>,
+        table_sink_map: &HashMap<TableRawId, Vec<ActorId>>,
     ) -> Result<()> {
         fn resolve_update_inner(
             stream_node: &mut StreamNode,
-            table_sink_map: &HashMap<i32, Vec<u32>>,
+            table_sink_map: &HashMap<TableRawId, Vec<ActorId>>,
         ) {
             if let Node::ChainNode(chain) = stream_node.node.as_mut().unwrap() {
                 chain.upstream_actor_ids = table_sink_map
