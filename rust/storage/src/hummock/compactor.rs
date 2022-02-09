@@ -138,7 +138,7 @@ impl Compactor {
     async fn sub_compact(
         context: SubCompactContext,
         kr: KeyRange,
-        mut iter: MergeIterator,
+        mut iter: MergeIterator<'_>,
         local_sorted_output_ssts: &mut Vec<SSTable>,
         is_target_ultimate_and_leveling: bool,
         watermark: Epoch,
@@ -355,22 +355,12 @@ mod tests {
             .unwrap();
 
         // Get the value after flushing to remote.
-        let value = hummock_storage
-            .get_snapshot()
-            .await
-            .unwrap()
-            .get(&anchor)
-            .await
-            .unwrap()
-            .unwrap();
+        let value = hummock_storage.get(&anchor, epoch).await.unwrap().unwrap();
         assert_eq!(Bytes::from(value), Bytes::from("111"));
 
         // Test looking for a nonexistent key. `next()` would return the next key.
         let value = hummock_storage
-            .get_snapshot()
-            .await
-            .unwrap()
-            .get(&Bytes::from("ab"))
+            .get(&Bytes::from("ab"), epoch)
             .await
             .unwrap();
         assert_eq!(value, None);
@@ -388,14 +378,7 @@ mod tests {
             .unwrap();
         Compactor::compact(&sub_compact_context).await?;
         // Get the value after flushing to remote.
-        let value = hummock_storage
-            .get_snapshot()
-            .await
-            .unwrap()
-            .get(&anchor)
-            .await
-            .unwrap()
-            .unwrap();
+        let value = hummock_storage.get(&anchor, epoch).await.unwrap().unwrap();
         assert_eq!(Bytes::from(value), Bytes::from("111111"));
 
         let mut table_iters: Vec<BoxedHummockIterator> = Vec::new();
@@ -451,21 +434,12 @@ mod tests {
         Compactor::compact(&sub_compact_context).await?;
 
         // Get the value after flushing to remote.
-        let value = hummock_storage
-            .get_snapshot()
-            .await
-            .unwrap()
-            .get(&anchor)
-            .await
-            .unwrap();
+        let value = hummock_storage.get(&anchor, epoch).await.unwrap();
         assert_eq!(value, None);
 
         // Get non-existent maximum key.
         let value = hummock_storage
-            .get_snapshot()
-            .await
-            .unwrap()
-            .get(&Bytes::from("ff"))
+            .get(&Bytes::from("ff"), epoch)
             .await
             .unwrap();
         assert_eq!(value, None);
