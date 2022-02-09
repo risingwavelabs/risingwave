@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Mutex, MutexGuard};
 
-use futures::channel::mpsc::Receiver;
+use futures::channel::mpsc::{Receiver, Sender};
 
 use crate::executor::Message;
 
@@ -39,7 +39,8 @@ pub struct SharedContext {
 
     /// The receiver is on the other side of rpc `Output`. The `ExchangeServiceImpl` take it
     /// when it receives request for streaming data from downstream clients.
-    pub(crate) receivers_for_exchange_service: Mutex<HashMap<UpDownActorIds, Receiver<Message>>>,
+    pub(crate) receivers_for_exchange_service:
+        Mutex<HashMap<UpDownActorIds, (Sender<Message>, Receiver<Message>)>>,
 
     /// Stores the local address
     ///
@@ -83,7 +84,7 @@ impl SharedContext {
     #[inline]
     pub fn lock_receivers_for_exchange_service(
         &self,
-    ) -> MutexGuard<HashMap<UpDownActorIds, Receiver<Message>>> {
+    ) -> MutexGuard<HashMap<UpDownActorIds, (Sender<Message>, Receiver<Message>)>> {
         self.receivers_for_exchange_service.lock().unwrap()
     }
 }

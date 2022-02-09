@@ -168,7 +168,7 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
                             new_outputs.push(Box::new(ChannelOutput::new(tx)) as Box<dyn Output>)
                         } else {
                             let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-                            exchange_pool_guard.insert(up_down_ids, rx);
+                            exchange_pool_guard.insert(up_down_ids, (tx.clone(), rx));
                             new_outputs.push(Box::new(RemoteOutput::new(tx)) as Box<dyn Output>)
                         }
                     }
@@ -206,7 +206,7 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
                             outputs_to_add.push(Box::new(ChannelOutput::new(tx)) as Box<dyn Output>)
                         } else {
                             let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-                            exchange_pool_guard.insert(up_down_ids, rx);
+                            exchange_pool_guard.insert(up_down_ids, (tx.clone(), rx));
                             outputs_to_add.push(Box::new(RemoteOutput::new(tx)) as Box<dyn Output>)
                         }
                     }
@@ -684,8 +684,8 @@ mod tests {
     fn add_remote_channels(ctx: Arc<SharedContext>, up_id: u32, down_ids: Vec<u32>) {
         let mut guard = ctx.receivers_for_exchange_service.lock().unwrap();
         for down_id in down_ids {
-            let (_, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-            guard.insert((up_id, down_id), rx);
+            let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
+            guard.insert((up_id, down_id), (tx, rx));
         }
     }
 

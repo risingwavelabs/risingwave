@@ -129,12 +129,13 @@ impl StreamManager {
     pub fn take_receiver(&self, ids: UpDownActorIds) -> Result<Receiver<Message>> {
         let core = self.core.lock().unwrap();
         let mut guard = core.context.lock_receivers_for_exchange_service();
-        guard.remove(&ids).ok_or_else(|| {
+        let tuple = guard.remove(&ids).ok_or_else(|| {
             RwError::from(ErrorCode::InternalError(format!(
                 "No receivers for rpc output from {} to {}",
                 ids.0, ids.1
             )))
-        })
+        });
+        tuple.map(|tuple| tuple.1)
     }
 
     pub fn update_actors(&self, actors: &[stream_plan::StreamActor]) -> Result<()> {
@@ -292,7 +293,7 @@ impl StreamManagerCore {
                     // later, `ExchangeServiceImpl` comes to get it
                     let mut guard = self.context.lock_receivers_for_exchange_service();
 
-                    guard.insert(up_down_ids, rx);
+                    guard.insert(up_down_ids, (tx.clone(),rx));
                     Ok(Box::new(RemoteOutput::new(tx)) as Box<dyn Output>)
                 }
             })
@@ -869,9 +870,9 @@ impl StreamManagerCore {
     fn drop_actor(&mut self, actor_id: u32) {
         let handle = self.handles.remove(&actor_id).unwrap();
         let mut channel_pool_guard = self.context.lock_channel_pool();
-        let mut exhange_guard = self.context.lock_receivers_for_exchange_service();
+        let mut exchange_guard = self.context.lock_receivers_for_exchange_service();
         channel_pool_guard.retain(|(x, _), _| *x != actor_id);
-        exhange_guard.retain(|(x, _), _| *x != actor_id);
+        exchange_guard.retain(|(x, _), _| *x != actor_id);
 
         self.actor_infos.remove(&actor_id);
         self.actors.remove(&actor_id);
