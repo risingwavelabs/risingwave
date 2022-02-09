@@ -37,6 +37,11 @@ impl FunctionCall {
     pub fn get_expr_type(&self) -> ExprType {
         self.func_type
     }
+
+    /// Get a reference to the function call's inputs.
+    pub fn inputs(&self) -> &[ExprImpl] {
+        self.inputs.as_ref()
+    }
 }
 impl Expr for FunctionCall {
     fn return_type(&self) -> DataType {
