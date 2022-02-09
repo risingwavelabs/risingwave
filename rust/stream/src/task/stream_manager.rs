@@ -23,14 +23,9 @@ use tokio::task::JoinHandle;
 
 use crate::executor::snapshot::BatchQueryExecutor;
 use crate::executor::*;
-use crate::task::{SharedContext, StreamTaskEnv};
-
-/// Default capacity of channel if two actors are on the same node
-pub const LOCAL_OUTPUT_CHANNEL_SIZE: usize = 16;
-
-pub type ConsumableChannelPair = (Option<Sender<Message>>, Option<Receiver<Message>>);
-pub type ConsumableChannelVecPair = (Vec<Sender<Message>>, Vec<Receiver<Message>>);
-pub type UpDownActorIds = (u32, u32);
+use crate::task::{
+    ConsumableChannelPair, SharedContext, StreamTaskEnv, UpDownActorIds, LOCAL_OUTPUT_CHANNEL_SIZE,
+};
 
 #[cfg(test)]
 lazy_static::lazy_static! {
@@ -128,14 +123,22 @@ impl StreamManager {
 
     pub fn take_receiver(&self, ids: UpDownActorIds) -> Result<Receiver<Message>> {
         let core = self.core.lock().unwrap();
-        let mut guard = core.context.lock_receivers_for_exchange_service();
-        let tuple = guard.remove(&ids).ok_or_else(|| {
-            RwError::from(ErrorCode::InternalError(format!(
-                "No receivers for rpc output from {} to {}",
-                ids.0, ids.1
-            )))
-        });
-        tuple.map(|tuple| tuple.1)
+        let mut guard = core.context.lock_channel_pool_for_exchange_service();
+        guard
+            .remove(&ids)
+            .ok_or_else(|| {
+                RwError::from(ErrorCode::InternalError(format!(
+                    "No receivers for rpc output from {} to {}",
+                    ids.0, ids.1
+                )))
+            })?
+            .1
+            .ok_or_else(|| {
+                RwError::from(ErrorCode::InternalError(format!(
+                    "sender from {} to {} does no exist",
+                    ids.0, ids.1,
+                )))
+            })
     }
 
     pub fn update_actors(&self, actors: &[stream_plan::StreamActor]) -> Result<()> {
@@ -291,9 +294,9 @@ impl StreamManagerCore {
                     // This channel is used for `RpcOutput` and `ExchangeServiceImpl`.
                     let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
                     // later, `ExchangeServiceImpl` comes to get it
-                    let mut guard = self.context.lock_receivers_for_exchange_service();
+                    let mut guard = self.context.lock_channel_pool_for_exchange_service();
 
-                    guard.insert(up_down_ids, (tx.clone(),rx));
+                    guard.insert(up_down_ids, (Some(tx.clone()),Some(rx)));
                     Ok(Box::new(RemoteOutput::new(tx)) as Box<dyn Output>)
                 }
             })
@@ -871,7 +874,7 @@ impl StreamManagerCore {
     fn drop_actor(&mut self, actor_id: u32) {
         let handle = self.handles.remove(&actor_id).unwrap();
         let mut channel_pool_guard = self.context.lock_channel_pool();
-        let mut exchange_guard = self.context.lock_receivers_for_exchange_service();
+        let mut exchange_guard = self.context.lock_channel_pool_for_exchange_service();
         channel_pool_guard.retain(|(x, _), _| *x != actor_id);
         exchange_guard.retain(|(x, _), _| *x != actor_id);
 

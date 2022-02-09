@@ -18,6 +18,13 @@ mod tests;
 #[cfg(test)]
 mod test_mv;
 
+/// Default capacity of channel if two actors are on the same node
+pub const LOCAL_OUTPUT_CHANNEL_SIZE: usize = 16;
+
+pub type ConsumableChannelPair = (Option<Sender<Message>>, Option<Receiver<Message>>);
+pub type ConsumableChannelVecPair = (Vec<Sender<Message>>, Vec<Receiver<Message>>);
+pub type UpDownActorIds = (u32, u32);
+
 /// Stores the data which may be modified from the data plane.
 pub struct SharedContext {
     /// Stores the senders and receivers for later `Processor`'s use.
@@ -37,10 +44,12 @@ pub struct SharedContext {
     /// is on the server-side and we will        also introduce backpressure.
     pub(crate) channel_pool: Mutex<HashMap<UpDownActorIds, ConsumableChannelPair>>,
 
+    /// The (remote) channel pool for exchange servce.
+    /// All remote channels are built before actually building actors.
     /// The receiver is on the other side of rpc `Output`. The `ExchangeServiceImpl` take it
     /// when it receives request for streaming data from downstream clients.
-    pub(crate) receivers_for_exchange_service:
-        Mutex<HashMap<UpDownActorIds, (Sender<Message>, Receiver<Message>)>>,
+    pub(crate) channel_pool_for_exchange_service:
+        Mutex<HashMap<UpDownActorIds, ConsumableChannelPair>>,
 
     /// Stores the local address
     ///
@@ -56,7 +65,7 @@ impl SharedContext {
     pub fn new(addr: SocketAddr) -> Self {
         Self {
             channel_pool: Mutex::new(HashMap::new()),
-            receivers_for_exchange_service: Mutex::new(HashMap::new()),
+            channel_pool_for_exchange_service: Mutex::new(HashMap::new()),
             addr,
             barrier_manager: Mutex::new(LocalBarrierManager::new()),
         }
@@ -66,7 +75,7 @@ impl SharedContext {
     pub fn for_test() -> Self {
         Self {
             channel_pool: Mutex::new(HashMap::new()),
-            receivers_for_exchange_service: Mutex::new(HashMap::new()),
+            channel_pool_for_exchange_service: Mutex::new(HashMap::new()),
             addr: *LOCAL_TEST_ADDR,
             barrier_manager: Mutex::new(LocalBarrierManager::for_test()),
         }
@@ -82,9 +91,9 @@ impl SharedContext {
     }
 
     #[inline]
-    pub fn lock_receivers_for_exchange_service(
+    pub fn lock_channel_pool_for_exchange_service(
         &self,
-    ) -> MutexGuard<HashMap<UpDownActorIds, (Sender<Message>, Receiver<Message>)>> {
-        self.receivers_for_exchange_service.lock().unwrap()
+    ) -> MutexGuard<HashMap<UpDownActorIds, ConsumableChannelPair>> {
+        self.channel_pool_for_exchange_service.lock().unwrap()
     }
 }

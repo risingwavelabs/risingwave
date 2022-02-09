@@ -129,9 +129,9 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
             Some(Mutation::UpdateOutputs(updates)) => {
                 if let Some((_, v)) = updates.get_key_value(&self.actor_id) {
                     let mut new_outputs = vec![];
-                    let mut channel_pool_guard = self.context.channel_pool.lock().unwrap();
+                    let mut channel_pool_guard = self.context.lock_channel_pool();
                     let mut exchange_pool_guard =
-                        self.context.receivers_for_exchange_service.lock().unwrap();
+                        self.context.lock_channel_pool_for_exchange_service();
 
                     let actor_id = self.actor_id;
 
@@ -168,7 +168,7 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
                             new_outputs.push(Box::new(ChannelOutput::new(tx)) as Box<dyn Output>)
                         } else {
                             let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-                            exchange_pool_guard.insert(up_down_ids, (tx.clone(), rx));
+                            exchange_pool_guard.insert(up_down_ids, (Some(tx.clone()), Some(rx)));
                             new_outputs.push(Box::new(RemoteOutput::new(tx)) as Box<dyn Output>)
                         }
                     }
@@ -178,9 +178,9 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
             }
             Some(Mutation::AddOutput(adds)) => {
                 if let Some(downstream_actor_infos) = adds.get(&self.actor_id) {
-                    let mut channel_pool_guard = self.context.channel_pool.lock().unwrap();
+                    let mut channel_pool_guard = self.context.lock_channel_pool();
                     let mut exchange_pool_guard =
-                        self.context.receivers_for_exchange_service.lock().unwrap();
+                        self.context.lock_channel_pool_for_exchange_service();
                     let mut outputs_to_add = Vec::with_capacity(downstream_actor_infos.len());
                     for downstream_actor_info in downstream_actor_infos {
                         let down_id = downstream_actor_info.get_actor_id();
@@ -206,7 +206,7 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
                             outputs_to_add.push(Box::new(ChannelOutput::new(tx)) as Box<dyn Output>)
                         } else {
                             let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-                            exchange_pool_guard.insert(up_down_ids, (tx.clone(), rx));
+                            exchange_pool_guard.insert(up_down_ids, (Some(tx.clone()), Some(rx)));
                             outputs_to_add.push(Box::new(RemoteOutput::new(tx)) as Box<dyn Output>)
                         }
                     }
@@ -674,7 +674,7 @@ mod tests {
     }
 
     fn add_local_channels(ctx: Arc<SharedContext>, up_down_ids: Vec<(u32, u32)>) {
-        let mut guard = ctx.channel_pool.lock().unwrap();
+        let mut guard = ctx.lock_channel_pool();
         for up_down_id in up_down_ids {
             let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
             guard.insert(up_down_id, (Some(tx), Some(rx)));
@@ -682,10 +682,10 @@ mod tests {
     }
 
     fn add_remote_channels(ctx: Arc<SharedContext>, up_id: u32, down_ids: Vec<u32>) {
-        let mut guard = ctx.receivers_for_exchange_service.lock().unwrap();
+        let mut guard = ctx.lock_channel_pool_for_exchange_service();
         for down_id in down_ids {
             let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-            guard.insert((up_id, down_id), (tx, rx));
+            guard.insert((up_id, down_id), (Some(tx), Some(rx)));
         }
     }
 
@@ -743,8 +743,8 @@ mod tests {
         executor.next().await.unwrap();
         let tctx = ctx.clone();
         {
-            let cp_guard = tctx.channel_pool.lock().unwrap();
-            let ex_guard = tctx.receivers_for_exchange_service.lock().unwrap();
+            let cp_guard = tctx.lock_channel_pool();
+            let ex_guard = tctx.lock_channel_pool_for_exchange_service();
             assert_eq!(cp_guard.len(), 2);
             assert_eq!(ex_guard.len(), 1);
         }
@@ -758,8 +758,8 @@ mod tests {
         executor.next().await.unwrap();
         let tctx = ctx.clone();
         {
-            let cp_guard = tctx.channel_pool.lock().unwrap();
-            let ex_guard = tctx.receivers_for_exchange_service.lock().unwrap();
+            let cp_guard = tctx.lock_channel_pool();
+            let ex_guard = tctx.lock_channel_pool_for_exchange_service();
             assert_eq!(cp_guard.len(), 1);
             assert_eq!(ex_guard.len(), 0);
         }
@@ -781,8 +781,8 @@ mod tests {
         executor.next().await.unwrap();
         let tctx = ctx.clone();
         {
-            let cp_guard = tctx.channel_pool.lock().unwrap();
-            let ex_guard = tctx.receivers_for_exchange_service.lock().unwrap();
+            let cp_guard = tctx.lock_channel_pool();
+            let ex_guard = tctx.lock_channel_pool_for_exchange_service();
             assert_eq!(cp_guard.len(), 2);
             assert_eq!(ex_guard.len(), 1);
         }
