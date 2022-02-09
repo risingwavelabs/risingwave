@@ -1,8 +1,9 @@
 use risingwave_common::array::Row;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_storage::bummock::BummockResult;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::mview::MViewTable;
-use risingwave_storage::table::TableIter;
+use risingwave_storage::table::{ScannableTable, TableIter};
 use risingwave_storage::Keyspace;
 
 use crate::executor::test_utils::schemas;
@@ -372,4 +373,50 @@ async fn test_multi_mview_table_iter() {
     );
     let res_2_2 = iter_2.next().await.unwrap();
     assert!(res_2_2.is_none());
+}
+
+#[tokio::test]
+async fn test_mview_scan_empty_column_ids_cardinality() {
+    let state_store = MemoryStateStore::new();
+    let schema = schemas::iii();
+    let pk_columns = vec![0, 1];
+    let orderings = vec![OrderType::Ascending, OrderType::Descending];
+    let keyspace = Keyspace::executor_root(state_store, 0x42);
+
+    let mut state = ManagedMViewState::new(
+        keyspace.clone(),
+        schema.clone(),
+        pk_columns.clone(),
+        orderings.clone(),
+    );
+    let table = MViewTable::new(keyspace.clone(), schema, pk_columns.clone(), orderings);
+    let epoch: u64 = 0;
+
+    state.put(
+        Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
+        Row(vec![
+            Some(1_i32.into()),
+            Some(11_i32.into()),
+            Some(111_i32.into()),
+        ]),
+    );
+    state.put(
+        Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
+        Row(vec![
+            Some(2_i32.into()),
+            Some(22_i32.into()),
+            Some(222_i32.into()),
+        ]),
+    );
+    state.flush(epoch).await.unwrap();
+
+    let chunk = table.get_data_by_columns(&[]).await.unwrap();
+
+    match chunk {
+        BummockResult::Data(chunks) => {
+            let chunk = chunks.into_iter().next().unwrap();
+            assert_eq!(chunk.cardinality(), 2);
+        }
+        BummockResult::DataEof => panic!(),
+    }
 }
