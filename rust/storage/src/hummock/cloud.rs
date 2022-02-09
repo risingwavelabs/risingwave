@@ -20,8 +20,8 @@ pub async fn get_sst_meta(
 }
 
 /// Upload table to remote object storage and return the URL
-/// TODO: this function should not take `block_cache` as parameter -- why should we have a block cache
-/// when uploading?
+/// TODO: this function should not take `block_cache` as parameter -- why should we have a block
+/// cache when uploading?
 pub async fn gen_remote_sstable(
     obj_client: Arc<dyn ObjectStore>,
     sstable_id: u64,

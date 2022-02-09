@@ -210,10 +210,8 @@ impl SSTable {
         let key = block_cache_key_of(self.id, idx as u64);
 
         if let Some(block) = self.block_cache.get(&key) {
-            println!("cache hit");
             Ok(block)
         } else {
-            println!("cache miss");
             let block_data = self
                 .obj_client
                 .read(self.data_path.as_str(), Some(block_loc))
