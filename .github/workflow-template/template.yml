@@ -142,10 +142,13 @@ jobs:
           ~/cargo-make/makers logs
           ~/cargo-make/makers check-logs
 
-      - name: e2e test batch 3-node
+      # TODO: batch 3-node is disabled since TABLE_V2 can't be distributed now
+      # - name: e2e test batch 3-node
+      - name: e2e test batch 1-node
         run: |
           ~/cargo-make/makers clean-data
-          ~/cargo-make/makers ci-3node
+          # ~/cargo-make/makers ci-3node
+          ~/cargo-make/makers ci-streaming
           sqllogictest -p 4567 -d dev './e2e_test/batch/**/*.slt'
 
       - name: Kill cluster
@@ -243,13 +246,16 @@ jobs:
         run: |
           sqllogictest -p ${{ env.PG_PORT }} './e2e_test/batch/**/*.slt'
 
-      - name: Run 3-node regress tests (batch)
+      # TODO: batch 3-node is disabled since TABLE_V2 can't be distributed now
+      # - name: Run 3-node regress tests (batch)
+      - name: Run 1-node regress tests (batch)
         run: |
           sleep 5
           chmod +x ./rust/target/debug/compute-node
           chmod +x ./rust/target/debug/meta-node
           chmod +x ./rust/target/debug/risingwave_regress_test
-          ./scripts/start_cluster.sh 3
+          # ./scripts/start_cluster.sh 3
+          ./scripts/start_cluster.sh 1
           psql --version
           RUST_LOG=info cd rust && target/debug/risingwave_regress_test -h 127.0.0.1 \
             -p ${{ env.RW_PORT }} \
