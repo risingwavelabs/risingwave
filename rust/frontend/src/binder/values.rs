@@ -27,15 +27,7 @@ impl Binder {
             .collect::<Vec<DataType>>();
         for vec in &bound {
             for (i, expr) in vec.iter().enumerate() {
-                if let Some(tmp) = Self::check_compat(types[i], expr.return_type()) {
-                    types[i] = tmp;
-                } else {
-                    return Err(RwError::from(ErrorCode::InternalError(format!(
-                        "Can not find a compatible type for {:?} and {:?}",
-                        types[i],
-                        expr.return_type()
-                    ))));
-                }
+                types[i] = Self::find_compat(types[i], expr.return_type())?
             }
         }
         let rows = bound
@@ -43,17 +35,7 @@ impl Binder {
             .map(|vec| {
                 vec.into_iter()
                     .enumerate()
-                    .map(|(i, expr)| {
-                        if types[i] != expr.return_type() {
-                            ExprImpl::FunctionCall(Box::new(FunctionCall::new_with_return_type(
-                                ExprType::Cast,
-                                vec![expr],
-                                types[i],
-                            )))
-                        } else {
-                            expr
-                        }
-                    })
+                    .map(|(i, expr)| Self::ensure_type(expr, types[i]))
                     .collect::<Vec<ExprImpl>>()
             })
             .collect::<Vec<Vec<ExprImpl>>>();
@@ -61,18 +43,35 @@ impl Binder {
         Ok(BoundValues { rows, schema })
     }
 
-    fn check_compat(left: DataType, right: DataType) -> Option<DataType> {
+    /// Find compatible type for `left` and `right`.
+    fn find_compat(left: DataType, right: DataType) -> Result<DataType> {
         if (left == right || left.is_numeric() && right.is_numeric())
             || (left.is_string() && right.is_string()
                 || (left.is_date_or_timestamp() && right.is_date_or_timestamp()))
         {
             if left as i32 > right as i32 {
-                Some(left)
+                Ok(left)
             } else {
-                Some(right)
+                Ok(right)
             }
         } else {
-            None
+            Err(RwError::from(ErrorCode::InternalError(format!(
+                "Can not find compatible type for {:?} and {:?}",
+                left, right
+            ))))
+        }
+    }
+
+    /// Check if cast needs to be inserted.
+    fn ensure_type(expr: ExprImpl, ty: DataType) -> ExprImpl {
+        if ty != expr.return_type() {
+            ExprImpl::FunctionCall(Box::new(FunctionCall::new_with_return_type(
+                ExprType::Cast,
+                vec![expr],
+                ty,
+            )))
+        } else {
+            expr
         }
     }
 }
@@ -122,7 +121,7 @@ mod tests {
             assert_eq!(
                 res_err,
                 RwError::from(ErrorCode::InternalError(format!(
-                    "Can not find a compatible type for {:?} and {:?}",
+                    "Can not find compatible type for {:?} and {:?}",
                     DataType::Varchar,
                     DataType::Int32
                 )))
