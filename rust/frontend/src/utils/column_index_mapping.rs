@@ -143,7 +143,7 @@ mod tests {
         remaining_cols.insert(3);
         remaining_cols.insert(5);
         let col_prune_mapping = ColIndexMapping::with_remaining_columns(&remaining_cols);
-        let composite = add_mapping.composite(col_prune_mapping);
+        let composite = add_mapping.composite(&col_prune_mapping);
         assert_eq!(composite.map(0), 0); // 0+3 = 3， 3 -> 0
         assert_eq!(composite.try_map(1), None);
         assert_eq!(composite.map(2), 1); // 2+3 = 5, 5 -> 1
