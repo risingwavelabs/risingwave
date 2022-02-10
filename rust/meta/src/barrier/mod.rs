@@ -4,7 +4,6 @@ use std::time::Duration;
 
 use futures::future::try_join_all;
 use itertools::Itertools;
-use log::trace;
 use risingwave_common::array::RwError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::common::WorkerType;
