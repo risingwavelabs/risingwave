@@ -26,14 +26,26 @@ pub fn to_conjunctions(expr: ExprImpl) -> Vec<ExprImpl> {
 }
 
 /// give a expression, and get all columns in its input_ref expressions.
-pub fn get_col_refs(_expr: &ExprImpl) -> FixedBitSet {
-    todo!()
+/// **Panics** if **bit** is out of bounds of the FixedBitSet.
+pub fn get_inputs_col_index(expr: &ExprImpl, cols: &mut FixedBitSet) {
+    match expr {
+        ExprImpl::FunctionCall(func_call) => {
+            for expr in func_call.inputs() {
+                get_inputs_col_index(expr, cols);
+            }
+        }
+        ExprImpl::AggCall(agg_call) => {
+            for expr in agg_call.inputs() {
+                get_inputs_col_index(expr, cols);
+            }
+        }
+        ExprImpl::InputRef(input_ref) => cols.insert(input_ref.index()),
+        _ => {}
+    }
 }
 /// give a expression, and check all columns in its input_ref expressions less than the input
 /// column number.
 pub fn assert_input_ref(expr: &ExprImpl, input_col_num: usize) {
-    let cols = get_col_refs(expr);
-    for col in cols.ones() {
-        assert!(col < input_col_num);
-    }
+    let mut cols = FixedBitSet::with_capacity(input_col_num);
+    let _cols = get_inputs_col_index(expr, &mut cols);
 }

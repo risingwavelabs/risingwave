@@ -6,9 +6,9 @@ use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
 
 /// [`ReverseUserIterator`] can be used by user directly.
-pub struct ReverseUserIterator {
+pub struct ReverseUserIterator<'a> {
     /// Inner table iterator.
-    iterator: ReverseMergeIterator,
+    iterator: ReverseMergeIterator<'a>,
 
     /// We just met a new key
     just_met_new_key: bool,
@@ -32,11 +32,11 @@ pub struct ReverseUserIterator {
     read_epoch: Epoch,
 }
 
-impl ReverseUserIterator {
+impl<'a> ReverseUserIterator<'a> {
     /// Create [`UserIterator`] with maximum epoch.
     #[cfg(test)]
     pub(crate) fn new(
-        iterator: ReverseMergeIterator,
+        iterator: ReverseMergeIterator<'a>,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
     ) -> Self {
         Self::new_with_epoch(iterator, key_range, Epoch::MAX)
@@ -44,7 +44,7 @@ impl ReverseUserIterator {
 
     /// Create [`UserIterator`] with given `read_epoch`.
     pub(crate) fn new_with_epoch(
-        iterator: ReverseMergeIterator,
+        iterator: ReverseMergeIterator<'a>,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
     ) -> Self {
@@ -723,6 +723,7 @@ mod tests {
             meta: table.meta.clone(),
             obj_client: table.obj_client.clone(),
             data_path: table.data_path.clone(),
+            block_cache: table.block_cache.clone(),
         }
     }
 
@@ -842,7 +843,7 @@ mod tests {
         let (data, meta) = b.finish();
         // get remote table
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
-        let table = gen_remote_sstable(obj_client, 0, data, meta, REMOTE_DIR)
+        let table = gen_remote_sstable(obj_client, 0, data, meta, REMOTE_DIR, None)
             .await
             .unwrap();
 
@@ -906,7 +907,7 @@ mod tests {
         let (data, meta) = b.finish();
         // get remote table
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
-        gen_remote_sstable(obj_client, 0, data, meta, REMOTE_DIR)
+        gen_remote_sstable(obj_client, 0, data, meta, REMOTE_DIR, None)
             .await
             .unwrap()
     }

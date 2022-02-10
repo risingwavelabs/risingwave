@@ -43,7 +43,7 @@ fn name_of(ty: &DataType) -> DataTypeName {
         DataType::Time => DataTypeName::Time,
         DataType::Timestamp => DataTypeName::Timestamp,
         DataType::Timestampz => DataTypeName::Timestampz,
-        DataType::Decimal { .. } => DataTypeName::Decimal,
+        DataType::Decimal => DataTypeName::Decimal,
         DataType::Interval => DataTypeName::Interval,
         DataType::Struct => DataTypeName::Struct,
     }
@@ -68,7 +68,7 @@ pub fn infer_type(func_type: ExprType, inputs_type: Vec<DataType>) -> Option<Dat
         DataTypeName::Time => DataType::Time,
         DataTypeName::Timestamp => DataType::Timestamp,
         DataTypeName::Timestampz => DataType::Timestampz,
-        DataTypeName::Decimal => DataType::decimal_default(),
+        DataTypeName::Decimal => DataType::Decimal,
         DataTypeName::Interval => DataType::Interval,
         DataTypeName::Struct => DataType::Struct,
     })
@@ -253,7 +253,7 @@ mod tests {
             ExprType::Divide,
             ExprType::Modulus,
         ];
-        let decimal_type = DataType::decimal_default();
+        let decimal_type = DataType::Decimal;
         let num_promote_table = vec![
             (Int16, Int16, Int16),
             (Int16, Int32, Int32),
@@ -321,7 +321,7 @@ mod tests {
             DataType::Int64,
             DataType::Float32,
             DataType::Float64,
-            DataType::decimal_default(),
+            DataType::Decimal,
         ];
 
         for (expr, num_t) in iproduct!(exprs, num_types) {

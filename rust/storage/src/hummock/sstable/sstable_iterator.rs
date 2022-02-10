@@ -42,9 +42,10 @@ impl SSTableIterator {
     /// Seek to a block, and then seek to the key if `seek_key` is given.
     async fn seek_idx(&mut self, idx: usize, seek_key: Option<&[u8]>) -> HummockResult<()> {
         tracing::trace!(
-            table_id = self.table.id,
-            block_id = idx,
-            "table iterator seek"
+            target: "events::storage::sstable::block_seek",
+            "table iterator seek: table_id = {}, block_id = {}",
+            self.table.id,
+            idx,
         );
         if idx >= self.table.block_count() {
             self.block_iter = None;

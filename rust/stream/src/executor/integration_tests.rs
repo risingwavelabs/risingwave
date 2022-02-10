@@ -59,7 +59,7 @@ async fn test_merger_sum_aggr() {
         };
         let input = ReceiverExecutor::new(schema, vec![], input_rx);
         // for the local aggregator, we need two states: row count and sum
-        let aggregator = SimpleAggExecutor::new(
+        let aggregator = LocalSimpleAggExecutor::new(
             Box::new(input),
             vec![
                 AggCall {
@@ -73,10 +73,10 @@ async fn test_merger_sum_aggr() {
                     return_type: DataType::Int64,
                 },
             ],
-            create_in_memory_keyspace(),
             vec![],
             1,
-        );
+        )
+        .unwrap();
         let (tx, rx) = channel(16);
         let consumer = SenderConsumer::new(Box::new(aggregator), Box::new(ChannelOutput::new(tx)));
         let context = SharedContext::for_test().into();
@@ -314,7 +314,7 @@ async fn test_tpch_q6() {
         let projection = ProjectExecutor::new(Box::new(filter), vec![], vec![multiply], 2);
 
         // for local aggregator, we need to sum data and count rows
-        let aggregator = SimpleAggExecutor::new(
+        let aggregator = LocalSimpleAggExecutor::new(
             Box::new(projection),
             vec![
                 AggCall {
@@ -328,10 +328,10 @@ async fn test_tpch_q6() {
                     return_type: DataType::Float64,
                 },
             ],
-            create_in_memory_keyspace(),
             vec![],
             3,
-        );
+        )
+        .unwrap();
         let (tx, rx) = channel(16);
         let consumer = SenderConsumer::new(Box::new(aggregator), Box::new(ChannelOutput::new(tx)));
         let context = SharedContext::for_test().into();

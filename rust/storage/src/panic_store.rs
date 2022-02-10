@@ -1,3 +1,5 @@
+use std::ops::RangeBounds;
+
 use async_trait::async_trait;
 use bytes::Bytes;
 use risingwave_common::error::Result;
@@ -11,9 +13,9 @@ pub struct PanicStateStore;
 
 #[async_trait]
 impl StateStore for PanicStateStore {
-    type Iter = PanicStateStoreIter;
+    type Iter<'a> = PanicStateStoreIter;
 
-    async fn get(&self, _key: &[u8]) -> Result<Option<Bytes>> {
+    async fn get(&self, _key: &[u8], _epoch: u64) -> Result<Option<Bytes>> {
         panic!("should not read from the state store!");
     }
 
@@ -25,7 +27,11 @@ impl StateStore for PanicStateStore {
         panic!("should not write the panic state store!");
     }
 
-    async fn iter(&self, _prefix: &[u8]) -> Result<Self::Iter> {
+    async fn iter<R, B>(&self, _key_range: R, _epoch: u64) -> Result<Self::Iter<'_>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]>,
+    {
         panic!("should not create iter from the panic state store!");
     }
 }
@@ -36,7 +42,7 @@ pub struct PanicStateStoreIter {}
 impl StateStoreIter for PanicStateStoreIter {
     type Item = (Bytes, Bytes);
 
-    async fn next(&mut self) -> Result<Option<Self::Item>> {
+    async fn next(&'_ mut self) -> Result<Option<Self::Item>> {
         unreachable!()
     }
 }

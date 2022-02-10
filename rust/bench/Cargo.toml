@@ -11,6 +11,7 @@ env_logger = "0.9"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.10"
 log = "0.4"
+moka = { version = "0.7", features = ["future"] }
 rand = "0.8"
 risingwave-pb = { path = "../prost" }
 risingwave_common = { path = "../common" }

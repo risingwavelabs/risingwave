@@ -48,8 +48,8 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     use risingwave_pb::expr::expr_node::Type::*;
 
     match prost.get_expr_type()? {
-        Cast | Upper | Not | PgSleep | IsTrue | IsNotTrue | IsFalse | IsNotFalse | IsNull
-        | IsNotNull | Neg => build_unary_expr_prost(prost),
+        Cast | Upper | Lower | Not | PgSleep | IsTrue | IsNotTrue | IsFalse | IsNotFalse
+        | IsNull | IsNotNull | Neg => build_unary_expr_prost(prost),
         Equal | NotEqual | LessThan | LessThanOrEqual | GreaterThan | GreaterThanOrEqual => {
             build_binary_expr_prost(prost)
         }
@@ -64,6 +64,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         Ltrim => build_ltrim_expr(prost),
         Rtrim => build_rtrim_expr(prost),
         Position => build_position_expr(prost),
+        Ascii => build_ascii_expr(prost),
         ConstantValue => LiteralExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
         InputRef => InputRefExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
         Case => build_case_expr(prost),

@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use super::info::BarrierActorInfo;
 use crate::manager::StreamClientsRef;
-use crate::model::TableFragments;
+use crate::model::{ActorId, TableFragments};
 use crate::stream::FragmentManagerRef;
 
 /// [`Command`] is the action of [`BarrierManager`]. For different commands, we'll build different
@@ -33,7 +33,7 @@ pub enum Command {
 
     CreateMaterializedView {
         table_fragments: TableFragments,
-        dispatches: HashMap<u32, Vec<ActorInfo>>,
+        dispatches: HashMap<ActorId, Vec<ActorInfo>>,
     },
 }
 
@@ -100,7 +100,7 @@ impl CommandContext<'_> {
                             },
                         )
                     })
-                    .collect::<HashMap<u32, Actors>>();
+                    .collect::<HashMap<_, _>>();
                 Mutation::Add(AddMutation { actors })
             }
         };

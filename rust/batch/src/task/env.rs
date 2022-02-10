@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use risingwave_common::config::BatchConfig;
 use risingwave_source::{SourceManager, SourceManagerRef};
 use risingwave_storage::table::{TableManager, TableManagerRef};
 
@@ -14,6 +15,7 @@ pub struct BatchTaskEnv {
     server_addr: SocketAddr,
     task_manager: Arc<TaskManager>,
     source_manager: SourceManagerRef,
+    config: Arc<BatchConfig>,
 }
 
 impl BatchTaskEnv {
@@ -22,12 +24,14 @@ impl BatchTaskEnv {
         source_manager: SourceManagerRef,
         task_manager: Arc<TaskManager>,
         server_addr: SocketAddr,
+        config: Arc<BatchConfig>,
     ) -> Self {
         BatchTaskEnv {
             table_manager,
             server_addr,
             task_manager,
             source_manager,
+            config,
         }
     }
 
@@ -42,6 +46,7 @@ impl BatchTaskEnv {
             task_manager: Arc::new(TaskManager::new()),
             server_addr: SocketAddr::V4("127.0.0.1:5688".parse().unwrap()),
             source_manager: std::sync::Arc::new(MemSourceManager::new()),
+            config: Arc::new(BatchConfig::default()),
         }
     }
 
@@ -67,5 +72,9 @@ impl BatchTaskEnv {
 
     pub fn source_manager_ref(&self) -> SourceManagerRef {
         self.source_manager.clone()
+    }
+
+    pub fn config(&self) -> &BatchConfig {
+        self.config.as_ref()
     }
 }
