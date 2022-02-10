@@ -68,7 +68,7 @@ pub trait TableIter: Send {
 #[async_trait::async_trait]
 pub trait ScannableTable: Sync + Send + Any + core::fmt::Debug {
     /// Open and return an iterator.
-    async fn iter(&self) -> Result<TableIterRef>;
+    async fn iter(&self, epoch: u64) -> Result<TableIterRef>;
 
     /// Collect data chunk with the target `chunk_size` from the given `iter`, projected on
     /// `indices`. If there's no more data, return `None`.
@@ -129,7 +129,7 @@ pub trait ScannableTable: Sync + Send + Any + core::fmt::Debug {
     /// specifically.
     async fn get_data_by_columns(&self, column_ids: &[i32]) -> Result<BummockResult> {
         let indices = self.column_indices(column_ids);
-        let mut iter = self.iter().await?;
+        let mut iter = self.iter(u64::MAX).await?;
         match self.collect_from_iter(&mut iter, &indices, None).await? {
             Some(chunk) => Ok(BummockResult::Data(vec![chunk.into()])),
             None => Ok(BummockResult::DataEof),
