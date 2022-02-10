@@ -8,11 +8,25 @@ fn proc_histogram(histogram: &Histogram) {
     let str_lines = metric_str.split('\n').collect::<Vec<&str>>();
     let mut sample_count = 0;
     let mut sample_sum = 0.0;
+    let mut buckets = Vec::new();
+    let mut i = 0;
     // We get metrics in buckets by parsing the fmt string.
     // This method is not elegant, but we cannot find a better way since the interface is not
     // provided.
-    let mut buckets = Vec::new();
-    let mut i = 0;
+    // 
+    // Metric string format example:
+    // histogram {
+    //     sample_count: 0
+    //     sample_sum: 0
+    //     bucket {
+    //       cumulative_count: 0
+    //       upper_bound: 0.0000010
+    //     }
+    //     bucket {
+    //       cumulative_count: 118
+    //       upper_bound: 0.000025
+    //     }
+    //   }
     while i < str_lines.len() {
         if str_lines[i].contains("bucket {") {
             let cumulative_count = str_lines[i + 1]

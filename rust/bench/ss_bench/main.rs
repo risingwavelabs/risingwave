@@ -18,7 +18,7 @@ use risingwave_storage::rocksdb_local::RocksDBStateStore;
 use risingwave_storage::tikv::TikvStateStore;
 use risingwave_storage::StateStore;
 
-use crate::utils::monitor_statistics::print_statistics;
+use crate::utils::store_statistics::print_statistics;
 
 #[allow(dead_code)]
 enum WorkloadType {
@@ -86,7 +86,7 @@ pub(crate) struct Opts {
     value_size: u32,
 
     // ----- flag -----
-    #[clap(parse(from_flag))]
+    #[clap(long)]
     statistics: bool,
 }
 

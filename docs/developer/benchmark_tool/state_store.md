@@ -8,7 +8,7 @@
  --batch-size 1000 \
  --reads 500 \
  --concurrency-num 4 \
- statistics
+ --statistics
 ```
 
 # Parameters
@@ -140,7 +140,7 @@ Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
 
 # Flag
 
-- `statistics`
+- `--statistics`
   - Detailed statistics of storage backend
 
 # Metrics
