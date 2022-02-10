@@ -17,7 +17,7 @@ pub const DEFAULT_DATABASE_NAME: &str = "dev";
 pub const DEFAULT_SCHEMA_NAME: &str = "dev";
 
 struct CatalogCache {
-    database_by_name: HashMap<String, DatabaseCatalog>,
+    database_by_name: HashMap<String, Arc<DatabaseCatalog>>,
 }
 
 /// Root catalog of database catalog. Manage all database/schema/table in memory.
@@ -37,17 +37,17 @@ impl CatalogCache {
 
     fn create_database(&mut self, db_name: &str, db_id: DatabaseId) -> Result<()> {
         self.database_by_name
-            .try_insert(db_name.to_string(), DatabaseCatalog::new(db_id))
+            .try_insert(db_name.to_string(), Arc::new(DatabaseCatalog::new(db_id)))
             .map(|_| ())
             .map_err(|_| CatalogError::Duplicated("database", db_name.to_string()).into())
     }
 
     fn get_database(&self, db_name: &str) -> Option<&DatabaseCatalog> {
-        self.database_by_name.get(db_name)
+        Some(self.database_by_name.get(db_name)?.as_ref())
     }
 
     fn get_database_mut(&mut self, db_name: &str) -> Option<&mut DatabaseCatalog> {
-        self.database_by_name.get_mut(db_name)
+        Some(Arc::make_mut(self.database_by_name.get_mut(db_name)?))
     }
 
     fn create_schema(
