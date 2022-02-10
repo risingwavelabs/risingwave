@@ -1,10 +1,12 @@
-const parsedNodeMap = new Map();
-const parsedActorMap = new Map();
-const actorId2Proto = new Map();
+// TODO: move these three to StreamPlanParser properties
+var parsedNodeMap = new Map();
+var parsedActorMap = new Map();
+var actorId2Proto = new Map();
 
 class Node {
   constructor(actorId, nodeProto) {
     this.id = nodeProto.operatorId;
+    this.nodeProto = nodeProto;
     this.nextNodes = [];
     this.actorId = actorId;
     if (nodeProto.input !== undefined) {
@@ -30,7 +32,7 @@ class StreamNode extends Node {
   }
 
   paseType(nodeProto) {
-    let types = ["tableSourceNode", "projectNode", "filterNode",
+    let types = ["tableSourceNode", "sourceNode", "projectNode", "filterNode",
       "mviewNode", "simpleAggNode", "hashAggNode", "topNNode",
       "hashJoinNode", "mergeNode", "exchangeNode", "chainNode"];
     for (let type of types) {
@@ -51,13 +53,14 @@ class StreamNode extends Node {
 }
 
 class Dispatcher extends Node {
-  constructor(actorId, dispatcherType, nodeProto) {
+  constructor(actorId, dispatcherType, downstreamActorId, nodeProto) {
     super(actorId, nodeProto);
     this.dispatcherType = dispatcherType;
+    this.downstreamActorId = downstreamActorId;
   }
 
-  static newDispatcher(actorId, type) {
-    return new Dispatcher(actorId, type, {
+  static newDispatcher(actorId, type, downstreamActorId) {
+    return new Dispatcher(actorId, type, downstreamActorId, {
       operatorId: 100000 + actorId
     })
   }
@@ -80,7 +83,7 @@ class Actor {
     let actor = new Actor(actorId, [], null, actorProto.nodes.operatorId);
     parsedActorMap.set(actorId, actor);
     let nodeBeforeDispatcher = StreamNode.parseNode(actor.actorId, actorProto.nodes);
-    let rootNode = Dispatcher.newDispatcher(actor.actorId, actorProto.dispatcher.type);
+    let rootNode = Dispatcher.newDispatcher(actor.actorId, actorProto.dispatcher.type, actorProto.downstreamActorId);
     rootNode.nextNodes = [nodeBeforeDispatcher];
     actor.rootNode = rootNode;
     return parsedActorMap.get(actorId);
@@ -94,6 +97,10 @@ export default class StreamPlanParser {
    * @param {*} streamPlan raw input from the meta node
    */
   constructor(streamPlan) {
+    parsedNodeMap = new Map();
+    parsedActorMap = new Map();
+    actorId2Proto = new Map();
+
     this.node = streamPlan.node;
     this.actorProtoList = streamPlan.actors;
     for (let actorProto of this.actorProtoList) {
@@ -106,6 +113,14 @@ export default class StreamPlanParser {
     for (let actorId of parsedActorMap.keys()) {
       this.parsedActorList.push(parsedActorMap.get(actorId));
     }
+  }
+
+  getActor(actorId) {
+    return parsedActorMap.get(actorId);
+  }
+
+  getOperator(operatorId) {
+    return parsedNodeMap.get(operatorId);
   }
 
   /**

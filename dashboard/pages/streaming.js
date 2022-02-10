@@ -2,9 +2,11 @@ import Layout from '../components/Layout';
 import StreamingView from '../components/StreamingView';
 import NoData from '../components/NoData';
 import { getActors } from './api/streaming';
+import { cloneDeep } from "lodash";
 
 export async function getStaticProps(context) {
   let actorProtoList = await getActors();
+  actorProtoList.push(cloneDeep(actorProtoList[0]))  // TODO: remove this (for testing)
   return {
     props: {
       actorProtoList
@@ -13,7 +15,6 @@ export async function getStaticProps(context) {
 }
 
 export default function Streaming(props) {
-
   return (
     <>
       <Layout currentPage="streaming">

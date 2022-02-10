@@ -1,6 +1,6 @@
 import * as d3 from "d3";
-import drawManyFlow from "../lib/streamPlan/streamChartHelper";
-import { useEffect, useRef } from 'react';
+import StreamChartHelper from "../lib/streamPlan/streamChartHelper";
+import { useEffect, useRef, useState } from 'react';
 import styled from '@emotion/styled';
 import LocationSearchingIcon from '@mui/icons-material/LocationSearching';
 
@@ -12,7 +12,8 @@ const SvgBox = styled('div')(() => ({
   padding: "10px",
   borderRadius: "20px",
   boxShadow: "5px 5px 10px #ebebeb, -5px -5px 10px #ffffff",
-  position: "relative"
+  position: "relative",
+  marginBottom: "100px"
 }));
 
 const SvgBoxCover = styled('div')(() => ({
@@ -20,18 +21,27 @@ const SvgBoxCover = styled('div')(() => ({
   zIndex: "6"
 }));
 
-export default function StreamingView(props) {
 
+export default function StreamingView(props) {
+  console.log("called.")
   const node = props.node;
   const actorProto = props.actorProto;
-
+  const [nodeJson, setNodeJson] = useState("");
+  const [showInfoPane, setShowInfoPane] = useState(false);
   const d3Container = useRef(null);
+
+  const onNodeClick = (e, node) => {
+    setShowInfoPane(true);
+    setNodeJson(node.dispatcherType
+      ? JSON.stringify({ dispatcher: { type: node.dispatcherType }, downstreamActorId: node.downstreamActorId }, null, 2)
+      : JSON.stringify(node.nodeProto, null, 2));
+  };
 
   let zoom;
   let svg;
 
   useEffect(() => {
-    if (d3Container.current) {
+    if (d3Container.current && (svg === undefined)) {
       const width = 1000;
       const height = 1000;
 
@@ -39,19 +49,16 @@ export default function StreamingView(props) {
         .select(d3Container.current)
         .attr("viewBox", [-width / 6, -height / 4, width, height]);
 
-      const g = svg.append("g");
+      const g = svg.append("g").attr("class", "top");
+      let helper = new StreamChartHelper(g, actorProto, onNodeClick);
 
-      drawManyFlow({
-        g: g,
-        actorProto: actorProto
-      });
+      helper.drawManyFlow();
 
       let transform;
       // Deal with zooming event
       zoom = d3.zoom().on("zoom", e => {
         transform = e.transform;
         g.attr("transform", e.transform);
-
       })
 
       svg.call(zoom)
@@ -60,12 +67,22 @@ export default function StreamingView(props) {
           transform.invert(d3.pointer(event));
         });
       ;
-
     }
-  }, [d3Container.current])
+  }, []);
 
   return (
     <SvgBox>
+      <SvgBoxCover style={{ right: "10px", top: "10px", width: "300px" }}>
+        <div style={{
+          height: "560px",
+          display: showInfoPane ? "block" : "none", padding: "20px",
+          backgroundColor: "snow", whiteSpace: "pre", lineHeight: "100%",
+          fontSize: "13px", overflow: "scroll"
+        }}>
+          {nodeJson}
+        </div>
+
+      </SvgBoxCover>
       <SvgBoxCover>
         <div>
           Actors {node ? (node.host.host + ":" + node.host.port) : ""}
@@ -84,6 +101,6 @@ export default function StreamingView(props) {
           height={600}
         />
       </div>
-    </SvgBox>
+    </SvgBox >
   )
 }
