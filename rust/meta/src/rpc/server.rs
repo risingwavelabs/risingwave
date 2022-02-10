@@ -15,7 +15,7 @@ use crate::barrier::BarrierManager;
 use crate::cluster::StoredClusterManager;
 use crate::dashboard::DashboardService;
 use crate::hummock;
-use crate::manager::{Config, MemEpochGenerator, MetaSrvEnv};
+use crate::manager::{MemEpochGenerator, MetaSrvEnv};
 use crate::rpc::service::catalog_service::CatalogServiceImpl;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
 use crate::rpc::service::epoch_service::EpochServiceImpl;
@@ -38,7 +38,6 @@ pub async fn rpc_serve(
     meta_store_backend: MetaStoreBackend,
 ) -> (JoinHandle<()>, UnboundedSender<()>) {
     let listener = TcpListener::bind(addr).await.unwrap();
-    let config = Arc::new(Config::default());
     let meta_store_ref: MetaStoreRef = match meta_store_backend {
         MetaStoreBackend::Mem => panic!("Use SledMetaStore instead"),
         MetaStoreBackend::Sled(db_path) => {
@@ -47,7 +46,7 @@ pub async fn rpc_serve(
         MetaStoreBackend::SledInMem => Arc::new(SledMetaStore::new(None).unwrap()),
     };
     let epoch_generator_ref = Arc::new(MemEpochGenerator::new());
-    let env = MetaSrvEnv::new(config, meta_store_ref, epoch_generator_ref.clone()).await;
+    let env = MetaSrvEnv::new(meta_store_ref, epoch_generator_ref.clone()).await;
 
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
     let cluster_manager = Arc::new(StoredClusterManager::new(env.clone()).await.unwrap());
