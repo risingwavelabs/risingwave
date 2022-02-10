@@ -79,7 +79,7 @@ async fn test_stream_proto() {
                 }),
                 dispatcher: Some(Dispatcher {
                     r#type: dispatcher::DispatcherType::Hash as i32,
-                    column_idx: 0,
+                    column_indices: vec![0],
                 }),
                 downstream_actor_id: vec![3],
             },
@@ -109,7 +109,7 @@ async fn test_stream_proto() {
                 }),
                 dispatcher: Some(Dispatcher {
                     r#type: dispatcher::DispatcherType::Hash as i32,
-                    column_idx: 0,
+                    column_indices: vec![0],
                 }),
                 downstream_actor_id: vec![7, 11],
             },
@@ -139,7 +139,7 @@ async fn test_stream_proto() {
                 }),
                 dispatcher: Some(Dispatcher {
                     r#type: dispatcher::DispatcherType::Hash as i32,
-                    column_idx: 0,
+                    column_indices: vec![0],
                 }),
                 downstream_actor_id: vec![13],
             },
@@ -169,7 +169,7 @@ async fn test_stream_proto() {
                 }),
                 dispatcher: Some(Dispatcher {
                     r#type: dispatcher::DispatcherType::Simple as i32,
-                    column_idx: 0,
+                    ..Default::default()
                 }),
                 downstream_actor_id: vec![13],
             },
@@ -199,7 +199,7 @@ async fn test_stream_proto() {
                 }),
                 dispatcher: Some(Dispatcher {
                     r#type: dispatcher::DispatcherType::Simple as i32,
-                    column_idx: 0,
+                    ..Default::default()
                 }),
                 downstream_actor_id: vec![233],
             },

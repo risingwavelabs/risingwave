@@ -7,7 +7,7 @@ use crate::error::Result;
 use crate::types::DataType;
 
 /// The field in the schema of the executor's return data
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct Field {
     pub data_type: DataType,
     pub name: String,
@@ -25,7 +25,7 @@ impl std::fmt::Debug for Field {
 }
 
 /// the schema of the executor's return data
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Schema {
     pub fields: Vec<Field>,
 }
