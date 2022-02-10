@@ -1,7 +1,8 @@
 use async_trait::async_trait;
 use risingwave_pb::hummock::{
-    AddTablesRequest, GetNewTableIdRequest, HummockSnapshot, HummockVersion, PinSnapshotRequest,
-    PinVersionRequest, SstableInfo, UnpinSnapshotRequest, UnpinVersionRequest,
+    AddTablesRequest, CompactTask, GetCompactionTasksRequest, GetNewTableIdRequest,
+    HummockSnapshot, HummockVersion, PinSnapshotRequest, PinVersionRequest,
+    ReportCompactionTasksRequest, SstableInfo, UnpinSnapshotRequest, UnpinVersionRequest,
 };
 use risingwave_rpc_client::MetaClient;
 
@@ -32,6 +33,12 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         &self,
         epoch: HummockEpoch,
         sstables: Vec<SstableInfo>,
+    ) -> HummockResult<()>;
+    async fn get_compaction_task(&self) -> HummockResult<Option<CompactTask>>;
+    async fn report_compaction_task(
+        &self,
+        compact_task: CompactTask,
+        task_result: bool,
     ) -> HummockResult<()>;
 }
 
@@ -128,6 +135,38 @@ impl HummockMetaClient for RPCHummockMetaClient {
                 context_identifier: 0,
                 tables: sstables,
                 epoch,
+            })
+            .await
+            .map_err(HummockError::meta_error)?;
+        Ok(())
+    }
+
+    async fn get_compaction_task(&self) -> HummockResult<Option<CompactTask>> {
+        let result = self
+            .meta_client
+            .to_owned()
+            .hummock_client
+            .get_compaction_tasks(GetCompactionTasksRequest {
+                context_identifier: 0,
+            })
+            .await
+            .map_err(HummockError::meta_error)?
+            .into_inner();
+        Ok(result.compact_task)
+    }
+
+    async fn report_compaction_task(
+        &self,
+        compact_task: CompactTask,
+        task_result: bool,
+    ) -> HummockResult<()> {
+        self.meta_client
+            .to_owned()
+            .hummock_client
+            .report_compaction_tasks(ReportCompactionTasksRequest {
+                context_identifier: 0,
+                compact_task: Some(compact_task),
+                task_result,
             })
             .await
             .map_err(HummockError::meta_error)?;
