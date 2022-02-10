@@ -29,8 +29,8 @@ fn proc_histogram(histogram: &Histogram) {
             let upper_bound = bucket.get_upper_bound();
             let count = bucket.get_cumulative_count();
             if count >= threshold {
-                // assume scale linearly within this bucket
-                // we return the propositional value bwtween last_upper_bound and upper_bound
+                // assume scale linearly within this bucket,
+                // return the propositional value bwtween last_upper_bound and upper_bound
                 let right_left_diff = upper_bound - last_upper_bound;
                 return last_upper_bound
                     + right_left_diff * (threshold - last_count) as f64
