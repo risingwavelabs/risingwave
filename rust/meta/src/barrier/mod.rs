@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use futures::future::try_join_all;
 use itertools::Itertools;
-use log::{trace, warn};
+use log::trace;
 use risingwave_common::array::RwError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::common::WorkerType;
@@ -153,7 +153,6 @@ impl BarrierManager {
             };
 
             let mutation = command_context.to_mutation().await?;
-            warn!("mutation: {:#?}", mutation);
 
             let epoch = self.epoch_generator.generate()?.into_inner();
 
@@ -164,10 +163,6 @@ impl BarrierManager {
                 ) {
                     let actor_ids_to_send = actor_ids_to_send.collect_vec();
                     let actor_ids_to_collect = actor_ids_to_collect.collect_vec();
-
-                    trace!("mutation: {:#?}", mutation);
-                    trace!("to send: {:?}", actor_ids_to_send);
-                    trace!("to collect: {:?}", actor_ids_to_collect);
 
                     let mutation = mutation.clone();
                     let request_id = Uuid::new_v4().to_string();
@@ -185,6 +180,7 @@ impl BarrierManager {
                             actor_ids_to_send,
                             actor_ids_to_collect,
                         };
+                        trace!("inject barrier request: {:#?}", request);
                         client.inject_barrier(request).await.to_rw_result()?;
 
                         Ok::<_, RwError>(())

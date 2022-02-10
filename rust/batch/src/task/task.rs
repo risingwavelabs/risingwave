@@ -175,11 +175,11 @@ impl TaskExecution {
 
     /// `get_data` consumes the data produced by `async_execute`.
     pub fn async_execute(&self) -> Result<()> {
-        // debug!(
-        //     "Prepare executing plan [{:?}]: {}",
-        //     self.task_id,
-        //     serde_json::to_string_pretty(self.plan.get_root()?).unwrap()
-        // );
+        trace!(
+            "Prepare executing plan [{:?}]: {}",
+            self.task_id,
+            serde_json::to_string_pretty(self.plan.get_root()?).unwrap()
+        );
         *self.state.lock().unwrap() = TaskStatus::Running;
         let exec = ExecutorBuilder::new(
             self.plan.root.as_ref().unwrap(),

@@ -77,15 +77,19 @@ impl StreamManagerService for StreamServiceImpl {
     ) -> TonicResponse<DropMaterializedViewResponse> {
         let _req = request.into_inner();
 
-        // match self
-        //     .sm
-        //     .drop_materialized_view(req.get_table_ref_id().map_err(tonic_err)?)
-        //     .await
-        // {
-        //     Ok(()) => Ok(Response::new(DropMaterializedViewResponse { status: None })),
-        //     Err(e) => Err(e.to_grpc_status()),
-        // }
-        Ok(Response::new(DropMaterializedViewResponse { status: None }))
+        // FIXME: We can't handle drop mv on mv now. Since TABLE_V2 is enabled, dropping
+        // materialized view on backend is temporarily disabled.
+        return Ok(Response::new(DropMaterializedViewResponse { status: None }));
+
+        #[allow(unreachable_code)]
+        match self
+            .sm
+            .drop_materialized_view(_req.get_table_ref_id().map_err(tonic_err)?)
+            .await
+        {
+            Ok(()) => Ok(Response::new(DropMaterializedViewResponse { status: None })),
+            Err(e) => Err(e.to_grpc_status()),
+        }
     }
 
     #[cfg(not(tarpaulin_include))]

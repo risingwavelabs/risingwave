@@ -240,7 +240,6 @@ impl StreamManager {
 
     /// Dropping materialized view is done by barrier manager. Check
     /// [`Command::DropMaterializedView`] for details.
-    #[allow(dead_code)]
     pub async fn drop_materialized_view(&self, table_id: &TableRefId) -> Result<()> {
         self.barrier_manager_ref
             .run_command(Command::DropMaterializedView(table_id.clone()))
