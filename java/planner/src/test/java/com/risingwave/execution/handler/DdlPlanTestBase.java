@@ -36,7 +36,7 @@ public class DdlPlanTestBase {
 
   protected void init() {
     initCatalog();
-    sqlHandlerFactory = new DefaultSqlHandlerFactory();
+    sqlHandlerFactory = new DefaultSqlHandlerFactory(false);
 
     var cfg = new Configuration();
     cfg.set(LeaderServerConfigurations.COMPUTE_NODES, Lists.newArrayList("127.0.0.1:1234"));

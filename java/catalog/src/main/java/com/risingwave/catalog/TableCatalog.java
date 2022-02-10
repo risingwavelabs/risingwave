@@ -45,7 +45,7 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
   private static final String TABLE_SOURCE_PREFIX = "_rw_source_";
   private final AtomicInteger nextColumnId = new AtomicInteger(ROWID_COLUMN_ID);
   private final List<ColumnCatalog> columns;
-  private final ColumnCatalog rowIdColumn;
+  private ColumnCatalog rowIdColumn;
   private final ConcurrentMap<ColumnCatalog.ColumnId, ColumnCatalog> columnById;
   private final ConcurrentMap<ColumnCatalog.ColumnName, ColumnCatalog> columnByName;
   private final boolean source;
@@ -83,10 +83,10 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
     this.distributionType = distributionType;
     this.properties = properties;
     this.rowFormat = rowFormat;
-    this.rowIdColumn = buildRowIdColumn();
     this.rowSchemaLocation = rowSchemaLocation;
     if (!isMaterializedView()) {
       // Put row-id column in map but do not put it in list of columns.
+      this.rowIdColumn = buildRowIdColumn();
       this.columnById.put(rowIdColumn.getId(), rowIdColumn);
       this.columnByName.put(rowIdColumn.getEntityName(), rowIdColumn);
     }
@@ -192,7 +192,8 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
     columnByName.put(column.getEntityName(), column);
     columnById.put(column.getId(), column);
     if (isAssociatedMaterializedView() && column.getName().equals(ROWID_COLUMN)) {
-      // ignore row id column for associated mview
+      // ignore row id column for associated mview, but store it
+      rowIdColumn = column;
     } else {
       columns.add(column);
     }
@@ -264,6 +265,7 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
   }
 
   public ColumnCatalog getRowIdColumn() {
+    requireNonNull(rowIdColumn, "rowIdColumn is not initialized");
     return rowIdColumn;
   }
 
