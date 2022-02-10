@@ -190,13 +190,11 @@ impl<'a, S: StateStore> MViewTableIter<S> {
                 .keyspace
                 .scan_with_start_key(last_key.to_vec(), Some(limit), self.epoch)
                 .await?;
-            assert!(!self.buf.is_empty());
-            assert_eq!(self.buf.first().as_ref().unwrap().0, last_key);
-            // TODO: remove clone here
+            assert!(!buf.is_empty());
+            assert_eq!(buf.first().as_ref().unwrap().0, last_key);
+            // TODO: remove the unnecessary clone here
             self.buf = buf[1..].to_vec();
         }
-
-        self.next_idx = 0;
 
         Ok(())
     }
