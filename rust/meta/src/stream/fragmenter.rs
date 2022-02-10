@@ -215,10 +215,10 @@ impl StreamFragmenter {
             .add_dependency(&current_actor_ids, &last_fragment_actors);
 
         // Recursively generating actors on the downstream level.
-        if self.fragment_graph.has_downstream(current_fragment_id) {
+        if self.fragment_graph.has_upstream(current_fragment_id) {
             for fragment_id in self
                 .fragment_graph
-                .get_downstream_fragments(current_fragment_id)
+                .get_upstream_fragments(current_fragment_id)
                 .unwrap()
             {
                 self.build_graph_from_fragment(

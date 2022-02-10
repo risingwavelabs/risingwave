@@ -99,11 +99,11 @@ impl StreamFragmentGraph {
             .insert(child_id);
     }
 
-    pub fn has_downstream(&self, fragment_id: FragmentId) -> bool {
+    pub fn has_upstream(&self, fragment_id: FragmentId) -> bool {
         self.child_edges.contains_key(&fragment_id)
     }
 
-    pub fn get_downstream_fragments(
+    pub fn get_upstream_fragments(
         &self,
         fragment_id: FragmentId,
     ) -> Option<BTreeSet<FragmentId>> {
