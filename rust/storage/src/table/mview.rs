@@ -243,7 +243,8 @@ impl<S: StateStore> TableIter for MViewTableIter<S> {
             self.next_idx += 1;
 
             tracing::trace!(
-                "scanned key = {:?}, value = {:?}",
+                target: "events::stream::mview::scan",
+                "mview scanned key = {:?}, value = {:?}",
                 bytes::Bytes::copy_from_slice(key),
                 bytes::Bytes::copy_from_slice(value)
             );

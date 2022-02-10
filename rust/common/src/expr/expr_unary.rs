@@ -15,6 +15,7 @@ use crate::vector_op::cast::*;
 use crate::vector_op::cmp::{is_false, is_not_false, is_not_true, is_true};
 use crate::vector_op::conjunction;
 use crate::vector_op::length::length_default;
+use crate::vector_op::lower::lower;
 use crate::vector_op::ltrim::ltrim;
 use crate::vector_op::rtrim::rtrim;
 use crate::vector_op::trim::trim;
@@ -295,6 +296,12 @@ pub fn new_unary_expr(
             expr_ia1: child_expr,
             return_type,
             func: upper,
+            _phantom: PhantomData,
+        }),
+        (ProstType::Lower, _, _) => Box::new(UnaryBytesExpression::<Utf8Array, _> {
+            expr_ia1: child_expr,
+            return_type,
+            func: lower,
             _phantom: PhantomData,
         }),
         (ProstType::Neg, _, _) => {

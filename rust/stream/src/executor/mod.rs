@@ -34,6 +34,9 @@ use smallvec::SmallVec;
 pub use stream_source::*;
 pub use top_n::*;
 pub use top_n_appendonly::*;
+use tracing::trace_span;
+
+use crate::task::ENABLE_BARRIER_AGGREGATION;
 
 mod actor;
 mod aggregation;
@@ -170,38 +173,45 @@ impl Barrier {
                         .collect(),
                 })),
             },
+            span: vec![],
         }
     }
 
     pub fn from_protobuf(prost: &ProstBarrier) -> Result<Self> {
+        let mutation = match prost.get_mutation()? {
+            ProstMutation::Nothing(_) => (None),
+            ProstMutation::Stop(stop) => {
+                Some(Mutation::Stop(HashSet::from_iter(stop.get_actors().clone())).into())
+            }
+            ProstMutation::Update(update) => Some(
+                Mutation::UpdateOutputs(
+                    update
+                        .actors
+                        .iter()
+                        .map(|(&f, actors)| (f, actors.get_info().clone()))
+                        .collect::<HashMap<u32, Vec<ActorInfo>>>(),
+                )
+                .into(),
+            ),
+            ProstMutation::Add(adds) => Some(
+                Mutation::AddOutput(
+                    adds.actors
+                        .iter()
+                        .map(|(&id, actors)| (id, actors.get_info().clone()))
+                        .collect::<HashMap<u32, Vec<ActorInfo>>>(),
+                )
+                .into(),
+            ),
+        };
+        let epoch = prost.get_epoch();
         Ok(Barrier {
-            epoch: prost.get_epoch(),
-            mutation: match prost.get_mutation()? {
-                ProstMutation::Nothing(_) => None,
-                ProstMutation::Stop(stop) => {
-                    Some(Mutation::Stop(HashSet::from_iter(stop.get_actors().clone())).into())
-                }
-                ProstMutation::Update(update) => Some(
-                    Mutation::UpdateOutputs(
-                        update
-                            .actors
-                            .iter()
-                            .map(|(&f, actors)| (f, actors.get_info().clone()))
-                            .collect::<HashMap<u32, Vec<ActorInfo>>>(),
-                    )
-                    .into(),
-                ),
-                ProstMutation::Add(adds) => Some(
-                    Mutation::AddOutput(
-                        adds.actors
-                            .iter()
-                            .map(|(&id, actors)| (id, actors.get_info().clone()))
-                            .collect::<HashMap<u32, Vec<ActorInfo>>>(),
-                    )
-                    .into(),
-                ),
+            span: if ENABLE_BARRIER_AGGREGATION {
+                trace_span!("barrier", epoch = %epoch, mutation = ?mutation)
+            } else {
+                tracing::Span::none()
             },
-            span: tracing::Span::none(),
+            epoch,
+            mutation,
         })
     }
 }
