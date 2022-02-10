@@ -5,11 +5,19 @@ import { getActors } from './api/streaming';
 import { cloneDeep } from "lodash";
 
 export async function getStaticProps(context) {
-  let actorProtoList = await getActors();
-  actorProtoList.push(cloneDeep(actorProtoList[0]))  // TODO: remove this (for testing)
-  return {
-    props: {
-      actorProtoList
+  try {
+    let actorProtoList = await getActors();
+    return {
+      props: {
+        actorProtoList
+      }
+    }
+  } catch (e) {
+    console.error("failed to fetch data from meta node.")
+    return {
+      props: {
+        actorProtoList: []
+      }
     }
   }
 }
