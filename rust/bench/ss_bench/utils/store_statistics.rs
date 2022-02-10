@@ -30,7 +30,7 @@ fn proc_histogram(histogram: &Histogram) {
             let count = bucket.get_cumulative_count();
             if count >= threshold {
                 // assume scale linearly within this bucket,
-                // return the propositional value bwtween last_upper_bound and upper_bound
+                // return a value bwtween last_upper_bound and upper_bound
                 let right_left_diff = upper_bound - last_upper_bound;
                 return last_upper_bound
                     + right_left_diff * (threshold - last_count) as f64
@@ -68,7 +68,7 @@ pub(crate) fn print_statistics() {
     // proc_counter(&stat.iter_next_counts);
 
     // proc_histogram(&stat.get_latency);
-    // proc_histogram(&stat.get_key_size);
+    proc_histogram(&stat.get_key_size);
     // proc_histogram(&stat.get_value_size);
     // proc_histogram(&stat.get_snapshot_latency);
     // proc_histogram(&stat.batch_write_latency);
