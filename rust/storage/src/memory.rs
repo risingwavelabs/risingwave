@@ -168,7 +168,7 @@ impl StateStore for MemoryStateStore {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]>,
     {
-        self.stats.range_scan_counts.inc();
+        self.stats.reverse_range_scan_counts.inc();
         self.reverse_scan_inner(key_range, limit).await
     }
 

@@ -36,8 +36,10 @@ pub struct StateStoreStats {
     pub get_counts: GenericCounter<AtomicU64>,
     pub get_snapshot_latency: Histogram,
 
-    pub put_bytes: GenericCounter<AtomicU64>,
     pub range_scan_counts: GenericCounter<AtomicU64>,
+    pub reverse_range_scan_counts: GenericCounter<AtomicU64>,
+
+    pub put_bytes: GenericCounter<AtomicU64>,
 
     pub batched_write_counts: GenericCounter<AtomicU64>,
     pub batch_write_tuple_counts: GenericCounter<AtomicU64>,
@@ -59,7 +61,7 @@ lazy_static::lazy_static! {
 
 impl StateStoreStats {
     pub fn new(registry: &Registry) -> Self {
-        // get
+        // ----- get -----
         let get_bytes = register_int_counter_with_registry!(
             "state_store_get_bytes",
             "Total number of bytes that have been requested from remote storage",
@@ -110,10 +112,10 @@ impl StateStoreStats {
         let get_snapshot_latency =
             register_histogram_with_registry!(get_snapshot_latency_opts, registry).unwrap();
 
-        // put
-        let put_bytes = register_int_counter_with_registry!(
-            "state_store_put_bytes",
-            "Total number of bytes that have been transmitted to remote storage",
+        // ----- range_scan -----
+        let reverse_range_scan_counts = register_int_counter_with_registry!(
+            "state_store_reverse_range_scan_counts",
+            "Total number of reverse range scan requests that have been issued to Hummock Storage",
             registry
         )
         .unwrap();
@@ -125,7 +127,15 @@ impl StateStoreStats {
         )
         .unwrap();
 
-        // write_batch
+        // ----- put -----
+        let put_bytes = register_int_counter_with_registry!(
+            "state_store_put_bytes",
+            "Total number of bytes that have been transmitted to remote storage",
+            registry
+        )
+        .unwrap();
+
+        // ----- write_batch -----
         let batched_write_counts = register_int_counter_with_registry!(
             "state_store_batched_write_counts",
             "Total number of batched write requests that have been issued to state store",
@@ -177,7 +187,7 @@ impl StateStoreStats {
         );
         let batch_write_add_l0_latency = register_histogram_with_registry!(opts, registry).unwrap();
 
-        // iter
+        // ----- iter -----
         let iter_counts = register_int_counter_with_registry!(
             "state_store_iter_counts",
             "Total number of iter requests that have been issued to state store",
@@ -219,14 +229,19 @@ impl StateStoreStats {
             get_value_size,
             get_counts,
             get_snapshot_latency,
-            put_bytes,
+
             range_scan_counts,
+            reverse_range_scan_counts,
+
+            put_bytes,
+
             batched_write_counts,
             batch_write_tuple_counts,
             batch_write_latency,
             batch_write_size,
             batch_write_build_table_latency,
             batch_write_add_l0_latency,
+
             iter_counts,
             iter_next_counts,
             iter_seek_latency,
