@@ -46,7 +46,7 @@ message ChainNode {
 }
 
 // Remark by Yanghao: for both local and global we use the same node in the protobuf.
-// Local and global aggregator distinguish with each other in their PlanNode definition.
+// Local and global aggregator distinguish with each other in PlanNode definition.
 message SimpleAggNode {
   repeated expr.AggCall agg_calls = 1;
 }
