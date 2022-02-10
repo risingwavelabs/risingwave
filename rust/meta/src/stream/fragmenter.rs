@@ -140,6 +140,12 @@ impl StreamFragmenter {
                     // We should implement two phase TopN.
                     (true, child_is_source)
                 }
+                Node::ChainNode(_) => {
+                    let (_, child_is_source) = self.build_fragment(parent_fragment, node)?;
+                    // TODO: Force Chain to be singleton as a workaround.
+                    // Remove this if parallel Chain is supported
+                    (true, child_is_source)
+                }
                 _ => self.build_fragment(parent_fragment, node)?,
             };
             is_singleton |= is_singleton1;
