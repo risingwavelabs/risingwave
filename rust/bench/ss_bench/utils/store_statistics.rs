@@ -13,7 +13,7 @@ fn proc_histogram(histogram: &Histogram) {
     // We get metrics in buckets by parsing the fmt string.
     // This method is not elegant, but we cannot find a better way since the interface is not
     // provided.
-    // 
+    //
     // Metric string format example:
     // histogram {
     //     sample_count: 0
