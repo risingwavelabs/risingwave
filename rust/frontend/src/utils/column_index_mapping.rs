@@ -21,6 +21,7 @@ impl ColIndexMapping {
             .collect();
         Self { map }
     }
+
     pub fn with_remaining_columns(cols: &FixedBitSet) -> Self {
         let mut map = vec![None; cols.len()];
         for (tar, src) in cols.ones().enumerate() {
@@ -28,21 +29,25 @@ impl ColIndexMapping {
         }
         Self { map }
     }
+
     pub fn with_removed_columns(cols: &FixedBitSet) -> Self {
         let mut cols = cols.clone();
         cols.toggle_range(..);
         Self::with_remaining_columns(&cols)
     }
-    pub fn composite_mapping(&self, fllowing: Self) -> Self {
+
+    pub fn composite(&self, following: Self) -> Self {
         let mut map = self.map.clone();
         for tar in &mut map {
-            *tar = tar.and_then(|index| fllowing.try_map(index));
+            *tar = tar.and_then(|index| following.try_map(index));
         }
         Self { map }
     }
+
     pub fn try_map(&self, index: usize) -> Option<usize> {
         *self.map.get(index)?
     }
+
     pub fn map(&self, index: usize) -> usize {
         self.try_map(index).unwrap()
     }
