@@ -50,6 +50,10 @@ impl CatalogCache {
         Some(Arc::make_mut(self.database_by_name.get_mut(db_name)?))
     }
 
+    fn get_database_snapshot(&self, db_name: &str) -> Option<Arc<DatabaseCatalog>> {
+        Some(self.database_by_name.get(db_name)?.clone())
+    }
+
     fn create_schema(
         &mut self,
         db_name: &str,
@@ -296,6 +300,10 @@ impl CatalogConnector {
         // Drop database locally.
         self.catalog_cache.lock().drop_database(db_name).unwrap();
         Ok(())
+    }
+
+    pub fn get_database_snapshot(&self, db_name: &str) -> Option<Arc<DatabaseCatalog>> {
+        self.catalog_cache.lock().get_database_snapshot(db_name)
     }
 
     /// Get catalog will not query meta service. The sync of schema is done by periodically push of

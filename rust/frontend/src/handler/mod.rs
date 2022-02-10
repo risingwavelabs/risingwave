@@ -13,7 +13,7 @@ pub(super) async fn handle(session: &RwSession, stmt: Statement) -> Result<PgRes
     match stmt {
         Statement::Explain {
             statement, verbose, ..
-        } => explain::handle_explain(*statement, verbose),
+        } => explain::handle_explain(session, *statement, verbose).await,
         Statement::CreateSource(stmt) => create_source::handle_create_source(session, stmt).await,
         Statement::CreateTable { name, columns, .. } => {
             create_table::handle_create_table(session, name, columns).await

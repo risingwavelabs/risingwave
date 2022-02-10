@@ -78,14 +78,18 @@ impl Binder {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use itertools::zip_eq;
     use risingwave_sqlparser::ast::{Expr, Value};
 
     use super::*;
+    use crate::catalog::database_catalog::DatabaseCatalog;
 
     #[test]
     fn test_bind_values() {
-        let mut binder = Binder {};
+        let catalog = DatabaseCatalog::new(0);
+        let mut binder = Binder::new(Arc::new(catalog));
 
         // Test i32 -> decimal.
         let expr1 = Expr::Value(Value::Number("1".to_string(), false));
