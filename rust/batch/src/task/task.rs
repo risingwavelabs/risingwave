@@ -196,7 +196,7 @@ impl TaskExecution {
         let failure = self.failure.clone();
         let task_id = self.task_id.clone();
         tokio::spawn(async move {
-            debug!("Executing plan [{:?}]", task_id);
+            trace!("Executing plan [{:?}]", task_id);
             let mut sender = sender;
 
             let task_id_cloned = task_id.clone();

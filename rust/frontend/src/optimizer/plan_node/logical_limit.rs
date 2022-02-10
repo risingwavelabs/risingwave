@@ -1,5 +1,6 @@
 use std::fmt;
 
+use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::Schema;
 
 use super::{BatchLimit, ColPrunable, IntoPlanRef, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
@@ -50,7 +51,12 @@ impl WithSchema for LogicalLimit {
         &self.schema
     }
 }
-impl ColPrunable for LogicalLimit {}
+impl ColPrunable for LogicalLimit {
+    fn prune_col(&self, required_cols: FixedBitSet) -> PlanRef {
+        let new_input = self.input.prune_col(required_cols);
+        self.clone_with_input(new_input).into_plan_ref()
+    }
+}
 impl ToBatch for LogicalLimit {
     fn to_batch(&self) -> PlanRef {
         let new_input = self.input().to_batch();
