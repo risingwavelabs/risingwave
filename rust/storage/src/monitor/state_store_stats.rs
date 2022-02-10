@@ -22,6 +22,7 @@ pub const ITER_SEEK_LATENCY_SCALE: f64 = 0.0001;
 /// In practice, keep in mind that this represents the whole Hummock utilizations of
 /// a `RisingWave` instance. More granular utilizations of per `materialization view`
 /// job or a executor should be collected by views like `StateStats` and `JobStats`.
+#[derive(Debug)]
 pub struct StateStoreStats {
     /// Overall utilizations.
     pub get_bytes: GenericCounter<AtomicU64>,
