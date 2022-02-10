@@ -24,12 +24,10 @@ pub fn translate(
         }
     }
 
-    let iter = s.chars().filter_map(|c| {
-        match char_map.get(&c) {
-            Some(Some(m)) => Some(*m),
-            Some(None) => None,
-            None => Some(c),
-        }
+    let iter = s.chars().filter_map(|c| match char_map.get(&c) {
+        Some(Some(m)) => Some(*m),
+        Some(None) => None,
+        None => Some(c),
     });
 
     writer.write_from_char_iter(iter)
