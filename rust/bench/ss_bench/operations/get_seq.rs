@@ -30,11 +30,12 @@ pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
     }
 
     // actual point get process
+    let epoch = u64::MAX;
     let get = |keys: Vec<Bytes>| async {
         let mut latencies = vec![];
         for key in keys {
             let start = Instant::now();
-            store.get(&key).await.unwrap();
+            store.get(&key, epoch).await.unwrap();
             let time_nano = start.elapsed().as_nanos();
             latencies.push(time_nano);
         }
