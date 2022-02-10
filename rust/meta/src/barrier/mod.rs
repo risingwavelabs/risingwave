@@ -182,7 +182,10 @@ impl BarrierManager {
                             actor_ids_to_send,
                             actor_ids_to_collect,
                         };
-                        trace!("inject barrier request: {:#?}", request);
+                        tracing::trace!(
+                            target: "events::meta::barrier::inject_barrier",
+                            "inject barrier request: {:#?}", request
+                        );
                         client.inject_barrier(request).await.to_rw_result()?;
 
                         Ok::<_, RwError>(())
