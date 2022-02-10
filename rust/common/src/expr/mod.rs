@@ -8,6 +8,7 @@ mod expr_case;
 mod expr_input_ref;
 mod expr_is_null;
 mod expr_literal;
+mod expr_search;
 mod expr_ternary_bytes;
 pub mod expr_unary;
 mod pg_sleep;
@@ -69,6 +70,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         InputRef => InputRefExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
         Case => build_case_expr(prost),
         Translate => build_translate_expr(prost),
+        Search => build_search_expr(prost),
         _ => Err(InternalError(format!(
             "Unsupported expression type: {:?}",
             prost.get_expr_type()
