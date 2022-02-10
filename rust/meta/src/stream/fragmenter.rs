@@ -173,15 +173,10 @@ impl StreamFragmenter {
         let current_fragment_id = current_fragment.get_fragment_id();
         let parallel_degree = if current_fragment.is_singleton() {
             1
-        } else if self.fragment_graph.has_downstream(current_fragment_id) {
-            // Fragment in the middle.
-            // Generate one or multiple actors and connect them to the next fragment.
+        } else {
             // Currently, we assume the parallel degree is at least 4, and grows linearly with
             // more worker nodes added.
             max(self.worker_count * 2, PARALLEL_DEGREE_LOW_BOUND)
-        } else {
-            // Fragment on the source.
-            self.worker_count
         };
 
         let node = current_fragment.get_node();
