@@ -137,15 +137,15 @@ mod tests {
         assert_eq!(mapping.try_map(5), None);
     }
     #[test]
-    fn test_composite_mapping() {
+    fn test_composite() {
         let add_mapping = ColIndexMapping::with_shift_offset(3, 3);
         let mut remaining_cols = FixedBitSet::with_capacity(6);
         remaining_cols.insert(3);
         remaining_cols.insert(5);
         let col_prune_mapping = ColIndexMapping::with_remaining_columns(&remaining_cols);
-        let composite_mapping = add_mapping.composite_mapping(col_prune_mapping);
-        assert_eq!(composite_mapping.map(0), 0); // 0+3 = 3， 3 -> 0
-        assert_eq!(composite_mapping.try_map(1), None);
-        assert_eq!(composite_mapping.map(2), 1); // 2+3 = 5, 5 -> 1
+        let composite = add_mapping.composite(col_prune_mapping);
+        assert_eq!(composite.map(0), 0); // 0+3 = 3， 3 -> 0
+        assert_eq!(composite.try_map(1), None);
+        assert_eq!(composite.map(2), 1); // 2+3 = 5, 5 -> 1
     }
 }
