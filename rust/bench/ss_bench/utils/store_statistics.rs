@@ -2,68 +2,27 @@ use prometheus::core::{AtomicU64, Collector, GenericCounter, Metric};
 use prometheus::Histogram;
 use risingwave_storage::monitor::DEFAULT_STATE_STORE_STATS;
 
+fn proc_counter(counter: &GenericCounter<AtomicU64>) {
+    let desc = &counter.desc()[0].fq_name;
+    let counter = counter.metric().get_counter().get_value() as u64;
+    println!("{desc} COUNT : {counter}");
+}
+
 fn proc_histogram(histogram: &Histogram) {
+    let desc = &histogram.desc()[0].fq_name;
+
     let metric = histogram.metric();
-    let metric_str = format!("{:#?}", metric);
-    let str_lines = metric_str.split('\n').collect::<Vec<&str>>();
-    let mut sample_count = 0;
-    let mut sample_sum = 0.0;
-    let mut buckets = Vec::new();
-    let mut i = 0;
-    // We get metrics in buckets by parsing the fmt string.
-    // This method is not elegant, but we cannot find a better way since the interface is not
-    // provided.
-    //
-    // Metric string format example:
-    // histogram {
-    //     sample_count: 0
-    //     sample_sum: 0
-    //     bucket {
-    //       cumulative_count: 0
-    //       upper_bound: 0.0000010
-    //     }
-    //     bucket {
-    //       cumulative_count: 118
-    //       upper_bound: 0.000025
-    //     }
-    //   }
-    while i < str_lines.len() {
-        if str_lines[i].contains("bucket {") {
-            let cumulative_count = str_lines[i + 1]
-                .split(": ")
-                .nth(1)
-                .unwrap()
-                .parse::<u64>()
-                .unwrap();
-            // empty bucket may appear
-            if cumulative_count == 0 {
-                i += 4;
-                continue;
-            }
-            let upper_bound = str_lines[i + 2]
-                .split(": ")
-                .nth(1)
-                .unwrap()
-                .parse::<f64>()
-                .unwrap();
-            buckets.push((cumulative_count, upper_bound));
-            i += 4;
-        } else if let Some(count) = str_lines[i].split("sample_count: ").nth(1) {
-            sample_count = count.parse::<u64>().unwrap();
-            i += 1;
-        } else if let Some(sum) = str_lines[i].split("sample_sum: ").nth(1) {
-            sample_sum = sum.parse::<f64>().unwrap();
-            i += 1;
-        } else {
-            i += 1;
-        }
-    }
+    let histogram = metric.get_histogram();
+    let sample_count = histogram.get_sample_count();
+    let sample_sum = histogram.get_sample_sum();
+    let buckets = histogram.get_bucket();
 
     let get_quantile = |percent: f64| -> f64 {
         let threshold = (sample_count as f64 * percent) as u64;
-        for (count, upper_bound) in &buckets {
-            if *count >= threshold {
-                return *upper_bound;
+        for bucket in buckets {
+            let count = bucket.get_cumulative_count();
+            if count > 0 && count >= threshold {
+                return bucket.get_upper_bound();
             }
         }
         0.0
@@ -74,18 +33,10 @@ fn proc_histogram(histogram: &Histogram) {
     let p99 = get_quantile(0.99);
     let p100 = match buckets.len() {
         0 => 0.0,
-        _ => buckets[buckets.len() - 1].1,
+        _ => buckets[buckets.len() - 1].get_upper_bound(),
     };
 
-    let desc = &histogram.desc()[0].fq_name;
-
     println!("{desc} P50 : {p50} P95 : {p95} P99 : {p99} P100 : {p100} COUNT : {sample_count} SUM : {sample_sum}");
-}
-
-fn proc_counter(counter: &GenericCounter<AtomicU64>) {
-    let desc = &counter.desc()[0].fq_name;
-    let metric = counter.metric().get_gauge().get_value();
-    println!("{desc} COUNT : {metric}");
 }
 
 pub(crate) fn print_statistics() {
