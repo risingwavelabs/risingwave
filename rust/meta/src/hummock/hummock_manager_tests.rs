@@ -34,13 +34,12 @@ async fn test_hummock_pin_unpin() -> Result<()> {
     let env = MetaSrvEnv::for_test_with_sled(sled_root).await;
     let hummock_manager = create_hummock_manager(env.clone(), &hummock_config).await?;
     let context_id = 0;
-    let manager_config = env.config();
 
     let version_id = env
         .meta_store()
         .get_cf(
-            manager_config.get_hummock_default_cf(),
-            manager_config.get_hummock_version_id_key().as_bytes(),
+            HUMMOCK_DEFAULT_CF_NAME,
+            HUMMOCK_VERSION_ID_LEY.as_bytes(),
             SINGLE_VERSION_EPOCH,
         )
         .await?;
@@ -162,10 +161,7 @@ async fn test_hummock_table() -> Result<()> {
         .unwrap();
 
     // Confirm tables are successfully added
-    let fetched_tables = env
-        .meta_store()
-        .list_cf(env.config().get_hummock_table_cf())
-        .await?;
+    let fetched_tables = env.meta_store().list_cf(HUMMOCK_TABLE_CF_NAME).await?;
     let fetched_tables: Vec<SstableInfo> = fetched_tables
         .iter()
         .map(|v| -> SstableInfo { SstableInfo::decode(v.as_slice()).unwrap() })
