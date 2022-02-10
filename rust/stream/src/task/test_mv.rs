@@ -115,7 +115,7 @@ async fn test_stream_mv_proto() {
         nodes: Some(mview_proto),
         dispatcher: Some(Dispatcher {
             r#type: DispatcherType::Simple as i32,
-            column_idx: 0,
+            ..Default::default()
         }),
         downstream_actor_id: vec![233],
     };

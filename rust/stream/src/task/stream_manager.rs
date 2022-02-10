@@ -304,13 +304,14 @@ impl StreamManagerCore {
         let dispatcher: Box<dyn StreamConsumer> = match dispatcher.get_type()? {
             Hash => {
                 assert!(!outputs.is_empty());
+                let column_indices = dispatcher
+                    .column_indices
+                    .iter()
+                    .map(|i| *i as usize)
+                    .collect();
                 Box::new(DispatchExecutor::new(
                     input,
-                    HashDataDispatcher::new(
-                        downstreams.to_vec(),
-                        outputs,
-                        vec![dispatcher.get_column_idx() as usize],
-                    ),
+                    HashDataDispatcher::new(downstreams.to_vec(), outputs, column_indices),
                     actor_id,
                     self.context.clone(),
                 ))
