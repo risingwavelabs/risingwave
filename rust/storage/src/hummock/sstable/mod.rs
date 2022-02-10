@@ -218,7 +218,13 @@ impl SSTable {
                 .await
                 .map_err(|e| HummockError::ObjectIoError(e.to_string()))?;
 
-            tracing::trace!(table_id = self.id, block_id = idx, block_loc = ?block_loc, "table read block");
+            tracing::trace!(
+                target: "events::storage::sstable::block_read",
+                "table read block: table_id = {}, block_id = {}, block_loc = {:?}",
+                self.id,
+                idx,
+                block_loc
+            );
 
             let block_data = Bytes::from(block_data);
 
