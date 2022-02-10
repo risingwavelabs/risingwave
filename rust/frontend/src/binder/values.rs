@@ -110,7 +110,7 @@ mod tests {
         // Test incompatible.
         let expr1 = Expr::Value(Value::SingleQuotedString("1".to_string()));
         let expr2 = Expr::Value(Value::Number("1".to_string(), false));
-        let values = Values(vec![vec![expr1.clone()], vec![expr2.clone()]]);
+        let values = Values(vec![vec![expr1], vec![expr2]]);
         let res = binder.bind_values(values);
         assert_eq!(
             res,
