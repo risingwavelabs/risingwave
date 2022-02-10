@@ -6,7 +6,7 @@ use risingwave_pb::expr::expr_node::Type;
 use risingwave_sqlparser::ast::Values;
 
 use crate::binder::Binder;
-use crate::expr::{infer_type, Expr as _, ExprImpl, FunctionCall};
+use crate::expr::{Expr as _, ExprImpl, FunctionCall};
 
 #[derive(Debug)]
 pub struct BoundValues {
@@ -61,8 +61,17 @@ impl Binder {
     }
 
     fn check_compat(left: DataTypeKind, right: DataTypeKind) -> Option<DataTypeKind> {
-        let func_type = Type::Add;
-        let inputs_type = vec![left, right];
-        infer_type(func_type, inputs_type)
+        if (left == right || left.is_numeric() && right.is_numeric())
+            || (left.is_string() && right.is_string()
+            || (left.is_date_or_timestamp() && right.is_date_or_timestamp()))
+        {
+            if left as i32 > right as i32 {
+                Some(left)
+            } else {
+                Some(right)
+            }
+        } else {
+            None
+        }
     }
 }
