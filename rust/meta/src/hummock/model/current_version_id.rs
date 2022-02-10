@@ -30,9 +30,8 @@ impl CurrentHummockVersionId {
                 SINGLE_VERSION_EPOCH,
             )
             .await?;
-        // TODO replace unwrap
         let instant = CurrentHummockVersionId {
-            id: HummockVersionRefId::decode(byte_vec.as_slice()).unwrap().id,
+            id: HummockVersionRefId::decode(byte_vec.as_slice())?.id,
         };
         Ok(instant)
     }

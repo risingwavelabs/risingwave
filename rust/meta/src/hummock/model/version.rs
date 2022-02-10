@@ -43,7 +43,13 @@ impl Transactional for HummockVersion {
         )]);
     }
 
-    fn delete(&self, _trx: &mut Transaction) {
-        todo!()
+    fn delete(&self, trx: &mut Transaction) {
+        trx.add_operations(vec![Operation::Delete(
+            ColumnFamilyUtils::prefix_key_with_cf(
+                self.key().unwrap().encode_to_vec(),
+                HummockVersion::cf_name(),
+            ),
+            None,
+        )]);
     }
 }
