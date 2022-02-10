@@ -14,13 +14,11 @@ use crate::{BatchSourceReader, Source, SourceWriter, StreamSourceReader};
 struct TableSourceV2Core {
     _table: ScannableTableRef,
 
-    /// Send changes to the associated materialize task.
-    changes_tx: mpsc::UnboundedSender<StreamChunk>,
-
-    /// The receiver of the above channel.
-    /// This field will be taken once a `StreamReader` is created, i.e., the associated materialize
-    /// task starts.
-    changes_rx: Option<mpsc::UnboundedReceiver<StreamChunk>>,
+    /// The senders of the changes channel.
+    ///
+    /// When a `StreamReader` is created, a channel will be created and the sender will be
+    /// saved here. The insert statement will take one channel randomly.
+    changes_txs: Vec<mpsc::UnboundedSender<StreamChunk>>,
 }
 
 /// [`TableSourceV2`] is a special internal source to handle table updates from user,
@@ -44,11 +42,9 @@ impl TableSourceV2 {
     pub fn new(table: ScannableTableRef) -> Self {
         let column_descs = table.column_descs().into_owned();
 
-        let (tx, rx) = mpsc::unbounded_channel();
         let core = TableSourceV2Core {
             _table: table,
-            changes_tx: tx,
-            changes_rx: Some(rx),
+            changes_txs: vec![],
         };
 
         Self {
@@ -106,8 +102,9 @@ pub struct TableV2StreamReader {
 impl StreamSourceReader for TableV2StreamReader {
     async fn open(&mut self) -> Result<()> {
         let mut core = self.core.write().await;
-        let rx = core.changes_rx.take().expect("can only open reader once");
+        let (tx, rx) = mpsc::unbounded_channel();
         self.rx = Some(rx);
+        core.changes_txs.push(tx);
         Ok(())
     }
 
@@ -139,10 +136,12 @@ pub struct TableV2Writer {
 #[async_trait]
 impl SourceWriter for TableV2Writer {
     async fn write(&mut self, chunk: StreamChunk) -> Result<()> {
+        use rand::Rng;
         let core = self.core.read().await;
-        core.changes_tx
-            .send(chunk)
-            .expect("write to table v2 failed");
+        // randomly pick a channel
+        let idx = rand::thread_rng().gen_range(0..core.changes_txs.len());
+        let tx = &core.changes_txs[idx];
+        tx.send(chunk).expect("write to table v2 failed");
         Ok(())
     }
 
