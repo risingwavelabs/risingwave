@@ -277,9 +277,7 @@ impl<S> ScannableTable for MViewTable<S>
 where
     S: StateStore,
 {
-    async fn iter(&self) -> Result<TableIterRef> {
-        // TODO: Use the correct epoch to generate iterator from a snapshot
-        let epoch = u64::MAX;
+    async fn iter(&self, epoch: u64) -> Result<TableIterRef> {
         Ok(Box::new(self.iter(epoch).await?))
     }
 
