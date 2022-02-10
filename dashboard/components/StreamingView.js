@@ -1,5 +1,5 @@
 import * as d3 from "d3";
-import { drawManyFlow } from "../lib/streamChartHelper";
+import drawManyFlow from "../lib/streamPlan/streamChartHelper";
 import { useEffect, useRef } from 'react';
 import styled from '@emotion/styled';
 import LocationSearchingIcon from '@mui/icons-material/LocationSearching';

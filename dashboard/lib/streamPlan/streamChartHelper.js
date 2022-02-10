@@ -1,9 +1,9 @@
 import * as d3 from "d3";
-import * as color from "./color";
-import { getConnectedComponent, treeBfs } from "./algo";
+import * as color from "../color";
+import { getConnectedComponent, treeBfs } from "../algo";
 import { cloneDeep, max } from "lodash";
-import { newNumberArray } from "./util";
-// d3.line().curve(d3.curveLinear)([pointe, ...])
+import { newNumberArray } from "../util";
+import StreamPlanParser from "./parser";
 // Actor constant
 const nodeRadius = 30; // the radius of the tree nodes in an actor
 const nodeStrokeWidth = 5; // the stroke width of the link of the tree nodes in an actor
@@ -20,7 +20,7 @@ const gapBetweenRow = 100;
 const gapBetweenLayer = 300;
 const gapBetweenFlowChart = 500;
 
-// Draw link effect
+// Draw linking effect
 const DrawLinkEffect = true;
 /*
                                 o--bendGap--o-----------o
@@ -37,124 +37,20 @@ const DrawLinkEffect = true;
 const bendGap = 50;
 const connectionGap = 50;
 
+//
+// layoutActorBox         -> dagLayout         -> drawActorBox      -> drawFlow 
+// [ The layout of the ]     [ The layout of ]    [ Draw an actor ]    [ Draw many actors   ]
+// [ operators in an   ]     [ actors in a   ]    [ in specified  ]    [ and links between  ]
+// [ actor.            ]     [ stram plan    ]    [ place         ]    [ them.              ]
+//
+
+
 function constructNodeLinkId(node1, node2) {
   return "node-" + (node1.id > node2.id ? node1.id + "-" + node2.id : node2.id + "-" + node1.id);
 }
 
 function constructNodeId(node) {
   return "node-" + node.id;
-}
-
-const parsedNodeMap = new Map();
-const parsedActorMap = new Map();
-const actorId2Proto = new Map();
-
-class Node {
-  constructor(actorId, nodeProto) {
-    this.id = nodeProto.operatorId;
-    this.nextNodes = [];
-    this.actorId = actorId;
-    if (nodeProto.input !== undefined) {
-      for (let nextNodeProto of nodeProto.input) {
-        let nextNode = StreamNode.parseNode(actorId, nextNodeProto);
-        this.nextNodes.push(nextNode);
-      }
-    }
-  }
-}
-
-class StreamNode extends Node {
-  constructor(actorId, nodeProto) {
-    super(actorId, nodeProto);
-    this.type = this.paseType(nodeProto);
-    this.typeInfo = nodeProto[this.type];
-
-    if (this.type === "mergeNode") {
-      for (let upStreamActorId of this.typeInfo.upstreamActorId) {
-        Actor.parseActor(actorId2Proto.get(upStreamActorId)).output.push(this);
-      }
-    }
-  }
-
-  paseType(nodeProto) {
-    let types = ["tableSourceNode", "projectNode", "filterNode",
-      "mviewNode", "simpleAggNode", "hashAggNode", "topNNode",
-      "hashJoinNode", "mergeNode", "exchangeNode", "chainNode"];
-    for (let type of types) {
-      if (type in nodeProto) {
-        return type;
-      }
-    }
-  }
-
-  static parseNode(actorId, nodeProto) {
-    let id = nodeProto.operatorId;
-    if (parsedNodeMap.has(id)) {
-      return parsedNodeMap.get(id);
-    }
-    parsedNodeMap.set(id, new StreamNode(actorId, nodeProto));
-    return parsedNodeMap.get(id);
-  }
-}
-
-class Dispatcher extends Node{
-  constructor(actorId, dispatcherType, nodeProto){
-    super(actorId, nodeProto);
-    this.dispatcherType = dispatcherType;
-  }
-
-  static newDispatcher(actorId, type){
-    return new Dispatcher(actorId, type, {
-      operatorId: 100000 + actorId
-    })
-  }
-}
-
-class Actor {
-  constructor(actorId, output, rootNode, fragmentIdentifier) {
-    this.actorId = actorId;
-    this.output = output;
-    this.rootNode = rootNode;
-    this.fragmentIdentifier = fragmentIdentifier;
-  }
-
-  static parseActor(actorProto) {
-    let actorId = actorProto.actorId;
-    if (parsedActorMap.has(actorId)) {
-      return parsedActorMap.get(actorId);
-    }
-
-    let actor = new Actor(actorId, [], null, actorProto.nodes.operatorId);
-    parsedActorMap.set(actorId, actor);
-    let nodeBeforeDispatcher = StreamNode.parseNode(actor.actorId, actorProto.nodes);
-    let rootNode = Dispatcher.newDispatcher(actor.actorId, actorProto.dispatcher.type);
-    rootNode.nextNodes = [nodeBeforeDispatcher];
-    actor.rootNode = rootNode;
-    return parsedActorMap.get(actorId);
-  }
-}
-
-class StreamPlanPaser {
-  constructor(streamPlan) {
-    this.node = streamPlan.node;
-    this.actorProtoList = streamPlan.actors;
-    for (let actorProto of this.actorProtoList) {
-      actorId2Proto.set(actorProto.actorId, actorProto);
-    }
-    for (let actorProto of this.actorProtoList) {
-      Actor.parseActor(actorProto);
-    }
-    this.parsedActorList = [];
-    for (let actorId of parsedActorMap.keys()) {
-      this.parsedActorList.push(parsedActorMap.get(actorId));
-    }
-  }
-  getNodeInformation() {
-    return this.node;
-  }
-  getParsedActorList() {
-    return this.parsedActorList;
-  }
 }
 
 /**
@@ -396,7 +292,7 @@ function layoutActorBox(rootNode, baseX, baseY) {
  * @param {number} props.baseY [optinal] The y coordinate of the lef-top corner
  * @returns {d3.Selection} The group element of this tree
  */
-export function drawActorBox(props) {
+function drawActorBox(props) {
 
   if (props.g === undefined) {
     throw Error("Invalid Argument: Target group cannot be undefined.");
@@ -512,7 +408,7 @@ export function drawActorBox(props) {
  * ]
  * @returns {d3.Selection} 
  */
-export function drawFlow(props) {
+function drawFlow(props) {
 
   if (props.g === undefined) {
     throw Error("Invalid Argument: Target group cannot be undefined.");
@@ -692,7 +588,14 @@ export function drawFlow(props) {
   };
 }
 
-export function drawManyFlow(props){
+/**
+ * 
+ * @param {d3.Selection} props.g The parent group to contain the result
+ * @param {any} props.actorProto The raw input from the meta node: e.g. [{node: {...}, actors: [...]}] 
+ * @param {number} props.baseX    [optional] The x coordination of the left corner
+ * @param {number} props.baseY    [optional] The y coordination of the left corner
+ */
+export default function drawManyFlow(props){
   const g = props.g;
   const actorProto = props.actorProto || [];
   const baseX = props.baseX || 0;
@@ -701,7 +604,7 @@ export function drawManyFlow(props){
   console.log(actorProto);
 
   // remove actors in the same fragment TODO: show these actors in the graph
-  const streamPlan = new StreamPlanPaser(actorProto);
+  const streamPlan = new StreamPlanParser(actorProto);
   const allActors = streamPlan.getParsedActorList();
   const dispatcherNode2ActorId = new Set();
   const fragmentRepresentedActors = [];
@@ -738,7 +641,7 @@ export function drawManyFlow(props){
   let actorsList = getConnectedComponent(actorDagNodes);
 
 
-  let y = 0;
+  let y = baseY;
   for(let actorDagList of actorsList){
     let flowChart = drawFlow({
       g: g,
