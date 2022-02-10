@@ -117,7 +117,7 @@ message Dispatcher {
     BROADCAST = 2;
   }
   DispatcherType type = 1;
-  int32 column_idx = 2;
+  repeated uint32 column_indices = 2;
 }
 
 // A StreamActor is a running fragment of the overall stream graph,
