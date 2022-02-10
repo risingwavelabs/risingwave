@@ -86,10 +86,7 @@ impl SharedContext {
     }
 
     #[inline]
-    pub fn take_sender(
-        &self,
-        ids: &UpDownActorIds,
-    ) -> Result<Sender<Message>> {
+    pub fn take_sender(&self, ids: &UpDownActorIds) -> Result<Sender<Message>> {
         self.lock_channel_pool()
             .get_mut(ids)
             .ok_or_else(|| {
@@ -109,10 +106,7 @@ impl SharedContext {
     }
 
     #[inline]
-    pub fn take_receiver(
-        &self,
-        ids: &UpDownActorIds,
-    ) -> Result<Receiver<Message>> {
+    pub fn take_receiver(&self, ids: &UpDownActorIds) -> Result<Receiver<Message>> {
         self.lock_channel_pool()
             .get_mut(ids)
             .ok_or_else(|| {

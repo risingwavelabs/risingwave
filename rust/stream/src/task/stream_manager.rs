@@ -177,9 +177,7 @@ impl StreamManager {
     #[cfg(test)]
     pub fn take_sink(&self, ids: UpDownActorIds) -> Receiver<Message> {
         let core = self.core.lock().unwrap();
-        core.context
-            .take_receiver(&ids)
-            .unwrap()
+        core.context.take_receiver(&ids).unwrap()
     }
 }
 
@@ -258,9 +256,7 @@ impl StreamManagerCore {
                 let downstream_addr = host_addr.to_socket_addr()?;
                 if is_local_address(&downstream_addr, &self.context.addr) {
                     // if this is a local downstream actor
-                    let tx = self
-                        .context
-                        .take_sender(&(actor_id, *down_id))?;
+                    let tx = self.context.take_sender(&(actor_id, *down_id))?;
                     Ok(Box::new(ChannelOutput::new(tx)) as Box<dyn Output>)
                 } else {
                     // This channel is used for `RpcOutput` and `ExchangeServiceImpl`.
@@ -711,9 +707,7 @@ impl StreamManagerCore {
                         // Get the sender for `RemoteInput` to forward received messages to
                         // receivers in `ReceiverExecutor` or
                         // `MergerExecutor`.
-                        let sender = self
-                            .context
-                            .take_sender(&(*up_id, actor_id))?;
+                        let sender = self.context.take_sender(&(*up_id, actor_id))?;
                         // spawn the `RemoteInput`
                         let up_id = *up_id;
                         tokio::spawn(async move {
@@ -731,9 +725,7 @@ impl StreamManagerCore {
                             }
                         });
                     }
-                    Ok(self
-                        .context
-                        .take_receiver(&(*up_id, actor_id))?)
+                    Ok(self.context.take_receiver(&(*up_id, actor_id))?)
                 }
             })
             .collect::<Result<Vec<_>>>()?;

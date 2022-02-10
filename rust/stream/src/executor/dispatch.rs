@@ -139,16 +139,12 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
                         let downstream_addr = act.get_host()?.to_socket_addr()?;
 
                         if is_local_address(&downstream_addr, &self.context.addr) {
-                            let tx = self
-                                .context
-                                .take_sender(&up_down_ids)?;
+                            let tx = self.context.take_sender(&up_down_ids)?;
                             new_outputs.push(Box::new(ChannelOutput::new(tx)) as Box<dyn Output>)
                         } else {
                             let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-                            self.context.add_channel_pairs(
-                                up_down_ids,
-                                (Some(tx.clone()), Some(rx)),
-                            );
+                            self.context
+                                .add_channel_pairs(up_down_ids, (Some(tx.clone()), Some(rx)));
                             new_outputs.push(Box::new(RemoteOutput::new(tx)) as Box<dyn Output>)
                         }
                     }
@@ -164,16 +160,12 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
                         let up_down_ids = (self.actor_id, down_id);
                         let downstream_addr = downstream_actor_info.get_host()?.to_socket_addr()?;
                         if is_local_address(&downstream_addr, &self.context.addr) {
-                            let tx = self
-                                .context
-                                .take_sender(&up_down_ids)?;
+                            let tx = self.context.take_sender(&up_down_ids)?;
                             outputs_to_add.push(Box::new(ChannelOutput::new(tx)) as Box<dyn Output>)
                         } else {
                             let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-                            self.context.add_channel_pairs(
-                                up_down_ids,
-                                (Some(tx.clone()), Some(rx)),
-                            );
+                            self.context
+                                .add_channel_pairs(up_down_ids, (Some(tx.clone()), Some(rx)));
                             outputs_to_add.push(Box::new(RemoteOutput::new(tx)) as Box<dyn Output>)
                         }
                     }
