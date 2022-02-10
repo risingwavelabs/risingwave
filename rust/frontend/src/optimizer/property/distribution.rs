@@ -91,8 +91,8 @@ mod tests {
     use super::Distribution;
 
     fn test_hash_shard_subset(uni: &Distribution, sub: &Distribution) {
-        assert_eq!(uni.satisfies(&sub), true);
-        assert_eq!(sub.satisfies(&uni), false);
+        assert_eq!(uni.satisfies(sub), true);
+        assert_eq!(sub.satisfies(uni), false);
     }
     fn test_hash_shard_false(d1: &Distribution, d2: &Distribution) {
         assert_eq!(d1.satisfies(d2), false);
