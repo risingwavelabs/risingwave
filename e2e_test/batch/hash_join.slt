@@ -17,9 +17,6 @@ insert into t2 values
 (null, 9.1::REAL), (9, null), (3, 5.7::REAL), (9, null), (null, 9.6::REAL),
 (100, null), (null, 8.18::REAL), (200, null);
 
-statement ok
-flush;
-
 query RR rowsort
 select t1.v2 as t1_v2, t2.v2 as t2_v2 from t1 join t2 on t1.v1 = t2.v1;
 ----
@@ -119,9 +116,6 @@ insert into t3 values (1, 7, 1.0), (49, 94,  49.0),(52, 25,  52.0), (100, 1000, 
 
 statement ok
 insert into t4 values (2, 8, 2.0), (94, 49, 49.0), (25, 52,  52.0), (200, 2000, 200.0);
-
-statement ok
-flush;
 
 query IIRIIR rowsort
 select * from t3, t4 where t3.v1 = t4.v2 and t3.v2 = t4.v1;

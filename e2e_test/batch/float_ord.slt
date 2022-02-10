@@ -16,9 +16,6 @@ insert into t values ('NaN');
 statement ok
 insert into t values ('-NaN');
 
-statement ok
-flush;
-
 query RI
 select v1, count(*) from t group by v1 order by v1;
 ----

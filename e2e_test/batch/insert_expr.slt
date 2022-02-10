@@ -4,9 +4,6 @@ create table t (v1 int not null);
 statement ok
 insert into t values (3);
 
-statement ok
-flush;
-
 query I rowsort
 select * from t;
 ----
@@ -14,9 +11,6 @@ select * from t;
 
 statement ok
 insert into t values (2+2);
-
-statement ok
-flush;
 
 query I rowsort
 select * from t;
@@ -26,9 +20,6 @@ select * from t;
 
 statement ok
 insert into t values (7), (8), (9);
-
-statement ok
-flush;
 
 query I rowsort
 select * from t;
@@ -41,9 +32,6 @@ select * from t;
 
 statement ok
 insert into t values (2+3), (2+4), (3+4);
-
-statement ok
-flush;
 
 query I rowsort
 select * from t;
@@ -59,9 +47,6 @@ select * from t;
 
 statement ok
 insert into t values (12), (6+7), (44);
-
-statement ok
-flush;
 
 query I rowsort
 select * from t;
