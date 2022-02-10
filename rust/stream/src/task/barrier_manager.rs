@@ -1,11 +1,14 @@
 use std::collections::{HashMap, HashSet};
 
-use itertools::Itertools;
 use risingwave_common::error::Result;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 
 use crate::executor::*;
+
+/// If enabled, all actors will be grouped in the same tracing span within one epoch.
+/// Note that this option will significantly increase the overhead of tracing.
+pub const ENABLE_BARRIER_AGGREGATION: bool = false;
 
 struct ManagedBarrierState {
     epoch: u64,
@@ -130,18 +133,6 @@ impl LocalBarrierManager {
             }
         };
 
-        let barrier = {
-            let mut barrier = barrier.clone();
-            if ENABLE_BARRIER_EVENT {
-                let receiver_ids = to_send.iter().cloned().join(", ");
-                // TODO: not a correct usage of span -- the span ends once it goes out of scope, but
-                // we still have events in the background.
-                let span = tracing::info_span!("send_barrier", epoch = barrier.epoch, mutation = ?barrier.mutation, receivers = %receiver_ids);
-                barrier.span = span;
-            }
-            barrier
-        };
-
         for actor_id in to_send {
             let sender = self
                 .senders
@@ -179,8 +170,9 @@ impl LocalBarrierManager {
                 let state = managed_state.as_mut().unwrap();
                 state.remaining_actors.remove(&actor_id);
 
-                trace!(
-                    "collect barrier epoch {} from actor {}, remaining actors {:?}",
+                tracing::trace!(
+                    target: "events::stream::barrier::collect_barrier",
+                    "collect_barrier: epoch = {}, actor_id = {}, remaining_actors = {:?}",
                     barrier.epoch,
                     actor_id,
                     state
@@ -217,6 +209,7 @@ impl LocalBarrierManager {
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::*;

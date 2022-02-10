@@ -169,6 +169,8 @@ impl BarrierManager {
                     let barrier = Barrier {
                         epoch,
                         mutation: Some(mutation),
+                        // TODO(chi): add distributed tracing
+                        span: vec![],
                     };
 
                     async move {

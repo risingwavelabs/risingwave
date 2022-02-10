@@ -69,10 +69,8 @@ mod tests {
 
     #[test]
     fn test_pg_sleep() -> Result<()> {
-        let mut expr = PgSleepExpression::new(Box::new(InputRefExpression::new(
-            DataType::decimal_default(),
-            0,
-        )));
+        let mut expr =
+            PgSleepExpression::new(Box::new(InputRefExpression::new(DataType::Decimal, 0)));
 
         let input_array = {
             let mut builder = DecimalArrayBuilder::new(3)?;

@@ -11,7 +11,6 @@ use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 
 use super::TableIterRef;
-use crate::hummock::key::next_key;
 use crate::table::{ScannableTable, TableIter};
 use crate::{Keyspace, StateStore, TableColumnDesc};
 
@@ -182,17 +181,21 @@ impl<'a, S: StateStore> MViewTableIter<S> {
     async fn consume_more(&mut self) -> Result<()> {
         // TODO: adjustable limit
         assert!(self.next_idx == self.buf.len());
-        let limit: usize = 100;
+        let limit: usize = 1024;
         if self.buf.is_empty() {
-            self.buf = self.keyspace.scan(Some(limit), self.epoch).await?
+            self.buf = self.keyspace.scan(Some(limit), self.epoch).await?;
         } else {
-            let next_key = next_key(self.buf.last().unwrap().0.to_vec().as_slice());
-            self.buf = self
+            let last_key = self.buf.last().unwrap().0.clone();
+            let buf = self
                 .keyspace
-                .scan_with_start_key(next_key, Some(limit), self.epoch)
-                .await?
+                .scan_with_start_key(last_key.to_vec(), Some(limit), self.epoch)
+                .await?;
+            assert!(!buf.is_empty());
+            assert_eq!(buf.first().as_ref().unwrap().0, last_key);
+            // TODO: remove the unnecessary clone here
+            self.buf = buf[1..].to_vec();
         }
-        self.next_idx = 0;
+
         Ok(())
     }
 }
@@ -238,7 +241,8 @@ impl<S: StateStore> TableIter for MViewTableIter<S> {
             self.next_idx += 1;
 
             tracing::trace!(
-                "scanned key = {:?}, value = {:?}",
+                target: "events::stream::mview::scan",
+                "mview scanned key = {:?}, value = {:?}",
                 bytes::Bytes::copy_from_slice(key),
                 bytes::Bytes::copy_from_slice(value)
             );
