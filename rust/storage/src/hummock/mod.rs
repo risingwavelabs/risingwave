@@ -64,7 +64,7 @@ pub type HummockSnapshotId = u64;
 pub type HummockContextId = i32;
 pub type HummockEpoch = u64;
 pub const INVALID_EPOCH: HummockEpoch = 0;
-pub const INVALID_VERSION: HummockVersionId = 0;
+pub const FIRST_VERSION_ID: HummockVersionId = 0;
 
 #[derive(Default, Debug, Clone)]
 pub struct HummockOptions {

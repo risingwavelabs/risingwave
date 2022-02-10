@@ -296,12 +296,13 @@ impl MetaStore for MemStore {
 
 pub struct ColumnFamilyUtils {}
 impl ColumnFamilyUtils {
-    pub fn prefix_key_with_cf(key: &[u8], prefix: &[u8]) -> Vec<u8> {
+    pub fn prefix_key_with_cf(key: impl AsRef<[u8]>, prefix: impl AsRef<[u8]>) -> Vec<u8> {
         let prefix_len: u8 = prefix
+            .as_ref()
             .len()
             .try_into()
             .expect("prefix length out of u8 range");
-        [&[prefix_len], prefix, key].concat()
+        [&[prefix_len], prefix.as_ref(), key.as_ref()].concat()
     }
 }
 
