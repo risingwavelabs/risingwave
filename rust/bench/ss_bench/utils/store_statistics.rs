@@ -60,9 +60,9 @@ fn proc_histogram(histogram: &Histogram) {
     }
 
     let get_quantile = |percent: f64| -> f64 {
-        let thereshold = (sample_count as f64 * percent) as u64;
+        let threshold = (sample_count as f64 * percent) as u64;
         for (count, upper_bound) in &buckets {
-            if *count >= thereshold {
+            if *count >= threshold {
                 return *upper_bound;
             }
         }
