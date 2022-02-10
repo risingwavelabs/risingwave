@@ -11,7 +11,6 @@ use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 
 use super::TableIterRef;
-use crate::hummock::key::next_key;
 use crate::table::{ScannableTable, TableIter};
 use crate::{Keyspace, StateStore, TableColumnDesc};
 
@@ -166,6 +165,9 @@ pub struct MViewTableIter<S: StateStore> {
 }
 
 impl<'a, S: StateStore> MViewTableIter<S> {
+    // TODO: adjustable limit
+    const SCAN_LIMIT: usize = 1024;
+
     fn new(keyspace: Keyspace<S>, schema: Schema, pk_columns: Vec<usize>, epoch: u64) -> Self {
         Self {
             keyspace,
@@ -180,19 +182,27 @@ impl<'a, S: StateStore> MViewTableIter<S> {
     }
 
     async fn consume_more(&mut self) -> Result<()> {
-        // TODO: adjustable limit
-        assert!(self.next_idx == self.buf.len());
-        let limit: usize = 100;
+        assert_eq!(self.next_idx, self.buf.len());
+
         if self.buf.is_empty() {
-            self.buf = self.keyspace.scan(Some(limit), self.epoch).await?
-        } else {
-            let next_key = next_key(self.buf.last().unwrap().0.to_vec().as_slice());
             self.buf = self
                 .keyspace
-                .scan_with_start_key(next_key, Some(limit), self.epoch)
-                .await?
+                .scan(Some(Self::SCAN_LIMIT), self.epoch)
+                .await?;
+        } else {
+            let last_key = self.buf.last().unwrap().0.clone();
+            let buf = self
+                .keyspace
+                .scan_with_start_key(last_key.to_vec(), Some(Self::SCAN_LIMIT), self.epoch)
+                .await?;
+            assert!(!buf.is_empty());
+            assert_eq!(buf.first().as_ref().unwrap().0, last_key);
+            // TODO: remove the unnecessary clone here
+            self.buf = buf[1..].to_vec();
         }
+
         self.next_idx = 0;
+
         Ok(())
     }
 }
@@ -238,7 +248,8 @@ impl<S: StateStore> TableIter for MViewTableIter<S> {
             self.next_idx += 1;
 
             tracing::trace!(
-                "scanned key = {:?}, value = {:?}",
+                target: "events::stream::mview::scan",
+                "mview scanned key = {:?}, value = {:?}",
                 bytes::Bytes::copy_from_slice(key),
                 bytes::Bytes::copy_from_slice(value)
             );
@@ -273,9 +284,7 @@ impl<S> ScannableTable for MViewTable<S>
 where
     S: StateStore,
 {
-    async fn iter(&self) -> Result<TableIterRef> {
-        // TODO: Use the correct epoch to generate iterator from a snapshot
-        let epoch = u64::MAX;
+    async fn iter(&self, epoch: u64) -> Result<TableIterRef> {
         Ok(Box::new(self.iter(epoch).await?))
     }
 

@@ -64,9 +64,11 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         Ltrim => build_ltrim_expr(prost),
         Rtrim => build_rtrim_expr(prost),
         Position => build_position_expr(prost),
+        Ascii => build_ascii_expr(prost),
         ConstantValue => LiteralExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
         InputRef => InputRefExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
         Case => build_case_expr(prost),
+        Translate => build_translate_expr(prost),
         _ => Err(InternalError(format!(
             "Unsupported expression type: {:?}",
             prost.get_expr_type()

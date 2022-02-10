@@ -13,6 +13,7 @@ import java.util.Arrays;
 import javax.inject.Singleton;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlNode;
+import org.apache.calcite.sql.ddl.SqlCreateTable;
 import org.reflections.Reflections;
 import org.reflections.scanners.SubTypesScanner;
 import org.reflections.scanners.TypeAnnotationsScanner;
@@ -46,6 +47,19 @@ public class DefaultSqlHandlerFactory implements SqlHandlerFactory {
   private static final ImmutableMap<SqlKind, Constructor<? extends SqlHandler>>
       SQL_HANDLER_FACTORY = createSqlHandlerFactory();
 
+  private boolean useV2 = true;
+
+  DefaultSqlHandlerFactory() {}
+
+  DefaultSqlHandlerFactory(boolean useV2) {
+    this.useV2 = useV2;
+  }
+
+  @Override
+  public void setUseV2(boolean useV2) {
+    this.useV2 = useV2;
+  }
+
   @Override
   public SqlHandler create(SqlNode ast, ExecutionContext context) {
     // TODO(TaoWu): Use operator name to find the handler.
@@ -58,8 +72,8 @@ public class DefaultSqlHandlerFactory implements SqlHandlerFactory {
       return new ShowParameterHandler();
     }
 
-    if (ast instanceof SqlCreateTableV2) {
-      return new CreateTableV2Handler();
+    if (!useV2 && ast instanceof SqlCreateTable && !(ast instanceof SqlCreateTableV2)) {
+      return new CreateTableHandler();
     }
 
     if (ast instanceof SqlFlush) {
