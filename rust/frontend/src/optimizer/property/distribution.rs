@@ -48,27 +48,15 @@ impl Distribution {
     fn satisfies(&self, other: &Distribution) -> bool {
         match self {
             Distribution::Any => true,
-            Distribution::Single => match other {
-                Distribution::Any => true,
-                Distribution::Single => true,
-                _ => false,
-            },
-            Distribution::Broadcast => match other {
-                Distribution::Any => true,
-                Distribution::Broadcast => true,
-                _ => false,
-            },
-            Distribution::AnyShard => match other {
-                Distribution::Any => true,
-                Distribution::AnyShard => true,
-                _ => false,
-            },
+            Distribution::Single => matches!(other, Distribution::Any | Distribution::Single),
+            Distribution::Broadcast => matches!(other, Distribution::Any | Distribution::Broadcast),
+            Distribution::AnyShard => matches!(other, Distribution::Any | Distribution::AnyShard),
             Distribution::HashShard(keys) => match other {
                 Distribution::Any => true,
                 Distribution::AnyShard => true,
                 Distribution::HashShard(other_keys) => other_keys
                     .iter()
-                    .all(|other_key| keys.iter().find(|key| *key == other_key).is_some()),
+                    .all(|other_key| keys.iter().any(|key| key == other_key)),
                 _ => false,
             },
         }
@@ -91,12 +79,12 @@ mod tests {
     use super::Distribution;
 
     fn test_hash_shard_subset(uni: &Distribution, sub: &Distribution) {
-        assert_eq!(uni.satisfies(sub), true);
-        assert_eq!(sub.satisfies(uni), false);
+        assert!(uni.satisfies(sub));
+        assert!(!sub.satisfies(uni));
     }
     fn test_hash_shard_false(d1: &Distribution, d2: &Distribution) {
-        assert_eq!(d1.satisfies(d2), false);
-        assert_eq!(d2.satisfies(d1), false);
+        assert!(!d1.satisfies(d2));
+        assert!(!d2.satisfies(d1));
     }
     #[test]
     fn hash_shard_satisfy() {
