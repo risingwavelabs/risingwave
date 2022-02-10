@@ -1,5 +1,4 @@
 include ../../tpch/create_tables.slt.part
-include ./create_views.slt.part
 
 include ../../tpch/insert_customer.slt.part
 include ../../tpch/insert_lineitem.slt.part
@@ -10,10 +9,10 @@ include ../../tpch/insert_partsupp.slt.part
 include ../../tpch/insert_region.slt.part
 include ../../tpch/insert_supplier.slt.part
 
+include ./create_views.slt.part
 
 statement ok
 flush;
-
 
 include ./q1.slt.part
 include ./q3.slt.part
