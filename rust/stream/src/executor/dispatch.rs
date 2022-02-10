@@ -141,11 +141,11 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
                         if is_local_address(&downstream_addr, &self.context.addr) {
                             let tx = self
                                 .context
-                                .take_sender_from_channel_pool_by_ids(&up_down_ids)?;
+                                .take_sender(&up_down_ids)?;
                             new_outputs.push(Box::new(ChannelOutput::new(tx)) as Box<dyn Output>)
                         } else {
                             let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-                            self.context.add_channel_pairs_by_ids(
+                            self.context.add_channel_pairs(
                                 up_down_ids,
                                 (Some(tx.clone()), Some(rx)),
                             );
@@ -166,11 +166,11 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
                         if is_local_address(&downstream_addr, &self.context.addr) {
                             let tx = self
                                 .context
-                                .take_sender_from_channel_pool_by_ids(&up_down_ids)?;
+                                .take_sender(&up_down_ids)?;
                             outputs_to_add.push(Box::new(ChannelOutput::new(tx)) as Box<dyn Output>)
                         } else {
                             let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-                            self.context.add_channel_pairs_by_ids(
+                            self.context.add_channel_pairs(
                                 up_down_ids,
                                 (Some(tx.clone()), Some(rx)),
                             );
@@ -643,14 +643,14 @@ mod tests {
     fn add_local_channels(ctx: Arc<SharedContext>, up_down_ids: Vec<(u32, u32)>) {
         for up_down_id in up_down_ids {
             let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-            ctx.add_channel_pairs_by_ids(up_down_id, (Some(tx), Some(rx)));
+            ctx.add_channel_pairs(up_down_id, (Some(tx), Some(rx)));
         }
     }
 
     fn add_remote_channels(ctx: Arc<SharedContext>, up_id: u32, down_ids: Vec<u32>) {
         for down_id in down_ids {
             let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-            ctx.add_channel_pairs_by_ids((up_id, down_id), (Some(tx), Some(rx)));
+            ctx.add_channel_pairs((up_id, down_id), (Some(tx), Some(rx)));
         }
     }
 

@@ -123,7 +123,7 @@ impl StreamManager {
 
     pub fn take_receiver(&self, ids: UpDownActorIds) -> Result<Receiver<Message>> {
         let core = self.core.lock().unwrap();
-        core.context.take_receiver_from_channel_pool_by_ids(&ids)
+        core.context.take_receiver(&ids)
     }
 
     pub fn update_actors(&self, actors: &[stream_plan::StreamActor]) -> Result<()> {
@@ -178,7 +178,7 @@ impl StreamManager {
     pub fn take_sink(&self, ids: UpDownActorIds) -> Receiver<Message> {
         let core = self.core.lock().unwrap();
         core.context
-            .take_receiver_from_channel_pool_by_ids(&ids)
+            .take_receiver(&ids)
             .unwrap()
     }
 }
@@ -260,7 +260,7 @@ impl StreamManagerCore {
                     // if this is a local downstream actor
                     let tx = self
                         .context
-                        .take_sender_from_channel_pool_by_ids(&(actor_id, *down_id))?;
+                        .take_sender(&(actor_id, *down_id))?;
                     Ok(Box::new(ChannelOutput::new(tx)) as Box<dyn Output>)
                 } else {
                     // This channel is used for `RpcOutput` and `ExchangeServiceImpl`.
@@ -269,7 +269,7 @@ impl StreamManagerCore {
 
                     // TODO: refactor this part.
                     self.context
-                        .add_channel_pairs_by_ids(up_down_ids, (Some(tx.clone()), Some(rx)));
+                        .add_channel_pairs(up_down_ids, (Some(tx.clone()), Some(rx)));
                     Ok(Box::new(RemoteOutput::new(tx)) as Box<dyn Output>)
                 }
             })
@@ -713,7 +713,7 @@ impl StreamManagerCore {
                         // `MergerExecutor`.
                         let sender = self
                             .context
-                            .take_sender_from_channel_pool_by_ids(&(*up_id, actor_id))?;
+                            .take_sender(&(*up_id, actor_id))?;
                         // spawn the `RemoteInput`
                         let up_id = *up_id;
                         tokio::spawn(async move {
@@ -733,7 +733,7 @@ impl StreamManagerCore {
                     }
                     Ok(self
                         .context
-                        .take_receiver_from_channel_pool_by_ids(&(*up_id, actor_id))?)
+                        .take_receiver(&(*up_id, actor_id))?)
                 }
             })
             .collect::<Result<Vec<_>>>()?;
@@ -857,7 +857,7 @@ impl StreamManagerCore {
                 let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
                 let up_down_ids = (*upstream_actor_id, actor_id);
                 self.context
-                    .add_channel_pairs_by_ids(up_down_ids, (Some(tx), Some(rx)));
+                    .add_channel_pairs(up_down_ids, (Some(tx), Some(rx)));
             }
         }
         for child in &stream_node.input {
@@ -887,7 +887,7 @@ impl StreamManagerCore {
                 let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
                 let up_down_ids = (*current_id, *downstream_id);
                 self.context
-                    .add_channel_pairs_by_ids(up_down_ids, (Some(tx), Some(rx)));
+                    .add_channel_pairs(up_down_ids, (Some(tx), Some(rx)));
             }
         }
         Ok(())

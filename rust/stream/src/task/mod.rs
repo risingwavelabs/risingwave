@@ -86,7 +86,7 @@ impl SharedContext {
     }
 
     #[inline]
-    pub fn take_sender_from_channel_pool_by_ids(
+    pub fn take_sender(
         &self,
         ids: &UpDownActorIds,
     ) -> Result<Sender<Message>> {
@@ -109,7 +109,7 @@ impl SharedContext {
     }
 
     #[inline]
-    pub fn take_receiver_from_channel_pool_by_ids(
+    pub fn take_receiver(
         &self,
         ids: &UpDownActorIds,
     ) -> Result<Receiver<Message>> {
@@ -132,7 +132,7 @@ impl SharedContext {
     }
 
     #[inline]
-    pub fn add_channel_pairs_by_ids(&self, ids: UpDownActorIds, channels: ConsumableChannelPair) {
+    pub fn add_channel_pairs(&self, ids: UpDownActorIds, channels: ConsumableChannelPair) {
         self.lock_channel_pool().insert(ids, channels);
     }
 
