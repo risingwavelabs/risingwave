@@ -12,6 +12,10 @@ pub use stream::*;
 use crate::manager::{Epoch, SINGLE_VERSION_EPOCH};
 use crate::storage::MetaStoreRef;
 
+pub type TableRawId = i32;
+pub type ActorId = u32;
+pub type FragmentId = u32;
+
 /// `MetadataModel` defines basic model operations in CRUD.
 #[async_trait]
 pub trait MetadataModel: Sized {

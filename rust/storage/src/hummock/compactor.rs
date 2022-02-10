@@ -3,7 +3,6 @@ use std::sync::Arc;
 use bytes::BytesMut;
 use futures::stream::{self, StreamExt};
 
-use super::cloud::gen_remote_sstable;
 use super::iterator::{ConcatIterator, HummockIterator, MergeIterator};
 use super::key::{get_epoch, Epoch, FullKey};
 use super::key_range::KeyRange;
@@ -14,6 +13,7 @@ use super::{
     HummockError, HummockOptions, HummockResult, HummockStorage, HummockValue, SSTable,
     SSTableIterator, VersionManager,
 };
+use crate::hummock::cloud::gen_remote_sstable;
 use crate::object::ObjectStore;
 
 pub struct SubCompactContext {
@@ -138,7 +138,7 @@ impl Compactor {
     async fn sub_compact(
         context: SubCompactContext,
         kr: KeyRange,
-        mut iter: MergeIterator,
+        mut iter: MergeIterator<'_>,
         local_sorted_output_ssts: &mut Vec<SSTable>,
         is_target_ultimate_and_leveling: bool,
         watermark: Epoch,
@@ -221,6 +221,8 @@ impl Compactor {
                 blocks,
                 meta,
                 context.options.remote_dir.as_str(),
+                // Will panic in production mode
+                None,
             )
             .await?;
             local_sorted_output_ssts.push(table);
@@ -296,7 +298,7 @@ mod tests {
                     checksum_algo: ChecksumAlg::Crc32c,
                 },
                 Arc::new(VersionManager::new()),
-                Arc::new(LocalVersionManager::new(object_client, remote_dir)),
+                Arc::new(LocalVersionManager::new(object_client, remote_dir, None)),
                 Arc::new(MockHummockMetaClient::new(Arc::new(
                     MockHummockMetaService::new(),
                 ))),
@@ -353,22 +355,12 @@ mod tests {
             .unwrap();
 
         // Get the value after flushing to remote.
-        let value = hummock_storage
-            .get_snapshot()
-            .await
-            .unwrap()
-            .get(&anchor)
-            .await
-            .unwrap()
-            .unwrap();
+        let value = hummock_storage.get(&anchor, epoch).await.unwrap().unwrap();
         assert_eq!(Bytes::from(value), Bytes::from("111"));
 
         // Test looking for a nonexistent key. `next()` would return the next key.
         let value = hummock_storage
-            .get_snapshot()
-            .await
-            .unwrap()
-            .get(&Bytes::from("ab"))
+            .get(&Bytes::from("ab"), epoch)
             .await
             .unwrap();
         assert_eq!(value, None);
@@ -386,14 +378,7 @@ mod tests {
             .unwrap();
         Compactor::compact(&sub_compact_context).await?;
         // Get the value after flushing to remote.
-        let value = hummock_storage
-            .get_snapshot()
-            .await
-            .unwrap()
-            .get(&anchor)
-            .await
-            .unwrap()
-            .unwrap();
+        let value = hummock_storage.get(&anchor, epoch).await.unwrap().unwrap();
         assert_eq!(Bytes::from(value), Bytes::from("111111"));
 
         let mut table_iters: Vec<BoxedHummockIterator> = Vec::new();
@@ -449,21 +434,12 @@ mod tests {
         Compactor::compact(&sub_compact_context).await?;
 
         // Get the value after flushing to remote.
-        let value = hummock_storage
-            .get_snapshot()
-            .await
-            .unwrap()
-            .get(&anchor)
-            .await
-            .unwrap();
+        let value = hummock_storage.get(&anchor, epoch).await.unwrap();
         assert_eq!(value, None);
 
         // Get non-existent maximum key.
         let value = hummock_storage
-            .get_snapshot()
-            .await
-            .unwrap()
-            .get(&Bytes::from("ff"))
+            .get(&Bytes::from("ff"), epoch)
             .await
             .unwrap();
         assert_eq!(value, None);
@@ -481,6 +457,7 @@ mod tests {
         let local_version_manager = Arc::new(LocalVersionManager::new(
             object_client.clone(),
             &options.remote_dir,
+            None,
         ));
         let target_table_size = options.sstable_size;
         let hummock_meta_client = Arc::new(MockHummockMetaClient::new(Arc::new(

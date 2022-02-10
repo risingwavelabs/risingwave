@@ -2,7 +2,7 @@ version: '3'
 
 services:
   zookeeper:
-    image: confluentinc/cp-zookeeper:7.0.1
+    image: ghcr.io/singularity-data/cp-zookeeper:7.0.1
     hostname: zookeeper
     container_name: zookeeper
     ports:
@@ -12,7 +12,7 @@ services:
       ZOOKEEPER_TICK_TIME: 2000
 
   broker:
-    image: confluentinc/cp-kafka:7.0.1
+    image: ghcr.io/singularity-data/cp-kafka:7.0.1
     hostname: broker
     container_name: broker
     depends_on:
@@ -37,7 +37,7 @@ services:
       start_period: 10s
 
   kafkacat:
-    image: edenhill/kafkacat:1.6.0
+    image: ghcr.io/singularity-data/kafkacat:1.6.0
     container_name: kafkacat
     depends_on:
       - broker
@@ -47,7 +47,7 @@ services:
     tty: true
 
   mysql:
-    image: debezium/example-mysql:latest
+    image: ghcr.io/singularity-data/debezium-example-mysql:1.8.0.Final
     hostname: mysql
     container_name: mysql
     ports:
@@ -58,7 +58,7 @@ services:
      - MYSQL_PASSWORD=mysqlpw
 
   debezium:
-    image: debezium/connect:latest
+    image: ghcr.io/singularity-data/debezium-connect:1.8.0.Final
     hostname: debezium
     container_name: debezium
     ports:
@@ -74,7 +74,7 @@ services:
      - STATUS_STORAGE_TOPIC=my_connect_statuses
 
   dbgen:
-    image: tabbbb/tpch-dbgen:ubuntu
+    image: ghcr.io/singularity-data/tpch-dbgen:ubuntu  # tabbbb/tpch-dbgen:ubuntu
     hostname: dbgen
     container_name: dbgen
     entrypoint: /bin/sh

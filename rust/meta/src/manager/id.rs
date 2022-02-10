@@ -110,7 +110,6 @@ pub mod IdCategory {
     pub const Table: IdCategoryType = 3;
     pub const Worker: IdCategoryType = 4;
     pub const Actor: IdCategoryType = 5;
-    pub const HummockContext: IdCategoryType = 6;
     pub const HummockSnapshot: IdCategoryType = 7;
     pub const HummockSSTableId: IdCategoryType = 8;
 }
@@ -127,7 +126,6 @@ pub struct IdGeneratorManager {
     table: Arc<StoredIdGenerator>,
     worker: Arc<StoredIdGenerator>,
     actor: Arc<StoredIdGenerator>,
-    hummock_context: Arc<StoredIdGenerator>,
     hummock_snapshot: Arc<StoredIdGenerator>,
     hummock_ss_table_id: Arc<StoredIdGenerator>,
 }
@@ -144,9 +142,6 @@ impl IdGeneratorManager {
             table: Arc::new(StoredIdGenerator::new(meta_store_ref.clone(), "table", None).await),
             worker: Arc::new(StoredIdGenerator::new(meta_store_ref.clone(), "worker", None).await),
             actor: Arc::new(StoredIdGenerator::new(meta_store_ref.clone(), "actor", Some(1)).await),
-            hummock_context: Arc::new(
-                StoredIdGenerator::new(meta_store_ref.clone(), "hummock_context", Some(1)).await,
-            ),
             hummock_snapshot: Arc::new(
                 StoredIdGenerator::new(meta_store_ref.clone(), "hummock_snapshot", Some(1)).await,
             ),
@@ -165,7 +160,6 @@ impl IdGeneratorManager {
             IdCategory::Schema => &self.schema,
             IdCategory::Table => &self.table,
             IdCategory::Actor => &self.actor,
-            IdCategory::HummockContext => &self.hummock_context,
             IdCategory::HummockSnapshot => &self.hummock_snapshot,
             IdCategory::Worker => &self.worker,
             IdCategory::HummockSSTableId => &self.hummock_ss_table_id,

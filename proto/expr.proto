@@ -39,6 +39,7 @@ message ExprNode {
     LENGTH = 203;
     LIKE = 204;
     UPPER = 205;
+    LOWER = 206;
     TRIM = 207;
     REPLACE = 208;
     POSITION = 209;

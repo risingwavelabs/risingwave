@@ -97,10 +97,10 @@ public class Messages {
         buf.writeInt(-1);
         continue;
       }
-      String valData = val.encodeInText();
-      buf.writeInt(valData.length());
-      buf.writeBytes(valData.getBytes());
-      totalLen += valData.length();
+      var valData = val.encodeInText().getBytes(StandardCharsets.UTF_8);
+      buf.writeInt(valData.length);
+      buf.writeBytes(valData);
+      totalLen += valData.length;
     }
     buf.setInt(1, totalLen);
   }

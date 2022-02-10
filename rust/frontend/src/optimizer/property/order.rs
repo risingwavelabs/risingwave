@@ -3,7 +3,7 @@ use super::Convention;
 use crate::optimizer::PlanRef;
 
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Order {
     pub field_order: Vec<FieldOrder>,
 }

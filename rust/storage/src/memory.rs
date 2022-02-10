@@ -1,5 +1,7 @@
 use std::collections::{btree_map, BTreeMap};
 use std::mem::size_of_val;
+use std::ops::Bound::{Excluded, Included, Unbounded};
+use std::ops::{Bound, RangeBounds};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -23,6 +25,24 @@ impl Default for MemoryStateStore {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn to_bytes_range<R, B>(range: R) -> (Bound<Bytes>, Bound<Bytes>)
+where
+    R: RangeBounds<B> + Send,
+    B: AsRef<[u8]>,
+{
+    let start = match range.start_bound() {
+        Included(k) => Included(Bytes::copy_from_slice(k.as_ref())),
+        Excluded(k) => Excluded(Bytes::copy_from_slice(k.as_ref())),
+        Unbounded => Unbounded,
+    };
+    let end = match range.end_bound() {
+        Included(k) => Included(Bytes::copy_from_slice(k.as_ref())),
+        Excluded(k) => Excluded(Bytes::copy_from_slice(k.as_ref())),
+        Unbounded => Unbounded,
+    };
+    (start, end)
 }
 
 impl MemoryStateStore {
@@ -52,46 +72,50 @@ impl MemoryStateStore {
         Ok(())
     }
 
-    pub fn get_stats_ref(&self) -> &StateStoreStats {
-        self.stats.as_ref()
-    }
-
-    async fn scan_inner(&self, prefix: &[u8], limit: Option<usize>) -> Result<Vec<(Bytes, Bytes)>> {
+    async fn scan_inner<R, B>(
+        &self,
+        key_range: R,
+        limit: Option<usize>,
+    ) -> Result<Vec<(Bytes, Bytes)>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]>,
+    {
         let mut data = vec![];
         if limit == Some(0) {
             return Ok(vec![]);
         }
         let inner = self.inner.lock().await;
-        for (key, value) in inner.iter() {
-            if key.starts_with(prefix) {
-                data.push((key.clone(), value.clone()));
-                if let Some(limit) = limit {
-                    if data.len() >= limit {
-                        break;
-                    }
+        for (key, value) in inner.range(to_bytes_range(key_range)) {
+            data.push((key.clone(), value.clone()));
+            if let Some(limit) = limit {
+                if data.len() >= limit {
+                    break;
                 }
             }
         }
         Ok(data)
     }
 
-    async fn reverse_scan_inner(
+    async fn reverse_scan_inner<R, B>(
         &self,
-        prefix: &[u8],
+        key_range: R,
         limit: Option<usize>,
-    ) -> Result<Vec<(Bytes, Bytes)>> {
+    ) -> Result<Vec<(Bytes, Bytes)>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]>,
+    {
         let mut data = vec![];
         if limit == Some(0) {
             return Ok(vec![]);
         }
         let inner = self.inner.lock().await;
-        for (key, value) in inner.iter().rev() {
-            if key.starts_with(prefix) {
-                data.push((key.clone(), value.clone()));
-                if let Some(limit) = limit {
-                    if data.len() >= limit {
-                        break;
-                    }
+        for (key, value) in inner.range(to_bytes_range(key_range)).rev() {
+            data.push((key.clone(), value.clone()));
+            if let Some(limit) = limit {
+                if data.len() >= limit {
+                    break;
                 }
             }
         }
@@ -101,18 +125,18 @@ impl MemoryStateStore {
 
 #[async_trait]
 impl StateStore for MemoryStateStore {
-    type Iter = MemoryStateStoreIter;
+    type Iter<'a> = MemoryStateStoreIter;
 
-    async fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
-        self.get_stats_ref().get_counts.inc();
-        let timer = self.get_stats_ref().get_latency.start_timer();
+    async fn get(&self, key: &[u8], _epoch: u64) -> Result<Option<Bytes>> {
+        self.stats.get_counts.inc();
+        let timer = self.stats.get_latency.start_timer();
         let inner = self.inner.lock().await;
         let res = inner.get(key).cloned();
         timer.observe_duration();
 
-        self.get_stats_ref().get_key_size.observe(key.len() as f64);
+        self.stats.get_key_size.observe(key.len() as f64);
         if res.is_some() {
-            self.get_stats_ref()
+            self.stats
                 .get_value_size
                 .observe(size_of_val(res.as_ref().unwrap()) as f64);
         }
@@ -120,16 +144,30 @@ impl StateStore for MemoryStateStore {
         Ok(res)
     }
 
-    async fn scan(&self, prefix: &[u8], limit: Option<usize>) -> Result<Vec<(Bytes, Bytes)>> {
-        self.scan_inner(prefix, limit).await
+    async fn scan<R, B>(
+        &self,
+        key_range: R,
+        limit: Option<usize>,
+        _epoch: u64,
+    ) -> Result<Vec<(Bytes, Bytes)>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]>,
+    {
+        self.scan_inner(key_range, limit).await
     }
 
-    async fn reverse_scan(
+    async fn reverse_scan<R, B>(
         &self,
-        prefix: &[u8],
+        key_range: R,
         limit: Option<usize>,
-    ) -> Result<Vec<(Bytes, Bytes)>> {
-        self.reverse_scan_inner(prefix, limit).await
+        _epoch: u64,
+    ) -> Result<Vec<(Bytes, Bytes)>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]>,
+    {
+        self.reverse_scan_inner(key_range, limit).await
     }
 
     async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>, _epoch: u64) -> Result<()> {
@@ -137,14 +175,17 @@ impl StateStore for MemoryStateStore {
         self.ingest_batch_inner(kv_pairs).await
     }
 
-    async fn iter(&self, prefix: &[u8]) -> Result<Self::Iter> {
+    async fn iter<R, B>(&self, key_range: R, _epoch: u64) -> Result<Self::Iter<'_>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]>,
+    {
         #[allow(clippy::mutable_key_type)]
         let snapshot: BTreeMap<_, _> = self
             .inner
             .lock()
             .await
-            .iter()
-            .filter(|(k, _v)| k.starts_with(prefix))
+            .range(to_bytes_range(key_range))
             .map(|(k, v)| (k.to_owned(), v.to_owned()))
             .collect();
 

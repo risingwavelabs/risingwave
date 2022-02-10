@@ -1,27 +1,18 @@
 #![allow(dead_code)]
 
-use std::collections::HashMap;
-use std::ops::Add;
-use std::sync::{Arc, Weak};
-use std::time::{Duration, Instant};
-
 use bytes::Bytes;
 use itertools::Itertools;
 use prost::Message;
-use risingwave_common::array::RwError;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::hummock::{
-    CompactTask, HummockContext, HummockContextPinnedSnapshot, HummockContextPinnedVersion,
-    HummockSnapshot, HummockTablesToDelete, HummockVersion, Level, LevelType, SstableInfo,
-    UncommittedEpoch,
+    CompactTask, HummockContextPinnedSnapshot, HummockContextPinnedVersion, HummockSnapshot,
+    HummockTablesToDelete, HummockVersion, Level, LevelType, SstableInfo, UncommittedEpoch,
 };
 use risingwave_storage::hummock::key_range::KeyRange;
 use risingwave_storage::hummock::{
-    HummockContextId, HummockEpoch, HummockError, HummockSSTableId, HummockTTL, HummockVersionId,
-    INVALID_EPOCH,
+    HummockContextId, HummockEpoch, HummockError, HummockSSTableId, HummockVersionId, INVALID_EPOCH,
 };
 use tokio::sync::{Mutex, RwLock};
-use tokio::task::JoinHandle;
 
 use crate::hummock::compaction::{CompactStatus, CompactionInner};
 use crate::hummock::level_handler::{LevelHandler, SSTableStat};
@@ -50,8 +41,6 @@ const RESERVED_HUMMOCK_CONTEXT_ID: HummockContextId = -1;
 pub struct HummockManager {
     env: MetaSrvEnv,
     hummock_config: Config,
-    // lock order: context_expires_at before compaction
-    context_expires_at: RwLock<HashMap<HummockContextId, Instant>>,
     // lock order: compaction before inner
     compaction: Mutex<CompactionInner>,
     inner: RwLock<HummockManagerInner>,
@@ -61,9 +50,27 @@ pub(super) struct HummockManagerInner {
     env: MetaSrvEnv,
 }
 
+/// Column family name for hummock context.
+const HUMMOCK_CONTEXT_CF_NAME: &str = "cf/hummock_context";
+/// Column family name for hummock version.
+const HUMMOCK_VERSION_CF_NAME: &str = "cf/hummock_version";
+/// Column family name for hummock table.
+pub(crate) const HUMMOCK_TABLE_CF_NAME: &str = "cf/hummock_table";
+/// Column family name for hummock epoch.
+pub(crate) const HUMMOCK_DEFAULT_CF_NAME: &str = "cf/hummock_default";
+/// Column family name for hummock deletion.
+const HUMMOCK_DELETION_CF_NAME: &str = "cf/hummock_deletion";
+/// Hummock version id key.
+pub(crate) const HUMMOCK_VERSION_ID_LEY: &str = "version_id";
+/// Hummock `compact_status` key
+pub(crate) const HUMMOCK_COMPACT_STATUS_KEY: &str = "compact_status";
+/// Column family name for hummock context pinned version
+const HUMMOCK_CONTEXT_PINNED_VERSION_CF_NAME: &str = "cf/hummock_context_pinned_version";
+/// Column family name for hummock context pinned snapshot
+const HUMMOCK_CONTEXT_PINNED_SNAPSHOT_CF_NAME: &str = "cf/hummock_context_pinned_snapshot";
+
 /// [`HummockManagerInner`] manages hummock meta data in meta store.
 /// Table refers to `SSTable` in `HummockManager`.
-/// `cf(hummock_context)`: `HummockContextId` -> `HummockContext`
 /// `cf(hummock_version)`: `HummockVersionId` -> `HummockVersion`
 /// `cf(hummock_table)`: `table_id` -> `Table`
 /// `cf(hummock_context_pinned_version)`: `HummockContextId` -> `HummockContextPinnedVersion`
@@ -76,33 +83,12 @@ impl HummockManagerInner {
         HummockManagerInner { env }
     }
 
-    async fn pick_few_tables(&self, table_ids: &[u64]) -> Result<Vec<SstableInfo>> {
-        let mut ret = Vec::with_capacity(table_ids.len());
-        for &table_id in table_ids {
-            let table: SstableInfo = self.get_table_data(table_id).await?;
-            ret.push(table);
-        }
-        Ok(ret)
-    }
-
-    async fn get_table_data(&self, table_id: u64) -> Result<SstableInfo> {
-        self.env
-            .meta_store()
-            .get_cf(
-                self.env.config().get_hummock_table_cf(),
-                &table_id.to_be_bytes(),
-                SINGLE_VERSION_EPOCH,
-            )
-            .await
-            .map(|t| SstableInfo::decode(t.as_slice()).unwrap())
-    }
-
     async fn get_current_version_id(&self) -> Result<HummockVersionId> {
         self.env
             .meta_store()
             .get_cf(
-                self.env.config().get_hummock_default_cf(),
-                self.env.config().get_hummock_version_id_key().as_bytes(),
+                HUMMOCK_DEFAULT_CF_NAME,
+                HUMMOCK_VERSION_ID_LEY.as_bytes(),
                 SINGLE_VERSION_EPOCH,
             )
             .await
@@ -113,7 +99,7 @@ impl HummockManagerInner {
         self.env
             .meta_store()
             .get_cf(
-                self.env.config().get_hummock_version_cf(),
+                HUMMOCK_VERSION_CF_NAME,
                 &version_id.to_be_bytes(),
                 SINGLE_VERSION_EPOCH,
             )
@@ -125,7 +111,7 @@ impl HummockManagerInner {
         trx.add_operations(vec![Operation::Put(
             ColumnFamilyUtils::prefix_key_with_cf(
                 table.id.to_be_bytes().as_slice(),
-                self.env.config().get_hummock_table_cf().as_bytes(),
+                HUMMOCK_TABLE_CF_NAME.as_bytes(),
             ),
             table.encode_to_vec(),
             None,
@@ -136,7 +122,7 @@ impl HummockManagerInner {
         trx.add_operations(vec![Operation::Delete(
             ColumnFamilyUtils::prefix_key_with_cf(
                 table_id.to_be_bytes().as_slice(),
-                self.env.config().get_hummock_table_cf().as_bytes(),
+                HUMMOCK_TABLE_CF_NAME.as_bytes(),
             ),
             None,
         )]);
@@ -151,7 +137,7 @@ impl HummockManagerInner {
         trx.add_operations(vec![Operation::Put(
             ColumnFamilyUtils::prefix_key_with_cf(
                 new_version_id.to_be_bytes().as_slice(),
-                self.env.config().get_hummock_version_cf().as_bytes(),
+                HUMMOCK_VERSION_CF_NAME.as_bytes(),
             ),
             hummock_version.encode_to_vec(),
             None,
@@ -165,7 +151,7 @@ impl HummockManagerInner {
         self.env
             .meta_store()
             .get_cf(
-                self.env.config().get_hummock_context_pinned_version_cf(),
+                HUMMOCK_CONTEXT_PINNED_VERSION_CF_NAME,
                 &context_id.to_be_bytes(),
                 SINGLE_VERSION_EPOCH,
             )
@@ -213,10 +199,7 @@ impl HummockManagerInner {
             trx.add_operations(vec![Operation::Delete(
                 ColumnFamilyUtils::prefix_key_with_cf(
                     context_id.to_be_bytes().as_slice(),
-                    self.env
-                        .config()
-                        .get_hummock_context_pinned_version_cf()
-                        .as_bytes(),
+                    HUMMOCK_CONTEXT_PINNED_VERSION_CF_NAME.as_bytes(),
                 ),
                 None,
             )]);
@@ -224,10 +207,7 @@ impl HummockManagerInner {
             trx.add_operations(vec![Operation::Put(
                 ColumnFamilyUtils::prefix_key_with_cf(
                     context_id.to_be_bytes().as_slice(),
-                    self.env
-                        .config()
-                        .get_hummock_context_pinned_version_cf()
-                        .as_bytes(),
+                    HUMMOCK_CONTEXT_PINNED_VERSION_CF_NAME.as_bytes(),
                 ),
                 pinned_versions.encode_to_vec(),
                 None,
@@ -242,7 +222,7 @@ impl HummockManagerInner {
         self.env
             .meta_store()
             .get_cf(
-                self.env.config().get_hummock_context_pinned_snapshot_cf(),
+                HUMMOCK_CONTEXT_PINNED_SNAPSHOT_CF_NAME,
                 &context_id.to_be_bytes(),
                 SINGLE_VERSION_EPOCH,
             )
@@ -289,10 +269,7 @@ impl HummockManagerInner {
             trx.add_operations(vec![Operation::Delete(
                 ColumnFamilyUtils::prefix_key_with_cf(
                     context_id.to_be_bytes().as_slice(),
-                    self.env
-                        .config()
-                        .get_hummock_context_pinned_snapshot_cf()
-                        .as_bytes(),
+                    HUMMOCK_CONTEXT_PINNED_SNAPSHOT_CF_NAME.as_bytes(),
                 ),
                 None,
             )]);
@@ -300,10 +277,7 @@ impl HummockManagerInner {
             trx.add_operations(vec![Operation::Put(
                 ColumnFamilyUtils::prefix_key_with_cf(
                     context_id.to_be_bytes().as_slice(),
-                    self.env
-                        .config()
-                        .get_hummock_context_pinned_snapshot_cf()
-                        .as_bytes(),
+                    HUMMOCK_CONTEXT_PINNED_SNAPSHOT_CF_NAME.as_bytes(),
                 ),
                 pinned_snapshots.encode_to_vec(),
                 None,
@@ -318,7 +292,7 @@ impl HummockManagerInner {
         let result = self
             .env
             .meta_store()
-            .list_cf(self.env.config().get_hummock_context_pinned_snapshot_cf())
+            .list_cf(HUMMOCK_CONTEXT_PINNED_SNAPSHOT_CF_NAME)
             .await?;
         let low_watermark = result
             .iter()
@@ -334,8 +308,8 @@ impl HummockManagerInner {
     fn update_version_id_in_trx(&self, trx: &mut Transaction, new_version_id: HummockVersionId) {
         trx.add_operations(vec![Operation::Put(
             ColumnFamilyUtils::prefix_key_with_cf(
-                self.env.config().get_hummock_version_id_key().as_bytes(),
-                self.env.config().get_hummock_default_cf().as_bytes(),
+                HUMMOCK_VERSION_ID_LEY.as_bytes(),
+                HUMMOCK_DEFAULT_CF_NAME.as_bytes(),
             ),
             new_version_id.to_be_bytes().to_vec(),
             None,
@@ -343,11 +317,7 @@ impl HummockManagerInner {
     }
 
     async fn get_tables(&self) -> Result<Vec<SstableInfo>> {
-        let table_list = self
-            .env
-            .meta_store()
-            .list_cf(self.env.config().get_hummock_table_cf())
-            .await?;
+        let table_list = self.env.meta_store().list_cf(HUMMOCK_TABLE_CF_NAME).await?;
         Ok(table_list
             .iter()
             .map(|v| SstableInfo::decode(v.as_slice()).unwrap())
@@ -361,7 +331,7 @@ impl HummockManagerInner {
         self.env
             .meta_store()
             .get_cf(
-                self.env.config().get_hummock_deletion_cf(),
+                HUMMOCK_DELETION_CF_NAME,
                 &version_id.to_be_bytes(),
                 SINGLE_VERSION_EPOCH,
             )
@@ -379,7 +349,7 @@ impl HummockManagerInner {
             trx.add_operations(vec![Operation::Delete(
                 ColumnFamilyUtils::prefix_key_with_cf(
                     version_id.to_be_bytes().as_slice(),
-                    self.env.config().get_hummock_deletion_cf().as_bytes(),
+                    HUMMOCK_DELETION_CF_NAME.as_bytes(),
                 ),
                 None,
             )]);
@@ -387,108 +357,31 @@ impl HummockManagerInner {
             trx.add_operations(vec![Operation::Put(
                 ColumnFamilyUtils::prefix_key_with_cf(
                     version_id.to_be_bytes().as_slice(),
-                    self.env.config().get_hummock_deletion_cf().as_bytes(),
+                    HUMMOCK_DELETION_CF_NAME.as_bytes(),
                 ),
                 hummock_tables_to_delete.encode_to_vec(),
                 None,
             )]);
         }
     }
-
-    fn invalidate_hummock_context_in_trx(
-        &self,
-        trx: &mut Transaction,
-        context_id: HummockContextId,
-    ) {
-        trx.add_operations(vec![
-            Operation::Delete(
-                ColumnFamilyUtils::prefix_key_with_cf(
-                    context_id.to_be_bytes().as_slice(),
-                    self.env
-                        .config()
-                        .get_hummock_context_pinned_version_cf()
-                        .as_bytes(),
-                ),
-                None,
-            ),
-            Operation::Delete(
-                ColumnFamilyUtils::prefix_key_with_cf(
-                    context_id.to_be_bytes().as_slice(),
-                    self.env
-                        .config()
-                        .get_hummock_context_pinned_snapshot_cf()
-                        .as_bytes(),
-                ),
-                None,
-            ),
-            Operation::Delete(
-                ColumnFamilyUtils::prefix_key_with_cf(
-                    context_id.to_be_bytes().as_slice(),
-                    self.env.config().get_hummock_context_cf().as_bytes(),
-                ),
-                None,
-            ),
-        ]);
-    }
-
-    fn add_hummock_context_in_trx(&self, trx: &mut Transaction, context: &HummockContext) {
-        trx.add_operations(vec![Operation::Put(
-            ColumnFamilyUtils::prefix_key_with_cf(
-                context.identifier.to_be_bytes().as_slice(),
-                self.env.config().get_hummock_context_cf().as_bytes(),
-            ),
-            context.encode_to_vec(),
-            None,
-        )]);
-    }
 }
 
 impl HummockManager {
-    pub async fn new(
-        env: MetaSrvEnv,
-        hummock_config: Config,
-    ) -> Result<(Arc<Self>, JoinHandle<Result<()>>)> {
-        let instance = Arc::new(Self {
+    pub async fn new(env: MetaSrvEnv, hummock_config: Config) -> Result<HummockManager> {
+        let instance = HummockManager {
             env: env.clone(),
             hummock_config,
-            context_expires_at: RwLock::new(HashMap::new()),
             inner: RwLock::new(HummockManagerInner::new(env.clone())),
             compaction: Mutex::new(CompactionInner::new(env.clone())),
-        });
+        };
 
-        instance.restore_context_meta().await?;
-        instance.restore_table_meta().await?;
+        instance.initialize_meta().await?;
 
-        let join_handle = tokio::spawn(Self::hummock_context_tracker_loop(Arc::downgrade(
-            &instance,
-        )));
-
-        Ok((instance, join_handle))
-    }
-
-    /// Restore the hummock context related data in meta store to a consistent state.
-    async fn restore_context_meta(&self) -> Result<()> {
-        let hummock_context_list = self
-            .inner
-            .read()
-            .await
-            .env
-            .meta_store()
-            .list_cf(self.env.config().get_hummock_context_cf())
-            .await?;
-        let mut context_guard = self.context_expires_at.write().await;
-        hummock_context_list.iter().for_each(|v| {
-            let hummock_context: HummockContext = HummockContext::decode(v.as_slice()).unwrap();
-            context_guard.insert(
-                hummock_context.identifier,
-                Instant::now().add(Duration::from_millis(self.hummock_config.context_ttl)),
-            );
-        });
-        Ok(())
+        Ok(instance)
     }
 
     /// Restore the table related data in meta store to a consistent state.
-    async fn restore_table_meta(&self) -> Result<()> {
+    async fn initialize_meta(&self) -> Result<()> {
         let compaction_guard = self.compaction.lock().await;
         let inner_guard = self.inner.write().await;
         let version_id = inner_guard.get_current_version_id().await;
@@ -549,115 +442,19 @@ impl HummockManager {
         Ok(())
     }
 
-    /// A background task that periodically invalidates the hummock contexts whose TTL are expired.
-    async fn hummock_context_tracker_loop(weak_self: Weak<Self>) -> Result<()> {
-        loop {
-            let hummock_manager_ref = weak_self.upgrade();
-            if hummock_manager_ref.is_none() {
-                return Ok(());
-            }
-            let hummock_manager = hummock_manager_ref.unwrap();
-            let mut interval = tokio::time::interval(Duration::from_millis(
-                hummock_manager.hummock_config.context_check_interval,
-            ));
-            interval.tick().await;
-            interval.tick().await;
-            let context_to_invalidate: Vec<HummockContextId>;
-            {
-                let guard = hummock_manager.context_expires_at.read().await;
-                context_to_invalidate = guard
-                    .iter()
-                    .filter(|kv| Instant::now().saturating_duration_since(*kv.1) > Duration::ZERO)
-                    .map(|kv| *kv.0)
-                    .collect();
-            }
-            for context_id in context_to_invalidate {
-                hummock_manager
-                    .invalidate_hummock_context(context_id)
-                    .await?;
-            }
-        }
-    }
-
     async fn commit_trx(&self, trx: &mut Transaction, context_id: HummockContextId) -> Result<()> {
         if context_id != RESERVED_HUMMOCK_CONTEXT_ID {
-            // check context validity
-            // TODO disable hummock context validation until we decide to adopt it.
-            // And remove this placeholder line, which is only to suppress dead code warning.
+            // TODO check context validity
             trx.add_preconditions(vec![]);
             // trx.add_preconditions(vec![Precondition::KeyExists {
             //   key: ColumnFamilyUtils::prefix_key_with_cf(
             //     context_id.to_be_bytes().as_slice(),
-            //     self.env.config().get_hummock_context_cf().as_bytes(),
+            //     HUMMOCK_CONTEXT_CF_NAME.as_bytes(),
             //   ),
             //   version: None,
             // }]);
         }
         self.env.meta_store().commit_transaction(trx).await
-    }
-
-    pub async fn create_hummock_context(&self) -> Result<HummockContext> {
-        let context_id = self
-            .env
-            .id_gen_manager_ref()
-            .generate::<{ IdCategory::HummockContext }>()
-            .await?;
-        let new_context = HummockContext {
-            identifier: context_id,
-            ttl: self.hummock_config.context_ttl,
-        };
-        let result = {
-            let inner_guard = self.inner.write().await;
-            let mut transaction = self.env.meta_store().get_transaction();
-            inner_guard.add_hummock_context_in_trx(&mut transaction, &new_context);
-            inner_guard
-                .env
-                .meta_store()
-                .commit_transaction(&mut transaction)
-                .await
-        };
-        match result {
-            Ok(()) => {
-                let mut guard = self.context_expires_at.write().await;
-                let expires_at = Instant::now().add(Duration::from_millis(new_context.ttl));
-                guard.insert(new_context.identifier, expires_at);
-                Ok(new_context)
-            }
-            Err(err) => Err(err),
-        }
-    }
-
-    pub async fn invalidate_hummock_context(&self, context_id: HummockContextId) -> Result<()> {
-        {
-            let mut guard = self.context_expires_at.write().await;
-            if guard.remove(&context_id) == None {
-                return Err(RwError::from(HummockError::invalid_hummock_context(
-                    context_id,
-                )));
-            }
-        }
-        let mut transaction = self.env.meta_store().get_transaction();
-        let inner_guard = self.inner.write().await;
-        inner_guard.invalidate_hummock_context_in_trx(&mut transaction, context_id);
-        self.commit_trx(&mut transaction, context_id).await
-    }
-
-    pub async fn refresh_hummock_context(
-        &self,
-        context_id: HummockContextId,
-    ) -> Result<HummockTTL> {
-        let mut guard = self.context_expires_at.write().await;
-        match guard.get_mut(&context_id) {
-            Some(_) => {
-                let new_ttl = self.hummock_config.context_ttl;
-                guard.insert(
-                    context_id,
-                    Instant::now().add(Duration::from_millis(new_ttl)),
-                );
-                Ok(new_ttl)
-            }
-            None => Err(HummockError::invalid_hummock_context(context_id).into()),
-        }
     }
 
     pub async fn pin_version(

@@ -7,6 +7,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 
 use crate::cluster::StoredClusterManager;
+use crate::model::ActorId;
 
 /// [`ScheduleCategory`] defines all supported categories.
 pub enum ScheduleCategory {
@@ -47,8 +48,8 @@ impl Scheduler {
     /// `enforced_round_actors`.
     pub async fn schedule(
         &self,
-        actors: &[u32],
-        enforce_round_actors: &[u32],
+        actors: &[ActorId],
+        enforce_round_actors: &[ActorId],
     ) -> Result<Vec<WorkerNode>> {
         let nodes = self
             .cluster_manager

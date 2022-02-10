@@ -12,9 +12,14 @@ use tracing_subscriber::prelude::*;
 #[allow(dead_code)]
 fn configure_risingwave_targets(targets: filter::Targets) -> filter::Targets {
     targets
+        // enable trace for most modules
         .with_target("risingwave_stream", Level::TRACE)
         .with_target("risingwave_batch", Level::TRACE)
         .with_target("risingwave_storage", Level::TRACE)
+        // disable events that are too verbose
+        // if you want to enable any of them, find the target name and set it to `TRACE`
+        // .with_target("events::stream::mview::scan", Level::TRACE)
+        .with_target("events", Level::ERROR)
 }
 
 #[cfg(not(tarpaulin_include))]

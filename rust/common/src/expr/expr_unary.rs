@@ -16,6 +16,7 @@ use crate::vector_op::cast::*;
 use crate::vector_op::cmp::{is_false, is_not_false, is_not_true, is_true};
 use crate::vector_op::conjunction;
 use crate::vector_op::length::length_default;
+use crate::vector_op::lower::lower;
 use crate::vector_op::ltrim::ltrim;
 use crate::vector_op::rtrim::rtrim;
 use crate::vector_op::trim::trim;
@@ -189,7 +190,7 @@ pub fn new_unary_expr(
                 _phantom: PhantomData,
             })
         }
-        (ProstType::Cast, DataType::Decimal { .. }, DataType::Char) => {
+        (ProstType::Cast, DataType::Decimal, DataType::Char) => {
             Box::new(UnaryExpression::<Utf8Array, DecimalArray, _> {
                 expr_ia1: child_expr,
                 return_type,
@@ -298,12 +299,16 @@ pub fn new_unary_expr(
             func: upper,
             _phantom: PhantomData,
         }),
+        (ProstType::Lower, _, _) => Box::new(UnaryBytesExpression::<Utf8Array, _> {
+            expr_ia1: child_expr,
+            return_type,
+            func: lower,
+            _phantom: PhantomData,
+        }),
         (ProstType::Neg, _, _) => {
             gen_neg! { child_expr, return_type }
         }
-        (ProstType::PgSleep, _, DataType::Decimal { .. }) => {
-            Box::new(PgSleepExpression::new(child_expr))
-        }
+        (ProstType::PgSleep, _, DataType::Decimal) => Box::new(PgSleepExpression::new(child_expr)),
         (expr, ret, child) => {
             unimplemented!("The expression {:?}({:?}) ->{:?} using vectorized expression framework is not supported yet!", expr, child, ret)
         }

@@ -111,6 +111,7 @@ async fn test_stream_mv_proto() {
     };
     let actor_proto = StreamActor {
         actor_id: 1,
+        fragment_id: 1,
         nodes: Some(mview_proto),
         dispatcher: Some(Dispatcher {
             r#type: DispatcherType::Simple as i32,
@@ -207,8 +208,9 @@ async fn test_stream_mv_proto() {
     // FIXME: use channel when testing hummock to make sure local state has already flushed.
     tokio::time::sleep(Duration::from_millis(500)).await;
 
+    let epoch = u64::MAX;
     let datum = table
-        .get(Row(vec![Some(1_i32.into())]), 0)
+        .get(Row(vec![Some(1_i32.into())]), 0, epoch)
         .await
         .unwrap()
         .unwrap();
