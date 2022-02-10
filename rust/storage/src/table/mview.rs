@@ -182,17 +182,21 @@ impl<'a, S: StateStore> MViewTableIter<S> {
     async fn consume_more(&mut self) -> Result<()> {
         // TODO: adjustable limit
         assert!(self.next_idx == self.buf.len());
-        let limit: usize = 100;
+        let limit: usize = 1024;
         if self.buf.is_empty() {
-            self.buf = self.keyspace.scan(Some(limit), self.epoch).await?
+            self.buf = self.keyspace.scan(Some(limit), self.epoch).await?;
+            self.next_idx = 0;
         } else {
-            let next_key = next_key(self.buf.last().unwrap().0.to_vec().as_slice());
+            let last_key = self.buf.last().unwrap().0.clone();
             self.buf = self
                 .keyspace
-                .scan_with_start_key(next_key, Some(limit), self.epoch)
-                .await?
+                .scan_with_start_key(last_key.to_vec(), Some(limit), self.epoch)
+                .await?;
+            assert!(!self.buf.is_empty());
+            assert_eq!(self.buf.first().as_ref().unwrap().0, last_key);
+            self.next_idx = 1;
         }
-        self.next_idx = 0;
+
         Ok(())
     }
 }
