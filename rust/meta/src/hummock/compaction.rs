@@ -10,6 +10,7 @@ use risingwave_storage::hummock::{HummockError, HummockSSTableId, HummockSnapsho
 use serde::{Deserialize, Serialize};
 
 use crate::hummock::level_handler::{LevelHandler, SSTableStat};
+use crate::hummock::{HUMMOCK_COMPACT_STATUS_KEY, HUMMOCK_DEFAULT_CF_NAME};
 use crate::manager::{MetaSrvEnv, SINGLE_VERSION_EPOCH};
 use crate::storage::{ColumnFamilyUtils, Operation, Transaction};
 
@@ -33,11 +34,8 @@ impl CompactionInner {
         self.env
             .meta_store()
             .get_cf(
-                self.env.config().get_hummock_default_cf(),
-                self.env
-                    .config()
-                    .get_hummock_compact_status_key()
-                    .as_bytes(),
+                HUMMOCK_DEFAULT_CF_NAME,
+                HUMMOCK_COMPACT_STATUS_KEY.as_bytes(),
                 SINGLE_VERSION_EPOCH,
             )
             .await
@@ -51,19 +49,14 @@ impl CompactionInner {
     ) {
         trx.add_operations(vec![Operation::Put(
             ColumnFamilyUtils::prefix_key_with_cf(
-                self.env
-                    .config()
-                    .get_hummock_compact_status_key()
-                    .as_bytes(),
-                self.env.config().get_hummock_default_cf().as_bytes(),
+                HUMMOCK_COMPACT_STATUS_KEY.as_bytes(),
+                HUMMOCK_DEFAULT_CF_NAME.as_bytes(),
             ),
             bincode::serialize(&compact_status).unwrap(),
             None,
         )]);
     }
 
-    /// We assume that SSTs will only be deleted in compaction, otherwise `get_compact_task` need to
-    /// `pin`
     pub async fn get_compact_task(
         &self,
         mut compact_status: CompactStatus,
