@@ -155,29 +155,23 @@ impl DataType {
     }
 
     pub fn is_numeric(&self) -> bool {
-        match self {
-            DataTypeKind::Int16
-            | DataTypeKind::Int32
-            | DataTypeKind::Int64
-            | DataTypeKind::Float32
-            | DataTypeKind::Float64
-            | DataTypeKind::Decimal { .. } => true,
-            _ => false,
-        }
+        matches!(
+            self,
+            DataType::Int16
+                | DataType::Int32
+                | DataType::Int64
+                | DataType::Float32
+                | DataType::Float64
+                | DataType::Decimal
+        )
     }
 
     pub fn is_string(&self) -> bool {
-        match self {
-            DataTypeKind::Char | DataTypeKind::Varchar => true,
-            _ => false,
-        }
+        matches!(self, DataType::Char | DataType::Varchar)
     }
 
     pub fn is_date_or_timestamp(&self) -> bool {
-        match self {
-            DataTypeKind::Date | DataTypeKind::Timestamp => true,
-            _ => false,
-        }
+        matches!(self, DataType::Date | DataType::Timestamp)
     }
 }
 

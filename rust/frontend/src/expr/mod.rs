@@ -19,7 +19,7 @@ pub trait Expr {
     fn return_type(&self) -> DataType;
     fn bound_expr(self) -> ExprImpl;
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ExprImpl {
     // ColumnRef(Box<BoundColumnRef>), might be used in binder.
     InputRef(Box<InputRef>),
