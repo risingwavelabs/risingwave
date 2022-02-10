@@ -8,6 +8,7 @@ impl Planner {
     pub(super) fn plan_statement(&mut self, stmt: BoundStatement) -> Result<PlanRef> {
         match stmt {
             BoundStatement::Query(q) => self.plan_query(*q),
+            BoundStatement::Insert(_i) => panic!(""),
         }
     }
 }
