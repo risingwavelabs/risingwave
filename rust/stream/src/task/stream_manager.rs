@@ -829,9 +829,6 @@ impl StreamManagerCore {
     /// sink. All the actors in the actors should stop themselves before this method is invoked.
     fn drop_actor(&mut self, actor_id: u32) {
         let handle = self.handles.remove(&actor_id).unwrap();
-        // let mut channel_pool_guard = self.context.lock_channel_pool();
-        // channel_pool_guard.retain(|(x, _), _| *x != actor_id);
-
         self.context.retain_channels_by_actor_id(actor_id, &[]);
 
         self.actor_infos.remove(&actor_id);
