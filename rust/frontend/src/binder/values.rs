@@ -1,4 +1,3 @@
-use risingwave_common::array::RwError;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
@@ -55,31 +54,31 @@ impl Binder {
                 Ok(right)
             }
         } else {
-            Err(RwError::from(ErrorCode::InternalError(format!(
+            Err(ErrorCode::InternalError(format!(
                 "Can not find compatible type for {:?} and {:?}",
                 left, right
-            ))))
+            ))
+            .into())
         }
     }
 
     /// Check if cast needs to be inserted.
     fn ensure_type(expr: ExprImpl, ty: DataType) -> ExprImpl {
-        if ty != expr.return_type() {
+        if ty == expr.return_type() {
+            expr
+        } else {
             ExprImpl::FunctionCall(Box::new(FunctionCall::new_with_return_type(
                 ExprType::Cast,
                 vec![expr],
                 ty,
             )))
-        } else {
-            expr
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::iter::zip;
-
+    use itertools::zip_eq;
     use risingwave_sqlparser::ast::{Expr, Value};
 
     use super::*;
@@ -91,41 +90,17 @@ mod tests {
         // Test i32 -> decimal.
         let expr1 = Expr::Value(Value::Number("1".to_string(), false));
         let expr2 = Expr::Value(Value::Number("1.1".to_string(), false));
-        let values = Values(vec![vec![expr1.clone()], vec![expr2.clone()]]);
+        let values = Values(vec![vec![expr1], vec![expr2]]);
         let res = binder.bind_values(values).unwrap();
 
-        let row1 = ExprImpl::FunctionCall(Box::new(FunctionCall::new_with_return_type(
-            ExprType::Cast,
-            vec![binder.bind_expr(expr1).unwrap()],
-            DataType::Decimal,
-        )));
-        let row2 = binder.bind_expr(expr2).unwrap();
-        let rows = vec![vec![row1], vec![row2]];
         let types = vec![DataType::Decimal];
         let schema = Schema::new(types.into_iter().map(Field::unnamed).collect());
 
         assert_eq!(res.schema, schema);
-        for (vec, expected_vec) in zip(res.rows, rows) {
-            for (expr, expected_expr) in zip(vec, expected_vec) {
-                assert_eq!(expr.return_type(), expected_expr.return_type());
+        for vec in res.rows {
+            for (expr, ty) in zip_eq(vec, schema.data_types()) {
+                assert_eq!(expr.return_type(), ty);
             }
-        }
-
-        // Test incompatible.
-        let expr1 = Expr::Value(Value::SingleQuotedString("1".to_string()));
-        let expr2 = Expr::Value(Value::Number("1".to_string(), false));
-        let values = Values(vec![vec![expr1], vec![expr2]]);
-        let res = binder.bind_values(values);
-        assert!(res.is_err());
-        if let Err(res_err) = res {
-            assert_eq!(
-                res_err,
-                RwError::from(ErrorCode::InternalError(format!(
-                    "Can not find compatible type for {:?} and {:?}",
-                    DataType::Varchar,
-                    DataType::Int32
-                )))
-            );
         }
     }
 }
