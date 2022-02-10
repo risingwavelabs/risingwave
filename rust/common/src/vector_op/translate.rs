@@ -18,12 +18,7 @@ pub fn translate(
         let m = match_chars.next();
         let r = replace_chars.next();
         if let Some(match_c) = m {
-            if !char_map.contains_key(&match_c) {
-                match r {
-                    Some(replace_c) => char_map.insert(match_c, replace_c),
-                    None => char_map.insert(match_c, '\0'),
-                };
-            }
+            char_map.entry(match_c).or_insert_with(|| r.unwrap_or('\0'));
         } else {
             break;
         }
