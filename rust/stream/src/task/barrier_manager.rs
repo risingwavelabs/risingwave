@@ -103,7 +103,6 @@ impl LocalBarrierManager {
             to_send
         };
         let to_collect: HashSet<u32> = actor_ids_to_collect.into_iter().collect();
-
         trace!(
             "send barrier {:?}, senders = {:?}, actor_ids_to_collect = {:?}",
             barrier,
@@ -190,7 +189,6 @@ impl LocalBarrierManager {
                 if state.remaining_actors.is_empty() {
                     let state = managed_state.take().unwrap();
                     self.last_epoch = Some(state.epoch);
-
                     // Notify about barrier finishing.
                     let tx = state.collect_notifier;
                     if tx.send(()).is_err() {

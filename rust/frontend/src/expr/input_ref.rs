@@ -14,6 +14,11 @@ impl InputRef {
     pub fn get_expr_type(&self) -> ExprType {
         ExprType::InputRef
     }
+
+    /// Get a reference to the input ref's index.
+    pub fn index(&self) -> usize {
+        self.index
+    }
 }
 impl Expr for InputRef {
     fn return_type(&self) -> DataType {

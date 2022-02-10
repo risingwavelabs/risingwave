@@ -13,7 +13,7 @@ use super::StreamingAggStateImpl;
 /// Note that if there are zero rows in aggregator, `0` will be emitted
 /// instead of `None`. Note that if you want to only count non-null value,
 /// use `StreamingCountAgg` instead.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct StreamingRowCountAgg {
     row_cnt: i64,
 }
@@ -45,12 +45,6 @@ impl StreamingRowCountAgg {
 
     pub fn return_type() -> DataType {
         DataType::Int64
-    }
-}
-
-impl Default for StreamingRowCountAgg {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -90,6 +84,10 @@ impl StreamingAggStateImpl for StreamingRowCountAgg {
 
     fn new_builder(&self) -> ArrayBuilderImpl {
         ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0).unwrap())
+    }
+
+    fn reset(&mut self) {
+        self.row_cnt = 0;
     }
 }
 

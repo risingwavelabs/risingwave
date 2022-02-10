@@ -26,12 +26,7 @@ impl Binder {
             let decimal = s
                 .parse::<Decimal>()
                 .map_err(|e| ErrorCode::ParseError(Box::new(e)))?;
-            let scale = decimal.scale() as u32;
-            let prec = decimal.precision();
-            (
-                Some(ScalarImpl::Decimal(decimal)),
-                DataType::Decimal { prec, scale },
-            )
+            (Some(ScalarImpl::Decimal(decimal)), DataType::Decimal)
         };
         Ok(Literal::new(data, data_type))
     }
@@ -70,10 +65,10 @@ mod tests {
         let data_type = vec![
             DataType::Int32,
             DataType::Int64,
-            DataType::Decimal { prec: 15, scale: 6 },
-            DataType::Decimal { prec: 24, scale: 0 },
-            DataType::Decimal { prec: 7, scale: 6 },
-            DataType::Decimal { prec: 3, scale: 2 },
+            DataType::Decimal,
+            DataType::Decimal,
+            DataType::Decimal,
+            DataType::Decimal,
         ];
 
         for i in 0..values.len() {

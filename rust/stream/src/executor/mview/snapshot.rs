@@ -21,7 +21,7 @@ pub struct BatchQueryExecutor {
     table: ScannableTableRef,
     /// The number of tuples in one [`StreamChunk`]
     batch_size: usize,
-    /// Inner iterator that read [`MViewTable`]
+    /// Inner iterator that reads [`MViewTable`]
     iter: Option<TableIterRef>,
     /// Schema
     schema: Schema,

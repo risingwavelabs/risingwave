@@ -68,34 +68,6 @@ message HummockSnapshot {
   uint64 epoch = 1;
 }
 
-message HummockContext {
-  int32 identifier = 1;
-  uint64 ttl = 2; //ms
-}
-
-message CreateHummockContextRequest {}
-
-message CreateHummockContextResponse {
-  common.Status status = 1;
-  HummockContext hummock_context = 2;
-}
-
-message InvalidateHummockContextRequest {
-  int32 context_identifier = 1;
-}
-
-message InvalidateHummockContextResponse {
-  common.Status status = 1;
-}
-
-message AddTableWatermarkRequest {
-  int32 context_identifier = 1;
-}
-
-message AddTableWatermarkResponse {
-  common.Status status = 1;
-}
-
 message RemoveTableWatermarkRequest {
   int32 context_identifier = 1;
 }
@@ -112,15 +84,6 @@ message AddTablesRequest {
 
 message AddTablesResponse {
   common.Status status = 1;
-}
-
-message RefreshHummockContextRequest {
-  int32 context_identifier = 1;
-}
-
-message RefreshHummockContextResponse {
-  common.Status status = 1;
-  uint64 ttl = 2; //ms
 }
 
 message PinVersionRequest {
@@ -244,14 +207,9 @@ message GetNewTableIdResponse {
 }
 
 service HummockManagerService {
-  rpc CreateHummockContext(CreateHummockContextRequest) returns (CreateHummockContextResponse);
-  rpc InvalidateHummockContext(InvalidateHummockContextRequest) returns (InvalidateHummockContextResponse);
-  rpc RefreshHummockContext(RefreshHummockContextRequest) returns (RefreshHummockContextResponse);
   rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
   rpc UnpinVersion(UnpinVersionRequest) returns (UnpinVersionResponse);
   rpc AddTables(AddTablesRequest) returns (AddTablesResponse);
-  rpc AddTableWatermark(AddTableWatermarkRequest) returns (AddTableWatermarkResponse);
-  rpc RemoveTableWatermark(RemoveTableWatermarkRequest) returns (RemoveTableWatermarkResponse);
   rpc GetCompactionTasks(GetCompactionTasksRequest) returns (GetCompactionTasksResponse);
   rpc ReportCompactionTasks(ReportCompactionTasksRequest) returns (ReportCompactionTasksResponse);
   rpc PinSnapshot(PinSnapshotRequest) returns (PinSnapshotResponse);

@@ -8,11 +8,11 @@ anyhow = "1"
 async-std = { version = "1" }
 async-stream = "0.3"
 async-trait = "0.1"
-aws-config = "0.4.1"
-aws-sdk-kinesis = "0.4.1"
-aws-smithy-http = "0.34.0"
-aws-smithy-types = "0.32.0"
-aws-types = { version = "0.4.1", features = ["hardcoded-credentials"] }
+aws-config = "0.6"
+aws-sdk-kinesis = "0.6"
+aws-smithy-http = "0.36"
+aws-smithy-types = "0.36"
+aws-types = { version = "0.6", features = ["hardcoded-credentials"] }
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 chrono = "0.4"

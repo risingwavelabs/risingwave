@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1"
-async-recursion = "0.2"
+async-recursion = "1"
 async-stream = "0.3"
 async-trait = "0.1"
 axum = "0.4"

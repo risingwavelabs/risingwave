@@ -55,9 +55,18 @@
       <div id="clusters" class="grid gap-2 md:grid-cols-2 lg:grid-cols-3 w-full">
       </div>
 
-      <h1 class="mt-5 mb-2 text-sm leading-6 font-semibold text-sky-500 dark:text-sky-400">
-        Stream Actors
-      </h1>
+      <div class="flex mt-5 mb-2 text-sm">
+        <h1 class="flex-auto leading-6 font-semibold text-sky-500 dark:text-sky-400">
+          Stream Actors
+        </h1>
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" value="" id="mvOnMvCheckbox"
+            onchange="handleMvOnMvClick(this);">
+          <label class="form-check-label text-gray-500" for="mvOnMvCheckbox">
+            Resolve MV on MV
+          </label>
+        </div>
+      </div>
       <div id="actors" class="w-full">
       </div>
     </div>
@@ -75,6 +84,9 @@
   integrity="sha256-ZjkehPx5n2M0daimR+hR4q8q4wIcPUNUrUTsykjK56Y=" crossorigin="anonymous"></script>
 
 <script>
+  /// Whether we should resolve mv on mv
+  let resolveMvOnMv = false
+
   const cluster = (type, cluster) => `
 <div class="p-6 max-w bg-white rounded-xl shadow-md flex flex-col space-y-1">
   <div class="flex flex-row items-center">
@@ -238,7 +250,7 @@
 
   /// Create a d3.hierarchy of actors
   const hierarchyActors = (actors, metaFn) => {
-    /// Mapping fragmentId -> { [actorId], parent }
+    /// Mapping fragmentId -> { [actorId], [parent] }
     const actorNodes = new Map
     /// actorId -> Actor
     const actorMap = new Map
@@ -259,18 +271,34 @@
           }
           lastFragmentId = downstreamFragmentId
         })
-        actorNodes.set(fragmentId, { actors: [actorId], parent: lastFragmentId })
+        const parents = lastFragmentId ? [lastFragmentId] : []
+        actorNodes.set(fragmentId, { actors: [actorId], parents })
       } else {
         actorNodes.get(fragmentId).actors.push(actorId)
       }
     })
 
+    /// Resolve MV on MV
+    if (resolveMvOnMv) {
+      actors.forEach(actor => {
+        const fragmentId = fragmentIdOf(actor)
+
+        if (actor.nodes.chainNode) {
+          let upstreamActorIds = actor.nodes.chainNode.upstreamActorIds
+          if (upstreamActorIds.length != 0) {
+            let upstreamFragmentId = fragmentIdOf(actorMap.get(upstreamActorIds[0]))
+            actorNodes.get(upstreamFragmentId).parents.push(fragmentId)
+          }
+        }
+      })
+    }
+
     /// Reverse mapping
     const actorReverseMapping = new Map
 
     /// Get reverse mapping
-    actorNodes.forEach(({ actors, parent }, fragmentId) => {
-      if (parent) {
+    actorNodes.forEach(({ actors, parents }, fragmentId) => {
+      for (const parent of parents) {
         const list = (actorReverseMapping.get(parent) || [])
         list.push(fragmentId)
         actorReverseMapping.set(parent, list)
@@ -280,7 +308,7 @@
     const roots = []
 
     /// Split into multiple graphs
-    actorNodes.forEach(({ actors, parent }, fragmentId) => {
+    actorNodes.forEach(({ actors, parents }, fragmentId) => {
       const buildGraph = (root, nextColor) => (
         {
           id: root,
@@ -291,7 +319,7 @@
 
       const countGraph = (root) => _.sum((actorReverseMapping.get(root) || []).map(countGraph)) + 1
 
-      if (!parent) {
+      if (parents.length == 0) {
         const totalActors = countGraph(fragmentId)
         let countedActor = 0
         const interp = d3.interpolateRainbow
@@ -460,13 +488,23 @@
       data => $("#clusters").append(cluster("Compute Node", data))))
   $("#clusters").append(cluster("Meta Node", { host: { host: "127.0.0.1", port: "2333" } }))
 
-  fetch('/api/actors')
-    .then(response => response.json())
-    .then(data => data.forEach(
-      (data, nodeId) => {
-        $("#actors").append(actors(data, nodeId))
-        layoutStreamGraphs(data, nodeId)
-      }))
+  const loadActors = () => {
+    fetch('/api/actors')
+      .then(response => response.json())
+      .then(data => data.forEach(
+        (data, nodeId) => {
+          $("#actors").empty()
+          $("#actors").append(actors(data, nodeId))
+          layoutStreamGraphs(data, nodeId)
+        }))
+  }
+
+  const handleMvOnMvClick = (cb) => {
+    resolveMvOnMv = cb.checked
+    loadActors()
+  }
+
+  loadActors()
 
 </script>
 

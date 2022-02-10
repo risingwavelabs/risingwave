@@ -1,23 +1,6 @@
 #![allow(dead_code)]
 
-/// Column family name for hummock context.
-const HUMMOCK_CONTEXT_CF_NAME: &str = "cf/hummock_context";
-/// Column family name for hummock version.
-const HUMMOCK_VERSION_CF_NAME: &str = "cf/hummock_version";
-/// Column family name for hummock table.
-const HUMMOCK_TABLE_CF_NAME: &str = "cf/hummock_table";
-/// Column family name for hummock epoch.
-const HUMMOCK_DEFAULT_CF_NAME: &str = "cf/hummock_default";
-/// Column family name for hummock deletion.
-const HUMMOCK_DELETION_CF_NAME: &str = "cf/hummock_deletion";
-/// Hummock version id key.
-const HUMMOCK_VERSION_ID_LEY: &str = "version_id";
-/// Hummock `compact_status` key
-const HUMMOCK_COMPACT_STATUS_KEY: &str = "compact_status";
-/// Column family name for hummock context pinned version
-const HUMMOCK_CONTEXT_PINNED_VERSION_CF_NAME: &str = "cf/hummock_context_pinned_version";
-/// Column family name for hummock context pinned snapshot
-const HUMMOCK_CONTEXT_PINNED_SNAPSHOT_CF_NAME: &str = "cf/hummock_context_pinned_snapshot";
+
 
 #[derive(Clone)]
 pub struct Config {
