@@ -11,7 +11,6 @@ use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 
 use super::TableIterRef;
-use crate::hummock::key::next_key;
 use crate::table::{ScannableTable, TableIter};
 use crate::{Keyspace, StateStore, TableColumnDesc};
 
