@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use itertools::Itertools;
 use risingwave_common::error::Result;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
