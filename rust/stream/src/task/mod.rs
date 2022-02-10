@@ -4,6 +4,7 @@ use std::sync::{Mutex, MutexGuard};
 
 use futures::channel::mpsc::{Receiver, Sender};
 use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_pb::common::ActorInfo;
 
 use crate::executor::Message;
 
@@ -41,16 +42,11 @@ pub struct SharedContext {
     /// 2. The RPC client at the downstream actor forwards received `Message` to one channel in
     /// `ReceiverExecutor` or `MergerExecutor`.
     /// 3. The RPC `Output` at the upstream actor forwards received `Message` to
-    /// `ExchangeServiceImpl`.        The channel servers as a buffer because `ExchangeServiceImpl`
-    /// is on the server-side and we will        also introduce backpressure.
+    /// `ExchangeServiceImpl`.       
+    ///
+    /// The channel servers as a buffer because `ExchangeServiceImpl`
+    /// is on the server-side and we will also introduce backpressure.
     pub(crate) channel_pool: Mutex<HashMap<UpDownActorIds, ConsumableChannelPair>>,
-
-    /// The (remote) channel pool for exchange servce.
-    /// All remote channels are built before actually building actors.
-    /// The receiver is on the other side of rpc `Output`. The `ExchangeServiceImpl` take it
-    /// when it receives request for streaming data from downstream clients.
-    pub(crate) channel_pool_for_exchange_service:
-        Mutex<HashMap<UpDownActorIds, ConsumableChannelPair>>,
 
     /// Stores the local address
     ///
@@ -66,7 +62,6 @@ impl SharedContext {
     pub fn new(addr: SocketAddr) -> Self {
         Self {
             channel_pool: Mutex::new(HashMap::new()),
-            channel_pool_for_exchange_service: Mutex::new(HashMap::new()),
             addr,
             barrier_manager: Mutex::new(LocalBarrierManager::new()),
         }
@@ -76,14 +71,13 @@ impl SharedContext {
     pub fn for_test() -> Self {
         Self {
             channel_pool: Mutex::new(HashMap::new()),
-            channel_pool_for_exchange_service: Mutex::new(HashMap::new()),
             addr: *LOCAL_TEST_ADDR,
             barrier_manager: Mutex::new(LocalBarrierManager::for_test()),
         }
     }
 
     #[inline]
-    pub fn lock_channel_pool(&self) -> MutexGuard<HashMap<UpDownActorIds, ConsumableChannelPair>> {
+    fn lock_channel_pool(&self) -> MutexGuard<HashMap<UpDownActorIds, ConsumableChannelPair>> {
         self.channel_pool.lock().unwrap()
     }
 
@@ -92,14 +86,7 @@ impl SharedContext {
     }
 
     #[inline]
-    pub fn lock_channel_pool_for_exchange_service(
-        &self,
-    ) -> MutexGuard<HashMap<UpDownActorIds, ConsumableChannelPair>> {
-        self.channel_pool_for_exchange_service.lock().unwrap()
-    }
-
-    #[inline]
-    pub fn get_sender_from_local_channel_pool_by_ids(
+    pub fn take_sender_from_channel_pool_by_ids(
         &self,
         ids: &UpDownActorIds,
     ) -> Result<Sender<Message>> {
@@ -115,14 +102,14 @@ impl SharedContext {
             .take()
             .ok_or_else(|| {
                 RwError::from(ErrorCode::InternalError(format!(
-                    "receiver from {} to {} does no exist",
+                    "sender from {} to {} does no exist",
                     ids.0, ids.1
                 )))
             })
     }
 
     #[inline]
-    pub fn get_receiver_from_local_channel_pool_by_ids(
+    pub fn take_receiver_from_channel_pool_by_ids(
         &self,
         ids: &UpDownActorIds,
     ) -> Result<Receiver<Message>> {
@@ -145,48 +132,19 @@ impl SharedContext {
     }
 
     #[inline]
-    pub fn get_sender_from_exchange_channel_pool_by_ids(
-        &self,
-        ids: &UpDownActorIds,
-    ) -> Result<Sender<Message>> {
-        self.lock_channel_pool_for_exchange_service()
-            .get_mut(ids)
-            .ok_or_else(|| {
-                RwError::from(ErrorCode::InternalError(format!(
-                    "channel between {} and {} does not exist",
-                    ids.0, ids.1
-                )))
-            })?
-            .0
-            .take()
-            .ok_or_else(|| {
-                RwError::from(ErrorCode::InternalError(format!(
-                    "receiver from {} to {} does no exist",
-                    ids.0, ids.1
-                )))
-            })
+    pub fn add_channel_pairs_by_ids(&self, ids: UpDownActorIds, channels: ConsumableChannelPair) {
+        self.lock_channel_pool().insert(ids, channels);
     }
 
     #[inline]
-    pub fn get_receiver_from_exchange_channel_pool_by_ids(
-        &self,
-        ids: &UpDownActorIds,
-    ) -> Result<Receiver<Message>> {
-        self.lock_channel_pool_for_exchange_service()
-            .get_mut(ids)
-            .ok_or_else(|| {
-                RwError::from(ErrorCode::InternalError(format!(
-                    "channel between {} and {} does not exist",
-                    ids.0, ids.1
-                )))
-            })?
-            .1
-            .take()
-            .ok_or_else(|| {
-                RwError::from(ErrorCode::InternalError(format!(
-                    "receiver from {} to {} does no exist",
-                    ids.0, ids.1
-                )))
-            })
+    pub fn retain_channels_by_actor_id(&self, actor_id: u32, actor_info: &[ActorInfo]) {
+        self.lock_channel_pool().retain(|(up_id, down_id), _| {
+            *up_id != actor_id || actor_info.iter().any(|info| info.actor_id == *down_id)
+        })
+    }
+
+    #[cfg(test)]
+    pub fn get_channel_pair_number(&self) -> u32 {
+        self.lock_channel_pool().len() as u32
     }
 }
