@@ -234,11 +234,12 @@ mod tests {
         .unwrap();
 
         sink_executor.next().await.unwrap();
+        let epoch = u64::MAX;
         // First stream chunk. We check the existence of (3) -> (3,6)
         match sink_executor.next().await.unwrap() {
             Message::Barrier(_) => {
                 let datum = table
-                    .get(Row(vec![Some(3_i32.into())]), 1)
+                    .get(Row(vec![Some(3_i32.into())]), 1, epoch)
                     .await
                     .unwrap()
                     .unwrap();
@@ -254,7 +255,7 @@ mod tests {
         match sink_executor.next().await.unwrap() {
             Message::Barrier(_) => {
                 let datum = table
-                    .get(Row(vec![Some(7_i32.into())]), 1)
+                    .get(Row(vec![Some(7_i32.into())]), 1, epoch)
                     .await
                     .unwrap()
                     .unwrap();

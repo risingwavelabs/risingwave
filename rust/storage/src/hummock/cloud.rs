@@ -73,19 +73,11 @@ pub async fn gen_remote_sstable(
 }
 
 pub fn get_sst_meta_path(remote_dir: &str, sstable_id: HummockSSTableId) -> String {
-    std::path::Path::new(remote_dir)
-        .join(format!("{}.meta", sstable_id))
-        .to_str()
-        .unwrap()
-        .to_owned()
+    format!("{}/{}.meta", remote_dir, sstable_id)
 }
 
 pub fn get_sst_data_path(remote_dir: &str, sstable_id: HummockSSTableId) -> String {
-    std::path::Path::new(remote_dir)
-        .join(format!("{}.data", sstable_id))
-        .to_str()
-        .unwrap()
-        .to_owned()
+    format!("{}/{}.data", remote_dir, sstable_id)
 }
 
 async fn get_object_store_file(

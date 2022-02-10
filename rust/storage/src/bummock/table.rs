@@ -46,7 +46,7 @@ pub struct BummockTable {
 
 #[async_trait::async_trait]
 impl ScannableTable for BummockTable {
-    async fn iter(&self) -> Result<Box<dyn TableIter>> {
+    async fn iter(&self, _epoch: u64) -> Result<Box<dyn TableIter>> {
         unimplemented!()
     }
 
@@ -290,8 +290,8 @@ mod tests {
 
         let schema = Schema {
             fields: vec![
-                Field::unnamed(DataType::decimal_default()),
-                Field::unnamed(DataType::decimal_default()),
+                Field::unnamed(DataType::Decimal),
+                Field::unnamed(DataType::Decimal),
             ],
         };
 

@@ -172,18 +172,17 @@ impl StreamManager {
             .map(|actor_info| (actor_info.actor_id, actor_info.clone()))
             .collect::<HashMap<ActorId, ActorInfo>>();
 
-        let dispatches = up_down_ids
-            .iter()
-            .map(|(up_id, down_id)| {
-                (
-                    *up_id,
-                    vec![actor_info_map
-                        .get(down_id)
-                        .expect("downstream actor info not exist")
-                        .clone()],
-                )
-            })
-            .collect::<HashMap<ActorId, Vec<ActorInfo>>>();
+        let dispatches = up_down_ids.into_iter().into_grouping_map().fold(
+            vec![],
+            |mut actors, _up_id, down_id| {
+                let info = actor_info_map
+                    .get(&down_id)
+                    .expect("downstream actor info not exist")
+                    .clone();
+                actors.push(info);
+                actors
+            },
+        );
 
         for (node_id, actors) in node_actors_map {
             let node = node_map.get(&node_id).unwrap();
