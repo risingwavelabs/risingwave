@@ -1,6 +1,6 @@
 use std::fmt;
-use fixedbitset::FixedBitSet;
 
+use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::Schema;
 
 use super::{BatchLimit, ColPrunable, IntoPlanRef, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
