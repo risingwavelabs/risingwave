@@ -121,8 +121,9 @@ impl BarrierManager {
             }
             .unwrap();
 
-            // Only wait for minimal interval if no command is scheduled.
-            if scheduled.is_none() {
+            // Only wait for minimal interval if no command is scheduled, and no extra notifiers is
+            // pending.
+            if scheduled.is_none() && self.extra_notifiers.lock().await.is_empty() {
                 min_interval.tick().await;
             }
 
