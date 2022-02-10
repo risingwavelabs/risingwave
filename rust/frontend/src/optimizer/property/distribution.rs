@@ -6,7 +6,7 @@ pub enum Distribution {
     Any,
     Single,
     Broadcast,
-    Shard,
+    AnyShard,
     HashShard(Vec<usize>),
 }
 #[allow(dead_code)]
@@ -28,15 +28,15 @@ impl Distribution {
         }
     }
     // "A -> B" represent A satisfies B
-    //                 +---+
-    //                 |Any|
-    //                 +---+
-    //                   ^
-    //         +---------------------+
-    //         |         |           |
-    //      +--+--+   +--+---+  +----+----+
-    //      |shard|   |single|  |broadcast|
-    //      +--+--+   +------+  +---------+
+    //                   +---+
+    //                   |Any|
+    //                   +---+
+    //                     ^
+    //         +-----------------------+
+    //         |           |           |
+    //     +---+----+   +--+---+  +----+----+
+    //     |Anyshard|   |single|  |broadcast|
+    //     +---+----+   +------+  +---------+
     //         ^
     //  +------+------+
     //  |hash_shard(a)|
@@ -45,8 +45,33 @@ impl Distribution {
     // +-------+-------+
     // |hash_shard(a,b)|
     // +---------------+
-    fn satisfies(&self, _other: &Distribution) -> bool {
-        todo!()
+    fn satisfies(&self, other: &Distribution) -> bool {
+        match self {
+            Distribution::Any => true,
+            Distribution::Single => match other {
+                Distribution::Any => true,
+                Distribution::Single => true,
+                _ => false,
+            },
+            Distribution::Broadcast => match other {
+                Distribution::Any => true,
+                Distribution::Broadcast => true,
+                _ => false,
+            },
+            Distribution::AnyShard => match other {
+                Distribution::Any => true,
+                Distribution::AnyShard => true,
+                _ => false,
+            },
+            Distribution::HashShard(keys) => match other {
+                Distribution::Any => true,
+                Distribution::AnyShard => true,
+                Distribution::HashShard(other_keys) => other_keys
+                    .iter()
+                    .all(|other_key| keys.iter().find(|key| *key == other_key).is_some()),
+                _ => false,
+            },
+        }
     }
     pub fn any() -> Self {
         Distribution::Any
@@ -59,5 +84,32 @@ pub trait WithDistribution {
     // use the default impl will not affect correctness, but insert unnecessary Exchange in plan
     fn distribution(&self) -> Distribution {
         Distribution::any()
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::Distribution;
+
+    fn test_hash_shard_subset(uni: &Distribution, sub: &Distribution) {
+        assert_eq!(uni.satisfies(&sub), true);
+        assert_eq!(sub.satisfies(&uni), false);
+    }
+    fn test_hash_shard_false(d1: &Distribution, d2: &Distribution) {
+        assert_eq!(d1.satisfies(d2), false);
+        assert_eq!(d2.satisfies(d1), false);
+    }
+    #[test]
+    fn hash_shard_satisfy() {
+        let d1 = Distribution::HashShard(vec![0, 2, 4, 6, 8]);
+        let d2 = Distribution::HashShard(vec![2, 4]);
+        let d3 = Distribution::HashShard(vec![4, 6]);
+        let d4 = Distribution::HashShard(vec![6, 8]);
+        test_hash_shard_subset(&d1, &d2);
+        test_hash_shard_subset(&d1, &d3);
+        test_hash_shard_subset(&d1, &d4);
+        test_hash_shard_subset(&d1, &d2);
+        test_hash_shard_false(&d2, &d3);
+        test_hash_shard_false(&d2, &d4);
+        test_hash_shard_false(&d3, &d4);
     }
 }

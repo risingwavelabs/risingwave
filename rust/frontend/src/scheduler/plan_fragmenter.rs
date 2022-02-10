@@ -212,13 +212,13 @@ mod tests {
         let batch_exchange_node1 = BatchExchange::new(
             batch_plan_node.clone(),
             Order::default(),
-            Distribution::Shard,
+            Distribution::AnyShard,
         )
         .into_plan_ref();
         let batch_exchange_node2 = BatchExchange::new(
             batch_plan_node.clone(),
             Order::default(),
-            Distribution::Shard,
+            Distribution::AnyShard,
         )
         .into_plan_ref();
         let hash_join_node = BatchHashJoin::new(LogicalJoin::new(
