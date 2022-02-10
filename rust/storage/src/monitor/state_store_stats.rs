@@ -10,9 +10,9 @@ pub const DEFAULT_BUCKETS: &[f64; 11] = &[
     0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
 ];
 
-pub const BYTES_BUCKETS: &[f64; 11] = &[
-    0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
-];
+pub const GET_KEY_SIZE_SCALE: f64 = 200.0;
+pub const GET_VALUE_SIZE_SCALE: f64 = 200.0;
+pub const BATCH_WRITE_SIZE_SCALE: f64 = 20000.0;
 
 pub const GET_LATENCY_SCALE: f64 = 0.01;
 pub const GET_SNAPSHOT_LATENCY_SCALE: f64 = 0.0001;
@@ -67,15 +67,19 @@ impl StateStoreStats {
         )
         .unwrap();
 
+        let buckets = DEFAULT_BUCKETS.map(|x| x * GET_KEY_SIZE_SCALE).to_vec();
         let opts = histogram_opts!(
             "state_store_get_key_size",
-            "Total key bytes of get that have been issued to state store"
+            "Total key bytes of get that have been issued to state store",
+            buckets
         );
         let get_key_size = register_histogram_with_registry!(opts, registry).unwrap();
 
+        let buckets = DEFAULT_BUCKETS.map(|x| x * GET_VALUE_SIZE_SCALE).to_vec();
         let opts = histogram_opts!(
             "state_store_get_value_size",
             "Total value bytes that have been requested from remote storage",
+            buckets
         );
         let get_value_size = register_histogram_with_registry!(opts, registry).unwrap();
 
@@ -146,9 +150,11 @@ impl StateStoreStats {
         );
         let batch_write_latency = register_histogram_with_registry!(opts, registry).unwrap();
 
+        let buckets = DEFAULT_BUCKETS.map(|x| x * BATCH_WRITE_SIZE_SCALE).to_vec();
         let opts = histogram_opts!(
             "state_store_batched_write_size",
-            "Total size of batched write that have been issued to state store"
+            "Total size of batched write that have been issued to state store",
+            buckets
         );
         let batch_write_size = register_histogram_with_registry!(opts, registry).unwrap();
 

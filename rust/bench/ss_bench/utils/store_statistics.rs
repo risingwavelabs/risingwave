@@ -55,28 +55,28 @@ pub(crate) fn print_statistics() {
 
     let stat = DEFAULT_STATE_STORE_STATS.clone();
 
-    print!("{:#?}", stat);
+    // print!("{:#?}", stat);
 
     // ----- TODO(Ting Sun): use macro to simplify the implementation -----
-    // proc_counter(&stat.get_bytes);
-    // proc_counter(&stat.get_counts);
-    // proc_counter(&stat.put_bytes);
-    // proc_counter(&stat.range_scan_counts);
-    // proc_counter(&stat.batched_write_counts);
-    // proc_counter(&stat.batch_write_tuple_counts);
-    // proc_counter(&stat.iter_counts);
-    // proc_counter(&stat.iter_next_counts);
+    proc_counter(&stat.get_bytes);
+    proc_counter(&stat.get_counts);
+    proc_counter(&stat.put_bytes);
+    proc_counter(&stat.range_scan_counts);
+    proc_counter(&stat.batched_write_counts);
+    proc_counter(&stat.batch_write_tuple_counts);
+    proc_counter(&stat.iter_counts);
+    proc_counter(&stat.iter_next_counts);
 
-    // proc_histogram(&stat.get_latency);
+    proc_histogram(&stat.get_latency);
     proc_histogram(&stat.get_key_size);
-    // proc_histogram(&stat.get_value_size);
-    // proc_histogram(&stat.get_snapshot_latency);
-    // proc_histogram(&stat.batch_write_latency);
-    // proc_histogram(&stat.batch_write_size);
-    // proc_histogram(&stat.batch_write_build_table_latency);
-    // proc_histogram(&stat.batch_write_add_l0_latency);
-    // proc_histogram(&stat.iter_seek_latency);
-    // proc_histogram(&stat.iter_next_latency);
+    proc_histogram(&stat.get_value_size);
+    proc_histogram(&stat.get_snapshot_latency);
+    proc_histogram(&stat.batch_write_latency);
+    proc_histogram(&stat.batch_write_size);
+    proc_histogram(&stat.batch_write_build_table_latency);
+    proc_histogram(&stat.batch_write_add_l0_latency);
+    proc_histogram(&stat.iter_seek_latency);
+    proc_histogram(&stat.iter_next_latency);
 
     println!();
 }
