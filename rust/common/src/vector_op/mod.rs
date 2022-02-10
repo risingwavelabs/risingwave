@@ -15,6 +15,7 @@ pub mod replace;
 pub mod round;
 pub mod rtrim;
 pub mod substr;
+pub mod translate;
 pub mod trim;
 pub mod upper;
 

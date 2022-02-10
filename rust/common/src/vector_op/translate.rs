@@ -1,0 +1,80 @@
+use std::collections::HashMap;
+
+use crate::array::{BytesGuard, BytesWriter};
+use crate::error::Result;
+
+#[inline(always)]
+pub fn translate(
+    s: &str,
+    match_str: &str,
+    replace_str: &str,
+    writer: BytesWriter,
+) -> Result<BytesGuard> {
+    let mut char_map = HashMap::new();
+    let mut match_chars = match_str.chars();
+    let mut replace_chars = replace_str.chars();
+
+    loop {
+        let m = match_chars.next();
+        let r = replace_chars.next();
+        if let Some(match_c) = m {
+            if !char_map.contains_key(&match_c) {
+                match r {
+                    Some(replace_c) => char_map.insert(match_c, replace_c),
+                    None => char_map.insert(match_c, '\0'),
+                };
+            }
+        } else {
+            break;
+        }
+    }
+
+    let mut result_str = String::new();
+    for c in s.chars() {
+        if let Some(&m) = char_map.get(&c) {
+            if m != '\0' {
+                result_str.push(m);
+            }
+        } else {
+            result_str.push(c);
+        }
+    }
+
+    writer.write_ref(&result_str)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::array::{Array, ArrayBuilder, Utf8ArrayBuilder};
+
+    #[test]
+    fn test_translate() -> Result<()> {
+        let cases = [
+            ("hello world", "lo", "12", "he112 w2r1d"),
+            (
+                "人之初，性本善。性相近，习相远。",
+                "人性。",
+                "abcd",
+                "a之初，b本善cb相近，习相远c",
+            ),
+            (
+                "奇点无限 Singularity Data",
+                "Data ",
+                "1234",
+                "奇点无限Singul2ri3y1232",
+            ),
+        ];
+
+        for (s, match_str, replace_str, expected) in cases {
+            let builder = Utf8ArrayBuilder::new(1)?;
+            let writer = builder.writer();
+            let guard = translate(s, match_str, replace_str, writer)?;
+            let array = guard.into_inner().finish()?;
+            let v = array.value_at(0).unwrap();
+            assert_eq!(v, expected);
+        }
+
+        Ok(())
+    }
+}
