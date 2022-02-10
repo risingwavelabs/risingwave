@@ -17,24 +17,35 @@ fn proc_histogram(histogram: &Histogram) {
     let sample_sum = histogram.get_sample_sum();
     let buckets = histogram.get_bucket();
 
-    let get_quantile = |percent: f64| -> f64 {
-        let threshold = (sample_count as f64 * percent) as u64;
+    let get_quantile = |p: f64| -> f64 {
+        // empty bucket may appear
+        if sample_count == 0 {
+            return 0.0;
+        }
+        let threshold = (sample_count as f64 * p / 100.0) as u64;
+        let mut last_upper_bound = 0.0;
+        let mut last_count = 0;
         for bucket in buckets {
+            let upper_bound = bucket.get_upper_bound();
             let count = bucket.get_cumulative_count();
-            if count > 0 && count >= threshold {
-                return bucket.get_upper_bound();
+            if count >= threshold {
+                // assume scale linearly within this bucket
+                // we return the propositional value bwtween last_upper_bound and upper_bound
+                let right_left_diff = upper_bound - last_upper_bound;
+                return last_upper_bound
+                    + right_left_diff * (threshold - last_count) as f64
+                        / (count - last_count) as f64;
             }
+            last_upper_bound = upper_bound;
+            last_count = count;
         }
         0.0
     };
 
-    let p50 = get_quantile(0.5);
-    let p95 = get_quantile(0.95);
-    let p99 = get_quantile(0.99);
-    let p100 = match buckets.len() {
-        0 => 0.0,
-        _ => buckets[buckets.len() - 1].get_upper_bound(),
-    };
+    let p50 = get_quantile(50.0);
+    let p95 = get_quantile(95.0);
+    let p99 = get_quantile(99.0);
+    let p100 = get_quantile(100.0);
 
     println!("{desc} P50 : {p50} P95 : {p95} P99 : {p99} P100 : {p100} COUNT : {sample_count} SUM : {sample_sum}");
 }
