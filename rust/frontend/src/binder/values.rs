@@ -2,13 +2,12 @@ use risingwave_common::array::RwError;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
-use risingwave_pb::expr::expr_node::Type;
 use risingwave_sqlparser::ast::Values;
 
 use crate::binder::Binder;
-use crate::expr::{Expr as _, ExprImpl, FunctionCall};
+use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub struct BoundValues {
     pub rows: Vec<Vec<ExprImpl>>,
     pub schema: Schema,
@@ -47,7 +46,7 @@ impl Binder {
                     .map(|(i, expr)| {
                         if types[i] != expr.return_type() {
                             ExprImpl::FunctionCall(Box::new(FunctionCall::new_with_return_type(
-                                Type::Cast,
+                                ExprType::Cast,
                                 vec![expr],
                                 types[i],
                             )))
@@ -80,6 +79,8 @@ impl Binder {
 
 #[cfg(test)]
 mod tests {
+    use std::iter::zip;
+
     use risingwave_sqlparser::ast::{Expr, Value};
 
     use super::*;
@@ -95,7 +96,7 @@ mod tests {
         let res = binder.bind_values(values).unwrap();
 
         let row1 = ExprImpl::FunctionCall(Box::new(FunctionCall::new_with_return_type(
-            Type::Cast,
+            ExprType::Cast,
             vec![binder.bind_expr(expr1).unwrap()],
             DataType::Decimal,
         )));
@@ -103,22 +104,29 @@ mod tests {
         let rows = vec![vec![row1], vec![row2]];
         let types = vec![DataType::Decimal];
         let schema = Schema::new(types.into_iter().map(Field::unnamed).collect());
-        let expected_res = BoundValues { rows, schema };
 
-        assert_eq!(res, expected_res);
+        assert_eq!(res.schema, schema);
+        for (vec, expected_vec) in zip(res.rows, rows) {
+            for (expr, expected_expr) in zip(vec, expected_vec) {
+                assert_eq!(expr.return_type(), expected_expr.return_type());
+            }
+        }
 
         // Test incompatible.
         let expr1 = Expr::Value(Value::SingleQuotedString("1".to_string()));
         let expr2 = Expr::Value(Value::Number("1".to_string(), false));
         let values = Values(vec![vec![expr1], vec![expr2]]);
         let res = binder.bind_values(values);
-        assert_eq!(
-            res,
-            Err(RwError::from(ErrorCode::InternalError(format!(
-                "Can not find a compatible type for {:?} and {:?}",
-                DataType::Varchar,
-                DataType::Int32
-            ))))
-        );
+        assert!(res.is_err());
+        if let Err(res_err) = res {
+            assert_eq!(
+                res_err,
+                RwError::from(ErrorCode::InternalError(format!(
+                    "Can not find a compatible type for {:?} and {:?}",
+                    DataType::Varchar,
+                    DataType::Int32
+                )))
+            );
+        }
     }
 }

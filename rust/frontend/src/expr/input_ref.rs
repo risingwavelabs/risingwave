@@ -2,7 +2,7 @@ use risingwave_common::types::DataType;
 
 use super::{Expr, ExprImpl};
 use crate::expr::ExprType;
-#[derive(Clone, PartialEq)]
+#[derive(Clone)]
 pub struct InputRef {
     index: usize,
     data_type: DataType,

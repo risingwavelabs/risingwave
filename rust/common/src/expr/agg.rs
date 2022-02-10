@@ -5,7 +5,7 @@ use risingwave_pb::expr::agg_call::Type;
 use crate::error::{ErrorCode, Result, RwError};
 
 /// Kind of aggregation function
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum AggKind {
     Min,
     Max,
