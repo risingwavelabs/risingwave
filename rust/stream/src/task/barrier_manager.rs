@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use itertools::Itertools;
 use risingwave_common::error::Result;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
@@ -175,7 +176,12 @@ impl LocalBarrierManager {
                     "collect_barrier: epoch = {}, actor_id = {}, remaining_actors = {:?}",
                     barrier.epoch,
                     actor_id,
-                    state.remaining_actors
+                    state
+                        .remaining_actors
+                        .clone()
+                        .into_iter()
+                        .sorted()
+                        .collect_vec()
                 );
 
                 if state.remaining_actors.is_empty() {

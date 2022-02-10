@@ -64,7 +64,7 @@ fn generate_new_data_chunks(
     for (sink_id, vis_map_vec) in vis_maps.into_iter().enumerate() {
         let vis_map = (vis_map_vec).try_into()?;
         let new_data_chunk = chunk.with_visibility(vis_map).compact()?;
-        debug!(
+        trace!(
             "send to sink:{}, cardinality:{}",
             sink_id,
             new_data_chunk.cardinality()
@@ -90,7 +90,7 @@ impl HashShuffleSender {
         let new_data_chunks = generate_new_data_chunks(&chunk, &self.hash_info, &hash_values)?;
 
         for (sink_id, new_data_chunk) in new_data_chunks.into_iter().enumerate() {
-            debug!(
+            trace!(
                 "send to sink:{}, cardinality:{}",
                 sink_id,
                 new_data_chunk.cardinality()
