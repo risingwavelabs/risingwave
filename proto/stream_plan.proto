@@ -46,7 +46,7 @@ message ChainNode {
 }
 
 // Remark by Yanghao: for both local and global we use the same node in the protobuf.
-// Local and global aggregator distinguish with each other in their aggregation definition.
+// Local and global aggregator distinguish with each other in their PlanNode definition.
 message SimpleAggNode {
   repeated expr.AggCall agg_calls = 1;
 }
@@ -90,6 +90,8 @@ message StreamNode {
     ProjectNode project_node = 5;
     FilterNode filter_node = 6;
     MViewNode mview_node = 7;
+    SimpleAggNode local_simple_agg_node = 16;
+    // TODO: rename to global_simple_agg_node in later PR.
     SimpleAggNode simple_agg_node = 8;
     HashAggNode hash_agg_node = 9;
     TopNNode append_only_top_n_node = 10;

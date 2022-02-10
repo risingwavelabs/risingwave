@@ -64,7 +64,8 @@ public class StreamingTwoPhaseAggRule extends RelRule<StreamingTwoPhaseAggRule.C
             localAggInput,
             logicalAgg.getGroupSet(),
             logicalAgg.getGroupSets(),
-            localAggCalls);
+            localAggCalls,
+            false);
 
     // For simple aggregation we use Singleton Distribution to gather all the results into a single
     // place.
