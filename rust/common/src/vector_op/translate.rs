@@ -18,24 +18,21 @@ pub fn translate(
         let m = match_chars.next();
         let r = replace_chars.next();
         if let Some(match_c) = m {
-            char_map.entry(match_c).or_insert_with(|| r.unwrap_or('\0'));
+            char_map.entry(match_c).or_insert(r);
         } else {
             break;
         }
     }
 
-    let mut result_str = String::new();
-    for c in s.chars() {
-        if let Some(&m) = char_map.get(&c) {
-            if m != '\0' {
-                result_str.push(m);
-            }
-        } else {
-            result_str.push(c);
+    let iter = s.chars().filter_map(|c| {
+        match char_map.get(&c) {
+            Some(Some(m)) => Some(*m),
+            Some(None) => None,
+            None => Some(c),
         }
-    }
+    });
 
-    writer.write_ref(&result_str)
+    writer.write_from_char_iter(iter)
 }
 
 #[cfg(test)]
