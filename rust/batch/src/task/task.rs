@@ -175,7 +175,7 @@ impl TaskExecution {
 
     /// `get_data` consumes the data produced by `async_execute`.
     pub fn async_execute(&self) -> Result<()> {
-        debug!(
+        trace!(
             "Prepare executing plan [{:?}]: {}",
             self.task_id,
             serde_json::to_string_pretty(self.plan.get_root()?).unwrap()
@@ -196,7 +196,7 @@ impl TaskExecution {
         let failure = self.failure.clone();
         let task_id = self.task_id.clone();
         tokio::spawn(async move {
-            debug!("Executing plan [{:?}]", task_id);
+            trace!("Executing plan [{:?}]", task_id);
             let mut sender = sender;
 
             let task_id_cloned = task_id.clone();
