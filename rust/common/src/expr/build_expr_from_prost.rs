@@ -9,7 +9,8 @@ use crate::expr::expr_binary_nullable::new_nullable_binary_expr;
 use crate::expr::expr_case::{CaseExpression, WhenClause};
 use crate::expr::expr_ternary_bytes::{new_replace_expr, new_substr_start_end, new_translate_expr};
 use crate::expr::expr_unary::{
-    new_length_default, new_ltrim_expr, new_rtrim_expr, new_trim_expr, new_unary_expr,
+    new_ascii_expr, new_length_default, new_ltrim_expr, new_rtrim_expr, new_trim_expr,
+    new_unary_expr,
 };
 use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
 use crate::types::DataType;
@@ -129,6 +130,13 @@ pub fn build_like_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let expr_ia1 = expr_build_from_prost(&children[0])?;
     let expr_ia2 = expr_build_from_prost(&children[1])?;
     Ok(new_like_default(expr_ia1, expr_ia2, ret_type))
+}
+
+pub fn build_ascii_expr(prost: &ExprNode) -> Result<BoxedExpression> {
+    let (children, ret_type) = get_return_type_and_children(prost)?;
+    ensure!(children.len() == 1);
+    let child = expr_build_from_prost(&children[0])?;
+    Ok(new_ascii_expr(child, ret_type))
 }
 
 pub fn build_case_expr(prost: &ExprNode) -> Result<BoxedExpression> {
