@@ -50,12 +50,9 @@ impl StreamManagerService for StreamServiceImpl {
         let req = request.into_inner();
         let worker_count = self
             .cluster_manager
-            .list_worker_node(WorkerType::ComputeNode)
-            .map_err(|e| e.to_grpc_status())?
-            .len();
+            .get_worker_count(WorkerType::ComputeNode);
 
-        let mut fragmenter =
-            StreamFragmenter::new(self.id_gen_manager_ref.clone(), worker_count as u32);
+        let mut fragmenter = StreamFragmenter::new(self.id_gen_manager_ref.clone(), worker_count as u32);
         let graph = fragmenter
             .generate_graph(req.get_stream_node().map_err(tonic_err)?)
             .await
