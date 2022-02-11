@@ -485,12 +485,12 @@ assignment
     ;
 
 createStmt
-    : CREATE TABLE (IF NOT EXISTS)? table
+    : CREATE (TABLE | TABLE_V2) (IF NOT EXISTS)? table
         '(' tableElement (',' tableElement)* ')'
          partitionedByOrClusteredInto withProperties?                                #createTable
-    | CREATE TABLE_V2 (IF NOT EXISTS)? table
+    | CREATE TABLE_V1 (IF NOT EXISTS)? table
         '(' tableElement (',' tableElement)* ')'
-         partitionedByOrClusteredInto withProperties?                                #createTableV2
+         partitionedByOrClusteredInto withProperties?                                #createTableV1
     | CREATE TABLE table AS insertSource                                             #createTableAs
     | CREATE SNAPSHOT qname (ALL | TABLE tableWithPartitions) withProperties?        #createSnapshot
     | CREATE ANALYZER name=ident (EXTENDS extendedName=ident)?
@@ -661,6 +661,7 @@ on
 clazz
     : SCHEMA
     | TABLE
+    | TABLE_V1
     | TABLE_V2
     | VIEW
     ;
@@ -698,7 +699,7 @@ nonReserved
     | CURRENT_SCHEMA | PROMOTE | CHARACTER | VARYING
     | DISCARD | PLANS | SEQUENCES | TEMPORARY | TEMP | METADATA
     | SOURCE | LOCATION | TRUE | FALSE
-    | TABLE_V2 | FLUSH
+    | TABLE_V1 | TABLE_V2 | FLUSH
     ;
 
 AUTHORIZATION: 'AUTHORIZATION';
@@ -970,6 +971,7 @@ METADATA: 'METADATA';
 
 LOCATION: 'LOCATION';
 
+TABLE_V1: 'TABLE_V1';
 TABLE_V2: 'TABLE_V2';
 FLUSH: 'FLUSH';
 

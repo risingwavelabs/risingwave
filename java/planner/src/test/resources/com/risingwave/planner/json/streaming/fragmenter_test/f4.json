@@ -52,7 +52,7 @@
         }
       }
     }],
-    "simpleAggNode": {
+    "globalSimpleAggNode": {
       "aggCalls": [{
         "type": "COUNT",
         "returnType": {
