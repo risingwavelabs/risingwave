@@ -62,10 +62,9 @@ async fn test_prometheus_endpoint_hummock() {
     let s = std::str::from_utf8(&bytes[..]).unwrap();
 
     println!("\n---{}---\n", s);
-    assert!(s.contains("state_store_put_bytes"));
-    assert!(!s.contains("state_store_pu_bytes"));
 
-    assert!(s.contains("state_store_get_bytes"));
+    assert!(s.contains("state_store_batched_write_counts"));
+    assert!(!s.contains("state_store_batched_counts"));
 }
 
 #[tokio::test]
