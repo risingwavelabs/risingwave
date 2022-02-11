@@ -67,16 +67,44 @@ impl HummockManagerService for HummockServiceImpl {
 
     async fn get_compaction_tasks(
         &self,
-        _request: Request<GetCompactionTasksRequest>,
+        request: Request<GetCompactionTasksRequest>,
     ) -> Result<Response<GetCompactionTasksResponse>, Status> {
-        todo!()
+        let req = request.into_inner();
+        let result = self
+            .hummock_manager
+            .get_compact_task(req.context_identifier)
+            .await;
+        match result {
+            Ok(compact_task) => Ok(Response::new(GetCompactionTasksResponse {
+                status: None,
+                compact_task: Some(compact_task),
+            })),
+            Err(e) => Err(e.to_grpc_status()),
+        }
     }
 
     async fn report_compaction_tasks(
         &self,
-        _request: Request<ReportCompactionTasksRequest>,
+        request: Request<ReportCompactionTasksRequest>,
     ) -> Result<Response<ReportCompactionTasksResponse>, Status> {
-        todo!()
+        let req = request.into_inner();
+        match req.compact_task {
+            None => Ok(Response::new(ReportCompactionTasksResponse {
+                status: None,
+            })),
+            Some(compact_task) => {
+                let result = self
+                    .hummock_manager
+                    .report_compact_task(req.context_identifier, compact_task, req.task_result)
+                    .await;
+                match result {
+                    Ok(_) => Ok(Response::new(ReportCompactionTasksResponse {
+                        status: None,
+                    })),
+                    Err(e) => Err(e.to_grpc_status()),
+                }
+            }
+        }
     }
 
     async fn pin_snapshot(
