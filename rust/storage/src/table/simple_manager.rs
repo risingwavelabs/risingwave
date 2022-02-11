@@ -106,6 +106,8 @@ impl TableManager for SimpleTableManager {
         pk_columns: Vec<usize>,
         orderings: Vec<OrderType>,
     ) -> Result<()> {
+        tracing::debug!("create materialized view: {:?}", table_id);
+
         let mut tables = self.lock_tables();
         ensure!(
             !tables.contains_key(table_id),
@@ -134,6 +136,12 @@ impl TableManager for SimpleTableManager {
         associated_table_id: &TableId,
         mview_id: &TableId,
     ) -> Result<ScannableTableRef> {
+        tracing::debug!(
+            "register associated materialized view: associated_table_id={:?}, mview_id={:?}",
+            associated_table_id,
+            mview_id
+        );
+
         let mut tables = self.lock_tables();
         let table = tables
             .get(associated_table_id)

@@ -17,10 +17,9 @@ use crate::hummock::compaction::CompactStatus;
 use crate::hummock::level_handler::{LevelHandler, SSTableStat};
 use crate::hummock::model::{
     CurrentHummockVersionId, HummockContextPinnedSnapshotExt, HummockContextPinnedVersionExt,
-    Transactional,
 };
 use crate::manager::{IdCategory, IdGeneratorManagerRef, MetaSrvEnv, SINGLE_VERSION_EPOCH};
-use crate::model::MetadataModel;
+use crate::model::{MetadataModel, Transactional};
 use crate::storage::{MetaStore, MetaStoreRef, Transaction};
 
 const RESERVED_HUMMOCK_CONTEXT_ID: HummockContextId = -1;
@@ -82,10 +81,10 @@ impl HummockManager {
         let mut transaction = compaction_guard.meta_store_ref.get_transaction();
 
         let compact_status = CompactStatus::new();
-        compact_status.update(&mut transaction);
+        compact_status.update_in_transaction(&mut transaction);
 
         let init_version_id = CurrentHummockVersionId::new();
-        init_version_id.update(&mut transaction);
+        init_version_id.update_in_transaction(&mut transaction);
 
         let init_version = &HummockVersion {
             id: init_version_id.id(),
@@ -102,14 +101,14 @@ impl HummockManager {
             uncommitted_epochs: vec![],
             max_committed_epoch: INVALID_EPOCH,
         };
-        init_version.upsert(&mut transaction);
+        init_version.upsert_in_transaction(&mut transaction)?;
 
         // pin latest version use RESERVED_HUMMOCK_CONTEXT_ID
         HummockContextPinnedVersion {
             context_id: RESERVED_HUMMOCK_CONTEXT_ID,
             version_id: vec![init_version_id.id()],
         }
-        .update(&mut transaction);
+        .update_in_transaction(&mut transaction)?;
 
         self.commit_trx(
             compaction_guard.meta_store_ref.as_ref(),
@@ -159,7 +158,7 @@ impl HummockManager {
         });
         context_pinned_version.pin_version(version_id);
         let mut transaction = versioning_guard.meta_store_ref.get_transaction();
-        context_pinned_version.update(&mut transaction);
+        context_pinned_version.update_in_transaction(&mut transaction)?;
         self.commit_trx(
             versioning_guard.meta_store_ref.as_ref(),
             &mut transaction,
@@ -193,7 +192,7 @@ impl HummockManager {
             }
         };
         context_pinned_version.unpin_version(pinned_version_id);
-        context_pinned_version.update(&mut transaction);
+        context_pinned_version.update_in_transaction(&mut transaction)?;
         self.commit_trx(
             versioning_guard.meta_store_ref.as_ref(),
             &mut transaction,
@@ -233,7 +232,7 @@ impl HummockManager {
         }
         let mut transaction = compaction_guard.meta_store_ref.get_transaction();
         // update compact_status
-        compact_status.update(&mut transaction);
+        compact_status.update_in_transaction(&mut transaction);
 
         let versioning_guard = self.versioning.write().await;
         let current_tables = SstableInfo::list(&versioning_guard.meta_store_ref).await?;
@@ -248,7 +247,7 @@ impl HummockManager {
             CurrentHummockVersionId::get(versioning_guard.meta_store_ref.as_ref()).await?;
         let old_version_id = current_version_id.increase();
         let new_version_id = current_version_id.id();
-        current_version_id.update(&mut transaction);
+        current_version_id.update_in_transaction(&mut transaction);
         let mut hummock_version = HummockVersion::select(
             &versioning_guard.meta_store_ref,
             &HummockVersionRefId { id: old_version_id },
@@ -267,9 +266,9 @@ impl HummockManager {
         // }
 
         // add tables
-        tables
-            .iter()
-            .for_each(|table: &SstableInfo| table.upsert(&mut transaction));
+        for table in &tables {
+            table.upsert_in_transaction(&mut transaction)?
+        }
 
         // create new_version by adding tables in UncommittedEpoch
         match hummock_version
@@ -288,7 +287,7 @@ impl HummockManager {
             }),
         };
         hummock_version.id = new_version_id;
-        hummock_version.upsert(&mut transaction);
+        hummock_version.upsert_in_transaction(&mut transaction)?;
 
         // update pinned_version
         let mut reserved_context_pinned_version = HummockContextPinnedVersion::select(
@@ -301,7 +300,7 @@ impl HummockManager {
         .await?;
         reserved_context_pinned_version.unpin_version(old_version_id);
         reserved_context_pinned_version.pin_version(new_version_id);
-        reserved_context_pinned_version.update(&mut transaction);
+        reserved_context_pinned_version.update_in_transaction(&mut transaction)?;
 
         // the trx contain update for both tables and compact_status
         self.commit_trx(
@@ -350,7 +349,7 @@ impl HummockManager {
         });
         context_pinned_snapshot.pin_snapshot(max_committed_epoch);
         let mut transaction = versioning_guard.meta_store_ref.get_transaction();
-        context_pinned_snapshot.update(&mut transaction);
+        context_pinned_snapshot.update_in_transaction(&mut transaction)?;
         self.commit_trx(
             versioning_guard.meta_store_ref.as_ref(),
             &mut transaction,
@@ -386,7 +385,7 @@ impl HummockManager {
         };
         let mut transaction = versioning_guard.meta_store_ref.get_transaction();
         context_pinned_snapshot.unpin_snapshot(hummock_snapshot.epoch);
-        context_pinned_snapshot.update(&mut transaction);
+        context_pinned_snapshot.update_in_transaction(&mut transaction)?;
         self.commit_trx(
             versioning_guard.meta_store_ref.as_ref(),
             &mut transaction,
@@ -421,7 +420,7 @@ impl HummockManager {
             CompactStatus::get(compaction_guard.meta_store_ref.as_ref()).await?;
         let mut compact_task = compact_status.get_compact_task().await?;
         let mut transaction = compaction_guard.meta_store_ref.get_transaction();
-        compact_status.update(&mut transaction);
+        compact_status.update_in_transaction(&mut transaction);
         self.commit_trx(
             compaction_guard.meta_store_ref.as_ref(),
             &mut transaction,
@@ -452,14 +451,14 @@ impl HummockManager {
             compact_task,
             task_result,
         );
-        compact_status.update(&mut transaction);
+        compact_status.update_in_transaction(&mut transaction);
         let versioning_guard = self.versioning.write().await;
         if task_result {
             let mut current_version_id =
                 CurrentHummockVersionId::get(versioning_guard.meta_store_ref.as_ref()).await?;
             let old_version_id = current_version_id.increase();
             let new_version_id = current_version_id.id();
-            current_version_id.update(&mut transaction);
+            current_version_id.update_in_transaction(&mut transaction);
             let old_version = HummockVersion::select(
                 &versioning_guard.meta_store_ref,
                 &HummockVersionRefId { id: old_version_id },
@@ -492,9 +491,9 @@ impl HummockManager {
                 max_committed_epoch: old_version.max_committed_epoch,
             };
 
-            sorted_output_ssts
-                .into_iter()
-                .for_each(|table| table.upsert(&mut transaction));
+            for table in sorted_output_ssts {
+                table.upsert_in_transaction(&mut transaction)?
+            }
 
             let mut pinned_versions = HummockContextPinnedVersion::select(
                 &versioning_guard.meta_store_ref,
@@ -506,10 +505,10 @@ impl HummockManager {
             .await?;
             pinned_versions.pin_version(new_version_id);
             pinned_versions.unpin_version(old_version_id);
-            pinned_versions.update(&mut transaction);
+            pinned_versions.update_in_transaction(&mut transaction)?;
 
             version.id = new_version_id;
-            version.upsert(&mut transaction);
+            version.upsert_in_transaction(&mut transaction)?;
             let mut tables_to_delete = HummockTablesToDelete::select(
                 &versioning_guard.meta_store_ref,
                 &HummockVersionRefId { id: new_version_id },
@@ -522,9 +521,9 @@ impl HummockManager {
             });
             tables_to_delete.id.extend(delete_table_ids);
             if tables_to_delete.id.is_empty() {
-                tables_to_delete.delete(&mut transaction);
+                tables_to_delete.delete_in_transaction(&mut transaction)?;
             } else {
-                tables_to_delete.upsert(&mut transaction);
+                tables_to_delete.upsert_in_transaction(&mut transaction)?;
             }
         }
         self.commit_trx(
@@ -547,7 +546,7 @@ impl HummockManager {
             CurrentHummockVersionId::get(versioning_guard.meta_store_ref.as_ref()).await?;
         let old_version_id = current_version_id.increase();
         let new_version_id = current_version_id.id();
-        current_version_id.update(&mut transaction);
+        current_version_id.update_in_transaction(&mut transaction);
         let mut hummock_version: HummockVersion = HummockVersion::select(
             &versioning_guard.meta_store_ref,
             &HummockVersionRefId { id: old_version_id },
@@ -585,7 +584,7 @@ impl HummockManager {
 
             // create new_version
             hummock_version.id = new_version_id;
-            hummock_version.upsert(&mut transaction);
+            hummock_version.upsert_in_transaction(&mut transaction)?;
 
             // update pinned_version
             let mut reserved_context_pinned_version = HummockContextPinnedVersion::select(
@@ -598,7 +597,7 @@ impl HummockManager {
             .await?;
             reserved_context_pinned_version.unpin_version(old_version_id);
             reserved_context_pinned_version.pin_version(new_version_id);
-            reserved_context_pinned_version.update(&mut transaction);
+            reserved_context_pinned_version.update_in_transaction(&mut transaction)?;
 
             self.commit_trx(
                 versioning_guard.meta_store_ref.as_ref(),
@@ -622,7 +621,7 @@ impl HummockManager {
             CurrentHummockVersionId::get(versioning_guard.meta_store_ref.as_ref()).await?;
         let old_version_id = current_version_id.increase();
         let new_version_id = current_version_id.id();
-        current_version_id.update(&mut transaction);
+        current_version_id.update_in_transaction(&mut transaction);
         let mut hummock_version: HummockVersion = HummockVersion::select(
             &versioning_guard.meta_store_ref,
             &HummockVersionRefId { id: old_version_id },
@@ -640,18 +639,18 @@ impl HummockManager {
                 let uncommitted_epoch = &hummock_version.uncommitted_epochs[idx];
 
                 // remove tables of the aborting epoch
-                uncommitted_epoch.table_ids.iter().for_each(|table_id| {
+                for table_id in &uncommitted_epoch.table_ids {
                     SstableInfo {
                         id: *table_id,
                         key_range: None,
                     }
-                    .delete(&mut transaction)
-                });
+                    .delete_in_transaction(&mut transaction)?
+                }
                 hummock_version.uncommitted_epochs.swap_remove(idx);
 
                 // create new_version
                 hummock_version.id = new_version_id;
-                hummock_version.upsert(&mut transaction);
+                hummock_version.upsert_in_transaction(&mut transaction)?;
 
                 // update pinned_version
                 let mut reserved_context_pinned_version = HummockContextPinnedVersion::select(
@@ -664,7 +663,7 @@ impl HummockManager {
                 .await?;
                 reserved_context_pinned_version.unpin_version(old_version_id);
                 reserved_context_pinned_version.pin_version(new_version_id);
-                reserved_context_pinned_version.update(&mut transaction);
+                reserved_context_pinned_version.update_in_transaction(&mut transaction)?;
 
                 self.commit_trx(
                     versioning_guard.meta_store_ref.as_ref(),
