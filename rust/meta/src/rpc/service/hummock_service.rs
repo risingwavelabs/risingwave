@@ -77,7 +77,7 @@ impl HummockManagerService for HummockServiceImpl {
         match result {
             Ok(compact_task) => Ok(Response::new(GetCompactionTasksResponse {
                 status: None,
-                compact_task: Some(compact_task),
+                compact_task,
             })),
             Err(e) => Err(e.to_grpc_status()),
         }
