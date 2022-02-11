@@ -26,11 +26,7 @@ import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.rex.RexVisitorImpl;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.type.SqlTypeName;
-import org.apache.calcite.util.DateString;
-import org.apache.calcite.util.NlsString;
-import org.apache.calcite.util.TimeString;
-import org.apache.calcite.util.TimestampString;
-import org.apache.calcite.util.TimestampWithTimeZoneString;
+import org.apache.calcite.util.*;
 
 /** Serialize Rex to protoExprNode */
 public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
@@ -62,6 +58,7 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
           .put(SqlKind.IS_NULL, ExprNode.Type.IS_NULL)
           .put(SqlKind.IS_NOT_NULL, ExprNode.Type.IS_NOT_NULL)
           .put(SqlKind.LIKE, ExprNode.Type.LIKE)
+          .put(SqlKind.SEARCH, ExprNode.Type.SEARCH)
           .build();
   private static final ImmutableMap<String, ExprNode.Type> STRING_TO_FUNC_MAPPING =
       ImmutableMap.<String, ExprNode.Type>builder()
@@ -234,6 +231,41 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
     return bb.array();
   }
 
+  private ExprNode visitSarg(Sarg<?> sarg, DataType protoDataType) {
+    var rangeSet = sarg.rangeSet;
+    var children = new ArrayList<ExprNode>();
+    for (var range : rangeSet.asRanges()) {
+      var nodeBuilder =
+          ExprNode.newBuilder()
+              .setExprType(ExprNode.Type.CONSTANT_VALUE)
+              .setReturnType(protoDataType);
+      if (!range.hasLowerBound()
+          || !range.hasUpperBound()
+          || (range.lowerEndpoint() != range.upperEndpoint())) {
+        throw new UnsupportedOperationException("We haven't support SARG other than in");
+      }
+      // Here we only support `in` expression. The two endpoints of arguments in the range must be
+      // the same.
+      var lower = range.lowerEndpoint();
+      String valueString = "";
+      if (lower instanceof NlsString) {
+        valueString = ((NlsString) lower).getValue();
+      } else {
+        valueString = lower.toString();
+      }
+      var bb = ByteBuffer.wrap(valueString.getBytes(StandardCharsets.UTF_8));
+      var constValue = ConstantValue.newBuilder().setBody(ByteString.copyFrom(bb)).build();
+      nodeBuilder.setConstant(constValue);
+      children.add(nodeBuilder.build());
+    }
+    FunctionCall func = FunctionCall.newBuilder().addAllChildren(children).build();
+    return ExprNode.newBuilder()
+        .setExprType(ExprNode.Type.SARG)
+        .setReturnType(protoDataType)
+        .setFuncCall(func)
+        .build();
+  }
+
   @Override
   public ExprNode visitLiteral(RexLiteral literal) {
     RisingWaveDataType dataType = (RisingWaveDataType) literal.getType();
@@ -260,6 +292,12 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
       children.add(constExpr);
       var callExpr = makeFunctionCallExpr(children, protoDataType, ExprNode.Type.CAST);
       return callExpr;
+    } else if (literal.getValue() instanceof Sarg<?>) {
+      // We remark that sqlTypeName == SqlTypeName.SARG is expected, but the reality does not work
+      // in this way.
+      // We have to judge on the type of value.
+      Sarg<?> value = (Sarg<?>) literal.getValue();
+      return visitSarg(value, protoDataType);
     }
     var retExpr = makeConstantExpr(literal, protoDataType, protoDataType);
     return retExpr;

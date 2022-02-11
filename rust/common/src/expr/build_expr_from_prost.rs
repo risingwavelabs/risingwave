@@ -1,19 +1,20 @@
 use risingwave_pb::expr::expr_node::RexNode;
-use risingwave_pb::expr::ExprNode;
+use risingwave_pb::expr::{expr_node, ExprNode};
 
-use crate::array::RwError;
+use crate::array::{DataChunk, RwError};
 use crate::error::{ErrorCode, Result};
 use crate::expr::expr_binary_bytes::new_substr_start;
 use crate::expr::expr_binary_nonnull::{new_binary_expr, new_like_default, new_position_expr};
 use crate::expr::expr_binary_nullable::new_nullable_binary_expr;
 use crate::expr::expr_case::{CaseExpression, WhenClause};
+use crate::expr::expr_search::SearchExpression;
 use crate::expr::expr_ternary_bytes::{new_replace_expr, new_substr_start_end, new_translate_expr};
 use crate::expr::expr_unary::{
     new_ascii_expr, new_length_default, new_ltrim_expr, new_rtrim_expr, new_trim_expr,
     new_unary_expr,
 };
 use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
-use crate::types::DataType;
+use crate::types::{DataType, ToOwnedDatum};
 
 fn get_return_type_and_children(prost: &ExprNode) -> Result<(Vec<ExprNode>, DataType)> {
     let ret_type = DataType::from(prost.get_return_type()?);
@@ -139,6 +140,32 @@ pub fn build_ascii_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     Ok(new_ascii_expr(child, ret_type))
 }
 
+pub fn build_search_expr(prost: &ExprNode) -> Result<BoxedExpression> {
+    let (children, ret_type) = get_return_type_and_children(prost)?;
+    ensure!(children.len() == 2);
+    ensure!(ret_type == DataType::Boolean);
+    ensure!(children[0].get_expr_type()? == expr_node::Type::InputRef);
+    let input_ref_expr = expr_build_from_prost(&children[0])?;
+    ensure!(children[1].get_expr_type()? == expr_node::Type::Sarg);
+    // Here we abuse a bit of `FuncCall` to store all the values in Sarg.
+    let sarg = try_match_expand!(children[1].get_rex_node()?, expr_node::RexNode::FuncCall)?;
+    let mut data = Vec::new();
+    // Used for literal expression below to generate datum
+    let data_chunk = DataChunk::new_dummy(1);
+    for expr in &sarg.children {
+        ensure!(expr.get_expr_type()? == expr_node::Type::ConstantValue);
+        let mut literal_expr = expr_build_from_prost(expr)?;
+        let array = literal_expr.eval(&data_chunk)?;
+        let datum = array.value_at(0).to_owned_datum();
+        data.push(datum);
+    }
+    Ok(Box::new(SearchExpression::new(
+        input_ref_expr,
+        data.into_iter(),
+        ret_type,
+    )))
+}
+
 pub fn build_case_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_return_type_and_children(prost)?;
     // children: (when, then)+, (else_clause)?
@@ -196,9 +223,82 @@ mod tests {
     use risingwave_pb::data::data_type::{IntervalType, TypeName};
     use risingwave_pb::data::DataType as ProstDataType;
     use risingwave_pb::expr::expr_node::{RexNode, Type};
-    use risingwave_pb::expr::{ConstantValue, ExprNode, FunctionCall};
+    use risingwave_pb::expr::{ConstantValue, ExprNode, FunctionCall, InputRefExpr};
 
     use super::*;
+
+    #[test]
+    fn test_build_search_expr() {
+        let input_ref = InputRefExpr { column_idx: 0 };
+        let sarg_values_in_func_call = FunctionCall {
+            children: vec![
+                ExprNode {
+                    expr_type: Type::ConstantValue as i32,
+                    return_type: Some(ProstDataType {
+                        type_name: TypeName::Char as i32,
+                        precision: 0,
+                        scale: 0,
+                        is_nullable: false,
+                        interval_type: IntervalType::Invalid as i32,
+                    }),
+                    rex_node: Some(RexNode::Constant(ConstantValue {
+                        body: "ABC".as_bytes().to_vec(),
+                    })),
+                },
+                ExprNode {
+                    expr_type: Type::ConstantValue as i32,
+                    return_type: Some(ProstDataType {
+                        type_name: TypeName::Char as i32,
+                        precision: 0,
+                        scale: 0,
+                        is_nullable: false,
+                        interval_type: IntervalType::Invalid as i32,
+                    }),
+                    rex_node: Some(RexNode::Constant(ConstantValue {
+                        body: "def".as_bytes().to_vec(),
+                    })),
+                },
+            ],
+        };
+        let call = FunctionCall {
+            children: vec![
+                ExprNode {
+                    expr_type: Type::InputRef as i32,
+                    return_type: Some(ProstDataType {
+                        type_name: TypeName::Char as i32,
+                        precision: 0,
+                        scale: 0,
+                        is_nullable: false,
+                        interval_type: IntervalType::Invalid as i32,
+                    }),
+                    rex_node: Some(RexNode::InputRef(input_ref)),
+                },
+                ExprNode {
+                    expr_type: Type::Sarg as i32,
+                    return_type: Some(ProstDataType {
+                        type_name: TypeName::Char as i32,
+                        precision: 0,
+                        scale: 0,
+                        is_nullable: false,
+                        interval_type: IntervalType::Invalid as i32,
+                    }),
+                    rex_node: Some(RexNode::FuncCall(sarg_values_in_func_call)),
+                },
+            ],
+        };
+        let p = ExprNode {
+            expr_type: Type::Search as i32,
+            return_type: Some(ProstDataType {
+                type_name: TypeName::Boolean as i32,
+                precision: 0,
+                scale: 0,
+                is_nullable: false,
+                interval_type: IntervalType::Invalid as i32,
+            }),
+            rex_node: Some(RexNode::FuncCall(call)),
+        };
+        assert!(build_search_expr(&p).is_ok());
+    }
 
     #[test]
     fn test_build_case_expr() {
