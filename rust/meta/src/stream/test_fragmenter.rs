@@ -122,7 +122,7 @@ fn make_stream_node() -> StreamNode {
         node: Some(Node::ExchangeNode(ExchangeNode {
             dispatcher: Some(Dispatcher {
                 r#type: DispatcherType::Hash as i32,
-                column_idx: 0,
+                column_indices: vec![0],
             }),
             input_column_descs: vec![
                 make_column_desc(1, TypeName::Int32),
@@ -132,7 +132,7 @@ fn make_stream_node() -> StreamNode {
         })),
         input: vec![source_node],
         pk_indices: vec![2],
-        node_id: 1,
+        operator_id: 1,
     };
 
     // filter node
@@ -152,17 +152,17 @@ fn make_stream_node() -> StreamNode {
         })),
         input: vec![exchange_node],
         pk_indices: vec![0, 1],
-        node_id: 2,
+        operator_id: 2,
     };
 
     // simple agg node
     let simple_agg_node = StreamNode {
-        node: Some(Node::SimpleAggNode(SimpleAggNode {
+        node: Some(Node::GlobalSimpleAggNode(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
         })),
         input: vec![filter_node],
         pk_indices: vec![0, 1],
-        node_id: 3,
+        operator_id: 3,
     };
 
     // exchange node
@@ -170,7 +170,7 @@ fn make_stream_node() -> StreamNode {
         node: Some(Node::ExchangeNode(ExchangeNode {
             dispatcher: Some(Dispatcher {
                 r#type: DispatcherType::Simple as i32,
-                column_idx: 0,
+                ..Default::default()
             }),
             input_column_descs: vec![
                 make_column_desc(0, TypeName::Int64),
@@ -179,17 +179,17 @@ fn make_stream_node() -> StreamNode {
         })),
         input: vec![simple_agg_node],
         pk_indices: vec![0, 1],
-        node_id: 4,
+        operator_id: 4,
     };
 
     // agg node
     let simple_agg_node_1 = StreamNode {
-        node: Some(Node::SimpleAggNode(SimpleAggNode {
+        node: Some(Node::GlobalSimpleAggNode(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
         })),
         input: vec![exchange_node_1],
         pk_indices: vec![0, 1],
-        node_id: 5,
+        operator_id: 5,
     };
 
     // project node
@@ -213,7 +213,7 @@ fn make_stream_node() -> StreamNode {
         })),
         input: vec![simple_agg_node_1],
         pk_indices: vec![1, 2],
-        node_id: 6,
+        operator_id: 6,
     };
 
     // mview node
@@ -231,7 +231,7 @@ fn make_stream_node() -> StreamNode {
             pk_indices: vec![1, 2],
             column_orders: vec![make_column_order(1), make_column_order(2)],
         })),
-        node_id: 7,
+        operator_id: 7,
     }
 }
 

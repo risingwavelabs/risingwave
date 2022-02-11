@@ -9,6 +9,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::{ensure, gen_error, try_match_expand};
 use risingwave_pb::common::{ActorInfo, WorkerNode};
+use risingwave_pb::meta::ActorLocation;
 use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::StreamNode;
@@ -18,9 +19,9 @@ use risingwave_pb::stream_service::{
 use uuid::Uuid;
 
 use crate::barrier::{BarrierManagerRef, Command};
-use crate::cluster::StoredClusterManager;
+use crate::cluster::{NodeId, StoredClusterManager};
 use crate::manager::{MetaSrvEnv, StreamClientsRef};
-use crate::model::TableFragments;
+use crate::model::{ActorId, TableFragments, TableRawId};
 use crate::stream::{FragmentManagerRef, ScheduleCategory, Scheduler};
 
 pub type StreamManagerRef = Arc<StreamManager>;
@@ -65,7 +66,7 @@ impl StreamManager {
     async fn lookup_actor_ids(
         &self,
         table_ref_id: &TableRefId,
-        table_sink_map: &mut HashMap<i32, Vec<u32>>,
+        table_sink_map: &mut HashMap<TableRawId, Vec<ActorId>>,
     ) -> Result<()> {
         let table_id = table_ref_id.table_id;
         if let Entry::Vacant(e) = table_sink_map.entry(table_id) {
@@ -156,7 +157,7 @@ impl StreamManager {
         let node_map = nodes
             .iter()
             .map(|n| (n.get_id(), n.clone()))
-            .collect::<HashMap<u32, WorkerNode>>();
+            .collect::<HashMap<NodeId, WorkerNode>>();
 
         let actor_infos = nodes
             .iter()
@@ -170,22 +171,35 @@ impl StreamManager {
         let actor_info_map = actor_infos
             .iter()
             .map(|actor_info| (actor_info.actor_id, actor_info.clone()))
-            .collect::<HashMap<u32, ActorInfo>>();
+            .collect::<HashMap<ActorId, ActorInfo>>();
 
-        let dispatches = up_down_ids
-            .iter()
-            .map(|(up_id, down_id)| {
-                (
-                    *up_id,
-                    vec![actor_info_map
-                        .get(down_id)
-                        .expect("downstream actor info not exist")
-                        .clone()],
-                )
-            })
-            .collect::<HashMap<u32, Vec<ActorInfo>>>();
+        let dispatches = up_down_ids.into_iter().into_grouping_map().fold(
+            vec![],
+            |mut actors, _up_id, down_id| {
+                let info = actor_info_map
+                    .get(&down_id)
+                    .expect("downstream actor info not exist")
+                    .clone();
+                actors.push(info);
+                actors
+            },
+        );
 
-        for (node_id, actors) in node_actors_map {
+        let mut actor_locations = Vec::with_capacity(actors.len());
+
+        // Debug usage: print the actor dependencies in log.
+        actors.iter().for_each(|e| {
+            debug!(
+                "actor {} with downstreams: {:?}",
+                e.actor_id, e.downstream_actor_id
+            );
+        });
+
+        // We send RPC request in two stages.
+        // The first stage does 2 things: broadcast actor info, and send local actor ids to
+        // different WorkerNodes. Such that each WorkerNode knows the overall actor
+        // allocation, but not actually builds it. We initialize all channels in this stage.
+        for (node_id, actors) in node_actors_map.clone() {
             let node = node_map.get(&node_id).unwrap();
 
             let client = self.clients.get(node).await?;
@@ -208,11 +222,23 @@ impl StreamManager {
                 .to_owned()
                 .update_actors(UpdateActorsRequest {
                     request_id,
-                    actors: stream_actors,
+                    actors: stream_actors.clone(),
                 })
                 .await
                 .to_rw_result_with(format!("failed to connect to {}", node_id))?;
 
+            actor_locations.push(ActorLocation {
+                node: Some(node.clone()),
+                actors: stream_actors,
+            });
+        }
+
+        // In the second stage, each [`WorkerNode`] builds local actors and connect them with
+        // channels.
+        for (node_id, actors) in node_actors_map {
+            let node = node_map.get(&node_id).unwrap();
+
+            let client = self.clients.get(node).await?;
             let request_id = Uuid::new_v4().to_string();
             debug!("[{}]build actors: {:?}", request_id, actors);
             client
@@ -294,9 +320,9 @@ mod tests {
     use crate::stream::FragmentManager;
 
     struct FakeFragmentState {
-        actor_streams: Mutex<HashMap<u32, StreamActor>>,
-        actor_ids: Mutex<HashSet<u32>>,
-        actor_infos: Mutex<HashMap<u32, HostAddress>>,
+        actor_streams: Mutex<HashMap<ActorId, StreamActor>>,
+        actor_ids: Mutex<HashSet<ActorId>>,
+        actor_infos: Mutex<HashMap<ActorId, HostAddress>>,
     }
 
     struct FakeStreamService {
@@ -471,7 +497,7 @@ mod tests {
                             ..Default::default()
                         },
                     )),
-                    node_id: 1,
+                    operator_id: 1,
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -567,7 +593,7 @@ mod tests {
                 actors: vec![StreamActor {
                     actor_id: 1,
                     nodes: Some(StreamNode {
-                        node_id: 1,
+                        operator_id: 1,
                         node: Some(Node::MviewNode(MViewNode {
                             table_ref_id: Some(table_ref_id_1.clone()),
                             ..Default::default()
@@ -588,13 +614,13 @@ mod tests {
                 actors: vec![StreamActor {
                     actor_id: 2,
                     nodes: Some(StreamNode {
-                        node_id: 2,
+                        operator_id: 2,
                         node: Some(Node::MviewNode(MViewNode {
                             table_ref_id: Some(table_ref_id_2.clone()),
                             ..Default::default()
                         })),
                         input: vec![StreamNode {
-                            node_id: 3,
+                            operator_id: 3,
                             node: Some(Node::ChainNode(ChainNode {
                                 table_ref_id: Some(table_ref_id_1.clone()),
                                 upstream_actor_ids: vec![0],

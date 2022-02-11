@@ -5,6 +5,7 @@
 #![warn(clippy::explicit_iter_loop)]
 #![warn(clippy::inconsistent_struct_constructor)]
 #![warn(clippy::map_flatten)]
+#![warn(clippy::no_effect_underscore_binding)]
 #![feature(path_file_prefix)]
 
 mod opts;

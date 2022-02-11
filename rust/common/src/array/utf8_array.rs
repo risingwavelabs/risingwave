@@ -211,6 +211,16 @@ impl BytesWriter {
         })
     }
 
+    pub fn write_from_char_iter(self, iter: impl Iterator<Item = char>) -> Result<BytesGuard> {
+        let mut writer = self.begin();
+        for c in iter {
+            let mut buf = [0; 4];
+            let result = c.encode_utf8(&mut buf);
+            writer.write_ref(result)?;
+        }
+        writer.finish()
+    }
+
     /// `begin` will create a `PartialBytesWriter`, which allow multiple
     /// appendings to create a new record.
     pub fn begin(self) -> PartialBytesWriter {

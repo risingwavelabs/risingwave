@@ -56,6 +56,7 @@ async fn test_stream_proto() {
             // create 0 -> (1) -> 3
             StreamActor {
                 actor_id: 1,
+                fragment_id: 1,
                 nodes: Some(StreamNode {
                     node: Some(Node::ProjectNode(ProjectNode::default())),
                     input: vec![StreamNode {
@@ -71,20 +72,21 @@ async fn test_stream_proto() {
                         })),
                         input: vec![],
                         pk_indices: vec![],
-                        node_id: 1,
+                        operator_id: 1,
                     }],
                     pk_indices: vec![],
-                    node_id: 2,
+                    operator_id: 2,
                 }),
                 dispatcher: Some(Dispatcher {
                     r#type: dispatcher::DispatcherType::Hash as i32,
-                    column_idx: 0,
+                    column_indices: vec![0],
                 }),
                 downstream_actor_id: vec![3],
             },
             // create 1 -> (3) -> 7, 11
             StreamActor {
                 actor_id: 3,
+                fragment_id: 1,
                 nodes: Some(StreamNode {
                     node: Some(Node::ProjectNode(ProjectNode::default())),
                     input: vec![StreamNode {
@@ -100,20 +102,21 @@ async fn test_stream_proto() {
                         })),
                         input: vec![],
                         pk_indices: vec![],
-                        node_id: 3,
+                        operator_id: 3,
                     }],
                     pk_indices: vec![],
-                    node_id: 4,
+                    operator_id: 4,
                 }),
                 dispatcher: Some(Dispatcher {
                     r#type: dispatcher::DispatcherType::Hash as i32,
-                    column_idx: 0,
+                    column_indices: vec![0],
                 }),
                 downstream_actor_id: vec![7, 11],
             },
             // create 3 -> (7) -> 13
             StreamActor {
                 actor_id: 7,
+                fragment_id: 2,
                 nodes: Some(StreamNode {
                     node: Some(Node::ProjectNode(ProjectNode::default())),
                     input: vec![StreamNode {
@@ -129,20 +132,21 @@ async fn test_stream_proto() {
                         })),
                         input: vec![],
                         pk_indices: vec![],
-                        node_id: 5,
+                        operator_id: 5,
                     }],
                     pk_indices: vec![],
-                    node_id: 6,
+                    operator_id: 6,
                 }),
                 dispatcher: Some(Dispatcher {
                     r#type: dispatcher::DispatcherType::Hash as i32,
-                    column_idx: 0,
+                    column_indices: vec![0],
                 }),
                 downstream_actor_id: vec![13],
             },
             // create 3 -> (11) -> 13
             StreamActor {
                 actor_id: 11,
+                fragment_id: 2,
                 nodes: Some(StreamNode {
                     node: Some(Node::ProjectNode(ProjectNode::default())),
                     input: vec![StreamNode {
@@ -158,20 +162,21 @@ async fn test_stream_proto() {
                         })),
                         input: vec![],
                         pk_indices: vec![],
-                        node_id: 7,
+                        operator_id: 7,
                     }],
                     pk_indices: vec![],
-                    node_id: 8,
+                    operator_id: 8,
                 }),
                 dispatcher: Some(Dispatcher {
                     r#type: dispatcher::DispatcherType::Simple as i32,
-                    column_idx: 0,
+                    ..Default::default()
                 }),
                 downstream_actor_id: vec![13],
             },
             // create 7, 11 -> (13) -> 233
             StreamActor {
                 actor_id: 13,
+                fragment_id: 3,
                 nodes: Some(StreamNode {
                     node: Some(Node::ProjectNode(ProjectNode::default())),
                     input: vec![StreamNode {
@@ -187,14 +192,14 @@ async fn test_stream_proto() {
                         })),
                         input: vec![],
                         pk_indices: vec![],
-                        node_id: 9,
+                        operator_id: 9,
                     }],
                     pk_indices: vec![],
-                    node_id: 10,
+                    operator_id: 10,
                 }),
                 dispatcher: Some(Dispatcher {
                     r#type: dispatcher::DispatcherType::Simple as i32,
-                    column_idx: 0,
+                    ..Default::default()
                 }),
                 downstream_actor_id: vec![233],
             },

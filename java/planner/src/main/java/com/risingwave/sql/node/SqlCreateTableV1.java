@@ -8,10 +8,10 @@ import org.apache.calcite.sql.ddl.SqlCreateTable;
 import org.apache.calcite.sql.parser.SqlParserPos;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
-/** The calcite node for CREATE TABLE_V2 statement. */
-public class SqlCreateTableV2 extends SqlCreateTable {
+/** The calcite node for CREATE TABLE_V1 statement. */
+public class SqlCreateTableV1 extends SqlCreateTable {
 
-  public SqlCreateTableV2(
+  public SqlCreateTableV1(
       SqlParserPos pos,
       boolean replace,
       boolean ifNotExists,
@@ -24,7 +24,7 @@ public class SqlCreateTableV2 extends SqlCreateTable {
   @Override
   public void unparse(SqlWriter writer, int leftPrec, int rightPrec) {
     writer.keyword("CREATE");
-    writer.keyword("TABLE_V2");
+    writer.keyword("TABLE_V1");
     if (ifNotExists) {
       writer.keyword("IF NOT EXISTS");
     }

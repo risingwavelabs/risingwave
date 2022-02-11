@@ -1,11 +1,12 @@
 use std::time::Instant;
 
-use bytes::Bytes;
+use bytes::{Buf, Bytes};
 use futures::future;
 use itertools::Itertools;
 use rand::distributions::Uniform;
 use rand::prelude::{Distribution, StdRng};
 use rand::SeedableRng;
+use risingwave_storage::hummock::key::next_key;
 use risingwave_storage::StateStore;
 
 use crate::utils::latency_stat::LatencyStat;
@@ -35,11 +36,19 @@ pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
     }
 
     // actual prefix scan process
+    let epoch = u64::MAX;
     let prefix_scan = |prefixes: Vec<Bytes>| async {
         let mut latencies = vec![];
         for prefix in prefixes {
             let start = Instant::now();
-            store.scan(&prefix, None).await.unwrap();
+            store
+                .scan(
+                    prefix.chunk().to_vec()..next_key(prefix.chunk()),
+                    None,
+                    epoch,
+                )
+                .await
+                .unwrap();
             let time_nano = start.elapsed().as_nanos();
             latencies.push(time_nano);
         }

@@ -7,7 +7,7 @@ use crate::catalog::{ColumnId, TableId};
 use crate::optimizer::plan_node::BatchSeqScan;
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 #[allow(dead_code)]
 pub struct LogicalScan {
     table_id: TableId,

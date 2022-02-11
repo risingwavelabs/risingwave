@@ -48,6 +48,7 @@ pub(super) async fn handle_create_source(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::io::Write;
 
     use risingwave_common::types::DataType;
@@ -101,16 +102,13 @@ mod tests {
             .columns()
             .iter()
             .map(|(col_name, col)| (col_name.clone(), col.data_type()))
-            .collect::<Vec<(String, DataType)>>();
-        assert_eq!(
-            columns,
-            vec![
-                ("id".to_string(), DataType::Int32),
-                ("city".to_string(), DataType::Varchar),
-                ("zipcode".to_string(), DataType::Int64),
-                ("rate".to_string(), DataType::Float32),
-            ]
-        );
+            .collect::<HashMap<String, DataType>>();
+        let mut expected_map = HashMap::new();
+        expected_map.insert("id".to_string(), DataType::Int32);
+        expected_map.insert("city".to_string(), DataType::Varchar);
+        expected_map.insert("zipcode".to_string(), DataType::Int64);
+        expected_map.insert("rate".to_string(), DataType::Float32);
+        assert_eq!(columns, expected_map);
 
         meta.stop().await;
     }

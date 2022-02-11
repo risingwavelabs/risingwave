@@ -80,7 +80,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutor {
 #[async_trait::async_trait]
 impl Executor for RowSeqScanExecutor {
     async fn open(&mut self) -> Result<()> {
-        self.iter = Some(self.table.iter().await?);
+        self.iter = Some(self.table.iter(u64::MAX).await?);
         Ok(())
     }
 

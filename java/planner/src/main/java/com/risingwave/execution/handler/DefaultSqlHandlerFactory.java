@@ -5,7 +5,7 @@ import com.risingwave.common.error.ExecutionError;
 import com.risingwave.common.exception.RisingWaveException;
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.sql.node.SqlCreateSource;
-import com.risingwave.sql.node.SqlCreateTableV2;
+import com.risingwave.sql.node.SqlCreateTableV1;
 import com.risingwave.sql.node.SqlFlush;
 import com.risingwave.sql.node.SqlShowParameters;
 import java.lang.reflect.Constructor;
@@ -13,6 +13,7 @@ import java.util.Arrays;
 import javax.inject.Singleton;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlNode;
+import org.apache.calcite.sql.ddl.SqlCreateTable;
 import org.reflections.Reflections;
 import org.reflections.scanners.SubTypesScanner;
 import org.reflections.scanners.TypeAnnotationsScanner;
@@ -46,6 +47,19 @@ public class DefaultSqlHandlerFactory implements SqlHandlerFactory {
   private static final ImmutableMap<SqlKind, Constructor<? extends SqlHandler>>
       SQL_HANDLER_FACTORY = createSqlHandlerFactory();
 
+  private boolean useV2 = true;
+
+  DefaultSqlHandlerFactory() {}
+
+  DefaultSqlHandlerFactory(boolean useV2) {
+    this.useV2 = useV2;
+  }
+
+  @Override
+  public void setUseV2(boolean useV2) {
+    this.useV2 = useV2;
+  }
+
   @Override
   public SqlHandler create(SqlNode ast, ExecutionContext context) {
     // TODO(TaoWu): Use operator name to find the handler.
@@ -58,8 +72,10 @@ public class DefaultSqlHandlerFactory implements SqlHandlerFactory {
       return new ShowParameterHandler();
     }
 
-    if (ast instanceof SqlCreateTableV2) {
-      return new CreateTableV2Handler();
+    if (ast instanceof SqlCreateTableV1) {
+      return new CreateTableV1Handler();
+    } else if (ast instanceof SqlCreateTable && !useV2) {
+      return new CreateTableV1Handler();
     }
 
     if (ast instanceof SqlFlush) {

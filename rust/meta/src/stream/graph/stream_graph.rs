@@ -7,24 +7,26 @@ use risingwave_pb::stream_plan::dispatcher::DispatcherType;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{Dispatcher, MergeNode, StreamActor, StreamNode};
 
+use crate::model::{ActorId, FragmentId};
+
 /// [`StreamActorBuilder`] build a stream actor in a stream DAG.
 pub struct StreamActorBuilder {
     /// actor id field.
-    actor_id: u32,
+    actor_id: ActorId,
     /// associated fragment id.
-    fragment_id: u32,
+    fragment_id: FragmentId,
     /// associated stream node.
     nodes: Arc<StreamNode>,
     /// dispatcher category.
     dispatcher: Option<Dispatcher>,
     /// downstream actor set.
-    downstream_actors: BTreeSet<u32>,
+    downstream_actors: BTreeSet<ActorId>,
     /// upstream actor array.
-    upstream_actors: Vec<Vec<u32>>,
+    upstream_actors: Vec<Vec<ActorId>>,
 }
 
 impl StreamActorBuilder {
-    pub fn new(actor_id: u32, fragment_id: u32, node: Arc<StreamNode>) -> Self {
+    pub fn new(actor_id: ActorId, fragment_id: FragmentId, node: Arc<StreamNode>) -> Self {
         Self {
             actor_id,
             fragment_id,
@@ -35,11 +37,11 @@ impl StreamActorBuilder {
         }
     }
 
-    pub fn get_id(&self) -> u32 {
+    pub fn get_id(&self) -> ActorId {
         self.actor_id
     }
 
-    pub fn get_fragment_id(&self) -> u32 {
+    pub fn get_fragment_id(&self) -> FragmentId {
         self.fragment_id
     }
 
@@ -47,15 +49,15 @@ impl StreamActorBuilder {
     pub fn set_simple_dispatcher(&mut self) {
         self.dispatcher = Some(Dispatcher {
             r#type: DispatcherType::Simple as i32,
-            column_idx: 0,
+            ..Default::default()
         })
     }
 
     #[allow(dead_code)]
-    pub fn set_hash_dispatcher(&mut self, column_idx: i32) {
+    pub fn set_hash_dispatcher(&mut self, column_indices: Vec<usize>) {
         self.dispatcher = Some(Dispatcher {
             r#type: DispatcherType::Hash as i32,
-            column_idx,
+            column_indices: column_indices.into_iter().map(|i| i as u32).collect(),
         })
     }
 
@@ -63,7 +65,7 @@ impl StreamActorBuilder {
     pub fn set_broadcast_dispatcher(&mut self) {
         self.dispatcher = Some(Dispatcher {
             r#type: DispatcherType::Broadcast as i32,
-            column_idx: 0,
+            ..Default::default()
         })
     }
 
@@ -72,13 +74,14 @@ impl StreamActorBuilder {
     }
 
     /// Used by stream graph to inject upstream fields.
-    pub fn get_upstream_actors(&self) -> Vec<Vec<u32>> {
+    pub fn get_upstream_actors(&self) -> Vec<Vec<ActorId>> {
         self.upstream_actors.clone()
     }
 
     pub fn build(&self) -> StreamActor {
         StreamActor {
             actor_id: self.actor_id,
+            fragment_id: self.fragment_id,
             nodes: Some(self.nodes.deref().clone()),
             dispatcher: self.dispatcher.clone(),
             downstream_actor_id: self.downstream_actors.iter().copied().collect(),
@@ -89,7 +92,7 @@ impl StreamActorBuilder {
 /// [`StreamGraphBuilder`] build a stream graph. It will do some injection here to achieve
 /// dependencies. See `build_inner` for more details.
 pub struct StreamGraphBuilder {
-    actor_builders: BTreeMap<u32, StreamActorBuilder>,
+    actor_builders: BTreeMap<ActorId, StreamActorBuilder>,
 }
 
 impl StreamGraphBuilder {
@@ -105,7 +108,7 @@ impl StreamGraphBuilder {
     }
 
     /// Add dependency between two connected node in the graph.
-    pub fn add_dependency(&mut self, upstreams: &[u32], downstreams: &[u32]) {
+    pub fn add_dependency(&mut self, upstreams: &[ActorId], downstreams: &[ActorId]) {
         downstreams.iter().for_each(|&downstream| {
             upstreams.iter().for_each(|upstream| {
                 self.actor_builders
@@ -123,7 +126,7 @@ impl StreamGraphBuilder {
     }
 
     /// Build final stream DAG with dependencies with current actor builders.
-    pub fn build(&self) -> Result<HashMap<u32, Vec<StreamActor>>> {
+    pub fn build(&self) -> Result<HashMap<FragmentId, Vec<StreamActor>>> {
         let mut graph = HashMap::new();
         for builder in self.actor_builders.values() {
             let mut actor = builder.build();
@@ -144,7 +147,7 @@ impl StreamGraphBuilder {
     pub fn build_inner(
         &self,
         stream_node: &StreamNode,
-        upstream_actor_id: &[Vec<u32>],
+        upstream_actor_id: &[Vec<ActorId>],
         next_idx: usize,
     ) -> Result<StreamNode> {
         if let Node::ExchangeNode(_) = stream_node.get_node()? {
@@ -169,7 +172,7 @@ impl StreamGraphBuilder {
                                 .unwrap(),
                             input_column_descs: exchange_node.get_input_column_descs().clone(),
                         })),
-                        node_id: input.node_id,
+                        operator_id: input.operator_id,
                     };
                     next_idx_new += 1;
                 } else {

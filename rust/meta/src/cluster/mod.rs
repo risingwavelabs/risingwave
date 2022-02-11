@@ -11,6 +11,8 @@ use crate::manager::{IdCategory, IdGeneratorManagerRef, MetaSrvEnv};
 use crate::model::{MetadataModel, Worker};
 use crate::storage::MetaStoreRef;
 
+pub type NodeId = u32;
+
 /// [`StoredClusterManager`] manager cluster/worker meta data in [`MetaStore`].
 pub struct StoredClusterManager {
     meta_store_ref: MetaStoreRef,
@@ -84,13 +86,19 @@ impl StoredClusterManager {
         }
     }
 
-    pub fn list_worker_node(&self, worker_type: WorkerType) -> Result<Vec<WorkerNode>> {
-        Ok(self
-            .workers
+    pub fn list_worker_node(&self, worker_type: WorkerType) -> Vec<WorkerNode> {
+        self.workers
             .iter()
             .map(|entry| entry.value().to_protobuf())
             .filter(|w| w.r#type == worker_type as i32)
-            .collect::<Vec<_>>())
+            .collect::<Vec<_>>()
+    }
+
+    pub fn get_worker_count(&self, worker_type: WorkerType) -> usize {
+        self.workers
+            .iter()
+            .filter(|entry| entry.value().worker_type() == worker_type)
+            .count()
     }
 }
 

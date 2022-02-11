@@ -21,7 +21,6 @@ impl LocalMeta {
         let (join_handle, shutdown_sender) = crate::rpc::server::rpc_serve(
             addr,
             None,
-            None,
             MetaStoreBackend::Sled(sled_root.as_ref().to_path_buf()),
         )
         .await;
