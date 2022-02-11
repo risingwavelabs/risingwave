@@ -4,7 +4,6 @@ use std::time::Duration;
 
 use futures::future::try_join_all;
 use itertools::Itertools;
-use log::trace;
 use risingwave_common::array::RwError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::common::WorkerType;
@@ -121,14 +120,15 @@ impl BarrierManager {
             }
             .unwrap();
 
-            // Only wait for minimal interval if no command is scheduled.
-            if scheduled.is_none() {
+            // Only wait for minimal interval if no command is scheduled, and no extra notifiers is
+            // pending.
+            if scheduled.is_none() && self.extra_notifiers.lock().await.is_empty() {
                 min_interval.tick().await;
             }
 
             let all_nodes = self
                 .cluster_manager
-                .list_worker_node(WorkerType::ComputeNode)?;
+                .list_worker_node(WorkerType::ComputeNode);
             let all_actor_infos = self.fragment_manager.load_all_actors()?;
 
             let info = BarrierActorInfo::resolve(&all_nodes, all_actor_infos);
@@ -156,22 +156,20 @@ impl BarrierManager {
             let epoch = self.epoch_generator.generate()?.into_inner();
 
             let collect_futures = info.node_map.iter().filter_map(|(node_id, node)| {
-                if let (Some(actor_ids_to_send), Some(actor_ids_to_collect)) = (
-                    info.actor_ids_to_send(node_id),
-                    info.actor_ids_to_collect(node_id),
-                ) {
-                    let actor_ids_to_send = actor_ids_to_send.collect_vec();
-                    let actor_ids_to_collect = actor_ids_to_collect.collect_vec();
+                let actor_ids_to_send = info.actor_ids_to_send(node_id).collect_vec();
+                let actor_ids_to_collect = info.actor_ids_to_collect(node_id).collect_vec();
 
-                    trace!("mutation: {:#?}", mutation);
-                    trace!("to send: {:?}", actor_ids_to_send);
-                    trace!("to collect: {:?}", actor_ids_to_collect);
-
+                if actor_ids_to_send.is_empty() || actor_ids_to_collect.is_empty() {
+                    // No need to send barrier for this node.
+                    None
+                } else {
                     let mutation = mutation.clone();
                     let request_id = Uuid::new_v4().to_string();
                     let barrier = Barrier {
                         epoch,
                         mutation: Some(mutation),
+                        // TODO(chi): add distributed tracing
+                        span: vec![],
                     };
 
                     async move {
@@ -183,14 +181,15 @@ impl BarrierManager {
                             actor_ids_to_send,
                             actor_ids_to_collect,
                         };
+                        tracing::trace!(
+                            target: "events::meta::barrier::inject_barrier",
+                            "inject barrier request: {:#?}", request
+                        );
                         client.inject_barrier(request).await.to_rw_result()?;
 
                         Ok::<_, RwError>(())
                     }
                     .into()
-                } else {
-                    // No need to send barrier for this node.
-                    None
                 }
             });
 

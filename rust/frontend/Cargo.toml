@@ -26,9 +26,17 @@ risingwave_source = { path = "../source" }
 risingwave_sqlparser = { path = "../sqlparser" }
 smallvec = { version = "1.6.1", features = ["serde"] }
 thiserror = "1"
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"] }
+tokio = { version = "1", features = [
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "time",
+    "signal",
+    "fs",
+] }
 tonic = "0.6"
-tracing = "0.1"
+tracing = { version = "0.1", features = ["release_max_level_info"] }
 tracing-subscriber = "0.3"
 uuid = "0.8"
 

@@ -61,7 +61,7 @@ tokio = { version = "1", features = [
 ] }
 tokio-stream = "0.1"
 tonic = "0.6"
-tracing = "0.1"
+tracing = { version = "0.1", features = ["release_max_level_info"] }
 tracing-opentelemetry = "0.17"
 tracing-subscriber = "0.3"
 twox-hash = "1"

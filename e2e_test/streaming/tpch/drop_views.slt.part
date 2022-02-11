@@ -30,3 +30,6 @@ drop table tpch_q14;
 
 statement ok
 drop table tpch_q17;
+
+statement ok
+drop table tpch_q18;

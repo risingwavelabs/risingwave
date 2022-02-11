@@ -13,6 +13,7 @@ pub mod multi_builder;
 pub use block_iterator::*;
 pub use builder::*;
 mod sstable_iterator;
+use moka::future::Cache;
 pub use sstable_iterator::*;
 mod reverse_sstable_iterator;
 pub use reverse_sstable_iterator::*;
@@ -123,6 +124,15 @@ pub struct SSTable {
 
     // Data path for the data object
     pub data_path: String,
+
+    pub block_cache: Arc<Cache<Vec<u8>, Arc<Block>>>,
+}
+
+fn block_cache_key_of(sst_id: u64, block_id: u64) -> Vec<u8> {
+    let mut key = Vec::with_capacity(16);
+    key.put_u64_le(sst_id);
+    key.put_u64_le(block_id);
+    key
 }
 
 impl SSTable {
@@ -132,12 +142,14 @@ impl SSTable {
         obj_client: Arc<dyn ObjectStore>,
         data_path: String,
         meta: SstableMeta,
+        block_cache: Arc<Cache<Vec<u8>, Arc<Block>>>,
     ) -> HummockResult<Self> {
         Ok(SSTable {
             id,
             meta,
             obj_client,
             data_path,
+            block_cache,
         })
     }
 
@@ -195,17 +207,33 @@ impl SSTable {
         let size = block_meta.len as usize;
         let block_loc = BlockLocation { offset, size };
 
-        let block_data = self
-            .obj_client
-            .read(self.data_path.as_str(), Some(block_loc))
-            .await
-            .map_err(|e| HummockError::ObjectIoError(e.to_string()))?;
+        let key = block_cache_key_of(self.id, idx as u64);
 
-        tracing::trace!(table_id = self.id, block_id = idx, block_loc = ?block_loc, "table read block");
+        if let Some(block) = self.block_cache.get(&key) {
+            Ok(block)
+        } else {
+            let block_data = self
+                .obj_client
+                .read(self.data_path.as_str(), Some(block_loc))
+                .await
+                .map_err(|e| HummockError::ObjectIoError(e.to_string()))?;
 
-        let block_data = Bytes::from(block_data);
+            tracing::trace!(
+                target: "events::storage::sstable::block_read",
+                "table read block: table_id = {}, block_id = {}, block_loc = {:?}",
+                self.id,
+                idx,
+                block_loc
+            );
 
-        Block::decode(block_data, offset)
+            let block_data = Bytes::from(block_data);
+
+            let block = Block::decode(block_data, offset)?;
+
+            self.block_cache.insert(key, block.clone()).await;
+
+            Ok(block)
+        }
     }
 
     /// Return true if the table has a Bloom filter

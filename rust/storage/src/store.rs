@@ -1,7 +1,9 @@
+use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use moka::future::Cache;
 use risingwave_common::error::{Result, RwError};
 use risingwave_rpc_client::MetaClient;
 
@@ -16,26 +18,43 @@ use crate::write_batch::WriteBatch;
 
 #[async_trait]
 pub trait StateStore: Send + Sync + 'static + Clone {
-    type Iter: StateStoreIter<Item = (Bytes, Bytes)>;
+    type Iter<'a>: StateStoreIter<Item = (Bytes, Bytes)>;
 
     /// Point get a value from the state store.
-    async fn get(&self, key: &[u8]) -> Result<Option<Bytes>>;
+    /// The result is based on a snapshot corresponding to the given `epoch`.
+    async fn get(&self, key: &[u8], epoch: u64) -> Result<Option<Bytes>>;
 
     /// Scan `limit` number of keys from the keyspace. If `limit` is `None`, scan all elements.
+    /// The result is based on a snapshot corresponding to the given `epoch`.
+    ///
     ///
     /// By default, this simply calls `StateStore::iter` to fetch elements.
     ///
     /// TODO: in some cases, the scan can be optimized into a `multi_get` request.
-    async fn scan(&self, prefix: &[u8], limit: Option<usize>) -> Result<Vec<(Bytes, Bytes)>> {
-        collect_from_iter(self.iter(prefix).await?, limit).await
+    async fn scan<R, B>(
+        &self,
+        key_range: R,
+        limit: Option<usize>,
+        epoch: u64,
+    ) -> Result<Vec<(Bytes, Bytes)>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]>,
+    {
+        collect_from_iter(self.iter(key_range, epoch).await?, limit).await
     }
 
-    async fn reverse_scan(
+    async fn reverse_scan<R, B>(
         &self,
-        prefix: &[u8],
+        key_range: R,
         limit: Option<usize>,
-    ) -> Result<Vec<(Bytes, Bytes)>> {
-        collect_from_iter(self.reverse_iter(prefix).await?, limit).await
+        epoch: u64,
+    ) -> Result<Vec<(Bytes, Bytes)>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]>,
+    {
+        collect_from_iter(self.reverse_iter(key_range, epoch).await?, limit).await
     }
 
     /// Ingest a batch of data into the state store. One write batch should never contain operation
@@ -50,10 +69,21 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>, epoch: u64) -> Result<()>;
 
     /// Open and return an iterator for given `prefix`.
-    async fn iter(&self, prefix: &[u8]) -> Result<Self::Iter>;
+    /// The returned iterator will iterate data based on a snapshot corresponding to the given
+    /// `epoch`.
+    async fn iter<R, B>(&self, key_range: R, epoch: u64) -> Result<Self::Iter<'_>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]>;
 
     /// Open and return a reversed iterator for given `prefix`.
-    async fn reverse_iter(&self, _prefix: &[u8]) -> Result<Self::Iter> {
+    /// The returned iterator will iterate data based on a snapshot corresponding to the given
+    /// `epoch`
+    async fn reverse_iter<R, B>(&self, _key_range: R, _epoch: u64) -> Result<Self::Iter<'_>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]>,
+    {
         unimplemented!()
     }
 
@@ -64,13 +94,13 @@ pub trait StateStore: Send + Sync + 'static + Clone {
 }
 
 #[async_trait]
-pub trait StateStoreIter: Send + 'static {
+pub trait StateStoreIter: Send {
     type Item;
 
     async fn next(&mut self) -> Result<Option<Self::Item>>;
 }
 
-async fn collect_from_iter<I>(mut iter: I, limit: Option<usize>) -> Result<Vec<I::Item>>
+async fn collect_from_iter<'a, I>(mut iter: I, limit: Option<usize>) -> Result<Vec<I::Item>>
 where
     I: StateStoreIter,
 {
@@ -144,7 +174,13 @@ impl StateStoreImpl {
                             checksum_algo: ChecksumAlg::Crc32c,
                         },
                         Arc::new(VersionManager::new()),
-                        Arc::new(LocalVersionManager::new(object_client, remote_dir)),
+                        Arc::new(LocalVersionManager::new(
+                            object_client,
+                            remote_dir,
+                            // TODO: configurable block cache in config
+                            // 1GB block cache (65536 blocks * 64KB block)
+                            Some(Arc::new(Cache::new(65536))),
+                        )),
                         Arc::new(RPCHummockMetaClient::new(meta_client)),
                     )
                     .await
@@ -173,7 +209,7 @@ impl StateStoreImpl {
                             checksum_algo: ChecksumAlg::Crc32c,
                         },
                         Arc::new(VersionManager::new()),
-                        Arc::new(LocalVersionManager::new(s3_store, remote_dir)),
+                        Arc::new(LocalVersionManager::new(s3_store, remote_dir, None)),
                         Arc::new(RPCHummockMetaClient::new(meta_client)),
                     )
                     .await

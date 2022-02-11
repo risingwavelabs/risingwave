@@ -3,7 +3,7 @@ use std::convert::TryFrom;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
-use futures::channel::mpsc::{channel, Receiver, Sender};
+use futures::channel::mpsc::{channel, Receiver};
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
@@ -23,14 +23,9 @@ use tokio::task::JoinHandle;
 
 use crate::executor::snapshot::BatchQueryExecutor;
 use crate::executor::*;
-use crate::task::{SharedContext, StreamTaskEnv};
-
-/// Default capacity of channel if two actors are on the same node
-pub const LOCAL_OUTPUT_CHANNEL_SIZE: usize = 16;
-
-pub type ConsumableChannelPair = (Option<Sender<Message>>, Option<Receiver<Message>>);
-pub type ConsumableChannelVecPair = (Vec<Sender<Message>>, Vec<Receiver<Message>>);
-pub type UpDownActorIds = (u32, u32);
+use crate::task::{
+    ConsumableChannelPair, SharedContext, StreamTaskEnv, UpDownActorIds, LOCAL_OUTPUT_CHANNEL_SIZE,
+};
 
 #[cfg(test)]
 lazy_static::lazy_static! {
@@ -128,13 +123,7 @@ impl StreamManager {
 
     pub fn take_receiver(&self, ids: UpDownActorIds) -> Result<Receiver<Message>> {
         let core = self.core.lock().unwrap();
-        let mut guard = core.context.lock_receivers_for_exchange_service();
-        guard.remove(&ids).ok_or_else(|| {
-            RwError::from(ErrorCode::InternalError(format!(
-                "No receivers for rpc output from {} to {}",
-                ids.0, ids.1
-            )))
-        })
+        core.context.take_receiver(&ids)
     }
 
     pub fn update_actors(&self, actors: &[stream_plan::StreamActor]) -> Result<()> {
@@ -180,7 +169,7 @@ impl StreamManager {
     }
 
     #[cfg(test)]
-    pub fn take_source(&self) -> Sender<Message> {
+    pub fn take_source(&self) -> futures::channel::mpsc::Sender<Message> {
         let mut core = self.core.lock().unwrap();
         core.mock_source.0.take().unwrap()
     }
@@ -188,8 +177,7 @@ impl StreamManager {
     #[cfg(test)]
     pub fn take_sink(&self, ids: UpDownActorIds) -> Receiver<Message> {
         let core = self.core.lock().unwrap();
-        let mut guard = core.context.lock_channel_pool();
-        guard.get_mut(&ids).unwrap().1.take().unwrap()
+        core.context.take_receiver(&ids).unwrap()
     }
 }
 
@@ -260,7 +248,7 @@ impl StreamManagerCore {
                     .get(down_id)
                     .ok_or_else(|| {
                         RwError::from(ErrorCode::InternalError(format!(
-                            "channel between {} and {} does not exist",
+                            "create dispatcher error: channel between {} and {} does not exist",
                             actor_id, down_id
                         )))
                     })?
@@ -268,31 +256,16 @@ impl StreamManagerCore {
                 let downstream_addr = host_addr.to_socket_addr()?;
                 if is_local_address(&downstream_addr, &self.context.addr) {
                     // if this is a local downstream actor
-                    let mut guard = self.context.lock_channel_pool();
-                    let tx = guard
-                        .get_mut(&(actor_id, *down_id))
-                        .ok_or_else(|| {
-                            RwError::from(ErrorCode::InternalError(format!(
-                                "channel between {} and {} does not exist",
-                                actor_id, down_id
-                            )))
-                        })?
-                        .0
-                        .take()
-                        .ok_or_else(|| {
-                            RwError::from(ErrorCode::InternalError(format!(
-                                "sender from {} to {} does no exist",
-                                actor_id, down_id
-                            )))
-                        })?;
+                    let tx = self.context.take_sender(&(actor_id, *down_id))?;
                     Ok(Box::new(ChannelOutput::new(tx)) as Box<dyn Output>)
                 } else {
                     // This channel is used for `RpcOutput` and `ExchangeServiceImpl`.
                     let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
                     // later, `ExchangeServiceImpl` comes to get it
-                    let mut guard = self.context.lock_receivers_for_exchange_service();
 
-                    guard.insert(up_down_ids, rx);
+                    // TODO: refactor this part.
+                    self.context
+                        .add_channel_pairs(up_down_ids, (Some(tx.clone()), Some(rx)));
                     Ok(Box::new(RemoteOutput::new(tx)) as Box<dyn Output>)
                 }
             })
@@ -304,13 +277,14 @@ impl StreamManagerCore {
         let dispatcher: Box<dyn StreamConsumer> = match dispatcher.get_type()? {
             Hash => {
                 assert!(!outputs.is_empty());
+                let column_indices = dispatcher
+                    .column_indices
+                    .iter()
+                    .map(|i| *i as usize)
+                    .collect();
                 Box::new(DispatchExecutor::new(
                     input,
-                    HashDataDispatcher::new(
-                        downstreams.to_vec(),
-                        outputs,
-                        vec![dispatcher.get_column_idx() as usize],
-                    ),
+                    HashDataDispatcher::new(downstreams.to_vec(), outputs, column_indices),
                     actor_id,
                     self.context.clone(),
                 ))
@@ -435,7 +409,20 @@ impl StreamManagerCore {
                     executor_id,
                 )))
             }
-            SimpleAggNode(aggr_node) => {
+            LocalSimpleAggNode(aggr_node) => {
+                let agg_calls: Vec<AggCall> = aggr_node
+                    .get_agg_calls()
+                    .iter()
+                    .map(build_agg_call_from_prost)
+                    .try_collect()?;
+                Ok(Box::new(LocalSimpleAggExecutor::new(
+                    input.remove(0),
+                    agg_calls,
+                    pk_indices,
+                    executor_id,
+                )?))
+            }
+            GlobalSimpleAggNode(aggr_node) => {
                 let agg_calls: Vec<AggCall> = aggr_node
                     .get_agg_calls()
                     .iter()
@@ -733,23 +720,7 @@ impl StreamManagerCore {
                         // Get the sender for `RemoteInput` to forward received messages to
                         // receivers in `ReceiverExecutor` or
                         // `MergerExecutor`.
-                        let mut guard = self.context.lock_channel_pool();
-                        let sender = guard
-                            .get_mut(&(*up_id, actor_id))
-                            .ok_or_else(|| {
-                                RwError::from(ErrorCode::InternalError(format!(
-                                    "channel between {} and {} does not exist",
-                                    up_id, actor_id
-                                )))
-                            })?
-                            .0
-                            .take()
-                            .ok_or_else(|| {
-                                RwError::from(ErrorCode::InternalError(format!(
-                                    "sender from {} to {} does no exist",
-                                    up_id, actor_id
-                                )))
-                            })?;
+                        let sender = self.context.take_sender(&(*up_id, actor_id))?;
                         // spawn the `RemoteInput`
                         let up_id = *up_id;
                         tokio::spawn(async move {
@@ -767,23 +738,7 @@ impl StreamManagerCore {
                             }
                         });
                     }
-                    let mut guard = self.context.lock_channel_pool();
-                    Ok(guard
-                        .get_mut(&(*up_id, actor_id))
-                        .ok_or_else(|| {
-                            RwError::from(ErrorCode::InternalError(format!(
-                                "channel between {} and {} does not exist",
-                                up_id, actor_id
-                            )))
-                        })?
-                        .1
-                        .take()
-                        .ok_or_else(|| {
-                            RwError::from(ErrorCode::InternalError(format!(
-                                "receiver from {} to {} does no exist",
-                                up_id, actor_id
-                            )))
-                        })?)
+                    Ok(self.context.take_receiver(&(*up_id, actor_id))?)
                 }
             })
             .collect::<Result<Vec<_>>>()?;
@@ -879,10 +834,7 @@ impl StreamManagerCore {
     /// sink. All the actors in the actors should stop themselves before this method is invoked.
     fn drop_actor(&mut self, actor_id: u32) {
         let handle = self.handles.remove(&actor_id).unwrap();
-        let mut channel_pool_guard = self.context.lock_channel_pool();
-        let mut exhange_guard = self.context.lock_receivers_for_exchange_service();
-        channel_pool_guard.retain(|(x, _), _| *x != actor_id);
-        exhange_guard.retain(|(x, _), _| *x != actor_id);
+        self.context.retain(|&(up_id, _)| up_id != actor_id);
 
         self.actor_infos.remove(&actor_id);
         self.actors.remove(&actor_id);
@@ -899,7 +851,6 @@ impl StreamManagerCore {
         {
             // Create channel based on upstream actor id for [`ChainNode`], check if upstream
             // exists.
-            let mut guard = self.context.lock_channel_pool();
             for upstream_actor_id in &chain.upstream_actor_ids {
                 if !self.actor_infos.contains_key(upstream_actor_id) {
                     return Err(ErrorCode::InternalError(format!(
@@ -910,7 +861,8 @@ impl StreamManagerCore {
                 }
                 let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
                 let up_down_ids = (*upstream_actor_id, actor_id);
-                guard.insert(up_down_ids, (Some(tx), Some(rx)));
+                self.context
+                    .add_channel_pairs(up_down_ids, (Some(tx), Some(rx)));
             }
         }
         for child in &stream_node.input {
@@ -939,8 +891,8 @@ impl StreamManagerCore {
                 // has `current_id` as upstream.
                 let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
                 let up_down_ids = (*current_id, *downstream_id);
-                let mut guard = self.context.lock_channel_pool();
-                guard.insert(up_down_ids, (Some(tx), Some(rx)));
+                self.context
+                    .add_channel_pairs(up_down_ids, (Some(tx), Some(rx)));
             }
         }
         Ok(())

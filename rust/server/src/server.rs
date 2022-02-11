@@ -36,7 +36,7 @@ pub async fn compute_node_serve(
     addr: SocketAddr,
     opts: ComputeNodeOpts,
 ) -> (JoinHandle<()>, UnboundedSender<()>) {
-    let _config = load_config(&opts); // TODO: _config will be used by streaming env & batch env.
+    let config = load_config(&opts);
 
     let meta_client = MetaClient::new(&opts.meta_address).await.unwrap();
     let state_store = StateStoreImpl::from_str(&opts.state_store, meta_client.clone())
@@ -47,11 +47,13 @@ pub async fn compute_node_serve(
     let stream_mgr = Arc::new(StreamManager::new(addr, state_store));
     let source_mgr = Arc::new(MemSourceManager::new());
 
+    let batch_config = Arc::new(config.batch.clone());
     let batch_env = BatchTaskEnv::new(
         table_mgr.clone(),
         source_mgr.clone(),
         task_mgr.clone(),
         addr,
+        batch_config,
     );
     let stream_env = StreamTaskEnv::new(table_mgr, source_mgr, addr);
     let task_srv = TaskServiceImpl::new(task_mgr.clone(), batch_env);

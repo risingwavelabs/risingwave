@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use risingwave_pb::hummock::{
-    AddTablesRequest, GetNewTableIdRequest, HummockSnapshot, HummockVersion, PinSnapshotRequest,
-    PinVersionRequest, SstableInfo, UnpinSnapshotRequest, UnpinVersionRequest,
+    AddTablesRequest, CompactTask, GetNewTableIdRequest, HummockSnapshot, HummockVersion,
+    PinSnapshotRequest, PinVersionRequest, SstableInfo, UnpinSnapshotRequest, UnpinVersionRequest,
 };
 
 use crate::hummock::hummock_meta_client::HummockMetaClient;
@@ -84,5 +84,17 @@ impl HummockMetaClient for MockHummockMetaClient {
             epoch,
         });
         Ok(())
+    }
+
+    async fn get_compaction_task(&self) -> HummockResult<Option<CompactTask>> {
+        panic!();
+    }
+
+    async fn report_compaction_task(
+        &self,
+        _compact_task: CompactTask,
+        _task_result: bool,
+    ) -> HummockResult<()> {
+        panic!();
     }
 }

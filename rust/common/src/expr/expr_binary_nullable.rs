@@ -56,7 +56,7 @@ pub fn new_nullable_binary_expr(
                 DataType::Int64 => gen_stream_null_by_row_count_expr!(l, r, ret, I64Array),
                 DataType::Float32 => gen_stream_null_by_row_count_expr!(l, r, ret, F32Array),
                 DataType::Float64 => gen_stream_null_by_row_count_expr!(l, r, ret, F64Array),
-                DataType::Decimal { .. } => {
+                DataType::Decimal => {
                     gen_stream_null_by_row_count_expr!(l, r, ret, DecimalArray)
                 }
                 DataType::Date => gen_stream_null_by_row_count_expr!(l, r, ret, DecimalArray),
