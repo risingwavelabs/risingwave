@@ -9,6 +9,7 @@ pub use chain::*;
 pub use debug::*;
 pub use dispatch::*;
 pub use filter::*;
+pub use global_simple_agg::*;
 pub use hash_agg::*;
 pub use hash_join::*;
 pub use local_simple_agg::*;
@@ -29,7 +30,6 @@ use risingwave_pb::data::{
     Actors as MutationActors, AddMutation, Barrier as ProstBarrier, NothingMutation, StopMutation,
     StreamMessage as ProstStreamMessage, UpdateMutation,
 };
-pub use simple_agg::*;
 use smallvec::SmallVec;
 pub use stream_source::*;
 pub use top_n::*;
@@ -45,6 +45,7 @@ mod chain;
 mod debug;
 mod dispatch;
 mod filter;
+mod global_simple_agg;
 mod hash_agg;
 mod hash_join;
 mod local_simple_agg;
@@ -53,7 +54,6 @@ mod merge;
 pub mod monitor;
 mod mview;
 mod project;
-mod simple_agg;
 mod stream_source;
 mod top_n;
 mod top_n_appendonly;

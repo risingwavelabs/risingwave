@@ -15,7 +15,7 @@
           "columnIds": [1, 2, 0]
         }
       }],
-      "simpleAggNode": {
+      "globalSimpleAggNode": {
         "aggCalls": [{
           "type": "COUNT",
           "returnType": {
