@@ -1,25 +1,26 @@
 use std::sync::Arc;
 
-use bytes::BytesMut;
+use bytes::{Bytes, BytesMut};
 use futures::stream::{self, StreamExt};
+use risingwave_pb::hummock::{CompactTask, LevelEntry, LevelType, SstableInfo};
 
 use super::iterator::{ConcatIterator, HummockIterator, MergeIterator};
 use super::key::{get_epoch, Epoch, FullKey};
 use super::key_range::KeyRange;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::version_cmp::VersionedComparator;
-use super::version_manager::{CompactMetrics, CompactTask, Level, LevelEntry, TableSetStatistics};
 use super::{
-    HummockError, HummockOptions, HummockResult, HummockStorage, HummockValue, SSTable,
-    SSTableIterator, VersionManager,
+    HummockError, HummockMetaClient, HummockOptions, HummockResult, HummockStorage, HummockValue,
+    LocalVersionManager, SSTable, SSTableIterator,
 };
 use crate::hummock::cloud::gen_remote_sstable;
 use crate::object::ObjectStore;
 
 pub struct SubCompactContext {
     pub options: Arc<HummockOptions>,
-    pub version_manager: Arc<VersionManager>,
+    pub local_version_manager: Arc<LocalVersionManager>,
     pub obj_client: Arc<dyn ObjectStore>,
+    pub hummock_meta_client: Arc<dyn HummockMetaClient>,
 }
 
 pub struct Compactor;
@@ -31,30 +32,19 @@ impl Compactor {
     ) -> HummockResult<()> {
         let mut overlapping_tables = vec![];
         let mut non_overlapping_table_seqs = vec![];
-        let target_level = compact_task.target_level;
-        let accumulating_readsize =
-            |metrics: &mut CompactMetrics, level_idx: u8, tables: &Vec<Arc<SSTable>>| {
-                let read_statistics: &mut TableSetStatistics = if level_idx == target_level {
-                    &mut metrics.read_level_nplus1
-                } else {
-                    &mut metrics.read_level_n
-                };
-                for table in tables {
-                    read_statistics.add_table(table);
-                }
-            };
-        for LevelEntry { level_idx, level } in &compact_task.input_ssts {
-            match level {
-                Level::Tiering(input_sst_ids) => {
-                    let tables = context.version_manager.pick_few_tables(input_sst_ids)?;
-                    accumulating_readsize(&mut compact_task.metrics, *level_idx, &tables);
-                    overlapping_tables.extend(tables);
-                }
-                Level::Leveling(input_sst_ids) => {
-                    let tables = context.version_manager.pick_few_tables(input_sst_ids)?;
-                    accumulating_readsize(&mut compact_task.metrics, *level_idx, &tables);
-                    non_overlapping_table_seqs.push(tables);
-                }
+        for LevelEntry {
+            level: opt_level, ..
+        } in &compact_task.input_ssts
+        {
+            let level = opt_level.as_ref().unwrap();
+            let tables = context
+                .local_version_manager
+                .pick_few_tables(level.get_table_ids())
+                .await?;
+            if level.get_level_type().unwrap() == LevelType::Nonoverlapping {
+                non_overlapping_table_seqs.push(tables);
+            } else {
+                overlapping_tables.extend(tables);
             }
         }
 
@@ -81,10 +71,15 @@ impl Compactor {
 
             let spawn_context = SubCompactContext {
                 options: context.options.clone(),
-                version_manager: context.version_manager.clone(),
+                local_version_manager: context.local_version_manager.clone(),
                 obj_client: context.obj_client.clone(),
+                hummock_meta_client: context.hummock_meta_client.clone(),
             };
-            let spawn_kr = kr.clone();
+            let spawn_kr = KeyRange {
+                left: Bytes::copy_from_slice(kr.get_left()),
+                right: Bytes::copy_from_slice(kr.get_right()),
+                inf: kr.get_inf(),
+            };
             let is_target_ultimate_and_leveling = compact_task.is_target_ultimate_and_leveling;
             let watermark = compact_task.watermark;
 
@@ -121,11 +116,17 @@ impl Compactor {
         }
 
         sub_compact_outputsets.sort_by_key(|(sub_kr_idx, _)| *sub_kr_idx);
-        for (_, mut sub_output) in sub_compact_outputsets {
-            for table in &sub_output {
-                compact_task.metrics.write.add_table(table);
+        for (_, sub_output) in sub_compact_outputsets {
+            for sstable in sub_output {
+                compact_task.sorted_output_ssts.push(SstableInfo {
+                    id: sstable.id,
+                    key_range: Some(risingwave_pb::hummock::KeyRange {
+                        left: sstable.meta.get_smallest_key().to_vec(),
+                        right: sstable.meta.get_largest_key().to_vec(),
+                        inf: false,
+                    }),
+                });
             }
-            compact_task.sorted_output_ssts.append(&mut sub_output);
         }
 
         for sub_compact_result in sub_compact_results {
@@ -156,7 +157,7 @@ impl Compactor {
         let mut last_key = BytesMut::new();
 
         let mut builder = CapacitySplitTableBuilder::new(|| async {
-            let table_id = context.version_manager.generate_table_id().await;
+            let table_id = context.hummock_meta_client.get_new_table_id().await?;
             let builder = HummockStorage::get_builder(&context.options);
             Ok((table_id, builder))
         });
@@ -221,8 +222,7 @@ impl Compactor {
                 blocks,
                 meta,
                 context.options.remote_dir.as_str(),
-                // Will panic in production mode
-                None,
+                Some(context.local_version_manager.block_cache.clone()),
             )
             .await?;
             local_sorted_output_ssts.push(table);
@@ -232,7 +232,7 @@ impl Compactor {
     }
 
     pub async fn compact(context: &SubCompactContext) -> HummockResult<()> {
-        let mut compact_task = match context.version_manager.get_compact_task().await? {
+        let mut compact_task = match context.hummock_meta_client.get_compaction_task().await? {
             Some(task) => task,
             None => return Ok(()),
         };
@@ -249,10 +249,21 @@ impl Compactor {
         }
 
         let is_task_ok = result.is_ok();
-        context
-            .version_manager
-            .report_compact_task(compact_task, result)
+
+        let report_result = context
+            .hummock_meta_client
+            .report_compaction_task(compact_task, is_task_ok)
             .await;
+
+        // TODO: #2336 The transaction flow is not ready yet. Before that we
+        // update_local_version after each write_batch to make uncommitted write
+        // visible.
+        context
+            .local_version_manager
+            .update_local_version(context.hummock_meta_client.as_ref())
+            .await?;
+
+        report_result?;
 
         if is_task_ok {
             Ok(())
@@ -268,184 +279,13 @@ mod tests {
     use std::iter::once;
     use std::sync::Arc;
 
-    use bytes::Bytes;
-    use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
-
     use super::*;
-    use crate::hummock::iterator::BoxedHummockIterator;
-    use crate::hummock::key::{key_with_epoch, Epoch};
+    use crate::hummock::key::Epoch;
     use crate::hummock::local_version_manager::LocalVersionManager;
     use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
-    use crate::hummock::utils::bloom_filter_sstables;
-    use crate::hummock::version_manager::{ScopedUnpinSnapshot, VersionManager};
-    use crate::hummock::{user_key, HummockOptions, HummockResult, HummockStorage};
+    use crate::hummock::version_manager::VersionManager;
+    use crate::hummock::{HummockOptions, HummockResult, HummockStorage};
     use crate::object::InMemObjectStore;
-
-    #[tokio::test]
-    // TODO #2649 compactor test should base on HummockManager in meta crate
-    #[ignore]
-    async fn test_basic() -> HummockResult<()> {
-        let object_client = Arc::new(InMemObjectStore::new());
-        let remote_dir = "";
-        let hummock_storage = Arc::new(
-            HummockStorage::new(
-                object_client.clone(),
-                HummockOptions {
-                    sstable_size: 1048576,
-                    block_size: 1024,
-                    bloom_false_positive: 0.1,
-                    remote_dir: remote_dir.to_string(),
-                    checksum_algo: ChecksumAlg::Crc32c,
-                },
-                Arc::new(VersionManager::new()),
-                Arc::new(LocalVersionManager::new(object_client, remote_dir, None)),
-                Arc::new(MockHummockMetaClient::new(Arc::new(
-                    MockHummockMetaService::new(),
-                ))),
-            )
-            .await
-            .unwrap(),
-        );
-        let sub_compact_context = SubCompactContext {
-            options: hummock_storage.options.clone(),
-            version_manager: hummock_storage.version_manager.clone(),
-            obj_client: hummock_storage.obj_client.clone(),
-        };
-
-        let anchor = Bytes::from("qa");
-
-        // First batch inserts the anchor and others.
-        let mut epoch: u64 = 0;
-        let mut batch1 = vec![
-            (anchor.clone(), Some(Bytes::from("111"))),
-            (Bytes::from("bb"), Some(Bytes::from("222"))),
-        ];
-
-        // Make sure the batch is sorted.
-        batch1.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-
-        // Second batch modifies the anchor.
-        let mut batch2 = vec![
-            (Bytes::from("cc"), Some(Bytes::from("333"))),
-            (anchor.clone(), Some(Bytes::from("111111"))),
-        ];
-
-        // Make sure the batch is sorted.
-        batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-
-        // Third batch deletes the anchor
-        let mut batch3 = vec![
-            (Bytes::from("dd"), Some(Bytes::from("444"))),
-            (Bytes::from("ee"), Some(Bytes::from("555"))),
-            (anchor.clone(), None),
-        ];
-
-        // Make sure the batch is sorted.
-        batch3.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-
-        // Write first batch.
-        hummock_storage
-            .write_batch(
-                batch1
-                    .into_iter()
-                    .map(|(k, v)| (k.to_vec(), v.map(|x| x.to_vec()).into())),
-                epoch,
-            )
-            .await
-            .unwrap();
-
-        // Get the value after flushing to remote.
-        let value = hummock_storage.get(&anchor, epoch).await.unwrap().unwrap();
-        assert_eq!(Bytes::from(value), Bytes::from("111"));
-
-        // Test looking for a nonexistent key. `next()` would return the next key.
-        let value = hummock_storage
-            .get(&Bytes::from("ab"), epoch)
-            .await
-            .unwrap();
-        assert_eq!(value, None);
-
-        // Write second batch.
-        epoch += 1;
-        hummock_storage
-            .write_batch(
-                batch2
-                    .into_iter()
-                    .map(|(k, v)| (k.to_vec(), v.map(|x| x.to_vec()).into())),
-                epoch,
-            )
-            .await
-            .unwrap();
-        Compactor::compact(&sub_compact_context).await?;
-        // Get the value after flushing to remote.
-        let value = hummock_storage.get(&anchor, epoch).await.unwrap().unwrap();
-        assert_eq!(Bytes::from(value), Bytes::from("111111"));
-
-        let mut table_iters: Vec<BoxedHummockIterator> = Vec::new();
-        let scoped_snapshot =
-            ScopedUnpinSnapshot::from_version_manager(hummock_storage.version_manager.clone());
-        let snapshot = scoped_snapshot.snapshot();
-
-        for level in &snapshot.levels {
-            match level {
-                Level::Tiering(table_ids) => {
-                    let tables = bloom_filter_sstables(
-                        hummock_storage.version_manager.pick_few_tables(table_ids)?,
-                        &anchor,
-                    )?;
-                    table_iters.extend(
-                        tables.into_iter().map(|table| {
-                            Box::new(SSTableIterator::new(table)) as BoxedHummockIterator
-                        }),
-                    )
-                }
-                Level::Leveling(table_ids) => {
-                    let tables = bloom_filter_sstables(
-                        hummock_storage.version_manager.pick_few_tables(table_ids)?,
-                        &anchor,
-                    )?;
-                    table_iters.push(Box::new(ConcatIterator::new(tables)))
-                }
-            }
-        }
-
-        let mut it = MergeIterator::new(table_iters);
-
-        it.seek(&key_with_epoch(anchor.to_vec(), u64::MAX)).await?;
-
-        assert_eq!(user_key(it.key()), anchor);
-        assert_eq!(it.value().into_put_value().unwrap(), Bytes::from("111111"));
-
-        it.next().await?;
-
-        assert!(!it.is_valid() || user_key(it.key()) != anchor);
-
-        // Write third batch.
-        epoch += 1;
-        hummock_storage
-            .write_batch(
-                batch3
-                    .into_iter()
-                    .map(|(k, v)| (k.to_vec(), v.map(|x| x.to_vec()).into())),
-                epoch,
-            )
-            .await
-            .unwrap();
-        Compactor::compact(&sub_compact_context).await?;
-
-        // Get the value after flushing to remote.
-        let value = hummock_storage.get(&anchor, epoch).await.unwrap();
-        assert_eq!(value, None);
-
-        // Get non-existent maximum key.
-        let value = hummock_storage
-            .get(&Bytes::from("ff"), epoch)
-            .await
-            .unwrap();
-        assert_eq!(value, None);
-
-        Ok(())
-    }
 
     #[tokio::test]
     // TODO #2649 compactor test should base on HummockManager in meta crate
@@ -459,7 +299,7 @@ mod tests {
             &options.remote_dir,
             None,
         ));
-        let target_table_size = options.sstable_size;
+        let _target_table_size = options.sstable_size;
         let hummock_meta_client = Arc::new(MockHummockMetaClient::new(Arc::new(
             MockHummockMetaService::new(),
         )));
@@ -475,8 +315,9 @@ mod tests {
         storage.shutdown_compactor().await.unwrap();
         let sub_compact_context = SubCompactContext {
             options: storage.options.clone(),
-            version_manager: storage.version_manager.clone(),
+            local_version_manager: storage.local_version_manager.clone(),
             obj_client: storage.obj_client.clone(),
+            hummock_meta_client: storage.hummock_meta_client.clone(),
         };
 
         let kv_count = 8192;
@@ -490,15 +331,21 @@ mod tests {
                 .await?;
         }
 
-        let mut compact_task = storage.version_manager.get_compact_task().await?.unwrap();
+        let mut compact_task = storage
+            .hummock_meta_client
+            .get_compaction_task()
+            .await?
+            .unwrap();
         compact_task.watermark = Epoch::MIN; // do not gc these records
         Compactor::run_compact(&sub_compact_context, &mut compact_task).await?;
 
         let output_table_count = compact_task.sorted_output_ssts.len();
         assert_eq!(output_table_count, 1); // should not split into multiple tables
 
-        let table = compact_task.sorted_output_ssts.get(0).unwrap();
-        assert!(table.meta.estimated_size > target_table_size); // even if it reaches the target size
+        let _table = compact_task.sorted_output_ssts.get(0).unwrap();
+        // todo: assert that output table reaches the target size
+        // assert!(table.meta.estimated_size > target_table_size); // even if it reaches the target
+        // size
 
         Ok(())
     }

@@ -35,7 +35,10 @@ public class StreamingTwoPhaseAggRule extends RelRule<StreamingTwoPhaseAggRule.C
     RwLogicalAggregate logicalAgg = call.rel(0);
     var groupCount = logicalAgg.getGroupCount();
     boolean distributedMode = isDistributedMode(contextOf(call));
-    return groupCount <= 1 && distributedMode;
+    return groupCount <= 1
+        && distributedMode
+        // In stream processing, only stateless aggregators can be parallelized.
+        && logicalAgg.streamingCanTwoPhase();
   }
 
   @Override
@@ -64,7 +67,8 @@ public class StreamingTwoPhaseAggRule extends RelRule<StreamingTwoPhaseAggRule.C
             localAggInput,
             logicalAgg.getGroupSet(),
             logicalAgg.getGroupSets(),
-            localAggCalls);
+            localAggCalls,
+            false);
 
     // For simple aggregation we use Singleton Distribution to gather all the results into a single
     // place.

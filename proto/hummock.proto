@@ -8,6 +8,10 @@ option optimize_for = SPEED;
 
 import "common.proto";
 
+message SstableRefId {
+  uint64 id = 1;
+}
+
 message SstableInfo {
   uint64 id = 1;
   KeyRange key_range = 2;
@@ -59,21 +63,17 @@ message UncommittedEpoch {
 }
 
 message HummockVersion {
-  repeated Level levels = 1;
-  repeated UncommittedEpoch uncommitted_epochs = 2;
-  uint64 max_committed_epoch = 3;
+  message HummockVersionRefId {
+    uint64 id = 1;
+  }
+  uint64 id = 1;
+  repeated Level levels = 2;
+  repeated UncommittedEpoch uncommitted_epochs = 3;
+  uint64 max_committed_epoch = 4;
 }
 
 message HummockSnapshot {
   uint64 epoch = 1;
-}
-
-message RemoveTableWatermarkRequest {
-  int32 context_identifier = 1;
-}
-
-message RemoveTableWatermarkResponse {
-  common.Status status = 1;
 }
 
 message AddTablesRequest {
@@ -162,23 +162,32 @@ message GetCompactionTasksResponse {
 
 message ReportCompactionTasksRequest {
   int32 context_identifier = 1;
+  CompactTask compact_task = 2;
+  bool task_result = 3;
 }
 
 message ReportCompactionTasksResponse {
   common.Status status = 1;
 }
 
+message HummockContextRefId {
+  int32 id = 1;
+}
+
 message HummockContextPinnedVersion {
-  repeated uint64 version_id = 1;
+  int32 context_id = 1;
+  repeated uint64 version_id = 2;
 }
 
 message HummockContextPinnedSnapshot {
-  repeated uint64 snapshot_id = 1;
+  int32 context_id = 1;
+  repeated uint64 snapshot_id = 2;
 }
 
 message HummockTablesToDelete {
-  // table id
-  repeated uint64 id = 1;
+  uint64 version_id = 1;
+  // sstable ids
+  repeated uint64 id = 2;
 }
 
 message CommitEpochRequest {

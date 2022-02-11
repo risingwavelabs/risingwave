@@ -153,6 +153,26 @@ impl DataType {
             DataType::Struct => DataSize::Variable,
         }
     }
+
+    pub fn is_numeric(&self) -> bool {
+        matches!(
+            self,
+            DataType::Int16
+                | DataType::Int32
+                | DataType::Int64
+                | DataType::Float32
+                | DataType::Float64
+                | DataType::Decimal
+        )
+    }
+
+    pub fn is_string(&self) -> bool {
+        matches!(self, DataType::Char | DataType::Varchar)
+    }
+
+    pub fn is_date_or_timestamp(&self) -> bool {
+        matches!(self, DataType::Date | DataType::Timestamp)
+    }
 }
 
 /// `Scalar` is a trait over all possible owned types in the evaluation

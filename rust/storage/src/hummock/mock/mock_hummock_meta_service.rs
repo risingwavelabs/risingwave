@@ -10,8 +10,8 @@ use risingwave_pb::hummock::{
 };
 
 use crate::hummock::{
-    HummockEpoch, HummockRefCount, HummockSSTableId, HummockVersionId, INVALID_EPOCH,
-    INVALID_VERSION,
+    HummockEpoch, HummockRefCount, HummockSSTableId, HummockVersionId, FIRST_VERSION_ID,
+    INVALID_EPOCH,
 };
 
 /// Mock of the `HummockService` in meta crate. Not all RPCs are mocked.
@@ -36,8 +36,9 @@ impl MockHummockMetaServiceInner {
     fn new() -> MockHummockMetaServiceInner {
         let mut versions = BTreeMap::new();
         versions.insert(
-            INVALID_VERSION,
+            FIRST_VERSION_ID,
             HummockVersion {
+                id: FIRST_VERSION_ID,
                 levels: vec![],
                 uncommitted_epochs: vec![],
                 max_committed_epoch: INVALID_EPOCH,
@@ -47,7 +48,7 @@ impl MockHummockMetaServiceInner {
             version_ref_counts: BTreeMap::new(),
             snapshot_ref_counts: BTreeMap::new(),
             versions,
-            current_version_id: INVALID_VERSION,
+            current_version_id: FIRST_VERSION_ID,
             max_committed_epoch: INVALID_EPOCH,
             current_table_id: 0,
         }
@@ -139,6 +140,7 @@ impl MockHummockMetaService {
             .versions
             .get(&old_version_id)
             .unwrap_or(&HummockVersion {
+                id: FIRST_VERSION_ID,
                 levels: vec![],
                 uncommitted_epochs: vec![],
                 max_committed_epoch: guard.max_committed_epoch,

@@ -75,6 +75,8 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
           .put("POSITION", ExprNode.Type.POSITION)
           .put("UPPER", ExprNode.Type.UPPER)
           .put("LOWER", ExprNode.Type.LOWER)
+          .put("ASCII", ExprNode.Type.ASCII)
+          .put("TRANSLATE", ExprNode.Type.TRANSLATE)
           .put("$STREAM_NULL_BY_ROW_COUNT", ExprNode.Type.STREAM_NULL_BY_ROW_COUNT)
           .put("PG_SLEEP", ExprNode.Type.PG_SLEEP)
           .put("BOOLNE", ExprNode.Type.NOT_EQUAL)

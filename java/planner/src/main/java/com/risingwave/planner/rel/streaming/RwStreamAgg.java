@@ -18,6 +18,8 @@ import org.checkerframework.checker.nullness.qual.Nullable;
 
 /** Stream Aggregation */
 public class RwStreamAgg extends RwAggregate implements RisingWaveStreamingRel {
+  boolean isGlobal;
+
   public RwStreamAgg(
       RelOptCluster cluster,
       RelTraitSet traitSet,
@@ -26,7 +28,20 @@ public class RwStreamAgg extends RwAggregate implements RisingWaveStreamingRel {
       ImmutableBitSet groupSet,
       @Nullable List<ImmutableBitSet> groupSets,
       List<AggregateCall> aggCalls) {
+    this(cluster, traitSet, hints, input, groupSet, groupSets, aggCalls, true);
+  }
+
+  public RwStreamAgg(
+      RelOptCluster cluster,
+      RelTraitSet traitSet,
+      List<RelHint> hints,
+      RelNode input,
+      ImmutableBitSet groupSet,
+      @Nullable List<ImmutableBitSet> groupSets,
+      List<AggregateCall> aggCalls,
+      boolean isGlobal) {
     super(cluster, traitSet, hints, input, groupSet, groupSets, aggCalls);
+    this.isGlobal = isGlobal;
     checkConvention();
   }
 
@@ -40,11 +55,15 @@ public class RwStreamAgg extends RwAggregate implements RisingWaveStreamingRel {
       for (AggregateCall aggCall : aggCalls) {
         simpleAggNodeBuilder.addAggCalls(serializeAggCall(aggCall));
       }
-      node =
-          StreamNode.newBuilder()
-              .setSimpleAggNode(simpleAggNodeBuilder.build())
-              .addAllPkIndices(primaryKeyIndices)
-              .build();
+      var simpleAggNode = simpleAggNodeBuilder.build();
+      var builder = StreamNode.newBuilder();
+      if (isGlobal) {
+        builder.setSimpleAggNode(simpleAggNode);
+      } else {
+        builder.setLocalSimpleAggNode(simpleAggNode);
+      }
+      builder.addAllPkIndices(primaryKeyIndices);
+      node = builder.build();
     } else {
       HashAggNode.Builder hashAggNodeBuilder = HashAggNode.newBuilder();
       for (int i = groupSet.nextSetBit(0); i >= 0; i = groupSet.nextSetBit(i + 1)) {
@@ -71,7 +90,7 @@ public class RwStreamAgg extends RwAggregate implements RisingWaveStreamingRel {
       @Nullable List<ImmutableBitSet> groupSets,
       List<AggregateCall> aggCalls) {
     return new RwStreamAgg(
-        getCluster(), traitSet, getHints(), input, groupSet, groupSets, aggCalls);
+        getCluster(), traitSet, getHints(), input, groupSet, groupSets, aggCalls, isGlobal);
   }
 
   @Override
