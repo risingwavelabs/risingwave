@@ -58,10 +58,9 @@ pub(crate) fn print_statistics() {
     // print!("{:#?}", stat);
 
     // ----- TODO(Ting Sun): use macro to simplify the implementation -----
-    proc_counter(&stat.get_bytes);
     proc_counter(&stat.get_counts);
-    proc_counter(&stat.put_bytes);
     proc_counter(&stat.range_scan_counts);
+    proc_counter(&stat.reverse_range_scan_counts);
     proc_counter(&stat.batched_write_counts);
     proc_counter(&stat.batch_write_tuple_counts);
     proc_counter(&stat.iter_counts);
