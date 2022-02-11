@@ -176,6 +176,16 @@ command = "rust/target/${BUILD_MODE_DIR}/risedev-playground"
 args = ["ci-3node"]
 description = "Start a RisingWave playground with 3 compute nodes, 1 meta node, 1 frontend"
 
+
+[tasks.ci-1node]
+category = "RiseDev - Start"
+dependencies = [
+  "pre-start-playground"
+]
+command = "rust/target/${BUILD_MODE_DIR}/risedev-playground"
+args = ["ci-1node"]
+description = "Start a RisingWave playground with 1 compute node, 1 meta node, 1 frontend"
+
 [tasks.ci-streaming]
 category = "RiseDev - Start"
 dependencies = [
