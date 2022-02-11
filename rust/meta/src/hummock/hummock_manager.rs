@@ -394,7 +394,10 @@ impl HummockManager {
         .await
     }
 
-    pub async fn get_compact_task(&self, context_id: HummockContextId) -> Result<CompactTask> {
+    pub async fn get_compact_task(
+        &self,
+        context_id: HummockContextId,
+    ) -> Result<Option<CompactTask>> {
         let watermark = {
             let versioning_guard = self.versioning.read().await;
             let current_version_id =
@@ -418,17 +421,22 @@ impl HummockManager {
         let compaction_guard = self.compaction.lock().await;
         let mut compact_status =
             CompactStatus::get(compaction_guard.meta_store_ref.as_ref()).await?;
-        let mut compact_task = compact_status.get_compact_task().await?;
-        let mut transaction = compaction_guard.meta_store_ref.get_transaction();
-        compact_status.update_in_transaction(&mut transaction);
-        self.commit_trx(
-            compaction_guard.meta_store_ref.as_ref(),
-            &mut transaction,
-            context_id,
-        )
-        .await?;
-        compact_task.watermark = watermark;
-        Ok(compact_task)
+        let compact_task = compact_status.get_compact_task();
+        match compact_task {
+            None => Ok(None),
+            Some(mut compact_task) => {
+                let mut transaction = compaction_guard.meta_store_ref.get_transaction();
+                compact_status.update_in_transaction(&mut transaction);
+                self.commit_trx(
+                    compaction_guard.meta_store_ref.as_ref(),
+                    &mut transaction,
+                    context_id,
+                )
+                .await?;
+                compact_task.watermark = watermark;
+                Ok(Some(compact_task))
+            }
+        }
     }
 
     pub async fn report_compact_task(
