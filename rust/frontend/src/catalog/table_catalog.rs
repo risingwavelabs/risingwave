@@ -7,6 +7,7 @@ use risingwave_pb::meta::Table;
 use crate::catalog::column_catalog::{ColumnCatalog, ColumnDesc};
 use crate::catalog::{CatalogError, TableId};
 
+#[derive(Clone)]
 pub struct TableCatalog {
     table_id: TableId,
     next_column_id: u64,
