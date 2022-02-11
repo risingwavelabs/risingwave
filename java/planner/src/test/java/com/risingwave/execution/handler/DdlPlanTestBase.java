@@ -63,7 +63,7 @@ public class DdlPlanTestBase {
     PlanFragment ret;
     if (ast.getKind() == SqlKind.CREATE_TABLE) {
       ret =
-          ((CreateTableHandler) sqlHandlerFactory.create(ast, executionContext))
+          ((CreateTableV1Handler) sqlHandlerFactory.create(ast, executionContext))
               .execute(ast, executionContext);
     } else if (ast.getKind() == SqlKind.DROP_TABLE) {
       ret =
