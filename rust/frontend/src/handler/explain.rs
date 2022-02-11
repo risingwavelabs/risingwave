@@ -6,7 +6,7 @@ use crate::binder::Binder;
 use crate::planner::Planner;
 use crate::session::RwSession;
 
-pub(super) async fn handle_explain(
+pub(super) fn handle_explain(
     session: &RwSession,
     stmt: Statement,
     _verbose: bool,
@@ -38,9 +38,7 @@ mod tests {
 
         let sql = "values (11, 22), (33+(1+2), 44);";
         let stmt = Parser::parse_sql(sql).unwrap().into_iter().next().unwrap();
-        let result = super::handle_explain(frontend.session(), stmt, false)
-            .await
-            .unwrap();
+        let result = super::handle_explain(frontend.session(), stmt, false).unwrap();
         let row = result.iter().next().unwrap();
         let s = row[0].as_ref().unwrap();
         assert!(s.contains("11"));
