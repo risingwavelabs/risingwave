@@ -2,9 +2,8 @@ use prost::Message;
 use risingwave_pb::hummock::{HummockContextPinnedSnapshot, HummockContextRefId};
 use risingwave_storage::hummock::HummockEpoch;
 
-use crate::hummock::model::Transactional;
-use crate::model::MetadataModel;
-use crate::storage::{ColumnFamilyUtils, Operation, Transaction};
+use crate::model::{MetadataModel, Transactional};
+use crate::storage::Transaction;
 
 /// Column family name for hummock context pinned snapshot
 /// `cf(hummock_context_pinned_snapshot)`: `HummockContextRefId` -> `HummockContextPinnedSnapshot`
@@ -20,6 +19,10 @@ impl MetadataModel for HummockContextPinnedSnapshot {
 
     fn to_protobuf(&self) -> Self::ProstType {
         self.clone()
+    }
+
+    fn to_protobuf_encoded_vec(&self) -> Vec<u8> {
+        self.encode_to_vec()
     }
 
     fn from_protobuf(prost: Self::ProstType) -> Self {
@@ -38,7 +41,7 @@ pub trait HummockContextPinnedSnapshotExt {
 
     fn unpin_snapshot(&mut self, pinned_snapshot_id: HummockEpoch);
 
-    fn update(&self, trx: &mut Transaction);
+    fn update_in_transaction(&self, trx: &mut Transaction) -> risingwave_common::error::Result<()>;
 }
 
 impl HummockContextPinnedSnapshotExt for HummockContextPinnedSnapshot {
@@ -56,34 +59,14 @@ impl HummockContextPinnedSnapshotExt for HummockContextPinnedSnapshot {
         }
     }
 
-    fn update(&self, trx: &mut Transaction) {
+    fn update_in_transaction(&self, trx: &mut Transaction) -> risingwave_common::error::Result<()> {
         if self.snapshot_id.is_empty() {
-            self.delete(trx);
+            self.delete_in_transaction(trx)?;
         } else {
-            self.upsert(trx);
+            self.upsert_in_transaction(trx)?;
         }
+        Ok(())
     }
 }
 
-impl Transactional for HummockContextPinnedSnapshot {
-    fn upsert(&self, trx: &mut Transaction) {
-        trx.add_operations(vec![Operation::Put(
-            ColumnFamilyUtils::prefix_key_with_cf(
-                self.key().unwrap().encode_to_vec(),
-                HummockContextPinnedSnapshot::cf_name(),
-            ),
-            self.encode_to_vec(),
-            None,
-        )]);
-    }
-
-    fn delete(&self, trx: &mut Transaction) {
-        trx.add_operations(vec![Operation::Delete(
-            ColumnFamilyUtils::prefix_key_with_cf(
-                self.key().unwrap().encode_to_vec(),
-                HummockContextPinnedSnapshot::cf_name(),
-            ),
-            None,
-        )]);
-    }
-}
+impl Transactional for HummockContextPinnedSnapshot {}

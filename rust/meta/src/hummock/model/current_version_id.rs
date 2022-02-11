@@ -43,7 +43,7 @@ impl CurrentHummockVersionId {
         previous_id
     }
 
-    pub fn update(&self, trx: &mut Transaction) {
+    pub fn update_in_transaction(&self, trx: &mut Transaction) {
         trx.add_operations(vec![Operation::Put(
             ColumnFamilyUtils::prefix_key_with_cf(HUMMOCK_VERSION_ID_LEY, HUMMOCK_DEFAULT_CF_NAME),
             HummockVersionRefId { id: self.id }.encode_to_vec(),
