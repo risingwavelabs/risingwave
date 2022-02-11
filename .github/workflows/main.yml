@@ -244,9 +244,10 @@ jobs:
         run: |
           ~/cargo-make/makers k
           ~/cargo-make/makers logs
-          ~/cargo-make/makers check-logs
+          # ~/cargo-make/makers check-logs # regression test is bound to produce errors, so we don't check logs
       - name: e2e test w/ source 1-node
         run: |
+          ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-1node
           timeout 5m sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source/**/*.slt'
       - name: Kill cluster
@@ -256,6 +257,7 @@ jobs:
           ~/cargo-make/makers check-logs
       - name: e2e test w/ source 3-node
         run: |
+          ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-3node
           timeout 5m sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source_distributed/**/*.slt'
       - name: Kill cluster
