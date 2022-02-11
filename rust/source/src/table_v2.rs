@@ -216,6 +216,7 @@ mod tests {
     #[tokio::test]
     async fn test_table_source_v2() -> Result<()> {
         let source = new_source();
+        let mut reader = source.stream_reader(TableV2ReaderContext, vec![0])?;
         let mut writer = source.create_writer()?;
 
         macro_rules! write_chunk {
@@ -231,16 +232,15 @@ mod tests {
 
         write_chunk!(0);
 
-        let mut reader = source.stream_reader(TableV2ReaderContext, vec![0])?;
         reader.open().await?;
 
         macro_rules! check_next_chunk {
-      ($i: expr) => {
-        assert_matches!(reader.next().await?, chunk => {
-          assert_eq!(chunk.columns()[0].array_ref().as_int64().iter().collect_vec(), vec![Some($i)]);
-        });
-      }
-    }
+            ($i: expr) => {
+                assert_matches!(reader.next().await?, chunk => {
+                    assert_eq!(chunk.columns()[0].array_ref().as_int64().iter().collect_vec(), vec![Some($i)]);
+                });
+            }
+        }
 
         check_next_chunk!(0);
 
@@ -248,15 +248,5 @@ mod tests {
         check_next_chunk!(1);
 
         Ok(())
-    }
-
-    #[should_panic]
-    #[tokio::test]
-    async fn test_only_one_reader() {
-        let source = new_source();
-        let mut reader_1 = source.stream_reader(TableV2ReaderContext, vec![0]).unwrap();
-        reader_1.open().await.unwrap();
-        let mut reader_2 = source.stream_reader(TableV2ReaderContext, vec![0]).unwrap();
-        reader_2.open().await.unwrap();
     }
 }
