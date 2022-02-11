@@ -150,7 +150,8 @@ impl HummockStorage {
 
         let arc_options = Arc::new(options);
         let options_for_compact = arc_options.clone();
-        let version_manager_for_compact = version_manager.clone();
+        let local_version_manager_for_compact = local_version_manager.clone();
+        let hummock_meta_client_for_compact = hummock_meta_client.clone();
         let obj_client_for_compact = obj_client.clone();
         let rx = Arc::new(PLMutex::new(Some(trigger_compact_rx)));
         let rx_for_compact = rx.clone();
@@ -179,8 +180,9 @@ impl HummockStorage {
                 Self::start_compactor(
                     SubCompactContext {
                         options: options_for_compact,
-                        version_manager: version_manager_for_compact,
+                        local_version_manager: local_version_manager_for_compact,
                         obj_client: obj_client_for_compact,
+                        hummock_meta_client: hummock_meta_client_for_compact,
                     },
                     rx_for_compact,
                     stop_compact_rx,
