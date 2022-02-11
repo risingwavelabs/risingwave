@@ -2,13 +2,15 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use itertools::Itertools;
+use moka::future::Cache;
 use parking_lot::{Mutex, RwLock};
 use risingwave_pb::hummock::{HummockVersion, Level, LevelType};
 
+use super::Block;
 use crate::hummock::cloud::{get_sst_data_path, get_sst_meta};
 use crate::hummock::{
     HummockMetaClient, HummockRefCount, HummockResult, HummockSSTableId, HummockVersionId, SSTable,
-    INVALID_EPOCH, INVALID_VERSION,
+    FIRST_VERSION_ID, INVALID_EPOCH,
 };
 use crate::object::ObjectStore;
 
@@ -80,23 +82,40 @@ pub struct LocalVersionManager {
     inner: Mutex<LocalVersionManagerInner>,
     sstables: RwLock<BTreeMap<HummockSSTableId, Arc<SSTable>>>,
 
-    // These two fields will be removed after block cache introduced.
     obj_client: Arc<dyn ObjectStore>,
     remote_dir: Arc<String>,
+    pub block_cache: Arc<Cache<Vec<u8>, Arc<Block>>>,
 }
 
 impl LocalVersionManager {
-    pub fn new(obj_client: Arc<dyn ObjectStore>, remote_dir: &str) -> LocalVersionManager {
+    pub fn new(
+        obj_client: Arc<dyn ObjectStore>,
+        remote_dir: &str,
+        block_cache: Option<Arc<Cache<Vec<u8>, Arc<Block>>>>,
+    ) -> LocalVersionManager {
         let instance = Self {
             inner: Mutex::new(LocalVersionManagerInner::new()),
             sstables: RwLock::new(BTreeMap::new()),
             obj_client,
             remote_dir: Arc::new(remote_dir.to_string()),
+            block_cache: if let Some(block_cache) = block_cache {
+                block_cache
+            } else {
+                #[cfg(test)]
+                {
+                    Arc::new(Cache::new(2333))
+                }
+                #[cfg(not(test))]
+                {
+                    panic!("must enable block cache in production mode")
+                }
+            },
         };
         // Insert an artificial empty version.
         instance.inner.lock().pinned_versions.insert(
-            INVALID_VERSION,
+            FIRST_VERSION_ID,
             Arc::new(HummockVersion {
+                id: FIRST_VERSION_ID,
                 levels: vec![],
                 uncommitted_epochs: vec![],
                 max_committed_epoch: INVALID_EPOCH,
@@ -141,7 +160,7 @@ impl LocalVersionManager {
 
         // Unpin versions with ref_count = 0 except for the greatest version in storage service.
         for version_id in versions_to_unpin {
-            if version_id == INVALID_VERSION {
+            if version_id == FIRST_VERSION_ID {
                 // Edge case. This is an artificial version.
                 continue;
             }
@@ -193,6 +212,7 @@ impl LocalVersionManager {
                             .await?,
                         obj_client: self.obj_client.clone(),
                         data_path: get_sst_data_path(&self.remote_dir, *table_id),
+                        block_cache: self.block_cache.clone(),
                     });
                     self.add_sstable_to_cache(fetched_sstable.clone());
                     fetched_sstable

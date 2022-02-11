@@ -35,6 +35,7 @@ import com.risingwave.planner.rules.streaming.StreamingRuleSets;
 import com.risingwave.planner.sql.SqlConverter;
 import java.util.List;
 import java.util.Objects;
+import java.util.stream.Stream;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.SqlNode;
@@ -126,10 +127,23 @@ public class StreamPlanner implements Planner<StreamingPlan> {
         assert parent != null;
         assert indexInParent >= 0;
 
-        ImmutableList<ColumnCatalog.ColumnId> sourceColumnIds = source.getAllColumnIds();
-        ImmutableList.Builder<ColumnCatalog.ColumnId> primaryKeyColumnIdsBuilder =
-            ImmutableList.builder();
-        for (var idx : source.getPrimaryKeyColumnIds()) {
+        var tableSourceNode = (RwStreamTableSource) node;
+
+        var sourceColumnIds = source.getAllColumnIds();
+        var sourcePrimaryKeyColumnIds = source.getPrimaryKeyColumnIds();
+        if (source.isAssociatedMaterializedView()) {
+          // since we've ignored row_id column for associated mv, the pk should be empty
+          assert sourcePrimaryKeyColumnIds.isEmpty();
+          var rowIdColumnId = source.getRowIdColumn().getId();
+          // manually put back the row_id column
+          sourceColumnIds =
+              Stream.concat(sourceColumnIds.stream(), Stream.of(rowIdColumnId))
+                  .collect(ImmutableList.toImmutableList());
+          sourcePrimaryKeyColumnIds = ImmutableIntList.of(rowIdColumnId.getValue());
+        }
+
+        var primaryKeyColumnIdsBuilder = ImmutableList.<ColumnCatalog.ColumnId>builder();
+        for (var idx : sourcePrimaryKeyColumnIds) {
           primaryKeyColumnIdsBuilder.add(sourceColumnIds.get(idx));
         }
 
@@ -137,12 +151,12 @@ public class StreamPlanner implements Planner<StreamingPlan> {
             new RwStreamChain(
                 node.getCluster(),
                 node.getTraitSet(),
-                ((RwStreamTableSource) node).getHints(),
+                tableSourceNode.getHints(),
                 node.getTable(),
-                ((RwStreamTableSource) node).getTableId(),
+                tableSourceNode.getTableId(),
                 primaryKeyColumnIdsBuilder.build(),
                 ImmutableIntList.of(),
-                ((RwStreamTableSource) node).getColumnIds());
+                tableSourceNode.getColumnIds());
         parent.replaceInput(indexInParent, chain);
       }
     }

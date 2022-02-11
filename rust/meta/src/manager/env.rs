@@ -4,7 +4,7 @@ use super::{StreamClients, StreamClientsRef};
 #[cfg(test)]
 use crate::manager::MemEpochGenerator;
 use crate::manager::{
-    Config, EpochGenerator, EpochGeneratorRef, IdGeneratorManager, IdGeneratorManagerRef,
+    EpochGenerator, EpochGeneratorRef, IdGeneratorManager, IdGeneratorManagerRef,
 };
 #[cfg(test)]
 use crate::storage::MemStore;
@@ -14,8 +14,6 @@ use crate::storage::{MetaStore, MetaStoreRef};
 /// kind of managers inside Meta.
 #[derive(Clone)]
 pub struct MetaSrvEnv {
-    /// global configuration.
-    config: Arc<Config>,
     /// id generator manager.
     id_gen_manager: IdGeneratorManagerRef,
     /// meta store.
@@ -27,17 +25,12 @@ pub struct MetaSrvEnv {
 }
 
 impl MetaSrvEnv {
-    pub async fn new(
-        config: Arc<Config>,
-        meta_store: MetaStoreRef,
-        epoch_generator: EpochGeneratorRef,
-    ) -> Self {
+    pub async fn new(meta_store: MetaStoreRef, epoch_generator: EpochGeneratorRef) -> Self {
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let stream_clients = Arc::new(StreamClients::default());
 
         Self {
-            config,
             id_gen_manager,
             meta_store,
             epoch_generator,
@@ -55,7 +48,6 @@ impl MetaSrvEnv {
         let stream_clients = Arc::new(StreamClients::default());
 
         Self {
-            config: Default::default(),
             id_gen_manager,
             meta_store,
             epoch_generator,
@@ -74,16 +66,11 @@ impl MetaSrvEnv {
         let stream_clients = Arc::new(StreamClients::default());
 
         Self {
-            config: Default::default(),
             id_gen_manager,
             meta_store,
             epoch_generator,
             stream_clients,
         }
-    }
-
-    pub fn config(&self) -> Arc<Config> {
-        self.config.clone()
     }
 
     #[allow(dead_code)]

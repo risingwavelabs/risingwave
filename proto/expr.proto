@@ -39,6 +39,7 @@ message ExprNode {
     LENGTH = 203;
     LIKE = 204;
     UPPER = 205;
+    LOWER = 206;
     TRIM = 207;
     REPLACE = 208;
     POSITION = 209;
@@ -50,15 +51,20 @@ message ExprNode {
     // ROUND(numeric) -> numeric
     // ROUND(double precision) -> double precision
     ROUND = 214;
+    ASCII = 215;
+    TRANSLATE = 216;
     // Boolean comparison
-    IS_TRUE = 215;
-    IS_NOT_TRUE = 216;
-    IS_FALSE = 217;
-    IS_NOT_FALSE = 218;
-    IS_NULL = 219;
-    IS_NOT_NULL = 220;
+    IS_TRUE = 301;
+    IS_NOT_TRUE = 302;
+    IS_FALSE = 303;
+    IS_NOT_FALSE = 304;
+    IS_NULL = 305;
+    IS_NOT_NULL = 306;
     // Unary operators
-    NEG = 221;
+    NEG = 401;
+    // Search operator and Search ARGument
+    SEARCH = 998;
+    SARG = 999;
     STREAM_NULL_BY_ROW_COUNT = 1000;
   }
   Type expr_type = 1;
@@ -103,4 +109,5 @@ message AggCall {
   Type type = 1;
   repeated Arg args = 2;
   data.DataType return_type = 3;
+  bool distinct = 4;
 }

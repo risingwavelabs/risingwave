@@ -55,9 +55,18 @@
       <div id="clusters" class="grid gap-2 md:grid-cols-2 lg:grid-cols-3 w-full">
       </div>
 
-      <h1 class="mt-5 mb-2 text-sm leading-6 font-semibold text-sky-500 dark:text-sky-400">
-        Stream Actors
-      </h1>
+      <div class="flex mt-5 mb-2 text-sm">
+        <h1 class="flex-auto leading-6 font-semibold text-sky-500 dark:text-sky-400">
+          Stream Actors
+        </h1>
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" value="" id="mvOnMvCheckbox"
+            onchange="handleMvOnMvClick(this);">
+          <label class="form-check-label text-gray-500" for="mvOnMvCheckbox">
+            Resolve MV on MV
+          </label>
+        </div>
+      </div>
       <div id="actors" class="w-full">
       </div>
     </div>
@@ -75,6 +84,9 @@
   integrity="sha256-ZjkehPx5n2M0daimR+hR4q8q4wIcPUNUrUTsykjK56Y=" crossorigin="anonymous"></script>
 
 <script>
+  /// Whether we should resolve mv on mv
+  let resolveMvOnMv = false
+
   const cluster = (type, cluster) => `
 <div class="p-6 max-w bg-white rounded-xl shadow-md flex flex-col space-y-1">
   <div class="flex flex-row items-center">
@@ -113,14 +125,14 @@
       return {
         name: findTitle(node),
         children: (node.input || []).map(hierarchyActorNode),
-        nodeId: node.nodeId
+        operatorId: node.operatorId
       }
     }
 
     return d3.hierarchy({
       name: `${_.toLower(actor.dispatcher.type)}Dispatcher`,
       children: [hierarchyActorNode(actor.nodes)],
-      nodeId: "dispatcher"
+      operatorId: "dispatcher"
     })
   }
 
@@ -234,12 +246,11 @@
     return { width, height, g }
   }
 
-  /// In Dashboard, we assume fragmentId = first nodeId
-  const fragmentIdOf = (actor) => actor.nodes.nodeId
+  const fragmentIdOf = (actor) => actor.fragmentId || 0
 
   /// Create a d3.hierarchy of actors
   const hierarchyActors = (actors, metaFn) => {
-    /// Mapping fragmentId -> { [actorId], parent }
+    /// Mapping fragmentId -> { [actorId], [parent] }
     const actorNodes = new Map
     /// actorId -> Actor
     const actorMap = new Map
@@ -260,18 +271,34 @@
           }
           lastFragmentId = downstreamFragmentId
         })
-        actorNodes.set(fragmentId, { actors: [actorId], parent: lastFragmentId })
+        const parents = lastFragmentId ? [lastFragmentId] : []
+        actorNodes.set(fragmentId, { actors: [actorId], parents })
       } else {
         actorNodes.get(fragmentId).actors.push(actorId)
       }
     })
 
+    /// Resolve MV on MV
+    if (resolveMvOnMv) {
+      actors.forEach(actor => {
+        const fragmentId = fragmentIdOf(actor)
+
+        if (actor.nodes.chainNode) {
+          let upstreamActorIds = actor.nodes.chainNode.upstreamActorIds
+          if (upstreamActorIds.length != 0) {
+            let upstreamFragmentId = fragmentIdOf(actorMap.get(upstreamActorIds[0]))
+            actorNodes.get(upstreamFragmentId).parents.push(fragmentId)
+          }
+        }
+      })
+    }
+
     /// Reverse mapping
     const actorReverseMapping = new Map
 
     /// Get reverse mapping
-    actorNodes.forEach(({ actors, parent }, fragmentId) => {
-      if (parent) {
+    actorNodes.forEach(({ actors, parents }, fragmentId) => {
+      for (const parent of parents) {
         const list = (actorReverseMapping.get(parent) || [])
         list.push(fragmentId)
         actorReverseMapping.set(parent, list)
@@ -281,7 +308,7 @@
     const roots = []
 
     /// Split into multiple graphs
-    actorNodes.forEach(({ actors, parent }, fragmentId) => {
+    actorNodes.forEach(({ actors, parents }, fragmentId) => {
       const buildGraph = (root, nextColor) => (
         {
           id: root,
@@ -292,7 +319,7 @@
 
       const countGraph = (root) => _.sum((actorReverseMapping.get(root) || []).map(countGraph)) + 1
 
-      if (!parent) {
+      if (parents.length == 0) {
         const totalActors = countGraph(fragmentId)
         let countedActor = 0
         const interp = d3.interpolateRainbow
@@ -334,18 +361,14 @@
   }
 
   const layoutStreamGraphs = (actors, nodeId) => {
-    const edgeYRadius = 15
-    const edgeXRadius = 100
-    const infoMap = new Map
-
     const svg = d3.select(`#actor-${nodeId}`)
 
     const oneColumn = ([actorId, node]) => {
-      const actorJump = (n) =>
+      const actorJump = () =>
         `<a target="_blank" rel="noopener noreferrer" class="text-sky-600" href="http://localhost:16680/search?service=compute&tags=%7B%22actor_id%22%3A%22${actorId}%22%2C%22msg%22%3A%22chunk%22%7D">Trace Message of Actor #${actorId}</a><br>
          <a target="_blank" rel="noopener noreferrer" class="text-sky-600" href="http://localhost:16680/search?service=compute&tags=%7B%22actor_id%22%3A%22${actorId}%22%2C%22epoch%22%3A%22-1%22%7D">Trace Epoch "-1" of Actor #${actorId}</a><br>`
       return `<div class="flex-1 overflow-x-scroll border border-gray-200 p-1">
-        <p>${actorJump(actorId)}</p>
+        <p>${actorJump()}</p>
         <p class="whitespace-pre text-xs font-mono">${JSON.stringify(node, null, 2)}</p>
       </div>`
     }
@@ -353,12 +376,12 @@
       $(`#message-${nodeId}`).html(_.zip(actorIds, nodes).map(oneColumn).join('\n'))
     }
 
-    const findInfo = (actorIds, actorNodes, nodeId, action) => {
-      if (actorNodes[0].nodeId == nodeId) {
+    const findInfo = (actorIds, actorNodes, operatorId, action) => {
+      if (actorNodes[0].operatorId == operatorId) {
         action(actorIds, actorNodes.map(node => exprNode(node)))
       } else {
         (actorNodes[0].input || []).forEach((input, idx) => {
-          findInfo(actorIds, actorNodes.map(node => node.input[idx]), nodeId, action)
+          findInfo(actorIds, actorNodes.map(node => node.input[idx]), operatorId, action)
         })
       }
     }
@@ -368,11 +391,11 @@
       // TODO: use a HashMap instead of probing all actors
       const selectedActors = actors.actors.filter(actor => fragmentIdOf(actor) == fragmentId)
       const actorIds = selectedActors.map(actor => actor.actorId)
-      if (d.data.nodeId == "dispatcher") {
+      if (d.data.operatorId == "dispatcher") {
         const nodes = selectedActors.map(actor => ({ dispatcher: actor.dispatcher, downstreamActorId: actor.downstreamActorId }))
         showInfo(actorIds, nodes)
       } else {
-        findInfo(actorIds, selectedActors.map(actor => actor.nodes), d.data.nodeId, showInfo)
+        findInfo(actorIds, selectedActors.map(actor => actor.nodes), d.data.operatorId, showInfo)
       }
     }
 
@@ -428,7 +451,7 @@
 
       actors.append("text")
         .attr("fill", "black")
-        .text(d => "Actor " + _.sortBy((d.data.actorIds)).join(", "))
+        .text(d => "Fragment " + d.data.id + ", Actor " + _.sortBy((d.data.actorIds)).join(", "))
         .attr("font-family", "sans-serif")
         .attr("text-anchor", "end")
         .attr("dy", d => d.ySize - actorMarginY + nodeRadius)
@@ -465,13 +488,23 @@
       data => $("#clusters").append(cluster("Compute Node", data))))
   $("#clusters").append(cluster("Meta Node", { host: { host: "127.0.0.1", port: "2333" } }))
 
-  fetch('/api/actors')
-    .then(response => response.json())
-    .then(data => data.forEach(
-      (data, nodeId) => {
-        $("#actors").append(actors(data, nodeId))
-        layoutStreamGraphs(data, nodeId)
-      }))
+  const loadActors = () => {
+    fetch('/api/actors')
+      .then(response => response.json())
+      .then(data => data.forEach(
+        (data, nodeId) => {
+          $("#actors").empty()
+          $("#actors").append(actors(data, nodeId))
+          layoutStreamGraphs(data, nodeId)
+        }))
+  }
+
+  const handleMvOnMvClick = (cb) => {
+    resolveMvOnMv = cb.checked
+    loadActors()
+  }
+
+  loadActors()
 
 </script>
 

@@ -8,7 +8,7 @@ members = [
   "meta",
   "prost",
   "prost/helpers",
-  "riselab",
+  "risedev",
   "rpc_client",
   "server",
   "source",

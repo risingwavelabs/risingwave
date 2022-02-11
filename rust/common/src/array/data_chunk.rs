@@ -336,9 +336,9 @@ impl DataChunk {
         states.resize_with(self.cardinality(), || hasher_builder.build_hasher());
         for column_idx in column_idxes {
             let array = self.column_at(*column_idx)?.array();
-            array.hash_vec(&mut states);
+            array.hash_vec(&mut states[..]);
         }
-        Ok(finalize_hashers(&mut states))
+        Ok(finalize_hashers(&mut states[..]))
     }
 
     /// Get an iterator for visible rows.

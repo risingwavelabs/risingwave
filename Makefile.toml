@@ -1,13 +1,13 @@
 extend = [
-  {path = "rust/riselab/grafana.toml"},
-  {path = "rust/riselab/prometheus.toml"},
-  {path = "rust/riselab/minio.toml"},
-  {path = "rust/riselab/jaeger.toml"},
-  {path = "rust/riselab/riselab-components.toml"},
+  {path = "rust/risedev/grafana.toml"},
+  {path = "rust/risedev/prometheus.toml"},
+  {path = "rust/risedev/minio.toml"},
+  {path = "rust/risedev/jaeger.toml"},
+  {path = "rust/risedev/risedev-components.toml"},
 ]
 
 env_files = [
-  "riselab-components.user.env"
+  "risedev-components.user.env"
 ]
 
 [env]
@@ -63,7 +63,7 @@ for out_file in ${PREFIX_LOG}/*.log
 do
   if grep "panic" "$out_file" -C 10; then
     echo "\"panic\" found in $out_file, please check if there's any bugs in this PR."
-    echo "You may find \"riselab-logs\" artifacts and download logs after all workflows finish."
+    echo "You may find \"risedev-logs\" artifacts and download logs after all workflows finish."
     exit 1
   fi
 done
@@ -115,8 +115,8 @@ ln -s "$(pwd)/java/pgserver/build/libs/risingwave-fe-runnable.jar" "${PREFIX_BIN
 '''
 
 [tasks.prepare-config]
-category = "RiseLAB - Prepare"
-description = "Copy necessary configuration files to RiseLAB"
+category = "RiseDev - Prepare"
+description = "Copy necessary configuration files to RiseDev"
 script = '''
 #!@shell
 
@@ -125,12 +125,12 @@ set -e
 cp "java/pgserver/src/main/resources/logback.xml" "${PREFIX_CONFIG}/logback.xml"
 cp "grafana/dashboard.json" "${PREFIX_CONFIG}/grafana_dashboard.json"
 cp "rust/config/risingwave.toml" "${PREFIX_CONFIG}/risingwave.toml"
-cp "rust/riselab/run_command.sh" "${PREFIX_BIN}/run_command.sh"
-cp "rust/riselab/welcome.sh" "${PREFIX_BIN}/welcome.sh"
+cp "rust/risedev/run_command.sh" "${PREFIX_BIN}/run_command.sh"
+cp "rust/risedev/welcome.sh" "${PREFIX_BIN}/welcome.sh"
 '''
 
 [tasks.pre-start-playground]
-category = "RiseLAB - Prepare"
+category = "RiseDev - Prepare"
 description = "Prepare playground by downloading necessary tools and build required components"
 dependencies = [
   "download-minio",
@@ -159,58 +159,68 @@ alias = "dev"
 alias = "dev"
 
 [tasks.dev]
-category = "RiseLAB - Start"
+category = "RiseDev - Start"
 dependencies = [
   "pre-start-playground"
 ]
-command = "rust/target/${BUILD_MODE_DIR}/playground"
+command = "rust/target/${BUILD_MODE_DIR}/risedev-playground"
 args = ["default"]
-description = "Start a RisingWave playground with 1 compute node, 1 meta node, 1 frontend, 1 minio, 1 prometheus"
+description = "Start a RisingWave playground with default config"
 
 [tasks.ci-3node]
-category = "RiseLAB - Start"
+category = "RiseDev - Start"
 dependencies = [
   "pre-start-playground"
 ]
-command = "rust/target/${BUILD_MODE_DIR}/playground"
+command = "rust/target/${BUILD_MODE_DIR}/risedev-playground"
 args = ["ci-3node"]
-description = "Start a RisingWave playground with 3 compute nodes, 1 meta node, 1 frontend"
+description = "Start a RisingWave playground with ci-3node config"
+
+
+[tasks.ci-1node]
+category = "RiseDev - Start"
+dependencies = [
+  "pre-start-playground"
+]
+command = "rust/target/${BUILD_MODE_DIR}/risedev-playground"
+args = ["ci-1node"]
+description = "Start a RisingWave playground ci-1node config"
 
 [tasks.ci-streaming]
-category = "RiseLAB - Start"
+category = "RiseDev - Start"
 dependencies = [
   "pre-start-playground"
 ]
-command = "rust/target/${BUILD_MODE_DIR}/playground"
+command = "rust/target/${BUILD_MODE_DIR}/risedev-playground"
 args = ["ci-streaming"]
-description = "Start a RisingWave playground with 1 compute node, 1 meta node, 1 frontend and 1 MinIO"
+description = "Start a RisingWave playground ci-streaming config"
 
 [tasks.dev-compute-node]
-category = "RiseLAB - Start"
+category = "RiseDev - Start"
 dependencies = [
   "pre-start-playground"
 ]
-command = "rust/target/${BUILD_MODE_DIR}/playground"
+command = "rust/target/${BUILD_MODE_DIR}/risedev-playground"
 args = ["dev-compute-node"]
-description = "Start a RisingWave playground with 1 user-managed compute node, 1 meta node, 1 frontend, 1 minio, 1 prometheus"
+description = "Start a RisingWave playground with dev-compute-node config"
 
 [tasks.dev-frontend]
-category = "RiseLAB - Start"
+category = "RiseDev - Start"
 dependencies = [
   "pre-start-playground"
 ]
-command = "rust/target/${BUILD_MODE_DIR}/playground"
+command = "rust/target/${BUILD_MODE_DIR}/risedev-playground"
 args = ["dev-frontend"]
-description = "Start a RisingWave playground with 1 compute node, 1 meta node, 1 user managed frontend"
+description = "Start a RisingWave playground with dev-frontend config"
 
 [tasks.kill-playground]
-category = "RiseLAB - Stop"
+category = "RiseDev - Stop"
 description = "kill playground"
 script = '''
 #!@shell
 set -e
-tmux list-windows -t riselab -F "-#{pane_pid}" | xargs -n 1 kill -SIGINT
-tmux kill-session -t riselab
+tmux list-windows -t risedev -F "-#{pane_pid}" | xargs -n 1 kill -SIGINT
+tmux kill-session -t risedev
 '''
 
 [tasks.kill]

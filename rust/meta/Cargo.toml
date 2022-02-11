@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1"
-async-recursion = "0.2"
+async-recursion = "1"
 async-stream = "0.3"
 async-trait = "0.1"
 axum = "0.4"
@@ -17,7 +17,7 @@ clap = { version = "3", features = ["derive"] }
 crc32fast = "1"
 dashmap = "5"
 either = "1"
-futures = "0.3"
+futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hyper = "0.14"
 itertools = "0.10"
 lazy_static = "1"
@@ -40,12 +40,19 @@ sled = "0.34.7"
 smallvec = "1"
 tempfile = "3"
 thiserror = "1"
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
+tokio = { version = "1", features = [
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "time",
+    "signal",
+] }
 tokio-stream = { version = "0.1", features = ["net"] }
 tonic = "0.6"
 tower = { version = "0.4", features = ["util", "load-shed"] }
 tower-http = { version = "0.2", features = ["add-extension", "cors"] }
-tracing = "0.1"
+tracing = { version = "0.1", features = ["release_max_level_info"] }
 tracing-subscriber = "0.3"
 uuid = { version = "0.8", features = ["v4"] }
 

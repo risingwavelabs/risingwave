@@ -2,6 +2,7 @@ use bytes::{BufMut, Bytes};
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 
+use crate::hummock::key::next_key;
 use crate::StateStore;
 
 /// Represents a unit part of [`Keyspace`].
@@ -58,20 +59,21 @@ pub struct Keyspace<S: StateStore> {
 }
 
 impl<S: StateStore> Keyspace<S> {
-    /// Create a shared root [`Keyspace`] for all executors in the same node.
+    /// Create a shared root [`Keyspace`] for all executors of the same operator.
     ///
-    /// By design, all executors in the same node should share the same keyspace in order to support
-    /// scaling out, and ensure not to overlap with each other. So we use `node_id` here.
+    /// By design, all executors of the same operator should share the same keyspace in order to
+    /// support scaling out, and ensure not to overlap with each other. So we use `operator_id`
+    /// here.
     ///
     /// Note: when using shared keyspace, be caution to scan the keyspace since states of other
     /// executors might be scanned as well.
-    pub fn shared_executor_root(store: S, node_id: u32) -> Self {
+    pub fn shared_executor_root(store: S, operator_id: u64) -> Self {
         let mut root = Self {
             store,
-            prefix: Vec::with_capacity(5),
+            prefix: Vec::with_capacity(9),
         };
         root.push(Segment::root(b's'));
-        root.push(Segment::u32(node_id));
+        root.push(Segment::u64(operator_id));
         root
     }
 
@@ -108,8 +110,9 @@ impl<S: StateStore> Keyspace<S> {
     }
 
     /// Treat the keyspace as a single key, and get its value.
-    pub async fn value(&self) -> Result<Option<Bytes>> {
-        self.store.get(&self.prefix).await
+    /// The returned value is based on a snapshot corresponding to the given `epoch`
+    pub async fn value(&self, epoch: u64) -> Result<Option<Bytes>> {
+        self.store.get(&self.prefix, epoch).await
     }
 
     /// Concatenate this keyspace and the given key to produce a prefixed key.
@@ -118,21 +121,48 @@ impl<S: StateStore> Keyspace<S> {
     }
 
     /// Get from the keyspace with the `prefixed_key` of given key.
-    pub async fn get(&self, key: impl AsRef<[u8]>) -> Result<Option<Bytes>> {
-        self.store.get(&self.prefixed_key(key)).await
+    /// The returned value is based on a snapshot corresponding to the given `epoch`
+    pub async fn get(&self, key: impl AsRef<[u8]>, epoch: u64) -> Result<Option<Bytes>> {
+        self.store.get(&self.prefixed_key(key), epoch).await
     }
 
     /// Scan `limit` keys from the keyspace and get their values. If `limit` is None, all keys of
     /// the given prefix will be scanned.
-    pub async fn scan(&self, limit: Option<usize>) -> Result<Vec<(Bytes, Bytes)>> {
-        self.store.scan(&self.prefix, limit).await
+    /// The returned values are based on a snapshot corresponding to the given `epoch`
+    pub async fn scan(&self, limit: Option<usize>, epoch: u64) -> Result<Vec<(Bytes, Bytes)>> {
+        let range = self.prefix.to_owned()..next_key(self.prefix.as_slice());
+        self.store.scan(range, limit, epoch).await
+    }
+
+    /// Scan `limit` keys from the keyspace using a inclusive `start_key` and get their values. If
+    /// `limit` is None, all keys of the given prefix will be scanned.
+    /// The returned values are based on a snapshot corresponding to the given `epoch`
+    pub async fn scan_with_start_key(
+        &self,
+        start_key: Vec<u8>,
+        limit: Option<usize>,
+        epoch: u64,
+    ) -> Result<Vec<(Bytes, Bytes)>> {
+        assert!(
+            start_key[..self.prefix.len()] == self.prefix,
+            "{:?} does not start with prefix {:?}",
+            start_key,
+            self.prefix
+        );
+        let range = start_key..next_key(self.prefix.as_slice());
+        self.store.scan(range, limit, epoch).await
     }
 
     /// Scan from the keyspace, and then strip the prefix of this keyspace.
+    /// The returned values are based on a snapshot corresponding to the given `epoch`
     ///
     /// See also: [`Keyspace::scan`]
-    pub async fn scan_strip_prefix(&self, limit: Option<usize>) -> Result<Vec<(Bytes, Bytes)>> {
-        let mut pairs = self.scan(limit).await?;
+    pub async fn scan_strip_prefix(
+        &self,
+        limit: Option<usize>,
+        epoch: u64,
+    ) -> Result<Vec<(Bytes, Bytes)>> {
+        let mut pairs = self.scan(limit, epoch).await?;
         pairs
             .iter_mut()
             .for_each(|(k, _v)| *k = k.slice(self.prefix.len()..));
@@ -140,8 +170,10 @@ impl<S: StateStore> Keyspace<S> {
     }
 
     /// Get an iterator with the prefix of this keyspace.
-    pub async fn iter(&self) -> Result<S::Iter> {
-        self.store.iter(self.key()).await
+    /// The returned iterator will iterate data from a snapshot corresponding to the given `epoch`
+    pub async fn iter(&'_ self, epoch: u64) -> Result<S::Iter<'_>> {
+        let range = self.prefix.to_owned()..next_key(self.prefix.as_slice());
+        self.store.iter(range, epoch).await
     }
 
     /// Get the underlying state store.

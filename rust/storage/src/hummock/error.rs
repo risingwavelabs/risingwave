@@ -15,8 +15,6 @@ pub enum HummockError {
     MockError(String),
     #[error("ObjectStore failed with IO error {0}.")]
     ObjectIoError(String),
-    #[error("Invalid HummockContext {0}.")]
-    InvalidHummockContext(i32),
     #[error("Meta error {0}.")]
     MetaError(String),
     #[error("No compact task.")]
@@ -48,10 +46,6 @@ impl HummockError {
 
     pub fn meta_error(error: impl ToString) -> TracedHummockError {
         Self::MetaError(error.to_string()).into()
-    }
-
-    pub fn invalid_hummock_context(context_id: i32) -> TracedHummockError {
-        Self::InvalidHummockContext(context_id).into()
     }
 
     pub fn invalid_write_batch() -> TracedHummockError {

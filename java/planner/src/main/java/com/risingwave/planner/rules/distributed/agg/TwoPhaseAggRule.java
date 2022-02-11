@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 import org.apache.calcite.plan.RelOptRule;
+import org.apache.calcite.plan.RelOptRuleCall;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.convert.ConverterRule;
 import org.apache.calcite.rex.RexNode;
@@ -38,6 +39,17 @@ public class TwoPhaseAggRule extends ConverterRule {
 
   protected TwoPhaseAggRule(Config config) {
     super(config);
+  }
+
+  @Override
+  public boolean matches(RelOptRuleCall call) {
+    var agg = (RwAggregate) call.rel(0);
+    for (var aggCall : agg.getAggCallList()) {
+      if (aggCall.isDistinct()) {
+        return false;
+      }
+    }
+    return true;
   }
 
   @Override
