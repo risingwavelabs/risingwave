@@ -64,8 +64,8 @@ impl Order {
 }
 pub trait WithOrder {
     // use the default impl will not affect correctness, but insert unnecessary Sort in plan
-    fn order(&self) -> Order {
-        Order::any()
+    fn order(&self) -> &Order {
+        &Order::any()
     }
 }
 #[cfg(test)]

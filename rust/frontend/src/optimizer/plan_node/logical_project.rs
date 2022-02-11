@@ -92,12 +92,12 @@ impl ToBatch for LogicalProject {
     }
 }
 impl ToStream for LogicalProject {
-    fn to_stream_with_dist_required(&self, required_dist: Distribution) -> PlanRef {
+    fn to_stream_with_dist_required(&self, required_dist: &Distribution) -> PlanRef {
         let new_input = self.input().to_stream_with_dist_required(required_dist);
         let new_logical = self.clone_with_input(new_input);
         StreamProject::new(new_logical).into_plan_ref()
     }
     fn to_stream(&self) -> PlanRef {
-        self.to_stream_with_dist_required(Distribution::any())
+        self.to_stream_with_dist_required(&Distribution::any())
     }
 }

@@ -20,7 +20,7 @@ impl BatchSortMergeJoin {
     }
 
     // Panic if input orders can't satisfy sortMergeJoin
-    fn derive_order(_left: Order, _right: Order) -> Order {
+    fn derive_order(_left: &Order, _right: &Order) -> Order {
         todo!()
     }
 
@@ -37,7 +37,7 @@ impl BatchSortMergeJoin {
         }
     }
     pub fn right_required_order_from_left_order(
-        _left_order: Order,
+        _left_order: &Order,
         _join_predicate: &JoinPredicate,
     ) -> Order {
         todo!()
@@ -64,8 +64,8 @@ impl PlanTreeNodeBinary for BatchSortMergeJoin {
 impl_plan_tree_node_for_binary! {BatchSortMergeJoin}
 
 impl WithOrder for BatchSortMergeJoin {
-    fn order(&self) -> Order {
-        self.order.clone()
+    fn order(&self) -> &Order {
+        &self.order
     }
 }
 impl WithDistribution for BatchSortMergeJoin {}

@@ -26,7 +26,7 @@ pub trait PlanTreeNode {
     /// return the required [`Distribution`] of each input for the node to matain the
     /// [`Distribution`] property of the current node, Use the default impl will not affect
     /// correctness, but insert unnecessary Exchange in plan
-    fn inputs_distribution_required(&self) -> Vec<Distribution> {
+    fn inputs_distribution_required(&self) -> Vec<&Distribution> {
         self.inputs()
             .into_iter()
             .map(|plan| plan.distribution())
@@ -36,7 +36,7 @@ pub trait PlanTreeNode {
     /// return the required [`Order`] of each input for the node to matain the [`Order`] property of
     /// the current node, Use the default impl will not affect correctness, but insert unnecessary
     /// Sort in plan
-    fn inputs_order_required(&self) -> Vec<Order> {
+    fn inputs_order_required(&self) -> Vec<&Order> {
         self.inputs().into_iter().map(|plan| plan.order()).collect()
     }
 
@@ -45,8 +45,8 @@ pub trait PlanTreeNode {
     /// Exchange in plan.
     // Maybe: maybe the return type should be Vec<Vec<Distribution>>, return all possible
     // combination of inputs' distribution, when a cascades introduced
-    fn dist_pass_through(&self, _required: &Distribution) -> Vec<Distribution> {
-        std::vec::from_elem(Distribution::any(), self.inputs().len())
+    fn dist_pass_through(&self, _required: &Distribution) -> Vec<&Distribution> {
+        std::vec::from_elem(&Distribution::any(), self.inputs().len())
     }
 }
 
@@ -57,15 +57,15 @@ pub trait PlanTreeNodeUnary {
     fn input(&self) -> PlanRef;
     #[must_use]
     fn clone_with_input(&self, input: PlanRef) -> Self;
-    fn input_dist_required(&self) -> Distribution {
+    fn input_dist_required(&self) -> &Distribution {
         self.input().distribution()
     }
-    fn input_order_required(&self) -> Order {
+    fn input_order_required(&self) -> &Order {
         self.input().order()
     }
 
-    fn dist_pass_through_input(&self, _required: &Distribution) -> Distribution {
-        Distribution::any()
+    fn dist_pass_through_input(&self, _required: &Distribution) -> &Distribution {
+        &Distribution::any()
     }
 }
 /// See [`PlanTreeNode`](super)
@@ -76,27 +76,27 @@ pub trait PlanTreeNodeBinary {
     #[must_use]
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self;
 
-    fn left_dist_required(&self) -> Distribution {
+    fn left_dist_required(&self) -> &Distribution {
         self.left().distribution()
     }
 
-    fn right_dist_required(&self) -> Distribution {
+    fn right_dist_required(&self) -> &Distribution {
         self.right().distribution()
     }
 
-    fn left_order_required(&self) -> Order {
+    fn left_order_required(&self) -> &Order {
         self.left().order()
     }
 
-    fn right_order_required(&self) -> Order {
+    fn right_order_required(&self) -> &Order {
         self.right().order()
     }
 
     fn dist_pass_through_left_right(
         &self,
         _required: &Distribution,
-    ) -> (Distribution, Distribution) {
-        (Distribution::any(), Distribution::any())
+    ) -> (&Distribution, &Distribution) {
+        (&Distribution::any(), &Distribution::any())
     }
 }
 
@@ -118,16 +118,16 @@ macro_rules! impl_plan_tree_node_for_leaf {
 
             fn inputs_distribution_required(
                 &self,
-            ) -> Vec<crate::optimizer::property::Distribution> {
+            ) -> Vec<&crate::optimizer::property::Distribution> {
                 vec![]
             }
-            fn inputs_order_required(&self) -> Vec<crate::optimizer::property::Order> {
+            fn inputs_order_required(&self) -> Vec<&crate::optimizer::property::Order> {
                 vec![]
             }
             fn dist_pass_through(
                 &self,
                 _required: &crate::optimizer::property::Distribution,
-            ) -> Vec<crate::optimizer::property::Distribution> {
+            ) -> Vec<&crate::optimizer::property::Distribution> {
                 vec![]
             }
         }
@@ -152,16 +152,16 @@ macro_rules! impl_plan_tree_node_for_unary {
 
             fn inputs_distribution_required(
                 &self,
-            ) -> Vec<crate::optimizer::property::Distribution> {
+            ) -> Vec<&crate::optimizer::property::Distribution> {
                 vec![self.input_dist_required()]
             }
-            fn inputs_order_required(&self) -> Vec<crate::optimizer::property::Order> {
+            fn inputs_order_required(&self) -> Vec<&crate::optimizer::property::Order> {
                 vec![self.input_order_required()]
             }
             fn dist_pass_through(
                 &self,
                 required: &crate::optimizer::property::Distribution,
-            ) -> Vec<crate::optimizer::property::Distribution> {
+            ) -> Vec<&crate::optimizer::property::Distribution> {
                 vec![self.dist_pass_through_input(required)]
             }
         }
@@ -184,16 +184,16 @@ macro_rules! impl_plan_tree_node_for_binary {
             }
             fn inputs_distribution_required(
                 &self,
-            ) -> Vec<crate::optimizer::property::Distribution> {
+            ) -> Vec<&crate::optimizer::property::Distribution> {
                 vec![self.left_dist_required()]
             }
-            fn inputs_order_required(&self) -> Vec<crate::optimizer::property::Order> {
+            fn inputs_order_required(&self) -> Vec<&crate::optimizer::property::Order> {
                 vec![self.right_order_required()]
             }
             fn dist_pass_through(
                 &self,
                 required: &crate::optimizer::property::Distribution,
-            ) -> Vec<crate::optimizer::property::Distribution> {
+            ) -> Vec<&crate::optimizer::property::Distribution> {
                 let (left_dist, right_dist) = self.dist_pass_through_left_right(required);
                 vec![left_dist, right_dist]
             }

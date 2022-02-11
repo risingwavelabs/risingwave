@@ -15,7 +15,7 @@ pub struct BatchSort {
 impl BatchSort {
     pub fn new(input: PlanRef, order: Order) -> Self {
         let schema = input.schema().clone();
-        let dist = input.distribution();
+        let dist = input.distribution().clone();
         BatchSort {
             input,
             order,
@@ -39,13 +39,13 @@ impl PlanTreeNodeUnary for BatchSort {
 }
 impl_plan_tree_node_for_unary! {BatchSort}
 impl WithOrder for BatchSort {
-    fn order(&self) -> Order {
-        self.order.clone()
+    fn order(&self) -> &Order {
+        &self.order
     }
 }
 impl WithDistribution for BatchSort {
-    fn distribution(&self) -> Distribution {
-        self.dist.clone()
+    fn distribution(&self) -> &Distribution {
+        &self.dist
     }
 }
 impl WithSchema for BatchSort {
@@ -57,7 +57,7 @@ impl ToDistributedBatch for BatchSort {
     fn to_distributed(&self) -> PlanRef {
         let new_input = self
             .input()
-            .to_distributed_with_required(self.input_order_required(), Distribution::any());
+            .to_distributed_with_required(&self.input_order_required(), &Distribution::any());
         self.clone_with_input(new_input).into_plan_ref()
     }
 }

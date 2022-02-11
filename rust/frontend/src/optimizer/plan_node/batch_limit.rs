@@ -39,7 +39,7 @@ impl ToDistributedBatch for BatchLimit {
     fn to_distributed(&self) -> PlanRef {
         let new_input = self
             .input()
-            .to_distributed_with_required(self.input_order_required(), Distribution::any());
+            .to_distributed_with_required(&self.input_order_required(), &Distribution::any());
         self.clone_with_input(new_input).into_plan_ref()
     }
 }

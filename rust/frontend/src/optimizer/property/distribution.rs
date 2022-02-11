@@ -70,8 +70,8 @@ impl Distribution {
 }
 pub trait WithDistribution {
     // use the default impl will not affect correctness, but insert unnecessary Exchange in plan
-    fn distribution(&self) -> Distribution {
-        Distribution::any()
+    fn distribution(&self) -> &Distribution {
+        &Distribution::any()
     }
 }
 #[cfg(test)]

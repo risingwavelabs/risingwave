@@ -12,12 +12,12 @@ pub use heuristic::*;
 /// `PlanPass` recive a plan tree and transform to a new one.
 trait PlanPass {
     fn pass(&mut self, plan: PlanRef) -> PlanRef {
-        self.pass_with_require(plan, Order::any(), Distribution::any())
+        self.pass_with_require(plan, &Order::any(), &Distribution::any())
     }
     fn pass_with_require(
         &mut self,
         plan: PlanRef,
-        required_order: Order,
-        required_dist: Distribution,
+        required_order: &Order,
+        required_dist: &Distribution,
     ) -> PlanRef;
 }

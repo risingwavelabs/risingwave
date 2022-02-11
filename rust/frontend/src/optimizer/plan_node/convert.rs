@@ -18,7 +18,7 @@ pub trait ToStream {
     /// `to_stream` is equivalent to `to_stream_with_dist_required(Distribution::any())`
     fn to_stream(&self) -> PlanRef;
     /// convert the plan to streaming physical plan and satisfy the required distribution
-    fn to_stream_with_dist_required(&self, required_dist: Distribution) -> PlanRef {
+    fn to_stream_with_dist_required(&self, required_dist: &Distribution) -> PlanRef {
         let ret = self.to_stream();
         required_dist.enforce_if_not_satisfies(ret, &Order::any())
     }
@@ -37,7 +37,7 @@ pub trait ToBatch {
     /// `to_batch` is equivalent to `to_batch_with_order_required(Order::any())`
     fn to_batch(&self) -> PlanRef;
     /// convert the plan to batch physical plan and satisfy the required Order
-    fn to_batch_with_order_required(&self, required_order: Order) -> PlanRef {
+    fn to_batch_with_order_required(&self, required_order: &Order) -> PlanRef {
         let ret = self.to_batch();
         required_order.enforce_if_not_satisfies(ret)
     }
@@ -60,8 +60,8 @@ pub trait ToDistributedBatch {
     /// insert the exchange in batch physical plan to satisfy the required Distribution and Order.
     fn to_distributed_with_required(
         &self,
-        required_order: Order,
-        required_dist: Distribution,
+        required_order: &Order,
+        required_dist: &Distribution,
     ) -> PlanRef {
         let ret = self.to_distributed();
         let ret = required_order.enforce_if_not_satisfies(ret);
