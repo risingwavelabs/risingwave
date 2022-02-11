@@ -53,7 +53,11 @@ impl HummockMetaClient for MockHummockMetaClient {
         todo!()
     }
 
-    async fn report_compaction_task(&self, _compact_task: CompactTask, _task_result: bool) -> HummockResult<()> {
+    async fn report_compaction_task(
+        &self,
+        _compact_task: CompactTask,
+        _task_result: bool,
+    ) -> HummockResult<()> {
         todo!()
     }
 }
