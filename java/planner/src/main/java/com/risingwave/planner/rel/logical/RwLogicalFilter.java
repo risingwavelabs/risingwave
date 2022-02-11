@@ -14,9 +14,7 @@ import org.apache.calcite.rel.logical.LogicalFilter;
 import org.apache.calcite.rex.RexNode;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
-/**
- * Logical filter for risingwave.
- */
+/** Logical filter for risingwave. */
 public class RwLogicalFilter extends Filter implements RisingWaveLogicalRel {
   protected RwLogicalFilter(
       RelOptCluster cluster, RelTraitSet traits, RelNode child, RexNode condition) {
@@ -35,9 +33,7 @@ public class RwLogicalFilter extends Filter implements RisingWaveLogicalRel {
         input.getCluster(), input.getTraitSet().plus(LOGICAL), input, condition);
   }
 
-  /**
-   * Rule to convert a {@link LogicalFilter} to a {@link RwLogicalFilter}.
-   */
+  /** Rule to convert a {@link LogicalFilter} to a {@link RwLogicalFilter}. */
   public static class RwFilterConverterRule extends ConverterRule {
     public static final RwFilterConverterRule INSTANCE =
         Config.INSTANCE
