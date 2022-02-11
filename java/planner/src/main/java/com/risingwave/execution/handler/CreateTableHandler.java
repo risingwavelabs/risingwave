@@ -42,7 +42,7 @@ import org.apache.calcite.sql.validate.SqlValidator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** Handler of <code>CREATE TABLE</code> statement */
+/** Handler of <code>CREATE TABLE</code> or <code>CREATE TABLE_V2</code> statement */
 @HandlerSignature(sqlKinds = {SqlKind.CREATE_TABLE})
 public class CreateTableHandler implements SqlHandler {
   private static final Logger log = LoggerFactory.getLogger(CreateTableHandler.class);
