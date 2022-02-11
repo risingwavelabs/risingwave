@@ -3,7 +3,6 @@ use risingwave_pb::hummock::SstableInfo;
 use risingwave_storage::hummock::key_range::KeyRange;
 use serde::{Deserialize, Serialize};
 
-// TODO: should store Arc<Table> instead of table_id in SSTableStat
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SSTableStat {
     pub key_range: KeyRange,

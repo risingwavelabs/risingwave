@@ -62,6 +62,9 @@ message ExprNode {
     IS_NOT_NULL = 306;
     // Unary operators
     NEG = 401;
+    // Search operator and Search ARGument
+    SEARCH = 998;
+    SARG = 999;
     STREAM_NULL_BY_ROW_COUNT = 1000;
   }
   Type expr_type = 1;

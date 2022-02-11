@@ -35,15 +35,17 @@ impl BarrierActorInfo {
     }
 
     // TODO: should only collect from reachable actors, for mv on mv
-    pub fn actor_ids_to_collect(&self, node_id: &NodeId) -> Option<impl Iterator<Item = ActorId>> {
+    pub fn actor_ids_to_collect(&self, node_id: &NodeId) -> impl Iterator<Item = ActorId> {
         self.actor_map
             .get(node_id)
             .map(|actor_ids| actor_ids.clone().into_iter())
+            .unwrap_or_else(|| vec![].into_iter())
     }
 
-    pub fn actor_ids_to_send(&self, node_id: &NodeId) -> Option<impl Iterator<Item = ActorId>> {
+    pub fn actor_ids_to_send(&self, node_id: &NodeId) -> impl Iterator<Item = ActorId> {
         self.actor_map_to_send
             .get(node_id)
             .map(|actor_ids| actor_ids.clone().into_iter())
+            .unwrap_or_else(|| vec![].into_iter())
     }
 }
