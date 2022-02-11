@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use bytes::Bytes;
 use itertools::{EitherOrBoth, Itertools};
 use risingwave_common::error::Result;
@@ -10,9 +8,13 @@ use risingwave_storage::hummock::{HummockError, HummockSSTableId, HummockSnapsho
 use serde::{Deserialize, Serialize};
 
 use crate::hummock::level_handler::{LevelHandler, SSTableStat};
-use crate::hummock::{HUMMOCK_COMPACT_STATUS_KEY, HUMMOCK_DEFAULT_CF_NAME};
-use crate::manager::{MetaSrvEnv, SINGLE_VERSION_EPOCH};
-use crate::storage::{ColumnFamilyUtils, Operation, Transaction};
+use crate::hummock::model::HUMMOCK_DEFAULT_CF_NAME;
+use crate::manager::SINGLE_VERSION_EPOCH;
+use crate::storage::{ColumnFamilyUtils, MetaStore, Operation, Transaction};
+
+/// Hummock `compact_status` key
+/// `cf(hummock_default)`: `hummock_compact_status_key` -> `CompactStatus`
+pub(crate) const HUMMOCK_COMPACT_STATUS_KEY: &str = "compact_status";
 
 // TODO define CompactStatus in prost instead
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
@@ -21,46 +23,43 @@ pub struct CompactStatus {
     pub(crate) next_compact_task_id: u64,
 }
 
-pub(crate) struct CompactionInner {
-    env: MetaSrvEnv,
-}
-
-impl CompactionInner {
-    pub fn new(env: MetaSrvEnv) -> CompactionInner {
-        CompactionInner { env }
+impl CompactStatus {
+    pub fn new() -> CompactStatus {
+        let vec_handler_having_l0 = vec![
+            LevelHandler::Overlapping(vec![], vec![]),
+            LevelHandler::Nonoverlapping(vec![], vec![]),
+        ];
+        CompactStatus {
+            level_handlers: vec_handler_having_l0,
+            next_compact_task_id: 1,
+        }
     }
 
-    pub async fn load_compact_status(&self) -> Result<CompactStatus> {
-        self.env
-            .meta_store()
+    pub async fn get(meta_store_ref: &dyn MetaStore) -> Result<CompactStatus> {
+        meta_store_ref
             .get_cf(
                 HUMMOCK_DEFAULT_CF_NAME,
                 HUMMOCK_COMPACT_STATUS_KEY.as_bytes(),
                 SINGLE_VERSION_EPOCH,
             )
             .await
+            // TODO replace unwrap
             .map(|v| bincode::deserialize(&v).unwrap())
     }
 
-    pub fn save_compact_status_in_transaction(
-        &self,
-        trx: &mut Transaction,
-        compact_status: &CompactStatus,
-    ) {
+    pub fn update(&self, trx: &mut Transaction) {
         trx.add_operations(vec![Operation::Put(
             ColumnFamilyUtils::prefix_key_with_cf(
                 HUMMOCK_COMPACT_STATUS_KEY.as_bytes(),
-                HUMMOCK_DEFAULT_CF_NAME.as_bytes(),
+                HUMMOCK_DEFAULT_CF_NAME,
             ),
-            bincode::serialize(&compact_status).unwrap(),
+            // TODO replace unwrap
+            bincode::serialize(&self).unwrap(),
             None,
         )]);
     }
 
-    pub async fn get_compact_task(
-        &self,
-        mut compact_status: CompactStatus,
-    ) -> Result<(CompactStatus, CompactTask)> {
+    pub async fn get_compact_task(&mut self) -> Result<CompactTask> {
         let select_level = 0u32;
 
         enum SearchResult {
@@ -69,10 +68,8 @@ impl CompactionInner {
         }
 
         let mut found = SearchResult::NotFound;
-        let next_task_id = compact_status.next_compact_task_id;
-        let (prior, posterior) = compact_status
-            .level_handlers
-            .split_at_mut(select_level as usize + 1);
+        let next_task_id = self.next_compact_task_id;
+        let (prior, posterior) = self.level_handlers.split_at_mut(select_level as usize + 1);
         let (prior, posterior) = (prior.last_mut().unwrap(), posterior.first_mut().unwrap());
         let is_select_level_leveling = matches!(prior, LevelHandler::Nonoverlapping(_, _));
         let target_level = select_level + 1;
@@ -244,7 +241,7 @@ impl CompactionInner {
         }
         match found {
             SearchResult::Found(select_ln_ids, select_lnsuc_ids, splits) => {
-                compact_status.next_compact_task_id += 1;
+                self.next_compact_task_id += 1;
                 let compact_task = CompactTask {
                     input_ssts: vec![
                         LevelEntry {
@@ -282,10 +279,10 @@ impl CompactionInner {
                     task_id: next_task_id,
                     target_level,
                     is_target_ultimate_and_leveling: target_level as usize
-                        == compact_status.level_handlers.len() - 1
+                        == self.level_handlers.len() - 1
                         && is_target_level_leveling,
                 };
-                Ok((compact_status, compact_task))
+                Ok(compact_task)
             }
             SearchResult::NotFound => Err(HummockError::no_compact_task_found().into()),
         }
@@ -293,23 +290,22 @@ impl CompactionInner {
 
     #[allow(clippy::needless_collect)]
     pub fn report_compact_task(
-        &self,
-        mut compact_status: CompactStatus,
+        &mut self,
         output_table_compact_entries: Vec<SSTableStat>,
         compact_task: CompactTask,
         task_result: bool,
-    ) -> (CompactStatus, Vec<SstableInfo>, Vec<HummockSSTableId>) {
+    ) -> (Vec<SstableInfo>, Vec<HummockSSTableId>) {
         let mut delete_table_ids = vec![];
         match task_result {
             true => {
                 for LevelEntry { level_idx, .. } in compact_task.input_ssts {
                     delete_table_ids.extend(
-                        compact_status.level_handlers[level_idx as usize]
+                        self.level_handlers[level_idx as usize]
                             .pop_task_input(compact_task.task_id)
                             .into_iter(),
                     );
                 }
-                match &mut compact_status.level_handlers[compact_task.target_level as usize] {
+                match &mut self.level_handlers[compact_task.target_level as usize] {
                     LevelHandler::Overlapping(l_n, _) | LevelHandler::Nonoverlapping(l_n, _) => {
                         let old_ln = std::mem::take(l_n);
                         *l_n = itertools::merge_join_by(
@@ -325,18 +321,14 @@ impl CompactionInner {
                         .collect();
                     }
                 }
-                (
-                    compact_status,
-                    compact_task.sorted_output_ssts,
-                    delete_table_ids,
-                )
+                (compact_task.sorted_output_ssts, delete_table_ids)
             }
             false => {
                 // TODO: loop only in input levels
-                for level_handler in &mut compact_status.level_handlers {
+                for level_handler in &mut self.level_handlers {
                     level_handler.unassign_task(compact_task.task_id);
                 }
-                (compact_status, vec![], vec![])
+                (vec![], vec![])
             }
         }
     }

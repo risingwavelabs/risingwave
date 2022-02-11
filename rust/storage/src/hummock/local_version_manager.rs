@@ -10,7 +10,7 @@ use super::Block;
 use crate::hummock::cloud::{get_sst_data_path, get_sst_meta};
 use crate::hummock::{
     HummockMetaClient, HummockRefCount, HummockResult, HummockSSTableId, HummockVersionId, SSTable,
-    INVALID_EPOCH, INVALID_VERSION,
+    FIRST_VERSION_ID, INVALID_EPOCH,
 };
 use crate::object::ObjectStore;
 
@@ -113,8 +113,9 @@ impl LocalVersionManager {
         };
         // Insert an artificial empty version.
         instance.inner.lock().pinned_versions.insert(
-            INVALID_VERSION,
+            FIRST_VERSION_ID,
             Arc::new(HummockVersion {
+                id: FIRST_VERSION_ID,
                 levels: vec![],
                 uncommitted_epochs: vec![],
                 max_committed_epoch: INVALID_EPOCH,
@@ -159,7 +160,7 @@ impl LocalVersionManager {
 
         // Unpin versions with ref_count = 0 except for the greatest version in storage service.
         for version_id in versions_to_unpin {
-            if version_id == INVALID_VERSION {
+            if version_id == FIRST_VERSION_ID {
                 // Edge case. This is an artificial version.
                 continue;
             }
