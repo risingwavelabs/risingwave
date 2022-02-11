@@ -90,24 +90,39 @@ mod tests {
 
     fn new_histogram(upper_bound: u64) -> Histogram {
         let registry = Registry::new();
-        let buckets = (1..upper_bound).map(|x| x as f64).collect::<Vec<f64>>();
+        let buckets = (1..=upper_bound).map(|x| x as f64).collect::<Vec<f64>>();
         let opts = histogram_opts!("test_histogram", "test_histogram", buckets);
 
         let histogram = register_histogram_with_registry!(opts, registry).unwrap();
 
-        for value in 1..upper_bound {
+        for value in 1..=upper_bound {
             histogram.observe(value as f64);
         }
+        
         histogram
     }
 
     #[test]
     fn test_proc_histogram1000() {
-        let histogram = new_histogram(1000);
+        let histogram = new_histogram(999);
         assert_eq!(get_percentile(&histogram, 50.0) as u64, 500);
         assert_eq!(get_percentile(&histogram, 90.0) as u64, 900);
         assert_eq!(get_percentile(&histogram, 99.0) as u64, 990);
         assert_eq!(get_percentile(&histogram, 99.9) as u64, 999);
         assert_eq!(get_percentile(&histogram, 100.0) as u64, 999);
+
+        let histogram = new_histogram(1000);
+        assert_eq!(get_percentile(&histogram, 50.0) as u64, 500);
+        assert_eq!(get_percentile(&histogram, 90.0) as u64, 900);
+        assert_eq!(get_percentile(&histogram, 99.0) as u64, 990);
+        assert_eq!(get_percentile(&histogram, 99.9) as u64, 1000);
+        assert_eq!(get_percentile(&histogram, 100.0) as u64, 1000);
+
+        let histogram = new_histogram(10000);
+        assert_eq!(get_percentile(&histogram, 50.0) as u64, 5000);
+        assert_eq!(get_percentile(&histogram, 90.0) as u64, 9000);
+        assert_eq!(get_percentile(&histogram, 99.0) as u64, 9900);
+        assert_eq!(get_percentile(&histogram, 99.9) as u64, 9991);
+        assert_eq!(get_percentile(&histogram, 100.0) as u64, 10000);
     }
 }
