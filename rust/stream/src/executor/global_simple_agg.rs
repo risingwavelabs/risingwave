@@ -218,7 +218,7 @@ mod tests {
     use risingwave_common::expr::*;
     use risingwave_common::types::*;
 
-    use super::*;
+    use global_simple_agg::*;
     use crate::executor::test_utils::*;
     use crate::executor::*;
     use crate::*;

@@ -29,7 +29,7 @@ use risingwave_pb::data::{
     Actors as MutationActors, AddMutation, Barrier as ProstBarrier, NothingMutation, StopMutation,
     StreamMessage as ProstStreamMessage, UpdateMutation,
 };
-pub use simple_agg::*;
+pub use global_simple_agg::*;
 use smallvec::SmallVec;
 pub use stream_source::*;
 pub use top_n::*;
@@ -53,7 +53,7 @@ mod merge;
 pub mod monitor;
 mod mview;
 mod project;
-mod simple_agg;
+mod global_simple_agg;
 mod stream_source;
 mod top_n;
 mod top_n_appendonly;
