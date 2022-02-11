@@ -126,6 +126,16 @@ jobs:
           ~/cargo-make/makers k
           ~/cargo-make/makers logs
           ~/cargo-make/makers check-logs
+      - name: e2e test batch 1-node (table_v2)
+        run: |
+          ~/cargo-make/makers clean-data
+          ~/cargo-make/makers ci-streaming
+          sqllogictest -p 4567 -d dev './e2e_test/batch/**/*.slt'
+      - name: Kill cluster
+        run: |
+          ~/cargo-make/makers k
+          ~/cargo-make/makers logs
+          ~/cargo-make/makers check-logs
       - name: e2e test batch 3-node (table_v1)
         run: |
           ~/cargo-make/makers clean-data
