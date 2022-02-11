@@ -98,7 +98,7 @@ mod tests {
         for value in 1..=upper_bound {
             histogram.observe(value as f64);
         }
-        
+
         histogram
     }
 
