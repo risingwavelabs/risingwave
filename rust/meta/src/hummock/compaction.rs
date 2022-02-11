@@ -47,7 +47,7 @@ impl CompactStatus {
             .map(|v| bincode::deserialize(&v).unwrap())
     }
 
-    pub fn update(&self, trx: &mut Transaction) {
+    pub fn update_in_transaction(&self, trx: &mut Transaction) {
         trx.add_operations(vec![Operation::Put(
             ColumnFamilyUtils::prefix_key_with_cf(
                 HUMMOCK_COMPACT_STATUS_KEY.as_bytes(),
