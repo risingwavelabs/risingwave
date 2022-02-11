@@ -128,7 +128,7 @@ impl BarrierManager {
 
             let all_nodes = self
                 .cluster_manager
-                .list_worker_node(WorkerType::ComputeNode)?;
+                .list_worker_node(WorkerType::ComputeNode);
             let all_actor_infos = self.fragment_manager.load_all_actors()?;
 
             let info = BarrierActorInfo::resolve(&all_nodes, all_actor_infos);
@@ -156,13 +156,13 @@ impl BarrierManager {
             let epoch = self.epoch_generator.generate()?.into_inner();
 
             let collect_futures = info.node_map.iter().filter_map(|(node_id, node)| {
-                if let (Some(actor_ids_to_send), Some(actor_ids_to_collect)) = (
-                    info.actor_ids_to_send(node_id),
-                    info.actor_ids_to_collect(node_id),
-                ) {
-                    let actor_ids_to_send = actor_ids_to_send.collect_vec();
-                    let actor_ids_to_collect = actor_ids_to_collect.collect_vec();
+                let actor_ids_to_send = info.actor_ids_to_send(node_id).collect_vec();
+                let actor_ids_to_collect = info.actor_ids_to_collect(node_id).collect_vec();
 
+                if actor_ids_to_send.is_empty() || actor_ids_to_collect.is_empty() {
+                    // No need to send barrier for this node.
+                    None
+                } else {
                     let mutation = mutation.clone();
                     let request_id = Uuid::new_v4().to_string();
                     let barrier = Barrier {
@@ -190,9 +190,6 @@ impl BarrierManager {
                         Ok::<_, RwError>(())
                     }
                     .into()
-                } else {
-                    // No need to send barrier for this node.
-                    None
                 }
             });
 

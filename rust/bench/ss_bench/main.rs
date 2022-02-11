@@ -8,8 +8,9 @@ use moka::future::Cache;
 use operations::*;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
+use risingwave_rpc_client::MetaClient;
+use risingwave_storage::hummock::hummock_meta_client::RPCHummockMetaClient;
 use risingwave_storage::hummock::local_version_manager::LocalVersionManager;
-use risingwave_storage::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
 use risingwave_storage::hummock::version_manager::VersionManager;
 use risingwave_storage::hummock::{HummockOptions, HummockStateStore, HummockStorage};
 use risingwave_storage::memory::MemoryStateStore;
@@ -107,6 +108,8 @@ pub(crate) enum StateStoreImpl {
 }
 
 async fn get_state_store_impl(opts: &Opts) -> Result<StateStoreImpl> {
+    let meta_address = "127.0.0.1:5691";
+
     let instance = match opts.store.as_ref() {
         "in-memory" | "in_memory" => StateStoreImpl::Memory(MemoryStateStore::new()),
         tikv if tikv.starts_with("tikv") => StateStoreImpl::Tikv(TikvStateStore::new(vec![tikv
@@ -118,6 +121,9 @@ async fn get_state_store_impl(opts: &Opts) -> Result<StateStoreImpl> {
                 minio.strip_prefix("hummock+").unwrap(),
             ));
             let remote_dir = "hummock_001";
+            let hummock_meta_client = Arc::new(RPCHummockMetaClient::new(
+                MetaClient::new(meta_address).await?,
+            ));
             StateStoreImpl::Hummock(HummockStateStore::new(
                 HummockStorage::new(
                     object_client.clone(),
@@ -134,9 +140,7 @@ async fn get_state_store_impl(opts: &Opts) -> Result<StateStoreImpl> {
                         remote_dir,
                         Some(Arc::new(Cache::new(65536))),
                     )),
-                    Arc::new(MockHummockMetaClient::new(Arc::new(
-                        MockHummockMetaService::new(),
-                    ))),
+                    hummock_meta_client,
                 )
                 .await
                 .map_err(RwError::from)?,
@@ -149,6 +153,9 @@ async fn get_state_store_impl(opts: &Opts) -> Result<StateStoreImpl> {
                 s3.strip_prefix("hummock+s3://").unwrap().to_string(),
             ));
             let remote_dir = "hummock_001";
+            let hummock_meta_client = Arc::new(RPCHummockMetaClient::new(
+                MetaClient::new(meta_address).await?,
+            ));
             StateStoreImpl::Hummock(HummockStateStore::new(
                 HummockStorage::new(
                     s3_store.clone(),
@@ -165,9 +172,7 @@ async fn get_state_store_impl(opts: &Opts) -> Result<StateStoreImpl> {
                         remote_dir,
                         Some(Arc::new(Cache::new(65536))),
                     )),
-                    Arc::new(MockHummockMetaClient::new(Arc::new(
-                        MockHummockMetaService::new(),
-                    ))),
+                    hummock_meta_client,
                 )
                 .await
                 .map_err(RwError::from)?,

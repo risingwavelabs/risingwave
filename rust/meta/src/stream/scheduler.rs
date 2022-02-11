@@ -53,7 +53,7 @@ impl Scheduler {
     ) -> Result<Vec<WorkerNode>> {
         let nodes = self
             .cluster_manager
-            .list_worker_node(WorkerType::ComputeNode)?;
+            .list_worker_node(WorkerType::ComputeNode);
         if nodes.is_empty() {
             return Err(InternalError("no available node exist".to_string()).into());
         }
@@ -116,7 +116,7 @@ mod test {
                 )
                 .await?;
         }
-        let workers = cluster_manager.list_worker_node(WorkerType::ComputeNode)?;
+        let workers = cluster_manager.list_worker_node(WorkerType::ComputeNode);
 
         let simple_schedule = Scheduler::new(ScheduleCategory::Simple, cluster_manager.clone());
         let nodes = simple_schedule.schedule(&actors, &[]).await?;

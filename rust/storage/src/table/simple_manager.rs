@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use risingwave_common::array::InternalError;
 use risingwave_common::catalog::{Schema, TableId};
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::{ensure, gen_error};
 use risingwave_pb::plan::ColumnDesc;
@@ -145,7 +145,17 @@ impl TableManager for SimpleTableManager {
         let mut tables = self.lock_tables();
         let table = tables
             .get(associated_table_id)
-            .expect("no associated table")
+            .ok_or_else(|| {
+                // TODO: make this "panic"
+                ErrorCode::CatalogError(
+                    anyhow::anyhow!(
+                        "associated table {:?} for table_v2 {:?} not exist",
+                        associated_table_id,
+                        mview_id
+                    )
+                    .into(),
+                )
+            })?
             .clone();
 
         // Simply associate the mview id to the table

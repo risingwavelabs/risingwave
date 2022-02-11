@@ -10,7 +10,7 @@ use super::version_cmp::VersionedComparator;
 pub struct KeyRange {
     pub left: Bytes,
     pub right: Bytes,
-    inf: bool,
+    pub inf: bool,
 }
 
 impl KeyRange {
