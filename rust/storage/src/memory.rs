@@ -154,6 +154,7 @@ impl StateStore for MemoryStateStore {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]>,
     {
+        self.stats.range_scan_counts.inc();
         self.scan_inner(key_range, limit).await
     }
 
@@ -167,12 +168,30 @@ impl StateStore for MemoryStateStore {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]>,
     {
+        self.stats.reverse_range_scan_counts.inc();
         self.reverse_scan_inner(key_range, limit).await
     }
 
     async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>, _epoch: u64) -> Result<()> {
         // TODO: actually use epoch and support rollback
-        self.ingest_batch_inner(kv_pairs).await
+        self.stats.batched_write_counts.inc();
+        let batch_write_tuple_counts = kv_pairs.len();
+        let timer = self.stats.batch_write_latency.start_timer();
+        // use estimated size in order to be faster
+        let batch_write_size = size_of_val(&kv_pairs);
+
+        let res = self.ingest_batch_inner(kv_pairs).await;
+
+        timer.observe_duration();
+
+        if res.is_ok() {
+            self.stats
+                .batch_write_tuple_counts
+                .inc_by(batch_write_tuple_counts as u64);
+            self.stats.batch_write_size.observe(batch_write_size as f64);
+        }
+
+        res
     }
 
     async fn iter<R, B>(&self, key_range: R, _epoch: u64) -> Result<Self::Iter<'_>>

@@ -4,7 +4,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::hummock::{CompactTask, Level, LevelEntry, LevelType, SstableInfo};
 use risingwave_storage::hummock::key::{user_key, FullKey};
 use risingwave_storage::hummock::key_range::KeyRange;
-use risingwave_storage::hummock::{HummockError, HummockSSTableId, HummockSnapshotId};
+use risingwave_storage::hummock::{HummockSSTableId, HummockSnapshotId};
 use serde::{Deserialize, Serialize};
 
 use crate::hummock::level_handler::{LevelHandler, SSTableStat};
@@ -47,7 +47,7 @@ impl CompactStatus {
             .map(|v| bincode::deserialize(&v).unwrap())
     }
 
-    pub fn update(&self, trx: &mut Transaction) {
+    pub fn update_in_transaction(&self, trx: &mut Transaction) {
         trx.add_operations(vec![Operation::Put(
             ColumnFamilyUtils::prefix_key_with_cf(
                 HUMMOCK_COMPACT_STATUS_KEY.as_bytes(),
@@ -59,7 +59,7 @@ impl CompactStatus {
         )]);
     }
 
-    pub async fn get_compact_task(&mut self) -> Result<CompactTask> {
+    pub fn get_compact_task(&mut self) -> Option<CompactTask> {
         let select_level = 0u32;
 
         enum SearchResult {
@@ -282,9 +282,9 @@ impl CompactStatus {
                         == self.level_handlers.len() - 1
                         && is_target_level_leveling,
                 };
-                Ok(compact_task)
+                Some(compact_task)
             }
-            SearchResult::NotFound => Err(HummockError::no_compact_task_found().into()),
+            SearchResult::NotFound => None,
         }
     }
 
