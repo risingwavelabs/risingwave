@@ -332,7 +332,7 @@ macro_rules! impl_fold_agg {
             }
 
             fn reset(&mut self) {
-                self.result = None;
+                self.result = S::initial();
             }
         }
     };
