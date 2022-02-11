@@ -70,13 +70,13 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
   }
 
   @Override
-  public SqlNode visitCreateTableV2(CreateTableV2<?> node, Void context) {
+  public SqlNode visitCreateTableV1(CreateTableV1<?> node, Void context) {
     boolean ifNotExists = node.ifNotExists();
     SqlIdentifier name = visitTable(node.name(), context);
     SqlNodeList columnList =
         sqlNodeListOf(Lists2.map(node.tableElements(), column -> column.accept(this, context)));
 
-    return new SqlCreateTableV2(SqlParserPos.ZERO, false, ifNotExists, name, columnList, null);
+    return new SqlCreateTableV1(SqlParserPos.ZERO, false, ifNotExists, name, columnList, null);
   }
 
   @Override
