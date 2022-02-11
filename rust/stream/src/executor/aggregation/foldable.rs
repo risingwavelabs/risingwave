@@ -122,8 +122,7 @@ where
         Ok(match (result, input) {
             (Some(x), Some(_)) => Some(x + 1),
             (Some(x), None) => Some(*x),
-            // this is not possible, as initial value of countable is `0`.
-            _ => unreachable!(),
+            _ => unreachable!("count initial value is 0"),
         })
     }
 
@@ -131,8 +130,7 @@ where
         Ok(match (result, input) {
             (Some(x), Some(_)) => Some(x - 1),
             (Some(x), None) => Some(*x),
-            // this is not possible, as initial value of countable is `0`.
-            _ => unreachable!(),
+            _ => unreachable!("count initial value is 0"),
         })
     }
 
