@@ -11,6 +11,7 @@ import org.apache.calcite.rel.core.Aggregate;
 import org.apache.calcite.rel.core.AggregateCall;
 import org.apache.calcite.rel.hint.RelHint;
 import org.apache.calcite.rel.logical.LogicalAggregate;
+import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.util.ImmutableBitSet;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
@@ -42,6 +43,16 @@ public class RwLogicalAggregate extends Aggregate implements RisingWaveLogicalRe
   /** An Aggregate is simple if there is no group keys */
   public boolean isSimpleAgg() {
     return groupSet.isEmpty();
+  }
+
+  /** An aggregate can be executed use two-phase iff all aggregation calls are stateless. * */
+  public boolean streamingCanTwoPhase() {
+    return getAggCallList().stream()
+        .allMatch(
+            (agg) -> {
+              var kind = agg.getAggregation().getKind();
+              return kind == SqlKind.SUM || kind == SqlKind.COUNT;
+            });
   }
 
   /** Rule to convert a Stream LogicalAggregate to RwLogicalAggregate */
