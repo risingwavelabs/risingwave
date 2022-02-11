@@ -1,5 +1,7 @@
 use std::convert::Infallible;
 use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
 
 use bytes::Bytes;
 use hyper::body::HttpBody;
@@ -73,8 +75,6 @@ async fn test_prometheus_endpoint_hummock() {
         hummock_storage.get(&anchor, epoch).await.unwrap().unwrap(),
         Bytes::from("111")
     );
-    let notifier = Arc::new(tokio::sync::Notify::new());
-    let notifiee = notifier.clone();
 
     let make_svc = make_service_fn(move |_| {
         let registry = prometheus::default_registry();
@@ -88,13 +88,13 @@ async fn test_prometheus_endpoint_hummock() {
     let server = Server::bind(&host_addr.parse().unwrap()).serve(make_svc);
 
     tokio::spawn(async move {
-        notifier.notify_one();
         if let Err(err) = server.await {
             eprintln!("server error: {}", err);
         }
     });
 
-    notifiee.notified().await;
+    // ensure that the Prometheus endpoint is up and running
+    thread::sleep(Duration::from_millis(1000));
     let client = Client::new();
     let uri = "http://127.0.0.1:1222/metrics".parse().unwrap();
     let mut response = client.get(uri).await.unwrap();
