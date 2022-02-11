@@ -299,7 +299,6 @@ mod tests {
             &options.remote_dir,
             None,
         ));
-        let _target_table_size = options.sstable_size;
         let hummock_meta_client = Arc::new(MockHummockMetaClient::new(Arc::new(
             MockHummockMetaService::new(),
         )));
