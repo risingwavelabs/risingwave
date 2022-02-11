@@ -53,7 +53,7 @@ public class CreateMaterializedViewHandlerTest {
             .build();
     String sql = "create table t(v1 int not null, v2 int not null, v3 float not null)";
     SqlNode ast = SqlParser.createCalciteStatement(sql);
-    var handler = ((CreateTableHandler) sqlHandlerFactory.create(ast, executionContext));
+    var handler = ((CreateTableV1Handler) sqlHandlerFactory.create(ast, executionContext));
     handler.execute(ast, executionContext);
   }
 

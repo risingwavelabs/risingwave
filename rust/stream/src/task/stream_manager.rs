@@ -422,7 +422,7 @@ impl StreamManagerCore {
                     executor_id,
                 )?))
             }
-            SimpleAggNode(aggr_node) => {
+            GlobalSimpleAggNode(aggr_node) => {
                 let agg_calls: Vec<AggCall> = aggr_node
                     .get_agg_calls()
                     .iter()
