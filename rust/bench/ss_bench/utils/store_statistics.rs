@@ -27,10 +27,12 @@ fn get_percentile(histogram: &Histogram, p: f64) -> f64 {
         if count >= threshold {
             // assume scale linearly within this bucket,
             // return a value bwtween last_upper_bound and upper_bound
-
             let right_left_diff = upper_bound - last_upper_bound;
             return last_upper_bound
-                + right_left_diff * (threshold - last_count) as f64 / (count - last_count) as f64;
+                + right_left_diff
+                    // * ((threshold - last_count) as f64 / (count - last_count) as f64);
+                    * (threshold - last_count) as f64
+                    / (count - last_count) as f64;
         }
         last_upper_bound = upper_bound;
         last_count = count;
@@ -57,8 +59,6 @@ pub(crate) fn print_statistics() {
 
     let stat = DEFAULT_STATE_STORE_STATS.clone();
 
-    // print!("{:#?}", stat);
-
     // ----- TODO(Ting Sun): use macro to simplify the implementation -----
     proc_counter(&stat.get_counts);
     proc_counter(&stat.range_scan_counts);
@@ -84,44 +84,30 @@ pub(crate) fn print_statistics() {
 
 #[cfg(test)]
 mod tests {
-    use prometheus::{histogram_opts, register_histogram_with_registry};
+    use prometheus::{histogram_opts, register_histogram_with_registry, Registry};
 
     use super::*;
 
-    struct Stats {
-        pub hist: Histogram,
-    }
+    fn new_histogram(upper_bound: u64) -> Histogram {
+        let registry = Registry::new();
+        let buckets = (1..upper_bound).map(|x| x as f64).collect::<Vec<f64>>();
+        let opts = histogram_opts!("test_histogram", "test_histogram", buckets);
 
-    impl Stats {
-        fn new(upper_bound: u64) -> Self {
-            let registry = prometheus::default_registry();
-            let buckets = (1 ..upper_bound + 1)
-                .map(|x| x as f64)
-                .collect::<Vec<f64>>();
-            let opts = histogram_opts!("test_histogram", "test histogram", buckets);
-            let hist = register_histogram_with_registry!(opts, &registry).unwrap();
+        let histogram = register_histogram_with_registry!(opts, registry).unwrap();
 
-            Stats { hist }
-        }
-    }
-
-    #[test]
-    fn test_proc_histogram() {
-        let upper_bound = 1000;
-        let stat = Stats::new(upper_bound);
-        let histogram = &stat.hist;
         for value in 1..upper_bound {
             histogram.observe(value as f64);
         }
+        histogram
+    }
 
-        println!("{:?}", get_percentile(histogram, 50.0));
-        println!("{:?}", get_percentile(histogram, 90.0));
-        println!("{:?}", get_percentile(histogram, 99.0));
-        println!("{:?}", get_percentile(histogram, 99.9));
-
-        assert_eq!(get_percentile(histogram, 50.0).ceil() as u64, 501);
-        assert_eq!(get_percentile(histogram, 90.0).ceil() as u64, 901);
-        assert_eq!(get_percentile(histogram, 99.0).ceil() as u64, 991);
-        assert_eq!(get_percentile(histogram, 99.9).ceil() as u64, 999);
+    #[test]
+    fn test_proc_histogram1000() {
+        let histogram = new_histogram(1000);
+        assert_eq!(get_percentile(&histogram, 50.0) as u64, 500);
+        assert_eq!(get_percentile(&histogram, 90.0) as u64, 900);
+        assert_eq!(get_percentile(&histogram, 99.0) as u64, 990);
+        assert_eq!(get_percentile(&histogram, 99.9) as u64, 999);
+        assert_eq!(get_percentile(&histogram, 100.0) as u64, 999);
     }
 }
