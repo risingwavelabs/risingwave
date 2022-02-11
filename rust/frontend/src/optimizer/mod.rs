@@ -1,13 +1,12 @@
 #![allow(dead_code)]
 pub mod plan_node;
 pub use plan_node::PlanRef;
-use risingwave_common::catalog::Schema;
-use risingwave_pb::plan::exchange_info::Distribution;
-
-use self::property::Order;
 pub mod plan_pass;
 pub mod property;
 pub mod rule;
+
+use property::{Distribution, Order};
+use risingwave_common::catalog::Schema;
 
 #[derive(Debug, Clone)]
 /// `PlanRoot` is used to describe a plan. planner will construct a `PlanRoot` with LogicalNode and
@@ -93,12 +92,12 @@ impl PlanRoot {
     }
 
     /// optimize and generate a batch query plan
-    pub fn gen_batch_query_plan() -> PlanRef {
+    pub fn gen_batch_query_plan(&self) -> PlanRef {
         todo!()
     }
 
     /// optimize and generate a create materialize view plan
-    pub fn gen_create_mv_plan() -> PlanRef {
+    pub fn gen_create_mv_plan(&self) -> PlanRef {
         todo!()
     }
 }
