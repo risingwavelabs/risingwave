@@ -157,7 +157,7 @@ fn make_stream_node() -> StreamNode {
 
     // simple agg node
     let simple_agg_node = StreamNode {
-        node: Some(Node::SimpleAggNode(SimpleAggNode {
+        node: Some(Node::GlobalSimpleAggNode(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
         })),
         input: vec![filter_node],
@@ -184,7 +184,7 @@ fn make_stream_node() -> StreamNode {
 
     // agg node
     let simple_agg_node_1 = StreamNode {
-        node: Some(Node::SimpleAggNode(SimpleAggNode {
+        node: Some(Node::GlobalSimpleAggNode(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
         })),
         input: vec![exchange_node_1],
