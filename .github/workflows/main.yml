@@ -51,8 +51,8 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           directory: java
           flags: java
-  end-to-end-riselab:
-    name: e2e-test-riselab
+  end-to-end-risedev:
+    name: e2e-test-risedev
     needs:
       - compute-node-build
       - frontend-check
@@ -146,8 +146,8 @@ jobs:
         with:
           path: .risingwave/log/
           name: risedev-logs
-  end-to-end:
-    name: e2e-test
+  end-to-end-source:
+    name: e2e-test-source
     needs:
       - compute-node-build
       - frontend-check
