@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use async_trait::async_trait;
 use risingwave_pb::hummock::{HummockVersion, SstableInfo};
 use risingwave_storage::hummock::hummock_meta_client::HummockMetaClient;
