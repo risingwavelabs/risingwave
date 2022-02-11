@@ -18,8 +18,13 @@ import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.util.Sarg;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
+/**
+ * Utility methods for RexNode.
+ */
 public class RisingWaveRexUtil {
-  /** Expands all the calls to {@link SqlStdOperatorTable#SEARCH} in an expression. */
+  /**
+   * Expands all the calls to {@link SqlStdOperatorTable#SEARCH} in an expression.
+   */
   public static RexNode expandSearch(
       RexBuilder rexBuilder, @Nullable RexProgram program, RexNode node) {
     return expandSearch(rexBuilder, program, node, -1);
@@ -63,7 +68,7 @@ public class RisingWaveRexUtil {
       final boolean[] update = {false};
       final List<RexNode> clonedOperands;
       switch (call.getKind()) {
-          // Flatten AND/OR operands.
+        // Flatten AND/OR operands.
         case OR:
           clonedOperands = visitList(call.operands, update);
           if (update[0]) {
