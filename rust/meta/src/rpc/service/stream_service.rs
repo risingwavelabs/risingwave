@@ -52,7 +52,8 @@ impl StreamManagerService for StreamServiceImpl {
             .cluster_manager
             .get_worker_count(WorkerType::ComputeNode);
 
-        let mut fragmenter = StreamFragmenter::new(self.id_gen_manager_ref.clone(), worker_count as u32);
+        let mut fragmenter =
+            StreamFragmenter::new(self.id_gen_manager_ref.clone(), worker_count as u32);
         let graph = fragmenter
             .generate_graph(req.get_stream_node().map_err(tonic_err)?)
             .await
