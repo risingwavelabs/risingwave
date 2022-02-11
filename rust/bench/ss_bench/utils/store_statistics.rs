@@ -29,10 +29,7 @@ fn get_percentile(histogram: &Histogram, p: f64) -> f64 {
             // return a value bwtween last_upper_bound and upper_bound
             let right_left_diff = upper_bound - last_upper_bound;
             return last_upper_bound
-                + right_left_diff
-                    // * ((threshold - last_count) as f64 / (count - last_count) as f64);
-                    * (threshold - last_count) as f64
-                    / (count - last_count) as f64;
+                + right_left_diff * (threshold - last_count) as f64 / (count - last_count) as f64;
         }
         last_upper_bound = upper_bound;
         last_count = count;
