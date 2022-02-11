@@ -68,6 +68,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         ConstantValue => LiteralExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
         InputRef => InputRefExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
         Case => build_case_expr(prost),
+        Translate => build_translate_expr(prost),
         _ => Err(InternalError(format!(
             "Unsupported expression type: {:?}",
             prost.get_expr_type()

@@ -7,7 +7,7 @@ use crate::expr::expr_binary_bytes::new_substr_start;
 use crate::expr::expr_binary_nonnull::{new_binary_expr, new_like_default, new_position_expr};
 use crate::expr::expr_binary_nullable::new_nullable_binary_expr;
 use crate::expr::expr_case::{CaseExpression, WhenClause};
-use crate::expr::expr_ternary_bytes::{new_replace_expr, new_substr_start_end};
+use crate::expr::expr_ternary_bytes::{new_replace_expr, new_substr_start_end, new_translate_expr};
 use crate::expr::expr_unary::{
     new_ascii_expr, new_length_default, new_ltrim_expr, new_rtrim_expr, new_trim_expr,
     new_unary_expr,
@@ -178,6 +178,15 @@ pub fn build_case_expr(prost: &ExprNode) -> Result<BoxedExpression> {
         when_clauses,
         else_clause,
     )))
+}
+
+pub fn build_translate_expr(prost: &ExprNode) -> Result<BoxedExpression> {
+    let (children, ret_type) = get_return_type_and_children(prost)?;
+    ensure!(children.len() == 3);
+    let s = expr_build_from_prost(&children[0])?;
+    let match_str = expr_build_from_prost(&children[1])?;
+    let replace_str = expr_build_from_prost(&children[2])?;
+    Ok(new_translate_expr(s, match_str, replace_str, ret_type))
 }
 
 #[cfg(test)]
