@@ -7,6 +7,10 @@ use tokio::sync::oneshot;
 
 use crate::executor::*;
 
+/// If enabled, all actors will be grouped in the same tracing span within one epoch.
+/// Note that this option will significantly increase the overhead of tracing.
+pub const ENABLE_BARRIER_AGGREGATION: bool = false;
+
 struct ManagedBarrierState {
     epoch: u64,
 
@@ -103,7 +107,6 @@ impl LocalBarrierManager {
             to_send
         };
         let to_collect: HashSet<u32> = actor_ids_to_collect.into_iter().collect();
-
         trace!(
             "send barrier {:?}, senders = {:?}, actor_ids_to_collect = {:?}",
             barrier,
@@ -129,18 +132,6 @@ impl LocalBarrierManager {
 
                 Some(rx)
             }
-        };
-
-        let barrier = {
-            let mut barrier = barrier.clone();
-            if ENABLE_BARRIER_EVENT {
-                let receiver_ids = to_send.iter().cloned().join(", ");
-                // TODO: not a correct usage of span -- the span ends once it goes out of scope, but
-                // we still have events in the background.
-                let span = tracing::info_span!("send_barrier", epoch = barrier.epoch, mutation = ?barrier.mutation, receivers = %receiver_ids);
-                barrier.span = span;
-            }
-            barrier
         };
 
         for actor_id in to_send {
@@ -172,19 +163,25 @@ impl LocalBarrierManager {
                 let current_epoch = managed_state.as_ref().map(|s| s.epoch);
                 if current_epoch != Some(barrier.epoch) {
                     panic!(
-            "bad barrier with epoch {} from actor {}, while current epoch is {:?}, last epoch is {:?}",
-            barrier.epoch, actor_id, current_epoch, self.last_epoch
-          );
+                        "bad barrier with epoch {} from actor {}, while current epoch is {:?}, last epoch is {:?}",
+                        barrier.epoch, actor_id, current_epoch, self.last_epoch
+                    );
                 }
 
                 let state = managed_state.as_mut().unwrap();
                 state.remaining_actors.remove(&actor_id);
 
-                trace!(
-                    "collect barrier epoch {} from actor {}, remaining actors {:?}",
+                tracing::trace!(
+                    target: "events::stream::barrier::collect_barrier",
+                    "collect_barrier: epoch = {}, actor_id = {}, remaining_actors = {:?}",
                     barrier.epoch,
                     actor_id,
-                    state.remaining_actors
+                    state
+                        .remaining_actors
+                        .clone()
+                        .into_iter()
+                        .sorted()
+                        .collect_vec()
                 );
 
                 if state.remaining_actors.is_empty() {
@@ -192,7 +189,12 @@ impl LocalBarrierManager {
                     self.last_epoch = Some(state.epoch);
                     // Notify about barrier finishing.
                     let tx = state.collect_notifier;
-                    tx.send(()).unwrap();
+                    if tx.send(()).is_err() {
+                        warn!(
+                            "failed to notify barrier collection with epoch {}: rx is dropped",
+                            state.epoch
+                        )
+                    }
                 }
             }
         }
@@ -208,6 +210,7 @@ impl LocalBarrierManager {
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::*;

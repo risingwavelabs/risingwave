@@ -1,4 +1,4 @@
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 use risingwave_pb::plan::ColumnDesc as ProstColumnDesc;
 
 use crate::catalog::ColumnId;
@@ -6,23 +6,15 @@ use crate::catalog::ColumnId;
 /// A descriptor of a column.
 #[derive(Debug, Clone)]
 pub struct ColumnDesc {
-    data_type: DataTypeKind,
-    is_primary: bool,
+    data_type: DataType,
 }
 
 impl ColumnDesc {
-    pub fn new(data_type: DataTypeKind, is_primary: bool) -> Self {
-        ColumnDesc {
-            data_type,
-            is_primary,
-        }
+    pub fn new(data_type: DataType) -> Self {
+        ColumnDesc { data_type }
     }
 
-    pub fn is_primary(&self) -> bool {
-        self.is_primary
-    }
-
-    pub fn data_type(&self) -> DataTypeKind {
+    pub fn data_type(&self) -> DataType {
         self.data_type
     }
 }
@@ -31,7 +23,6 @@ impl From<ProstColumnDesc> for ColumnDesc {
     fn from(col: ProstColumnDesc) -> Self {
         Self {
             data_type: col.get_column_type().expect("column type not found").into(),
-            is_primary: col.is_primary,
         }
     }
 }
@@ -57,12 +48,8 @@ impl ColumnCatalog {
         &self.name
     }
 
-    pub fn data_type(&self) -> DataTypeKind {
+    pub fn data_type(&self) -> DataType {
         self.desc.data_type
-    }
-
-    pub fn is_primary(&self) -> bool {
-        self.desc.is_primary()
     }
 
     pub fn col_desc_ref(&self) -> &ColumnDesc {

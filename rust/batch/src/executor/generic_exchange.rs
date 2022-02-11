@@ -51,14 +51,14 @@ impl CreateSource for DefaultCreateSource {
     ) -> Result<Box<dyn ExchangeSource>> {
         let peer_addr = value.get_host()?.to_socket_addr()?;
         if is_local_address(env.server_address(), &peer_addr) {
-            debug!("Exchange locally [{:?}]", value.get_sink_id());
+            trace!("Exchange locally [{:?}]", value.get_sink_id());
             return Ok(Box::new(LocalExchangeSource::create(
                 value.get_sink_id()?.try_into()?,
                 env,
                 task_id,
             )?));
         }
-        debug!(
+        trace!(
             "Exchange remotely from {} [{:?}]",
             &peer_addr,
             value.get_sink_id()
@@ -150,7 +150,7 @@ mod tests {
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{DataChunk, I32Array};
     use risingwave_common::array_nonnull;
-    use risingwave_common::types::DataTypeKind;
+    use risingwave_common::types::DataType;
 
     use super::*;
 
@@ -199,7 +199,7 @@ mod tests {
             source_creator: PhantomData,
             env: BatchTaskEnv::for_test(),
             schema: Schema {
-                fields: vec![Field::unnamed(DataTypeKind::Int32)],
+                fields: vec![Field::unnamed(DataType::Int32)],
             },
             task_id: TaskId::default(),
             identity: "GenericExchangeExecutor".to_string(),

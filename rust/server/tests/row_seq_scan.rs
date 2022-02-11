@@ -7,7 +7,7 @@ use risingwave_batch::executor::{Executor, RowSeqScanExecutor};
 use risingwave_common::array::{Array, Row};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::Keyspace;
@@ -20,8 +20,9 @@ async fn test_row_seq_scan() -> Result<()> {
     let keyspace = Keyspace::executor_root(state_store, 0x42);
 
     let schema = Schema::new(vec![
-        Field::unnamed(DataTypeKind::Int32),
-        Field::unnamed(DataTypeKind::Int32),
+        Field::unnamed(DataType::Int32), // pk
+        Field::unnamed(DataType::Int32),
+        Field::unnamed(DataType::Int64),
     ]);
     let pk_columns = vec![0];
     let orderings = vec![OrderType::Ascending];
@@ -39,25 +40,29 @@ async fn test_row_seq_scan() -> Result<()> {
         orderings,
     ));
 
-    let mut executor = RowSeqScanExecutor::new(
-        table,
-        schema.fields.iter().map(|field| field.data_type).collect(),
-        vec![0, 1],
-        schema,
-    );
+    let mut executor = RowSeqScanExecutor::new(table, vec![0, 1], 1);
 
     let epoch: u64 = 0;
     state.put(
         Row(vec![Some(1_i32.into())]),
-        Row(vec![Some(1_i32.into()), Some(4_i32.into())]),
+        Row(vec![
+            Some(1_i32.into()),
+            Some(4_i32.into()),
+            Some(7_i64.into()),
+        ]),
     );
     state.put(
         Row(vec![Some(2_i32.into())]),
-        Row(vec![Some(2_i32.into()), Some(5_i32.into())]),
+        Row(vec![
+            Some(2_i32.into()),
+            Some(5_i32.into()),
+            Some(8_i64.into()),
+        ]),
     );
     state.flush(epoch).await.unwrap();
 
     executor.open().await.unwrap();
+    assert_eq!(executor.schema().fields().len(), 2);
 
     let res_chunk = executor.next().await?.unwrap();
     assert_eq!(res_chunk.dimension(), 2);

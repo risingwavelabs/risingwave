@@ -5,7 +5,7 @@ use log::debug;
 use crate::array::{ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, I32ArrayBuilder};
 use crate::error::Result;
 use crate::expr::{BoxedExpression, Expression};
-use crate::types::DataTypeKind;
+use crate::types::DataType;
 
 /// `PG_SLEEP` sleeps on current session for given duration (double precision in seconds),
 /// and returns `NULL` for all inputs.
@@ -16,20 +16,20 @@ use crate::types::DataTypeKind;
 #[derive(Debug)]
 pub struct PgSleepExpression {
     child_expr: BoxedExpression,
-    return_type: DataTypeKind,
+    return_type: DataType,
 }
 
 impl PgSleepExpression {
     pub fn new(child_expr: BoxedExpression) -> Self {
         PgSleepExpression {
             child_expr,
-            return_type: DataTypeKind::Int32,
+            return_type: DataType::Int32,
         }
     }
 }
 
 impl Expression for PgSleepExpression {
-    fn return_type(&self) -> DataTypeKind {
+    fn return_type(&self) -> DataType {
         self.return_type
     }
 
@@ -69,10 +69,8 @@ mod tests {
 
     #[test]
     fn test_pg_sleep() -> Result<()> {
-        let mut expr = PgSleepExpression::new(Box::new(InputRefExpression::new(
-            DataTypeKind::decimal_default(),
-            0,
-        )));
+        let mut expr =
+            PgSleepExpression::new(Box::new(InputRefExpression::new(DataType::Decimal, 0)));
 
         let input_array = {
             let mut builder = DecimalArrayBuilder::new(3)?;

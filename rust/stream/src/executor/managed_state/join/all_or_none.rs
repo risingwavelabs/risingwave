@@ -4,7 +4,7 @@ use itertools::Itertools;
 use risingwave_common::array::data_chunk_iter::RowDeserializer;
 use risingwave_common::array::Row;
 use risingwave_common::error::Result;
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -30,10 +30,10 @@ pub struct AllOrNoneState<S: StateStore> {
     total_count: isize,
 
     /// Data types of the sort column
-    data_types: Vec<DataTypeKind>,
+    data_types: Vec<DataType>,
 
     /// Data types of primary keys
-    pk_data_types: Vec<DataTypeKind>,
+    pk_data_types: Vec<DataType>,
 
     /// Indices of primary keys
     pk_indices: Vec<usize>,
@@ -43,11 +43,7 @@ pub struct AllOrNoneState<S: StateStore> {
 }
 
 impl<S: StateStore> AllOrNoneState<S> {
-    pub fn new(
-        keyspace: Keyspace<S>,
-        data_types: Vec<DataTypeKind>,
-        pk_indices: Vec<usize>,
-    ) -> Self {
+    pub fn new(keyspace: Keyspace<S>, data_types: Vec<DataType>, pk_indices: Vec<usize>) -> Self {
         let pk_data_types = pk_indices.iter().map(|idx| data_types[*idx]).collect_vec();
         Self {
             cached: None,
@@ -125,9 +121,10 @@ impl<S: StateStore> AllOrNoneState<S> {
 
     // Fetch cache from the state store.
     async fn fetch_cache(&mut self) -> Result<()> {
+        let epoch = u64::MAX;
         assert!(self.cached.is_none());
 
-        let all_data = self.keyspace.scan_strip_prefix(None).await?;
+        let all_data = self.keyspace.scan_strip_prefix(None, epoch).await?;
 
         // Fetch cached states.
         let mut cached = BTreeMap::new();
@@ -200,11 +197,8 @@ mod tests {
     async fn test_managed_all_or_none_state() {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
-        let mut managed_state = AllOrNoneState::new(
-            keyspace,
-            vec![DataTypeKind::Int64, DataTypeKind::Int64],
-            vec![0],
-        );
+        let mut managed_state =
+            AllOrNoneState::new(keyspace, vec![DataType::Int64, DataType::Int64], vec![0]);
         assert!(!managed_state.is_dirty());
         let columns = vec![
             column_nonnull! { I64Array, [3, 2, 1] },

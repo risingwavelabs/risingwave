@@ -31,8 +31,10 @@ impl<S: StateStore> ManagedValueState<S> {
         row_count: Option<usize>,
     ) -> Result<Self> {
         let data = if row_count != Some(0) {
+            // TODO: use the correct epoch
+            let epoch = u64::MAX;
             // View the keyspace as a single-value space, and get the value.
-            let raw_data = keyspace.value().await?;
+            let raw_data = keyspace.value(epoch).await?;
 
             // Decode the Datum from the value.
             if let Some(raw_data) = raw_data {
@@ -105,7 +107,7 @@ impl<S: StateStore> ManagedValueState<S> {
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::{I64Array, Op};
-    use risingwave_common::types::{DataTypeKind, ScalarImpl};
+    use risingwave_common::types::{DataType, ScalarImpl};
 
     use super::*;
     use crate::executor::test_utils::create_in_memory_keyspace;
@@ -114,8 +116,8 @@ mod tests {
     fn create_test_count_state() -> AggCall {
         AggCall {
             kind: risingwave_common::expr::AggKind::Count,
-            args: AggArgs::Unary(DataTypeKind::Int64, 0),
-            return_type: DataTypeKind::Int64,
+            args: AggArgs::Unary(DataType::Int64, 0),
+            return_type: DataType::Int64,
         }
     }
 

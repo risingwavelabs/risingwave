@@ -8,6 +8,7 @@ mod expr_case;
 mod expr_input_ref;
 mod expr_is_null;
 mod expr_literal;
+mod expr_search;
 mod expr_ternary_bytes;
 pub mod expr_unary;
 mod pg_sleep;
@@ -26,13 +27,13 @@ use crate::array::{ArrayRef, DataChunk, Row};
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
 use crate::expr::build_expr_from_prost::*;
-use crate::types::DataTypeKind;
+use crate::types::DataType;
 
 pub type ExpressionRef = Arc<dyn Expression>;
 
 /// Instance of an expression
 pub trait Expression: std::fmt::Debug + Sync + Send {
-    fn return_type(&self) -> DataTypeKind;
+    fn return_type(&self) -> DataType;
 
     /// Evaluate the expression
     ///
@@ -48,8 +49,8 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     use risingwave_pb::expr::expr_node::Type::*;
 
     match prost.get_expr_type()? {
-        Cast | Upper | Not | PgSleep | IsTrue | IsNotTrue | IsFalse | IsNotFalse | IsNull
-        | IsNotNull => build_unary_expr_prost(prost),
+        Cast | Upper | Lower | Not | PgSleep | IsTrue | IsNotTrue | IsFalse | IsNotFalse
+        | IsNull | IsNotNull | Neg => build_unary_expr_prost(prost),
         Equal | NotEqual | LessThan | LessThanOrEqual | GreaterThan | GreaterThanOrEqual => {
             build_binary_expr_prost(prost)
         }
@@ -64,9 +65,12 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         Ltrim => build_ltrim_expr(prost),
         Rtrim => build_rtrim_expr(prost),
         Position => build_position_expr(prost),
+        Ascii => build_ascii_expr(prost),
         ConstantValue => LiteralExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
         InputRef => InputRefExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
         Case => build_case_expr(prost),
+        Translate => build_translate_expr(prost),
+        Search => build_search_expr(prost),
         _ => Err(InternalError(format!(
             "Unsupported expression type: {:?}",
             prost.get_expr_type()
@@ -86,12 +90,12 @@ impl RowExpression {
         Self { expr }
     }
 
-    pub fn eval(&mut self, row: &Row, data_types: &[DataTypeKind]) -> Result<ArrayRef> {
+    pub fn eval(&mut self, row: &Row, data_types: &[DataType]) -> Result<ArrayRef> {
         let input = DataChunk::from_rows(slice::from_ref(row), data_types)?;
         self.expr.eval(&input)
     }
 
-    fn return_type(&self) -> DataTypeKind {
+    fn return_type(&self) -> DataType {
         self.expr.return_type()
     }
 }

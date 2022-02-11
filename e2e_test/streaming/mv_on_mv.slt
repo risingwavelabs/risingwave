@@ -1,0 +1,226 @@
+statement ok
+create table mom_t1(v1 int not null, v2 int not null);
+
+statement ok
+create table mom_t2(v1 real not null, v2 int not null, v3 real not null);
+
+statement ok
+create materialized view mom_m1 as select v1, v2 from mom_t1 where v1 = 1;
+
+statement ok
+create materialized view mom_m2 as select v1, v2 from mom_t1 where v2 = 1;
+
+statement ok
+create materialized view mom_m3 as select sum(mom_m1.v1) as sum_mom_m1_v1, sum(mom_m1.v2) as sum_mom_m1_v2 from mom_m1;
+
+statement ok
+create materialized view mom_m4 as select mom_m1.v1, mom_m1.v2, mom_m2.v1, mom_m2.v2 from mom_m1 join mom_m2 on mom_m1.v1 = mom_m2.v1;
+
+statement ok
+flush;
+
+statement ok
+insert into mom_t1 values (2,1),(1,2),(1,1);
+
+statement ok
+flush;
+
+query II
+select * from mom_t1;
+----
+2 1
+1 2
+1 1
+
+query III
+select * from mom_m1;
+----
+1 2 1
+1 1 2
+
+query III
+select * from mom_m2;
+----
+2 1 0
+1 1 2
+
+query IIIII
+select * from mom_m3;
+----
+2 3 2 2 3
+
+query IIIIII
+select * from mom_m4;
+----
+1 2 1 1 1 2
+1 1 2 1 1 2
+
+statement ok
+create materialized view mom_m5 as select mom_m1.v1, mom_m1.v2, mom_m2.v1, mom_m2.v2 from mom_m1 join mom_m2 on mom_m1.v1 = mom_m2.v1;
+
+statement ok
+flush;
+
+query IIIIII
+select * from mom_m5;
+----
+1 2 1 1 1 2
+1 1 2 1 1 2
+
+statement ok
+insert into mom_t1 values (3,1),(1,3);
+
+statement ok
+flush;
+
+query IIIIII
+select * from mom_m5;
+----
+1 2 1 1 1 2
+1 1 2 1 1 2
+1 3 4 1 1 2
+
+statement ok
+create materialized view mom_m6 as select v2, v3, v1 from mom_t2;
+
+statement ok
+create materialized view mom_m7 as select sum(v1) as sum_v1, avg(v3) as avg_v3 from mom_m6 group by v1;
+
+statement ok
+create materialized view mom_m8 as select sum(v1) as sum_v1 from mom_m6 group by v2;
+
+statement ok
+flush;
+
+statement ok
+insert into mom_t2 values (1,2,3),(1,5,6),(3,2,6);
+
+statement ok
+flush;
+
+query III
+select * from mom_t2;
+----
+1 2 3
+1 5 6
+3 2 6
+
+query IIII
+select * from mom_m6;
+----
+2 3 1 0
+5 6 1 1
+2 6 3 2
+
+query III
+select * from mom_m7;
+----
+2 4.5 1
+3 6 3
+
+query II
+select * from mom_m8;
+----
+4 2
+1 5
+
+statement ok
+create materialized view mom_m9 as select * from mom_t2;
+
+statement ok
+create materialized view mom_m10 as select sum(v1) as sum_v1, sum(v3) as sum_v3 from mom_m9 group by v2;
+
+statement ok
+flush;
+
+query IIII
+select * from mom_m9;
+----
+1 2 3 0
+1 5 6 1
+3 2 6 2
+
+query III
+select * from mom_m10;
+----
+4 9 2
+1 6 5
+
+statement ok
+create table mom_t3(v1 int not null, v2 int not null, v3 int not null);
+
+statement ok
+flush;
+
+statement ok
+insert into mom_t3 values (1,2,3),(1,5,6),(3,2,6);
+
+statement ok
+flush;
+
+statement ok
+create materialized view mom_m11 as select v1, v2, v3 from mom_t3;
+
+statement ok
+create materialized view mom_m12 as select round(avg(v1), 1) as avg_v1, sum(v2) as sum_v2, count(v3) as count_v3 from mom_m11;
+
+statement ok
+flush;
+
+query IIII
+select * from mom_m11;
+----
+1 2 3 0
+1 5 6 1
+3 2 6 2
+
+query IIIIII
+select * from mom_m12;
+----
+1.7 9 3 5 3 9
+
+statement ok
+create table mom_t4(v1 real not null);
+
+statement ok
+flush;
+
+statement ok
+insert into mom_t4 values(1),(2),(3);
+
+statement ok
+flush;
+
+statement ok
+create materialized view mom_m13 as select * from mom_t4;
+
+statement ok
+create materialized view mom_m14 as select count(v1) from mom_m13;
+
+statement ok
+flush;
+
+query II
+select * from mom_m13;
+----
+1 0
+2 1
+3 2
+
+query I
+select * from mom_m14;
+----
+3
+
+statement ok
+create materialized view mom_m15 as select * from (select t1.v1 as t1v1, t2.v1 as t2v1 from mom_m13 t1 join mom_m13 t2 on t1.v1 = t2.v1);
+
+statement ok
+flush;
+
+query IIII
+select * from mom_m15;
+----
+1 0 1 0
+2 1 2 1
+3 2 3 2

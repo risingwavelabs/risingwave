@@ -1,6 +1,6 @@
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
-use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedRem, CheckedSub};
+use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub};
 pub use rust_decimal::prelude::{FromPrimitive, FromStr, ToPrimitive};
 use rust_decimal::{Decimal as RustDecimal, Error, RoundingStrategy};
 
@@ -179,6 +179,17 @@ impl Neg for Decimal {
             Self::NaN => Self::NaN,
             Self::PositiveINF => Self::NegativeINF,
             Self::NegativeINF => Self::PositiveINF,
+        }
+    }
+}
+
+impl CheckedNeg for Decimal {
+    fn checked_neg(&self) -> Option<Self> {
+        match self {
+            Self::Normalized(d) => Some(Self::Normalized(-d)),
+            Self::NaN => Some(Self::NaN),
+            Self::PositiveINF => Some(Self::NegativeINF),
+            Self::NegativeINF => Some(Self::PositiveINF),
         }
     }
 }

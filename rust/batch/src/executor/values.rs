@@ -16,6 +16,7 @@ pub(super) struct ValuesExecutor {
     rows: Vec<Vec<BoxedExpression>>,
     schema: Schema,
     identity: String,
+    chunk_size: usize,
 }
 
 #[async_trait::async_trait]
@@ -56,9 +57,7 @@ impl Executor for ValuesExecutor {
             .columns(vec![Column::new(Arc::new(one_row_array.into()))])
             .build();
 
-        // TODO: pass chunk_size from context
-        let chunk_size = 1000;
-        let end = std::cmp::min(chunk_size, self.rows.len());
+        let end = std::cmp::min(self.chunk_size, self.rows.len());
         for row in self.rows.drain(0..end) {
             for (mut expr, builder) in row.into_iter().zip_eq(&mut array_builders) {
                 let out = expr.eval(&one_row_chunk)?;
@@ -116,6 +115,7 @@ impl BoxedExecutorBuilder for ValuesExecutor {
             rows,
             schema: Schema { fields },
             identity: "ValuesExecutor".to_string(),
+            chunk_size: source.global_task_env().config().chunk_size as usize,
         }))
     }
 }
@@ -124,7 +124,7 @@ impl BoxedExecutorBuilder for ValuesExecutor {
 mod tests {
     use risingwave_common::array::Array;
     use risingwave_common::expr::LiteralExpression;
-    use risingwave_common::types::{DataTypeKind, ScalarImpl};
+    use risingwave_common::types::{DataType, ScalarImpl};
 
     use super::*;
 
@@ -132,15 +132,15 @@ mod tests {
     async fn test_values_executor() -> Result<()> {
         let exprs = vec![vec![
             Box::new(LiteralExpression::new(
-                DataTypeKind::Int16,
+                DataType::Int16,
                 Some(ScalarImpl::Int16(1)),
             )) as BoxedExpression,
             Box::new(LiteralExpression::new(
-                DataTypeKind::Int32,
+                DataType::Int32,
                 Some(ScalarImpl::Int32(2)),
             )),
             Box::new(LiteralExpression::new(
-                DataTypeKind::Int64,
+                DataType::Int64,
                 Some(ScalarImpl::Int64(3)),
             )),
         ]];
@@ -155,13 +155,14 @@ mod tests {
             rows: exprs,
             schema: Schema { fields },
             identity: "ValuesExecutor".to_string(),
+            chunk_size: 1000,
         };
         values_executor.open().await.unwrap();
 
         let fields = &values_executor.schema().fields;
-        assert_eq!(fields[0].data_type, DataTypeKind::Int16);
-        assert_eq!(fields[1].data_type, DataTypeKind::Int32);
-        assert_eq!(fields[2].data_type, DataTypeKind::Int64);
+        assert_eq!(fields[0].data_type, DataType::Int16);
+        assert_eq!(fields[1].data_type, DataType::Int32);
+        assert_eq!(fields[2].data_type, DataType::Int64);
 
         values_executor.open().await.unwrap();
         let result = values_executor.next().await?.unwrap();

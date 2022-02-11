@@ -175,9 +175,9 @@ mod tests {
     use risingwave_common::array_nonnull;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::expr::build_from_prost;
-    use risingwave_common::types::DataTypeKind;
+    use risingwave_common::types::DataType;
     use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::DataType;
+    use risingwave_pb::data::DataType as ProstDataType;
     use risingwave_pb::expr::agg_call::{Arg, Type};
     use risingwave_pb::expr::expr_node::RexNode;
     use risingwave_pb::expr::expr_node::Type::InputRef;
@@ -192,7 +192,7 @@ mod tests {
         let a = Arc::new(array_nonnull! { I32Array, [1, 2, 3] }.into());
         let chunk = DataChunk::builder().columns(vec![Column::new(a)]).build();
         let schema = Schema {
-            fields: vec![Field::unnamed(DataTypeKind::Int32)],
+            fields: vec![Field::unnamed(DataType::Int32)],
         };
         let mut child = MockExecutor::new(schema);
         child.add(chunk);
@@ -201,15 +201,16 @@ mod tests {
             r#type: Type::Sum as i32,
             args: vec![Arg {
                 input: Some(InputRefExpr { column_idx: 0 }),
-                r#type: Some(DataType {
+                r#type: Some(ProstDataType {
                     type_name: TypeName::Int32 as i32,
                     ..Default::default()
                 }),
             }],
-            return_type: Some(DataType {
+            return_type: Some(ProstDataType {
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
+            distinct: false,
         };
 
         let s = AggStateFactory::new(&prost)?.create_agg_state()?;
@@ -261,9 +262,9 @@ mod tests {
             .build();
         let schema = Schema {
             fields: vec![
-                Field::unnamed(DataTypeKind::Int32),
-                Field::unnamed(DataTypeKind::Int32),
-                Field::unnamed(DataTypeKind::Int32),
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Int32),
             ],
         };
         let mut child = MockExecutor::new(schema);
@@ -281,15 +282,16 @@ mod tests {
             r#type: Type::Sum as i32,
             args: vec![Arg {
                 input: Some(InputRefExpr { column_idx: 0 }),
-                r#type: Some(DataType {
+                r#type: Some(ProstDataType {
                     type_name: TypeName::Int32 as i32,
                     ..Default::default()
                 }),
             }],
-            return_type: Some(DataType {
+            return_type: Some(ProstDataType {
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
+            distinct: false,
         };
 
         let s = AggStateFactory::new(&prost)?.create_agg_state()?;
@@ -298,7 +300,7 @@ mod tests {
             .map(|idx| {
                 build_from_prost(&ExprNode {
                     expr_type: InputRef as i32,
-                    return_type: Some(DataType {
+                    return_type: Some(ProstDataType {
                         type_name: TypeName::Int32 as i32,
                         ..Default::default()
                     }),
@@ -331,9 +333,9 @@ mod tests {
 
         executor.open().await?;
         let fields = &executor.schema().fields;
-        assert_eq!(fields[0].data_type, DataTypeKind::Int32);
-        assert_eq!(fields[1].data_type, DataTypeKind::Int32);
-        assert_eq!(fields[2].data_type, DataTypeKind::Int64);
+        assert_eq!(fields[0].data_type, DataType::Int32);
+        assert_eq!(fields[1].data_type, DataType::Int32);
+        assert_eq!(fields[2].data_type, DataType::Int64);
         let o = executor.next().await?.unwrap();
         if executor.next().await?.is_some() {
             panic!("simple agg should have no more than 1 output.");

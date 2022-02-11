@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
@@ -20,6 +21,7 @@ use risingwave_pb::stream_plan::{
 };
 
 use crate::manager::MetaSrvEnv;
+use crate::model::TableFragments;
 use crate::stream::fragmenter::StreamFragmenter;
 
 fn make_table_ref_id(id: i32) -> TableRefId {
@@ -57,6 +59,7 @@ fn make_sum_aggcall(idx: i32) -> AggCall {
             type_name: TypeName::Int64 as i32,
             ..Default::default()
         }),
+        distinct: false,
     }
 }
 
@@ -119,7 +122,7 @@ fn make_stream_node() -> StreamNode {
         node: Some(Node::ExchangeNode(ExchangeNode {
             dispatcher: Some(Dispatcher {
                 r#type: DispatcherType::Hash as i32,
-                column_idx: 0,
+                column_indices: vec![0],
             }),
             input_column_descs: vec![
                 make_column_desc(1, TypeName::Int32),
@@ -129,7 +132,7 @@ fn make_stream_node() -> StreamNode {
         })),
         input: vec![source_node],
         pk_indices: vec![2],
-        node_id: 1,
+        operator_id: 1,
     };
 
     // filter node
@@ -149,17 +152,17 @@ fn make_stream_node() -> StreamNode {
         })),
         input: vec![exchange_node],
         pk_indices: vec![0, 1],
-        node_id: 2,
+        operator_id: 2,
     };
 
     // simple agg node
     let simple_agg_node = StreamNode {
-        node: Some(Node::SimpleAggNode(SimpleAggNode {
+        node: Some(Node::GlobalSimpleAggNode(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
         })),
         input: vec![filter_node],
         pk_indices: vec![0, 1],
-        node_id: 3,
+        operator_id: 3,
     };
 
     // exchange node
@@ -167,7 +170,7 @@ fn make_stream_node() -> StreamNode {
         node: Some(Node::ExchangeNode(ExchangeNode {
             dispatcher: Some(Dispatcher {
                 r#type: DispatcherType::Simple as i32,
-                column_idx: 0,
+                ..Default::default()
             }),
             input_column_descs: vec![
                 make_column_desc(0, TypeName::Int64),
@@ -176,17 +179,17 @@ fn make_stream_node() -> StreamNode {
         })),
         input: vec![simple_agg_node],
         pk_indices: vec![0, 1],
-        node_id: 4,
+        operator_id: 4,
     };
 
     // agg node
     let simple_agg_node_1 = StreamNode {
-        node: Some(Node::SimpleAggNode(SimpleAggNode {
+        node: Some(Node::GlobalSimpleAggNode(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
         })),
         input: vec![exchange_node_1],
         pk_indices: vec![0, 1],
-        node_id: 5,
+        operator_id: 5,
     };
 
     // project node
@@ -210,7 +213,7 @@ fn make_stream_node() -> StreamNode {
         })),
         input: vec![simple_agg_node_1],
         pk_indices: vec![1, 2],
-        node_id: 6,
+        operator_id: 6,
     };
 
     // mview node
@@ -228,7 +231,7 @@ fn make_stream_node() -> StreamNode {
             pk_indices: vec![1, 2],
             column_orders: vec![make_column_order(1), make_column_order(2)],
         })),
-        node_id: 7,
+        operator_id: 7,
     }
 }
 
@@ -238,10 +241,15 @@ async fn test_fragmenter() -> Result<()> {
     let stream_node = make_stream_node();
     let mut fragmenter = StreamFragmenter::new(env.id_gen_manager_ref(), 1);
 
-    let (graph, source_actor_ids) = fragmenter.generate_graph(&stream_node).await?;
-    assert_eq!(graph.len(), 6);
-    assert_eq!(source_actor_ids.len(), 1);
-    assert_eq!(source_actor_ids[0], 6);
+    let graph = fragmenter.generate_graph(&stream_node).await?;
+    let table_fragments = TableFragments::new(TableId::default(), graph);
+    let actors = table_fragments.actors();
+    let source_actor_ids = table_fragments.source_actor_ids();
+    let sink_actor_ids = table_fragments.sink_actor_ids();
+    assert_eq!(actors.len(), 6);
+    assert_eq!(source_actor_ids, vec![6]);
+    assert_eq!(sink_actor_ids, vec![1]);
+
     let mut expected_downstream = HashMap::new();
     expected_downstream.insert(1, vec![]);
     expected_downstream.insert(2, vec![1]);
@@ -257,7 +265,7 @@ async fn test_fragmenter() -> Result<()> {
     expected_upstream.insert(4, vec![6]);
     expected_upstream.insert(5, vec![6]);
     expected_upstream.insert(6, vec![]);
-    for actor in graph {
+    for actor in actors {
         assert_eq!(
             expected_downstream.get(&actor.get_actor_id()).unwrap(),
             actor.get_downstream_actor_id(),
@@ -286,7 +294,7 @@ async fn test_fragmenter() -> Result<()> {
                 assert_eq!(source_node_cnt, 1);
             }
             _ => {
-                panic!("it should be MergeNode.");
+                panic!("it should be MergeNode or SourceNode.");
             }
         }
     }
@@ -301,10 +309,14 @@ async fn test_fragmenter_case2() -> Result<()> {
     let stream_node = make_stream_node();
     let mut fragmenter = StreamFragmenter::new(env.id_gen_manager_ref(), 3);
 
-    let (graph, source_actor_ids) = fragmenter.generate_graph(&stream_node).await?;
-    assert_eq!(graph.len(), 10);
-    assert_eq!(source_actor_ids.len(), 3);
+    let graph = fragmenter.generate_graph(&stream_node).await?;
+    let table_fragments = TableFragments::new(TableId::default(), graph);
+    let actors = table_fragments.actors();
+    let source_actor_ids = table_fragments.source_actor_ids();
+    let sink_actor_ids = table_fragments.sink_actor_ids();
+    assert_eq!(actors.len(), 10);
     assert_eq!(source_actor_ids, vec![8, 9, 10]);
+    assert_eq!(sink_actor_ids, vec![1]);
     let mut expected_downstream = HashMap::new();
     expected_downstream.insert(1, vec![]);
     expected_downstream.insert(2, vec![1]);
@@ -329,7 +341,7 @@ async fn test_fragmenter_case2() -> Result<()> {
     expected_upstream.insert(9, vec![]);
     expected_upstream.insert(10, vec![]);
 
-    for actor in graph {
+    for actor in actors {
         assert_eq!(
             expected_downstream.get(&actor.get_actor_id()).unwrap(),
             actor.get_downstream_actor_id(),
@@ -358,7 +370,7 @@ async fn test_fragmenter_case2() -> Result<()> {
                 assert_eq!(source_node_cnt, 1);
             }
             _ => {
-                panic!("it should be MergeNode.");
+                panic!("it should be MergeNode or SourceNode.");
             }
         }
     }

@@ -1,7 +1,7 @@
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 use risingwave_pb::plan::JoinType;
 
 use super::{
@@ -26,13 +26,18 @@ impl fmt::Display for LogicalJoin {
     }
 }
 impl LogicalJoin {
-    fn new(left: PlanRef, right: PlanRef, join_type: JoinType, predicate: JoinPredicate) -> Self {
+    pub(crate) fn new(
+        left: PlanRef,
+        right: PlanRef,
+        join_type: JoinType,
+        predicate: JoinPredicate,
+    ) -> Self {
         let schema = Self::derive_schema(left.schema(), right.schema(), join_type);
 
         let left_cols_num = left.schema().fields.len();
         let input_col_num = left_cols_num + right.schema().fields.len();
         for cond in predicate.other_conds() {
-            assert_eq!(cond.return_type(), DataTypeKind::Boolean);
+            assert_eq!(cond.return_type(), DataType::Boolean);
             assert_input_ref(cond, input_col_num);
         }
         for (k1, k2) in predicate.equal_keys() {
@@ -60,8 +65,16 @@ impl LogicalJoin {
         let predicate = JoinPredicate::create(left_cols_num, on_clause);
         Self::new(left, right, join_type, predicate).into_plan_ref()
     }
-    fn derive_schema(_left: &Schema, _right: &Schema, _join_type: JoinType) -> Schema {
-        todo!()
+    fn derive_schema(left: &Schema, right: &Schema, join_type: JoinType) -> Schema {
+        let mut new_fields = Vec::with_capacity(left.fields.len() + right.fields.len());
+        match join_type {
+            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
+                new_fields.extend_from_slice(&left.fields);
+                new_fields.extend_from_slice(&right.fields);
+                Schema { fields: new_fields }
+            }
+            _ => unimplemented!(),
+        }
     }
     pub fn predicate(&self) -> &JoinPredicate {
         &self.predicate

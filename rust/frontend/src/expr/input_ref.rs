@@ -1,22 +1,27 @@
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 
 use super::{Expr, ExprImpl};
 use crate::expr::ExprType;
 #[derive(Clone)]
 pub struct InputRef {
     index: usize,
-    data_type: DataTypeKind,
+    data_type: DataType,
 }
 impl InputRef {
-    pub fn new(index: usize, data_type: DataTypeKind) -> Self {
+    pub fn new(index: usize, data_type: DataType) -> Self {
         InputRef { index, data_type }
     }
     pub fn get_expr_type(&self) -> ExprType {
         ExprType::InputRef
     }
+
+    /// Get a reference to the input ref's index.
+    pub fn index(&self) -> usize {
+        self.index
+    }
 }
 impl Expr for InputRef {
-    fn return_type(&self) -> DataTypeKind {
+    fn return_type(&self) -> DataType {
         self.data_type
     }
     fn bound_expr(self) -> ExprImpl {

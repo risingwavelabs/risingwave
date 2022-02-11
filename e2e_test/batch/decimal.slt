@@ -11,7 +11,5 @@ select round(v1, 2), round(v2, 1), round(v1, -1) from t
 2.22 3.3 0
 1.17 1.2 0
 
-
-
 statement ok
 drop table t

@@ -5,12 +5,14 @@ use crate::error::{ErrorCode, Result};
 use crate::expr::AggKind;
 use crate::types::*;
 use crate::vector_op::agg::count_star::CountStar;
+use crate::vector_op::agg::functions::*;
 use crate::vector_op::agg::general_agg::*;
+use crate::vector_op::agg::general_distinct_agg::*;
 use crate::vector_op::agg::general_sorted_grouper::EqGroups;
 
 /// An `Aggregator` supports `update` data and `output` result.
 pub trait Aggregator: Send + 'static {
-    fn return_type(&self) -> DataTypeKind;
+    fn return_type(&self) -> DataType;
 
     /// `update` the aggregator with a row with type checked at runtime.
     fn update_with_row(&mut self, input: &DataChunk, row_id: usize) -> Result<()>;
@@ -42,33 +44,37 @@ pub type BoxedAggState = Box<dyn Aggregator>;
 
 pub struct AggStateFactory {
     // When agg func is count(*), the args is empty and input type is None.
-    input_type: Option<DataTypeKind>,
+    input_type: Option<DataType>,
     input_col_idx: usize,
     agg_kind: AggKind,
-    return_type: DataTypeKind,
+    return_type: DataType,
+    distinct: bool,
 }
 
 impl AggStateFactory {
     pub fn new(prost: &AggCall) -> Result<Self> {
-        let return_type = DataTypeKind::from(prost.get_return_type()?);
+        let return_type = DataType::from(prost.get_return_type()?);
         let agg_kind = AggKind::try_from(prost.get_type()?)?;
+        let distinct = prost.distinct;
         match &prost.get_args()[..] {
             [ref arg] => {
-                let input_type = DataTypeKind::from(arg.get_type()?);
+                let input_type = DataType::from(arg.get_type()?);
                 let input_col_idx = arg.get_input()?.get_column_idx() as usize;
                 Ok(Self {
                     input_type: Some(input_type),
                     input_col_idx,
                     agg_kind,
                     return_type,
+                    distinct,
                 })
             }
             [] => match (&agg_kind, return_type) {
-                (AggKind::Count, DataTypeKind::Int64) => Ok(Self {
+                (AggKind::Count, DataType::Int64) => Ok(Self {
                     input_type: None,
                     input_col_idx: 0,
                     agg_kind,
                     return_type,
+                    distinct,
                 }),
                 _ => Err(ErrorCode::InternalError(format!(
                     "Agg {:?} without args not supported",
@@ -89,53 +95,64 @@ impl AggStateFactory {
                 self.input_col_idx,
                 &self.agg_kind,
                 self.return_type,
+                self.distinct,
             )
         } else {
             Ok(Box::new(CountStar::new(self.return_type, 0)))
         }
     }
 
-    pub fn get_return_type(&self) -> DataTypeKind {
+    pub fn get_return_type(&self) -> DataType {
         self.return_type
     }
 }
 
 pub fn create_agg_state_unary(
-    input_type: DataTypeKind,
+    input_type: DataType,
     input_col_idx: usize,
     agg_type: &AggKind,
-    return_type: DataTypeKind,
+    return_type: DataType,
+    distinct: bool,
 ) -> Result<Box<dyn Aggregator>> {
     use crate::expr::data_types::*;
 
     macro_rules! gen_arms {
-    [$(($agg:ident, $fn:expr, $in:tt, $ret:tt)),* $(,)?] => {
+      [$(($agg:ident, $fn:expr, $in:tt, $ret:tt)),* $(,)?] => {
       match (
         input_type,
         agg_type,
         return_type,
+        distinct,
       ) {
         $(
-        ($in! { type_match_pattern }, AggKind::$agg, $ret! { type_match_pattern }) => {
+        ($in! { type_match_pattern }, AggKind::$agg, $ret! { type_match_pattern }, false) => {
           Box::new(GeneralAgg::<$in! { type_array }, _, $ret! { type_array }>::new(
             return_type,
             input_col_idx,
             $fn,
           ))
-        }
+        },
+        ($in! { type_match_pattern }, AggKind::$agg, $ret! { type_match_pattern }, true) => {
+          Box::new(GeneralDistinctAgg::<$in! { type_array }, _, $ret! { type_array }>::new(
+            return_type,
+            input_col_idx,
+            $fn,
+          ))
+        },
         )*
-        (unimpl_input, unimpl_agg, unimpl_ret) => {
+        (unimpl_input, unimpl_agg, unimpl_ret, distinct) => {
           return Err(
             ErrorCode::InternalError(format!(
-              "unsupported aggregator: type={:?} input={:?} output={:?}",
-              unimpl_agg, unimpl_input, unimpl_ret
+              "unsupported aggregator: type={:?} input={:?} output={:?} distinct={}",
+              unimpl_agg, unimpl_input, unimpl_ret, distinct
             ))
             .into(),
           )
         }
       }
     };
-  }
+    }
+
     let state: Box<dyn Aggregator> = gen_arms![
         (Count, count, int16, int64),
         (Count, count, int32, int64),
@@ -177,21 +194,49 @@ pub fn create_agg_state_unary(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::array::column::Column;
+    use crate::types::DataType;
 
-    fn eval_agg(
-        input_type: DataTypeKind,
-        input: ArrayRef,
-        agg_type: &AggKind,
-        return_type: DataTypeKind,
-        mut builder: ArrayBuilderImpl,
-    ) -> Result<ArrayImpl> {
-        let input_chunk = DataChunk::builder()
-            .columns(vec![Column::new(input)])
-            .build();
-        let mut agg_state = create_agg_state_unary(input_type, 0, agg_type, return_type)?;
-        agg_state.update(&input_chunk)?;
-        agg_state.output(&mut builder)?;
-        builder.finish()
+    #[test]
+    fn test_create_agg_state() {
+        let int64_type = DataType::Int64;
+        let decimal_type = DataType::Decimal;
+        let bool_type = DataType::Boolean;
+        let char_type = DataType::Char;
+
+        macro_rules! test_create {
+            ($input_type:expr, $agg:ident, $return_type:expr, $expected:ident) => {
+                assert!(create_agg_state_unary(
+                    $input_type.clone(),
+                    0,
+                    &AggKind::$agg,
+                    $return_type.clone(),
+                    false,
+                )
+                .$expected());
+                assert!(create_agg_state_unary(
+                    $input_type.clone(),
+                    0,
+                    &AggKind::$agg,
+                    $return_type.clone(),
+                    true,
+                )
+                .$expected());
+            };
+        }
+
+        test_create! { int64_type, Count, int64_type, is_ok }
+        test_create! { decimal_type, Count, int64_type, is_ok }
+        test_create! { bool_type, Count, int64_type, is_ok }
+        test_create! { char_type, Count, int64_type, is_ok }
+
+        test_create! { int64_type, Sum, decimal_type, is_ok }
+        test_create! { decimal_type, Sum, decimal_type, is_ok }
+        test_create! { bool_type, Sum, bool_type, is_err }
+        test_create! { char_type, Sum, char_type, is_err }
+
+        test_create! { int64_type, Min, int64_type, is_ok }
+        test_create! { decimal_type, Min, decimal_type, is_ok }
+        test_create! { bool_type, Min, bool_type, is_err }
+        test_create! { char_type, Min, char_type, is_ok }
     }
 }

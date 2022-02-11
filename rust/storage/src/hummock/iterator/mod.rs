@@ -51,6 +51,7 @@ pub trait HummockIterator: Send + Sync {
     ///
     /// # Panics
     /// This function will panic if the iterator is invalid.
+    // TODO: Add lifetime
     fn key(&self) -> &[u8];
 
     /// Retrieve the current value, decoded as [`HummockValue`].
@@ -62,6 +63,7 @@ pub trait HummockIterator: Send + Sync {
     /// # Panics
     /// This function will panic if the iterator is invalid, or the value cannot be decoded into
     /// [`HummockValue`].
+    // TODO: Add lifetime
     fn value(&self) -> HummockValue<&[u8]>;
 
     /// Indicate whether the iterator can be used.
@@ -89,7 +91,7 @@ pub trait HummockIterator: Send + Sync {
     async fn seek(&mut self, key: &[u8]) -> HummockResult<()>;
 }
 
-pub type BoxedHummockIterator = Box<dyn HummockIterator>;
+pub type BoxedHummockIterator<'a> = Box<dyn HummockIterator + 'a>;
 
 pub mod variants {
     pub const FORWARD: usize = 0;
