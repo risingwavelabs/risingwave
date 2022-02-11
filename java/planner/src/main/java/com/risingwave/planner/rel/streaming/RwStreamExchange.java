@@ -87,7 +87,7 @@ public class RwStreamExchange extends Exchange implements RisingWaveStreamingRel
       dispatcherBuilder.setType(Dispatcher.DispatcherType.BROADCAST);
     } else if (distribution.getType() == RelDistribution.Type.HASH_DISTRIBUTED) {
       dispatcherBuilder.setType(Dispatcher.DispatcherType.HASH);
-      dispatcherBuilder.setColumnIdx(distribution.getKeys().get(0));
+      dispatcherBuilder.addAllColumnIndices(distribution.getKeys());
     } else if (distribution.getType() == RelDistribution.Type.SINGLETON) {
       dispatcherBuilder.setType(Dispatcher.DispatcherType.SIMPLE);
     }
