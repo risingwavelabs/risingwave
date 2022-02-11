@@ -2,9 +2,10 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use anyhow::anyhow;
 use risingwave_common::array::InternalError;
 use risingwave_common::catalog::{Schema, TableId};
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::{ensure, gen_error};
 use risingwave_pb::plan::ColumnDesc;
@@ -145,7 +146,11 @@ impl TableManager for SimpleTableManager {
         let mut tables = self.lock_tables();
         let table = tables
             .get(associated_table_id)
-            .expect("no associated table")
+            .ok_or_else(|| {
+                ErrorCode::CatalogError(
+                    anyhow!("associated table not found: {:?}", associated_table_id).into(),
+                )
+            })?
             .clone();
 
         // Simply associate the mview id to the table
