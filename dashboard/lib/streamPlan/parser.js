@@ -21,7 +21,7 @@ class Node {
 class StreamNode extends Node {
   constructor(actorId, nodeProto) {
     super(actorId, nodeProto);
-    this.type = this.paseType(nodeProto);
+    this.type = this.parseType(nodeProto);
     this.typeInfo = nodeProto[this.type];
 
     if (this.type === "mergeNode") {
@@ -31,7 +31,7 @@ class StreamNode extends Node {
     }
   }
 
-  paseType(nodeProto) {
+  parseType(nodeProto) {
     let types = ["tableSourceNode", "sourceNode", "projectNode", "filterNode",
       "mviewNode", "simpleAggNode", "hashAggNode", "topNNode",
       "hashJoinNode", "mergeNode", "exchangeNode", "chainNode"];

@@ -17,6 +17,7 @@ pub mod key;
 pub mod key_range;
 mod level_handler;
 pub mod local_version_manager;
+#[cfg(test)]
 pub mod mock;
 #[cfg(test)]
 mod snapshot_tests;
@@ -149,7 +150,8 @@ impl HummockStorage {
 
         let arc_options = Arc::new(options);
         let options_for_compact = arc_options.clone();
-        let version_manager_for_compact = version_manager.clone();
+        let local_version_manager_for_compact = local_version_manager.clone();
+        let hummock_meta_client_for_compact = hummock_meta_client.clone();
         let obj_client_for_compact = obj_client.clone();
         let rx = Arc::new(PLMutex::new(Some(trigger_compact_rx)));
         let rx_for_compact = rx.clone();
@@ -178,8 +180,9 @@ impl HummockStorage {
                 Self::start_compactor(
                     SubCompactContext {
                         options: options_for_compact,
-                        version_manager: version_manager_for_compact,
+                        local_version_manager: local_version_manager_for_compact,
                         obj_client: obj_client_for_compact,
+                        hummock_meta_client: hummock_meta_client_for_compact,
                     },
                     rx_for_compact,
                     stop_compact_rx,
@@ -409,13 +412,11 @@ impl HummockStorage {
             builder.add_user_key(k, v, epoch).await?;
         }
 
-        let (total_size, tables) = {
+        let tables = {
             let mut tables = Vec::with_capacity(builder.len());
-            let mut total_size = 0;
 
             // TODO: decide upload concurrency
             for (table_id, blocks, meta) in builder.finish() {
-                total_size += blocks.len();
                 let table = gen_remote_sstable(
                     self.obj_client.clone(),
                     table_id,
@@ -428,7 +429,7 @@ impl HummockStorage {
                 tables.push(table);
             }
 
-            (total_size, tables)
+            tables
         };
 
         if tables.is_empty() {
@@ -454,8 +455,6 @@ impl HummockStorage {
             )
             .await?;
         timer.observe_duration();
-        // Update statistics if needed.
-        self.stats.put_bytes.inc_by(total_size.try_into().unwrap());
 
         // Notify the compactor
         self.tx.send(()).ok();

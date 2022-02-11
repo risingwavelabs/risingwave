@@ -3910,6 +3910,7 @@ dependencies = [
  "rand 0.8.4",
  "risingwave-pb",
  "risingwave_common",
+ "risingwave_rpc_client",
  "risingwave_storage",
  "rusoto_core",
  "rusoto_credential",

@@ -151,18 +151,6 @@ async fn test_hummock_table() -> Result<()> {
         get_sorted_committed_sstable_ids(pinned_version)
     );
 
-    // TODO should use strong cases after compactor is ready so that real compact_tasks are
-    // reported.
-    let compact_task = hummock_manager.get_compact_task(context_id).await?;
-    hummock_manager
-        .report_compact_task(context_id, compact_task.clone(), true)
-        .await
-        .unwrap();
-    hummock_manager
-        .report_compact_task(context_id, compact_task.clone(), false)
-        .await
-        .unwrap();
-
     Ok(())
 }
 

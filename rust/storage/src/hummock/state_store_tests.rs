@@ -1,10 +1,7 @@
-use std::convert::Infallible;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use hyper::body::HttpBody;
-use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Client, Request, Response, Server};
+use hyper::{Body, Request, Response};
 use prometheus::{Encoder, Registry, TextEncoder};
 
 use super::iterator::UserIterator;
@@ -32,15 +29,15 @@ async fn prometheus_service(
 
 #[tokio::test]
 async fn test_prometheus_endpoint_hummock() {
+    // Create a hummock instance so as to fill the registry.
     let hummock_options = HummockOptions::default_for_test();
-    let host_addr = "127.0.0.1:1222";
     let object_client = Arc::new(InMemObjectStore::new());
     let local_version_manager = Arc::new(LocalVersionManager::new(
         object_client.clone(),
         &hummock_options.remote_dir,
         None,
     ));
-    let hummock_storage = HummockStorage::new(
+    let _hummock_storage = HummockStorage::new(
         object_client,
         hummock_options,
         Arc::new(VersionManager::new()),
@@ -51,66 +48,23 @@ async fn test_prometheus_endpoint_hummock() {
     )
     .await
     .unwrap();
-    let anchor = Bytes::from("aa");
-    let mut batch1 = vec![
-        (anchor.clone(), Some(Bytes::from("111"))),
-        (Bytes::from("bb"), Some(Bytes::from("222"))),
-    ];
-    let epoch: u64 = 0;
-    batch1.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-    hummock_storage
-        .write_batch(
-            batch1
-                .into_iter()
-                .map(|(k, v)| (k.to_vec(), v.map(|x| x.to_vec()).into())),
-            epoch,
-        )
-        .await
-        .unwrap();
 
-    let epoch = u64::MAX;
-    assert_eq!(
-        hummock_storage.get(&anchor, epoch).await.unwrap().unwrap(),
-        Bytes::from("111")
-    );
-    let notifier = Arc::new(tokio::sync::Notify::new());
-    let notifiee = notifier.clone();
+    // Send a request to the prometheus service func.
+    let registry = prometheus::default_registry();
+    let mut response = prometheus_service(
+        Request::get("/metrics").body(Body::default()).unwrap(),
+        registry,
+    )
+    .await
+    .unwrap();
 
-    let make_svc = make_service_fn(move |_| {
-        let registry = prometheus::default_registry();
-        async move {
-            Ok::<_, Infallible>(service_fn(move |req: Request<Body>| async move {
-                prometheus_service(req, registry).await
-            }))
-        }
-    });
+    let bytes = hyper::body::to_bytes(response.body_mut()).await.unwrap();
+    let s = std::str::from_utf8(&bytes[..]).unwrap();
 
-    let server = Server::bind(&host_addr.parse().unwrap()).serve(make_svc);
-
-    tokio::spawn(async move {
-        notifier.notify_one();
-        if let Err(err) = server.await {
-            eprintln!("server error: {}", err);
-        }
-    });
-
-    notifiee.notified().await;
-    let client = Client::new();
-    let uri = "http://127.0.0.1:1222/metrics".parse().unwrap();
-    let mut response = client.get(uri).await.unwrap();
-
-    let mut web_page: Vec<u8> = Vec::new();
-    while let Some(next) = response.data().await {
-        let chunk = next.unwrap();
-        web_page.append(&mut chunk.to_vec());
-    }
-
-    let s = String::from_utf8_lossy(&web_page);
     println!("\n---{}---\n", s);
-    assert!(s.contains("state_store_put_bytes"));
-    assert!(!s.contains("state_store_pu_bytes"));
 
-    assert!(s.contains("state_store_get_bytes"));
+    assert!(s.contains("state_store_batched_write_counts"));
+    assert!(!s.contains("state_store_batched_counts"));
 }
 
 #[tokio::test]

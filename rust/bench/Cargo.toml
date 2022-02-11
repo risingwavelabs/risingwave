@@ -15,6 +15,7 @@ moka = { version = "0.7", features = ["future"] }
 rand = "0.8"
 risingwave-pb = { path = "../prost" }
 risingwave_common = { path = "../common" }
+risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_storage = { path = "../storage" } 
 rusoto_core = "0.47"
 rusoto_credential = "0.47"
