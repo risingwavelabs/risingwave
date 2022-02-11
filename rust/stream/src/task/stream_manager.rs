@@ -409,6 +409,19 @@ impl StreamManagerCore {
                     executor_id,
                 )))
             }
+            LocalSimpleAggNode(aggr_node) => {
+                let agg_calls: Vec<AggCall> = aggr_node
+                    .get_agg_calls()
+                    .iter()
+                    .map(build_agg_call_from_prost)
+                    .try_collect()?;
+                Ok(Box::new(LocalSimpleAggExecutor::new(
+                    input.remove(0),
+                    agg_calls,
+                    pk_indices,
+                    executor_id,
+                )?))
+            }
             SimpleAggNode(aggr_node) => {
                 let agg_calls: Vec<AggCall> = aggr_node
                     .get_agg_calls()
