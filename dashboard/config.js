@@ -1,3 +1,3 @@
 export default {
-  baseUrl: "http://localhost:5691"
+  baseUrl: "http://127.0.0.1:5691"
 }
