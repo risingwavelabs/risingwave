@@ -118,11 +118,11 @@ mod tests {
         assert_eq!(get_percentile(&histogram, 99.9) as u64, 1000);
         assert_eq!(get_percentile(&histogram, 100.0) as u64, 1000);
 
-        let histogram = new_histogram(10000);
+        let histogram = new_histogram(9999);
         assert_eq!(get_percentile(&histogram, 50.0) as u64, 5000);
         assert_eq!(get_percentile(&histogram, 90.0) as u64, 9000);
         assert_eq!(get_percentile(&histogram, 99.0) as u64, 9900);
-        assert_eq!(get_percentile(&histogram, 99.9) as u64, 9991);
-        assert_eq!(get_percentile(&histogram, 100.0) as u64, 10000);
+        assert_eq!(get_percentile(&histogram, 99.9) as u64, 9990);
+        assert_eq!(get_percentile(&histogram, 100.0) as u64, 9999);
     }
 }
