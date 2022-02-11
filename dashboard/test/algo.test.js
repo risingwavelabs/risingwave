@@ -1,5 +1,5 @@
 import { Node } from "../lib/algo";
-import { dagLayout } from "../lib/streamChartHelper";
+import { StreamChartHelper } from "../lib/streamPlan/streamChartHelper";
 
 describe("Algo", () => {
   it("shoule generate right dag layout", () => {
@@ -17,7 +17,7 @@ describe("Algo", () => {
     n(6).nextNodes = [n(9), n(10)];
     n(7).nextNodes = [n(8)];
 
-    let dagPositionMapper = dagLayout(nodes);
+    let dagPositionMapper = new StreamChartHelper().dagLayout(nodes);
 
     // construct map
     let maxLayer = 0;

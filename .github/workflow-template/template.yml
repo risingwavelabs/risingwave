@@ -122,7 +122,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-streaming
-          sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
+          timeout 5m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
 
       - name: Kill cluster
         run: |
@@ -134,7 +134,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           RW_NO_CACHE=1 ~/cargo-make/makers ci-streaming
-          sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
+          timeout 5m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
 
       - name: Kill cluster
         run: |
@@ -147,7 +147,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-streaming
-          sqllogictest -p 4567 -d dev './e2e_test/batch/**/*.slt'
+          timeout 5m sqllogictest -p 4567 -d dev './e2e_test/batch/**/*.slt'
 
       - name: Kill cluster
         run: |
@@ -160,7 +160,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           RW_FORCE_TABLE_V1=1 ~/cargo-make/makers ci-3node
-          sqllogictest -p 4567 -d dev './e2e_test/batch/**/*.slt'
+          timeout 5m sqllogictest -p 4567 -d dev './e2e_test/batch/**/*.slt'
 
       - name: Kill cluster
         run: |
@@ -211,60 +211,79 @@ jobs:
           username: ${{ secrets.GHCR_ACTOR }}
           password: ${{ secrets.WUTAO_PAT }}
 
+      - name: Install required components
+        run: |
+          sudo apt-get update -yy
+          sudo apt-get install --upgrade -yy tmux postgresql
+
       # For source testing.
       - name: Setup kafka cluster
         run: ./scripts/source/prepare_source.sh
-
-      - name: Set up JDK 11
-        uses: actions/setup-java@v2
-        with:
-          java-version: "11"
-          distribution: "adopt"
-
-      # Install latest postgresql client, our tests requires 14.1+
-      - name: Install postgres client
-        run: |
-          sudo apt-get update -yy
-          sudo apt-get install --upgrade -yy postgresql
 
       - name: Download sqllogictest
         run: |
           curl -fL -o ~/.cargo/bin/sqllogictest https://github.com/singularity-data/sqllogictest-rs/releases/download/v0.2.0/sqllogictest-linux-amd64
           chmod +x ~/.cargo/bin/sqllogictest
 
+      - name: Download cargo-make
+        run: |
+          curl -fL https://github.com/sagiegurari/cargo-make/releases/download/0.35.7/cargo-make-v0.35.7-x86_64-unknown-linux-musl.zip -o ~/cargo-make-v0.35.7-x86_64-unknown-linux-musl.zip
+          unzip ~/cargo-make-v0.35.7-x86_64-unknown-linux-musl.zip -d ~
+          mv ~/cargo-make-v0.35.7-x86_64-unknown-linux-musl ~/cargo-make
+
       - uses: actions/download-artifact@v2
+        name: Download compute-node binary
         with:
           name: compute-node
-          path: ./rust/target/debug
+          path: ./.risingwave/bin
 
       - uses: actions/download-artifact@v2
+        name: Download meta-node binary
         with:
           name: meta-node
-          path: ./rust/target/debug
-
-      - uses: actions/download-artifact@v2
-        with:
-          name: risingwave_regress_test
-          path: ./rust/target/debug
+          path: ./.risingwave/bin
 
       - uses: actions/download-artifact@v2
         name: Download frontend binary
         with:
           name: risingwave-fe-runnable.jar
-          path: ./java/pgserver/build/libs
+          path: ./.risingwave/bin
 
-      - name: Run tests on Postgresql
+      - uses: actions/download-artifact@v2
+        name: Download playground binary
+        with:
+          name: risedev-playground
+          path: ./rust/target/debug
+
+      - uses: actions/download-artifact@v2
+        name: Download risingwave_regress_test binary
+        with:
+          name: risingwave_regress_test
+          path: ./rust/target/debug
+
+      - name: Adjust permission
         run: |
-          sqllogictest -p ${{ env.PG_PORT }} './e2e_test/batch/**/*.slt'
+          chmod +x ./.risingwave/bin/meta-node
+          chmod +x ./.risingwave/bin/compute-node
+          chmod +x ./rust/target/debug/risedev-playground
+          chmod +x ./rust/target/debug/risingwave_regress_test
+
+      - name: Run batch tests on Postgresql
+        run: |
+          timeout 5m sqllogictest -p ${{ env.PG_PORT }} './e2e_test/batch/**/*.slt'
+
+      - name: Generate RiseDev CI config
+        run: |
+          cp risedev-components.ci.env risedev-components.user.env
+
+      - name: Prepare RiseDev playground
+        run: ~/cargo-make/makers pre-start-playground
 
       # TODO: TABLE_V2 can't be distributed now
       - name: Run 3-node regress tests (batch, table_v1)
         run: |
-          sleep 5
-          chmod +x ./rust/target/debug/compute-node
-          chmod +x ./rust/target/debug/meta-node
-          chmod +x ./rust/target/debug/risingwave_regress_test
-          RW_FORCE_TABLE_V1=1 ./scripts/start_cluster.sh 3
+          ~/cargo-make/makers clean-data
+          RW_FORCE_TABLE_V1=1 ~/cargo-make/makers ci-3node
           psql --version
           RUST_LOG=info cd rust && target/debug/risingwave_regress_test -h 127.0.0.1 \
             -p ${{ env.RW_PORT }} \
@@ -272,28 +291,46 @@ jobs:
             --output `pwd`/tests/regress/output \
             --schedule `pwd`/tests/regress/data/schedule
 
-      - name: Run single-node end-to-end tests (source)
+      - name: Kill cluster
         run: |
-          chmod +x ./rust/target/debug/compute-node
-          chmod +x ./rust/target/debug/meta-node
-          ./scripts/start_cluster.sh 1
-          sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source/**/*.slt'
-          ./scripts/kill_cluster.sh
+          ~/cargo-make/makers k
+          ~/cargo-make/makers logs
+          # ~/cargo-make/makers check-logs # regression test is bound to produce errors, so we don't check logs
 
-      - name: Run 3-node end-to-end tests (source)
+      - name: e2e test w/ source and Hummock
         run: |
-          sleep 5
-          chmod +x ./rust/target/debug/compute-node
-          ./scripts/start_cluster.sh 3
-          sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source_distributed/**/*.slt'
+          ~/cargo-make/makers clean-data
+          ~/cargo-make/makers ci-streaming
+          timeout 5m sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source/**/*.slt'
 
-      - name: Show compute-nodes logs on failure
+      - name: Kill cluster
+        run: |
+          ~/cargo-make/makers k
+          ~/cargo-make/makers logs
+          ~/cargo-make/makers check-logs
+
+      - name: e2e test w/ source 3-node
+        run: |
+          ~/cargo-make/makers clean-data
+          ~/cargo-make/makers ci-3node
+          timeout 5m sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source_distributed/**/*.slt'
+
+      - name: Kill cluster
+        run: |
+          ~/cargo-make/makers k
+          ~/cargo-make/makers logs
+          ~/cargo-make/makers check-logs
+
+      - name: Dump last 100 lines of logs on failure
         if: ${{ failure() }}
-        run: ./scripts/dump_cluster_logs.sh
+        run: ~/cargo-make/makers logs
 
-      - name: Kill clusters
-        run: |
-          ./scripts/kill_cluster.sh
+      - uses: actions/upload-artifact@v2
+        if: ${{ failure() }}
+        name: Upload RiseDev logs on failure (You may find it in artifacts)
+        with:
+          path: .risingwave/log/
+          name: risedev-logs-source
 
   # Start 2 runners (a/b) to run build and test in parallel.
   start-runner-a:
