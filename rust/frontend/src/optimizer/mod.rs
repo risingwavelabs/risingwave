@@ -10,14 +10,14 @@ pub mod property;
 pub mod rule;
 
 #[derive(Debug, Clone)]
-/// used to describe a plan, its required
-/// and planner will construct a `PlanRoot` with LogicalNode and required Order. And `PlanRoot` can
-/// generate corresponding streaming or batch Plan with optimization.
-/// the required Order and Distribution columns might be more than the output columns. for example:
+/// `PlanRoot` is used to describe a plan. planner will construct a `PlanRoot` with LogicalNode and
+/// required distribution and order. And `PlanRoot` can generate corresponding streaming or batch
+/// Plan with optimization. the required Order and Distribution columns might be more than the
+/// output columns. for example:
 /// ```SQL
-///    select v1 from t order by id
+///    select v1 from t order by id;
 /// ```
-/// the plan will return two columns `(id, v1)`, and the required order column is `id`. the id
+/// the plan will return two columns (id, v1), and the required order column is id. the id
 /// column is required in optimization, but the final generated plan will remove the unnecessary
 /// column in the result.
 struct PlanRoot {
