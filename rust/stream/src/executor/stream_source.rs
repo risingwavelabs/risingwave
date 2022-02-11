@@ -126,7 +126,7 @@ impl Executor for StreamSourceExecutor {
     async fn next(&mut self) -> Result<Message> {
         if self.first_execution {
             self.reader.open().await?;
-            self.first_execution = false
+            self.first_execution = false;
         }
         // FIXME: may lose message
         tokio::select! {

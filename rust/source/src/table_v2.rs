@@ -1,12 +1,12 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::error::Result;
 use risingwave_storage::table::ScannableTableRef;
 use risingwave_storage::TableColumnDesc;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::mpsc;
 
 use crate::{BatchSourceReader, Source, SourceWriter, StreamSourceReader};
 
@@ -88,11 +88,9 @@ impl BatchSourceReader for TableV2BatchReader {
 /// structure of "`MView` on `MView`".
 #[derive(Debug)]
 pub struct TableV2StreamReader {
-    core: Arc<RwLock<TableSourceV2Core>>,
-
     /// The receiver of the changes channel. This field is `Some` only if the reader has been
     /// `open`ed.
-    rx: Option<mpsc::UnboundedReceiver<StreamChunk>>,
+    rx: mpsc::UnboundedReceiver<StreamChunk>,
 
     /// Mappings from the source column to the column to be read.
     column_indices: Vec<usize>,
@@ -101,15 +99,11 @@ pub struct TableV2StreamReader {
 #[async_trait]
 impl StreamSourceReader for TableV2StreamReader {
     async fn open(&mut self) -> Result<()> {
-        let mut core = self.core.write().await;
-        let (tx, rx) = mpsc::unbounded_channel();
-        self.rx = Some(rx);
-        core.changes_txs.push(tx);
         Ok(())
     }
 
     async fn next(&mut self) -> Result<StreamChunk> {
-        let chunk = match self.rx.as_mut().expect("reader not open").recv().await {
+        let chunk = match self.rx.recv().await {
             Some(chunk) => chunk,
             None => panic!("TableSourceV2 dropped before associated streaming task terminated"),
         };
@@ -137,7 +131,8 @@ pub struct TableV2Writer {
 impl SourceWriter for TableV2Writer {
     async fn write(&mut self, chunk: StreamChunk) -> Result<()> {
         use rand::Rng;
-        let core = self.core.read().await;
+        let core = self.core.read().unwrap();
+        assert!(core.changes_txs.len() > 0, "table reader not exists");
         // randomly pick a channel
         let idx = rand::thread_rng().gen_range(0..core.changes_txs.len());
         let tx = &core.changes_txs[idx];
@@ -180,11 +175,11 @@ impl Source for TableSourceV2 {
             })
             .collect();
 
-        Ok(TableV2StreamReader {
-            core: self.core.clone(),
-            rx: None,
-            column_indices,
-        })
+        let mut core = self.core.write().unwrap();
+        let (tx, rx) = mpsc::unbounded_channel();
+        core.changes_txs.push(tx);
+
+        Ok(TableV2StreamReader { rx, column_indices })
     }
 
     fn create_writer(&self) -> Result<Self::Writer> {
