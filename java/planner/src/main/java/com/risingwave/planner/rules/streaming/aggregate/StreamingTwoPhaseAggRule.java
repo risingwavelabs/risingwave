@@ -16,6 +16,7 @@ import java.util.stream.Collectors;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptRuleCall;
 import org.apache.calcite.plan.RelRule;
+import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.util.ImmutableBitSet;
 
 /** Rule for converting logical aggregation to two phase stream aggregation */
@@ -35,7 +36,15 @@ public class StreamingTwoPhaseAggRule extends RelRule<StreamingTwoPhaseAggRule.C
     RwLogicalAggregate logicalAgg = call.rel(0);
     var groupCount = logicalAgg.getGroupCount();
     boolean distributedMode = isDistributedMode(contextOf(call));
-    return groupCount <= 1 && distributedMode;
+    return groupCount <= 1
+        && distributedMode
+        // In stream processing, only stateless aggregators can be parallelized.
+        && logicalAgg.getAggCallList().stream()
+            .allMatch(
+                (agg) -> {
+                  var kind = agg.getAggregation().getKind();
+                  return kind == SqlKind.SUM || kind == SqlKind.COUNT;
+                });
   }
 
   @Override
