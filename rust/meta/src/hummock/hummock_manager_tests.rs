@@ -57,6 +57,20 @@ async fn test_hummock_pin_unpin() -> Result<()> {
     Ok(())
 }
 
+#[tokio::test]
+async fn test_hummock_get_compact_task() -> Result<()> {
+    let sled_root = tempfile::tempdir().unwrap();
+    let env = MetaSrvEnv::for_test_with_sled(sled_root).await;
+    let hummock_manager = create_hummock_manager(env.clone()).await?;
+    let context_id = 0;
+
+    let task = hummock_manager.get_compact_task(context_id).await?;
+
+    assert_eq!(task, None);
+
+    Ok(())
+}
+
 /// Generate keys like `001_key_test_00002` with timestamp `epoch`.
 fn iterator_test_key_of_epoch(table: u64, idx: usize, ts: HummockSnapshotId) -> Vec<u8> {
     // key format: {prefix_index}_version
