@@ -14,12 +14,12 @@
         <appender-ref ref="STDOUT" />
     </appender>
 
-    <root level="INFO">
+    <root level="DEBUG">
         <appender-ref ref="STDOUT"/>
     </root>
 
     <logger name="io.grpc.netty.shaded.io" level="OFF"/>
-    <logger name="org.apache.calcite" level="INFO"/>
+    <logger name="org.apache.calcite" level="DEBUG"/>
 
     <!-- Add logger config to debug specified package or class e.g. -->
     <!-- <logger name="com.risingwave.planner.rel.physical" level="TRACE"/> -->
