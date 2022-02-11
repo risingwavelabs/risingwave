@@ -1,5 +1,6 @@
 package com.risingwave.planner.rel.logical;
 
+import com.risingwave.planner.sql.RisingWaveRexUtil;
 import java.util.Set;
 import org.apache.calcite.plan.Convention;
 import org.apache.calcite.plan.RelOptCluster;
@@ -11,7 +12,6 @@ import org.apache.calcite.rel.core.CorrelationId;
 import org.apache.calcite.rel.core.Filter;
 import org.apache.calcite.rel.logical.LogicalFilter;
 import org.apache.calcite.rex.RexNode;
-import org.apache.calcite.rex.RexUtil;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
 public class RwLogicalFilter extends Filter implements RisingWaveLogicalRel {
@@ -49,15 +49,15 @@ public class RwLogicalFilter extends Filter implements RisingWaveLogicalRel {
 
     @Override
     public @Nullable RelNode convert(RelNode rel) {
+      var logicalFilter = (LogicalFilter) rel;
       var input = ((LogicalFilter) rel).getInput();
       var newInput = RelOptRule.convert(input, input.getTraitSet().plus(LOGICAL).simplify());
+      // Hack here to remove Sarg optimization of Calcite.
+      var newCondition =
+          RisingWaveRexUtil.expandSearch(
+              rel.getCluster().getRexBuilder(), null, logicalFilter.getCondition());
       return new RwLogicalFilter(
-          rel.getCluster(),
-          rel.getTraitSet().plus(LOGICAL),
-          newInput,
-          // Hack here to remove Sarg optimization of Calcite.
-          RexUtil.expandSearch(
-              rel.getCluster().getRexBuilder(), null, ((LogicalFilter) rel).getCondition()));
+          rel.getCluster(), rel.getTraitSet().plus(LOGICAL), newInput, newCondition);
     }
   }
 }

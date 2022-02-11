@@ -1205,10 +1205,10 @@ RwBatchSortAgg(group=[{}], revenue=[SUM($0)])
     RwBatchSortAgg(group=[{}], revenue=[SUM($0)])
       RwBatchProject($f0=[$1])
         RwBatchNestedLoopJoin(condition=[OR(AND(=($10, $0), $11, $12, $2, $3, $13, $4, $5), AND(=($10, $0), $14, $15, $6, $7, $16, $4, $5), AND(=($10, $0), $17, $18, $8, $9, $19, $4, $5))], joinType=[inner])
-          RwBatchProject(l_partkey=[$0], *=[*($2, -(1, $3))], >==[>=($1, 8)], <==[<=($1, +(8, 10))], OR=[SEARCH($5, Sarg['AIR':CHAR(7), 'AIR REG']:CHAR(7))], ==[=($4, CAST('DELIVER IN PERSON'):CHAR(25) NOT NULL)], >=6=[>=($1, 10)], <=7=[<=($1, +(10, 10))], >=8=[>=($1, 24)], <=9=[<=($1, +(24, 10))])
+          RwBatchProject(l_partkey=[$0], *=[*($2, -(1, $3))], >==[>=($1, 8)], <==[<=($1, +(8, 10))], OR=[OR(=($5, 'AIR'), =($5, 'AIR REG'))], ==[=($4, CAST('DELIVER IN PERSON'):CHAR(25) NOT NULL)], >=6=[>=($1, 10)], <=7=[<=($1, +(10, 10))], >=8=[>=($1, 24)], <=9=[<=($1, +(24, 10))])
             RwBatchTableScan(table=[[test_schema, lineitem]], columns=[l_partkey,l_quantity,l_extendedprice,l_discount,l_shipinstruct,l_shipmode])
           RwBatchExchange(distribution=[RwDistributionTrait{type=BROADCAST_DISTRIBUTED, keys=[]}], collation=[[]])
-            RwBatchProject(p_partkey=[$0], ==[=($1, CAST('Brand#22'):CHAR(10) NOT NULL)], OR=[SEARCH($3, Sarg['SM BOX':CHAR(7), 'SM CASE', 'SM PACK', 'SM PKG':CHAR(7)]:CHAR(7))], OR3=[OR(AND(>=($2, 1), <=($2, 5)), <>($2, $2))], =4=[=($1, CAST('Brand#23'):CHAR(10) NOT NULL)], OR5=[SEARCH($3, Sarg['MED BAG':CHAR(8), 'MED BOX':CHAR(8), 'MED PACK', 'MED PKG':CHAR(8)]:CHAR(8))], OR6=[OR(AND(>=($2, 1), <=($2, 10)), <>($2, $2))], =7=[=($1, CAST('Brand#12'):CHAR(10) NOT NULL)], OR8=[SEARCH($3, Sarg['LG BOX':CHAR(7), 'LG CASE', 'LG PACK', 'LG PKG':CHAR(7)]:CHAR(7))], OR9=[OR(AND(>=($2, 1), <=($2, 15)), <>($2, $2))])
+            RwBatchProject(p_partkey=[$0], ==[=($1, CAST('Brand#22'):CHAR(10) NOT NULL)], OR=[OR(=($3, 'SM BOX'), =($3, 'SM CASE'), =($3, 'SM PACK'), =($3, 'SM PKG'))], OR3=[OR(AND(>=($2, 1), <=($2, 5)), <>($2, $2))], =4=[=($1, CAST('Brand#23'):CHAR(10) NOT NULL)], OR5=[OR(=($3, 'MED BAG'), =($3, 'MED BOX'), =($3, 'MED PACK'), =($3, 'MED PKG'))], OR6=[OR(AND(>=($2, 1), <=($2, 10)), <>($2, $2))], =7=[=($1, CAST('Brand#12'):CHAR(10) NOT NULL)], OR8=[OR(=($3, 'LG BOX'), =($3, 'LG CASE'), =($3, 'LG PACK'), =($3, 'LG PKG'))], OR9=[OR(AND(>=($2, 1), <=($2, 15)), <>($2, $2))])
               RwBatchTableScan(table=[[test_schema, part]], columns=[p_partkey,p_brand,p_size,p_container])
 ]]>
         </Resource>
