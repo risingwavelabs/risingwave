@@ -52,6 +52,7 @@ public class DefaultSqlHandlerFactory implements SqlHandlerFactory {
   private boolean useV2 = true;
 
   DefaultSqlHandlerFactory() {
+    // TODO: remove this hack after distributed table_v2 is implemented.
     var forceTableV1 = System.getenv(FORCE_TABLE_V1_ENV_VAR_KEY) != null;
     if (forceTableV1) {
       useV2 = false;
