@@ -126,14 +126,16 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
     async fn mutate_outputs(&mut self, barrier: &Barrier) -> Result<()> {
         match barrier.mutation.as_deref() {
             Some(Mutation::UpdateOutputs(updates)) => {
-                if let Some((_, v)) = updates.get_key_value(&self.actor_id) {
+                if let Some((_, actor_infos)) = updates.get_key_value(&self.actor_id) {
                     let mut new_outputs = vec![];
 
                     let actor_id = self.actor_id;
                     // delete the old local connections in both local and remote pools;
-                    self.context.retain_channels_by_actor_id(actor_id, v);
+                    self.context.retain(|&(up_id, down_id)| {
+                        up_id != actor_id || actor_infos.iter().any(|info| info.actor_id == down_id)
+                    });
 
-                    for act in v.iter() {
+                    for act in actor_infos.iter() {
                         let down_id = act.get_actor_id();
                         let up_down_ids = (actor_id, down_id);
                         let downstream_addr = act.get_host()?.to_socket_addr()?;
