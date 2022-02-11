@@ -1,5 +1,5 @@
 import * as d3 from "d3";
-import StreamChartHelper from "../lib/streamPlan/streamChartHelper";
+import createView from "../lib/streamPlan/streamChartHelper";
 import { useEffect, useRef, useState } from 'react';
 import styled from '@emotion/styled';
 import LocationSearchingIcon from '@mui/icons-material/LocationSearching';
@@ -7,6 +7,8 @@ import LocationSearchingIcon from '@mui/icons-material/LocationSearching';
 import { Tooltip } from '@mui/material';
 
 const orginalZoom = new d3.ZoomTransform(0.3, 0, 0);
+let zoom;
+let svg;
 
 const SvgBox = styled('div')(() => ({
   padding: "10px",
@@ -37,9 +39,6 @@ export default function StreamingView(props) {
       : JSON.stringify(node.nodeProto, null, 2));
   };
 
-  let zoom;
-  let svg;
-
   useEffect(() => {
     if (d3Container.current && (svg === undefined)) {
       const width = 1000;
@@ -50,9 +49,7 @@ export default function StreamingView(props) {
         .attr("viewBox", [-width / 6, -height / 4, width, height]);
 
       const g = svg.append("g").attr("class", "top");
-      let helper = new StreamChartHelper(g, actorProto, onNodeClick);
-
-      helper.drawManyFlow();
+      createView(g, actorProto, onNodeClick);
 
       let transform;
       // Deal with zooming event

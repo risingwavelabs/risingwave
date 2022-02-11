@@ -22,7 +22,7 @@
             }]
           }
         }],
-        "simpleAggNode": {
+        "globalSimpleAggNode": {
           "aggCalls": [{
             "type": "SUM",
             "args": [{

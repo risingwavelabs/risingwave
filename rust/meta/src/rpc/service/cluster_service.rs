@@ -70,10 +70,7 @@ impl ClusterService for ClusterServiceImpl {
     ) -> Result<Response<ListAllNodesResponse>, Status> {
         let req = request.into_inner();
         let worker_type = req.get_worker_type().map_err(tonic_err)?;
-        let node_list = self
-            .scm
-            .list_worker_node(worker_type)
-            .map_err(|e| e.to_grpc_status())?;
+        let node_list = self.scm.list_worker_node(worker_type);
         Ok(Response::new(ListAllNodesResponse {
             status: None,
             nodes: node_list,

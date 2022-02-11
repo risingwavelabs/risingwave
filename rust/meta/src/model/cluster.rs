@@ -1,5 +1,5 @@
 use risingwave_common::error::Result;
-use risingwave_pb::common::{HostAddress, WorkerNode};
+use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 
 use crate::model::MetadataModel;
 
@@ -27,5 +27,11 @@ impl MetadataModel for Worker {
 
     fn key(&self) -> Result<Self::KeyType> {
         Ok(self.0.get_host()?.clone())
+    }
+}
+
+impl Worker {
+    pub fn worker_type(&self) -> WorkerType {
+        WorkerType::from_i32(self.0.r#type).unwrap()
     }
 }
