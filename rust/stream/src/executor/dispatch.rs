@@ -135,10 +135,10 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
                         up_id != actor_id || actor_infos.iter().any(|info| info.actor_id == down_id)
                     });
 
-                    for act in actor_infos.iter() {
-                        let down_id = act.get_actor_id();
+                    for actor_info in actor_infos.iter() {
+                        let down_id = actor_info.get_actor_id();
                         let up_down_ids = (actor_id, down_id);
-                        let downstream_addr = act.get_host()?.to_socket_addr()?;
+                        let downstream_addr = actor_info.get_host()?.to_socket_addr()?;
 
                         if is_local_address(&downstream_addr, &self.context.addr) {
                             let tx = self.context.take_sender(&up_down_ids)?;
