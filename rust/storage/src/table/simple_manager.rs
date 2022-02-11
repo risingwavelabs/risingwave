@@ -2,7 +2,6 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use anyhow::anyhow;
 use risingwave_common::array::InternalError;
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result};
@@ -147,8 +146,14 @@ impl TableManager for SimpleTableManager {
         let table = tables
             .get(associated_table_id)
             .ok_or_else(|| {
+                // TODO: make this "panic"
                 ErrorCode::CatalogError(
-                    anyhow!("associated table not found: {:?}", associated_table_id).into(),
+                    anyhow::anyhow!(
+                        "associated table {:?} for table_v2 {:?} not exist",
+                        associated_table_id,
+                        mview_id
+                    )
+                    .into(),
                 )
             })?
             .clone();
