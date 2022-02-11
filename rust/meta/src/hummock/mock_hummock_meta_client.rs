@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use async_trait::async_trait;
-use risingwave_pb::hummock::{HummockVersion, SstableInfo};
+use risingwave_pb::hummock::{CompactTask, HummockVersion, SstableInfo};
 use risingwave_storage::hummock::hummock_meta_client::HummockMetaClient;
 use risingwave_storage::hummock::{
     HummockEpoch, HummockResult, HummockSSTableId, HummockVersionId,
@@ -45,6 +45,18 @@ impl HummockMetaClient for MockHummockMetaClient {
         &self,
         _epoch: HummockEpoch,
         _sstables: Vec<SstableInfo>,
+    ) -> HummockResult<()> {
+        todo!()
+    }
+
+    async fn get_compaction_task(&self) -> HummockResult<Option<CompactTask>> {
+        todo!()
+    }
+
+    async fn report_compaction_task(
+        &self,
+        _compact_task: CompactTask,
+        _task_result: bool,
     ) -> HummockResult<()> {
         todo!()
     }
