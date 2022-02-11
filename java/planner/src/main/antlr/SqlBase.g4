@@ -485,7 +485,7 @@ assignment
     ;
 
 createStmt
-    : CREATE TABLE (IF NOT EXISTS)? table
+    : CREATE (TABLE | TABLE_V2) (IF NOT EXISTS)? table
         '(' tableElement (',' tableElement)* ')'
          partitionedByOrClusteredInto withProperties?                                #createTable
     | CREATE TABLE_V1 (IF NOT EXISTS)? table
@@ -662,6 +662,7 @@ clazz
     : SCHEMA
     | TABLE
     | TABLE_V1
+    | TABLE_V2
     | VIEW
     ;
 
@@ -698,7 +699,7 @@ nonReserved
     | CURRENT_SCHEMA | PROMOTE | CHARACTER | VARYING
     | DISCARD | PLANS | SEQUENCES | TEMPORARY | TEMP | METADATA
     | SOURCE | LOCATION | TRUE | FALSE
-    | TABLE_V1 | FLUSH
+    | TABLE_V1 | TABLE_V2 | FLUSH
     ;
 
 AUTHORIZATION: 'AUTHORIZATION';
@@ -792,7 +793,7 @@ WITH: 'WITH';
 WITHOUT: 'WITHOUT';
 RECURSIVE: 'RECURSIVE';
 CREATE: 'CREATE';
-TABLE: 'TABLE' | 'TABLE_V2';
+TABLE: 'TABLE';
 SOURCE: 'SOURCE';
 SWAP: 'SWAP';
 GC: 'GC';
@@ -971,6 +972,7 @@ METADATA: 'METADATA';
 LOCATION: 'LOCATION';
 
 TABLE_V1: 'TABLE_V1';
+TABLE_V2: 'TABLE_V2';
 FLUSH: 'FLUSH';
 
 EQ  : '=';
