@@ -1525,6 +1525,7 @@ dependencies = [
  "log",
  "paste",
  "pgwire",
+ "rand 0.8.4",
  "risingwave-pb",
  "risingwave_common",
  "risingwave_meta",

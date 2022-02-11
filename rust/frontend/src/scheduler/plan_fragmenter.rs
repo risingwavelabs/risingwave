@@ -8,7 +8,8 @@ use crate::optimizer::plan_node::{BatchExchange, PlanNodeType, PlanTreeNode};
 use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
 
-type StageId = u64;
+pub(crate) type StageId = u64;
+pub(crate) type TaskId = u64;
 
 struct BatchPlanFragmenter {
     stage_graph_builder: StageGraphBuilder,
@@ -24,25 +25,74 @@ impl BatchPlanFragmenter {
     }
 }
 
-struct Query {
+pub(crate) struct Query {
     /// Query id should always be unique.
     query_id: Uuid,
-    stage_graph: StageGraph,
+    pub(crate) stage_graph: StageGraph,
 }
 
-struct QueryStage {
+impl Query {
+    pub fn leaf_stages(&self) -> Vec<StageId> {
+        let mut ret_leaf_stages = Vec::new();
+        for stage_id in self.stage_graph.stages.keys() {
+            if self.stage_graph.get_child_stages_unchecked(stage_id).len() == 0 {
+                ret_leaf_stages.push(*stage_id);
+            }
+        }
+        ret_leaf_stages
+    }
+
+    pub fn get_parents(&self, stage_id: &StageId) -> &HashSet<StageId> {
+        self.stage_graph.parent_edges.get(stage_id).unwrap()
+    }
+}
+
+pub(crate) struct QueryStage {
     pub id: StageId,
     pub root: PlanRef,
-    /// Fill exchange source to augment phase.
-    /// TODO(Bowen): Introduce augment phase to fill in exchange node info (#73).
-    exchange_source: HashMap<StageId, QueryStage>,
-    distribution: Distribution,
+    pub distribution: Distribution,
 }
 
-type QueryStageRef = Arc<QueryStage>;
+pub(crate) type QueryStageRef = Arc<QueryStage>;
 
-struct StageGraph {
-    id: StageId,
+pub(crate) struct AugmentedStage {
+    query_stage: QueryStageRef,
+    /// Fill exchange source to augment phase.
+    /// TODO(Bowen): Introduce augment phase to fill in exchange node info (#73).
+    exchange_source: HashMap<StageId, ScheduledStageRef>,
+    parallelism: u32,
+}
+
+impl AugmentedStage {
+    pub fn new_with_query_stage(
+        query_stage: QueryStageRef,
+        exchange_source: &HashMap<StageId, ScheduledStageRef>,
+        workers: &[WorkerNode],
+        next_stage_parallelism: u32,
+    ) -> Self {
+        Self {
+            query_stage: query_stage,
+            exchange_source: exchange_source.clone(),
+            parallelism: next_stage_parallelism,
+        }
+    }
+}
+
+type AugmentedQueryStageRef = Arc<QueryStage>;
+
+pub(crate) struct ScheduledStage {
+    pub id: StageId,
+    pub assignments: HashMap<TaskId, WorkerNode>,
+    pub query_stage: AugmentedQueryStageRef,
+}
+
+pub(crate) type ScheduledStageRef = Arc<ScheduledStage>;
+
+#[derive(Clone)]
+pub(crate) struct WorkerNode;
+
+pub(crate) struct StageGraph {
+    pub(crate) id: StageId,
     stages: HashMap<StageId, QueryStageRef>,
     /// Traverse from top to down. Used in split plan into stages.
     child_edges: HashMap<StageId, HashSet<StageId>>,
@@ -51,6 +101,16 @@ struct StageGraph {
     /// Indicates which stage the exchange executor is running on.
     /// Look up child stage for exchange source so that parent stage knows where to pull data.
     exchange_id_to_stage: HashMap<u64, StageId>,
+}
+
+impl StageGraph {
+    pub fn get_stage_unchecked(&self, stage_id: &StageId) -> QueryStageRef {
+        self.stages.get(stage_id).unwrap().clone()
+    }
+
+    pub fn get_child_stages_unchecked(&self, stage_id: &StageId) -> &HashSet<StageId> {
+        self.child_edges.get(stage_id).unwrap()
+    }
 }
 
 struct StageGraphBuilder {
@@ -152,7 +212,6 @@ impl BatchPlanFragmenter {
         let stage = Arc::new(QueryStage {
             id: next_stage_id,
             root: node.clone(),
-            exchange_source: HashMap::new(),
             distribution,
         });
         self.stage_graph_builder.add_node(stage.clone());

@@ -1,7 +1,7 @@
 use super::super::plan_node::*;
 use crate::optimizer::property::{Convention, Order};
 use crate::optimizer::PlanRef;
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Distribution {
     Any,
     Single,
