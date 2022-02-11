@@ -64,7 +64,7 @@ public class RisingWaveRexUtil {
       final boolean[] update = {false};
       final List<RexNode> clonedOperands;
       switch (call.getKind()) {
-          // Flatten AND/OR operands.
+        // Flatten AND/OR operands.
         case OR:
           clonedOperands = visitList(call.operands, update);
           if (update[0]) {
