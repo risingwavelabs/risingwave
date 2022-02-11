@@ -175,6 +175,10 @@ jobs:
           registry: ghcr.io
           username: ${{ secrets.GHCR_ACTOR }}
           password: ${{ secrets.WUTAO_PAT }}
+      - name: Install required components
+        run: |
+          sudo apt-get update -yy
+          sudo apt-get install --upgrade -yy tmux postgresql
       - name: Setup kafka cluster
         run: ./scripts/source/prepare_source.sh
       - name: Download sqllogictest
@@ -220,6 +224,9 @@ jobs:
       - name: Run tests on Postgresql
         run: |
           timeout 5m sqllogictest -p ${{ env.PG_PORT }} './e2e_test/batch/**/*.slt'
+      - name: Generate RiseDev CI config
+        run: |
+          cp risedev-components.ci.env risedev-components.user.env
       - name: Prepare RiseDev playground
         run: ~/cargo-make/makers pre-start-playground
       - name: regress test batch 1-node
