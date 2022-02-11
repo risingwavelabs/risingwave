@@ -45,30 +45,101 @@ const actorOutgoinglinkColor = (actor) => {
   return color.TwoGradient(actor.actorId)[0];
 }
 
-//
-// layoutActorBox         -> dagLayout         -> drawActorBox      -> drawFlow 
-// [ The layout of the ]     [ The layout of ]    [ Draw an actor ]    [ Draw many actors   ]
-// [ operators in an   ]     [ actors in a   ]    [ in specified  ]    [ and links between  ]
-// [ actor.            ]     [ stram plan    ]    [ place         ]    [ them.              ]
-//
 
+
+/**
+ * Construct an id for a link in actor box.
+ * You may use this method to query and get the svg element
+ * of the link.
+ * @param {*} node1 a node (operator) in an actor box
+ * @param {*} node2 a node (operator) in an actor box
+ * @returns {string} The link id
+ */
 function constructNodeLinkId(node1, node2) {
   return "node-" + (node1.id > node2.id ? node1.id + "-" + node2.id : node2.id + "-" + node1.id);
 }
 
+/**
+ * Construct an id for a node (operator) in an actor box.
+ * You may use this method to query and get the svg element
+ * of the link.
+ * @param {*} node a node (operator) in an actor box 
+ * @returns {string} The node id
+ */
 function constructNodeId(node) {
   return "node-" + node.id;
 }
 
 
-export default class StreamChartHelper {
+/**
+ * Work flow
+ *   1. Get the layout for actor boxes (Calculate the base coordination of each actor box)
+ *   2. Get the layout for operators in each actor box
+ *   3. Draw all actor boxes
+ *   4. Draw link between actor boxes
+ * 
+ * 
+ * Dependencies
+ *   layoutActorBox         <- dagLayout         <- drawActorBox      <- drawFlow 
+ *   [ The layout of the ]     [ The layout of ]    [ Draw an actor ]    [ Draw many actors   ]
+ *   [ operators in an   ]     [ actors in a   ]    [ in specified  ]    [ and links between  ]
+ *   [ actor.            ]     [ stram plan    ]    [ place         ]    [ them.              ]
+ *
+ */
+export class StreamChartHelper {
 
+  /**
+   * 
+   * @param {d3.Selection} g The svg group to contain the graph 
+   * @param {*} actorProto 
+   * @param {*} onNodeClick 
+   */
   constructor(g, actorProto, onNodeClick) {
     this.topGroup = g;
     this.actorProto = actorProto;
     this.onNodeClick = onNodeClick;
   }
 
+  //
+  // A simple DAG layout algorithm.
+  // The layout is built based on two rules.
+  // 1. The link should have at two turnning points.
+  // 2. The turnning point of a link should be placed
+  //    at the margin after the layer of its starting point.
+  // -------------------------------------------------------
+  // Example 1: (X)-(Z) and (Y)-(Z) is valid.
+  // Row 0   (X)---------------->(Z)
+  //                         |
+  // Row 1                   |
+  //                         |
+  // Row 2             (Y)---/
+  //       Layer 1 | Layer 2 | Layer 3 
+  // -------------------------------------------------------
+  // Example 2: (A)-(B) is not valid.
+  // Row 0   (X)   /---------\   (Z)
+  //               |         |
+  // Row 1   (A)---/   (Y)   |-->(B)
+  //       
+  //       Layer 1 | Layer 2 | Layer 3 
+  // -------------------------------------------------------
+  // Example 3: (C)-(Z) is not valid
+  // Row 0   (X)             /-->(Z)
+  //                         |
+  // Row 1   (C)-------------/
+  //       
+  //        Layer 1 | Layer 2 | Layer 3  
+  // -------------------------------------------------------
+  // Note that the layer of each node can be different
+  // For example:
+  // Row 0   ( 1)     ( 3)      ( 5)      ( 2)      ( 9)
+  // Row 1   ( 4)                         ( 6)      (10)
+  // Row 2                                ( 7)      ( 8)
+  //       Layer 0 | Layer 1 | Layer 2 | Layer 3 | Layer 4 |
+  //
+  // Row 0   ( 1)     ( 3)      ( 5)      ( 2)      ( 9)
+  // Row 1            ( 4)                ( 6)      (10)
+  // Row 2                                ( 7)      ( 8)
+  //       Layer 0 | Layer 1 | Layer 2 | Layer 3 | Layer 4 |
   /**
    * Topological sort
    * @param {Array<Node>} nodes An array of node: {nextNodes: [...]} 
@@ -101,7 +172,7 @@ export default class StreamChartHelper {
       return n.g;
     }
     for (let node of nodes) {
-      let dagNode = { node: node, temp: false, perm: false, isInput: true, isOutput: true }; // top: flag for input nodes (no incoming edges)
+      let dagNode = { node: node, temp: false, perm: false, isInput: true, isOutput: true };
       node2dagNode.set(node, dagNode);
       _nodes.push(dagNode);
     }
@@ -118,8 +189,6 @@ export default class StreamChartHelper {
     for (let node of _nodes) {
       // node.g = node.isInput ? 0 : (maxLayer - node.g); // TODO: determine which is more suitable
       node.g = maxLayer - node.g;
-      node.node.isInput = node.isInput;
-      node.node.isOutput = node.isOutput;
     }
 
     let layers = [];
@@ -221,18 +290,23 @@ export default class StreamChartHelper {
     return rtn;
   }
 
+  /**
+   * Calculate the position of each node in the actor box.
+   * @param {Node} rootNode The root node of an actor box (dispatcher)
+   * @returns {[width, height]} The size of the actor box
+   */
   calculateActorBoxSize(rootNode) {
     let rootNodeCopy = cloneDeep(rootNode);
     return this.layoutActorBox(rootNodeCopy, 0, 0);
   }
 
   /**
-   * Calculate the position of each node in the actor box.
+   * Calculate the position of each node (operator) in the actor box.
    * This will change the node's position
-   * @param {Node} rootNode 
-   * @param {number} baseX 
-   * @param {number} baseY  
-   * @returns The size [width, height] of the actor box
+   * @param {Node} rootNode The root node of an actor box (dispatcher)
+   * @param {number} baseX The x coordination of the top-left corner of the actor box
+   * @param {number} baseY The y coordination of the top-left corner of the actor box
+   * @returns {[width, height]} The size of the actor box
    */
   layoutActorBox(rootNode, baseX, baseY) {
     // calculate nodes' required width
@@ -300,16 +374,26 @@ export default class StreamChartHelper {
   }
 
   /**
-   * 
+   * @param {{
+   *   g: d3.Selection, 
+   *   rootNode: any, 
+   *   nodeColor: string, 
+   *   strokeColor?: string,
+   *   onNodeClicked?: (e, node) => void,
+   *   onMouseOver?: (e, node) => void,
+   *   onMouseOut? (e, node) => void,
+   *   baseX?: number,
+   *   baseY?: number
+   * }} props
    * @param {d3.Selection} props.g The target group contains this tree.
    * @param {object} props.rootNode The root node of the tree in the actor
-   * @param {String} props.nodeColor [optinal] The filled color of nodes.
-   * @param {String} props.strokeColor [optinal] The color of the stroke.
-   * @param {Function} props.onNodeClicked [optinal] The callback function when a node is clicked.
+   * @param {string} props.nodeColor [optinal] The filled color of nodes.
+   * @param {string} props.strokeColor [optinal] The color of the stroke.
+   * @param {(node) => void} props.onNodeClicked [optinal] The callback function when a node is clicked.
    * @param {Function} props.onMouseOver [optinal] The callback function when the mouse enters a node.
    * @param {Function} props.onMouseOut [optinal] The callback function when the mouse leaves a node.
-   * @param {number} props.baseX [optinal] The x coordination of the lef-top corner
-   * @param {number} props.baseY [optinal] The y coordination of the lef-top corner
+   * @param {number} props.baseX [optinal] The x coordination of the lef-top corner. default: 0
+   * @param {number} props.baseY [optinal] The y coordination of the lef-top corner. default: 0
    * @returns {d3.Selection} The group element of this tree
    */
   drawActorBox(props) {
@@ -331,15 +415,15 @@ export default class StreamChartHelper {
 
     const onNodeClicked = (e, node) => {
       this.onNodeClick && this.onNodeClick(e, node);
-      props.onNodeClicked && props.onNodeClicked(node);
+      props.onNodeClicked && props.onNodeClicked(e, node);
     }
 
     const onMouseOut = (e, node) => {
-      props.onMouseOut && props.onMouseOut(node);
+      props.onMouseOut && props.onMouseOut(e, node);
     }
 
     const onMouseOver = (e, node) => {
-      props.onMouseOut && props.onMouseOver(node);
+      props.onMouseOut && props.onMouseOver(e, node);
     }
 
     // draw box
@@ -430,12 +514,18 @@ export default class StreamChartHelper {
   }
   /**
    * 
+   * @param {{
+   *   g: d3.Selection, 
+   *   actorDagList: Array, 
+   *   baseX?: number, 
+   *   baseY?: number
+   * }} props
    * @param {d3.Selection} props.g The target group contains this group.
    * @param {Arrary} props.actorDagList A list of dag nodes constructed from actors
    * { id: actor.actorId, nextNodes: [], actor: actor }
-   * @param {number} props.baseX The x coordination of left-top corner
-   * @param {number} props.baseY The y coordination of left-top corner
-   * @returns {*} {group, width, height} 
+   * @param {number} props.baseX [optional] The x coordination of left-top corner. default: 0.
+   * @param {number} props.baseY [optional] The y coordination of left-top corner. default: 0.
+   * @returns {{group: d3.Selection, width: number, height: number}} The size of the flow
    */
   drawFlow(props) {
 
@@ -604,6 +694,13 @@ export default class StreamChartHelper {
     };
   }
 
+  /**
+   * A flow is an extracted connected component of actors of
+   * the raw response from the meta node. This method will first
+   * merge actors in the same fragment using some identifier 
+   * (currently it is the id of the operator before the dispatcher).
+   * And then use `drawFlow()` to draw each connected component.
+   */
   drawManyFlow() {
     const g = this.topGroup;
     const actorProto = this.actorProto;
@@ -664,4 +761,16 @@ export default class StreamChartHelper {
       y += (flowChart.height + gapBetweenFlowChart);
     }
   }
+}
+
+/**
+ * create a graph view based on raw input from the meta node, 
+ * and append the svg component to the giving svg group.
+ * @param {d3.Selection} g The parent svg group contain the graph. 
+ * @param {any} actorProto Raw response from the meta node. e.g. {node: {...}, actors: {...}}
+ * @param {(clickEvent, node) => void} onNodeClick callback when a node (operator) is clicked.
+ * @returns void
+ */
+export default function createView(g, actorProto, onNodeClick){
+  return new StreamChartHelper(g, actorProto, onNodeClick).drawManyFlow();
 }
