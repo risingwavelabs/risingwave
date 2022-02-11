@@ -409,13 +409,11 @@ impl HummockStorage {
             builder.add_user_key(k, v, epoch).await?;
         }
 
-        let (total_size, tables) = {
+        let tables = {
             let mut tables = Vec::with_capacity(builder.len());
-            let mut total_size = 0;
 
             // TODO: decide upload concurrency
             for (table_id, blocks, meta) in builder.finish() {
-                total_size += blocks.len();
                 let table = gen_remote_sstable(
                     self.obj_client.clone(),
                     table_id,
@@ -428,7 +426,7 @@ impl HummockStorage {
                 tables.push(table);
             }
 
-            (total_size, tables)
+            tables
         };
 
         if tables.is_empty() {
@@ -454,8 +452,6 @@ impl HummockStorage {
             )
             .await?;
         timer.observe_duration();
-        // Update statistics if needed.
-        self.stats.put_bytes.inc_by(total_size.try_into().unwrap());
 
         // Notify the compactor
         self.tx.send(()).ok();
