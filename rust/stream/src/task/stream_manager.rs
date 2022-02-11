@@ -409,6 +409,19 @@ impl StreamManagerCore {
                     executor_id,
                 )))
             }
+            LocalSimpleAggNode(aggr_node) => {
+                let agg_calls: Vec<AggCall> = aggr_node
+                    .get_agg_calls()
+                    .iter()
+                    .map(build_agg_call_from_prost)
+                    .try_collect()?;
+                Ok(Box::new(LocalSimpleAggExecutor::new(
+                    input.remove(0),
+                    agg_calls,
+                    pk_indices,
+                    executor_id,
+                )?))
+            }
             SimpleAggNode(aggr_node) => {
                 let agg_calls: Vec<AggCall> = aggr_node
                     .get_agg_calls()
@@ -821,7 +834,7 @@ impl StreamManagerCore {
     /// sink. All the actors in the actors should stop themselves before this method is invoked.
     fn drop_actor(&mut self, actor_id: u32) {
         let handle = self.handles.remove(&actor_id).unwrap();
-        self.context.retain_channels_by_actor_id(actor_id, &[]);
+        self.context.retain(|&(up_id, _)| up_id != actor_id);
 
         self.actor_infos.remove(&actor_id);
         self.actors.remove(&actor_id);

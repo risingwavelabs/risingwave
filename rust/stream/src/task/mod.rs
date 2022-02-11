@@ -4,7 +4,6 @@ use std::sync::{Mutex, MutexGuard};
 
 use futures::channel::mpsc::{Receiver, Sender};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_pb::common::ActorInfo;
 
 use crate::executor::Message;
 
@@ -130,11 +129,12 @@ impl SharedContext {
         self.lock_channel_pool().insert(ids, channels);
     }
 
-    #[inline]
-    pub fn retain_channels_by_actor_id(&self, actor_id: u32, actor_info: &[ActorInfo]) {
-        self.lock_channel_pool().retain(|(up_id, down_id), _| {
-            *up_id != actor_id || actor_info.iter().any(|info| info.actor_id == *down_id)
-        })
+    pub fn retain<F>(&self, mut f: F)
+    where
+        F: FnMut(&(u32, u32)) -> bool,
+    {
+        self.lock_channel_pool()
+            .retain(|up_down_ids, _| f(up_down_ids));
     }
 
     #[cfg(test)]
