@@ -34,7 +34,6 @@ pub enum MetaStoreBackend {
 pub async fn rpc_serve(
     addr: SocketAddr,
     dashboard_addr: Option<SocketAddr>,
-    hummock_config: Option<hummock::Config>,
     meta_store_backend: MetaStoreBackend,
 ) -> (JoinHandle<()>, UnboundedSender<()>) {
     let listener = TcpListener::bind(addr).await.unwrap();
@@ -50,10 +49,7 @@ pub async fn rpc_serve(
 
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
     let cluster_manager = Arc::new(StoredClusterManager::new(env.clone()).await.unwrap());
-    let hummock_manager =
-        hummock::HummockManager::new(env.clone(), hummock_config.unwrap_or_default())
-            .await
-            .unwrap();
+    let hummock_manager = hummock::HummockManager::new(env.clone()).await.unwrap();
 
     if let Some(dashboard_addr) = dashboard_addr {
         let dashboard_service = DashboardService {
@@ -131,7 +127,6 @@ mod tests {
         let sled_root = tempfile::tempdir().unwrap();
         let (join_handle, shutdown_send) = rpc_serve(
             addr,
-            None,
             None,
             MetaStoreBackend::Sled(sled_root.path().to_path_buf()),
         )

@@ -59,12 +59,7 @@ async fn main() {
     let addr = opts.host.parse().unwrap();
     let dashboard_addr = opts.dashboard_host.parse().unwrap();
     info!("Starting meta server at {}", addr);
-    let (join_handle, _shutdown_send) = rpc_serve(
-        addr,
-        Some(dashboard_addr),
-        None,
-        MetaStoreBackend::SledInMem,
-    )
-    .await;
+    let (join_handle, _shutdown_send) =
+        rpc_serve(addr, Some(dashboard_addr), MetaStoreBackend::SledInMem).await;
     join_handle.await.unwrap();
 }
