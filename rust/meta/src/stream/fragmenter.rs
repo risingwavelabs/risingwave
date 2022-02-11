@@ -142,7 +142,7 @@ impl StreamFragmenter {
                     (true, child_is_source)
                 }
                 Node::ChainNode(_) => {
-                    let (_, child_is_source) = self.build_fragment(parent_fragment, node)?;
+                    let (_, child_is_source) = self.build_fragment(parent_fragment, node).await?;
                     // TODO: Force Chain to be singleton as a workaround.
                     // Remove this if parallel Chain is supported
                     (true, child_is_source)

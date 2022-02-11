@@ -132,7 +132,7 @@ impl SourceWriter for TableV2Writer {
     async fn write(&mut self, chunk: StreamChunk) -> Result<()> {
         use rand::Rng;
         let core = self.core.read().unwrap();
-        assert!(core.changes_txs.len() > 0, "table reader not exists");
+        assert!(!core.changes_txs.is_empty(), "table reader not exists");
         // randomly pick a channel
         let idx = rand::thread_rng().gen_range(0..core.changes_txs.len());
         let tx = &core.changes_txs[idx];
