@@ -44,12 +44,20 @@ public class DefaultSqlHandlerFactory implements SqlHandlerFactory {
   private static final Logger LOGGER = LoggerFactory.getLogger(DefaultSqlHandlerFactory.class);
   private static final String PACKAGE_NAME = DefaultSqlHandlerFactory.class.getPackage().getName();
 
+  private static final String FORCE_TABLE_V1_ENV_VAR_KEY = "RW_FORCE_TABLE_V1";
+
   private static final ImmutableMap<SqlKind, Constructor<? extends SqlHandler>>
       SQL_HANDLER_FACTORY = createSqlHandlerFactory();
 
   private boolean useV2 = true;
 
-  DefaultSqlHandlerFactory() {}
+  DefaultSqlHandlerFactory() {
+    var forceTableV1 = System.getenv(FORCE_TABLE_V1_ENV_VAR_KEY) != null;
+    if (forceTableV1) {
+      useV2 = false;
+      LOGGER.info("Env var `{}` is set, will not create table_v2.", FORCE_TABLE_V1_ENV_VAR_KEY);
+    }
+  }
 
   DefaultSqlHandlerFactory(boolean useV2) {
     this.useV2 = useV2;
