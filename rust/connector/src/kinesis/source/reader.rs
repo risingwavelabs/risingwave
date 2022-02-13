@@ -122,8 +122,8 @@ impl SourceReader for KinesisSplitReader {
 }
 
 impl KinesisSplitReader {
-    /// This method is only used to initialize the [`KinesisSplitReader`], which is needed to allocate
-    /// the [`KinesisSplit`] and then fetch the data.
+    /// This method is only used to initialize the [`KinesisSplitReader`], which is needed to
+    /// allocate the [`KinesisSplit`] and then fetch the data.
     async fn new(config: AwsConfigInfo, endpoint: Option<String>) -> Self {
         let aws_config = config.load().await.unwrap();
         let mut builder = aws_sdk_kinesis::config::Builder::from(&aws_config);
