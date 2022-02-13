@@ -3,7 +3,6 @@ use aws_config::default_provider::credentials::DefaultCredentialsChain;
 use aws_config::default_provider::region::DefaultRegionChain;
 use aws_types::credentials::SharedCredentialsProvider;
 use aws_types::region::Region;
-use aws_types::Credentials;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

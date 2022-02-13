@@ -28,7 +28,7 @@ impl SourceReader for KinesisSplitReader {
     type Split = KinesisSplit;
 
     async fn next(&mut self) -> Result<Option<Vec<Self::Message>>> {
-        if let None = &self.assigned_split {
+        if self.assigned_split.is_none() {
             return Err(anyhow::Error::msg(
                 "you should call `assign_split` before calling `next`".to_string(),
             ));
@@ -81,7 +81,7 @@ impl SourceReader for KinesisSplitReader {
             for record in records {
                 if !is_stopping(
                     record.sequence_number.as_ref().unwrap(),
-                    &self.assigned_split.as_ref().unwrap(),
+                    self.assigned_split.as_ref().unwrap(),
                 ) {
                     return Ok(Some(record_collection));
                 }
