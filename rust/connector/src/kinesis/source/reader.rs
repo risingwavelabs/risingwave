@@ -122,8 +122,8 @@ impl SourceReader for KinesisSplitReader {
 }
 
 impl KinesisSplitReader {
-    /// This method is only used to initialize the KinesisSplitReader, which is needed to allocate
-    /// the KinesisSplit and then fetch the data.
+    /// This method is only used to initialize the [`KinesisSplitReader`], which is needed to allocate
+    /// the [`KinesisSplit`] and then fetch the data.
     async fn new(config: AwsConfigInfo, endpoint: Option<String>) -> Self {
         let aws_config = config.load().await.unwrap();
         let mut builder = aws_sdk_kinesis::config::Builder::from(&aws_config);
@@ -148,15 +148,13 @@ impl KinesisSplitReader {
         &self,
         shard_iter: String,
     ) -> core::result::Result<GetRecordsOutput, SdkError<GetRecordsError>> {
-        println!("get_records: send iter {:?}", shard_iter);
         let resp = self
             .client
             .get_records()
             .shard_iterator(shard_iter.clone())
             .send()
             .await;
-        println!("get_records: resp {:#?}", resp);
-        return resp;
+        resp
     }
 
     async fn renew_shard_iter(&mut self) -> Result<()> {
