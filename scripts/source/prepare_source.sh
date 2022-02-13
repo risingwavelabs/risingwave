@@ -40,7 +40,7 @@ if command -v docker-compose; then
     docker-compose -f "$SCRIPT_PATH"/docker-compose.yml up -d
 
     cd "$SCRIPT_PATH" 
-    mkdir ../logs 
+    mkdir -p ../logs 
     docker-compose logs -f > ../logs/docker-compose.log & 
     cd -
 else
