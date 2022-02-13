@@ -6,7 +6,6 @@ use aws_sdk_kinesis::error::GetRecordsError;
 use aws_sdk_kinesis::model::ShardIteratorType;
 use aws_sdk_kinesis::output::GetRecordsOutput;
 use aws_sdk_kinesis::{Client as kinesis_client, DateTime, SdkError};
-use futures::executor::block_on;
 use http::uri::Uri;
 
 use crate::base::SourceReader;
@@ -44,7 +43,7 @@ impl SourceReader for KinesisSplitReader {
                     )));
                 }
             };
-            let get_record_output = match block_on(self.get_records(iter.clone())) {
+            let get_record_output = match self.get_records(iter.clone()).await {
                 Ok(record_resp) => record_resp,
                 Err(SdkError::DispatchFailure(e)) => {
                     return Err(anyhow!(e));
@@ -292,15 +291,6 @@ mod tests {
         let resp = &split_reader.next().await.unwrap().unwrap()[0];
         println!("first message: {:#?}", resp);
         assert_eq!(sequence_num, resp.sequence_number);
-
-        // let resp = split_reader
-        //     .client
-        //     .get_records()
-        //     .shard_iterator(split_reader.shard_iter.unwrap().clone())
-        //     .send()
-        //     .await
-        //     .unwrap();
-        // println!("output {:#?}", resp);
     }
 
     #[test]
