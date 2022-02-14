@@ -124,5 +124,3 @@ pub trait StreamSourceReader: Send + Sync + 'static {
     /// block until new data coming
     async fn next(&mut self) -> Result<StreamChunk>;
 }
-
-////////////////////////////////////////////////////////////////////////////////
