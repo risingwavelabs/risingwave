@@ -1,20 +1,9 @@
-// TODO: move these three to StreamPlanParser properties
-var parsedNodeMap = new Map();
-var parsedActorMap = new Map();
-var actorId2Proto = new Map();
-
 class Node {
   constructor(actorId, nodeProto) {
     this.id = nodeProto.operatorId;
     this.nodeProto = nodeProto;
     this.nextNodes = [];
     this.actorId = actorId;
-    if (nodeProto.input !== undefined) {
-      for (let nextNodeProto of nodeProto.input) {
-        let nextNode = StreamNode.parseNode(actorId, nextNodeProto);
-        this.nextNodes.push(nextNode);
-      }
-    }
   }
 }
 
@@ -23,38 +12,17 @@ class StreamNode extends Node {
     super(actorId, nodeProto);
     this.type = this.parseType(nodeProto);
     this.typeInfo = nodeProto[this.type];
-
-    if (this.type === "mergeNode") {
-      for (let upStreamActorId of this.typeInfo.upstreamActorId) {
-        Actor.parseActor(actorId2Proto.get(upStreamActorId)).output.push(this);
-      }
-    }
-
-    if (this.type === "chainNode") {
-      for (let upStreamActorId of this.typeInfo.upstreamActorIds) {
-        Actor.parseActor(actorId2Proto.get(upStreamActorId)).output.push(this);
-      }
-    }
   }
 
   parseType(nodeProto) {
     let types = ["tableSourceNode", "sourceNode", "projectNode", "filterNode",
-      "mviewNode", "simpleAggNode", "hashAggNode", "topNNode",
+      "mviewNode", "globalSimpleAggNode", "localSimpleAggNode", "hashAggNode", "topNNode",
       "hashJoinNode", "mergeNode", "exchangeNode", "chainNode"];
     for (let type of types) {
       if (type in nodeProto) {
         return type;
       }
     }
-  }
-
-  static parseNode(actorId, nodeProto) {
-    let id = nodeProto.operatorId;
-    if (parsedNodeMap.has(id)) {
-      return parsedNodeMap.get(id);
-    }
-    parsedNodeMap.set(id, new StreamNode(actorId, nodeProto));
-    return parsedNodeMap.get(id);
   }
 }
 
@@ -63,12 +31,6 @@ class Dispatcher extends Node {
     super(actorId, nodeProto);
     this.dispatcherType = dispatcherType;
     this.downstreamActorId = downstreamActorId;
-  }
-
-  static newDispatcher(actorId, type, downstreamActorId) {
-    return new Dispatcher(actorId, type, downstreamActorId, {
-      operatorId: 100000 + actorId
-    })
   }
 }
 
@@ -79,7 +41,41 @@ class Actor {
     this.rootNode = rootNode;
     this.fragmentId = fragmentId;
   }
-  
+}
+
+
+export default class StreamPlanParser {
+  /**
+   * 
+   * @param {{node: any, actors: []}} streamPlan raw response from the meta node
+   */
+  constructor(streamPlan) {
+    this.parsedNodeMap = new Map();
+    this.parsedActorMap = new Map();
+    this.actorId2Proto = new Map();
+
+
+    this.node = streamPlan.node;
+    this.actorProtoList = streamPlan.actors;
+    for (let actorProto of this.actorProtoList) {
+      this.actorId2Proto.set(actorProto.actorId, actorProto);
+    }
+    for (let actorProto of this.actorProtoList) {
+      this.parseActor(actorProto);
+    }
+    this.parsedActorList = [];
+    for (let actorId of this.parsedActorMap.keys()) {
+      this.parsedActorList.push(this.parsedActorMap.get(actorId));
+    }
+    console.log(this.parsedActorList);
+  }
+
+  newDispatcher(actorId, type, downstreamActorId) {
+    return new Dispatcher(actorId, type, downstreamActorId, {
+      operatorId: 100000 + actorId
+    })
+  }
+
   /**
    * Parse raw data from meta node to an actor
    * @param {{
@@ -91,53 +87,62 @@ class Actor {
    * }} actorProto 
    * @returns {Actor}
    */
-  static parseActor(actorProto) {
+  parseActor(actorProto) {
     let actorId = actorProto.actorId;
-    if (parsedActorMap.has(actorId)) {
-      return parsedActorMap.get(actorId);
+    if (this.parsedActorMap.has(actorId)) {
+      return this.parsedActorMap.get(actorId);
     }
 
     let actor = new Actor(actorId, [], null, actorProto.fragmentId);
-    parsedActorMap.set(actorId, actor);
-    let nodeBeforeDispatcher = StreamNode.parseNode(actor.actorId, actorProto.nodes);
-    let rootNode = Dispatcher.newDispatcher(actor.actorId, actorProto.dispatcher.type, actorProto.downstreamActorId);
-    rootNode.nextNodes = [nodeBeforeDispatcher];
+    let rootNode
+    this.parsedActorMap.set(actorId, actor);
+    if (actorProto.dispatcher && actorProto.dispatcher.type) {
+      let nodeBeforeDispatcher = this.parseNode(actor.actorId, actorProto.nodes);
+      rootNode = this.newDispatcher(actor.actorId, actorProto.dispatcher.type, actorProto.downstreamActorId);
+      rootNode.nextNodes = [nodeBeforeDispatcher];
+    } else {
+      rootNode = this.parseNode(actorId, actorProto.nodes);
+    }
+
     actor.rootNode = rootNode;
-    return parsedActorMap.get(actorId);
+    return this.parsedActorMap.get(actorId);
   }
-}
 
+  parseNode(actorId, nodeProto) {
+    let id = nodeProto.operatorId;
+    if (this.parsedNodeMap.has(id)) {
+      return this.parsedNodeMap.get(id);
+    }
+    let newNode = new StreamNode(actorId, nodeProto);
+    this.parsedNodeMap.set(id, newNode);
 
-export default class StreamPlanParser {
-  /**
-   * 
-   * @param {{node: any, actors: []}} streamPlan raw response from the meta node
-   */
-  constructor(streamPlan) {
-    parsedNodeMap = new Map();
-    parsedActorMap = new Map();
-    actorId2Proto = new Map();
+    if (nodeProto.input !== undefined) {
+      for (let nextNodeProto of nodeProto.input) {
+        newNode.nextNodes.push(this.parseNode(actorId, nextNodeProto));
+      }
+    }
 
-    this.node = streamPlan.node;
-    this.actorProtoList = streamPlan.actors;
-    for (let actorProto of this.actorProtoList) {
-      actorId2Proto.set(actorProto.actorId, actorProto);
+    if (newNode.type === "mergeNode") {
+      for (let upStreamActorId of newNode.typeInfo.upstreamActorId) {
+        this.parseActor(this.actorId2Proto.get(upStreamActorId)).output.push(newNode);
+      }
     }
-    for (let actorProto of this.actorProtoList) {
-      Actor.parseActor(actorProto);
+
+    if (newNode.type === "chainNode") {
+      for (let upStreamActorId of newNode.typeInfo.upstreamActorIds) {
+        this.parseActor(this.actorId2Proto.get(upStreamActorId)).output.push(newNode);
+      }
     }
-    this.parsedActorList = [];
-    for (let actorId of parsedActorMap.keys()) {
-      this.parsedActorList.push(parsedActorMap.get(actorId));
-    }
+
+    return newNode;
   }
 
   getActor(actorId) {
-    return parsedActorMap.get(actorId);
+    return this.parsedActorMap.get(actorId);
   }
 
   getOperator(operatorId) {
-    return parsedNodeMap.get(operatorId);
+    return this.parsedNodeMap.get(operatorId);
   }
 
   /**
