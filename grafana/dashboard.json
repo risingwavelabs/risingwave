@@ -57,12 +57,121 @@
 	"liveNow": false,
 	"panels": [
 		{
-			"collapsed": true,
+			"collapsed": false,
 			"gridPos": {
 				"h": 1,
 				"w": 24,
 				"x": 0,
 				"y": 0
+			},
+			"id": 58,
+			"panels": [],
+			"title": "hummock_range_scan",
+			"type": "row"
+		},
+		{
+			"aliasColors": {},
+			"bars": false,
+			"dashLength": 10,
+			"dashes": false,
+			"fill": 1,
+			"fillGradient": 0,
+			"gridPos": {
+				"h": 8,
+				"w": 12,
+				"x": 0,
+				"y": 1
+			},
+			"hiddenSeries": false,
+			"id": 56,
+			"legend": {
+				"avg": false,
+				"current": false,
+				"max": false,
+				"min": false,
+				"show": true,
+				"total": false,
+				"values": false
+			},
+			"lines": true,
+			"linewidth": 1,
+			"nullPointMode": "null",
+			"options": {
+				"alertThreshold": true
+			},
+			"percentage": false,
+			"pluginVersion": "8.3.3",
+			"pointradius": 2,
+			"points": false,
+			"renderer": "flot",
+			"seriesOverrides": [],
+			"spaceLength": 10,
+			"stack": false,
+			"steppedLine": false,
+			"targets": [
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "${DS_RISEDEV-PROMETHEUS}"
+					},
+					"exemplar": true,
+					"expr": "sum(rate(state_store_reverse_range_scan_counts[1m])) by (type)",
+					"interval": "",
+					"legendFormat": "reverse_range_scan_counts",
+					"refId": "A"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "${DS_RISEDEV-PROMETHEUS}"
+					},
+					"exemplar": true,
+					"expr": "sum(rate(state_store_range_scan_counts[1m])) by (type)",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "range_scan_count",
+					"refId": "B"
+				}
+			],
+			"thresholds": [],
+			"timeRegions": [],
+			"title": "range_scan_count",
+			"tooltip": {
+				"shared": true,
+				"sort": 0,
+				"value_type": "individual"
+			},
+			"type": "graph",
+			"xaxis": {
+				"mode": "time",
+				"show": true,
+				"values": []
+			},
+			"yaxes": [
+				{
+					"$$hashKey": "object:88",
+					"format": "ops",
+					"logBase": 1,
+					"show": true
+				},
+				{
+					"$$hashKey": "object:89",
+					"format": "short",
+					"logBase": 1,
+					"show": true
+				}
+			],
+			"yaxis": {
+				"align": false
+			}
+		},
+		{
+			"collapsed": true,
+			"gridPos": {
+				"h": 1,
+				"w": 24,
+				"x": 0,
+				"y": 9
 			},
 			"id": 38,
 			"panels": [
@@ -77,7 +186,7 @@
 						"h": 8,
 						"w": 12,
 						"x": 0,
-						"y": 1
+						"y": 10
 					},
 					"hiddenSeries": false,
 					"id": 14,
@@ -155,103 +264,102 @@
 			"type": "row"
 		},
 		{
-			"collapsed": true,
+			"collapsed": false,
 			"gridPos": {
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 1
+				"y": 10
 			},
 			"id": 36,
-			"panels": [
-				{
-					"aliasColors": {},
-					"bars": false,
-					"dashLength": 10,
-					"dashes": false,
-					"fill": 1,
-					"fillGradient": 0,
-					"gridPos": {
-						"h": 8,
-						"w": 12,
-						"x": 0,
-						"y": 2
-					},
-					"hiddenSeries": false,
-					"id": 16,
-					"legend": {
-						"avg": false,
-						"current": false,
-						"max": false,
-						"min": false,
-						"show": true,
-						"total": false,
-						"values": false
-					},
-					"lines": true,
-					"linewidth": 1,
-					"nullPointMode": "null",
-					"options": {
-						"alertThreshold": true
-					},
-					"percentage": false,
-					"pluginVersion": "8.3.3",
-					"pointradius": 2,
-					"points": false,
-					"renderer": "flot",
-					"seriesOverrides": [],
-					"spaceLength": 10,
-					"stack": false,
-					"steppedLine": false,
-					"targets": [
-						{
-							"datasource": {
-								"type": "prometheus",
-								"uid": "${DS_RISEDEV-PROMETHEUS}"
-							},
-							"exemplar": true,
-							"expr": "rate(stream_source_output_rows_counts[15s])",
-							"hide": false,
-							"interval": "",
-							"legendFormat": "source_id = {{source_id}}",
-							"refId": "B"
-						}
-					],
-					"thresholds": [],
-					"timeRegions": [],
-					"title": "source throughput",
-					"tooltip": {
-						"shared": true,
-						"sort": 0,
-						"value_type": "individual"
-					},
-					"type": "graph",
-					"xaxis": {
-						"mode": "time",
-						"show": true,
-						"values": []
-					},
-					"yaxes": [
-						{
-							"$$hashKey": "object:439",
-							"format": "rows/s",
-							"logBase": 1,
-							"show": true
-						},
-						{
-							"$$hashKey": "object:440",
-							"format": "short",
-							"logBase": 1,
-							"show": true
-						}
-					],
-					"yaxis": {
-						"align": false
-					}
-				}
-			],
+			"panels": [],
 			"title": "source",
 			"type": "row"
+		},
+		{
+			"aliasColors": {},
+			"bars": false,
+			"dashLength": 10,
+			"dashes": false,
+			"fill": 1,
+			"fillGradient": 0,
+			"gridPos": {
+				"h": 8,
+				"w": 12,
+				"x": 0,
+				"y": 11
+			},
+			"hiddenSeries": false,
+			"id": 16,
+			"legend": {
+				"avg": false,
+				"current": false,
+				"max": false,
+				"min": false,
+				"show": true,
+				"total": false,
+				"values": false
+			},
+			"lines": true,
+			"linewidth": 1,
+			"nullPointMode": "null",
+			"options": {
+				"alertThreshold": true
+			},
+			"percentage": false,
+			"pluginVersion": "8.3.3",
+			"pointradius": 2,
+			"points": false,
+			"renderer": "flot",
+			"seriesOverrides": [],
+			"spaceLength": 10,
+			"stack": false,
+			"steppedLine": false,
+			"targets": [
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "${DS_RISEDEV-PROMETHEUS}"
+					},
+					"exemplar": true,
+					"expr": "rate(stream_source_output_rows_counts[15s])",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "source_id = {{source_id}}",
+					"refId": "B"
+				}
+			],
+			"thresholds": [],
+			"timeRegions": [],
+			"title": "source throughput",
+			"tooltip": {
+				"shared": true,
+				"sort": 0,
+				"value_type": "individual"
+			},
+			"type": "graph",
+			"xaxis": {
+				"mode": "time",
+				"show": true,
+				"values": []
+			},
+			"yaxes": [
+				{
+					"$$hashKey": "object:439",
+					"format": "rows/s",
+					"logBase": 1,
+					"show": true
+				},
+				{
+					"$$hashKey": "object:440",
+					"format": "short",
+					"logBase": 1,
+					"show": true
+				}
+			],
+			"yaxis": {
+				"align": false
+			}
 		},
 		{
 			"collapsed": true,
@@ -259,7 +367,7 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 2
+				"y": 19
 			},
 			"id": 26,
 			"panels": [
@@ -280,7 +388,7 @@
 						"h": 8,
 						"w": 12,
 						"x": 0,
-						"y": 3
+						"y": 4
 					},
 					"hiddenSeries": false,
 					"id": 28,
@@ -394,17 +502,13 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
-					"fieldConfig": {
-						"defaults": {},
-						"overrides": []
-					},
 					"fill": 1,
 					"fillGradient": 0,
 					"gridPos": {
 						"h": 8,
 						"w": 12,
 						"x": 12,
-						"y": 3
+						"y": 4
 					},
 					"hiddenSeries": false,
 					"id": 30,
@@ -489,7 +593,7 @@
 						"h": 8,
 						"w": 12,
 						"x": 0,
-						"y": 11
+						"y": 12
 					},
 					"hiddenSeries": false,
 					"id": 32,
@@ -585,7 +689,7 @@
 						"h": 8,
 						"w": 12,
 						"x": 12,
-						"y": 11
+						"y": 12
 					},
 					"hiddenSeries": false,
 					"id": 34,
@@ -704,7 +808,7 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 3
+				"y": 20
 			},
 			"id": 24,
 			"panels": [
@@ -713,10 +817,6 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
-					"fieldConfig": {
-						"defaults": {},
-						"overrides": []
-					},
 					"fill": 1,
 					"fillGradient": 0,
 					"gridPos": {
@@ -802,10 +902,6 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
-					"fieldConfig": {
-						"defaults": {},
-						"overrides": []
-					},
 					"fill": 1,
 					"fillGradient": 0,
 					"gridPos": {
@@ -1340,7 +1436,7 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 4
+				"y": 21
 			},
 			"id": 22,
 			"panels": [
@@ -1772,7 +1868,7 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 5
+				"y": 22
 			},
 			"id": 20,
 			"panels": [
@@ -2198,6 +2294,6 @@
 	"timezone": "",
 	"title": "risingwave_dashboard",
 	"uid": "Ecy3uV1nz",
-	"version": 62,
+	"version": 96,
 	"weekStart": ""
 }

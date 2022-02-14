@@ -103,7 +103,7 @@ impl WithSchema for LogicalJoin {
 }
 impl ColPrunable for LogicalJoin {}
 impl ToBatch for LogicalJoin {
-    fn to_batch_with_order_required(&self, _required_order: Order) -> PlanRef {
+    fn to_batch_with_order_required(&self, _required_order: &Order) -> PlanRef {
         if self.predicate().is_equal_cond() {
             // TODO: check if use SortMergeJoin could satisfy the required_order
             let new_left = self.left().to_batch();
@@ -116,7 +116,7 @@ impl ToBatch for LogicalJoin {
                 );
                 let new_right = self
                     .left()
-                    .to_batch_with_order_required(right_required_order);
+                    .to_batch_with_order_required(&right_required_order);
                 let new_logical = self.clone_with_left_right(new_left, new_right);
                 return BatchSortMergeJoin::new(new_logical).into_plan_ref();
             } else {
@@ -135,10 +135,10 @@ impl ToStream for LogicalJoin {
     fn to_stream(&self) -> PlanRef {
         let left = self
             .left()
-            .to_stream_with_dist_required(Distribution::HashShard(self.predicate().left_keys()));
+            .to_stream_with_dist_required(&Distribution::HashShard(self.predicate().left_keys()));
         let right = self
             .right()
-            .to_stream_with_dist_required(Distribution::HashShard(self.predicate().right_keys()));
+            .to_stream_with_dist_required(&Distribution::HashShard(self.predicate().right_keys()));
         StreamHashJoin::new(self.clone_with_left_right(left, right)).into_plan_ref()
     }
 }
