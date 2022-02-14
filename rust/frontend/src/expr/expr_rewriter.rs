@@ -1,6 +1,6 @@
 use super::{AggCall, Expr, ExprImpl, FunctionCall, InputRef, Literal};
 
-trait ExprRewriter {
+pub trait ExprRewriter {
     fn rewrite_expr(&mut self, expr: ExprImpl) -> ExprImpl {
         match expr {
             ExprImpl::InputRef(inner) => self.rewrite_input_ref(*inner).bound_expr(),
