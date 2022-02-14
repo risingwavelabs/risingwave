@@ -187,6 +187,10 @@ mod test {
         fn identity(&self) -> &'static str {
             "MockSnapshot"
         }
+
+        fn init(&mut self, _: u64) -> Result<()> {
+            Ok(())
+        }
     }
 
     #[tokio::test]
