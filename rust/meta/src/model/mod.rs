@@ -6,7 +6,7 @@ use async_trait::async_trait;
 pub use catalog::*;
 pub use cluster::*;
 use prost::Message;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 pub use stream::*;
 
 use crate::manager::{Epoch, SINGLE_VERSION_EPOCH};
@@ -75,13 +75,25 @@ pub trait MetadataModel: Sized {
     }
 
     /// `select` query a record with associated key and version.
-    async fn select(store: &MetaStoreRef, key: &Self::KeyType, version: Epoch) -> Result<Self> {
-        let byte_vec = store
+    async fn select(
+        store: &MetaStoreRef,
+        key: &Self::KeyType,
+        version: Epoch,
+    ) -> Result<Option<Self>> {
+        let byte_vec = match store
             .get_cf(&Self::cf_name(), &key.encode_to_vec(), version)
-            .await?;
-        Ok(Self::from_protobuf(Self::ProstType::decode(
-            byte_vec.as_slice(),
-        )?))
+            .await
+        {
+            Ok(byte_vec) => byte_vec,
+            Err(err) => {
+                if !matches!(err.inner(), ErrorCode::ItemNotFound(_)) {
+                    return Err(err);
+                }
+                return Ok(None);
+            }
+        };
+        let model = Self::from_protobuf(Self::ProstType::decode(byte_vec.as_slice())?);
+        Ok(Some(model))
     }
 }
 
