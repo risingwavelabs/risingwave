@@ -79,7 +79,18 @@ class Actor {
     this.rootNode = rootNode;
     this.fragmentId = fragmentId;
   }
-
+  
+  /**
+   * Parse raw data from meta node to an actor
+   * @param {{
+   *  actorId: number, 
+   *  fragmentId: number, 
+   *  nodes: any, 
+   *  dispatcher?: {type: string}, 
+   *  downstreamActorId?: any
+   * }} actorProto 
+   * @returns {Actor}
+   */
   static parseActor(actorProto) {
     let actorId = actorProto.actorId;
     if (parsedActorMap.has(actorId)) {
@@ -100,7 +111,7 @@ class Actor {
 export default class StreamPlanParser {
   /**
    * 
-   * @param {*} streamPlan raw input from the meta node
+   * @param {{node: any, actors: []}} streamPlan raw response from the meta node
    */
   constructor(streamPlan) {
     parsedNodeMap = new Map();
@@ -137,7 +148,6 @@ export default class StreamPlanParser {
   }
 
   /**
-   * 
    * @returns {Array<Actor>}
    */
   getParsedActorList() {

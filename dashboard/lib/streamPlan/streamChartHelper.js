@@ -5,6 +5,30 @@ import { cloneDeep, max } from "lodash";
 import { newNumberArray } from "../util";
 import StreamPlanParser from "./parser";
 // Actor constant
+// 
+// =======================================================
+//                  ^ 
+//                  | actorBoxPadding
+//                  v
+//        --┌───────────┐      
+//        | │      node │                                          
+//        | │<--->radius│>───────\        
+//        | │           │        │        
+//        | └───────────┘        │
+//        |                      │
+//        | ┌───────────┐        │         ┌───────────┐
+//        | │      node │        │         │      node │
+// widthUnit│<--->radius│>───────┼────────>│<--->radius│
+//        | │           │        │         │           │
+//        | └───────────┘        │         └───────────┘
+//        |                      │
+//        | ┌───────────┐        │
+//        | │      node │        │      
+//        | │<--->radius│>───────/
+//        | │           │                      
+//       ---└───────────┘
+//          |-----------------heightUnit---------------|
+//
 const nodeRadius = 30; // the radius of the tree nodes in an actor
 const nodeStrokeWidth = 5; // the stroke width of the link of the tree nodes in an actor
 const widthUnit = 230; // the width of a tree node in an actor
@@ -51,8 +75,8 @@ const actorOutgoinglinkColor = (actor) => {
  * Construct an id for a link in actor box.
  * You may use this method to query and get the svg element
  * of the link.
- * @param {*} node1 a node (operator) in an actor box
- * @param {*} node2 a node (operator) in an actor box
+ * @param {{id: number}} node1 a node (operator) in an actor box
+ * @param {{id: number}} node2 a node (operator) in an actor box
  * @returns {string} The link id
  */
 function constructNodeLinkId(node1, node2) {
@@ -63,7 +87,7 @@ function constructNodeLinkId(node1, node2) {
  * Construct an id for a node (operator) in an actor box.
  * You may use this method to query and get the svg element
  * of the link.
- * @param {*} node a node (operator) in an actor box 
+ * @param {{id: number}} node a node (operator) in an actor box 
  * @returns {string} The node id
  */
 function constructNodeId(node) {
@@ -91,8 +115,8 @@ export class StreamChartHelper {
   /**
    * 
    * @param {d3.Selection} g The svg group to contain the graph 
-   * @param {*} actorProto 
-   * @param {*} onNodeClick 
+   * @param {*} actorProto The raw response from the meta node
+   * @param {(e, node) => void} onNodeClick The callback function trigged when a node is click
    */
   constructor(g, actorProto, onNodeClick) {
     this.topGroup = g;
@@ -292,7 +316,7 @@ export class StreamChartHelper {
 
   /**
    * Calculate the position of each node in the actor box.
-   * @param {Node} rootNode The root node of an actor box (dispatcher)
+   * @param {{id: any, nextNodes: [], x: number, y: number}} rootNode The root node of an actor box (dispatcher)
    * @returns {[width, height]} The size of the actor box
    */
   calculateActorBoxSize(rootNode) {
@@ -303,7 +327,7 @@ export class StreamChartHelper {
   /**
    * Calculate the position of each node (operator) in the actor box.
    * This will change the node's position
-   * @param {Node} rootNode The root node of an actor box (dispatcher)
+   * @param {{id: any, nextNodes: [], x: number, y: number}} rootNode The root node of an actor box (dispatcher)
    * @param {number} baseX The x coordination of the top-left corner of the actor box
    * @param {number} baseY The y coordination of the top-left corner of the actor box
    * @returns {[width, height]} The size of the actor box
@@ -376,22 +400,22 @@ export class StreamChartHelper {
   /**
    * @param {{
    *   g: d3.Selection, 
-   *   rootNode: any, 
+   *   rootNode: {id: any, nextNodes: []}, 
    *   nodeColor: string, 
    *   strokeColor?: string,
-   *   onNodeClicked?: (e, node) => void,
-   *   onMouseOver?: (e, node) => void,
-   *   onMouseOut? (e, node) => void,
+   *   onNodeClicked?: (event, node) => void,
+   *   onMouseOver?: (event, node) => void,
+   *   onMouseOut?: (event, node) => void,
    *   baseX?: number,
    *   baseY?: number
    * }} props
    * @param {d3.Selection} props.g The target group contains this tree.
-   * @param {object} props.rootNode The root node of the tree in the actor
+   * @param {{id: any, nextNodes: []}} props.rootNode The root node of the tree in the actor
    * @param {string} props.nodeColor [optinal] The filled color of nodes.
    * @param {string} props.strokeColor [optinal] The color of the stroke.
-   * @param {(node) => void} props.onNodeClicked [optinal] The callback function when a node is clicked.
-   * @param {Function} props.onMouseOver [optinal] The callback function when the mouse enters a node.
-   * @param {Function} props.onMouseOut [optinal] The callback function when the mouse leaves a node.
+   * @param {(event, node) => void} props.onNodeClicked [optinal] The callback function when a node is clicked.
+   * @param {(event, node) => void} props.onMouseOver [optinal] The callback function when the mouse enters a node.
+   * @param {(event, node) => void} props.onMouseOut [optinal] The callback function when the mouse leaves a node.
    * @param {number} props.baseX [optinal] The x coordination of the lef-top corner. default: 0
    * @param {number} props.baseY [optinal] The y coordination of the lef-top corner. default: 0
    * @returns {d3.Selection} The group element of this tree
