@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
 use risingwave_pb::hummock::*;
 use tonic::{Request, Response, Status};
@@ -5,11 +7,11 @@ use tonic::{Request, Response, Status};
 use crate::hummock::HummockManager;
 
 pub struct HummockServiceImpl {
-    hummock_manager: HummockManager,
+    hummock_manager: Arc<HummockManager>,
 }
 
 impl HummockServiceImpl {
-    pub fn new(hummock_manager: HummockManager) -> Self {
+    pub fn new(hummock_manager: Arc<HummockManager>) -> Self {
         HummockServiceImpl { hummock_manager }
     }
 }
@@ -21,10 +23,7 @@ impl HummockManagerService for HummockServiceImpl {
         request: Request<PinVersionRequest>,
     ) -> Result<Response<PinVersionResponse>, Status> {
         let req = request.into_inner();
-        let result = self
-            .hummock_manager
-            .pin_version(req.context_identifier)
-            .await;
+        let result = self.hummock_manager.pin_version(req.context_id).await;
         match result {
             Ok((pinned_version_id, pinned_version)) => Ok(Response::new(PinVersionResponse {
                 status: None,
@@ -42,7 +41,7 @@ impl HummockManagerService for HummockServiceImpl {
         let req = request.into_inner();
         let result = self
             .hummock_manager
-            .unpin_version(req.context_identifier, req.pinned_version_id)
+            .unpin_version(req.context_id, req.pinned_version_id)
             .await;
         match result {
             Ok(_) => Ok(Response::new(UnpinVersionResponse { status: None })),
@@ -57,7 +56,7 @@ impl HummockManagerService for HummockServiceImpl {
         let req = request.into_inner();
         let result = self
             .hummock_manager
-            .add_tables(req.context_identifier, req.tables, req.epoch)
+            .add_tables(req.context_id, req.tables, req.epoch)
             .await;
         match result {
             Ok(_) => Ok(Response::new(AddTablesResponse { status: None })),
@@ -70,10 +69,7 @@ impl HummockManagerService for HummockServiceImpl {
         request: Request<GetCompactionTasksRequest>,
     ) -> Result<Response<GetCompactionTasksResponse>, Status> {
         let req = request.into_inner();
-        let result = self
-            .hummock_manager
-            .get_compact_task(req.context_identifier)
-            .await;
+        let result = self.hummock_manager.get_compact_task(req.context_id).await;
         match result {
             Ok(compact_task) => Ok(Response::new(GetCompactionTasksResponse {
                 status: None,
@@ -95,7 +91,7 @@ impl HummockManagerService for HummockServiceImpl {
             Some(compact_task) => {
                 let result = self
                     .hummock_manager
-                    .report_compact_task(req.context_identifier, compact_task, req.task_result)
+                    .report_compact_task(req.context_id, compact_task, req.task_result)
                     .await;
                 match result {
                     Ok(_) => Ok(Response::new(ReportCompactionTasksResponse {
@@ -112,10 +108,7 @@ impl HummockManagerService for HummockServiceImpl {
         request: Request<PinSnapshotRequest>,
     ) -> Result<Response<PinSnapshotResponse>, Status> {
         let req = request.into_inner();
-        let result = self
-            .hummock_manager
-            .pin_snapshot(req.context_identifier)
-            .await;
+        let result = self.hummock_manager.pin_snapshot(req.context_id).await;
         match result {
             Ok(hummock_snapshot) => Ok(Response::new(PinSnapshotResponse {
                 status: None,
@@ -132,7 +125,7 @@ impl HummockManagerService for HummockServiceImpl {
         let req = request.into_inner();
         let result = self
             .hummock_manager
-            .unpin_snapshot(req.context_identifier, req.snapshot.unwrap())
+            .unpin_snapshot(req.context_id, req.snapshot.unwrap())
             .await;
         match result {
             Ok(_) => Ok(Response::new(UnpinSnapshotResponse { status: None })),
@@ -147,7 +140,7 @@ impl HummockManagerService for HummockServiceImpl {
         let req = request.into_inner();
         let result = self
             .hummock_manager
-            .commit_epoch(req.context_identifier, req.epoch)
+            .commit_epoch(req.context_id, req.epoch)
             .await;
         match result {
             Ok(_) => Ok(Response::new(CommitEpochResponse { status: None })),
@@ -162,7 +155,7 @@ impl HummockManagerService for HummockServiceImpl {
         let req = request.into_inner();
         let result = self
             .hummock_manager
-            .abort_epoch(req.context_identifier, req.epoch)
+            .abort_epoch(req.context_id, req.epoch)
             .await;
         match result {
             Ok(_) => Ok(Response::new(AbortEpochResponse { status: None })),

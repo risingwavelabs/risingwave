@@ -430,7 +430,7 @@ mod tests {
             sleep(Duration::from_secs(1));
 
             let env = MetaSrvEnv::for_test().await;
-            let cluster_manager = Arc::new(StoredClusterManager::new(env.clone()).await?);
+            let cluster_manager = Arc::new(StoredClusterManager::new(env.clone(), None).await?);
             cluster_manager
                 .add_worker_node(
                     HostAddress {

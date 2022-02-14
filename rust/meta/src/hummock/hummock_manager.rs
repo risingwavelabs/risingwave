@@ -632,4 +632,39 @@ impl HummockManager {
             .await
             .map(|id| id as HummockSSTableId)
     }
+
+    pub async fn release_context_resource(&self, context_id: HummockContextId) -> Result<()> {
+        let versioning_guard = self.versioning.write().await;
+        let mut transaction = versioning_guard.meta_store_ref.get_transaction();
+        let pinned_version = HummockContextPinnedVersion::select(
+            &versioning_guard.meta_store_ref,
+            &HummockContextRefId { id: context_id },
+            SINGLE_VERSION_EPOCH,
+        )
+        .await?;
+        let mut to_commit = false;
+        if let Some(pinned_version) = pinned_version {
+            pinned_version.delete_in_transaction(&mut transaction)?;
+            to_commit = true;
+        }
+        let pinned_snapshot = HummockContextPinnedSnapshot::select(
+            &versioning_guard.meta_store_ref,
+            &HummockContextRefId { id: context_id },
+            SINGLE_VERSION_EPOCH,
+        )
+        .await?;
+        if let Some(pinned_snapshot) = pinned_snapshot {
+            pinned_snapshot.delete_in_transaction(&mut transaction)?;
+            to_commit = true;
+        }
+        if !to_commit {
+            return Ok(());
+        }
+        self.commit_trx(
+            versioning_guard.meta_store_ref.as_ref(),
+            &mut transaction,
+            None,
+        )
+        .await
+    }
 }

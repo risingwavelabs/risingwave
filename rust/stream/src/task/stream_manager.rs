@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -238,7 +238,6 @@ impl StreamManagerCore {
         let outputs = downstreams
             .iter()
             .map(|down_id| {
-                let up_down_ids = (actor_id, *down_id);
                 let host_addr = self
                     .actor_infos
                     .get(down_id)
@@ -250,18 +249,11 @@ impl StreamManagerCore {
                     })?
                     .get_host()?;
                 let downstream_addr = host_addr.to_socket_addr()?;
+                let tx = self.context.take_sender(&(actor_id, *down_id))?;
                 if is_local_address(&downstream_addr, &self.context.addr) {
                     // if this is a local downstream actor
-                    let tx = self.context.take_sender(&(actor_id, *down_id))?;
                     Ok(Box::new(ChannelOutput::new(tx)) as Box<dyn Output>)
                 } else {
-                    // This channel is used for `RpcOutput` and `ExchangeServiceImpl`.
-                    let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-                    // later, `ExchangeServiceImpl` comes to get it
-
-                    // TODO: refactor this part.
-                    self.context
-                        .add_channel_pairs(up_down_ids, (Some(tx.clone()), Some(rx)));
                     Ok(Box::new(RemoteOutput::new(tx)) as Box<dyn Output>)
                 }
             })
@@ -866,6 +858,14 @@ impl StreamManagerCore {
     }
 
     fn update_actors(&mut self, actors: &[stream_plan::StreamActor]) -> Result<()> {
+        let local_actor_ids: HashSet<u32> = HashSet::from_iter(
+            actors
+                .iter()
+                .map(|actor| actor.clone().get_actor_id())
+                .collect::<Vec<_>>()
+                .into_iter(),
+        );
+
         for actor in actors {
             let ret = self.actors.insert(actor.get_actor_id(), actor.clone());
             if ret.is_some() {
@@ -887,6 +887,16 @@ impl StreamManagerCore {
                 let up_down_ids = (*current_id, *downstream_id);
                 self.context
                     .add_channel_pairs(up_down_ids, (Some(tx), Some(rx)));
+            }
+
+            // Add remote input channels.
+            for upstream_id in actor.get_upstream_actor_id() {
+                if !local_actor_ids.contains(upstream_id) {
+                    let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
+                    let up_down_ids = (*upstream_id, *current_id);
+                    self.context
+                        .add_channel_pairs(up_down_ids, (Some(tx), Some(rx)));
+                }
             }
         }
         Ok(())
