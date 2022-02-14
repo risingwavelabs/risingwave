@@ -25,14 +25,14 @@ pub trait PlanTreeNode {
 
     /// return the required [`Distribution`] of each input for the node to maintain the
     /// [`Distribution`] property of the current node, please implement it correctly if the
-    /// requirement of order is necessary.
+    /// requirement of order is necessary such as hash join (shuffle join).
     fn inputs_distribution_required(&self) -> Vec<&Distribution> {
         vec![Distribution::any(); self.inputs().len()]
     }
 
     /// return the required [`Order`] of each input for the node to maintain the [`Order`] property
     /// of the current node, please implement it correctly if the requirement of order is
-    /// necessary.
+    /// necessary such as sort merge join or sort agg.
     fn inputs_order_required(&self) -> Vec<&Order> {
         vec![Order::any(); self.inputs().len()]
     }
