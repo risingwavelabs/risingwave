@@ -4,8 +4,10 @@ use crate::binder::BoundStatement;
 use crate::optimizer::plan_node::PlanRef;
 
 mod query;
+mod select;
 mod set_expr;
 mod statement;
+mod table_ref;
 mod values;
 
 pub struct Planner {}
