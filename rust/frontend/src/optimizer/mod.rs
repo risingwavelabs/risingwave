@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 pub mod plan_node;
+use fixedbitset::FixedBitSet;
 pub use plan_node::PlanRef;
 pub mod plan_pass;
 pub mod property;
@@ -23,7 +24,7 @@ struct PlanRoot {
     logical_plan: PlanRef,
     required_dist: Distribution,
     required_order: Order,
-    out_fields: Vec<usize>,
+    out_fields: FixedBitSet,
     schema: Schema,
 }
 
@@ -32,13 +33,15 @@ impl PlanRoot {
         plan: PlanRef,
         required_dist: Distribution,
         required_order: Order,
-        out_fields: Vec<usize>,
+        out_fields: FixedBitSet,
     ) -> Self {
         let input_schema = plan.schema();
+        assert_eq!(input_schema.fields().len(), out_fields.len());
+
         let schema = Schema {
             fields: out_fields
-                .iter()
-                .map(|i| input_schema.fields()[*i].clone())
+                .ones()
+                .map(|i| input_schema.fields()[i].clone())
                 .collect(),
         };
         Self {
@@ -77,7 +80,7 @@ impl PlanRoot {
         )
     }
 
-    pub fn with_out_fields(self, out_fields: Vec<usize>) -> Self {
+    pub fn with_out_fields(self, out_fields: FixedBitSet) -> Self {
         Self::new(
             self.logical_plan,
             self.required_dist,
@@ -93,11 +96,19 @@ impl PlanRoot {
 
     /// optimize and generate a batch query plan
     pub fn gen_batch_query_plan(&self) -> PlanRef {
-        todo!()
+        // TODO: add a `HeuristicOptimizer` here
+        let mut plan = self.logical_plan.prune_col(&self.out_fields);
+        plan = plan.to_batch_with_order_required(&self.required_order);
+        plan = plan.to_distributed_with_required(&self.required_order, &self.required_dist);
+        plan
     }
 
     /// optimize and generate a create materialize view plan
     pub fn gen_create_mv_plan(&self) -> PlanRef {
-        todo!()
+        // TODO: add a `HeuristicOptimizer` here
+        let mut plan = self.logical_plan.prune_col(&self.out_fields);
+        plan = plan.to_stream_with_dist_required(&self.required_dist);
+        // FIXME: add `Materialize` operator on the top of plan
+        plan
     }
 }
