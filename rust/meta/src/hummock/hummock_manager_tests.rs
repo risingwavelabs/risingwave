@@ -90,8 +90,31 @@ async fn test_hummock_get_compact_task() -> Result<()> {
     let context_id = 0;
 
     let task = hummock_manager.get_compact_task(context_id).await?;
-
     assert_eq!(task, None);
+
+    let epoch: u64 = 1;
+    let mut table_id = 1;
+    let original_tables = generate_test_tables(epoch, &mut table_id);
+    hummock_manager
+        .add_tables(context_id, original_tables.clone(), epoch)
+        .await
+        .unwrap();
+    hummock_manager
+        .commit_epoch(context_id, epoch)
+        .await
+        .unwrap();
+
+    let task = hummock_manager.get_compact_task(context_id).await?;
+    let compact_task = task.unwrap();
+    assert_eq!(
+        compact_task
+            .get_input_ssts()
+            .first()
+            .unwrap()
+            .get_level_idx(),
+        0
+    );
+    assert_eq!(compact_task.get_task_id(), 1);
 
     Ok(())
 }
