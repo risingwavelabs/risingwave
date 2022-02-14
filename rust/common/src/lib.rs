@@ -6,6 +6,7 @@
 #![warn(clippy::inconsistent_struct_constructor)]
 #![warn(clippy::map_flatten)]
 #![warn(clippy::no_effect_underscore_binding)]
+#![warn(clippy::await_holding_lock)]
 #![deny(unused_must_use)]
 #![feature(trait_alias)]
 #![feature(generic_associated_types)]
