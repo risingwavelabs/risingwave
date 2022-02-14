@@ -12,6 +12,7 @@ use risingwave_pb::stream_plan::dispatcher::DispatcherType;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{Dispatcher, StreamNode};
 
+use super::FragmentManagerRef;
 use crate::manager::{IdCategory, IdGeneratorManagerRef};
 use crate::model::{ActorId, FragmentId};
 use crate::stream::graph::{
@@ -34,10 +35,14 @@ pub struct StreamFragmenter {
 }
 
 impl StreamFragmenter {
-    pub fn new(id_gen_manager_ref: IdGeneratorManagerRef, worker_count: u32) -> Self {
+    pub fn new(
+        id_gen_manager_ref: IdGeneratorManagerRef,
+        fragment_manager_ref: FragmentManagerRef,
+        worker_count: u32,
+    ) -> Self {
         Self {
             fragment_graph: StreamFragmentGraph::new(None),
-            stream_graph: StreamGraphBuilder::new(),
+            stream_graph: StreamGraphBuilder::new(fragment_manager_ref.clone()),
             id_gen_manager_ref,
             worker_count,
         }
@@ -57,7 +62,7 @@ impl StreamFragmenter {
         self.build_graph_from_fragment(self.fragment_graph.get_root_fragment(), vec![])
             .await?;
 
-        let stream_graph = self.stream_graph.build()?;
+        let stream_graph = self.stream_graph.build().await?;
         stream_graph
             .iter()
             .map(|(&fragment_id, actors)| {

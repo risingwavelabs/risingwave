@@ -290,6 +290,10 @@ pub trait Executor: Send + Debug + 'static {
     fn clear_cache(&mut self) -> Result<()> {
         Ok(())
     }
+
+    fn init(&mut self, _epoch: u64) -> Result<()> {
+        unreachable!()
+    }
 }
 
 pub type PkIndices = Vec<usize>;

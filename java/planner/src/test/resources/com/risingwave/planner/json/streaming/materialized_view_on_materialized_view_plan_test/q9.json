@@ -4,6 +4,24 @@
     "input": [{
       "pkIndices": [0, 1, 2, 3],
       "input": [{
+        "input": [{
+          "exchangeNode": {
+            "dispatcher": {
+            }
+          }
+        }, {
+          "batchPlanNode": {
+            "tableRefId": {
+              "schemaRefId": {
+                "databaseRefId": {
+                }
+              },
+              "tableId": 9
+            },
+            "pkIndices": [2],
+            "columnIds": [0, 1, 3]
+          }
+        }],
         "chainNode": {
           "tableRefId": {
             "schemaRefId": {
@@ -12,6 +30,23 @@
             },
             "tableId": 9
           },
+          "upstreamColumnDescs": [{
+            "columnType": {
+              "typeName": "FLOAT"
+            }
+          }, {
+            "columnType": {
+              "typeName": "INT32"
+            }
+          }, {
+            "columnType": {
+              "typeName": "FLOAT"
+            }
+          }, {
+            "columnType": {
+              "typeName": "INT64"
+            }
+          }],
           "pkIndices": [2],
           "columnIds": [0, 1, 3]
         }
