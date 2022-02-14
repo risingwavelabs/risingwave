@@ -33,11 +33,13 @@ export default function StreamingView(props) {
 
   actorProto.actors = actorProto.actors || [];
 
+  const exprNode = (actorNode) => (({ input, ...o }) => o)(actorNode)
+
   const onNodeClick = (e, node) => {
     setShowInfoPane(true);
     setNodeJson(node.dispatcherType
       ? JSON.stringify({ dispatcher: { type: node.dispatcherType }, downstreamActorId: node.downstreamActorId }, null, 2)
-      : JSON.stringify(node.nodeProto, null, 2));
+      : JSON.stringify(exprNode(node.nodeProto), null, 2));
   };
 
   useEffect(() => {
@@ -65,6 +67,8 @@ export default function StreamingView(props) {
           transform.invert(d3.pointer(event));
         });
       ;
+
+      return () => d3.select(d3Container.current).selectAll("*").remove();
     }
   }, []);
 

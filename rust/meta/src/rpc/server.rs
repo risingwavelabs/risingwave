@@ -60,6 +60,7 @@ pub async fn rpc_serve(
             dashboard_addr,
             cluster_manager: cluster_manager.clone(),
             fragment_manager: fragment_manager.clone(),
+            meta_store_ref: env.meta_store_ref(),
             has_test_data: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
         tokio::spawn(dashboard_service.serve()); // TODO: join dashboard service back to local

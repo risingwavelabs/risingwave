@@ -26,7 +26,12 @@ impl RowSeqScanExecutor {
     // TODO: decide the chunk size for row seq scan
     pub const DEFAULT_CHUNK_SIZE: usize = 1024;
 
-    pub fn new(table: Arc<dyn ScannableTable>, column_ids: Vec<i32>, chunk_size: usize) -> Self {
+    pub fn new(
+        table: Arc<dyn ScannableTable>,
+        column_ids: Vec<i32>,
+        chunk_size: usize,
+        identity: String,
+    ) -> Self {
         // Currently row_id for table_v2 is totally a mess, we override this function to match the
         // behavior of column ids of mviews.
         // FIXME: remove this hack
@@ -48,7 +53,7 @@ impl RowSeqScanExecutor {
             column_indices,
             chunk_size,
             schema,
-            identity: "RowSeqScanExecutor".to_string(),
+            identity,
         }
     }
 }
@@ -73,6 +78,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutor {
             table,
             column_ids,
             Self::DEFAULT_CHUNK_SIZE,
+            source.plan_node().get_identity().clone(),
         )))
     }
 }

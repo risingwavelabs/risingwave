@@ -20,7 +20,8 @@
           },
           "name": "v2"
         }]
-      }
+      },
+      "identity": "RwBatchTableScan(table\u003d[[test_schema, t]], columns\u003d[v1,v2])"
     }],
     "orderBy": {
       "columnOrders": [{
@@ -32,7 +33,8 @@
           "typeName": "INT32"
         }
       }]
-    }
+    },
+    "identity": "RwBatchSort(sort0\u003d[$1], dir0\u003d[ASC])"
   }],
   "project": {
     "selectList": [{
@@ -43,5 +45,6 @@
       "inputRef": {
       }
     }]
-  }
+  },
+  "identity": "RwBatchProject(v1\u003d[$0])"
 }

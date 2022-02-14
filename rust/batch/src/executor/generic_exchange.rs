@@ -92,7 +92,7 @@ impl<CS: 'static + CreateSource> BoxedExecutorBuilder for GenericExchangeExecuto
             current_source: None,
             schema: Schema { fields },
             task_id: source.task_id.clone(),
-            identity: "GenericExchangeExecutor".to_string(),
+            identity: source.plan_node().get_identity().clone(),
         }))
     }
 }

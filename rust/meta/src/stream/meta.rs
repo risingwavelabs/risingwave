@@ -63,6 +63,14 @@ impl FragmentManager {
         }
     }
 
+    pub fn list_table_fragments(&self) -> Result<Vec<TableFragments>> {
+        Ok(self
+            .table_fragments
+            .iter()
+            .map(|f| f.value().clone())
+            .collect())
+    }
+
     pub async fn update_table_fragments(&self, table_fragment: TableFragments) -> Result<()> {
         match self.table_fragments.entry(table_fragment.table_id()) {
             Entry::Occupied(mut entry) => {
@@ -131,7 +139,7 @@ impl FragmentManager {
         Ok(actor_maps)
     }
 
-    pub async fn get_table_node_actors(
+    pub fn get_table_node_actors(
         &self,
         table_id: &TableId,
     ) -> Result<BTreeMap<NodeId, Vec<ActorId>>> {
@@ -143,7 +151,7 @@ impl FragmentManager {
         }
     }
 
-    pub async fn get_table_actor_ids(&self, table_id: &TableId) -> Result<Vec<ActorId>> {
+    pub fn get_table_actor_ids(&self, table_id: &TableId) -> Result<Vec<ActorId>> {
         match self.table_fragments.get(table_id) {
             Some(table_fragment) => Ok(table_fragment.actor_ids()),
             None => Err(RwError::from(InternalError(
@@ -152,7 +160,7 @@ impl FragmentManager {
         }
     }
 
-    pub async fn get_table_sink_actor_ids(&self, table_id: &TableId) -> Result<Vec<ActorId>> {
+    pub fn get_table_sink_actor_ids(&self, table_id: &TableId) -> Result<Vec<ActorId>> {
         match self.table_fragments.get(table_id) {
             Some(table_fragment) => Ok(table_fragment.sink_actor_ids()),
             None => Err(RwError::from(InternalError(
