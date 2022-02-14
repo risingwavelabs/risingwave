@@ -4,6 +4,12 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub struct WorkerIdRef(Arc<AtomicU32>);
 
+impl Default for WorkerIdRef {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WorkerIdRef {
     const INVALID_WORKER_ID: u32 = u32::MAX;
 
