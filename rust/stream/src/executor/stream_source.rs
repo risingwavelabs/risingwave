@@ -40,6 +40,7 @@ pub struct StreamSourceExecutor {
 }
 
 impl StreamSourceExecutor {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         source_id: TableId,
         source_desc: SourceDesc,
@@ -48,12 +49,13 @@ impl StreamSourceExecutor {
         pk_indices: PkIndices,
         barrier_receiver: UnboundedReceiver<Message>,
         executor_id: u64,
+        operator_id: u64,
     ) -> Result<Self> {
         let source = source_desc.clone().source;
         let reader: Box<dyn StreamSourceReader> = match source.as_ref() {
             SourceImpl::HighLevelKafka(s) => Box::new(s.stream_reader(
                 HighLevelKafkaSourceReaderContext {
-                    query_id: None,
+                    query_id: Some(format!("source-operator-{}", operator_id)),
                     bound_timestamp_ms: None,
                 },
                 column_ids.clone(),
@@ -126,7 +128,7 @@ impl Executor for StreamSourceExecutor {
     async fn next(&mut self) -> Result<Message> {
         if self.first_execution {
             self.reader.open().await?;
-            self.first_execution = false
+            self.first_execution = false;
         }
         // FIXME: may lose message
         tokio::select! {
@@ -274,6 +276,7 @@ mod tests {
             pk_indices,
             barrier_receiver,
             1,
+            1,
         )
         .unwrap();
 
@@ -395,6 +398,7 @@ mod tests {
             schema,
             pk_indices,
             barrier_receiver,
+            1,
             1,
         )
         .unwrap();

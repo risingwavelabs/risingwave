@@ -24,6 +24,7 @@ import com.risingwave.proto.common.Status;
 import com.risingwave.proto.computenode.CreateTaskRequest;
 import com.risingwave.proto.computenode.CreateTaskResponse;
 import com.risingwave.proto.computenode.GetDataRequest;
+import com.risingwave.proto.computenode.GetDataResponse;
 import com.risingwave.proto.plan.PlanFragment;
 import com.risingwave.proto.plan.TableRefId;
 import com.risingwave.proto.plan.TaskSinkId;
@@ -33,6 +34,8 @@ import com.risingwave.rpc.ComputeClientManager;
 import com.risingwave.rpc.Messages;
 import com.risingwave.scheduler.streaming.StreamManager;
 import com.risingwave.sql.parser.SqlParser;
+import java.util.ArrayList;
+import java.util.Iterator;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.ddl.SqlColumnDeclaration;
@@ -155,6 +158,7 @@ public class CreateTableHandler implements SqlHandler {
     PlanFragment planFragment = execute(ast, context);
     ComputeClientManager clientManager = context.getComputeClientManager();
 
+    var responseIterators = new ArrayList<Iterator<GetDataResponse>>();
     for (var node : context.getWorkerNodeManager().allNodes()) {
       ComputeClient client = clientManager.getOrCreate(node);
       CreateTaskRequest createTaskRequest = Messages.buildCreateTaskRequest(planFragment);
@@ -165,7 +169,13 @@ public class CreateTableHandler implements SqlHandler {
         throw new PgException(PgErrorCode.INTERNAL_ERROR, "Create Task failed");
       }
       TaskSinkId taskSinkId = Messages.buildTaskSinkId(createTaskRequest.getTaskId());
-      client.getData(GetDataRequest.newBuilder().setSinkId(taskSinkId).build());
+      var iterator = client.getData(GetDataRequest.newBuilder().setSinkId(taskSinkId).build());
+      responseIterators.add(iterator);
+    }
+
+    // Wait for create table task finished.
+    for (var iterator : responseIterators) {
+      iterator.forEachRemaining((r) -> {});
     }
 
     return new DdlResult(StatementType.CREATE_TABLE, 0);
