@@ -662,24 +662,51 @@ mod tests {
 
     #[test]
     fn test_decimal_e_m() {
-        // 1.0, 111.11, 12345, 0.00001, 10, 0.01111
-        let mantissas: Vec<i128> = vec![10, 11111, 12345, 1, 10, 1111];
-        let scales: Vec<i8> = vec![1, 2, 0, 5, 0, 5];
-
-        let exponets: Vec<i8> = vec![1, 2, 3, -2, 1, 0];
-        let significands: Vec<Vec<u8>> = vec![
-            vec![2],
-            vec![3, 23, 22],
-            vec![3, 47, 90],
-            vec![20],
-            vec![20],
-            vec![3, 23, 20],
+        // from: https://sqlite.org/src4/doc/trunk/www/key_encoding.wiki
+        let cases = vec![
+            // (decimal, exponets, significand)
+            ("1.0", 1, "02"),
+            ("10.0", 1, "14"),
+            ("99.0", 1, "c6"),
+            ("99.01", 1, "c7 02"),
+            ("99.0001", 1, "c7 01 02"),
+            ("100.0", 2, "02"),
+            ("100.01", 2, "03 01 02"),
+            ("100.1", 2, "03 01 14"),
+            ("1234", 2, "19 44"),
+            ("9999", 2, "c7 c6"),
+            ("9999.000001", 2, "c7 c7 01 01 02"),
+            ("9999.000009", 2, "c7 c7 01 01 12"),
+            ("9999.00001", 2, "c7 c7 01 01 14"),
+            ("9999.00009", 2, "c7 c7 01 01 b4"),
+            ("9999.000099", 2, "c7 c7 01 01 c6"),
+            ("9999.0001", 2, "c7 c7 01 02"),
+            ("9999.001", 2, "c7 c7 01 14"),
+            ("9999.01", 2, "c7 c7 02"),
+            ("9999.1", 2, "c7 c7 14"),
+            ("10000", 3, "02"),
+            ("10001", 3, "03 01 02"),
+            ("12345", 3, "03 2f 5a"),
+            ("123450", 4, "19 45 64"),
+            ("1234.5", 3, "19 45 64"),
+            ("12.345", 2, "19 45 64"),
+            ("0.123", 0, "19 3c"),
+            ("0.0123", 0, "03 2e"),
+            ("0.00123", -1, "19 3c"),
+            ("9223372036854775807", 10, "13 2d 43 91 07 89 6d 9b 75 0e"),
         ];
 
-        for i in 0..mantissas.len() {
+        for (decimal, exponets, significand) in cases {
+            let d = decimal.parse::<rust_decimal::Decimal>().unwrap();
+            let (exp, sig) = decimal_e_m(d.mantissa(), d.scale() as i8);
+            assert_eq!(exp, exponets, "wrong exponets for decimal: {decimal}");
             assert_eq!(
-                (exponets[i], significands[i].clone()),
-                decimal_e_m(mantissas[i], scales[i])
+                sig.iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                significand,
+                "wrong significand for decimal: {decimal}"
             );
         }
     }
