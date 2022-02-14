@@ -67,11 +67,11 @@ class Dispatcher extends Node {
 }
 
 class Actor {
-  constructor(actorId, output, rootNode, fragmentIdentifier) {
+  constructor(actorId, output, rootNode, fragmentId) {
     this.actorId = actorId;
     this.output = output;
     this.rootNode = rootNode;
-    this.fragmentIdentifier = fragmentIdentifier;
+    this.fragmentId = fragmentId;
   }
 
   static parseActor(actorProto) {
@@ -80,7 +80,7 @@ class Actor {
       return parsedActorMap.get(actorId);
     }
 
-    let actor = new Actor(actorId, [], null, actorProto.nodes.operatorId);
+    let actor = new Actor(actorId, [], null, actorProto.fragmentId);
     parsedActorMap.set(actorId, actor);
     let nodeBeforeDispatcher = StreamNode.parseNode(actor.actorId, actorProto.nodes);
     let rootNode = Dispatcher.newDispatcher(actor.actorId, actorProto.dispatcher.type, actorProto.downstreamActorId);
