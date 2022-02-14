@@ -231,48 +231,51 @@ impl StateStoreStats {
 
         // ----- gRPC -----
         // gRPC count
-        let pin_version_counts =
-            register_int_counter_with_registry!("state_store_pin_version_counts", "233", registry)
-                .unwrap();
+        let pin_version_counts = register_int_counter_with_registry!(
+            "state_store_pin_version_counts",
+            "Total number of pin_version_counts requests that have been issued to state store",
+            registry
+        )
+        .unwrap();
         let unpin_version_counts = register_int_counter_with_registry!(
             "state_store_unpin_version_counts",
-            "233",
+            "Total number of unpin_version_counts requests that have been issued to state store",
             registry
         )
         .unwrap();
         let pin_snapshot_counts = register_int_counter_with_registry!(
             "state_store_pin_snapshot_counts",
-            "Total number of iter.next requests that have been issued to state store",
+            "Total number of pin_snapshot_counts requests that have been issued to state store",
             registry
         )
         .unwrap();
         let unpin_snapshot_counts = register_int_counter_with_registry!(
             "state_store_unpin_snapshot_counts",
-            "Total number of iter.next requests that have been issued to state store",
+            "Total number of unpin_snapshot_counts requests that have been issued to state store",
             registry
         )
         .unwrap();
         let add_tables_counts = register_int_counter_with_registry!(
             "state_store_add_tables_counts",
-            "Total number of iter.next requests that have been issued to state store",
+            "Total number of add_tables_counts requests that have been issued to state store",
             registry
         )
         .unwrap();
         let get_new_table_id_counts = register_int_counter_with_registry!(
             "state_store_get_new_table_id_counts",
-            "Total number of iter.next requests that have been issued to state store",
+            "Total number of get_new_table_id requests that have been issued to state store",
             registry
         )
         .unwrap();
         let get_compaction_task_counts = register_int_counter_with_registry!(
             "state_store_get_compaction_task_counts",
-            "Total number of iter.next requests that have been issued to state store",
+            "Total number of get_compaction_task requests that have been issued to state store",
             registry
         )
         .unwrap();
         let report_compaction_task_counts = register_int_counter_with_registry!(
             "state_store_report_compaction_task_counts",
-            "Total number of iter.next requests that have been issued to state store",
+            "Total number of report_compaction_task requests that have been issued to state store",
             registry
         )
         .unwrap();
@@ -284,7 +287,7 @@ impl StateStoreStats {
             .to_vec();
         let pin_version_latency_opts = histogram_opts!(
             "state_store_pin_version_latency",
-            "Total latency of get that have been issued to state store",
+            "Total latency of pin version that have been issued to state store",
             buckets
         );
         let pin_version_latency =
@@ -296,7 +299,7 @@ impl StateStoreStats {
             .to_vec();
         let unpin_version_latency_opts = histogram_opts!(
             "state_store_unpin_version_latency",
-            "Total latency of get that have been issued to state store",
+            "Total latency of unpin version that have been issued to state store",
             buckets
         );
         let unpin_version_latency =
@@ -308,7 +311,7 @@ impl StateStoreStats {
             .to_vec();
         let pin_snapshot_latency_opts = histogram_opts!(
             "state_store_pin_snapshot_latency",
-            "Total latency of get that have been issued to state store",
+            "Total latency of pin snapshot that have been issued to state store",
             buckets
         );
         let pin_snapshot_latency =
@@ -320,7 +323,7 @@ impl StateStoreStats {
             .to_vec();
         let unpin_snapshot_latency_opts = histogram_opts!(
             "state_store_unpin_snapshot_latency",
-            "Total latency of get that have been issued to state store",
+            "Total latency of unpin snapshot that have been issued to state store",
             buckets
         );
         let unpin_snapshot_latency =
@@ -332,7 +335,7 @@ impl StateStoreStats {
             .to_vec();
         let add_tables_latency_opts = histogram_opts!(
             "state_store_add_tables_latency",
-            "Total latency of get that have been issued to state store",
+            "Total latency of add tables that have been issued to state store",
             buckets
         );
         let add_tables_latency =
@@ -344,7 +347,7 @@ impl StateStoreStats {
             .to_vec();
         let get_new_table_id_latency_opts = histogram_opts!(
             "state_store_get_new_table_id_latency",
-            "Total latency of get that have been issued to state store",
+            "Total latency of get new table id that have been issued to state store",
             buckets
         );
         let get_new_table_id_latency =
@@ -356,7 +359,7 @@ impl StateStoreStats {
             .to_vec();
         let get_compaction_task_latency_opts = histogram_opts!(
             "state_store_get_compaction_task_latency",
-            "Total latency of get that have been issued to state store",
+            "Total latency of get compaction task that have been issued to state store",
             buckets
         );
         let get_compaction_task_latency =
@@ -368,7 +371,7 @@ impl StateStoreStats {
             .to_vec();
         let report_compaction_task_latency_opts = histogram_opts!(
             "state_store_report_compaction_task_latency",
-            "Total latency of get that have been issued to state store",
+            "Total latency of report compaction task that have been issued to state store",
             buckets
         );
         let report_compaction_task_latency =
