@@ -18,10 +18,12 @@
         },
         "name": "v1"
       }]
-    }
+    },
+    "identity": "RwBatchTableScan(table\u003d[[test_schema, t5]], columns\u003d[v1])"
   }],
   "limit": {
     "limit": 1,
     "offset": 1
-  }
+  },
+  "identity": "RwBatchLimit(offset\u003d[1], fetch\u003d[1])"
 }

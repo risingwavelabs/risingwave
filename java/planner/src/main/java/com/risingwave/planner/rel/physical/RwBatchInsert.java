@@ -89,10 +89,18 @@ public class RwBatchInsert extends TableModify implements RisingWaveBatchPhyRel 
     InsertNode.Builder insertNodeBuilder =
         InsertNode.newBuilder().setTableRefId(Messages.getTableRefId(tableCatalog.getId()));
 
+    var identity =
+        "RwBatchInsertExecutor(TableName:"
+            + this.table.getQualifiedName()
+            + ",ColumnIds:"
+            + columnIds
+            + ")";
+
     insertNodeBuilder.addAllColumnIds(columnIds);
     return PlanNode.newBuilder()
         .setInsert(insertNodeBuilder.build())
         .addChildren(((RisingWaveBatchPhyRel) input).serialize())
+        .setIdentity(identity)
         .build();
   }
 
