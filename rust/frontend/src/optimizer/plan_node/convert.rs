@@ -20,7 +20,7 @@ pub trait ToStream {
     /// convert the plan to streaming physical plan and satisfy the required distribution
     fn to_stream_with_dist_required(&self, required_dist: &Distribution) -> PlanRef {
         let ret = self.to_stream();
-        required_dist.enforce_if_not_satisfies(ret, &Order::any())
+        required_dist.enforce_if_not_satisfies(ret, Order::any())
     }
 }
 /// `ToBatch` allows to convert a logical plan node to batch physical node
@@ -65,7 +65,7 @@ pub trait ToDistributedBatch {
     ) -> PlanRef {
         let ret = self.to_distributed();
         let ret = required_order.enforce_if_not_satisfies(ret);
-        required_dist.enforce_if_not_satisfies(ret, &required_order)
+        required_dist.enforce_if_not_satisfies(ret, required_order)
     }
 }
 

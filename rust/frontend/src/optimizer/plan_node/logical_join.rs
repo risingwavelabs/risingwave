@@ -128,7 +128,7 @@ impl ToBatch for LogicalJoin {
         todo!(); // nestedLoopJoin
     }
     fn to_batch(&self) -> PlanRef {
-        self.to_batch_with_order_required(&Order::any())
+        self.to_batch_with_order_required(Order::any())
     }
 }
 impl ToStream for LogicalJoin {

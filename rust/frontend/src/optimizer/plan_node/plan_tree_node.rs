@@ -43,7 +43,7 @@ pub trait PlanTreeNode {
     // Maybe: maybe the return type should be Vec<Vec<Distribution>>, return all possible
     // combination of inputs' distribution, when a cascades introduced
     fn dist_pass_through(&self, _required: &Distribution) -> Vec<&Distribution> {
-        std::vec::from_elem(&Distribution::any(), self.inputs().len())
+        std::vec::from_elem(Distribution::any(), self.inputs().len())
     }
 }
 
@@ -62,7 +62,7 @@ pub trait PlanTreeNodeUnary {
     }
 
     fn dist_pass_through_input(&self, _required: &Distribution) -> &Distribution {
-        &Distribution::any()
+        Distribution::any()
     }
 }
 /// See [`PlanTreeNode`](super)
@@ -93,7 +93,7 @@ pub trait PlanTreeNodeBinary {
         &self,
         _required: &Distribution,
     ) -> (&Distribution, &Distribution) {
-        (&Distribution::any(), &Distribution::any())
+        (Distribution::any(), Distribution::any())
     }
 }
 

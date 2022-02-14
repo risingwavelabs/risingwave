@@ -98,6 +98,6 @@ impl ToStream for LogicalProject {
         StreamProject::new(new_logical).into_plan_ref()
     }
     fn to_stream(&self) -> PlanRef {
-        self.to_stream_with_dist_required(&Distribution::any())
+        self.to_stream_with_dist_required(Distribution::any())
     }
 }

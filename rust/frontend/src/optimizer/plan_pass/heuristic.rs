@@ -64,6 +64,6 @@ impl PlanPass for HeuristicOptimizer {
             }
         };
         plan = required_order.enforce_if_not_satisfies(plan);
-        required_dist.enforce_if_not_satisfies(plan, &required_order)
+        required_dist.enforce_if_not_satisfies(plan, required_order)
     }
 }
