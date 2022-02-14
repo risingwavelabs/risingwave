@@ -63,7 +63,7 @@ impl FragmentManager {
         }
     }
 
-    pub async fn list_table_fragments(&self) -> Result<Vec<TableFragments>> {
+    pub fn list_table_fragments(&self) -> Result<Vec<TableFragments>> {
         Ok(self
             .table_fragments
             .iter()
@@ -139,7 +139,7 @@ impl FragmentManager {
         Ok(actor_maps)
     }
 
-    pub async fn get_table_node_actors(
+    pub fn get_table_node_actors(
         &self,
         table_id: &TableId,
     ) -> Result<BTreeMap<NodeId, Vec<ActorId>>> {
@@ -151,7 +151,7 @@ impl FragmentManager {
         }
     }
 
-    pub async fn get_table_actor_ids(&self, table_id: &TableId) -> Result<Vec<ActorId>> {
+    pub fn get_table_actor_ids(&self, table_id: &TableId) -> Result<Vec<ActorId>> {
         match self.table_fragments.get(table_id) {
             Some(table_fragment) => Ok(table_fragment.actor_ids()),
             None => Err(RwError::from(InternalError(
@@ -160,7 +160,7 @@ impl FragmentManager {
         }
     }
 
-    pub async fn get_table_sink_actor_ids(&self, table_id: &TableId) -> Result<Vec<ActorId>> {
+    pub fn get_table_sink_actor_ids(&self, table_id: &TableId) -> Result<Vec<ActorId>> {
         match self.table_fragments.get(table_id) {
             Some(table_fragment) => Ok(table_fragment.sink_actor_ids()),
             None => Err(RwError::from(InternalError(
