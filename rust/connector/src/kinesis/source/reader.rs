@@ -291,7 +291,34 @@ mod tests {
         assert_eq!(sequence_num, resp.sequence_number);
     }
 
-    #[test]
+    #[tokio::test]
     #[ignore]
-    fn test_load_from_timestamp() {}
+    async fn test_load_from_timestamp() {
+        let client = new_client().await;
+        let start_timestamp = chrono::prelude::Utc::now().timestamp();
+        let (shard_id, sequence_num) = push_to_mq(&client).await.unwrap();
+        println!(
+            "start timestamp {:?}, first message: shard_id {:?}, seq num: {:?}",
+            start_timestamp, shard_id, sequence_num
+        );
+
+        let mock_split = KinesisSplit {
+            shard_id: shard_id.clone(),
+            start_position: KinesisOffset::Timestamp(start_timestamp),
+            end_position: KinesisOffset::None,
+        };
+        println!("mock split: {:#?}", mock_split);
+
+        let demo_aws_config_info = AwsConfigInfo {
+            stream_name: STREAM_NAME.to_string(),
+            region: Some("cn-north-1".to_string()),
+            credentials: None,
+        };
+        let mut split_reader = KinesisSplitReader::new(demo_aws_config_info, None).await;
+        split_reader.assign_split(mock_split).await.unwrap();
+
+        let resp = &split_reader.next().await.unwrap().unwrap()[0];
+        println!("first message: {:#?}", resp);
+        assert_eq!(sequence_num, resp.sequence_number);
+    }
 }
