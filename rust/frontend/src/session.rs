@@ -1,11 +1,8 @@
-use std::sync::Arc;
-
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{Session, SessionManager};
 use risingwave_common::error::Result;
 use risingwave_rpc_client::MetaClient;
 use risingwave_sqlparser::parser::Parser;
-use tokio::sync::Mutex;
 
 use crate::catalog::catalog_service::{
     CatalogConnector, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
@@ -18,14 +15,14 @@ use crate::FrontendOpts;
 pub struct FrontendEnv {
     meta_client: MetaClient,
     // Different session may access catalog manager at the same time.
-    catalog_manager: Arc<Mutex<CatalogConnector>>,
+    catalog_manager: CatalogConnector,
 }
 
 impl FrontendEnv {
     pub async fn init(opts: &FrontendOpts) -> Result<Self> {
         let meta_client = MetaClient::new(opts.meta_addr.clone().as_str()).await?;
         // Create default database when env init.
-        let mut catalog_manager = CatalogConnector::new(meta_client.clone());
+        let catalog_manager = CatalogConnector::new(meta_client.clone());
         catalog_manager
             .create_database(DEFAULT_DATABASE_NAME)
             .await?;
@@ -34,7 +31,7 @@ impl FrontendEnv {
             .await?;
         Ok(Self {
             meta_client,
-            catalog_manager: Arc::new(Mutex::new(catalog_manager)),
+            catalog_manager,
         })
     }
 
@@ -42,8 +39,8 @@ impl FrontendEnv {
         &self.meta_client
     }
 
-    pub fn catalog_mgr(&self) -> Arc<Mutex<CatalogConnector>> {
-        self.catalog_manager.clone()
+    pub fn catalog_mgr(&self) -> &CatalogConnector {
+        &self.catalog_manager
     }
 }
 
@@ -126,8 +123,6 @@ mod tests {
         assert!(mgr
             .env
             .catalog_manager
-            .lock()
-            .await
             .get_database(DEFAULT_DATABASE_NAME)
             .is_some());
         let session = mgr.connect();

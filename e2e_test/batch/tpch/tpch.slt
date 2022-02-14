@@ -10,6 +10,7 @@ include ../../tpch/insert_supplier.slt.part
 include ../../tpch/insert_region.slt.part
 
 include ./q1.slt.part
+include ./q2.slt.part
 include ./q3.slt.part
 include ./q5.slt.part
 include ./q6.slt.part
@@ -18,6 +19,7 @@ include ./q8.slt.part
 include ./q9.slt.part
 include ./q10.slt.part
 include ./q11.slt.part
+include ./q12.slt.part
 include ./q13.slt.part
 include ./q14.slt.part
 include ./q16.slt.part

@@ -386,6 +386,7 @@ impl StreamManagerCore {
                     pk_indices,
                     barrier_receiver,
                     executor_id,
+                    operator_id,
                 )?))
             }
             ProjectNode(project_node) => {
@@ -422,7 +423,7 @@ impl StreamManagerCore {
                     executor_id,
                 )?))
             }
-            SimpleAggNode(aggr_node) => {
+            GlobalSimpleAggNode(aggr_node) => {
                 let agg_calls: Vec<AggCall> = aggr_node
                     .get_agg_calls()
                     .iter()

@@ -510,6 +510,11 @@ mod tests {
             .await?;
         source_manager.create_table_source_v2(&table_id, table)?;
 
+        // Create reader
+        let source_desc = source_manager.get_source(&table_id)?;
+        let source = source_desc.source.as_table_v2();
+        let mut reader = source.stream_reader(TableV2ReaderContext, vec![0, 1, 2])?;
+
         let mut insert_executor = InsertExecutor::new(
             table_id.clone(),
             source_manager.clone(),
@@ -529,11 +534,6 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![Some(5)] // inserted rows
         );
-
-        // Check the reader.
-        let source_desc = source_manager.get_source(&table_id)?;
-        let source = source_desc.source.as_table_v2();
-        let mut reader = source.stream_reader(TableV2ReaderContext, vec![0, 1, 2])?;
 
         reader.open().await?;
         let chunk = reader.next().await?;
