@@ -64,6 +64,11 @@ impl PlanRoot {
         let mut plan = self.logical_plan.prune_col(&self.out_fields);
         plan = plan.to_batch_with_order_required(&self.required_order);
         plan = plan.to_distributed_with_required(&self.required_order, &self.required_dist);
+        // FIXME: add a Batch Project for the Plan, to remove the unnecessary column in the
+        // result.
+        // TODO: do a final column pruning after add the batch project, but now the column
+        // pruning is not used in batch node, need to think.
+
         plan
     }
 
@@ -73,6 +78,10 @@ impl PlanRoot {
         let mut plan = self.logical_plan.prune_col(&self.out_fields);
         plan = plan.to_stream_with_dist_required(&self.required_dist);
         // FIXME: add `Materialize` operator on the top of plan
+        // FIXME: add a Streaming Project for the Plan to remove the unnecessary column in the
+        // result.
+        // TODO: do a final column pruning after add the streaming project, but now
+        // the column pruning is not used in streaming node, need to think.
         plan
     }
 }
