@@ -7,6 +7,7 @@ use uuid::Uuid;
 use crate::optimizer::plan_node::{BatchExchange, PlanNodeType, PlanTreeNode};
 use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
+use risingwave_pb::common::WorkerNode;
 
 pub(crate) type StageId = u64;
 pub(crate) type TaskId = u64;
@@ -35,7 +36,7 @@ impl Query {
     pub fn leaf_stages(&self) -> Vec<StageId> {
         let mut ret_leaf_stages = Vec::new();
         for stage_id in self.stage_graph.stages.keys() {
-            if self.stage_graph.get_child_stages_unchecked(stage_id).len() == 0 {
+            if self.stage_graph.get_child_stages_unchecked(stage_id).is_empty() {
                 ret_leaf_stages.push(*stage_id);
             }
         }
@@ -56,11 +57,12 @@ pub(crate) struct QueryStage {
 pub(crate) type QueryStageRef = Arc<QueryStage>;
 
 pub(crate) struct AugmentedStage {
-    query_stage: QueryStageRef,
+    pub query_stage: QueryStageRef,
     /// Fill exchange source to augment phase.
     /// TODO(Bowen): Introduce augment phase to fill in exchange node info (#73).
     exchange_source: HashMap<StageId, ScheduledStageRef>,
-    parallelism: u32,
+    pub parallelism: u32,
+    pub workers: Vec<WorkerNode>
 }
 
 impl AugmentedStage {
@@ -74,11 +76,12 @@ impl AugmentedStage {
             query_stage: query_stage,
             exchange_source: exchange_source.clone(),
             parallelism: next_stage_parallelism,
+            workers: workers.to_vec()
         }
     }
 }
 
-type AugmentedQueryStageRef = Arc<QueryStage>;
+pub(crate) type AugmentedQueryStageRef = Arc<AugmentedStage>;
 
 pub(crate) struct ScheduledStage {
     pub id: StageId,
@@ -86,10 +89,16 @@ pub(crate) struct ScheduledStage {
     pub query_stage: AugmentedQueryStageRef,
 }
 
+impl ScheduledStage {
+    pub fn from_augmented_stage(augmented_stage: AugmentedQueryStageRef, assignments: HashMap<TaskId, WorkerNode>) -> Self {
+        Self {
+            id: augmented_stage.query_stage.id,
+            assignments,
+            query_stage: augmented_stage,
+        }
+    }
+}
 pub(crate) type ScheduledStageRef = Arc<ScheduledStage>;
-
-#[derive(Clone)]
-pub(crate) struct WorkerNode;
 
 pub(crate) struct StageGraph {
     pub(crate) id: StageId,
@@ -182,7 +191,7 @@ impl StageGraphBuilder {
 
             None => {
                 let mut parents = HashSet::new();
-                parents.insert(child_id);
+                parents.insert(parent_id);
                 self.parent_edges.insert(child_id, parents);
             }
         };
@@ -257,6 +266,8 @@ mod tests {
     };
     use crate::optimizer::property::{Distribution, Order};
     use crate::scheduler::plan_fragmenter::BatchPlanFragmenter;
+    use crate::scheduler::scheduler::{Scheduler, WorkerNodeManager};
+    use risingwave_pb::common::{WorkerNode, WorkerType};
 
     #[test]
     fn test_fragmenter() {
@@ -322,5 +333,49 @@ mod tests {
         assert_eq!(scan_node1.root.node_type(), PlanNodeType::BatchSeqScan);
         let scan_node2 = query.stage_graph.stages.get(&3).unwrap();
         assert_eq!(scan_node2.root.node_type(), PlanNodeType::BatchSeqScan);
+
+        // -- Check augment phase --
+        let worker1 = WorkerNode {id: 0, r#type: WorkerType::ComputeNode as i32, host: None};
+        let worker2 = WorkerNode {id: 1, r#type: WorkerType::ComputeNode as i32, host: None};
+        let worker3 = WorkerNode {id: 2, r#type: WorkerType::ComputeNode as i32, host: None};
+        let workers = vec![
+            worker1.clone(),
+            worker2.clone(),
+            worker3.clone(),
+        ];
+        let mut scheduler = Scheduler::mock(workers.clone());
+        let query_result_loc = scheduler.augment(&query);
+
+        let root = scheduler.get_scheduled_stage_unchecked(&0);
+        assert_eq!(root.query_stage.exchange_source.len(), 1);
+        assert!(root.query_stage.exchange_source.get(&1).is_some());
+        assert_eq!(root.assignments.len(), 1);
+        assert_eq!(root.assignments.get(&0).unwrap(), &worker1);
+
+        let join_node = scheduler.get_scheduled_stage_unchecked(&1);
+        assert_eq!(join_node.query_stage.exchange_source.len(), 2);
+        assert!(join_node.query_stage.exchange_source.get(&2).is_some());
+        assert!(join_node.query_stage.exchange_source.get(&3).is_some());
+        assert_eq!(join_node.assignments.len(), 3);
+        assert_eq!(join_node.assignments.get(&0).unwrap(), &worker1);
+        assert_eq!(join_node.assignments.get(&1).unwrap(), &worker2);
+        assert_eq!(join_node.assignments.get(&2).unwrap(), &worker3);
+
+
+        let scan_node_1 = scheduler.get_scheduled_stage_unchecked(&2);
+        assert_eq!(scan_node_1.query_stage.exchange_source.len(), 0);
+        assert_eq!(scan_node_1.assignments.len(), 3);
+        assert_eq!(scan_node_1.assignments.get(&0).unwrap(), &worker1);
+        assert_eq!(scan_node_1.assignments.get(&1).unwrap(), &worker2);
+        assert_eq!(scan_node_1.assignments.get(&2).unwrap(), &worker3);
+
+        let scan_node_2 = scheduler.get_scheduled_stage_unchecked(&2);
+        assert_eq!(scan_node_2.query_stage.exchange_source.len(), 0);
+        assert_eq!(scan_node_2.assignments.len(), 3);
+        assert_eq!(scan_node_2.assignments.get(&0).unwrap(), &worker1);
+        assert_eq!(scan_node_2.assignments.get(&1).unwrap(), &worker2);
+        assert_eq!(scan_node_2.assignments.get(&2).unwrap(), &worker3);
+
+
     }
 }
