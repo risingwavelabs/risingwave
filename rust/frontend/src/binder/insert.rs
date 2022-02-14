@@ -5,8 +5,8 @@ use crate::binder::{BaseTableRef, Binder, BoundQuery};
 
 #[derive(Debug)]
 pub struct BoundInsert {
-    pub table: Box<BaseTableRef>,
-    pub source: Box<BoundQuery>,
+    pub table: BaseTableRef,
+    pub source: BoundQuery,
 }
 
 impl Binder {
@@ -17,8 +17,8 @@ impl Binder {
         source: Query,
     ) -> Result<BoundInsert> {
         Ok(BoundInsert {
-            table: Box::new(self.bind_table(table_name)?),
-            source: Box::new(self.bind_query(source)?),
+            table: self.bind_table(table_name)?,
+            source: self.bind_query(source)?,
         })
     }
 }
