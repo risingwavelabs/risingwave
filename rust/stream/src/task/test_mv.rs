@@ -118,6 +118,7 @@ async fn test_stream_mv_proto() {
             ..Default::default()
         }),
         downstream_actor_id: vec![233],
+        upstream_actor_id: vec![],
     };
 
     // Initialize storage.
