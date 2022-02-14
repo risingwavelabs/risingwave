@@ -609,24 +609,10 @@ impl StreamManagerCore {
                 self.create_merge_node(actor_id, schema, upstreams, pk_indices)
             }
             ChainNode(chain_node) => {
-                // let snapshot =
-                // let pk_indices = chain_node
-                //     .pk_indices
-                //     .iter()
-                //     .map(|x| *x as usize)
-                //     .collect_vec();
-                // let upstream_schema = table.schema().into_owned();
-                // let mview = self.create_merge_node(
-                //     actor_id,
-                //     upstream_schema.clone(),
-                //     &chain_node.upstream_actor_ids,
-                //     pk_indices,
-                // )?;
-
                 let snapshot = input.remove(1);
                 let mview = input.remove(0);
 
-                let upstream_schema = mview.schema();
+                let upstream_schema = snapshot.schema();
                 // TODO(MrCroxx): Use column_descs to get idx after mv planner can generate stable
                 // column_ids. Now simply treat column_id as column_idx.
                 let column_idxs: Vec<usize> = chain_node

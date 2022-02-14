@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 use async_recursion::async_recursion;
 use itertools::Itertools;
-use log::debug;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 use risingwave_common::try_match_expand;
@@ -141,7 +140,6 @@ impl StreamGraphBuilder {
         let mut table_sink_map = HashMap::new();
         for builder in self.actor_builders.values() {
             let mut actor = builder.build();
-            debug!("to build:\n{:#?}", actor.get_nodes());
 
             let upstream_actors = builder.get_upstream_actors();
             actor.nodes = Some(
@@ -170,7 +168,6 @@ impl StreamGraphBuilder {
         upstream_actor_id: &[Vec<ActorId>],
         next_idx: usize,
     ) -> Result<StreamNode> {
-        debug!("build inner:\n{:#?}", stream_node);
         match stream_node.get_node()? {
             Node::ExchangeNode(_) => {
                 self.build_inner(
@@ -207,7 +204,7 @@ impl StreamGraphBuilder {
                         }
                         Node::ChainNode(_) => {
                             new_stream_node.input[idx] =
-                                self.resolve_chain_node(table_sink_map, stream_node).await?;
+                                self.resolve_chain_node(table_sink_map, input).await?;
                         }
                         _ => {
                             new_stream_node.input[idx] = self
@@ -226,7 +223,6 @@ impl StreamGraphBuilder {
         table_sink_map: &mut HashMap<TableRawId, Vec<ActorId>>,
         stream_node: &StreamNode,
     ) -> Result<StreamNode> {
-        debug!("reach chain node!!!!!!!!!!");
         if let Node::ChainNode(chain_node) = stream_node.get_node().unwrap() {
             let input = stream_node.get_input();
             assert_eq!(input.len(), 2);

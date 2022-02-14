@@ -4,10 +4,7 @@ import com.google.common.collect.ImmutableList;
 import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.ColumnDesc;
 import com.risingwave.catalog.TableCatalog;
-import com.risingwave.proto.streaming.plan.ChainNode;
-import com.risingwave.proto.streaming.plan.Dispatcher;
-import com.risingwave.proto.streaming.plan.ExchangeNode;
-import com.risingwave.proto.streaming.plan.StreamNode;
+import com.risingwave.proto.streaming.plan.*;
 import com.risingwave.rpc.Messages;
 import java.util.List;
 import org.apache.calcite.plan.RelOptCluster;
@@ -98,15 +95,7 @@ public class RwStreamChain extends Union implements RisingWaveStreamingRel {
         .setChainNode(chainNode)
         .addInput(
             // Just a placeholder for operator id gen.
-            StreamNode.newBuilder()
-                .setExchangeNode(
-                    ExchangeNode.newBuilder()
-                        .setDispatcher(
-                            Dispatcher.newBuilder()
-                                .setType(Dispatcher.DispatcherType.BROADCAST)
-                                .build())
-                        .build())
-                .build())
+            StreamNode.newBuilder().setMergeNode(MergeNode.newBuilder().build()).build())
         .build();
   }
 

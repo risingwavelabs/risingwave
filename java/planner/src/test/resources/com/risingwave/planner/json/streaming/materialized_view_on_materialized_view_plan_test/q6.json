@@ -5,9 +5,7 @@
       "pkIndices": [0],
       "input": [{
         "input": [{
-          "exchangeNode": {
-            "dispatcher": {
-            }
+          "mergeNode": {
           }
         }, {
           "batchPlanNode": {

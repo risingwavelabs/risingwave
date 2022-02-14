@@ -149,9 +149,16 @@ public class StreamPlanner implements Planner<StreamingPlan> {
                 tableSourceNode.getColumnIds());
 
         var upstreamColumnDescsBuilder = ImmutableList.<ColumnDesc>builder();
-        source
-            .getAllColumns()
-            .forEach(columnCatalog -> upstreamColumnDescsBuilder.add(columnCatalog.getDesc()));
+        if (!source.isAssociatedMaterializedView()) {
+          source
+              .getAllColumns()
+              .forEach(columnCatalog -> upstreamColumnDescsBuilder.add(columnCatalog.getDesc()));
+          ;
+        } else {
+          source
+              .getAllColumnsV2()
+              .forEach(columnCatalog -> upstreamColumnDescsBuilder.add(columnCatalog.getDesc()));
+        }
 
         RwStreamChain chain =
             new RwStreamChain(
