@@ -1,3 +1,4 @@
 #[allow(dead_code)]
 mod plan_fragmenter;
-mod scheduler;
+#[allow(dead_code)]
+mod schedule;
