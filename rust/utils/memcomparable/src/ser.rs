@@ -661,6 +661,80 @@ mod tests {
     }
 
     #[test]
+    fn test_decimal_e_m() {
+        // 1.0, 111.11, 12345, 0.00001, 10, 0.01111
+        let mantissas: Vec<i128> = vec![10, 11111, 12345, 1, 10, 1111];
+        let scales: Vec<i8> = vec![1, 2, 0, 5, 0, 5];
+
+        let exponets: Vec<i8> = vec![1, 2, 3, -2, 1, 0];
+        let significands: Vec<Vec<u8>> = vec![
+            vec![2],
+            vec![3, 23, 22],
+            vec![3, 47, 90],
+            vec![20],
+            vec![20],
+            vec![3, 23, 20],
+        ];
+
+        for i in 0..mantissas.len() {
+            assert_eq!(
+                (exponets[i], significands[i].clone()),
+                decimal_e_m(mantissas[i], scales[i])
+            );
+        }
+    }
+
+    fn decimal_e_m(mantissa: i128, scale: i8) -> (i8, Vec<u8>) {
+        let prec = {
+            let mut abs_man = mantissa.abs();
+            let mut cnt = 0;
+            while abs_man > 0 {
+                cnt += 1;
+                abs_man /= 10;
+            }
+            cnt
+        };
+        let scale = scale as i32;
+
+        let e10 = prec - scale;
+        let e100 = if e10 >= 0 { (e10 + 1) / 2 } else { e10 / 2 };
+        // Maybe need to add a zero at the beginning.
+        // e.g. 111.11 -> 2(exponent which is 100 based) + 0.011111(mantissa).
+        // So, the `digit_num` of 111.11 will be 6.
+        let mut digit_num = if e10 == 2 * e100 { prec } else { prec + 1 };
+
+        let mut byte_array: Vec<u8> = vec![];
+        let mut mantissa = mantissa.abs();
+        // Remove trailing zero.
+        while mantissa % 10 == 0 && mantissa != 0 {
+            mantissa /= 10;
+            digit_num -= 1;
+        }
+
+        // Cases like: 0.12345, not 0.01111.
+        if digit_num % 2 == 1 {
+            // let last_byte = (mantissa % 10) as u8 * 2 + 1;
+            // mantissa /= 10;
+            // byte_array.push(last_byte);
+            mantissa *= 10;
+            digit_num += 1;
+        }
+        println!(
+            "e10: {}, e100: {}, prec: {}, scale: {}, digit_num: {}, mantissa: {}",
+            e10, e100, prec, scale, digit_num, mantissa
+        );
+        while mantissa != 0 {
+            let byte = (mantissa % 100) as u8 * 2 + 1;
+            byte_array.push(byte);
+            mantissa /= 100;
+        }
+        byte_array[0] -= 1;
+        byte_array.reverse();
+
+        (e100 as i8, byte_array)
+    }
+
+    #[test]
     fn test_naivedate() {
         let a = serialize_naivedate(12_3456);
         let b = serialize_naivedate(0);
