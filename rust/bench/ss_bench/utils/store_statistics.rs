@@ -160,8 +160,8 @@ mod tests {
 
         histogram.observe(0.0132);
         histogram.observe(0.0143);
-        histogram.observe(0.0146); 
-        histogram.observe(0.0249); 
+        histogram.observe(0.0146);
+        histogram.observe(0.0249);
 
         histogram.observe(0.99);
 
