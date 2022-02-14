@@ -63,6 +63,14 @@ impl FragmentManager {
         }
     }
 
+    pub async fn list_table_fragments(&self) -> Result<Vec<TableFragments>> {
+        Ok(self
+            .table_fragments
+            .iter()
+            .map(|f| f.value().clone())
+            .collect())
+    }
+
     pub async fn update_table_fragments(&self, table_fragment: TableFragments) -> Result<()> {
         match self.table_fragments.entry(table_fragment.table_id()) {
             Entry::Occupied(mut entry) => {
