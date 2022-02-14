@@ -22,9 +22,10 @@ include ./q11.slt.part
 include ./q12.slt.part
 include ./q13.slt.part
 include ./q14.slt.part
+include ./q15.slt.part
 include ./q16.slt.part
 include ./q17.slt.part
 include ./q18.slt.part
 include ./q19.slt.part
 
-include ../../tpch/drop_tables.slt.part
+# include ../../tpch/drop_tables.slt.part
