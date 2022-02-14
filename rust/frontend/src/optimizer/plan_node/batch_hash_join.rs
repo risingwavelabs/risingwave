@@ -36,6 +36,12 @@ impl PlanTreeNodeBinary for BatchHashJoin {
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
         Self::new(self.logical.clone_with_left_right(left, right))
     }
+    fn left_dist_required(&self) -> &Distribution {
+        todo!()
+    }
+    fn right_dist_required(&self) -> &Distribution {
+        todo!()
+    }
 }
 impl_plan_tree_node_for_binary! {BatchHashJoin}
 
