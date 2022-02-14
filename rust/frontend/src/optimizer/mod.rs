@@ -53,42 +53,6 @@ impl PlanRoot {
         }
     }
 
-    pub fn with_required_dist(self, dist: Distribution) -> Self {
-        Self::new(
-            self.logical_plan,
-            dist,
-            self.required_order,
-            self.out_fields,
-        )
-    }
-
-    pub fn with_required_order(self, order: Order) -> Self {
-        Self::new(
-            self.logical_plan,
-            self.required_dist,
-            order,
-            self.out_fields,
-        )
-    }
-
-    pub fn with_plan(self, plan: PlanRef) -> Self {
-        Self::new(
-            plan,
-            self.required_dist,
-            self.required_order,
-            self.out_fields,
-        )
-    }
-
-    pub fn with_out_fields(self, out_fields: FixedBitSet) -> Self {
-        Self::new(
-            self.logical_plan,
-            self.required_dist,
-            self.required_order,
-            out_fields,
-        )
-    }
-
     /// Get a reference to the plan root's schema.
     fn schema(&self) -> &Schema {
         &self.schema
