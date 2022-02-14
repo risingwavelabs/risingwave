@@ -51,8 +51,8 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           directory: java
           flags: java
-  end-to-end-riselab:
-    name: e2e-test-riselab
+  end-to-end-risedev:
+    name: e2e-test-risedev
     needs:
       - compute-node-build
       - frontend-check
@@ -126,11 +126,20 @@ jobs:
           ~/cargo-make/makers k
           ~/cargo-make/makers logs
           ~/cargo-make/makers check-logs
-      - name: e2e test batch 1-node
+      - name: e2e test batch 1-node (table_v2)
         run: |
           ~/cargo-make/makers clean-data
-          # ~/cargo-make/makers ci-3node
           ~/cargo-make/makers ci-streaming
+          timeout 5m sqllogictest -p 4567 -d dev './e2e_test/batch/**/*.slt'
+      - name: Kill cluster
+        run: |
+          ~/cargo-make/makers k
+          ~/cargo-make/makers logs
+          ~/cargo-make/makers check-logs
+      - name: e2e test batch 3-node (table_v1)
+        run: |
+          ~/cargo-make/makers clean-data
+          RW_FORCE_TABLE_V1=1 ~/cargo-make/makers ci-3node
           timeout 5m sqllogictest -p 4567 -d dev './e2e_test/batch/**/*.slt'
       - name: Kill cluster
         run: |
@@ -146,8 +155,8 @@ jobs:
         with:
           path: .risingwave/log/
           name: risedev-logs
-  end-to-end:
-    name: e2e-test
+  end-to-end-source:
+    name: e2e-test-source
     needs:
       - compute-node-build
       - frontend-check
@@ -222,7 +231,7 @@ jobs:
           chmod +x ./.risingwave/bin/compute-node
           chmod +x ./rust/target/debug/risedev-playground
           chmod +x ./rust/target/debug/risingwave_regress_test
-      - name: Run tests on Postgresql
+      - name: Run batch tests on Postgresql
         run: |
           timeout 5m sqllogictest -p ${{ env.PG_PORT }} './e2e_test/batch/**/*.slt'
       - name: Generate RiseDev CI config
@@ -230,10 +239,10 @@ jobs:
           cp risedev-components.ci.env risedev-components.user.env
       - name: Prepare RiseDev playground
         run: ~/cargo-make/makers pre-start-playground
-      - name: regress test batch 1-node
+      - name: Run 3-node regress tests (batch, table_v1)
         run: |
           ~/cargo-make/makers clean-data
-          ~/cargo-make/makers ci-streaming
+          RW_FORCE_TABLE_V1=1 ~/cargo-make/makers ci-3node
           psql --version
           RUST_LOG=info cd rust && target/debug/risingwave_regress_test -h 127.0.0.1 \
             -p ${{ env.RW_PORT }} \
@@ -245,26 +254,6 @@ jobs:
           ~/cargo-make/makers k
           ~/cargo-make/makers logs
           # ~/cargo-make/makers check-logs # regression test is bound to produce errors, so we don't check logs
-      - name: e2e test w/ source and Hummock
-        run: |
-          ~/cargo-make/makers clean-data
-          ~/cargo-make/makers ci-streaming
-          timeout 5m sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source/**/*.slt'
-      - name: Kill cluster
-        run: |
-          ~/cargo-make/makers k
-          ~/cargo-make/makers logs
-          ~/cargo-make/makers check-logs
-      - name: e2e test w/ source 3-node
-        run: |
-          ~/cargo-make/makers clean-data
-          ~/cargo-make/makers ci-3node
-          timeout 5m sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source_distributed/**/*.slt'
-      - name: Kill cluster
-        run: |
-          ~/cargo-make/makers k
-          ~/cargo-make/makers logs
-          ~/cargo-make/makers check-logs
       - name: Dump last 100 lines of logs on failure
         if: ${{ failure() }}
         run: ~/cargo-make/makers logs

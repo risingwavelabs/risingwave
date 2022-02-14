@@ -7,6 +7,7 @@ use risingwave_pb::meta::Table;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::{CatalogError, SchemaId};
 
+#[derive(Clone)]
 pub struct SchemaCatalog {
     schema_id: SchemaId,
     table_by_name: HashMap<String, TableCatalog>,

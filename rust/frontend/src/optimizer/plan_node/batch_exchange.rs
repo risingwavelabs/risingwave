@@ -33,18 +33,18 @@ impl PlanTreeNodeUnary for BatchExchange {
         self.input.clone()
     }
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.order.clone(), self.distribution())
+        Self::new(input, self.order.clone(), self.distribution().clone())
     }
 }
 impl_plan_tree_node_for_unary! {BatchExchange}
 impl WithOrder for BatchExchange {
-    fn order(&self) -> Order {
-        self.order.clone()
+    fn order(&self) -> &Order {
+        &self.order
     }
 }
 impl WithDistribution for BatchExchange {
-    fn distribution(&self) -> Distribution {
-        self.dist.clone()
+    fn distribution(&self) -> &Distribution {
+        &self.dist
     }
 }
 impl WithSchema for BatchExchange {

@@ -17,7 +17,7 @@ trait PlanPass {
     fn pass_with_require(
         &mut self,
         plan: PlanRef,
-        required_order: Order,
-        required_dist: Distribution,
+        required_order: &Order,
+        required_dist: &Distribution,
     ) -> PlanRef;
 }

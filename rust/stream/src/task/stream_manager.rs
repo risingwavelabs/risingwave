@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -132,21 +132,17 @@ impl StreamManager {
     }
 
     /// This function was called while [`StreamManager`] exited.
-    ///
-    /// Suspend was allowed here.
     pub async fn wait_all(self) -> Result<()> {
-        let mut core = self.core.lock().unwrap();
-        core.wait_all().await
+        let handles = self.core.lock().unwrap().wait_all()?;
+        for (_id, handle) in handles {
+            handle.await??;
+        }
+        Ok(())
     }
 
     #[cfg(test)]
     pub async fn wait_actors(&self, actor_ids: &[u32]) -> Result<()> {
-        let handles = self
-            .core
-            .lock()
-            .unwrap()
-            .remove_actor_handles(actor_ids)
-            .await?;
+        let handles = self.core.lock().unwrap().remove_actor_handles(actor_ids)?;
         for handle in handles {
             handle.await.unwrap()?
         }
@@ -242,7 +238,6 @@ impl StreamManagerCore {
         let outputs = downstreams
             .iter()
             .map(|down_id| {
-                let up_down_ids = (actor_id, *down_id);
                 let host_addr = self
                     .actor_infos
                     .get(down_id)
@@ -254,18 +249,11 @@ impl StreamManagerCore {
                     })?
                     .get_host()?;
                 let downstream_addr = host_addr.to_socket_addr()?;
+                let tx = self.context.take_sender(&(actor_id, *down_id))?;
                 if is_local_address(&downstream_addr, &self.context.addr) {
                     // if this is a local downstream actor
-                    let tx = self.context.take_sender(&(actor_id, *down_id))?;
                     Ok(Box::new(ChannelOutput::new(tx)) as Box<dyn Output>)
                 } else {
-                    // This channel is used for `RpcOutput` and `ExchangeServiceImpl`.
-                    let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-                    // later, `ExchangeServiceImpl` comes to get it
-
-                    // TODO: refactor this part.
-                    self.context
-                        .add_channel_pairs(up_down_ids, (Some(tx.clone()), Some(rx)));
                     Ok(Box::new(RemoteOutput::new(tx)) as Box<dyn Output>)
                 }
             })
@@ -386,6 +374,7 @@ impl StreamManagerCore {
                     pk_indices,
                     barrier_receiver,
                     executor_id,
+                    operator_id,
                 )?))
             }
             ProjectNode(project_node) => {
@@ -789,14 +778,11 @@ impl StreamManagerCore {
         Ok(())
     }
 
-    pub async fn wait_all(&mut self) -> Result<()> {
-        for (_sid, handle) in std::mem::take(&mut self.handles) {
-            handle.await.unwrap()?;
-        }
-        Ok(())
+    pub fn wait_all(&mut self) -> Result<HashMap<u32, JoinHandle<Result<()>>>> {
+        Ok(std::mem::take(&mut self.handles))
     }
 
-    pub async fn remove_actor_handles(
+    pub fn remove_actor_handles(
         &mut self,
         actor_ids: &[u32],
     ) -> Result<Vec<JoinHandle<Result<()>>>> {
@@ -872,6 +858,14 @@ impl StreamManagerCore {
     }
 
     fn update_actors(&mut self, actors: &[stream_plan::StreamActor]) -> Result<()> {
+        let local_actor_ids: HashSet<u32> = HashSet::from_iter(
+            actors
+                .iter()
+                .map(|actor| actor.clone().get_actor_id())
+                .collect::<Vec<_>>()
+                .into_iter(),
+        );
+
         for actor in actors {
             let ret = self.actors.insert(actor.get_actor_id(), actor.clone());
             if ret.is_some() {
@@ -893,6 +887,16 @@ impl StreamManagerCore {
                 let up_down_ids = (*current_id, *downstream_id);
                 self.context
                     .add_channel_pairs(up_down_ids, (Some(tx), Some(rx)));
+            }
+
+            // Add remote input channels.
+            for upstream_id in actor.get_upstream_actor_id() {
+                if !local_actor_ids.contains(upstream_id) {
+                    let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
+                    let up_down_ids = (*upstream_id, *current_id);
+                    self.context
+                        .add_channel_pairs(up_down_ids, (Some(tx), Some(rx)));
+                }
             }
         }
         Ok(())

@@ -441,7 +441,7 @@ export class StreamChartHelper {
       .attr("x", baseX)
       .attr("y", baseY - actorBoxStroke)
       .attr("font-size", fontSize)
-      .text("Actors: " + actor.representedActorList);
+      .text(`Fragment ${actor.fragmentId}, Actor ${actor.representedActorList}`);
 
     // draw links
     const linkData = [];
@@ -483,9 +483,9 @@ export class StreamChartHelper {
     })
 
     // dataflow effect
+    group.selectAll("path")
+      .attr("stroke-dasharray", linkStrokeDash);
     if (DrawLinkEffect) {
-      group.selectAll("path")
-        .attr("stroke-dasharray", linkStrokeDash);
       function repeat() {
         group.selectAll("path")
           .attr("stroke-dashoffset", "0")
@@ -655,9 +655,9 @@ export class StreamChartHelper {
       .style("stroke-width", 20)
       .attr("stroke", s => actorOutgoinglinkColor(s.actor));
     // dataflow effect
+    linkLayer.selectAll("path")
+      .attr("stroke-dasharray", "20, 20");
     if (DrawLinkEffect) {
-      linkLayer.selectAll("path")
-        .attr("stroke-dasharray", "20, 20");
       function repeat() {
         linkLayer.selectAll("path")
           .attr("stroke-dashoffset", "40")
@@ -715,15 +715,15 @@ export class StreamChartHelper {
     const dispatcherNode2ActorId = new Map();
     const fragmentRepresentedActors = [];
     for (let actor of allActors) {
-      if (!dispatcherNode2ActorId.has(actor.fragmentIdentifier)) {
+      if (!dispatcherNode2ActorId.has(actor.fragmentId)) {
         fragmentRepresentedActors.push(actor);
-        dispatcherNode2ActorId.set(actor.fragmentIdentifier, [actor.actorId]);
+        dispatcherNode2ActorId.set(actor.fragmentId, [actor.actorId]);
       } else {
-        dispatcherNode2ActorId.get(actor.fragmentIdentifier).push(actor.actorId);
+        dispatcherNode2ActorId.get(actor.fragmentId).push(actor.actorId);
       }
     }
     for (let actor of fragmentRepresentedActors) {
-      actor.representedActorList = dispatcherNode2ActorId.get(actor.fragmentIdentifier);
+      actor.representedActorList = dispatcherNode2ActorId.get(actor.fragmentId);
     }
 
     // get dag layout of these actors
