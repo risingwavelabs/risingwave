@@ -79,12 +79,17 @@ impl StreamActorBuilder {
     }
 
     pub fn build(&self) -> StreamActor {
+        let mut upstream_actor_id = vec![];
+        self.upstream_actors.iter().for_each(|v| {
+            upstream_actor_id.append(&mut v.clone());
+        });
         StreamActor {
             actor_id: self.actor_id,
             fragment_id: self.fragment_id,
             nodes: Some(self.nodes.deref().clone()),
             dispatcher: self.dispatcher.clone(),
             downstream_actor_id: self.downstream_actors.iter().copied().collect(),
+            upstream_actor_id,
         }
     }
 }
