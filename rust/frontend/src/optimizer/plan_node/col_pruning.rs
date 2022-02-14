@@ -9,7 +9,7 @@ use crate::{for_batch_plan_nodes, for_stream_plan_nodes};
 /// The trait for column pruning, only logical plan node will use it, though all plan node impl it.
 pub trait ColPrunable: WithSchema + IntoPlanRef {
     /// transform the plan node to only output the required columns ordered by index number.
-    fn prune_col(&self, required_cols: FixedBitSet) -> PlanRef {
+    fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
         let schema = self.schema();
         let exprs: Vec<ExprImpl> = required_cols
             .ones()
@@ -25,7 +25,7 @@ macro_rules! ban_prune_col {
   ([], $( { $convention:ident, $name:ident }),*) => {
     paste!{
       $(impl ColPrunable for [<$convention $name>] {
-        fn prune_col(&self, _required_cols: FixedBitSet) -> PlanRef {
+        fn prune_col(&self, _required_cols: &FixedBitSet) -> PlanRef {
           panic!("column pruning is only allowed on logical plan")
         }
      })*

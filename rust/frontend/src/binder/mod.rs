@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::Statement;
 
@@ -12,12 +14,16 @@ pub use set_expr::BoundSetExpr;
 pub use statement::BoundStatement;
 pub use values::BoundValues;
 
-pub struct Binder {}
+use crate::catalog::database_catalog::DatabaseCatalog;
+
+pub struct Binder {
+    #[allow(dead_code)]
+    catalog: Arc<DatabaseCatalog>,
+}
 
 impl Binder {
-    #[allow(clippy::new_without_default)]
-    pub fn new() -> Binder {
-        Binder {}
+    pub fn new(catalog: Arc<DatabaseCatalog>) -> Binder {
+        Binder { catalog }
     }
     pub fn bind(&mut self, stmt: Statement) -> Result<BoundStatement> {
         self.bind_statement(stmt)
