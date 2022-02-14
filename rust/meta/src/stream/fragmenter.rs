@@ -42,7 +42,7 @@ impl StreamFragmenter {
     ) -> Self {
         Self {
             fragment_graph: StreamFragmentGraph::new(None),
-            stream_graph: StreamGraphBuilder::new(fragment_manager_ref.clone()),
+            stream_graph: StreamGraphBuilder::new(fragment_manager_ref),
             id_gen_manager_ref,
             worker_count,
         }

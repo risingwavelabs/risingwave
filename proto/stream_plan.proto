@@ -77,9 +77,7 @@ message ExchangeNode {
   Dispatcher dispatcher = 2;
 }
 
-
 // ChainNode is used for mv on mv.
-// 
 // ChainNode is like a "UNION" on mv snapshot and streaming. So it takes two inputs with fixed order:
 //   1. ExchangeNode (as a placeholder) for streaming read.
 //   2. BatchPlanNode for snapshot read.
