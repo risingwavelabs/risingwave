@@ -23,21 +23,18 @@ pub trait PlanTreeNode {
     /// Clone the node with a list of new inputs.
     fn clone_with_inputs(&self, inputs: &[PlanRef]) -> PlanRef;
 
-    /// return the required [`Distribution`] of each input for the node to matain the
-    /// [`Distribution`] property of the current node, Use the default impl will not affect
-    /// correctness, but insert unnecessary Exchange in plan
+    /// return the required [`Distribution`] of each input for the node to maintain the
+    /// [`Distribution`] property of the current node, please implement it correctly if the
+    /// requirement of order is necessary.
     fn inputs_distribution_required(&self) -> Vec<&Distribution> {
-        self.inputs()
-            .into_iter()
-            .map(|plan| plan.distribution())
-            .collect()
+        vec![Distribution::any(); self.inputs().len()]
     }
 
-    /// return the required [`Order`] of each input for the node to matain the [`Order`] property of
-    /// the current node, Use the default impl will not affect correctness, but insert unnecessary
-    /// Sort in plan
+    /// return the required [`Order`] of each input for the node to maintain the [`Order`] property
+    /// of the current node, please implement it correctly if the requirement of order is
+    /// necessary.
     fn inputs_order_required(&self) -> Vec<&Order> {
-        self.inputs().into_iter().map(|plan| plan.order()).collect()
+        vec![Order::any(); self.inputs().len()]
     }
 
     /// return the required  [`Distribution`]  of each input for the node, it is just a hint for
@@ -58,10 +55,10 @@ pub trait PlanTreeNodeUnary {
     #[must_use]
     fn clone_with_input(&self, input: PlanRef) -> Self;
     fn input_dist_required(&self) -> &Distribution {
-        self.input().distribution()
+        Distribution::any()
     }
     fn input_order_required(&self) -> &Order {
-        self.input().order()
+        Order::any()
     }
 
     fn dist_pass_through_input(&self, _required: &Distribution) -> &Distribution {
@@ -77,19 +74,19 @@ pub trait PlanTreeNodeBinary {
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self;
 
     fn left_dist_required(&self) -> &Distribution {
-        self.left().distribution()
+        Distribution::any()
     }
 
     fn right_dist_required(&self) -> &Distribution {
-        self.right().distribution()
+        Distribution::any()
     }
 
     fn left_order_required(&self) -> &Order {
-        self.left().order()
+        Order::any()
     }
 
     fn right_order_required(&self) -> &Order {
-        self.right().order()
+        Order::any()
     }
 
     fn dist_pass_through_left_right(
