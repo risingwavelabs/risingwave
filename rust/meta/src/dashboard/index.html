@@ -496,6 +496,7 @@
           allActors.push(...nodeActors)
         })
         const processedData = { actors: allActors }
+        $("#actors").empty()
         $("#actors").append(actors(processedData, 0))
         layoutStreamGraphs(processedData, 0)
       })
