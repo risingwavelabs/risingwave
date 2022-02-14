@@ -154,23 +154,22 @@ mod tests {
         let opts = histogram_opts!("test_histogram", "test_histogram", buckets);
         let histogram = register_histogram_with_registry!(opts, registry).unwrap();
 
-        histogram.observe(0.001);
+        histogram.observe(0.0012);
+        histogram.observe(0.0013);
         histogram.observe(0.003);
 
-        histogram.observe(0.0113);
+        histogram.observe(0.0132);
         histogram.observe(0.0143);
-        histogram.observe(0.0249);
+        histogram.observe(0.0146); 
+        histogram.observe(0.0249); 
 
-        histogram.observe(0.041);
-        histogram.observe(0.042);
-
-        histogram.observe(0.098);
         histogram.observe(0.99);
 
         histogram.observe(6.11);
+        histogram.observe(7.833);
 
-        assert_eq!(get_percentile(&histogram, 50.0), 0.025);
-        assert_eq!(get_percentile(&histogram, 90.0), 1.00);
+        assert_eq!(get_percentile(&histogram, 50.0), 0.0175);
+        assert_eq!(get_percentile(&histogram, 90.0), 7.5);
         assert_eq!(get_percentile(&histogram, 99.0), 10.00);
         assert_eq!(get_percentile(&histogram, 99.9), 10.00);
         assert_eq!(get_percentile(&histogram, 100.0), 10.00);
