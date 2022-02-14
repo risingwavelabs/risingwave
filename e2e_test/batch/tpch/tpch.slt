@@ -28,4 +28,4 @@ include ./q17.slt.part
 include ./q18.slt.part
 include ./q19.slt.part
 
-# include ../../tpch/drop_tables.slt.part
+include ../../tpch/drop_tables.slt.part
