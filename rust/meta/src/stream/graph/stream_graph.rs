@@ -89,7 +89,7 @@ impl StreamActorBuilder {
             nodes: Some(self.nodes.deref().clone()),
             dispatcher: self.dispatcher.clone(),
             downstream_actor_id: self.downstream_actors.iter().copied().collect(),
-            upstream_actor_id: upstream_actor_id,
+            upstream_actor_id,
         }
     }
 }
