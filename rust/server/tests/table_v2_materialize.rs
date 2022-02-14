@@ -137,6 +137,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         PkIndices::from([1]),
         barrier_rx,
         1,
+        1,
     )?;
 
     // Create a `Materialize` to write the changes to storage

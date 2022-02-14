@@ -386,6 +386,7 @@ impl StreamManagerCore {
                     pk_indices,
                     barrier_receiver,
                     executor_id,
+                    operator_id,
                 )?))
             }
             ProjectNode(project_node) => {
