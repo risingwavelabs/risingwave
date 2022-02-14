@@ -48,8 +48,12 @@ pub async fn rpc_serve(
     let env = MetaSrvEnv::new(meta_store_ref, epoch_generator_ref.clone()).await;
 
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
-    let cluster_manager = Arc::new(StoredClusterManager::new(env.clone()).await.unwrap());
-    let hummock_manager = hummock::HummockManager::new(env.clone()).await.unwrap();
+    let hummock_manager = Arc::new(hummock::HummockManager::new(env.clone()).await.unwrap());
+    let cluster_manager = Arc::new(
+        StoredClusterManager::new(env.clone(), Some(hummock_manager.clone()))
+            .await
+            .unwrap(),
+    );
 
     if let Some(dashboard_addr) = dashboard_addr {
         let dashboard_service = DashboardService {
