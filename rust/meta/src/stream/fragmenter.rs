@@ -62,7 +62,7 @@ impl StreamFragmenter {
         self.build_graph_from_fragment(self.fragment_graph.get_root_fragment(), vec![])
             .await?;
 
-        let stream_graph = self.stream_graph.build().await?;
+        let stream_graph = self.stream_graph.build()?;
         stream_graph
             .iter()
             .map(|(&fragment_id, actors)| {

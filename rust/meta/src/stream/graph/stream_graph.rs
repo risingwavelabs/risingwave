@@ -3,11 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Deref;
 use std::sync::Arc;
 
-use async_recursion::async_recursion;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
-use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan::dispatcher::DispatcherType;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{Dispatcher, MergeNode, StreamActor, StreamNode};
@@ -140,17 +138,19 @@ impl StreamGraphBuilder {
     }
 
     /// Build final stream DAG with dependencies with current actor builders.
-    pub async fn build(&self) -> Result<HashMap<FragmentId, Vec<StreamActor>>> {
+    pub fn build(&self) -> Result<HashMap<FragmentId, Vec<StreamActor>>> {
         let mut graph = HashMap::new();
         let mut table_sink_map = HashMap::new();
         for builder in self.actor_builders.values() {
             let mut actor = builder.build();
 
             let upstream_actors = builder.get_upstream_actors();
-            actor.nodes = Some(
-                self.build_inner(&mut table_sink_map, actor.get_nodes()?, &upstream_actors, 0)
-                    .await?,
-            );
+            actor.nodes = Some(self.build_inner(
+                &mut table_sink_map,
+                actor.get_nodes()?,
+                &upstream_actors,
+                0,
+            )?);
             graph
                 .entry(builder.get_fragment_id())
                 .or_insert(vec![])
@@ -165,8 +165,7 @@ impl StreamGraphBuilder {
     /// 2. ignore root node when it's [`ExchangeNode`].
     /// 3. replace node's [`ExchangeNode`] input with [`MergeNode`] and resolve its upstream actor
     /// ids if it is a [`ChainNode`].
-    #[async_recursion]
-    pub async fn build_inner(
+    pub fn build_inner(
         &self,
         table_sink_map: &mut HashMap<TableRawId, Vec<ActorId>>,
         stream_node: &StreamNode,
@@ -174,16 +173,13 @@ impl StreamGraphBuilder {
         next_idx: usize,
     ) -> Result<StreamNode> {
         match stream_node.get_node()? {
-            Node::ExchangeNode(_) => {
-                self.build_inner(
-                    table_sink_map,
-                    stream_node.input.get(0).unwrap(),
-                    upstream_actor_id,
-                    next_idx,
-                )
-                .await
-            }
-            Node::ChainNode(_) => self.resolve_chain_node(table_sink_map, stream_node).await,
+            Node::ExchangeNode(_) => self.build_inner(
+                table_sink_map,
+                stream_node.input.get(0).unwrap(),
+                upstream_actor_id,
+                next_idx,
+            ),
+            Node::ChainNode(_) => self.resolve_chain_node(table_sink_map, stream_node),
             _ => {
                 let mut new_stream_node = stream_node.clone();
                 let mut next_idx_new = next_idx;
@@ -209,12 +205,15 @@ impl StreamGraphBuilder {
                         }
                         Node::ChainNode(_) => {
                             new_stream_node.input[idx] =
-                                self.resolve_chain_node(table_sink_map, input).await?;
+                                self.resolve_chain_node(table_sink_map, input)?;
                         }
                         _ => {
-                            new_stream_node.input[idx] = self
-                                .build_inner(table_sink_map, input, upstream_actor_id, next_idx_new)
-                                .await?;
+                            new_stream_node.input[idx] = self.build_inner(
+                                table_sink_map,
+                                input,
+                                upstream_actor_id,
+                                next_idx_new,
+                            )?;
                         }
                     }
                 }
@@ -223,7 +222,7 @@ impl StreamGraphBuilder {
         }
     }
 
-    async fn resolve_chain_node(
+    fn resolve_chain_node(
         &self,
         table_sink_map: &mut HashMap<TableRawId, Vec<ActorId>>,
         stream_node: &StreamNode,
@@ -235,12 +234,9 @@ impl StreamGraphBuilder {
             let table_raw_id = chain_node.table_ref_id.as_ref().unwrap().table_id;
             let upstream_actor_ids = match table_sink_map.entry(table_raw_id) {
                 Entry::Vacant(v) => {
-                    let actor_ids = try_match_expand!(
-                        self.fragment_manager_ref
-                            .get_table_sink_actor_ids(&table_id)
-                            .await,
-                        Ok
-                    )?;
+                    let actor_ids = self
+                        .fragment_manager_ref
+                        .get_table_sink_actor_ids(&table_id)?;
                     v.insert(actor_ids)
                 }
                 Entry::Occupied(o) => o.into_mut(),
