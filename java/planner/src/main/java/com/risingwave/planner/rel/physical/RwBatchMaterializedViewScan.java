@@ -58,6 +58,9 @@ public class RwBatchMaterializedViewScan extends RwScan implements RisingWaveBat
     TableRefId tableRefId = Messages.getTableRefId(tableId);
     RowSeqScanNode.Builder builder = RowSeqScanNode.newBuilder().setTableRefId(tableRefId);
     columnIds.forEach(c -> builder.addColumnIds(c.getValue()));
-    return PlanNode.newBuilder().setRowSeqScan(builder.build()).build();
+    return PlanNode.newBuilder()
+        .setRowSeqScan(builder.build())
+        .setIdentity(BatchPlan.getCurrentNodeIdentity(this))
+        .build();
   }
 }

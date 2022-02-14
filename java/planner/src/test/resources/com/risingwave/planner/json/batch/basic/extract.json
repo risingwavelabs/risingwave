@@ -18,7 +18,8 @@
         },
         "name": "ZERO"
       }]
-    }
+    },
+    "identity": "RwBatchValuesExecutor"
   }],
   "project": {
     "selectList": [{
@@ -58,5 +59,6 @@
         }]
       }
     }]
-  }
+  },
+  "identity": "RwBatchProject(EXPR$0\u003d[EXTRACT(FLAG(DAY), CAST(\u00271999-1-2\u0027):DATE NOT NULL)])"
 }

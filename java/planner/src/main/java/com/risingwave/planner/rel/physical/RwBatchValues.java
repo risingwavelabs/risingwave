@@ -59,7 +59,10 @@ public class RwBatchValues extends RwValues implements RisingWaveBatchPhyRel {
           Field.newBuilder().setDataType(dataType).setName(field.getName()).build());
     }
 
-    return PlanNode.newBuilder().setValues(valuesNodeBuilder.build()).build();
+    return PlanNode.newBuilder()
+        .setValues(valuesNodeBuilder.build())
+        .setIdentity("RwBatchValuesExecutor")
+        .build();
   }
 
   public RelNode copy(RelTraitSet traitSet) {
