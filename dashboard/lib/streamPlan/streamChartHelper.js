@@ -485,21 +485,22 @@ export class StreamChartHelper {
     // dataflow effect
     group.selectAll("path")
       .attr("stroke-dasharray", linkStrokeDash);
+
     if (DrawLinkEffect) {
-      function repeat() {
-        group.selectAll("path")
-          .attr("stroke-dashoffset", "0")
-          .transition()
-          .duration(linkFlowEffectDuration / 2)
-          .ease(d3.easeLinear)
-          .attr("stroke-dashoffset", "20")
-          .transition()
-          .duration(linkFlowEffectDuration / 2)
-          .ease(d3.easeLinear)
-          .attr("stroke-dashoffset", "40")
-          .on("end", repeat);
-      }
-      repeat();
+      group.selectAll("path")
+        .attr("stroke-dashoffset", "0")
+        .transition()
+        .duration(linkFlowEffectDuration)
+        .ease(d3.easeLinear)
+        .on("start", function repeat() {
+          d3.active(this)
+            .attr("stroke-dashoffset", "20")
+            .transition()
+            .on("start", function () {
+              d3.select(this).attr("stroke-dashoffset", "0");
+              repeat.bind(this)();
+            })
+        });
     }
 
     // ~ END OF dataflow effect 
@@ -658,20 +659,20 @@ export class StreamChartHelper {
     linkLayer.selectAll("path")
       .attr("stroke-dasharray", "20, 20");
     if (DrawLinkEffect) {
-      function repeat() {
-        linkLayer.selectAll("path")
-          .attr("stroke-dashoffset", "40")
-          .transition()
-          .duration(linkFlowEffectDuration / 2)
-          .ease(d3.easeLinear)
-          .attr("stroke-dashoffset", "20")
-          .transition()
-          .duration(linkFlowEffectDuration / 2)
-          .ease(d3.easeLinear)
-          .attr("stroke-dashoffset", "0")
-          .on("end", repeat);
-      }
-      repeat();
+      linkLayer.selectAll("path")
+        .attr("stroke-dashoffset", "40")
+        .transition()
+        .duration(linkFlowEffectDuration)
+        .ease(d3.easeLinear)
+        .on("start", function repeat() {
+          d3.active(this)
+            .attr("stroke-dashoffset", "0")
+            .transition()
+            .on("start", function () {
+              d3.select(this).attr("stroke-dashoffset", "40");
+              repeat.bind(this)();
+            })
+        });
     }
     // ~ END OF dataflow effect 
 
@@ -771,6 +772,6 @@ export class StreamChartHelper {
  * @param {(clickEvent, node) => void} onNodeClick callback when a node (operator) is clicked.
  * @returns void
  */
-export default function createView(g, actorProto, onNodeClick){
+export default function createView(g, actorProto, onNodeClick) {
   return new StreamChartHelper(g, actorProto, onNodeClick).drawManyFlow();
 }
