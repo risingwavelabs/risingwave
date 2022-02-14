@@ -29,6 +29,12 @@ class StreamNode extends Node {
         Actor.parseActor(actorId2Proto.get(upStreamActorId)).output.push(this);
       }
     }
+
+    if (this.type === "chainNode") {
+      for (let upStreamActorId of this.typeInfo.upstreamActorIds) {
+        Actor.parseActor(actorId2Proto.get(upStreamActorId)).output.push(this);
+      }
+    }
   }
 
   parseType(nodeProto) {
