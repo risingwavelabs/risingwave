@@ -137,7 +137,8 @@ impl StageGraphBuilder {
 impl BatchPlanFragmenter {
     /// Split the plan node into each stages, based on exchange node.
     pub fn split(mut self, batch_node: PlanRef) -> Result<Query> {
-        let root_stage_graph = self.new_query_stage(batch_node.clone(), batch_node.distribution());
+        let root_stage_graph =
+            self.new_query_stage(batch_node.clone(), batch_node.distribution().clone());
         self.build_stage(&root_stage_graph, batch_node.clone());
         let stage_graph = self.stage_graph_builder.build(root_stage_graph.id);
         Ok(Query {
@@ -172,7 +173,7 @@ impl BatchPlanFragmenter {
                 // If plan node is a exchange node, for each inputs (child), new a query stage and
                 // link with current stage.
                 let child_query_stage =
-                    self.new_query_stage(child_node.clone(), child_node.distribution());
+                    self.new_query_stage(child_node.clone(), child_node.distribution().clone());
                 // TODO(Bowen): replace mock exchange id 0 to real operator id (#67).
                 self.stage_graph_builder
                     .link_to_child(cur_stage.id, 0, child_query_stage.id);
