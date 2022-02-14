@@ -25,12 +25,13 @@ const SvgBoxCover = styled('div')(() => ({
 
 
 export default function StreamingView(props) {
-  console.log("called.")
   const node = props.node;
   const actorProto = props.actorProto;
   const [nodeJson, setNodeJson] = useState("");
   const [showInfoPane, setShowInfoPane] = useState(false);
   const d3Container = useRef(null);
+
+  actorProto.actors = actorProto.actors || [];
 
   const onNodeClick = (e, node) => {
     setShowInfoPane(true);
@@ -40,7 +41,7 @@ export default function StreamingView(props) {
   };
 
   useEffect(() => {
-    if (d3Container.current && (svg === undefined)) {
+    if (d3Container.current) {
       const width = 1000;
       const height = 1000;
 

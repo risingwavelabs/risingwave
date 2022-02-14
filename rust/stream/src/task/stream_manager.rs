@@ -132,21 +132,17 @@ impl StreamManager {
     }
 
     /// This function was called while [`StreamManager`] exited.
-    ///
-    /// Suspend was allowed here.
     pub async fn wait_all(self) -> Result<()> {
-        let mut core = self.core.lock().unwrap();
-        core.wait_all().await
+        let handles = self.core.lock().unwrap().wait_all()?;
+        for (_id, handle) in handles {
+            handle.await??;
+        }
+        Ok(())
     }
 
     #[cfg(test)]
     pub async fn wait_actors(&self, actor_ids: &[u32]) -> Result<()> {
-        let handles = self
-            .core
-            .lock()
-            .unwrap()
-            .remove_actor_handles(actor_ids)
-            .await?;
+        let handles = self.core.lock().unwrap().remove_actor_handles(actor_ids)?;
         for handle in handles {
             handle.await.unwrap()?
         }
@@ -782,14 +778,11 @@ impl StreamManagerCore {
         Ok(())
     }
 
-    pub async fn wait_all(&mut self) -> Result<()> {
-        for (_sid, handle) in std::mem::take(&mut self.handles) {
-            handle.await.unwrap()?;
-        }
-        Ok(())
+    pub fn wait_all(&mut self) -> Result<HashMap<u32, JoinHandle<Result<()>>>> {
+        Ok(std::mem::take(&mut self.handles))
     }
 
-    pub async fn remove_actor_handles(
+    pub fn remove_actor_handles(
         &mut self,
         actor_ids: &[u32],
     ) -> Result<Vec<JoinHandle<Result<()>>>> {
