@@ -31,13 +31,13 @@ impl PlanTreeNodeUnary for StreamExchange {
         self.input.clone()
     }
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.distribution())
+        Self::new(input, self.distribution().clone())
     }
 }
 impl_plan_tree_node_for_unary! {StreamExchange}
 impl WithDistribution for StreamExchange {
-    fn distribution(&self) -> Distribution {
-        self.dist.clone()
+    fn distribution(&self) -> &Distribution {
+        &self.dist
     }
 }
 impl WithOrder for StreamExchange {}

@@ -52,7 +52,7 @@ impl WithSchema for LogicalLimit {
     }
 }
 impl ColPrunable for LogicalLimit {
-    fn prune_col(&self, required_cols: FixedBitSet) -> PlanRef {
+    fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
         let new_input = self.input.prune_col(required_cols);
         self.clone_with_input(new_input).into_plan_ref()
     }
