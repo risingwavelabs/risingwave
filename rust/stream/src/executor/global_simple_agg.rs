@@ -213,12 +213,12 @@ impl<S: StateStore> Executor for SimpleAggExecutor<S> {
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
+    use global_simple_agg::*;
     use risingwave_common::catalog::Field;
     use risingwave_common::column_nonnull;
     use risingwave_common::expr::*;
     use risingwave_common::types::*;
 
-    use super::*;
     use crate::executor::test_utils::*;
     use crate::executor::*;
     use crate::*;

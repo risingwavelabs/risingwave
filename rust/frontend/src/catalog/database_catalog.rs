@@ -6,6 +6,7 @@ use risingwave_common::error::Result;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::{CatalogError, DatabaseId, SchemaId};
 
+#[derive(Clone)]
 pub struct DatabaseCatalog {
     id: DatabaseId,
     schema_by_name: HashMap<String, SchemaCatalog>,
@@ -41,7 +42,7 @@ impl DatabaseCatalog {
         self.schema_by_name.get_mut(schema)
     }
 
-    pub fn id(&self) -> u32 {
+    pub fn id(&self) -> u64 {
         self.id
     }
 }

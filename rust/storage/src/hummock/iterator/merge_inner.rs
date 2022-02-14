@@ -9,21 +9,21 @@ use crate::hummock::value::HummockValue;
 use crate::hummock::version_cmp::VersionedComparator;
 use crate::hummock::HummockResult;
 
-pub struct Node<const DIRECTION: usize>(BoxedHummockIterator);
+pub struct Node<'a, const DIRECTION: usize>(BoxedHummockIterator<'a>);
 
-impl<const DIRECTION: usize> PartialEq for Node<DIRECTION> {
+impl<const DIRECTION: usize> PartialEq for Node<'_, DIRECTION> {
     fn eq(&self, other: &Self) -> bool {
         self.0.key() == other.0.key()
     }
 }
-impl<const DIRECTION: usize> Eq for Node<DIRECTION> {}
+impl<const DIRECTION: usize> Eq for Node<'_, DIRECTION> {}
 
-impl<const DIRECTION: usize> PartialOrd for Node<DIRECTION> {
+impl<const DIRECTION: usize> PartialOrd for Node<'_, DIRECTION> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
-impl<const DIRECTION: usize> Ord for Node<DIRECTION> {
+impl<const DIRECTION: usize> Ord for Node<'_, DIRECTION> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // Note: to implement min-heap by using max-heap internally, the comparing
         // order should be reversed.
@@ -36,17 +36,17 @@ impl<const DIRECTION: usize> Ord for Node<DIRECTION> {
 }
 
 /// Iterates on multiple iterators, a.k.a. `MergeIterator`.
-pub struct MergeIteratorInner<const DIRECTION: usize> {
+pub struct MergeIteratorInner<'a, const DIRECTION: usize> {
     /// Invalid or non-initialized iterators.
-    unused_iters: LinkedList<BoxedHummockIterator>,
+    unused_iters: LinkedList<BoxedHummockIterator<'a>>,
 
     /// The heap for merge sort.
-    heap: BinaryHeap<Node<DIRECTION>>,
+    heap: BinaryHeap<Node<'a, DIRECTION>>,
 }
 
-impl<const DIRECTION: usize> MergeIteratorInner<DIRECTION> {
+impl<'a, const DIRECTION: usize> MergeIteratorInner<'a, DIRECTION> {
     /// Caller should make sure that `iterators`'s direction is the same as `DIRECTION`.
-    pub fn new(iterators: impl IntoIterator<Item = BoxedHummockIterator>) -> Self {
+    pub fn new(iterators: impl IntoIterator<Item = BoxedHummockIterator<'a>>) -> Self {
         Self {
             unused_iters: iterators.into_iter().collect(),
             heap: BinaryHeap::new(),
@@ -72,7 +72,7 @@ impl<const DIRECTION: usize> MergeIteratorInner<DIRECTION> {
 }
 
 #[async_trait]
-impl<const DIRECTION: usize> HummockIterator for MergeIteratorInner<DIRECTION> {
+impl<const DIRECTION: usize> HummockIterator for MergeIteratorInner<'_, DIRECTION> {
     async fn next(&mut self) -> HummockResult<()> {
         let mut node = self.heap.peek_mut().expect("no inner iter");
 

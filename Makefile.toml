@@ -165,7 +165,7 @@ dependencies = [
 ]
 command = "rust/target/${BUILD_MODE_DIR}/risedev-playground"
 args = ["default"]
-description = "Start a RisingWave playground with 1 compute node, 1 meta node, 1 frontend, 1 minio, 1 prometheus"
+description = "Start a RisingWave playground with default config"
 
 [tasks.ci-3node]
 category = "RiseDev - Start"
@@ -174,7 +174,17 @@ dependencies = [
 ]
 command = "rust/target/${BUILD_MODE_DIR}/risedev-playground"
 args = ["ci-3node"]
-description = "Start a RisingWave playground with 3 compute nodes, 1 meta node, 1 frontend"
+description = "Start a RisingWave playground with ci-3node config"
+
+
+[tasks.ci-1node]
+category = "RiseDev - Start"
+dependencies = [
+  "pre-start-playground"
+]
+command = "rust/target/${BUILD_MODE_DIR}/risedev-playground"
+args = ["ci-1node"]
+description = "Start a RisingWave playground ci-1node config"
 
 [tasks.ci-streaming]
 category = "RiseDev - Start"
@@ -183,7 +193,7 @@ dependencies = [
 ]
 command = "rust/target/${BUILD_MODE_DIR}/risedev-playground"
 args = ["ci-streaming"]
-description = "Start a RisingWave playground with 1 compute node, 1 meta node, 1 frontend and 1 MinIO"
+description = "Start a RisingWave playground ci-streaming config"
 
 [tasks.dev-compute-node]
 category = "RiseDev - Start"
@@ -192,7 +202,7 @@ dependencies = [
 ]
 command = "rust/target/${BUILD_MODE_DIR}/risedev-playground"
 args = ["dev-compute-node"]
-description = "Start a RisingWave playground with 1 user-managed compute node, 1 meta node, 1 frontend, 1 minio, 1 prometheus"
+description = "Start a RisingWave playground with dev-compute-node config"
 
 [tasks.dev-frontend]
 category = "RiseDev - Start"
@@ -201,7 +211,7 @@ dependencies = [
 ]
 command = "rust/target/${BUILD_MODE_DIR}/risedev-playground"
 args = ["dev-frontend"]
-description = "Start a RisingWave playground with 1 compute node, 1 meta node, 1 user managed frontend"
+description = "Start a RisingWave playground with dev-frontend config"
 
 [tasks.kill-playground]
 category = "RiseDev - Stop"

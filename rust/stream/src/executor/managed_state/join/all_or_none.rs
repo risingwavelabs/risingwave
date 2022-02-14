@@ -121,9 +121,10 @@ impl<S: StateStore> AllOrNoneState<S> {
 
     // Fetch cache from the state store.
     async fn fetch_cache(&mut self) -> Result<()> {
+        let epoch = u64::MAX;
         assert!(self.cached.is_none());
 
-        let all_data = self.keyspace.scan_strip_prefix(None).await?;
+        let all_data = self.keyspace.scan_strip_prefix(None, epoch).await?;
 
         // Fetch cached states.
         let mut cached = BTreeMap::new();

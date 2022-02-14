@@ -112,7 +112,7 @@ mod tests {
                 database_name: format!("database_{}", i),
                 version: i as u64,
             }
-            .create(store)
+            .insert(store)
             .await
         }))
         .await
@@ -142,7 +142,7 @@ mod tests {
             database_name: "database_0".to_string(),
             version: 101,
         }
-        .create(store)
+        .insert(store)
         .await?;
 
         let databases = Database::list(store).await?;

@@ -25,6 +25,7 @@ import com.risingwave.planner.rel.physical.RwBatchValues;
 import com.risingwave.planner.rel.physical.join.RwBatchHashJoin;
 import com.risingwave.planner.rel.physical.join.RwBatchNestedLoopJoin;
 import com.risingwave.planner.rel.physical.join.RwBatchSortMergeJoin;
+import com.risingwave.planner.rules.distributed.agg.ShuffleAggRule;
 import com.risingwave.planner.rules.distributed.agg.SingleLimitRule;
 import com.risingwave.planner.rules.distributed.agg.TwoPhaseAggRule;
 import com.risingwave.planner.rules.distributed.agg.TwoPhaseLimitRule;
@@ -163,7 +164,7 @@ public class BatchRuleSets {
           ShuffleJoinRule.INSTANCE,
           // FIXME: currently cardinality estimation is inaccurate without enough statistics to
           // determine shuffleAgg or 2phaseAgg
-          //          ShuffleAggRule.INSTANCE,
+          ShuffleAggRule.INSTANCE,
           TwoPhaseAggRule.INSTANCE,
           TwoPhaseLimitRule.INSTANCE,
           SingleLimitRule.INSTANCE);

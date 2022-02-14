@@ -750,6 +750,7 @@ impl Drop for ScopedUnpinSnapshot {
 
 #[cfg(test)]
 mod tests {
+    use moka::future::Cache;
     use risingwave_pb::hummock::SstableMeta;
 
     use super::*;
@@ -778,6 +779,7 @@ mod tests {
                     Arc::new(InMemObjectStore::default()),
                     String::from(""),
                     SstableMeta::default(),
+                    Arc::new(Cache::new(2333)),
                 )
                 .await?,
                 epoch,

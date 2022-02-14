@@ -4,6 +4,8 @@
 #![warn(clippy::explicit_iter_loop)]
 #![warn(clippy::inconsistent_struct_constructor)]
 #![warn(clippy::map_flatten)]
+#![warn(clippy::no_effect_underscore_binding)]
+#![warn(clippy::await_holding_lock)]
 #![feature(trait_alias)]
 #![feature(generic_associated_types)]
 #![feature(more_qualified_paths)]

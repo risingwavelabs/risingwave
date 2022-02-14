@@ -49,8 +49,6 @@ pub(super) async fn handle_create_table(
 
     let catalog_mgr = session.env().catalog_mgr();
     catalog_mgr
-        .lock()
-        .await
         .create_table(session.database(), DEFAULT_SCHEMA_NAME, table)
         .await?;
 
@@ -64,6 +62,8 @@ pub(super) async fn handle_create_table(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use risingwave_common::types::DataType;
     use risingwave_meta::test_utils::LocalMeta;
 
@@ -79,26 +79,21 @@ mod tests {
         frontend.run_sql(sql).await.unwrap();
 
         let catalog_manager = frontend.session().env().catalog_mgr();
-        let catalog_manager_guard = catalog_manager.lock().await;
-        let table = catalog_manager_guard
+        let table = catalog_manager
             .get_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "t")
             .unwrap();
         let columns = table
             .columns()
             .iter()
             .map(|(col_name, col)| (col_name.clone(), col.data_type()))
-            .collect::<Vec<(String, DataType)>>();
-        assert_eq!(
-            columns,
-            vec![
-                ("v1".to_string(), DataType::Int16),
-                ("v2".to_string(), DataType::Int32),
-                ("v3".to_string(), DataType::Int64),
-                ("v4".to_string(), DataType::Float32),
-                ("v5".to_string(), DataType::Float64),
-            ]
-        );
-
+            .collect::<HashMap<String, DataType>>();
+        let mut expected_map = HashMap::new();
+        expected_map.insert("v1".to_string(), DataType::Int16);
+        expected_map.insert("v2".to_string(), DataType::Int32);
+        expected_map.insert("v3".to_string(), DataType::Int64);
+        expected_map.insert("v4".to_string(), DataType::Float32);
+        expected_map.insert("v5".to_string(), DataType::Float64);
+        assert_eq!(columns, expected_map);
         meta.stop().await;
     }
 }

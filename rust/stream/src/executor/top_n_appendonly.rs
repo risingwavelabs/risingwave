@@ -276,8 +276,8 @@ pub(super) fn generate_output(
 ) -> Result<StreamChunk> {
     if !new_rows.is_empty() {
         let mut data_chunk_builder = DataChunkBuilder::new_with_default_size(schema.data_types());
-        for row in new_rows {
-            data_chunk_builder.append_one_row_ref((&row).into())?;
+        for row in &new_rows {
+            data_chunk_builder.append_one_row_ref(row.into())?;
         }
         // since `new_rows` is not empty, we unwrap directly
         let new_data_chunk = data_chunk_builder.consume_all()?.unwrap();

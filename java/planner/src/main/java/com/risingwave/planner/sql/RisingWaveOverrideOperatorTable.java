@@ -122,6 +122,16 @@ public class RisingWaveOverrideOperatorTable extends ReflectiveSqlOperatorTable 
           OperandTypes.BOOLEAN_BOOLEAN,
           SqlFunctionCategory.SYSTEM);
 
+  /** Pg's translate function */
+  public static final SqlFunction TRANSLATE =
+      new SqlFunction(
+          "TRANSLATE",
+          SqlKind.OTHER_FUNCTION,
+          ReturnTypes.VARCHAR_2000,
+          InferTypes.RETURN_TYPE,
+          OperandTypes.STRING_STRING_STRING,
+          SqlFunctionCategory.SYSTEM);
+
   /** Pg's extract function */
   public static final SqlFunction EXTRACT = new RwSqlExtractFunction();
 }

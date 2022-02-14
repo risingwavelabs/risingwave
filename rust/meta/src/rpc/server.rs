@@ -15,7 +15,7 @@ use crate::barrier::BarrierManager;
 use crate::cluster::StoredClusterManager;
 use crate::dashboard::DashboardService;
 use crate::hummock;
-use crate::manager::{Config, MemEpochGenerator, MetaSrvEnv};
+use crate::manager::{MemEpochGenerator, MetaSrvEnv};
 use crate::rpc::service::catalog_service::CatalogServiceImpl;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
 use crate::rpc::service::epoch_service::EpochServiceImpl;
@@ -23,7 +23,7 @@ use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
 use crate::rpc::service::hummock_service::HummockServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::storage::{MetaStoreRef, SledMetaStore};
-use crate::stream::{StoredStreamMetaManager, StreamManager};
+use crate::stream::{FragmentManager, StreamManager};
 
 pub enum MetaStoreBackend {
     Mem,
@@ -34,11 +34,9 @@ pub enum MetaStoreBackend {
 pub async fn rpc_serve(
     addr: SocketAddr,
     dashboard_addr: Option<SocketAddr>,
-    hummock_config: Option<hummock::Config>,
     meta_store_backend: MetaStoreBackend,
 ) -> (JoinHandle<()>, UnboundedSender<()>) {
     let listener = TcpListener::bind(addr).await.unwrap();
-    let config = Arc::new(Config::default());
     let meta_store_ref: MetaStoreRef = match meta_store_backend {
         MetaStoreBackend::Mem => panic!("Use SledMetaStore instead"),
         MetaStoreBackend::Sled(db_path) => {
@@ -47,20 +45,17 @@ pub async fn rpc_serve(
         MetaStoreBackend::SledInMem => Arc::new(SledMetaStore::new(None).unwrap()),
     };
     let epoch_generator_ref = Arc::new(MemEpochGenerator::new());
-    let env = MetaSrvEnv::new(config, meta_store_ref, epoch_generator_ref.clone()).await;
+    let env = MetaSrvEnv::new(meta_store_ref, epoch_generator_ref.clone()).await;
 
-    let stream_meta_manager = Arc::new(StoredStreamMetaManager::new(env.clone()));
+    let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
     let cluster_manager = Arc::new(StoredClusterManager::new(env.clone()).await.unwrap());
-    let (hummock_manager, _) =
-        hummock::HummockManager::new(env.clone(), hummock_config.unwrap_or_default())
-            .await
-            .unwrap();
+    let hummock_manager = hummock::HummockManager::new(env.clone()).await.unwrap();
 
     if let Some(dashboard_addr) = dashboard_addr {
         let dashboard_service = DashboardService {
             dashboard_addr,
             cluster_manager: cluster_manager.clone(),
-            stream_meta_manager: stream_meta_manager.clone(),
+            fragment_manager: fragment_manager.clone(),
             has_test_data: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
         tokio::spawn(dashboard_service.serve()); // TODO: join dashboard service back to local
@@ -70,7 +65,7 @@ pub async fn rpc_serve(
     let barrier_manager_ref = Arc::new(BarrierManager::new(
         env.clone(),
         cluster_manager.clone(),
-        stream_meta_manager.clone(),
+        fragment_manager.clone(),
         epoch_generator_ref,
     ));
     {
@@ -79,12 +74,16 @@ pub async fn rpc_serve(
         tokio::spawn(async move { barrier_manager_ref.run().await.unwrap() });
     }
 
-    let stream_manager_ref = Arc::new(StreamManager::new(
-        env.clone(),
-        stream_meta_manager.clone(),
-        barrier_manager_ref,
-        cluster_manager.clone(),
-    ));
+    let stream_manager_ref = Arc::new(
+        StreamManager::new(
+            env.clone(),
+            fragment_manager,
+            barrier_manager_ref,
+            cluster_manager.clone(),
+        )
+        .await
+        .unwrap(),
+    );
 
     let epoch_srv = EpochServiceImpl::new(env.clone());
     let heartbeat_srv = HeartbeatServiceImpl::new(env.clone());
@@ -128,7 +127,6 @@ mod tests {
         let sled_root = tempfile::tempdir().unwrap();
         let (join_handle, shutdown_send) = rpc_serve(
             addr,
-            None,
             None,
             MetaStoreBackend::Sled(sled_root.path().to_path_buf()),
         )

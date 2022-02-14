@@ -68,7 +68,57 @@ pub trait TableIter: Send {
 #[async_trait::async_trait]
 pub trait ScannableTable: Sync + Send + Any + core::fmt::Debug {
     /// Open and return an iterator.
-    async fn iter(&self) -> Result<TableIterRef>;
+    async fn iter(&self, epoch: u64) -> Result<TableIterRef>;
+
+    /// Collect data chunk with the target `chunk_size` from the given `iter`, projected on
+    /// `indices`. If there's no more data, return `None`.
+    async fn collect_from_iter(
+        &self,
+        iter: &mut TableIterRef,
+        indices: &[usize],
+        chunk_size: Option<usize>,
+    ) -> Result<Option<DataChunk>> {
+        let schema = self.schema();
+        let mut builders = indices
+            .iter()
+            .map(|i| {
+                schema.fields()[*i]
+                    .data_type()
+                    .create_array_builder(chunk_size.unwrap_or(0))
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        let mut row_count = 0;
+        for _ in 0..chunk_size.unwrap_or(usize::MAX) {
+            match iter.next().await? {
+                Some(row) => {
+                    for (&index, builder) in indices.iter().zip_eq(builders.iter_mut()) {
+                        builder.append_datum(&row.0[index])?;
+                    }
+                    row_count += 1;
+                }
+                None => break,
+            }
+        }
+
+        let chunk = if indices.is_empty() {
+            // Generate some dummy data to ensure a correct cardinality, which might be used by
+            // count(*).
+            DataChunk::new_dummy(row_count)
+        } else {
+            let columns: Vec<Column> = builders
+                .into_iter()
+                .map(|builder| builder.finish().map(|a| Column::new(Arc::new(a))))
+                .try_collect()?;
+            DataChunk::builder().columns(columns).build()
+        };
+
+        if chunk.cardinality() == 0 {
+            Ok(None)
+        } else {
+            Ok(Some(chunk))
+        }
+    }
 
     /// Scan data of specified column ids
     ///
@@ -78,37 +128,12 @@ pub trait ScannableTable: Sync + Send + Any + core::fmt::Debug {
     /// by row. If the underlying storage is a column store, we may implement this function
     /// specifically.
     async fn get_data_by_columns(&self, column_ids: &[i32]) -> Result<BummockResult> {
-        let indices = column_ids
-            .iter()
-            .map(|id| {
-                self.column_descs()
-                    .iter()
-                    .position(|c| c.column_id == *id)
-                    .expect("column id not exists")
-            })
-            .collect_vec();
-
-        let mut iter = self.iter().await?;
-
-        let schema = self.schema();
-        let mut builders = indices
-            .iter()
-            .map(|i| schema.fields()[*i].data_type().create_array_builder(0))
-            .collect::<Result<Vec<_>>>()?;
-
-        while let Some(row) = iter.next().await? {
-            for (&index, builder) in indices.iter().zip_eq(builders.iter_mut()) {
-                builder.append_datum(&row.0[index])?;
-            }
+        let indices = self.column_indices(column_ids);
+        let mut iter = self.iter(u64::MAX).await?;
+        match self.collect_from_iter(&mut iter, &indices, None).await? {
+            Some(chunk) => Ok(BummockResult::Data(vec![chunk.into()])),
+            None => Ok(BummockResult::DataEof),
         }
-
-        let columns: Vec<Column> = builders
-            .into_iter()
-            .map(|builder| builder.finish().map(|a| Column::new(Arc::new(a))))
-            .try_collect()?;
-        let chunk = DataChunk::builder().columns(columns).build();
-
-        Ok(BummockResult::Data(vec![Arc::new(chunk)]))
     }
 
     fn into_any(self: Arc<Self>) -> Arc<dyn Any + Sync + Send>;
@@ -116,6 +141,19 @@ pub trait ScannableTable: Sync + Send + Any + core::fmt::Debug {
     fn schema(&self) -> Cow<Schema>;
 
     fn column_descs(&self) -> Cow<[TableColumnDesc]>;
+
+    /// Get column indices for given `column_ids`.
+    fn column_indices(&self, column_ids: &[i32]) -> Vec<usize> {
+        column_ids
+            .iter()
+            .map(|id| {
+                self.column_descs()
+                    .iter()
+                    .position(|c| c.column_id == *id)
+                    .expect("column id not exists")
+            })
+            .collect()
+    }
 }
 
 /// Reference of a `TableManager`.

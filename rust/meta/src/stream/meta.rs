@@ -1,407 +1,163 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use async_trait::async_trait;
-use prost::Message;
-use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::common::WorkerNode;
-use risingwave_pb::meta::{ActorLocation, TableActors};
+use dashmap::mapref::entry::Entry;
+use dashmap::DashMap;
+use risingwave_common::array::RwError;
+use risingwave_common::catalog::TableId;
+use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::Result;
+use risingwave_common::try_match_expand;
 use risingwave_pb::plan::TableRefId;
-use tokio::sync::RwLock;
+use risingwave_pb::stream_plan::StreamActor;
 
-use crate::manager::{Config, Epoch, MetaSrvEnv, SINGLE_VERSION_EPOCH};
+use crate::cluster::NodeId;
+use crate::manager::MetaSrvEnv;
+use crate::model::{ActorId, MetadataModel, TableFragments};
 use crate::storage::MetaStoreRef;
 
-#[async_trait]
-// TODO: refactor this trait, it's too ugly!!
-pub trait StreamMetaManager: Sync + Send + 'static {
-    /// [`add_actors_to_node`] adds actors to its belonging node.
-    async fn add_actors_to_node(&self, location: &ActorLocation) -> Result<()>;
-    /// [`load_all_actors`] loads all actors for all nodes.
-    async fn load_all_actors(&self) -> Result<Vec<ActorLocation>>;
-    /// [`get_actor_node`] returns which node the actor belongs to.
-    async fn get_actor_node(&self, actor_id: u32) -> Result<WorkerNode>;
-    /// [`add_table_actors`] stores table related actors.
-    async fn add_table_actors(&self, table_id: &TableRefId, actors: &TableActors) -> Result<()>;
-    /// [`get_table_actors`] returns table related actors.
-    async fn get_table_actors(&self, table_id: &TableRefId) -> Result<TableActors>;
-    /// [`drop_table_actors`] drops table actors info, used when `Drop MV`.
-    async fn drop_table_actors(&self, table_id: &TableRefId) -> Result<()>;
-}
-
-pub type StreamMetaManagerRef = Arc<dyn StreamMetaManager>;
-
-/// [`StoredStreamMetaManager`] manages stream meta data using `metastore`.
-pub struct StoredStreamMetaManager {
-    config: Arc<Config>,
+pub struct FragmentManager {
     meta_store_ref: MetaStoreRef,
-    // todo: remove the lock, refactor `node_actors` storage.
-    fragment_lock: RwLock<()>,
+    table_fragments: DashMap<TableId, TableFragments>,
 }
 
-impl StoredStreamMetaManager {
-    pub fn new(env: MetaSrvEnv) -> Self {
-        Self {
-            config: env.config(),
+pub struct ActorInfos {
+    /// node_id => actor_ids
+    pub actor_maps: HashMap<NodeId, Vec<ActorId>>,
+
+    /// all reachable source actors
+    pub source_actor_maps: HashMap<NodeId, Vec<ActorId>>,
+}
+
+pub type FragmentManagerRef = Arc<FragmentManager>;
+
+impl FragmentManager {
+    pub async fn new(env: MetaSrvEnv) -> Result<Self> {
+        let meta_store_ref = env.meta_store_ref();
+        let table_fragments = try_match_expand!(
+            TableFragments::list(&meta_store_ref).await,
+            Ok,
+            "TableFragments::list fail"
+        )?;
+        let fragment_map = DashMap::new();
+        for table_fragment in table_fragments {
+            fragment_map.insert(table_fragment.table_id(), table_fragment);
+        }
+
+        Ok(Self {
             meta_store_ref: env.meta_store_ref(),
-            fragment_lock: RwLock::new(()),
-        }
+            table_fragments: fragment_map,
+        })
     }
-}
 
-#[async_trait]
-impl StreamMetaManager for StoredStreamMetaManager {
-    /// [`MetaManager`] manages streaming related meta data. actors stored as follow category
-    /// in meta store:
-    ///
-    /// cf(node_actor): `node` -> `ActorLocation`, defines all included actors in the node.
-    ///
-    /// cf(actor): `actor_id` -> `Node`, defines which node the actor belongs.
-    ///
-    /// cf(table_actor): `table_ref_id` -> `TableActors`, defines table included actors.
-    async fn add_actors_to_node(&self, location: &ActorLocation) -> Result<()> {
-        let _ = self.fragment_lock.write().await;
-
-        let node = location.get_node()?.encode_to_vec();
-        let actors = location.get_actors();
-        let mut write_batch: Vec<(&str, Vec<u8>, Vec<u8>, Epoch)> = vec![];
-        for f in actors {
-            write_batch.push((
-                self.config.get_actor_cf(),
-                f.get_actor_id().to_be_bytes().to_vec(),
-                node.clone(),
-                SINGLE_VERSION_EPOCH,
-            ));
-        }
-
-        let node_pb = self
-            .meta_store_ref
-            .get_cf(
-                self.config.get_node_actor_cf(),
-                &node.clone(),
-                SINGLE_VERSION_EPOCH,
-            )
-            .await;
-        match node_pb {
-            Ok(value) => {
-                let mut old_location = ActorLocation::decode(value.as_slice())?;
-                old_location.actors.extend(location.clone().actors);
-                write_batch.push((
-                    self.config.get_node_actor_cf(),
-                    node,
-                    old_location.encode_to_vec(),
-                    SINGLE_VERSION_EPOCH,
-                ));
-            }
-            Err(err) => {
-                if !matches!(err.inner(), ErrorCode::ItemNotFound(_)) {
-                    return Err(err);
-                }
-                write_batch.push((
-                    self.config.get_node_actor_cf(),
-                    node,
-                    location.encode_to_vec(),
-                    SINGLE_VERSION_EPOCH,
-                ));
+    pub async fn add_table_fragments(&self, table_fragment: TableFragments) -> Result<()> {
+        match self.table_fragments.entry(table_fragment.table_id()) {
+            Entry::Occupied(_) => Err(RwError::from(InternalError(
+                "table_fragment already exist!".to_string(),
+            ))),
+            Entry::Vacant(v) => {
+                table_fragment.insert(&self.meta_store_ref).await?;
+                v.insert(table_fragment);
+                Ok(())
             }
         }
-
-        self.meta_store_ref.put_batch_cf(write_batch).await?;
-
-        Ok(())
     }
 
-    async fn load_all_actors(&self) -> Result<Vec<ActorLocation>> {
-        let _ = self.fragment_lock.read().await;
+    pub async fn update_table_fragments(&self, table_fragment: TableFragments) -> Result<()> {
+        match self.table_fragments.entry(table_fragment.table_id()) {
+            Entry::Occupied(mut entry) => {
+                table_fragment.insert(&self.meta_store_ref).await?;
+                entry.insert(table_fragment);
 
-        let locations_pb = self
-            .meta_store_ref
-            .list_cf(self.config.get_node_actor_cf())
-            .await?;
-
-        Ok(locations_pb
-            .iter()
-            .map(|l| ActorLocation::decode(l.as_slice()).unwrap())
-            .collect::<Vec<_>>())
-    }
-
-    async fn get_actor_node(&self, actor_id: u32) -> Result<WorkerNode> {
-        let _ = self.fragment_lock.read().await;
-
-        let node_pb = self
-            .meta_store_ref
-            .get_cf(
-                self.config.get_actor_cf(),
-                actor_id.to_be_bytes().as_ref(),
-                SINGLE_VERSION_EPOCH,
-            )
-            .await?;
-
-        Ok(WorkerNode::decode(node_pb.as_slice())?)
-    }
-
-    async fn add_table_actors(&self, table_id: &TableRefId, actors: &TableActors) -> Result<()> {
-        let _ = self.fragment_lock.write().await;
-
-        self.meta_store_ref
-            .put_cf(
-                self.config.get_table_actor_cf(),
-                &table_id.encode_to_vec(),
-                &actors.encode_to_vec(),
-                SINGLE_VERSION_EPOCH,
-            )
-            .await
-    }
-
-    async fn get_table_actors(&self, table_id: &TableRefId) -> Result<TableActors> {
-        let _ = self.fragment_lock.read().await;
-
-        let actors_pb = self
-            .meta_store_ref
-            .get_cf(
-                self.config.get_table_actor_cf(),
-                &table_id.encode_to_vec(),
-                SINGLE_VERSION_EPOCH,
-            )
-            .await?;
-
-        Ok(TableActors::decode(actors_pb.as_slice())?)
-    }
-
-    // TODO: update `actor_cf`
-    async fn drop_table_actors(&self, table_id: &TableRefId) -> Result<()> {
-        let _ = self.fragment_lock.write().await;
-
-        let table_actors = {
-            let actors_pb = self
-                .meta_store_ref
-                .get_cf(
-                    self.config.get_table_actor_cf(),
-                    &table_id.encode_to_vec(),
-                    SINGLE_VERSION_EPOCH,
-                )
-                .await?;
-
-            TableActors::decode(actors_pb.as_slice())?
-        };
-
-        let mut node_to_actors: HashMap<_, HashSet<_>> = HashMap::new();
-
-        for actor_id in table_actors.actor_ids {
-            let node_pb = self
-                .meta_store_ref
-                .get_cf(
-                    self.config.get_actor_cf(),
-                    actor_id.to_be_bytes().as_ref(),
-                    SINGLE_VERSION_EPOCH,
-                )
-                .await?;
-
-            node_to_actors.entry(node_pb).or_default().insert(actor_id);
-        }
-
-        for (node_pb, actors) in node_to_actors {
-            let actor_location_pb = self
-                .meta_store_ref
-                .get_cf(
-                    self.config.get_node_actor_cf(),
-                    &node_pb,
-                    SINGLE_VERSION_EPOCH,
-                )
-                .await?;
-
-            let mut actor_location = ActorLocation::decode(actor_location_pb.as_slice())?;
-            actor_location
-                .actors
-                .retain(|a| !actors.contains(&a.actor_id));
-
-            // Delete these actors in `node_actor` cf.
-            self.meta_store_ref
-                .put_cf(
-                    self.config.get_node_actor_cf(),
-                    &node_pb,
-                    &actor_location.encode_to_vec(),
-                    SINGLE_VERSION_EPOCH,
-                )
-                .await?;
-        }
-
-        // Delete this table in `table_actor` cf.
-        self.meta_store_ref
-            .delete_cf(
-                self.config.get_table_actor_cf(),
-                &table_id.encode_to_vec(),
-                SINGLE_VERSION_EPOCH,
-            )
-            .await?;
-
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use std::collections::HashSet;
-
-    use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
-    use risingwave_pb::stream_plan::StreamActor;
-
-    use super::*;
-
-    fn make_location(node: WorkerNode, actor_ids: Vec<u32>) -> ActorLocation {
-        ActorLocation {
-            node: Some(node),
-            actors: actor_ids
-                .iter()
-                .map(|&i| StreamActor {
-                    actor_id: i,
-                    nodes: None,
-                    dispatcher: None,
-                    downstream_actor_id: vec![],
-                })
-                .collect::<Vec<_>>(),
+                Ok(())
+            }
+            Entry::Vacant(_) => Err(RwError::from(InternalError(
+                "table_fragment not exist!".to_string(),
+            ))),
         }
     }
 
-    #[tokio::test]
-    async fn test_node_actors() -> Result<()> {
-        let meta_manager = StoredStreamMetaManager::new(MetaSrvEnv::for_test().await);
-
-        // Add actors to node 1.
-        assert_eq!(meta_manager.load_all_actors().await?.len(), 0);
-        let location = make_location(
-            WorkerNode {
-                id: 1,
-                r#type: WorkerType::ComputeNode as i32,
-                host: Some(HostAddress {
-                    host: "127.0.0.1".to_string(),
-                    port: 9527,
-                }),
-            },
-            (0..5).collect(),
-        );
-        meta_manager.add_actors_to_node(&location).await?;
-
-        let locations = meta_manager.load_all_actors().await?;
-        assert_eq!(locations.len(), 1);
-        let location = locations.get(0).unwrap();
-        assert_eq!(location.get_node().unwrap().get_id(), 1);
-        assert_eq!(location.get_actors().len(), 5);
-        assert_eq!(
-            location
-                .actors
-                .iter()
-                .map(|f| f.actor_id)
-                .collect::<Vec<_>>(),
-            (0..5).collect::<Vec<_>>()
-        );
-
-        // Add more actors to same node 1.
-        let location = make_location(
-            WorkerNode {
-                id: 1,
-                r#type: WorkerType::ComputeNode as i32,
-                host: Some(HostAddress {
-                    host: "127.0.0.1".to_string(),
-                    port: 9527,
-                }),
-            },
-            (5..10).collect(),
-        );
-        meta_manager.add_actors_to_node(&location).await?;
-
-        // Check new actors added result.
-        let locations = meta_manager.load_all_actors().await?;
-        assert_eq!(locations.len(), 1);
-        let location = locations.get(0).unwrap();
-        assert_eq!(location.get_node().unwrap().get_id(), 1);
-        assert_eq!(location.get_actors().len(), 10);
-        assert_eq!(
-            location
-                .actors
-                .iter()
-                .map(|f| f.actor_id)
-                .collect::<Vec<_>>(),
-            (0..10).collect::<Vec<_>>()
-        );
-
-        // Add actors to another node 2.
-        let location = make_location(
-            WorkerNode {
-                id: 2,
-                r#type: WorkerType::ComputeNode as i32,
-                host: Some(HostAddress {
-                    host: "127.0.0.1".to_string(),
-                    port: 9528,
-                }),
-            },
-            (10..15).collect(),
-        );
-        meta_manager.add_actors_to_node(&location).await?;
-        let locations = meta_manager.load_all_actors().await?;
-        assert_eq!(locations.len(), 2);
-        let location0 = locations.get(0).unwrap();
-        let location1 = locations.get(1).unwrap();
-
-        assert_eq!(
-            location0
-                .actors
-                .iter()
-                .chain(location1.actors.iter())
-                .map(|f| f.actor_id)
-                .collect::<HashSet<_>>(),
-            HashSet::from_iter(0..15)
-        );
-
-        let node = meta_manager.get_actor_node(0).await?;
-        assert_eq!(node.id, 1);
-        let node = meta_manager.get_actor_node(10).await?;
-        assert_eq!(node.id, 2);
-
-        Ok(())
+    pub async fn drop_table_fragments(&self, table_id: &TableId) -> Result<()> {
+        match self.table_fragments.remove(table_id) {
+            Some(_) => {
+                TableFragments::delete(&self.meta_store_ref, &TableRefId::from(table_id)).await
+            }
+            None => Err(RwError::from(InternalError(
+                "table_fragment not exist!".to_string(),
+            ))),
+        }
     }
 
-    #[tokio::test]
-    async fn test_table_actor() -> Result<()> {
-        let meta_manager = StoredStreamMetaManager::new(MetaSrvEnv::for_test().await);
+    pub fn load_all_actors(&self) -> Result<ActorInfos> {
+        let mut actor_maps = HashMap::new();
+        let mut source_actor_ids = HashMap::new();
+        self.table_fragments.iter().for_each(|entry| {
+            // TODO: when swallow barrier available while blocking creating MV or MV on MV, refactor
+            //  the filter logic.
+            if entry.value().is_created() {
+                let node_actors = entry.value().node_actor_ids();
+                node_actors.iter().for_each(|(node_id, actor_ids)| {
+                    let node_actor_ids = actor_maps.entry(*node_id).or_insert_with(Vec::new);
+                    node_actor_ids.extend_from_slice(actor_ids);
+                });
 
-        let table_ref_id = TableRefId {
-            schema_ref_id: None,
-            table_id: 0,
-        };
-        let actor_ids = (0..5).collect::<Vec<u32>>();
+                let source_actors = entry.value().node_source_actors();
+                source_actors.iter().for_each(|(node_id, actor_ids)| {
+                    let node_actor_ids = source_actor_ids.entry(*node_id).or_insert_with(Vec::new);
+                    node_actor_ids.extend_from_slice(actor_ids);
+                });
+            }
+        });
 
-        meta_manager
-            .add_actors_to_node(&make_location(
-                WorkerNode {
-                    id: 114514,
-                    r#type: WorkerType::ComputeNode as i32,
-                    host: Some(HostAddress {
-                        host: "127.0.0.1".to_string(),
-                        port: 8888,
-                    }),
-                },
-                actor_ids.clone(),
-            ))
-            .await?;
+        Ok(ActorInfos {
+            actor_maps,
+            source_actor_maps: source_actor_ids,
+        })
+    }
 
-        meta_manager
-            .add_table_actors(
-                &table_ref_id,
-                &TableActors {
-                    table_ref_id: Some(table_ref_id.clone()),
-                    actor_ids: actor_ids.clone(),
-                },
-            )
-            .await?;
+    pub fn load_all_node_actors(&self) -> Result<HashMap<NodeId, Vec<StreamActor>>> {
+        let mut actor_maps = HashMap::new();
+        self.table_fragments.iter().for_each(|entry| {
+            entry
+                .value()
+                .node_actors()
+                .iter()
+                .for_each(|(node_id, actor_ids)| {
+                    let node_actor_ids = actor_maps.entry(*node_id).or_insert_with(Vec::new);
+                    node_actor_ids.extend_from_slice(actor_ids);
+                });
+        });
 
-        let actors = meta_manager.get_table_actors(&table_ref_id).await?;
-        assert_eq!(*actors.get_actor_ids(), actor_ids);
+        Ok(actor_maps)
+    }
 
-        meta_manager.drop_table_actors(&table_ref_id).await?;
-        let res = meta_manager.get_table_actors(&table_ref_id).await;
-        assert!(res.is_err());
+    pub async fn get_table_node_actors(
+        &self,
+        table_id: &TableId,
+    ) -> Result<BTreeMap<NodeId, Vec<ActorId>>> {
+        match self.table_fragments.get(table_id) {
+            Some(table_fragment) => Ok(table_fragment.node_actor_ids()),
+            None => Err(RwError::from(InternalError(
+                "table_fragment not exist!".to_string(),
+            ))),
+        }
+    }
 
-        Ok(())
+    pub async fn get_table_actor_ids(&self, table_id: &TableId) -> Result<Vec<ActorId>> {
+        match self.table_fragments.get(table_id) {
+            Some(table_fragment) => Ok(table_fragment.actor_ids()),
+            None => Err(RwError::from(InternalError(
+                "table_fragment not exist!".to_string(),
+            ))),
+        }
+    }
+
+    pub async fn get_table_sink_actor_ids(&self, table_id: &TableId) -> Result<Vec<ActorId>> {
+        match self.table_fragments.get(table_id) {
+            Some(table_fragment) => Ok(table_fragment.sink_actor_ids()),
+            None => Err(RwError::from(InternalError(
+                "table_fragment not exist!".to_string(),
+            ))),
+        }
     }
 }
