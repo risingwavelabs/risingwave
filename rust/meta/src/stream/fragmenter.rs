@@ -141,6 +141,12 @@ impl StreamFragmenter {
                     // We should implement two phase TopN.
                     (true, child_is_source)
                 }
+                Node::ChainNode(_) => {
+                    let (_, child_is_source) = self.build_fragment(parent_fragment, node).await?;
+                    // TODO: Force Chain to be singleton as a workaround.
+                    // Remove this if parallel Chain is supported
+                    (true, child_is_source)
+                }
                 _ => self.build_fragment(parent_fragment, node).await?,
             };
             is_singleton |= is_singleton1;
@@ -182,15 +188,10 @@ impl StreamFragmenter {
         let current_fragment_id = current_fragment.get_fragment_id();
         let parallel_degree = if current_fragment.is_singleton() {
             1
-        } else if self.fragment_graph.has_downstream(current_fragment_id) {
-            // Fragment in the middle.
-            // Generate one or multiple actors and connect them to the next fragment.
+        } else {
             // Currently, we assume the parallel degree is at least 4, and grows linearly with
             // more worker nodes added.
             max(self.worker_count * 2, PARALLEL_DEGREE_LOW_BOUND)
-        } else {
-            // Fragment on the source.
-            self.worker_count
         };
 
         let node = current_fragment.get_node();
@@ -223,10 +224,10 @@ impl StreamFragmenter {
             .add_dependency(&current_actor_ids, &last_fragment_actors);
 
         // Recursively generating actors on the downstream level.
-        if self.fragment_graph.has_downstream(current_fragment_id) {
+        if self.fragment_graph.has_upstream(current_fragment_id) {
             for fragment_id in self
                 .fragment_graph
-                .get_downstream_fragments(current_fragment_id)
+                .get_upstream_fragments(current_fragment_id)
                 .unwrap()
             {
                 self.build_graph_from_fragment(

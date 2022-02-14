@@ -34,6 +34,9 @@ impl Binder {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use crate::catalog::database_catalog::DatabaseCatalog;
 
     #[test]
     fn test_bind_value() {
@@ -41,7 +44,8 @@ mod tests {
 
         use super::*;
 
-        let mut binder = Binder {};
+        let catalog = DatabaseCatalog::new(0);
+        let mut binder = Binder::new(Arc::new(catalog));
         let values = vec![
             "1",
             "111111111111111",
