@@ -11,6 +11,7 @@ use http::uri::Uri;
 use crate::base::SourceReader;
 use crate::kinesis::config::AwsConfigInfo;
 use crate::kinesis::source::message::KinesisMessage;
+use crate::kinesis::source::state::KinesisSplitReaderState;
 use crate::kinesis::split::{KinesisOffset, KinesisSplit};
 
 pub struct KinesisSplitReader {
@@ -205,6 +206,22 @@ impl KinesisSplitReader {
         };
 
         Ok(())
+    }
+
+    fn get_state(&self) -> KinesisSplitReaderState {
+        KinesisSplitReaderState::new(
+            self.stream_name.clone(),
+            self.shard_id.clone(),
+            self.latest_sequence_num.clone(),
+        )
+    }
+
+    async fn restore_from_state(&mut self, state: KinesisSplitReaderState) -> Result<()> {
+        self.stream_name = state.stream_name;
+        self.shard_id = state.shard_id;
+        self.latest_sequence_num = state.sequence_number;
+
+        self.renew_shard_iter().await
     }
 }
 
