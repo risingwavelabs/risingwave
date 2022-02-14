@@ -142,4 +142,9 @@ message StreamActor {
   Dispatcher dispatcher = 4;
   // Number of downstreams decides how many endpoints a dispatcher should dispatch.
   repeated uint32 downstream_actor_id = 5;
+  // The actors that send messages to this actor.
+  // Note that upstream actor ids are also stored in the proto of merge nodes.
+  // It is painstaking to traverse through the node tree and get upstream actor id from the root StreamNode.
+  // We duplicate the information here to ease the parsing logic in stream manager.
+  repeated uint32 upstream_actor_id = 6;
 }

@@ -5,7 +5,7 @@ use thiserror::Error;
 
 pub(crate) mod catalog_service;
 pub(crate) mod column_catalog;
-mod database_catalog;
+pub(crate) mod database_catalog;
 mod schema_catalog;
 mod table_catalog;
 
