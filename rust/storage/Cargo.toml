@@ -20,6 +20,7 @@ itertools = "0.10"
 lazy_static = "1"
 log = "0.4"
 memcomparable = { path = "../utils/memcomparable" }
+moka = { version = "0.7", features = ["future"] }
 num-integer = "0.1"
 num-traits = "0.2"
 parking_lot = "0.12"
@@ -30,7 +31,10 @@ rand = "0.8"
 risingwave-pb = { path = "../prost" }
 risingwave_common = { path = "../common" }
 risingwave_rpc_client = { path = "../rpc_client" }
-rocksdb = { git = "https://github.com/tikv/rust-rocksdb.git", rev = "fa83ff19", features = ["encryption", "static_libcpp"], optional = true }
+rocksdb = { git = "https://github.com/tikv/rust-rocksdb.git", rev = "fa83ff19", features = [
+    "encryption",
+    "static_libcpp",
+], optional = true }
 rusoto_core = "0.47"
 rusoto_s3 = "0.47"
 serde = { version = "1", features = ["derive"] }
@@ -39,11 +43,19 @@ serde_with = "1"
 smallvec = "1"
 thiserror = "1"
 tikv-client = { version = "0.1.0", optional = true }
-tokio = { version = "1", features = ["fs", "rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
+tokio = { version = "1", features = [
+    "fs",
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "time",
+    "signal",
+] }
 tokio-retry = "0.3"
 tokio-stream = "0.1"
 tonic = "0.6"
-tracing = "0.1"
+tracing = { version = "0.1", features = ["release_max_level_info"] }
 twox-hash = "1"
 
 [dev-dependencies]

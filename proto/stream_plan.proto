@@ -46,7 +46,7 @@ message ChainNode {
 }
 
 // Remark by Yanghao: for both local and global we use the same node in the protobuf.
-// Local and global aggregator distinguish with each other in their aggregation definition.
+// Local and global aggregator distinguish with each other in PlanNode definition.
 message SimpleAggNode {
   repeated expr.AggCall agg_calls = 1;
 }
@@ -90,7 +90,8 @@ message StreamNode {
     ProjectNode project_node = 5;
     FilterNode filter_node = 6;
     MViewNode mview_node = 7;
-    SimpleAggNode simple_agg_node = 8;
+    SimpleAggNode local_simple_agg_node = 16;
+    SimpleAggNode global_simple_agg_node = 8;
     HashAggNode hash_agg_node = 9;
     TopNNode append_only_top_n_node = 10;
     HashJoinNode hash_join_node = 11;
@@ -115,7 +116,7 @@ message Dispatcher {
     BROADCAST = 2;
   }
   DispatcherType type = 1;
-  int32 column_idx = 2;
+  repeated uint32 column_indices = 2;
 }
 
 // A StreamActor is a running fragment of the overall stream graph,

@@ -273,8 +273,12 @@ where
             // To future developers: please make **SURE** you have taken `EXTREME_TYPE` into
             // account. EXTREME_MIN and EXTREME_MAX will significantly impact the
             // following logic.
-
-            let all_data = self.keyspace.scan_strip_prefix(self.top_n_count).await?;
+            // TODO: use the correct epoch
+            let epoch = u64::MAX;
+            let all_data = self
+                .keyspace
+                .scan_strip_prefix(self.top_n_count, epoch)
+                .await?;
 
             for (raw_key, raw_value) in all_data {
                 let mut deserializer = memcomparable::Deserializer::new(&raw_value[..]);
@@ -366,7 +370,8 @@ where
     #[cfg(test)]
     #[allow(dead_code)]
     pub async fn iterate_store(&self) -> Result<Vec<(A::OwnedItem, ExtremePk)>> {
-        let all_data = self.keyspace.scan_strip_prefix(None).await?;
+        let epoch = u64::MAX;
+        let all_data = self.keyspace.scan_strip_prefix(None, epoch).await?;
         let mut result = vec![];
 
         for (raw_key, raw_value) in all_data {
@@ -432,7 +437,7 @@ pub async fn create_streaming_extreme_state<S: StateStore>(
         { Int16, I16Array },
         { Float64, F64Array },
         { Float32, F32Array },
-        { Decimal { .. }, DecimalArray },
+        { Decimal, DecimalArray },
         { Char | Varchar, Utf8Array },
         { Interval, IntervalArray },
     )

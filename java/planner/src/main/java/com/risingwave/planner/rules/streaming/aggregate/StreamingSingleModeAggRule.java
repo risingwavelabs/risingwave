@@ -22,7 +22,8 @@ public class StreamingSingleModeAggRule extends RelRule<StreamingSingleModeAggRu
 
   @Override
   public boolean matches(RelOptRuleCall call) {
-    return isSingleMode(contextOf(call));
+    RwLogicalAggregate logicalAgg = call.rel(0);
+    return isSingleMode(contextOf(call)) || !logicalAgg.streamingCanTwoPhase();
   }
 
   @Override

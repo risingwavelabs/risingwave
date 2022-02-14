@@ -1,12 +1,26 @@
+use bytes::Bytes;
+use risingwave_pb::hummock::SstableInfo;
 use risingwave_storage::hummock::key_range::KeyRange;
 use serde::{Deserialize, Serialize};
 
-// TODO: should store Arc<Table> instead of table_id in SSTableStat
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SSTableStat {
     pub key_range: KeyRange,
     pub table_id: u64,
     pub compact_task: Option<u64>,
+}
+
+impl From<&SstableInfo> for SSTableStat {
+    fn from(info: &SstableInfo) -> Self {
+        SSTableStat {
+            key_range: KeyRange::new(
+                Bytes::copy_from_slice(&info.key_range.as_ref().unwrap().left),
+                Bytes::copy_from_slice(&info.key_range.as_ref().unwrap().right),
+            ),
+            table_id: info.id,
+            compact_task: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

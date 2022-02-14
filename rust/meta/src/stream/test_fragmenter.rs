@@ -122,7 +122,7 @@ fn make_stream_node() -> StreamNode {
         node: Some(Node::ExchangeNode(ExchangeNode {
             dispatcher: Some(Dispatcher {
                 r#type: DispatcherType::Hash as i32,
-                column_idx: 0,
+                column_indices: vec![0],
             }),
             input_column_descs: vec![
                 make_column_desc(1, TypeName::Int32),
@@ -157,7 +157,7 @@ fn make_stream_node() -> StreamNode {
 
     // simple agg node
     let simple_agg_node = StreamNode {
-        node: Some(Node::SimpleAggNode(SimpleAggNode {
+        node: Some(Node::GlobalSimpleAggNode(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
         })),
         input: vec![filter_node],
@@ -170,7 +170,7 @@ fn make_stream_node() -> StreamNode {
         node: Some(Node::ExchangeNode(ExchangeNode {
             dispatcher: Some(Dispatcher {
                 r#type: DispatcherType::Simple as i32,
-                column_idx: 0,
+                ..Default::default()
             }),
             input_column_descs: vec![
                 make_column_desc(0, TypeName::Int64),
@@ -184,7 +184,7 @@ fn make_stream_node() -> StreamNode {
 
     // agg node
     let simple_agg_node_1 = StreamNode {
-        node: Some(Node::SimpleAggNode(SimpleAggNode {
+        node: Some(Node::GlobalSimpleAggNode(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
         })),
         input: vec![exchange_node_1],

@@ -43,7 +43,7 @@ public class PgException extends RuntimeException {
     return code;
   }
 
-  public static PgException from(Exception e) {
+  public static PgException from(Throwable e) {
     if (e instanceof StatusRuntimeException) {
       return PgException.fromGrpcException((StatusRuntimeException) e);
     }

@@ -209,7 +209,7 @@ mod tests {
         let input = I64Array::from_slice(&[Some(1), Some(2), Some(3)])?;
         let agg_type = AggKind::Sum;
         let input_type = DataType::Int64;
-        let return_type = DataType::decimal_default();
+        let return_type = DataType::Decimal;
         let actual = eval_agg(
             input_type,
             Arc::new(input.into()),

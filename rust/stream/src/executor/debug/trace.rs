@@ -10,10 +10,6 @@ use tracing_futures::Instrument;
 use crate::executor::monitor::DEFAULT_COMPUTE_STATS;
 use crate::executor::{Executor, Message};
 
-/// Barrier event might quickly flush the log to millions of lines. Should enable this when you
-/// really want to debug.
-pub const ENABLE_BARRIER_EVENT: bool = false;
-
 /// `TraceExecutor` prints data passing in the stream graph to stdout.
 ///
 /// The position of `TraceExecutor` in graph:
@@ -29,6 +25,7 @@ pub struct TraceExecutor {
     /// Input position of the input executor
     input_pos: usize,
     /// Actor id
+    #[allow(dead_code)]
     actor_id: u32,
 
     // monitor
@@ -91,18 +88,11 @@ impl super::DebugExecutor for TraceExecutor {
             .await;
         match input_message {
             Ok(message) => {
-                match &message {
-                    Message::Chunk(chunk) => {
-                        if chunk.cardinality() > 0 {
-                            self.actor_row_count
-                                .add(chunk.cardinality() as u64, &self.attributes);
-                            event!(tracing::Level::TRACE, prev = %input_desc, msg = "chunk", "input = \n{:#?}", chunk);
-                        }
-                    }
-                    Message::Barrier(barrier) => {
-                        if ENABLE_BARRIER_EVENT {
-                            event!(tracing::Level::TRACE, prev = %input_desc, msg = "barrier", epoch = barrier.epoch, actor_id = self.actor_id, "process barrier");
-                        }
+                if let Message::Chunk(ref chunk) = message {
+                    if chunk.cardinality() > 0 {
+                        self.actor_row_count
+                            .add(chunk.cardinality() as u64, &self.attributes);
+                        event!(tracing::Level::TRACE, prev = %input_desc, msg = "chunk", "input = \n{:#?}", chunk);
                     }
                 }
                 Ok(message)

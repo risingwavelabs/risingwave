@@ -122,8 +122,7 @@ where
         Ok(match (result, input) {
             (Some(x), Some(_)) => Some(x + 1),
             (Some(x), None) => Some(*x),
-            // this is not possible, as initial value of countable is `0`.
-            _ => unreachable!(),
+            _ => unreachable!("count initial value is 0"),
         })
     }
 
@@ -131,8 +130,7 @@ where
         Ok(match (result, input) {
             (Some(x), Some(_)) => Some(x - 1),
             (Some(x), None) => Some(*x),
-            // this is not possible, as initial value of countable is `0`.
-            _ => unreachable!(),
+            _ => unreachable!("count initial value is 0"),
         })
     }
 
@@ -329,6 +327,10 @@ macro_rules! impl_fold_agg {
 
             fn new_builder(&self) -> ArrayBuilderImpl {
                 ArrayBuilderImpl::$result_variant(<$result as Array>::Builder::new(0).unwrap())
+            }
+
+            fn reset(&mut self) {
+                self.result = S::initial();
             }
         }
     };

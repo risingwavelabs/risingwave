@@ -199,7 +199,7 @@ mod tests {
     #[test]
     fn test_create_agg_state() {
         let int64_type = DataType::Int64;
-        let decimal_type = DataType::decimal_default();
+        let decimal_type = DataType::Decimal;
         let bool_type = DataType::Boolean;
         let char_type = DataType::Char;
 

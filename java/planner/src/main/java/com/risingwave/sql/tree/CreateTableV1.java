@@ -24,9 +24,8 @@ package com.risingwave.sql.tree;
 import java.util.List;
 import java.util.Optional;
 
-// TODO: directly use `CreateTable` when v2 is stabilized
-/** Planner node for CREATE TABLE_V2 statement. */
-public class CreateTableV2<T> extends Statement {
+/** Planner node for CREATE TABLE_V1 statement. */
+public class CreateTableV1<T> extends Statement {
 
   private final Table<T> name;
   private final List<TableElement<T>> tableElements;
@@ -35,7 +34,7 @@ public class CreateTableV2<T> extends Statement {
   private final boolean ifNotExists;
   private final GenericProperties<T> properties;
 
-  public CreateTableV2(
+  public CreateTableV1(
       Table<T> name,
       List<TableElement<T>> tableElements,
       Optional<PartitionedBy<T>> partitionedBy,
@@ -76,7 +75,7 @@ public class CreateTableV2<T> extends Statement {
 
   @Override
   public <R, C> R accept(AstVisitor<R, C> visitor, C context) {
-    return visitor.visitCreateTableV2(this, context);
+    return visitor.visitCreateTableV1(this, context);
   }
 
   @Override
@@ -88,7 +87,7 @@ public class CreateTableV2<T> extends Statement {
       return false;
     }
 
-    CreateTableV2 that = (CreateTableV2) o;
+    CreateTableV1 that = (CreateTableV1) o;
 
     if (ifNotExists != that.ifNotExists) {
       return false;
@@ -121,7 +120,7 @@ public class CreateTableV2<T> extends Statement {
 
   @Override
   public String toString() {
-    return "CreateTableV2{"
+    return "CreateTableV1{"
         + "name="
         + name
         + ", tableElements="

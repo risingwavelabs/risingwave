@@ -49,15 +49,15 @@ impl StreamActorBuilder {
     pub fn set_simple_dispatcher(&mut self) {
         self.dispatcher = Some(Dispatcher {
             r#type: DispatcherType::Simple as i32,
-            column_idx: 0,
+            ..Default::default()
         })
     }
 
     #[allow(dead_code)]
-    pub fn set_hash_dispatcher(&mut self, column_idx: i32) {
+    pub fn set_hash_dispatcher(&mut self, column_indices: Vec<usize>) {
         self.dispatcher = Some(Dispatcher {
             r#type: DispatcherType::Hash as i32,
-            column_idx,
+            column_indices: column_indices.into_iter().map(|i| i as u32).collect(),
         })
     }
 
@@ -65,7 +65,7 @@ impl StreamActorBuilder {
     pub fn set_broadcast_dispatcher(&mut self) {
         self.dispatcher = Some(Dispatcher {
             r#type: DispatcherType::Broadcast as i32,
-            column_idx: 0,
+            ..Default::default()
         })
     }
 

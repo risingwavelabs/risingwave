@@ -7,6 +7,7 @@ use crate::expr::BoxedExpression;
 use crate::types::DataType;
 use crate::vector_op::replace::replace;
 use crate::vector_op::substr::substr_start_for;
+use crate::vector_op::translate::translate;
 
 pub fn new_substr_start_end(
     items: BoxedExpression,
@@ -37,6 +38,24 @@ pub fn new_replace_expr(
             expr_ia3: to_str,
             return_type,
             func: replace,
+            _phantom: PhantomData,
+        },
+    )
+}
+
+pub fn new_translate_expr(
+    s: BoxedExpression,
+    match_str: BoxedExpression,
+    replace_str: BoxedExpression,
+    return_type: DataType,
+) -> BoxedExpression {
+    Box::new(
+        TernaryBytesExpression::<Utf8Array, Utf8Array, Utf8Array, _> {
+            expr_ia1: s,
+            expr_ia2: match_str,
+            expr_ia3: replace_str,
+            return_type,
+            func: translate,
             _phantom: PhantomData,
         },
     )

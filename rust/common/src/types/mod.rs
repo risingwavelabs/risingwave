@@ -39,7 +39,7 @@ pub enum DataType {
     Int64,
     Float32,
     Float64,
-    Decimal { prec: u32, scale: u32 },
+    Decimal,
     Date,
     Char,
     Varchar,
@@ -76,10 +76,7 @@ impl From<&ProstDataType> for DataType {
             TypeName::Time => DataType::Time,
             TypeName::Timestamp => DataType::Timestamp,
             TypeName::Timestampz => DataType::Timestampz,
-            TypeName::Decimal => DataType::Decimal {
-                prec: proto.precision,
-                scale: proto.scale,
-            },
+            TypeName::Decimal => DataType::Decimal,
             TypeName::Interval => DataType::Interval,
             TypeName::Symbol => DataType::Varchar,
             TypeName::Struct => DataType::Struct,
@@ -97,7 +94,7 @@ impl DataType {
             DataType::Int64 => PrimitiveArrayBuilder::<i64>::new(capacity)?.into(),
             DataType::Float32 => PrimitiveArrayBuilder::<OrderedF32>::new(capacity)?.into(),
             DataType::Float64 => PrimitiveArrayBuilder::<OrderedF64>::new(capacity)?.into(),
-            DataType::Decimal { prec: _, scale: _ } => DecimalArrayBuilder::new(capacity)?.into(),
+            DataType::Decimal => DecimalArrayBuilder::new(capacity)?.into(),
             DataType::Date => NaiveDateArrayBuilder::new(capacity)?.into(),
             DataType::Char | DataType::Varchar => Utf8ArrayBuilder::new(capacity)?.into(),
             DataType::Time => NaiveTimeArrayBuilder::new(capacity)?.into(),
@@ -122,7 +119,7 @@ impl DataType {
             DataType::Time => TypeName::Time,
             DataType::Timestamp => TypeName::Timestamp,
             DataType::Timestampz => TypeName::Timestampz,
-            DataType::Decimal { .. } => TypeName::Decimal,
+            DataType::Decimal => TypeName::Decimal,
             DataType::Interval => TypeName::Interval,
             DataType::Struct => TypeName::Struct,
         }
@@ -145,7 +142,7 @@ impl DataType {
             DataType::Int64 => DataSize::Fixed(size_of::<i64>()),
             DataType::Float32 => DataSize::Fixed(size_of::<OrderedF32>()),
             DataType::Float64 => DataSize::Fixed(size_of::<OrderedF64>()),
-            DataType::Decimal { .. } => DataSize::Fixed(16),
+            DataType::Decimal => DataSize::Fixed(16),
             DataType::Char => DataSize::Variable,
             DataType::Varchar => DataSize::Variable,
             DataType::Date => DataSize::Fixed(size_of::<i32>()),
@@ -157,11 +154,24 @@ impl DataType {
         }
     }
 
-    pub fn decimal_default() -> DataType {
-        DataType::Decimal {
-            prec: DECIMAL_DEFAULT_PRECISION,
-            scale: DECIMAL_DEFAULT_SCALE,
-        }
+    pub fn is_numeric(&self) -> bool {
+        matches!(
+            self,
+            DataType::Int16
+                | DataType::Int32
+                | DataType::Int64
+                | DataType::Float32
+                | DataType::Float64
+                | DataType::Decimal
+        )
+    }
+
+    pub fn is_string(&self) -> bool {
+        matches!(self, DataType::Char | DataType::Varchar)
+    }
+
+    pub fn is_date_or_timestamp(&self) -> bool {
+        matches!(self, DataType::Date | DataType::Timestamp)
     }
 }
 
@@ -596,7 +606,7 @@ impl ScalarImpl {
             Ty::Float64 => Self::Float64(f64::deserialize(de)?.into()),
             Ty::Char | Ty::Varchar => Self::Utf8(String::deserialize(de)?),
             Ty::Boolean => Self::Bool(bool::deserialize(de)?),
-            Ty::Decimal { .. } => Self::Decimal({
+            Ty::Decimal => Self::Decimal({
                 let (mantissa, scale) = de.deserialize_decimal()?;
                 match scale {
                     -1 => Decimal::NegativeINF,

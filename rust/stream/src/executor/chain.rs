@@ -5,6 +5,10 @@ use risingwave_common::error::{ErrorCode, Result};
 
 use super::{Executor, Message, PkIndicesRef};
 
+pub trait EpochedExecutor: Executor {
+    fn init_epoch(&mut self, epoch: u64) -> Result<()>;
+}
+
 #[derive(Debug)]
 enum ChainState {
     Init,
@@ -18,7 +22,7 @@ enum ChainState {
 /// existing MVs are dispatched.
 #[derive(Debug)]
 pub struct ChainExecutor {
-    snapshot: Box<dyn Executor>,
+    snapshot: Box<dyn EpochedExecutor>,
     mview: Box<dyn Executor>,
     state: ChainState,
     schema: Schema,
@@ -27,7 +31,7 @@ pub struct ChainExecutor {
 
 impl ChainExecutor {
     pub fn new(
-        snapshot: Box<dyn Executor>,
+        snapshot: Box<dyn EpochedExecutor>,
         mview: Box<dyn Executor>,
         schema: Schema,
         column_idxs: Vec<usize>,
@@ -89,8 +93,8 @@ impl ChainExecutor {
                 "the first message received by chain node should be a barrier".to_owned(),
             )
             .into()),
-            Message::Barrier(_barrier) => {
-                // TODO(MrCroxx): take the epoch of the barrier.
+            Message::Barrier(barrier) => {
+                self.snapshot.init_epoch(barrier.epoch)?;
                 self.state = ChainState::ReadingSnapshot;
                 return self.read_snapshot().await;
             }
@@ -138,7 +142,7 @@ mod test {
     use risingwave_pb::plan::column_desc::ColumnEncodingType;
     use risingwave_pb::plan::ColumnDesc;
 
-    use super::ChainExecutor;
+    use super::{ChainExecutor, EpochedExecutor};
     use crate::executor::test_utils::MockSource;
     use crate::executor::{Barrier, Executor, Message, PkIndices, PkIndicesRef};
 
@@ -186,6 +190,12 @@ mod test {
 
         fn identity(&self) -> &'static str {
             "MockSnapshot"
+        }
+    }
+
+    impl EpochedExecutor for MockSnapshot {
+        fn init_epoch(&mut self, _epoch: u64) -> Result<()> {
+            Ok(())
         }
     }
 

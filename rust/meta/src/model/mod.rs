@@ -10,7 +10,7 @@ use risingwave_common::error::Result;
 pub use stream::*;
 
 use crate::manager::{Epoch, SINGLE_VERSION_EPOCH};
-use crate::storage::MetaStoreRef;
+use crate::storage::{ColumnFamilyUtils, MetaStoreRef, Operation, Transaction};
 
 pub type TableRawId = i32;
 pub type ActorId = u32;
@@ -29,6 +29,11 @@ pub trait MetadataModel: Sized {
 
     /// Serialize to protobuf.
     fn to_protobuf(&self) -> Self::ProstType;
+
+    /// Serialize to protobuf encoded byte vector.
+    fn to_protobuf_encoded_vec(&self) -> Vec<u8> {
+        self.to_protobuf().encode_to_vec()
+    }
 
     /// Deserialize from protobuf.
     fn from_protobuf(prost: Self::ProstType) -> Self;
@@ -77,5 +82,25 @@ pub trait MetadataModel: Sized {
         Ok(Self::from_protobuf(Self::ProstType::decode(
             byte_vec.as_slice(),
         )?))
+    }
+}
+
+/// `Transactional` defines operations supported in a transaction.
+/// Read operations can be supported if necessary.
+pub trait Transactional: MetadataModel {
+    fn upsert_in_transaction(&self, trx: &mut Transaction) -> risingwave_common::error::Result<()> {
+        trx.add_operations(vec![Operation::Put(
+            ColumnFamilyUtils::prefix_key_with_cf(&self.key()?.encode_to_vec(), Self::cf_name()),
+            self.to_protobuf_encoded_vec(),
+            None,
+        )]);
+        Ok(())
+    }
+    fn delete_in_transaction(&self, trx: &mut Transaction) -> risingwave_common::error::Result<()> {
+        trx.add_operations(vec![Operation::Delete(
+            ColumnFamilyUtils::prefix_key_with_cf(&self.key()?.encode_to_vec(), Self::cf_name()),
+            None,
+        )]);
+        Ok(())
     }
 }
