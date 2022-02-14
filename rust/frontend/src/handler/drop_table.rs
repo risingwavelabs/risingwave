@@ -13,8 +13,6 @@ pub(super) async fn handle_drop_table(
 
     let catalog_mgr = session.env().catalog_mgr();
     catalog_mgr
-        .lock()
-        .await
         .drop_table(session.database(), DEFAULT_SCHEMA_NAME, &str_table_name)
         .await?;
 
@@ -44,9 +42,8 @@ mod tests {
         frontend.run_sql(sql_drop_table).await.unwrap();
 
         let catalog_manager = frontend.session().env().catalog_mgr();
-        let catalog_manager_guard = catalog_manager.lock().await;
 
-        assert!(catalog_manager_guard
+        assert!(catalog_manager
             .get_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "t")
             .is_none());
 
