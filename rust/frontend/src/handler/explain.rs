@@ -48,4 +48,31 @@ mod tests {
 
         meta.stop().await;
     }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_handle_explain_scan() {
+        let meta = risingwave_meta::test_utils::LocalMeta::start_in_tempdir().await;
+        let frontend = crate::test_utils::LocalFrontend::new().await;
+
+        let sql_scan = "explain select * from t";
+
+        let err_str = frontend.run_sql(sql_scan).await.err().unwrap().to_string();
+        assert_eq!(err_str, "Item not found: relation \"t\"");
+
+        frontend
+            .run_sql("create table t (v1 bigint, v2 double precision)")
+            .await
+            .unwrap();
+
+        let response = frontend.run_sql(sql_scan).await.unwrap();
+        let row = response.iter().next().unwrap();
+        let s = row[0].as_ref().unwrap();
+        assert!(s.contains("v1"));
+        assert!(s.contains("Int64"));
+        assert!(s.contains("v2"));
+        assert!(s.contains("Float64"));
+
+        meta.stop().await;
+    }
 }

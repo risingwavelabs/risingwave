@@ -1,6 +1,7 @@
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
+use risingwave_common::error::Result;
 
 use super::{ColPrunable, IntoPlanRef, PlanRef, ToBatch, ToStream};
 use crate::catalog::{ColumnId, TableId};
@@ -14,6 +15,23 @@ pub struct LogicalScan {
     columns: Vec<ColumnId>,
     schema: Schema,
 }
+
+impl LogicalScan {
+    /// Create a LogicalScan node. Used internally by optimizer.
+    pub fn new(table_id: TableId, columns: Vec<ColumnId>, schema: Schema) -> Self {
+        Self {
+            table_id,
+            columns,
+            schema,
+        }
+    }
+
+    /// Create a LogicalScan node. Used by planner.
+    pub fn create(table_id: TableId, columns: Vec<ColumnId>, schema: Schema) -> Result<Self> {
+        Ok(Self::new(table_id, columns, schema))
+    }
+}
+
 impl WithSchema for LogicalScan {
     fn schema(&self) -> &Schema {
         &self.schema
@@ -24,8 +42,8 @@ impl WithOrder for LogicalScan {}
 impl WithDistribution for LogicalScan {}
 
 impl fmt::Display for LogicalScan {
-    fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
-        todo!()
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:?}", self)
     }
 }
 impl ColPrunable for LogicalScan {}
