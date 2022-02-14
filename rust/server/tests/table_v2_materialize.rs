@@ -161,6 +161,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         mview_id.clone(),
         source_manager.clone(),
         Box::new(insert_inner),
+        0,
     );
 
     insert.open().await?;

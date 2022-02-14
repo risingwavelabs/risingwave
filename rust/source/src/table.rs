@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use std::ops::Deref;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -27,7 +27,7 @@ pub struct TableSource {
     columns: Vec<SourceColumnDesc>,
 
     /// current allocated row id
-    next_row_id: AtomicUsize,
+    next_row_id: AtomicI64,
 }
 
 #[derive(Debug)]
@@ -59,11 +59,11 @@ impl TableSource {
         TableSource {
             core: Arc::new(RwLock::new(core)),
             columns: source_columns,
-            next_row_id: AtomicUsize::new(0),
+            next_row_id: 0.into(),
         }
     }
 
-    pub fn next_row_id(&self) -> usize {
+    pub fn next_row_id(&self) -> i64 {
         self.next_row_id.fetch_add(1, Ordering::Relaxed)
     }
 }
