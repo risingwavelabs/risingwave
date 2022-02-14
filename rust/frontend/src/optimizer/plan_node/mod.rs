@@ -51,7 +51,7 @@ pub type PlanRef = Rc<dyn PlanNode>;
 impl dyn PlanNode {
     /// Write explain the whole plan tree.
     pub fn explain(&self, level: usize, f: &mut dyn std::fmt::Write) -> std::fmt::Result {
-        write!(f, "{}{}", " ".repeat(level * 2), self)?;
+        writeln!(f, "{}{}", " ".repeat(level * 2), self)?;
         for input in self.inputs() {
             input.explain(level + 1, f)?;
         }

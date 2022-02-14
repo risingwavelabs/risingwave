@@ -55,7 +55,11 @@ impl WithDistribution for LogicalInsert {}
 
 impl fmt::Display for LogicalInsert {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", self)
+        write!(
+            f,
+            "LogicalInsert {{ table_id: {}, columns: {:?} }}",
+            self.table_id, self.columns,
+        )
     }
 }
 impl ColPrunable for LogicalInsert {}
