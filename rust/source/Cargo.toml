@@ -24,6 +24,7 @@ paste = "1"
 prost = "0.9"
 protobuf = "2"
 protobuf-codegen-pure = "2.25.2"
+rand = "0.8"
 rdkafka = { version = "0.28", features = ["cmake-build"] }
 risingwave-pb = { path = "../prost" }
 risingwave_common = { path = "../common" }
@@ -46,5 +47,4 @@ url = "2"
 
 [dev-dependencies]
 assert_matches = "1"
-rand = "0.8"
 tempfile = "3"
