@@ -82,6 +82,7 @@ async fn test_stream_proto() {
                     column_indices: vec![0],
                 }),
                 downstream_actor_id: vec![3],
+                upstream_actor_id: vec![0],
             },
             // create 1 -> (3) -> 7, 11
             StreamActor {
@@ -112,6 +113,7 @@ async fn test_stream_proto() {
                     column_indices: vec![0],
                 }),
                 downstream_actor_id: vec![7, 11],
+                upstream_actor_id: vec![1],
             },
             // create 3 -> (7) -> 13
             StreamActor {
@@ -142,6 +144,7 @@ async fn test_stream_proto() {
                     column_indices: vec![0],
                 }),
                 downstream_actor_id: vec![13],
+                upstream_actor_id: vec![3],
             },
             // create 3 -> (11) -> 13
             StreamActor {
@@ -172,6 +175,7 @@ async fn test_stream_proto() {
                     ..Default::default()
                 }),
                 downstream_actor_id: vec![13],
+                upstream_actor_id: vec![3],
             },
             // create 7, 11 -> (13) -> 233
             StreamActor {
@@ -202,6 +206,7 @@ async fn test_stream_proto() {
                     ..Default::default()
                 }),
                 downstream_actor_id: vec![233],
+                upstream_actor_id: vec![11],
             },
         ])
         .unwrap();
