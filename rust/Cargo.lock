@@ -1601,6 +1601,7 @@ dependencies = [
  "itertools 0.10.3",
  "lazy_static",
  "log",
+ "parking_lot 0.12.0",
  "paste",
  "pgwire",
  "risingwave-pb",
