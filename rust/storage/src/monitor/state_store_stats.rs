@@ -22,34 +22,49 @@ pub const ADD_L0_LATENCT_SCALE: f64 = 0.00001;
 pub const ITER_NEXT_LATENCY_SCALE: f64 = 0.0001;
 pub const ITER_SEEK_LATENCY_SCALE: f64 = 0.0001;
 
-/// [`StateStoreStats`] stores the performance and IO metrics of `XXXStore` such as
-/// `RocksDBStateStore` and `TikvStateStore`.
-/// In practice, keep in mind that this represents the whole Hummock utilizations of
-/// a `RisingWave` instance. More granular utilizations of per `materialization view`
-/// job or a executor should be collected by views like `StateStats` and `JobStats`.
-#[derive(Debug)]
-pub struct StateStoreStats {
-    pub get_latency: Histogram,
-    pub get_key_size: Histogram,
-    pub get_value_size: Histogram,
-    pub get_counts: GenericCounter<AtomicU64>,
-    pub get_snapshot_latency: Histogram,
+/// Define all metrics.
+#[macro_export]
+macro_rules! for_all_metrics {
+    ($macro:tt) => {
+        $macro! {
+            get_latency: Histogram,
+            get_key_size: Histogram,
+            get_value_size: Histogram,
+            get_counts: GenericCounter<AtomicU64>,
+            get_snapshot_latency: Histogram,
 
-    pub range_scan_counts: GenericCounter<AtomicU64>,
-    pub reverse_range_scan_counts: GenericCounter<AtomicU64>,
+            range_scan_counts: GenericCounter<AtomicU64>,
+            reverse_range_scan_counts: GenericCounter<AtomicU64>,
 
-    pub batched_write_counts: GenericCounter<AtomicU64>,
-    pub batch_write_tuple_counts: GenericCounter<AtomicU64>,
-    pub batch_write_latency: Histogram,
-    pub batch_write_size: Histogram,
-    pub batch_write_build_table_latency: Histogram,
-    pub batch_write_add_l0_latency: Histogram,
+            batched_write_counts: GenericCounter<AtomicU64>,
+            batch_write_tuple_counts: GenericCounter<AtomicU64>,
+            batch_write_latency: Histogram,
+            batch_write_size: Histogram,
+            batch_write_build_table_latency: Histogram,
+            batch_write_add_l0_latency: Histogram,
 
-    pub iter_counts: GenericCounter<AtomicU64>,
-    pub iter_next_counts: GenericCounter<AtomicU64>,
-    pub iter_seek_latency: Histogram,
-    pub iter_next_latency: Histogram,
+            iter_counts: GenericCounter<AtomicU64>,
+            iter_next_counts: GenericCounter<AtomicU64>,
+            iter_seek_latency: Histogram,
+            iter_next_latency: Histogram,
+        }
+    };
 }
+
+macro_rules! define_state_store_stats {
+    ($( $name:ident: $type:ty ),* ,) => {
+        /// [`StateStoreStats`] stores the performance and IO metrics of `XXXStore` such as
+        /// `RocksDBStateStore` and `TikvStateStore`.
+        /// In practice, keep in mind that this represents the whole Hummock utilizations of
+        /// a `RisingWave` instance. More granular utilizations of per `materialization view`
+        /// job or a executor should be collected by views like `StateStats` and `JobStats`.
+        #[derive(Debug)]
+        pub struct StateStoreStats {
+            $( pub $name: $type, )*
+        }
+    }
+}
+for_all_metrics! { define_state_store_stats }
 
 lazy_static::lazy_static! {
   pub static ref

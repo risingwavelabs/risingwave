@@ -1,12 +1,7 @@
 use prometheus::core::{AtomicU64, Collector, GenericCounter, Metric};
 use prometheus::Histogram;
+use risingwave_storage::for_all_metrics;
 use risingwave_storage::monitor::DEFAULT_STATE_STORE_STATS;
-
-fn proc_counter(counter: &GenericCounter<AtomicU64>) {
-    let desc = &counter.desc()[0].fq_name;
-    let counter = counter.metric().get_counter().get_value() as u64;
-    println!("{desc} COUNT : {counter}");
-}
 
 fn get_percentile(histogram: &Histogram, p: f64) -> f64 {
     let metric = histogram.metric();
@@ -37,47 +32,47 @@ fn get_percentile(histogram: &Histogram, p: f64) -> f64 {
     0.0
 }
 
-fn proc_histogram(histogram: &Histogram) {
-    let desc = &histogram.desc()[0].fq_name;
-
-    let p50 = get_percentile(histogram, 50.0);
-    let p95 = get_percentile(histogram, 95.0);
-    let p99 = get_percentile(histogram, 99.0);
-    let p100 = get_percentile(histogram, 100.0);
-
-    let sample_count = histogram.get_sample_count();
-    let sample_sum = histogram.get_sample_sum();
-
-    println!("{desc} P50 : {p50} P95 : {p95} P99 : {p99} P100 : {p100} COUNT : {sample_count} SUM : {sample_sum}");
+/// Define extension method `print` used in `print_statistics`.
+trait Print {
+    fn print(&self);
 }
 
-pub(crate) fn print_statistics() {
-    println!("STATISTICS:");
-
-    let stat = DEFAULT_STATE_STORE_STATS.clone();
-
-    // ----- TODO(Ting Sun): use macro to simplify the implementation -----
-    proc_counter(&stat.get_counts);
-    proc_counter(&stat.range_scan_counts);
-    proc_counter(&stat.reverse_range_scan_counts);
-    proc_counter(&stat.batched_write_counts);
-    proc_counter(&stat.batch_write_tuple_counts);
-    proc_counter(&stat.iter_counts);
-    proc_counter(&stat.iter_next_counts);
-
-    proc_histogram(&stat.get_latency);
-    proc_histogram(&stat.get_key_size);
-    proc_histogram(&stat.get_value_size);
-    proc_histogram(&stat.get_snapshot_latency);
-    proc_histogram(&stat.batch_write_latency);
-    proc_histogram(&stat.batch_write_size);
-    proc_histogram(&stat.batch_write_build_table_latency);
-    proc_histogram(&stat.batch_write_add_l0_latency);
-    proc_histogram(&stat.iter_seek_latency);
-    proc_histogram(&stat.iter_next_latency);
-
-    println!();
+impl Print for GenericCounter<AtomicU64> {
+    fn print(&self) {
+        let desc = &self.desc()[0].fq_name;
+        let counter = self.metric().get_counter().get_value() as u64;
+        println!("{desc} COUNT : {counter}");
+    }
 }
+
+impl Print for Histogram {
+    fn print(&self) {
+        let desc = &self.desc()[0].fq_name;
+
+        let p50 = get_percentile(self, 50.0);
+        let p95 = get_percentile(self, 95.0);
+        let p99 = get_percentile(self, 99.0);
+        let p100 = get_percentile(self, 100.0);
+
+        let sample_count = self.get_sample_count();
+        let sample_sum = self.get_sample_sum();
+
+        println!("{desc} P50 : {p50} P95 : {p95} P99 : {p99} P100 : {p100} COUNT : {sample_count} SUM : {sample_sum}");
+    }
+}
+
+macro_rules! print_statistics {
+    ($( $name:ident: $type:ty ),* ,) => {
+        pub(crate) fn print_statistics() {
+            println!("STATISTICS:");
+            let stat = DEFAULT_STATE_STORE_STATS.clone();
+            // print for all fields
+            $( stat.$name.print(); )*
+            println!();
+        }
+    }
+}
+for_all_metrics! { print_statistics }
 
 #[cfg(test)]
 mod tests {

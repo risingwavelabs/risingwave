@@ -4,6 +4,7 @@ use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::Statement;
 
 mod expr;
+mod insert;
 mod query;
 mod select;
 mod set_expr;
@@ -11,6 +12,7 @@ mod statement;
 mod table_ref;
 mod values;
 
+pub use insert::BoundInsert;
 pub use query::BoundQuery;
 pub use select::BoundSelect;
 pub use set_expr::BoundSetExpr;

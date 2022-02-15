@@ -3,6 +3,7 @@ use risingwave_common::error::Result;
 use crate::binder::BoundStatement;
 use crate::optimizer::plan_node::PlanRef;
 
+mod insert;
 mod query;
 mod select;
 mod set_expr;
