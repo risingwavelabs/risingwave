@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -8,6 +8,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::expr::{build_from_prost as build_expr_from_prost, AggKind, RowExpression};
+use risingwave_common::try_match_expand;
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::is_local_address;
 use risingwave_common::util::sort_util::{
@@ -15,6 +16,7 @@ use risingwave_common::util::sort_util::{
 };
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::plan::JoinType as JoinTypeProto;
+use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::{expr, stream_plan, stream_service};
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
 use tokio::sync::mpsc::unbounded_channel;
@@ -132,21 +134,17 @@ impl StreamManager {
     }
 
     /// This function was called while [`StreamManager`] exited.
-    ///
-    /// Suspend was allowed here.
     pub async fn wait_all(self) -> Result<()> {
-        let mut core = self.core.lock().unwrap();
-        core.wait_all().await
+        let handles = self.core.lock().unwrap().wait_all()?;
+        for (_id, handle) in handles {
+            handle.await??;
+        }
+        Ok(())
     }
 
     #[cfg(test)]
     pub async fn wait_actors(&self, actor_ids: &[u32]) -> Result<()> {
-        let handles = self
-            .core
-            .lock()
-            .unwrap()
-            .remove_actor_handles(actor_ids)
-            .await?;
+        let handles = self.core.lock().unwrap().remove_actor_handles(actor_ids)?;
         for handle in handles {
             handle.await.unwrap()?
         }
@@ -242,7 +240,6 @@ impl StreamManagerCore {
         let outputs = downstreams
             .iter()
             .map(|down_id| {
-                let up_down_ids = (actor_id, *down_id);
                 let host_addr = self
                     .actor_infos
                     .get(down_id)
@@ -254,18 +251,11 @@ impl StreamManagerCore {
                     })?
                     .get_host()?;
                 let downstream_addr = host_addr.to_socket_addr()?;
+                let tx = self.context.take_sender(&(actor_id, *down_id))?;
                 if is_local_address(&downstream_addr, &self.context.addr) {
                     // if this is a local downstream actor
-                    let tx = self.context.take_sender(&(actor_id, *down_id))?;
                     Ok(Box::new(ChannelOutput::new(tx)) as Box<dyn Output>)
                 } else {
-                    // This channel is used for `RpcOutput` and `ExchangeServiceImpl`.
-                    let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-                    // later, `ExchangeServiceImpl` comes to get it
-
-                    // TODO: refactor this part.
-                    self.context
-                        .add_channel_pairs(up_down_ids, (Some(tx.clone()), Some(rx)));
                     Ok(Box::new(RemoteOutput::new(tx)) as Box<dyn Output>)
                 }
             })
@@ -319,8 +309,6 @@ impl StreamManagerCore {
         env: StreamTaskEnv,
         store: impl StateStore,
     ) -> Result<Box<dyn Executor>> {
-        use stream_plan::stream_node::Node::*;
-
         // Create the input executor before creating itself
         // The node with no input must be a `MergeNode`
         let mut input: Vec<Box<dyn Executor>> = node
@@ -354,7 +342,7 @@ impl StreamManagerCore {
         let operator_id = ((fragment_id as u64) << 32) + node.get_operator_id();
 
         let executor: Result<Box<dyn Executor>> = match node.get_node()? {
-            SourceNode(node) => {
+            Node::SourceNode(node) => {
                 let source_id = TableId::from(&node.table_ref_id);
                 let source_desc = source_manager.get_source(&source_id)?;
 
@@ -389,7 +377,7 @@ impl StreamManagerCore {
                     operator_id,
                 )?))
             }
-            ProjectNode(project_node) => {
+            Node::ProjectNode(project_node) => {
                 let project_exprs = project_node
                     .get_select_list()
                     .iter()
@@ -402,7 +390,7 @@ impl StreamManagerCore {
                     executor_id,
                 )))
             }
-            FilterNode(filter_node) => {
+            Node::FilterNode(filter_node) => {
                 let search_condition = build_expr_from_prost(filter_node.get_search_condition()?)?;
                 Ok(Box::new(FilterExecutor::new(
                     input.remove(0),
@@ -410,7 +398,7 @@ impl StreamManagerCore {
                     executor_id,
                 )))
             }
-            LocalSimpleAggNode(aggr_node) => {
+            Node::LocalSimpleAggNode(aggr_node) => {
                 let agg_calls: Vec<AggCall> = aggr_node
                     .get_agg_calls()
                     .iter()
@@ -423,7 +411,7 @@ impl StreamManagerCore {
                     executor_id,
                 )?))
             }
-            GlobalSimpleAggNode(aggr_node) => {
+            Node::GlobalSimpleAggNode(aggr_node) => {
                 let agg_calls: Vec<AggCall> = aggr_node
                     .get_agg_calls()
                     .iter()
@@ -438,7 +426,7 @@ impl StreamManagerCore {
                     executor_id,
                 )))
             }
-            HashAggNode(aggr_node) => {
+            Node::HashAggNode(aggr_node) => {
                 let keys = aggr_node
                     .get_group_keys()
                     .iter()
@@ -460,7 +448,7 @@ impl StreamManagerCore {
                     executor_id,
                 )))
             }
-            AppendOnlyTopNNode(top_n_node) => {
+            Node::AppendOnlyTopNNode(top_n_node) => {
                 let order_types = top_n_node
                     .get_order_types()
                     .iter()
@@ -485,7 +473,7 @@ impl StreamManagerCore {
                     executor_id,
                 )))
             }
-            TopNNode(top_n_node) => {
+            Node::TopNNode(top_n_node) => {
                 let order_types = top_n_node
                     .get_order_types()
                     .iter()
@@ -510,7 +498,7 @@ impl StreamManagerCore {
                     executor_id,
                 )))
             }
-            HashJoinNode(hash_join_node) => {
+            Node::HashJoinNode(hash_join_node) => {
                 let source_r = input.remove(1);
                 let source_l = input.remove(0);
                 let params_l = JoinParams::new(
@@ -568,7 +556,7 @@ impl StreamManagerCore {
                 let executor = create_hash_join_executor(join_type_proto);
                 Ok(executor)
             }
-            MviewNode(materialized_view_node) => {
+            Node::MviewNode(materialized_view_node) => {
                 let table_id = TableId::from(&materialized_view_node.table_ref_id);
                 let columns = materialized_view_node.get_column_descs();
                 let pks = materialized_view_node
@@ -603,28 +591,16 @@ impl StreamManagerCore {
                 ));
                 Ok(executor)
             }
-            MergeNode(merge_node) => {
+            Node::MergeNode(merge_node) => {
                 let schema = Schema::try_from(merge_node.get_input_column_descs())?;
                 let upstreams = merge_node.get_upstream_actor_id();
                 self.create_merge_node(actor_id, schema, upstreams, pk_indices)
             }
-            ChainNode(chain_node) => {
-                let table_id = TableId::from(&chain_node.table_ref_id);
-                let table = table_manager.get_table(&table_id)?;
-                let snapshot = Box::new(BatchQueryExecutor::new(table.clone(), pk_indices));
-                let pk_indices = chain_node
-                    .pk_indices
-                    .iter()
-                    .map(|x| *x as usize)
-                    .collect_vec();
-                let upstream_schema = table.schema().into_owned();
-                let mview = self.create_merge_node(
-                    actor_id,
-                    upstream_schema.clone(),
-                    &chain_node.upstream_actor_ids,
-                    pk_indices,
-                )?;
+            Node::ChainNode(chain_node) => {
+                let snapshot = input.remove(1);
+                let mview = input.remove(0);
 
+                let upstream_schema = snapshot.schema();
                 // TODO(MrCroxx): Use column_descs to get idx after mv planner can generate stable
                 // column_ids. Now simply treat column_id as column_idx.
                 let column_idxs: Vec<usize> = chain_node
@@ -644,6 +620,11 @@ impl StreamManagerCore {
                     schema,
                     column_idxs,
                 )))
+            }
+            Node::BatchPlanNode(batch_plan_node) => {
+                let table_id = TableId::from(&batch_plan_node.table_ref_id);
+                let table = table_manager.get_table(&table_id)?;
+                Ok(Box::new(BatchQueryExecutor::new(table.clone(), pk_indices)))
             }
             _ => Err(RwError::from(ErrorCode::InternalError(format!(
                 "unsupported node:{:?}",
@@ -790,14 +771,11 @@ impl StreamManagerCore {
         Ok(())
     }
 
-    pub async fn wait_all(&mut self) -> Result<()> {
-        for (_sid, handle) in std::mem::take(&mut self.handles) {
-            handle.await.unwrap()?;
-        }
-        Ok(())
+    pub fn wait_all(&mut self) -> Result<HashMap<u32, JoinHandle<Result<()>>>> {
+        Ok(std::mem::take(&mut self.handles))
     }
 
-    pub async fn remove_actor_handles(
+    pub fn remove_actor_handles(
         &mut self,
         actor_ids: &[u32],
     ) -> Result<Vec<JoinHandle<Result<()>>>> {
@@ -848,11 +826,15 @@ impl StreamManagerCore {
         actor_id: u32,
         stream_node: &stream_plan::StreamNode,
     ) -> Result<()> {
-        if let stream_plan::stream_node::Node::ChainNode(chain) = stream_node.node.as_ref().unwrap()
-        {
+        if let Node::ChainNode(_) = stream_node.node.as_ref().unwrap() {
             // Create channel based on upstream actor id for [`ChainNode`], check if upstream
             // exists.
-            for upstream_actor_id in &chain.upstream_actor_ids {
+            let merge = try_match_expand!(
+                stream_node.input.get(0).unwrap().node.as_ref().unwrap(),
+                Node::MergeNode,
+                "first input of chain node should be merge node"
+            )?;
+            for upstream_actor_id in &merge.upstream_actor_id {
                 if !self.actor_infos.contains_key(upstream_actor_id) {
                     return Err(ErrorCode::InternalError(format!(
                         "chain upstream actor {} not exists",
@@ -873,6 +855,14 @@ impl StreamManagerCore {
     }
 
     fn update_actors(&mut self, actors: &[stream_plan::StreamActor]) -> Result<()> {
+        let local_actor_ids: HashSet<u32> = HashSet::from_iter(
+            actors
+                .iter()
+                .map(|actor| actor.clone().get_actor_id())
+                .collect::<Vec<_>>()
+                .into_iter(),
+        );
+
         for actor in actors {
             let ret = self.actors.insert(actor.get_actor_id(), actor.clone());
             if ret.is_some() {
@@ -894,6 +884,16 @@ impl StreamManagerCore {
                 let up_down_ids = (*current_id, *downstream_id);
                 self.context
                     .add_channel_pairs(up_down_ids, (Some(tx), Some(rx)));
+            }
+
+            // Add remote input channels.
+            for upstream_id in actor.get_upstream_actor_id() {
+                if !local_actor_ids.contains(upstream_id) {
+                    let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
+                    let up_down_ids = (*upstream_id, *current_id);
+                    self.context
+                        .add_channel_pairs(up_down_ids, (Some(tx), Some(rx)));
+                }
             }
         }
         Ok(())

@@ -75,15 +75,14 @@ impl<'a> CommandContext<'a> {
 
 impl CommandContext<'_> {
     /// Generate a mutation for the given command.
-    pub async fn to_mutation(&self) -> Result<Mutation> {
+    pub fn to_mutation(&self) -> Result<Mutation> {
         let mutation = match &self.command {
             Command::Plain(mutation) => mutation.clone(),
 
             Command::DropMaterializedView(table_id) => {
                 let table_actors = self
                     .fragment_manager
-                    .get_table_actor_ids(&TableId::from(&Some(table_id.clone())))
-                    .await?;
+                    .get_table_actor_ids(&TableId::from(&Some(table_id.clone())))?;
                 Mutation::Stop(StopMutation {
                     actors: table_actors,
                 })
@@ -116,10 +115,7 @@ impl CommandContext<'_> {
             Command::DropMaterializedView(table_ref_id) => {
                 // Tell compute nodes to drop actors.
                 let table_id = TableId::from(&Some(table_ref_id.clone()));
-                let node_actors = self
-                    .fragment_manager
-                    .get_table_node_actors(&table_id)
-                    .await?;
+                let node_actors = self.fragment_manager.get_table_node_actors(&table_id)?;
                 let futures = node_actors.iter().map(|(node_id, actors)| {
                     let node = self.info.node_map.get(node_id).unwrap();
                     let request_id = Uuid::new_v4().to_string();

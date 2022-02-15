@@ -33,7 +33,7 @@ impl BoxedExecutorBuilder for GenerateSeriesI32Executor {
             step: node.step,
             cur: node.start,
             schema: Schema::new(vec![Field::unnamed(DataType::Int32)]),
-            identity: "GenerateSeriesI32Executor".to_string(),
+            identity: source.plan_node().get_identity().clone(),
         }))
     }
 }

@@ -217,6 +217,7 @@ impl<'a> TableBuilder<'a> {
             root: Some(PlanNode {
                 children: vec![],
                 node_body: Some(NodeBody::CreateTable(create)),
+                identity: "CreateTableExecutor".to_string(),
             }),
 
             exchange_info: Some(ExchangeInfo {
@@ -254,8 +255,10 @@ impl<'a> TableBuilder<'a> {
                 children: vec![PlanNode {
                     children: vec![],
                     node_body: Some(NodeBody::Values(ValuesNode { tuples, fields })),
+                    identity: "ValuesExecutor".to_string(),
                 }],
                 node_body: Some(NodeBody::Insert(insert)),
+                identity: "InsertExecutor".to_string(),
             }),
 
             exchange_info: Some(ExchangeInfo {
@@ -329,6 +332,7 @@ impl<'a> SelectBuilder<'a> {
                 root: Some(PlanNode {
                     children: vec![],
                     node_body: None,
+                    identity: "PlaceHolderExecutor".to_string(),
                 }),
                 exchange_info: Some(ExchangeInfo {
                     mode: 0,
@@ -358,6 +362,7 @@ impl<'a> SelectBuilder<'a> {
                 root: Some(PlanNode {
                     children: vec![],
                     node_body: Some(NodeBody::SeqScan(scan)),
+                    identity: "SeqScanExecutor".to_string(),
                 }),
                 exchange_info: Some(ExchangeInfo {
                     mode: 0,

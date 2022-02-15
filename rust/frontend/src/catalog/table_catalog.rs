@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use risingwave_common::array::RwError;
 use risingwave_common::error::Result;
@@ -8,27 +7,27 @@ use risingwave_pb::meta::Table;
 use crate::catalog::column_catalog::{ColumnCatalog, ColumnDesc};
 use crate::catalog::{CatalogError, TableId};
 
+#[derive(Clone)]
 pub struct TableCatalog {
     table_id: TableId,
-    next_column_id: AtomicU64,
+    next_column_id: u64,
     column_by_name: HashMap<String, ColumnCatalog>,
 }
+
+pub const ROWID_NAME: &str = "_row_id";
 
 impl TableCatalog {
     pub fn new(table_id: TableId) -> Self {
         Self {
             table_id,
-            next_column_id: AtomicU64::new(0),
+            next_column_id: 0,
             column_by_name: HashMap::new(),
         }
     }
 
     pub fn add_column(&mut self, col_name: &str, col_desc: ColumnDesc) -> Result<()> {
-        let col_catalog = ColumnCatalog::new(
-            self.next_column_id.fetch_add(1, Ordering::Relaxed),
-            col_name.to_string(),
-            col_desc,
-        );
+        let col_catalog = ColumnCatalog::new(self.next_column_id, col_name.to_string(), col_desc);
+        self.next_column_id += 1;
         self.column_by_name
             .try_insert(col_name.to_string(), col_catalog)
             .map_err(|_| RwError::from(CatalogError::Duplicated("column", col_name.to_string())))?;

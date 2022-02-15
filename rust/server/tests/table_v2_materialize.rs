@@ -171,7 +171,12 @@ async fn test_table_v2_materialize() -> Result<()> {
     let table = table_manager.get_table(&mview_id)?;
     let data_column_ids = vec![0];
 
-    let mut scan = RowSeqScanExecutor::new(table.clone(), data_column_ids.clone(), 1024);
+    let mut scan = RowSeqScanExecutor::new(
+        table.clone(),
+        data_column_ids.clone(),
+        1024,
+        "RowSeqExecutor".to_string(),
+    );
     scan.open().await?;
     assert!(scan.next().await?.is_none());
 
@@ -201,7 +206,12 @@ async fn test_table_v2_materialize() -> Result<()> {
     ));
 
     // Scan the table again, we are able to get the data now!
-    let mut scan = RowSeqScanExecutor::new(table.clone(), data_column_ids.clone(), 1024);
+    let mut scan = RowSeqScanExecutor::new(
+        table.clone(),
+        data_column_ids.clone(),
+        1024,
+        "RowSeqScanExecutor".to_string(),
+    );
     scan.open().await?;
     let c = scan.next().await?.unwrap();
     let col_data = c.columns()[0].array_ref().as_float64();

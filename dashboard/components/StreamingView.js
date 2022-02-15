@@ -25,22 +25,25 @@ const SvgBoxCover = styled('div')(() => ({
 
 
 export default function StreamingView(props) {
-  console.log("called.")
   const node = props.node;
   const actorProto = props.actorProto;
   const [nodeJson, setNodeJson] = useState("");
   const [showInfoPane, setShowInfoPane] = useState(false);
   const d3Container = useRef(null);
 
+  actorProto.actors = actorProto.actors || [];
+
+  const exprNode = (actorNode) => (({ input, ...o }) => o)(actorNode)
+
   const onNodeClick = (e, node) => {
     setShowInfoPane(true);
     setNodeJson(node.dispatcherType
       ? JSON.stringify({ dispatcher: { type: node.dispatcherType }, downstreamActorId: node.downstreamActorId }, null, 2)
-      : JSON.stringify(node.nodeProto, null, 2));
+      : JSON.stringify(exprNode(node.nodeProto), null, 2));
   };
 
   useEffect(() => {
-    if (d3Container.current && (svg === undefined)) {
+    if (d3Container.current) {
       const width = 1000;
       const height = 1000;
 
@@ -64,6 +67,8 @@ export default function StreamingView(props) {
           transform.invert(d3.pointer(event));
         });
       ;
+
+      return () => d3.select(d3Container.current).selectAll("*").remove();
     }
   }, []);
 

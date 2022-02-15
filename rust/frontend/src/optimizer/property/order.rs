@@ -30,6 +30,12 @@ impl Direction {
         }
     }
 }
+lazy_static::lazy_static! {
+    static ref ANY_ORDER: Order = Order {
+        field_order: vec![],
+    };
+}
+
 impl Order {
     pub fn enforce_if_not_satisfies(&self, plan: PlanRef) -> PlanRef {
         if !plan.order().satisfies(self) {
@@ -53,10 +59,8 @@ impl Order {
         }
         true
     }
-    pub fn any() -> Self {
-        Order {
-            field_order: vec![],
-        }
+    pub fn any() -> &'static Self {
+        &ANY_ORDER
     }
     pub fn is_any(&self) -> bool {
         self.field_order.is_empty()
@@ -64,7 +68,7 @@ impl Order {
 }
 pub trait WithOrder {
     // use the default impl will not affect correctness, but insert unnecessary Sort in plan
-    fn order(&self) -> Order {
+    fn order(&self) -> &Order {
         Order::any()
     }
 }

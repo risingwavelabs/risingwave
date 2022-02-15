@@ -57,7 +57,7 @@ impl BoxedExecutorBuilder for OrderByExecutor {
                 encoded_keys: vec![],
                 encodable: false,
                 disable_encoding: false,
-                identity: "OrderByExecutor".to_string(),
+                identity: source.plan_node().get_identity().clone(),
             }));
         }
         Err(InternalError("OrderBy must have one child".to_string()).into())

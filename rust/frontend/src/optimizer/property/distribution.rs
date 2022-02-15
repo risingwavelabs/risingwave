@@ -1,7 +1,7 @@
 use super::super::plan_node::*;
 use crate::optimizer::property::{Convention, Order};
 use crate::optimizer::PlanRef;
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Distribution {
     Any,
     Single,
@@ -9,6 +9,8 @@ pub enum Distribution {
     AnyShard,
     HashShard(Vec<usize>),
 }
+
+static ANY_DISTRIBUTION: Distribution = Distribution::Any;
 #[allow(dead_code)]
 impl Distribution {
     pub fn enforce_if_not_satisfies(&self, plan: PlanRef, required_order: &Order) -> PlanRef {
@@ -61,8 +63,8 @@ impl Distribution {
             },
         }
     }
-    pub fn any() -> Self {
-        Distribution::Any
+    pub fn any() -> &'static Self {
+        &ANY_DISTRIBUTION
     }
     pub fn is_any(&self) -> bool {
         matches!(self, Distribution::Any)
@@ -70,7 +72,7 @@ impl Distribution {
 }
 pub trait WithDistribution {
     // use the default impl will not affect correctness, but insert unnecessary Exchange in plan
-    fn distribution(&self) -> Distribution {
+    fn distribution(&self) -> &Distribution {
         Distribution::any()
     }
 }

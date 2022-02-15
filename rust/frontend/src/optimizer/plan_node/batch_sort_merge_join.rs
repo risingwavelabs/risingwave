@@ -6,7 +6,7 @@ use super::{
     IntoPlanRef, JoinPredicate, LogicalJoin, PlanRef, PlanTreeNodeBinary, ToDistributedBatch,
 };
 use crate::optimizer::property::{
-    Direction, FieldOrder, Order, WithDistribution, WithOrder, WithSchema,
+    Direction, Distribution, FieldOrder, Order, WithDistribution, WithOrder, WithSchema,
 };
 #[derive(Debug, Clone)]
 pub struct BatchSortMergeJoin {
@@ -20,7 +20,7 @@ impl BatchSortMergeJoin {
     }
 
     // Panic if input orders can't satisfy sortMergeJoin
-    fn derive_order(_left: Order, _right: Order) -> Order {
+    fn derive_order(_left: &Order, _right: &Order) -> Order {
         todo!()
     }
 
@@ -37,7 +37,7 @@ impl BatchSortMergeJoin {
         }
     }
     pub fn right_required_order_from_left_order(
-        _left_order: Order,
+        _left_order: &Order,
         _join_predicate: &JoinPredicate,
     ) -> Order {
         todo!()
@@ -60,12 +60,24 @@ impl PlanTreeNodeBinary for BatchSortMergeJoin {
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
         Self::new(self.logical.clone_with_left_right(left, right))
     }
+    fn right_order_required(&self) -> &Order {
+        todo!()
+    }
+    fn left_order_required(&self) -> &Order {
+        todo!()
+    }
+    fn left_dist_required(&self) -> &Distribution {
+        todo!()
+    }
+    fn right_dist_required(&self) -> &Distribution {
+        todo!()
+    }
 }
 impl_plan_tree_node_for_binary! {BatchSortMergeJoin}
 
 impl WithOrder for BatchSortMergeJoin {
-    fn order(&self) -> Order {
-        self.order.clone()
+    fn order(&self) -> &Order {
+        &self.order
     }
 }
 impl WithDistribution for BatchSortMergeJoin {}

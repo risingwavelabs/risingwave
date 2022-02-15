@@ -22,6 +22,8 @@ public interface RwStreamingRelVisitor<T> {
 
   Result<T> visit(RwStreamChain chain);
 
+  Result<T> visit(RwStreamBatchPlan batchPlan);
+
   /** Result to return one node and other info */
   class Result<T> {
     @Nonnull public final RisingWaveStreamingRel node;

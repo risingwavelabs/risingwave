@@ -50,8 +50,8 @@ impl PlanPass for HeuristicOptimizer {
     fn pass_with_require(
         &mut self,
         mut plan: PlanRef,
-        required_order: Order,
-        required_dist: Distribution,
+        required_order: &Order,
+        required_dist: &Distribution,
     ) -> PlanRef {
         plan = match self.apply_order {
             ApplyOrder::TopDown => {
@@ -64,6 +64,6 @@ impl PlanPass for HeuristicOptimizer {
             }
         };
         plan = required_order.enforce_if_not_satisfies(plan);
-        required_dist.enforce_if_not_satisfies(plan, &required_order)
+        required_dist.enforce_if_not_satisfies(plan, required_order)
     }
 }

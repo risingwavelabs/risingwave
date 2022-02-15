@@ -49,8 +49,6 @@ pub(super) async fn handle_create_table(
 
     let catalog_mgr = session.env().catalog_mgr();
     catalog_mgr
-        .lock()
-        .await
         .create_table(session.database(), DEFAULT_SCHEMA_NAME, table)
         .await?;
 
@@ -70,6 +68,7 @@ mod tests {
     use risingwave_meta::test_utils::LocalMeta;
 
     use crate::catalog::catalog_service::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
+    use crate::catalog::table_catalog::ROWID_NAME;
     use crate::test_utils::LocalFrontend;
 
     #[tokio::test]
@@ -81,8 +80,7 @@ mod tests {
         frontend.run_sql(sql).await.unwrap();
 
         let catalog_manager = frontend.session().env().catalog_mgr();
-        let catalog_manager_guard = catalog_manager.lock().await;
-        let table = catalog_manager_guard
+        let table = catalog_manager
             .get_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "t")
             .unwrap();
         let columns = table
@@ -91,6 +89,7 @@ mod tests {
             .map(|(col_name, col)| (col_name.clone(), col.data_type()))
             .collect::<HashMap<String, DataType>>();
         let mut expected_map = HashMap::new();
+        expected_map.insert(ROWID_NAME.to_string(), DataType::Int64);
         expected_map.insert("v1".to_string(), DataType::Int16);
         expected_map.insert("v2".to_string(), DataType::Int32);
         expected_map.insert("v3".to_string(), DataType::Int64);
