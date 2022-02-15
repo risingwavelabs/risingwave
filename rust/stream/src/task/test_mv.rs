@@ -8,6 +8,7 @@ use risingwave_common::catalog::{SchemaId, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::downcast_arc;
 use risingwave_common::util::sort_util::OrderType as SortType;
+use risingwave_common::worker_id::WorkerIdRef;
 use risingwave_pb::common::{ActorInfo, HostAddress};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType as ProstDataType;
@@ -168,7 +169,12 @@ async fn test_stream_mv_proto() {
 
     // Build stream actor.
     let stream_manager = StreamManager::for_test();
-    let env = StreamTaskEnv::new(table_manager.clone(), source_manager, *LOCAL_TEST_ADDR);
+    let env = StreamTaskEnv::new(
+        table_manager.clone(),
+        source_manager,
+        *LOCAL_TEST_ADDR,
+        WorkerIdRef::for_test(),
+    );
 
     let actor_info_proto = ActorInfo {
         actor_id: 1,
