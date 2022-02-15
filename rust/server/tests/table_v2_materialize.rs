@@ -138,6 +138,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         barrier_rx,
         1,
         1,
+        "StreamSourceExecutor".to_string(),
     )?;
 
     // Create a `Materialize` to write the changes to storage
@@ -149,6 +150,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         vec![1],
         vec![OrderType::Ascending],
         2,
+        "MaterializeExecutor".to_string(),
     );
 
     // Add some data using `InsertExecutor`, assuming we are inserting into the "mv"

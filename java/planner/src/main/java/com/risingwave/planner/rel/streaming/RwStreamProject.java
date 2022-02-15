@@ -45,6 +45,7 @@ public class RwStreamProject extends Project implements RisingWaveStreamingRel {
     return StreamNode.newBuilder()
         .setProjectNode(projectNodeBuilder.build())
         .addAllPkIndices(primaryKeyIndices)
+        .setIdentity(StreamingPlan.getCurrentNodeIdentity(this))
         .build();
   }
 

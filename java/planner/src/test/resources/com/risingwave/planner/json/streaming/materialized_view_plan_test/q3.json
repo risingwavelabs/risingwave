@@ -13,7 +13,8 @@
             }
           },
           "columnIds": [2, 1, 0]
-        }
+        },
+        "identity": "RwStreamTableSource(table\u003d[[test_schema, t]], columns\u003d[v2,v1,_row_id])"
       }],
       "hashAggNode": {
         "groupKeys": [{
@@ -37,7 +38,8 @@
             "typeName": "INT64"
           }
         }]
-      }
+      },
+      "identity": "RwStreamAgg(group\u003d[{0}], agg#0\u003d[COUNT()], v\u003d[SUM($1)])"
     }],
     "projectNode": {
       "selectList": [{
@@ -56,7 +58,8 @@
           "columnIdx": 2
         }
       }]
-    }
+    },
+    "identity": "RwStreamProject(v2\u003d[$0], v\u003d[$2])"
   }],
   "mviewNode": {
     "tableRefId": {
@@ -88,5 +91,6 @@
         "typeName": "INT32"
       }
     }]
-  }
+  },
+  "identity": "RwStreamMaterializedView(name\u003d[t3])"
 }
