@@ -1,8 +1,7 @@
 use std::collections::{btree_map, BTreeMap};
+use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_common::array::data_chunk_iter::RowDeserializer;
-use risingwave_common::array::Row;
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_storage::write_batch::WriteBatch;
@@ -27,31 +26,48 @@ pub struct AllOrNoneState<S: StateStore> {
     flush_buffer: BTreeMap<PkType, FlushStatus<StateValueType>>,
 
     /// Number of items in the state including the cache and state store.
-    total_count: isize,
+    total_count: usize,
 
     /// Data types of the sort column
-    data_types: Vec<DataType>,
+    data_types: Arc<[DataType]>,
 
     /// Data types of primary keys
-    pk_data_types: Vec<DataType>,
-
-    /// Indices of primary keys
-    pk_indices: Vec<usize>,
+    pk_data_types: Arc<[DataType]>,
 
     /// The keyspace to operate on.
     keyspace: Keyspace<S>,
 }
 
 impl<S: StateStore> AllOrNoneState<S> {
-    pub fn new(keyspace: Keyspace<S>, data_types: Vec<DataType>, pk_indices: Vec<usize>) -> Self {
-        let pk_data_types = pk_indices.iter().map(|idx| data_types[*idx]).collect_vec();
+    pub fn new(
+        keyspace: Keyspace<S>,
+        total_count: usize,
+        data_types: Arc<[DataType]>,
+        pk_data_types: Arc<[DataType]>,
+    ) -> Self {
         Self {
             cached: None,
             flush_buffer: BTreeMap::new(),
-            total_count: 0,
+            total_count,
             data_types,
             pk_data_types,
-            pk_indices,
+            keyspace,
+        }
+    }
+
+    pub fn with_cached_state(
+        keyspace: Keyspace<S>,
+        cached: BTreeMap<PkType, StateValueType>,
+        data_types: Arc<[DataType]>,
+        pk_data_types: Arc<[DataType]>,
+    ) -> Self {
+        let len = cached.len();
+        Self {
+            cached: Some(cached),
+            flush_buffer: BTreeMap::new(),
+            total_count: len,
+            data_types,
+            pk_data_types,
             keyspace,
         }
     }
@@ -74,20 +90,13 @@ impl<S: StateStore> AllOrNoneState<S> {
     }
 
     // Insert into the cache and flush buffer.
-    pub fn insert(&mut self, value: StateValueType) {
-        let pk = self
-            .pk_indices
-            .iter()
-            .map(|idx| value[*idx].clone())
-            .collect_vec();
-        let pk = Row(pk);
-
+    pub fn insert(&mut self, key: PkType, value: StateValueType) {
         if let Some(cached) = self.cached.as_mut() {
-            cached.insert(pk.clone(), value.clone());
+            cached.insert(key.clone(), value.clone());
         }
         // If no cache maintained, only update the flush buffer.
         self.total_count += 1;
-        FlushStatus::do_insert(self.flush_buffer.entry(pk), value);
+        FlushStatus::do_insert(self.flush_buffer.entry(key), value);
     }
 
     pub fn remove(&mut self, pk: PkType) {
@@ -128,9 +137,9 @@ impl<S: StateStore> AllOrNoneState<S> {
         // Fetch cached states.
         let mut cached = BTreeMap::new();
         for (raw_key, raw_value) in all_data {
-            let pk_deserializer = RowDeserializer::new(self.pk_data_types.clone());
+            let pk_deserializer = RowDeserializer::new(self.pk_data_types.to_vec());
             let key = pk_deserializer.deserialize_not_null(&raw_key)?;
-            let deserializer = JoinRowDeserializer::new(self.data_types.clone());
+            let deserializer = JoinRowDeserializer::new(self.data_types.to_vec());
             let value = deserializer.deserialize(&raw_value)?;
             cached.insert(key, value);
         }
@@ -147,7 +156,7 @@ impl<S: StateStore> AllOrNoneState<S> {
             }
         }
 
-        self.total_count = cached.len() as isize;
+        self.total_count = cached.len();
         self.cached = Some(cached);
         Ok(())
     }
@@ -196,23 +205,29 @@ mod tests {
     async fn test_managed_all_or_none_state() {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
-        let mut managed_state =
-            AllOrNoneState::new(keyspace, vec![DataType::Int64, DataType::Int64], vec![0]);
+        let mut managed_state = AllOrNoneState::new(
+            keyspace,
+            0,
+            vec![DataType::Int64, DataType::Int64].into(),
+            vec![DataType::Int64].into(),
+        );
         assert!(!managed_state.is_dirty());
         let columns = vec![
             column_nonnull! { I64Array, [3, 2, 1] },
             column_nonnull! { I64Array, [4, 5, 6] },
         ];
-
+        let pk_indices = [0];
         let col1 = [1, 2, 3];
         let col2 = [6, 5, 4];
         let data_chunk_builder = DataChunk::builder().columns(columns);
         let data_chunk = data_chunk_builder.build();
 
         for row_ref in data_chunk.rows() {
-            let row = row_ref.into();
+            let row: Row = row_ref.into();
+            let pk = pk_indices.iter().map(|idx| row[*idx].clone()).collect_vec();
+            let pk = Row(pk);
             let join_row = JoinRow { row, degree: 0 };
-            managed_state.insert(join_row);
+            managed_state.insert(pk, join_row);
         }
 
         for state in managed_state
