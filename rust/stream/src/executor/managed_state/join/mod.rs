@@ -273,4 +273,3 @@ impl<S: StateStore> DerefMut for JoinHashMap<S> {
         &mut self.inner
     }
 }
-
