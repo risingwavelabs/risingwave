@@ -1,5 +1,5 @@
 risedev:
-  # The CI-3node configuration will start 3 compute nodes, 1 meta node, 1 frontend.
+  # The CI-3node configuration will start 3 compute nodes, 1 meta node, 1 frontend and 1 MinIO.
   ci-3node:
     - use: meta-node
     - use: compute-node
@@ -14,18 +14,12 @@ risedev:
     - use: frontend
     - use: minio
 
-  # The CI-1node configuration will start 1 compute node, 1 meta node, 1 frontend.
+  # The CI-1node configuration will start 1 compute node, 1 meta node, 1 frontend and 1 MinIO.
   ci-1node:
     - use: meta-node
     - use: compute-node
     - use: frontend
-
-  # The CI-streaming configuration will start 1 compute node, 1 meta node, 1 frontend and 1 MinIO.
-  ci-streaming:
     - use: minio
-    - use: meta-node
-    - use: compute-node
-    - use: frontend
 
   # The default configuration will start 1 MinIO, 1 compute node, 1 meta node and 1 frontend.
   default:
