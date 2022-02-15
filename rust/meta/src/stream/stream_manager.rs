@@ -58,7 +58,7 @@ impl StreamManager {
                 let merge_node = try_match_expand!(
                     stream_node.input.get(0).unwrap().node.as_ref().unwrap(),
                     Node::MergeNode,
-                    "first input of chain node should should be merge node"
+                    "first input of chain node should be merge node"
                 )
                 .unwrap();
                 upstream_actor_ids.extend(merge_node.upstream_actor_id.iter());

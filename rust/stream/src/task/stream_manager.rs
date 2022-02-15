@@ -832,7 +832,7 @@ impl StreamManagerCore {
             let merge = try_match_expand!(
                 stream_node.input.get(0).unwrap().node.as_ref().unwrap(),
                 Node::MergeNode,
-                "first input of chain node should should be merge node"
+                "first input of chain node should be merge node"
             )?;
             for upstream_actor_id in &merge.upstream_actor_id {
                 if !self.actor_infos.contains_key(upstream_actor_id) {
