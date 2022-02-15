@@ -51,14 +51,14 @@ impl CreateSource for DefaultCreateSource {
     ) -> Result<Box<dyn ExchangeSource>> {
         let peer_addr = value.get_host()?.to_socket_addr()?;
         if is_local_address(env.server_address(), &peer_addr) {
-            debug!("Exchange locally [{:?}]", value.get_sink_id());
+            trace!("Exchange locally [{:?}]", value.get_sink_id());
             return Ok(Box::new(LocalExchangeSource::create(
                 value.get_sink_id()?.try_into()?,
                 env,
                 task_id,
             )?));
         }
-        debug!(
+        trace!(
             "Exchange remotely from {} [{:?}]",
             &peer_addr,
             value.get_sink_id()
@@ -92,7 +92,7 @@ impl<CS: 'static + CreateSource> BoxedExecutorBuilder for GenericExchangeExecuto
             current_source: None,
             schema: Schema { fields },
             task_id: source.task_id.clone(),
-            identity: "GenericExchangeExecutor".to_string(),
+            identity: source.plan_node().get_identity().clone(),
         }))
     }
 }

@@ -101,7 +101,9 @@ impl<S: StateStore> ManagedStringAggState<S> {
         // storage.
         assert!(!self.is_dirty());
         // Read all.
-        let all_data = self.keyspace.scan_strip_prefix(None).await?;
+        // TODO: use the correct epoch
+        let epoch = u64::MAX;
+        let all_data = self.keyspace.scan_strip_prefix(None, epoch).await?;
         for (raw_key, raw_value) in all_data {
             // We only need to deserialize the value, and keep the key as bytes.
             let mut deserializer = memcomparable::Deserializer::new(&raw_value[..]);

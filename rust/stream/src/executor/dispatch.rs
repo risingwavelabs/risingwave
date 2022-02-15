@@ -5,8 +5,7 @@ use async_trait::async_trait;
 use futures::channel::mpsc::{channel, Sender};
 use futures::SinkExt;
 use itertools::Itertools;
-use risingwave_common::array::{Op, RwError};
-use risingwave_common::error::ErrorCode;
+use risingwave_common::array::Op;
 use risingwave_common::util::addr::is_local_address;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use tracing::event;
@@ -127,48 +126,27 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
     async fn mutate_outputs(&mut self, barrier: &Barrier) -> Result<()> {
         match barrier.mutation.as_deref() {
             Some(Mutation::UpdateOutputs(updates)) => {
-                if let Some((_, v)) = updates.get_key_value(&self.actor_id) {
+                if let Some((_, actor_infos)) = updates.get_key_value(&self.actor_id) {
                     let mut new_outputs = vec![];
-                    let mut channel_pool_guard = self.context.channel_pool.lock().unwrap();
-                    let mut exchange_pool_guard =
-                        self.context.receivers_for_exchange_service.lock().unwrap();
 
                     let actor_id = self.actor_id;
-
                     // delete the old local connections in both local and remote pools;
-                    channel_pool_guard.retain(|(up_id, down_id), _| {
-                        *up_id != actor_id || v.iter().any(|info| info.actor_id == *down_id)
-                    });
-                    exchange_pool_guard.retain(|(up_id, down_id), _| {
-                        *up_id != actor_id || v.iter().any(|info| info.actor_id == *down_id)
+                    self.context.retain(|&(up_id, down_id)| {
+                        up_id != actor_id || actor_infos.iter().any(|info| info.actor_id == down_id)
                     });
 
-                    for act in v.iter() {
-                        let down_id = act.get_actor_id();
+                    for actor_info in actor_infos.iter() {
+                        let down_id = actor_info.get_actor_id();
                         let up_down_ids = (actor_id, down_id);
-                        let downstream_addr = act.get_host()?.to_socket_addr()?;
+                        let downstream_addr = actor_info.get_host()?.to_socket_addr()?;
 
                         if is_local_address(&downstream_addr, &self.context.addr) {
-                            let tx = channel_pool_guard
-                                .get_mut(&(actor_id, down_id))
-                                .ok_or_else(|| {
-                                    RwError::from(ErrorCode::InternalError(format!(
-                                        "channel between {} and {} does not exist",
-                                        actor_id, down_id
-                                    )))
-                                })?
-                                .0
-                                .take()
-                                .ok_or_else(|| {
-                                    RwError::from(ErrorCode::InternalError(format!(
-                                        "sender from {} to {} does no exist",
-                                        actor_id, down_id
-                                    )))
-                                })?;
+                            let tx = self.context.take_sender(&up_down_ids)?;
                             new_outputs.push(Box::new(ChannelOutput::new(tx)) as Box<dyn Output>)
                         } else {
                             let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-                            exchange_pool_guard.insert(up_down_ids, rx);
+                            self.context
+                                .add_channel_pairs(up_down_ids, (Some(tx.clone()), Some(rx)));
                             new_outputs.push(Box::new(RemoteOutput::new(tx)) as Box<dyn Output>)
                         }
                     }
@@ -178,35 +156,18 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
             }
             Some(Mutation::AddOutput(adds)) => {
                 if let Some(downstream_actor_infos) = adds.get(&self.actor_id) {
-                    let mut channel_pool_guard = self.context.channel_pool.lock().unwrap();
-                    let mut exchange_pool_guard =
-                        self.context.receivers_for_exchange_service.lock().unwrap();
                     let mut outputs_to_add = Vec::with_capacity(downstream_actor_infos.len());
                     for downstream_actor_info in downstream_actor_infos {
                         let down_id = downstream_actor_info.get_actor_id();
                         let up_down_ids = (self.actor_id, down_id);
                         let downstream_addr = downstream_actor_info.get_host()?.to_socket_addr()?;
                         if is_local_address(&downstream_addr, &self.context.addr) {
-                            let tx = channel_pool_guard
-                                .get_mut(&(self.actor_id, down_id))
-                                .ok_or_else(|| {
-                                    RwError::from(ErrorCode::InternalError(format!(
-                                        "channel between {} and {} does not exist",
-                                        self.actor_id, down_id
-                                    )))
-                                })?
-                                .0
-                                .take()
-                                .ok_or_else(|| {
-                                    RwError::from(ErrorCode::InternalError(format!(
-                                        "sender from {} to {} does no exist",
-                                        self.actor_id, down_id
-                                    )))
-                                })?;
+                            let tx = self.context.take_sender(&up_down_ids)?;
                             outputs_to_add.push(Box::new(ChannelOutput::new(tx)) as Box<dyn Output>)
                         } else {
                             let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-                            exchange_pool_guard.insert(up_down_ids, rx);
+                            self.context
+                                .add_channel_pairs(up_down_ids, (Some(tx.clone()), Some(rx)));
                             outputs_to_add.push(Box::new(RemoteOutput::new(tx)) as Box<dyn Output>)
                         }
                     }
@@ -674,18 +635,16 @@ mod tests {
     }
 
     fn add_local_channels(ctx: Arc<SharedContext>, up_down_ids: Vec<(u32, u32)>) {
-        let mut guard = ctx.channel_pool.lock().unwrap();
         for up_down_id in up_down_ids {
             let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-            guard.insert(up_down_id, (Some(tx), Some(rx)));
+            ctx.add_channel_pairs(up_down_id, (Some(tx), Some(rx)));
         }
     }
 
     fn add_remote_channels(ctx: Arc<SharedContext>, up_id: u32, down_ids: Vec<u32>) {
-        let mut guard = ctx.receivers_for_exchange_service.lock().unwrap();
         for down_id in down_ids {
-            let (_, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-            guard.insert((up_id, down_id), rx);
+            let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
+            ctx.add_channel_pairs((up_id, down_id), (Some(tx), Some(rx)));
         }
     }
 
@@ -736,17 +695,13 @@ mod tests {
             ],
         );
         add_local_channels(ctx.clone(), vec![(233, 234), (233, 235)]);
-        add_remote_channels(ctx.clone(), 233, vec![238]);
 
         let b1 = Barrier::new(0).with_mutation(Mutation::UpdateOutputs(updates1));
         tx.send(Message::Barrier(b1)).await.unwrap();
         executor.next().await.unwrap();
         let tctx = ctx.clone();
         {
-            let cp_guard = tctx.channel_pool.lock().unwrap();
-            let ex_guard = tctx.receivers_for_exchange_service.lock().unwrap();
-            assert_eq!(cp_guard.len(), 2);
-            assert_eq!(ex_guard.len(), 1);
+            assert_eq!(tctx.get_channel_pair_number(), 3);
         }
 
         let mut updates2: HashMap<u32, Vec<ActorInfo>> = HashMap::new();
@@ -758,10 +713,7 @@ mod tests {
         executor.next().await.unwrap();
         let tctx = ctx.clone();
         {
-            let cp_guard = tctx.channel_pool.lock().unwrap();
-            let ex_guard = tctx.receivers_for_exchange_service.lock().unwrap();
-            assert_eq!(cp_guard.len(), 1);
-            assert_eq!(ex_guard.len(), 0);
+            assert_eq!(tctx.get_channel_pair_number(), 1);
         }
 
         add_local_channels(ctx.clone(), vec![(233, 245)]);
@@ -781,10 +733,7 @@ mod tests {
         executor.next().await.unwrap();
         let tctx = ctx.clone();
         {
-            let cp_guard = tctx.channel_pool.lock().unwrap();
-            let ex_guard = tctx.receivers_for_exchange_service.lock().unwrap();
-            assert_eq!(cp_guard.len(), 2);
-            assert_eq!(ex_guard.len(), 1);
+            assert_eq!(tctx.get_channel_pair_number(), 3);
         }
     }
 

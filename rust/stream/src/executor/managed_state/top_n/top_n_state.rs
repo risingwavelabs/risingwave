@@ -277,9 +277,14 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         &mut self,
         number_rows: Option<usize>,
     ) -> Result<Vec<(OrderedRow, Row)>> {
+        // TODO: use the correct epoch
+        let epoch = u64::MAX;
         let pk_row_bytes = self
             .keyspace
-            .scan_strip_prefix(number_rows.map(|top_n_count| top_n_count * self.data_types.len()))
+            .scan_strip_prefix(
+                number_rows.map(|top_n_count| top_n_count * self.data_types.len()),
+                epoch,
+            )
             .await?;
         // We must have enough cells to restore a complete row.
         debug_assert_eq!(pk_row_bytes.len() % self.data_types.len(), 0);

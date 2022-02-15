@@ -61,6 +61,9 @@ public class RwBatchSourceScan extends RwScan implements RisingWaveBatchPhyRel {
             .setTableRefId(tableRefId)
             .setTimestampMs(System.currentTimeMillis());
     columnIds.forEach(c -> streamScanNodeBuilder.addColumnIds(c.getValue()));
-    return PlanNode.newBuilder().setSourceScan(streamScanNodeBuilder.build()).build();
+    return PlanNode.newBuilder()
+        .setSourceScan(streamScanNodeBuilder.build())
+        .setIdentity(BatchPlan.getCurrentNodeIdentity(this))
+        .build();
   }
 }

@@ -2,60 +2,51 @@ package com.risingwave.planner.rel.streaming;
 
 import com.google.common.collect.ImmutableList;
 import com.risingwave.catalog.ColumnCatalog;
-import com.risingwave.catalog.MaterializedViewCatalog;
+import com.risingwave.catalog.ColumnDesc;
 import com.risingwave.catalog.TableCatalog;
-import com.risingwave.proto.streaming.plan.ChainNode;
-import com.risingwave.proto.streaming.plan.StreamNode;
+import com.risingwave.proto.streaming.plan.*;
 import com.risingwave.rpc.Messages;
 import java.util.List;
 import org.apache.calcite.plan.RelOptCluster;
-import org.apache.calcite.plan.RelOptTable;
 import org.apache.calcite.plan.RelTraitSet;
+import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.RelWriter;
-import org.apache.calcite.rel.core.TableScan;
-import org.apache.calcite.rel.hint.RelHint;
-import org.apache.calcite.rel.type.RelDataType;
-import org.apache.calcite.rel.type.RelDataTypeFactory;
+import org.apache.calcite.rel.core.SetOp;
+import org.apache.calcite.rel.core.Union;
 import org.apache.calcite.util.ImmutableIntList;
 
 /** Chain Node */
-public class RwStreamChain extends TableScan implements RisingWaveStreamingRel {
+public class RwStreamChain extends Union implements RisingWaveStreamingRel {
 
   private final TableCatalog.TableId tableId;
-  private final ImmutableList<ColumnCatalog.ColumnId> primaryKeyColumnIds;
   private final ImmutableList<ColumnCatalog.ColumnId> columnIds;
   private final ImmutableIntList primaryKeyIndices;
+  private final ImmutableList<ColumnDesc> upstreamColumnDescs;
 
   /**
    * ChainNode is used to scan materialized view snapshot and its further stream chunks.
    *
    * @param tableId table id of the origin materialized view table.
-   * @param primaryKeyColumnIds column ids of the origin materialized view table.
    * @param primaryKeyIndices derived pk indices of chain output.
    * @param columnIds column ids of the origin materialized view.
    */
   public RwStreamChain(
       RelOptCluster cluster,
       RelTraitSet traitSet,
-      List<RelHint> hints,
-      RelOptTable table,
       TableCatalog.TableId tableId,
-      ImmutableList<ColumnCatalog.ColumnId> primaryKeyColumnIds,
       ImmutableIntList primaryKeyIndices,
-      ImmutableList<ColumnCatalog.ColumnId> columnIds) {
-    super(cluster, traitSet, hints, table);
+      ImmutableList<ColumnCatalog.ColumnId> columnIds,
+      ImmutableList<ColumnDesc> upstreamColumnDescs,
+      List<RelNode> inputs) {
+    super(cluster, traitSet, inputs, true);
     this.tableId = tableId;
-    this.primaryKeyColumnIds = primaryKeyColumnIds;
     this.primaryKeyIndices = primaryKeyIndices;
     this.columnIds = columnIds;
+    this.upstreamColumnDescs = upstreamColumnDescs;
   }
 
   public TableCatalog.TableId getTableId() {
     return tableId;
-  }
-
-  public ImmutableList<ColumnCatalog.ColumnId> getPrimaryKeyColumnIds() {
-    return primaryKeyColumnIds;
   }
 
   public ImmutableIntList getPrimaryKeyIndices() {
@@ -66,17 +57,14 @@ public class RwStreamChain extends TableScan implements RisingWaveStreamingRel {
     return columnIds;
   }
 
-  /** Derive row type from table catalog */
+  public ImmutableList<ColumnDesc> getUpstreamColumnDescs() {
+    return upstreamColumnDescs;
+  }
+
   @Override
-  public RelDataType deriveRowType() {
-    RelDataTypeFactory.Builder typeBuilder = getCluster().getTypeFactory().builder();
-    MaterializedViewCatalog materializedViewCatalog =
-        getTable().unwrapOrThrow(MaterializedViewCatalog.class);
-    columnIds.stream()
-        .map(materializedViewCatalog::getColumnChecked)
-        .forEachOrdered(
-            col -> typeBuilder.add(col.getEntityName().getValue(), col.getDesc().getDataType()));
-    return typeBuilder.build();
+  public SetOp copy(RelTraitSet traitSet, List<RelNode> inputs, boolean all) {
+    return new RwStreamChain(
+        getCluster(), traitSet, tableId, primaryKeyIndices, columnIds, upstreamColumnDescs, inputs);
   }
 
   /** Explain */
@@ -86,7 +74,8 @@ public class RwStreamChain extends TableScan implements RisingWaveStreamingRel {
         super.explainTerms(pw)
             .item("tableId", tableId)
             .item("primaryKeyIndices", primaryKeyIndices)
-            .item("columnIds", columnIds);
+            .item("columnIds", columnIds)
+            .item("upstreamColumnDescs", upstreamColumnDescs);
     return writer;
   }
 
@@ -95,8 +84,19 @@ public class RwStreamChain extends TableScan implements RisingWaveStreamingRel {
     ChainNode.Builder builder = ChainNode.newBuilder();
     builder.setTableRefId(Messages.getTableRefId(tableId)).addAllPkIndices(primaryKeyIndices);
     columnIds.forEach(c -> builder.addColumnIds(c.getValue()));
+    for (ColumnDesc upstreamColumnDesc : upstreamColumnDescs) {
+      com.risingwave.proto.plan.ColumnDesc.Builder columnDescBuilder =
+          com.risingwave.proto.plan.ColumnDesc.newBuilder();
+      columnDescBuilder.setColumnType(upstreamColumnDesc.getDataType().getProtobufType());
+      builder.addUpstreamColumnDescs(columnDescBuilder.build());
+    }
     ChainNode chainNode = builder.build();
-    return StreamNode.newBuilder().setChainNode(chainNode).build();
+    return StreamNode.newBuilder()
+        .setChainNode(chainNode)
+        .addInput(
+            // Just a placeholder for operator id gen.
+            StreamNode.newBuilder().setMergeNode(MergeNode.newBuilder().build()).build())
+        .build();
   }
 
   @Override

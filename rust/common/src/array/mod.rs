@@ -154,7 +154,7 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
 
     fn hash_at<H: Hasher>(&self, idx: usize, state: &mut H);
 
-    fn hash_vec<H: Hasher>(&self, hashers: &mut Vec<H>) {
+    fn hash_vec<H: Hasher>(&self, hashers: &mut [H]) {
         assert_eq!(hashers.len(), self.len());
         for (idx, state) in hashers.iter_mut().enumerate() {
             self.hash_at(idx, state);
@@ -444,7 +444,7 @@ macro_rules! impl_array {
                 }
             }
 
-            pub fn hash_vec<H: Hasher>(&self, hashers: &mut Vec<H>) {
+            pub fn hash_vec<H: Hasher>(&self, hashers: &mut [H]) {
                 match self {
                     $( Self::$variant_name(inner) => inner.hash_vec( hashers), )*
                 }
@@ -622,7 +622,8 @@ mod test_util {
                 arr.hash_at(i, state)
             }
         });
-        arrs.iter().for_each(|arr| arr.hash_vec(&mut states_vec));
+        arrs.iter()
+            .for_each(|arr| arr.hash_vec(&mut states_vec[..]));
         itertools::cons_tuples(
             expects
                 .iter()

@@ -1,7 +1,7 @@
 use super::variants::BACKWARD;
 use crate::hummock::iterator::merge_inner::MergeIteratorInner;
 
-pub type ReverseMergeIterator = MergeIteratorInner<BACKWARD>;
+pub type ReverseMergeIterator<'a> = MergeIteratorInner<'a, BACKWARD>;
 
 #[cfg(test)]
 mod test {

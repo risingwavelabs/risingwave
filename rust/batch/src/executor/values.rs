@@ -16,6 +16,7 @@ pub(super) struct ValuesExecutor {
     rows: Vec<Vec<BoxedExpression>>,
     schema: Schema,
     identity: String,
+    chunk_size: usize,
 }
 
 #[async_trait::async_trait]
@@ -56,9 +57,7 @@ impl Executor for ValuesExecutor {
             .columns(vec![Column::new(Arc::new(one_row_array.into()))])
             .build();
 
-        // TODO: pass chunk_size from context
-        let chunk_size = 1000;
-        let end = std::cmp::min(chunk_size, self.rows.len());
+        let end = std::cmp::min(self.chunk_size, self.rows.len());
         for row in self.rows.drain(0..end) {
             for (mut expr, builder) in row.into_iter().zip_eq(&mut array_builders) {
                 let out = expr.eval(&one_row_chunk)?;
@@ -115,7 +114,8 @@ impl BoxedExecutorBuilder for ValuesExecutor {
         Ok(Box::new(Self {
             rows,
             schema: Schema { fields },
-            identity: "ValuesExecutor".to_string(),
+            identity: source.plan_node().get_identity().clone(),
+            chunk_size: source.global_task_env().config().chunk_size as usize,
         }))
     }
 }
@@ -155,6 +155,7 @@ mod tests {
             rows: exprs,
             schema: Schema { fields },
             identity: "ValuesExecutor".to_string(),
+            chunk_size: 1000,
         };
         values_executor.open().await.unwrap();
 

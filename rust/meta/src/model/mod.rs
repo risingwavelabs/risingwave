@@ -1,14 +1,20 @@
 mod catalog;
 mod cluster;
+mod stream;
 
 use async_trait::async_trait;
 pub use catalog::*;
 pub use cluster::*;
 use prost::Message;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
+pub use stream::*;
 
 use crate::manager::{Epoch, SINGLE_VERSION_EPOCH};
-use crate::storage::MetaStoreRef;
+use crate::storage::{ColumnFamilyUtils, MetaStoreRef, Operation, Transaction};
+
+pub type TableRawId = i32;
+pub type ActorId = u32;
+pub type FragmentId = u32;
 
 /// `MetadataModel` defines basic model operations in CRUD.
 #[async_trait]
@@ -23,6 +29,11 @@ pub trait MetadataModel: Sized {
 
     /// Serialize to protobuf.
     fn to_protobuf(&self) -> Self::ProstType;
+
+    /// Serialize to protobuf encoded byte vector.
+    fn to_protobuf_encoded_vec(&self) -> Vec<u8> {
+        self.to_protobuf().encode_to_vec()
+    }
 
     /// Deserialize from protobuf.
     fn from_protobuf(prost: Self::ProstType) -> Self;
@@ -44,8 +55,8 @@ pub trait MetadataModel: Sized {
             .collect::<Vec<_>>())
     }
 
-    /// `create` create a new record in meta store.
-    async fn create(&self, store: &MetaStoreRef) -> Result<()> {
+    /// `insert` insert a new record in meta store, replaced it if the record already exist.
+    async fn insert(&self, store: &MetaStoreRef) -> Result<()> {
         store
             .put_cf(
                 &Self::cf_name(),
@@ -64,12 +75,44 @@ pub trait MetadataModel: Sized {
     }
 
     /// `select` query a record with associated key and version.
-    async fn select(store: &MetaStoreRef, key: &Self::KeyType, version: Epoch) -> Result<Self> {
-        let byte_vec = store
+    async fn select(
+        store: &MetaStoreRef,
+        key: &Self::KeyType,
+        version: Epoch,
+    ) -> Result<Option<Self>> {
+        let byte_vec = match store
             .get_cf(&Self::cf_name(), &key.encode_to_vec(), version)
-            .await?;
-        Ok(Self::from_protobuf(Self::ProstType::decode(
-            byte_vec.as_slice(),
-        )?))
+            .await
+        {
+            Ok(byte_vec) => byte_vec,
+            Err(err) => {
+                if !matches!(err.inner(), ErrorCode::ItemNotFound(_)) {
+                    return Err(err);
+                }
+                return Ok(None);
+            }
+        };
+        let model = Self::from_protobuf(Self::ProstType::decode(byte_vec.as_slice())?);
+        Ok(Some(model))
+    }
+}
+
+/// `Transactional` defines operations supported in a transaction.
+/// Read operations can be supported if necessary.
+pub trait Transactional: MetadataModel {
+    fn upsert_in_transaction(&self, trx: &mut Transaction) -> risingwave_common::error::Result<()> {
+        trx.add_operations(vec![Operation::Put(
+            ColumnFamilyUtils::prefix_key_with_cf(&self.key()?.encode_to_vec(), Self::cf_name()),
+            self.to_protobuf_encoded_vec(),
+            None,
+        )]);
+        Ok(())
+    }
+    fn delete_in_transaction(&self, trx: &mut Transaction) -> risingwave_common::error::Result<()> {
+        trx.add_operations(vec![Operation::Delete(
+            ColumnFamilyUtils::prefix_key_with_cf(&self.key()?.encode_to_vec(), Self::cf_name()),
+            None,
+        )]);
+        Ok(())
     }
 }

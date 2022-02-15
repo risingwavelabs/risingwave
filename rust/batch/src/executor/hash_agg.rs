@@ -43,6 +43,7 @@ pub(super) struct HashAggExecutorBuilder {
     group_key_types: Vec<DataType>,
     schema: Schema,
     task_id: TaskId,
+    identity: String,
 }
 
 impl HashAggExecutorBuilder {
@@ -50,6 +51,7 @@ impl HashAggExecutorBuilder {
         hash_agg_node: &HashAggNode,
         child: BoxedExecutor,
         task_id: TaskId,
+        identity: String,
     ) -> Result<BoxedExecutor> {
         let group_key_columns = hash_agg_node
             .get_group_keys()
@@ -86,6 +88,7 @@ impl HashAggExecutorBuilder {
             group_key_types,
             schema: Schema { fields },
             task_id,
+            identity,
         };
 
         Ok(hash_key_dispatch!(
@@ -112,7 +115,8 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
             NodeBody::HashAgg
         )?;
 
-        Self::deserialize(hash_agg_node, child, source.task_id.clone())
+        let identity = source.plan_node().get_identity().clone();
+        Self::deserialize(hash_agg_node, child, source.task_id.clone(), identity)
     }
 }
 /// `HashAggExecutor` implements the hash aggregate algorithm.
@@ -143,7 +147,7 @@ impl<K> HashAggExecutor<K> {
             group_key_types: builder.group_key_types,
             result: None,
             schema: builder.schema,
-            identity: "HashAggExecutor".to_string(),
+            identity: builder.identity,
         }
     }
 }
@@ -195,7 +199,7 @@ impl<K: HashKey + Send + Sync> Executor for HashAggExecutor<K> {
             .collect::<Result<Vec<_>>>()?;
 
         for (key, states) in mem::take(&mut self.groups) {
-            key.deserialize_to_builders(&mut group_builders)?;
+            key.deserialize_to_builders(&mut group_builders[..])?;
             states
                 .into_iter()
                 .zip_eq(&mut agg_builders)
@@ -289,6 +293,7 @@ mod tests {
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
+            distinct: false,
         };
 
         let agg_prost = HashAggNode {
@@ -296,9 +301,13 @@ mod tests {
             agg_calls: vec![agg_call],
         };
 
-        let actual_exec =
-            HashAggExecutorBuilder::deserialize(&agg_prost, Box::new(src_exec), TaskId::default())
-                .unwrap();
+        let actual_exec = HashAggExecutorBuilder::deserialize(
+            &agg_prost,
+            Box::new(src_exec),
+            TaskId::default(),
+            "HashAggExecutor".to_string(),
+        )
+        .unwrap();
 
         let schema = Schema {
             fields: vec![
@@ -344,6 +353,7 @@ mod tests {
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
+            distinct: false,
         };
 
         let agg_prost = HashAggNode {
@@ -351,9 +361,13 @@ mod tests {
             agg_calls: vec![agg_call],
         };
 
-        let actual_exec =
-            HashAggExecutorBuilder::deserialize(&agg_prost, Box::new(src_exec), TaskId::default())
-                .unwrap();
+        let actual_exec = HashAggExecutorBuilder::deserialize(
+            &agg_prost,
+            Box::new(src_exec),
+            TaskId::default(),
+            "HashAggExecutor".to_string(),
+        )
+        .unwrap();
         let schema = Schema {
             fields: vec![Field::unnamed(t32)],
         };

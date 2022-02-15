@@ -195,9 +195,9 @@ impl StreamChunk {
         states.resize_with(self.capacity(), || hasher_builder.build_hasher());
         for key in keys {
             let array = self.columns[*key].array();
-            array.hash_vec(&mut states);
+            array.hash_vec(&mut states[..]);
         }
-        Ok(finalize_hashers(&mut states))
+        Ok(finalize_hashers(&mut states[..]))
     }
 
     /// Random access a tuple in a stream chunk. Return in a row format.

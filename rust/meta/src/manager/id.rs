@@ -109,8 +109,8 @@ pub mod IdCategory {
     pub const Schema: IdCategoryType = 2;
     pub const Table: IdCategoryType = 3;
     pub const Worker: IdCategoryType = 4;
-    pub const Actor: IdCategoryType = 5;
-    pub const HummockContext: IdCategoryType = 6;
+    pub const Fragment: IdCategoryType = 5;
+    pub const Actor: IdCategoryType = 6;
     pub const HummockSnapshot: IdCategoryType = 7;
     pub const HummockSSTableId: IdCategoryType = 8;
 }
@@ -126,8 +126,8 @@ pub struct IdGeneratorManager {
     schema: Arc<StoredIdGenerator>,
     table: Arc<StoredIdGenerator>,
     worker: Arc<StoredIdGenerator>,
+    fragment: Arc<StoredIdGenerator>,
     actor: Arc<StoredIdGenerator>,
-    hummock_context: Arc<StoredIdGenerator>,
     hummock_snapshot: Arc<StoredIdGenerator>,
     hummock_ss_table_id: Arc<StoredIdGenerator>,
 }
@@ -143,10 +143,10 @@ impl IdGeneratorManager {
             schema: Arc::new(StoredIdGenerator::new(meta_store_ref.clone(), "schema", None).await),
             table: Arc::new(StoredIdGenerator::new(meta_store_ref.clone(), "table", None).await),
             worker: Arc::new(StoredIdGenerator::new(meta_store_ref.clone(), "worker", None).await),
-            actor: Arc::new(StoredIdGenerator::new(meta_store_ref.clone(), "actor", Some(1)).await),
-            hummock_context: Arc::new(
-                StoredIdGenerator::new(meta_store_ref.clone(), "hummock_context", Some(1)).await,
+            fragment: Arc::new(
+                StoredIdGenerator::new(meta_store_ref.clone(), "fragment", Some(1)).await,
             ),
+            actor: Arc::new(StoredIdGenerator::new(meta_store_ref.clone(), "actor", Some(1)).await),
             hummock_snapshot: Arc::new(
                 StoredIdGenerator::new(meta_store_ref.clone(), "hummock_snapshot", Some(1)).await,
             ),
@@ -164,8 +164,8 @@ impl IdGeneratorManager {
             IdCategory::Database => &self.database,
             IdCategory::Schema => &self.schema,
             IdCategory::Table => &self.table,
+            IdCategory::Fragment => &self.fragment,
             IdCategory::Actor => &self.actor,
-            IdCategory::HummockContext => &self.hummock_context,
             IdCategory::HummockSnapshot => &self.hummock_snapshot,
             IdCategory::Worker => &self.worker,
             IdCategory::HummockSSTableId => &self.hummock_ss_table_id,

@@ -98,9 +98,15 @@ public class RwBatchExchange extends Exchange implements RisingWaveBatchPhyRel {
       }
       MergeSortExchangeNode.Builder builder = MergeSortExchangeNode.newBuilder();
       builder.addAllColumnOrders(columnOrders);
-      return PlanNode.newBuilder().setMergeSortExchange(builder.build()).build();
+      return PlanNode.newBuilder()
+          .setMergeSortExchange(builder.build())
+          .setIdentity(BatchPlan.getCurrentNodeIdentity(this))
+          .build();
     } else {
-      return PlanNode.newBuilder().setExchange(ExchangeNode.newBuilder().build()).build();
+      return PlanNode.newBuilder()
+          .setExchange(ExchangeNode.newBuilder().build())
+          .setIdentity(BatchPlan.getCurrentNodeIdentity(this))
+          .build();
     }
   }
 

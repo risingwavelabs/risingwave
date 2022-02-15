@@ -89,8 +89,8 @@ impl ChainExecutor {
                 "the first message received by chain node should be a barrier".to_owned(),
             )
             .into()),
-            Message::Barrier(_barrier) => {
-                // TODO(MrCroxx): take the epoch of the barrier.
+            Message::Barrier(barrier) => {
+                self.snapshot.init(barrier.epoch)?;
                 self.state = ChainState::ReadingSnapshot;
                 return self.read_snapshot().await;
             }
@@ -186,6 +186,10 @@ mod test {
 
         fn identity(&self) -> &'static str {
             "MockSnapshot"
+        }
+
+        fn init(&mut self, _: u64) -> Result<()> {
+            Ok(())
         }
     }
 

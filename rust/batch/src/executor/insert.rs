@@ -186,6 +186,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Bound;
     use std::sync::Arc;
 
     use risingwave_common::array::{Array, I64Array};
@@ -222,9 +223,9 @@ mod tests {
         // Schema of first table
         let schema = Schema {
             fields: vec![
-                Field::unnamed(DataType::decimal_default()),
-                Field::unnamed(DataType::decimal_default()),
-                Field::unnamed(DataType::decimal_default()),
+                Field::unnamed(DataType::Decimal),
+                Field::unnamed(DataType::Decimal),
+                Field::unnamed(DataType::Decimal),
             ],
         };
 
@@ -480,9 +481,9 @@ mod tests {
         // Schema of first table
         let schema = Schema {
             fields: vec![
-                Field::unnamed(DataType::decimal_default()),
-                Field::unnamed(DataType::decimal_default()),
-                Field::unnamed(DataType::decimal_default()),
+                Field::unnamed(DataType::Decimal),
+                Field::unnamed(DataType::Decimal),
+                Field::unnamed(DataType::Decimal),
             ],
         };
 
@@ -509,6 +510,11 @@ mod tests {
             .await?;
         source_manager.create_table_source_v2(&table_id, table)?;
 
+        // Create reader
+        let source_desc = source_manager.get_source(&table_id)?;
+        let source = source_desc.source.as_table_v2();
+        let mut reader = source.stream_reader(TableV2ReaderContext, vec![0, 1, 2])?;
+
         let mut insert_executor = InsertExecutor::new(
             table_id.clone(),
             source_manager.clone(),
@@ -528,11 +534,6 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![Some(5)] // inserted rows
         );
-
-        // Check the reader.
-        let source_desc = source_manager.get_source(&table_id)?;
-        let source = source_desc.source.as_table_v2();
-        let mut reader = source.stream_reader(TableV2ReaderContext, vec![0, 1, 2])?;
 
         reader.open().await?;
         let chunk = reader.next().await?;
@@ -566,7 +567,9 @@ mod tests {
 
         // There's nothing in store since `TableSourceV2` has no side effect.
         // Data will be materialized in associated streaming task.
-        let store_content = store.scan(&[], None).await?;
+        let epoch = u64::MAX;
+        let full_range = (Bound::<Vec<u8>>::Unbounded, Bound::<Vec<u8>>::Unbounded);
+        let store_content = store.scan(full_range, None, epoch).await?;
         assert!(store_content.is_empty());
 
         // First insertion test ends.

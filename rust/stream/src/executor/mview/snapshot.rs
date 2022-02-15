@@ -21,10 +21,12 @@ pub struct BatchQueryExecutor {
     table: ScannableTableRef,
     /// The number of tuples in one [`StreamChunk`]
     batch_size: usize,
-    /// Inner iterator that read [`MViewTable`]
+    /// Inner iterator that reads [`MViewTable`]
     iter: Option<TableIterRef>,
-    /// Schema
+
     schema: Schema,
+
+    epoch: Option<u64>,
 }
 
 impl std::fmt::Debug for BatchQueryExecutor {
@@ -54,13 +56,19 @@ impl BatchQueryExecutor {
             batch_size,
             iter: None,
             schema,
+            epoch: None,
         }
     }
 }
 impl BatchQueryExecutor {
     async fn next_inner(&mut self) -> Result<Message> {
         if self.iter.is_none() {
-            self.iter = Some(self.table.iter().await.unwrap());
+            self.iter = Some(
+                self.table
+                    .iter(self.epoch.expect("epoch has not been set"))
+                    .await
+                    .unwrap(),
+            );
         }
         let iter = self.iter.as_mut().unwrap();
         let mut count = 0;
@@ -111,6 +119,18 @@ impl Executor for BatchQueryExecutor {
     fn identity(&self) -> &'static str {
         "BatchQueryExecutor"
     }
+
+    fn init(&mut self, epoch: u64) -> Result<()> {
+        match self.epoch {
+            None => {
+                self.epoch = Some(epoch);
+                Ok(())
+            }
+            Some(_) => {
+                Err(ErrorCode::InternalError("epoch cannot be initialized twice".to_owned()).into())
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -129,6 +149,7 @@ mod test {
         let table = Arc::new(gen_basic_table(test_batch_count * test_batch_size).await)
             as ScannableTableRef;
         let mut node = BatchQueryExecutor::new_with_batch_size(table, vec![0, 1], test_batch_size);
+        node.init(u64::MAX).unwrap();
         let mut batch_cnt = 0;
         while let Ok(Message::Chunk(sc)) = node.next().await {
             let data = *sc.column(0).array_ref().datum_at(0).unwrap().as_int32();
@@ -136,5 +157,17 @@ mod test {
             batch_cnt += 1;
         }
         assert_eq!(batch_cnt, test_batch_count)
+    }
+
+    #[should_panic]
+    #[tokio::test]
+    async fn test_init_epoch_twice() {
+        let test_batch_size = 50;
+        let test_batch_count = 5;
+        let table = Arc::new(gen_basic_table(test_batch_count * test_batch_size).await)
+            as ScannableTableRef;
+        let mut node = BatchQueryExecutor::new_with_batch_size(table, vec![0, 1], test_batch_size);
+        node.init(u64::MAX).unwrap();
+        node.init(0).unwrap();
     }
 }

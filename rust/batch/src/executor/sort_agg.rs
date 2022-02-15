@@ -76,7 +76,7 @@ impl BoxedExecutorBuilder for SortAggExecutor {
             child,
             child_done: false,
             schema: Schema { fields },
-            identity: "SortAggExecutor".to_string(),
+            identity: source.plan_node().get_identity().clone(),
         }))
     }
 }
@@ -210,6 +210,7 @@ mod tests {
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
+            distinct: false,
         };
 
         let s = AggStateFactory::new(&prost)?.create_agg_state()?;
@@ -290,6 +291,7 @@ mod tests {
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
+            distinct: false,
         };
 
         let s = AggStateFactory::new(&prost)?.create_agg_state()?;

@@ -4,9 +4,9 @@ use std::time::Duration;
 
 use futures::future::try_join_all;
 use itertools::Itertools;
-use log::trace;
 use risingwave_common::array::RwError;
 use risingwave_common::error::{Result, ToRwResult};
+use risingwave_pb::common::WorkerType;
 use risingwave_pb::data::Barrier;
 use risingwave_pb::stream_service::InjectBarrierRequest;
 use tokio::sync::mpsc::error::TryRecvError;
@@ -19,7 +19,7 @@ use self::command::CommandContext;
 use self::info::BarrierActorInfo;
 use crate::cluster::StoredClusterManager;
 use crate::manager::{EpochGeneratorRef, MetaSrvEnv, StreamClientsRef};
-use crate::stream::StreamMetaManagerRef;
+use crate::stream::FragmentManagerRef;
 
 mod command;
 mod info;
@@ -34,14 +34,14 @@ struct Notifier {
 }
 
 impl Notifier {
-    /// Nofify when we are about to send a barrier.
+    /// Notify when we are about to send a barrier.
     fn notify_to_send(&mut self) {
         if let Some(tx) = self.to_send.take() {
             tx.send(()).ok();
         }
     }
 
-    /// Nofify when we have collected a barrier from all actors.
+    /// Notify when we have collected a barrier from all actors.
     fn notify_collected(&mut self) {
         if let Some(tx) = self.collected.take() {
             tx.send(()).ok();
@@ -61,10 +61,9 @@ type Scheduled = (Command, Notifier);
 /// store, some actions like "drop materialized view" or "create mv on mv" must be done in barrier
 /// manager transactionally using [`Command`].
 pub struct BarrierManager {
-    #[allow(dead_code)]
     cluster_manager: Arc<StoredClusterManager>,
 
-    stream_meta_manager: StreamMetaManagerRef,
+    fragment_manager: FragmentManagerRef,
 
     epoch_generator: EpochGeneratorRef,
 
@@ -86,14 +85,14 @@ impl BarrierManager {
     pub fn new(
         env: MetaSrvEnv,
         cluster_manager: Arc<StoredClusterManager>,
-        stream_meta_manager: StreamMetaManagerRef,
+        fragment_manager: FragmentManagerRef,
         epoch_generator: EpochGeneratorRef,
     ) -> Self {
         let (tx, rx) = unbounded_channel();
 
         Self {
             cluster_manager,
-            stream_meta_manager,
+            fragment_manager,
             epoch_generator,
             clients: env.stream_clients_ref(),
             scheduled_barriers_tx: tx,
@@ -121,13 +120,18 @@ impl BarrierManager {
             }
             .unwrap();
 
-            // Only wait for minimal interval if no command is scheduled.
-            if scheduled.is_none() {
+            // Only wait for minimal interval if no command is scheduled, and no extra notifiers is
+            // pending.
+            if scheduled.is_none() && self.extra_notifiers.lock().await.is_empty() {
                 min_interval.tick().await;
             }
 
-            let all_actors = self.stream_meta_manager.load_all_actors().await?;
-            let info = BarrierActorInfo::resolve(all_actors);
+            let all_nodes = self
+                .cluster_manager
+                .list_worker_node(WorkerType::ComputeNode);
+            let all_actor_infos = self.fragment_manager.load_all_actors()?;
+
+            let info = BarrierActorInfo::resolve(&all_nodes, all_actor_infos);
 
             let (command_context, mut notifiers) = {
                 let (command, notifier) = scheduled.unwrap_or_else(
@@ -139,7 +143,7 @@ impl BarrierManager {
                     .chain(extra_notifiers.into_iter())
                     .collect_vec();
                 let context = CommandContext::new(
-                    self.stream_meta_manager.clone(),
+                    self.fragment_manager.clone(),
                     self.clients.clone(),
                     &info,
                     command,
@@ -147,7 +151,7 @@ impl BarrierManager {
                 (context, notifiers)
             };
 
-            let mutation = command_context.to_mutation().await?;
+            let mutation = command_context.to_mutation()?;
 
             let epoch = self.epoch_generator.generate()?.into_inner();
 
@@ -155,11 +159,7 @@ impl BarrierManager {
                 let actor_ids_to_send = info.actor_ids_to_send(node_id).collect_vec();
                 let actor_ids_to_collect = info.actor_ids_to_collect(node_id).collect_vec();
 
-                trace!("mutation: {:#?}", mutation);
-                trace!("to send: {:?}", actor_ids_to_send);
-                trace!("to collect: {:?}", actor_ids_to_collect);
-
-                if actor_ids_to_collect.is_empty() || actor_ids_to_send.is_empty() {
+                if actor_ids_to_send.is_empty() || actor_ids_to_collect.is_empty() {
                     // No need to send barrier for this node.
                     None
                 } else {
@@ -168,6 +168,8 @@ impl BarrierManager {
                     let barrier = Barrier {
                         epoch,
                         mutation: Some(mutation),
+                        // TODO(chi): add distributed tracing
+                        span: vec![],
                     };
 
                     async move {
@@ -179,6 +181,10 @@ impl BarrierManager {
                             actor_ids_to_send,
                             actor_ids_to_collect,
                         };
+                        tracing::trace!(
+                            target: "events::meta::barrier::inject_barrier",
+                            "inject barrier request: {:#?}", request
+                        );
                         client.inject_barrier(request).await.to_rw_result()?;
 
                         Ok::<_, RwError>(())

@@ -21,13 +21,18 @@ pub struct SeqScanExecutor {
 }
 
 impl SeqScanExecutor {
-    pub fn new(table: ScannableTableRef, column_ids: Vec<i32>, schema: Schema) -> Self {
+    pub fn new(
+        table: ScannableTableRef,
+        column_ids: Vec<i32>,
+        schema: Schema,
+        identity: String,
+    ) -> Self {
         Self {
             table,
             column_ids,
             schema,
             snapshot: Default::default(),
-            identity: "SeqScanExecutor".to_string(),
+            identity,
         }
     }
 }
@@ -61,7 +66,12 @@ impl BoxedExecutorBuilder for SeqScanExecutor {
                 .collect::<Result<Vec<Field>>>()?,
         );
 
-        Ok(Box::new(Self::new(table_ref, column_ids.to_vec(), schema)))
+        Ok(Box::new(Self::new(
+            table_ref,
+            column_ids.to_vec(),
+            schema,
+            source.plan_node().get_identity().clone(),
+        )))
     }
 }
 
@@ -115,7 +125,7 @@ mod tests {
     async fn test_seq_scan_executor() -> Result<()> {
         let table_id = TableId::default();
         let schema = Schema {
-            fields: vec![Field::unnamed(DataType::decimal_default())],
+            fields: vec![Field::unnamed(DataType::Decimal)],
         };
         let table_columns = schema
             .fields
@@ -147,7 +157,7 @@ mod tests {
         seq_scan_executor.open().await.unwrap();
 
         let fields = &seq_scan_executor.schema().fields;
-        assert_eq!(fields[0].data_type, DataType::decimal_default());
+        assert_eq!(fields[0].data_type, DataType::Decimal);
 
         seq_scan_executor.open().await.unwrap();
 

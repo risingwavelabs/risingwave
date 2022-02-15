@@ -35,7 +35,7 @@ public class DropMaterializedViewHandlerTest {
   public void initAll() {
     catalogService = new SimpleCatalogService();
     catalogService.createDatabase(TEST_DB_NAME, TEST_SCHEMA_NAME);
-    sqlHandlerFactory = new DefaultSqlHandlerFactory();
+    sqlHandlerFactory = new DefaultSqlHandlerFactory(false);
 
     var cfg = new Configuration();
     cfg.set(LeaderServerConfigurations.COMPUTE_NODES, Lists.newArrayList("127.0.0.1:1234"));
@@ -50,7 +50,7 @@ public class DropMaterializedViewHandlerTest {
             .build();
     String sql = "create table t(v1 int not null, v2 int not null, v3 float not null)";
     SqlNode ast = SqlParser.createCalciteStatement(sql);
-    var handler = ((CreateTableHandler) sqlHandlerFactory.create(ast, executionContext));
+    var handler = ((CreateTableV1Handler) sqlHandlerFactory.create(ast, executionContext));
     handler.execute(ast, executionContext);
 
     // Add materialized view.

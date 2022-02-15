@@ -88,7 +88,12 @@ impl BoxedExecutorBuilder for CreateTableExecutor {
 #[async_trait::async_trait]
 impl Executor for CreateTableExecutor {
     async fn open(&mut self) -> Result<()> {
-        info!("Initializing create table executor");
+        tracing::info!(
+            "create table: table_id={:?}, associated_table_id={:?}, is_materialized_view={}",
+            self.table_id,
+            self.associated_table_id,
+            self.is_materialized_view
+        );
 
         let table_columns = self
             .table_columns
@@ -111,7 +116,6 @@ impl Executor for CreateTableExecutor {
             self.source_manager
                 .create_table_source_v2(&self.table_id, table)?;
         } else if self.is_materialized_view {
-            info!("Create materialized view id:{}", &self.table_id.table_id());
             let order_pairs = fetch_orders(&self.column_orders).unwrap();
             let orderings = order_pairs
                 .iter()
@@ -120,10 +124,6 @@ impl Executor for CreateTableExecutor {
 
             // Create associated materialized view.
             if self.associated_table_id.is_some() {
-                info!(
-                    "Associate table id:{}",
-                    &self.associated_table_id.as_ref().unwrap().table_id()
-                );
                 self.table_manager.register_associated_materialized_view(
                     self.associated_table_id.as_ref().unwrap(),
                     &self.table_id,

@@ -72,7 +72,7 @@ pub trait HashKey: Hash + Eq + Sized + Send + Sync + 'static {
             data_chunk
                 .column_at(*column_idx)?
                 .array_ref()
-                .serialize_to_hash_key(&mut serializers)?;
+                .serialize_to_hash_key(&mut serializers[..])?;
         }
 
         Ok(serializers
@@ -81,7 +81,7 @@ pub trait HashKey: Hash + Eq + Sized + Send + Sync + 'static {
             .collect())
     }
 
-    fn deserialize_to_builders(self, array_builders: &mut Vec<ArrayBuilderImpl>) -> Result<()>;
+    fn deserialize_to_builders(self, array_builders: &mut [ArrayBuilderImpl]) -> Result<()>;
 
     fn has_null(&self) -> bool;
 }
@@ -496,7 +496,7 @@ impl HashKeySerializer for SerializedKeySerializer {
     }
 }
 
-fn serialize_array_to_hash_key<'a, A, S>(array: &'a A, serializers: &mut Vec<S>) -> Result<()>
+fn serialize_array_to_hash_key<'a, A, S>(array: &'a A, serializers: &mut [S]) -> Result<()>
 where
     A: Array,
     A::RefItem<'a>: HashKeySerDe<'a>,
@@ -522,7 +522,7 @@ where
 }
 
 impl ArrayImpl {
-    fn serialize_to_hash_key<S: HashKeySerializer>(&self, serializers: &mut Vec<S>) -> Result<()> {
+    fn serialize_to_hash_key<S: HashKeySerializer>(&self, serializers: &mut [S]) -> Result<()> {
         macro_rules! impl_all_serialize_to_hash_key {
             ([$self:ident, $serializers: ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
                 match $self {
@@ -553,7 +553,7 @@ impl ArrayBuilderImpl {
 impl<const N: usize> HashKey for FixedSizeKey<N> {
     type S = FixedSizeKeySerializer<N>;
 
-    fn deserialize_to_builders(self, array_builders: &mut Vec<ArrayBuilderImpl>) -> Result<()> {
+    fn deserialize_to_builders(self, array_builders: &mut [ArrayBuilderImpl]) -> Result<()> {
         let mut deserializer = FixedSizeKeyDeserializer::<N>::from_hash_key(self);
         array_builders.iter_mut().try_for_each(|array_builder| {
             array_builder.deserialize_from_hash_key(&mut deserializer)
@@ -568,7 +568,7 @@ impl<const N: usize> HashKey for FixedSizeKey<N> {
 impl HashKey for SerializedKey {
     type S = SerializedKeySerializer;
 
-    fn deserialize_to_builders(self, array_builders: &mut Vec<ArrayBuilderImpl>) -> Result<()> {
+    fn deserialize_to_builders(self, array_builders: &mut [ArrayBuilderImpl]) -> Result<()> {
         ensure!(self.key.len() == array_builders.len());
         array_builders
             .iter_mut()
@@ -699,7 +699,7 @@ mod tests {
             .collect::<Vec<ArrayBuilderImpl>>();
 
         keys.into_iter()
-            .try_for_each(|k| K::deserialize_to_builders(k, &mut array_builders))
+            .try_for_each(|k| K::deserialize_to_builders(k, &mut array_builders[..]))
             .expect("Failed to deserialize!");
 
         let result_arrays = array_builders
@@ -801,10 +801,10 @@ mod tests {
         let mut array_builders = [0, 1]
             .iter()
             .map(|_| ArrayBuilderImpl::Int32(I32ArrayBuilder::new(2).unwrap()))
-            .collect();
+            .collect::<Vec<_>>();
 
         keys.into_iter()
-            .for_each(|k| k.deserialize_to_builders(&mut array_builders).unwrap());
+            .for_each(|k| k.deserialize_to_builders(&mut array_builders[..]).unwrap());
 
         let array = array_builders.pop().unwrap().finish().unwrap();
         let i32_vec = array

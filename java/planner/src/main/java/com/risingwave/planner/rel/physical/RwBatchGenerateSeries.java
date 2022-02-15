@@ -69,7 +69,10 @@ public class RwBatchGenerateSeries extends TableFunctionScan implements RisingWa
     if (node == null) {
       throw new IllegalArgumentException("no matching overload of generate_series");
     }
-    return PlanNode.newBuilder().setGenerateInt32Series(node).build();
+    return PlanNode.newBuilder()
+        .setGenerateInt32Series(node)
+        .setIdentity(BatchPlan.getCurrentNodeIdentity(this))
+        .build();
   }
 
   private GenerateInt32SeriesNode serializeI32(RexLiteral start, RexLiteral stop) {
