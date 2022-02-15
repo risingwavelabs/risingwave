@@ -18,7 +18,8 @@
         },
         "name": "ZERO"
       }]
-    }
+    },
+    "identity": "RwBatchValuesExecutor"
   }],
   "project": {
     "selectList": [{
@@ -73,5 +74,6 @@
         }]
       }
     }]
-  }
+  },
+  "identity": "RwBatchProject(EXPR$0\u003d[+(+(CAST(\u00272021-10-1\u0027):DATE NOT NULL, 12288:INTERVAL YEAR(9)), 88473600000:INTERVAL DAY(9))])"
 }

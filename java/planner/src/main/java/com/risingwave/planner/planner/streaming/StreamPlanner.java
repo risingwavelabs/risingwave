@@ -10,10 +10,7 @@ import static com.risingwave.planner.rules.physical.BatchRuleSets.LOGICAL_OPTIMI
 import static com.risingwave.planner.rules.physical.BatchRuleSets.LOGICAL_REWRITE_RULES;
 
 import com.google.common.collect.ImmutableList;
-import com.risingwave.catalog.CatalogService;
-import com.risingwave.catalog.ColumnCatalog;
-import com.risingwave.catalog.MaterializedViewCatalog;
-import com.risingwave.catalog.TableCatalog;
+import com.risingwave.catalog.*;
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.planner.planner.Planner;
 import com.risingwave.planner.program.ChainedOptimizerProgram;
@@ -23,13 +20,7 @@ import com.risingwave.planner.program.OptimizerProgram;
 import com.risingwave.planner.program.SubQueryRewriteProgram;
 import com.risingwave.planner.program.VolcanoOptimizerProgram;
 import com.risingwave.planner.rel.serialization.ExplainWriter;
-import com.risingwave.planner.rel.streaming.PrimaryKeyDerivationVisitor;
-import com.risingwave.planner.rel.streaming.RisingWaveStreamingRel;
-import com.risingwave.planner.rel.streaming.RwStreamChain;
-import com.risingwave.planner.rel.streaming.RwStreamMaterializedView;
-import com.risingwave.planner.rel.streaming.RwStreamSort;
-import com.risingwave.planner.rel.streaming.RwStreamTableSource;
-import com.risingwave.planner.rel.streaming.StreamingPlan;
+import com.risingwave.planner.rel.streaming.*;
 import com.risingwave.planner.rules.physical.BatchRuleSets;
 import com.risingwave.planner.rules.streaming.StreamingRuleSets;
 import com.risingwave.planner.sql.SqlConverter;
@@ -128,7 +119,6 @@ public class StreamPlanner implements Planner<StreamingPlan> {
         assert indexInParent >= 0;
 
         var tableSourceNode = (RwStreamTableSource) node;
-
         var sourceColumnIds = source.getAllColumnIds();
         var sourcePrimaryKeyColumnIds = source.getPrimaryKeyColumnIds();
         if (source.isAssociatedMaterializedView()) {
@@ -147,16 +137,38 @@ public class StreamPlanner implements Planner<StreamingPlan> {
           primaryKeyColumnIdsBuilder.add(sourceColumnIds.get(idx));
         }
 
-        RwStreamChain chain =
-            new RwStreamChain(
+        RwStreamBatchPlan batchPlan =
+            new RwStreamBatchPlan(
                 node.getCluster(),
                 node.getTraitSet(),
-                tableSourceNode.getHints(),
+                ((RwStreamTableSource) node).getHints(),
                 node.getTable(),
                 tableSourceNode.getTableId(),
                 primaryKeyColumnIdsBuilder.build(),
                 ImmutableIntList.of(),
                 tableSourceNode.getColumnIds());
+
+        var upstreamColumnDescsBuilder = ImmutableList.<ColumnDesc>builder();
+        if (!source.isAssociatedMaterializedView()) {
+          source
+              .getAllColumns()
+              .forEach(columnCatalog -> upstreamColumnDescsBuilder.add(columnCatalog.getDesc()));
+          ;
+        } else {
+          source
+              .getAllColumnsV2()
+              .forEach(columnCatalog -> upstreamColumnDescsBuilder.add(columnCatalog.getDesc()));
+        }
+
+        RwStreamChain chain =
+            new RwStreamChain(
+                node.getCluster(),
+                node.getTraitSet(),
+                tableSourceNode.getTableId(),
+                ImmutableIntList.of(),
+                tableSourceNode.getColumnIds(),
+                upstreamColumnDescsBuilder.build(),
+                List.of(batchPlan));
         parent.replaceInput(indexInParent, chain);
       }
     }

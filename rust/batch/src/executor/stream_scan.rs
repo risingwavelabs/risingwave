@@ -74,7 +74,7 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
             reader,
             done: false,
             schema: Schema { fields },
-            identity: "StreamScanExecutor".to_string(),
+            identity: source.plan_node().get_identity().clone(),
         }))
     }
 }

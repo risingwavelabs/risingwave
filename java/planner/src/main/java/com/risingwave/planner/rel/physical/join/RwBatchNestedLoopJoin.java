@@ -4,6 +4,7 @@ import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 import static com.risingwave.planner.rel.physical.join.BatchJoinUtils.isEquiJoin;
 
 import com.risingwave.planner.rel.logical.RwLogicalJoin;
+import com.risingwave.planner.rel.physical.BatchPlan;
 import com.risingwave.planner.rel.physical.RisingWaveBatchPhyRel;
 import com.risingwave.planner.rel.serialization.RexToProtoSerializer;
 import com.risingwave.proto.plan.NestedLoopJoinNode;
@@ -47,6 +48,7 @@ public class RwBatchNestedLoopJoin extends RwBufferJoinBase implements RisingWav
         .setNestedLoopJoin(joinNode)
         .addChildren(((RisingWaveBatchPhyRel) left).serialize())
         .addChildren(((RisingWaveBatchPhyRel) right).serialize())
+        .setIdentity(BatchPlan.getCurrentNodeIdentity(this))
         .build();
   }
 

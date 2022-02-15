@@ -9,7 +9,6 @@ use risingwave_rpc_client::MetaClient;
 
 use crate::hummock::hummock_meta_client::RPCHummockMetaClient;
 use crate::hummock::local_version_manager::LocalVersionManager;
-use crate::hummock::version_manager::VersionManager;
 use crate::hummock::HummockStateStore;
 use crate::memory::MemoryStateStore;
 use crate::rocksdb_local::RocksDBStateStore;
@@ -177,7 +176,6 @@ impl StateStoreImpl {
                             remote_dir: remote_dir.to_string(),
                             checksum_algo: ChecksumAlg::Crc32c,
                         },
-                        Arc::new(VersionManager::new()),
                         Arc::new(LocalVersionManager::new(
                             object_client,
                             remote_dir,
@@ -212,7 +210,6 @@ impl StateStoreImpl {
                             remote_dir: remote_dir.to_string(),
                             checksum_algo: ChecksumAlg::Crc32c,
                         },
-                        Arc::new(VersionManager::new()),
                         Arc::new(LocalVersionManager::new(s3_store, remote_dir, None)),
                         Arc::new(RPCHummockMetaClient::new(meta_client)),
                     )

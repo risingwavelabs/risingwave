@@ -8,7 +8,6 @@ use super::iterator::UserIterator;
 use super::{HummockOptions, HummockStorage};
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
-use crate::hummock::version_manager::VersionManager;
 use crate::object::InMemObjectStore;
 
 async fn prometheus_service(
@@ -40,7 +39,6 @@ async fn test_prometheus_endpoint_hummock() {
     let _hummock_storage = HummockStorage::new(
         object_client,
         hummock_options,
-        Arc::new(VersionManager::new()),
         local_version_manager,
         Arc::new(MockHummockMetaClient::new(Arc::new(
             MockHummockMetaService::new(),
@@ -81,7 +79,6 @@ async fn test_basic() {
     let hummock_storage = HummockStorage::new(
         object_client,
         hummock_options,
-        Arc::new(VersionManager::new()),
         local_version_manager,
         Arc::new(MockHummockMetaClient::new(Arc::new(
             MockHummockMetaService::new(),
@@ -233,7 +230,6 @@ async fn count_iter(iter: &mut UserIterator<'_>) -> usize {
 async fn test_reload_storage() {
     let mem_objstore = Arc::new(InMemObjectStore::new());
     let hummock_options = HummockOptions::default_for_test();
-    let version_manager = Arc::new(VersionManager::new());
     let local_version_manager = Arc::new(LocalVersionManager::new(
         mem_objstore.clone(),
         &hummock_options.remote_dir,
@@ -246,7 +242,6 @@ async fn test_reload_storage() {
     let hummock_storage = HummockStorage::new(
         mem_objstore.clone(),
         hummock_options,
-        version_manager.clone(),
         local_version_manager.clone(),
         hummock_meta_client.clone(),
     )
@@ -291,7 +286,6 @@ async fn test_reload_storage() {
     let hummock_storage = HummockStorage::new(
         mem_objstore,
         HummockOptions::default_for_test(),
-        version_manager,
         local_version_manager,
         hummock_meta_client,
     )

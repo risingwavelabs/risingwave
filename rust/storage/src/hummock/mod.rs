@@ -15,7 +15,6 @@ pub mod hummock_meta_client;
 mod iterator;
 pub mod key;
 pub mod key_range;
-mod level_handler;
 pub mod local_version_manager;
 #[cfg(test)]
 pub mod mock;
@@ -27,7 +26,6 @@ mod state_store_tests;
 mod utils;
 pub mod value;
 mod version_cmp;
-pub mod version_manager;
 
 use cloud::gen_remote_sstable;
 use compactor::{Compactor, SubCompactContext};
@@ -46,11 +44,10 @@ use self::iterator::{
     BoxedHummockIterator, ConcatIterator, HummockIterator, MergeIterator, ReverseMergeIterator,
     UserIterator,
 };
-use self::key::{key_with_epoch, user_key, FullKey};
+use self::key::{key_with_epoch, user_key};
 use self::multi_builder::CapacitySplitTableBuilder;
 pub use self::state_store::*;
 use self::utils::bloom_filter_sstables;
-use self::version_manager::VersionManager;
 use super::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
 use crate::hummock::hummock_meta_client::{HummockMetaClient, RetryableError};
 use crate::hummock::iterator::ReverseUserIterator;
@@ -61,8 +58,7 @@ pub type HummockTTL = u64;
 pub type HummockSSTableId = u64;
 pub type HummockRefCount = u64;
 pub type HummockVersionId = u64;
-pub type HummockSnapshotId = u64;
-pub type HummockContextId = i32;
+pub type HummockContextId = u32;
 pub type HummockEpoch = u64;
 pub const INVALID_EPOCH: HummockEpoch = 0;
 pub const FIRST_VERSION_ID: HummockVersionId = 0;
@@ -110,10 +106,6 @@ impl HummockOptions {
 pub struct HummockStorage {
     options: Arc<HummockOptions>,
 
-    // TODO #2648 remove this once compactor is refactored
-    #[allow(dead_code)]
-    version_manager: Arc<VersionManager>,
-
     local_version_manager: Arc<LocalVersionManager>,
 
     obj_client: Arc<dyn ObjectStore>,
@@ -139,7 +131,6 @@ impl HummockStorage {
     pub async fn new(
         obj_client: Arc<dyn ObjectStore>,
         options: HummockOptions,
-        version_manager: Arc<VersionManager>,
         local_version_manager: Arc<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> HummockResult<HummockStorage> {
@@ -170,7 +161,6 @@ impl HummockStorage {
 
         let instance = Self {
             options: arc_options,
-            version_manager,
             local_version_manager,
             obj_client,
             tx: trigger_compact_tx,

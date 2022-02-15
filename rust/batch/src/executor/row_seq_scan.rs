@@ -33,6 +33,7 @@ impl RowSeqScanExecutor {
         column_ids: Vec<i32>,
         chunk_size: usize,
         primary: bool,
+        identity: String,
     ) -> Self {
         // Currently row_id for table_v2 is totally a mess, we override this function to match the
         // behavior of column ids of mviews.
@@ -56,7 +57,7 @@ impl RowSeqScanExecutor {
             column_indices,
             chunk_size,
             schema,
-            identity: "RowSeqScanExecutor".to_string(),
+            identity,
         }
     }
 }
@@ -82,6 +83,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutor {
             column_ids,
             Self::DEFAULT_CHUNK_SIZE,
             source.task_id.task_id == 0,
+            source.plan_node().get_identity().clone(),
         )))
     }
 }

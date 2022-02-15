@@ -4,13 +4,14 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use risingwave_common::array::RwError;
 use risingwave_common::error::Result;
+use risingwave_common::types::DataType;
 use risingwave_pb::meta::{Database, Schema, Table};
-use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
+use risingwave_pb::plan::{ColumnDesc, DatabaseRefId, SchemaRefId, TableRefId};
 use risingwave_rpc_client::MetaClient;
 
 use crate::catalog::database_catalog::DatabaseCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
-use crate::catalog::table_catalog::TableCatalog;
+use crate::catalog::table_catalog::{TableCatalog, ROWID_NAME};
 use crate::catalog::{CatalogError, DatabaseId, SchemaId};
 
 pub const DEFAULT_DATABASE_NAME: &str = "dev";
@@ -205,6 +206,15 @@ impl CatalogConnector {
             schema_ref_id: schema_ref_id.clone(),
             table_id: 0,
         });
+        // Append hidden column ROWID.
+        table.column_descs.insert(
+            0,
+            ColumnDesc {
+                name: ROWID_NAME.to_string(),
+                column_type: Some(DataType::Int64.to_protobuf()?),
+                ..Default::default()
+            },
+        );
         let table_id = self.meta_client.create_table(table.clone()).await?;
         // Create table locally.
         table.table_ref_id = Some(TableRefId {
@@ -364,6 +374,8 @@ mod tests {
 
     use risingwave_pb::meta::{GetCatalogRequest, Table};
 
+    use crate::catalog::table_catalog::ROWID_NAME;
+
     #[tokio::test]
     #[serial_test::serial]
     async fn test_create_and_drop_table() {
@@ -396,7 +408,7 @@ mod tests {
             ],
         );
         catalog_mgr
-            .create_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, table.clone())
+            .create_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, table)
             .await
             .unwrap();
         assert!(catalog_mgr
@@ -413,7 +425,15 @@ mod tests {
         let catalog = response.get_ref().catalog.as_ref().unwrap();
         assert_eq!(catalog.tables.len(), 1);
         assert_eq!(catalog.tables[0].table_name, test_table_name);
-        assert_eq!(catalog.tables[0].column_descs, table.column_descs);
+        let expected_table = create_test_table(
+            test_table_name,
+            vec![
+                (ROWID_NAME.to_string(), DataType::Int64),
+                ("v1".to_string(), DataType::Int32),
+                ("v2".to_string(), DataType::Int32),
+            ],
+        );
+        assert_eq!(catalog.tables[0].column_descs, expected_table.column_descs);
 
         // -----  test drop table, schema and database  -----
 

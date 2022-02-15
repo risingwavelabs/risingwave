@@ -77,7 +77,7 @@ message HummockSnapshot {
 }
 
 message AddTablesRequest {
-  int32 context_identifier = 1;
+  uint32 context_id = 1;
   repeated SstableInfo tables = 2;
   uint64 epoch = 3;
 }
@@ -87,7 +87,7 @@ message AddTablesResponse {
 }
 
 message PinVersionRequest {
-  int32 context_identifier = 1;
+  uint32 context_id = 1;
 }
 
 message PinVersionResponse {
@@ -97,7 +97,7 @@ message PinVersionResponse {
 }
 
 message UnpinVersionRequest {
-  int32 context_identifier = 1;
+  uint32 context_id = 1;
   uint64 pinned_version_id = 2;
 }
 
@@ -106,7 +106,7 @@ message UnpinVersionResponse {
 }
 
 message PinSnapshotRequest {
-  int32 context_identifier = 1;
+  uint32 context_id = 1;
 }
 
 message PinSnapshotResponse {
@@ -115,7 +115,7 @@ message PinSnapshotResponse {
 }
 
 message UnpinSnapshotRequest {
-  int32 context_identifier = 1;
+  uint32 context_id = 1;
   HummockSnapshot snapshot = 2;
 }
 
@@ -152,7 +152,7 @@ message CompactTask {
 }
 
 message GetCompactionTasksRequest {
-  int32 context_identifier = 1;
+  uint32 context_id = 1;
 }
 
 message GetCompactionTasksResponse {
@@ -161,7 +161,7 @@ message GetCompactionTasksResponse {
 }
 
 message ReportCompactionTasksRequest {
-  int32 context_identifier = 1;
+  uint32 context_id = 1;
   CompactTask compact_task = 2;
   bool task_result = 3;
 }
@@ -171,16 +171,16 @@ message ReportCompactionTasksResponse {
 }
 
 message HummockContextRefId {
-  int32 id = 1;
+  uint32 id = 1;
 }
 
 message HummockContextPinnedVersion {
-  int32 context_id = 1;
+  uint32 context_id = 1;
   repeated uint64 version_id = 2;
 }
 
 message HummockContextPinnedSnapshot {
-  int32 context_id = 1;
+  uint32 context_id = 1;
   repeated uint64 snapshot_id = 2;
 }
 
@@ -191,7 +191,7 @@ message HummockTablesToDelete {
 }
 
 message CommitEpochRequest {
-  int32 context_identifier = 1;
+  uint32 context_id = 1;
   uint64 epoch = 2;
 }
 
@@ -200,7 +200,7 @@ message CommitEpochResponse {
 }
 
 message AbortEpochRequest {
-  int32 context_identifier = 1;
+  uint32 context_id = 1;
   uint64 epoch = 2;
 }
 

@@ -54,6 +54,7 @@ public class RwBatchHashAgg extends RwAggregate implements RisingWaveBatchPhyRel
     return PlanNode.newBuilder()
         .setHashAgg(serializeHashAgg())
         .addChildren(((RisingWaveBatchPhyRel) input).serialize())
+        .setIdentity(BatchPlan.getCurrentNodeIdentity(this))
         .build();
   }
 

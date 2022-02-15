@@ -6,7 +6,7 @@ use aws_sdk_kinesis::model::Record;
 // use aws_sdk_kinesis::error::GetRecordsError;
 use crate::base::SourceMessage;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct KinesisMessage {
     pub shard_id: String,
     pub sequence_number: String,

@@ -68,6 +68,7 @@ public class RwBatchLimit extends SingleRel implements RisingWaveBatchPhyRel, Ph
     return PlanNode.newBuilder()
         .setLimit(limitNode)
         .addChildren(((RisingWaveBatchPhyRel) input).serialize())
+        .setIdentity(BatchPlan.getCurrentNodeIdentity(this))
         .build();
   }
 
