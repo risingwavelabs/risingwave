@@ -9,7 +9,7 @@ use risingwave_common::error::{ErrorCode, Result};
 
 use crate::manager::Epoch;
 use crate::storage::transaction::Transaction;
-use crate::storage::{Key, KeyValueVersion, Operation, Precondition, Value};
+use crate::storage::{Key, KeyValueVersion, Value};
 
 pub const DEFAULT_COLUMN_FAMILY: &str = "default";
 
@@ -35,9 +35,6 @@ impl KeyValue {
 
     pub fn key(&self) -> &Key {
         &self.key
-    }
-    pub fn value(&self) -> &Value {
-        &self.value
     }
     pub fn version(&self) -> KeyValueVersion {
         self.version
@@ -66,8 +63,10 @@ pub trait MetaStore: Sync + Send + 'static {
     async fn delete_cf(&self, cf: &str, key: &[u8], version: Epoch) -> Result<()>;
     async fn delete_all_cf(&self, cf: &str, key: &[u8]) -> Result<()>;
 
-    /// `get_transaction` return a transaction. See Transaction trait for detail.
-    fn get_transaction(&self) -> Box<dyn Transaction>;
+    fn get_transaction(&self) -> Transaction {
+        Transaction::new()
+    }
+    async fn commit_transaction(&self, trx: &mut Transaction) -> Result<()>;
 }
 
 // Error of metastore
@@ -88,11 +87,6 @@ impl From<Error> for RwError {
     }
 }
 
-pub enum OperationOption {
-    WithPrefix(),
-    WithVersion(KeyValueVersion),
-}
-
 pub type MetaStoreRef = Arc<dyn MetaStore>;
 
 // TODO: introduce etcd as storage engine here.
@@ -103,8 +97,8 @@ impl KeyWithVersion {
     /// The serialized result contains two parts
     /// 1. The key part, which is in memcomparable format.
     /// 2. The version part, which is the bitwise inversion of the given version.
-    pub fn serialize(key: &[u8], version: KeyValueVersion) -> Vec<u8> {
-        KeyWithVersion::serialize_key(key)
+    pub fn serialize(key: impl AsRef<[u8]>, version: KeyValueVersion) -> Vec<u8> {
+        KeyWithVersion::serialize_key(key.as_ref())
             .into_iter()
             .chain((KeyValueVersion::MAX - version).to_be_bytes().into_iter())
             .collect()
@@ -112,8 +106,9 @@ impl KeyWithVersion {
 
     /// This range will match entries whose key is the given `key`.
     /// Versions won't be filtered out.
-    pub fn point_lookup_key_range(key: &[u8]) -> (Vec<u8>, Vec<u8>) {
-        let start = KeyWithVersion::serialize_key(key);
+    pub fn point_lookup_key_range(key: impl AsRef<[u8]>) -> (Vec<u8>, Vec<u8>) {
+        assert!(!key.as_ref().is_empty());
+        let start = KeyWithVersion::serialize_key(key.as_ref());
         let mut end = start.to_owned();
         *end.last_mut().unwrap() = 1;
         (start, end)
@@ -121,38 +116,37 @@ impl KeyWithVersion {
 
     /// This range will match entries whose key is prefixed by the given `key`.
     /// Versions won't be filtered out.
-    pub fn range_lookup_key_range(key: &[u8]) -> (Vec<u8>, Vec<u8>) {
-        let start = KeyWithVersion::serialize_key(key);
-        let mut next_key = key.to_vec();
-        if next_key.is_empty() || *next_key.last().unwrap() == u8::MAX {
-            next_key.push(0u8);
-        } else {
-            *next_key.last_mut().unwrap() += 1;
-        }
-        let end = KeyWithVersion::serialize_key(&next_key);
+    pub fn range_lookup_key_range(key: impl AsRef<[u8]>) -> (Vec<u8>, Vec<u8>) {
+        assert!(!key.as_ref().is_empty());
+        let start = KeyWithVersion::serialize_key(key.as_ref());
+        let mut end = start.to_owned();
+        *end.last_mut().unwrap() = 2;
         (start, end)
     }
 
     /// Get the key part in memcomparable format.
-    fn serialize_key(key: &[u8]) -> Vec<u8> {
-        memcomparable::to_vec(&key).unwrap()
+    fn serialize_key(key: impl AsRef<[u8]>) -> Vec<u8> {
+        memcomparable::to_vec(&key.as_ref()).unwrap()
     }
 
-    pub fn deserialize(key_with_version: &[u8]) -> Option<(Key, KeyValueVersion)> {
+    pub fn deserialize(key_with_version: impl AsRef<[u8]>) -> Option<(Key, KeyValueVersion)> {
         let version_field_size = std::mem::size_of::<KeyValueVersion>();
-        if key_with_version.len() <= version_field_size {
+        if key_with_version.as_ref().len() <= version_field_size {
             return None;
         }
-        let key_slice = &key_with_version[..key_with_version.len() - version_field_size];
+        let key_slice =
+            &key_with_version.as_ref()[..key_with_version.as_ref().len() - version_field_size];
         let key = match memcomparable::from_slice::<Vec<u8>>(key_slice) {
             Ok(key) => key,
             Err(_) => return None,
         };
-        let version =
-            match key_with_version[key_with_version.len() - version_field_size..].try_into() {
-                Ok(version) => KeyValueVersion::MAX - u64::from_be_bytes(version),
-                Err(_) => return None,
-            };
+        let version = match key_with_version.as_ref()
+            [key_with_version.as_ref().len() - version_field_size..]
+            .try_into()
+        {
+            Ok(version) => KeyValueVersion::MAX - u64::from_be_bytes(version),
+            Err(_) => return None,
+        };
         Some((key, version))
     }
 }
@@ -295,131 +289,28 @@ impl MetaStore for MemStore {
         Ok(())
     }
 
-    fn get_transaction(&self) -> Box<dyn Transaction> {
-        Box::new(MemTransaction {})
-    }
-}
-
-/// We should use `SledMetaStore` now. `MemStore` won't be functioning any more until
-/// `MemTransaction` is implemented.
-struct MemTransaction {}
-impl Transaction for MemTransaction {
-    fn add_preconditions(&mut self, _preconditions: Vec<Precondition>) {
-        unimplemented!()
-    }
-
-    fn add_operations(&mut self, _operations: Vec<Operation>) {
-        unimplemented!()
-    }
-
-    fn commit(&self) -> std::result::Result<(), Error> {
+    async fn commit_transaction(&self, _trx: &mut Transaction) -> Result<()> {
         unimplemented!()
     }
 }
 
 pub struct ColumnFamilyUtils {}
 impl ColumnFamilyUtils {
-    pub fn prefix_key_with_cf(key: &[u8], prefix: &[u8]) -> Vec<u8> {
+    pub fn prefix_key_with_cf(key: impl AsRef<[u8]>, prefix: impl AsRef<[u8]>) -> Vec<u8> {
         let prefix_len: u8 = prefix
+            .as_ref()
             .len()
             .try_into()
             .expect("prefix length out of u8 range");
-        [&[prefix_len], prefix, key].concat()
-    }
-    pub fn get_cf_from_prefixed_key(prefixed_key: &[u8]) -> Vec<u8> {
-        let prefix_len = prefixed_key[0] as usize;
-        prefixed_key[1..prefix_len as usize + 1].to_vec()
+        [&[prefix_len], prefix.as_ref(), key.as_ref()].concat()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::str;
+    use risingwave_common::error::Result;
 
-    use super::*;
-
-    #[tokio::test]
-    async fn test_memory_store() -> Result<()> {
-        let store = Box::new(MemStore::new());
-        let (k, v, version) = (b"key_1", b"value_1", Epoch::from(1));
-        assert!(store.put(k, v, version).await.is_ok());
-        let val = store.get(k, version).await.unwrap();
-        assert_eq!(val.as_slice(), v);
-        let val = store
-            .get_cf(DEFAULT_COLUMN_FAMILY, k, version)
-            .await
-            .unwrap();
-        assert_eq!(val.as_slice(), v);
-        assert!(store.get_cf("test_cf", k, version).await.is_err());
-
-        assert!(store.put_cf("test_cf", k, v, version).await.is_ok());
-        let val = store.get_cf("test_cf", k, version).await.unwrap();
-        assert_eq!(val.as_slice(), v);
-
-        assert!(store.delete(k, version).await.is_ok());
-        assert_eq!(store.list().await.unwrap().len(), 0);
-
-        assert!(store.delete_cf("test_cf", k, version).await.is_ok());
-        assert_eq!(store.list_cf("test_cf").await.unwrap().len(), 0);
-
-        let batch_values: Vec<(Vec<u8>, Vec<u8>, Epoch)> = vec![
-            (b"key_1".to_vec(), b"value_1".to_vec(), Epoch::from(2)),
-            (b"key_2".to_vec(), b"value_2".to_vec(), Epoch::from(2)),
-            (b"key_3".to_vec(), b"value_3".to_vec(), Epoch::from(2)),
-        ];
-        assert!(store.put_batch(batch_values).await.is_ok());
-
-        let batch_values: Vec<(&str, Vec<u8>, Vec<u8>, Epoch)> = vec![
-            (
-                "test_cf",
-                b"key_1".to_vec(),
-                b"value_1".to_vec(),
-                Epoch::from(2),
-            ),
-            (
-                "test_cf",
-                b"key_2".to_vec(),
-                b"value_2".to_vec(),
-                Epoch::from(2),
-            ),
-        ];
-        assert!(store.put_batch_cf(batch_values).await.is_ok());
-
-        assert_eq!(store.list().await.unwrap().len(), 3);
-        assert_eq!(store.list_cf("test_cf").await.unwrap().len(), 2);
-        assert_eq!(
-            store
-                .list_batch_cf(vec!["test_cf", DEFAULT_COLUMN_FAMILY])
-                .await
-                .unwrap()
-                .len(),
-            2
-        );
-
-        assert!(store
-            .put(b"key_3", b"value_3_new", Epoch::from(3))
-            .await
-            .is_ok());
-        let mut values = store.list().await.unwrap();
-        values.sort();
-        let expected: Vec<Vec<u8>> = vec![
-            b"value_1".to_vec(),
-            b"value_2".to_vec(),
-            b"value_3_new".to_vec(),
-        ];
-        assert_eq!(values, expected);
-
-        assert!(store.delete_all(b"key_1").await.is_ok());
-        assert!(store.delete_all(b"key_2").await.is_ok());
-        assert!(store.delete_all(b"key_3").await.is_ok());
-        assert_eq!(store.list().await.unwrap().len(), 0);
-
-        assert!(store.delete_all_cf("test_cf", b"key_1").await.is_ok());
-        assert!(store.delete_all_cf("test_cf", b"key_2").await.is_ok());
-        assert_eq!(store.list_cf("test_cf").await.unwrap().len(), 0);
-
-        Ok(())
-    }
+    use crate::storage::KeyWithVersion;
 
     #[test]
     fn test_key_with_version() -> Result<()> {
@@ -450,8 +341,15 @@ mod tests {
             (start, end),
             (
                 vec![1, 0x1, 1, 0x2, 1, 0xfe, 0],
-                vec![1, 0x1, 1, 0x2, 1, 0xff, 0]
+                vec![1, 0x1, 1, 0x2, 1, 0xfe, 2]
             )
+        );
+
+        let key = vec![0x01, 0xff];
+        let (start, end) = KeyWithVersion::range_lookup_key_range(&key);
+        assert_eq!(
+            (start, end),
+            (vec![1, 0x01, 1, 0xff, 0], vec![1, 0x01, 1, 0xff, 2])
         );
 
         Ok(())

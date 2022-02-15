@@ -73,6 +73,9 @@ enum ArrayType {
   UTF8 = 5;
   BOOL = 6;
   DECIMAL = 7;
+  DATE = 8;
+  TIME = 9;
+  TIMESTAMP = 10;
 }
 
 message Array {
@@ -129,8 +132,7 @@ message UpdateMutation {
 }
 
 message AddMutation {
-  uint32 actor_id = 1;
-  Actors downstream_actors = 2;
+  map<uint32, Actors> actors = 1;
 }
 
 message Barrier {
@@ -141,6 +143,7 @@ message Barrier {
     UpdateMutation update = 4;
     AddMutation add = 5;
   }
+  bytes span = 6;
 }
 
 message Terminate {}

@@ -6,7 +6,7 @@ use std::vec::Drain;
 
 use risingwave_common::array::{Row, RowDeserializer};
 use risingwave_common::error::Result;
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::*;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -33,8 +33,8 @@ pub struct ManagedTopNBottomNState<S: StateStore> {
     bottom_n_count: Option<usize>,
     /// The keyspace to operate on.
     keyspace: Keyspace<S>,
-    /// `DataTypeKind`s use for deserializing `Row`.
-    data_types: Vec<DataTypeKind>,
+    /// `DataType`s use for deserializing `Row`.
+    data_types: Vec<DataType>,
     /// For deserializing `OrderedRow`.
     ordered_row_deserializer: OrderedRowDeserializer,
 }
@@ -44,7 +44,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         cache_size: Option<usize>,
         total_count: usize,
         keyspace: Keyspace<S>,
-        data_types: Vec<DataTypeKind>,
+        data_types: Vec<DataType>,
         ordered_row_deserializer: OrderedRowDeserializer,
     ) -> Self {
         Self {
@@ -236,9 +236,14 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         &mut self,
         number_rows: Option<usize>,
     ) -> Result<Vec<(OrderedRow, Row)>> {
+        // TODO: use the correct epoch
+        let epoch = u64::MAX;
         let pk_row_bytes = self
             .keyspace
-            .scan_strip_prefix(number_rows.map(|top_n_count| top_n_count * self.data_types.len()))
+            .scan_strip_prefix(
+                number_rows.map(|top_n_count| top_n_count * self.data_types.len()),
+                epoch,
+            )
             .await?;
         // We must have enough cells to restore a complete row.
         debug_assert_eq!(pk_row_bytes.len() % self.data_types.len(), 0);
@@ -320,6 +325,15 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         // We don't retain `n` elements as we have a all-or-nothing policy for now.
         Ok(())
     }
+
+    pub fn clear_cache(&mut self) {
+        assert!(
+            !self.is_dirty(),
+            "cannot clear cache while top n bottom n state is dirty"
+        );
+        self.top_n.clear();
+        self.bottom_n.clear();
+    }
 }
 
 /// Test-related methods
@@ -333,7 +347,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
 #[cfg(test)]
 mod tests {
 
-    use risingwave_common::types::DataTypeKind;
+    use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::{Keyspace, StateStore};
@@ -345,7 +359,7 @@ mod tests {
     fn create_managed_top_n_bottom_n_state<S: StateStore>(
         store: &S,
         row_count: usize,
-        data_types: Vec<DataTypeKind>,
+        data_types: Vec<DataType>,
         order_types: Vec<OrderType>,
     ) -> ManagedTopNBottomNState<S> {
         let ordered_row_deserializer = OrderedRowDeserializer::new(data_types.clone(), order_types);
@@ -361,7 +375,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_managed_top_n_bottom_n_state() {
-        let data_types = vec![DataTypeKind::Varchar, DataTypeKind::Int64];
+        let data_types = vec![DataType::Varchar, DataType::Int64];
         let order_types = vec![OrderType::Descending, OrderType::Ascending];
         let store = MemoryStateStore::new();
         let mut managed_state =

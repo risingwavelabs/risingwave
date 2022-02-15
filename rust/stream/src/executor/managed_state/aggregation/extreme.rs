@@ -8,8 +8,8 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
 use risingwave_common::expr::AggKind;
 use risingwave_common::types::{
-    deserialize_datum_not_null_from, serialize_datum_not_null_into, DataTypeKind, Datum,
-    ScalarImpl, ScalarRef,
+    deserialize_datum_not_null_from, serialize_datum_not_null_into, DataType, Datum, ScalarImpl,
+    ScalarRef,
 };
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
@@ -59,7 +59,7 @@ where
     top_n_count: Option<usize>,
 
     /// Data type of the sort column
-    data_type: DataTypeKind,
+    data_type: DataType,
 
     /// The keyspace to operate on.
     keyspace: Keyspace<S>,
@@ -103,7 +103,7 @@ where
     /// after each flush.
     pub async fn new(
         keyspace: Keyspace<S>,
-        data_type: DataTypeKind,
+        data_type: DataType,
         top_n_count: Option<usize>,
         row_count: usize,
         pk_data_types: PkDataTypes,
@@ -120,7 +120,7 @@ where
         })
     }
 
-    fn pk_data_types(&self) -> &[DataTypeKind] {
+    fn pk_data_types(&self) -> &[DataType] {
         self.serializer.pk_data_types.as_slice()
     }
 
@@ -273,8 +273,12 @@ where
             // To future developers: please make **SURE** you have taken `EXTREME_TYPE` into
             // account. EXTREME_MIN and EXTREME_MAX will significantly impact the
             // following logic.
-
-            let all_data = self.keyspace.scan_strip_prefix(self.top_n_count).await?;
+            // TODO: use the correct epoch
+            let epoch = u64::MAX;
+            let all_data = self
+                .keyspace
+                .scan_strip_prefix(self.top_n_count, epoch)
+                .await?;
 
             for (raw_key, raw_value) in all_data {
                 let mut deserializer = memcomparable::Deserializer::new(&raw_value[..]);
@@ -366,7 +370,8 @@ where
     #[cfg(test)]
     #[allow(dead_code)]
     pub async fn iterate_store(&self) -> Result<Vec<(A::OwnedItem, ExtremePk)>> {
-        let all_data = self.keyspace.scan_strip_prefix(None).await?;
+        let epoch = u64::MAX;
+        let all_data = self.keyspace.scan_strip_prefix(None, epoch).await?;
         let mut result = vec![];
 
         for (raw_key, raw_value) in all_data {
@@ -407,34 +412,34 @@ pub async fn create_streaming_extreme_state<S: StateStore>(
     }
 
     macro_rules! match_new_extreme_state {
-    ($( { $( $kind:pat_param )|+, $array:ty } ),* $(,)?) => {{
-      use DataTypeKind::*;
-      use risingwave_common::array::*;
+        ($( { $( $kind:pat_param )|+, $array:ty } ),* $(,)?) => {{
+            use DataType::*;
+            use risingwave_common::array::*;
 
-      match (agg_call.kind, agg_call.return_type) {
-        $(
-          (AggKind::Max, $( $kind )|+) => Ok(Box::new(
-            ManagedMaxState::<_, $array>::new(keyspace, agg_call.return_type, top_n_count, row_count, pk_data_types).await?,
-          )),
-          (AggKind::Min, $( $kind )|+) => Ok(Box::new(
-            ManagedMinState::<_, $array>::new(keyspace, agg_call.return_type, top_n_count, row_count, pk_data_types).await?,
-          )),
-        )*
-        (kind, return_type) => unimplemented!("unsupported extreme agg, kind: {:?}, return type: {:?}", kind, return_type),
-      }
-    }};
-  }
+            match (agg_call.kind, agg_call.return_type) {
+                $(
+                    (AggKind::Max, $( $kind )|+) => Ok(Box::new(
+                        ManagedMaxState::<_, $array>::new(keyspace, agg_call.return_type, top_n_count, row_count, pk_data_types).await?,
+                    )),
+                    (AggKind::Min, $( $kind )|+) => Ok(Box::new(
+                        ManagedMinState::<_, $array>::new(keyspace, agg_call.return_type, top_n_count, row_count, pk_data_types).await?,
+                    )),
+                )*
+                (kind, return_type) => unimplemented!("unsupported extreme agg, kind: {:?}, return type: {:?}", kind, return_type),
+            }
+        }};
+    }
 
     match_new_extreme_state!(
-      {Boolean, BoolArray},
-      {Int64, I64Array},
-      {Int32, I32Array},
-      {Int16, I16Array},
-      {Float64, F64Array},
-      {Float32, F32Array},
-      {Decimal{ .. }, DecimalArray},
-      {Char | Varchar, Utf8Array},
-      {Interval, IntervalArray},
+        { Boolean, BoolArray },
+        { Int64, I64Array },
+        { Int32, I32Array },
+        { Int16, I16Array },
+        { Float64, F64Array },
+        { Float32, F32Array },
+        { Decimal, DecimalArray },
+        { Char | Varchar, Utf8Array },
+        { Interval, IntervalArray },
     )
 }
 
@@ -457,7 +462,7 @@ mod tests {
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
         let mut managed_state = ManagedMinState::<_, I64Array>::new(
             keyspace.clone(),
-            DataTypeKind::Int64,
+            DataType::Int64,
             Some(5),
             0,
             PkDataTypes::new(),
@@ -594,7 +599,7 @@ mod tests {
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
         let mut managed_state = ManagedMinState::<_, I64Array>::new(
             keyspace,
-            DataTypeKind::Int64,
+            DataType::Int64,
             Some(5),
             row_count,
             PkDataTypes::new(),
@@ -625,10 +630,10 @@ mod tests {
 
         let mut managed_state = GenericManagedState::<_, I64Array, EXTREME_TYPE>::new(
             keyspace.clone(),
-            DataTypeKind::Int64,
+            DataType::Int64,
             Some(3),
             0,
-            smallvec![DataTypeKind::Int64],
+            smallvec![DataType::Int64],
         )
         .await
         .unwrap();
@@ -711,7 +716,7 @@ mod tests {
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
         let mut managed_state = ManagedMinState::<_, I64Array>::new(
             keyspace.clone(),
-            DataTypeKind::Int64,
+            DataType::Int64,
             Some(3),
             0,
             PkDataTypes::new(),
@@ -790,7 +795,7 @@ mod tests {
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
         let mut managed_state = GenericManagedState::<_, I64Array, EXTREME_TYPE>::new(
             keyspace.clone(),
-            DataTypeKind::Int64,
+            DataType::Int64,
             Some(3),
             0,
             PkDataTypes::new(),
@@ -887,7 +892,7 @@ mod tests {
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
         let mut managed_state = ManagedMinState::<_, I64Array>::new(
             keyspace.clone(),
-            DataTypeKind::Int64,
+            DataType::Int64,
             Some(3),
             0,
             PkDataTypes::new(),

@@ -3,15 +3,15 @@ use std::fmt;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::expr::AggKind;
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 
 use super::{ColPrunable, IntoPlanRef, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
-use crate::expr::BoundExprImpl;
+use crate::expr::ExprImpl;
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 #[derive(Clone, Debug)]
 pub struct PlanAggCall {
     pub agg_kind: AggKind,
-    pub return_type: DataTypeKind,
+    pub return_type: DataType,
     pub inputs: Vec<usize>,
 }
 #[derive(Clone, Debug)]
@@ -51,7 +51,7 @@ impl LogicalAgg {
     fn derive_schema(
         input: &Schema,
         group_keys: &[usize],
-        agg_call_data_types: Vec<DataTypeKind>,
+        agg_call_data_types: Vec<DataType>,
         agg_call_alias: &[Option<String>],
     ) -> Schema {
         let fields = group_keys
@@ -76,9 +76,9 @@ impl LogicalAgg {
     /// LogicalProject-LogicalAgg-LogicalProject-input
     #[allow(unused_variables)]
     pub fn create(
-        select_exprs: Vec<BoundExprImpl>,
+        select_exprs: Vec<ExprImpl>,
         select_alias: Vec<Option<String>>,
-        group_exprs: Vec<BoundExprImpl>,
+        group_exprs: Vec<ExprImpl>,
         input: PlanRef,
     ) -> PlanRef {
         todo!()

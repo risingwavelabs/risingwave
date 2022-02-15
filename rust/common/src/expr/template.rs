@@ -6,11 +6,56 @@ use paste::paste;
 
 /// Template macro to generate code for unary/binary/ternary expression.
 use crate::array::{
-    Array, ArrayBuilder, ArrayImpl, ArrayRef, BytesGuard, BytesWriter, DataChunk, Utf8ArrayBuilder,
+    Array, ArrayBuilder, ArrayImpl, ArrayRef, BytesGuard, BytesWriter, DataChunk, Utf8Array,
 };
 use crate::error::Result;
 use crate::expr::{BoxedExpression, Expression};
-use crate::types::{option_as_scalar_ref, DataTypeKind, Scalar};
+use crate::types::{option_as_scalar_ref, DataType, Scalar};
+
+macro_rules! gen_eval {
+  {$macro:tt,$ty_name:ident,$OA:ty,$($arg:ident,)*} => {
+    fn eval(&mut self, data_chunk: &DataChunk) -> Result<ArrayRef> {
+      paste! {
+        $(
+          let [<ret_ $arg:lower>] = self.[<expr_ $arg:lower>].eval(data_chunk)?;
+          let [<arr_ $arg:lower>]: &$arg = [<ret_ $arg:lower>].as_ref().into();
+        )*
+
+        let bitmap = data_chunk.get_visibility_ref();
+        let mut output_array = <$OA as Array>::Builder::new(data_chunk.capacity())?;
+        Ok(Arc::new(match bitmap {
+          Some(bitmap) => {
+            for (($([<v_ $arg:lower>], )*), visible) in multizip(($([<arr_ $arg:lower>].iter(), )*)).zip_eq(bitmap.iter()) {
+              if !visible {
+                continue;
+              }
+              $macro!(self, output_array, $([<v_ $arg:lower>],)*)
+            }
+            output_array.finish()?.into()
+          }
+          None => {
+            for ($([<v_ $arg:lower>], )*) in multizip(($([<arr_ $arg:lower>].iter(), )*)) {
+              $macro!(self, output_array, $([<v_ $arg:lower>],)*)
+            }
+            output_array.finish()?.into()
+          }
+        }))
+      }
+    }
+  }
+}
+
+macro_rules! eval_normal {
+  ($self:ident, $output_array:ident, $($arg:ident,)*) => {
+    if let ($(Some($arg), )*) = ($($arg, )*) {
+      let ret = ($self.func)($($arg, )*)?;
+      let output = Some(ret.as_scalar_ref());
+      $output_array.append(output)?;
+    } else {
+      $output_array.append(None)?;
+    }
+  }
+}
 
 macro_rules! gen_expr_normal {
   ($ty_name:ident,$($arg:ident),*) => {
@@ -23,7 +68,7 @@ macro_rules! gen_expr_normal {
         // pub the fields in super mod, so that we can construct it directly.
         // FIXME: make private while new function available.
         $(pub(super) [<expr_ $arg:lower>]: BoxedExpression,)*
-        pub(super) return_type: DataTypeKind,
+        pub(super) return_type: DataType,
         pub(super) func: F,
         pub(super) _phantom: std::marker::PhantomData<($($arg, )* OA)>,
       }
@@ -49,48 +94,11 @@ macro_rules! gen_expr_normal {
         $(for<'a> &'a $arg: std::convert::From<&'a ArrayImpl>,)*
         for<'a> &'a OA: std::convert::From<&'a ArrayImpl>,
       {
-        fn return_type(&self) -> DataTypeKind {
+        fn return_type(&self) -> DataType {
           self.return_type
         }
 
-        fn eval(&mut self, data_chunk: &DataChunk) -> Result<ArrayRef> {
-          $(
-            let [<ret_ $arg:lower>] = self.[<expr_ $arg:lower>].eval(data_chunk)?;
-            let [<arr_ $arg:lower>]: &$arg = [<ret_ $arg:lower>].as_ref().into();
-          )*
-
-          let bitmap = data_chunk.get_visibility_ref();
-          let mut output_array = <OA as Array>::Builder::new(data_chunk.capacity())?;
-          Ok(Arc::new(match bitmap {
-            Some(bitmap) => {
-              for (($([<v_ $arg:lower>], )*), visible) in multizip(($([<arr_ $arg:lower>].iter(), )*)).zip_eq(bitmap.iter()) {
-                if !visible {
-                  continue;
-                }
-                if let ($(Some([<v_ $arg:lower>]), )*) = ($([<v_ $arg:lower>], )*) {
-                  let ret = (self.func)($([<v_ $arg:lower>], )*)?;
-                  let output = Some(ret.as_scalar_ref());
-                  output_array.append(output)?;
-                } else {
-                  output_array.append(None)?;
-                }
-              }
-              output_array.finish()?.into()
-            }
-            None => {
-              for ($([<v_ $arg:lower>], )*) in multizip(($([<arr_ $arg:lower>].iter(), )*)) {
-                if let ($(Some([<v_ $arg:lower>]), )*) = ($([<v_ $arg:lower>], )*) {
-                  let ret = (self.func)($([<v_ $arg:lower>], )*)?;
-                  let output = Some(ret.as_scalar_ref());
-                  output_array.append(output)?;
-                } else {
-                  output_array.append(None)?;
-                }
-              }
-              output_array.finish()?.into()
-            }
-          }))
-        }
+        gen_eval! { eval_normal, $ty_name, OA, $($arg, )* }
       }
 
       impl<$($arg: Array, )*
@@ -101,7 +109,7 @@ macro_rules! gen_expr_normal {
         // Check issues #742.
         fn new(
           $([<expr_ $arg:lower>]: BoxedExpression, )*
-          return_type: DataTypeKind,
+          return_type: DataType,
           func: F,
         ) -> Self {
           Self {
@@ -116,6 +124,18 @@ macro_rules! gen_expr_normal {
   }
 }
 
+macro_rules! eval_bytes {
+  ($self:ident, $output_array:ident, $($arg:ident,)*) => {
+    if let ($(Some($arg), )*) = ($($arg, )*) {
+      let writer = $output_array.writer();
+      let guard = ($self.func)($($arg, )* writer)?;
+      $output_array = guard.into_inner();
+    } else {
+      $output_array.append(None)?;
+    }
+  }
+}
+
 macro_rules! gen_expr_bytes {
   ($ty_name:ident, $($arg:ident),*) => {
     paste! {
@@ -126,7 +146,7 @@ macro_rules! gen_expr_bytes {
         // pub the fields in super mod, so that we can construct it directly.
         // FIXME: make private while new function available.
         $(pub(super) [<expr_ $arg:lower>]: BoxedExpression,)*
-        pub(super) return_type: DataTypeKind,
+        pub(super) return_type: DataType,
         pub(super) func: F,
         pub(super) _phantom: std::marker::PhantomData<($($arg, )*)>,
       }
@@ -149,48 +169,11 @@ macro_rules! gen_expr_bytes {
       where
         $(for<'a> &'a $arg: std::convert::From<&'a ArrayImpl>,)*
       {
-        fn return_type(&self) -> DataTypeKind {
+        fn return_type(&self) -> DataType {
           self.return_type
         }
 
-        fn eval(&mut self, data_chunk: &DataChunk) -> Result<ArrayRef> {
-          $(
-            let [<ret_ $arg:lower>] = self.[<expr_ $arg:lower>].eval(data_chunk)?;
-            let [<arr_ $arg:lower>]: &$arg = [<ret_ $arg:lower>].as_ref().into();
-          )*
-
-          let bitmap = data_chunk.get_visibility_ref();
-          let mut output_array = Utf8ArrayBuilder::new(data_chunk.capacity())?;
-          Ok(Arc::new(match bitmap {
-            Some(bitmap) => {
-              for (($([<v_ $arg:lower>], )*), visible) in multizip(($([<arr_ $arg:lower>].iter(), )*)).zip_eq(bitmap.iter()) {
-                if !visible {
-                  continue;
-                }
-                if let ($(Some([<v_ $arg:lower>]), )*) = ($([<v_ $arg:lower>], )*) {
-                  let writer = output_array.writer();
-                  let guard = (self.func)($([<v_ $arg:lower>], )* writer)?;
-                  output_array = guard.into_inner();
-                } else {
-                  output_array.append(None)?;
-                }
-              }
-              output_array.finish()?.into()
-            }
-            None => {
-              for ($([<v_ $arg:lower>], )*) in multizip(($([<arr_ $arg:lower>].iter(), )*)) {
-                if let ($(Some([<v_ $arg:lower>]), )*) = ($([<v_ $arg:lower>], )*) {
-                  let writer = output_array.writer();
-                  let guard = (self.func)($([<v_ $arg:lower>], )* writer)?;
-                  output_array = guard.into_inner();
-                } else {
-                  output_array.append(None)?;
-                }
-              }
-              output_array.finish()?.into()
-            }
-          }))
-        }
+        gen_eval! { eval_bytes, $ty_name, Utf8Array, $($arg, )* }
       }
 
       impl<$($arg: Array, )*
@@ -198,7 +181,7 @@ macro_rules! gen_expr_bytes {
       > $ty_name<$($arg, )* F> {
         fn new(
           $([<expr_ $arg:lower>]: BoxedExpression, )*
-          return_type: DataTypeKind,
+          return_type: DataType,
           func: F,
         ) -> Self {
           Self {
@@ -209,6 +192,15 @@ macro_rules! gen_expr_bytes {
           }
         }
       }
+    }
+  }
+}
+
+macro_rules! eval_nullable {
+  ($self:ident, $output_array:ident, $($arg:ident,)*) => {
+    {
+      let ret = ($self.func)($($arg,)*)?;
+      $output_array.append(option_as_scalar_ref(&ret))?;
     }
   }
 }
@@ -225,7 +217,7 @@ macro_rules! gen_expr_nullable {
         // pub the fields in super mod, so that we can construct it directly.
         // FIXME: make private while new function available.
         $(pub(super) [<expr_ $arg:lower>]: BoxedExpression,)*
-        pub(super) return_type: DataTypeKind,
+        pub(super) return_type: DataType,
         pub(super) func: F,
         pub(super) _phantom: std::marker::PhantomData<($($arg, )* OA)>,
       }
@@ -251,38 +243,11 @@ macro_rules! gen_expr_nullable {
         $(for<'a> &'a $arg: std::convert::From<&'a ArrayImpl>,)*
         for<'a> &'a OA: std::convert::From<&'a ArrayImpl>,
       {
-        fn return_type(&self) -> DataTypeKind {
+        fn return_type(&self) -> DataType {
           self.return_type
         }
 
-        fn eval(&mut self, data_chunk: &DataChunk) -> Result<ArrayRef> {
-          $(
-            let [<ret_ $arg:lower>] = self.[<expr_ $arg:lower>].eval(data_chunk)?;
-            let [<arr_ $arg:lower>]: &$arg = [<ret_ $arg:lower>].as_ref().into();
-          )*
-
-          let bitmap = data_chunk.get_visibility_ref();
-          let mut output_array = <OA as Array>::Builder::new(data_chunk.capacity())?;
-          Ok(Arc::new(match bitmap {
-            Some(bitmap) => {
-              for (($([<v_ $arg:lower>], )*), visible) in multizip(($([<arr_ $arg:lower>].iter(), )*)).zip_eq(bitmap.iter()) {
-                if !visible {
-                  continue;
-                }
-                let ret = (self.func)($([<v_$arg:lower>],)*)?;
-                output_array.append(option_as_scalar_ref(&ret))?;
-              }
-              output_array.finish()?.into()
-            }
-            None => {
-              for ($([<v_ $arg:lower>], )*) in multizip(($([<arr_ $arg:lower>].iter(), )*)) {
-                let ret = (self.func)($([<v_$arg:lower>],)*)?;
-                output_array.append(option_as_scalar_ref(&ret))?;
-              }
-              output_array.finish()?.into()
-            }
-          }))
-        }
+        gen_eval! { eval_nullable, $ty_name, OA, $($arg, )* }
       }
 
       impl<$($arg: Array, )*
@@ -293,7 +258,7 @@ macro_rules! gen_expr_nullable {
         // Check issues #742.
         fn new(
           $([<expr_ $arg:lower>]: BoxedExpression, )*
-          return_type: DataTypeKind,
+          return_type: DataType,
           func: F,
         ) -> Self {
           Self {

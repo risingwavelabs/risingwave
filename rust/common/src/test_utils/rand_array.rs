@@ -4,6 +4,7 @@
 
 use std::sync::Arc;
 
+use chrono::{Datelike, NaiveTime};
 use num_traits::FromPrimitive;
 use rand::distributions::Standard;
 use rand::prelude::Distribution;
@@ -11,7 +12,10 @@ use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 
 use crate::array::{Array, ArrayBuilder, ArrayRef, StructValue};
-use crate::types::{Decimal, IntervalUnit, NativeType, Scalar};
+use crate::types::{
+    Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, NativeType,
+    Scalar,
+};
 
 pub trait RandValue {
     fn rand_value<R: Rng>(rand: &mut R) -> Self;
@@ -29,7 +33,8 @@ where
 
 impl RandValue for String {
     fn rand_value<R: Rng>(rand: &mut R) -> Self {
-        let len: usize = rand.gen::<usize>() % 10 + 1;
+        let len = rand.gen_range(1..=10);
+        // `rand.gen:::<char>` create a random Unicode scalar value.
         (0..len).map(|_| rand.gen::<char>()).collect()
     }
 }
@@ -42,16 +47,45 @@ impl RandValue for Decimal {
 
 impl RandValue for IntervalUnit {
     fn rand_value<R: Rng>(rand: &mut R) -> Self {
-        let months = (rand.gen::<u32>() % 100) as i32;
-        let days = (rand.gen::<u32>() % 200) as i32;
-        let ms = (rand.gen::<u64>() % 100000) as i64;
+        let months = rand.gen_range(0..100);
+        let days = rand.gen_range(0..200);
+        let ms = rand.gen_range(0..100_000);
         IntervalUnit::new(months, days, ms)
+    }
+}
+
+impl RandValue for NaiveDateWrapper {
+    fn rand_value<R: Rng>(rand: &mut R) -> Self {
+        let max_day = chrono::MAX_DATE.num_days_from_ce();
+        let min_day = chrono::MIN_DATE.num_days_from_ce();
+        let days = rand.gen_range(min_day..=max_day);
+        NaiveDateWrapper::new_with_days(days).unwrap()
+    }
+}
+
+impl RandValue for NaiveTimeWrapper {
+    fn rand_value<R: Rng>(rand: &mut R) -> Self {
+        let hour = rand.gen_range(0..24);
+        let min = rand.gen_range(0..60);
+        let sec = rand.gen_range(0..60);
+        let nano = rand.gen_range(0..1_000_000_000);
+        NaiveTimeWrapper::new(NaiveTime::from_hms_nano(hour, min, sec, nano))
+    }
+}
+
+impl RandValue for NaiveDateTimeWrapper {
+    fn rand_value<R: Rng>(rand: &mut R) -> Self {
+        NaiveDateTimeWrapper::new(
+            NaiveDateWrapper::rand_value(rand)
+                .0
+                .and_time(NaiveTimeWrapper::rand_value(rand).0),
+        )
     }
 }
 
 impl RandValue for bool {
     fn rand_value<R: Rng>(rand: &mut R) -> Self {
-        rand.gen::<i32>() > 0
+        rand.gen::<bool>()
     }
 }
 

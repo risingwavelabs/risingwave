@@ -12,7 +12,7 @@ use crate::array::{ArrayBuilderImpl, ArrayImpl};
 use crate::buffer::Bitmap;
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
-use crate::types::DataTypeKind;
+use crate::types::DataType;
 use crate::util::hash_util::finalize_hashers;
 
 pub struct DataChunkBuilder {
@@ -93,7 +93,7 @@ impl DataChunk {
     }
 
     /// Build a `DataChunk` with rows.
-    pub fn from_rows(rows: &[Row], data_types: &[DataTypeKind]) -> Result<Self> {
+    pub fn from_rows(rows: &[Row], data_types: &[DataType]) -> Result<Self> {
         let mut array_builders = data_types
             .iter()
             .map(|data_type| data_type.create_array_builder(1))
@@ -336,9 +336,9 @@ impl DataChunk {
         states.resize_with(self.cardinality(), || hasher_builder.build_hasher());
         for column_idx in column_idxes {
             let array = self.column_at(*column_idx)?.array();
-            array.hash_vec(&mut states);
+            array.hash_vec(&mut states[..]);
         }
-        Ok(finalize_hashers(&mut states))
+        Ok(finalize_hashers(&mut states[..]))
     }
 
     /// Get an iterator for visible rows.

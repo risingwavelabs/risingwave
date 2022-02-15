@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 use risingwave_common::{ensure, gen_error};
 use risingwave_storage::bummock::BummockTable;
 use risingwave_storage::table::{ScannableTable, ScannableTableRef};
@@ -43,7 +43,7 @@ pub trait SourceManager: Sync + Send {
 #[derive(Clone, Debug)]
 pub struct SourceColumnDesc {
     pub name: String,
-    pub data_type: DataTypeKind,
+    pub data_type: DataType,
     pub column_id: i32,
     pub skip_parse: bool,
     pub is_primary: bool,
@@ -238,7 +238,7 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema, TableId};
     use risingwave_common::column_nonnull;
     use risingwave_common::error::Result;
-    use risingwave_common::types::DataTypeKind;
+    use risingwave_common::types::DataType;
     use risingwave_storage::bummock::BummockTable;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::mview::MViewTable;
@@ -267,7 +267,7 @@ mod tests {
 
         let table = Arc::new(BummockTable::new(
             &TableId::default(),
-            vec![TableColumnDesc::new_without_name(0, DataTypeKind::Int64)],
+            vec![TableColumnDesc::new_without_name(0, DataType::Int64)],
         ));
 
         let chunk0 = StreamChunk::new(vec![Op::Insert], vec![column_nonnull!(I64Array, [0])], None);
@@ -317,8 +317,8 @@ mod tests {
 
         let schema = Schema {
             fields: vec![
-                Field::unnamed(DataTypeKind::decimal_default()),
-                Field::unnamed(DataTypeKind::decimal_default()),
+                Field::unnamed(DataType::Decimal),
+                Field::unnamed(DataType::Decimal),
             ],
         };
 
@@ -357,8 +357,8 @@ mod tests {
 
         let schema = Schema {
             fields: vec![
-                Field::unnamed(DataTypeKind::decimal_default()),
-                Field::unnamed(DataTypeKind::decimal_default()),
+                Field::unnamed(DataType::Decimal),
+                Field::unnamed(DataType::Decimal),
             ],
         };
 

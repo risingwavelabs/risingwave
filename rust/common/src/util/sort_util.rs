@@ -9,7 +9,7 @@ use crate::array::{Array, ArrayImpl, DataChunk, DataChunkRef};
 use crate::error::ErrorCode::InternalError;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::InputRefExpression;
-use crate::types::{DataTypeKind, ScalarPartialOrd, ScalarRef};
+use crate::types::{DataType, ScalarPartialOrd, ScalarRef};
 
 pub const K_PROCESSING_WINDOW_SIZE: usize = 1024;
 
@@ -143,7 +143,20 @@ pub fn compare_two_row(
         let res = gen_match!(
             lhs_array,
             rhs_array,
-            [Int16, Int32, Int64, Float32, Float64, Utf8, Bool, Decimal]
+            [
+                Int16,
+                Int32,
+                Int64,
+                Float32,
+                Float64,
+                Utf8,
+                Bool,
+                Decimal,
+                Interval,
+                NaiveDate,
+                NaiveDateTime,
+                NaiveTime
+            ]
         );
         if res != Ordering::Equal {
             return Ok(res);
@@ -156,7 +169,7 @@ pub fn fetch_orders(column_orders: &[ColumnOrder]) -> Result<Vec<OrderPair>> {
     let mut order_pairs = Vec::<OrderPair>::new();
     for column_order in column_orders {
         let order_type: ProstOrderType = column_order.get_order_type()?;
-        let return_type = DataTypeKind::from(column_order.get_return_type()?);
+        let return_type = DataType::from(column_order.get_return_type()?);
         let input_ref: &InputRefExpr = column_order.get_input_ref()?;
         let input_ref_expr = InputRefExpression::new(return_type, input_ref.column_idx as usize);
         order_pairs.push(OrderPair {

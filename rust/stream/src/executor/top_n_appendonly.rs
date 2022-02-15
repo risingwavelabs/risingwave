@@ -54,7 +54,7 @@ pub struct AppendOnlyTopNExecutor<S: StateStore> {
     /// The input of the current executor
     input: Box<dyn Executor>,
     /// The ordering
-    order_types: Vec<OrderType>,
+    pk_order_types: Vec<OrderType>,
     /// `LIMIT XXX`. `None` means no limit.
     limit: Option<usize>,
     /// `OFFSET XXX`. `0` means no offset.
@@ -80,7 +80,7 @@ impl<S: StateStore> std::fmt::Debug for AppendOnlyTopNExecutor<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AppendOnlyTopNExecutor")
             .field("input", &self.input)
-            .field("order_types", &self.order_types)
+            .field("pk_order_types", &self.pk_order_types)
             .field("limit", &self.limit)
             .field("offset", &self.offset)
             .field("pk_indices", &self.pk_indices)
@@ -92,7 +92,7 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         input: Box<dyn Executor>,
-        order_types: Vec<OrderType>,
+        pk_order_types: Vec<OrderType>,
         offset_and_limit: (usize, Option<usize>),
         pk_indices: PkIndices,
         keyspace: Keyspace<S>,
@@ -100,24 +100,30 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
         total_count: (usize, usize),
         executor_id: u64,
     ) -> Self {
-        let data_types = pk_indices
+        let pk_data_types = pk_indices
             .iter()
             .map(|idx| input.schema().fields[*idx].data_type())
+            .collect::<Vec<_>>();
+        let row_data_types = input
+            .schema()
+            .fields
+            .iter()
+            .map(|field| field.data_type)
             .collect::<Vec<_>>();
         let lower_sub_keyspace = keyspace.with_segment(Segment::FixedLength(b"l/".to_vec()));
         let higher_sub_keyspace = keyspace.with_segment(Segment::FixedLength(b"h/".to_vec()));
         let ordered_row_deserializer =
-            OrderedRowDeserializer::new(data_types.clone(), order_types.clone());
+            OrderedRowDeserializer::new(pk_data_types, pk_order_types.clone());
         Self {
             input,
-            order_types,
+            pk_order_types,
             offset: offset_and_limit.0,
             limit: offset_and_limit.1,
             managed_lower_state: ManagedTopNState::<S, TOP_N_MAX>::new(
                 cache_size,
                 total_count.0,
                 lower_sub_keyspace,
-                data_types.clone(),
+                row_data_types.clone(),
                 ordered_row_deserializer.clone(),
                 0,
             ),
@@ -125,7 +131,7 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
                 cache_size,
                 total_count.1,
                 higher_sub_keyspace,
-                data_types,
+                row_data_types,
                 ordered_row_deserializer,
                 0,
             ),
@@ -157,6 +163,14 @@ impl<S: StateStore> Executor for AppendOnlyTopNExecutor<S> {
 
     fn identity(&self) -> &str {
         self.identity.as_str()
+    }
+
+    fn clear_cache(&mut self) -> Result<()> {
+        self.managed_lower_state.clear_cache();
+        self.managed_higher_state.clear_cache();
+        self.first_execution = true;
+
+        Ok(())
     }
 }
 
@@ -192,7 +206,7 @@ impl<S: StateStore> TopNExecutorBase for AppendOnlyTopNExecutor<S> {
                 .iter()
                 .map(|idx| row_ref.0[*idx].to_owned_datum())
                 .collect::<Vec<_>>());
-            let ordered_pk_row = OrderedRow::new(pk_row, &self.order_types);
+            let ordered_pk_row = OrderedRow::new(pk_row, &self.pk_order_types);
             let row = row_ref.into();
             if self.managed_lower_state.total_count() < self.offset {
                 // `elem` is in the range of `[0, offset)`,
@@ -262,8 +276,8 @@ pub(super) fn generate_output(
 ) -> Result<StreamChunk> {
     if !new_rows.is_empty() {
         let mut data_chunk_builder = DataChunkBuilder::new_with_default_size(schema.data_types());
-        for row in new_rows {
-            data_chunk_builder.append_one_row_ref((&row).into())?;
+        for row in &new_rows {
+            data_chunk_builder.append_one_row_ref(row.into())?;
         }
         // since `new_rows` is not empty, we unwrap directly
         let new_data_chunk = data_chunk_builder.consume_all()?.unwrap();
@@ -287,7 +301,7 @@ mod tests {
     use risingwave_common::array::{Array, I64Array, Op};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::column_nonnull;
-    use risingwave_common::types::DataTypeKind;
+    use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
 
     use crate::executor::test_utils::{create_in_memory_keyspace, MockSource};
@@ -325,8 +339,8 @@ mod tests {
     fn create_schema() -> Schema {
         Schema {
             fields: vec![
-                Field::unnamed(DataTypeKind::Int64),
-                Field::unnamed(DataTypeKind::Int64),
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
             ],
         }
     }

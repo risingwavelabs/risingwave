@@ -6,7 +6,7 @@ use itertools::Itertools;
 use crate::array::column::Column;
 use crate::array::{ArrayBuilderImpl, ArrayImpl, DataChunk, RowRef};
 use crate::error::Result;
-use crate::types::DataTypeKind;
+use crate::types::DataType;
 
 pub const DEFAULT_CHUNK_BUFFER_SIZE: usize = 2048;
 
@@ -19,7 +19,7 @@ pub struct SlicedDataChunk {
 /// Used as a buffer for accumulating rows.
 pub struct DataChunkBuilder {
     /// Data types for build array
-    data_types: Vec<DataTypeKind>,
+    data_types: Vec<DataType>,
     batch_size: usize,
 
     /// Buffers storing current data
@@ -28,11 +28,11 @@ pub struct DataChunkBuilder {
 }
 
 impl DataChunkBuilder {
-    pub fn new_with_default_size(data_types: Vec<DataTypeKind>) -> Self {
+    pub fn new_with_default_size(data_types: Vec<DataType>) -> Self {
         Self::new(data_types, DEFAULT_CHUNK_BUFFER_SIZE)
     }
 
-    pub fn new(data_types: Vec<DataTypeKind>, batch_size: usize) -> Self {
+    pub fn new(data_types: Vec<DataType>, batch_size: usize) -> Self {
         Self {
             data_types,
             batch_size,
@@ -229,12 +229,12 @@ mod tests {
     use crate::array::{DataChunk, I32Array, I64Array};
     use crate::buffer::Bitmap;
     use crate::column;
-    use crate::types::DataTypeKind;
+    use crate::types::DataType;
     use crate::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
 
     #[test]
     fn test_append_chunk() {
-        let mut builder = DataChunkBuilder::new(vec![DataTypeKind::Int32, DataTypeKind::Int64], 3);
+        let mut builder = DataChunkBuilder::new(vec![DataType::Int32, DataType::Int64], 3);
 
         // Append a chunk with 2 rows
         let input = {
@@ -287,7 +287,7 @@ mod tests {
 
     #[test]
     fn test_append_chunk_with_bitmap() {
-        let mut builder = DataChunkBuilder::new(vec![DataTypeKind::Int32, DataTypeKind::Int64], 3);
+        let mut builder = DataChunkBuilder::new(vec![DataType::Int32, DataType::Int64], 3);
 
         // Append a chunk with 2 rows
         let input = {
@@ -341,7 +341,7 @@ mod tests {
 
     #[test]
     fn test_consume_all() {
-        let mut builder = DataChunkBuilder::new(vec![DataTypeKind::Int32, DataTypeKind::Int64], 3);
+        let mut builder = DataChunkBuilder::new(vec![DataType::Int32, DataType::Int64], 3);
 
         // It should return `None` when builder is empty
         assert!(builder.consume_all().unwrap().is_none());

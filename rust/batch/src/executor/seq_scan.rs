@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use risingwave_common::array::{DataChunk, DataChunkRef};
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::Result;
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_storage::bummock::BummockResult;
 use risingwave_storage::table::ScannableTableRef;
@@ -21,13 +21,18 @@ pub struct SeqScanExecutor {
 }
 
 impl SeqScanExecutor {
-    pub fn new(table: ScannableTableRef, column_ids: Vec<i32>, schema: Schema) -> Self {
+    pub fn new(
+        table: ScannableTableRef,
+        column_ids: Vec<i32>,
+        schema: Schema,
+        identity: String,
+    ) -> Self {
         Self {
             table,
             column_ids,
             schema,
             snapshot: Default::default(),
-            identity: "SeqScanExecutor".to_string(),
+            identity,
         }
     }
 }
@@ -54,14 +59,19 @@ impl BoxedExecutorBuilder for SeqScanExecutor {
                 .iter()
                 .map(|f| {
                     Ok(Field {
-                        data_type: DataTypeKind::from(f.get_data_type()?),
+                        data_type: DataType::from(f.get_data_type()?),
                         name: f.get_name().clone(),
                     })
                 })
                 .collect::<Result<Vec<Field>>>()?,
         );
 
-        Ok(Box::new(Self::new(table_ref, column_ids.to_vec(), schema)))
+        Ok(Box::new(Self::new(
+            table_ref,
+            column_ids.to_vec(),
+            schema,
+            source.plan_node().get_identity().clone(),
+        )))
     }
 }
 
@@ -103,7 +113,7 @@ mod tests {
     use risingwave_common::array::{Array, I64Array};
     use risingwave_common::catalog::Field;
     use risingwave_common::column_nonnull;
-    use risingwave_common::types::DataTypeKind;
+    use risingwave_common::types::DataType;
     use risingwave_storage::bummock::BummockTable;
     use risingwave_storage::table::ScannableTable;
     use risingwave_storage::{Table, TableColumnDesc};
@@ -115,7 +125,7 @@ mod tests {
     async fn test_seq_scan_executor() -> Result<()> {
         let table_id = TableId::default();
         let schema = Schema {
-            fields: vec![Field::unnamed(DataTypeKind::decimal_default())],
+            fields: vec![Field::unnamed(DataType::Decimal)],
         };
         let table_columns = schema
             .fields
@@ -147,7 +157,7 @@ mod tests {
         seq_scan_executor.open().await.unwrap();
 
         let fields = &seq_scan_executor.schema().fields;
-        assert_eq!(fields[0].data_type, DataTypeKind::decimal_default());
+        assert_eq!(fields[0].data_type, DataType::Decimal);
 
         seq_scan_executor.open().await.unwrap();
 

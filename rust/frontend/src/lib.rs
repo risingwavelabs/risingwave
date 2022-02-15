@@ -6,8 +6,10 @@ pub mod binder;
 pub mod expr;
 pub mod handler;
 pub mod optimizer;
+pub mod planner;
+mod scheduler;
 pub mod session;
-
+pub mod utils;
 extern crate log;
 #[cfg(test)]
 mod test_utils;

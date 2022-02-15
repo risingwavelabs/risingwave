@@ -51,7 +51,7 @@ pub type PlanRef = Rc<dyn PlanNode>;
 impl dyn PlanNode {
     /// Write explain the whole plan tree.
     pub fn explain(&self, level: usize, f: &mut dyn std::fmt::Write) -> std::fmt::Result {
-        write!(f, "{}{}", " ".repeat(level * 2), self)?;
+        writeln!(f, "{}{}", " ".repeat(level * 2), self)?;
         for input in self.inputs() {
             input.explain(level + 1, f)?;
         }
@@ -84,15 +84,19 @@ pub use join_predicate::*;
 
 mod batch_exchange;
 mod batch_hash_join;
+mod batch_limit;
 mod batch_project;
 mod batch_seq_scan;
 mod batch_sort;
 mod batch_sort_merge_join;
 mod logical_agg;
 mod logical_filter;
+mod logical_insert;
 mod logical_join;
+mod logical_limit;
 mod logical_project;
 mod logical_scan;
+mod logical_topn;
 mod logical_values;
 mod stream_exchange;
 mod stream_hash_join;
@@ -100,15 +104,19 @@ mod stream_project;
 mod stream_table_source;
 pub use batch_exchange::BatchExchange;
 pub use batch_hash_join::BatchHashJoin;
+pub use batch_limit::BatchLimit;
 pub use batch_project::BatchProject;
 pub use batch_seq_scan::BatchSeqScan;
 pub use batch_sort::BatchSort;
 pub use batch_sort_merge_join::BatchSortMergeJoin;
 pub use logical_agg::LogicalAgg;
 pub use logical_filter::LogicalFilter;
+pub use logical_insert::LogicalInsert;
 pub use logical_join::LogicalJoin;
+pub use logical_limit::LogicalLimit;
 pub use logical_project::LogicalProject;
 pub use logical_scan::LogicalScan;
+pub use logical_topn::LogicalTopN;
 pub use logical_values::LogicalValues;
 pub use stream_exchange::StreamExchange;
 pub use stream_hash_join::StreamHashJoin;
@@ -136,8 +144,11 @@ macro_rules! for_all_plan_nodes {
           ,{ Logical, Filter}
           ,{ Logical, Project}
           ,{ Logical, Scan}
+          ,{ Logical, Insert}
           ,{ Logical, Join}
           ,{ Logical, Values}
+          ,{ Logical, Limit}
+          ,{ Logical, TopN}
           // ,{ Logical, Sort} we don't need a LogicalSort, just require the Order
           ,{ Batch, Project}
           ,{ Batch, SeqScan}
@@ -145,6 +156,7 @@ macro_rules! for_all_plan_nodes {
           ,{ Batch, SortMergeJoin}
           ,{ Batch, Sort}
           ,{ Batch, Exchange}
+          ,{ Batch, Limit}
           ,{ Stream, Project}
           ,{ Stream, TableSource}
           ,{ Stream, HashJoin}
@@ -162,8 +174,11 @@ macro_rules! for_logical_plan_nodes {
             ,{ Logical, Filter}
             ,{ Logical, Project}
             ,{ Logical, Scan}
+            ,{ Logical, Insert}
             ,{ Logical, Join}
             ,{ Logical, Values}
+            ,{ Logical, Limit}
+            ,{ Logical, TopN}
             // ,{ Logical, Sort} not sure if we will support Order by clause in subquery/view/MV
             // if we dont support thatk, we don't need LogicalSort, just require the Order at the top of query
         }
@@ -179,6 +194,7 @@ macro_rules! for_batch_plan_nodes {
             ,{ Batch, Project}
             ,{ Batch, SeqScan}
             ,{ Batch, HashJoin}
+            ,{ Batch, Limit}
             ,{ Batch, SortMergeJoin}
             ,{ Batch, Sort}
             ,{ Batch, Exchange}
@@ -204,7 +220,9 @@ macro_rules! for_stream_plan_nodes {
 macro_rules! enum_plan_node_type {
   ([], $( { $convention:ident, $name:ident }),*) => {
     paste!{
+
       /// each enum value represent a PlanNode struct type, help us to dispatch and downcast
+      #[derive(PartialEq, Debug)]
       pub enum PlanNodeType{
         $(  [<$convention $name>] ),*
       }
@@ -225,32 +243,32 @@ pub trait IntoPlanRef {
 }
 /// impl fn plan_ref for each node.
 macro_rules! impl_plan_ref {
-  ([], $( { $convention:ident, $name:ident }),*) => {
-    paste!{
-      $(impl IntoPlanRef for [<$convention $name>] {
-        fn into_plan_ref(self) -> PlanRef {
-          std::rc::Rc::new(self)
+    ([], $( { $convention:ident, $name:ident }),*) => {
+        paste!{
+            $(impl IntoPlanRef for [<$convention $name>] {
+                fn into_plan_ref(self) -> PlanRef {
+                    std::rc::Rc::new(self)
+                }
+                fn clone_as_plan_ref(&self) -> PlanRef{
+                    self.clone().into_plan_ref()
+                }
+            })*
         }
-        fn clone_as_plan_ref(&self) -> PlanRef{
-          self.clone().into_plan_ref()
-        }
-     })*
     }
-  }
 }
 for_all_plan_nodes! {impl_plan_ref }
 
 /// impl plan node downcast fn for each node.
 macro_rules! impl_down_cast_fn {
-  ([], $( { $convention:ident, $name:ident }),*) => {
-    paste!{
-      #[allow(unused)]
-      impl dyn PlanNode {
-        $( pub fn [< as_$convention:snake _ $name:snake>](&self) -> Option<&[<$convention $name>]> {
-          self.downcast_ref::<[<$convention $name>]>()
-        } )*
-      }
+    ([], $( { $convention:ident, $name:ident }),*) => {
+        paste!{
+            #[allow(unused)]
+            impl dyn PlanNode {
+                $( pub fn [< as_$convention:snake _ $name:snake>](&self) -> Option<&[<$convention $name>]> {
+                    self.downcast_ref::<[<$convention $name>]>()
+                } )*
+            }
+        }
     }
-  }
 }
 for_all_plan_nodes! {impl_down_cast_fn }

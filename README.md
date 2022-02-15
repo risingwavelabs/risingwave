@@ -1,13 +1,13 @@
 # RisingWave
 
 [![Slack](https://badgen.net/badge/Slack/Join%20RisingWave/0abd59?icon=slack)](https://join.slack.com/t/risingwave-community/shared_invite/zt-120rft0mr-d8uGk3d~NZiZAQWPnElOfw)
-[![CI](https://github.com/singularity-data/risingwave/actions/workflows/main.yml/badge.svg)](https://github.com/singularity-data/risingwave/actions/workflows/main.yml)
-[![codecov](https://codecov.io/gh/singularity-data/risingwave/branch/main/graph/badge.svg?token=C5ZX0L0GWK)](https://codecov.io/gh/singularity-data/risingwave)
+[![CI](https://github.com/singularity-data/risingwave-dev/actions/workflows/main.yml/badge.svg)](https://github.com/singularity-data/risingwave-dev/actions/workflows/main.yml)
+[![codecov](https://codecov.io/gh/singularity-data/risingwave-dev/branch/main/graph/badge.svg?token=EB44K9K38B)](https://codecov.io/gh/singularity-data/risingwave-dev)
 
 ## Download
 Run:
 ```shell
-git clone https://github.com/singularity-data/risingwave.git
+git clone https://github.com/singularity-data/risingwave-dev.git
 ```
 
 ## Environment
@@ -40,9 +40,9 @@ engine, storage engine and meta service.
 - The `e2e_test` folder contains the latest end-to-end test cases.
 
 
-### RiseLAB
+### RiseDev
 
-RiseLAB is the new tool for developing RisingWave. You'll need to install tmux (>= 3.2a) beforehand.
+RiseDev is the new tool for developing RisingWave. You'll need to install tmux (>= 3.2a) beforehand.
 
 ```
 brew install tmux wget
@@ -51,10 +51,10 @@ brew install tmux wget
 Then, simply run:
 
 ```
-./riselab d # shortcut for ./riselab dev
-./riselab ci-streaming
-./riselab ci-3node
-./riselab dev-compute-node # compute node will need to be started by you
+./risedev d # shortcut for ./risedev dev
+./risedev ci-streaming
+./risedev ci-3node
+./risedev dev-compute-node # compute node will need to be started by you
 ```
 
 Everything will be set for you.
@@ -62,16 +62,16 @@ Everything will be set for you.
 To stop the playground,
 
 ```
-./riselab k # shortcut for ./riselab kill
+./risedev k # shortcut for ./risedev kill
 ```
 
-And you can configure components for RiseLAB.
+And you can configure components for RiseDev.
 
 ```
-./riselab configure
+./risedev configure
 ```
 
-For more information, refer to `README.md` under `rust/riselab`.
+For more information, refer to `README.md` under `rust/risedev`.
 
 ### Dashboard
 
@@ -142,7 +142,7 @@ psql -h localhost -p 4567 -d dev
 Now you can use the Postgres shell to try out your SQL command!
 
 ## Contributing
-Thanks for your interest in contributing to the project, please refer to the [CONTRIBUTING.md](https://github.com/singularity-data/risingwave/blob/main/CONTRIBUTING.md).
+Thanks for your interest in contributing to the project, please refer to the [CONTRIBUTING.md](https://github.com/singularity-data/risingwave-dev/blob/main/CONTRIBUTING.md).
 
 ## Toolchain
 Currently, we are using nightly toolchain `nightly-2022-01-13`. If anyone needs to upgrade

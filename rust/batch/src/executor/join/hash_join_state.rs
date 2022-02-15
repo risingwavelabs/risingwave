@@ -37,9 +37,10 @@ impl BuildTable {
             "Build table size exceeded limit!"
         );
         let data_chunk = data_chunk.compact()?;
-        ensure!(data_chunk.cardinality() > 0);
-        self.row_count += data_chunk.cardinality();
-        self.build_data.push(data_chunk);
+        if data_chunk.cardinality() > 0 {
+            self.row_count += data_chunk.cardinality();
+            self.build_data.push(data_chunk);
+        }
         Ok(())
     }
 

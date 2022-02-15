@@ -47,7 +47,7 @@ impl TableId {
     }
 }
 
-// TODO: replace boilplate code
+// TODO: replace boilerplate code
 impl From<&Option<risingwave_pb::plan::DatabaseRefId>> for DatabaseId {
     fn from(option: &Option<risingwave_pb::plan::DatabaseRefId>) -> Self {
         match option {
@@ -61,7 +61,7 @@ impl From<&Option<risingwave_pb::plan::DatabaseRefId>> for DatabaseId {
     }
 }
 
-// TODO: replace boilplate code
+// TODO: replace boilerplate code
 impl From<&Option<risingwave_pb::plan::SchemaRefId>> for SchemaId {
     fn from(option: &Option<risingwave_pb::plan::SchemaRefId>) -> Self {
         match option {
@@ -80,7 +80,7 @@ impl From<&Option<risingwave_pb::plan::SchemaRefId>> for SchemaId {
     }
 }
 
-// TODO: replace boilplate code
+// TODO: replace boilerplate code
 impl From<&Option<risingwave_pb::plan::TableRefId>> for TableId {
     fn from(option: &Option<risingwave_pb::plan::TableRefId>) -> Self {
         match option {
@@ -95,6 +95,39 @@ impl From<&Option<risingwave_pb::plan::TableRefId>> for TableId {
                     table_id: pb.table_id,
                 }
             }
+        }
+    }
+}
+
+// TODO: replace boilerplate code
+impl From<&DatabaseId> for risingwave_pb::plan::DatabaseRefId {
+    fn from(database_id: &DatabaseId) -> Self {
+        risingwave_pb::plan::DatabaseRefId {
+            database_id: database_id.database_id,
+        }
+    }
+}
+
+// TODO: replace boilerplate code
+impl From<&SchemaId> for risingwave_pb::plan::SchemaRefId {
+    fn from(schema_id: &SchemaId) -> Self {
+        risingwave_pb::plan::SchemaRefId {
+            database_ref_id: Some(risingwave_pb::plan::DatabaseRefId::from(
+                &schema_id.database_ref_id,
+            )),
+            schema_id: schema_id.schema_id,
+        }
+    }
+}
+
+// TODO: replace boilerplate code
+impl From<&TableId> for risingwave_pb::plan::TableRefId {
+    fn from(table_id: &TableId) -> Self {
+        risingwave_pb::plan::TableRefId {
+            schema_ref_id: Some(risingwave_pb::plan::SchemaRefId::from(
+                &table_id.schema_ref_id,
+            )),
+            table_id: 0,
         }
     }
 }

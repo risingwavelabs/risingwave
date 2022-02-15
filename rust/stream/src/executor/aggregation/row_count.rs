@@ -5,7 +5,7 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
-use risingwave_common::types::{DataTypeKind, Datum, ScalarImpl};
+use risingwave_common::types::{DataType, Datum, ScalarImpl};
 
 use super::StreamingAggStateImpl;
 
@@ -13,7 +13,7 @@ use super::StreamingAggStateImpl;
 /// Note that if there are zero rows in aggregator, `0` will be emitted
 /// instead of `None`. Note that if you want to only count non-null value,
 /// use `StreamingCountAgg` instead.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct StreamingRowCountAgg {
     row_cnt: i64,
 }
@@ -43,14 +43,8 @@ impl StreamingRowCountAgg {
         I64ArrayBuilder::new(capacity).map(|builder| builder.into())
     }
 
-    pub fn return_type() -> DataTypeKind {
-        DataTypeKind::Int64
-    }
-}
-
-impl Default for StreamingRowCountAgg {
-    fn default() -> Self {
-        Self::new()
+    pub fn return_type() -> DataType {
+        DataType::Int64
     }
 }
 
@@ -90,6 +84,10 @@ impl StreamingAggStateImpl for StreamingRowCountAgg {
 
     fn new_builder(&self) -> ArrayBuilderImpl {
         ArrayBuilderImpl::Int64(I64ArrayBuilder::new(0).unwrap())
+    }
+
+    fn reset(&mut self) {
+        self.row_cnt = 0;
     }
 }
 

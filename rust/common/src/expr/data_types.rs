@@ -1,18 +1,18 @@
 //! Macros containing all necessary information for a logical type.
 //!
 //! Each type macro will call the `$macro` with multiple parameters:
-//! * Patterns when being used in pattern match. e.g., `DataTypeKind::Decimal { .. }`.
+//! * Patterns when being used in pattern match. e.g., `DataType::Decimal { .. }`.
 //! * Array types. e.g., `DecimalArray`.
 //!
 //! To understand how this datatype macros work, we write them in pseudo code:
 //!
 //! ```ignore
-//! fn boolean<T>(f: impl Fn(DataTypeKind, Array) -> T) -> T {
-//!   f(DataTypeKind::Boolean, BoolArray)
+//! fn boolean<T>(f: impl Fn(DataType, Array) -> T) -> T {
+//!     f(DataType::Boolean, BoolArray)
 //! }
 //!
-//! fn type_array(_: DataTypeKind, a: Array) -> Array {
-//!   a
+//! fn type_array(_: DataType, a: Array) -> Array {
+//!     a
 //! }
 //!
 //! boolean(type_array) // result = BoolArray
@@ -25,8 +25,8 @@
 macro_rules! boolean {
     ($macro:tt) => {
         $macro! {
-          $crate::types::DataTypeKind::Boolean,
-          $crate::array::BoolArray
+            $crate::types::DataType::Boolean,
+            $crate::array::BoolArray
         }
     };
 }
@@ -37,8 +37,8 @@ pub(crate) use boolean;
 macro_rules! int16 {
     ($macro:tt) => {
         $macro! {
-          $crate::types::DataTypeKind::Int16,
-          $crate::array::I16Array
+            $crate::types::DataType::Int16,
+            $crate::array::I16Array
         }
     };
 }
@@ -49,8 +49,8 @@ pub(crate) use int16;
 macro_rules! int32 {
     ($macro:tt) => {
         $macro! {
-          $crate::types::DataTypeKind::Int32,
-          $crate::array::I32Array
+            $crate::types::DataType::Int32,
+            $crate::array::I32Array
         }
     };
 }
@@ -61,8 +61,8 @@ pub(crate) use int32;
 macro_rules! int64 {
     ($macro:tt) => {
         $macro! {
-          $crate::types::DataTypeKind::Int64,
-          $crate::array::I64Array
+            $crate::types::DataType::Int64,
+            $crate::array::I64Array
         }
     };
 }
@@ -73,8 +73,8 @@ pub(crate) use int64;
 macro_rules! float32 {
     ($macro:tt) => {
         $macro! {
-          $crate::types::DataTypeKind::Float32,
-          $crate::array::F32Array
+            $crate::types::DataType::Float32,
+            $crate::array::F32Array
         }
     };
 }
@@ -85,8 +85,8 @@ pub(crate) use float32;
 macro_rules! float64 {
     ($macro:tt) => {
         $macro! {
-          $crate::types::DataTypeKind::Float64,
-          $crate::array::F64Array
+            $crate::types::DataType::Float64,
+            $crate::array::F64Array
         }
     };
 }
@@ -97,8 +97,8 @@ pub(crate) use float64;
 macro_rules! decimal {
     ($macro:tt) => {
         $macro! {
-          $crate::types::DataTypeKind::Decimal { .. },
-          $crate::array::DecimalArray
+            $crate::types::DataType::Decimal { .. },
+            $crate::array::DecimalArray
         }
     };
 }
@@ -109,8 +109,8 @@ pub(crate) use decimal;
 macro_rules! date {
     ($macro:tt) => {
         $macro! {
-          $crate::types::DataTypeKind::Date,
-          $crate::array::I32Array
+            $crate::types::DataType::Date,
+            $crate::array::NaiveDateArray
         }
     };
 }
@@ -121,8 +121,8 @@ pub(crate) use date;
 macro_rules! char {
     ($macro:tt) => {
         $macro! {
-          $crate::types::DataTypeKind::Char,
-          $crate::array::Utf8Array
+            $crate::types::DataType::Char,
+            $crate::array::Utf8Array
         }
     };
 }
@@ -133,8 +133,8 @@ pub(crate) use char;
 macro_rules! varchar {
     ($macro:tt) => {
         $macro! {
-          $crate::types::DataTypeKind::Varchar,
-          $crate::array::Utf8Array
+            $crate::types::DataType::Varchar,
+            $crate::array::Utf8Array
         }
     };
 }
@@ -145,8 +145,8 @@ pub(crate) use varchar;
 macro_rules! time {
     ($macro:tt) => {
         $macro! {
-          $crate::types::DataTypeKind::Time,
-          $crate::array::I64Array
+            $crate::types::DataType::Time,
+            $crate::array::NaiveTimeArray
         }
     };
 }
@@ -158,8 +158,8 @@ pub(crate) use time;
 macro_rules! timestamp {
     ($macro:tt) => {
         $macro! {
-          $crate::types::DataTypeKind::Timestamp,
-          $crate::array::I64Array
+            $crate::types::DataType::Timestamp,
+            $crate::array::NaiveDateTimeArray
         }
     };
 }
@@ -170,8 +170,8 @@ pub(crate) use timestamp;
 macro_rules! timestampz {
     ($macro:tt) => {
         $macro! {
-          $crate::types::DataTypeKind::Timestampz,
-          $crate::array::I64Array
+            $crate::types::DataType::Timestampz,
+            $crate::array::I64Array
         }
     };
 }
@@ -182,15 +182,15 @@ pub(crate) use timestampz;
 macro_rules! interval {
     ($macro:tt) => {
         $macro! {
-          $crate::types::DataTypeKind::Interval,
-          $crate::array::IntervalArray
+            $crate::types::DataType::Interval,
+            $crate::array::IntervalArray
         }
     };
 }
 
 pub(crate) use interval;
 
-/// Get the type match pattern out of the type macro. e.g., `DataTypeKind::Decimal { .. }`.
+/// Get the type match pattern out of the type macro. e.g., `DataType::Decimal { .. }`.
 #[macro_export]
 macro_rules! type_match_pattern {
     ($match_pattern:pat, $array:ty) => {

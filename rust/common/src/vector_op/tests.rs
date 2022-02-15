@@ -1,11 +1,12 @@
 use std::str::FromStr;
 
-use chrono::{Datelike, NaiveDate, NaiveDateTime};
-use rust_decimal::Decimal;
+use chrono::{NaiveDate, NaiveDateTime};
 
-use crate::types::{IntervalUnit, OrderedF32, OrderedF64};
+use crate::types::{
+    Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, OrderedF32, OrderedF64,
+};
 use crate::vector_op::arithmetic_op::*;
-use crate::vector_op::cast::{date_to_timestamp, UNIX_EPOCH_DAYS};
+use crate::vector_op::cast::date_to_timestamp;
 use crate::vector_op::cmp::*;
 use crate::vector_op::conjunction::*;
 #[test]
@@ -30,11 +31,16 @@ fn test_arithmetic() {
         general_mod::<Decimal, i32, Decimal>(Decimal::from_str("2.0").unwrap(), 2).unwrap(),
         Decimal::from_str("0").unwrap()
     );
+    assert_eq!(
+        general_neg::<Decimal>(Decimal::from_str("1.0").unwrap()).unwrap(),
+        Decimal::from_str("-1.0").unwrap()
+    );
     assert_eq!(general_add::<i16, i32, i32>(1i16, 1i32).unwrap(), 2i32);
     assert_eq!(general_sub::<i16, i32, i32>(1i16, 1i32).unwrap(), 0i32);
     assert_eq!(general_mul::<i16, i32, i32>(1i16, 1i32).unwrap(), 1i32);
     assert_eq!(general_div::<i16, i32, i32>(1i16, 1i32).unwrap(), 1i32);
     assert_eq!(general_mod::<i16, i32, i32>(1i16, 1i32).unwrap(), 0i32);
+    assert_eq!(general_neg::<i16>(1i16).unwrap(), -1i16);
 
     assert_eq!(
         general_add::<Decimal, f32, Decimal>(Decimal::from_str("1.0").unwrap(), -1f32).unwrap(),
@@ -81,37 +87,38 @@ fn test_arithmetic() {
             < f64::EPSILON
     );
     assert_eq!(
-        date_interval_add::<i32, i32, i64>(
-            NaiveDate::from_ymd(1994, 1, 1).num_days_from_ce() - UNIX_EPOCH_DAYS,
+        general_neg::<OrderedF32>(1f32.into()).unwrap(),
+        OrderedF32::from(-1f32)
+    );
+    assert_eq!(
+        date_interval_add::<NaiveDateWrapper, IntervalUnit, NaiveDateTimeWrapper>(
+            NaiveDateWrapper::new(NaiveDate::from_ymd(1994, 1, 1)),
             IntervalUnit::from_month(12)
         )
         .unwrap(),
-        NaiveDateTime::parse_from_str("1995-1-1 0:0:0", "%Y-%m-%d %H:%M:%S")
-            .unwrap()
-            .timestamp_nanos()
-            / 1000
+        NaiveDateTimeWrapper::new(
+            NaiveDateTime::parse_from_str("1995-1-1 0:0:0", "%Y-%m-%d %H:%M:%S").unwrap()
+        )
     );
     assert_eq!(
-        interval_date_add::<i32, i32, i64>(
+        interval_date_add::<IntervalUnit, NaiveDateWrapper, NaiveDateTimeWrapper>(
             IntervalUnit::from_month(12),
-            NaiveDate::from_ymd(1994, 1, 1).num_days_from_ce() - UNIX_EPOCH_DAYS,
+            NaiveDateWrapper::new(NaiveDate::from_ymd(1994, 1, 1))
         )
         .unwrap(),
-        NaiveDateTime::parse_from_str("1995-1-1 0:0:0", "%Y-%m-%d %H:%M:%S")
-            .unwrap()
-            .timestamp_nanos()
-            / 1000
+        NaiveDateTimeWrapper::new(
+            NaiveDateTime::parse_from_str("1995-1-1 0:0:0", "%Y-%m-%d %H:%M:%S").unwrap()
+        )
     );
     assert_eq!(
-        date_interval_sub::<i32, i32, i64>(
-            NaiveDate::from_ymd(1994, 1, 1).num_days_from_ce() - UNIX_EPOCH_DAYS,
+        date_interval_sub::<NaiveDateWrapper, IntervalUnit, NaiveDateTimeWrapper>(
+            NaiveDateWrapper::new(NaiveDate::from_ymd(1994, 1, 1)),
             IntervalUnit::from_month(12)
         )
         .unwrap(),
-        NaiveDateTime::parse_from_str("1993-1-1 0:0:0", "%Y-%m-%d %H:%M:%S")
-            .unwrap()
-            .timestamp_nanos()
-            / 1000
+        NaiveDateTimeWrapper::new(
+            NaiveDateTime::parse_from_str("1993-1-1 0:0:0", "%Y-%m-%d %H:%M:%S").unwrap()
+        )
     );
 }
 
@@ -152,11 +159,9 @@ fn test_conjunction() {
 #[test]
 fn test_cast() {
     assert_eq!(
-        date_to_timestamp(NaiveDate::from_ymd(1994, 1, 1).num_days_from_ce() - UNIX_EPOCH_DAYS)
-            .unwrap(),
-        NaiveDateTime::parse_from_str("1994-1-1 0:0:0", "%Y-%m-%d %H:%M:%S")
-            .unwrap()
-            .timestamp_nanos()
-            / 1000
+        date_to_timestamp(NaiveDateWrapper::new(NaiveDate::from_ymd(1994, 1, 1))).unwrap(),
+        NaiveDateTimeWrapper::new(
+            NaiveDateTime::parse_from_str("1994-1-1 0:0:0", "%Y-%m-%d %H:%M:%S").unwrap()
+        )
     )
 }

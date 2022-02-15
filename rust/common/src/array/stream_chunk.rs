@@ -191,13 +191,13 @@ impl StreamChunk {
         keys: &[usize],
         hasher_builder: H,
     ) -> Result<Vec<u64>> {
-        let mut states = Vec::with_capacity(self.cardinality());
+        let mut states = vec![];
         states.resize_with(self.capacity(), || hasher_builder.build_hasher());
         for key in keys {
             let array = self.columns[*key].array();
-            array.hash_vec(&mut states);
+            array.hash_vec(&mut states[..]);
         }
-        Ok(finalize_hashers(&mut states))
+        Ok(finalize_hashers(&mut states[..]))
     }
 
     /// Random access a tuple in a stream chunk. Return in a row format.

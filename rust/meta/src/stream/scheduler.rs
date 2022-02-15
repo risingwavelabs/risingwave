@@ -7,6 +7,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 
 use crate::cluster::StoredClusterManager;
+use crate::model::ActorId;
 
 /// [`ScheduleCategory`] defines all supported categories.
 pub enum ScheduleCategory {
@@ -47,12 +48,12 @@ impl Scheduler {
     /// `enforced_round_actors`.
     pub async fn schedule(
         &self,
-        actors: &[u32],
-        enforce_round_actors: &[u32],
+        actors: &[ActorId],
+        enforce_round_actors: &[ActorId],
     ) -> Result<Vec<WorkerNode>> {
         let nodes = self
             .cluster_manager
-            .list_worker_node(WorkerType::ComputeNode)?;
+            .list_worker_node(WorkerType::ComputeNode);
         if nodes.is_empty() {
             return Err(InternalError("no available node exist".to_string()).into());
         }
@@ -100,7 +101,7 @@ mod test {
     #[tokio::test]
     async fn test_schedule() -> Result<()> {
         let env = MetaSrvEnv::for_test().await;
-        let cluster_manager = Arc::new(StoredClusterManager::new(env.clone()).await?);
+        let cluster_manager = Arc::new(StoredClusterManager::new(env.clone(), None).await?);
         let actors = (0..15).collect::<Vec<u32>>();
         let source_actors = (20..30).collect::<Vec<u32>>();
         let source_actors2 = (20..40).collect::<Vec<u32>>();
@@ -115,7 +116,7 @@ mod test {
                 )
                 .await?;
         }
-        let workers = cluster_manager.list_worker_node(WorkerType::ComputeNode)?;
+        let workers = cluster_manager.list_worker_node(WorkerType::ComputeNode);
 
         let simple_schedule = Scheduler::new(ScheduleCategory::Simple, cluster_manager.clone());
         let nodes = simple_schedule.schedule(&actors, &[]).await?;

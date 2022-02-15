@@ -12,7 +12,7 @@ use risingwave_common::collection::hash_map::{
     Key256, Key32, Key64, KeySerialized, PrecomputedBuildHasher,
 };
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 use risingwave_common::vector_op::agg::{AggStateFactory, BoxedAggState};
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::HashAggNode;
@@ -40,9 +40,10 @@ pub(super) struct HashAggExecutorBuilder {
     agg_factories: Vec<AggStateFactory>,
     group_key_columns: Vec<usize>,
     child: BoxedExecutor,
-    group_key_types: Vec<DataTypeKind>,
+    group_key_types: Vec<DataType>,
     schema: Schema,
     task_id: TaskId,
+    identity: String,
 }
 
 impl HashAggExecutorBuilder {
@@ -50,6 +51,7 @@ impl HashAggExecutorBuilder {
         hash_agg_node: &HashAggNode,
         child: BoxedExecutor,
         task_id: TaskId,
+        identity: String,
     ) -> Result<BoxedExecutor> {
         let group_key_columns = hash_agg_node
             .get_group_keys()
@@ -86,6 +88,7 @@ impl HashAggExecutorBuilder {
             group_key_types,
             schema: Schema { fields },
             task_id,
+            identity,
         };
 
         Ok(hash_key_dispatch!(
@@ -112,7 +115,8 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
             NodeBody::HashAgg
         )?;
 
-        Self::deserialize(hash_agg_node, child, source.task_id.clone())
+        let identity = source.plan_node().get_identity().clone();
+        Self::deserialize(hash_agg_node, child, source.task_id.clone(), identity)
     }
 }
 /// `HashAggExecutor` implements the hash aggregate algorithm.
@@ -128,7 +132,7 @@ pub(super) struct HashAggExecutor<K> {
     /// the aggregated result set
     result: Option<DataChunk>,
     /// the data types of key columns
-    group_key_types: Vec<DataTypeKind>,
+    group_key_types: Vec<DataType>,
     schema: Schema,
     identity: String,
 }
@@ -143,7 +147,7 @@ impl<K> HashAggExecutor<K> {
             group_key_types: builder.group_key_types,
             result: None,
             schema: builder.schema,
-            identity: "HashAggExecutor".to_string(),
+            identity: builder.identity,
         }
     }
 }
@@ -195,7 +199,7 @@ impl<K: HashKey + Send + Sync> Executor for HashAggExecutor<K> {
             .collect::<Result<Vec<_>>>()?;
 
         for (key, states) in mem::take(&mut self.groups) {
-            key.deserialize_to_builders(&mut group_builders)?;
+            key.deserialize_to_builders(&mut group_builders[..])?;
             states
                 .into_iter()
                 .zip_eq(&mut agg_builders)
@@ -243,7 +247,7 @@ mod tests {
     use risingwave_common::array_nonnull;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::DataType;
+    use risingwave_pb::data::DataType as ProstDataType;
     use risingwave_pb::expr::agg_call::{Arg, Type};
     use risingwave_pb::expr::{AggCall, InputRefExpr};
 
@@ -256,8 +260,8 @@ mod tests {
         let key2_col = Arc::new(array_nonnull! { I32Array, [1,1,0,1,0,0,1,1] }.into());
         let sum_col = Arc::new(array_nonnull! { I32Array,  [1,1,1,2,1,2,3,2] }.into());
 
-        let t32 = DataTypeKind::Int32;
-        let t64 = DataTypeKind::Int64;
+        let t32 = DataType::Int32;
+        let t64 = DataType::Int64;
 
         let src_exec = MockExecutor::with_chunk(
             DataChunk::builder()
@@ -280,15 +284,16 @@ mod tests {
             r#type: Type::Sum as i32,
             args: vec![Arg {
                 input: Some(InputRefExpr { column_idx: 2 }),
-                r#type: Some(DataType {
+                r#type: Some(ProstDataType {
                     type_name: TypeName::Int32 as i32,
                     ..Default::default()
                 }),
             }],
-            return_type: Some(DataType {
+            return_type: Some(ProstDataType {
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
+            distinct: false,
         };
 
         let agg_prost = HashAggNode {
@@ -296,9 +301,13 @@ mod tests {
             agg_calls: vec![agg_call],
         };
 
-        let actual_exec =
-            HashAggExecutorBuilder::deserialize(&agg_prost, Box::new(src_exec), TaskId::default())
-                .unwrap();
+        let actual_exec = HashAggExecutorBuilder::deserialize(
+            &agg_prost,
+            Box::new(src_exec),
+            TaskId::default(),
+            "HashAggExecutor".to_string(),
+        )
+        .unwrap();
 
         let schema = Schema {
             fields: vec![
@@ -329,7 +338,7 @@ mod tests {
     #[tokio::test]
     async fn execute_count_star() {
         let col = Arc::new(array_nonnull! { I32Array, [0,1,0,1,1,0,1,0] }.into());
-        let t32 = DataTypeKind::Int32;
+        let t32 = DataType::Int32;
         let src_exec = MockExecutor::with_chunk(
             DataChunk::builder().columns(vec![Column::new(col)]).build(),
             Schema {
@@ -340,10 +349,11 @@ mod tests {
         let agg_call = AggCall {
             r#type: Type::Count as i32,
             args: vec![],
-            return_type: Some(DataType {
+            return_type: Some(ProstDataType {
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
+            distinct: false,
         };
 
         let agg_prost = HashAggNode {
@@ -351,9 +361,13 @@ mod tests {
             agg_calls: vec![agg_call],
         };
 
-        let actual_exec =
-            HashAggExecutorBuilder::deserialize(&agg_prost, Box::new(src_exec), TaskId::default())
-                .unwrap();
+        let actual_exec = HashAggExecutorBuilder::deserialize(
+            &agg_prost,
+            Box::new(src_exec),
+            TaskId::default(),
+            "HashAggExecutor".to_string(),
+        )
+        .unwrap();
         let schema = Schema {
             fields: vec![Field::unnamed(t32)],
         };

@@ -4,13 +4,11 @@ use std::convert::TryInto;
 use std::fmt::Debug;
 
 use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime};
-use num_traits::{AsPrimitive, CheckedAdd, CheckedDiv, CheckedMul, CheckedRem, CheckedSub};
+use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub};
 
-use crate::array::PrimitiveArrayItemType;
 use crate::error::ErrorCode::{InternalError, NumericValueOutOfRange};
 use crate::error::{Result, RwError};
-use crate::types::IntervalUnit;
-use crate::vector_op::cast::UNIX_EPOCH_DAYS;
+use crate::types::{IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper};
 
 #[inline(always)]
 pub fn general_add<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
@@ -78,6 +76,14 @@ where
 }
 
 #[inline(always)]
+pub fn general_neg<T1: CheckedNeg>(expr: T1) -> Result<T1> {
+    match expr.checked_neg() {
+        Some(expr) => Ok(expr),
+        None => Err(RwError::from(NumericValueOutOfRange)),
+    }
+}
+
+#[inline(always)]
 pub fn general_atm<T1, T2, T3, F>(l: T1, r: T2, atm: F) -> Result<T3>
 where
     T1: TryInto<T3> + Debug,
@@ -119,13 +125,25 @@ fn get_mouth_days(year: i32, month: usize) -> i32 {
 }
 
 #[inline(always)]
-pub fn interval_date_add<T1, T2, T3>(l: IntervalUnit, r: T2) -> Result<T3>
-where
-    T2: PrimitiveArrayItemType + AsPrimitive<i32>,
-    T3: PrimitiveArrayItemType,
-    i64: AsPrimitive<T3>,
-{
-    let mut date = NaiveDate::from_num_days_from_ce(r.as_() + UNIX_EPOCH_DAYS);
+pub fn timestamp_timestamp_sub<T1, T2, T3>(
+    l: NaiveDateTimeWrapper,
+    r: NaiveDateTimeWrapper,
+) -> Result<IntervalUnit> {
+    let tmp = l.0 - r.0;
+    Ok(IntervalUnit::new(0, tmp.num_days() as i32, 0))
+}
+
+#[inline(always)]
+pub fn date_date_sub<T1, T2, T3>(l: NaiveDateWrapper, r: NaiveDateWrapper) -> Result<i32> {
+    Ok((l.0 - r.0).num_days() as i32)
+}
+
+#[inline(always)]
+pub fn interval_date_add<T1, T2, T3>(
+    l: IntervalUnit,
+    r: NaiveDateWrapper,
+) -> Result<NaiveDateTimeWrapper> {
+    let mut date = r.0;
     if l.get_months() != 0 {
         // NaiveDate don't support add months. We need calculate manually
         let mut day = date.day() as i32;
@@ -163,26 +181,22 @@ where
     datetime = datetime
         .checked_add_signed(Duration::milliseconds(l.get_ms()))
         .ok_or_else(|| InternalError("Date out of range".to_string()))?;
-    Ok((datetime.timestamp_nanos() / 1000).as_())
+    Ok(NaiveDateTimeWrapper::new(datetime))
 }
 
 #[inline(always)]
-pub fn date_interval_add<T2, T1, T3>(l: T2, r: IntervalUnit) -> Result<T3>
-where
-    T2: PrimitiveArrayItemType + AsPrimitive<i32>,
-    T3: PrimitiveArrayItemType,
-    i64: AsPrimitive<T3>,
-{
+pub fn date_interval_add<T2, T1, T3>(
+    l: NaiveDateWrapper,
+    r: IntervalUnit,
+) -> Result<NaiveDateTimeWrapper> {
     interval_date_add::<T1, T2, T3>(r, l)
 }
 
 #[inline(always)]
-pub fn date_interval_sub<T2, T1, T3>(l: T2, r: IntervalUnit) -> Result<T3>
-where
-    T2: PrimitiveArrayItemType + AsPrimitive<i32>,
-    T3: PrimitiveArrayItemType,
-    i64: AsPrimitive<T3>,
-{
+pub fn date_interval_sub<T2, T1, T3>(
+    l: NaiveDateWrapper,
+    r: IntervalUnit,
+) -> Result<NaiveDateTimeWrapper> {
     interval_date_add::<T1, T2, T3>(r.negative(), l)
 }
 

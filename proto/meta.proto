@@ -127,11 +127,30 @@ service HeartbeatService {
 }
 
 // Below for stream manager.
-message TableActors {
+message TableFragments {
+  enum State {
+    CREATING = 0;
+    CREATED = 1;
+    DROPPING = 2;
+    DROPPED = 3;
+  }
+  message Fragment {
+    enum FragmentType {
+      SOURCE = 0;
+      SINK = 1;
+      OTHERS = 2;
+    }
+    uint32 fragment_id = 1;
+    FragmentType fragment_type = 2;
+    repeated stream_plan.StreamActor actors = 3;
+  }
   plan.TableRefId table_ref_id = 1;
-  repeated uint32 actor_ids = 2;
+  State state = 2;
+  map<uint32, Fragment> fragments = 3;
+  map<uint32, uint32> actor_locations = 4;
 }
 
+// TODO: remove this when dashboard refactored.
 message ActorLocation {
   common.WorkerNode node = 1;
   repeated stream_plan.StreamActor actors = 2;

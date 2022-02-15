@@ -4,7 +4,7 @@ use tokio::sync as tokio_sync;
 use tokio::sync::mpsc::error::SendError;
 
 /// ``EntryStat`` Describes a directory or file. A file is a generic concept,
-/// and can be a LocalFile, a distributed file system, or a bucket in S3.
+/// and can be a local file, a distributed file system, or a bucket in S3.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct EntryStat {
     path: String,
@@ -57,13 +57,13 @@ impl Default for EntryOptEvent {
     }
 }
 
-/// Unlike the concept in the OS, the abstraction of a location is represented in the current context.
-/// For external resources we assume that none of them have the permission to modify,
+/// Unlike the concept in the OS, the abstraction of a location is represented in the current
+/// context. For external resources we assume that none of them have the permission to modify,
 /// so in Directory we only support read operations. However, unlike the classic File API,
 /// it is necessary to be able to sense changes in this directory.
 ///
-/// In contrast to the concept in MessageSystem source, Directory is similar to the concept of **Topic**;
-/// the Entry under Directory is equivalent to the **Partition** in Topic.
+/// In contrast to the concept in MessageSystem source, Directory is similar to the concept of
+/// **Topic**; the Entry under Directory is equivalent to the **Partition** in Topic.
 #[async_trait]
 pub trait Directory: Send + Sync {
     async fn push_entries_change(

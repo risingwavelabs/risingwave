@@ -2,7 +2,9 @@ use std::marker::PhantomData;
 
 use risingwave_pb::expr::expr_node::Type;
 
-use crate::array::{Array, BoolArray, DecimalArray, I32Array, I64Array, Utf8Array};
+use crate::array::{
+    Array, BoolArray, DecimalArray, I32Array, NaiveDateArray, NaiveDateTimeArray, Utf8Array,
+};
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
 use crate::expr::template::BinaryExpression;
@@ -92,7 +94,7 @@ macro_rules! gen_cmp_impl {
 macro_rules! gen_binary_expr_cmp {
     ($macro:tt, $general_f:ident, $str_f:ident, $l:expr, $r:expr, $ret:expr) => {
         match ($l.return_type(), $r.return_type()) {
-            (DataTypeKind::Varchar, DataTypeKind::Varchar) => {
+            (DataType::Varchar, DataType::Varchar) => {
                 Box::new(BinaryExpression::<Utf8Array, Utf8Array, BoolArray, _> {
                     expr_ia1: $l,
                     expr_ia2: $r,
@@ -101,7 +103,7 @@ macro_rules! gen_binary_expr_cmp {
                     _phantom: PhantomData,
                 })
             }
-            (DataTypeKind::Varchar, DataTypeKind::Char) => {
+            (DataType::Varchar, DataType::Char) => {
                 Box::new(BinaryExpression::<Utf8Array, Utf8Array, BoolArray, _> {
                     expr_ia1: $l,
                     expr_ia2: $r,
@@ -110,7 +112,7 @@ macro_rules! gen_binary_expr_cmp {
                     _phantom: PhantomData,
                 })
             }
-            (DataTypeKind::Char, DataTypeKind::Char) => {
+            (DataType::Char, DataType::Char) => {
                 Box::new(BinaryExpression::<Utf8Array, Utf8Array, BoolArray, _> {
                     expr_ia1: $l,
                     expr_ia2: $r,
@@ -159,7 +161,7 @@ macro_rules! gen_binary_expr_cmp {
                   { float32, decimal, float64, $general_f },
                   { float64, decimal, float64, $general_f },
                   { timestamp, timestamp, timestamp, $general_f },
-                  { date, date, int32, $general_f },
+                  { date, date, date, $general_f },
                   { boolean, boolean, boolean, $general_f }
                 }
             }
@@ -178,6 +180,8 @@ macro_rules! gen_binary_expr_atm {
     (
         $macro:tt,
         $general_f:ident,
+        $timestamp_timestamp_f:ident,
+        $date_date_f:ident,
         $interval_date_f:ident,
         $date_interval_f:ident,
         $l:expr,
@@ -222,35 +226,35 @@ macro_rules! gen_binary_expr_atm {
           { decimal, decimal, decimal, $general_f },
           { float32, decimal, float64, $general_f },
           { float64, decimal, float64, $general_f },
-          { timestamp, timestamp, timestamp, $general_f },
-          { date, date, int32, $general_f },
+          { timestamp, timestamp, interval, $timestamp_timestamp_f },
+          { date, date, int32, $date_date_f },
           { date, interval, timestamp, $date_interval_f },
           { interval, date, timestamp, $interval_date_f }
         }
     };
 }
 
-fn build_extract_expr(
-    ret: DataTypeKind,
-    l: BoxedExpression,
-    r: BoxedExpression,
-) -> BoxedExpression {
+fn build_extract_expr(ret: DataType, l: BoxedExpression, r: BoxedExpression) -> BoxedExpression {
     match r.return_type() {
-        DataTypeKind::Date => Box::new(BinaryExpression::<Utf8Array, I32Array, DecimalArray, _> {
-            expr_ia1: l,
-            expr_ia2: r,
-            return_type: ret,
-            func: extract_from_date,
-            _phantom: PhantomData,
-        }),
-        DataTypeKind::Timestamp => {
-            Box::new(BinaryExpression::<Utf8Array, I64Array, DecimalArray, _> {
+        DataType::Date => Box::new(
+            BinaryExpression::<Utf8Array, NaiveDateArray, DecimalArray, _> {
                 expr_ia1: l,
                 expr_ia2: r,
                 return_type: ret,
-                func: extract_from_timestamp,
+                func: extract_from_date,
                 _phantom: PhantomData,
-            })
+            },
+        ),
+        DataType::Timestamp => {
+            Box::new(
+                BinaryExpression::<Utf8Array, NaiveDateTimeArray, DecimalArray, _> {
+                    expr_ia1: l,
+                    expr_ia2: r,
+                    return_type: ret,
+                    func: extract_from_timestamp,
+                    _phantom: PhantomData,
+                },
+            )
         }
         _ => {
             unimplemented!("Extract ( {:?} ) is not supported yet!", r.return_type())
@@ -260,7 +264,7 @@ fn build_extract_expr(
 
 pub fn new_binary_expr(
     expr_type: Type,
-    ret: DataTypeKind,
+    ret: DataType,
     l: BoxedExpression,
     r: BoxedExpression,
 ) -> BoxedExpression {
@@ -286,23 +290,23 @@ pub fn new_binary_expr(
             gen_binary_expr_cmp! {gen_cmp_impl, general_le, str_le, l, r, ret}
         }
         Type::Add => {
-            gen_binary_expr_atm! {gen_atm_impl, general_add,
+            gen_binary_expr_atm! {gen_atm_impl, general_add, atm_placeholder, atm_placeholder,
             interval_date_add, date_interval_add, l, r, ret}
         }
         Type::Subtract => {
-            gen_binary_expr_atm! {gen_atm_impl, general_sub,
+            gen_binary_expr_atm! {gen_atm_impl, general_sub, timestamp_timestamp_sub, date_date_sub,
             atm_placeholder, date_interval_sub, l, r, ret}
         }
         Type::Multiply => {
-            gen_binary_expr_atm! {gen_atm_impl, general_mul,
+            gen_binary_expr_atm! {gen_atm_impl, general_mul, atm_placeholder, atm_placeholder,
             atm_placeholder, atm_placeholder, l, r, ret}
         }
         Type::Divide => {
-            gen_binary_expr_atm! {gen_atm_impl, general_div,
+            gen_binary_expr_atm! {gen_atm_impl, general_div, atm_placeholder, atm_placeholder,
             atm_placeholder, atm_placeholder, l, r, ret}
         }
         Type::Modulus => {
-            gen_binary_expr_atm! {gen_atm_impl, general_mod,
+            gen_binary_expr_atm! {gen_atm_impl, general_mod, atm_placeholder, atm_placeholder,
             atm_placeholder, atm_placeholder, l, r, ret}
         }
         Type::Extract => build_extract_expr(ret, l, r),
@@ -327,7 +331,7 @@ pub fn new_binary_expr(
 pub fn new_like_default(
     expr_ia1: BoxedExpression,
     expr_ia2: BoxedExpression,
-    return_type: DataTypeKind,
+    return_type: DataType,
 ) -> BoxedExpression {
     Box::new(BinaryExpression::<Utf8Array, Utf8Array, BoolArray, _> {
         expr_ia1,
@@ -341,7 +345,7 @@ pub fn new_like_default(
 pub fn new_position_expr(
     expr_ia1: BoxedExpression,
     expr_ia2: BoxedExpression,
-    return_type: DataTypeKind,
+    return_type: DataType,
 ) -> BoxedExpression {
     Box::new(BinaryExpression::<Utf8Array, Utf8Array, I32Array, _> {
         expr_ia1,
@@ -354,6 +358,7 @@ pub fn new_position_expr(
 
 #[cfg(test)]
 mod tests {
+    use chrono::NaiveDate;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::expr::expr_node::Type;
 
@@ -362,7 +367,7 @@ mod tests {
     use crate::array::interval_array::IntervalArray;
     use crate::array::*;
     use crate::expr::test_utils::make_expression;
-    use crate::types::{Decimal, IntervalUnit, Scalar};
+    use crate::types::{Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, Scalar};
     use crate::vector_op::arithmetic_op::{date_interval_add, date_interval_sub};
 
     #[test]
@@ -387,12 +392,18 @@ mod tests {
         test_binary_decimal::<BoolArray, _>(|x, y| x >= y, Type::GreaterThanOrEqual);
         test_binary_decimal::<BoolArray, _>(|x, y| x < y, Type::LessThan);
         test_binary_decimal::<BoolArray, _>(|x, y| x <= y, Type::LessThanOrEqual);
-        test_binary_interval::<I64Array, _>(
-            |x, y| date_interval_add::<i32, i32, i64>(x, y).unwrap(),
+        test_binary_interval::<NaiveDateTimeArray, _>(
+            |x, y| {
+                date_interval_add::<NaiveDateWrapper, IntervalUnit, NaiveDateTimeWrapper>(x, y)
+                    .unwrap()
+            },
             Type::Add,
         );
-        test_binary_interval::<I64Array, _>(
-            |x, y| date_interval_sub::<i32, i32, i64>(x, y).unwrap(),
+        test_binary_interval::<NaiveDateTimeArray, _>(
+            |x, y| {
+                date_interval_sub::<NaiveDateWrapper, IntervalUnit, NaiveDateTimeWrapper>(x, y)
+                    .unwrap()
+            },
             Type::Subtract,
         );
     }
@@ -453,9 +464,9 @@ mod tests {
         A: Array,
         for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
         for<'a> <A as Array>::RefItem<'a>: PartialEq,
-        F: Fn(i32, IntervalUnit) -> <A as Array>::OwnedItem,
+        F: Fn(NaiveDateWrapper, IntervalUnit) -> <A as Array>::OwnedItem,
     {
-        let mut lhs = Vec::<Option<i32>>::new();
+        let mut lhs = Vec::<Option<NaiveDateWrapper>>::new();
         let mut rhs = Vec::<Option<IntervalUnit>>::new();
         let mut target = Vec::<Option<<A as Array>::OwnedItem>>::new();
         for i in 0..100 {
@@ -465,13 +476,18 @@ mod tests {
                 target.push(None);
             } else {
                 rhs.push(Some(IntervalUnit::from_ymd(0, i, i)));
-                lhs.push(Some(i));
-                target.push(Some(f(i, IntervalUnit::from_ymd(0, i, i))));
+                lhs.push(Some(NaiveDateWrapper::new(
+                    NaiveDate::from_num_days_from_ce(i),
+                )));
+                target.push(Some(f(
+                    NaiveDateWrapper::new(NaiveDate::from_num_days_from_ce(i)),
+                    IntervalUnit::from_ymd(0, i, i),
+                )));
             }
         }
 
         let col1 = Column::new(
-            I32Array::from_slice(&lhs)
+            NaiveDateArray::from_slice(&lhs)
                 .map(|x| Arc::new(x.into()))
                 .unwrap(),
         );

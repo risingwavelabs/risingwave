@@ -33,8 +33,6 @@ pub(super) async fn handle_create_source(
 
     let catalog_mgr = session.env().catalog_mgr();
     catalog_mgr
-        .lock()
-        .await
         .create_table(session.database(), DEFAULT_SCHEMA_NAME, table)
         .await?;
 
@@ -48,12 +46,14 @@ pub(super) async fn handle_create_source(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::io::Write;
 
-    use risingwave_common::types::DataTypeKind;
+    use risingwave_common::types::DataType;
     use risingwave_meta::test_utils::LocalMeta;
     use tempfile::NamedTempFile;
 
+    use crate::catalog::table_catalog::ROWID_NAME;
     use crate::test_utils::LocalFrontend;
 
     /// Returns the file.
@@ -95,22 +95,19 @@ mod tests {
         frontend.run_sql(sql).await.unwrap();
 
         let catalog_manager = frontend.session().env().catalog_mgr();
-        let catalog_manager_guard = catalog_manager.lock().await;
-        let table = catalog_manager_guard.get_table("dev", "dev", "t").unwrap();
+        let table = catalog_manager.get_table("dev", "dev", "t").unwrap();
         let columns = table
             .columns()
             .iter()
             .map(|(col_name, col)| (col_name.clone(), col.data_type()))
-            .collect::<Vec<(String, DataTypeKind)>>();
-        assert_eq!(
-            columns,
-            vec![
-                ("id".to_string(), DataTypeKind::Int32),
-                ("city".to_string(), DataTypeKind::Varchar),
-                ("zipcode".to_string(), DataTypeKind::Int64),
-                ("rate".to_string(), DataTypeKind::Float32),
-            ]
-        );
+            .collect::<HashMap<String, DataType>>();
+        let mut expected_map = HashMap::new();
+        expected_map.insert(ROWID_NAME.to_string(), DataType::Int64);
+        expected_map.insert("id".to_string(), DataType::Int32);
+        expected_map.insert("city".to_string(), DataType::Varchar);
+        expected_map.insert("zipcode".to_string(), DataType::Int64);
+        expected_map.insert("rate".to_string(), DataType::Float32);
+        assert_eq!(columns, expected_map);
 
         meta.stop().await;
     }

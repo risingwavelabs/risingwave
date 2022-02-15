@@ -40,6 +40,7 @@ pub struct StreamSourceExecutor {
 }
 
 impl StreamSourceExecutor {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         source_id: TableId,
         source_desc: SourceDesc,
@@ -48,12 +49,13 @@ impl StreamSourceExecutor {
         pk_indices: PkIndices,
         barrier_receiver: UnboundedReceiver<Message>,
         executor_id: u64,
+        operator_id: u64,
     ) -> Result<Self> {
         let source = source_desc.clone().source;
         let reader: Box<dyn StreamSourceReader> = match source.as_ref() {
             SourceImpl::HighLevelKafka(s) => Box::new(s.stream_reader(
                 HighLevelKafkaSourceReaderContext {
-                    query_id: None,
+                    query_id: Some(format!("source-operator-{}", operator_id)),
                     bound_timestamp_ms: None,
                 },
                 column_ids.clone(),
@@ -126,7 +128,7 @@ impl Executor for StreamSourceExecutor {
     async fn next(&mut self) -> Result<Message> {
         if self.first_execution {
             self.reader.open().await?;
-            self.first_execution = false
+            self.first_execution = false;
         }
         // FIXME: may lose message
         tokio::select! {
@@ -185,7 +187,7 @@ mod tests {
     use risingwave_common::array::{ArrayImpl, I32Array, I64Array, Op, StreamChunk, Utf8Array};
     use risingwave_common::array_nonnull;
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::DataTypeKind;
+    use risingwave_common::types::DataType;
     use risingwave_source::*;
     use risingwave_storage::bummock::BummockTable;
     use risingwave_storage::TableColumnDesc;
@@ -198,9 +200,9 @@ mod tests {
     async fn test_table_source() -> Result<()> {
         let table_id = TableId::default();
 
-        let rowid_type = DataTypeKind::Int64;
-        let col1_type = DataTypeKind::Int32;
-        let col2_type = DataTypeKind::Varchar;
+        let rowid_type = DataType::Int64;
+        let col1_type = DataType::Int32;
+        let col2_type = DataType::Varchar;
 
         let table_columns = vec![
             TableColumnDesc {
@@ -274,6 +276,7 @@ mod tests {
             pk_indices,
             barrier_receiver,
             1,
+            1,
         )
         .unwrap();
 
@@ -333,9 +336,9 @@ mod tests {
     async fn test_table_dropped() -> Result<()> {
         let table_id = TableId::default();
 
-        let rowid_type = DataTypeKind::Int64;
-        let col1_type = DataTypeKind::Int32;
-        let col2_type = DataTypeKind::Varchar;
+        let rowid_type = DataType::Int64;
+        let col1_type = DataType::Int32;
+        let col2_type = DataType::Varchar;
 
         let table_columns = vec![
             TableColumnDesc {
@@ -395,6 +398,7 @@ mod tests {
             schema,
             pk_indices,
             barrier_receiver,
+            1,
             1,
         )
         .unwrap();

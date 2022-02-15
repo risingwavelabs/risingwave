@@ -106,8 +106,8 @@ public class CatalogCast {
               ColumnOrder.newBuilder().setOrderType(orderType).setInputRef(inputRefExpr).build();
           builder.addColumnOrders(columnOrder);
         }
-        builder.setIsAssociated(createMaterializedViewInfo.isAssociated());
       }
+      builder.setIsAssociated(createMaterializedViewInfo.isAssociated());
     }
 
     return builder.build();

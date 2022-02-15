@@ -57,7 +57,7 @@ impl BoxedExecutorBuilder for OrderByExecutor {
                 encoded_keys: vec![],
                 encodable: false,
                 disable_encoding: false,
-                identity: "OrderByExecutor".to_string(),
+                identity: source.plan_node().get_identity().clone(),
             }));
         }
         Err(InternalError("OrderBy must have one child".to_string()).into())
@@ -178,7 +178,20 @@ impl Executor for OrderByExecutor {
                 let _ = gen_match!(
                     builder,
                     chunk_arr,
-                    [Int16, Int32, Int64, Float32, Float64, Utf8, Bool, Decimal]
+                    [
+                        Int16,
+                        Int32,
+                        Int64,
+                        Float32,
+                        Float64,
+                        Utf8,
+                        Bool,
+                        Decimal,
+                        Interval,
+                        NaiveDate,
+                        NaiveTime,
+                        NaiveDateTime
+                    ]
                 );
             }
             chunk_size += 1;
@@ -219,7 +232,7 @@ mod tests {
     use risingwave_common::array::{BoolArray, DataChunk, PrimitiveArray, Utf8Array};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::expr::InputRefExpression;
-    use risingwave_common::types::{DataTypeKind, OrderedF32, OrderedF64};
+    use risingwave_common::types::{DataType, OrderedF32, OrderedF64};
     use risingwave_common::util::sort_util::OrderType;
     use test::Bencher;
 
@@ -269,14 +282,14 @@ mod tests {
         let data_chunk = DataChunk::builder().columns([col0, col1].to_vec()).build();
         let schema = Schema {
             fields: vec![
-                Field::unnamed(DataTypeKind::Int32),
-                Field::unnamed(DataTypeKind::Int32),
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Int32),
             ],
         };
         let mut mock_executor = MockExecutor::new(schema);
         mock_executor.add(data_chunk);
-        let input_ref_1 = InputRefExpression::new(DataTypeKind::Int32, 0);
-        let input_ref_2 = InputRefExpression::new(DataTypeKind::Int32, 1);
+        let input_ref_1 = InputRefExpression::new(DataType::Int32, 0);
+        let input_ref_2 = InputRefExpression::new(DataType::Int32, 1);
         let order_pairs = vec![
             OrderPair {
                 order: Box::new(input_ref_2),
@@ -300,8 +313,8 @@ mod tests {
             identity: "OrderByExecutor".to_string(),
         };
         let fields = &order_by_executor.schema().fields;
-        assert_eq!(fields[0].data_type, DataTypeKind::Int32);
-        assert_eq!(fields[1].data_type, DataTypeKind::Int32);
+        assert_eq!(fields[0].data_type, DataType::Int32);
+        assert_eq!(fields[1].data_type, DataType::Int32);
         order_by_executor.open().await.unwrap();
         let res = order_by_executor.next().await.unwrap();
         assert!(matches!(res, Some(_)));
@@ -323,14 +336,14 @@ mod tests {
         let data_chunk = DataChunk::builder().columns([col0, col1].to_vec()).build();
         let schema = Schema {
             fields: vec![
-                Field::unnamed(DataTypeKind::Float32),
-                Field::unnamed(DataTypeKind::Float64),
+                Field::unnamed(DataType::Float32),
+                Field::unnamed(DataType::Float64),
             ],
         };
         let mut mock_executor = MockExecutor::new(schema);
         mock_executor.add(data_chunk);
-        let input_ref_1 = InputRefExpression::new(DataTypeKind::Float32, 0);
-        let input_ref_2 = InputRefExpression::new(DataTypeKind::Float64, 1);
+        let input_ref_1 = InputRefExpression::new(DataType::Float32, 0);
+        let input_ref_2 = InputRefExpression::new(DataType::Float64, 1);
         let order_pairs = vec![
             OrderPair {
                 order: Box::new(input_ref_2),
@@ -354,8 +367,8 @@ mod tests {
             identity: "OrderByExecutor".to_string(),
         };
         let fields = &order_by_executor.schema().fields;
-        assert_eq!(fields[0].data_type, DataTypeKind::Float32);
-        assert_eq!(fields[1].data_type, DataTypeKind::Float64);
+        assert_eq!(fields[0].data_type, DataType::Float32);
+        assert_eq!(fields[1].data_type, DataType::Float64);
         order_by_executor.open().await.unwrap();
         let res = order_by_executor.next().await.unwrap();
         assert!(matches!(res, Some(_)));
@@ -386,14 +399,14 @@ mod tests {
         let data_chunk = DataChunk::builder().columns([col0, col1].to_vec()).build();
         let schema = Schema {
             fields: vec![
-                Field::unnamed(DataTypeKind::Varchar),
-                Field::unnamed(DataTypeKind::Varchar),
+                Field::unnamed(DataType::Varchar),
+                Field::unnamed(DataType::Varchar),
             ],
         };
         let mut mock_executor = MockExecutor::new(schema);
         mock_executor.add(data_chunk);
-        let input_ref_1 = InputRefExpression::new(DataTypeKind::Varchar, 0);
-        let input_ref_2 = InputRefExpression::new(DataTypeKind::Varchar, 1);
+        let input_ref_1 = InputRefExpression::new(DataType::Varchar, 0);
+        let input_ref_2 = InputRefExpression::new(DataType::Varchar, 1);
         let order_pairs = vec![
             OrderPair {
                 order: Box::new(input_ref_2),
@@ -417,8 +430,8 @@ mod tests {
             identity: "OrderByExecutor".to_string(),
         };
         let fields = &order_by_executor.schema().fields;
-        assert_eq!(fields[0].data_type, DataTypeKind::Varchar);
-        assert_eq!(fields[1].data_type, DataTypeKind::Varchar);
+        assert_eq!(fields[0].data_type, DataType::Varchar);
+        assert_eq!(fields[1].data_type, DataType::Varchar);
         order_by_executor.open().await.unwrap();
         let res = order_by_executor.next().await.unwrap();
         assert!(matches!(res, Some(_)));
@@ -469,18 +482,18 @@ mod tests {
                 .build();
             let schema = Schema {
                 fields: vec![
-                    Field::unnamed(DataTypeKind::Int16),
-                    Field::unnamed(DataTypeKind::Boolean),
-                    Field::unnamed(DataTypeKind::Float32),
-                    Field::unnamed(DataTypeKind::Varchar),
+                    Field::unnamed(DataType::Int16),
+                    Field::unnamed(DataType::Boolean),
+                    Field::unnamed(DataType::Float32),
+                    Field::unnamed(DataType::Varchar),
                 ],
             };
             let mut mock_executor = MockExecutor::new(schema);
             mock_executor.add(data_chunk);
-            let input_ref_0 = InputRefExpression::new(DataTypeKind::Int16, 0);
-            let input_ref_1 = InputRefExpression::new(DataTypeKind::Boolean, 1);
-            let input_ref_2 = InputRefExpression::new(DataTypeKind::Float32, 2);
-            let input_ref_3 = InputRefExpression::new(DataTypeKind::Varchar, 3);
+            let input_ref_0 = InputRefExpression::new(DataType::Int16, 0);
+            let input_ref_1 = InputRefExpression::new(DataType::Boolean, 1);
+            let input_ref_2 = InputRefExpression::new(DataType::Float32, 2);
+            let input_ref_3 = InputRefExpression::new(DataType::Varchar, 3);
             let order_pairs = vec![
                 OrderPair {
                     order: Box::new(input_ref_1),

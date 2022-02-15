@@ -1,6 +1,6 @@
 Thanks for your interest in contributing to RisingWave! Contributions of many kinds are encouraged and most welcome.
 
-If you have questions, please [create a Github issue](https://github.com/singularity-data/risingwave/issues/new/choose).
+If you have questions, please [create a Github issue](https://github.com/singularity-data/risingwave-dev/issues/new/choose).
 
 There are some tips for you.
 
@@ -35,30 +35,32 @@ make sqllogictest
 To run end-to-end tests with multiple compute-nodes, run the script:
 
 ```shell
-./riselab ci-3node
+./risedev ci-3node
 sqllogictest -p 4567 -d dev './e2e_test/**/*.slt'
 ```
 
 To run end-to-end tests with state store, run the script:
 
 ```shell
-./riselab ci-streaming
+./risedev ci-streaming
 sqllogictest -p 4567 -d dev './e2e_test/**/*.slt'
 ```
 
 It will start processes in the background. After testing, you can run the following scriptto clean-up:
 
 ```shell
-./riselab k
+./risedev k
 ```
 
 ## Monitoring
 
-Uncomment `grafana` and `prometheus` services in `riselab.yml`, and you can view the metrics.
+Uncomment `grafana` and `prometheus` services in `risedev.yml`, and you can view the metrics.
 
 ## Tracing
 
-Compute node supports streaming tracing. Simply uncomment `jaeger` service in `riselab.yml`.
+Compute node supports streaming tracing. Tracing is not enabled by default, and you will need to
+use `./risedev configure` to enable tracing components. After that, simply uncomment `jaeger`
+service in `risedev.yml`.
 
 ## Dashboard
 
@@ -135,7 +137,7 @@ For example, a PR title could be:
 - `refactor: modify executor protobuf package path`
 - `feat(execution): enable comparison between nullable data arrays`, where `(execution)` means that this PR mainly focuses on the execution component.
 
-You may also check out our previous PRs in the [PR list](https://github.com/singularity-data/risingwave/pulls).
+You may also check out our previous PRs in the [PR list](https://github.com/singularity-data/risingwave-dev/pulls).
 
 ## Pull Request Description
 

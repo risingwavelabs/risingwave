@@ -8,7 +8,6 @@ use crate::hummock::iterator::test_utils::{
 };
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
-use crate::hummock::snapshot::HummockSnapshot;
 use crate::hummock::value::HummockValue;
 use crate::hummock::SSTableBuilder;
 use crate::object::{InMemObjectStore, ObjectStore};
@@ -37,7 +36,7 @@ async fn gen_and_upload_table(
     }
     let (data, meta) = b.finish();
     // get remote table
-    let table = gen_remote_sstable(obj_client, table_id, data, meta, remote_dir)
+    let table = gen_remote_sstable(obj_client, table_id, data, meta, remote_dir, None)
         .await
         .unwrap();
     hummock_meta_client
@@ -59,8 +58,11 @@ async fn gen_and_upload_table(
 }
 
 macro_rules! assert_count_range_scan {
-    ($snapshot:expr, $range:expr, $expect_count:expr) => {{
-        let mut it = $snapshot.range_scan::<_, Vec<u8>>($range).await.unwrap();
+    ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
+        let mut it = $storage
+            .range_scan::<_, Vec<u8>>($range, $epoch)
+            .await
+            .unwrap();
         it.rewind().await.unwrap();
         let mut count = 0;
         while it.is_valid() {
@@ -72,9 +74,9 @@ macro_rules! assert_count_range_scan {
 }
 
 macro_rules! assert_count_reverse_range_scan {
-    ($snapshot:expr, $range:expr, $expect_count:expr) => {{
-        let mut it = $snapshot
-            .reverse_range_scan::<_, Vec<u8>>($range)
+    ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
+        let mut it = $storage
+            .reverse_range_scan::<_, Vec<u8>>($range, $epoch)
             .await
             .unwrap();
         it.rewind().await.unwrap();
@@ -91,12 +93,27 @@ macro_rules! assert_count_reverse_range_scan {
 async fn test_snapshot() {
     let remote_dir = "/test";
     let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
-    let vm = Arc::new(LocalVersionManager::new(obj_client.clone(), remote_dir));
+    let vm = Arc::new(LocalVersionManager::new(
+        obj_client.clone(),
+        remote_dir,
+        None,
+    ));
     let mock_hummock_meta_service = Arc::new(MockHummockMetaService::new());
     let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
         mock_hummock_meta_service.clone(),
     ));
-    let mut epoch: u64 = 1;
+
+    let hummock_options = HummockOptions::default_for_test();
+    let hummock_storage = HummockStorage::new(
+        obj_client.clone(),
+        hummock_options,
+        vm.clone(),
+        mock_hummock_meta_client.clone(),
+    )
+    .await
+    .unwrap();
+
+    let epoch1: u64 = 1;
     gen_and_upload_table(
         obj_client.clone(),
         remote_dir,
@@ -106,13 +123,12 @@ async fn test_snapshot() {
             (1, HummockValue::Put(b"test".to_vec())),
             (2, HummockValue::Put(b"test".to_vec())),
         ],
-        epoch,
+        epoch1,
     )
     .await;
-    let snapshot_1 = HummockSnapshot::new(epoch, vm.clone());
-    assert_count_range_scan!(snapshot_1, .., 2);
+    assert_count_range_scan!(hummock_storage, .., 2, epoch1);
 
-    epoch += 1;
+    let epoch2 = epoch1 + 1;
     gen_and_upload_table(
         obj_client.clone(),
         remote_dir,
@@ -123,14 +139,13 @@ async fn test_snapshot() {
             (3, HummockValue::Put(b"test".to_vec())),
             (4, HummockValue::Put(b"test".to_vec())),
         ],
-        epoch,
+        epoch2,
     )
     .await;
-    let snapshot_2 = HummockSnapshot::new(epoch, vm.clone());
-    assert_count_range_scan!(snapshot_2, .., 3);
-    assert_count_range_scan!(snapshot_1, .., 2);
+    assert_count_range_scan!(hummock_storage, .., 3, epoch2);
+    assert_count_range_scan!(hummock_storage, .., 2, epoch1);
 
-    epoch += 1;
+    let epoch3 = epoch2 + 1;
     gen_and_upload_table(
         obj_client.clone(),
         remote_dir,
@@ -141,25 +156,38 @@ async fn test_snapshot() {
             (3, HummockValue::Delete),
             (4, HummockValue::Delete),
         ],
-        epoch,
+        epoch3,
     )
     .await;
-    let snapshot_3 = HummockSnapshot::new(epoch, vm.clone());
-    assert_count_range_scan!(snapshot_3, .., 0);
-    assert_count_range_scan!(snapshot_2, .., 3);
-    assert_count_range_scan!(snapshot_1, .., 2);
+    assert_count_range_scan!(hummock_storage, .., 0, epoch3);
+    assert_count_range_scan!(hummock_storage, .., 3, epoch2);
+    assert_count_range_scan!(hummock_storage, .., 2, epoch1);
 }
 
 #[tokio::test]
 async fn test_snapshot_range_scan() {
     let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
     let remote_dir = "/test";
-    let vm = Arc::new(LocalVersionManager::new(obj_client.clone(), remote_dir));
+    let vm = Arc::new(LocalVersionManager::new(
+        obj_client.clone(),
+        remote_dir,
+        None,
+    ));
     let mock_hummock_meta_service = Arc::new(MockHummockMetaService::new());
     let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
         mock_hummock_meta_service.clone(),
     ));
-    let epoch = 1;
+    let hummock_options = HummockOptions::default_for_test();
+    let hummock_storage = HummockStorage::new(
+        obj_client.clone(),
+        hummock_options,
+        vm.clone(),
+        mock_hummock_meta_client.clone(),
+    )
+    .await
+    .unwrap();
+
+    let epoch: u64 = 1;
 
     gen_and_upload_table(
         obj_client.clone(),
@@ -182,24 +210,37 @@ async fn test_snapshot_range_scan() {
         };
     }
 
-    let snapshot = HummockSnapshot::new(epoch, vm.clone());
-    assert_count_range_scan!(snapshot, key!(2)..=key!(3), 2);
-    assert_count_range_scan!(snapshot, key!(2)..key!(3), 1);
-    assert_count_range_scan!(snapshot, key!(2).., 3);
-    assert_count_range_scan!(snapshot, ..=key!(3), 3);
-    assert_count_range_scan!(snapshot, ..key!(3), 2);
-    assert_count_range_scan!(snapshot, .., 4);
+    assert_count_range_scan!(hummock_storage, key!(2)..=key!(3), 2, epoch);
+    assert_count_range_scan!(hummock_storage, key!(2)..key!(3), 1, epoch);
+    assert_count_range_scan!(hummock_storage, key!(2).., 3, epoch);
+    assert_count_range_scan!(hummock_storage, ..=key!(3), 3, epoch);
+    assert_count_range_scan!(hummock_storage, ..key!(3), 2, epoch);
+    assert_count_range_scan!(hummock_storage, .., 4, epoch);
 }
 
 #[tokio::test]
 async fn test_snapshot_reverse_range_scan() {
     let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
     let remote_dir = "/test";
-    let vm = Arc::new(LocalVersionManager::new(obj_client.clone(), remote_dir));
+    let vm = Arc::new(LocalVersionManager::new(
+        obj_client.clone(),
+        remote_dir,
+        None,
+    ));
     let mock_hummock_meta_service = Arc::new(MockHummockMetaService::new());
     let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
         mock_hummock_meta_service.clone(),
     ));
+    let hummock_options = HummockOptions::default_for_test();
+    let hummock_storage = HummockStorage::new(
+        obj_client.clone(),
+        hummock_options,
+        vm.clone(),
+        mock_hummock_meta_client.clone(),
+    )
+    .await
+    .unwrap();
+
     let epoch = 1;
 
     gen_and_upload_table(
@@ -223,11 +264,10 @@ async fn test_snapshot_reverse_range_scan() {
         };
     }
 
-    let snapshot = HummockSnapshot::new(epoch, vm.clone());
-    assert_count_reverse_range_scan!(snapshot, key!(3)..=key!(2), 2);
-    assert_count_reverse_range_scan!(snapshot, key!(3)..key!(2), 1);
-    assert_count_reverse_range_scan!(snapshot, key!(3)..key!(1), 2);
-    assert_count_reverse_range_scan!(snapshot, key!(3)..=key!(1), 3);
-    assert_count_reverse_range_scan!(snapshot, key!(3)..key!(0), 3);
-    assert_count_reverse_range_scan!(snapshot, .., 4);
+    assert_count_reverse_range_scan!(hummock_storage, key!(3)..=key!(2), 2, epoch);
+    assert_count_reverse_range_scan!(hummock_storage, key!(3)..key!(2), 1, epoch);
+    assert_count_reverse_range_scan!(hummock_storage, key!(3)..key!(1), 2, epoch);
+    assert_count_reverse_range_scan!(hummock_storage, key!(3)..=key!(1), 3, epoch);
+    assert_count_reverse_range_scan!(hummock_storage, key!(3)..key!(0), 3, epoch);
+    assert_count_reverse_range_scan!(hummock_storage, .., 4, epoch);
 }

@@ -9,8 +9,10 @@ pub use chain::*;
 pub use debug::*;
 pub use dispatch::*;
 pub use filter::*;
+pub use global_simple_agg::*;
 pub use hash_agg::*;
 pub use hash_join::*;
+pub use local_simple_agg::*;
 pub use merge::*;
 pub use monitor::*;
 pub use mview::*;
@@ -20,7 +22,7 @@ use risingwave_common::array::{ArrayImpl, DataChunk, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::data::barrier::Mutation as ProstMutation;
 use risingwave_pb::data::stream_message::StreamMessage;
@@ -28,11 +30,13 @@ use risingwave_pb::data::{
     Actors as MutationActors, AddMutation, Barrier as ProstBarrier, NothingMutation, StopMutation,
     StreamMessage as ProstStreamMessage, UpdateMutation,
 };
-pub use simple_agg::*;
 use smallvec::SmallVec;
 pub use stream_source::*;
 pub use top_n::*;
 pub use top_n_appendonly::*;
+use tracing::trace_span;
+
+use crate::task::ENABLE_BARRIER_AGGREGATION;
 
 mod actor;
 mod aggregation;
@@ -41,14 +45,15 @@ mod chain;
 mod debug;
 mod dispatch;
 mod filter;
+mod global_simple_agg;
 mod hash_agg;
 mod hash_join;
+mod local_simple_agg;
 mod managed_state;
 mod merge;
-mod monitor;
+pub mod monitor;
 mod mview;
 mod project;
-mod simple_agg;
 mod stream_source;
 mod top_n;
 mod top_n_appendonly;
@@ -65,7 +70,7 @@ pub trait ExprFn = Fn(&DataChunk) -> Result<Bitmap> + Send + Sync + 'static;
 pub enum Mutation {
     Stop(HashSet<u32>),
     UpdateOutputs(HashMap<u32, Vec<ActorInfo>>),
-    AddOutput(u32, Vec<ActorInfo>),
+    AddOutput(HashMap<u32, Vec<ActorInfo>>),
 }
 
 #[derive(Debug, Clone)]
@@ -139,9 +144,9 @@ impl Barrier {
                 Some(Mutation::Stop(actors)) => Some(ProstMutation::Stop(StopMutation {
                     actors: actors.iter().cloned().collect::<Vec<_>>(),
                 })),
-                Some(Mutation::UpdateOutputs(update)) => {
+                Some(Mutation::UpdateOutputs(updates)) => {
                     Some(ProstMutation::Update(UpdateMutation {
-                        actors: update
+                        actors: updates
                             .iter()
                             .map(|(&f, actors)| {
                                 (
@@ -154,42 +159,59 @@ impl Barrier {
                             .collect(),
                     }))
                 }
-                Some(Mutation::AddOutput(actor_id, downstream_actors)) => {
-                    Some(ProstMutation::Add(AddMutation {
-                        actor_id: *actor_id,
-                        downstream_actors: Some(MutationActors {
-                            info: downstream_actors.clone(),
-                        }),
-                    }))
-                }
+                Some(Mutation::AddOutput(adds)) => Some(ProstMutation::Add(AddMutation {
+                    actors: adds
+                        .iter()
+                        .map(|(&id, actors)| {
+                            (
+                                id,
+                                MutationActors {
+                                    info: actors.clone(),
+                                },
+                            )
+                        })
+                        .collect(),
+                })),
             },
+            span: vec![],
         }
     }
 
     pub fn from_protobuf(prost: &ProstBarrier) -> Result<Self> {
+        let mutation = match prost.get_mutation()? {
+            ProstMutation::Nothing(_) => (None),
+            ProstMutation::Stop(stop) => {
+                Some(Mutation::Stop(HashSet::from_iter(stop.get_actors().clone())).into())
+            }
+            ProstMutation::Update(update) => Some(
+                Mutation::UpdateOutputs(
+                    update
+                        .actors
+                        .iter()
+                        .map(|(&f, actors)| (f, actors.get_info().clone()))
+                        .collect::<HashMap<u32, Vec<ActorInfo>>>(),
+                )
+                .into(),
+            ),
+            ProstMutation::Add(adds) => Some(
+                Mutation::AddOutput(
+                    adds.actors
+                        .iter()
+                        .map(|(&id, actors)| (id, actors.get_info().clone()))
+                        .collect::<HashMap<u32, Vec<ActorInfo>>>(),
+                )
+                .into(),
+            ),
+        };
+        let epoch = prost.get_epoch();
         Ok(Barrier {
-            epoch: prost.get_epoch(),
-            mutation: match prost.get_mutation()? {
-                ProstMutation::Nothing(_) => None,
-                ProstMutation::Stop(stop) => {
-                    Some(Mutation::Stop(HashSet::from_iter(stop.get_actors().clone())).into())
-                }
-                ProstMutation::Update(update) => Some(
-                    Mutation::UpdateOutputs(
-                        update
-                            .actors
-                            .iter()
-                            .map(|(&f, actors)| (f, actors.get_info().clone()))
-                            .collect::<HashMap<u32, Vec<ActorInfo>>>(),
-                    )
-                    .into(),
-                ),
-                ProstMutation::Add(add) => Some(
-                    Mutation::AddOutput(add.actor_id, add.get_downstream_actors()?.info.clone())
-                        .into(),
-                ),
+            span: if ENABLE_BARRIER_AGGREGATION {
+                trace_span!("barrier", epoch = %epoch, mutation = ?mutation)
+            } else {
+                tracing::Span::none()
             },
-            span: tracing::Span::none(),
+            epoch,
+            mutation,
         })
     }
 }
@@ -268,11 +290,15 @@ pub trait Executor: Send + Debug + 'static {
     fn clear_cache(&mut self) -> Result<()> {
         Ok(())
     }
+
+    fn init(&mut self, _epoch: u64) -> Result<()> {
+        unreachable!()
+    }
 }
 
 pub type PkIndices = Vec<usize>;
 pub type PkIndicesRef<'a> = &'a [usize];
-pub type PkDataTypes = SmallVec<[DataTypeKind; 1]>;
+pub type PkDataTypes = SmallVec<[DataType; 1]>;
 
 /// Get inputs by given `pk_indices` from `columns`.
 pub fn pk_input_arrays<'a>(pk_indices: PkIndicesRef, columns: &'a [Column]) -> Vec<&'a ArrayImpl> {

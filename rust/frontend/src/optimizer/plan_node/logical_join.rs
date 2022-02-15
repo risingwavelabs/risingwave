@@ -1,14 +1,14 @@
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
-use risingwave_common::types::DataTypeKind;
+use risingwave_common::types::DataType;
 use risingwave_pb::plan::JoinType;
 
 use super::{
     ColPrunable, IntoPlanRef, JoinPredicate, PlanRef, PlanTreeNodeBinary, StreamHashJoin, ToBatch,
     ToStream,
 };
-use crate::expr::{assert_input_ref, BoundExpr, BoundExprImpl};
+use crate::expr::{assert_input_ref, Expr, ExprImpl};
 use crate::optimizer::plan_node::{BatchHashJoin, BatchSortMergeJoin};
 use crate::optimizer::property::{Distribution, Order, WithDistribution, WithOrder, WithSchema};
 
@@ -26,13 +26,18 @@ impl fmt::Display for LogicalJoin {
     }
 }
 impl LogicalJoin {
-    fn new(left: PlanRef, right: PlanRef, join_type: JoinType, predicate: JoinPredicate) -> Self {
+    pub(crate) fn new(
+        left: PlanRef,
+        right: PlanRef,
+        join_type: JoinType,
+        predicate: JoinPredicate,
+    ) -> Self {
         let schema = Self::derive_schema(left.schema(), right.schema(), join_type);
 
         let left_cols_num = left.schema().fields.len();
         let input_col_num = left_cols_num + right.schema().fields.len();
         for cond in predicate.other_conds() {
-            assert_eq!(cond.return_type(), DataTypeKind::Boolean);
+            assert_eq!(cond.return_type(), DataType::Boolean);
             assert_input_ref(cond, input_col_num);
         }
         for (k1, k2) in predicate.equal_keys() {
@@ -54,14 +59,22 @@ impl LogicalJoin {
         left: PlanRef,
         right: PlanRef,
         join_type: JoinType,
-        on_clause: BoundExprImpl,
+        on_clause: ExprImpl,
     ) -> PlanRef {
         let left_cols_num = left.schema().fields.len();
         let predicate = JoinPredicate::create(left_cols_num, on_clause);
         Self::new(left, right, join_type, predicate).into_plan_ref()
     }
-    fn derive_schema(_left: &Schema, _right: &Schema, _join_type: JoinType) -> Schema {
-        todo!()
+    fn derive_schema(left: &Schema, right: &Schema, join_type: JoinType) -> Schema {
+        let mut new_fields = Vec::with_capacity(left.fields.len() + right.fields.len());
+        match join_type {
+            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
+                new_fields.extend_from_slice(&left.fields);
+                new_fields.extend_from_slice(&right.fields);
+                Schema { fields: new_fields }
+            }
+            _ => unimplemented!(),
+        }
     }
     pub fn predicate(&self) -> &JoinPredicate {
         &self.predicate
@@ -90,7 +103,7 @@ impl WithSchema for LogicalJoin {
 }
 impl ColPrunable for LogicalJoin {}
 impl ToBatch for LogicalJoin {
-    fn to_batch_with_order_required(&self, _required_order: Order) -> PlanRef {
+    fn to_batch_with_order_required(&self, _required_order: &Order) -> PlanRef {
         if self.predicate().is_equal_cond() {
             // TODO: check if use SortMergeJoin could satisfy the required_order
             let new_left = self.left().to_batch();
@@ -103,7 +116,7 @@ impl ToBatch for LogicalJoin {
                 );
                 let new_right = self
                     .left()
-                    .to_batch_with_order_required(right_required_order);
+                    .to_batch_with_order_required(&right_required_order);
                 let new_logical = self.clone_with_left_right(new_left, new_right);
                 return BatchSortMergeJoin::new(new_logical).into_plan_ref();
             } else {
@@ -122,10 +135,10 @@ impl ToStream for LogicalJoin {
     fn to_stream(&self) -> PlanRef {
         let left = self
             .left()
-            .to_stream_with_dist_required(Distribution::HashShard(self.predicate().left_keys()));
+            .to_stream_with_dist_required(&Distribution::HashShard(self.predicate().left_keys()));
         let right = self
             .right()
-            .to_stream_with_dist_required(Distribution::HashShard(self.predicate().right_keys()));
+            .to_stream_with_dist_required(&Distribution::HashShard(self.predicate().right_keys()));
         StreamHashJoin::new(self.clone_with_left_right(left, right)).into_plan_ref()
     }
 }

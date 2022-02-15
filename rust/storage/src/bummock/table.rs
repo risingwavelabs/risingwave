@@ -46,7 +46,7 @@ pub struct BummockTable {
 
 #[async_trait::async_trait]
 impl ScannableTable for BummockTable {
-    async fn iter(&self) -> Result<Box<dyn TableIter>> {
+    async fn iter(&self, _epoch: u64) -> Result<Box<dyn TableIter>> {
         unimplemented!()
     }
 
@@ -279,7 +279,7 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema, TableId};
     use risingwave_common::column_nonnull;
     use risingwave_common::error::Result;
-    use risingwave_common::types::DataTypeKind;
+    use risingwave_common::types::DataType;
 
     use crate::bummock::{BummockResult, BummockTable};
     use crate::{ScannableTable, Table, TableColumnDesc};
@@ -290,8 +290,8 @@ mod tests {
 
         let schema = Schema {
             fields: vec![
-                Field::unnamed(DataTypeKind::decimal_default()),
-                Field::unnamed(DataTypeKind::decimal_default()),
+                Field::unnamed(DataType::Decimal),
+                Field::unnamed(DataType::Decimal),
             ],
         };
 

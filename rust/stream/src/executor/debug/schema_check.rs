@@ -53,17 +53,17 @@ impl super::DebugExecutor for SchemaCheckExecutor {
                     .map(|f| f.data_type.create_array_builder(0).unwrap()); // TODO: check `data_type` directly
 
                 macro_rules! check_schema {
-          ([], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-            use risingwave_common::array::ArrayBuilderImpl;
-            use risingwave_common::array::ArrayImpl;
+                    ([], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+                        use risingwave_common::array::ArrayBuilderImpl;
+                        use risingwave_common::array::ArrayImpl;
 
-            match (array, &builder) {
-              $( (Some(ArrayImpl::$variant_name(_)), Some(ArrayBuilderImpl::$variant_name(_))) => {} ),*
-              _ => panic!("schema check failed on {}: column {} should be {:?}, while stream chunk gives {:?}",
-                          self.input.identity(), i, builder.map(|b| b.get_ident()), array.map(|a| a.get_ident())),
-            }
-          };
-        }
+                        match (array, &builder) {
+                            $( (Some(ArrayImpl::$variant_name(_)), Some(ArrayBuilderImpl::$variant_name(_))) => {} ),*
+                            _ => panic!("schema check failed on {}: column {} should be {:?}, while stream chunk gives {:?}",
+                                                    self.input.identity(), i, builder.map(|b| b.get_ident()), array.map(|a| a.get_ident())),
+                        }
+                    };
+                }
 
                 for_all_variants! { check_schema };
             }
@@ -87,7 +87,7 @@ mod tests {
     use risingwave_common::array::{F64Array, I64Array, Op, StreamChunk};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::column_nonnull;
-    use risingwave_common::types::DataTypeKind;
+    use risingwave_common::types::DataType;
 
     use super::*;
     use crate::executor::test_utils::MockSource;
@@ -104,8 +104,8 @@ mod tests {
         );
         let schema = Schema {
             fields: vec![
-                Field::unnamed(DataTypeKind::Int64),
-                Field::unnamed(DataTypeKind::Float64),
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Float64),
             ],
         };
 
@@ -131,8 +131,8 @@ mod tests {
         );
         let schema = Schema {
             fields: vec![
-                Field::unnamed(DataTypeKind::Int64),
-                Field::unnamed(DataTypeKind::Float64),
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Float64),
             ],
         };
 

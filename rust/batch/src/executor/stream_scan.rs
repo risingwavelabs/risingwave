@@ -74,7 +74,7 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
             reader,
             done: false,
             schema: Schema { fields },
-            identity: "StreamScanExecutor".to_string(),
+            identity: source.plan_node().get_identity().clone(),
         }))
     }
 }
@@ -119,7 +119,7 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{Array, I32Array};
-    use risingwave_common::types::DataTypeKind;
+    use risingwave_common::types::DataType;
 
     use super::*;
 
@@ -151,7 +151,7 @@ mod tests {
         let mut executor = StreamScanExecutor {
             reader: Box::new(reader),
             done: false,
-            schema: Schema::new(vec![Field::unnamed(DataTypeKind::Int32)]),
+            schema: Schema::new(vec![Field::unnamed(DataType::Int32)]),
             identity: "StreamScanExecutor".to_string(),
         };
         executor.open().await.unwrap();

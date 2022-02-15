@@ -6,7 +6,7 @@ use itertools::Itertools;
 use crate::array::DataChunk;
 use crate::types::{
     deserialize_datum_from, deserialize_datum_not_null_from, serialize_datum_into,
-    serialize_datum_not_null_into, DataTypeKind, Datum, DatumRef, ToOwnedDatum,
+    serialize_datum_not_null_into, DataType, Datum, DatumRef, ToOwnedDatum,
 };
 use crate::util::sort_util::OrderType;
 
@@ -184,23 +184,21 @@ impl Row {
 
 /// Deserializer of the `Row`.
 pub struct RowDeserializer {
-    data_type_kinds: Vec<DataTypeKind>,
+    data_types: Vec<DataType>,
 }
 
 impl RowDeserializer {
     /// Creates a new `RowDeserializer` with row schema.
-    pub fn new(schema: Vec<DataTypeKind>) -> Self {
-        RowDeserializer {
-            data_type_kinds: schema,
-        }
+    pub fn new(schema: Vec<DataType>) -> Self {
+        RowDeserializer { data_types: schema }
     }
 
     /// Deserialize the row from a memcomparable bytes.
     pub fn deserialize(&self, data: &[u8]) -> Result<Row, memcomparable::Error> {
         let mut values = vec![];
-        values.reserve(self.data_type_kinds.len());
+        values.reserve(self.data_types.len());
         let mut deserializer = memcomparable::Deserializer::new(data);
-        for &ty in &self.data_type_kinds {
+        for &ty in &self.data_types {
             values.push(deserialize_datum_from(&ty, &mut deserializer)?);
         }
         Ok(Row(values))
@@ -209,9 +207,9 @@ impl RowDeserializer {
     /// Deserialize the row from a memcomparable bytes. All values are not null.
     pub fn deserialize_not_null(&self, data: &[u8]) -> Result<Row, memcomparable::Error> {
         let mut values = vec![];
-        values.reserve(self.data_type_kinds.len());
+        values.reserve(self.data_types.len());
         let mut deserializer = memcomparable::Deserializer::new(data);
-        for &ty in &self.data_type_kinds {
+        for &ty in &self.data_types {
             values.push(deserialize_datum_not_null_from(ty, &mut deserializer)?);
         }
         Ok(Row(values))
@@ -228,7 +226,7 @@ impl RowDeserializer {
         datum_idx: usize,
     ) -> Result<Datum, memcomparable::Error> {
         let mut deserializer = memcomparable::Deserializer::new(data);
-        let datum = deserialize_datum_from(&self.data_type_kinds[datum_idx], &mut deserializer)?;
+        let datum = deserialize_datum_from(&self.data_types[datum_idx], &mut deserializer)?;
         Ok(datum)
     }
 }
@@ -236,7 +234,7 @@ impl RowDeserializer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{DataTypeKind as Ty, IntervalUnit, ScalarImpl};
+    use crate::types::{DataType as Ty, IntervalUnit, ScalarImpl};
 
     #[test]
     fn row_memcomparable_encode_decode_not_null() {
@@ -262,7 +260,7 @@ mod tests {
             Ty::Int64,
             Ty::Float32,
             Ty::Float64,
-            Ty::decimal_default(),
+            Ty::Decimal,
             Ty::Interval,
         ]);
         let row1 = de.deserialize_not_null(&bytes).unwrap();
@@ -293,7 +291,7 @@ mod tests {
             Ty::Int64,
             Ty::Float32,
             Ty::Float64,
-            Ty::decimal_default(),
+            Ty::Decimal,
             Ty::Interval,
         ]);
         let row1 = de.deserialize(&bytes).unwrap();

@@ -34,7 +34,7 @@ impl SourceParser for JSONParser {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::types::{DataTypeKind, ScalarImpl};
+    use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::vector_op::cast::str_to_date;
 
     use crate::{JSONParser, SourceColumnDesc, SourceParser};
@@ -47,63 +47,63 @@ mod tests {
         let descs = vec![
             SourceColumnDesc {
                 name: "i32".to_string(),
-                data_type: DataTypeKind::Int32,
+                data_type: DataType::Int32,
                 column_id: 0,
                 skip_parse: false,
                 is_primary: false,
             },
             SourceColumnDesc {
                 name: "char".to_string(),
-                data_type: DataTypeKind::Char,
+                data_type: DataType::Char,
                 column_id: 1,
                 skip_parse: false,
                 is_primary: false,
             },
             SourceColumnDesc {
                 name: "bool".to_string(),
-                data_type: DataTypeKind::Boolean,
+                data_type: DataType::Boolean,
                 column_id: 2,
                 skip_parse: false,
                 is_primary: false,
             },
             SourceColumnDesc {
                 name: "i16".to_string(),
-                data_type: DataTypeKind::Int16,
+                data_type: DataType::Int16,
                 column_id: 3,
                 skip_parse: false,
                 is_primary: false,
             },
             SourceColumnDesc {
                 name: "i64".to_string(),
-                data_type: DataTypeKind::Int64,
+                data_type: DataType::Int64,
                 column_id: 4,
                 skip_parse: false,
                 is_primary: false,
             },
             SourceColumnDesc {
                 name: "f32".to_string(),
-                data_type: DataTypeKind::Float32,
+                data_type: DataType::Float32,
                 column_id: 5,
                 skip_parse: false,
                 is_primary: false,
             },
             SourceColumnDesc {
                 name: "f64".to_string(),
-                data_type: DataTypeKind::Float64,
+                data_type: DataType::Float64,
                 column_id: 6,
                 skip_parse: false,
                 is_primary: false,
             },
             SourceColumnDesc {
                 name: "varchar".to_string(),
-                data_type: DataTypeKind::Varchar,
+                data_type: DataType::Varchar,
                 column_id: 7,
                 skip_parse: false,
                 is_primary: false,
             },
             SourceColumnDesc {
                 name: "date".to_string(),
-                data_type: DataTypeKind::Date,
+                data_type: DataType::Date,
                 column_id: 8,
                 skip_parse: false,
                 is_primary: false,
@@ -123,7 +123,9 @@ mod tests {
         assert!(row[5].eq(&Some(ScalarImpl::Float32(1.23.into()))));
         assert!(row[6].eq(&Some(ScalarImpl::Float64(1.2345.into()))));
         assert!(row[7].eq(&Some(ScalarImpl::Utf8("varchar".to_string()))));
-        assert!(row[8].eq(&Some(ScalarImpl::Int32(str_to_date("2021-01-01").unwrap()))));
+        assert!(row[8].eq(&Some(ScalarImpl::NaiveDate(
+            str_to_date("2021-01-01").unwrap()
+        ))));
 
         let payload = r#"{"i32":1}"#.as_bytes();
         let result = parser.parse(payload, &descs);

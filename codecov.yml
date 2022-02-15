@@ -4,8 +4,8 @@
 #   curl --data-binary @codecov.yml https://codecov.io/validate
 codecov:
   notify:
-    # do not notify until 3 builds collected (java & rust & e2e)
-    after_n_builds: 3
+    # do not notify until 3 builds collected (java & rust)
+    after_n_builds: 2
 coverage:
   status:
     patch: off # disable patch status
@@ -21,4 +21,4 @@ comment:
   # do not comment until 2 builds collected (java & rust)
   after_n_builds: 2
 ignore:
-  - "rust/riselab"
+  - "rust/risedev"

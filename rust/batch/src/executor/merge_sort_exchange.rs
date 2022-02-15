@@ -213,7 +213,7 @@ impl<CS: 'static + CreateSource> BoxedExecutorBuilder for MergeSortExchangeExecu
             schema: Schema { fields },
             first_execution: true,
             task_id: source.task_id.clone(),
-            identity: "MergeSortExchangeExecutor".to_string(),
+            identity: source.plan_node().get_identity().clone(),
         }))
     }
 }
@@ -227,7 +227,7 @@ mod tests {
     use risingwave_common::array::{Array, DataChunk, I32Array};
     use risingwave_common::array_nonnull;
     use risingwave_common::expr::InputRefExpression;
-    use risingwave_common::types::DataTypeKind;
+    use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
 
     use super::*;
@@ -269,7 +269,7 @@ mod tests {
         for _ in 0..num_sources {
             proto_sources.push(ProstExchangeSource::default());
         }
-        let input_ref_1 = InputRefExpression::new(DataTypeKind::Int32, 0);
+        let input_ref_1 = InputRefExpression::new(DataType::Int32, 0);
         let order_pairs = Arc::new(vec![OrderPair {
             order: Box::new(input_ref_1),
             order_type: OrderType::Ascending,
@@ -285,7 +285,7 @@ mod tests {
             sources: vec![],
             source_creator: PhantomData,
             schema: Schema {
-                fields: vec![Field::unnamed(DataTypeKind::Int32)],
+                fields: vec![Field::unnamed(DataType::Int32)],
             },
             first_execution: true,
             task_id: TaskId::default(),

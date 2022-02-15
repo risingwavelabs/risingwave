@@ -11,9 +11,9 @@ wait_server() {
     # Licensed by https://creativecommons.org/licenses/by-sa/3.0/
     {
         failed_times=0
-        while ! echo -n > /dev/tcp/localhost/"$1"; do
+        while ! echo -n >/dev/tcp/localhost/"$1"; do
             sleep 0.5
-            failed_times=$((failed_times+1))
+            failed_times=$((failed_times + 1))
             if [ $failed_times -gt 30 ]; then
                 echo "ERROR: failed to start server $1 [timeout=15s]"
                 exit 1
@@ -22,9 +22,27 @@ wait_server() {
     } 2>/dev/null
 }
 
-if command -v docker-compose ; then 
+wait_until_container_healthy() {
+    until
+        [ "$(docker inspect --format "{{.State.Health.Status}}" "$1")" = 'healthy' ]
+    do
+        # Log container status
+        local container_status
+        container_status="$(docker inspect --format "{{.State.Health.Status}}" "$1")"
+
+        echo "Waiting for container $1 to be 'healthy', current status is '$container_status'. Sleeping for five seconds..."
+        sleep 5
+    done
+}
+
+if command -v docker-compose; then
     echo "Starting single node zookeeper/kafka/mysql/debezium"
     docker-compose -f "$SCRIPT_PATH"/docker-compose.yml up -d
+
+    cd "$SCRIPT_PATH" 
+    mkdir -p ../logs 
+    docker-compose logs -f > ../logs/docker-compose.log & 
+    cd -
 else
     echo "This script requires docker-compose, please follow docker install instructions (https://docs.docker.com/compose/install/)."
     exit 1
@@ -35,6 +53,7 @@ wait_server 2181
 
 echo "Waiting for kafka broker"
 wait_server 29092
+wait_until_container_healthy broker
 
 echo "Waiting for mysql source"
 wait_server 23306
@@ -48,7 +67,7 @@ sleep 10
 docker exec dbgen sh -c "cd src/tpch-dbgen && ./dbgen -s 0.001 && mkdir -p /streaming/tpch-testcase && mv *.tbl /streaming/tpch-testcase"
 
 echo "Create topics"
-for filename in "$SCRIPT_PATH"/test_data/* ; do
+for filename in "$SCRIPT_PATH"/test_data/*; do
     [ -e "$filename" ] || continue
     base=$(basename "$filename")
     topic="${base%%.*}"
@@ -62,7 +81,7 @@ for filename in "$SCRIPT_PATH"/test_data/* ; do
     docker exec -i broker /usr/bin/kafka-topics --bootstrap-server broker:9092 --topic "$topic" --create --partitions "$partition"
 done
 
-for filename in "$SCRIPT_PATH"/tpch-testcase/*.tbl ; do
+for filename in "$SCRIPT_PATH"/tpch-testcase/*.tbl; do
     [ -e "$filename" ] || continue
     base=$(basename "$filename")
     topic="${base%%.*}"
@@ -75,7 +94,7 @@ for filename in "$SCRIPT_PATH"/tpch-testcase/*.tbl ; do
 done
 
 echo "Fulfill kafka topics"
-for filename in "$SCRIPT_PATH"/test_data/* ; do
+for filename in "$SCRIPT_PATH"/test_data/*; do
     [ -e "$filename" ] || continue
     base=$(basename "$filename")
     topic="${base%%.*}"
@@ -86,7 +105,7 @@ for filename in "$SCRIPT_PATH"/test_data/* ; do
 done
 
 echo "Fulfill kafka topics - tpch"
-for filename in "$SCRIPT_PATH"/tpch-testcase/*.tbl ; do
+for filename in "$SCRIPT_PATH"/tpch-testcase/*.tbl; do
     [ -e "$filename" ] || continue
     base=$(basename "$filename")
     topic="${base%%.*}"
@@ -97,4 +116,4 @@ for filename in "$SCRIPT_PATH"/tpch-testcase/*.tbl ; do
 done
 
 echo "Creating sync job for debezium and mysql"
-curl -i -X POST -H "Accept:application/json" -H  "Content-Type:application/json" http://localhost:28083/connectors/ -d @"$SCRIPT_PATH"/debezium-mysql.json
+curl -i -X POST -H "Accept:application/json" -H "Content-Type:application/json" http://localhost:28083/connectors/ -d @"$SCRIPT_PATH"/debezium-mysql.json

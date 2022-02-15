@@ -19,7 +19,7 @@ use risingwave_common::array::{
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
 use risingwave_common::expr::AggKind;
-use risingwave_common::types::{DataTypeKind, Datum};
+use risingwave_common::types::{DataType, Datum};
 use risingwave_common::*;
 pub use row_count::*;
 
@@ -71,6 +71,9 @@ pub trait StreamingAggStateImpl: Any + std::fmt::Debug + DynClone + Send + Sync 
 
     /// Get the builder of the state output
     fn new_builder(&self) -> ArrayBuilderImpl;
+
+    /// Reset to initial state
+    fn reset(&mut self);
 }
 
 dyn_clone::clone_trait_object!(StreamingAggStateImpl);
@@ -87,34 +90,34 @@ dyn_clone::clone_trait_object!(StreamingAggStateImpl);
 /// semantics of `count(*)` 2. `count("any")` computes the number of input rows in which the input
 /// value is not null.
 pub fn create_streaming_agg_state(
-    input_types: &[DataTypeKind],
+    input_types: &[DataType],
     agg_type: &AggKind,
-    return_type: &DataTypeKind,
+    return_type: &DataType,
     datum: Option<Datum>,
 ) -> Result<Box<dyn StreamingAggStateImpl>> {
     macro_rules! gen_unary_agg_state_match {
-    ($agg_type_expr:expr, $input_type_expr:expr, $return_type_expr:expr, $datum: expr, [$(($agg_type:ident, $input_type:ident, $return_type:ident, $state_impl:ty)),*$(,)?]) => {
-      match (
-        $agg_type_expr,
-        $input_type_expr,
-        $return_type_expr,
-        $datum,
-      ) {
-        $(
-          (AggKind::$agg_type, $input_type! { type_match_pattern }, $return_type! { type_match_pattern }, Some(datum)) => {
-            Box::new(<$state_impl>::try_from(datum)?)
-          }
-          (AggKind::$agg_type, $input_type! { type_match_pattern }, $return_type! { type_match_pattern }, None) => {
-            Box::new(<$state_impl>::new())
-          }
-        )*
-        (other_agg, other_input, other_return, _) => panic!(
-          "streaming state not implemented: {:?} {:?} {:?}",
-          other_agg, other_input, other_return
-        )
-      }
+        ($agg_type_expr:expr, $input_type_expr:expr, $return_type_expr:expr, $datum: expr, [$(($agg_type:ident, $input_type:ident, $return_type:ident, $state_impl:ty)),*$(,)?]) => {
+            match (
+                $agg_type_expr,
+                $input_type_expr,
+                $return_type_expr,
+                $datum,
+            ) {
+                $(
+                    (AggKind::$agg_type, $input_type! { type_match_pattern }, $return_type! { type_match_pattern }, Some(datum)) => {
+                        Box::new(<$state_impl>::try_from(datum)?)
+                    }
+                    (AggKind::$agg_type, $input_type! { type_match_pattern }, $return_type! { type_match_pattern }, None) => {
+                        Box::new(<$state_impl>::new())
+                    }
+                )*
+                (other_agg, other_input, other_return, _) => panic!(
+                    "streaming state not implemented: {:?} {:?} {:?}",
+                    other_agg, other_input, other_return
+                )
+            }
+        }
     }
-  }
 
     let state: Box<dyn StreamingAggStateImpl> = match input_types {
         [input_type] => {
@@ -176,20 +179,16 @@ pub fn create_streaming_agg_state(
             match (agg_type, return_type, datum) {
                 // `AggKind::Count` for partial/local Count(*) == RowCount while `AggKind::Sum` for
                 // final/global Count(*)
-                (AggKind::RowCount, DataTypeKind::Int64, Some(datum)) => {
+                (AggKind::RowCount, DataType::Int64, Some(datum)) => {
                     Box::new(StreamingRowCountAgg::with_row_cnt(datum))
                 }
-                (AggKind::RowCount, DataTypeKind::Int64, None) => {
-                    Box::new(StreamingRowCountAgg::new())
-                }
+                (AggKind::RowCount, DataType::Int64, None) => Box::new(StreamingRowCountAgg::new()),
                 // According to the function header comments and the link, Count(*) == RowCount
                 // `StreamingCountAgg` does not count `NULL`, so we use `StreamingRowCountAgg` here.
-                (AggKind::Count, DataTypeKind::Int64, Some(datum)) => {
+                (AggKind::Count, DataType::Int64, Some(datum)) => {
                     Box::new(StreamingRowCountAgg::with_row_cnt(datum))
                 }
-                (AggKind::Count, DataTypeKind::Int64, None) => {
-                    Box::new(StreamingRowCountAgg::new())
-                }
+                (AggKind::Count, DataType::Int64, None) => Box::new(StreamingRowCountAgg::new()),
                 _ => unimplemented!(),
             }
         }

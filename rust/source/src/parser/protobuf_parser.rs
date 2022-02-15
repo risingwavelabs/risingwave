@@ -7,7 +7,7 @@ use risingwave_common::error::ErrorCode::{
     InternalError, ItemNotFound, NotImplementedError, ProtocolError,
 };
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{DataTypeKind, Datum, Decimal, OrderedF32, OrderedF64, ScalarImpl};
+use risingwave_common::types::{DataType, Datum, Decimal, OrderedF32, OrderedF64, ScalarImpl};
 use risingwave_common::vector_op::cast::str_to_date;
 use risingwave_pb::plan::ColumnDesc;
 use serde::de::Deserialize;
@@ -131,30 +131,30 @@ impl ProtobufParser {
 }
 
 macro_rules! protobuf_match_type {
-  ($value:expr, $target_scalar_type:path, { $($serde_type:tt),* }, $target_type:tt) => {
-    $value.and_then(|v| match v {
-      $(Value::$serde_type(b) => Some($target_type::from(b)), )*
-      Value::Option(Some(boxed_value)) => match *boxed_value {
-        $(Value::$serde_type(b) => Some($target_type::from(b)), )*
-        _ => None,
-      },
-      _ => None,
-    }).map($target_scalar_type)
-  };
+    ($value:expr, $target_scalar_type:path, { $($serde_type:tt),* }, $target_type:tt) => {
+        $value.and_then(|v| match v {
+            $(Value::$serde_type(b) => Some($target_type::from(b)), )*
+            Value::Option(Some(boxed_value)) => match *boxed_value {
+                $(Value::$serde_type(b) => Some($target_type::from(b)), )*
+                _ => None,
+            },
+            _ => None,
+        }).map($target_scalar_type)
+    };
 }
 
 /// Maps a protobuf field type to a DB column type.
-fn protobuf_type_mapping(field_type: &FieldType, is_repeated: bool) -> Result<DataTypeKind> {
+fn protobuf_type_mapping(field_type: &FieldType, is_repeated: bool) -> Result<DataType> {
     if is_repeated {
         return Err(NotImplementedError("repeated field is not supported".to_string()).into());
     }
     let t = match field_type {
-        FieldType::Double => DataTypeKind::Float64,
-        FieldType::Float => DataTypeKind::Float32,
-        FieldType::Int64 | FieldType::SFixed64 | FieldType::SInt64 => DataTypeKind::Int64,
-        FieldType::Int32 | FieldType::SFixed32 | FieldType::SInt32 => DataTypeKind::Int32,
-        FieldType::Bool => DataTypeKind::Boolean,
-        FieldType::String => DataTypeKind::Varchar,
+        FieldType::Double => DataType::Float64,
+        FieldType::Float => DataType::Float32,
+        FieldType::Int64 | FieldType::SFixed64 | FieldType::SInt64 => DataType::Int64,
+        FieldType::Int32 | FieldType::SFixed32 | FieldType::SInt32 => DataType::Int32,
+        FieldType::Bool => DataType::Boolean,
+        FieldType::String => DataType::Varchar,
         actual_type => {
             return Err(
                 NotImplementedError(format!("unsupported field type: {:?}", actual_type)).into(),
@@ -172,52 +172,52 @@ impl SourceParser for ProtobufParser {
         };
 
         let row = columns.iter().map(|column| {
-      if column.skip_parse {
-        return None;
-      }
-
-      let key = Value::String(column.name.clone());
-
-      // Use `remove` instead of `get` to take the ownership of the value
-      let value = map.remove(&key);
-      match column.data_type {
-        DataTypeKind::Boolean => {
-          protobuf_match_type!(value, ScalarImpl::Bool, { Bool }, bool)
-        }
-        DataTypeKind::Int16 => {
-          protobuf_match_type!(value, ScalarImpl::Int16, { I8, I16, U8 }, i16)
-        },
-        DataTypeKind::Int32 => {
-          protobuf_match_type!(value, ScalarImpl::Int32, { I8, I16, I32, U8, U16 }, i32)
-        }
-        DataTypeKind::Int64 => {
-          protobuf_match_type!(value, ScalarImpl::Int64, { I8, I16, I32, I64, U8, U16, U32 }, i64)
-        }
-        DataTypeKind::Float32 => {
-          protobuf_match_type!(value, ScalarImpl::Float32, { I8, I16, U8, U16, F32 }, OrderedF32)
-        }
-        DataTypeKind::Float64 => {
-          protobuf_match_type!(value, ScalarImpl::Float64, { I8, I16, I32, U8, U16, U32, F32, F64}, OrderedF64)
-        }
-        DataTypeKind::Decimal{ .. } => {
-          protobuf_match_type!(value, ScalarImpl::Decimal, { I8, I16, I32, I64, U8, U16, U32, U64}, Decimal)
-        }
-        DataTypeKind::Char | DataTypeKind::Varchar => {
-          protobuf_match_type!(value, ScalarImpl::Utf8, { String }, String)
-        }
-        DataTypeKind::Date => {
-          value.and_then(|v| match v {
-            Value::String(b) => str_to_date(&b).ok(),
-            Value::Option(Some(boxed_value)) => match *boxed_value {
-              Value::String(b) => str_to_date(&b).ok(),
-              _ => None,
+            if column.skip_parse {
+                return None;
             }
-            _ => None,
-          }).map(ScalarImpl::Int32)
-        }
-        _ => unimplemented!(),
-      }
-    }).collect::<Vec<Datum>>();
+
+            let key = Value::String(column.name.clone());
+
+            // Use `remove` instead of `get` to take the ownership of the value
+            let value = map.remove(&key);
+            match column.data_type {
+                DataType::Boolean => {
+                    protobuf_match_type!(value, ScalarImpl::Bool, { Bool }, bool)
+                }
+                DataType::Int16 => {
+                    protobuf_match_type!(value, ScalarImpl::Int16, { I8, I16, U8 }, i16)
+                },
+                DataType::Int32 => {
+                    protobuf_match_type!(value, ScalarImpl::Int32, { I8, I16, I32, U8, U16 }, i32)
+                }
+                DataType::Int64 => {
+                    protobuf_match_type!(value, ScalarImpl::Int64, { I8, I16, I32, I64, U8, U16, U32 }, i64)
+                }
+                DataType::Float32 => {
+                    protobuf_match_type!(value, ScalarImpl::Float32, { I8, I16, U8, U16, F32 }, OrderedF32)
+                }
+                DataType::Float64 => {
+                    protobuf_match_type!(value, ScalarImpl::Float64, { I8, I16, I32, U8, U16, U32, F32, F64}, OrderedF64)
+                }
+                DataType::Decimal => {
+                    protobuf_match_type!(value, ScalarImpl::Decimal, { I8, I16, I32, I64, U8, U16, U32, U64}, Decimal)
+                }
+                DataType::Char | DataType::Varchar => {
+                    protobuf_match_type!(value, ScalarImpl::Utf8, { String }, String)
+                }
+                DataType::Date => {
+                    value.and_then(|v| match v {
+                        Value::String(b) => str_to_date(&b).ok(),
+                        Value::Option(Some(boxed_value)) => match *boxed_value {
+                            Value::String(b) => str_to_date(&b).ok(),
+                            _ => None,
+                        }
+                        _ => None,
+                    }).map(ScalarImpl::NaiveDate)
+                }
+                _ => unimplemented!(),
+            }
+        }).collect::<Vec<Datum>>();
 
         Ok(Event {
             ops: vec![Op::Insert],
@@ -232,7 +232,7 @@ mod tests {
 
     use maplit::hashmap;
     use risingwave_common::error::Result;
-    use risingwave_common::types::{DataTypeKind, ScalarImpl};
+    use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::vector_op::cast::str_to_date;
     use risingwave_pb::plan::ColumnDesc;
     use serde_value::Value;
@@ -310,12 +310,12 @@ mod tests {
         };
 
         let hash = hashmap!(
-          "id" => Value::Option(Some(Box::new(Value::I32(123)))),
-          "address" => Value::Option(Some(Box::new(Value::String("test address".to_string())))),
-          "city" => Value::Option(Some(Box::new(Value::String("test city".to_string())))),
-          "zipcode" => Value::Option(Some(Box::new(Value::I64(456)))),
-          "rate" => Value::Option(Some(Box::new(Value::F32(1.2345)))),
-          "date" => Value::Option(Some(Box::new(Value::String("2021-01-01".to_string()))))
+            "id" => Value::Option(Some(Box::new(Value::I32(123)))),
+            "address" => Value::Option(Some(Box::new(Value::String("test address".to_string())))),
+            "city" => Value::Option(Some(Box::new(Value::String("test city".to_string())))),
+            "zipcode" => Value::Option(Some(Box::new(Value::I64(456)))),
+            "rate" => Value::Option(Some(Box::new(Value::F32(1.2345)))),
+            "date" => Value::Option(Some(Box::new(Value::String("2021-01-01".to_string()))))
         );
 
         let keys = hash
@@ -345,42 +345,42 @@ mod tests {
         let descs = vec![
             SourceColumnDesc {
                 name: "id".to_string(),
-                data_type: DataTypeKind::Int32,
+                data_type: DataType::Int32,
                 column_id: 0,
                 skip_parse: false,
                 is_primary: false,
             },
             SourceColumnDesc {
                 name: "address".to_string(),
-                data_type: DataTypeKind::Char,
+                data_type: DataType::Char,
                 column_id: 1,
                 skip_parse: false,
                 is_primary: false,
             },
             SourceColumnDesc {
                 name: "city".to_string(),
-                data_type: DataTypeKind::Char,
+                data_type: DataType::Char,
                 column_id: 2,
                 skip_parse: false,
                 is_primary: false,
             },
             SourceColumnDesc {
                 name: "zipcode".to_string(),
-                data_type: DataTypeKind::Int64,
+                data_type: DataType::Int64,
                 column_id: 3,
                 skip_parse: false,
                 is_primary: false,
             },
             SourceColumnDesc {
                 name: "rate".to_string(),
-                data_type: DataTypeKind::Float32,
+                data_type: DataType::Float32,
                 column_id: 4,
                 skip_parse: false,
                 is_primary: false,
             },
             SourceColumnDesc {
                 name: "date".to_string(),
-                data_type: DataTypeKind::Date,
+                data_type: DataType::Date,
                 column_id: 5,
                 skip_parse: false,
                 is_primary: false,
@@ -397,7 +397,9 @@ mod tests {
         assert!(data[2].eq(&Some(ScalarImpl::Utf8("test city".to_string()))));
         assert!(data[3].eq(&Some(ScalarImpl::Int64(456))));
         assert!(data[4].eq(&Some(ScalarImpl::Float32(1.2345.into()))));
-        assert!(data[5].eq(&Some(ScalarImpl::Int32(str_to_date("2021-01-01").unwrap()))))
+        assert!(data[5].eq(&Some(ScalarImpl::NaiveDate(
+            str_to_date("2021-01-01").unwrap()
+        ))))
     }
 
     #[test]
@@ -410,37 +412,37 @@ mod tests {
             columns,
             vec![
                 ColumnDesc {
-                    column_type: Some(DataTypeKind::Int32.to_protobuf().unwrap()),
+                    column_type: Some(DataType::Int32.to_protobuf().unwrap()),
                     is_primary: false,
                     name: "id".to_string(),
                     ..Default::default()
                 },
                 ColumnDesc {
-                    column_type: Some(DataTypeKind::Varchar.to_protobuf().unwrap()),
+                    column_type: Some(DataType::Varchar.to_protobuf().unwrap()),
                     is_primary: false,
                     name: "address".to_string(),
                     ..Default::default()
                 },
                 ColumnDesc {
-                    column_type: Some(DataTypeKind::Varchar.to_protobuf().unwrap()),
+                    column_type: Some(DataType::Varchar.to_protobuf().unwrap()),
                     is_primary: false,
                     name: "city".to_string(),
                     ..Default::default()
                 },
                 ColumnDesc {
-                    column_type: Some(DataTypeKind::Int64.to_protobuf().unwrap()),
+                    column_type: Some(DataType::Int64.to_protobuf().unwrap()),
                     is_primary: false,
                     name: "zipcode".to_string(),
                     ..Default::default()
                 },
                 ColumnDesc {
-                    column_type: Some(DataTypeKind::Float32.to_protobuf().unwrap()),
+                    column_type: Some(DataType::Float32.to_protobuf().unwrap()),
                     is_primary: false,
                     name: "rate".to_string(),
                     ..Default::default()
                 },
                 ColumnDesc {
-                    column_type: Some(DataTypeKind::Varchar.to_protobuf().unwrap()),
+                    column_type: Some(DataType::Varchar.to_protobuf().unwrap()),
                     is_primary: false,
                     name: "date".to_string(),
                     ..Default::default()

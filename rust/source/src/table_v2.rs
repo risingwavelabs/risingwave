@@ -1,12 +1,12 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::error::Result;
 use risingwave_storage::table::ScannableTableRef;
 use risingwave_storage::TableColumnDesc;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::mpsc;
 
 use crate::{BatchSourceReader, Source, SourceWriter, StreamSourceReader};
 
@@ -14,13 +14,11 @@ use crate::{BatchSourceReader, Source, SourceWriter, StreamSourceReader};
 struct TableSourceV2Core {
     _table: ScannableTableRef,
 
-    /// Send changes to the associated materialize task.
-    changes_tx: mpsc::UnboundedSender<StreamChunk>,
-
-    /// The receiver of the above channel.
-    /// This field will be taken once a `StreamReader` is created, i.e., the associated materialize
-    /// task starts.
-    changes_rx: Option<mpsc::UnboundedReceiver<StreamChunk>>,
+    /// The senders of the changes channel.
+    ///
+    /// When a `StreamReader` is created, a channel will be created and the sender will be
+    /// saved here. The insert statement will take one channel randomly.
+    changes_txs: Vec<mpsc::UnboundedSender<StreamChunk>>,
 }
 
 /// [`TableSourceV2`] is a special internal source to handle table updates from user,
@@ -44,11 +42,9 @@ impl TableSourceV2 {
     pub fn new(table: ScannableTableRef) -> Self {
         let column_descs = table.column_descs().into_owned();
 
-        let (tx, rx) = mpsc::unbounded_channel();
         let core = TableSourceV2Core {
             _table: table,
-            changes_tx: tx,
-            changes_rx: Some(rx),
+            changes_txs: vec![],
         };
 
         Self {
@@ -92,11 +88,9 @@ impl BatchSourceReader for TableV2BatchReader {
 /// structure of "`MView` on `MView`".
 #[derive(Debug)]
 pub struct TableV2StreamReader {
-    core: Arc<RwLock<TableSourceV2Core>>,
-
     /// The receiver of the changes channel. This field is `Some` only if the reader has been
     /// `open`ed.
-    rx: Option<mpsc::UnboundedReceiver<StreamChunk>>,
+    rx: mpsc::UnboundedReceiver<StreamChunk>,
 
     /// Mappings from the source column to the column to be read.
     column_indices: Vec<usize>,
@@ -105,14 +99,11 @@ pub struct TableV2StreamReader {
 #[async_trait]
 impl StreamSourceReader for TableV2StreamReader {
     async fn open(&mut self) -> Result<()> {
-        let mut core = self.core.write().await;
-        let rx = core.changes_rx.take().expect("can only open reader once");
-        self.rx = Some(rx);
         Ok(())
     }
 
     async fn next(&mut self) -> Result<StreamChunk> {
-        let chunk = match self.rx.as_mut().expect("reader not open").recv().await {
+        let chunk = match self.rx.recv().await {
             Some(chunk) => chunk,
             None => panic!("TableSourceV2 dropped before associated streaming task terminated"),
         };
@@ -139,10 +130,13 @@ pub struct TableV2Writer {
 #[async_trait]
 impl SourceWriter for TableV2Writer {
     async fn write(&mut self, chunk: StreamChunk) -> Result<()> {
-        let core = self.core.read().await;
-        core.changes_tx
-            .send(chunk)
-            .expect("write to table v2 failed");
+        use rand::Rng;
+        let core = self.core.read().unwrap();
+        assert!(!core.changes_txs.is_empty(), "table reader not exists");
+        // randomly pick a channel
+        let idx = rand::thread_rng().gen_range(0..core.changes_txs.len());
+        let tx = &core.changes_txs[idx];
+        tx.send(chunk).expect("write to table v2 failed");
         Ok(())
     }
 
@@ -181,11 +175,11 @@ impl Source for TableSourceV2 {
             })
             .collect();
 
-        Ok(TableV2StreamReader {
-            core: self.core.clone(),
-            rx: None,
-            column_indices,
-        })
+        let mut core = self.core.write().unwrap();
+        let (tx, rx) = mpsc::unbounded_channel();
+        core.changes_txs.push(tx);
+
+        Ok(TableV2StreamReader { rx, column_indices })
     }
 
     fn create_writer(&self) -> Result<Self::Writer> {
@@ -201,7 +195,7 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::array::{Array, I64Array, Op};
     use risingwave_common::column_nonnull;
-    use risingwave_common::types::DataTypeKind;
+    use risingwave_common::types::DataType;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::mview::MViewTable;
     use risingwave_storage::Keyspace;
@@ -213,7 +207,7 @@ mod tests {
         let keyspace = Keyspace::table_root(store, &Default::default());
         let table = Arc::new(MViewTable::new_batch(
             keyspace,
-            vec![TableColumnDesc::new_without_name(0, DataTypeKind::Int64)],
+            vec![TableColumnDesc::new_without_name(0, DataType::Int64)],
         ));
 
         TableSourceV2::new(table)
@@ -222,6 +216,7 @@ mod tests {
     #[tokio::test]
     async fn test_table_source_v2() -> Result<()> {
         let source = new_source();
+        let mut reader = source.stream_reader(TableV2ReaderContext, vec![0])?;
         let mut writer = source.create_writer()?;
 
         macro_rules! write_chunk {
@@ -237,16 +232,15 @@ mod tests {
 
         write_chunk!(0);
 
-        let mut reader = source.stream_reader(TableV2ReaderContext, vec![0])?;
         reader.open().await?;
 
         macro_rules! check_next_chunk {
-      ($i: expr) => {
-        assert_matches!(reader.next().await?, chunk => {
-          assert_eq!(chunk.columns()[0].array_ref().as_int64().iter().collect_vec(), vec![Some($i)]);
-        });
-      }
-    }
+            ($i: expr) => {
+                assert_matches!(reader.next().await?, chunk => {
+                    assert_eq!(chunk.columns()[0].array_ref().as_int64().iter().collect_vec(), vec![Some($i)]);
+                });
+            }
+        }
 
         check_next_chunk!(0);
 
@@ -254,15 +248,5 @@ mod tests {
         check_next_chunk!(1);
 
         Ok(())
-    }
-
-    #[should_panic]
-    #[tokio::test]
-    async fn test_only_one_reader() {
-        let source = new_source();
-        let mut reader_1 = source.stream_reader(TableV2ReaderContext, vec![0]).unwrap();
-        reader_1.open().await.unwrap();
-        let mut reader_2 = source.stream_reader(TableV2ReaderContext, vec![0]).unwrap();
-        reader_2.open().await.unwrap();
     }
 }

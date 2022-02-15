@@ -1,11 +1,11 @@
-use crate::expr::{get_col_refs, to_conjunctions, BoundExprImpl};
+use crate::expr::{to_conjunctions, ExprImpl};
 #[derive(Debug, Clone)]
 /// the join predicate used in optimizer
 pub struct JoinPredicate {
     /// other conditions, linked with AND conjunction.
     /// 1. the non equal conditons
     /// 2. the conditions in the same side,
-    other_conds: Vec<BoundExprImpl>,
+    other_conds: Vec<ExprImpl>,
     /// the equal columns indexes(in the input schema) both sides, now all are normal equal(not
     /// null-safe-equal),
     keys: Vec<(usize, usize)>,
@@ -13,9 +13,18 @@ pub struct JoinPredicate {
 #[allow(dead_code)]
 impl JoinPredicate {
     /// the new method for `JoinPredicate` without any analysis, check or rewrite.
-    pub fn new(other_conds: Vec<BoundExprImpl>, keys: Vec<(usize, usize)>) -> Self {
+    pub fn new(other_conds: Vec<ExprImpl>, keys: Vec<(usize, usize)>) -> Self {
         JoinPredicate { other_conds, keys }
     }
+
+    /// Construct a empty predicate. Condition always true -- do not filter rows.
+    pub fn new_empty() -> Self {
+        JoinPredicate {
+            other_conds: vec![],
+            keys: vec![],
+        }
+    }
+
     /// `create` will analyze the on clause condition and construct a `JoinPredicate`.
     /// e.g.
     /// ```sql
@@ -32,11 +41,9 @@ impl JoinPredicate {
     ///   keys= Vec[(1,1)]
     /// ```
     #[allow(unused_variables)]
-    pub fn create(left_cols_num: usize, on_clause: BoundExprImpl) -> Self {
+    pub fn create(left_cols_num: usize, on_clause: ExprImpl) -> Self {
         let conds = to_conjunctions(on_clause);
-        for cond in conds {
-            let cols = get_col_refs(&cond);
-        }
+        for cond in conds {}
         todo!()
     }
 
@@ -56,7 +63,7 @@ impl JoinPredicate {
     }
 
     /// Get a reference to the join predicate's other conds.
-    pub fn other_conds(&self) -> &[BoundExprImpl] {
+    pub fn other_conds(&self) -> &[ExprImpl] {
         self.other_conds.as_ref()
     }
     // TODO: our backend not support some equal columns and sonm NonEqual condition

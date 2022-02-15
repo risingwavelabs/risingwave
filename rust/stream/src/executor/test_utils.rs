@@ -11,13 +11,13 @@ use crate::executor::*;
 /// `row_nonnull` builds a `Row` with concrete values.
 /// TODO: add macro row!, which requires a new trait `ToScalarValue`.
 macro_rules! row_nonnull {
-  [$( $value:expr ),*] => {
-    {
-      use risingwave_common::types::Scalar;
-      use risingwave_common::array::Row;
-      Row(vec![$(Some($value.to_scalar_value()), )*])
-    }
-  };
+    [$( $value:expr ),*] => {
+        {
+            use risingwave_common::types::Scalar;
+            use risingwave_common::array::Row;
+            Row(vec![$(Some($value.to_scalar_value()), )*])
+        }
+    };
 }
 
 pub struct MockSource {
@@ -192,14 +192,14 @@ pub fn create_in_memory_keyspace() -> Keyspace<MemoryStateStore> {
 
 pub mod schemas {
     use risingwave_common::catalog::*;
-    use risingwave_common::types::DataTypeKind;
+    use risingwave_common::types::DataType;
 
-    fn field_n<const N: usize>(data_type: DataTypeKind) -> Schema {
+    fn field_n<const N: usize>(data_type: DataType) -> Schema {
         Schema::new(vec![Field::unnamed(data_type); N])
     }
 
     fn int32_n<const N: usize>() -> Schema {
-        field_n::<N>(DataTypeKind::Int32)
+        field_n::<N>(DataType::Int32)
     }
 
     /// Create a util schema **for test only** with two int32 fields.
@@ -213,7 +213,7 @@ pub mod schemas {
     }
 
     fn varchar_n<const N: usize>() -> Schema {
-        field_n::<N>(DataTypeKind::Varchar)
+        field_n::<N>(DataType::Varchar)
     }
 
     /// Create a util schema **for test only** with three varchar fields.

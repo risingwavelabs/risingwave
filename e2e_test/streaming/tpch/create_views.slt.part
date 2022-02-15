@@ -214,7 +214,7 @@ create materialized view tpch_q10 as
 select
 	c_custkey,
 	c_name,
-	sum(l_extendedprice * (1 - l_discount)) as revenue,
+	sum(l_extendedprice * (1.00 - l_discount)) as revenue,
 	c_acctbal,
 	n_name,
 	c_address,
@@ -284,3 +284,61 @@ where
 	l_partkey = p_partkey
 	and l_shipdate >= date '1995-09-01'
 	and l_shipdate < date '1995-09-01' + interval '1' month;
+
+
+statement ok
+create materialized view tpch_q17 as
+select
+	ROUND(sum(l_extendedprice) / 7.0, 16) as avg_yearly
+from
+	lineitem,
+	part
+where
+	p_partkey = l_partkey
+	and p_brand = 'Brand#13'
+	and p_container = 'JUMBO PKG'
+	and l_quantity < (
+		select
+			0.2 * avg(l_quantity)
+		from
+			lineitem
+		where
+			l_partkey = p_partkey
+	);
+
+
+statement ok
+create materialized view tpch_q18 as
+select
+	c_name,
+	c_custkey,
+	o_orderkey,
+	o_orderdate,
+	o_totalprice,
+	sum(l_quantity) quantity
+from
+	customer,
+	orders,
+	lineitem
+where
+	o_orderkey in (
+		select
+			l_orderkey
+		from
+			lineitem
+		group by
+			l_orderkey having
+				sum(l_quantity) > 1
+	)
+	and c_custkey = o_custkey
+	and o_orderkey = l_orderkey
+group by
+	c_name,
+	c_custkey,
+	o_orderkey,
+	o_orderdate,
+	o_totalprice
+order by
+	o_totalprice desc,
+	o_orderdate
+LIMIT 100;

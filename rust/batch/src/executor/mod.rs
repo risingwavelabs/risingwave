@@ -90,15 +90,15 @@ pub struct ExecutorBuilder<'a> {
 }
 
 macro_rules! build_executor {
-  ($source: expr, $($proto_type_name:path => $data_type:ty),*) => {
-    match $source.plan_node().get_node_body().unwrap() {
-      $(
-        $proto_type_name(..) => {
-          <$data_type>::new_boxed_executor($source)
-        },
-      )*
+    ($source: expr, $($proto_type_name:path => $data_type:ty),*) => {
+        match $source.plan_node().get_node_body().unwrap() {
+            $(
+                $proto_type_name(..) => {
+                    <$data_type>::new_boxed_executor($source)
+                },
+            )*
+        }
     }
-  }
 }
 
 impl<'a> ExecutorBuilder<'a> {

@@ -3,11 +3,15 @@ use std::default::Default;
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::io::{Cursor, Read};
 
+use chrono::{Datelike, Timelike};
 use itertools::Itertools;
 
 use crate::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, StructValue};
 use crate::error::Result;
-use crate::types::{Datum, Decimal, IntervalUnit, OrderedF32, OrderedF64, ScalarRef};
+use crate::types::{
+    Datum, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
+    OrderedF32, OrderedF64, ScalarRef,
+};
 use crate::util::hash_util::CRC32FastBuilder;
 
 /// This file contains implementation for hash key serialization for
@@ -68,7 +72,7 @@ pub trait HashKey: Hash + Eq + Sized + Send + Sync + 'static {
             data_chunk
                 .column_at(*column_idx)?
                 .array_ref()
-                .serialize_to_hash_key(&mut serializers)?;
+                .serialize_to_hash_key(&mut serializers[..])?;
         }
 
         Ok(serializers
@@ -77,7 +81,7 @@ pub trait HashKey: Hash + Eq + Sized + Send + Sync + 'static {
             .collect())
     }
 
-    fn deserialize_to_builders(self, array_builders: &mut Vec<ArrayBuilderImpl>) -> Result<()>;
+    fn deserialize_to_builders(self, array_builders: &mut [ArrayBuilderImpl]) -> Result<()>;
 
     fn has_null(&self) -> bool;
 }
@@ -296,6 +300,61 @@ impl<'a> HashKeySerDe<'a> for &'a str {
     }
 }
 
+impl HashKeySerDe<'_> for NaiveDateWrapper {
+    type S = [u8; 4];
+
+    fn serialize(self) -> Self::S {
+        let mut ret = [0; 4];
+        ret[0..4].copy_from_slice(&self.0.num_days_from_ce().to_ne_bytes());
+
+        ret
+    }
+
+    fn deserialize<R: Read>(source: &mut R) -> Self {
+        let value = Self::read_fixed_size_bytes::<R, 4>(source);
+        let days = i32::from_ne_bytes(value[0..4].try_into().unwrap());
+        NaiveDateWrapper::new_with_days(days).unwrap()
+    }
+}
+
+impl HashKeySerDe<'_> for NaiveDateTimeWrapper {
+    type S = [u8; 12];
+
+    fn serialize(self) -> Self::S {
+        let mut ret = [0; 12];
+        ret[0..8].copy_from_slice(&self.0.timestamp().to_ne_bytes());
+        ret[8..12].copy_from_slice(&self.0.timestamp_subsec_nanos().to_ne_bytes());
+
+        ret
+    }
+
+    fn deserialize<R: Read>(source: &mut R) -> Self {
+        let value = Self::read_fixed_size_bytes::<R, 12>(source);
+        let secs = i64::from_ne_bytes(value[0..8].try_into().unwrap());
+        let nsecs = u32::from_ne_bytes(value[8..12].try_into().unwrap());
+        NaiveDateTimeWrapper::new_with_secs_nsecs(secs, nsecs).unwrap()
+    }
+}
+
+impl HashKeySerDe<'_> for NaiveTimeWrapper {
+    type S = [u8; 8];
+
+    fn serialize(self) -> Self::S {
+        let mut ret = [0; 8];
+        ret[0..4].copy_from_slice(&self.0.num_seconds_from_midnight().to_ne_bytes());
+        ret[4..8].copy_from_slice(&self.0.nanosecond().to_ne_bytes());
+
+        ret
+    }
+
+    fn deserialize<R: Read>(source: &mut R) -> Self {
+        let value = Self::read_fixed_size_bytes::<R, 8>(source);
+        let secs = u32::from_ne_bytes(value[0..4].try_into().unwrap());
+        let nano = u32::from_ne_bytes(value[4..8].try_into().unwrap());
+        NaiveTimeWrapper::new_with_secs_nano(secs, nano).unwrap()
+    }
+}
+
 impl<'a> HashKeySerDe<'_> for StructValue {
     type S = Vec<u8>;
 
@@ -437,7 +496,7 @@ impl HashKeySerializer for SerializedKeySerializer {
     }
 }
 
-fn serialize_array_to_hash_key<'a, A, S>(array: &'a A, serializers: &mut Vec<S>) -> Result<()>
+fn serialize_array_to_hash_key<'a, A, S>(array: &'a A, serializers: &mut [S]) -> Result<()>
 where
     A: Array,
     A::RefItem<'a>: HashKeySerDe<'a>,
@@ -463,14 +522,14 @@ where
 }
 
 impl ArrayImpl {
-    fn serialize_to_hash_key<S: HashKeySerializer>(&self, serializers: &mut Vec<S>) -> Result<()> {
+    fn serialize_to_hash_key<S: HashKeySerializer>(&self, serializers: &mut [S]) -> Result<()> {
         macro_rules! impl_all_serialize_to_hash_key {
-      ([$self:ident, $serializers: ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-        match $self {
-          $( Self::$variant_name(inner) => serialize_array_to_hash_key(inner, $serializers), )*
+            ([$self:ident, $serializers: ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+                match $self {
+                    $( Self::$variant_name(inner) => serialize_array_to_hash_key(inner, $serializers), )*
+                }
+            };
         }
-      };
-    }
         for_all_variants! { impl_all_serialize_to_hash_key, self, serializers }
     }
 }
@@ -481,12 +540,12 @@ impl ArrayBuilderImpl {
         deserializer: &mut S,
     ) -> Result<()> {
         macro_rules! impl_all_deserialize_from_hash_key {
-      ([$self:ident, $deserializer: ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-        match $self {
-          $( Self::$variant_name(inner) => deserialize_array_element_from_hash_key(inner, $deserializer), )*
+            ([$self:ident, $deserializer: ident], $({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+                match $self {
+                    $( Self::$variant_name(inner) => deserialize_array_element_from_hash_key(inner, $deserializer), )*
+                }
+            };
         }
-      };
-    }
         for_all_variants! { impl_all_deserialize_from_hash_key, self, deserializer }
     }
 }
@@ -494,7 +553,7 @@ impl ArrayBuilderImpl {
 impl<const N: usize> HashKey for FixedSizeKey<N> {
     type S = FixedSizeKeySerializer<N>;
 
-    fn deserialize_to_builders(self, array_builders: &mut Vec<ArrayBuilderImpl>) -> Result<()> {
+    fn deserialize_to_builders(self, array_builders: &mut [ArrayBuilderImpl]) -> Result<()> {
         let mut deserializer = FixedSizeKeyDeserializer::<N>::from_hash_key(self);
         array_builders.iter_mut().try_for_each(|array_builder| {
             array_builder.deserialize_from_hash_key(&mut deserializer)
@@ -509,7 +568,7 @@ impl<const N: usize> HashKey for FixedSizeKey<N> {
 impl HashKey for SerializedKey {
     type S = SerializedKeySerializer;
 
-    fn deserialize_to_builders(self, array_builders: &mut Vec<ArrayBuilderImpl>) -> Result<()> {
+    fn deserialize_to_builders(self, array_builders: &mut [ArrayBuilderImpl]) -> Result<()> {
         ensure!(self.key.len() == array_builders.len());
         array_builders
             .iter_mut()
@@ -534,7 +593,7 @@ mod tests {
     use crate::array::column::Column;
     use crate::array::{
         ArrayRef, BoolArray, DataChunk, DecimalArray, F32Array, F64Array, I16Array, I32Array,
-        I32ArrayBuilder, I64Array, Utf8Array,
+        I32ArrayBuilder, I64Array, NaiveDateArray, NaiveDateTimeArray, NaiveTimeArray, Utf8Array,
     };
     use crate::collection::hash_map::{
         HashKey, Key128, Key16, Key256, Key32, Key64, KeySerialized, PrecomputedBuildHasher,
@@ -557,6 +616,12 @@ mod tests {
             Column::new(seed_rand_array_ref::<F64Array>(capacity, seed + 5)),
             Column::new(seed_rand_array_ref::<DecimalArray>(capacity, seed + 6)),
             Column::new(seed_rand_array_ref::<Utf8Array>(capacity, seed + 7)),
+            Column::new(seed_rand_array_ref::<NaiveDateArray>(capacity, seed + 8)),
+            Column::new(seed_rand_array_ref::<NaiveTimeArray>(capacity, seed + 9)),
+            Column::new(seed_rand_array_ref::<NaiveDateTimeArray>(
+                capacity,
+                seed + 10,
+            )),
         ];
 
         DataChunk::try_from(columns).expect("Failed to create data chunk")
@@ -634,7 +699,7 @@ mod tests {
             .collect::<Vec<ArrayBuilderImpl>>();
 
         keys.into_iter()
-            .try_for_each(|k| K::deserialize_to_builders(k, &mut array_builders))
+            .try_for_each(|k| K::deserialize_to_builders(k, &mut array_builders[..]))
             .expect("Failed to deserialize!");
 
         let result_arrays = array_builders
@@ -700,13 +765,13 @@ mod tests {
 
     fn generate_decimal_test_data() -> DataChunk {
         let columns = vec![Column::new(Arc::new(
-            array! { DecimalArray,
-              [Some(Decimal::from_str("1.2").unwrap()),
-               None,
-               Some(Decimal::from_str("1.200").unwrap()),
-               Some(Decimal::from_str("0.00").unwrap()),
-               Some(Decimal::from_str("0.0").unwrap())]
-            }
+            array! { DecimalArray, [
+                Some(Decimal::from_str("1.2").unwrap()),
+                None,
+                Some(Decimal::from_str("1.200").unwrap()),
+                Some(Decimal::from_str("0.00").unwrap()),
+                Some(Decimal::from_str("0.0").unwrap())
+            ]}
             .into(),
         ) as ArrayRef)];
 
@@ -736,10 +801,10 @@ mod tests {
         let mut array_builders = [0, 1]
             .iter()
             .map(|_| ArrayBuilderImpl::Int32(I32ArrayBuilder::new(2).unwrap()))
-            .collect();
+            .collect::<Vec<_>>();
 
         keys.into_iter()
-            .for_each(|k| k.deserialize_to_builders(&mut array_builders).unwrap());
+            .for_each(|k| k.deserialize_to_builders(&mut array_builders[..]).unwrap());
 
         let array = array_builders.pop().unwrap().finish().unwrap();
         let i32_vec = array

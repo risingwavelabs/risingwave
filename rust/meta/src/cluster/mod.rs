@@ -1,4 +1,5 @@
 use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 
 use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
@@ -7,14 +8,18 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 
+use crate::hummock::HummockManager;
 use crate::manager::{IdCategory, IdGeneratorManagerRef, MetaSrvEnv};
 use crate::model::{MetadataModel, Worker};
 use crate::storage::MetaStoreRef;
+
+pub type NodeId = u32;
 
 /// [`StoredClusterManager`] manager cluster/worker meta data in [`MetaStore`].
 pub struct StoredClusterManager {
     meta_store_ref: MetaStoreRef,
     id_gen_manager_ref: IdGeneratorManagerRef,
+    hummock_manager_ref: Option<Arc<HummockManager>>,
     workers: DashMap<WorkerKey, Worker>,
 }
 
@@ -35,7 +40,10 @@ impl Hash for WorkerKey {
 }
 
 impl StoredClusterManager {
-    pub async fn new(env: MetaSrvEnv) -> Result<Self> {
+    pub async fn new(
+        env: MetaSrvEnv,
+        hummock_manager_ref: Option<Arc<HummockManager>>,
+    ) -> Result<Self> {
         let meta_store_ref = env.meta_store_ref();
         let workers =
             try_match_expand!(Worker::list(&meta_store_ref).await, Ok, "Worker::list fail")?;
@@ -48,6 +56,7 @@ impl StoredClusterManager {
         Ok(Self {
             meta_store_ref,
             id_gen_manager_ref: env.id_gen_manager_ref(),
+            hummock_manager_ref,
             workers: worker_map,
         })
     }
@@ -69,7 +78,7 @@ impl StoredClusterManager {
                     r#type: r#type as i32,
                     host: Some(host_address),
                 });
-                worker.create(&self.meta_store_ref).await?;
+                worker.insert(&self.meta_store_ref).await?;
                 Ok((v.insert(worker).to_protobuf(), true))
             }
         }
@@ -80,17 +89,35 @@ impl StoredClusterManager {
             None => Err(RwError::from(InternalError(
                 "Worker node does not exist!".to_string(),
             ))),
-            Some(_) => Worker::delete(&self.meta_store_ref, &host_address).await,
+            Some(entry) => {
+                Worker::delete(&self.meta_store_ref, &host_address).await?;
+                if let Some(hummock_manager_ref) = self.hummock_manager_ref.as_ref() {
+                    // It's desirable these operations are committed atomically.
+                    // But meta store transaction across *Manager is not intuitive.
+                    // TODO #93: So we rely on a safe guard that periodically purges hummock context
+                    // resource owned by stale worker nodes.
+                    hummock_manager_ref
+                        .release_context_resource(entry.1.to_protobuf().id)
+                        .await?;
+                }
+                Ok(())
+            }
         }
     }
 
-    pub fn list_worker_node(&self, worker_type: WorkerType) -> Result<Vec<WorkerNode>> {
-        Ok(self
-            .workers
+    pub fn list_worker_node(&self, worker_type: WorkerType) -> Vec<WorkerNode> {
+        self.workers
             .iter()
             .map(|entry| entry.value().to_protobuf())
             .filter(|w| w.r#type == worker_type as i32)
-            .collect::<Vec<_>>())
+            .collect::<Vec<_>>()
+    }
+
+    pub fn get_worker_count(&self, worker_type: WorkerType) -> usize {
+        self.workers
+            .iter()
+            .filter(|entry| entry.value().worker_type() == worker_type)
+            .count()
     }
 }
 

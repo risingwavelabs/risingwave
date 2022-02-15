@@ -1,4 +1,5 @@
 use std::fmt::Debug;
+use std::sync::Once;
 
 use async_trait::async_trait;
 use risingwave_common::error::Result;
@@ -16,6 +17,9 @@ pub struct CacheClearExecutor {
 
 impl CacheClearExecutor {
     pub fn new(input: Box<dyn Executor>) -> Self {
+        static ONCE: Once = Once::new();
+        ONCE.call_once(|| info!("CacheClearExecutor enabled."));
+
         Self { input }
     }
 }

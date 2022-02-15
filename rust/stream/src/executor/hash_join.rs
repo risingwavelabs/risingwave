@@ -10,7 +10,7 @@ use risingwave_common::array::{
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_common::expr::RowExpression;
-use risingwave_common::types::{DataTypeKind, ToOwnedDatum};
+use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_storage::keyspace::Segment;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -54,7 +54,7 @@ struct StreamChunkBuilder {
 impl StreamChunkBuilder {
     fn new(
         capacity: usize,
-        data_types: &[DataTypeKind],
+        data_types: &[DataType],
         update_start_pos: usize,
         matched_start_pos: usize,
     ) -> Result<Self> {
@@ -162,13 +162,14 @@ impl JoinParams {
 
 struct JoinSide<S: StateStore> {
     /// Store all data from a one side stream
+    // TODO: use `EvictableHashMap`.
     ht: HashMap<HashKeyType, HashValueType<S>>,
     /// Indices of the join key columns
     key_indices: Vec<usize>,
     /// The primary key indices of this side, used for state store
     pk_indices: Vec<usize>,
     /// The date type of each columns to join on
-    col_types: Vec<DataTypeKind>,
+    col_types: Vec<DataType>,
     /// The start position for the side in output new columns
     start_pos: usize,
     /// The join side operates on this keyspace.
@@ -186,13 +187,26 @@ impl<S: StateStore> std::fmt::Debug for JoinSide<S> {
     }
 }
 
+impl<S: StateStore> JoinSide<S> {
+    #[allow(dead_code)]
+    fn is_dirty(&self) -> bool {
+        self.ht.values().any(|state| state.is_dirty())
+    }
+
+    fn clear_cache(&mut self) {
+        // TODO: should clear the hashmap entirely after cache eviction of hash join is fixed,
+        // instead of clear cache for all states.
+        self.ht.values_mut().for_each(|s| s.clear_cache());
+    }
+}
+
 /// `HashJoinExecutor` takes two input streams and runs equal hash join on them.
 /// The output columns are the concatenation of left and right columns.
 pub struct HashJoinExecutor<S: StateStore, const T: JoinTypePrimitive> {
     /// Barrier aligner that combines two input streams and aligns their barriers
     aligner: BarrierAligner,
     /// the data types of the formed new columns
-    output_data_types: Vec<DataTypeKind>,
+    output_data_types: Vec<DataType>,
     /// The schema of the hash join executor
     schema: Schema,
     /// The primary key indices of the schema
@@ -256,6 +270,13 @@ impl<S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<S,
 
     fn identity(&self) -> &str {
         self.identity.as_str()
+    }
+
+    fn clear_cache(&mut self) -> Result<()> {
+        self.side_l.clear_cache();
+        self.side_r.clear_cache();
+
+        Ok(())
     }
 }
 
@@ -585,13 +606,14 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
                                     ))
                                 }
                             };
-                            entry_value.insert(JoinRow::new(value, matched_rows.len() as u64));
+                            entry_value
+                                .insert(JoinRow::new(value, matched_rows.len().await as u64));
                         }
                         Op::Delete | Op::UpdateDelete => {
                             if let Some(v) = side_update.ht.get_mut(&key) {
                                 let pk = Self::pk_from_row_ref(&row, &side_update.pk_indices);
                                 v.remove(pk);
-                                if outer_side_null(T, SIDE) && v.is_empty() {
+                                if outer_side_null(T, SIDE) && v.is_empty().await {
                                     for matched_row in matched_rows.values().await {
                                         stream_chunk_builder.append_row(
                                             Op::UpdateDelete,
@@ -617,6 +639,9 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
                 }
             } else {
                 // if there are no matched rows, just update the hash table
+                //
+                // FIXME: matched rows can still be there but just evicted from the memory cache, we
+                // should handle this!
                 match *op {
                     Op::Insert | Op::UpdateInsert => {
                         side_update
@@ -673,11 +698,11 @@ mod tests {
     }
 
     fn create_cond() -> Option<RowExpression> {
-        let left_expr = InputRefExpression::new(DataTypeKind::Int64, 1);
-        let right_expr = InputRefExpression::new(DataTypeKind::Int64, 3);
+        let left_expr = InputRefExpression::new(DataType::Int64, 1);
+        let right_expr = InputRefExpression::new(DataType::Int64, 3);
         let cond = new_binary_expr(
             Type::LessThan,
-            DataTypeKind::Boolean,
+            DataType::Boolean,
             Box::new(left_expr),
             Box::new(right_expr),
         );
@@ -720,8 +745,8 @@ mod tests {
         );
         let schema = Schema {
             fields: vec![
-                Field::unnamed(DataTypeKind::Int64),
-                Field::unnamed(DataTypeKind::Int64),
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
             ],
         };
 
@@ -864,8 +889,8 @@ mod tests {
         );
         let schema = Schema {
             fields: vec![
-                Field::unnamed(DataTypeKind::Int64),
-                Field::unnamed(DataTypeKind::Int64),
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
             ],
         };
 
@@ -1036,8 +1061,8 @@ mod tests {
         );
         let schema = Schema {
             fields: vec![
-                Field::unnamed(DataTypeKind::Int64),
-                Field::unnamed(DataTypeKind::Int64),
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
             ],
         };
 
@@ -1200,8 +1225,8 @@ mod tests {
         );
         let schema = Schema {
             fields: vec![
-                Field::unnamed(DataTypeKind::Int64),
-                Field::unnamed(DataTypeKind::Int64),
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
             ],
         };
 
@@ -1344,8 +1369,8 @@ mod tests {
         );
         let schema = Schema {
             fields: vec![
-                Field::unnamed(DataTypeKind::Int64),
-                Field::unnamed(DataTypeKind::Int64),
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
             ],
         };
 
@@ -1476,7 +1501,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_streaming_hash_full_outer_join_with_nonequi_condition() {
         let chunk_l1 = StreamChunk::new(
             vec![Op::Insert, Op::Insert, Op::Insert],
@@ -1512,8 +1536,8 @@ mod tests {
         );
         let schema = Schema {
             fields: vec![
-                Field::unnamed(DataTypeKind::Int64),
-                Field::unnamed(DataTypeKind::Int64),
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
             ],
         };
 
@@ -1646,7 +1670,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     async fn test_streaming_hash_inner_join_with_nonequi_condition() {
         let chunk_l1 = StreamChunk::new(
             vec![Op::Insert, Op::Insert, Op::Insert],
@@ -1682,8 +1705,8 @@ mod tests {
         );
         let schema = Schema {
             fields: vec![
-                Field::unnamed(DataTypeKind::Int64),
-                Field::unnamed(DataTypeKind::Int64),
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
             ],
         };
 
@@ -1744,30 +1767,6 @@ mod tests {
         // push the 1st right chunk
         MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r1]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
-            assert_eq!(chunk.ops(), vec![Op::Insert]);
-            assert_eq!(chunk.columns().len(), 4);
-            assert_eq!(
-                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
-                vec![Some(2)]
-            );
-            assert_eq!(
-                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
-                vec![Some(10)]
-            );
-            assert_eq!(
-                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
-                vec![Some(2)]
-            );
-            assert_eq!(
-                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
-                vec![Some(7)]
-            );
-        } else {
-            unreachable!();
-        }
-        // push the 2nd right chunk
-        MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r2]);
-        if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
             assert_eq!(chunk.ops(), vec![]);
             assert_eq!(chunk.columns().len(), 4);
             for i in 0..4 {
@@ -1776,6 +1775,31 @@ mod tests {
                     vec![]
                 );
             }
+        } else {
+            unreachable!();
+        }
+
+        // push the 2nd right chunk
+        MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r2]);
+        if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
+            assert_eq!(chunk.ops(), vec![Op::Insert]);
+            assert_eq!(chunk.columns().len(), 4);
+            assert_eq!(
+                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
+                vec![Some(3)]
+            );
+            assert_eq!(
+                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
+                vec![Some(6)]
+            );
+            assert_eq!(
+                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
+                vec![Some(3)]
+            );
+            assert_eq!(
+                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
+                vec![Some(10)]
+            );
         } else {
             unreachable!();
         }
