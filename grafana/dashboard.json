@@ -1364,7 +1364,7 @@
 			"type": "row"
 		},
 		{
-			"collapsed": false,
+			"collapsed": true,
 			"gridPos": {
 				"h": 1,
 				"w": 24,
@@ -1372,542 +1372,544 @@
 				"y": 35
 			},
 			"id": 36,
-			"panels": [],
+			"panels": [
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 0,
+						"y": 4
+					},
+					"hiddenSeries": false,
+					"id": 16,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "rate(stream_source_output_rows_counts[15s])",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "source_id = {{source_id}}",
+							"refId": "B"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "source throughput",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:439",
+							"format": "rows/s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:440",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				}
+			],
 			"title": "source",
 			"type": "row"
 		},
 		{
-			"aliasColors": {},
-			"bars": false,
-			"dashLength": 10,
-			"dashes": false,
-			"fill": 1,
-			"fillGradient": 0,
-			"gridPos": {
-				"h": 8,
-				"w": 12,
-				"x": 0,
-				"y": 36
-			},
-			"hiddenSeries": false,
-			"id": 16,
-			"legend": {
-				"avg": false,
-				"current": false,
-				"max": false,
-				"min": false,
-				"show": true,
-				"total": false,
-				"values": false
-			},
-			"lines": true,
-			"linewidth": 1,
-			"nullPointMode": "null",
-			"options": {
-				"alertThreshold": true
-			},
-			"percentage": false,
-			"pluginVersion": "8.3.3",
-			"pointradius": 2,
-			"points": false,
-			"renderer": "flot",
-			"seriesOverrides": [],
-			"spaceLength": 10,
-			"stack": false,
-			"steppedLine": false,
-			"targets": [
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "rate(stream_source_output_rows_counts[15s])",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "source_id = {{source_id}}",
-					"refId": "B"
-				}
-			],
-			"thresholds": [],
-			"timeRegions": [],
-			"title": "source throughput",
-			"tooltip": {
-				"shared": true,
-				"sort": 0,
-				"value_type": "individual"
-			},
-			"type": "graph",
-			"xaxis": {
-				"mode": "time",
-				"show": true,
-				"values": []
-			},
-			"yaxes": [
-				{
-					"$$hashKey": "object:439",
-					"format": "rows/s",
-					"logBase": 1,
-					"show": true
-				},
-				{
-					"$$hashKey": "object:440",
-					"format": "short",
-					"logBase": 1,
-					"show": true
-				}
-			],
-			"yaxis": {
-				"align": false
-			}
-		},
-		{
-			"collapsed": false,
+			"collapsed": true,
 			"gridPos": {
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 44
+				"y": 36
 			},
 			"id": 26,
-			"panels": [],
+			"panels": [
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fieldConfig": {
+						"defaults": {
+							"unit": "s"
+						},
+						"overrides": []
+					},
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 0,
+						"y": 5
+					},
+					"hiddenSeries": false,
+					"id": 28,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(rate(state_store_get_latency_bucket[5m])) by (le))",
+							"interval": "",
+							"legendFormat": "p50",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(rate(state_store_get_latency_bucket[5m])) by (le))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "p99",
+							"refId": "B"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.9, sum(rate(state_store_get_latency_bucket[5m])) by (le))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "p90",
+							"refId": "C"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(rate(state_store_get_latency_sum[5m])) / sum(rate(state_store_get_latency_count[5m]))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "avg",
+							"refId": "D"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "get_latency",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:123",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:124",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				},
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 12,
+						"y": 5
+					},
+					"hiddenSeries": false,
+					"id": 30,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(rate(state_store_get_counts[1m])) by (type)",
+							"interval": "",
+							"intervalFactor": 2,
+							"legendFormat": "get_count",
+							"refId": "A"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "get_count",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:90",
+							"format": "ops",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:91",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				},
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 0,
+						"y": 13
+					},
+					"hiddenSeries": false,
+					"id": 32,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(state_store_get_key_size_sum)/sum(state_store_get_key_size_count)",
+							"interval": "",
+							"legendFormat": "get_key_size",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(state_store_get_value_size_sum)/sum(state_store_get_value_size_count)",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "get_value_size",
+							"refId": "B"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "get_size",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:160",
+							"format": "decbytes",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:161",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				},
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 12,
+						"y": 13
+					},
+					"hiddenSeries": false,
+					"id": 34,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(rate(state_store_get_snapshot_latency_bucket[5m])) by (le))",
+							"interval": "",
+							"legendFormat": "p50",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.95, sum(rate(state_store_get_snapshot_latency_bucket[5m])) by (le))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "p95",
+							"refId": "B"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(rate(state_store_get_snapshot_latency_bucket[5m])) by (le))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "p99",
+							"refId": "C"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(rate(state_store_get_snapshot_latency_sum[5m])) / sum(rate(state_store_get_latency_count[5m]))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "avg",
+							"refId": "D"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "get_snapshot_latency",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:244",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:245",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				}
+			],
 			"title": "hummock_get",
 			"type": "row"
 		},
 		{
-			"aliasColors": {},
-			"bars": false,
-			"dashLength": 10,
-			"dashes": false,
-			"fieldConfig": {
-				"defaults": {
-					"unit": "s"
-				},
-				"overrides": []
-			},
-			"fill": 1,
-			"fillGradient": 0,
-			"gridPos": {
-				"h": 8,
-				"w": 12,
-				"x": 0,
-				"y": 45
-			},
-			"hiddenSeries": false,
-			"id": 28,
-			"legend": {
-				"avg": false,
-				"current": false,
-				"max": false,
-				"min": false,
-				"show": true,
-				"total": false,
-				"values": false
-			},
-			"lines": true,
-			"linewidth": 1,
-			"nullPointMode": "null",
-			"options": {
-				"alertThreshold": true
-			},
-			"percentage": false,
-			"pluginVersion": "8.3.3",
-			"pointradius": 2,
-			"points": false,
-			"renderer": "flot",
-			"seriesOverrides": [],
-			"spaceLength": 10,
-			"stack": false,
-			"steppedLine": false,
-			"targets": [
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.5, sum(rate(state_store_get_latency_bucket[5m])) by (le))",
-					"interval": "",
-					"legendFormat": "p50",
-					"refId": "A"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.99, sum(rate(state_store_get_latency_bucket[5m])) by (le))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "p99",
-					"refId": "B"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.9, sum(rate(state_store_get_latency_bucket[5m])) by (le))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "p90",
-					"refId": "C"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "sum(rate(state_store_get_latency_sum[5m])) / sum(rate(state_store_get_latency_count[5m]))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "avg",
-					"refId": "D"
-				}
-			],
-			"thresholds": [],
-			"timeRegions": [],
-			"title": "get_latency",
-			"tooltip": {
-				"shared": true,
-				"sort": 0,
-				"value_type": "individual"
-			},
-			"type": "graph",
-			"xaxis": {
-				"mode": "time",
-				"show": true,
-				"values": []
-			},
-			"yaxes": [
-				{
-					"$$hashKey": "object:123",
-					"format": "s",
-					"logBase": 1,
-					"show": true
-				},
-				{
-					"$$hashKey": "object:124",
-					"format": "short",
-					"logBase": 1,
-					"show": true
-				}
-			],
-			"yaxis": {
-				"align": false
-			}
-		},
-		{
-			"aliasColors": {},
-			"bars": false,
-			"dashLength": 10,
-			"dashes": false,
-			"fill": 1,
-			"fillGradient": 0,
-			"gridPos": {
-				"h": 8,
-				"w": 12,
-				"x": 12,
-				"y": 45
-			},
-			"hiddenSeries": false,
-			"id": 30,
-			"legend": {
-				"avg": false,
-				"current": false,
-				"max": false,
-				"min": false,
-				"show": true,
-				"total": false,
-				"values": false
-			},
-			"lines": true,
-			"linewidth": 1,
-			"nullPointMode": "null",
-			"options": {
-				"alertThreshold": true
-			},
-			"percentage": false,
-			"pluginVersion": "8.3.3",
-			"pointradius": 2,
-			"points": false,
-			"renderer": "flot",
-			"seriesOverrides": [],
-			"spaceLength": 10,
-			"stack": false,
-			"steppedLine": false,
-			"targets": [
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "sum(rate(state_store_get_counts[1m])) by (type)",
-					"interval": "",
-					"intervalFactor": 2,
-					"legendFormat": "get_count",
-					"refId": "A"
-				}
-			],
-			"thresholds": [],
-			"timeRegions": [],
-			"title": "get_count",
-			"tooltip": {
-				"shared": true,
-				"sort": 0,
-				"value_type": "individual"
-			},
-			"type": "graph",
-			"xaxis": {
-				"mode": "time",
-				"show": true,
-				"values": []
-			},
-			"yaxes": [
-				{
-					"$$hashKey": "object:90",
-					"format": "ops",
-					"logBase": 1,
-					"show": true
-				},
-				{
-					"$$hashKey": "object:91",
-					"format": "short",
-					"logBase": 1,
-					"show": true
-				}
-			],
-			"yaxis": {
-				"align": false
-			}
-		},
-		{
-			"aliasColors": {},
-			"bars": false,
-			"dashLength": 10,
-			"dashes": false,
-			"fill": 1,
-			"fillGradient": 0,
-			"gridPos": {
-				"h": 8,
-				"w": 12,
-				"x": 0,
-				"y": 53
-			},
-			"hiddenSeries": false,
-			"id": 32,
-			"legend": {
-				"avg": false,
-				"current": false,
-				"max": false,
-				"min": false,
-				"show": true,
-				"total": false,
-				"values": false
-			},
-			"lines": true,
-			"linewidth": 1,
-			"nullPointMode": "null",
-			"options": {
-				"alertThreshold": true
-			},
-			"percentage": false,
-			"pluginVersion": "8.3.3",
-			"pointradius": 2,
-			"points": false,
-			"renderer": "flot",
-			"seriesOverrides": [],
-			"spaceLength": 10,
-			"stack": false,
-			"steppedLine": false,
-			"targets": [
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "sum(state_store_get_key_size_sum)/sum(state_store_get_key_size_count)",
-					"interval": "",
-					"legendFormat": "get_key_size",
-					"refId": "A"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "sum(state_store_get_value_size_sum)/sum(state_store_get_value_size_count)",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "get_value_size",
-					"refId": "B"
-				}
-			],
-			"thresholds": [],
-			"timeRegions": [],
-			"title": "get_size",
-			"tooltip": {
-				"shared": true,
-				"sort": 0,
-				"value_type": "individual"
-			},
-			"type": "graph",
-			"xaxis": {
-				"mode": "time",
-				"show": true,
-				"values": []
-			},
-			"yaxes": [
-				{
-					"$$hashKey": "object:160",
-					"format": "decbytes",
-					"logBase": 1,
-					"show": true
-				},
-				{
-					"$$hashKey": "object:161",
-					"format": "short",
-					"logBase": 1,
-					"show": true
-				}
-			],
-			"yaxis": {
-				"align": false
-			}
-		},
-		{
-			"aliasColors": {},
-			"bars": false,
-			"dashLength": 10,
-			"dashes": false,
-			"fill": 1,
-			"fillGradient": 0,
-			"gridPos": {
-				"h": 8,
-				"w": 12,
-				"x": 12,
-				"y": 53
-			},
-			"hiddenSeries": false,
-			"id": 34,
-			"legend": {
-				"avg": false,
-				"current": false,
-				"max": false,
-				"min": false,
-				"show": true,
-				"total": false,
-				"values": false
-			},
-			"lines": true,
-			"linewidth": 1,
-			"nullPointMode": "null",
-			"options": {
-				"alertThreshold": true
-			},
-			"percentage": false,
-			"pluginVersion": "8.3.3",
-			"pointradius": 2,
-			"points": false,
-			"renderer": "flot",
-			"seriesOverrides": [],
-			"spaceLength": 10,
-			"stack": false,
-			"steppedLine": false,
-			"targets": [
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.5, sum(rate(state_store_get_snapshot_latency_bucket[5m])) by (le))",
-					"interval": "",
-					"legendFormat": "p50",
-					"refId": "A"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.95, sum(rate(state_store_get_snapshot_latency_bucket[5m])) by (le))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "p95",
-					"refId": "B"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.99, sum(rate(state_store_get_snapshot_latency_bucket[5m])) by (le))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "p99",
-					"refId": "C"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "sum(rate(state_store_get_snapshot_latency_sum[5m])) / sum(rate(state_store_get_latency_count[5m]))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "avg",
-					"refId": "D"
-				}
-			],
-			"thresholds": [],
-			"timeRegions": [],
-			"title": "get_snapshot_latency",
-			"tooltip": {
-				"shared": true,
-				"sort": 0,
-				"value_type": "individual"
-			},
-			"type": "graph",
-			"xaxis": {
-				"mode": "time",
-				"show": true,
-				"values": []
-			},
-			"yaxes": [
-				{
-					"$$hashKey": "object:244",
-					"format": "s",
-					"logBase": 1,
-					"show": true
-				},
-				{
-					"$$hashKey": "object:245",
-					"format": "s",
-					"logBase": 1,
-					"show": true
-				}
-			],
-			"yaxis": {
-				"align": false
-			}
-		},
-		{
 			"collapsed": false,
 			"gridPos": {
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 61
+				"y": 37
 			},
 			"id": 24,
 			"panels": [],
@@ -1925,7 +1927,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 0,
-				"y": 62
+				"y": 38
 			},
 			"hiddenSeries": false,
 			"id": 43,
@@ -2010,7 +2012,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 12,
-				"y": 62
+				"y": 38
 			},
 			"hiddenSeries": false,
 			"id": 44,
@@ -2095,7 +2097,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 0,
-				"y": 70
+				"y": 46
 			},
 			"hiddenSeries": false,
 			"id": 40,
@@ -2215,7 +2217,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 12,
-				"y": 70
+				"y": 46
 			},
 			"hiddenSeries": false,
 			"id": 42,
@@ -2335,7 +2337,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 0,
-				"y": 78
+				"y": 54
 			},
 			"hiddenSeries": false,
 			"id": 41,
@@ -2455,7 +2457,7 @@
 				"h": 8,
 				"w": 12,
 				"x": 12,
-				"y": 78
+				"y": 54
 			},
 			"hiddenSeries": false,
 			"id": 45,
@@ -2534,7 +2536,7 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 86
+				"y": 62
 			},
 			"id": 22,
 			"panels": [
@@ -2966,7 +2968,7 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 87
+				"y": 63
 			},
 			"id": 20,
 			"panels": [
