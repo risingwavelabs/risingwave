@@ -18,7 +18,8 @@
         },
         "name": "v1"
       }]
-    }
+    },
+    "identity": "RwBatchTableScan(table\u003d[[test_schema, t5]], columns\u003d[v1])"
   }],
   "project": {
     "selectList": [{
@@ -51,5 +52,6 @@
         }]
       }
     }]
-  }
+  },
+  "identity": "RwBatchProject(EXPR$0\u003d[ROUND($0, 4)])"
 }

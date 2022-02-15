@@ -30,51 +30,68 @@ pub const ADD_TABLE_LATENCT_SCALE: f64 = 0.1;
 pub const GET_NEW_TABLE_ID_LATENCY_SCALE: f64 = 0.1;
 pub const GET_COMPATION_TASK_LATENCY_SCALE: f64 = 0.1;
 pub const REPORT_COMPATION_TASK_LATENCY_SCALE: f64 = 0.1;
-/// `StateStoreStats` stores the performance and IO metrics of `XXXStorage` such as
-/// In practice, keep in mind that this represents the whole Hummock utilizations of
-/// a `RisingWave` instance. More granular utilizations of per `materialization view`
-/// job or a executor should be collected by views like `StateStats` and `JobStats`.
-#[derive(Debug)]
-pub struct StateStoreStats {
-    pub get_latency: Histogram,
-    pub get_key_size: Histogram,
-    pub get_value_size: Histogram,
-    pub get_counts: GenericCounter<AtomicU64>,
-    pub get_snapshot_latency: Histogram,
+/// Define all metrics.
+#[macro_export]
+macro_rules! for_all_metrics {
+    ($macro:tt) => {
+        $macro! {
+            get_latency: Histogram,
+            get_key_size: Histogram,
+            get_value_size: Histogram,
+            get_counts: GenericCounter<AtomicU64>,
+            get_snapshot_latency: Histogram,
 
-    pub range_scan_counts: GenericCounter<AtomicU64>,
-    pub reverse_range_scan_counts: GenericCounter<AtomicU64>,
+            range_scan_counts: GenericCounter<AtomicU64>,
+            reverse_range_scan_counts: GenericCounter<AtomicU64>,
 
-    pub batched_write_counts: GenericCounter<AtomicU64>,
-    pub batch_write_tuple_counts: GenericCounter<AtomicU64>,
-    pub batch_write_latency: Histogram,
-    pub batch_write_size: Histogram,
-    pub batch_write_build_table_latency: Histogram,
-    pub batch_write_add_l0_latency: Histogram,
+            batched_write_counts: GenericCounter<AtomicU64>,
+            batch_write_tuple_counts: GenericCounter<AtomicU64>,
+            batch_write_latency: Histogram,
+            batch_write_size: Histogram,
+            batch_write_build_table_latency: Histogram,
+            batch_write_add_l0_latency: Histogram,
 
-    pub iter_counts: GenericCounter<AtomicU64>,
-    pub iter_next_counts: GenericCounter<AtomicU64>,
-    pub iter_seek_latency: Histogram,
-    pub iter_next_latency: Histogram,
+            iter_counts: GenericCounter<AtomicU64>,
+            iter_next_counts: GenericCounter<AtomicU64>,
+            iter_seek_latency: Histogram,
+            iter_next_latency: Histogram,
 
-    pub pin_version_counts: GenericCounter<AtomicU64>,
-    pub unpin_version_counts: GenericCounter<AtomicU64>,
-    pub pin_snapshot_counts: GenericCounter<AtomicU64>,
-    pub unpin_snapshot_counts: GenericCounter<AtomicU64>,
-    pub add_tables_counts: GenericCounter<AtomicU64>,
-    pub get_new_table_id_counts: GenericCounter<AtomicU64>,
-    pub get_compaction_task_counts: GenericCounter<AtomicU64>,
-    pub report_compaction_task_counts: GenericCounter<AtomicU64>,
+            pin_version_counts: GenericCounter<AtomicU64>,
+            unpin_version_counts: GenericCounter<AtomicU64>,
+            pin_snapshot_counts: GenericCounter<AtomicU64>,
+            unpin_snapshot_counts: GenericCounter<AtomicU64>,
+            add_tables_counts: GenericCounter<AtomicU64>,
+            get_new_table_id_counts: GenericCounter<AtomicU64>,
+            get_compaction_task_counts: GenericCounter<AtomicU64>,
+            report_compaction_task_counts: GenericCounter<AtomicU64>,
 
-    pub pin_version_latency: Histogram,
-    pub unpin_version_latency: Histogram,
-    pub pin_snapshot_latency: Histogram,
-    pub unpin_snapshot_latency: Histogram,
-    pub add_tables_latency: Histogram,
-    pub get_new_table_id_latency: Histogram,
-    pub get_compaction_task_latency: Histogram,
-    pub report_compaction_task_latency: Histogram,
+            pin_version_latency: Histogram,
+            unpin_version_latency: Histogram,
+            pin_snapshot_latency: Histogram,
+            unpin_snapshot_latency: Histogram,
+            add_tables_latency: Histogram,
+            get_new_table_id_latency: Histogram,
+            get_compaction_task_latency: Histogram,
+            report_compaction_task_latency: Histogram,
+        }
+    };
 }
+
+macro_rules! define_state_store_stats {
+    ($( $name:ident: $type:ty ),* ,) => {
+        /// [`StateStoreStats`] stores the performance and IO metrics of `XXXStore` such as
+        /// `RocksDBStateStore` and `TikvStateStore`.
+        /// In practice, keep in mind that this represents the whole Hummock utilizations of
+        /// a `RisingWave` instance. More granular utilizations of per `materialization view`
+        /// job or a executor should be collected by views like `StateStats` and `JobStats`.
+        #[derive(Debug)]
+        pub struct StateStoreStats {
+            $( pub $name: $type, )*
+        }
+    }
+
+}
+for_all_metrics! { define_state_store_stats }
 
 lazy_static::lazy_static! {
   pub static ref

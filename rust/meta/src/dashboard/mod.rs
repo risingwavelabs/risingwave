@@ -14,6 +14,7 @@ use tower_http::add_extension::AddExtensionLayer;
 use tower_http::cors::{self, CorsLayer};
 
 use crate::cluster::StoredClusterManager;
+use crate::storage::MetaStoreRef;
 use crate::stream::FragmentManager;
 
 #[derive(Clone)]
@@ -21,6 +22,9 @@ pub struct DashboardService {
     pub dashboard_addr: SocketAddr,
     pub cluster_manager: Arc<StoredClusterManager>,
     pub fragment_manager: Arc<FragmentManager>,
+
+    // TODO: replace with catalog manager.
+    pub meta_store_ref: MetaStoreRef,
     pub has_test_data: Arc<AtomicBool>,
 }
 
@@ -29,13 +33,16 @@ pub type Service = Arc<DashboardService>;
 mod handlers {
     use axum::Json;
     use risingwave_pb::common::WorkerNode;
-    use risingwave_pb::meta::ActorLocation;
+    use risingwave_pb::meta::{ActorLocation, Table};
+    use risingwave_pb::stream_plan::StreamActor;
     use serde_json::json;
 
     use super::*;
 
     pub struct DashboardError(anyhow::Error);
     pub type Result<T> = std::result::Result<T, DashboardError>;
+    type TableId = i32;
+    type TableActors = (TableId, Vec<StreamActor>);
 
     fn err(err: impl Into<anyhow::Error>) -> DashboardError {
         DashboardError(err.into())
@@ -68,6 +75,21 @@ mod handlers {
         Ok(result.into())
     }
 
+    pub async fn list_materialized_views(
+        Extension(srv): Extension<Service>,
+    ) -> Result<Json<Vec<(TableId, Table)>>> {
+        use crate::model::MetadataModel;
+
+        let materialized_views = Table::list(&srv.meta_store_ref)
+            .await
+            .map_err(err)?
+            .iter()
+            .filter(|t| t.is_materialized_view)
+            .map(|mv| (mv.table_ref_id.as_ref().unwrap().table_id, mv.clone()))
+            .collect::<Vec<_>>();
+        Ok(Json(materialized_views))
+    }
+
     pub async fn list_actors(
         Extension(srv): Extension<Service>,
     ) -> Result<Json<Vec<ActorLocation>>> {
@@ -87,6 +109,20 @@ mod handlers {
 
         Ok(Json(actors))
     }
+
+    pub async fn list_table_fragments(
+        Extension(srv): Extension<Service>,
+    ) -> Result<Json<Vec<TableActors>>> {
+        let table_fragments = srv
+            .fragment_manager
+            .list_table_fragments()
+            .map_err(err)?
+            .iter()
+            .map(|f| (f.table_id().table_id(), f.actors()))
+            .collect::<Vec<_>>();
+
+        Ok(Json(table_fragments))
+    }
 }
 
 impl DashboardService {
@@ -96,6 +132,8 @@ impl DashboardService {
         let app = Router::new()
             .route("/api/clusters/:ty", get(list_clusters))
             .route("/api/actors", get(list_actors))
+            .route("/api/fragments", get(list_table_fragments))
+            .route("/api/materialized_views", get(list_materialized_views))
             .route(
                 "/",
                 get(|| async { Html::from(include_str!("index.html")) }),

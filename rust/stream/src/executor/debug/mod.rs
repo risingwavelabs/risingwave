@@ -49,4 +49,8 @@ where
     fn clear_cache(&mut self) -> Result<()> {
         self.input_mut().clear_cache()
     }
+
+    fn init(&mut self, epoch: u64) -> Result<()> {
+        self.input_mut().init(epoch)
+    }
 }

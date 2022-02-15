@@ -84,7 +84,7 @@ impl BoxedExecutorBuilder for TopNExecutor {
                 child,
                 order_pairs,
                 top_n_node.get_limit() as usize,
-                "TopNExecutor".to_string(),
+                source.plan_node().get_identity().clone(),
             )));
         }
         Err(InternalError("TopN must have one child".to_string()).into())

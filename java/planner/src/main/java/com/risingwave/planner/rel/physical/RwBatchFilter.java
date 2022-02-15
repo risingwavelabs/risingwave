@@ -37,6 +37,7 @@ public class RwBatchFilter extends Filter implements RisingWaveBatchPhyRel, Phys
     return PlanNode.newBuilder()
         .setFilter(filter)
         .addChildren(((RisingWaveBatchPhyRel) input).serialize())
+        .setIdentity(BatchPlan.getCurrentNodeIdentity(this))
         .build();
   }
 

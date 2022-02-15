@@ -6,6 +6,7 @@
 #![warn(clippy::inconsistent_struct_constructor)]
 #![warn(clippy::map_flatten)]
 #![warn(clippy::no_effect_underscore_binding)]
+#![warn(clippy::await_holding_lock)]
 #![feature(trait_alias)]
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
@@ -124,5 +125,3 @@ pub trait StreamSourceReader: Send + Sync + 'static {
     /// block until new data coming
     async fn next(&mut self) -> Result<StreamChunk>;
 }
-
-////////////////////////////////////////////////////////////////////////////////

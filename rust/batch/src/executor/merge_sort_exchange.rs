@@ -213,7 +213,7 @@ impl<CS: 'static + CreateSource> BoxedExecutorBuilder for MergeSortExchangeExecu
             schema: Schema { fields },
             first_execution: true,
             task_id: source.task_id.clone(),
-            identity: "MergeSortExchangeExecutor".to_string(),
+            identity: source.plan_node().get_identity().clone(),
         }))
     }
 }

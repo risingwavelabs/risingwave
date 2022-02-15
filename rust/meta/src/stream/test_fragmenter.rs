@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
@@ -23,6 +24,7 @@ use risingwave_pb::stream_plan::{
 use crate::manager::MetaSrvEnv;
 use crate::model::TableFragments;
 use crate::stream::fragmenter::StreamFragmenter;
+use crate::stream::FragmentManager;
 
 fn make_table_ref_id(id: i32) -> TableRefId {
     TableRefId {
@@ -239,15 +241,16 @@ fn make_stream_node() -> StreamNode {
 async fn test_fragmenter() -> Result<()> {
     let env = MetaSrvEnv::for_test().await;
     let stream_node = make_stream_node();
-    let mut fragmenter = StreamFragmenter::new(env.id_gen_manager_ref(), 1);
+    let fragment_manager_ref = Arc::new(FragmentManager::new(env.clone()).await?);
+    let mut fragmenter = StreamFragmenter::new(env.id_gen_manager_ref(), fragment_manager_ref, 1);
 
     let graph = fragmenter.generate_graph(&stream_node).await?;
     let table_fragments = TableFragments::new(TableId::default(), graph);
     let actors = table_fragments.actors();
     let source_actor_ids = table_fragments.source_actor_ids();
     let sink_actor_ids = table_fragments.sink_actor_ids();
-    assert_eq!(actors.len(), 6);
-    assert_eq!(source_actor_ids, vec![6]);
+    assert_eq!(actors.len(), 9);
+    assert_eq!(source_actor_ids, vec![6, 7, 8, 9]);
     assert_eq!(sink_actor_ids, vec![1]);
 
     let mut expected_downstream = HashMap::new();
@@ -257,14 +260,21 @@ async fn test_fragmenter() -> Result<()> {
     expected_downstream.insert(4, vec![1]);
     expected_downstream.insert(5, vec![1]);
     expected_downstream.insert(6, vec![2, 3, 4, 5]);
+    expected_downstream.insert(7, vec![2, 3, 4, 5]);
+    expected_downstream.insert(8, vec![2, 3, 4, 5]);
+    expected_downstream.insert(9, vec![2, 3, 4, 5]);
 
     let mut expected_upstream = HashMap::new();
     expected_upstream.insert(1, vec![2, 3, 4, 5]);
-    expected_upstream.insert(2, vec![6]);
-    expected_upstream.insert(3, vec![6]);
-    expected_upstream.insert(4, vec![6]);
-    expected_upstream.insert(5, vec![6]);
+    expected_upstream.insert(2, vec![6, 7, 8, 9]);
+    expected_upstream.insert(3, vec![6, 7, 8, 9]);
+    expected_upstream.insert(4, vec![6, 7, 8, 9]);
+    expected_upstream.insert(5, vec![6, 7, 8, 9]);
     expected_upstream.insert(6, vec![]);
+    expected_upstream.insert(7, vec![]);
+    expected_upstream.insert(8, vec![]);
+    expected_upstream.insert(9, vec![]);
+
     for actor in actors {
         assert_eq!(
             expected_downstream.get(&actor.get_actor_id()).unwrap(),
@@ -274,7 +284,6 @@ async fn test_fragmenter() -> Result<()> {
         while !node.get_input().is_empty() {
             node = node.get_input().get(0).unwrap();
         }
-        let mut source_node_cnt = 0;
         match node.get_node().unwrap() {
             Node::MergeNode(merge_node) => {
                 assert_eq!(
@@ -290,8 +299,7 @@ async fn test_fragmenter() -> Result<()> {
                 );
             }
             Node::SourceNode(_) => {
-                source_node_cnt += 1;
-                assert_eq!(source_node_cnt, 1);
+                // check nothing.
             }
             _ => {
                 panic!("it should be MergeNode or SourceNode.");
@@ -303,19 +311,19 @@ async fn test_fragmenter() -> Result<()> {
 }
 
 #[tokio::test]
-/// Test case for multiple compute nodes.
-async fn test_fragmenter_case2() -> Result<()> {
+async fn test_fragmenter_multi_nodes() -> Result<()> {
     let env = MetaSrvEnv::for_test().await;
     let stream_node = make_stream_node();
-    let mut fragmenter = StreamFragmenter::new(env.id_gen_manager_ref(), 3);
+    let fragment_manager_ref = Arc::new(FragmentManager::new(env.clone()).await?);
+    let mut fragmenter = StreamFragmenter::new(env.id_gen_manager_ref(), fragment_manager_ref, 3);
 
     let graph = fragmenter.generate_graph(&stream_node).await?;
     let table_fragments = TableFragments::new(TableId::default(), graph);
     let actors = table_fragments.actors();
     let source_actor_ids = table_fragments.source_actor_ids();
     let sink_actor_ids = table_fragments.sink_actor_ids();
-    assert_eq!(actors.len(), 10);
-    assert_eq!(source_actor_ids, vec![8, 9, 10]);
+    assert_eq!(actors.len(), 13);
+    assert_eq!(source_actor_ids, vec![8, 9, 10, 11, 12, 13]);
     assert_eq!(sink_actor_ids, vec![1]);
     let mut expected_downstream = HashMap::new();
     expected_downstream.insert(1, vec![]);
@@ -328,15 +336,18 @@ async fn test_fragmenter_case2() -> Result<()> {
     expected_downstream.insert(8, vec![2, 3, 4, 5, 6, 7]);
     expected_downstream.insert(9, vec![2, 3, 4, 5, 6, 7]);
     expected_downstream.insert(10, vec![2, 3, 4, 5, 6, 7]);
+    expected_downstream.insert(11, vec![2, 3, 4, 5, 6, 7]);
+    expected_downstream.insert(12, vec![2, 3, 4, 5, 6, 7]);
+    expected_downstream.insert(13, vec![2, 3, 4, 5, 6, 7]);
 
     let mut expected_upstream = HashMap::new();
     expected_upstream.insert(1, vec![2, 3, 4, 5, 6, 7]);
-    expected_upstream.insert(2, vec![8, 9, 10]);
-    expected_upstream.insert(3, vec![8, 9, 10]);
-    expected_upstream.insert(4, vec![8, 9, 10]);
-    expected_upstream.insert(5, vec![8, 9, 10]);
-    expected_upstream.insert(6, vec![8, 9, 10]);
-    expected_upstream.insert(7, vec![8, 9, 10]);
+    expected_upstream.insert(2, vec![8, 9, 10, 11, 12, 13]);
+    expected_upstream.insert(3, vec![8, 9, 10, 11, 12, 13]);
+    expected_upstream.insert(4, vec![8, 9, 10, 11, 12, 13]);
+    expected_upstream.insert(5, vec![8, 9, 10, 11, 12, 13]);
+    expected_upstream.insert(6, vec![8, 9, 10, 11, 12, 13]);
+    expected_upstream.insert(7, vec![8, 9, 10, 11, 12, 13]);
     expected_upstream.insert(8, vec![]);
     expected_upstream.insert(9, vec![]);
     expected_upstream.insert(10, vec![]);
@@ -350,7 +361,6 @@ async fn test_fragmenter_case2() -> Result<()> {
         while !node.get_input().is_empty() {
             node = node.get_input().get(0).unwrap();
         }
-        let mut source_node_cnt = 0;
         match node.get_node().unwrap() {
             Node::MergeNode(merge_node) => {
                 assert_eq!(
@@ -366,8 +376,7 @@ async fn test_fragmenter_case2() -> Result<()> {
                 );
             }
             Node::SourceNode(_) => {
-                source_node_cnt += 1;
-                assert_eq!(source_node_cnt, 1);
+                // check nothing.
             }
             _ => {
                 panic!("it should be MergeNode or SourceNode.");
