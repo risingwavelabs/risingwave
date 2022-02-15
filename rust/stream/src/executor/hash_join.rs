@@ -216,7 +216,6 @@ pub struct HashJoinExecutor<S: StateStore, const T: JoinTypePrimitive> {
     debug_l: String,
     /// Debug info for the right executor
     debug_r: String,
-
     /// Identity string
     identity: String,
 }
@@ -249,7 +248,10 @@ impl<S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<S,
                 Err(e) => Err(e),
             },
             AlignedMessage::Barrier(barrier) => {
-                self.flush_data(barrier.epoch).await?;
+                let epoch = barrier.epoch;
+                self.side_l.ht.update_epoch(epoch);
+                self.side_r.ht.update_epoch(epoch);
+                self.flush_data(epoch).await?;
                 Ok(Message::Barrier(barrier))
             }
         }
@@ -959,9 +961,6 @@ mod tests {
 
         // join the 2nd left chunk
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
-            for i in chunk.columns().iter() {
-                println!("{:?}", i.array_ref().as_int64().iter().collect_vec())
-            }
             assert_eq!(chunk.ops(), vec![Op::Insert]);
             assert_eq!(chunk.columns().len(), 4);
             assert_eq!(

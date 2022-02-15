@@ -105,6 +105,8 @@ pub struct JoinHashMap<S: StateStore> {
     pk_data_types: Arc<[DataType]>,
     /// The keyspace to operate on.
     keyspace: Keyspace<S>,
+    /// Current epoch
+    current_epoch: u64,
 }
 
 impl<S: StateStore> JoinHashMap<S> {
@@ -122,7 +124,12 @@ impl<S: StateStore> JoinHashMap<S> {
             data_types: data_types.into(),
             pk_data_types: pk_data_types.into(),
             keyspace,
+            current_epoch: 0,
         }
+    }
+
+    pub fn update_epoch(&mut self, epoch: u64) {
+        self.current_epoch = epoch;
     }
 
     fn get_state_keyspace(&self, key: &HashKeyType) -> Keyspace<S> {
@@ -188,7 +195,7 @@ impl<S: StateStore> JoinHashMap<S> {
     /// Fetch cache from the state store.
     async fn fetch_cached_state(&self, key: &HashKeyType) -> RWResult<Option<AllOrNoneState<S>>> {
         let keyspace = self.get_state_keyspace(key);
-        let all_data = keyspace.scan_strip_prefix(None).await?;
+        let all_data = keyspace.scan_strip_prefix(None, self.current_epoch).await?;
         if !all_data.is_empty() {
             // Insert cached states.
             let mut cached = BTreeMap::new();
@@ -214,7 +221,7 @@ impl<S: StateStore> JoinHashMap<S> {
     /// does not exist in memory or remote storage.
     pub async fn init_without_cache(&mut self, key: &HashKeyType) -> RWResult<()> {
         let keyspace = self.get_state_keyspace(key);
-        let all_data = keyspace.scan_strip_prefix(None).await?;
+        let all_data = keyspace.scan_strip_prefix(None, self.current_epoch).await?;
         let total_count = all_data.len();
         let state = AllOrNoneState::new(
             keyspace,
@@ -238,7 +245,7 @@ impl<S: StateStore> JoinHashMap<S> {
             Ok(self.inner.get_mut(key).unwrap())
         } else {
             let keyspace = self.get_state_keyspace(key);
-            let all_data = keyspace.scan_strip_prefix(None).await?;
+            let all_data = keyspace.scan_strip_prefix(None, self.current_epoch).await?;
             let total_count = all_data.len();
             let state = AllOrNoneState::new(
                 keyspace,
@@ -251,20 +258,6 @@ impl<S: StateStore> JoinHashMap<S> {
             Ok(self.inner.get_mut(key).unwrap())
         }
     }
-
-    // /// Returns a mutable reference to the value of the key, or put with `construct` if it is not
-    // /// present.
-    // pub fn get_or_put<'a, I>(
-    //     &'a mut self,
-    //     key: &HashKeyType,
-    //     construct: I,
-    // ) -> &'a mut HashValueType<S> {
-    //     if !self.inner.contains(key) {
-    //         let value = construct();
-    //         self.inner.put(key.to_owned(), value);
-    //     }
-    //     self.inner.get_mut(key).unwrap()
-    // }
 }
 
 impl<S: StateStore> Deref for JoinHashMap<S> {
@@ -281,16 +274,3 @@ impl<S: StateStore> DerefMut for JoinHashMap<S> {
     }
 }
 
-// pub fn create_hash_join_state<S: StateStore>(
-//     key: PkType,
-//     keyspace: &Keyspace<S>,
-//     data_types: &[DataType],
-//     pk_data_types: &[DataType],
-// ) -> AllOrNoneState<S> {
-//     // TODO: in pure in-memory engine, we should not do this serialization.
-//     let key_encoded = key.serialize().unwrap();
-
-//     let keyspace = keyspace.with_segment(Segment::VariantLength(key_encoded));
-
-//     AllOrNoneState::new(keyspace, data_types.to_vec(), pk_data_types.to_vec())
-// }
