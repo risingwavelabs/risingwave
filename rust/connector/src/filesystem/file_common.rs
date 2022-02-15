@@ -75,21 +75,6 @@ pub trait Directory: Send + Sync {
     fn entry_discover(&self) -> EntryDiscover;
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct Response {
-    data: Vec<u8>,
-    entry: EntryStat,
-    offset: i64,
-    more_data: bool,
-}
-
-#[async_trait]
-pub trait EntrySubscriber: Send + Sync {
-    async fn read_next(&mut self) -> Result<Option<Response>>;
-    fn seek(&self, offset: i64, entry: &EntryStat) -> Result<()>;
-    fn get_directory(&self) -> Box<dyn Directory>;
-}
-
 #[cfg(test)]
 mod test {
     use std::collections::HashMap;
