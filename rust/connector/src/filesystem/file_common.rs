@@ -11,7 +11,7 @@ pub struct EntryStat {
     atime: i64,
     mtime: i64,
     size: i64,
-    is_dir: bool,
+    // is_dir: bool,
 }
 
 /// The operations supported on Entry/file.
@@ -37,7 +37,7 @@ impl Default for EntryStat {
             atime: 0,
             mtime: 0,
             size: 0,
-            is_dir: false,
+            // is_dir: false,
         }
     }
 }
@@ -73,21 +73,6 @@ pub trait Directory: Send + Sync {
     async fn list_entries(&self) -> Result<Vec<EntryStat>>;
     async fn last_modification(&self) -> i64;
     fn entry_discover(&self) -> EntryDiscover;
-}
-
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct Response {
-    data: Vec<u8>,
-    entry: EntryStat,
-    offset: i64,
-    more_data: bool,
-}
-
-#[async_trait]
-pub trait EntrySubscriber: Send + Sync {
-    async fn read_next(&mut self) -> Result<Option<Response>>;
-    fn seek(&self, offset: i64, entry: &EntryStat) -> Result<()>;
-    fn get_directory(&self) -> Box<dyn Directory>;
 }
 
 #[cfg(test)]
@@ -139,7 +124,6 @@ mod test {
                 atime: meta.ctime,
                 mtime: meta.mtime,
                 size: meta.size,
-                is_dir: false,
             }
         }
     }
@@ -196,7 +180,7 @@ mod test {
                             for name_idx in init..=total {
                                 let mtime = (Local::now()
                                     - chrono::Duration::minutes(name_idx as i64))
-                                .timestamp_millis();
+                                    .timestamp_millis();
                                 let file_name = format!("{}_{}", "file", name_idx);
                                 let file_meta = MockFileMeta::new(file_name.clone(), mtime);
                                 // println!("newFileMeta={:?}", file_meta.clone());
@@ -340,7 +324,6 @@ mod test {
                     atime: value.ctime,
                     mtime: value.mtime,
                     size: value.size,
-                    is_dir: false,
                 })
                 .collect_vec();
             Ok(entries)

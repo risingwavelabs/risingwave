@@ -6,7 +6,7 @@ version = "0.1.2"
 [dependencies]
 anyhow = "1"
 async-std = { version = "1" }
-async-stream = "0.3.2"
+async-stream = "0.3"
 async-trait = "0.1"
 aws-config = "0.6"
 aws-sdk-kinesis = "0.6"
