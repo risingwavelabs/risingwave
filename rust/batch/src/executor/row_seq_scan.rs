@@ -60,6 +60,17 @@ impl RowSeqScanExecutor {
             identity,
         }
     }
+
+    // TODO: Remove this when we support real partition-scan.
+    // For shared storage like Hummock, we are using a fake partition-scan now. If `self.primary` is
+    // false, we'll ignore this scanning and yield no chunk.
+    fn should_ignore(&self) -> bool {
+        if self.table.is_shared_storage() {
+            !self.primary
+        } else {
+            false
+        }
+    }
 }
 
 impl BoxedExecutorBuilder for RowSeqScanExecutor {
@@ -91,7 +102,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutor {
 #[async_trait::async_trait]
 impl Executor for RowSeqScanExecutor {
     async fn open(&mut self) -> Result<()> {
-        if !self.primary {
+        if self.should_ignore() {
             info!("non-primary row seq scan, ignored");
             return Ok(());
         }
@@ -101,7 +112,7 @@ impl Executor for RowSeqScanExecutor {
     }
 
     async fn next(&mut self) -> Result<Option<DataChunk>> {
-        if !self.primary {
+        if self.should_ignore() {
             return Ok(None);
         }
 

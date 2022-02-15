@@ -175,6 +175,9 @@ impl<'a, S: StateStore> MViewTableIter<S> {
         pk_columns: Vec<usize>,
         epoch: u64,
     ) -> Result<Self> {
+        // The table might be updated from other compute nodes, and we are not aware of the latest
+        // version in Hummock's local version manager.
+        // TODO: remove this after we implement periodical version updating.
         keyspace.state_store().update_local_version().await?;
 
         let iter = Self {
@@ -307,5 +310,9 @@ where
 
     fn column_descs(&self) -> Cow<[TableColumnDesc]> {
         Cow::Borrowed(&self.column_descs)
+    }
+
+    fn is_shared_storage(&self) -> bool {
+        true
     }
 }
