@@ -42,7 +42,7 @@ impl BoxedExecutorBuilder for LimitExecutor {
                 offset,
                 skipped: 0,
                 returned: 0,
-                identity: "LimitExecutor".to_string(),
+                identity: source.plan_node().get_identity().clone(),
             }));
         }
         Err(InternalError("Limit must have one child".to_string()).into())

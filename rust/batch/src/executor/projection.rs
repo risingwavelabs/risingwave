@@ -83,7 +83,7 @@ impl BoxedExecutorBuilder for ProjectionExecutor {
             expr: project_exprs,
             child: child_node,
             schema: Schema { fields },
-            identity: "ProjectionExecutor".to_string(),
+            identity: source.plan_node().get_identity().clone(),
         }))
     }
 }

@@ -151,7 +151,7 @@ impl BarrierManager {
                 (context, notifiers)
             };
 
-            let mutation = command_context.to_mutation().await?;
+            let mutation = command_context.to_mutation()?;
 
             let epoch = self.epoch_generator.generate()?.into_inner();
 

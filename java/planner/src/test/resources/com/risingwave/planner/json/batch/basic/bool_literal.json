@@ -18,7 +18,8 @@
         },
         "name": "ZERO"
       }]
-    }
+    },
+    "identity": "RwBatchValuesExecutor"
   }],
   "project": {
     "selectList": [{
@@ -66,5 +67,6 @@
         }]
       }
     }]
-  }
+  },
+  "identity": "RwBatchProject(EXPR$0\u003d[AND(false, null)], EXPR$1\u003d[OR(true, null)])"
 }

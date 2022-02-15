@@ -21,13 +21,18 @@ pub struct SeqScanExecutor {
 }
 
 impl SeqScanExecutor {
-    pub fn new(table: ScannableTableRef, column_ids: Vec<i32>, schema: Schema) -> Self {
+    pub fn new(
+        table: ScannableTableRef,
+        column_ids: Vec<i32>,
+        schema: Schema,
+        identity: String,
+    ) -> Self {
         Self {
             table,
             column_ids,
             schema,
             snapshot: Default::default(),
-            identity: "SeqScanExecutor".to_string(),
+            identity,
         }
     }
 }
@@ -61,7 +66,12 @@ impl BoxedExecutorBuilder for SeqScanExecutor {
                 .collect::<Result<Vec<Field>>>()?,
         );
 
-        Ok(Box::new(Self::new(table_ref, column_ids.to_vec(), schema)))
+        Ok(Box::new(Self::new(
+            table_ref,
+            column_ids.to_vec(),
+            schema,
+            source.plan_node().get_identity().clone(),
+        )))
     }
 }
 

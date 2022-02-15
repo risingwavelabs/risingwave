@@ -40,7 +40,7 @@ class StreamNode extends Node {
   parseType(nodeProto) {
     let types = ["tableSourceNode", "sourceNode", "projectNode", "filterNode",
       "mviewNode", "simpleAggNode", "hashAggNode", "topNNode",
-      "hashJoinNode", "mergeNode", "exchangeNode", "chainNode"];
+      "hashJoinNode", "mergeNode", "exchangeNode", "chainNode", "localSimpleAggNode"];
     for (let type of types) {
       if (type in nodeProto) {
         return type;

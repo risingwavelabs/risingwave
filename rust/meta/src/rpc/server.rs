@@ -48,14 +48,19 @@ pub async fn rpc_serve(
     let env = MetaSrvEnv::new(meta_store_ref, epoch_generator_ref.clone()).await;
 
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
-    let cluster_manager = Arc::new(StoredClusterManager::new(env.clone()).await.unwrap());
-    let hummock_manager = hummock::HummockManager::new(env.clone()).await.unwrap();
+    let hummock_manager = Arc::new(hummock::HummockManager::new(env.clone()).await.unwrap());
+    let cluster_manager = Arc::new(
+        StoredClusterManager::new(env.clone(), Some(hummock_manager.clone()))
+            .await
+            .unwrap(),
+    );
 
     if let Some(dashboard_addr) = dashboard_addr {
         let dashboard_service = DashboardService {
             dashboard_addr,
             cluster_manager: cluster_manager.clone(),
             fragment_manager: fragment_manager.clone(),
+            meta_store_ref: env.meta_store_ref(),
             has_test_data: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
         tokio::spawn(dashboard_service.serve()); // TODO: join dashboard service back to local

@@ -95,6 +95,7 @@ public class RwBatchSort extends Sort implements RisingWaveBatchPhyRel, Physical
       return PlanNode.newBuilder()
           .setTopN(topnNodeBuilder.build())
           .addChildren(((RisingWaveBatchPhyRel) input).serialize())
+          .setIdentity(BatchPlan.getCurrentNodeIdentity(this))
           .build();
     } else {
       // serialize to OrderByNode
@@ -103,6 +104,7 @@ public class RwBatchSort extends Sort implements RisingWaveBatchPhyRel, Physical
       return PlanNode.newBuilder()
           .setOrderBy(orderByNodeBuilder.build())
           .addChildren(((RisingWaveBatchPhyRel) input).serialize())
+          .setIdentity(BatchPlan.getCurrentNodeIdentity(this))
           .build();
     }
   }
