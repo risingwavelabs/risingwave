@@ -22,7 +22,7 @@ use crate::cluster::{StoredClusterManager, StoredClusterManagerRef};
 use crate::hummock::HummockManager;
 use crate::manager::{EpochGeneratorRef, MetaSrvEnv, StreamClientsRef, INVALID_EPOCH};
 use crate::rpc::metrics::MetaMetrics;
-use crate::storage::MetaStore;
+use crate::storage::{MetaStore, DEFAULT_COLUMN_FAMILY_ID};
 use crate::stream::FragmentManagerRef;
 
 mod command;
@@ -265,10 +265,10 @@ where
             if prev_epoch != INVALID_EPOCH {
                 match collect_result {
                     Ok(_) => {
-                        self.hummock_manager.commit_epoch(prev_epoch).await?;
+                        self.hummock_manager.commit_epoch(DEFAULT_COLUMN_FAMILY_ID, prev_epoch).await?;
                     }
                     Err(err) => {
-                        self.hummock_manager.abort_epoch(prev_epoch).await?;
+                        self.hummock_manager.abort_epoch(DEFAULT_COLUMN_FAMILY_ID, prev_epoch).await?;
                         return Err(err);
                     }
                 };

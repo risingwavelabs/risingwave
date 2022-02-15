@@ -8,7 +8,7 @@ use risingwave_storage::hummock::{
 };
 
 use crate::hummock::HummockManager;
-use crate::storage::MemStore;
+use crate::storage::{MemStore, DEFAULT_COLUMN_FAMILY_ID};
 
 pub(crate) struct MockHummockMetaClient {
     hummock_manager: Arc<HummockManager<MemStore>>,
@@ -31,21 +31,21 @@ impl MockHummockMetaClient {
 impl HummockMetaClient for MockHummockMetaClient {
     async fn pin_version(&self) -> HummockResult<HummockVersion> {
         self.hummock_manager
-            .pin_version(self.context_id)
+            .pin_version(self.context_id, DEFAULT_COLUMN_FAMILY_ID)
             .await
             .map_err(HummockError::meta_error)
     }
 
     async fn unpin_version(&self, pinned_version_id: HummockVersionId) -> HummockResult<()> {
         self.hummock_manager
-            .unpin_version(self.context_id, pinned_version_id)
+            .unpin_version(self.context_id, DEFAULT_COLUMN_FAMILY_ID, pinned_version_id)
             .await
             .map_err(HummockError::meta_error)
     }
 
     async fn pin_snapshot(&self) -> HummockResult<HummockEpoch> {
         self.hummock_manager
-            .pin_snapshot(self.context_id)
+            .pin_snapshot(self.context_id, DEFAULT_COLUMN_FAMILY_ID)
             .await
             .map(|e| e.epoch)
             .map_err(HummockError::meta_error)
@@ -55,6 +55,7 @@ impl HummockMetaClient for MockHummockMetaClient {
         self.hummock_manager
             .unpin_snapshot(
                 self.context_id,
+                DEFAULT_COLUMN_FAMILY_ID,
                 HummockSnapshot {
                     epoch: pinned_epoch,
                 },
@@ -76,14 +77,14 @@ impl HummockMetaClient for MockHummockMetaClient {
         sstables: Vec<SstableInfo>,
     ) -> HummockResult<HummockVersion> {
         self.hummock_manager
-            .add_tables(self.context_id, sstables, epoch)
+            .add_tables(self.context_id, DEFAULT_COLUMN_FAMILY_ID, sstables, epoch)
             .await
             .map_err(HummockError::meta_error)
     }
 
     async fn get_compaction_task(&self) -> HummockResult<Option<CompactTask>> {
         self.hummock_manager
-            .get_compact_task(self.context_id)
+            .get_compact_task(self.context_id, DEFAULT_COLUMN_FAMILY_ID)
             .await
             .map_err(HummockError::meta_error)
     }
@@ -94,21 +95,26 @@ impl HummockMetaClient for MockHummockMetaClient {
         task_result: bool,
     ) -> HummockResult<()> {
         self.hummock_manager
-            .report_compact_task(self.context_id, compact_task, task_result)
+            .report_compact_task(
+                self.context_id,
+                DEFAULT_COLUMN_FAMILY_ID,
+                compact_task,
+                task_result,
+            )
             .await
             .map_err(HummockError::meta_error)
     }
 
     async fn commit_epoch(&self, epoch: HummockEpoch) -> HummockResult<()> {
         self.hummock_manager
-            .commit_epoch(epoch)
+            .commit_epoch(DEFAULT_COLUMN_FAMILY_ID, epoch)
             .await
             .map_err(HummockError::meta_error)
     }
 
     async fn abort_epoch(&self, epoch: HummockEpoch) -> HummockResult<()> {
         self.hummock_manager
-            .abort_epoch(epoch)
+            .abort_epoch(DEFAULT_COLUMN_FAMILY_ID, epoch)
             .await
             .map_err(HummockError::meta_error)
     }

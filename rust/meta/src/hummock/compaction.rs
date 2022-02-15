@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::hummock::level_handler::{LevelHandler, SSTableStat};
 use crate::hummock::model::HUMMOCK_DEFAULT_CF_NAME;
-use crate::storage::{MetaStore, Operation, Transaction};
+use crate::storage::{ColumnFamilyUtils, MetaStore, Operation, Transaction};
 
 /// Hummock `compact_status` key
 /// `cf(hummock_default)`: `hummock_compact_status_key` -> `CompactStatus`
@@ -18,17 +18,19 @@ pub(crate) const HUMMOCK_COMPACT_STATUS_KEY: &str = "compact_status";
 // TODO define CompactStatus in prost instead
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct CompactStatus {
+    pub(crate) cf_ident: String,
     pub(crate) level_handlers: Vec<LevelHandler>,
     pub(crate) next_compact_task_id: u64,
 }
 
 impl CompactStatus {
-    pub fn new() -> CompactStatus {
+    pub fn new(cf_ident: &str) -> CompactStatus {
         let vec_handler_having_l0 = vec![
             LevelHandler::Overlapping(vec![], vec![]),
             LevelHandler::Nonoverlapping(vec![], vec![]),
         ];
         CompactStatus {
+            cf_ident: String::from(cf_ident),
             level_handlers: vec_handler_having_l0,
             next_compact_task_id: 1,
         }
@@ -42,9 +44,12 @@ impl CompactStatus {
         HUMMOCK_COMPACT_STATUS_KEY
     }
 
-    pub async fn get<S: MetaStore>(meta_store_ref: &S) -> Result<CompactStatus> {
+    pub async fn get<S: MetaStore>(meta_store_ref: &S, cf_ident: &str) -> Result<CompactStatus> {
         meta_store_ref
-            .get_cf(CompactStatus::cf_name(), CompactStatus::key().as_bytes())
+            .get_cf(
+                &ColumnFamilyUtils::get_composed_cf(CompactStatus::cf_name(), cf_ident),
+                CompactStatus::key().as_bytes(),
+            )
             .await
             // TODO replace unwrap
             .map(|v| bincode::deserialize(&v).unwrap())
@@ -52,8 +57,8 @@ impl CompactStatus {
     }
 
     pub fn update_in_transaction(&self, trx: &mut Transaction) {
-        trx.add_operations(vec![Operation::Put {
-            cf: CompactStatus::cf_name().to_string(),
+        trx.add_operations(vec![Operation::Put{
+            cf: ColumnFamilyUtils::get_composed_cf(CompactStatus::cf_name(), &self.cf_ident),
             key: CompactStatus::key().as_bytes().to_vec(),
             // TODO replace unwrap
             value: bincode::serialize(&self).unwrap(),
@@ -342,6 +347,7 @@ mod tests {
     #[tokio::test]
     async fn test_serde() -> Result<()> {
         let origin = CompactStatus {
+            cf_ident: String::from("global"),
             level_handlers: vec![],
             next_compact_task_id: 3,
         };

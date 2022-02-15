@@ -5,7 +5,7 @@ use risingwave_pb::hummock::*;
 use tonic::{Request, Response, Status};
 
 use crate::hummock::HummockManager;
-use crate::storage::MetaStore;
+use crate::storage::{MetaStore, DEFAULT_COLUMN_FAMILY_ID};
 
 pub struct HummockServiceImpl<S>
 where
@@ -33,7 +33,10 @@ where
         request: Request<PinVersionRequest>,
     ) -> Result<Response<PinVersionResponse>, Status> {
         let req = request.into_inner();
-        let result = self.hummock_manager.pin_version(req.context_id).await;
+        let result = self
+            .hummock_manager
+            .pin_version(req.context_id, DEFAULT_COLUMN_FAMILY_ID)
+            .await;
         match result {
             Ok(pinned_version) => Ok(Response::new(PinVersionResponse {
                 status: None,
@@ -50,7 +53,11 @@ where
         let req = request.into_inner();
         let result = self
             .hummock_manager
-            .unpin_version(req.context_id, req.pinned_version_id)
+            .unpin_version(
+                req.context_id,
+                DEFAULT_COLUMN_FAMILY_ID,
+                req.pinned_version_id,
+            )
             .await;
         match result {
             Ok(_) => Ok(Response::new(UnpinVersionResponse { status: None })),
@@ -65,7 +72,12 @@ where
         let req = request.into_inner();
         let result = self
             .hummock_manager
-            .add_tables(req.context_id, req.tables, req.epoch)
+            .add_tables(
+                req.context_id,
+                DEFAULT_COLUMN_FAMILY_ID,
+                req.tables,
+                req.epoch,
+            )
             .await;
         match result {
             Ok(version) => Ok(Response::new(AddTablesResponse {
@@ -81,7 +93,10 @@ where
         request: Request<GetCompactionTasksRequest>,
     ) -> Result<Response<GetCompactionTasksResponse>, Status> {
         let req = request.into_inner();
-        let result = self.hummock_manager.get_compact_task(req.context_id).await;
+        let result = self
+            .hummock_manager
+            .get_compact_task(req.context_id, DEFAULT_COLUMN_FAMILY_ID)
+            .await;
         match result {
             Ok(compact_task) => Ok(Response::new(GetCompactionTasksResponse {
                 status: None,
@@ -103,7 +118,12 @@ where
             Some(compact_task) => {
                 let result = self
                     .hummock_manager
-                    .report_compact_task(req.context_id, compact_task, req.task_result)
+                    .report_compact_task(
+                        req.context_id,
+                        DEFAULT_COLUMN_FAMILY_ID,
+                        compact_task,
+                        req.task_result,
+                    )
                     .await;
                 match result {
                     Ok(_) => Ok(Response::new(ReportCompactionTasksResponse {
@@ -120,7 +140,10 @@ where
         request: Request<PinSnapshotRequest>,
     ) -> Result<Response<PinSnapshotResponse>, Status> {
         let req = request.into_inner();
-        let result = self.hummock_manager.pin_snapshot(req.context_id).await;
+        let result = self
+            .hummock_manager
+            .pin_snapshot(req.context_id, DEFAULT_COLUMN_FAMILY_ID)
+            .await;
         match result {
             Ok(hummock_snapshot) => Ok(Response::new(PinSnapshotResponse {
                 status: None,
@@ -137,7 +160,11 @@ where
         let req = request.into_inner();
         let result = self
             .hummock_manager
-            .unpin_snapshot(req.context_id, req.snapshot.unwrap())
+            .unpin_snapshot(
+                req.context_id,
+                DEFAULT_COLUMN_FAMILY_ID,
+                req.snapshot.unwrap(),
+            )
             .await;
         match result {
             Ok(_) => Ok(Response::new(UnpinSnapshotResponse { status: None })),
@@ -150,7 +177,10 @@ where
         request: Request<CommitEpochRequest>,
     ) -> Result<Response<CommitEpochResponse>, Status> {
         let req = request.into_inner();
-        let result = self.hummock_manager.commit_epoch(req.epoch).await;
+        let result = self
+            .hummock_manager
+            .commit_epoch(req.epoch, DEFAULT_COLUMN_FAMILY_ID, req.epoch)
+            .await;
         match result {
             Ok(_) => Ok(Response::new(CommitEpochResponse { status: None })),
             Err(e) => Err(e.to_grpc_status()),
@@ -162,7 +192,10 @@ where
         request: Request<AbortEpochRequest>,
     ) -> Result<Response<AbortEpochResponse>, Status> {
         let req = request.into_inner();
-        let result = self.hummock_manager.abort_epoch(req.epoch).await;
+        let result = self
+            .hummock_manager
+            .abort_epoch(req.epoch, DEFAULT_COLUMN_FAMILY_ID, req.epoch)
+            .await;
         match result {
             Ok(_) => Ok(Response::new(AbortEpochResponse { status: None })),
             Err(e) => Err(e.to_grpc_status()),

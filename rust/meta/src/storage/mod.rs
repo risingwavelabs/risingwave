@@ -1,3 +1,4 @@
+mod columnfamily;
 mod mem_meta_store;
 mod meta_store;
 #[cfg(test)]
@@ -8,6 +9,7 @@ pub type ColumnFamily = String;
 pub type Key = Vec<u8>;
 pub type Value = Vec<u8>;
 
+pub use columnfamily::*;
 pub use mem_meta_store::*;
 pub use meta_store::*;
 pub use transaction::*;

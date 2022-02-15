@@ -2,7 +2,7 @@ use prost::Message;
 use risingwave_pb::hummock::hummock_version::HummockVersionRefId;
 use risingwave_pb::hummock::HummockTablesToDelete;
 
-use crate::model::{MetadataModel, Transactional};
+use crate::model::{MetadataModel, MetadataUserCfModel, Transactional, TransactionalUserCf};
 
 /// Column family name for hummock deletion.
 /// `cf(hummock_sstable_to_delete)`: `HummockVersionRefId` -> `HummockTablesToDelete`
@@ -35,4 +35,8 @@ impl MetadataModel for HummockTablesToDelete {
     }
 }
 
+impl MetadataUserCfModel for HummockTablesToDelete {}
+
 impl Transactional for HummockTablesToDelete {}
+
+impl TransactionalUserCf for HummockTablesToDelete {}

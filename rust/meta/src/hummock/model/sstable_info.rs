@@ -1,7 +1,7 @@
 use prost::Message;
 use risingwave_pb::hummock::{SstableInfo, SstableRefId};
 
-use crate::model::{MetadataModel, Transactional};
+use crate::model::{MetadataModel, MetadataUserCfModel, Transactional, TransactionalUserCf};
 
 /// Column family name for hummock table.
 /// `cf(hummock_sstable_info)`: `SstableRefId` -> `SstableInfo`
@@ -32,4 +32,8 @@ impl MetadataModel for SstableInfo {
     }
 }
 
+impl MetadataUserCfModel for SstableInfo {}
+
 impl Transactional for SstableInfo {}
+
+impl TransactionalUserCf for SstableInfo {}

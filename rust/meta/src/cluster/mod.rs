@@ -20,7 +20,7 @@ pub type NodeId = u32;
 pub type NodeLocations = HashMap<NodeId, WorkerNode>;
 
 /// [`StoredClusterManager`] manager cluster/worker meta data in [`MetaStore`].
-pub struct StoredClusterManager<S> {
+pub struct StoredClusterManager<S: MetaStore> {
     meta_store_ref: Arc<S>,
     id_gen_manager_ref: IdGeneratorManagerRef<S>,
     hummock_manager_ref: Option<Arc<HummockManager<S>>>,
@@ -158,7 +158,7 @@ where
                     // TODO #93: So we rely on a safe guard that periodically purges hummock context
                     // resource owned by stale worker nodes.
                     hummock_manager_ref
-                        .release_context_resource(entry.1.to_protobuf().id)
+                        .release_all_context_resource(entry.1.to_protobuf().id)
                         .await?;
                 }
                 Ok(())

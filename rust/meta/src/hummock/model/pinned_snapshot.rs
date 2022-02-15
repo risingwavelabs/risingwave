@@ -2,7 +2,7 @@ use prost::Message;
 use risingwave_pb::hummock::{HummockContextPinnedSnapshot, HummockContextRefId};
 use risingwave_storage::hummock::HummockEpoch;
 
-use crate::model::{MetadataModel, Transactional};
+use crate::model::{MetadataModel, MetadataUserCfModel, Transactional, TransactionalUserCf};
 use crate::storage::Transaction;
 
 /// Column family name for hummock context pinned snapshot
@@ -36,12 +36,18 @@ impl MetadataModel for HummockContextPinnedSnapshot {
     }
 }
 
+impl MetadataUserCfModel for HummockContextPinnedSnapshot {}
+
 pub trait HummockContextPinnedSnapshotExt {
     fn pin_snapshot(&mut self, new_snapshot_id: HummockEpoch);
 
     fn unpin_snapshot(&mut self, pinned_snapshot_id: HummockEpoch);
 
-    fn update_in_transaction(&self, trx: &mut Transaction) -> risingwave_common::error::Result<()>;
+    fn update_in_transaction(
+        &self,
+        cf_ident: &str,
+        trx: &mut Transaction,
+    ) -> risingwave_common::error::Result<()>;
 }
 
 impl HummockContextPinnedSnapshotExt for HummockContextPinnedSnapshot {
@@ -59,14 +65,20 @@ impl HummockContextPinnedSnapshotExt for HummockContextPinnedSnapshot {
         }
     }
 
-    fn update_in_transaction(&self, trx: &mut Transaction) -> risingwave_common::error::Result<()> {
+    fn update_in_transaction(
+        &self,
+        cf_ident: &str,
+        trx: &mut Transaction,
+    ) -> risingwave_common::error::Result<()> {
         if self.snapshot_id.is_empty() {
-            self.delete_in_transaction(trx)?;
+            self.delete_in_transaction_with_cf(cf_ident, trx)?;
         } else {
-            self.upsert_in_transaction(trx)?;
+            self.upsert_in_transaction_with_cf(cf_ident, trx)?;
         }
         Ok(())
     }
 }
 
 impl Transactional for HummockContextPinnedSnapshot {}
+
+impl TransactionalUserCf for HummockContextPinnedSnapshot {}
