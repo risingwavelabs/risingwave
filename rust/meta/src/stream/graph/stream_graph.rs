@@ -1,13 +1,17 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::hash_map::{Entry, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Deref;
 use std::sync::Arc;
 
+use itertools::Itertools;
+use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 use risingwave_pb::stream_plan::dispatcher::DispatcherType;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{Dispatcher, MergeNode, StreamActor, StreamNode};
 
-use crate::model::{ActorId, FragmentId};
+use crate::model::{ActorId, FragmentId, TableRawId};
+use crate::stream::FragmentManagerRef;
 
 /// [`StreamActorBuilder`] build a stream actor in a stream DAG.
 pub struct StreamActorBuilder {
@@ -98,12 +102,15 @@ impl StreamActorBuilder {
 /// dependencies. See `build_inner` for more details.
 pub struct StreamGraphBuilder {
     actor_builders: BTreeMap<ActorId, StreamActorBuilder>,
+    /// (ctx) fragment manager.
+    fragment_manager_ref: FragmentManagerRef,
 }
 
 impl StreamGraphBuilder {
-    pub fn new() -> Self {
+    pub fn new(fragment_manager_ref: FragmentManagerRef) -> Self {
         Self {
             actor_builders: BTreeMap::new(),
+            fragment_manager_ref,
         }
     }
 
@@ -133,10 +140,17 @@ impl StreamGraphBuilder {
     /// Build final stream DAG with dependencies with current actor builders.
     pub fn build(&self) -> Result<HashMap<FragmentId, Vec<StreamActor>>> {
         let mut graph = HashMap::new();
+        let mut table_sink_map = HashMap::new();
         for builder in self.actor_builders.values() {
             let mut actor = builder.build();
+
             let upstream_actors = builder.get_upstream_actors();
-            actor.nodes = Some(self.build_inner(actor.get_nodes()?, &upstream_actors, 0)?);
+            actor.nodes = Some(self.build_inner(
+                &mut table_sink_map,
+                actor.get_nodes()?,
+                &upstream_actors,
+                0,
+            )?);
             graph
                 .entry(builder.get_fragment_id())
                 .or_insert(vec![])
@@ -149,43 +163,111 @@ impl StreamGraphBuilder {
     /// 1. replace node's input with [`MergeNode`] if it is [`ExchangeNode`], and swallow
     /// mergeNode's input.
     /// 2. ignore root node when it's [`ExchangeNode`].
+    /// 3. replace node's [`ExchangeNode`] input with [`MergeNode`] and resolve its upstream actor
+    /// ids if it is a [`ChainNode`].
     pub fn build_inner(
         &self,
+        table_sink_map: &mut HashMap<TableRawId, Vec<ActorId>>,
         stream_node: &StreamNode,
         upstream_actor_id: &[Vec<ActorId>],
         next_idx: usize,
     ) -> Result<StreamNode> {
-        if let Node::ExchangeNode(_) = stream_node.get_node()? {
-            self.build_inner(
+        match stream_node.get_node()? {
+            Node::ExchangeNode(_) => self.build_inner(
+                table_sink_map,
                 stream_node.input.get(0).unwrap(),
                 upstream_actor_id,
                 next_idx,
-            )
-        } else {
-            let mut new_stream_node = stream_node.clone();
-            let mut next_idx_new = next_idx;
-            for (idx, input) in stream_node.input.iter().enumerate() {
-                if let Node::ExchangeNode(exchange_node) = input.get_node()? {
-                    assert!(next_idx_new < upstream_actor_id.len());
-                    new_stream_node.input[idx] = StreamNode {
-                        input: vec![],
-                        pk_indices: input.pk_indices.clone(),
-                        node: Some(Node::MergeNode(MergeNode {
-                            upstream_actor_id: upstream_actor_id
-                                .get(next_idx_new)
-                                .cloned()
-                                .unwrap(),
-                            input_column_descs: exchange_node.get_input_column_descs().clone(),
-                        })),
-                        operator_id: input.operator_id,
-                    };
-                    next_idx_new += 1;
-                } else {
-                    new_stream_node.input[idx] =
-                        self.build_inner(input, upstream_actor_id, next_idx_new)?;
+            ),
+            Node::ChainNode(_) => self.resolve_chain_node(table_sink_map, stream_node),
+            _ => {
+                let mut new_stream_node = stream_node.clone();
+                let mut next_idx_new = next_idx;
+                for (idx, input) in stream_node.input.iter().enumerate() {
+                    match input.get_node()? {
+                        Node::ExchangeNode(exchange_node) => {
+                            assert!(next_idx_new < upstream_actor_id.len());
+                            new_stream_node.input[idx] = StreamNode {
+                                input: vec![],
+                                pk_indices: input.pk_indices.clone(),
+                                node: Some(Node::MergeNode(MergeNode {
+                                    upstream_actor_id: upstream_actor_id
+                                        .get(next_idx_new)
+                                        .cloned()
+                                        .unwrap(),
+                                    input_column_descs: exchange_node
+                                        .get_input_column_descs()
+                                        .clone(),
+                                })),
+                                operator_id: input.operator_id,
+                            };
+                            next_idx_new += 1;
+                        }
+                        Node::ChainNode(_) => {
+                            new_stream_node.input[idx] =
+                                self.resolve_chain_node(table_sink_map, input)?;
+                        }
+                        _ => {
+                            new_stream_node.input[idx] = self.build_inner(
+                                table_sink_map,
+                                input,
+                                upstream_actor_id,
+                                next_idx_new,
+                            )?;
+                        }
+                    }
                 }
+                Ok(new_stream_node)
             }
-            Ok(new_stream_node)
+        }
+    }
+
+    fn resolve_chain_node(
+        &self,
+        table_sink_map: &mut HashMap<TableRawId, Vec<ActorId>>,
+        stream_node: &StreamNode,
+    ) -> Result<StreamNode> {
+        if let Node::ChainNode(chain_node) = stream_node.get_node().unwrap() {
+            let input = stream_node.get_input();
+            assert_eq!(input.len(), 2);
+            let table_id = TableId::from(&chain_node.table_ref_id);
+            let table_raw_id = chain_node.table_ref_id.as_ref().unwrap().table_id;
+            let upstream_actor_ids = match table_sink_map.entry(table_raw_id) {
+                Entry::Vacant(v) => {
+                    let actor_ids = self
+                        .fragment_manager_ref
+                        .get_table_sink_actor_ids(&table_id)?;
+                    v.insert(actor_ids)
+                }
+                Entry::Occupied(o) => o.into_mut(),
+            }
+            .to_owned();
+
+            let chain_input = vec![
+                StreamNode {
+                    input: vec![],
+                    pk_indices: chain_node
+                        .pk_indices
+                        .iter()
+                        .map(|x| *x as u32)
+                        .collect_vec(),
+                    node: Some(Node::MergeNode(MergeNode {
+                        upstream_actor_id: upstream_actor_ids,
+                        input_column_descs: chain_node.upstream_column_descs.clone(),
+                    })),
+                    operator_id: input.get(0).as_ref().unwrap().operator_id,
+                },
+                input.get(1).unwrap().clone(),
+            ];
+
+            Ok(StreamNode {
+                input: chain_input,
+                pk_indices: stream_node.pk_indices.clone(),
+                node: Some(Node::ChainNode(chain_node.clone())),
+                operator_id: stream_node.operator_id,
+            })
+        } else {
+            unreachable!()
         }
     }
 }

@@ -38,13 +38,6 @@ message MViewNode {
   repeated plan.ColumnOrder column_orders = 4;
 }
 
-message ChainNode {
-  plan.TableRefId table_ref_id = 1;
-  repeated uint32 upstream_actor_ids = 2;
-  repeated int32 pk_indices = 3;
-  repeated int32 column_ids = 4;
-}
-
 // Remark by Yanghao: for both local and global we use the same node in the protobuf.
 // Local and global aggregator distinguish with each other in PlanNode definition.
 message SimpleAggNode {
@@ -84,6 +77,27 @@ message ExchangeNode {
   Dispatcher dispatcher = 2;
 }
 
+// ChainNode is used for mv on mv.
+// ChainNode is like a "UNION" on mv snapshot and streaming. So it takes two inputs with fixed order:
+//   1. MergeNode (as a placeholder) for streaming read.
+//   2. BatchPlanNode for snapshot read.
+message ChainNode {
+  plan.TableRefId table_ref_id = 1;
+  repeated plan.ColumnDesc upstream_column_descs = 2;
+  repeated uint32 upstream_actor_ids = 3;
+  repeated int32 pk_indices = 4;
+  repeated int32 column_ids = 5;
+}
+
+// BatchPlanNode is used for mv on mv snapshot read.
+// BatchPlanNode is supposed to carry a batch plan that can be optimized with the streaming plan.
+// Currently, streaming to batch push down is not yet supported, BatchPlanNode is simply a table scan.
+message BatchPlanNode {
+  plan.TableRefId table_ref_id = 1;
+  repeated int32 pk_indices = 2;
+  repeated int32 column_ids = 3;
+}
+
 message StreamNode {
   oneof node {
     SourceNode source_node = 4;
@@ -99,6 +113,7 @@ message StreamNode {
     MergeNode merge_node = 13;
     ExchangeNode exchange_node = 14;
     ChainNode chain_node = 15;
+    BatchPlanNode batch_plan_node = 17;
   }
   // The id for the operator.
   uint64 operator_id = 1;

@@ -597,22 +597,10 @@ impl StreamManagerCore {
                 self.create_merge_node(actor_id, schema, upstreams, pk_indices)
             }
             ChainNode(chain_node) => {
-                let table_id = TableId::from(&chain_node.table_ref_id);
-                let table = table_manager.get_table(&table_id)?;
-                let snapshot = Box::new(BatchQueryExecutor::new(table.clone(), pk_indices));
-                let pk_indices = chain_node
-                    .pk_indices
-                    .iter()
-                    .map(|x| *x as usize)
-                    .collect_vec();
-                let upstream_schema = table.schema().into_owned();
-                let mview = self.create_merge_node(
-                    actor_id,
-                    upstream_schema.clone(),
-                    &chain_node.upstream_actor_ids,
-                    pk_indices,
-                )?;
+                let snapshot = input.remove(1);
+                let mview = input.remove(0);
 
+                let upstream_schema = snapshot.schema();
                 // TODO(MrCroxx): Use column_descs to get idx after mv planner can generate stable
                 // column_ids. Now simply treat column_id as column_idx.
                 let column_idxs: Vec<usize> = chain_node
@@ -632,6 +620,11 @@ impl StreamManagerCore {
                     schema,
                     column_idxs,
                 )))
+            }
+            BatchPlanNode(batch_plan_node) => {
+                let table_id = TableId::from(&batch_plan_node.table_ref_id);
+                let table = table_manager.get_table(&table_id)?;
+                Ok(Box::new(BatchQueryExecutor::new(table.clone(), pk_indices)))
             }
             _ => Err(RwError::from(ErrorCode::InternalError(format!(
                 "unsupported node:{:?}",
