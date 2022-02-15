@@ -91,6 +91,10 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     fn start_write_batch(&self) -> WriteBatch<Self> {
         WriteBatch::new(self.clone())
     }
+
+    async fn update_local_version(&self) -> Result<()> {
+        Ok(())
+    }
 }
 
 #[async_trait]
