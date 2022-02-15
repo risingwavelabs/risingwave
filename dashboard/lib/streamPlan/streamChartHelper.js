@@ -764,7 +764,6 @@ export class StreamChartHelper {
       .style("stroke-width", 20)
       .attr("stroke", s => this._actorOutgoinglinkColor(s.actor));
 
-
     // calculate box size
     let width = 0;
     let height = 0;
@@ -793,7 +792,6 @@ export class StreamChartHelper {
    */
   drawManyFlow() {
     const g = this.topGroup;
-
     const baseX = 0;
     const baseY = 0;
 
