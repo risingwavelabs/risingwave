@@ -1,6 +1,15 @@
+let cnt = 0;
+function generateNewNodeId() {
+  return "g" + (++cnt);
+}
+
+function getNodeId(nodeProto) {
+  return nodeProto.operatorId === undefined ? generateNewNodeId() : "o" + nodeProto.operatorId;  
+}
+
 class Node {
-  constructor(actorId, nodeProto) {
-    this.id = nodeProto.operatorId;
+  constructor(id, actorId, nodeProto) {
+    this.id = id;
     this.nodeProto = nodeProto;
     this.nextNodes = [];
     this.actorId = actorId;
@@ -8,18 +17,16 @@ class Node {
 }
 
 class StreamNode extends Node {
-  constructor(actorId, nodeProto) {
-    super(actorId, nodeProto);
+  constructor(id, actorId, nodeProto) {
+    super(id, actorId, nodeProto);
     this.type = this.parseType(nodeProto);
     this.typeInfo = nodeProto[this.type];
   }
 
   parseType(nodeProto) {
-    let types = ["tableSourceNode", "sourceNode", "projectNode", "filterNode",
-      "mviewNode", "simpleAggNode", "hashAggNode", "topNNode",
-      "hashJoinNode", "mergeNode", "exchangeNode", "chainNode", "localSimpleAggNode"];
-    for (let type of types) {
-      if (type in nodeProto) {
+    let typeReg = new RegExp('.+Node');
+    for (let [type, _] of Object.entries(nodeProto)) {
+      if (typeReg.test(type)) {
         return type;
       }
     }
@@ -35,39 +42,43 @@ class Dispatcher extends Node {
 }
 
 class Actor {
-  constructor(actorId, output, rootNode, fragmentId) {
+  constructor(actorId, output, rootNode, fragmentId, actorIdentifier) {
     this.actorId = actorId;
     this.output = output;
     this.rootNode = rootNode;
     this.fragmentId = fragmentId;
+    this.actorIdentifier = actorIdentifier;
   }
 }
-
 
 export default class StreamPlanParser {
   /**
    * 
-   * @param {{node: any, actors: []}} streamPlan raw response from the meta node
+   * @param {[{node: any, actors: []}]} data raw response from the meta node
    */
-  constructor(streamPlan) {
+  constructor(data) {
+
     this.parsedNodeMap = new Map();
     this.parsedActorMap = new Map();
     this.actorId2Proto = new Map();
 
+    for (let computeNodeData of data) {
+      for (let singleActorProto of computeNodeData.actors) {
+        this.actorId2Proto.set(singleActorProto.actorId, {
+          actorIdentifier: `${computeNodeData.node.host.host}:${computeNodeData.node.host.port}`,
+          ...singleActorProto
+        });
+      }
+    }
 
-    this.node = streamPlan.node;
-    this.actorProtoList = streamPlan.actors;
-    for (let actorProto of this.actorProtoList) {
-      this.actorId2Proto.set(actorProto.actorId, actorProto);
+    for (let [_, singleActorProto] of this.actorId2Proto.entries()) {
+      this.parseActor(singleActorProto);
     }
-    for (let actorProto of this.actorProtoList) {
-      this.parseActor(actorProto);
-    }
+
     this.parsedActorList = [];
-    for (let actorId of this.parsedActorMap.keys()) {
-      this.parsedActorList.push(this.parsedActorMap.get(actorId));
+    for (let [_, actor] of this.parsedActorMap.entries()) {
+      this.parsedActorList.push(actor);
     }
-    console.log(this.parsedActorList);
   }
 
   newDispatcher(actorId, type, downstreamActorId) {
@@ -93,8 +104,9 @@ export default class StreamPlanParser {
       return this.parsedActorMap.get(actorId);
     }
 
-    let actor = new Actor(actorId, [], null, actorProto.fragmentId);
-    let rootNode
+    let actor = new Actor(actorId, [], null, actorProto.fragmentId, actorProto.actorIdentifier);
+
+    let rootNode;
     this.parsedActorMap.set(actorId, actor);
     if (actorProto.dispatcher && actorProto.dispatcher.type) {
       let nodeBeforeDispatcher = this.parseNode(actor.actorId, actorProto.nodes);
@@ -103,17 +115,17 @@ export default class StreamPlanParser {
     } else {
       rootNode = this.parseNode(actorId, actorProto.nodes);
     }
-
     actor.rootNode = rootNode;
-    return this.parsedActorMap.get(actorId);
+
+    return actor;
   }
 
   parseNode(actorId, nodeProto) {
-    let id = nodeProto.operatorId;
+    let id = getNodeId(nodeProto);
     if (this.parsedNodeMap.has(id)) {
       return this.parsedNodeMap.get(id);
     }
-    let newNode = new StreamNode(actorId, nodeProto);
+    let newNode = new StreamNode(id, actorId, nodeProto);
     this.parsedNodeMap.set(id, newNode);
 
     if (nodeProto.input !== undefined) {
@@ -122,13 +134,13 @@ export default class StreamPlanParser {
       }
     }
 
-    if (newNode.type === "mergeNode") {
+    if (newNode.type === "mergeNode" && newNode.typeInfo.upstreamActorId) {
       for (let upStreamActorId of newNode.typeInfo.upstreamActorId) {
         this.parseActor(this.actorId2Proto.get(upStreamActorId)).output.push(newNode);
       }
     }
 
-    if (newNode.type === "chainNode") {
+    if (newNode.type === "chainNode" && newNode.typeInfo.upstreamActorIds) {
       for (let upStreamActorId of newNode.typeInfo.upstreamActorIds) {
         this.parseActor(this.actorId2Proto.get(upStreamActorId)).output.push(newNode);
       }
@@ -143,13 +155,6 @@ export default class StreamPlanParser {
 
   getOperator(operatorId) {
     return this.parsedNodeMap.get(operatorId);
-  }
-
-  /**
-   * @returns information about computation node
-   */
-  getNodeInformation() {
-    return this.node;
   }
 
   /**
