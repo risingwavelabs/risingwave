@@ -162,6 +162,7 @@ impl<S: StateStore> AllOrNoneState<S> {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn clear_cache(&mut self) {
         assert!(
             !self.is_dirty(),

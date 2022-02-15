@@ -189,9 +189,11 @@ impl<S: StateStore> JoinSide<S> {
     }
 
     fn clear_cache(&mut self) {
-        // TODO: should clear the hashmap entirely after cache eviction of hash join is fixed,
-        // instead of clear cache for all states.
-        self.ht.values_mut().for_each(|s| s.clear_cache());
+        assert!(
+            !self.is_dirty(),
+            "cannot clear cache while states of hash join are dirty"
+        );
+        self.ht.clear();
     }
 }
 
@@ -369,6 +371,12 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
             }
             write_batch.ingest(epoch).await.unwrap();
         }
+
+        // evict the LRU cache
+        assert!(!self.side_l.is_dirty());
+        self.side_l.ht.evict_to_target_cap();
+        assert!(!self.side_r.is_dirty());
+        self.side_r.ht.evict_to_target_cap();
         Ok(())
     }
 
