@@ -4,6 +4,8 @@ use std::vec;
 
 use fixedbitset::FixedBitSet;
 
+use crate::expr::{ExprRewriter, InputRef};
+
 /// `ColIndexMapping` is a mapping from usize to usize, and its source domain is [1..N]. it is used
 /// in optimizer for transformation of column index. if the value in the vec is None, the source is
 /// illegal.
@@ -50,6 +52,12 @@ impl ColIndexMapping {
 
     pub fn map(&self, index: usize) -> usize {
         self.try_map(index).unwrap()
+    }
+}
+
+impl ExprRewriter for ColIndexMapping {
+    fn rewrite_input_ref(&mut self, input_ref: InputRef) -> InputRef {
+        InputRef::new(self.map(input_ref.index()), input_ref.data_type())
     }
 }
 
