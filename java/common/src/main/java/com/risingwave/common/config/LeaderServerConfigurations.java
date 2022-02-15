@@ -3,12 +3,14 @@ package com.risingwave.common.config;
 import static com.risingwave.common.config.Parsers.ADDRESSES_PARSER;
 import static com.risingwave.common.config.Parsers.enumParserOf;
 
-import com.google.common.collect.Lists;
+import java.util.ArrayList;
 import java.util.List;
 
+/** LeaderServerConfigurations defined several configurations in leader server. */
 public class LeaderServerConfigurations {
   private LeaderServerConfigurations() {}
 
+  /** whether there are multiple worker nodes */
   public enum ClusterMode {
     /** Single mean that we have only one worker node */
     Single,
@@ -19,9 +21,10 @@ public class LeaderServerConfigurations {
 
   @Config
   public static final ConfigEntry<List<String>> COMPUTE_NODES =
+      // "risingwave.leader.computenodes" is no longer used in properties file.
       ConfigEntry.<List<String>>builder("risingwave.leader.computenodes")
           .setOptional(false)
-          .withDefaultValue(Lists.newArrayList("127.0.0.1:5688"))
+          .withDefaultValue(new ArrayList<>())
           .withDoc("Compute node addresses")
           .withConverter(ADDRESSES_PARSER)
           .build();

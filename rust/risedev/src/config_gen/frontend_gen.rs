@@ -21,7 +21,6 @@ impl FrontendGen {
 risingwave.pgserver.ip={frontend_host}
 risingwave.pgserver.port={frontend_port}
 risingwave.leader.clustermode=Distributed
-risingwave.leader.computenodes=
 
 risingwave.catalog.mode=Remote
 risingwave.meta.node={meta_node_hosts}
