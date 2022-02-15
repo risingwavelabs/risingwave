@@ -61,6 +61,9 @@ impl Default for EntryOptEvent {
 /// For external resources we assume that none of them have the permission to modify,
 /// so in Directory we only support read operations. However, unlike the classic File API,
 /// it is necessary to be able to sense changes in this directory.
+///
+/// In contrast to the concept in MessageSystem source, Directory is similar to the concept of **Topic**;
+/// the Entry under Directory is equivalent to the **Partition** in Topic.
 #[async_trait]
 pub trait Directory: Send + Sync {
     async fn push_entries_change(
