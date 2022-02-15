@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::sync::RwLock;
 
 use async_trait::async_trait;
 use itertools::Itertools;
@@ -24,7 +23,7 @@ impl From<sled::Error> for crate::storage::Error {
 
 pub struct SledMetaStore {
     /// The rwlock is to ensure serializable isolation.
-    db: RwLock<sled::Db>,
+    db: sled::Db,
 }
 
 /// `SledMetaStore` stores a key composed of `KeyValue.key` and `KeyValue.version`.
@@ -47,9 +46,7 @@ impl SledMetaStore {
                 .open()
                 .unwrap(),
         };
-        Ok(SledMetaStore {
-            db: RwLock::new(db),
-        })
+        Ok(SledMetaStore { db })
     }
 
     /// `get` key value pairs matched by `OperationOption`s.
@@ -62,7 +59,7 @@ impl SledMetaStore {
         &self,
         keys_with_opts: &[(Key, Option<KeyValueVersion>, bool)],
     ) -> Result<Vec<Vec<KeyValue>>> {
-        let db_guard = self.db.read().unwrap();
+        let db_guard = &self.db;
         let mut batch_result = vec![];
         for (key, version, by_prefix) in keys_with_opts {
             let (range_start, range_end) = {
@@ -332,7 +329,7 @@ impl MetaStore for SledMetaStore {
     }
 
     async fn commit_transaction(&self, trx: &mut Transaction) -> Result<()> {
-        let db_guard = self.db.write().unwrap();
+        let db_guard = &self.db;
         // workaround for sled's lack of range delete
         let mut operations_meta = vec![None; trx.operations().len()];
         for (index, operation) in trx.operations().iter().enumerate() {
