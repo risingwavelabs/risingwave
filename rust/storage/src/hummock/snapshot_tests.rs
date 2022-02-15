@@ -107,7 +107,6 @@ async fn test_snapshot() {
     let hummock_storage = HummockStorage::new(
         obj_client.clone(),
         hummock_options,
-        Arc::new(VersionManager::new()),
         vm.clone(),
         mock_hummock_meta_client.clone(),
     )
@@ -182,7 +181,6 @@ async fn test_snapshot_range_scan() {
     let hummock_storage = HummockStorage::new(
         obj_client.clone(),
         hummock_options,
-        Arc::new(VersionManager::new()),
         vm.clone(),
         mock_hummock_meta_client.clone(),
     )
@@ -237,7 +235,6 @@ async fn test_snapshot_reverse_range_scan() {
     let hummock_storage = HummockStorage::new(
         obj_client.clone(),
         hummock_options,
-        Arc::new(VersionManager::new()),
         vm.clone(),
         mock_hummock_meta_client.clone(),
     )

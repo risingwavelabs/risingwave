@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
@@ -23,6 +24,7 @@ use risingwave_pb::stream_plan::{
 use crate::manager::MetaSrvEnv;
 use crate::model::TableFragments;
 use crate::stream::fragmenter::StreamFragmenter;
+use crate::stream::FragmentManager;
 
 fn make_table_ref_id(id: i32) -> TableRefId {
     TableRefId {
@@ -239,7 +241,8 @@ fn make_stream_node() -> StreamNode {
 async fn test_fragmenter() -> Result<()> {
     let env = MetaSrvEnv::for_test().await;
     let stream_node = make_stream_node();
-    let mut fragmenter = StreamFragmenter::new(env.id_gen_manager_ref(), 1);
+    let fragment_manager_ref = Arc::new(FragmentManager::new(env.clone()).await?);
+    let mut fragmenter = StreamFragmenter::new(env.id_gen_manager_ref(), fragment_manager_ref, 1);
 
     let graph = fragmenter.generate_graph(&stream_node).await?;
     let table_fragments = TableFragments::new(TableId::default(), graph);
@@ -311,7 +314,8 @@ async fn test_fragmenter() -> Result<()> {
 async fn test_fragmenter_multi_nodes() -> Result<()> {
     let env = MetaSrvEnv::for_test().await;
     let stream_node = make_stream_node();
-    let mut fragmenter = StreamFragmenter::new(env.id_gen_manager_ref(), 3);
+    let fragment_manager_ref = Arc::new(FragmentManager::new(env.clone()).await?);
+    let mut fragmenter = StreamFragmenter::new(env.id_gen_manager_ref(), fragment_manager_ref, 3);
 
     let graph = fragmenter.generate_graph(&stream_node).await?;
     let table_fragments = TableFragments::new(TableId::default(), graph);

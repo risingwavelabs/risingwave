@@ -10,7 +10,7 @@ use tonic::{Request, Response, Status};
 use crate::cluster::StoredClusterManager;
 use crate::manager::{EpochGeneratorRef, IdGeneratorManagerRef, MetaSrvEnv};
 use crate::model::TableFragments;
-use crate::stream::{StreamFragmenter, StreamManagerRef};
+use crate::stream::{FragmentManagerRef, StreamFragmenter, StreamManagerRef};
 
 pub type TonicResponse<T> = Result<Response<T>, Status>;
 
@@ -19,6 +19,7 @@ pub struct StreamServiceImpl {
     sm: StreamManagerRef,
 
     id_gen_manager_ref: IdGeneratorManagerRef,
+    fragment_manager_ref: FragmentManagerRef,
     cluster_manager: Arc<StoredClusterManager>,
 
     #[allow(dead_code)]
@@ -28,11 +29,13 @@ pub struct StreamServiceImpl {
 impl StreamServiceImpl {
     pub fn new(
         sm: StreamManagerRef,
+        fragment_manager_ref: FragmentManagerRef,
         cluster_manager: Arc<StoredClusterManager>,
         env: MetaSrvEnv,
     ) -> Self {
         StreamServiceImpl {
             sm,
+            fragment_manager_ref,
             id_gen_manager_ref: env.id_gen_manager_ref(),
             cluster_manager,
             epoch_generator: env.epoch_generator_ref(),
@@ -52,8 +55,11 @@ impl StreamManagerService for StreamServiceImpl {
             .cluster_manager
             .get_worker_count(WorkerType::ComputeNode);
 
-        let mut fragmenter =
-            StreamFragmenter::new(self.id_gen_manager_ref.clone(), worker_count as u32);
+        let mut fragmenter = StreamFragmenter::new(
+            self.id_gen_manager_ref.clone(),
+            self.fragment_manager_ref.clone(),
+            worker_count as u32,
+        );
         let graph = fragmenter
             .generate_graph(req.get_stream_node().map_err(tonic_err)?)
             .await

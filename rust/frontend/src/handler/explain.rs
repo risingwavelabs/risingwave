@@ -75,4 +75,29 @@ mod tests {
 
         meta.stop().await;
     }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_handle_explain_insert() {
+        let meta = risingwave_meta::test_utils::LocalMeta::start_in_tempdir().await;
+        let frontend = crate::test_utils::LocalFrontend::new().await;
+
+        frontend
+            .run_sql("create table t (v1 int, v2 int)")
+            .await
+            .unwrap();
+
+        let sql = "explain insert into t values (22, 33), (44, 55)";
+
+        let response = frontend.run_sql(sql).await.unwrap();
+        let row = response.iter().next().unwrap();
+        let s = row[0].as_ref().unwrap();
+        assert!(s.contains("Insert"));
+        assert!(s.contains("22"));
+        assert!(s.contains("33"));
+        assert!(s.contains("44"));
+        assert!(s.contains("55"));
+
+        meta.stop().await;
+    }
 }

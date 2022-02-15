@@ -58,7 +58,7 @@ jobs:
       - compute-node-build
       - frontend-check
     runs-on: ubuntu-latest
-    timeout-minutes: 15 # NOTE: Increase this number when we have more tests.
+    timeout-minutes: 30 # NOTE: Increase this number when we have more tests.
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -122,7 +122,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-streaming
-          timeout 5m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
+          timeout 10m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
 
       - name: Kill cluster
         run: |
@@ -134,7 +134,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           RW_NO_CACHE=1 ~/cargo-make/makers ci-streaming
-          timeout 5m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
+          timeout 10m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
 
       - name: Kill cluster
         run: |
@@ -147,7 +147,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-streaming
-          timeout 5m sqllogictest -p 4567 -d dev './e2e_test/batch/**/*.slt'
+          timeout 10m sqllogictest -p 4567 -d dev './e2e_test/batch/**/*.slt'
 
       - name: Kill cluster
         run: |
@@ -160,7 +160,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           RW_FORCE_TABLE_V1=1 ~/cargo-make/makers ci-3node
-          timeout 5m sqllogictest -p 4567 -d dev './e2e_test/batch/**/*.slt'
+          timeout 10m sqllogictest -p 4567 -d dev './e2e_test/batch/**/*.slt'
 
       - name: Kill cluster
         run: |
@@ -185,7 +185,7 @@ jobs:
       - compute-node-build
       - frontend-check
     runs-on: ubuntu-latest
-    timeout-minutes: 15 # NOTE: Increase this number when we have more tests.
+    timeout-minutes: 30 # NOTE: Increase this number when we have more tests.
     env:
       PG_PORT: 5432
       RW_PORT: 4567
@@ -270,7 +270,7 @@ jobs:
 
       - name: Run batch tests on Postgresql
         run: |
-          timeout 5m sqllogictest -p ${{ env.PG_PORT }} './e2e_test/batch/**/*.slt'
+          timeout 10m sqllogictest -p ${{ env.PG_PORT }} './e2e_test/batch/**/*.slt'
 
       - name: Generate RiseDev CI config
         run: |
@@ -301,7 +301,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-streaming
-          timeout 5m sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source/**/*.slt'
+          timeout 10m sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source/**/*.slt'
 
       - name: Kill cluster
         run: |
@@ -313,7 +313,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-3node
-          timeout 5m sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source_distributed/**/*.slt'
+          timeout 10m sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source_distributed/**/*.slt'
 
       - name: Kill cluster
         run: |

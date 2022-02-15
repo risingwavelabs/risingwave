@@ -687,11 +687,31 @@ public class PrimaryKeyDerivationVisitor
   @Override
   public Result<PrimaryKeyIndicesAndPositionMap> visit(RwStreamChain chain) {
     LOGGER.debug("visit RwStreamChain");
-    // If we don't have full pk columns, we need to append the rest to chain.
+    RisingWaveStreamingRel input = (RisingWaveStreamingRel) chain.getInput(0);
+    var p = input.accept(this);
+    var info = p.info;
+    var node = (RwStreamBatchPlan) p.node;
+    var newChain =
+        new RwStreamChain(
+            chain.getCluster(),
+            chain.getTraitSet(),
+            chain.getTableId(),
+            node.getPrimaryKeyIndices(),
+            node.getColumnIds(),
+            chain.getUpstreamColumnDescs(),
+            List.of(node));
+    LOGGER.debug("leave RwStreamChain");
+    return new Result<>(newChain, info);
+  }
+
+  @Override
+  public Result<PrimaryKeyIndicesAndPositionMap> visit(RwStreamBatchPlan batchPlan) {
+    LOGGER.debug("visit RwStreamBatchPlan");
+    // If we don't have full pk columns, we need to append the rest to plan.
     ImmutableList.Builder<ColumnCatalog.ColumnId> newColumnIds = ImmutableList.builder();
     ImmutableList.Builder<Integer> newPrimaryKeyIndicesBuilder = ImmutableList.builder();
-    var primaryKeyIndices = new HashSet<>(chain.getPrimaryKeyColumnIds());
-    var columnIds = chain.getColumnIds();
+    var primaryKeyIndices = new HashSet<>(batchPlan.getPrimaryKeyColumnIds());
+    var columnIds = batchPlan.getColumnIds();
 
     int idx = 0;
     for (; idx < columnIds.size(); idx++) {
@@ -708,19 +728,19 @@ public class PrimaryKeyDerivationVisitor
     }
     var newPrimaryKeyIndices = newPrimaryKeyIndicesBuilder.build();
 
-    var newChain =
-        new RwStreamChain(
-            chain.getCluster(),
-            chain.getTraitSet(),
-            chain.getHints(),
-            chain.getTable(),
-            chain.getTableId(),
-            chain.getPrimaryKeyColumnIds(),
+    var newBatchPlan =
+        new RwStreamBatchPlan(
+            batchPlan.getCluster(),
+            batchPlan.getTraitSet(),
+            batchPlan.getHints(),
+            batchPlan.getTable(),
+            batchPlan.getTableId(),
+            batchPlan.getPrimaryKeyColumnIds(),
             ImmutableIntList.copyOf(newPrimaryKeyIndices),
             newColumnIds.build());
 
     var info = new PrimaryKeyIndicesAndPositionMap(newPrimaryKeyIndices, ImmutableMap.of());
-    LOGGER.debug("leave RwStreamChain");
-    return new Result<>(newChain, info);
+    LOGGER.debug("leave RwStreamBatchPlan");
+    return new Result<>(newBatchPlan, info);
   }
 }
