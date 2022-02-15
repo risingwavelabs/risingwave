@@ -12,6 +12,7 @@ risedev:
       port: 5689
       exporter-port: 1224
     - use: frontend
+    - use: minio
 
   # The CI-1node configuration will start 1 compute node, 1 meta node, 1 frontend.
   ci-1node:
