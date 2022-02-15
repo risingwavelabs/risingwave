@@ -29,12 +29,18 @@ class StreamNode extends Node {
         Actor.parseActor(actorId2Proto.get(upStreamActorId)).output.push(this);
       }
     }
+
+    if (this.type === "chainNode") {
+      for (let upStreamActorId of this.typeInfo.upstreamActorIds) {
+        Actor.parseActor(actorId2Proto.get(upStreamActorId)).output.push(this);
+      }
+    }
   }
 
   parseType(nodeProto) {
     let types = ["tableSourceNode", "sourceNode", "projectNode", "filterNode",
       "mviewNode", "simpleAggNode", "hashAggNode", "topNNode",
-      "hashJoinNode", "mergeNode", "exchangeNode", "chainNode"];
+      "hashJoinNode", "mergeNode", "exchangeNode", "chainNode", "localSimpleAggNode"];
     for (let type of types) {
       if (type in nodeProto) {
         return type;
@@ -67,11 +73,11 @@ class Dispatcher extends Node {
 }
 
 class Actor {
-  constructor(actorId, output, rootNode, fragmentIdentifier) {
+  constructor(actorId, output, rootNode, fragmentId) {
     this.actorId = actorId;
     this.output = output;
     this.rootNode = rootNode;
-    this.fragmentIdentifier = fragmentIdentifier;
+    this.fragmentId = fragmentId;
   }
 
   static parseActor(actorProto) {
@@ -80,7 +86,7 @@ class Actor {
       return parsedActorMap.get(actorId);
     }
 
-    let actor = new Actor(actorId, [], null, actorProto.nodes.operatorId);
+    let actor = new Actor(actorId, [], null, actorProto.fragmentId);
     parsedActorMap.set(actorId, actor);
     let nodeBeforeDispatcher = StreamNode.parseNode(actor.actorId, actorProto.nodes);
     let rootNode = Dispatcher.newDispatcher(actor.actorId, actorProto.dispatcher.type, actorProto.downstreamActorId);

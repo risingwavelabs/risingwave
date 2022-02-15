@@ -12,3 +12,5 @@ labels:
   title: "^style*"
 - label: "chore"
   title: "^chore*"
+- label: doc
+  title: "^doc*"

@@ -96,4 +96,14 @@ class GrpcMetaClient(private val channel: Channel) : MetaClient {
       throw rpcException("flush", e)
     }
   }
+
+  override fun listAllNodes(request: ListAllNodesRequest): ListAllNodesResponse {
+    val stub = ClusterServiceGrpc.newBlockingStub(channel)
+    try {
+      return stub.listAllNodes(request)
+    } catch (e: StatusRuntimeException) {
+      LOGGER.warn("RPC failed: {}", e.status)
+      throw rpcException("listAllNodes", e)
+    }
+  }
 }

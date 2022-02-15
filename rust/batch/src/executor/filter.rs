@@ -116,7 +116,7 @@ impl BoxedExecutorBuilder for FilterExecutor {
                 child,
                 chunk_builder,
                 last_input: None,
-                identity: "FilterExecutor".to_string(),
+                identity: source.plan_node().get_identity().clone(),
                 child_can_be_nexted: true,
             }));
         }

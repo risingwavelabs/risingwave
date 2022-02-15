@@ -49,8 +49,6 @@ pub(super) async fn handle_create_table(
 
     let catalog_mgr = session.env().catalog_mgr();
     catalog_mgr
-        .lock()
-        .await
         .create_table(session.database(), DEFAULT_SCHEMA_NAME, table)
         .await?;
 
@@ -81,8 +79,7 @@ mod tests {
         frontend.run_sql(sql).await.unwrap();
 
         let catalog_manager = frontend.session().env().catalog_mgr();
-        let catalog_manager_guard = catalog_manager.lock().await;
-        let table = catalog_manager_guard
+        let table = catalog_manager
             .get_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "t")
             .unwrap();
         let columns = table

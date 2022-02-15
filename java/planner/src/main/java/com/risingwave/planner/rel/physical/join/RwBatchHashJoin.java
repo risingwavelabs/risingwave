@@ -7,6 +7,7 @@ import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 import static com.risingwave.planner.rel.physical.join.BatchJoinUtils.isEquiJoin;
 
 import com.risingwave.planner.rel.logical.RwLogicalJoin;
+import com.risingwave.planner.rel.physical.BatchPlan;
 import com.risingwave.planner.rel.physical.RisingWaveBatchPhyRel;
 import com.risingwave.proto.plan.HashJoinNode;
 import com.risingwave.proto.plan.PlanNode;
@@ -64,6 +65,7 @@ public class RwBatchHashJoin extends RwBufferJoinBase implements RisingWaveBatch
         .addChildren(leftChild)
         .addChildren(rightChild)
         .setHashJoin(hashJoinNode)
+        .setIdentity(BatchPlan.getCurrentNodeIdentity(this))
         .build();
   }
 

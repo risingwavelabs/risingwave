@@ -4,7 +4,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::hummock::{CompactTask, Level, LevelEntry, LevelType, SstableInfo};
 use risingwave_storage::hummock::key::{user_key, FullKey};
 use risingwave_storage::hummock::key_range::KeyRange;
-use risingwave_storage::hummock::{HummockSSTableId, HummockSnapshotId};
+use risingwave_storage::hummock::{HummockEpoch, HummockSSTableId};
 use serde::{Deserialize, Serialize};
 
 use crate::hummock::level_handler::{LevelHandler, SSTableStat};
@@ -190,7 +190,7 @@ impl CompactStatus {
                                                         user_key(
                                                             &l_n_suc[overlap_idx].key_range.left,
                                                         ),
-                                                        HummockSnapshotId::MAX,
+                                                        HummockEpoch::MAX,
                                                     )
                                                     .into_inner()
                                                     .into(),
@@ -274,7 +274,7 @@ impl CompactStatus {
                         },
                     ],
                     splits: splits.iter().map(|v| v.clone().into()).collect_vec(),
-                    watermark: HummockSnapshotId::MAX,
+                    watermark: HummockEpoch::MAX,
                     sorted_output_ssts: vec![],
                     task_id: next_task_id,
                     target_level,

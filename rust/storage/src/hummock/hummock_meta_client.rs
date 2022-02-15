@@ -60,9 +60,7 @@ impl HummockMetaClient for RPCHummockMetaClient {
             .meta_client
             .to_owned()
             .hummock_client
-            .pin_version(PinVersionRequest {
-                context_identifier: 0,
-            })
+            .pin_version(PinVersionRequest { context_id: 0 })
             .await
             .map_err(HummockError::meta_error)?
             .into_inner();
@@ -74,7 +72,7 @@ impl HummockMetaClient for RPCHummockMetaClient {
             .to_owned()
             .hummock_client
             .unpin_version(UnpinVersionRequest {
-                context_identifier: 0,
+                context_id: 0,
                 pinned_version_id,
             })
             .await
@@ -87,9 +85,7 @@ impl HummockMetaClient for RPCHummockMetaClient {
             .meta_client
             .to_owned()
             .hummock_client
-            .pin_snapshot(PinSnapshotRequest {
-                context_identifier: 0,
-            })
+            .pin_snapshot(PinSnapshotRequest { context_id: 0 })
             .await
             .map_err(HummockError::meta_error)?
             .into_inner();
@@ -101,7 +97,7 @@ impl HummockMetaClient for RPCHummockMetaClient {
             .to_owned()
             .hummock_client
             .unpin_snapshot(UnpinSnapshotRequest {
-                context_identifier: 0,
+                context_id: 0,
                 snapshot: Some(HummockSnapshot {
                     epoch: pinned_epoch,
                 }),
@@ -132,7 +128,7 @@ impl HummockMetaClient for RPCHummockMetaClient {
             .to_owned()
             .hummock_client
             .add_tables(AddTablesRequest {
-                context_identifier: 0,
+                context_id: 0,
                 tables: sstables,
                 epoch,
             })
@@ -146,9 +142,7 @@ impl HummockMetaClient for RPCHummockMetaClient {
             .meta_client
             .to_owned()
             .hummock_client
-            .get_compaction_tasks(GetCompactionTasksRequest {
-                context_identifier: 0,
-            })
+            .get_compaction_tasks(GetCompactionTasksRequest { context_id: 0 })
             .await
             .map_err(HummockError::meta_error)?
             .into_inner();
@@ -164,7 +158,7 @@ impl HummockMetaClient for RPCHummockMetaClient {
             .to_owned()
             .hummock_client
             .report_compaction_tasks(ReportCompactionTasksRequest {
-                context_identifier: 0,
+                context_id: 0,
                 compact_task: Some(compact_task),
                 task_result,
             })

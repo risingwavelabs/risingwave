@@ -63,7 +63,7 @@ impl StreamManager {
         None
     }
 
-    async fn lookup_actor_ids(
+    fn lookup_actor_ids(
         &self,
         table_ref_id: &TableRefId,
         table_sink_map: &mut HashMap<TableRawId, Vec<ActorId>>,
@@ -72,8 +72,7 @@ impl StreamManager {
         if let Entry::Vacant(e) = table_sink_map.entry(table_id) {
             let sink_actors = try_match_expand!(
                 self.fragment_manager_ref
-                    .get_table_sink_actor_ids(&TableId::from(&Some(table_ref_id.clone())))
-                    .await,
+                    .get_table_sink_actor_ids(&TableId::from(&Some(table_ref_id.clone()))),
                 Ok
             )?;
             ensure!(!sink_actors.is_empty());
@@ -103,8 +102,7 @@ impl StreamManager {
             let stream_node = actor.nodes.as_mut().unwrap();
             let table_ref_id = self.search_chain_table_ref_ids(stream_node);
             if let Some(table_ref_id) = table_ref_id {
-                self.lookup_actor_ids(&table_ref_id, &mut table_sink_map)
-                    .await?;
+                self.lookup_actor_ids(&table_ref_id, &mut table_sink_map)?;
                 chain_actors.push((actor.actor_id, table_ref_id));
             }
         }
@@ -430,7 +428,7 @@ mod tests {
             sleep(Duration::from_secs(1));
 
             let env = MetaSrvEnv::for_test().await;
-            let cluster_manager = Arc::new(StoredClusterManager::new(env.clone()).await?);
+            let cluster_manager = Arc::new(StoredClusterManager::new(env.clone(), None).await?);
             cluster_manager
                 .add_worker_node(
                     HostAddress {
@@ -556,12 +554,8 @@ mod tests {
 
         let sink_actor_ids = services
             .fragment_manager
-            .get_table_sink_actor_ids(&table_id)
-            .await?;
-        let actor_ids = services
-            .fragment_manager
-            .get_table_actor_ids(&table_id)
-            .await?;
+            .get_table_sink_actor_ids(&table_id)?;
+        let actor_ids = services.fragment_manager.get_table_actor_ids(&table_id)?;
         assert_eq!(sink_actor_ids, (0..5).collect::<Vec<u32>>());
         assert_eq!(actor_ids, (0..5).collect::<Vec<u32>>());
 

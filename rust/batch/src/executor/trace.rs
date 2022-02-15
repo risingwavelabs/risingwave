@@ -22,7 +22,7 @@ impl TraceExecutor {
 impl Executor for TraceExecutor {
     async fn open(&mut self) -> Result<()> {
         let input_desc = self.input_desc.as_str();
-        let span_name = format!("{}_open", input_desc);
+        let span_name = format!("{input_desc}_open");
         self.child
             .open()
             .instrument(tracing::trace_span!(
@@ -36,7 +36,7 @@ impl Executor for TraceExecutor {
 
     async fn next(&mut self) -> Result<Option<DataChunk>> {
         let input_desc = self.input_desc.as_str();
-        let span_name = format!("{}_next", input_desc);
+        let span_name = format!("{input_desc}_next");
         let input_chunk = self
             .child
             .next()
@@ -64,7 +64,7 @@ impl Executor for TraceExecutor {
 
     async fn close(&mut self) -> Result<()> {
         let input_desc = self.input_desc.as_str();
-        let span_name = format!("{}_close", input_desc);
+        let span_name = format!("{input_desc}_close");
         self.child
             .close()
             .instrument(tracing::trace_span!(
