@@ -1,253 +1,412 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use itertools::Itertools;
-use log::{error, info};
-use tokio::{sync as tokio_sync, time as tokio_time};
+use tokio::sync as tokio_sync;
+use tokio::sync::mpsc::error::SendError;
 
+/// ``EntryStat`` Describes a directory or file. A file is a generic concept,
+/// and can be a LocalFile, a distributed file system, or a bucket in S3.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct EntryStat {
+    path: String,
+    atime: i64,
+    mtime: i64,
+    size: i64,
+    is_dir: bool,
+}
+
+/// The operations supported on Entry/file.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub enum ItemChange {
+pub enum EntryOpt {
     Add,
     Modify,
     Delete,
 }
 
-type LocationItem = (String, i64);
-type LocationItemChangeEvent = (ItemChange, LocationItem);
-type ItemChangeChannel = (
-    tokio_sync::mpsc::Sender<LocationItemChangeEvent>,
-    tokio_sync::mpsc::Receiver<LocationItemChangeEvent>,
-);
-
-const NO_MODIFICATION: i64 = i64::MIN;
-
-#[async_trait]
-pub trait Location: Send + Sync {
-    async fn list_all_items(&self) -> Result<Option<Vec<LocationItem>>>;
-    async fn list_change_items(
-        &self,
-        after_modification_time: i64,
-    ) -> Result<Option<Vec<LocationItemChangeEvent>>>;
-    fn last_modification_time(&self) -> i64;
-    fn location(&self) -> Result<String>;
+/// For a certain Entry is aware of its changes, such as deleting a file,
+/// or having the contents of an appended write.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum EntryDiscover {
+    None,
+    Auto,
 }
 
-pub struct FetchResponse {
+impl Default for EntryStat {
+    fn default() -> Self {
+        EntryStat {
+            path: "_NONE_".to_string(),
+            atime: 0,
+            mtime: 0,
+            size: 0,
+            is_dir: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct EntryOptEvent {
+    entry_operation: EntryOpt,
+    entry: EntryStat,
+}
+
+impl Default for EntryOptEvent {
+    fn default() -> Self {
+        EntryOptEvent {
+            entry_operation: EntryOpt::Add,
+            entry: Default::default(),
+        }
+    }
+}
+
+/// Unlike the concept in the OS, the abstraction of a location is represented in the current context.
+/// For external resources we assume that none of them have the permission to modify,
+/// so in Directory we only support read operations. However, unlike the classic File API,
+/// it is necessary to be able to sense changes in this directory.
+#[async_trait]
+pub trait Directory: Send + Sync {
+    async fn push_entries_change(
+        &self,
+        sender: tokio_sync::mpsc::Sender<EntryOptEvent>,
+    ) -> Result<(), SendError<EntryOptEvent>>;
+    async fn list_entries(&self) -> Result<Vec<EntryStat>>;
+    async fn last_modification(&self) -> i64;
+    fn entry_discover(&self) -> EntryDiscover;
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct Response {
     data: Vec<u8>,
-    location_item: LocationItem,
+    entry: EntryStat,
     offset: i64,
     more_data: bool,
 }
 
-pub trait LocationSubscriber: Send + Sync {
-    fn fetch_next(&self, location_item: LocationItem) -> Result<FetchResponse>;
-    fn list_metadata(&self) -> Option<Vec<LocationItem>>;
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-enum TaskStatus {
-    Started,
-    Stopped,
-}
-
 #[async_trait]
-trait Task<In: ?Sized, Out> {
-    async fn run(
-        &self,
-        mut status: tokio_sync::watch::Receiver<TaskStatus>,
-        input: In,
-    ) -> &tokio_sync::mpsc::Receiver<Out>;
+pub trait EntrySubscriber: Send + Sync {
+    async fn read_next(&mut self) -> Result<Option<Response>>;
+    fn seek(&self, offset: i64, entry: &EntryStat) -> Result<()>;
+    fn get_directory(&self) -> Box<dyn Directory>;
 }
 
-struct ListenerTask {
-    period: tokio_time::Duration,
-    item_change_channel: ItemChangeChannel,
-}
+#[cfg(test)]
+mod test {
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+    use std::sync::Arc;
 
-impl ListenerTask {
-    fn new(period: tokio_time::Duration, channel_buff: usize) -> Self {
-        let (sender, receiver) = tokio_sync::mpsc::channel(channel_buff);
-        Self {
-            period,
-            item_change_channel: (sender, receiver),
+    use anyhow::Result;
+    use async_trait::async_trait;
+    use chrono::Local;
+    use itertools::Itertools;
+    use tokio::sync::mpsc::error::SendError;
+    use tokio::{sync, time};
+
+    use crate::filesystem::file_common::{
+        Directory, EntryDiscover, EntryOpt, EntryOptEvent, EntryStat,
+    };
+
+    // path, init_count, total_count, file_size
+    #[derive(Debug, Clone)]
+    struct MockFileSystemConf(String, i32, i32, i32);
+
+    // name, ctime, mtime,size
+    #[derive(Debug, Clone)]
+    struct MockFileMeta {
+        path: String,
+        ctime: i64,
+        mtime: i64,
+        size: i64,
+    }
+
+    // struct MockFileMeta(String, i64, i64, i64);
+    impl MockFileMeta {
+        fn new(path: String, mtime: i64) -> Self {
+            Self {
+                path,
+                ctime: mtime,
+                mtime,
+                size: i64::MAX - 10000,
+            }
         }
     }
 
-    fn if_ok_return<T>(
-        rs: Result<Option<Vec<T>>>,
-        map_fn: Box<dyn Fn(&T) -> LocationItemChangeEvent>,
-    ) -> Vec<LocationItemChangeEvent> {
-        let val = match rs.unwrap_or_else(|_| Some(vec![])) {
-            Some(opt) => opt.iter().map(|t| map_fn(t)).collect_vec(),
-            _ => {
-                vec![]
+    impl From<MockFileMeta> for EntryStat {
+        fn from(meta: MockFileMeta) -> Self {
+            EntryStat {
+                path: meta.path,
+                atime: meta.ctime,
+                mtime: meta.mtime,
+                size: meta.size,
+                is_dir: false,
             }
-        };
-        val
+        }
     }
 
-    async fn listen(
-        listen_location: Box<dyn Location>,
-        period: tokio_time::Duration,
-        mut status: tokio_sync::watch::Receiver<TaskStatus>,
-        tx: tokio_sync::mpsc::Sender<LocationItemChangeEvent>,
-    ) {
-        let delay_for = tokio_time::Duration::from_millis(300);
-        let start = tokio_time::Instant::now() + tokio_time::Duration::from_millis(500);
-        let mut interval = tokio_time::interval_at(start, period);
-        loop {
-            tokio::select! {
-                status_change = status.changed() => {
-                    if status_change.is_ok() {
-                        if let TaskStatus::Stopped = *status.borrow() {
-                            info!("ListenerTask listen() Receive TaskStatus::Stopped.");
-                            break;
-                        }
-                    }
-                    continue;
-                }
-                _ = tokio_time::sleep(delay_for)=> {
-                  info!("ListenerTask TaskStatus channel timeout next around.")
-                }
+    #[derive(Debug, Clone)]
+    struct MockFileSystem {
+        meta: MockFileSystemConf,
+        control_signal: sync::mpsc::Sender<i32>,
+        entries: Arc<tokio::sync::Mutex<HashMap<String, MockFileMeta>>>,
+        state_change_complete_notify: Arc<tokio::sync::Notify>,
+    }
+
+    impl MockFileSystem {
+        fn new(meta: MockFileSystemConf) -> Self {
+            let (tx, rx) = sync::mpsc::channel(1);
+            let mut init_entries = HashMap::new();
+            for i in 0..meta.1 {
+                let file_name = format!("{}_{}", "file", i);
+                let mtime = (Local::now() - chrono::Duration::minutes(i as i64)).timestamp_millis();
+                init_entries.insert(file_name.clone(), MockFileMeta::new(file_name, mtime));
             }
-            let item_change_events = if listen_location.last_modification_time() == NO_MODIFICATION
-            {
-                let all_item_rs = listen_location.list_all_items().await;
-                ListenerTask::if_ok_return(
-                    all_item_rs,
-                    Box::new(|a| -> LocationItemChangeEvent { (ItemChange::Add, a.clone()) }),
-                )
-            } else {
-                let modification_time = listen_location.last_modification_time();
-                let item_change_rs = listen_location.list_change_items(modification_time).await;
-                ListenerTask::if_ok_return(
-                    item_change_rs,
-                    Box::new(|a| -> LocationItemChangeEvent { (a.clone().0, a.clone().1) }),
-                )
+            let file_system = MockFileSystem {
+                meta,
+                entries: Arc::new(tokio::sync::Mutex::new(init_entries)),
+                control_signal: tx,
+                state_change_complete_notify: Arc::new(tokio::sync::Notify::new()),
             };
-            interval.tick().await;
-            for item in item_change_events {
-                if let Err(send_rse_err) = tx.send(item.clone()).await {
-                    error!(
-                        "ListenerTask send location_item value error cause by {:?}",
-                        send_rse_err
-                    );
-                } else {
-                    // TODO metrics
-                    info!("ListenerTask send location_item_change success");
-                }
-            }
+            let file_for_task = Arc::new(file_system.clone());
+            tokio::task::spawn(async move {
+                file_for_task.update_state_once(rx).await;
+            });
+            file_system
         }
-    }
-}
 
-#[async_trait]
-impl Task<Box<dyn Location>, LocationItemChangeEvent> for ListenerTask {
-    async fn run(
-        &self,
-        status: tokio_sync::watch::Receiver<TaskStatus>,
-        input: Box<dyn Location>,
-    ) -> &tokio_sync::mpsc::Receiver<LocationItemChangeEvent> {
-        tokio::task::spawn(ListenerTask::listen(
-            input,
-            self.period,
-            status,
-            self.item_change_channel.0.clone(),
-        ));
-        &self.item_change_channel.1
-    }
-}
-
-struct SubscribeTask {
-    event_filter: fn(ItemChange) -> bool,
-    receiver: tokio_sync::mpsc::Receiver<Vec<u8>>,
-    sender: tokio_sync::mpsc::Sender<(Vec<u8>, i64)>,
-    subscriber: Box<dyn LocationSubscriber>,
-}
-
-impl SubscribeTask {
-    async fn fetch_task(&self, location_item: LocationItem) {
-        loop {
-            let fetch_rs = self.subscriber.fetch_next(location_item.clone());
-            match fetch_rs {
-                Ok(response) => {
-                    let send_res = self.sender.send((response.data, response.offset)).await;
-                    if !response.more_data {
-                        break;
-                    } else {
-                        match send_res {
-                            Ok(_) => {
-                                continue;
-                            }
-                            Err(send_res_err) => {
-                                error!(
-                                    "fetch_task send() data to channel error. {:?}",
-                                    send_res_err
-                                );
-                                break;
-                            }
-                        }
+        async fn update_state_once(&self, mut rx: sync::mpsc::Receiver<i32>) {
+            let mut interval = time::interval(time::Duration::from_millis(1));
+            let total = self.meta.2 - self.meta.1;
+            let init = self.meta.1;
+            let mut index = 0;
+            println!("MockFileSystem update_state running");
+            loop {
+                let msg = tokio::select! {
+                    _ = interval.tick() => {
+                        3_i32
                     }
-                }
-                Err(e) => {
-                    error!("fetch_task fetch_next() error cause by {:?}", e);
-                    break;
-                }
-            };
-        }
-    }
-}
-
-#[async_trait]
-impl Task<tokio_sync::mpsc::Receiver<LocationItemChangeEvent>, Vec<u8>> for SubscribeTask {
-    async fn run(
-        &self,
-        mut status: tokio_sync::watch::Receiver<TaskStatus>,
-        mut item_change_receiver: tokio_sync::mpsc::Receiver<LocationItemChangeEvent>,
-    ) -> &tokio_sync::mpsc::Receiver<Vec<u8>> {
-        // 1. if status == Stopped. return;
-        // 2. if filter(changeEvent) == true continue;
-        // 3. if fetch_next == NO_DATA (next around);
-        loop {
-            let event_change: LocationItemChangeEvent = tokio::select! {
-                location_item_event = item_change_receiver.recv() => {
-                    if let Some(item_change) = location_item_event {
-                        item_change
-                    } else {
-                        info!("SubscribeTask not found data");
+                    Some(m) = rx.recv() => {
+                        Some(m).unwrap()
+                    }
+                };
+                match msg {
+                    1_i32 => {
+                        if index < 1 {
+                            let mut entries_guard = self.entries.lock().await;
+                            for name_idx in init..=total {
+                                let mtime = (Local::now()
+                                    - chrono::Duration::minutes(name_idx as i64))
+                                    .timestamp_millis();
+                                let file_name = format!("{}_{}", "file", name_idx);
+                                let file_meta = MockFileMeta::new(file_name.clone(), mtime);
+                                // println!("newFileMeta={:?}", file_meta.clone());
+                                entries_guard.insert(file_name.clone(), file_meta);
+                            }
+                            self.state_change_complete_notify.notify_one();
+                        }
+                        index += 1;
+                    }
+                    2_i32 => {
                         break;
                     }
-                }
-                status_change = status.changed() => {
-                    if status_change.is_ok() {
-                        if let TaskStatus::Stopped = *status.borrow() {
-                            info!("SubscribeTask Receive TaskStatus::Stopped, task run() complete.");
-                            break;
-                        }
+                    _ => {
+                        continue;
                     }
+                }
+            }
+        }
+
+        async fn state_change(&self, signal: i32) {
+            let rs = self.control_signal.send(signal).await;
+            println!("MockFileSystem send state_change rs = {:?}", rs);
+        }
+
+        async fn wait_state_change_complete(&self) {
+            self.state_change_complete_notify.notified().await;
+        }
+
+        async fn list_files(&self) -> HashMap<String, MockFileMeta> {
+            let read_guard = self.entries.lock().await;
+            (*read_guard).clone()
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct DummyDirectory {
+        file_system: MockFileSystem,
+        last_modification: Arc<AtomicI64>,
+        auto_discover: EntryDiscover,
+        push_change_status: Arc<AtomicBool>,
+    }
+
+    impl DummyDirectory {
+        fn new(file_system: MockFileSystem) -> Self {
+            Self {
+                file_system,
+                last_modification: Arc::new(AtomicI64::new(i64::MIN)),
+                auto_discover: EntryDiscover::Auto,
+                push_change_status: Arc::new(AtomicBool::new(false)),
+            }
+        }
+
+        fn push_status_start(&self) {
+            let _ignore = self.push_change_status.compare_exchange(
+                false,
+                true,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            );
+        }
+
+        fn push_status_stop(&self) {
+            let _ignore = self.push_change_status.compare_exchange(
+                true,
+                false,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            );
+        }
+    }
+
+    #[async_trait]
+    impl Directory for DummyDirectory {
+        async fn push_entries_change(
+            &self,
+            sender: tokio::sync::mpsc::Sender<EntryOptEvent>,
+        ) -> Result<(), SendError<EntryOptEvent>> {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(2));
+            let file_system_clone = Arc::new(&self.file_system);
+            println!(
+                "entry_change_listener running. {:?} change_status_value = {:?}",
+                self.last_modification.load(Ordering::SeqCst),
+                self.push_change_status.load(Ordering::SeqCst)
+            );
+            let rs = loop {
+                if !self.push_change_status.load(Ordering::SeqCst) {
+                    break Ok(());
+                }
+                let file_values = file_system_clone.list_files().await;
+                let curr_modification = self.last_modification.load(Ordering::SeqCst);
+
+                let sorted_files = file_values
+                    .values()
+                    .filter(|p_value| p_value.mtime > curr_modification)
+                    .cloned()
+                    .sorted_by(|m1, m2| Ord::cmp(&m1.mtime, &m2.mtime))
+                    .collect_vec();
+
+                if sorted_files.is_empty() {
+                    let _instant = interval.tick().await;
                     continue;
                 }
+                let curr_max_modification = sorted_files.last().unwrap().mtime;
+                self.last_modification
+                    .store(curr_max_modification, Ordering::SeqCst);
+                let mut send_opt_event_err = None;
+                for change_event in &sorted_files {
+                    let tx_send_rs = sender
+                        .send(EntryOptEvent {
+                            entry_operation: EntryOpt::Add,
+                            entry: EntryStat::from(change_event.clone()),
+                        })
+                        .await;
+                    if tx_send_rs.is_err() {
+                        send_opt_event_err = Some(tx_send_rs.err().unwrap());
+                        break;
+                    } else {
+                        continue;
+                    }
+                }
+                match send_opt_event_err {
+                    Some(tx_send_err) => {
+                        break Err(tx_send_err);
+                    }
+                    None => {
+                        continue;
+                    }
+                }
             };
-
-            if (self.event_filter)(event_change.0) {
-                continue;
-            }
-            self.fetch_task(event_change.1).await;
+            rs
         }
-        &self.receiver
+
+        async fn list_entries(&self) -> Result<Vec<EntryStat>> {
+            let entries = self
+                .file_system
+                .list_files()
+                .await
+                .values()
+                .map(|value| EntryStat {
+                    path: value.path.to_string(),
+                    atime: value.ctime,
+                    mtime: value.mtime,
+                    size: value.size,
+                    is_dir: false,
+                })
+                .collect_vec();
+            Ok(entries)
+        }
+
+        async fn last_modification(&self) -> i64 {
+            self.last_modification.load(Ordering::SeqCst)
+        }
+
+        fn entry_discover(&self) -> EntryDiscover {
+            self.auto_discover
+        }
     }
-}
 
-struct TaskRunner {
-    interval: tokio_time::Duration,
-    status_sender: tokio_sync::watch::Sender<TaskStatus>,
-}
+    fn default_filesystem_conf() -> MockFileSystemConf {
+        MockFileSystemConf("/mock/path".to_string(), 1, 5, 10000)
+    }
 
-impl TaskRunner {}
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn test_mock_file_system() {
+        let file_system = MockFileSystem::new(default_filesystem_conf());
+        let files_change_before = file_system.list_files().await;
+        assert_eq!(1, files_change_before.len());
+        println!(
+            "MockFileSystem files_change_before = {:?}",
+            files_change_before
+        );
+        file_system.state_change(1).await;
+        file_system.wait_state_change_complete().await;
+        let files_change_after = file_system.list_files().await;
+        assert_eq!(5, files_change_after.len());
+        file_system.state_change(2).await;
+        println!(
+            "MockFileSystem files_change_after = {:?}",
+            files_change_after
+        );
+        tokio::task::yield_now().await;
+    }
 
-impl Drop for TaskRunner {
-    fn drop(&mut self) {
-        if self.status_sender.send(TaskStatus::Stopped).is_err() {
-            error!("Send ListenerStatus::Stopped Error");
-        }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn test_push_entries_change() {
+        let file_system = MockFileSystem::new(default_filesystem_conf());
+        let directory = DummyDirectory::new(file_system.clone());
+        let (tx, mut rx) = tokio::sync::mpsc::channel(10);
+        let directory_for_clone = Arc::new(directory.clone());
+        file_system.state_change(1).await;
+        file_system.wait_state_change_complete().await;
+        directory.push_status_start();
+        let send_join = tokio::task::spawn(async move {
+            let rs = directory_for_clone.push_entries_change(tx).await;
+            match rs {
+                Ok(()) => {
+                    println!("send success");
+                }
+                Err(err) => {
+                    panic!("send operator should be no SendError {:?}", err);
+                }
+            }
+            println!("sender task complete");
+        });
+        let recv_join = tokio::task::spawn(async move {
+            for _i in 0..5 {
+                let receive_event = rx.recv().await;
+                println!("receive event change = {:?}", receive_event);
+            }
+            directory.clone().push_status_stop();
+            println!("receive task complete");
+        });
+        send_join.await.unwrap();
+        recv_join.await.unwrap();
     }
 }
