@@ -768,7 +768,7 @@ export class StreamChartHelper {
       }
     }
     for (let actor of fragmentRepresentedActors) {
-      actor.representedActorList = fragmentId2actorList.get(actor.fragmentId).map(x => x.actorId);
+      actor.representedActorList = fragmentId2actorList.get(actor.fragmentId).map(x => x.actorId).sort();
     }
     // get dag layout of these actors
     let dagNodeMap = new Map();
