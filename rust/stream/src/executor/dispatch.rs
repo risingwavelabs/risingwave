@@ -19,25 +19,25 @@ pub trait Output: Debug + Send + Sync + 'static {
     async fn send(&mut self, message: Message) -> Result<()>;
 }
 
-/// `ChannelOutput` sends data to a local `mpsc::Channel`
-pub struct ChannelOutput {
+/// `LocalOutput` sends data to a local `mpsc::Channel`
+pub struct LocalOutput {
     ch: Sender<Message>,
 }
 
-impl Debug for ChannelOutput {
+impl Debug for LocalOutput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ChannelOutput").finish()
+        f.debug_struct("LocalOutput").finish()
     }
 }
 
-impl ChannelOutput {
+impl LocalOutput {
     pub fn new(ch: Sender<Message>) -> Self {
         Self { ch }
     }
 }
 
 #[async_trait]
-impl Output for ChannelOutput {
+impl Output for LocalOutput {
     async fn send(&mut self, message: Message) -> Result<()> {
         // local channel should never fail
         self.ch.send(message).await.unwrap();
@@ -142,7 +142,7 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
 
                         if is_local_address(&downstream_addr, &self.context.addr) {
                             let tx = self.context.take_sender(&up_down_ids)?;
-                            new_outputs.push(Box::new(ChannelOutput::new(tx)) as Box<dyn Output>)
+                            new_outputs.push(Box::new(LocalOutput::new(tx)) as Box<dyn Output>)
                         } else {
                             let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
                             self.context
@@ -163,7 +163,7 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
                         let downstream_addr = downstream_actor_info.get_host()?.to_socket_addr()?;
                         if is_local_address(&downstream_addr, &self.context.addr) {
                             let tx = self.context.take_sender(&up_down_ids)?;
-                            outputs_to_add.push(Box::new(ChannelOutput::new(tx)) as Box<dyn Output>)
+                            outputs_to_add.push(Box::new(LocalOutput::new(tx)) as Box<dyn Output>)
                         } else {
                             let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
                             self.context
