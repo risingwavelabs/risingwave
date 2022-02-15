@@ -36,7 +36,7 @@ const heightUnit = 250; // the height of a tree layer in an actor
 const actorBoxPadding = 100; // box padding
 const actorBoxStroke = 15; // the width of the stroke of the box
 const linkStrokeWidth = 30; // the width of the link between nodes
-const linkFlowEffectDuration = 1000; // the duration of the flow effect amination
+const linkFlowEffectDuration = 500; // the duration of the flow effect amination
 const linkStrokeDash = "10, 10";
 
 // Stream Plan constant
@@ -45,12 +45,13 @@ const gapBetweenLayer = 300;
 const gapBetweenFlowChart = 500;
 
 // Draw linking effect
-const DrawLinkEffect = true;
 const bendGap = 50; // try example at: http://bl.ocks.org/d3indepth/b6d4845973089bc1012dec1674d3aff8
-const connectionGap = 50;
+const connectionGap = 20;
 
-// font constant
+// Others
 const fontSize = 30;
+const highLightColor = "#DC143C";
+const outGoingLinkBgColor = "#eee";
 
 /**
  * Construct an id for a link in actor box.
@@ -73,6 +74,80 @@ function constructNodeLinkId(node1, node2) {
  */
 function constructNodeId(node) {
   return "node-" + node.id;
+}
+
+function highlightActorList(actorList) {
+  // cancel the effect of being selected
+  d3.selectAll("rect.selected")
+    .attr("stroke", 'none')
+    .classed("selected", false);
+
+  d3.selectAll(`path.selected.outgoing-link-bg`)
+    .attr("stroke", function () { return d3.select(this).attr("data-color") });
+
+  d3.selectAll("path.selected.outgoing-link")
+    .attr("stroke", function () { return d3.select(this).attr("data-color") });
+
+  d3.selectAll("path.selected")
+    .on("start", null)
+    .classed("selected", false);
+
+  // apply the effect of being selected
+  for (let id of actorList) {
+    // highlight actor box
+    d3.selectAll(`rect.actor-${id}`)
+      .attr("stroke", highLightColor)
+      .classed("selected", true);
+
+    // apply moving effect on internal links
+    d3.selectAll(`path.actor-${id}.interal-link`)
+      .classed("selected", true)
+      .attr("stroke-dashoffset", "0")
+      .transition()
+      .duration(linkFlowEffectDuration)
+      .ease(d3.easeLinear)
+      .on("start", function repeat() {
+        if (!d3.select(this).classed("selected")) {
+          return;
+        }
+        d3.active(this)
+          .attr("stroke-dashoffset", "20")
+          .transition()
+          .on("start", function () {
+            d3.select(this).attr("stroke-dashoffset", "0");
+            repeat.bind(this)();
+          })
+      });
+
+    // apply moving effect on outgoing links of actors
+    d3.selectAll(`path.actor-${id}.outgoing-link`)
+      .classed("selected", true)
+      .attr("data-color", function () { return d3.select(this).attr("stroke") })
+      .attr("stroke", "white")
+      .attr("stroke-dasharray", "20, 20")
+      .attr("stroke-dashoffset", "0")
+      .transition()
+      .duration(linkFlowEffectDuration)
+      .ease(d3.easeLinear)
+      .on("start", function repeat() {
+        if (!d3.select(this).classed("selected")) {
+          return;
+        }
+        d3.active(this)
+          .attr("stroke-dashoffset", "40")
+          .transition()
+          .on("start", function () {
+            d3.select(this).attr("stroke-dashoffset", "0");
+            repeat.bind(this)();
+          })
+      });
+
+    // change the background color of the outgoing link
+    d3.selectAll(`path.actor-${id}.outgoing-link-bg`)
+      .classed("selected", true)
+      .attr("data-color", function () { return d3.select(this).attr("stroke") })
+      .attr("stroke", highLightColor);
+  }
 }
 
 
@@ -102,7 +177,7 @@ export class StreamChartHelper {
    */
   constructor(g, data, onNodeClick, selectedActor) {
     this.topGroup = g;
-    this.data = data;
+    this.streamPlan = new StreamPlanParser(data);
     this.onNodeClick = onNodeClick;
     this.selectedActor = selectedActor;
     this.selectedActorStr = this.selectedActor ? selectedActor.host.host + ":" + selectedActor.host.port : null;
@@ -449,7 +524,16 @@ export class StreamChartHelper {
     const [boxWidth, boxHeight] = this.calculateActorBoxSize(rootNode);
     this.layoutActorBox(rootNode, baseX + boxWidth - actorBoxPadding, baseY + boxHeight / 2);
 
+    const onActorClicked = (e) => {
+      highlightActorList([actor.actorId]);
+    }
+
+    const onLinkClicked = (e) => {
+      onActorClicked(e, actor);
+    }
+
     const onNodeClicked = (e, node) => {
+      onActorClicked(e, actor);
       this.onNodeClick && this.onNodeClick(e, node);
       props.onNodeClicked && props.onNodeClicked(e, node);
     }
@@ -459,12 +543,14 @@ export class StreamChartHelper {
     }
 
     const onMouseOver = (e, node) => {
-      props.onMouseOut && props.onMouseOver(e, node);
+      props.onMouseOver && props.onMouseOver(e, node);
     }
+
 
     // draw box
     group.attr("id", "actor-" + actor.actorId);
     group.append("rect")
+      .attr("class", "actor-" + actor.actorId)
       .attr("width", boxWidth)
       .attr("height", boxHeight)
       .attr("x", baseX)
@@ -472,7 +558,8 @@ export class StreamChartHelper {
       .attr("fill", this._actorBoxBackgroundColor(actor))
       .attr("rx", 20)
       .attr("stroke-width", actorBoxStroke)
-      .attr("stroke", this._actorBoxStrokeColor(actor))
+      .on("click", (e) => onActorClicked(e, actor))
+
     group.append("text")
       .attr("x", baseX)
       .attr("y", baseY - actorBoxStroke)
@@ -490,10 +577,14 @@ export class StreamChartHelper {
     group.selectAll("path")
       .data(linkData)
       .join("path")
+      .attr("stroke-dasharray", linkStrokeDash)
       .attr("d", linkGen)
       .attr("fill", "none")
+      .attr("class", "actor-" + actor.actorId)
+      .classed("interal-link", true)
       .attr("id", (link) => constructNodeLinkId(link.sourceNode, link.nextNode))
       .style("stroke-width", linkStrokeWidth)
+      .on("click", onLinkClicked)
       .attr("stroke", linkColor);
 
     // draw nodes
@@ -517,29 +608,6 @@ export class StreamChartHelper {
         .attr("font-size", fontSize)
         .text(node.type ? node.type : node.dispatcherType);
     })
-
-    // dataflow effect
-    group.selectAll("path")
-      .attr("stroke-dasharray", linkStrokeDash);
-
-    if (DrawLinkEffect) {
-      group.selectAll("path")
-        .attr("stroke-dashoffset", "0")
-        .transition()
-        .duration(linkFlowEffectDuration)
-        .ease(d3.easeLinear)
-        .on("start", function repeat() {
-          d3.active(this)
-            .attr("stroke-dashoffset", "20")
-            .transition()
-            .on("start", function () {
-              d3.select(this).attr("stroke-dashoffset", "0");
-              repeat.bind(this)();
-            })
-        });
-    }
-
-    // ~ END OF dataflow effect 
 
     return {
       g: group,
@@ -651,12 +719,11 @@ export class StreamChartHelper {
     const getLinkBetweenPathStr = (start, end, compensation) => {
       const lineGen = d3.line().curve(d3.curveBasis);
       let pathStr = lineGen([
-        start,
-        [start[0] + compensation + actorBoxPadding + connectionGap, start[1]],
-        [start[0] + compensation + actorBoxPadding + connectionGap + bendGap, start[1]],
-        [start[0] + compensation + actorBoxPadding + connectionGap + bendGap, end[1]],
+        end,
         [start[0] + compensation + actorBoxPadding + connectionGap + bendGap * 2, end[1]],
-        end
+        [start[0] + compensation + actorBoxPadding + connectionGap + bendGap, end[1]],
+        [start[0] + compensation + actorBoxPadding + connectionGap + bendGap, start[1]],
+        start
       ]);
       return pathStr;
     }
@@ -682,35 +749,21 @@ export class StreamChartHelper {
       .attr("d", s => s.d)
       .attr("fill", "none")
       .style("stroke-width", 40)
-      .attr("stroke", "#eee");
+      .attr("class", s => "actor-" + s.actor.actorId)
+      .classed("outgoing-link-bg", true)
+      .attr("stroke", outGoingLinkBgColor);
     linkLayer
       .selectAll("path")
       .data(linkData)
       .join("path")
+      .attr("stroke-dasharray", "20, 20")
       .attr("d", s => s.d)
       .attr("fill", "none")
+      .attr("class", s => "actor-" + s.actor.actorId)
+      .classed("outgoing-link", true)
       .style("stroke-width", 20)
       .attr("stroke", s => this._actorOutgoinglinkColor(s.actor));
-    // dataflow effect
-    linkLayer.selectAll("path")
-      .attr("stroke-dasharray", "20, 20");
-    if (DrawLinkEffect) {
-      linkLayer.selectAll("path")
-        .attr("stroke-dashoffset", "40")
-        .transition()
-        .duration(linkFlowEffectDuration)
-        .ease(d3.easeLinear)
-        .on("start", function repeat() {
-          d3.active(this)
-            .attr("stroke-dashoffset", "0")
-            .transition()
-            .on("start", function () {
-              d3.select(this).attr("stroke-dashoffset", "40");
-              repeat.bind(this)();
-            })
-        });
-    }
-    // ~ END OF dataflow effect 
+
 
     // calculate box size
     let width = 0;
@@ -740,15 +793,13 @@ export class StreamChartHelper {
    */
   drawManyFlow() {
     const g = this.topGroup;
-    const data = this.data;
+
     const baseX = 0;
     const baseY = 0;
 
     g.attr("id", "");
 
-    // remove actors in the same fragment TODO: show these actors in the graph
-    const streamPlan = new StreamPlanParser(data);
-    const allActors = streamPlan.getParsedActorList();
+    const allActors = this.streamPlan.getParsedActorList();
 
     const fragmentId2actorList = new Map();
     const fragmentRepresentedActors = new Set();
@@ -764,7 +815,6 @@ export class StreamChartHelper {
         } else {
           fragmentId2actorList.get(actor.fragmentId).push(actor);
         }
-        // fragmentId2actorList.get(actor.fragmentId).push(actor);
       }
     }
     for (let actor of fragmentRepresentedActors) {
@@ -813,7 +863,6 @@ export class StreamChartHelper {
  * @param {any} data Raw response from the meta node. e.g. [{node: {...}, actors: {...}}, ...]
  * @param {(clickEvent, node) => void} onNodeClick callback when a node (operator) is clicked.
  * @param {{type: string, node: {host: {host: string, port: number}}, id?: number}} selectedActor
- * @returns void
  */
 export default function createView(g, data, onNodeClick, selectedActor) {
   return new StreamChartHelper(g, data, onNodeClick, selectedActor).drawManyFlow();
