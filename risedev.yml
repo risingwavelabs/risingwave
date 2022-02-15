@@ -166,9 +166,6 @@ template:
     # Id of this instance
     id: frontend
 
-    # Compute-nodes used by this frontend instance
-    provide-compute-node: "compute-node*"
-
     # Meta-nodes used by this frontend instance
     provide-meta-node: "meta-node*"
 
