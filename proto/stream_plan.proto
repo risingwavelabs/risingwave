@@ -84,9 +84,8 @@ message ExchangeNode {
 message ChainNode {
   plan.TableRefId table_ref_id = 1;
   repeated plan.ColumnDesc upstream_column_descs = 2;
-  repeated uint32 upstream_actor_ids = 3;
-  repeated int32 pk_indices = 4;
-  repeated int32 column_ids = 5;
+  repeated int32 pk_indices = 3;
+  repeated int32 column_ids = 4;
 }
 
 // BatchPlanNode is used for mv on mv snapshot read.
