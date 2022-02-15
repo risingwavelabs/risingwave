@@ -5,6 +5,7 @@ use std::time::Instant;
 use itertools::Itertools;
 use log::{debug, info};
 use risingwave_common::error::{Result, ToRwResult};
+use risingwave_common::try_match_expand;
 use risingwave_pb::common::{ActorInfo, WorkerNode};
 use risingwave_pb::meta::ActorLocation;
 use risingwave_pb::plan::TableRefId;
@@ -54,13 +55,13 @@ impl StreamManager {
     ) {
         match stream_node.node.as_ref().unwrap() {
             Node::ChainNode(_) => {
-                if let Node::MergeNode(merge_node) =
-                    stream_node.input.get(0).unwrap().node.as_ref().unwrap()
-                {
-                    upstream_actor_ids.extend(merge_node.upstream_actor_id.iter());
-                } else {
-                    unreachable!()
-                }
+                let merge_node = try_match_expand!(
+                    stream_node.input.get(0).unwrap().node.as_ref().unwrap(),
+                    Node::MergeNode,
+                    "first input of chain node should should be merge node"
+                )
+                .unwrap();
+                upstream_actor_ids.extend(merge_node.upstream_actor_id.iter());
             }
             _ => {
                 for child in &stream_node.input {

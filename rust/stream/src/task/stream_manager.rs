@@ -8,6 +8,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::expr::{build_from_prost as build_expr_from_prost, AggKind, RowExpression};
+use risingwave_common::try_match_expand;
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::is_local_address;
 use risingwave_common::util::sort_util::{
@@ -828,21 +829,23 @@ impl StreamManagerCore {
         if let Node::ChainNode(_) = stream_node.node.as_ref().unwrap() {
             // Create channel based on upstream actor id for [`ChainNode`], check if upstream
             // exists.
-            if let Node::MergeNode(merge) = stream_node.input.get(0).unwrap().node.as_ref().unwrap()
-            {
-                for upstream_actor_id in &merge.upstream_actor_id {
-                    if !self.actor_infos.contains_key(upstream_actor_id) {
-                        return Err(ErrorCode::InternalError(format!(
-                            "chain upstream actor {} not exists",
-                            upstream_actor_id
-                        ))
-                        .into());
-                    }
-                    let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-                    let up_down_ids = (*upstream_actor_id, actor_id);
-                    self.context
-                        .add_channel_pairs(up_down_ids, (Some(tx), Some(rx)));
+            let merge = try_match_expand!(
+                stream_node.input.get(0).unwrap().node.as_ref().unwrap(),
+                Node::MergeNode,
+                "first input of chain node should should be merge node"
+            )?;
+            for upstream_actor_id in &merge.upstream_actor_id {
+                if !self.actor_infos.contains_key(upstream_actor_id) {
+                    return Err(ErrorCode::InternalError(format!(
+                        "chain upstream actor {} not exists",
+                        upstream_actor_id
+                    ))
+                    .into());
                 }
+                let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
+                let up_down_ids = (*upstream_actor_id, actor_id);
+                self.context
+                    .add_channel_pairs(up_down_ids, (Some(tx), Some(rx)));
             }
         }
         for child in &stream_node.input {
