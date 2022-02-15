@@ -132,19 +132,11 @@ impl StreamManager {
     }
 
     /// This function was called while [`StreamManager`] exited.
+    #[cfg(test)]
     pub async fn wait_all(self) -> Result<()> {
         let handles = self.core.lock().unwrap().wait_all()?;
         for (_id, handle) in handles {
             handle.await??;
-        }
-        Ok(())
-    }
-
-    #[cfg(test)]
-    pub async fn wait_actors(&self, actor_ids: &[u32]) -> Result<()> {
-        let handles = self.core.lock().unwrap().remove_actor_handles(actor_ids)?;
-        for handle in handles {
-            handle.await.unwrap()?
         }
         Ok(())
     }
@@ -780,23 +772,6 @@ impl StreamManagerCore {
 
     pub fn wait_all(&mut self) -> Result<HashMap<u32, JoinHandle<Result<()>>>> {
         Ok(std::mem::take(&mut self.handles))
-    }
-
-    pub fn remove_actor_handles(
-        &mut self,
-        actor_ids: &[u32],
-    ) -> Result<Vec<JoinHandle<Result<()>>>> {
-        actor_ids
-            .iter()
-            .map(|actor_id| {
-                self.handles.remove(actor_id).ok_or_else(|| {
-                    RwError::from(ErrorCode::InternalError(format!(
-                        "No such actor with actor id:{}",
-                        actor_id
-                    )))
-                })
-            })
-            .collect::<Result<Vec<_>>>()
     }
 
     fn update_actor_info(

@@ -1,17 +1,15 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use futures::channel::mpsc::Receiver;
 use futures::StreamExt;
 use risingwave_batch::rpc::service::exchange::GrpcExchangeWriter;
 use risingwave_batch::task::{TaskManager, TaskSinkId};
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::{tonic_err, ErrorCode, Result, RwError};
 use risingwave_pb::plan::TaskSinkId as ProtoTaskSinkId;
 use risingwave_pb::task_service::exchange_service_server::ExchangeService;
 use risingwave_pb::task_service::{
     GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse,
 };
-use risingwave_stream::executor::Message;
 use risingwave_stream::task::StreamManager;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
@@ -34,8 +32,6 @@ impl ExchangeService for ExchangeServiceImpl {
         &self,
         request: Request<GetDataRequest>,
     ) -> std::result::Result<Response<Self::GetDataStream>, Status> {
-        use risingwave_common::error::tonic_err;
-
         let peer_addr = request
             .remote_addr()
             .ok_or_else(|| Status::unavailable("connection unestablished"))?;
@@ -61,11 +57,7 @@ impl ExchangeService for ExchangeServiceImpl {
             .ok_or_else(|| Status::unavailable("get_stream connection unestablished"))?;
         let req = request.into_inner();
         let up_down_ids = (req.up_fragment_id, req.down_fragment_id);
-        let receiver = self
-            .stream_mgr
-            .take_receiver(up_down_ids)
-            .map_err(|e| e.to_grpc_status())?;
-        match self.get_stream_impl(peer_addr, receiver).await {
+        match self.get_stream_impl(peer_addr, up_down_ids).await {
             Ok(resp) => Ok(resp),
             Err(e) => {
                 error!(
@@ -115,8 +107,9 @@ impl ExchangeServiceImpl {
     async fn get_stream_impl(
         &self,
         peer_addr: SocketAddr,
-        mut receiver: Receiver<Message>,
+        up_down_ids: (u32, u32),
     ) -> Result<Response<<Self as ExchangeService>::GetStreamStream>> {
+        let mut receiver = self.stream_mgr.take_receiver(up_down_ids)?;
         let (tx, rx) = tokio::sync::mpsc::channel(10);
         debug!("Serve stream exchange RPC from {}", peer_addr);
         tokio::spawn(async move {
@@ -126,12 +119,12 @@ impl ExchangeServiceImpl {
                     // the sender is closed, we close the receiver and stop forwarding message
                     None => break,
                     Some(msg) => {
-                        let res = match msg.to_protobuf() {
-                            Ok(stream_msg) => Ok(GetStreamResponse {
+                        let res = msg
+                            .to_protobuf()
+                            .map(|stream_msg| GetStreamResponse {
                                 message: Some(stream_msg),
-                            }),
-                            Err(e) => Err(e.to_grpc_status()),
-                        };
+                            })
+                            .map_err(tonic_err);
                         let _ = match tx.send(res).await.map_err(|e| {
                             RwError::from(ErrorCode::InternalError(format!(
                                 "failed to send stream data: {}",

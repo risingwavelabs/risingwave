@@ -197,14 +197,11 @@ impl TaskExecution {
         let task_id = self.task_id.clone();
         tokio::spawn(async move {
             trace!("Executing plan [{:?}]", task_id);
-            let mut sender = sender;
 
             let task_id_cloned = task_id.clone();
 
             let join_handle = tokio::spawn(async move {
-                // We should only pass a reference of sender to execution because we should only
-                // close it after task error has been set.
-                if let Err(e) = TaskExecution::try_execute(exec, &mut sender)
+                if let Err(e) = TaskExecution::try_execute(exec, sender)
                     .instrument(tracing::trace_span!(
                       "batch_execute",
                       task_id = ?task_id.task_id,
@@ -228,7 +225,7 @@ impl TaskExecution {
         Ok(())
     }
 
-    async fn try_execute(mut root: BoxedExecutor, sender: &mut BoxChanSender) -> Result<()> {
+    async fn try_execute(mut root: BoxedExecutor, mut sender: BoxChanSender) -> Result<()> {
         root.open().await?;
         while let Some(chunk) = root.next().await? {
             if chunk.cardinality() > 0 {
