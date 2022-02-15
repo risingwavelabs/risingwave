@@ -1,6 +1,7 @@
 risedev:
   # The CI-3node configuration will start 3 compute nodes, 1 meta node, 1 frontend and 1 MinIO.
   ci-3node:
+    - use: minio
     - use: meta-node
     - use: compute-node
       port: 5687
@@ -12,14 +13,13 @@ risedev:
       port: 5689
       exporter-port: 1224
     - use: frontend
-    - use: minio
 
   # The CI-1node configuration will start 1 compute node, 1 meta node, 1 frontend and 1 MinIO.
   ci-1node:
+    - use: minio
     - use: meta-node
     - use: compute-node
     - use: frontend
-    - use: minio
 
   # The default configuration will start 1 MinIO, 1 compute node, 1 meta node and 1 frontend.
   default:
@@ -45,6 +45,7 @@ risedev:
 
   # `dev-frontend` have the same settings as default except the the frontend node will be started by user.
   dev-frontend:
+    - use: minio
     - use: meta-node
     - use: compute-node
     - use: frontend
