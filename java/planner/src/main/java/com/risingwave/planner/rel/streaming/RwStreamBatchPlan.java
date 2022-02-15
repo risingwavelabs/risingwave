@@ -18,7 +18,7 @@ import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.util.ImmutableIntList;
 
-/** Chain Node */
+/** Batch Plan Node */
 public class RwStreamBatchPlan extends TableScan implements RisingWaveStreamingRel {
 
   private final TableCatalog.TableId tableId;
