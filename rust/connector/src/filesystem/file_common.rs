@@ -196,7 +196,7 @@ mod test {
                             for name_idx in init..=total {
                                 let mtime = (Local::now()
                                     - chrono::Duration::minutes(name_idx as i64))
-                                    .timestamp_millis();
+                                .timestamp_millis();
                                 let file_name = format!("{}_{}", "file", name_idx);
                                 let file_meta = MockFileMeta::new(file_name.clone(), mtime);
                                 // println!("newFileMeta={:?}", file_meta.clone());
