@@ -110,7 +110,7 @@ impl BarrierManager {
             .take()
             .expect("barrier manager can only run once");
 
-        let mut min_interval = tokio::time::interval(Duration::from_millis(100));
+        let mut min_interval = tokio::time::interval(Duration::from_millis(5000));
 
         loop {
             let scheduled = match rx.try_recv() {
