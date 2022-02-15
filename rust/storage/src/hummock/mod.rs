@@ -451,10 +451,15 @@ impl HummockStorage {
 
         // TODO: #2336 The transaction flow is not ready yet. Before that we update_local_version
         // after each write_batch to make uncommitted write visible.
+        self.update_local_version().await?;
+
+        Ok(())
+    }
+
+    pub async fn update_local_version(&self) -> HummockResult<()> {
         self.local_version_manager
             .update_local_version(self.hummock_meta_client())
             .await?;
-
         Ok(())
     }
 

@@ -161,6 +161,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         mview_id.clone(),
         source_manager.clone(),
         Box::new(insert_inner),
+        0,
     );
 
     insert.open().await?;
@@ -175,6 +176,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         table.clone(),
         data_column_ids.clone(),
         1024,
+        true,
         "RowSeqExecutor".to_string(),
     );
     scan.open().await?;
@@ -210,6 +212,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         table.clone(),
         data_column_ids.clone(),
         1024,
+        true,
         "RowSeqScanExecutor".to_string(),
     );
     scan.open().await?;

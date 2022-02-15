@@ -154,6 +154,10 @@ pub trait ScannableTable: Sync + Send + Any + core::fmt::Debug {
             })
             .collect()
     }
+
+    /// Indicates whether this table is backed with a shared storage. The behavior of distributed
+    /// scanning differs according to this property.
+    fn is_shared_storage(&self) -> bool;
 }
 
 /// Reference of a `TableManager`.
