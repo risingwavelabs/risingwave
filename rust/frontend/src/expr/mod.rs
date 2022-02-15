@@ -11,7 +11,8 @@ mod type_inference;
 pub use type_inference::*;
 mod utils;
 pub use utils::*;
-
+mod expr_rewriter;
+pub use expr_rewriter::*;
 pub type ExprType = risingwave_pb::expr::expr_node::Type;
 
 /// the trait of bound exprssions
