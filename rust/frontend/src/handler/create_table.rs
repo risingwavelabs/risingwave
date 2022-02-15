@@ -68,6 +68,7 @@ mod tests {
     use risingwave_meta::test_utils::LocalMeta;
 
     use crate::catalog::catalog_service::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
+    use crate::catalog::table_catalog::ROWID_NAME;
     use crate::test_utils::LocalFrontend;
 
     #[tokio::test]
@@ -88,6 +89,7 @@ mod tests {
             .map(|(col_name, col)| (col_name.clone(), col.data_type()))
             .collect::<HashMap<String, DataType>>();
         let mut expected_map = HashMap::new();
+        expected_map.insert(ROWID_NAME.to_string(), DataType::Int64);
         expected_map.insert("v1".to_string(), DataType::Int16);
         expected_map.insert("v2".to_string(), DataType::Int32);
         expected_map.insert("v3".to_string(), DataType::Int64);
