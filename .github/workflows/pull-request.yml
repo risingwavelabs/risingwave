@@ -256,7 +256,7 @@ jobs:
       - name: e2e test w/ source and Hummock
         run: |
           ~/cargo-make/makers clean-data
-          ~/cargo-make/makers ci-streaming
+          ~/cargo-make/makers ci-1node
           timeout 10m sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source/**/*.slt'
       - name: Kill cluster
         run: |
