@@ -13,7 +13,8 @@
             }
           },
           "columnIds": [1, 2, 0]
-        }
+        },
+        "identity": "RwStreamTableSource(table\u003d[[test_schema, t]], columns\u003d[v1,v2,_row_id])"
       }],
       "globalSimpleAggNode": {
         "aggCalls": [{
@@ -128,7 +129,8 @@
           "columnIdx": 2
         }
       }]
-    }
+    },
+    "identity": "RwStreamProject(v\u003d[+($STREAM_NULL_BY_ROW_COUNT($0, $1), $STREAM_NULL_BY_ROW_COUNT($0, $2))], $f0\u003d[$0], $f1\u003d[$1], $f2\u003d[$2])"
   }],
   "mviewNode": {
     "tableRefId": {
@@ -189,5 +191,6 @@
         "typeName": "INT64"
       }
     }]
-  }
+  },
+  "identity": "RwStreamMaterializedView(name\u003d[t4])"
 }

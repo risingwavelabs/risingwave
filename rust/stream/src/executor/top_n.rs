@@ -66,6 +66,7 @@ impl<S: StateStore> TopNExecutor<S> {
         cache_size: Option<usize>,
         total_count: (usize, usize, usize),
         executor_id: u64,
+        identity: String,
     ) -> Self {
         let pk_data_types = pk_indices
             .iter()
@@ -115,7 +116,7 @@ impl<S: StateStore> TopNExecutor<S> {
             managed_highest_state,
             pk_indices,
             first_execution: true,
-            identity: format!("TopNExecutor {:X}", executor_id),
+            identity: format!("{} {:X}", identity, executor_id),
         }
     }
 
@@ -438,6 +439,7 @@ mod tests {
             Some(2),
             (0, 0, 0),
             1,
+            "TopNExecutor".to_string(),
         );
         let res = top_n_executor.next().await.unwrap();
         assert_matches!(res, Message::Chunk(_));
@@ -532,6 +534,7 @@ mod tests {
             Some(2),
             (0, 0, 0),
             1,
+            "TopNExecutor".to_string(),
         );
         let res = top_n_executor.next().await.unwrap();
         assert_matches!(res, Message::Chunk(_));
@@ -664,6 +667,7 @@ mod tests {
             Some(2),
             (0, 0, 0),
             1,
+            "TopNExecutor".to_string(),
         );
         let res = top_n_executor.next().await.unwrap();
         assert_matches!(res, Message::Chunk(_));

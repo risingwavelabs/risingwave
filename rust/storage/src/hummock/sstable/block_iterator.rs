@@ -224,7 +224,7 @@ mod tests {
             b.add(
                 format!("key_test_{}", i).as_bytes(),
                 HummockValue::Put(
-                    format!("val_{}", i)
+                    &format!("val_{}", i)
                         .as_str()
                         .as_bytes()
                         .iter()

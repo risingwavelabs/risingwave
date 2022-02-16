@@ -14,7 +14,8 @@
               }
             },
             "columnIds": [1, 2, 0]
-          }
+          },
+          "identity": "RwStreamTableSource(table\u003d[[test_schema, t]], columns\u003d[v1,v2,_row_id])"
         }],
         "filterNode": {
           "searchCondition": {
@@ -41,7 +42,8 @@
               }]
             }
           }
-        }
+        },
+        "identity": "RwStreamFilter(condition\u003d[\u003e($0, 1)])"
       }],
       "globalSimpleAggNode": {
         "aggCalls": [{
@@ -105,7 +107,8 @@
           "columnIdx": 1
         }
       }]
-    }
+    },
+    "identity": "RwStreamProject(v\u003d[$STREAM_NULL_BY_ROW_COUNT($0, $1)], $f0\u003d[$0], v_copy\u003d[$1])"
   }],
   "mviewNode": {
     "tableRefId": {
@@ -152,5 +155,6 @@
         "typeName": "INT64"
       }
     }]
-  }
+  },
+  "identity": "RwStreamMaterializedView(name\u003d[t1])"
 }

@@ -837,7 +837,7 @@ mod tests {
         for (key, inserts) in &truth {
             for (time, value) in inserts {
                 let full_key = key_with_epoch(key.clone(), *time);
-                b.add(&full_key, value.clone());
+                b.add(&full_key, value.as_slice());
             }
         }
         let (data, meta) = b.finish();
@@ -902,7 +902,10 @@ mod tests {
         const REMOTE_DIR: &str = "test";
         let mut b = SSTableBuilder::new(default_builder_opt_for_test());
         for kv in kv_pairs {
-            b.add(key_range_test_key(kv.0, kv.1, kv.2).as_slice(), kv.3);
+            b.add(
+                key_range_test_key(kv.0, kv.1, kv.2).as_slice(),
+                kv.3.as_slice(),
+            );
         }
         let (data, meta) = b.finish();
         // get remote table

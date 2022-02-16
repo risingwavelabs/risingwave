@@ -112,7 +112,7 @@ pub struct StreamGraph {
     pub upstream_node_actors: HashMap<NodeId, Vec<ActorId>>,
 }
 
-/// [`StreamGraphBuilder`] build a stream graph. It will do some injection here to achieve
+/// [`StreamGraphBuilder`] build a stream graph. It injects some information to achieve
 /// dependencies. See `build_inner` for more details.
 pub struct StreamGraphBuilder {
     actor_builders: BTreeMap<ActorId, StreamActorBuilder>,
@@ -251,6 +251,7 @@ impl StreamGraphBuilder {
                                         .clone(),
                                 })),
                                 operator_id: input.operator_id,
+                                identity: "MergeExecutor".to_string(),
                             };
                             next_idx_new += 1;
                         }
@@ -338,6 +339,7 @@ impl StreamGraphBuilder {
                         input_column_descs: chain_node.upstream_column_descs.clone(),
                     })),
                     operator_id: input.get(0).as_ref().unwrap().operator_id,
+                    identity: "MergeExecutor".to_string(),
                 },
                 input.get(1).unwrap().clone(),
             ];
@@ -347,6 +349,7 @@ impl StreamGraphBuilder {
                 pk_indices: stream_node.pk_indices.clone(),
                 node: Some(Node::ChainNode(chain_node.clone())),
                 operator_id: stream_node.operator_id,
+                identity: "ChainExecutor".to_string(),
             })
         } else {
             unreachable!()
