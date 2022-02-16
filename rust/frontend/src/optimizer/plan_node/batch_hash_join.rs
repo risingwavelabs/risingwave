@@ -56,11 +56,11 @@ impl ToDistributedBatch for BatchHashJoin {
     fn to_distributed(&self) -> PlanRef {
         let left = self.left().to_distributed_with_required(
             self.left_order_required(),
-            &Distribution::HashShard(self.predicate().left_keys()),
+            &Distribution::HashShard(self.predicate().left_eq_indexes()),
         );
         let right = self.right().to_distributed_with_required(
             self.right_order_required(),
-            &Distribution::HashShard(self.predicate().right_keys()),
+            &Distribution::HashShard(self.predicate().right_eq_indexes()),
         );
 
         self.clone_with_left_right(left, right).into_plan_ref()

@@ -27,7 +27,7 @@ impl BatchSortMergeJoin {
     pub fn left_required_order(join_predicate: &JoinPredicate) -> Order {
         Order {
             field_order: join_predicate
-                .left_keys()
+                .left_eq_indexes()
                 .into_iter()
                 .map(|index| FieldOrder {
                     index,

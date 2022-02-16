@@ -1,27 +1,44 @@
-use crate::expr::{to_conjunctions, ExprImpl};
+use crate::expr::{to_conjunctions, Expr, ExprImpl, ExprType, FunctionCall, InputRef};
+use crate::utils::Condition;
 #[derive(Debug, Clone)]
 /// the join predicate used in optimizer
 pub struct JoinPredicate {
+    /// the conditions that all columns in the left side,
+    left_cond: Condition,
+    /// the conditions that all columns in the right side,
+    right_cond: Condition,
     /// other conditions, linked with AND conjunction.
-    /// 1. the non equal conditons
-    /// 2. the conditions in the same side,
-    other_conds: Vec<ExprImpl>,
-    /// the equal columns indexes(in the input schema) both sides, now all are normal equal(not
-    /// null-safe-equal),
-    keys: Vec<(usize, usize)>,
+    other_cond: Condition,
+
+    /// the equal columns indexes(in the input schema) both sides,
+    /// the first is from the left table and the second is from the right table.
+    /// now all are normal equal(not null-safe-equal),
+    eq_keys: Vec<(InputRef, InputRef)>,
 }
 #[allow(dead_code)]
 impl JoinPredicate {
     /// the new method for `JoinPredicate` without any analysis, check or rewrite.
-    pub fn new(other_conds: Vec<ExprImpl>, keys: Vec<(usize, usize)>) -> Self {
-        JoinPredicate { other_conds, keys }
+    pub fn new(
+        left_cond: Condition,
+        right_cond: Condition,
+        other_cond: Condition,
+        eq_keys: Vec<(InputRef, InputRef)>,
+    ) -> Self {
+        Self {
+            left_cond,
+            right_cond,
+            other_cond,
+            eq_keys,
+        }
     }
 
     /// Construct a empty predicate. Condition always true -- do not filter rows.
-    pub fn new_empty() -> Self {
+    pub fn true_predicate() -> Self {
         JoinPredicate {
-            other_conds: vec![],
-            keys: vec![],
+            left_cond: Condition::true_cond(),
+            right_cond: Condition::true_cond(),
+            other_cond: Condition::true_cond(),
+            eq_keys: vec![],
         }
     }
 
@@ -47,27 +64,51 @@ impl JoinPredicate {
         todo!()
     }
 
-    /// check if the `JoinPredicate` only include equal conditions, because now our hash join and
-    /// stream join executor just support join predicate only with equi-conditions
-    pub fn is_equal_cond(&self) -> bool {
-        self.other_conds.is_empty()
-    }
-    pub fn equal_keys(&self) -> Vec<(usize, usize)> {
-        self.keys.clone()
-    }
-    pub fn left_keys(&self) -> Vec<usize> {
-        self.keys.iter().map(|(left, _)| *left).collect()
-    }
-    pub fn right_keys(&self) -> Vec<usize> {
-        self.keys.iter().map(|(_, right)| *right).collect()
+    /// Get join predicate's eq conds.
+    pub fn eq_conds(&self) -> Vec<ExprImpl> {
+        self.eq_keys
+            .iter()
+            .cloned()
+            .map(|(l, r)| {
+                FunctionCall::new(ExprType::Equal, vec![l.bound_expr(), r.bound_expr()])
+                    .unwrap()
+                    .bound_expr()
+            })
+            .collect()
     }
 
-    /// Get a reference to the join predicate's other conds.
-    pub fn other_conds(&self) -> &[ExprImpl] {
-        self.other_conds.as_ref()
+    /// Get a reference to the join predicate's left cond.
+    pub fn left_cond(&self) -> &Condition {
+        &self.left_cond
     }
-    // TODO: our backend not support some equal columns and sonm NonEqual condition
-    //   fn has_equal_cond(&self) ->bool{
-    //     todo!()
-    //   }
+
+    /// Get a reference to the join predicate's right cond.
+    pub fn right_cond(&self) -> &Condition {
+        &self.right_cond
+    }
+
+    /// Get a reference to the join predicate's other cond.
+    pub fn other_cond(&self) -> &Condition {
+        &self.other_cond
+    }
+    /// Get a reference to the join predicate's eq keys.
+    pub fn eq_keys(&self) -> &[(InputRef, InputRef)] {
+        self.eq_keys.as_ref()
+    }
+    pub fn eq_indexes(&self) -> Vec<(usize, usize)> {
+        self.eq_keys
+            .iter()
+            .map(|(left, right)| (left.index(), right.index()))
+            .collect()
+    }
+
+    pub fn left_eq_indexes(&self) -> Vec<usize> {
+        self.eq_keys.iter().map(|(left, _)| left.index()).collect()
+    }
+    pub fn right_eq_indexes(&self) -> Vec<usize> {
+        self.eq_keys
+            .iter()
+            .map(|(_, right)| right.index())
+            .collect()
+    }
 }

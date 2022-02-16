@@ -13,6 +13,11 @@ impl Condition {
             conjunctions: to_conjunctions(expr),
         }
     }
+    pub fn true_cond() -> Self {
+        Self {
+            conjunctions: vec![],
+        }
+    }
     pub fn to_expr(self) -> ExprImpl {
         let mut iter = self.conjunctions.into_iter();
         if let Some(mut ret) = iter.next() {

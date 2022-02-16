@@ -36,11 +36,7 @@ impl LogicalJoin {
 
         let left_cols_num = left.schema().fields.len();
         let input_col_num = left_cols_num + right.schema().fields.len();
-        for cond in predicate.other_conds() {
-            assert_eq!(cond.return_type(), DataType::Boolean);
-            assert_input_ref(cond, input_col_num);
-        }
-        for (k1, k2) in predicate.equal_keys() {
+        for (k1, k2) in predicate.eq_indexes() {
             assert!(k1 < left_cols_num);
             assert!(k2 >= left_cols_num);
             assert!(k2 < input_col_num);
@@ -104,27 +100,27 @@ impl WithSchema for LogicalJoin {
 impl ColPrunable for LogicalJoin {}
 impl ToBatch for LogicalJoin {
     fn to_batch_with_order_required(&self, _required_order: &Order) -> PlanRef {
-        if self.predicate().is_equal_cond() {
-            // TODO: check if use SortMergeJoin could satisfy the required_order
-            let new_left = self.left().to_batch();
-            let sort_join_required_order =
-                BatchSortMergeJoin::left_required_order(self.predicate());
-            if new_left.order().satisfies(&sort_join_required_order) {
-                let right_required_order = BatchSortMergeJoin::right_required_order_from_left_order(
-                    new_left.order(),
-                    self.predicate(),
-                );
-                let new_right = self
-                    .left()
-                    .to_batch_with_order_required(&right_required_order);
-                let new_logical = self.clone_with_left_right(new_left, new_right);
-                return BatchSortMergeJoin::new(new_logical).into_plan_ref();
-            } else {
-                let new_right = self.left().to_batch();
-                let new_logical = self.clone_with_left_right(new_left, new_right);
-                return BatchHashJoin::new(new_logical).into_plan_ref();
-            }
-        }
+        // if self.predicate().is_equal_cond() {
+        //     // TODO: check if use SortMergeJoin could satisfy the required_order
+        //     let new_left = self.left().to_batch();
+        //     let sort_join_required_order =
+        //         BatchSortMergeJoin::left_required_order(self.predicate());
+        //     if new_left.order().satisfies(&sort_join_required_order) {
+        //         let right_required_order =
+        // BatchSortMergeJoin::right_required_order_from_left_order(
+        // new_left.order(),             self.predicate(),
+        //         );
+        //         let new_right = self
+        //             .left()
+        //             .to_batch_with_order_required(&right_required_order);
+        //         let new_logical = self.clone_with_left_right(new_left, new_right);
+        //         return BatchSortMergeJoin::new(new_logical).into_plan_ref();
+        //     } else {
+        //         let new_right = self.left().to_batch();
+        //         let new_logical = self.clone_with_left_right(new_left, new_right);
+        //         return BatchHashJoin::new(new_logical).into_plan_ref();
+        //     }
+        // }
         todo!(); // nestedLoopJoin
     }
     fn to_batch(&self) -> PlanRef {
@@ -135,10 +131,14 @@ impl ToStream for LogicalJoin {
     fn to_stream(&self) -> PlanRef {
         let left = self
             .left()
-            .to_stream_with_dist_required(&Distribution::HashShard(self.predicate().left_keys()));
+            .to_stream_with_dist_required(&Distribution::HashShard(
+                self.predicate().left_eq_indexes(),
+            ));
         let right = self
             .right()
-            .to_stream_with_dist_required(&Distribution::HashShard(self.predicate().right_keys()));
+            .to_stream_with_dist_required(&Distribution::HashShard(
+                self.predicate().right_eq_indexes(),
+            ));
         StreamHashJoin::new(self.clone_with_left_right(left, right)).into_plan_ref()
     }
 }
