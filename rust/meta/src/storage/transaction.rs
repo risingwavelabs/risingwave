@@ -1,4 +1,4 @@
-use crate::storage::{Key, KeyValueVersion, Value};
+use crate::storage::{ColumnFamily, Key, KeyValueVersion, Value};
 
 /// A `Transaction` executes several writes(aka. operations) to meta store atomically with optional
 /// preconditions checked. It executes as follow:
@@ -35,17 +35,18 @@ impl Transaction {
 pub enum Operation {
     /// `put` key value pairs.
     /// If `WithVersion` is not specified, a default global version is used.
-    Put(Key, Value, Option<KeyValueVersion>),
+    Put(ColumnFamily, Key, Value, Option<KeyValueVersion>),
     /// `delete` key value pairs.
     /// If `WithVersion` is not specified, all versions of this `Key` are matched and deleted.
     /// Otherwise, only specific version of this `Key` is deleted.
-    Delete(Key, Option<KeyValueVersion>),
+    Delete(ColumnFamily, Key, Option<KeyValueVersion>),
 }
 
 /// Preconditions are checked in the beginning of a transaction
 pub enum Precondition {
     #[allow(dead_code)]
     KeyExists {
+        cf: ColumnFamily,
         key: Key,
         /// If version is None, a default global version is used.
         version: Option<KeyValueVersion>,

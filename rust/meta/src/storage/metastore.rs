@@ -9,20 +9,22 @@ use risingwave_common::error::{ErrorCode, Result};
 
 use crate::manager::Epoch;
 use crate::storage::transaction::Transaction;
-use crate::storage::{Key, KeyValueVersion, Value};
+use crate::storage::{ColumnFamily, Key, KeyValueVersion, Value};
 
 pub const DEFAULT_COLUMN_FAMILY: &str = "default";
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct KeyValue {
+    cf: ColumnFamily,
     key: Key,
     value: Value,
     version: KeyValueVersion,
 }
 
 impl KeyValue {
-    pub fn new(key: Key, value: Value, version: KeyValueVersion) -> KeyValue {
+    pub fn new(cf: ColumnFamily, key: Key, value: Value, version: KeyValueVersion) -> KeyValue {
         KeyValue {
+            cf,
             key,
             value,
             version,
@@ -281,18 +283,6 @@ impl MetaStore for MemStore {
 
     async fn commit_transaction(&self, _trx: &mut Transaction) -> Result<()> {
         unimplemented!()
-    }
-}
-
-pub struct ColumnFamilyUtils {}
-impl ColumnFamilyUtils {
-    pub fn prefix_key_with_cf(key: impl AsRef<[u8]>, prefix: impl AsRef<[u8]>) -> Vec<u8> {
-        let prefix_len: u8 = prefix
-            .as_ref()
-            .len()
-            .try_into()
-            .expect("prefix length out of u8 range");
-        [&[prefix_len], prefix.as_ref(), key.as_ref()].concat()
     }
 }
 

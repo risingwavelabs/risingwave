@@ -3,8 +3,7 @@ use risingwave_common::error::{ErrorCode, Result};
 
 use crate::manager::{Epoch, SINGLE_VERSION_EPOCH};
 use crate::storage::{
-    ColumnFamilyUtils, MemStore, MetaStore, Operation, Precondition, SledMetaStore,
-    DEFAULT_COLUMN_FAMILY,
+    MemStore, MetaStore, Operation, Precondition, SledMetaStore, DEFAULT_COLUMN_FAMILY,
 };
 
 async fn test_meta_store_basic(store: &dyn MetaStore) -> Result<()> {
@@ -93,10 +92,7 @@ async fn test_meta_store_transaction(meta_store: &dyn MetaStore) -> Result<()> {
     let mut kvs = vec![];
     for i in 1..=5 {
         kvs.push((
-            ColumnFamilyUtils::prefix_key_with_cf(
-                format!("key{}", i).as_bytes(),
-                "test_trx_cf".as_bytes(),
-            ),
+            format!("key{}", i).as_bytes().to_vec(),
             "value1".as_bytes().to_vec(),
             Some(10),
         ));
@@ -107,7 +103,12 @@ async fn test_meta_store_transaction(meta_store: &dyn MetaStore) -> Result<()> {
         .iter()
         .take(2)
         .map(|(key, value, version)| {
-            Operation::Put(key.to_owned(), value.to_owned(), version.to_owned())
+            Operation::Put(
+                cf.to_owned(),
+                key.to_owned(),
+                value.to_owned(),
+                version.to_owned(),
+            )
         })
         .collect_vec();
     let mut trx = meta_store.get_transaction();
@@ -126,10 +127,12 @@ async fn test_meta_store_transaction(meta_store: &dyn MetaStore) -> Result<()> {
     // preconditions evaluated to true
     let mut trx = meta_store.get_transaction();
     trx.add_preconditions(vec![Precondition::KeyExists {
+        cf: cf.to_owned(),
         key: kvs[0].0.to_owned(),
         version: kvs[0].2,
     }]);
     trx.add_operations(vec![Operation::Put(
+        cf.to_owned(),
         kvs[2].0.to_owned(),
         kvs[2].1.to_owned(),
         kvs[2].2,
@@ -140,7 +143,7 @@ async fn test_meta_store_transaction(meta_store: &dyn MetaStore) -> Result<()> {
     let mut trx = meta_store.get_transaction();
     let ops = kvs
         .iter()
-        .map(|(key, _, _)| Operation::Delete(key.to_owned(), None))
+        .map(|(key, _, _)| Operation::Delete(cf.to_owned(), key.to_owned(), None))
         .collect_vec();
     trx.add_operations(ops);
     meta_store.commit_transaction(&mut trx).await.unwrap();
@@ -149,10 +152,12 @@ async fn test_meta_store_transaction(meta_store: &dyn MetaStore) -> Result<()> {
     // preconditions evaluated to false
     let mut trx = meta_store.get_transaction();
     trx.add_preconditions(vec![Precondition::KeyExists {
+        cf: cf.to_owned(),
         key: kvs[4].0.to_owned(),
         version: kvs[4].2,
     }]);
     trx.add_operations(vec![Operation::Put(
+        cf.to_owned(),
         kvs[3].0.to_owned(),
         kvs[3].1.to_owned(),
         kvs[3].2,
