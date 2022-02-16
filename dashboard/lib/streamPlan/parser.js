@@ -107,8 +107,6 @@ export default class StreamPlanParser {
       }
     }
 
-    console.log(this.actorId2Proto)
-
     this.parsedNodeMap = new Map();
     this.parsedActorMap = new Map();
 
@@ -149,6 +147,10 @@ export default class StreamPlanParser {
       return shellNode;
     }
 
+    for(let actorId of this.actorId2Proto.keys()){
+      getShellNode(actorId);
+    }
+
     for (let [actorId, mviewNode] of this.actorIdTomviewNodes.entries()) {
       let list = new Set();
       let shellNode = getShellNode(actorId);
@@ -156,9 +158,9 @@ export default class StreamPlanParser {
         list.add(n.id);
       });
       graphBfs(shellNode, (n) => {
+        console.log(n);
         list.add(n.id);
       }, "parentNodes");
-      //TODO: chain view back
       mvTableIdToChainViewActorList.set(mviewNode.typeInfo.tableRefId.tableId, [...list.values()]);
     }
 
@@ -174,10 +176,10 @@ export default class StreamPlanParser {
       }
       let shellNode = {
         id: actorId,
-        nextNodes: []
+        parentNodes: []
       };
       for (let node of this.parsedActorMap.get(actorId).output) {
-        getShellNode(node.actorId).nextNodes.push(shellNode);
+        getShellNode(node.actorId).parentNodes.push(shellNode);
       }
       shellNodes.set(actorId, shellNode);
       return shellNode;
@@ -186,15 +188,19 @@ export default class StreamPlanParser {
       getShellNode(actor.actorId);
     }
 
+    for(let actorId of this.actorId2Proto.keys()){
+      getShellNode(actorId);
+    }
+
     for (let [actorId, mviewNode] of this.actorIdTomviewNodes.entries()) {
       let list = [];
       let shellNode = getShellNode(actorId);
-      treeBfs(shellNode, (n) => {
+      graphBfs(shellNode, (n) => {
         list.push(n.id)
         if (shellNode.id !== n.id && this.actorIdTomviewNodes.has(n.id)) {
           return true; // stop to traverse its next nodes
         }
-      })
+      }, "parentNodes");
       mvTableIdToSingleViewActorList.set(mviewNode.typeInfo.tableRefId.tableId, list);
     }
 

@@ -3,8 +3,9 @@ import createView from "../lib/streamPlan/streamChartHelper";
 import { useEffect, useRef, useState } from 'react';
 import styled from '@emotion/styled';
 import LocationSearchingIcon from '@mui/icons-material/LocationSearching';
+import FmdGoodIcon from '@mui/icons-material/FmdGood';
 import SearchIcon from '@mui/icons-material/Search';
-import { Tooltip, FormControl, Select, MenuItem, InputLabel, FormHelperText, Input, InputAdornment, IconButton, Autocomplete, TextField } from '@mui/material';
+import { Tooltip, FormControl, Select, MenuItem, InputLabel, FormHelperText, Input, InputAdornment, IconButton, Autocomplete, TextField, FormControlLabel, Switch, Divider } from '@mui/material';
 
 const width = 1000;
 const height = 1000;
@@ -44,8 +45,9 @@ export default function StreamingView(props) {
   const [mvTableIdToSingleViewActorList, setMvTableIdToSingleViewActorList] = useState(null);
   const [mvTableIdToChainViewActorList, setMvTableIdToChainViewActorList] = useState(null);
   const [mviewTableList, setMviewTableList] = useState([]);
-  const [filterMode, setFilterMode] = useState("Full Graph");
+  const [filterMode, setFilterMode] = useState("Chain View");
   const [selectedMvTableId, setSelectedMvTableId] = useState(null);
+  const [showFullGraph, setShowFullGraph] = useState(true);
 
   const d3Container = useRef(null);
 
@@ -99,6 +101,18 @@ export default function StreamingView(props) {
     setFilterMode(e.target.value);
   }
 
+  const onFullGraphSwitchChange = (e, v) => {
+    setShowFullGraph(v);
+  }
+
+  const locateToCurrentMviewActor = () => {
+    let shownActorIdList = (filterMode === "Chain View" ? mvTableIdToChainViewActorList : mvTableIdToSingleViewActorList)
+      .get(selectedMvTableId) || [];
+    if (shownActorIdList.length !== 0) {
+      locateTo(locateTo(`rect.actor-${shownActorIdList[0]}`));
+    }
+  }
+
   const onReset = () => {
     svg.call(zoom.transform, orginalZoom);
     view.highlightByActorIds([]);
@@ -145,7 +159,7 @@ export default function StreamingView(props) {
 
   // render the full graph
   useEffect(() => {
-    if (d3Container.current && filterMode === "Full Graph") {
+    if (d3Container.current && showFullGraph) {
       createSvg((g) => {
         view = createView(g, data, onNodeClick, selectedActor === "Show All" ? null : selectedActor, null);
       })
@@ -155,31 +169,29 @@ export default function StreamingView(props) {
 
       return () => d3.select(d3Container.current).selectAll("*").remove();
     }
-  }, [selectedActor, filterMode]);
+  }, [selectedActor, showFullGraph]);
 
-  // render the partial graph
+  // locate and render partial graph on mview query
   useEffect(() => {
     if (selectedMvTableId === null) {
+      view.highlightByActorIds([]);
       return;
     }
-    if (filterMode === "Full Graph") {
-      let actorIdList = mvTableIdToSingleViewActorList.get(selectedMvTableId) || [];
-      if (actorIdList.length !== 0) {
-        view.highlightByActorIds(actorIdList);
-        locateTo(`rect.actor-${actorIdList[0]}`);
-      }
+    let shownActorIdList = (filterMode === "Chain View" ? mvTableIdToChainViewActorList : mvTableIdToSingleViewActorList)
+      .get(selectedMvTableId) || [];
+    if (showFullGraph) { // locate to the selected part
+      let shownActorIdList = (filterMode === "Chain View" ? mvTableIdToChainViewActorList : mvTableIdToSingleViewActorList)
+        .get(selectedMvTableId);
+      view.highlightByActorIds(shownActorIdList);
     } else {
       if (d3Container.current) {
-        let shownActorIdlist = filterMode === "Single View"
-          ? mvTableIdToSingleViewActorList.get(selectedMvTableId)
-          : mvTableIdToChainViewActorList.get(selectedMvTableId);
         createSvg((g) => {
-          view = createView(g, data, onNodeClick, selectedActor === "Show All" ? null : selectedActor, shownActorIdlist);
+          view = createView(g, data, onNodeClick, selectedActor === "Show All" ? null : selectedActor, shownActorIdList);
         });
-        locateTo(`rect.actor-${shownActorIdlist[0]}`);
       }
     }
-  }, [filterMode, selectedMvTableId])
+    locateToCurrentMviewActor();
+  }, [filterMode, selectedMvTableId, showFullGraph])
 
   return (
     <SvgBox>
@@ -192,7 +204,6 @@ export default function StreamingView(props) {
         }}>
           {nodeJson}
         </div>
-
       </SvgBoxCover>
       <SvgBoxCover className="noselect" style={{ display: "flex", flexDirection: "column" }}>
         {/* Select actor */}
@@ -257,26 +268,35 @@ export default function StreamingView(props) {
         <ToolBoxTitle>
           Filter materialized view
         </ToolBoxTitle>
-        <div style={{ display: "flex", flexDirection: "row", alignItems: "center" }}>
-          <FormControl sx={{ m: 1, width: 140 }}>
-            <InputLabel>Mode</InputLabel>
-            <Select
-              value={filterMode}
-              label="Mode"
-              onChange={onFilterModeChange}
-            >
-              <MenuItem value="Full Graph">Full Graph</MenuItem>
-              <MenuItem value="Single View">Single View</MenuItem>
-              <MenuItem value="Chain View">Chain View</MenuItem>
-            </Select>
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          <FormControl sx={{ m: 1, width: 300 }}>
+            <div style={{ display: "flex", flexDirection: "row", alignItems: "center", marginBottom: "10px" }}>
+              <div>
+                <InputLabel>Mode</InputLabel>
+                <Select
+                  sx={{ width: 140 }}
+                  value={filterMode}
+                  label="Mode"
+                  onChange={onFilterModeChange}
+                >
+                  <MenuItem value="Single View">Single View</MenuItem>
+                  <MenuItem value="Chain View">Chain View</MenuItem>
+                </Select>
+              </div>
+              <div style={{ marginLeft: "20px" }}>Full Graph</div>
+              <Switch
+                defaultChecked
+                value={showFullGraph}
+                onChange={onFullGraphSwitchChange}
+              />
+            </div>
+            <Autocomplete
+              disablePortal
+              options={mviewTableList || []}
+              onChange={onSelectMvChange}
+              renderInput={(param) => <TextField {...param} label="Materialized View" />}
+            />
           </FormControl>
-          <Autocomplete
-            sx={{ minWidth: 200 }}
-            disablePortal
-            options={mviewTableList || []}
-            onChange={onSelectMvChange}
-            renderInput={(param) => <TextField {...param} label="Materialized View" />}
-          />
         </div>
       </SvgBoxCover>
 
