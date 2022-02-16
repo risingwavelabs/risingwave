@@ -1,4 +1,6 @@
-use crate::expr::{to_conjunctions, Expr, ExprImpl, ExprType, FunctionCall, InputRef};
+use fixedbitset::FixedBitSet;
+
+use crate::expr::{get_inputs_col_index, Expr, ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::utils::Condition;
 #[derive(Debug, Clone)]
 /// the join predicate used in optimizer
@@ -58,10 +60,54 @@ impl JoinPredicate {
     ///   keys= Vec[(1,1)]
     /// ```
     #[allow(unused_variables)]
-    pub fn create(left_cols_num: usize, on_clause: ExprImpl) -> Self {
-        let conds = to_conjunctions(on_clause);
-        for cond in conds {}
-        todo!()
+    pub fn create(left_cols_num: usize, right_cols_num: usize, on_clause: ExprImpl) -> Self {
+        let on_clause = Condition::with_expr(on_clause);
+        let mut other_cond = Condition::true_cond();
+        let mut left_cond = Condition::true_cond();
+        let mut right_cond = Condition::true_cond();
+        let mut eq_keys = vec![];
+
+        for cond_expr in on_clause.conjunctions {
+            let mut cols = FixedBitSet::with_capacity(left_cols_num + right_cols_num);
+            get_inputs_col_index(&cond_expr, &mut cols);
+            let from_left = cols
+                .ones()
+                .min()
+                .map(|mx| mx < left_cols_num)
+                .unwrap_or(false);
+            let from_right = cols
+                .ones()
+                .max()
+                .map(|mx| mx >= left_cols_num)
+                .unwrap_or(false);
+            match (from_left, from_right) {
+                (true, true) => {
+                    // TODO: refactor with if_chain
+                    let mut is_eq_cond = false;
+                    if let ExprImpl::FunctionCall(function_call) = cond_expr.clone() {
+                        if function_call.get_expr_type() == ExprType::Equal {
+                            if let (_, ExprImpl::InputRef(x), ExprImpl::InputRef(y)) =
+                                function_call.decompose_as_binary()
+                            {
+                                is_eq_cond = true;
+                                if x.index() < y.index() {
+                                    eq_keys.push((*x, *y));
+                                } else {
+                                    eq_keys.push((*y, *x));
+                                }
+                            }
+                        }
+                    }
+                    if !is_eq_cond {
+                        other_cond.conjunctions.push(cond_expr)
+                    }
+                }
+                (true, false) => left_cond.conjunctions.push(cond_expr),
+                (false, true) => right_cond.conjunctions.push(cond_expr),
+                (false, false) => other_cond.conjunctions.push(cond_expr),
+            }
+        }
+        Self::new(left_cond, right_cond, other_cond, eq_keys)
     }
 
     /// Get join predicate's eq conds.

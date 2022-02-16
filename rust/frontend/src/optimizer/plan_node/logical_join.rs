@@ -1,15 +1,13 @@
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
-
 use risingwave_pb::plan::JoinType;
 
 use super::{
     ColPrunable, IntoPlanRef, JoinPredicate, PlanRef, PlanTreeNodeBinary, StreamHashJoin, ToBatch,
     ToStream,
 };
-use crate::expr::{ExprImpl};
-
+use crate::expr::ExprImpl;
 use crate::optimizer::property::{Distribution, Order, WithDistribution, WithOrder, WithSchema};
 
 #[derive(Debug, Clone)]
@@ -58,7 +56,8 @@ impl LogicalJoin {
         on_clause: ExprImpl,
     ) -> PlanRef {
         let left_cols_num = left.schema().fields.len();
-        let predicate = JoinPredicate::create(left_cols_num, on_clause);
+        let right_cols_num = right.schema().fields.len();
+        let predicate = JoinPredicate::create(left_cols_num, right_cols_num, on_clause);
         Self::new(left, right, join_type, predicate).into_plan_ref()
     }
     fn derive_schema(left: &Schema, right: &Schema, join_type: JoinType) -> Schema {
