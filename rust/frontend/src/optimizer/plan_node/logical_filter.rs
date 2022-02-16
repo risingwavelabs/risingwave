@@ -2,37 +2,35 @@ use std::fmt;
 
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
-use risingwave_common::types::DataType;
 
 use super::{ColPrunable, IntoPlanRef, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
-use crate::expr::{assert_input_ref, to_conjunctions, Expr, ExprImpl};
+use crate::expr::{assert_input_ref, ExprImpl};
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
+use crate::utils::Condition;
 
 #[derive(Debug, Clone)]
 pub struct LogicalFilter {
-    /// condition bool expressions, linked with AND conjunction
-    conds: Vec<ExprImpl>,
+    predicate: Condition,
     input: PlanRef,
     schema: Schema,
 }
 impl LogicalFilter {
-    fn new(input: PlanRef, conds: Vec<ExprImpl>) -> Self {
-        for cond in &conds {
-            assert_eq!(cond.return_type(), DataType::Boolean);
+    fn new(input: PlanRef, predicate: Condition) -> Self {
+        for cond in &predicate.conjunctions {
             assert_input_ref(cond, input.schema().fields().len());
         }
         let schema = input.schema().clone();
         LogicalFilter {
             input,
             schema,
-            conds,
+            predicate,
         }
     }
 
-    /// the function will check if the cond is bool expression
-    pub fn create(input: PlanRef, cond: ExprImpl) -> Result<PlanRef> {
-        let conds = to_conjunctions(cond);
-        Ok(Self::new(input, conds).into_plan_ref())
+    /// the function will check if the predicate is bool expression
+    pub fn create(input: PlanRef, predicate: ExprImpl) -> Result<PlanRef> {
+        let predicate = Condition::with_expr(predicate);
+        Ok(Self::new(input, predicate).into_plan_ref())
     }
 }
 impl PlanTreeNodeUnary for LogicalFilter {
@@ -40,7 +38,7 @@ impl PlanTreeNodeUnary for LogicalFilter {
         self.input.clone()
     }
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.conds.clone())
+        Self::new(input, self.predicate.clone())
     }
 }
 impl_plan_tree_node_for_unary! {LogicalFilter}

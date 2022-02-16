@@ -4,6 +4,7 @@ use crate::expr::{to_conjunctions, Expr, ExprImpl, ExprType, FunctionCall, Liter
 
 #[derive(Debug, Clone)]
 pub struct Condition {
+    /// condition bool expressions, linked with AND conjunction
     pub conjunctions: Vec<ExprImpl>,
 }
 impl Condition {
