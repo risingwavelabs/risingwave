@@ -109,6 +109,10 @@ impl ScannableTable for BummockTable {
     fn column_descs(&self) -> Cow<[TableColumnDesc]> {
         Cow::Borrowed(self.table_columns.as_slice())
     }
+
+    fn is_shared_storage(&self) -> bool {
+        false
+    }
 }
 
 #[async_trait::async_trait]

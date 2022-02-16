@@ -42,6 +42,7 @@ impl ProjectExecutor {
         pk_indices: PkIndices,
         exprs: Vec<BoxedExpression>,
         executor_id: u64,
+        identity: String,
     ) -> Self {
         let schema = Schema {
             fields: exprs
@@ -54,7 +55,7 @@ impl ProjectExecutor {
             pk_indices,
             input,
             exprs,
-            identity: format!("ProjectExecutor {:X}", executor_id),
+            identity: format!("{} {:X}", identity, executor_id),
         }
     }
 }
@@ -159,7 +160,13 @@ mod tests {
             Box::new(right_expr),
         );
 
-        let mut project = ProjectExecutor::new(Box::new(source), vec![], vec![test_expr], 1);
+        let mut project = ProjectExecutor::new(
+            Box::new(source),
+            vec![],
+            vec![test_expr],
+            1,
+            "ProjectExecutor".to_string(),
+        );
 
         if let Message::Chunk(chunk) = project.next().await.unwrap() {
             assert_eq!(chunk.ops(), vec![Op::Insert, Op::Insert, Op::Insert]);

@@ -161,7 +161,10 @@ public class RwStreamMaterializedView extends SingleRel implements RisingWaveStr
     // Sort key serialization ends
     // Build and return.
     MViewNode materializedViewNode = materializedViewNodeBuilder.build();
-    return StreamNode.newBuilder().setMviewNode(materializedViewNode).build();
+    return StreamNode.newBuilder()
+        .setMviewNode(materializedViewNode)
+        .setIdentity(StreamingPlan.getCurrentNodeIdentity(this))
+        .build();
   }
 
   public void setTableId(TableCatalog.TableId tableId) {

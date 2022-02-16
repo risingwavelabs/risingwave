@@ -90,6 +90,14 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     fn start_write_batch(&self) -> WriteBatch<Self> {
         WriteBatch::new(self.clone())
     }
+
+    /// Update local version for this state store. This is currently no-op on stores other than
+    /// Hummock.
+    ///
+    /// TODO: remove this after we implement periodical version updating.
+    async fn update_local_version(&self) -> Result<()> {
+        Ok(())
+    }
 }
 
 #[async_trait]

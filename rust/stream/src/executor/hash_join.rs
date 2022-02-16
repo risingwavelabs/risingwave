@@ -291,6 +291,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
         keyspace: Keyspace<S>,
         executor_id: u64,
         cond: Option<RowExpression>,
+        identity: String,
     ) -> Self {
         let debug_l = format!("{:#?}", &input_l);
         let debug_r = format!("{:#?}", &input_r);
@@ -350,7 +351,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
             cond,
             debug_l,
             debug_r,
-            identity: format!("HashJoinExecutor {:X}", executor_id),
+            identity: format!("{} {:X}", identity, executor_id),
         }
     }
 
@@ -770,6 +771,7 @@ mod tests {
             keyspace,
             1,
             None,
+            "HashJoinExecutor".to_string(),
         );
 
         // push the 1st left chunk
@@ -914,6 +916,7 @@ mod tests {
             keyspace,
             1,
             None,
+            "HashJoinExecutor".to_string(),
         );
 
         // push the 1st left chunk
@@ -1086,6 +1089,7 @@ mod tests {
             keyspace,
             1,
             None,
+            "HashJoinExecutor".to_string(),
         );
 
         // push the 1st left chunk
@@ -1250,6 +1254,7 @@ mod tests {
             keyspace,
             1,
             None,
+            "HashJoinExecutor".to_string(),
         );
 
         // push the 1st left chunk
@@ -1394,6 +1399,7 @@ mod tests {
             keyspace,
             1,
             None,
+            "HashJoinExecutor".to_string(),
         );
 
         // push the 1st left chunk
@@ -1563,6 +1569,7 @@ mod tests {
             keyspace,
             1,
             cond,
+            "HashJoinExecutor".to_string(),
         );
 
         // push the 1st left chunk
@@ -1732,6 +1739,7 @@ mod tests {
             keyspace,
             1,
             cond,
+            "HashJoinExecutor".to_string(),
         );
 
         // push the 1st left chunk
