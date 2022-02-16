@@ -19,8 +19,8 @@ pub fn generate_test_tables(epoch: u64, table_id: &mut u64) -> Vec<SstableInfo> 
     for i in 0..2 {
         let mut b = SSTableBuilder::new(opt.clone());
         let kv_pairs = vec![
-            (i, HummockValue::Put(b"test".to_vec())),
-            (i * 10, HummockValue::Put(b"test".to_vec())),
+            (i, HummockValue::Put(b"test".as_slice())),
+            (i * 10, HummockValue::Put(b"test".as_slice())),
         ];
         for kv in kv_pairs {
             b.add(&iterator_test_key_of_epoch(*table_id, kv.0, epoch), kv.1);
