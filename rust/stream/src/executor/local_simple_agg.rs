@@ -27,7 +27,7 @@ pub struct LocalSimpleAggExecutor {
     /// Aggregation states after last barrier.
     states: Vec<Box<dyn StreamingAggStateImpl>>,
 
-    /// Returns whether there is new data in the epoch.
+    /// Represents whether there is new data in the epoch.
     is_dirty: bool,
 
     /// The input of the current operator.
