@@ -98,7 +98,7 @@ impl StreamActorBuilder {
     }
 }
 
-/// [`StreamGraphBuilder`] build a stream graph. It will do some injection here to achieve
+/// [`StreamGraphBuilder`] build a stream graph. It injects some information to achieve
 /// dependencies. See `build_inner` for more details.
 pub struct StreamGraphBuilder {
     actor_builders: BTreeMap<ActorId, StreamActorBuilder>,
