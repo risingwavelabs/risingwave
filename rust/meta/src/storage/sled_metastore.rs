@@ -12,13 +12,32 @@ use crate::manager::{Epoch, SINGLE_VERSION_EPOCH};
 use crate::storage::transaction::{Operation, Precondition, Transaction};
 use crate::storage::Operation::Delete;
 use crate::storage::{
-    ColumnFamilyUtils, Key, KeyValue, KeyValueVersion, KeyWithVersion, MetaStore, Value,
-    DEFAULT_COLUMN_FAMILY,
+    ColumnFamily, Key, KeyValue, KeyValueVersion, KeyWithVersion, MetaStore, Value,
 };
 
 impl From<sled::Error> for crate::storage::Error {
     fn from(e: sled::Error) -> Self {
         crate::storage::Error::StorageError(e.to_string())
+    }
+}
+
+/// Mimic the cf interface for sled
+struct ColumnFamilyUtils {}
+impl ColumnFamilyUtils {
+    /// Return a composed key which is cf + raw key
+    pub fn get_composed_key(key: impl AsRef<[u8]>, cf: impl AsRef<[u8]>) -> Vec<u8> {
+        let cf_len: u8 = cf
+            .as_ref()
+            .len()
+            .try_into()
+            .expect("cf length out of u8 range");
+        [&[cf_len], cf.as_ref(), key.as_ref()].concat()
+    }
+
+    /// Extract the raw key from a composed key (cf + raw key)
+    pub fn get_raw_key(composed_key: impl AsRef<[u8]>) -> Vec<u8> {
+        let cf_len = composed_key.as_ref().get(0).expect("invalid composed_key");
+        composed_key.as_ref()[*cf_len as usize + 1..].to_vec()
     }
 }
 
@@ -60,16 +79,20 @@ impl SledMetaStore {
     /// `WithPrefix` and `WithVersion` are compatible.
     fn get_impl(
         &self,
-        keys_with_opts: &[(Key, Option<KeyValueVersion>, bool)],
+        keys_with_opts: &[(ColumnFamily, Key, Option<KeyValueVersion>, bool)],
     ) -> Result<Vec<Vec<KeyValue>>> {
         let db_guard = self.db.read().unwrap();
         let mut batch_result = vec![];
-        for (key, version, by_prefix) in keys_with_opts {
+        for (cf, key, version, by_prefix) in keys_with_opts {
             let (range_start, range_end) = {
                 if *by_prefix {
-                    KeyWithVersion::range_lookup_key_range(key)
+                    KeyWithVersion::range_lookup_key_range(ColumnFamilyUtils::get_composed_key(
+                        key, cf,
+                    ))
                 } else {
-                    KeyWithVersion::point_lookup_key_range(key)
+                    KeyWithVersion::point_lookup_key_range(ColumnFamilyUtils::get_composed_key(
+                        key, cf,
+                    ))
                 }
             };
 
@@ -82,8 +105,13 @@ impl SledMetaStore {
                 .collect::<Result<Vec<(IVec, IVec)>>>()?
                 .into_iter()
                 .map(|(k, v)| {
-                    let (key, version) = KeyWithVersion::deserialize(k.as_ref()).unwrap();
-                    KeyValue::new(key, v.to_vec(), version)
+                    let (composed_key, version) = KeyWithVersion::deserialize(k.as_ref()).unwrap();
+                    KeyValue::new(
+                        cf.to_string(),
+                        ColumnFamilyUtils::get_raw_key(composed_key),
+                        v.to_vec(),
+                        version,
+                    )
                 });
             // 2. Select kvs with target version
             let matched_versions = match version {
@@ -116,32 +144,33 @@ impl SledMetaStore {
 
     fn get_impl_flatten(
         &self,
-        keys_with_opts: &[(Key, Option<KeyValueVersion>, bool)],
+        keys_with_opts: &[(ColumnFamily, Key, Option<KeyValueVersion>, bool)],
     ) -> Result<Vec<KeyValue>> {
         self.get_impl(keys_with_opts)
             .map(|result| result.into_iter().flatten().collect_vec())
     }
 
     /// refer to `Operation::Put`
-    async fn put_impl(&self, kvs: &[(Key, KeyValueVersion, Value)]) -> Result<()> {
+    async fn put_impl(&self, kvs: Vec<(ColumnFamily, Key, KeyValueVersion, Value)>) -> Result<()> {
         let mut trx = self.get_transaction();
         trx.add_operations(
-            kvs.iter()
-                .map(|(key, version, value)| {
-                    Operation::Put(key.to_owned(), value.to_owned(), Some(*version))
-                })
+            kvs.into_iter()
+                .map(|(cf, key, version, value)| Operation::Put(cf, key, value, Some(version)))
                 .collect_vec(),
         );
         self.commit_transaction(&mut trx).await
     }
 
     /// refer to `Operation::Delete`
-    async fn delete_impl(&self, keys_with_opts: Vec<(Key, Option<KeyValueVersion>)>) -> Result<()> {
+    async fn delete_impl(
+        &self,
+        keys_with_opts: Vec<(ColumnFamily, Key, Option<KeyValueVersion>)>,
+    ) -> Result<()> {
         let mut trx = self.get_transaction();
         trx.add_operations(
             keys_with_opts
                 .into_iter()
-                .map(|(key, version)| Operation::Delete(key, version))
+                .map(|(cf, key, version)| Operation::Delete(cf, key, version))
                 .collect_vec(),
         );
         self.commit_transaction(&mut trx).await
@@ -154,12 +183,13 @@ impl SledMetaStore {
     ) -> std::result::Result<(), sled::transaction::UnabortableTransactionError> {
         for (index, operation) in operations.iter().enumerate() {
             match operation {
-                Operation::Put(k, v, version) => {
-                    SledMetaStore::apply_put(tx_db, k, v, version)?;
+                Operation::Put(cf, k, v, version) => {
+                    SledMetaStore::apply_put(tx_db, cf, k, v, version)?;
                 }
-                Operation::Delete(k, version) => {
+                Operation::Delete(cf, k, version) => {
                     SledMetaStore::apply_delete(
                         tx_db,
+                        cf,
                         k,
                         version,
                         operations_meta.get(index).unwrap(),
@@ -172,12 +202,14 @@ impl SledMetaStore {
 
     fn apply_put(
         tx_db: &sled::transaction::TransactionalTree,
+        cf: &str,
         key: &[u8],
         value: &[u8],
         version: &Option<KeyValueVersion>,
     ) -> std::result::Result<(), sled::transaction::UnabortableTransactionError> {
         let version = version.unwrap_or(SINGLE_VERSION_EPOCH.into_inner());
-        let composed_key = KeyWithVersion::serialize(key, version);
+        let composed_key =
+            KeyWithVersion::serialize(ColumnFamilyUtils::get_composed_key(key, cf), version);
         tx_db.insert(composed_key.as_slice(), value)?;
         Ok(())
     }
@@ -186,6 +218,7 @@ impl SledMetaStore {
     /// The atomicity is guaranteed by `db_guard`.
     fn apply_delete(
         tx_db: &sled::transaction::TransactionalTree,
+        cf: &str,
         key: &Key,
         version: &Option<KeyValueVersion>,
         operations_meta: &Option<Batch>,
@@ -193,7 +226,10 @@ impl SledMetaStore {
         match version {
             Some(version) => {
                 // delete specified version
-                let composed_key = KeyWithVersion::serialize(key, *version);
+                let composed_key = KeyWithVersion::serialize(
+                    ColumnFamilyUtils::get_composed_key(key, cf),
+                    *version,
+                );
                 tx_db.remove(composed_key.as_slice())?;
             }
             None => {
@@ -211,9 +247,9 @@ impl SledMetaStore {
         tx_db: &sled::transaction::TransactionalTree,
     ) -> std::result::Result<bool, sled::transaction::UnabortableTransactionError> {
         match precondition {
-            Precondition::KeyExists { key, version } => {
+            Precondition::KeyExists { cf, key, version } => {
                 let composed_key = KeyWithVersion::serialize(
-                    key,
+                    ColumnFamilyUtils::get_composed_key(key, cf),
                     version.unwrap_or(SINGLE_VERSION_EPOCH.into_inner()),
                 );
                 match tx_db.get(composed_key)? {
@@ -227,16 +263,6 @@ impl SledMetaStore {
 
 #[async_trait]
 impl MetaStore for SledMetaStore {
-    async fn put_batch(&self, tuples: Vec<(Vec<u8>, Vec<u8>, Epoch)>) -> Result<()> {
-        self.put_batch_cf(
-            tuples
-                .into_iter()
-                .map(|(k, v, e)| (DEFAULT_COLUMN_FAMILY, k, v, e))
-                .collect_vec(),
-        )
-        .await
-    }
-
     async fn list_cf(&self, cf: &str) -> Result<Vec<Vec<u8>>> {
         Ok(self.list_batch_cf(vec![cf]).await?.pop().unwrap())
     }
@@ -244,13 +270,7 @@ impl MetaStore for SledMetaStore {
     async fn list_batch_cf(&self, cfs: Vec<&str>) -> Result<Vec<Vec<Vec<u8>>>> {
         let keys_with_opts = cfs
             .iter()
-            .map(|cf| {
-                (
-                    ColumnFamilyUtils::prefix_key_with_cf(&[], cf.as_bytes()),
-                    None,
-                    true,
-                )
-            })
+            .map(|cf| (cf.to_string(), vec![], None, true))
             .collect_vec();
         self.get_impl(&keys_with_opts).map(|batch| {
             batch
@@ -261,32 +281,20 @@ impl MetaStore for SledMetaStore {
     }
 
     async fn put_cf(&self, cf: &str, key: &[u8], value: &[u8], version: Epoch) -> Result<()> {
-        self.put_impl(&[(
-            ColumnFamilyUtils::prefix_key_with_cf(key, cf.as_bytes()),
+        self.put_impl(vec![(
+            cf.to_owned(),
+            key.to_owned(),
             version.into_inner(),
             value.to_vec(),
         )])
         .await
     }
 
-    async fn put_batch_cf(&self, tuples: Vec<(&str, Vec<u8>, Vec<u8>, Epoch)>) -> Result<()> {
-        let ops = tuples
-            .into_iter()
-            .map(|(cf, k, v, e)| {
-                (
-                    ColumnFamilyUtils::prefix_key_with_cf(k.as_slice(), cf.as_bytes()),
-                    e.into_inner(),
-                    v,
-                )
-            })
-            .collect_vec();
-        self.put_impl(&ops).await
-    }
-
     async fn get_cf(&self, cf: &str, key: &[u8], version: Epoch) -> Result<Vec<u8>> {
         let result = self
             .get_impl_flatten(&[(
-                ColumnFamilyUtils::prefix_key_with_cf(key, cf.as_bytes()),
+                cf.to_string(),
+                key.to_owned(),
                 Some(version.into_inner()),
                 false,
             )])
@@ -296,18 +304,16 @@ impl MetaStore for SledMetaStore {
 
     async fn delete_cf(&self, cf: &str, key: &[u8], version: Epoch) -> Result<()> {
         self.delete_impl(vec![(
-            ColumnFamilyUtils::prefix_key_with_cf(key, cf.as_bytes()),
+            cf.to_owned(),
+            key.to_owned(),
             Some(version.into_inner()),
         )])
         .await
     }
 
     async fn delete_all_cf(&self, cf: &str, key: &[u8]) -> Result<()> {
-        self.delete_impl(vec![(
-            ColumnFamilyUtils::prefix_key_with_cf(key, cf.as_bytes()),
-            None,
-        )])
-        .await
+        self.delete_impl(vec![(cf.to_owned(), key.to_owned(), None)])
+            .await
     }
 
     async fn commit_transaction(&self, trx: &mut Transaction) -> Result<()> {
@@ -315,13 +321,15 @@ impl MetaStore for SledMetaStore {
         // workaround for sled's lack of range delete
         let mut operations_meta = vec![None; trx.operations().len()];
         for (index, operation) in trx.operations().iter().enumerate() {
-            if let Delete(key, version) = operation {
+            if let Delete(cf, key, version) = operation {
                 if version.is_some() {
                     continue;
                 }
                 // Version is not specified, so perform a range delete.
                 let mut batch = Batch::default();
-                let (start_range, end_range) = KeyWithVersion::point_lookup_key_range(key);
+                let (start_range, end_range) = KeyWithVersion::point_lookup_key_range(
+                    ColumnFamilyUtils::get_composed_key(key, cf),
+                );
                 db_guard
                     .range(start_range.as_slice()..end_range.as_slice())
                     .collect::<std::result::Result<Vec<(IVec, IVec)>, sled::Error>>()
@@ -370,35 +378,54 @@ mod tests {
 
     #[tokio::test]
     async fn test_sled_metastore_basic() -> Result<()> {
+        let cf = "cf_test_sled_metastore_basic";
         let sled_root = tempfile::tempdir().unwrap();
         let meta_store = SledMetaStore::new(Some(sled_root.path()))?;
-        let result = meta_store.get_impl_flatten(&[("key1".as_bytes().to_vec(), None, false)])?;
+        let result = meta_store.get_impl_flatten(&[(
+            cf.to_string(),
+            "key1".as_bytes().to_vec(),
+            None,
+            false,
+        )])?;
         assert!(result.is_empty());
         let result = meta_store
-            .put_impl(&[(
+            .put_impl(vec![(
+                cf.to_string(),
                 "key1".as_bytes().to_vec(),
                 SINGLE_VERSION_EPOCH.into_inner(),
                 "value1".as_bytes().to_vec(),
             )])
             .await;
         assert!(result.is_ok());
-        let result = meta_store.get_impl_flatten(&[("key1".as_bytes().to_vec(), None, false)])?;
+        let result = meta_store.get_impl_flatten(&[(
+            cf.to_string(),
+            "key1".as_bytes().to_vec(),
+            None,
+            false,
+        )])?;
         assert_eq!(
             result,
             vec![KeyValue::new(
+                cf.to_string(),
                 "key1".as_bytes().to_vec(),
                 "value1".as_bytes().to_vec(),
                 SINGLE_VERSION_EPOCH.into_inner()
             )]
         );
         meta_store
-            .delete_impl(vec![("key1".as_bytes().to_vec(), None)])
+            .delete_impl(vec![(cf.to_string(), "key1".as_bytes().to_vec(), None)])
             .await?;
-        let result = meta_store.get_impl_flatten(&[("key1".as_bytes().to_vec(), None, false)])?;
+        let result = meta_store.get_impl_flatten(&[(
+            cf.to_string(),
+            "key1".as_bytes().to_vec(),
+            None,
+            false,
+        )])?;
         assert!(result.is_empty());
 
         meta_store
-            .put_impl(&[(
+            .put_impl(vec![(
+                cf.to_string(),
                 "key2".as_bytes().to_vec(),
                 SINGLE_VERSION_EPOCH.into_inner(),
                 "value2".as_bytes().to_vec(),
@@ -406,89 +433,52 @@ mod tests {
             .await?;
         drop(meta_store);
         let meta_store = SledMetaStore::new(Some(sled_root.path()))?;
-        let result = meta_store.get_impl_flatten(&[("key2".as_bytes().to_vec(), None, false)]);
+        let result = meta_store.get_impl_flatten(&[(
+            cf.to_string(),
+            "key2".as_bytes().to_vec(),
+            None,
+            false,
+        )]);
         assert_eq!(
             result.unwrap(),
             vec![KeyValue::new(
+                cf.to_string(),
                 "key2".as_bytes().to_vec(),
                 "value2".as_bytes().to_vec(),
                 SINGLE_VERSION_EPOCH.into_inner()
             )]
         );
 
-        meta_store
-            .put_batch_cf(vec![
-                (
-                    "cf/cf1",
-                    "k22".as_bytes().to_vec(),
-                    "v22".as_bytes().to_vec(),
-                    Epoch::from(15),
-                ),
-                (
-                    "cf/cf1",
-                    "k1".as_bytes().to_vec(),
-                    "v2".as_bytes().to_vec(),
-                    Epoch::from(20),
-                ),
-                (
-                    "cf/cf1",
-                    "k1".as_bytes().to_vec(),
-                    "v3".as_bytes().to_vec(),
-                    Epoch::from(30),
-                ),
-                (
-                    "cf/cf1",
-                    "k1".as_bytes().to_vec(),
-                    "v1".as_bytes().to_vec(),
-                    Epoch::from(10),
-                ),
-                (
-                    "cf/another_cf",
-                    "another_k1".as_bytes().to_vec(),
-                    "another_v1".as_bytes().to_vec(),
-                    Epoch::from(2),
-                ),
-            ])
-            .await?;
-        let result = meta_store
-            .list_batch_cf(vec!["cf/cf1", "cf/another_cf"])
-            .await?;
-        assert_eq!(2, result.len());
-        assert!(result[0]
-            .iter()
-            .map(|v| std::str::from_utf8(v).unwrap())
-            .sorted()
-            .eq(vec!["v22", "v3"]));
-        assert!(result[1]
-            .iter()
-            .map(|v| std::str::from_utf8(v).unwrap())
-            .sorted()
-            .eq(vec!["another_v1"]));
-
         Ok(())
     }
 
     #[tokio::test]
     async fn test_sled_metastore_prefix_key() -> Result<()> {
+        let cf = "cf_test_sled_metastore_prefix_key";
         let sled_root = tempfile::tempdir().unwrap();
         let meta_store = SledMetaStore::new(Some(sled_root.path()))?;
         meta_store
-            .put_impl(&[
-                (vec![0xfe], 118, "value".as_bytes().to_vec()),
-                (vec![0xff], 118, "value".as_bytes().to_vec()),
-                (vec![0xff, 0x01], 118, "value".as_bytes().to_vec()),
+            .put_impl(vec![
+                (cf.to_string(), vec![0xfe], 118, "value".as_bytes().to_vec()),
+                (cf.to_string(), vec![0xff], 118, "value".as_bytes().to_vec()),
+                (
+                    cf.to_string(),
+                    vec![0xff, 0x01],
+                    118,
+                    "value".as_bytes().to_vec(),
+                ),
             ])
             .await?;
         assert_eq!(
             1,
             meta_store
-                .get_impl_flatten(&[(vec![0xff], None, false)])?
+                .get_impl_flatten(&[(cf.to_string(), vec![0xff], None, false)])?
                 .len()
         );
         assert_eq!(
             2,
             meta_store
-                .get_impl_flatten(&[(vec![0xff], None, true)])?
+                .get_impl_flatten(&[(cf.to_string(), vec![0xff], None, true)])?
                 .len()
         );
 
@@ -497,11 +487,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_sled_metastore_with_op_options() -> Result<()> {
+        let cf = "cf_test_sled_metastore_with_op_options";
         let sled_root = tempfile::tempdir().unwrap();
         let meta_store = SledMetaStore::new(Some(sled_root.path()))?;
         // put with one kv
         meta_store
-            .put_impl(&[(
+            .put_impl(vec![(
+                cf.to_string(),
                 "key1".as_bytes().to_vec(),
                 118,
                 "value1_greatest_version".as_bytes().to_vec(),
@@ -510,23 +502,27 @@ mod tests {
 
         // put several kvs with different versions
         meta_store
-            .put_impl(&[
+            .put_impl(vec![
                 (
+                    cf.to_string(),
                     "key2".as_bytes().to_vec(),
                     115,
                     "value2_smallest_version".as_bytes().to_vec(),
                 ),
                 (
+                    cf.to_string(),
                     "key2".as_bytes().to_vec(),
                     121,
                     "value2_greatest_version".as_bytes().to_vec(),
                 ),
                 (
+                    cf.to_string(),
                     "key2".as_bytes().to_vec(),
                     118,
                     "value2_medium_version".as_bytes().to_vec(),
                 ),
                 (
+                    cf.to_string(),
                     "key222".as_bytes().to_vec(),
                     150,
                     "value222".as_bytes().to_vec(),
@@ -535,9 +531,15 @@ mod tests {
             .await?;
 
         // get the kv with greatest version
-        let result = meta_store.get_impl_flatten(&[("key2".as_bytes().to_vec(), None, false)])?;
+        let result = meta_store.get_impl_flatten(&[(
+            cf.to_string(),
+            "key2".as_bytes().to_vec(),
+            None,
+            false,
+        )])?;
         assert_eq!(
             vec![KeyValue::new(
+                cf.to_string(),
                 "key2".as_bytes().to_vec(),
                 "value2_greatest_version".as_bytes().to_vec(),
                 121
@@ -546,10 +548,15 @@ mod tests {
         );
 
         // get the kv with specified version
-        let result =
-            meta_store.get_impl_flatten(&[("key2".as_bytes().to_vec(), Some(118), false)])?;
+        let result = meta_store.get_impl_flatten(&[(
+            cf.to_string(),
+            "key2".as_bytes().to_vec(),
+            Some(118),
+            false,
+        )])?;
         assert_eq!(
             vec![KeyValue::new(
+                cf.to_string(),
                 "key2".as_bytes().to_vec(),
                 "value2_medium_version".as_bytes().to_vec(),
                 118
@@ -559,35 +566,56 @@ mod tests {
 
         // Key with specified version doesn't exist. There is kv with the same key but different
         // version.
-        let result =
-            meta_store.get_impl_flatten(&[("key2".as_bytes().to_vec(), Some(123), false)])?;
+        let result = meta_store.get_impl_flatten(&[(
+            cf.to_string(),
+            "key2".as_bytes().to_vec(),
+            Some(123),
+            false,
+        )])?;
         assert!(result.is_empty());
 
         // Key with specified version doesn't exist. There is no kvs with the same key.
-        let result =
-            meta_store.get_impl_flatten(&[("key".as_bytes().to_vec(), Some(118), false)])?;
+        let result = meta_store.get_impl_flatten(&[(
+            cf.to_string(),
+            "key".as_bytes().to_vec(),
+            Some(118),
+            false,
+        )])?;
         assert!(result.is_empty());
 
         // Key with greatest version doesn't exist. There is no kvs with the same key.
-        let result = meta_store.get_impl_flatten(&[("key".as_bytes().to_vec(), None, false)])?;
+        let result = meta_store.get_impl_flatten(&[(
+            cf.to_string(),
+            "key".as_bytes().to_vec(),
+            None,
+            false,
+        )])?;
         assert!(result.is_empty());
 
         // get kvs prefixed by specified string with greatest version
-        let mut result = meta_store.get_impl_flatten(&[("key".as_bytes().to_vec(), None, true)])?;
+        let mut result = meta_store.get_impl_flatten(&[(
+            cf.to_string(),
+            "key".as_bytes().to_vec(),
+            None,
+            true,
+        )])?;
         result.sort_by_key(|kv| kv.key().clone());
         assert_eq!(
             vec![
                 KeyValue::new(
+                    cf.to_string(),
                     "key1".as_bytes().to_vec(),
                     "value1_greatest_version".as_bytes().to_vec(),
                     118
                 ),
                 KeyValue::new(
+                    cf.to_string(),
                     "key2".as_bytes().to_vec(),
                     "value2_greatest_version".as_bytes().to_vec(),
                     121
                 ),
                 KeyValue::new(
+                    cf.to_string(),
                     "key222".as_bytes().to_vec(),
                     "value222".as_bytes().to_vec(),
                     150,
@@ -598,27 +626,42 @@ mod tests {
 
         // kvs prefixed by specified prefix with default version doesn't exist. The prefix string
         // matches no kvs.
-        let result = meta_store.get_impl_flatten(&[("key2-".as_bytes().to_vec(), None, true)])?;
+        let result = meta_store.get_impl_flatten(&[(
+            cf.to_string(),
+            "key2-".as_bytes().to_vec(),
+            None,
+            true,
+        )])?;
         assert!(result.is_empty());
 
         // kvs prefixed by specified string with specified version doesn't exist. The prefix string
         // matches no kvs.
-        let result =
-            meta_store.get_impl_flatten(&[("key1-".as_bytes().to_vec(), Some(118), true)])?;
+        let result = meta_store.get_impl_flatten(&[(
+            cf.to_string(),
+            "key1-".as_bytes().to_vec(),
+            Some(118),
+            true,
+        )])?;
         assert!(result.is_empty());
 
         // get kvs prefixed by specified string with specified version
-        let mut result =
-            meta_store.get_impl_flatten(&[("key".as_bytes().to_vec(), Some(118), true)])?;
+        let mut result = meta_store.get_impl_flatten(&[(
+            cf.to_string(),
+            "key".as_bytes().to_vec(),
+            Some(118),
+            true,
+        )])?;
         result.sort_by_key(|kv| kv.key().clone());
         assert_eq!(
             vec![
                 KeyValue::new(
+                    cf.to_string(),
                     "key1".as_bytes().to_vec(),
                     "value1_greatest_version".as_bytes().to_vec(),
                     118
                 ),
                 KeyValue::new(
+                    cf.to_string(),
                     "key2".as_bytes().to_vec(),
                     "value2_medium_version".as_bytes().to_vec(),
                     118
@@ -630,19 +673,28 @@ mod tests {
         // delete specific version
         meta_store
             .delete_impl(vec![
-                ("key1".as_bytes().to_vec(), Some(118)),
-                ("key2".as_bytes().to_vec(), Some(118)),
+                (cf.to_string(), "key1".as_bytes().to_vec(), Some(118)),
+                (cf.to_string(), "key2".as_bytes().to_vec(), Some(118)),
             ])
             .await?;
-        let result =
-            meta_store.get_impl_flatten(&[("key".as_bytes().to_vec(), Some(118), true)])?;
+        let result = meta_store.get_impl_flatten(&[(
+            cf.to_string(),
+            "key".as_bytes().to_vec(),
+            Some(118),
+            true,
+        )])?;
         assert!(result.is_empty());
 
         // delete all versions
         meta_store
-            .delete_impl(vec![("key2".as_bytes().to_vec(), None)])
+            .delete_impl(vec![(cf.to_string(), "key2".as_bytes().to_vec(), None)])
             .await?;
-        let result = meta_store.get_impl_flatten(&[("key2".as_bytes().to_vec(), None, false)])?;
+        let result = meta_store.get_impl_flatten(&[(
+            cf.to_string(),
+            "key2".as_bytes().to_vec(),
+            None,
+            false,
+        )])?;
         assert!(result.is_empty());
 
         Ok(())
