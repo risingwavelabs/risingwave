@@ -17,18 +17,17 @@ impl OperationRunner {
         // generate queried point get key
         let mut rng = StdRng::seed_from_u64(233);
         let dist = Uniform::from(0..self.keys.len());
-        let mut get_keys = match self.keys.len() {
-            // if state store is empty, use default key
-            0 => (0..opts.reads)
+        let mut get_keys = match self.keys.is_empty() {
+            // if state store is empty, use default key: ["a"*key_size]
+            true => (0..opts.reads)
                 .into_iter()
                 .map(|_| Bytes::from(String::from_utf8(vec![65; opts.key_size as usize]).unwrap()))
                 .collect_vec(),
-            _ => (0..opts.reads)
+            false => (0..opts.reads)
                 .into_iter()
                 .map(|_| self.keys[dist.sample(&mut rng)].clone())
                 .collect_vec(),
         };
-        let get_keys_len = get_keys.len();
 
         // partitioned these keys for each concurrency
         let mut grouped_keys = vec![vec![]; opts.concurrency_num as usize];
@@ -61,7 +60,7 @@ impl OperationRunner {
             }
         }
         let stat = LatencyStat::new(latencies);
-        let qps = get_keys_len as u128 * 1_000_000_000 / total_time_nano as u128;
+        let qps = opts.reads as u128 * 1_000_000_000 / total_time_nano as u128;
 
         println!(
             "

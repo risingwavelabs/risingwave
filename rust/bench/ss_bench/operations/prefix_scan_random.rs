@@ -11,28 +11,26 @@ use risingwave_storage::StateStore;
 
 use super::OperationRunner;
 use crate::utils::latency_stat::LatencyStat;
-use crate::utils::workload::{get_epoch, Workload};
-use crate::{Opts, WorkloadType};
+use crate::Opts;
 
 impl OperationRunner {
     pub(crate) async fn prefix_scan_random(&self, store: &impl StateStore, opts: &Opts) {
-        let (prefixes, keys, values) = Workload::new(opts, WorkloadType::PrefixScanRandom, None);
-        let batch = Workload::make_batch(keys, values);
-
-        store
-            .ingest_batch(batch.clone(), get_epoch())
-            .await
-            .unwrap();
-
         // generate queried prefixes
-        // FIXME(Sun Ting): use global data to generate queries
         let mut rng = StdRng::seed_from_u64(233);
-        let dist = Uniform::from(0..prefixes.len());
-        let mut scan_prefixes = (0..opts.reads)
-            .into_iter()
-            .map(|_| prefixes[dist.sample(&mut rng)].clone())
-            .collect_vec();
-        let scan_prefixes_len = scan_prefixes.len();
+        let dist = Uniform::from(0..self.prefixes.len());
+        let mut scan_prefixes = match self.prefixes.is_empty() {
+            // if prefixes is empty, use default prefix: ["a"*key_prefix_size]
+            true => (0..opts.reads as usize)
+                .into_iter()
+                .map(|_| {
+                    Bytes::from(String::from_utf8(vec![65; opts.key_prefix_size as usize]).unwrap())
+                })
+                .collect_vec(),
+            false => (0..opts.reads as usize)
+                .into_iter()
+                .map(|_| self.prefixes[dist.sample(&mut rng)].clone())
+                .collect_vec(),
+        };
 
         // partitioned these prefixes for each concurrency
         let mut grouped_prefixes = vec![vec![]; opts.concurrency_num as usize];
@@ -75,7 +73,7 @@ impl OperationRunner {
             }
         }
         let stat = LatencyStat::new(latencies);
-        let qps = scan_prefixes_len as u128 * 1_000_000_000 / total_time_nano as u128;
+        let qps = opts.reads as u128 * 1_000_000_000 / total_time_nano as u128;
 
         println!(
             "

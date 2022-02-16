@@ -16,7 +16,7 @@ impl OperationRunner {
             .into_iter()
             .map(|i| {
                 let (prefixes, keys, values) =
-                    Workload::new(opts, WorkloadType::WriteBatch, Some(i as u64));
+                    Workload::gen(opts, WorkloadType::WriteBatch, Some(i as u64));
 
                 // add new prefixes and keys to global prefixes and keys
                 self.merge_prefixes(prefixes);

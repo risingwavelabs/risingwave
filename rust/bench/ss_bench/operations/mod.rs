@@ -31,13 +31,13 @@ impl OperationRunner {
 
     fn merge_prefixes(&mut self, mut other: Vec<Bytes>) {
         self.prefixes.append(&mut other);
-        self.prefixes.sort_by(|k1, k2| k1.cmp(k2));
+        self.prefixes.sort();
         self.prefixes.dedup_by(|k1, k2| k1 == k2);
     }
 
     fn merge_keys(&mut self, mut other: Vec<Bytes>) {
         self.keys.append(&mut other);
-        self.keys.sort_by(|k1, k2| k1.cmp(k2));
+        self.keys.sort();
         self.keys.dedup_by(|k1, k2| k1 == k2);
     }
 }
