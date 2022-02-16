@@ -14,11 +14,7 @@ type Prefixes = Vec<Bytes>;
 type Keys = Vec<Bytes>;
 type Values = Vec<Option<Bytes>>;
 
-pub struct Workload; // (Prefixes, Keys, Values);
-                     //     prefixes: Vec<Bytes>,
-                     //     pub keys: Vec<Bytes>,
-                     //     pub values: Vec<Option<Bytes>>,
-                     // }
+pub struct Workload;
 
 impl Workload {
     pub(crate) fn make_batch(
