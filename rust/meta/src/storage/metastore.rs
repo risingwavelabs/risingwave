@@ -49,7 +49,7 @@ pub trait MetaStore: Sync + Send + 'static {
     async fn list_cf(&self, cf: &str) -> Result<Vec<Vec<u8>>>;
     /// We will need a proper implementation for `list`, `list_cf` and `list_batch_cf` in etcd
     /// MetaStore. In a naive implementation, we need to select the latest version for each key
-    /// locally after fetching all versions of given cfs from etcd, which may not meet our
+    /// locally after fetching all versions of it from etcd, which may not meet our
     /// performance expectation.
     async fn list_batch_cf(&self, cfs: Vec<&str>) -> Result<Vec<Vec<Vec<u8>>>>;
     async fn put_cf(&self, cf: &str, key: &[u8], value: &[u8], version: Epoch) -> Result<()>;
