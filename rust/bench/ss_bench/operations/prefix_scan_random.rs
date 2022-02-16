@@ -25,6 +25,7 @@ impl OperationRunner {
             .unwrap();
 
         // generate queried prefixes
+        // FIXME(Sun Ting): use global data to generate queries
         let mut rng = StdRng::seed_from_u64(233);
         let dist = Uniform::from(0..prefixes.len());
         let mut scan_prefixes = (0..opts.reads)

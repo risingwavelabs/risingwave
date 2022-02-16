@@ -10,25 +10,24 @@ use risingwave_storage::StateStore;
 
 use super::OperationRunner;
 use crate::utils::latency_stat::LatencyStat;
-use crate::utils::workload::{get_epoch, Workload};
-use crate::{Opts, WorkloadType};
+use crate::Opts;
 
 impl OperationRunner {
     pub(crate) async fn get_random(&self, store: &impl StateStore, opts: &Opts) {
-        let (_prefixes, keys, values) = Workload::new(opts, WorkloadType::GetRandom, None);
-        let batch = Workload::make_batch(keys, values);
-        store
-            .ingest_batch(batch.clone(), get_epoch())
-            .await
-            .unwrap();
-
         // generate queried point get key
         let mut rng = StdRng::seed_from_u64(233);
-        let dist = Uniform::from(0..opts.batch_size as usize);
-        let mut get_keys = (0..opts.reads)
-            .into_iter()
-            .map(|_| batch[dist.sample(&mut rng)].0.clone())
-            .collect_vec();
+        let dist = Uniform::from(0..self.keys.len());
+        let mut get_keys = match self.keys.len() {
+            // if state store is empty, use default key
+            0 => (0..opts.reads)
+                .into_iter()
+                .map(|_| Bytes::from(String::from_utf8(vec![65; opts.key_size as usize]).unwrap()))
+                .collect_vec(),
+            _ => (0..opts.reads)
+                .into_iter()
+                .map(|_| self.keys[dist.sample(&mut rng)].clone())
+                .collect_vec(),
+        };
         let get_keys_len = get_keys.len();
 
         // partitioned these keys for each concurrency

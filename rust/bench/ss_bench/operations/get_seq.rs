@@ -20,6 +20,7 @@ impl OperationRunner {
             .unwrap();
 
         // generate queried point get key
+        // FIXME(Sun Ting): use global data to generate queries
         let mut get_keys = (0..opts.reads as usize)
             .into_iter()
             .map(|i| batch[i].0.clone())
