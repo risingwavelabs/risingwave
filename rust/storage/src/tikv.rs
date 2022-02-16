@@ -1,9 +1,11 @@
+use std::ops::Bound::Excluded;
+use std::ops::{Bound, RangeBounds};
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
 use risingwave_common::error::{Result, ToRwResult};
-use tikv_client::{KvPair, TransactionClient};
+use tikv_client::{BoundRange, KvPair, TransactionClient};
 use tokio::sync::OnceCell;
 
 use super::StateStore;
@@ -40,9 +42,9 @@ impl TikvStateStore {
 }
 #[async_trait]
 impl StateStore for TikvStateStore {
-    type Iter = TikvStateStoreIter;
+    type Iter<'a> = TikvStateStoreIter;
 
-    async fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
+    async fn get(&self, key: &[u8], _epoch: u64) -> Result<Option<Bytes>> {
         self.stats.get_counts.inc();
         let mut txn = self.client().await.begin_optimistic().await.unwrap();
         let res = txn
@@ -55,7 +57,16 @@ impl StateStore for TikvStateStore {
         res
     }
 
-    async fn scan(&self, prefix: &[u8], limit: Option<usize>) -> Result<Vec<(Bytes, Bytes)>> {
+    async fn scan<R, B>(
+        &self,
+        key_range: R,
+        limit: Option<usize>,
+        _epoch: u64,
+    ) -> Result<Vec<(Bytes, Bytes)>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]>,
+    {
         let mut data = vec![];
 
         if limit == Some(0) {
@@ -66,9 +77,14 @@ impl StateStore for TikvStateStore {
             None => return Ok(vec![]),
         };
 
+        let range = (
+            key_range.start_bound().map(|b| b.as_ref().to_owned()),
+            key_range.end_bound().map(|b| b.as_ref().to_owned()),
+        );
+
         let mut txn = self.client().await.begin_optimistic().await.unwrap();
         let res: Vec<KvPair> = txn
-            .scan(tikv_client::Key::from(prefix.to_vec()).., scan_limit)
+            .scan(BoundRange::from(range), scan_limit)
             .await
             .unwrap()
             .collect();
@@ -77,12 +93,10 @@ impl StateStore for TikvStateStore {
         for tikv_client::KvPair(key, value) in res {
             let key = Bytes::copy_from_slice(key.as_ref().into());
             let value = Bytes::from(value);
-            if key.starts_with(prefix) {
-                data.push((key.clone(), value.clone()));
-                if let Some(limit) = limit {
-                    if data.len() >= limit {
-                        break;
-                    }
+            data.push((key.clone(), value.clone()));
+            if let Some(limit) = limit {
+                if data.len() >= limit {
+                    break;
                 }
             }
         }
@@ -112,28 +126,33 @@ impl StateStore for TikvStateStore {
         Ok(())
     }
 
-    async fn iter(&self, prefix: &[u8]) -> Result<Self::Iter> {
-        Ok(TikvStateStoreIter::new(self.clone(), prefix.to_owned()).await)
+    async fn iter<R, B>(&self, key_range: R, _epoch: u64) -> Result<Self::Iter<'_>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]>,
+    {
+        let range = (
+            key_range.start_bound().map(|b| b.as_ref().to_owned()),
+            key_range.end_bound().map(|b| b.as_ref().to_owned()),
+        );
+        Ok(TikvStateStoreIter::new(self.clone(), range).await)
     }
 }
 
 pub struct TikvStateStoreIter {
     store: TikvStateStore,
-    prefix: Vec<u8>,
+    key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
     index: usize,
-
     kv_pair_buffer: Vec<tikv_client::KvPair>,
-    iter: Option<<Vec<(Bytes, Bytes)> as IntoIterator>::IntoIter>,
 }
 
 impl TikvStateStoreIter {
-    pub async fn new(store: TikvStateStore, prefix: Vec<u8>) -> Self {
+    pub async fn new(store: TikvStateStore, key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>)) -> Self {
         Self {
             store,
-            prefix,
+            key_range,
             index: 0,
             kv_pair_buffer: Vec::with_capacity(SCAN_LIMIT),
-            iter: None,
         }
     }
 }
@@ -147,19 +166,20 @@ impl StateStoreIter for TikvStateStoreIter {
 
         let mut txn = self.store.client().await.begin_optimistic().await.unwrap();
         if self.index == self.kv_pair_buffer.len() {
-            let start_key = if self.kv_pair_buffer.is_empty() {
-                tikv_client::Key::from(self.prefix.to_vec())
+            let range = if self.kv_pair_buffer.is_empty() {
+                self.key_range.clone()
             } else {
-                tikv_client::Key::from(
-                    Bytes::copy_from_slice(self.kv_pair_buffer.last().unwrap().0.as_ref().into())
+                (
+                    Excluded(
+                        Bytes::copy_from_slice(
+                            self.kv_pair_buffer.last().unwrap().0.as_ref().into(),
+                        )
                         .to_vec(),
+                    ),
+                    self.key_range.1.clone(),
                 )
             };
-            self.kv_pair_buffer = txn
-                .scan(start_key.., SCAN_LIMIT as u32)
-                .await
-                .unwrap()
-                .collect();
+            self.kv_pair_buffer = txn.scan(range, SCAN_LIMIT as u32).await.unwrap().collect();
 
             self.index = 0;
         }
@@ -171,13 +191,9 @@ impl StateStoreIter for TikvStateStoreIter {
         let key = &Bytes::copy_from_slice(key.as_ref().into());
         let value = &Bytes::from(value);
         txn.commit().await.unwrap();
-        if key.starts_with(&self.prefix) {
-            self.index += 1;
+        self.index += 1;
 
-            return Ok(Some((key.clone(), value.clone())));
-        } else {
-            return Ok(None);
-        }
+        return Ok(Some((key.clone(), value.clone())));
     }
 }
 
@@ -187,6 +203,7 @@ mod tests {
     use bytes::Bytes;
 
     use super::TikvStateStore;
+    use crate::hummock::key::next_key;
     use crate::StateStore;
 
     #[tokio::test]
@@ -195,6 +212,8 @@ mod tests {
         let tikv_storage = TikvStateStore::new(vec!["127.0.0.1:2379".to_string()]);
 
         let anchor = Bytes::from("aa");
+        let anchor_vec = anchor.to_vec();
+        let range = anchor_vec.clone()..next_key(anchor_vec.as_slice());
 
         // First batch inserts the anchor and others.
         let batch1 = vec![
@@ -220,41 +239,47 @@ mod tests {
         ];
 
         // Make sure the batch is sorted.
-
+        let epoch1 = 1;
         batch3.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-        let res = tikv_storage.ingest_batch(batch1, 0).await;
+        let res = tikv_storage.ingest_batch(batch1, epoch1).await;
         assert!(res.is_ok());
 
         // let gc_res = tikv_storage.gc().await;
         // assert!(gc_res.is_ok());
         // get "aa"
-        let value = tikv_storage.get(&anchor).await.unwrap().unwrap();
+        let value = tikv_storage.get(&anchor, epoch1).await.unwrap().unwrap();
         assert_eq!(value, Bytes::from("000"));
 
         // scan aa1, aa2
-        let scan_res = tikv_storage.scan(&anchor, Some(2)).await.unwrap();
+        let scan_res = tikv_storage.scan(range, Some(2), epoch1).await.unwrap();
         assert_eq!(scan_res.len(), 2);
         assert_eq!(scan_res[1].1, Bytes::from("111"));
 
         // scan non-existent prefix
         let scan_res = tikv_storage
-            .scan(&Bytes::from("non-existent prefix"), Some(2))
+            .scan(
+                (Bytes::from("non-existent prefix").to_vec())..,
+                Some(2),
+                epoch1
+            )
             .await
             .unwrap();
         assert_eq!(scan_res.len(), 0);
 
         // get non-existent prefix
-        let value = tikv_storage.get(&Bytes::from("ab")).await.unwrap();
+        let value = tikv_storage.get(&Bytes::from("ab"), epoch1).await.unwrap();
         assert_eq!(value, None);
 
-        let res = tikv_storage.ingest_batch(batch2, 0).await;
+        let epoch2 = epoch1 + 1;
+        let res = tikv_storage.ingest_batch(batch2, epoch2).await;
         assert!(res.is_ok());
-        let value = tikv_storage.get(&anchor).await.unwrap().unwrap();
+        let value = tikv_storage.get(&anchor, epoch2).await.unwrap().unwrap();
         assert_eq!(value, Bytes::from("111111"));
 
-        let res = tikv_storage.ingest_batch(batch3, 0).await;
+        let epoch3 = epoch2 + 1;
+        let res = tikv_storage.ingest_batch(batch3, epoch3).await;
         assert!(res.is_ok());
-        let value = tikv_storage.get(&anchor).await.unwrap();
+        let value = tikv_storage.get(&anchor, epoch3).await.unwrap();
         assert_eq!(value, None);
 
         Ok(())
