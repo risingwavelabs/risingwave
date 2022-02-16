@@ -20,7 +20,7 @@ RisingWave natively supports various connectors as below.
 
 ## How to use connectors
 
-RisingWave supports using SQL `` to register source. One can define the source name, the source schema, and the options for connecting to an external system.
+RisingWave supports using SQL `CREATE SOURCE` to register source. One can define the source name, the source schema, and the options for connecting to an external system.
 
 The following code shows a full example of how to connect to Kafka for reading and writing JSON records.
 
@@ -38,7 +38,7 @@ row format 'json' -- declare a format
 
 Connectors' properties are configured by string-based key-value pairs and factories will build corresponding sources and connectors. Only one factory can be configured for one source operator, otherwise, an exception will be thrown with additional information about considered factories and related properties.
 
-## Implementation (beta)
+## Implementation (WIP)
 
 > The current design and implementation of the connector is still in progress and may result in breaking change in the future.
 
