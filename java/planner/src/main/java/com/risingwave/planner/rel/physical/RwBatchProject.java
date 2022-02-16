@@ -56,6 +56,7 @@ public class RwBatchProject extends Project implements RisingWaveBatchPhyRel, Ph
     return PlanNode.newBuilder()
         .setProject(projectNodeBuilder.build())
         .addChildren(((RisingWaveBatchPhyRel) input).serialize())
+        .setIdentity(BatchPlan.getCurrentNodeIdentity(this))
         .build();
   }
 

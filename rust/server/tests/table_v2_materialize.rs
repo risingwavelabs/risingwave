@@ -138,6 +138,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         barrier_rx,
         1,
         1,
+        "StreamSourceExecutor".to_string(),
     )?;
 
     // Create a `Materialize` to write the changes to storage
@@ -149,6 +150,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         vec![1],
         vec![OrderType::Ascending],
         2,
+        "MaterializeExecutor".to_string(),
     );
 
     // Add some data using `InsertExecutor`, assuming we are inserting into the "mv"
@@ -161,6 +163,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         mview_id.clone(),
         source_manager.clone(),
         Box::new(insert_inner),
+        0,
     );
 
     insert.open().await?;
@@ -171,7 +174,13 @@ async fn test_table_v2_materialize() -> Result<()> {
     let table = table_manager.get_table(&mview_id)?;
     let data_column_ids = vec![0];
 
-    let mut scan = RowSeqScanExecutor::new(table.clone(), data_column_ids.clone(), 1024);
+    let mut scan = RowSeqScanExecutor::new(
+        table.clone(),
+        data_column_ids.clone(),
+        1024,
+        true,
+        "RowSeqExecutor".to_string(),
+    );
     scan.open().await?;
     assert!(scan.next().await?.is_none());
 
@@ -201,7 +210,13 @@ async fn test_table_v2_materialize() -> Result<()> {
     ));
 
     // Scan the table again, we are able to get the data now!
-    let mut scan = RowSeqScanExecutor::new(table.clone(), data_column_ids.clone(), 1024);
+    let mut scan = RowSeqScanExecutor::new(
+        table.clone(),
+        data_column_ids.clone(),
+        1024,
+        true,
+        "RowSeqScanExecutor".to_string(),
+    );
     scan.open().await?;
     let c = scan.next().await?.unwrap();
     let col_data = c.columns()[0].array_ref().as_float64();

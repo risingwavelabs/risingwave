@@ -1,6 +1,7 @@
 risedev:
-  # The CI-3node configuration will start 3 compute nodes, 1 meta node, 1 frontend.
+  # The CI-3node configuration will start 3 compute nodes, 1 meta node, 1 frontend and 1 MinIO.
   ci-3node:
+    - use: minio
     - use: meta-node
     - use: compute-node
       port: 5687
@@ -13,14 +14,8 @@ risedev:
       exporter-port: 1224
     - use: frontend
 
-  # The CI-1node configuration will start 1 compute node, 1 meta node, 1 frontend.
+  # The CI-1node configuration will start 1 compute node, 1 meta node, 1 frontend and 1 MinIO.
   ci-1node:
-    - use: meta-node
-    - use: compute-node
-    - use: frontend
-
-  # The CI-streaming configuration will start 1 compute node, 1 meta node, 1 frontend and 1 MinIO.
-  ci-streaming:
     - use: minio
     - use: meta-node
     - use: compute-node
@@ -50,6 +45,7 @@ risedev:
 
   # `dev-frontend` have the same settings as default except the the frontend node will be started by user.
   dev-frontend:
+    - use: minio
     - use: meta-node
     - use: compute-node
     - use: frontend
@@ -165,9 +161,6 @@ template:
 
     # Id of this instance
     id: frontend
-
-    # Compute-nodes used by this frontend instance
-    provide-compute-node: "compute-node*"
 
     # Meta-nodes used by this frontend instance
     provide-meta-node: "meta-node*"

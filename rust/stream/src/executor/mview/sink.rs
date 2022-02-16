@@ -30,6 +30,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
         pk_columns: Vec<usize>,
         orderings: Vec<OrderType>,
         executor_id: u64,
+        identity: String,
     ) -> Self {
         Self {
             input,
@@ -41,7 +42,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
             ),
             schema,
             pk_columns,
-            identity: format!("MaterializeExecutor {:X}", executor_id),
+            identity: format!("{} {:X}", identity, executor_id),
         }
     }
 
@@ -226,6 +227,7 @@ mod tests {
             pks,
             vec![OrderType::Ascending],
             1,
+            "MaterializeExecutor".to_string(),
         ));
 
         let table = downcast_arc::<MViewTable<MemoryStateStore>>(

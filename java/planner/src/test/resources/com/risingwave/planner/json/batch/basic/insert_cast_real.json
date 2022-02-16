@@ -25,7 +25,8 @@
         },
         "name": "v1"
       }]
-    }
+    },
+    "identity": "RwBatchValuesExecutor"
   }],
   "insert": {
     "tableRefId": {
@@ -36,5 +37,6 @@
       "tableId": 1
     },
     "columnIds": [1]
-  }
+  },
+  "identity": "RwBatchInsertExecutor(TableName:[test_schema, f],ColumnIds:[1])"
 }

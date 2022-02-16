@@ -200,11 +200,7 @@ impl Compactor {
             }
 
             builder
-                .add_full_key(
-                    FullKey::from_slice(iter_key),
-                    iter.value().to_owned_value(),
-                    is_new_user_key,
-                )
+                .add_full_key(FullKey::from_slice(iter_key), iter.value(), is_new_user_key)
                 .await?;
 
             iter.next().await?;
@@ -283,7 +279,6 @@ mod tests {
     use crate::hummock::key::Epoch;
     use crate::hummock::local_version_manager::LocalVersionManager;
     use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
-    use crate::hummock::version_manager::VersionManager;
     use crate::hummock::{HummockOptions, HummockResult, HummockStorage};
     use crate::object::InMemObjectStore;
 
@@ -293,7 +288,6 @@ mod tests {
     async fn test_same_key_not_splitted() -> HummockResult<()> {
         let options = HummockOptions::small_for_test();
         let object_client = Arc::new(InMemObjectStore::new());
-        let version_manager = Arc::new(VersionManager::new());
         let local_version_manager = Arc::new(LocalVersionManager::new(
             object_client.clone(),
             &options.remote_dir,
@@ -305,7 +299,6 @@ mod tests {
         let mut storage = HummockStorage::new(
             object_client,
             options,
-            version_manager,
             local_version_manager,
             hummock_meta_client,
         )

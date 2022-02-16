@@ -1172,9 +1172,9 @@ checksum = "7a81dae078cea95a014a339291cec439d2f232ebe854a9d672b796c6afafa9b7"
 
 [[package]]
 name = "crypto-common"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "683d6b536309245c849479fba3da410962a43ed8e51c26b729208ec0ac2798d0"
+checksum = "a4600d695eb3f6ce1cd44e6e291adceb2cc3ab12f20a33777ecd0bf6eba34e06"
 dependencies = [
  "generic-array",
 ]
@@ -1368,13 +1368,12 @@ dependencies = [
 
 [[package]]
 name = "digest"
-version = "0.10.1"
+version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b697d66081d42af4fba142d56918a3cb21dc8eb63372c6b85d14f44fb9c5979b"
+checksum = "8cb780dce4f9a8f5c087362b3a4595936b2019e7c8b30f2c3e9a7e94e6ae9837"
 dependencies = [
  "block-buffer 0.10.2",
  "crypto-common",
- "generic-array",
  "subtle",
 ]
 
@@ -1604,6 +1603,7 @@ dependencies = [
  "parking_lot 0.12.0",
  "paste",
  "pgwire",
+ "rand 0.8.5",
  "risingwave-pb",
  "risingwave_common",
  "risingwave_meta",
@@ -1945,7 +1945,7 @@ version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ddca131f3e7f2ce2df364b57949a9d47915cfbd35e46cfee355ccebbf794d6a2"
 dependencies = [
- "digest 0.10.1",
+ "digest 0.10.2",
 ]
 
 [[package]]
@@ -2024,9 +2024,9 @@ checksum = "9a3a5bfb195931eeb336b2a7b4d761daec841b97f947d34394601737a7bba5e4"
 
 [[package]]
 name = "hyper"
-version = "0.14.16"
+version = "0.14.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7ec3e62bdc98a2f0393a5048e4c30ef659440ea6e0e572965103e72bd836f55"
+checksum = "043f0e083e9901b6cc658a77d1eb86f4fc650bbb977a4337dd63192826aa85dd"
 dependencies = [
  "bytes",
  "futures-channel",
@@ -2037,7 +2037,7 @@ dependencies = [
  "http-body",
  "httparse",
  "httpdate",
- "itoa 0.4.8",
+ "itoa 1.0.1",
  "pin-project-lite",
  "socket2",
  "tokio",
@@ -2491,7 +2491,7 @@ version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6a38fc55c8bbc10058782919516f88826e70320db6d206aebc49611d24216ae"
 dependencies = [
- "digest 0.10.1",
+ "digest 0.10.2",
 ]
 
 [[package]]
@@ -2505,7 +2505,7 @@ name = "memcomparable"
 version = "0.1.0"
 dependencies = [
  "bytes",
- "rand 0.8.4",
+ "rand 0.8.5",
  "rust_decimal",
  "serde",
  "thiserror",
@@ -2651,9 +2651,9 @@ dependencies = [
 
 [[package]]
 name = "ntapi"
-version = "0.3.6"
+version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f6bb902e437b6d86e03cce10a7e2af662292c5dfef23b65899ea3ac9354ad44"
+checksum = "c28774a7fd2fbb4f0babd8237ce554b73af68021b5f695a3cebd6c59bac0980f"
 dependencies = [
  "winapi",
 ]
@@ -2804,7 +2804,7 @@ dependencies = [
  "lazy_static",
  "percent-encoding",
  "pin-project",
- "rand 0.8.4",
+ "rand 0.8.5",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -3146,7 +3146,7 @@ dependencies = [
  "hmac 0.12.0",
  "md-5 0.10.0",
  "memchr",
- "rand 0.8.4",
+ "rand 0.8.5",
  "sha2 0.10.1",
  "stringprep",
 ]
@@ -3482,7 +3482,7 @@ dependencies = [
  "prost 0.9.0",
  "prost-build 0.9.0",
  "prost-derive 0.9.0",
- "rand 0.8.4",
+ "rand 0.8.5",
  "regex",
  "snap",
  "tokio",
@@ -3527,19 +3527,18 @@ dependencies = [
  "libc",
  "rand_chacha 0.2.2",
  "rand_core 0.5.1",
- "rand_hc 0.2.0",
+ "rand_hc",
 ]
 
 [[package]]
 name = "rand"
-version = "0.8.4"
+version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e7573632e6454cf6b99d7aac4ccca54be06da05aca2ef7423d22d27d4d4bcd8"
+checksum = "34af8d1a0e25924bc5b7c43c079c942339d8f0a8b57c39049bef581b46327404"
 dependencies = [
  "libc",
  "rand_chacha 0.3.1",
  "rand_core 0.6.3",
- "rand_hc 0.3.1",
 ]
 
 [[package]]
@@ -3587,15 +3586,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ca3129af7b92a17112d59ad498c6f81eaf463253766b90396d39ea7a39d6613c"
 dependencies = [
  "rand_core 0.5.1",
-]
-
-[[package]]
-name = "rand_hc"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d51e9f596de227fda2ea6c84607f5558e196eeaf43c986b724ba4fb8fdf497e7"
-dependencies = [
- "rand_core 0.6.3",
 ]
 
 [[package]]
@@ -3803,7 +3793,7 @@ dependencies = [
  "paste",
  "prometheus 0.13.0",
  "prost 0.9.0",
- "rand 0.8.4",
+ "rand 0.8.5",
  "rdkafka",
  "risingwave-pb",
  "risingwave_batch",
@@ -3872,7 +3862,7 @@ dependencies = [
  "num-traits",
  "paste",
  "prost 0.9.0",
- "rand 0.8.4",
+ "rand 0.8.5",
  "rdkafka",
  "risingwave-pb",
  "risingwave_common",
@@ -3908,7 +3898,8 @@ dependencies = [
  "itertools 0.10.3",
  "log",
  "moka",
- "rand 0.8.4",
+ "prometheus 0.13.0",
+ "rand 0.8.5",
  "risingwave-pb",
  "risingwave_common",
  "risingwave_rpc_client",
@@ -3942,7 +3933,7 @@ dependencies = [
  "paste",
  "prettytable-rs",
  "prost 0.9.0",
- "rand 0.8.4",
+ "rand 0.8.5",
  "risingwave-pb",
  "rust_decimal",
  "serde",
@@ -3989,7 +3980,7 @@ dependencies = [
  "prost 0.9.0",
  "protobuf",
  "pulsar",
- "rand 0.8.4",
+ "rand 0.8.5",
  "rdkafka",
  "risingwave-pb",
  "risingwave_common",
@@ -4038,7 +4029,7 @@ dependencies = [
  "num-traits",
  "paste",
  "prost 0.9.0",
- "rand 0.8.4",
+ "rand 0.8.5",
  "risingwave-pb",
  "risingwave_common",
  "risingwave_rpc_client",
@@ -4110,7 +4101,7 @@ dependencies = [
  "prost 0.9.0",
  "protobuf",
  "protobuf-codegen-pure",
- "rand 0.8.4",
+ "rand 0.8.5",
  "rdkafka",
  "risingwave-pb",
  "risingwave_common",
@@ -4172,7 +4163,7 @@ dependencies = [
  "paste",
  "prometheus 0.13.0",
  "prost 0.9.0",
- "rand 0.8.4",
+ "rand 0.8.5",
  "risingwave-pb",
  "risingwave_common",
  "risingwave_rpc_client",
@@ -4221,7 +4212,7 @@ dependencies = [
  "paste",
  "prometheus 0.13.0",
  "prost 0.9.0",
- "rand 0.8.4",
+ "rand 0.8.5",
  "rdkafka",
  "risingwave-pb",
  "risingwave_common",
@@ -4537,9 +4528,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.78"
+version = "1.0.79"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d23c1ba4cf0efd44be32017709280b32d1cea5c3f1275c3b6d9e8bc54f758085"
+checksum = "8e8d9fa5c3b304765ce1fd9c4c8a3de2c8db365a5b91be52f186efc675681d95"
 dependencies = [
  "itoa 1.0.1",
  "ryu",
@@ -4646,7 +4637,7 @@ checksum = "99c3bd8169c58782adad9290a9af5939994036b76187f7b4f0e6de91dbbfc0ec"
 dependencies = [
  "cfg-if 1.0.0",
  "cpufeatures",
- "digest 0.10.1",
+ "digest 0.10.2",
 ]
 
 [[package]]
@@ -5011,7 +5002,7 @@ dependencies = [
  "lazy_static",
  "log",
  "prometheus 0.12.0",
- "rand 0.8.4",
+ "rand 0.8.5",
  "regex",
  "serde",
  "serde_derive",
@@ -5213,7 +5204,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f57eb36ecbe0fc510036adff84824dd3c24bb781e21bfa67b69d556aa85214f"
 dependencies = [
  "pin-project",
- "rand 0.8.4",
+ "rand 0.8.5",
  "tokio",
 ]
 
@@ -5329,7 +5320,7 @@ dependencies = [
  "indexmap",
  "pin-project",
  "pin-project-lite",
- "rand 0.8.4",
+ "rand 0.8.5",
  "slab",
  "tokio",
  "tokio-stream",
@@ -5426,9 +5417,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-opentelemetry"
-version = "0.17.0"
+version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dff3ebfa73490b6d574ca747819b6bde3e8d006b58861f34cafa89898d91eb9c"
+checksum = "a73d0f08e0d227c4c63e6d003804946767f4c4f01f52098b56821ae22e336bfc"
 dependencies = [
  "opentelemetry",
  "tracing",
@@ -5481,7 +5472,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ee73e6e4924fe940354b8d4d98cad5231175d615cd855b758adc658c0aac6a0"
 dependencies = [
  "cfg-if 1.0.0",
- "rand 0.8.4",
+ "rand 0.8.5",
  "static_assertions",
 ]
 

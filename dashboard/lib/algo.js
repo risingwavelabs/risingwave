@@ -1,21 +1,11 @@
-import { iter, newMatrix } from "./util";
-
-export class Node {
-  /**
-   * @param {Array<Node>} nextNodes 
-   * @param {number} id
-   */
-  constructor(nextNodes, id) {
-    this.nextNodes = nextNodes;
-    this.id = id;
-  }
-}
+import { newMatrix } from "./util";
 
 /**
  * Traverse a tree from its root node, and do operation
- * by calling the setp function.
- * @param {Node} root 
- * @param {(node: Node) => void} step callback when a node is visited.
+ * by calling the step function.
+ * Every node will be visted only once.
+ * @param {{nextNodes: []}} root The root node of the tree
+ * @param {(node: any) => void} step callback when a node is visited.
  */
 export function treeBfs(root, step) {
   let bfsList = [root];
@@ -30,6 +20,14 @@ export function treeBfs(root, step) {
   }
 }
 
+
+/**
+ * Traverse a graph from a random node, and do
+ * operation by calling the step function.
+ * Every node will be visted only once.
+ * @param {{nextNodes: []}} root A random node in the graph
+ * @param {(node: any) => void} step callback when a node is visited
+ */
 export function graphBfs(root, step) {
   let visitedNodes = new Set();
   let bfsList = [root];
@@ -47,21 +45,14 @@ export function graphBfs(root, step) {
   }
 }
 
-/**
- * 0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5 ,....
- */
-export class OscSeq {
-  constructor() {
-    this._n = 0;
-  }
-  next() {
-    this._n = this._n > 0 ? -(this._n + 1) : -this._n;
-  }
-  current() {
-    return this.n;
-  }
-}
 
+/**
+ * Group nodes in the same connected component. The method will not
+ * change the input. The ouput contains the original references.
+ * @param {Array<{nextNodes: []}>} nodes 
+ * @returns {Array<Array<any>>} A list of groups containing 
+ * nodes in the same connected component
+ */
 export function getConnectedComponent(nodes) {
 
   let node2shellNodes = new Map();

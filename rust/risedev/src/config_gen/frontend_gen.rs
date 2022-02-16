@@ -8,13 +8,6 @@ impl FrontendGen {
     pub fn gen_server_properties(&self, config: &FrontendConfig) -> String {
         let frontend_host = &config.address;
         let frontend_port = config.port;
-        let compute_node_hosts = config
-            .provide_compute_node
-            .as_ref()
-            .unwrap()
-            .iter()
-            .map(|node| format!("{}:{}", node.address, node.port))
-            .join(",");
         let meta_node_hosts = config
             .provide_meta_node
             .as_ref()
@@ -28,7 +21,6 @@ impl FrontendGen {
 risingwave.pgserver.ip={frontend_host}
 risingwave.pgserver.port={frontend_port}
 risingwave.leader.clustermode=Distributed
-risingwave.leader.computenodes={compute_node_hosts}
 
 risingwave.catalog.mode=Remote
 risingwave.meta.node={meta_node_hosts}

@@ -1,13 +1,14 @@
 use std::collections::hash_map::DefaultHasher;
+use std::collections::{BTreeMap, HashMap};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
-use risingwave_pb::common::{WorkerNode, WorkerType};
+use risingwave_pb::common::{ActorInfo, WorkerType};
 
-use crate::cluster::StoredClusterManager;
-use crate::model::ActorId;
+use crate::cluster::{NodeId, NodeLocations, StoredClusterManager};
+use crate::model::{ActorId, ActorLocations};
 
 /// [`ScheduleCategory`] defines all supported categories.
 pub enum ScheduleCategory {
@@ -27,6 +28,56 @@ pub struct Scheduler {
     category: ScheduleCategory,
 }
 
+/// [`ScheduledLocations`] represents the location of scheduled result.
+pub struct ScheduledLocations {
+    /// actor location map.
+    pub actor_locations: ActorLocations,
+    /// worker location map.
+    pub node_locations: NodeLocations,
+}
+
+impl ScheduledLocations {
+    /// [`node_actors`] returns all actors for every node.
+    pub fn node_actors(&self) -> HashMap<NodeId, Vec<ActorId>> {
+        let mut node_actors = HashMap::new();
+        self.actor_locations.iter().for_each(|(actor_id, node_id)| {
+            node_actors
+                .entry(*node_id)
+                .or_insert_with(Vec::new)
+                .push(*actor_id);
+        });
+
+        node_actors
+    }
+
+    /// [`actor_info_map`] returns the `ActorInfo` map for every actor.
+    pub fn actor_info_map(&self) -> HashMap<ActorId, ActorInfo> {
+        self.actor_locations
+            .iter()
+            .map(|(actor_id, node_id)| {
+                (
+                    *actor_id,
+                    ActorInfo {
+                        actor_id: *actor_id,
+                        host: self.node_locations[node_id].host.clone(),
+                    },
+                )
+            })
+            .collect::<HashMap<_, _>>()
+    }
+
+    /// [`actor_infos`] returns the `ActorInfo` slice.
+    pub fn actor_infos(&self) -> Vec<ActorInfo> {
+        self.actor_locations
+            .iter()
+            .map(|(actor_id, node_id)| ActorInfo {
+                actor_id: *actor_id,
+                host: self.node_locations[node_id].host.clone(),
+            })
+            .collect::<Vec<_>>()
+    }
+}
+
 impl Scheduler {
     pub fn new(category: ScheduleCategory, cluster_manager: Arc<StoredClusterManager>) -> Self {
         Self {
@@ -35,22 +86,20 @@ impl Scheduler {
         }
     }
 
-    /// [`schedule`] schedules node for input actors.
+    /// [`schedule`] schedules input actors to different workers.
     /// The schedule procedure is two-fold:
     /// (1) For regular actors, we use some strategies to schedule them.
     /// (2) For source actors under certain cases (determined elsewhere), we enforce round robin
     /// strategy to ensure that each compute node will have one source node.
     ///
-    /// Note that we assume there is no
-    ///
     /// The result `Vec<WorkerNode>` contains two parts.
     /// The first part is the schedule result of `actors`, the second part is the schedule result of
     /// `enforced_round_actors`.
-    pub async fn schedule(
+    pub fn schedule(
         &self,
         actors: &[ActorId],
         enforce_round_actors: &[ActorId],
-    ) -> Result<Vec<WorkerNode>> {
+    ) -> Result<ScheduledLocations> {
         let nodes = self
             .cluster_manager
             .list_worker_node(WorkerType::ComputeNode);
@@ -65,29 +114,36 @@ impl Scheduler {
             )
             .into());
         }
-        let enforced_round_actor_schedule = (0..enforce_round_actors.len())
-            .map(|i| nodes.get(i % nodes.len()).unwrap().clone())
-            .collect::<Vec<_>>();
+        let mut actor_locations = BTreeMap::new();
+        enforce_round_actors
+            .iter()
+            .enumerate()
+            .for_each(|(idx, actor)| {
+                actor_locations.insert(*actor, nodes[idx % nodes.len()].id);
+            });
 
-        let mut ret_list = match self.category {
-            ScheduleCategory::Simple => vec![nodes.get(0).unwrap().clone(); actors.len()],
-            ScheduleCategory::RoundRobin => (0..actors.len())
-                .map(|i| nodes.get(i % nodes.len()).unwrap().clone())
-                .collect::<Vec<_>>(),
-            ScheduleCategory::Hash => actors
-                .iter()
-                .map(|f| {
+        actors
+            .iter()
+            .enumerate()
+            .for_each(|(idx, actor)| match self.category {
+                ScheduleCategory::Simple => {
+                    actor_locations.insert(*actor, nodes[0].id);
+                }
+                ScheduleCategory::RoundRobin => {
+                    actor_locations.insert(*actor, nodes[idx % nodes.len()].id);
+                }
+                ScheduleCategory::Hash => {
                     let mut hasher = DefaultHasher::new();
-                    f.hash(&mut hasher);
-                    nodes
-                        .get(hasher.finish() as usize % nodes.len())
-                        .unwrap()
-                        .clone()
-                })
-                .collect::<Vec<_>>(),
-        };
-        ret_list.extend(enforced_round_actor_schedule);
-        Ok(ret_list)
+                    actor.hash(&mut hasher);
+                    let hash_value = hasher.finish() as usize;
+                    actor_locations.insert(*actor, nodes[hash_value % nodes.len()].id);
+                }
+            });
+
+        Ok(ScheduledLocations {
+            actor_locations,
+            node_locations: nodes.iter().map(|node| (node.id, node.clone())).collect(),
+        })
     }
 }
 
@@ -101,10 +157,9 @@ mod test {
     #[tokio::test]
     async fn test_schedule() -> Result<()> {
         let env = MetaSrvEnv::for_test().await;
-        let cluster_manager = Arc::new(StoredClusterManager::new(env.clone()).await?);
+        let cluster_manager = Arc::new(StoredClusterManager::new(env.clone(), None).await?);
         let actors = (0..15).collect::<Vec<u32>>();
         let source_actors = (20..30).collect::<Vec<u32>>();
-        let source_actors2 = (20..40).collect::<Vec<u32>>();
         for i in 0..10 {
             cluster_manager
                 .add_worker_node(
@@ -119,55 +174,37 @@ mod test {
         let workers = cluster_manager.list_worker_node(WorkerType::ComputeNode);
 
         let simple_schedule = Scheduler::new(ScheduleCategory::Simple, cluster_manager.clone());
-        let nodes = simple_schedule.schedule(&actors, &[]).await?;
-        assert_eq!(nodes.len(), 15);
-        assert!(nodes.iter().all(|n| n == workers.get(0).unwrap()));
+        let nodes = simple_schedule.schedule(&actors, &[])?;
+        assert_eq!(nodes.actor_locations.len(), actors.len());
+        assert!(nodes
+            .actor_locations
+            .iter()
+            .all(|(_, &n)| n == workers[0].id));
 
         let round_bin_schedule =
             Scheduler::new(ScheduleCategory::RoundRobin, cluster_manager.clone());
-        let nodes = round_bin_schedule.schedule(&actors, &[]).await?;
-        assert_eq!(nodes.len(), 15);
+        let nodes = round_bin_schedule.schedule(&actors, &[])?;
+        assert_eq!(nodes.actor_locations.len(), actors.len());
         assert!(nodes
+            .actor_locations
             .iter()
             .enumerate()
-            .all(|(idx, n)| n == workers.get(idx % 10).unwrap()));
+            .all(|(idx, (_, &n))| n == workers[idx % workers.len()].id));
 
         let hash_schedule = Scheduler::new(ScheduleCategory::Hash, cluster_manager.clone());
-        let nodes = hash_schedule.schedule(&actors, &[]).await?;
-        assert_eq!(nodes.len(), 15);
+        let nodes = hash_schedule.schedule(&actors, &[])?;
+        assert_eq!(nodes.actor_locations.len(), actors.len());
 
         let round_bin_schedule2 =
             Scheduler::new(ScheduleCategory::RoundRobin, cluster_manager.clone());
-        let nodes = round_bin_schedule2
-            .schedule(&actors, &source_actors)
-            .await?;
-        assert_eq!(nodes.len(), 25);
-        assert!(nodes[0..15]
-            .iter()
-            .enumerate()
-            .all(|(idx, n)| n == workers.get(idx % 10).unwrap()));
-        assert!(nodes[15..]
-            .iter()
-            .enumerate()
-            .all(|(idx, n)| n == workers.get(idx % 10).unwrap()));
-
-        let simple_schedule2 = Scheduler::new(ScheduleCategory::Simple, cluster_manager.clone());
-        let nodes = simple_schedule2.schedule(&actors, &source_actors).await?;
-        assert_eq!(nodes.len(), 25);
-        assert!(nodes[0..15].iter().all(|n| n == workers.get(0).unwrap()));
-        assert!(nodes[15..]
-            .iter()
-            .enumerate()
-            .all(|(idx, n)| n == workers.get(idx % 10).unwrap()));
-
-        let simple_schedule3 = Scheduler::new(ScheduleCategory::Simple, cluster_manager.clone());
-        let nodes = simple_schedule3.schedule(&actors, &source_actors2).await?;
-        assert_eq!(nodes.len(), 35);
-        assert!(nodes[0..15].iter().all(|n| n == workers.get(0).unwrap()));
-        assert!(nodes[15..]
-            .iter()
-            .enumerate()
-            .all(|(idx, n)| n == workers.get(idx % 10).unwrap()));
+        let nodes = round_bin_schedule2.schedule(&actors, &source_actors)?;
+        assert_eq!(nodes.actor_locations.len(), 25);
+        assert!(actors.iter().enumerate().all(|(idx, actor)| {
+            nodes.actor_locations[actor] == workers[idx % workers.len()].id
+        }));
+        assert!(source_actors.iter().enumerate().all(|(idx, actor)| {
+            nodes.actor_locations[actor] == workers[idx % workers.len()].id
+        }));
 
         Ok(())
     }

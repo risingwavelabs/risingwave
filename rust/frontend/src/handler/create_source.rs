@@ -53,6 +53,7 @@ mod tests {
     use risingwave_meta::test_utils::LocalMeta;
     use tempfile::NamedTempFile;
 
+    use crate::catalog::table_catalog::ROWID_NAME;
     use crate::test_utils::LocalFrontend;
 
     /// Returns the file.
@@ -101,6 +102,7 @@ mod tests {
             .map(|(col_name, col)| (col_name.clone(), col.data_type()))
             .collect::<HashMap<String, DataType>>();
         let mut expected_map = HashMap::new();
+        expected_map.insert(ROWID_NAME.to_string(), DataType::Int64);
         expected_map.insert("id".to_string(), DataType::Int32);
         expected_map.insert("city".to_string(), DataType::Varchar);
         expected_map.insert("zipcode".to_string(), DataType::Int64);

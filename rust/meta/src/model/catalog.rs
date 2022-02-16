@@ -103,7 +103,8 @@ mod tests {
         assert!(
             Database::select(store, &DatabaseRefId { database_id: 0 }, Epoch::from(0))
                 .await
-                .is_err()
+                .unwrap()
+                .is_none()
         );
 
         future::join_all((0..100).map(|i| async move {
@@ -126,7 +127,8 @@ mod tests {
                 },
                 Epoch::from(i as u64),
             )
-            .await?;
+            .await?
+            .unwrap();
             assert_eq!(
                 database,
                 Database {

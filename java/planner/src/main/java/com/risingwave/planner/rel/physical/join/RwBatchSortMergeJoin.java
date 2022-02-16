@@ -7,6 +7,7 @@ import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 import static com.risingwave.planner.rel.physical.join.BatchJoinUtils.isEquiJoin;
 
 import com.risingwave.planner.rel.logical.RwLogicalJoin;
+import com.risingwave.planner.rel.physical.BatchPlan;
 import com.risingwave.planner.rel.physical.RisingWaveBatchPhyRel;
 import com.risingwave.proto.plan.OrderType;
 import com.risingwave.proto.plan.PlanNode;
@@ -84,6 +85,7 @@ public class RwBatchSortMergeJoin extends RwBufferJoinBase implements RisingWave
         .addChildren(leftChild)
         .addChildren(rightChild)
         .setSortMergeJoin(node)
+        .setIdentity(BatchPlan.getCurrentNodeIdentity(this))
         .build();
   }
 

@@ -19,4 +19,6 @@ interface MetaClient {
   fun dropMaterializedView(request: DropMaterializedViewRequest): DropMaterializedViewResponse
 
   fun flush(request: FlushRequest): FlushResponse
+
+  fun listAllNodes(request: ListAllNodesRequest): ListAllNodesResponse
 }

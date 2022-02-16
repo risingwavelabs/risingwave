@@ -27,16 +27,14 @@ impl HummockMetaClient for MockHummockMetaClient {
     async fn pin_version(&self) -> HummockResult<(HummockVersionId, HummockVersion)> {
         let response = self
             .mock_hummock_meta_service
-            .pin_version(PinVersionRequest {
-                context_identifier: 0,
-            });
+            .pin_version(PinVersionRequest { context_id: 0 });
         Ok((response.pinned_version_id, response.pinned_version.unwrap()))
     }
 
     async fn unpin_version(&self, pinned_version_id: HummockVersionId) -> HummockResult<()> {
         self.mock_hummock_meta_service
             .unpin_version(UnpinVersionRequest {
-                context_identifier: 0,
+                context_id: 0,
                 pinned_version_id,
             });
         Ok(())
@@ -45,9 +43,7 @@ impl HummockMetaClient for MockHummockMetaClient {
     async fn pin_snapshot(&self) -> HummockResult<HummockEpoch> {
         let epoch = self
             .mock_hummock_meta_service
-            .pin_snapshot(PinSnapshotRequest {
-                context_identifier: 0,
-            })
+            .pin_snapshot(PinSnapshotRequest { context_id: 0 })
             .snapshot
             .unwrap()
             .epoch;
@@ -57,7 +53,7 @@ impl HummockMetaClient for MockHummockMetaClient {
     async fn unpin_snapshot(&self, pinned_epoch: HummockEpoch) -> HummockResult<()> {
         self.mock_hummock_meta_service
             .unpin_snapshot(UnpinSnapshotRequest {
-                context_identifier: 0,
+                context_id: 0,
                 snapshot: Some(HummockSnapshot {
                     epoch: pinned_epoch,
                 }),
@@ -79,7 +75,7 @@ impl HummockMetaClient for MockHummockMetaClient {
         sstables: Vec<SstableInfo>,
     ) -> HummockResult<()> {
         self.mock_hummock_meta_service.add_tables(AddTablesRequest {
-            context_identifier: 0,
+            context_id: 0,
             tables: sstables.to_vec(),
             epoch,
         });
