@@ -20,6 +20,9 @@ impl Condition {
         }
     }
 
+    pub fn always_true(&self) -> bool {
+        self.conjunctions.len() == 0
+    }
     pub fn to_expr(self) -> ExprImpl {
         let mut iter = self.conjunctions.into_iter();
         if let Some(mut ret) = iter.next() {
@@ -34,11 +37,11 @@ impl Condition {
         }
     }
 
-    pub fn and(&mut self, other: &Self) {
+    pub fn and(&mut self, other: Self) {
         self.conjunctions
             .reserve(self.conjunctions.len() + other.conjunctions.len());
-        for expr in &other.conjunctions {
-            self.conjunctions.push(expr.clone());
+        for expr in other.conjunctions {
+            self.conjunctions.push(expr);
         }
     }
 

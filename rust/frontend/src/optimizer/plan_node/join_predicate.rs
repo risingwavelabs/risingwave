@@ -111,18 +111,43 @@ impl JoinPredicate {
     }
 
     /// Get join predicate's eq conds.
-    pub fn eq_conds(&self) -> Vec<ExprImpl> {
-        self.eq_keys
-            .iter()
-            .cloned()
-            .map(|(l, r)| {
-                FunctionCall::new(ExprType::Equal, vec![l.bound_expr(), r.bound_expr()])
-                    .unwrap()
-                    .bound_expr()
-            })
-            .collect()
+    pub fn eq_cond(&self) -> Condition {
+        Condition {
+            conjunctions: self
+                .eq_keys
+                .iter()
+                .cloned()
+                .map(|(l, r)| {
+                    FunctionCall::new(ExprType::Equal, vec![l.bound_expr(), r.bound_expr()])
+                        .unwrap()
+                        .bound_expr()
+                })
+                .collect(),
+        }
     }
 
+    pub fn non_eq_cond(&self) -> Condition {
+        let mut cond = self.left_cond.clone();
+        cond.and(self.right_cond.clone());
+        cond.and(self.other_cond.clone());
+        cond
+    }
+
+    pub fn all_cond(&self) -> Condition {
+        let mut cond = self.eq_cond();
+        cond.and(self.non_eq_cond());
+        cond
+    }
+
+    pub fn has_eq(&self) -> bool {
+        self.eq_keys.len() != 0
+    }
+
+    pub fn has_non_eq(&self) -> bool {
+        !self.left_cond.always_true()
+            || !self.right_cond.always_true()
+            || !self.other_cond.always_true()
+    }
     /// Get a reference to the join predicate's left cond.
     pub fn left_cond(&self) -> &Condition {
         &self.left_cond
