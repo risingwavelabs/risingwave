@@ -45,7 +45,6 @@ risingwave_stream = { path = "../stream" }
 serde = { version = "1", features = ["derive"] }
 serde-value = "0.7"
 serde_json = "1"
-serde_with = "1"
 smallvec = "1"
 static_assertions = "1"
 thiserror = "1"

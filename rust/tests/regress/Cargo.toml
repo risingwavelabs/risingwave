@@ -8,7 +8,6 @@ anyhow = { version = "1", features = ["backtrace"] }
 clap = { version = "3", features = ["derive"] }
 env_logger = "0.9"
 log = "0.4"
-log4rs = "1"
 path-absolutize = "3.0"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "process"] }
 
