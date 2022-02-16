@@ -194,7 +194,7 @@ async fn test_stream_mv_proto() {
         info: vec![actor_info_proto, actor_info_proto2],
     };
     stream_manager.update_actor_info(actor_info_table).unwrap();
-    stream_manager.update_actors(&[actor_proto]).unwrap();
+    stream_manager.update_actors(&[actor_proto], &[]).unwrap();
     stream_manager.build_actors(&[1], env).unwrap();
 
     // Insert data and check if the materialized view has been updated.

@@ -1,5 +1,5 @@
 use std::cmp::max;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use async_recursion::async_recursion;
@@ -13,6 +13,7 @@ use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{Dispatcher, StreamNode};
 
 use super::FragmentManagerRef;
+use crate::cluster::NodeId;
 use crate::manager::{IdCategory, IdGeneratorManagerRef};
 use crate::model::{ActorId, FragmentId};
 use crate::stream::graph::{
@@ -20,6 +21,17 @@ use crate::stream::graph::{
 };
 
 const PARALLEL_DEGREE_LOW_BOUND: u32 = 4;
+
+/// [`Graph`] contains generated graph with more infos for further usage.
+pub struct Graph {
+    pub graph: BTreeMap<FragmentId, Fragment>,
+    /// New dispatches to add from upstream actors to downstream actors.
+    /// Used by creating MV on MV.
+    pub dispatches: HashMap<ActorId, Vec<ActorId>>,
+    /// Upstream mview actor ids grouped by node id.
+    /// Used by creating MV on MV.
+    pub upstream_node_actors: HashMap<NodeId, Vec<ActorId>>,
+}
 
 /// [`StreamFragmenter`] generates the proto for interconnected actors for a streaming pipeline.
 pub struct StreamFragmenter {
@@ -54,29 +66,34 @@ impl StreamFragmenter {
     ///
     /// Return a pair of (1) all stream actors, and (2) the actor id of sources to be forcefully
     /// round-robin scheduled.
-    pub async fn generate_graph(
-        &mut self,
-        stream_node: &StreamNode,
-    ) -> Result<BTreeMap<FragmentId, Fragment>> {
+    pub async fn generate_graph(&mut self, stream_node: &StreamNode) -> Result<Graph> {
         self.generate_fragment_graph(stream_node).await?;
         self.build_graph_from_fragment(self.fragment_graph.get_root_fragment(), vec![])
             .await?;
 
         let stream_graph = self.stream_graph.build()?;
-        stream_graph
-            .iter()
-            .map(|(&fragment_id, actors)| {
-                Ok::<_, RwError>((
-                    fragment_id,
-                    Fragment {
+
+        Ok(Graph {
+            graph: stream_graph
+                .graph
+                .iter()
+                .map(|(&fragment_id, actors)| {
+                    Ok::<_, RwError>((
                         fragment_id,
-                        fragment_type: self.fragment_graph.get_fragment_type_by_id(fragment_id)?
-                            as i32,
-                        actors: actors.clone(),
-                    },
-                ))
-            })
-            .collect::<Result<BTreeMap<_, _>>>()
+                        Fragment {
+                            fragment_id,
+                            fragment_type: self
+                                .fragment_graph
+                                .get_fragment_type_by_id(fragment_id)?
+                                as i32,
+                            actors: actors.clone(),
+                        },
+                    ))
+                })
+                .collect::<Result<BTreeMap<_, _>>>()?,
+            dispatches: stream_graph.dispatches,
+            upstream_node_actors: stream_graph.upstream_node_actors,
+        })
     }
 
     /// Generate fragment DAG from input streaming plan by their dependency.
