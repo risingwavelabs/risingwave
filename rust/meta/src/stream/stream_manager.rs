@@ -100,7 +100,7 @@ impl StreamManager {
                     *node_id,
                     up_ids
                         .iter()
-                        .map(|up_id| {
+                        .flat_map(|up_id| {
                             dispatches
                                 .get(up_id)
                                 .expect("expected dispatches info")
@@ -113,7 +113,6 @@ impl StreamManager {
                                     downstream: Some(down_info.clone()),
                                 })
                         })
-                        .flatten()
                         .collect_vec(),
                 )
             })
@@ -147,7 +146,7 @@ impl StreamManager {
                 .update_actors(UpdateActorsRequest {
                     request_id,
                     actors: stream_actors.clone(),
-                    hanging_channels: node_hanging_channels.remove(node_id).unwrap_or(vec![]),
+                    hanging_channels: node_hanging_channels.remove(node_id).unwrap_or_default(),
                 })
                 .await
                 .to_rw_result_with(format!("failed to connect to {}", node_id))?;

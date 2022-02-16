@@ -2,16 +2,15 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::channel::mpsc::{channel, Sender};
+use futures::channel::mpsc::Sender;
 use futures::SinkExt;
 use itertools::Itertools;
 use risingwave_common::array::Op;
-use risingwave_common::util::addr::is_local_address;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use tracing::event;
 
 use super::{Barrier, Executor, Message, Mutation, Result, StreamChunk, StreamConsumer};
-use crate::task::{SharedContext, LOCAL_OUTPUT_CHANNEL_SIZE};
+use crate::task::SharedContext;
 
 /// `Output` provides an interface for `Dispatcher` to send data into downstream actors.
 #[async_trait]
@@ -138,17 +137,8 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
                     for actor_info in actor_infos.iter() {
                         let down_id = actor_info.get_actor_id();
                         let up_down_ids = (actor_id, down_id);
-                        let downstream_addr = actor_info.get_host()?.to_socket_addr()?;
-
-                        if is_local_address(&downstream_addr, &self.context.addr) {
-                            let tx = self.context.take_sender(&up_down_ids)?;
-                            new_outputs.push(Box::new(ChannelOutput::new(tx)) as Box<dyn Output>)
-                        } else {
-                            let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-                            self.context
-                                .add_channel_pairs(up_down_ids, (Some(tx.clone()), Some(rx)));
-                            new_outputs.push(Box::new(RemoteOutput::new(tx)) as Box<dyn Output>)
-                        }
+                        let tx = self.context.take_sender(&up_down_ids)?;
+                        new_outputs.push(Box::new(ChannelOutput::new(tx)) as Box<dyn Output>)
                     }
                     self.inner.update_outputs(new_outputs)
                 }
@@ -160,16 +150,8 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
                     for downstream_actor_info in downstream_actor_infos {
                         let down_id = downstream_actor_info.get_actor_id();
                         let up_down_ids = (self.actor_id, down_id);
-                        let downstream_addr = downstream_actor_info.get_host()?.to_socket_addr()?;
-                        if is_local_address(&downstream_addr, &self.context.addr) {
-                            let tx = self.context.take_sender(&up_down_ids)?;
-                            outputs_to_add.push(Box::new(ChannelOutput::new(tx)) as Box<dyn Output>)
-                        } else {
-                            let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-                            self.context
-                                .add_channel_pairs(up_down_ids, (Some(tx.clone()), Some(rx)));
-                            outputs_to_add.push(Box::new(RemoteOutput::new(tx)) as Box<dyn Output>)
-                        }
+                        let tx = self.context.take_sender(&up_down_ids)?;
+                        outputs_to_add.push(Box::new(ChannelOutput::new(tx)) as Box<dyn Output>)
                     }
                     self.inner.add_outputs(outputs_to_add);
                 }
@@ -513,6 +495,7 @@ mod tests {
     use std::hash::{BuildHasher, Hasher};
     use std::sync::{Arc, Mutex};
 
+    use futures::channel::mpsc::channel;
     use itertools::Itertools;
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, I64Array, Op};
@@ -523,7 +506,7 @@ mod tests {
 
     use super::*;
     use crate::executor::ReceiverExecutor;
-    use crate::task::LOCAL_TEST_ADDR;
+    use crate::task::{LOCAL_OUTPUT_CHANNEL_SIZE, LOCAL_TEST_ADDR};
 
     #[derive(Debug)]
     pub struct MockOutput {
