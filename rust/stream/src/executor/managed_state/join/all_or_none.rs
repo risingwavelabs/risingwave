@@ -1,6 +1,7 @@
 use std::collections::{btree_map, BTreeMap};
 use std::sync::Arc;
 
+use bytes::Bytes;
 use risingwave_common::array::data_chunk_iter::RowDeserializer;
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
@@ -55,21 +56,44 @@ impl<S: StateStore> AllOrNoneState<S> {
         }
     }
 
-    pub fn with_cached_state(
+    pub async fn with_cached_state(
         keyspace: Keyspace<S>,
-        cached: BTreeMap<PkType, StateValueType>,
         data_types: Arc<[DataType]>,
         pk_data_types: Arc<[DataType]>,
-    ) -> Self {
-        let len = cached.len();
-        Self {
-            cached: Some(cached),
-            flush_buffer: BTreeMap::new(),
-            total_count: len,
-            data_types,
-            pk_data_types,
-            keyspace,
+        epoch: u64,
+    ) -> Result<Option<Self>> {
+        let all_data = keyspace.scan_strip_prefix(None, epoch).await?;
+        if !all_data.is_empty() {
+            // Insert cached states.
+            let cached = Self::fill_cached(all_data, data_types.clone(), pk_data_types.clone())?;
+            let total_count = cached.len();
+            Ok(Some(Self {
+                cached: None,
+                flush_buffer: BTreeMap::new(),
+                total_count,
+                data_types,
+                pk_data_types,
+                keyspace,
+            }))
+        } else {
+            Ok(None)
         }
+    }
+
+    fn fill_cached(
+        data: Vec<(Bytes, Bytes)>,
+        data_types: Arc<[DataType]>,
+        pk_data_types: Arc<[DataType]>,
+    ) -> Result<BTreeMap<PkType, StateValueType>> {
+        let mut cached = BTreeMap::new();
+        for (raw_key, raw_value) in data {
+            let pk_deserializer = RowDeserializer::new(pk_data_types.to_vec());
+            let key = pk_deserializer.deserialize_not_null(&raw_key)?;
+            let deserializer = JoinRowDeserializer::new(data_types.to_vec());
+            let value = deserializer.deserialize(&raw_value)?;
+            cached.insert(key, value);
+        }
+        Ok(cached)
     }
 
     pub async fn is_empty(&mut self) -> bool {
@@ -78,7 +102,7 @@ impl<S: StateStore> AllOrNoneState<S> {
 
     pub async fn len(&mut self) -> usize {
         if self.cached.is_none() {
-            self.fetch_cache().await.unwrap();
+            self.populate_cache().await.unwrap();
         }
         self.total_count as usize
     }
@@ -129,21 +153,18 @@ impl<S: StateStore> AllOrNoneState<S> {
     }
 
     // Fetch cache from the state store.
-    async fn fetch_cache(&mut self) -> Result<()> {
+    async fn populate_cache(&mut self) -> Result<()> {
         let epoch = u64::MAX;
         assert!(self.cached.is_none());
 
         let all_data = self.keyspace.scan_strip_prefix(None, epoch).await?;
 
-        // Fetch cached states.
-        let mut cached = BTreeMap::new();
-        for (raw_key, raw_value) in all_data {
-            let pk_deserializer = RowDeserializer::new(self.pk_data_types.to_vec());
-            let key = pk_deserializer.deserialize_not_null(&raw_key)?;
-            let deserializer = JoinRowDeserializer::new(self.data_types.to_vec());
-            let value = deserializer.deserialize(&raw_value)?;
-            cached.insert(key, value);
-        }
+        // Insert cached states.
+        let mut cached = Self::fill_cached(
+            all_data,
+            self.data_types.clone(),
+            self.pk_data_types.clone(),
+        )?;
 
         // Apply current flush buffer to cached states.
         for (pk, row) in &self.flush_buffer {
@@ -174,21 +195,21 @@ impl<S: StateStore> AllOrNoneState<S> {
     #[allow(dead_code)]
     pub async fn iter(&mut self) -> AllOrNoneStateIter<'_> {
         if self.cached.is_none() {
-            self.fetch_cache().await.unwrap();
+            self.populate_cache().await.unwrap();
         }
         self.cached.as_ref().unwrap().iter()
     }
 
     pub async fn values(&mut self) -> AllOrNoneStateValues<'_> {
         if self.cached.is_none() {
-            self.fetch_cache().await.unwrap();
+            self.populate_cache().await.unwrap();
         }
         self.cached.as_ref().unwrap().values()
     }
 
     pub async fn values_mut(&mut self) -> AllOrNoneStateValuesMut<'_> {
         if self.cached.is_none() {
-            self.fetch_cache().await.unwrap();
+            self.populate_cache().await.unwrap();
         }
         self.cached.as_mut().unwrap().values_mut()
     }

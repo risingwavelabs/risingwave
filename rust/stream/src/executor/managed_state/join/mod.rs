@@ -1,11 +1,9 @@
 mod all_or_none;
-use std::collections::BTreeMap;
 use std::ops::{Deref, DerefMut, Index};
 use std::sync::Arc;
 
 pub use all_or_none::AllOrNoneState;
 use itertools::Itertools;
-use risingwave_common::array::data_chunk_iter::RowDeserializer;
 use risingwave_common::array::Row;
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::error::Result as RWResult;
@@ -192,29 +190,16 @@ impl<S: StateStore> JoinHashMap<S> {
         }
     }
 
-    /// Fetch cache from the state store.
+    /// Fetch cache from the state store. Should only be called if the key does not exist in memory.
     async fn fetch_cached_state(&self, key: &HashKeyType) -> RWResult<Option<AllOrNoneState<S>>> {
         let keyspace = self.get_state_keyspace(key);
-        let all_data = keyspace.scan_strip_prefix(None, self.current_epoch).await?;
-        if !all_data.is_empty() {
-            // Insert cached states.
-            let mut cached = BTreeMap::new();
-            for (raw_key, raw_value) in all_data {
-                let pk_deserializer = RowDeserializer::new(self.pk_data_types.to_vec());
-                let key = pk_deserializer.deserialize_not_null(&raw_key)?;
-                let deserializer = JoinRowDeserializer::new(self.data_types.to_vec());
-                let value = deserializer.deserialize(&raw_value)?;
-                cached.insert(key, value);
-            }
-            Ok(Some(AllOrNoneState::with_cached_state(
-                keyspace,
-                cached,
-                self.data_types.clone(),
-                self.pk_data_types.clone(),
-            )))
-        } else {
-            Ok(None)
-        }
+        Ok(AllOrNoneState::with_cached_state(
+            keyspace,
+            self.data_types.clone(),
+            self.pk_data_types.clone(),
+            self.current_epoch,
+        )
+        .await?)
     }
 
     /// Create a [`AllOrNoneState`] without cached state. Should only be called if the key
@@ -244,17 +229,7 @@ impl<S: StateStore> JoinHashMap<S> {
         if contains {
             Ok(self.inner.get_mut(key).unwrap())
         } else {
-            let keyspace = self.get_state_keyspace(key);
-            let all_data = keyspace.scan_strip_prefix(None, self.current_epoch).await?;
-            let total_count = all_data.len();
-            let state = AllOrNoneState::new(
-                keyspace,
-                total_count,
-                self.data_types.clone(),
-                self.pk_data_types.clone(),
-            );
-            self.inner.put(key.clone(), state);
-
+            self.init_without_cache(key).await?;
             Ok(self.inner.get_mut(key).unwrap())
         }
     }
