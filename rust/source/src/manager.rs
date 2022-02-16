@@ -6,14 +6,11 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::{ensure, gen_error};
-use risingwave_storage::bummock::BummockTable;
-use risingwave_storage::table::{ScannableTable, ScannableTableRef};
+use risingwave_storage::table::{ScannableTableRef};
 use risingwave_storage::TableColumnDesc;
 
 use crate::table_v2::TableSourceV2;
-use crate::{
-    HighLevelKafkaSource, SourceConfig, SourceFormat, SourceImpl, SourceParser, TableSource,
-};
+use crate::{HighLevelKafkaSource, SourceConfig, SourceFormat, SourceImpl, SourceParser};
 
 pub type SourceRef = Arc<SourceImpl>;
 
@@ -27,7 +24,6 @@ pub trait SourceManager: Sync + Send {
         columns: Vec<SourceColumnDesc>,
         row_id_index: Option<usize>,
     ) -> Result<()>;
-    fn create_table_source(&self, table_id: &TableId, table: Arc<BummockTable>) -> Result<()>;
     fn create_table_source_v2(&self, table_id: &TableId, table: ScannableTableRef) -> Result<()>;
     fn register_associated_materialized_view(
         &self,
@@ -111,35 +107,6 @@ impl SourceManager for MemSourceManager {
 
         tables.insert(source_id.clone(), desc);
 
-        Ok(())
-    }
-
-    fn create_table_source(&self, table_id: &TableId, table: Arc<BummockTable>) -> Result<()> {
-        let mut sources = self.get_sources()?;
-
-        ensure!(
-            !sources.contains_key(table_id),
-            "Source id already exists: {:?}",
-            table_id
-        );
-
-        let columns = table
-            .column_descs()
-            .iter()
-            .map(SourceColumnDesc::from)
-            .collect();
-
-        let source = SourceImpl::Table(TableSource::new(table));
-
-        // Table sources do not need columns and format
-        let desc = SourceDesc {
-            source: Arc::new(source),
-            columns,
-            format: SourceFormat::Invalid,
-            row_id_index: Some(0), // always use the first column as row_id
-        };
-
-        sources.insert(table_id.clone(), desc);
         Ok(())
     }
 
@@ -305,46 +272,6 @@ mod tests {
         let drop_source_res = mem_source_manager.drop_source(&table_id);
         assert!(drop_source_res.is_ok());
 
-        let get_source_res = mem_source_manager.get_source(&table_id);
-        assert!(get_source_res.is_err());
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_table_source() -> Result<()> {
-        let table_id = TableId::default();
-
-        let schema = Schema {
-            fields: vec![
-                Field::unnamed(DataType::Decimal),
-                Field::unnamed(DataType::Decimal),
-            ],
-        };
-
-        let table_columns = schema
-            .fields
-            .iter()
-            .enumerate()
-            .map(|(i, f)| TableColumnDesc {
-                data_type: f.data_type,
-                column_id: i as i32, // use column index as column id
-                name: f.name.clone(),
-            })
-            .collect();
-
-        let bummock_table = Arc::new(BummockTable::new(&table_id, table_columns));
-        let mem_source_manager = MemSourceManager::new();
-        let res = mem_source_manager.create_table_source(&table_id, bummock_table);
-        assert!(res.is_ok());
-
-        // get source
-        let get_source_res = mem_source_manager.get_source(&table_id);
-        assert!(get_source_res.is_ok());
-
-        // drop source
-        let drop_source_res = mem_source_manager.drop_source(&table_id);
-        assert!(drop_source_res.is_ok());
         let get_source_res = mem_source_manager.get_source(&table_id);
         assert!(get_source_res.is_err());
 

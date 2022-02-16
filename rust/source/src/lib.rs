@@ -19,7 +19,6 @@ pub use manager::*;
 pub use parser::*;
 use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::error::Result;
-pub use table::*;
 pub use table_v2::*;
 
 pub mod parser;
@@ -28,7 +27,6 @@ mod high_level_kafka;
 mod manager;
 
 mod common;
-mod table;
 mod table_v2;
 
 extern crate maplit;
@@ -50,18 +48,10 @@ pub enum SourceFormat {
 #[derive(Debug)]
 pub enum SourceImpl {
     HighLevelKafka(HighLevelKafkaSource),
-    Table(TableSource),
     TableV2(TableSourceV2),
 }
 
 impl SourceImpl {
-    pub fn as_table(&self) -> &TableSource {
-        match self {
-            SourceImpl::Table(table) => table,
-            _ => panic!("not a table source"),
-        }
-    }
-
     pub fn as_table_v2(&self) -> &TableSourceV2 {
         match self {
             SourceImpl::TableV2(table) => table,
