@@ -3,6 +3,7 @@ import * as color from "../color";
 import { getConnectedComponent, treeBfs } from "../algo";
 import { cloneDeep, max } from "lodash";
 import { newNumberArray } from "../util";
+import { highlightActorList } from "./chartEffect";
 import StreamPlanParser from "./parser";
 // Actor constant
 // 
@@ -29,15 +30,13 @@ import StreamPlanParser from "./parser";
 //       ---└───────────┘
 //          |-----------------heightUnit---------------|
 //
-const nodeRadius = 30; // the radius of the tree nodes in an actor
-const nodeStrokeWidth = 5; // the stroke width of the link of the tree nodes in an actor
+const operatorNodeRadius = 30; // the radius of the tree nodes in an actor
+const operatorNodeStrokeWidth = 5; // the stroke width of the link of the tree nodes in an actor
 const widthUnit = 230; // the width of a tree node in an actor
 const heightUnit = 250; // the height of a tree layer in an actor
 const actorBoxPadding = 100; // box padding
 const actorBoxStroke = 15; // the width of the stroke of the box
-const linkStrokeWidth = 30; // the width of the link between nodes
-const linkFlowEffectDuration = 500; // the duration of the flow effect amination
-const linkStrokeDash = "10, 10";
+const internalLinkStrokeWidth = 30; // the width of the link between nodes
 
 // Stream Plan constant
 const gapBetweenRow = 100;
@@ -50,7 +49,6 @@ const connectionGap = 20;
 
 // Others
 const fontSize = 30;
-const highLightColor = "#DC143C";
 const outGoingLinkBgColor = "#eee";
 
 /**
@@ -61,7 +59,7 @@ const outGoingLinkBgColor = "#eee";
  * @param {{id: number}} node2 a node (operator) in an actor box
  * @returns {string} The link id
  */
-function constructNodeLinkId(node1, node2) {
+function constructInternalLinkId(node1, node2) {
   return "node-" + (node1.id > node2.id ? node1.id + "-" + node2.id : node2.id + "-" + node1.id);
 }
 
@@ -72,84 +70,9 @@ function constructNodeLinkId(node1, node2) {
  * @param {{id: number}} node a node (operator) in an actor box 
  * @returns {string} The node id
  */
-function constructNodeId(node) {
+function constructOperatorNodeId(node) {
   return "node-" + node.id;
 }
-
-function highlightActorList(actorList) {
-  // cancel the effect of being selected
-  d3.selectAll("rect.selected")
-    .attr("stroke", 'none')
-    .classed("selected", false);
-
-  d3.selectAll(`path.selected.outgoing-link-bg`)
-    .attr("stroke", function () { return d3.select(this).attr("data-color") });
-
-  d3.selectAll("path.selected.outgoing-link")
-    .attr("stroke", function () { return d3.select(this).attr("data-color") });
-
-  d3.selectAll("path.selected")
-    .on("start", null)
-    .classed("selected", false);
-
-  // apply the effect of being selected
-  for (let id of actorList) {
-    // highlight actor box
-    d3.selectAll(`rect.actor-${id}`)
-      .attr("stroke", highLightColor)
-      .classed("selected", true);
-
-    // apply moving effect on internal links
-    d3.selectAll(`path.actor-${id}.interal-link`)
-      .classed("selected", true)
-      .attr("stroke-dashoffset", "0")
-      .transition()
-      .duration(linkFlowEffectDuration)
-      .ease(d3.easeLinear)
-      .on("start", function repeat() {
-        if (!d3.select(this).classed("selected")) {
-          return;
-        }
-        d3.active(this)
-          .attr("stroke-dashoffset", "20")
-          .transition()
-          .on("start", function () {
-            d3.select(this).attr("stroke-dashoffset", "0");
-            repeat.bind(this)();
-          })
-      });
-
-    // apply moving effect on outgoing links of actors
-    d3.selectAll(`path.actor-${id}.outgoing-link`)
-      .classed("selected", true)
-      .attr("data-color", function () { return d3.select(this).attr("stroke") })
-      .attr("stroke", "white")
-      .attr("stroke-dasharray", "20, 20")
-      .attr("stroke-dashoffset", "0")
-      .transition()
-      .duration(linkFlowEffectDuration)
-      .ease(d3.easeLinear)
-      .on("start", function repeat() {
-        if (!d3.select(this).classed("selected")) {
-          return;
-        }
-        d3.active(this)
-          .attr("stroke-dashoffset", "40")
-          .transition()
-          .on("start", function () {
-            d3.select(this).attr("stroke-dashoffset", "0");
-            repeat.bind(this)();
-          })
-      });
-
-    // change the background color of the outgoing link
-    d3.selectAll(`path.actor-${id}.outgoing-link-bg`)
-      .classed("selected", true)
-      .attr("data-color", function () { return d3.select(this).attr("stroke") })
-      .attr("stroke", highLightColor);
-  }
-}
-
 
 /**
  * Work flow
@@ -181,6 +104,7 @@ export class StreamChartHelper {
     this.onNodeClick = onNodeClick;
     this.selectedActor = selectedActor;
     this.selectedActorStr = this.selectedActor ? selectedActor.host.host + ":" + selectedActor.host.port : null;
+    this.selectedActorList = new Set();
   }
 
   isInSelectedActor(actor) {
@@ -192,6 +116,12 @@ export class StreamChartHelper {
   }
 
   _operatorColor = (actor, operator) => {
+    console.log(operator);
+    if(operator.type === "mviewNode"){
+      // return "#ffc806"
+      return "#1976d2";
+    }
+    return "#eee";
     // return color.TwoGradient(actor.actorId)[0];
     return this.isInSelectedActor(actor) ? "#1976d2" : "#eee";
   }
@@ -525,7 +455,12 @@ export class StreamChartHelper {
     this.layoutActorBox(rootNode, baseX + boxWidth - actorBoxPadding, baseY + boxHeight / 2);
 
     const onActorClicked = (e) => {
-      highlightActorList([actor.actorId]);
+      if(this.selectedActorList.has(actor.actorId)){
+        this.selectedActorList.delete(actor.actorId);
+      }else{
+        this.selectedActorList.add(actor.actorId);
+      }
+      highlightActorList(this.selectedActorList);
     }
 
     const onLinkClicked = (e) => {
@@ -533,7 +468,6 @@ export class StreamChartHelper {
     }
 
     const onNodeClicked = (e, node) => {
-      onActorClicked(e, actor);
       this.onNodeClick && this.onNodeClick(e, node);
       props.onNodeClicked && props.onNodeClicked(e, node);
     }
@@ -549,8 +483,11 @@ export class StreamChartHelper {
 
     // draw box
     group.attr("id", "actor-" + actor.actorId);
-    group.append("rect")
-      .attr("class", "actor-" + actor.actorId)
+    let actorRect = group.append("rect");
+    for(let id of actor.representedActorList){
+      actorRect.classed("actor-" + id, true);
+    }
+    actorRect
       .attr("width", boxWidth)
       .attr("height", boxHeight)
       .attr("x", baseX)
@@ -577,33 +514,33 @@ export class StreamChartHelper {
     group.selectAll("path")
       .data(linkData)
       .join("path")
-      .attr("stroke-dasharray", linkStrokeDash)
+      .attr("stroke-dasharray", "10, 10")
       .attr("d", linkGen)
       .attr("fill", "none")
       .attr("class", "actor-" + actor.actorId)
       .classed("interal-link", true)
-      .attr("id", (link) => constructNodeLinkId(link.sourceNode, link.nextNode))
-      .style("stroke-width", linkStrokeWidth)
+      .attr("id", (link) => constructInternalLinkId(link.sourceNode, link.nextNode))
+      .style("stroke-width", internalLinkStrokeWidth)
       .on("click", onLinkClicked)
       .attr("stroke", linkColor);
 
     // draw nodes
     treeBfs(rootNode, (node) => {
       node.d3Selection = group.append("circle")
-        .attr("r", nodeRadius)
+        .attr("r", operatorNodeRadius)
         .attr("cx", node.x)
         .attr("cy", node.y)
-        .attr("id", constructNodeId(node))
+        .attr("id", constructOperatorNodeId(node))
         .attr('stroke', strokeColor)
         .attr('fill', this._operatorColor(actor, node))
         .style('cursor', 'pointer')
-        .style('stroke-width', nodeStrokeWidth)
+        .style('stroke-width', operatorNodeStrokeWidth)
         .on("click", (e) => onNodeClicked(e, node))
         .on("mouseover", (e) => onMouseOver(e, node))
         .on("mouseout", (e) => onMouseOut(e, node))
       group.append("text")
         .attr("x", node.x)
-        .attr("y", node.y + nodeRadius + fontSize + 10)
+        .attr("y", node.y + operatorNodeRadius + fontSize + 10)
         .attr("text-anchor", "middle")
         .attr("font-size", fontSize)
         .text(node.type ? node.type : node.dispatcherType);
@@ -723,6 +660,7 @@ export class StreamChartHelper {
         [start[0] + compensation + actorBoxPadding + connectionGap + bendGap * 2, end[1]],
         [start[0] + compensation + actorBoxPadding + connectionGap + bendGap, end[1]],
         [start[0] + compensation + actorBoxPadding + connectionGap + bendGap, start[1]],
+        [start[0] + compensation + actorBoxPadding + connectionGap, start[1]],
         start
       ]);
       return pathStr;

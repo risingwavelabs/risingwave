@@ -3,9 +3,11 @@ import createView from "../lib/streamPlan/streamChartHelper";
 import { useEffect, useRef, useState } from 'react';
 import styled from '@emotion/styled';
 import LocationSearchingIcon from '@mui/icons-material/LocationSearching';
+import SearchIcon from '@mui/icons-material/Search';
+import { Tooltip, FormControl, Select, MenuItem, InputLabel, FormHelperText, Input, InputAdornment, IconButton } from '@mui/material';
 
-import { Tooltip, FormControl, Select, MenuItem, InputLabel, FormHelperText } from '@mui/material';
-
+const width = 1000;
+const height = 1000;
 const orginalZoom = new d3.ZoomTransform(0.5, 0, 0);
 let zoom;
 let svg;
@@ -23,6 +25,14 @@ const SvgBoxCover = styled('div')(() => ({
   zIndex: "6"
 }));
 
+const ToolBoxTitle = styled('div')(() => ({
+  fontSize: "15px",
+  fontWeight: 700
+}))
+
+document.addEventListener("mousedown", (e) => {
+  console.log(e)
+})
 
 export default function StreamingView(props) {
   const data = props.data || [];
@@ -31,10 +41,25 @@ export default function StreamingView(props) {
   const [nodeJson, setNodeJson] = useState("");
   const [showInfoPane, setShowInfoPane] = useState(false);
   const [selectedActor, setSelectedActor] = useState("Show All");
+  const [searchType, setSearchType] = useState("Actor");
+  const [searchContent, setSearchContent] = useState("");
 
   const d3Container = useRef(null);
 
   const exprNode = (actorNode) => (({ input, ...o }) => o)(actorNode)
+
+  const locateSearchPosition = () => {
+    let type = searchType === "Operator" ? "Node" : searchType;
+    type = type.toLocaleLowerCase();
+
+    if (type === "actor") {
+      let selection = d3.select(`rect.${type}-${searchContent}`);
+      if (!selection.empty()) {
+        console.log(selection.attr("x"), selection.attr("y"));
+        svg.call(zoom).call(zoom.transform, new d3.ZoomTransform(1, -selection.attr("x"), -selection.attr("y") + height / 2));
+      }
+    }
+  }
 
   const onNodeClick = (e, node) => {
     setShowInfoPane(true);
@@ -47,14 +72,27 @@ export default function StreamingView(props) {
     setSelectedActor(e.target.value);
   }
 
+  const onSearchTypeChange = (e) => {
+    setSearchType(e.target.value);
+  }
+
+  const onSearchButtonClick = (e) => {
+    locateSearchPosition();
+  }
+
+  const onSearchBoxChange = (e) => {
+    setSearchContent(e.target.value);
+  }
+
+  useEffect(() => {
+    locateSearchPosition();
+  }, [searchType, searchContent]);
+
   useEffect(() => {
     if (d3Container.current) {
-      const width = 1000;
-      const height = 1000;
-
       svg = d3
         .select(d3Container.current)
-        .attr("viewBox", [-width / 6, -height / 4, width, height]);
+        .attr("viewBox", [0, 0, width, height]);
 
       const g = svg.append("g").attr("class", "top");
       createView(g, data, onNodeClick, selectedActor === "Show All" ? null : selectedActor);
@@ -89,7 +127,11 @@ export default function StreamingView(props) {
         </div>
 
       </SvgBoxCover>
-      <SvgBoxCover className="noselect">
+      <SvgBoxCover className="noselect" style={{ display: "flex", flexDirection: "column" }}>
+        {/* Select actor */}
+        <ToolBoxTitle>
+          Select a worker node
+        </ToolBoxTitle>
         <FormControl sx={{ m: 1, minWidth: 300 }}>
           <InputLabel>Actor</InputLabel>
           <Select
@@ -111,7 +153,42 @@ export default function StreamingView(props) {
           </Select>
           <FormHelperText>Select an Actor</FormHelperText>
         </FormControl>
+
+        {/* Search box */}
+        <ToolBoxTitle>
+          Search
+        </ToolBoxTitle>
+        <div style={{ display: "flex", flexDirection: "row", alignItems: "center" }}>
+          <FormControl sx={{ m: 1, minWidth: 120 }}>
+            <InputLabel>Type</InputLabel>
+            <Select
+              size="small"
+              value={searchType}
+              label="Type"
+              onChange={onSearchTypeChange}
+            >
+              <MenuItem value="Actor">Actor</MenuItem>
+            </Select>
+          </FormControl>
+          <Input
+            sx={{ m: 1, width: 150 }}
+            size="small" label="Search" variant="standard"
+            onChange={onSearchBoxChange}
+            value={searchContent}
+            endAdornment={
+              <InputAdornment position="end">
+                <IconButton
+                  aria-label="toggle password visibility"
+                  onClick={onSearchButtonClick}
+                >
+                  <SearchIcon />
+                </IconButton>
+              </InputAdornment>
+            } />
+
+        </div>
       </SvgBoxCover>
+
       <SvgBoxCover style={{ right: "10px", bottom: "10px", cursor: "pointer" }}>
         <Tooltip title="Reset">
           <div onClick={() => { svg.call(zoom.transform, orginalZoom) }}>
