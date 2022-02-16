@@ -44,4 +44,3 @@ uuid = "0.8"
 [dev-dependencies]
 serial_test = "*"
 tempfile = "3"
-tokio-postgres = "0.7"
