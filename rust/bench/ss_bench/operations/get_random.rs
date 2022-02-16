@@ -8,12 +8,12 @@ use rand::prelude::{Distribution, StdRng};
 use rand::SeedableRng;
 use risingwave_storage::StateStore;
 
-use super::OperationManager;
+use super::OperationRunner;
 use crate::utils::latency_stat::LatencyStat;
 use crate::utils::workload::{get_epoch, Workload};
 use crate::{Opts, WorkloadType};
 
-impl OperationManager {
+impl OperationRunner {
     pub(crate) async fn get_random(&self, store: &impl StateStore, opts: &Opts) {
         let batch = Workload::new(opts, WorkloadType::GetRandom, None).batch;
         store

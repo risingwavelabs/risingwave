@@ -221,12 +221,11 @@ async fn main() {
         }
     };
 
-    let om = OperationManager::new();
     match state_store {
-        StateStoreImpl::Hummock(store) => om.run_operations(store, &opts).await,
-        StateStoreImpl::Memory(store) => om.run_operations(store, &opts).await,
-        StateStoreImpl::RocksDB(store) => om.run_operations(store, &opts).await,
-        StateStoreImpl::Tikv(store) => om.run_operations(store, &opts).await,
+        StateStoreImpl::Hummock(store) => OperationRunner::run_operations(store, &opts).await,
+        StateStoreImpl::Memory(store) => OperationRunner::run_operations(store, &opts).await,
+        StateStoreImpl::RocksDB(store) => OperationRunner::run_operations(store, &opts).await,
+        StateStoreImpl::Tikv(store) => OperationRunner::run_operations(store, &opts).await,
     };
 
     if opts.statistics {

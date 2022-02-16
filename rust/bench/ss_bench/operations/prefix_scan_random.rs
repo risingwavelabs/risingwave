@@ -9,12 +9,12 @@ use rand::SeedableRng;
 use risingwave_storage::hummock::key::next_key;
 use risingwave_storage::StateStore;
 
-use super::OperationManager;
+use super::OperationRunner;
 use crate::utils::latency_stat::LatencyStat;
 use crate::utils::workload::{get_epoch, Workload};
 use crate::{Opts, WorkloadType};
 
-impl OperationManager {
+impl OperationRunner {
     pub(crate) async fn prefix_scan_random(&self, store: &impl StateStore, opts: &Opts) {
         let workload = Workload::new(opts, WorkloadType::PrefixScanRandom, None);
         store
