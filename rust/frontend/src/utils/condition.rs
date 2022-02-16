@@ -13,11 +13,13 @@ impl Condition {
             conjunctions: to_conjunctions(expr),
         }
     }
+
     pub fn true_cond() -> Self {
         Self {
             conjunctions: vec![],
         }
     }
+
     pub fn to_expr(self) -> ExprImpl {
         let mut iter = self.conjunctions.into_iter();
         if let Some(mut ret) = iter.next() {
@@ -31,6 +33,7 @@ impl Condition {
             Literal::new(Some(ScalarImpl::Bool(true)), DataType::Boolean).bound_expr()
         }
     }
+
     pub fn and(&mut self, other: &Self) {
         self.conjunctions
             .reserve(self.conjunctions.len() + other.conjunctions.len());
@@ -38,6 +41,7 @@ impl Condition {
             self.conjunctions.push(expr.clone());
         }
     }
+
     #[must_use]
     pub fn rewrite_expr(self, rewriter: &mut impl ExprRewriter) -> Self {
         Self {
