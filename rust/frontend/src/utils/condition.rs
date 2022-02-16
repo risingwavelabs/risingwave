@@ -21,7 +21,7 @@ impl Condition {
     }
 
     pub fn always_true(&self) -> bool {
-        self.conjunctions.len() == 0
+        self.conjunctions.is_empty()
     }
     pub fn to_expr(self) -> ExprImpl {
         let mut iter = self.conjunctions.into_iter();

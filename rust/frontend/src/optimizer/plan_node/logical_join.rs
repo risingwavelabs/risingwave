@@ -8,7 +8,7 @@ use super::{
     ToStream,
 };
 use crate::expr::ExprImpl;
-use crate::optimizer::plan_node::{BatchHashJoin, BatchSortMergeJoin};
+use crate::optimizer::plan_node::{BatchHashJoin, BatchSortMergeJoin, LogicalFilter};
 use crate::optimizer::property::{Distribution, Order, WithDistribution, WithOrder, WithSchema};
 
 #[derive(Debug, Clone)]
@@ -110,8 +110,7 @@ impl ToBatch for LogicalJoin {
                 BatchSortMergeJoin::left_required_order(self.predicate());
             let use_sort_merge_join = new_left.order().satisfies(&sort_join_required_order);
 
-            let phy_join;
-            if use_sort_merge_join {
+            let phy_join = if use_sort_merge_join {
                 let right_required_order = BatchSortMergeJoin::right_required_order_from_left_order(
                     new_left.order(),
                     self.predicate(),
@@ -120,14 +119,16 @@ impl ToBatch for LogicalJoin {
                     .left()
                     .to_batch_with_order_required(&right_required_order);
                 let new_logical = self.clone_with_left_right(new_left, new_right);
-                phy_join = BatchSortMergeJoin::new(new_logical).into_plan_ref();
+                BatchSortMergeJoin::new(new_logical).into_plan_ref()
             } else {
                 let new_right = self.left().to_batch();
                 let new_logical = self.clone_with_left_right(new_left, new_right);
-                phy_join = BatchHashJoin::new(new_logical).into_plan_ref();
-            }
+                BatchHashJoin::new(new_logical).into_plan_ref()
+            };
 
             if need_pull_filter {
+                let _filter = LogicalFilter::new(phy_join, self.predicate.non_eq_cond());
+                todo!()
                 // TODO: add a BatchFilter on the top of the join.
             } else {
                 return phy_join;

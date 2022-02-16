@@ -140,7 +140,7 @@ impl JoinPredicate {
     }
 
     pub fn has_eq(&self) -> bool {
-        self.eq_keys.len() != 0
+        !self.eq_keys.is_empty()
     }
 
     pub fn has_non_eq(&self) -> bool {
