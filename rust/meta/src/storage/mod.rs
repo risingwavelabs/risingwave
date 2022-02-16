@@ -4,6 +4,7 @@ mod sled_metastore;
 mod tests;
 mod transaction;
 
+pub type ColumnFamily = String;
 pub type Key = Vec<u8>;
 pub type Value = Vec<u8>;
 pub type KeyValueVersion = u64;

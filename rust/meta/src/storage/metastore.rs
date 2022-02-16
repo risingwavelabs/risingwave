@@ -9,20 +9,22 @@ use risingwave_common::error::{ErrorCode, Result};
 
 use crate::manager::Epoch;
 use crate::storage::transaction::Transaction;
-use crate::storage::{Key, KeyValueVersion, Value};
+use crate::storage::{ColumnFamily, Key, KeyValueVersion, Value};
 
 pub const DEFAULT_COLUMN_FAMILY: &str = "default";
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct KeyValue {
+    cf: ColumnFamily,
     key: Key,
     value: Value,
     version: KeyValueVersion,
 }
 
 impl KeyValue {
-    pub fn new(key: Key, value: Value, version: KeyValueVersion) -> KeyValue {
+    pub fn new(cf: ColumnFamily, key: Key, value: Value, version: KeyValueVersion) -> KeyValue {
         KeyValue {
+            cf,
             key,
             value,
             version,
@@ -47,7 +49,7 @@ pub trait MetaStore: Sync + Send + 'static {
     async fn list_cf(&self, cf: &str) -> Result<Vec<Vec<u8>>>;
     /// We will need a proper implementation for `list`, `list_cf` and `list_batch_cf` in etcd
     /// MetaStore. In a naive implementation, we need to select the latest version for each key
-    /// locally after fetching all versions of given cfs from etcd, which may not meet our
+    /// locally after fetching all versions of it from etcd, which may not meet our
     /// performance expectation.
     async fn list_batch_cf(&self, cfs: Vec<&str>) -> Result<Vec<Vec<Vec<u8>>>>;
     async fn put_cf(&self, cf: &str, key: &[u8], value: &[u8], version: Epoch) -> Result<()>;
@@ -281,18 +283,6 @@ impl MetaStore for MemStore {
 
     async fn commit_transaction(&self, _trx: &mut Transaction) -> Result<()> {
         unimplemented!()
-    }
-}
-
-pub struct ColumnFamilyUtils {}
-impl ColumnFamilyUtils {
-    pub fn prefix_key_with_cf(key: impl AsRef<[u8]>, prefix: impl AsRef<[u8]>) -> Vec<u8> {
-        let prefix_len: u8 = prefix
-            .as_ref()
-            .len()
-            .try_into()
-            .expect("prefix length out of u8 range");
-        [&[prefix_len], prefix.as_ref(), key.as_ref()].concat()
     }
 }
 
