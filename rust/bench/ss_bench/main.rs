@@ -22,6 +22,7 @@ use crate::utils::store_statistics::print_statistics;
 #[allow(dead_code)]
 enum WorkloadType {
     WriteBatch = 0,
+    GetRandom = 1,
     GetSeq = 2,
     PrefixScanRandom = 3,
     DeleteRandom = 4,

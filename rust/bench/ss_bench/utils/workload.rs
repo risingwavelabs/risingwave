@@ -39,7 +39,7 @@ impl Workload {
         let prefix_num =
             (opts.batch_size + opts.keys_per_prefix - 1) as u64 / opts.keys_per_prefix as u64;
         let (prefixes, keys) = match workload_type {
-            WriteBatch | PrefixScanRandom | DeleteRandom => {
+            WriteBatch | GetRandom | PrefixScanRandom | DeleteRandom => {
                 Self::new_random_keys(opts, base_seed, prefix_num)
             }
             GetSeq | DeleteSeq => Self::new_sequential_keys(opts, prefix_num),
