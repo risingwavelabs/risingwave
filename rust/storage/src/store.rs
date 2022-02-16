@@ -214,7 +214,11 @@ impl StateStoreImpl {
                             remote_dir: remote_dir.to_string(),
                             checksum_algo: ChecksumAlg::Crc32c,
                         },
-                        Arc::new(LocalVersionManager::new(s3_store, remote_dir, None)),
+                        Arc::new(LocalVersionManager::new(
+                            s3_store,
+                            remote_dir,
+                            Some(Arc::new(Cache::new(65536))),
+                        )),
                         Arc::new(RPCHummockMetaClient::new(meta_client)),
                     )
                     .await
