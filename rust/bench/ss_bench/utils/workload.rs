@@ -13,6 +13,7 @@ use crate::{Opts, WorkloadType};
 type Keys = Vec<Bytes>;
 type Prefixes = Vec<Bytes>;
 
+#[derive(Clone, Default)]
 pub struct Workload {
     pub batch: Vec<(Bytes, Option<Bytes>)>,
     pub prefixes: Vec<Bytes>,
@@ -43,6 +44,19 @@ impl Workload {
         batch.dedup_by(|(k1, _), (k2, _)| k1 == k2);
 
         Workload { batch, prefixes }
+    }
+
+    fn merge(&mut self, other: &mut Workload) {
+        // TODO(Sun Ting): ensure that the batch matches the prefixes
+        self.batch.append(&mut other.batch);
+        // use reverse order because new batch need to be appended to the front of the old batch
+        self.batch.sort_by(|(k1, _), (k2, _)| k2.cmp(k1));
+        // remove old KV pairs
+        self.batch.dedup_by(|(k1, _), (k2, _)| k1 == k2);
+
+        self.prefixes.append(&mut other.prefixes);
+        self.prefixes.sort_by(|k1, k2| k1.cmp(k2));
+        self.prefixes.dedup_by(|k1, k2| k1 == k2);
     }
 
     fn new_values(opts: &Opts, base_seed: u64) -> Vec<Option<Bytes>> {
