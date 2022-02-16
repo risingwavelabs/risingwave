@@ -8,11 +8,11 @@ use rand::prelude::{Distribution, StdRng};
 use rand::SeedableRng;
 use risingwave_storage::StateStore;
 
-use super::OperationRunner;
+use super::Operations;
 use crate::utils::latency_stat::LatencyStat;
 use crate::Opts;
 
-impl OperationRunner {
+impl Operations {
     pub(crate) async fn get_random(&self, store: &impl StateStore, opts: &Opts) {
         // generate queried point get key
         let mut rng = StdRng::seed_from_u64(233);

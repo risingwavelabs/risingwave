@@ -9,11 +9,11 @@ use rand::SeedableRng;
 use risingwave_storage::hummock::key::next_key;
 use risingwave_storage::StateStore;
 
-use super::OperationRunner;
+use super::Operations;
 use crate::utils::latency_stat::LatencyStat;
 use crate::Opts;
 
-impl OperationRunner {
+impl Operations {
     pub(crate) async fn prefix_scan_random(&self, store: &impl StateStore, opts: &Opts) {
         // generate queried prefixes
         let mut rng = StdRng::seed_from_u64(233);

@@ -5,12 +5,12 @@ use futures::future;
 use itertools::Itertools;
 use risingwave_storage::StateStore;
 
-use super::OperationRunner;
+use super::Operations;
 use crate::utils::latency_stat::LatencyStat;
 use crate::utils::workload::{get_epoch, Workload};
 use crate::{Opts, WorkloadType};
 
-impl OperationRunner {
+impl Operations {
     pub(crate) async fn get_seq(&self, store: &impl StateStore, opts: &Opts) {
         let (_prefixes, keys, values) = Workload::gen(opts, WorkloadType::GetSeq, None);
         let batch = Workload::make_batch(keys, values);

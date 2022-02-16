@@ -222,10 +222,10 @@ async fn main() {
     };
 
     match state_store {
-        StateStoreImpl::Hummock(store) => OperationRunner::run_operations(store, &opts).await,
-        StateStoreImpl::Memory(store) => OperationRunner::run_operations(store, &opts).await,
-        StateStoreImpl::RocksDB(store) => OperationRunner::run_operations(store, &opts).await,
-        StateStoreImpl::Tikv(store) => OperationRunner::run_operations(store, &opts).await,
+        StateStoreImpl::Hummock(store) => Operations::run(store, &opts).await,
+        StateStoreImpl::Memory(store) => Operations::run(store, &opts).await,
+        StateStoreImpl::RocksDB(store) => Operations::run(store, &opts).await,
+        StateStoreImpl::Tikv(store) => Operations::run(store, &opts).await,
     };
 
     if opts.statistics {

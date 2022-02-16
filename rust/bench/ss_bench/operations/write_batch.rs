@@ -5,12 +5,12 @@ use futures::future;
 use itertools::Itertools;
 use risingwave_storage::StateStore;
 
-use super::OperationRunner;
+use super::Operations;
 use crate::utils::latency_stat::LatencyStat;
 use crate::utils::workload::{get_epoch, Workload};
 use crate::{Opts, WorkloadType};
 
-impl OperationRunner {
+impl Operations {
     pub(crate) async fn write_batch(&mut self, store: &impl StateStore, opts: &Opts) {
         let mut batches = (0..opts.write_batches)
             .into_iter()

@@ -9,14 +9,14 @@ pub(crate) mod prefix_scan_random;
 pub(crate) mod write_batch;
 
 #[derive(Clone, Default)]
-pub(crate) struct OperationRunner {
+pub(crate) struct Operations {
     pub(crate) keys: Vec<Bytes>,
     pub(crate) prefixes: Vec<Bytes>,
 }
 
-impl OperationRunner {
-    pub(crate) async fn run_operations(store: impl StateStore, opts: &Opts) {
-        let mut runner = OperationRunner::default();
+impl Operations {
+    pub(crate) async fn run(store: impl StateStore, opts: &Opts) {
+        let mut runner = Operations::default();
 
         for operation in opts.benchmarks.split(',') {
             match operation {
