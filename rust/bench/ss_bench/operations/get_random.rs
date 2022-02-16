@@ -15,18 +15,20 @@ use crate::Opts;
 impl Operations {
     pub(crate) async fn get_random(&self, store: &impl StateStore, opts: &Opts) {
         // generate queried point get key
-        let mut rng = StdRng::seed_from_u64(233);
-        let dist = Uniform::from(0..self.keys.len());
         let mut get_keys = match self.keys.is_empty() {
             // if state store is empty, use default key: ["a"*key_size]
             true => (0..opts.reads)
                 .into_iter()
                 .map(|_| Bytes::from(String::from_utf8(vec![65; opts.key_size as usize]).unwrap()))
                 .collect_vec(),
-            false => (0..opts.reads)
-                .into_iter()
-                .map(|_| self.keys[dist.sample(&mut rng)].clone())
-                .collect_vec(),
+            false => {
+                let mut rng = StdRng::seed_from_u64(233);
+                let dist = Uniform::from(0..self.keys.len());
+                (0..opts.reads)
+                    .into_iter()
+                    .map(|_| self.keys[dist.sample(&mut rng)].clone())
+                    .collect_vec()
+            }
         };
 
         // partitioned these keys for each concurrency

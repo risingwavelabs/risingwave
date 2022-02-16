@@ -16,8 +16,6 @@ use crate::Opts;
 impl Operations {
     pub(crate) async fn prefix_scan_random(&self, store: &impl StateStore, opts: &Opts) {
         // generate queried prefixes
-        let mut rng = StdRng::seed_from_u64(233);
-        let dist = Uniform::from(0..self.prefixes.len());
         let mut scan_prefixes = match self.prefixes.is_empty() {
             // if prefixes is empty, use default prefix: ["a"*key_prefix_size]
             true => (0..opts.reads as usize)
@@ -26,10 +24,14 @@ impl Operations {
                     Bytes::from(String::from_utf8(vec![65; opts.key_prefix_size as usize]).unwrap())
                 })
                 .collect_vec(),
-            false => (0..opts.reads as usize)
-                .into_iter()
-                .map(|_| self.prefixes[dist.sample(&mut rng)].clone())
-                .collect_vec(),
+            false => {
+                let mut rng = StdRng::seed_from_u64(233);
+                let dist = Uniform::from(0..self.prefixes.len());
+                (0..opts.reads as usize)
+                    .into_iter()
+                    .map(|_| self.prefixes[dist.sample(&mut rng)].clone())
+                    .collect_vec()
+            }
         };
 
         // partitioned these prefixes for each concurrency
