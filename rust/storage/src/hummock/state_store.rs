@@ -2,7 +2,7 @@ use std::ops::RangeBounds;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 
 use super::HummockStorage;
 use crate::hummock::iterator::DirectedUserIterator;
@@ -71,9 +71,11 @@ impl StateStore for HummockStateStore {
         Ok(HummockStateStoreIter(DirectedUserIterator::Backward(res)))
     }
 
-    async fn update_local_version(&self) -> Result<()> {
-        self.storage.update_local_version().await?;
-        Ok(())
+    async fn wait_epoch_in_version(&self, epoch: u64) -> Result<()> {
+        self.storage
+            .wait_epoch_in_version(epoch)
+            .await
+            .map_err(RwError::from)
     }
 }
 

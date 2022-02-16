@@ -35,9 +35,8 @@ use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 use risingwave_pb::hummock::{KeyRange, LevelType, SstableInfo};
 use tokio::select;
 use tokio::sync::mpsc;
+use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::task::JoinHandle;
-use tokio_retry::strategy::{jitter, ExponentialBackoff};
-use tokio_retry::RetryIf;
 use value::*;
 
 use self::iterator::{
@@ -49,7 +48,7 @@ use self::multi_builder::CapacitySplitTableBuilder;
 pub use self::state_store::*;
 use self::utils::bloom_filter_sstables;
 use super::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
-use crate::hummock::hummock_meta_client::{HummockMetaClient, RetryableError};
+use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::iterator::ReverseUserIterator;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::object::ObjectStore;
@@ -61,7 +60,8 @@ pub type HummockVersionId = u64;
 pub type HummockContextId = u32;
 pub type HummockEpoch = u64;
 pub const INVALID_EPOCH: HummockEpoch = 0;
-pub const FIRST_VERSION_ID: HummockVersionId = 0;
+pub const INVALID_VERSION_ID: HummockVersionId = 0;
+pub const FIRST_VERSION_ID: HummockVersionId = 1;
 
 #[derive(Default, Debug, Clone)]
 pub struct HummockOptions {
@@ -125,6 +125,8 @@ pub struct HummockStorage {
     stats: Arc<StateStoreStats>,
 
     hummock_meta_client: Arc<dyn HummockMetaClient>,
+
+    _stop_update_version_tx: mpsc::UnboundedSender<()>,
 }
 
 impl HummockStorage {
@@ -147,17 +149,12 @@ impl HummockStorage {
         let rx = Arc::new(PLMutex::new(Some(trigger_compact_rx)));
         let rx_for_compact = rx.clone();
 
-        RetryIf::spawn(
-            ExponentialBackoff::from_millis(10).map(jitter).take(4),
-            || async {
-                // Initialize the local version
-                local_version_manager
-                    .update_local_version(hummock_meta_client.as_ref())
-                    .await
-            },
-            RetryableError::default(),
-        )
-        .await?;
+        let (stop_update_version_tx, stop_update_version_rx) = mpsc::unbounded_channel();
+        tokio::spawn(HummockStorage::start_update_local_version_loop(
+            local_version_manager.clone(),
+            hummock_meta_client.clone(),
+            stop_update_version_rx,
+        ));
 
         let instance = Self {
             options: arc_options,
@@ -181,6 +178,7 @@ impl HummockStorage {
             })))),
             stats,
             hummock_meta_client,
+            _stop_update_version_tx: stop_update_version_tx,
         };
         Ok(instance)
     }
@@ -449,17 +447,6 @@ impl HummockStorage {
         // Notify the compactor
         self.tx.send(()).ok();
 
-        // TODO: #2336 The transaction flow is not ready yet. Before that we update_local_version
-        // after each write_batch to make uncommitted write visible.
-        self.update_local_version().await?;
-
-        Ok(())
-    }
-
-    pub async fn update_local_version(&self) -> HummockResult<()> {
-        self.local_version_manager
-            .update_local_version(self.hummock_meta_client())
-            .await?;
         Ok(())
     }
 
@@ -500,5 +487,31 @@ impl HummockStorage {
 
     pub fn hummock_meta_client(&self) -> &dyn HummockMetaClient {
         self.hummock_meta_client.as_ref()
+    }
+
+    async fn start_update_local_version_loop(
+        local_version_manager: Arc<LocalVersionManager>,
+        hummock_meta_client: Arc<dyn HummockMetaClient>,
+        mut stop_rx: UnboundedReceiver<()>,
+    ) {
+        let sleep = tokio::time::sleep(tokio::time::Duration::from_millis(10));
+        tokio::pin!(sleep);
+        loop {
+            select! {
+                _ = stop_rx.recv() => {
+                    return;
+                }
+                _ = &mut sleep => {
+                    // Ignore error
+                    local_version_manager.update_local_version(hummock_meta_client.as_ref()).await.ok();
+                }
+            }
+        }
+    }
+
+    async fn wait_epoch_in_version(&self, epoch: HummockEpoch) -> HummockResult<()> {
+        self.local_version_manager
+            .wait_epoch_in_version(epoch)
+            .await
     }
 }

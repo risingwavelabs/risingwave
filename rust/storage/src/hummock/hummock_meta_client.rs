@@ -48,6 +48,7 @@ pub trait HummockMetaClient: Send + Sync + 'static {
 pub struct RPCHummockMetaClient {
     meta_client: MetaClient,
     stats: Arc<StateStoreStats>,
+    // TODO #372: Use worker node id as context_id in RPC
 }
 
 impl RPCHummockMetaClient {

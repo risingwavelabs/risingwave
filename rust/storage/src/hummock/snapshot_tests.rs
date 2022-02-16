@@ -53,7 +53,6 @@ async fn gen_and_upload_table(
         )
         .await
         .unwrap();
-    // TODO #2336 we need to maintain local version.
     vm.update_local_version(hummock_meta_client).await.unwrap();
 }
 

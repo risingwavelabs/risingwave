@@ -3,14 +3,15 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use moka::future::Cache;
-use parking_lot::{Mutex, RwLock};
+use parking_lot::RwLock;
 use risingwave_pb::hummock::{HummockVersion, Level, LevelType};
+use tokio::sync::watch::Sender;
 
 use super::Block;
 use crate::hummock::cloud::{get_sst_data_path, get_sst_meta};
 use crate::hummock::{
-    HummockMetaClient, HummockRefCount, HummockResult, HummockSSTableId, HummockVersionId, SSTable,
-    FIRST_VERSION_ID, INVALID_EPOCH,
+    HummockEpoch, HummockMetaClient, HummockRefCount, HummockResult, HummockSSTableId,
+    HummockVersionId, SSTable, INVALID_EPOCH, INVALID_VERSION_ID,
 };
 use crate::object::ObjectStore;
 
@@ -79,12 +80,14 @@ impl LocalVersionManagerInner {
 /// during the lifetime of `ScopedLocalVersion`. Internally `LocalVersionManager` will pin/unpin the
 /// versions in storage service.
 pub struct LocalVersionManager {
-    inner: Mutex<LocalVersionManagerInner>,
+    inner: RwLock<LocalVersionManagerInner>,
     sstables: RwLock<BTreeMap<HummockSSTableId, Arc<SSTable>>>,
 
     obj_client: Arc<dyn ObjectStore>,
     remote_dir: Arc<String>,
     pub block_cache: Arc<Cache<Vec<u8>, Arc<Block>>>,
+
+    version_updated_tx: Sender<HummockEpoch>,
 }
 
 impl LocalVersionManager {
@@ -93,8 +96,9 @@ impl LocalVersionManager {
         remote_dir: &str,
         block_cache: Option<Arc<Cache<Vec<u8>, Arc<Block>>>>,
     ) -> LocalVersionManager {
+        let (version_updated_tx, _) = tokio::sync::watch::channel(INVALID_EPOCH);
         let instance = Self {
-            inner: Mutex::new(LocalVersionManagerInner::new()),
+            inner: RwLock::new(LocalVersionManagerInner::new()),
             sstables: RwLock::new(BTreeMap::new()),
             obj_client,
             remote_dir: Arc::new(remote_dir.to_string()),
@@ -110,12 +114,13 @@ impl LocalVersionManager {
                     panic!("must enable block cache in production mode")
                 }
             },
+            version_updated_tx,
         };
         // Insert an artificial empty version.
-        instance.inner.lock().pinned_versions.insert(
-            FIRST_VERSION_ID,
+        instance.inner.write().pinned_versions.insert(
+            INVALID_VERSION_ID,
             Arc::new(HummockVersion {
-                id: FIRST_VERSION_ID,
+                id: INVALID_VERSION_ID,
                 levels: vec![],
                 uncommitted_epochs: vec![],
                 max_committed_epoch: INVALID_EPOCH,
@@ -125,9 +130,6 @@ impl LocalVersionManager {
     }
 
     /// Get the greatest version from storage service and add it to local state.
-    /// Currently it's invoked in two places:
-    /// - At the end of `HummockStorage` creation.
-    /// - At the end of `write_batch`.
     pub async fn update_local_version(
         &self,
         hummock_meta_client: &dyn HummockMetaClient,
@@ -135,7 +137,7 @@ impl LocalVersionManager {
         let (new_pinned_version_id, new_pinned_version) = hummock_meta_client.pin_version().await?;
         let versions_to_unpin = {
             // Add to local state
-            let mut guard = self.inner.lock();
+            let mut guard = self.inner.write();
             guard
                 .pinned_versions
                 .insert(new_pinned_version_id, Arc::new(new_pinned_version));
@@ -152,15 +154,21 @@ impl LocalVersionManager {
                 .cloned()
                 .collect_vec();
             for version_id in &versions_to_unpin {
-                guard.version_ref_counts.remove(version_id).unwrap();
-                guard.pinned_versions.remove(version_id).unwrap();
+                guard.version_ref_counts.remove(version_id);
+                guard.pinned_versions.remove(version_id);
             }
+
+            let (_, greatest_version) = guard.pinned_versions.last_key_value().unwrap();
+            self.version_updated_tx
+                .send(greatest_version.max_committed_epoch)
+                .ok();
+
             versions_to_unpin
         };
 
         // Unpin versions with ref_count = 0 except for the greatest version in storage service.
         for version_id in versions_to_unpin {
-            if version_id == FIRST_VERSION_ID {
+            if version_id == INVALID_VERSION_ID {
                 // Edge case. This is an artificial version.
                 continue;
             }
@@ -172,7 +180,7 @@ impl LocalVersionManager {
 
     /// Get and pin the greatest local version
     fn pin_greatest_local_version(&self) -> (HummockVersionId, Arc<HummockVersion>) {
-        let mut guard = self.inner.lock();
+        let mut guard = self.inner.write();
         let (version_id, version) = guard
             .pinned_versions
             .last_key_value()
@@ -184,7 +192,7 @@ impl LocalVersionManager {
     }
 
     fn unpin_local_version(&self, version_id: HummockVersionId) {
-        let mut guard = self.inner.lock();
+        let mut guard = self.inner.write();
         let entry = guard.version_ref_counts.entry(version_id);
         *entry.or_insert(1) -= 1;
     }
@@ -245,5 +253,18 @@ impl LocalVersionManager {
         }
 
         Ok(out)
+    }
+
+    pub async fn wait_epoch_in_version(&self, epoch: HummockEpoch) -> HummockResult<()> {
+        let mut rx = self.version_updated_tx.subscribe();
+        loop {
+            if *rx.borrow() >= epoch {
+                break;
+            }
+            if rx.changed().await.is_err() {
+                break;
+            }
+        }
+        Ok(())
     }
 }
