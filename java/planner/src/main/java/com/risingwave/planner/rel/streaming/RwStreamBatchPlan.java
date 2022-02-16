@@ -100,7 +100,10 @@ public class RwStreamBatchPlan extends TableScan implements RisingWaveStreamingR
     builder.setTableRefId(Messages.getTableRefId(tableId)).addAllPkIndices(primaryKeyIndices);
     columnIds.forEach(c -> builder.addColumnIds(c.getValue()));
     BatchPlanNode batchPlanNode = builder.build();
-    return StreamNode.newBuilder().setBatchPlanNode(batchPlanNode).build();
+    return StreamNode.newBuilder()
+        .setBatchPlanNode(batchPlanNode)
+        .setIdentity(StreamingPlan.getCurrentNodeIdentity(this))
+        .build();
   }
 
   @Override

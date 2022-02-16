@@ -96,6 +96,7 @@ public class RwStreamChain extends Union implements RisingWaveStreamingRel {
         .addInput(
             // Just a placeholder for operator id gen.
             StreamNode.newBuilder().setMergeNode(MergeNode.newBuilder().build()).build())
+        .setIdentity(StreamingPlan.getCurrentNodeIdentity(this))
         .build();
   }
 

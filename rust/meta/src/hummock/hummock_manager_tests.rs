@@ -160,7 +160,10 @@ fn generate_test_tables(epoch: u64, table_id: &mut u64) -> Vec<SstableInfo> {
             (i * 10, HummockValue::Put(b"test".to_vec())),
         ];
         for kv in kv_pairs {
-            b.add(&iterator_test_key_of_epoch(*table_id, kv.0, epoch), kv.1);
+            b.add(
+                &iterator_test_key_of_epoch(*table_id, kv.0, epoch),
+                kv.1.as_slice(),
+            );
         }
         let (_data, meta) = b.finish();
         tables.push(SstableInfo {

@@ -227,15 +227,6 @@ impl SledMetaStore {
 
 #[async_trait]
 impl MetaStore for SledMetaStore {
-    async fn list(&self) -> Result<Vec<Vec<u8>>> {
-        self.list_cf(DEFAULT_COLUMN_FAMILY).await
-    }
-
-    async fn put(&self, key: &[u8], value: &[u8], version: Epoch) -> Result<()> {
-        self.put_cf(DEFAULT_COLUMN_FAMILY, key, value, version)
-            .await
-    }
-
     async fn put_batch(&self, tuples: Vec<(Vec<u8>, Vec<u8>, Epoch)>) -> Result<()> {
         self.put_batch_cf(
             tuples
@@ -244,18 +235,6 @@ impl MetaStore for SledMetaStore {
                 .collect_vec(),
         )
         .await
-    }
-
-    async fn get(&self, key: &[u8], version: Epoch) -> Result<Vec<u8>> {
-        self.get_cf(DEFAULT_COLUMN_FAMILY, key, version).await
-    }
-
-    async fn delete(&self, key: &[u8], version: Epoch) -> Result<()> {
-        self.delete_cf(DEFAULT_COLUMN_FAMILY, key, version).await
-    }
-
-    async fn delete_all(&self, key: &[u8]) -> Result<()> {
-        self.delete_all_cf(DEFAULT_COLUMN_FAMILY, key).await
     }
 
     async fn list_cf(&self, cf: &str) -> Result<Vec<Vec<u8>>> {

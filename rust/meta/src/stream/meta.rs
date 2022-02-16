@@ -86,11 +86,14 @@ impl FragmentManager {
     }
 
     pub async fn drop_table_fragments(&self, table_id: &TableId) -> Result<()> {
-        match self.table_fragments.remove(table_id) {
-            Some(_) => {
-                TableFragments::delete(&self.meta_store_ref, &TableRefId::from(table_id)).await
+        match self.table_fragments.entry(table_id.clone()) {
+            Entry::Occupied(entry) => {
+                TableFragments::delete(&self.meta_store_ref, &TableRefId::from(table_id)).await?;
+                entry.remove();
+
+                Ok(())
             }
-            None => Err(RwError::from(InternalError(
+            Entry::Vacant(_) => Err(RwError::from(InternalError(
                 "table_fragment not exist!".to_string(),
             ))),
         }
