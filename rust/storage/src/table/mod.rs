@@ -1,5 +1,7 @@
 pub mod mview;
 mod simple_manager;
+pub mod test;
+
 use std::any::Any;
 use std::borrow::Cow;
 use std::sync::Arc;
