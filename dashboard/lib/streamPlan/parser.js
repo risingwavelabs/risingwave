@@ -1,16 +1,24 @@
+import { treeBfs } from "../algo";
+
 let cnt = 0;
 function generateNewNodeId() {
   return "g" + (++cnt);
 }
 
 function getNodeId(nodeProto) {
-  return nodeProto.operatorId === undefined ? generateNewNodeId() : "o" + nodeProto.operatorId;  
+  return nodeProto.operatorId === undefined ? generateNewNodeId() : "o" + nodeProto.operatorId;
 }
 
 class Node {
   constructor(id, actorId, nodeProto) {
     this.id = id;
+    /**
+     * @type {any}
+     */
     this.nodeProto = nodeProto;
+    /**
+     * @type {Array<Node}
+     */
     this.nextNodes = [];
     this.actorId = actorId;
   }
@@ -19,7 +27,13 @@ class Node {
 class StreamNode extends Node {
   constructor(id, actorId, nodeProto) {
     super(id, actorId, nodeProto);
+    /**
+     * @type {string}
+     */
     this.type = this.parseType(nodeProto);
+    /**
+     * @type {any}
+     */
     this.typeInfo = nodeProto[this.type];
   }
 
@@ -43,13 +57,29 @@ class Dispatcher extends Node {
 
 class Actor {
   constructor(actorId, output, rootNode, fragmentId, actorIdentifier) {
+    /**
+     * @type {number}
+     */
     this.actorId = actorId;
+    /**
+     * @type {Array<Node>}
+     */
     this.output = output;
+    /**
+     * @type {Node}
+     */
     this.rootNode = rootNode;
+    /**
+     * @type {number}
+     */
     this.fragmentId = fragmentId;
+    /**
+     * @type {string | number}
+     */
     this.actorIdentifier = actorIdentifier;
   }
 }
+
 
 export default class StreamPlanParser {
   /**
@@ -61,6 +91,11 @@ export default class StreamPlanParser {
     this.parsedNodeMap = new Map();
     this.parsedActorMap = new Map();
     this.actorId2Proto = new Map();
+    /**
+     * @type {Set<Actor>}
+     * @private
+     */
+    this.actorIdTomviewNodes = new Map();
 
     for (let computeNodeData of data) {
       for (let singleActorProto of computeNodeData.actors) {
@@ -79,6 +114,47 @@ export default class StreamPlanParser {
     for (let [_, actor] of this.parsedActorMap.entries()) {
       this.parsedActorList.push(actor);
     }
+
+    /**
+     * @type {Map<number, Array<number>}
+     */
+    this.mvTableIdToActorList = this._constructMvList();
+  }
+
+  _constructMvList() {
+    let mvTableIdToActorList = new Map();
+    let shellNodes = new Map();
+    const getShellNode = (actorId) => {
+      if (shellNodes.has(actorId)) {
+        return shellNodes.get(actorId);
+      }
+      let shellNode = {
+        id: actorId,
+        nextNodes: []
+      };
+      for (let node of this.parsedActorMap.get(actorId).output) {
+        getShellNode(node.actorId).nextNodes.push(shellNode);
+      }
+      shellNodes.set(actorId, shellNode);
+      return shellNode;
+    }
+    for (let actor of this.parsedActorList) {
+      getShellNode(actor.actorId);
+    }
+
+    for (let [actorId, mviewNode] of this.actorIdTomviewNodes.entries()) {
+      let list = [];
+      let shellNode = getShellNode(actorId);
+      treeBfs(shellNode, (n) => {
+        list.push(n.id)
+        if (shellNode.id !== n.id && this.actorIdTomviewNodes.has(n.id)) {
+          return true; // stop to traverse its next nodes
+        }
+      })
+      mvTableIdToActorList.set(mviewNode.typeInfo.tableRefId.tableId, list);
+    }
+    
+    return mvTableIdToActorList;
   }
 
   newDispatcher(actorId, type, downstreamActorId) {
@@ -144,6 +220,10 @@ export default class StreamPlanParser {
       for (let upStreamActorId of newNode.typeInfo.upstreamActorIds) {
         this.parseActor(this.actorId2Proto.get(upStreamActorId)).output.push(newNode);
       }
+    }
+
+    if (newNode.type === "mviewNode") {
+      this.actorIdTomviewNodes.set(actorId, newNode);
     }
 
     return newNode;

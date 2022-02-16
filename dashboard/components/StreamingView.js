@@ -4,13 +4,15 @@ import { useEffect, useRef, useState } from 'react';
 import styled from '@emotion/styled';
 import LocationSearchingIcon from '@mui/icons-material/LocationSearching';
 import SearchIcon from '@mui/icons-material/Search';
-import { Tooltip, FormControl, Select, MenuItem, InputLabel, FormHelperText, Input, InputAdornment, IconButton } from '@mui/material';
+import { Tooltip, FormControl, Select, MenuItem, InputLabel, FormHelperText, Input, InputAdornment, IconButton, Autocomplete, TextField } from '@mui/material';
+import { highlightActorList } from "../lib/streamPlan/chartEffect";
 
 const width = 1000;
 const height = 1000;
 const orginalZoom = new d3.ZoomTransform(0.5, 0, 0);
 let zoom;
 let svg;
+let view;
 
 const SvgBox = styled('div')(() => ({
   padding: "10px",
@@ -28,11 +30,8 @@ const SvgBoxCover = styled('div')(() => ({
 const ToolBoxTitle = styled('div')(() => ({
   fontSize: "15px",
   fontWeight: 700
-}))
+}));
 
-document.addEventListener("mousedown", (e) => {
-  console.log(e)
-})
 
 export default function StreamingView(props) {
   const data = props.data || [];
@@ -43,21 +42,27 @@ export default function StreamingView(props) {
   const [selectedActor, setSelectedActor] = useState("Show All");
   const [searchType, setSearchType] = useState("Actor");
   const [searchContent, setSearchContent] = useState("");
+  const [mvTableIdToActorList, setMvTableIdToActorList] = useState(null);
+  const [mviewTableList, setMviewTableList] = useState([]);
 
   const d3Container = useRef(null);
 
   const exprNode = (actorNode) => (({ input, ...o }) => o)(actorNode)
+
+  const locateTo = (selector) => {
+    let selection = d3.select(selector);
+    if (!selection.empty()) {
+      console.log(selection.attr("x"), selection.attr("y"));
+      svg.call(zoom).call(zoom.transform, new d3.ZoomTransform(1, -selection.attr("x"), -selection.attr("y") + height / 2));
+    }
+  }
 
   const locateSearchPosition = () => {
     let type = searchType === "Operator" ? "Node" : searchType;
     type = type.toLocaleLowerCase();
 
     if (type === "actor") {
-      let selection = d3.select(`rect.${type}-${searchContent}`);
-      if (!selection.empty()) {
-        console.log(selection.attr("x"), selection.attr("y"));
-        svg.call(zoom).call(zoom.transform, new d3.ZoomTransform(1, -selection.attr("x"), -selection.attr("y") + height / 2));
-      }
+      locateTo(`rect.${type}-${searchContent}`);
     }
   }
 
@@ -84,9 +89,31 @@ export default function StreamingView(props) {
     setSearchContent(e.target.value);
   }
 
+  const onSelectMvChange = (e, v) => {
+    if (v === null) {
+      return;
+    }
+    let actorIdList = mvTableIdToActorList.get(v.tableId) || [];
+    if (actorIdList.length !== 0) {
+      highlightActorList(actorIdList);
+      locateTo(`rect.actor-${actorIdList[0]}`);
+    }
+  }
+
   useEffect(() => {
     locateSearchPosition();
   }, [searchType, searchContent]);
+
+  useEffect(() => {
+    if (mvTableIdToActorList !== null) {
+      let tmp = [];
+      for (let [tableId, _] of mvTableIdToActorList.entries()) {
+        tmp.push({ label: "mvtable " + tableId, tableId: tableId });
+      }
+      tmp.sort(x => x.label);
+      setMviewTableList(tmp);
+    }
+  }, [mvTableIdToActorList])
 
   useEffect(() => {
     if (d3Container.current) {
@@ -95,7 +122,7 @@ export default function StreamingView(props) {
         .attr("viewBox", [0, 0, width, height]);
 
       const g = svg.append("g").attr("class", "top");
-      createView(g, data, onNodeClick, selectedActor === "Show All" ? null : selectedActor);
+      view = createView(g, data, onNodeClick, selectedActor === "Show All" ? null : selectedActor);
 
       let transform;
       // Deal with zooming event
@@ -109,6 +136,8 @@ export default function StreamingView(props) {
         .on("pointermove", event => {
           transform.invert(d3.pointer(event));
         });
+
+      setMvTableIdToActorList(view.getMvTableIdToActorList());
 
       return () => d3.select(d3Container.current).selectAll("*").remove();
     }
@@ -162,7 +191,6 @@ export default function StreamingView(props) {
           <FormControl sx={{ m: 1, minWidth: 120 }}>
             <InputLabel>Type</InputLabel>
             <Select
-              size="small"
               value={searchType}
               label="Type"
               onChange={onSearchTypeChange}
@@ -172,7 +200,7 @@ export default function StreamingView(props) {
           </FormControl>
           <Input
             sx={{ m: 1, width: 150 }}
-            size="small" label="Search" variant="standard"
+            label="Search" variant="standard"
             onChange={onSearchBoxChange}
             value={searchContent}
             endAdornment={
@@ -185,7 +213,21 @@ export default function StreamingView(props) {
                 </IconButton>
               </InputAdornment>
             } />
+        </div>
 
+        {/* Search box */}
+        <ToolBoxTitle>
+          Filter materialized view
+        </ToolBoxTitle>
+        <div style={{ display: "flex", flexDirection: "row", alignItems: "center" }}>
+          <FormControl sx={{ m: 1, minWidth: 300 }}>
+            <Autocomplete
+              disablePortal
+              options={mviewTableList || []}
+              onChange={onSelectMvChange}
+              renderInput={(param) => <TextField {...param} label="Materialized View" />}
+            />
+          </FormControl>
         </div>
       </SvgBoxCover>
 

@@ -107,6 +107,10 @@ export class StreamChartHelper {
     this.selectedActorList = new Set();
   }
 
+  getMvTableIdToActorList() {
+    return this.streamPlan.mvTableIdToActorList;
+  }
+
   isInSelectedActor(actor) {
     if (!this.selectedActorStr) { // show all
       return true;
@@ -116,14 +120,8 @@ export class StreamChartHelper {
   }
 
   _operatorColor = (actor, operator) => {
-    console.log(operator);
-    if(operator.type === "mviewNode"){
-      // return "#ffc806"
-      return "#1976d2";
-    }
-    return "#eee";
     // return color.TwoGradient(actor.actorId)[0];
-    return this.isInSelectedActor(actor) ? "#1976d2" : "#eee";
+    return this.isInSelectedActor(actor) && operator.type === "mviewNode" ? "#1976d2" : "#eee";
   }
   _actorBoxStrokeColor = (actor) => {
     // return color.TwoGradient(actor.actorId)[0];
@@ -799,7 +797,10 @@ export class StreamChartHelper {
  * @param {any} data Raw response from the meta node. e.g. [{node: {...}, actors: {...}}, ...]
  * @param {(clickEvent, node) => void} onNodeClick callback when a node (operator) is clicked.
  * @param {{type: string, node: {host: {host: string, port: number}}, id?: number}} selectedActor
+ * @returns {StreamChartHelper}
  */
 export default function createView(g, data, onNodeClick, selectedActor) {
-  return new StreamChartHelper(g, data, onNodeClick, selectedActor).drawManyFlow();
+  let streamChartHelper = new StreamChartHelper(g, data, onNodeClick, selectedActor);
+  streamChartHelper.drawManyFlow();
+  return streamChartHelper;
 }
