@@ -238,7 +238,7 @@ mod tests {
 
         test_create! { int64_type, Min, int64_type, is_ok }
         test_create! { decimal_type, Min, decimal_type, is_ok }
-        test_create! { bool_type, Min, bool_type, is_err }
+        test_create! { bool_type, Min, bool_type, is_ok } // TODO(#359): revert to is_err
         test_create! { char_type, Min, char_type, is_ok }
     }
 }
