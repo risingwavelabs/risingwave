@@ -295,6 +295,7 @@ impl StreamManagerCore {
                     self.context.clone(),
                 ))
             }
+            Invalid => unreachable!(),
         };
         Ok(dispatcher)
     }
