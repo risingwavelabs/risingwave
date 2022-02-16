@@ -77,6 +77,7 @@ public class RwStreamAgg extends RwAggregate implements RisingWaveStreamingRel {
           StreamNode.newBuilder()
               .setHashAggNode(hashAggNodeBuilder.build())
               .addAllPkIndices(primaryKeyIndices)
+              .setIdentity(StreamingPlan.getCurrentNodeIdentity(this))
               .build();
     }
     return node;

@@ -309,6 +309,7 @@ impl StreamManagerCore {
         env: StreamTaskEnv,
         store: impl StateStore,
     ) -> Result<Box<dyn Executor>> {
+        let identity = node.get_identity().clone();
         // Create the input executor before creating itself
         // The node with no input must be a `MergeNode`
         let mut input: Vec<Box<dyn Executor>> = node
@@ -375,6 +376,7 @@ impl StreamManagerCore {
                     barrier_receiver,
                     executor_id,
                     operator_id,
+                    identity,
                 )?))
             }
             Node::ProjectNode(project_node) => {
@@ -388,6 +390,7 @@ impl StreamManagerCore {
                     pk_indices,
                     project_exprs,
                     executor_id,
+                    identity,
                 )))
             }
             Node::FilterNode(filter_node) => {
@@ -396,6 +399,7 @@ impl StreamManagerCore {
                     input.remove(0),
                     search_condition,
                     executor_id,
+                    identity,
                 )))
             }
             Node::LocalSimpleAggNode(aggr_node) => {
@@ -409,6 +413,7 @@ impl StreamManagerCore {
                     agg_calls,
                     pk_indices,
                     executor_id,
+                    identity,
                 )?))
             }
             Node::GlobalSimpleAggNode(aggr_node) => {
@@ -424,6 +429,7 @@ impl StreamManagerCore {
                     Keyspace::executor_root(store.clone(), executor_id),
                     pk_indices,
                     executor_id,
+                    identity,
                 )))
             }
             Node::HashAggNode(aggr_node) => {
@@ -446,6 +452,7 @@ impl StreamManagerCore {
                     Keyspace::shared_executor_root(store.clone(), operator_id),
                     pk_indices,
                     executor_id,
+                    identity,
                 )))
             }
             Node::AppendOnlyTopNNode(top_n_node) => {
@@ -471,6 +478,7 @@ impl StreamManagerCore {
                     cache_size,
                     total_count,
                     executor_id,
+                    identity,
                 )))
             }
             Node::TopNNode(top_n_node) => {
@@ -496,6 +504,7 @@ impl StreamManagerCore {
                     cache_size,
                     total_count,
                     executor_id,
+                    identity,
                 )))
             }
             Node::HashJoinNode(hash_join_node) => {
@@ -534,6 +543,7 @@ impl StreamManagerCore {
                                 Keyspace::shared_executor_root(store.clone(), operator_id),
                                 executor_id,
                                 condition,
+                                identity,
                             )) as Box<dyn Executor>, )*
                             _ => todo!("Join type {:?} not implemented", typ),
                         }
@@ -588,6 +598,7 @@ impl StreamManagerCore {
                     pks,
                     orderings,
                     executor_id,
+                    identity,
                 ));
                 Ok(executor)
             }

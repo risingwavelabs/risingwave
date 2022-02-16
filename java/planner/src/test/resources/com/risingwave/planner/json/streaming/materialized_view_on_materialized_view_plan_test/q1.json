@@ -10,7 +10,8 @@
           }
         },
         "columnIds": [1, 2, 0]
-      }
+      },
+      "identity": "RwStreamTableSource(table\u003d[[test_schema, t1]], columns\u003d[v1,v2,_row_id])"
     }],
     "filterNode": {
       "searchCondition": {
@@ -37,7 +38,8 @@
           }]
         }
       }
-    }
+    },
+    "identity": "RwStreamFilter(condition\u003d[\u003d($0, 1)])"
   }],
   "mviewNode": {
     "tableRefId": {
@@ -76,5 +78,6 @@
         "typeName": "INT64"
       }
     }]
-  }
+  },
+  "identity": "RwStreamMaterializedView(name\u003d[m1])"
 }

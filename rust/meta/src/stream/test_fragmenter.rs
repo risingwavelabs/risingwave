@@ -135,6 +135,7 @@ fn make_stream_node() -> StreamNode {
         input: vec![source_node],
         pk_indices: vec![2],
         operator_id: 1,
+        identity: "ExchangeExecutor".to_string(),
     };
 
     // filter node
@@ -155,6 +156,7 @@ fn make_stream_node() -> StreamNode {
         input: vec![exchange_node],
         pk_indices: vec![0, 1],
         operator_id: 2,
+        identity: "FilterExecutor".to_string(),
     };
 
     // simple agg node
@@ -165,6 +167,7 @@ fn make_stream_node() -> StreamNode {
         input: vec![filter_node],
         pk_indices: vec![0, 1],
         operator_id: 3,
+        identity: "GlobalSimpleAggExecutor".to_string(),
     };
 
     // exchange node
@@ -182,6 +185,7 @@ fn make_stream_node() -> StreamNode {
         input: vec![simple_agg_node],
         pk_indices: vec![0, 1],
         operator_id: 4,
+        identity: "ExchangeExecutor".to_string(),
     };
 
     // agg node
@@ -192,6 +196,7 @@ fn make_stream_node() -> StreamNode {
         input: vec![exchange_node_1],
         pk_indices: vec![0, 1],
         operator_id: 5,
+        identity: "GlobalSimpleAggExecutor".to_string(),
     };
 
     // project node
@@ -216,6 +221,7 @@ fn make_stream_node() -> StreamNode {
         input: vec![simple_agg_node_1],
         pk_indices: vec![1, 2],
         operator_id: 6,
+        identity: "ProjectExecutor".to_string(),
     };
 
     // mview node
@@ -234,6 +240,7 @@ fn make_stream_node() -> StreamNode {
             column_orders: vec![make_column_order(1), make_column_order(2)],
         })),
         operator_id: 7,
+        identity: "MviewExecutor".to_string(),
     }
 }
 

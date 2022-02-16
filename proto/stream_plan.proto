@@ -119,6 +119,7 @@ message StreamNode {
   // Child node in plan aka. upstream nodes in the streaming DAG
   repeated StreamNode input = 3;
   repeated uint32 pk_indices = 2;
+  string identity = 18;
 }
 
 // A dispatcher redistribute messages.

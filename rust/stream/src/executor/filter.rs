@@ -25,11 +25,16 @@ pub struct FilterExecutor {
 }
 
 impl FilterExecutor {
-    pub fn new(input: Box<dyn Executor>, expr: BoxedExpression, executor_id: u64) -> Self {
+    pub fn new(
+        input: Box<dyn Executor>,
+        expr: BoxedExpression,
+        executor_id: u64,
+        identity: String,
+    ) -> Self {
         Self {
             input,
             expr,
-            identity: format!("FilterExecutor {:X}", executor_id),
+            identity: format!("{} {:X}", identity, executor_id),
         }
     }
 }
@@ -201,7 +206,8 @@ mod tests {
             Box::new(left_expr),
             Box::new(right_expr),
         );
-        let mut filter = FilterExecutor::new(Box::new(source), test_expr, 1);
+        let mut filter =
+            FilterExecutor::new(Box::new(source), test_expr, 1, "FilterExecutor".to_string());
 
         if let Message::Chunk(chunk) = filter.next().await.unwrap() {
             assert_eq!(

@@ -75,6 +75,7 @@ public class RwStreamTableSource extends TableScan implements RisingWaveStreamin
     return StreamNode.newBuilder()
         .setSourceNode(tableSourceNodeBuilder.build())
         .addAllPkIndices(primaryKeyIndices)
+        .setIdentity(StreamingPlan.getCurrentNodeIdentity(this))
         .build();
   }
 

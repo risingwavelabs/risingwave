@@ -75,6 +75,7 @@ async fn test_merger_sum_aggr() {
             ],
             vec![],
             1,
+            "LocalSimpleAggExecutor".to_string(),
         )
         .unwrap();
         let (tx, rx) = channel(16);
@@ -139,6 +140,7 @@ async fn test_merger_sum_aggr() {
         create_in_memory_keyspace(),
         vec![],
         2,
+        "SimpleAggExecutor".to_string(),
     );
 
     let projection = ProjectExecutor::new(
@@ -149,6 +151,7 @@ async fn test_merger_sum_aggr() {
             Box::new(InputRefExpression::new(DataType::Int64, 1)),
         ],
         3,
+        "ProjectExecutor".to_string(),
     );
     let items = Arc::new(Mutex::new(vec![]));
     let consumer = MockConsumer::new(Box::new(projection), items.clone());
@@ -310,8 +313,14 @@ async fn test_tpch_q6() {
         let (and, multiply) = make_tpchq6_expr();
         let input = ReceiverExecutor::new(schema.clone(), vec![], input_rx);
 
-        let filter = FilterExecutor::new(Box::new(input), and, 1);
-        let projection = ProjectExecutor::new(Box::new(filter), vec![], vec![multiply], 2);
+        let filter = FilterExecutor::new(Box::new(input), and, 1, "FilterExecutor".to_string());
+        let projection = ProjectExecutor::new(
+            Box::new(filter),
+            vec![],
+            vec![multiply],
+            2,
+            "ProjectExecutor".to_string(),
+        );
 
         // for local aggregator, we need to sum data and count rows
         let aggregator = LocalSimpleAggExecutor::new(
@@ -330,6 +339,7 @@ async fn test_tpch_q6() {
             ],
             vec![],
             3,
+            "LocalSimpleAggExecutor".to_string(),
         )
         .unwrap();
         let (tx, rx) = channel(16);
@@ -390,6 +400,7 @@ async fn test_tpch_q6() {
         create_in_memory_keyspace(),
         vec![],
         4,
+        "SimpleAggExecutor".to_string(),
     );
     let projection = ProjectExecutor::new(
         Box::new(aggregator),
@@ -399,6 +410,7 @@ async fn test_tpch_q6() {
             Box::new(InputRefExpression::new(DataType::Float64, 1)),
         ],
         5,
+        "ProjectExecutor".to_string(),
     );
 
     let items = Arc::new(Mutex::new(vec![]));
