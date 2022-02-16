@@ -1,15 +1,15 @@
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
-use risingwave_common::types::DataType;
+
 use risingwave_pb::plan::JoinType;
 
 use super::{
     ColPrunable, IntoPlanRef, JoinPredicate, PlanRef, PlanTreeNodeBinary, StreamHashJoin, ToBatch,
     ToStream,
 };
-use crate::expr::{assert_input_ref, Expr, ExprImpl};
-use crate::optimizer::plan_node::{BatchHashJoin, BatchSortMergeJoin};
+use crate::expr::{ExprImpl};
+
 use crate::optimizer::property::{Distribution, Order, WithDistribution, WithOrder, WithSchema};
 
 #[derive(Debug, Clone)]
