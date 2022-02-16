@@ -11,7 +11,8 @@
           }
         },
         "columnIds": [1, 2, 0]
-      }
+      },
+      "identity": "RwStreamTableSource(table\u003d[[test_schema, t]], columns\u003d[v1,v2,_row_id])"
     }],
     "projectNode": {
       "selectList": [{
@@ -46,7 +47,8 @@
           "columnIdx": 2
         }
       }]
-    }
+    },
+    "identity": "RwStreamProject(v\u003d[+($0, $1)], _row_id\u003d[$2])"
   }],
   "mviewNode": {
     "tableRefId": {
@@ -79,5 +81,6 @@
         "typeName": "INT64"
       }
     }]
-  }
+  },
+  "identity": "RwStreamMaterializedView(name\u003d[t2])"
 }

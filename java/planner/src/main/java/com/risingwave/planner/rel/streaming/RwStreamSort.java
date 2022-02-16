@@ -2,12 +2,8 @@ package com.risingwave.planner.rel.streaming;
 
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
 
-import com.risingwave.common.datatype.RisingWaveDataType;
 import com.risingwave.planner.metadata.RisingWaveRelMetadataQuery;
 import com.risingwave.planner.rel.logical.RwLogicalSort;
-import com.risingwave.proto.data.DataType;
-import com.risingwave.proto.expr.InputRefExpr;
-import com.risingwave.proto.plan.ColumnOrder;
 import com.risingwave.proto.plan.OrderType;
 import com.risingwave.proto.streaming.plan.StreamNode;
 import com.risingwave.proto.streaming.plan.TopNNode;
@@ -22,7 +18,6 @@ import org.apache.calcite.rel.RelFieldCollation;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.convert.ConverterRule;
 import org.apache.calcite.rel.core.Sort;
-import org.apache.calcite.rex.RexInputRef;
 import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.rex.RexNode;
 import org.apache.commons.lang3.SerializationException;
@@ -85,6 +80,7 @@ public class RwStreamSort extends Sort implements RisingWaveStreamingRel {
     return StreamNode.newBuilder()
         .setTopNNode(topnBuilder)
         .addAllPkIndices(primaryKeyIndices)
+        .setIdentity(StreamingPlan.getCurrentNodeIdentity(this))
         .build();
   }
 

@@ -200,6 +200,7 @@ impl StreamGraphBuilder {
                                         .clone(),
                                 })),
                                 operator_id: input.operator_id,
+                                identity: "MergeExecutor".to_string(),
                             };
                             next_idx_new += 1;
                         }
@@ -256,6 +257,7 @@ impl StreamGraphBuilder {
                         input_column_descs: chain_node.upstream_column_descs.clone(),
                     })),
                     operator_id: input.get(0).as_ref().unwrap().operator_id,
+                    identity: "MergeExecutor".to_string(),
                 },
                 input.get(1).unwrap().clone(),
             ];
@@ -265,6 +267,7 @@ impl StreamGraphBuilder {
                 pk_indices: stream_node.pk_indices.clone(),
                 node: Some(Node::ChainNode(chain_node.clone())),
                 operator_id: stream_node.operator_id,
+                identity: "ChainExecutor".to_string(),
             })
         } else {
             unreachable!()

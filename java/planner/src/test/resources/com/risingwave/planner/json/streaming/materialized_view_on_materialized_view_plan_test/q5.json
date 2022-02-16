@@ -10,7 +10,8 @@
         "tableId": 1
       },
       "columnIds": [2, 3, 1, 0]
-    }
+    },
+    "identity": "RwStreamTableSource(table\u003d[[test_schema, t2]], columns\u003d[v2,v3,v1,_row_id])"
   }],
   "mviewNode": {
     "tableRefId": {
@@ -55,5 +56,6 @@
         "typeName": "INT64"
       }
     }]
-  }
+  },
+  "identity": "RwStreamMaterializedView(name\u003d[m5])"
 }
