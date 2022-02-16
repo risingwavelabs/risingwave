@@ -55,7 +55,7 @@ where
     pub async fn add_user_key(
         &mut self,
         user_key: Vec<u8>,
-        value: HummockValue<Vec<u8>>,
+        value: HummockValue<&[u8]>,
         epoch: Epoch,
     ) -> HummockResult<()> {
         assert!(!user_key.is_empty());
@@ -74,7 +74,7 @@ where
     pub async fn add_full_key(
         &mut self,
         full_key: FullKey<&[u8]>,
-        value: HummockValue<Vec<u8>>,
+        value: HummockValue<&[u8]>,
         allow_split: bool,
     ) -> HummockResult<()> {
         let new_builder_required = allow_split
@@ -154,7 +154,7 @@ mod tests {
 
         for _ in 0..table_capacity {
             builder
-                .add_user_key(b"key".to_vec(), Put(b"value".to_vec()), 233)
+                .add_user_key(b"key".to_vec(), Put(b"value"), 233)
                 .await
                 .unwrap();
         }
@@ -177,7 +177,7 @@ mod tests {
         macro_rules! add {
             () => {
                 builder
-                    .add_user_key(b"k".to_vec(), Put(b"v".to_vec()), 233)
+                    .add_user_key(b"k".to_vec(), Put(b"v"), 233)
                     .await
                     .unwrap();
             };
