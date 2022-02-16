@@ -452,7 +452,25 @@ impl<B: BufMut> Serializer<B> {
                 encoded_decimal.extend(significand.iter());
             }
             0 => {
-                encoded_decimal.push(0x15);
+                match scale {
+                    -1 => {
+                        // Negative INF
+                        encoded_decimal.push(0x07);
+                    }
+                    29 => {
+                        // Positive INF
+                        encoded_decimal.push(0x23);
+                    }
+                    30 => {
+                        // NaN
+                        encoded_decimal.push(0x06);
+                    }
+                    _ => {
+                        // 0
+                        // Maybe need to change.
+                        encoded_decimal.push(0x15);
+                    }
+                }
             }
             _ => {
                 match exponent {

@@ -113,11 +113,10 @@ impl<B: Buf> Deserializer<B> {
         let mut byte_array = vec![flag];
         loop {
             let byte = self.input.get_u8();
-            if byte != 0 {
-                byte_array.push(byte);
-            } else {
+            if byte == 0 {
                 break;
             }
+            byte_array.push(byte);
         }
         Ok(byte_array)
     }
@@ -484,6 +483,14 @@ impl<B: Buf> Deserializer<B> {
         // whether the decimal is negative or not.
         let mut neg: bool = false;
         let exponent = match byte_array[0] {
+            0x06 => {
+                // NaN
+                return Ok((0, 30));
+            }
+            0x07 => {
+                // Negative INF
+                return Ok((0, -1));
+            }
             0x08 => {
                 neg = true;
                 !byte_array[1] as i8
@@ -506,6 +513,10 @@ impl<B: Buf> Deserializer<B> {
                 (byte_array[0] - 0x17) as i8
             }
             0x22 => byte_array[1] as i8,
+            0x23 => {
+                // Positive INF
+                return Ok((0, 29));
+            }
             invalid_byte => {
                 return Err(Error::InvalidBytesEncoding(invalid_byte));
             }
@@ -526,7 +537,7 @@ impl<B: Buf> Deserializer<B> {
 
         // get scale
         let mut scale = (bytes_len as i8 - exponent) * 2;
-        if scale < 0 {
+        if scale <= 0 {
             // e.g. 1(mantissa) + 2(exponent) (which is 100).
             for _i in 0..-scale {
                 mantissa *= 10;
@@ -718,7 +729,7 @@ mod tests {
         // Notice: decimals like 100.00 will be decoding as 100.
 
         // Test: -1234_5678_9012_3456_7890_1234, -12_3456_7890.1234, -0.001, 0.001, 100, 0.01111,
-        // 12345, 1234_5678_9012_3456_7890_1234, -233.3
+        // 12345, 1234_5678_9012_3456_7890_1234, -233.3, 50
         let mantissas: Vec<i128> = vec![
             -1234_5678_9012_3456_7890_1234,
             -12_3456_7890_1234,
@@ -729,8 +740,9 @@ mod tests {
             12345,
             1234_5678_9012_3456_7890_1234,
             -2333,
+            50,
         ];
-        let scales: Vec<i8> = vec![0, 4, 3, 3, 0, 5, 0, 0, 1];
+        let scales: Vec<i8> = vec![0, 4, 3, 3, 0, 5, 0, 0, 1, 0];
         for (mantissa, scale) in zip(mantissas, scales) {
             assert_eq!(
                 (mantissa, scale),
