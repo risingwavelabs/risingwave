@@ -4,6 +4,23 @@
     "input": [{
       "pkIndices": [0, 1, 2],
       "input": [{
+        "input": [{
+          "mergeNode": {
+          }
+        }, {
+          "batchPlanNode": {
+            "tableRefId": {
+              "schemaRefId": {
+                "databaseRefId": {
+                }
+              },
+              "tableId": 2
+            },
+            "pkIndices": [2],
+            "columnIds": [0, 1, 2]
+          },
+          "identity": "RwStreamBatchPlan(table\u003d[[test_schema, m1]], tableId\u003d[0.0.2], primaryKeyIndices\u003d[[2]], columnIds\u003d[[0.0.2.0, 0.0.2.1, 0.0.2.2]])"
+        }],
         "chainNode": {
           "tableRefId": {
             "schemaRefId": {
@@ -12,9 +29,23 @@
             },
             "tableId": 2
           },
+          "upstreamColumnDescs": [{
+            "columnType": {
+              "typeName": "INT32"
+            }
+          }, {
+            "columnType": {
+              "typeName": "INT32"
+            }
+          }, {
+            "columnType": {
+              "typeName": "INT64"
+            }
+          }],
           "pkIndices": [2],
           "columnIds": [0, 1, 2]
-        }
+        },
+        "identity": "RwStreamChain(all\u003d[true], tableId\u003d[0.0.2], primaryKeyIndices\u003d[[2]], columnIds\u003d[[0.0.2.0, 0.0.2.1, 0.0.2.2]], upstreamColumnDescs\u003d[[ColumnDesc{dataType\u003dINTEGER, primary\u003dfalse}, ColumnDesc{dataType\u003dINTEGER, primary\u003dfalse}, ColumnDesc{dataType\u003dBIGINT, primary\u003dfalse}]])"
       }],
       "globalSimpleAggNode": {
         "aggCalls": [{
@@ -121,7 +152,8 @@
           "columnIdx": 2
         }
       }]
-    }
+    },
+    "identity": "RwStreamProject(sum_m1_v1\u003d[$STREAM_NULL_BY_ROW_COUNT($0, $1)], sum_m1_v2\u003d[$STREAM_NULL_BY_ROW_COUNT($0, $2)], $f0\u003d[$0], sum_m1_v1_copy\u003d[$1], sum_m1_v2_copy\u003d[$2])"
   }],
   "mviewNode": {
     "tableRefId": {
@@ -188,5 +220,6 @@
         "typeName": "INT64"
       }
     }]
-  }
+  },
+  "identity": "RwStreamMaterializedView(name\u003d[m3])"
 }

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
@@ -14,6 +15,7 @@ use crate::model::{MetadataModel, Worker};
 use crate::storage::MetaStoreRef;
 
 pub type NodeId = u32;
+pub type NodeLocations = HashMap<NodeId, WorkerNode>;
 
 /// [`StoredClusterManager`] manager cluster/worker meta data in [`MetaStore`].
 pub struct StoredClusterManager {

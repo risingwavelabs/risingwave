@@ -57,7 +57,7 @@ jobs:
       - compute-node-build
       - frontend-check
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -109,8 +109,8 @@ jobs:
       - name: e2e test w/ Hummock
         run: |
           ~/cargo-make/makers clean-data
-          ~/cargo-make/makers ci-streaming
-          timeout 5m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
+          ~/cargo-make/makers ci-1node
+          timeout 10m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
@@ -119,18 +119,18 @@ jobs:
       - name: e2e test w/ Hummock w/o cache
         run: |
           ~/cargo-make/makers clean-data
-          RW_NO_CACHE=1 ~/cargo-make/makers ci-streaming
-          timeout 5m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
+          RW_NO_CACHE=1 ~/cargo-make/makers ci-1node
+          timeout 10m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
           ~/cargo-make/makers logs
           ~/cargo-make/makers check-logs
-      - name: e2e test batch 1-node (table_v2)
+      - name: e2e test batch 3-node (table_v2)
         run: |
           ~/cargo-make/makers clean-data
-          ~/cargo-make/makers ci-streaming
-          timeout 5m sqllogictest -p 4567 -d dev './e2e_test/batch/**/*.slt'
+          ~/cargo-make/makers ci-3node
+          timeout 10m sqllogictest -p 4567 -d dev './e2e_test/batch/**/*.slt'
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
@@ -140,7 +140,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           RW_FORCE_TABLE_V1=1 ~/cargo-make/makers ci-3node
-          timeout 5m sqllogictest -p 4567 -d dev './e2e_test/batch/**/*.slt'
+          timeout 10m sqllogictest -p 4567 -d dev './e2e_test/batch/**/*.slt'
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
@@ -161,7 +161,7 @@ jobs:
       - compute-node-build
       - frontend-check
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     env:
       PG_PORT: 5432
       RW_PORT: 4567
@@ -233,16 +233,16 @@ jobs:
           chmod +x ./rust/target/debug/risingwave_regress_test
       - name: Run batch tests on Postgresql
         run: |
-          timeout 5m sqllogictest -p ${{ env.PG_PORT }} './e2e_test/batch/**/*.slt'
+          timeout 10m sqllogictest -p ${{ env.PG_PORT }} './e2e_test/batch/**/*.slt'
       - name: Generate RiseDev CI config
         run: |
           cp risedev-components.ci.env risedev-components.user.env
       - name: Prepare RiseDev playground
         run: ~/cargo-make/makers pre-start-playground
-      - name: Run 3-node regress tests (batch, table_v1)
+      - name: Run 3-node regress tests (batch)
         run: |
           ~/cargo-make/makers clean-data
-          RW_FORCE_TABLE_V1=1 ~/cargo-make/makers ci-3node
+          ~/cargo-make/makers ci-3node
           psql --version
           RUST_LOG=info cd rust && target/debug/risingwave_regress_test -h 127.0.0.1 \
             -p ${{ env.RW_PORT }} \
@@ -257,8 +257,8 @@ jobs:
       - name: e2e test w/ source and Hummock
         run: |
           ~/cargo-make/makers clean-data
-          ~/cargo-make/makers ci-streaming
-          timeout 5m sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source/**/*.slt'
+          ~/cargo-make/makers ci-1node
+          timeout 10m sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source/**/*.slt'
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
@@ -268,7 +268,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-3node
-          timeout 5m sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source_distributed/**/*.slt'
+          timeout 10m sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source_distributed/**/*.slt'
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k

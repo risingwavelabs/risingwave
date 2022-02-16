@@ -43,6 +43,7 @@ impl LocalSimpleAggExecutor {
         agg_calls: Vec<AggCall>,
         pk_indices: PkIndices,
         executor_id: u64,
+        identity: String,
     ) -> Result<Self> {
         // simple agg does not have group key
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
@@ -64,7 +65,7 @@ impl LocalSimpleAggExecutor {
             states,
             input,
             agg_calls,
-            identity: format!("LocalSimpleAggExecutor {:X}", executor_id),
+            identity: format!("{} {:X}", identity, executor_id),
         })
     }
 }
@@ -198,7 +199,13 @@ mod tests {
             },
         ];
 
-        let mut simple_agg = LocalSimpleAggExecutor::new(Box::new(source), agg_calls, vec![], 1)?;
+        let mut simple_agg = LocalSimpleAggExecutor::new(
+            Box::new(source),
+            agg_calls,
+            vec![],
+            1,
+            "LocalSimpleAggExecutor".to_string(),
+        )?;
 
         let msg = simple_agg.next().await?;
         if let Message::Chunk(chunk) = msg {

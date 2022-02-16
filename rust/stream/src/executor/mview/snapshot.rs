@@ -8,7 +8,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_storage::table::{ScannableTableRef, TableIterRef};
 
-use crate::executor::{EpochedExecutor, Executor, Message, PkIndices, PkIndicesRef};
+use crate::executor::{Executor, Message, PkIndices, PkIndicesRef};
 
 const DEFAULT_BATCH_SIZE: usize = 100;
 
@@ -119,10 +119,8 @@ impl Executor for BatchQueryExecutor {
     fn identity(&self) -> &'static str {
         "BatchQueryExecutor"
     }
-}
 
-impl EpochedExecutor for BatchQueryExecutor {
-    fn init_epoch(&mut self, epoch: u64) -> Result<()> {
+    fn init(&mut self, epoch: u64) -> Result<()> {
         match self.epoch {
             None => {
                 self.epoch = Some(epoch);
@@ -151,7 +149,7 @@ mod test {
         let table = Arc::new(gen_basic_table(test_batch_count * test_batch_size).await)
             as ScannableTableRef;
         let mut node = BatchQueryExecutor::new_with_batch_size(table, vec![0, 1], test_batch_size);
-        node.init_epoch(u64::MAX).unwrap();
+        node.init(u64::MAX).unwrap();
         let mut batch_cnt = 0;
         while let Ok(Message::Chunk(sc)) = node.next().await {
             let data = *sc.column(0).array_ref().datum_at(0).unwrap().as_int32();
@@ -169,7 +167,7 @@ mod test {
         let table = Arc::new(gen_basic_table(test_batch_count * test_batch_size).await)
             as ScannableTableRef;
         let mut node = BatchQueryExecutor::new_with_batch_size(table, vec![0, 1], test_batch_size);
-        node.init_epoch(u64::MAX).unwrap();
-        node.init_epoch(0).unwrap();
+        node.init(u64::MAX).unwrap();
+        node.init(0).unwrap();
     }
 }

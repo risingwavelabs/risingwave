@@ -8,6 +8,7 @@ use risingwave_common::catalog::{SchemaId, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::downcast_arc;
 use risingwave_common::util::sort_util::OrderType as SortType;
+use risingwave_common::worker_id::WorkerIdRef;
 use risingwave_pb::common::{ActorInfo, HostAddress};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType as ProstDataType;
@@ -65,6 +66,7 @@ async fn test_stream_mv_proto() {
         input: vec![],
         pk_indices: vec![],
         operator_id: 1,
+        identity: "SourceExecutor".to_string(),
     };
     let expr_proto = ExprNode {
         expr_type: InputRef as i32,
@@ -89,6 +91,7 @@ async fn test_stream_mv_proto() {
         input: vec![source_proto],
         pk_indices: vec![],
         operator_id: 2,
+        identity: "ProjectExecutor".to_string(),
     };
     let mview_proto = StreamNode {
         node: Some(Node::MviewNode(MViewNode {
@@ -108,6 +111,7 @@ async fn test_stream_mv_proto() {
         input: vec![project_proto],
         pk_indices: vec![],
         operator_id: 3,
+        identity: "MviewExecutor".to_string(),
     };
     let actor_proto = StreamActor {
         actor_id: 1,
@@ -168,7 +172,12 @@ async fn test_stream_mv_proto() {
 
     // Build stream actor.
     let stream_manager = StreamManager::for_test();
-    let env = StreamTaskEnv::new(table_manager.clone(), source_manager, *LOCAL_TEST_ADDR);
+    let env = StreamTaskEnv::new(
+        table_manager.clone(),
+        source_manager,
+        *LOCAL_TEST_ADDR,
+        WorkerIdRef::for_test(),
+    );
 
     let actor_info_proto = ActorInfo {
         actor_id: 1,

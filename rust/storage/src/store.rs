@@ -9,7 +9,6 @@ use risingwave_rpc_client::MetaClient;
 
 use crate::hummock::hummock_meta_client::RPCHummockMetaClient;
 use crate::hummock::local_version_manager::LocalVersionManager;
-use crate::hummock::version_manager::VersionManager;
 use crate::hummock::HummockStateStore;
 use crate::memory::MemoryStateStore;
 use crate::rocksdb_local::RocksDBStateStore;
@@ -90,6 +89,14 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     /// Create a `WriteBatch` associated with this state store.
     fn start_write_batch(&self) -> WriteBatch<Self> {
         WriteBatch::new(self.clone())
+    }
+
+    /// Update local version for this state store. This is currently no-op on stores other than
+    /// Hummock.
+    ///
+    /// TODO: remove this after we implement periodical version updating.
+    async fn update_local_version(&self) -> Result<()> {
+        Ok(())
     }
 }
 
@@ -173,7 +180,6 @@ impl StateStoreImpl {
                             remote_dir: remote_dir.to_string(),
                             checksum_algo: ChecksumAlg::Crc32c,
                         },
-                        Arc::new(VersionManager::new()),
                         Arc::new(LocalVersionManager::new(
                             object_client,
                             remote_dir,
@@ -208,7 +214,6 @@ impl StateStoreImpl {
                             remote_dir: remote_dir.to_string(),
                             checksum_algo: ChecksumAlg::Crc32c,
                         },
-                        Arc::new(VersionManager::new()),
                         Arc::new(LocalVersionManager::new(s3_store, remote_dir, None)),
                         Arc::new(RPCHummockMetaClient::new(meta_client)),
                     )

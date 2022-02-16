@@ -82,7 +82,7 @@ pub async fn rpc_serve(
     let stream_manager_ref = Arc::new(
         StreamManager::new(
             env.clone(),
-            fragment_manager,
+            fragment_manager.clone(),
             barrier_manager_ref,
             cluster_manager.clone(),
         )
@@ -94,7 +94,12 @@ pub async fn rpc_serve(
     let heartbeat_srv = HeartbeatServiceImpl::new(env.clone());
     let catalog_srv = CatalogServiceImpl::new(env.clone());
     let cluster_srv = ClusterServiceImpl::new(cluster_manager.clone());
-    let stream_srv = StreamServiceImpl::new(stream_manager_ref, cluster_manager, env);
+    let stream_srv = StreamServiceImpl::new(
+        stream_manager_ref,
+        fragment_manager.clone(),
+        cluster_manager,
+        env,
+    );
     let hummock_srv = HummockServiceImpl::new(hummock_manager);
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();

@@ -267,7 +267,7 @@ This expanded config will serve as a base config for the following config genera
 
 ### Config Generator
 
-RiseDev will generate config of each service using modules in risedev/src/config_gen. Given the above frontend meta-config, the server.properties will be generated:
+RiseDev will generate config of each service using modules in risedev/src/config_gen. Given the above frontend meta-config, the server.properties will be generated (`risingwave.leader.computenodes` is no longer used):
 
 ```apache
 risingwave.pgserver.ip=127.0.0.1

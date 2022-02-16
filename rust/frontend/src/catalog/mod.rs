@@ -7,7 +7,7 @@ pub(crate) mod catalog_service;
 pub(crate) mod column_catalog;
 pub(crate) mod database_catalog;
 mod schema_catalog;
-mod table_catalog;
+pub(crate) mod table_catalog;
 
 pub(crate) type DatabaseId = u64;
 pub(crate) type SchemaId = u64;

@@ -54,8 +54,11 @@ impl TableSourceV2 {
         }
     }
 
-    pub fn next_row_id(&self) -> usize {
-        self.next_row_id.fetch_add(1, Ordering::SeqCst)
+    pub fn next_row_id(&self, worker_id: u32) -> i64 {
+        let local_row_id = self.next_row_id.fetch_add(1, Ordering::SeqCst) as u32;
+
+        // Concatenate worker_id and local_row_id to produce a global unique row_id
+        (((worker_id as u64) << 32) + (local_row_id as u64)) as i64
     }
 }
 

@@ -27,13 +27,9 @@ export default function Streaming(props) {
     <>
       <Layout currentPage="streaming">
         {props.actorProtoList.length !== 0 ?
-          props.actorProtoList.map((data, index) =>
-            <StreamingView
-              key={index}
-              node={data.node}
-              actorProto={data}
-            />
-          )
+          <StreamingView
+            data={props.actorProtoList}
+          />
           : <NoData />}
       </Layout>
     </>
