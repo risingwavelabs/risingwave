@@ -429,11 +429,98 @@ impl<B: BufMut> Serializer<B> {
     /// The decimal will be encoded to 13 bytes.
     /// It is memcomparable only when two decimals have the same scale.
     pub fn serialize_decimal(&mut self, mantissa: i128, scale: i8) -> Result<()> {
-        // TODO(wrj): variable-length encoding
         // https://github.com/pingcap/tidb/blob/fec2938c1379270bf9939822c1abfe3d7244c174/types/mydecimal.go#L1133
-        self.output.put_i8(scale);
-        self.output.put_i128(mantissa ^ (1 << 127));
+        // https://sqlite.org/src4/doc/trunk/www/key_encoding.wiki
+        // NaN, PositiveINF and NegativeINF are not handled.
+        let (exponent, significand) = Serializer::<B>::decimal_e_m(mantissa, scale);
+        let mut encoded_decimal = vec![];
+        match mantissa {
+            1.. => {
+                match exponent {
+                    11.. => {
+                        encoded_decimal.push(0x22);
+                        encoded_decimal.push(exponent as u8);
+                    }
+                    0..=10 => {
+                        encoded_decimal.push(0x17 + exponent as u8);
+                    }
+                    _ => {
+                        encoded_decimal.push(0x16);
+                        encoded_decimal.push(!(-exponent) as u8);
+                    }
+                }
+                encoded_decimal.extend(significand.iter());
+            }
+            0 => {
+                encoded_decimal.push(0x15);
+            }
+            _ => {
+                match exponent {
+                    11.. => {
+                        encoded_decimal.push(0x8);
+                        encoded_decimal.push(!exponent as u8);
+                    }
+                    0..=10 => {
+                        encoded_decimal.push(0x13 - exponent as u8);
+                    }
+                    _ => {
+                        encoded_decimal.push(0x14);
+                        encoded_decimal.push(-exponent as u8);
+                    }
+                }
+                encoded_decimal.extend(significand.into_iter().map(|m| !m));
+            }
+        }
+        // TODO: change the way we put encoded_decimal.
+        self.output.put_slice(&encoded_decimal);
         Ok(())
+    }
+
+    /// Get the exponent and byte_array form of mantissa.
+    pub fn decimal_e_m(mantissa: i128, scale: i8) -> (i8, Vec<u8>) {
+        if mantissa == 0 {
+            return (0, vec![]);
+        }
+        let prec = {
+            let mut abs_man = mantissa.abs();
+            let mut cnt = 0;
+            while abs_man > 0 {
+                cnt += 1;
+                abs_man /= 10;
+            }
+            cnt
+        };
+        let scale = scale as i32;
+
+        let e10 = prec - scale;
+        let e100 = if e10 >= 0 { (e10 + 1) / 2 } else { e10 / 2 };
+        // Maybe need to add a zero at the beginning.
+        // e.g. 111.11 -> 2(exponent which is 100 based) + 0.011111(mantissa).
+        // So, the `digit_num` of 111.11 will be 6.
+        let mut digit_num = if e10 == 2 * e100 { prec } else { prec + 1 };
+
+        let mut byte_array: Vec<u8> = vec![];
+        let mut mantissa = mantissa.abs();
+        // Remove trailing zero.
+        while mantissa % 10 == 0 && mantissa != 0 {
+            mantissa /= 10;
+            digit_num -= 1;
+        }
+
+        // Cases like: 0.12345, not 0.01111.
+        if digit_num % 2 == 1 {
+            mantissa *= 10;
+            // digit_num += 1;
+        }
+        while mantissa != 0 {
+            let byte = (mantissa % 100) as u8 * 2 + 1;
+            byte_array.push(byte);
+            mantissa /= 100;
+        }
+        byte_array[0] -= 1;
+        byte_array.reverse();
+
+        (e100 as i8, byte_array)
     }
 
     /// Serialize a NaiveDateWrapper value.
