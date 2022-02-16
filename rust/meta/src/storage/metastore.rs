@@ -44,13 +44,6 @@ impl KeyValue {
 /// `MetaStore` defines the functions used to operate metadata.
 #[async_trait]
 pub trait MetaStore: Sync + Send + 'static {
-    async fn list(&self) -> Result<Vec<Vec<u8>>>;
-    async fn put(&self, key: &[u8], value: &[u8], version: Epoch) -> Result<()>;
-    async fn put_batch(&self, tuples: Vec<(Vec<u8>, Vec<u8>, Epoch)>) -> Result<()>;
-    async fn get(&self, key: &[u8], version: Epoch) -> Result<Vec<u8>>;
-    async fn delete(&self, key: &[u8], version: Epoch) -> Result<()>;
-    async fn delete_all(&self, key: &[u8]) -> Result<()>;
-
     async fn list_cf(&self, cf: &str) -> Result<Vec<Vec<u8>>>;
     /// We will need a proper implementation for `list`, `list_cf` and `list_batch_cf` in etcd
     /// MetaStore. In a naive implementation, we need to select the latest version for each key
@@ -63,6 +56,24 @@ pub trait MetaStore: Sync + Send + 'static {
     async fn delete_cf(&self, cf: &str, key: &[u8], version: Epoch) -> Result<()>;
     async fn delete_all_cf(&self, cf: &str, key: &[u8]) -> Result<()>;
 
+    async fn list(&self) -> Result<Vec<Vec<u8>>> {
+        self.list_cf(DEFAULT_COLUMN_FAMILY).await
+    }
+    async fn put(&self, key: &[u8], value: &[u8], version: Epoch) -> Result<()> {
+        self.put_cf(DEFAULT_COLUMN_FAMILY, key, value, version)
+            .await
+    }
+    // FIXME: we need a proper signature to forward the implementation to `put_batch_cf`.
+    async fn put_batch(&self, tuples: Vec<(Vec<u8>, Vec<u8>, Epoch)>) -> Result<()>;
+    async fn get(&self, key: &[u8], version: Epoch) -> Result<Vec<u8>> {
+        self.get_cf(DEFAULT_COLUMN_FAMILY, key, version).await
+    }
+    async fn delete(&self, key: &[u8], version: Epoch) -> Result<()> {
+        self.delete_cf(DEFAULT_COLUMN_FAMILY, key, version).await
+    }
+    async fn delete_all(&self, key: &[u8]) -> Result<()> {
+        self.delete_all_cf(DEFAULT_COLUMN_FAMILY, key).await
+    }
     fn get_transaction(&self) -> Transaction {
         Transaction::new()
     }
@@ -168,15 +179,6 @@ impl MemStore {
 
 #[async_trait]
 impl MetaStore for MemStore {
-    async fn list(&self) -> Result<Vec<Vec<u8>>> {
-        self.list_cf(DEFAULT_COLUMN_FAMILY).await
-    }
-
-    async fn put(&self, key: &[u8], value: &[u8], version: Epoch) -> Result<()> {
-        self.put_cf(DEFAULT_COLUMN_FAMILY, key, value, version)
-            .await
-    }
-
     async fn put_batch(&self, tuples: Vec<(Vec<u8>, Vec<u8>, Epoch)>) -> Result<()> {
         let mut entities = self.entities.lock().unwrap();
         for (key, value, version) in tuples {
@@ -192,18 +194,6 @@ impl MetaStore for MemStore {
             }
         }
         Ok(())
-    }
-
-    async fn get(&self, key: &[u8], version: Epoch) -> Result<Vec<u8>> {
-        self.get_cf(DEFAULT_COLUMN_FAMILY, key, version).await
-    }
-
-    async fn delete(&self, key: &[u8], version: Epoch) -> Result<()> {
-        self.delete_cf(DEFAULT_COLUMN_FAMILY, key, version).await
-    }
-
-    async fn delete_all(&self, key: &[u8]) -> Result<()> {
-        self.delete_all_cf(DEFAULT_COLUMN_FAMILY, key).await
     }
 
     async fn list_cf(&self, cf: &str) -> Result<Vec<Vec<u8>>> {
