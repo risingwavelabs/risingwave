@@ -17,7 +17,6 @@ use risingwave_pb::plan::{
     TaskSinkId as ProstSinkId, ValuesNode,
 };
 use risingwave_pb::task_service::GetDataResponse;
-use risingwave_storage::bummock::BummockTable;
 use risingwave_storage::Table;
 
 use super::*;
@@ -350,29 +349,29 @@ impl<'a> SelectBuilder<'a> {
             .table_manager_ref()
             .get_table(&TableId::default())
             .unwrap();
-        if let Ok(column_table_ref) = downcast_arc::<BummockTable>(table_ref.into_any()) {
-            let column_ids = column_table_ref.get_column_ids();
-            let scan = SeqScanNode {
-                table_ref_id: None,
-                column_ids,
-                fields: vec![],
-            };
+        // if let Ok(column_table_ref) = downcast_arc::<BummockTable>(table_ref.into_any()) {
+        //     let column_ids = column_table_ref.get_column_ids();
+        //     let scan = SeqScanNode {
+        //         table_ref_id: None,
+        //         column_ids,
+        //         fields: vec![],
+        //     };
 
-            self.plan = PlanFragment {
-                root: Some(PlanNode {
-                    children: vec![],
-                    node_body: Some(NodeBody::SeqScan(scan)),
-                    identity: "SeqScanExecutor".to_string(),
-                }),
-                exchange_info: Some(ExchangeInfo {
-                    mode: 0,
-                    distribution: None,
-                }),
-            };
-            self
-        } else {
-            todo!()
-        }
+        //     self.plan = PlanFragment {
+        //         root: Some(PlanNode {
+        //             children: vec![],
+        //             node_body: Some(NodeBody::SeqScan(scan)),
+        //             identity: "SeqScanExecutor".to_string(),
+        //         }),
+        //         exchange_info: Some(ExchangeInfo {
+        //             mode: 0,
+        //             distribution: None,
+        //         }),
+        //     };
+        //     self
+        // } else {
+        todo!()
+        // }
     }
 
     pub fn run_task(&mut self) -> &mut Self {

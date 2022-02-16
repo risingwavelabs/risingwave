@@ -22,12 +22,6 @@ use crate::TableColumnDesc;
 /// `Database` is a logical concept and stored as metadata information.
 pub trait TableManager: Sync + Send + AsRef<dyn Any> {
     /// Create a specific table.
-    async fn create_table(
-        &self,
-        table_id: &TableId,
-        table_columns: Vec<TableColumnDesc>,
-    ) -> Result<ScannableTableRef>;
-
     async fn create_table_v2(
         &self,
         table_id: &TableId,
