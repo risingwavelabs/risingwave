@@ -4110,6 +4110,7 @@ dependencies = [
  "lazy_static",
  "log",
  "memcomparable",
+ "moka",
  "num-integer",
  "num-traits",
  "paste",
