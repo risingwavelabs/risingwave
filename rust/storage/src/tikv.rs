@@ -260,7 +260,7 @@ mod tests {
             .scan(
                 (Bytes::from("non-existent prefix").to_vec())..,
                 Some(2),
-                epoch1
+                epoch1,
             )
             .await
             .unwrap();
