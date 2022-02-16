@@ -1,6 +1,6 @@
 use risingwave_common::types::{DataType, ScalarImpl};
 
-use crate::expr::{to_conjunctions, Expr, ExprImpl, ExprType, FunctionCall, Literal};
+use crate::expr::{to_conjunctions, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, Literal};
 
 #[derive(Debug, Clone)]
 pub struct Condition {
@@ -36,6 +36,16 @@ impl Condition {
             .reserve(self.conjunctions.len() + other.conjunctions.len());
         for expr in &other.conjunctions {
             self.conjunctions.push(expr.clone());
+        }
+    }
+    #[must_use]
+    pub fn rewrite_expr(self, rewriter: &mut impl ExprRewriter) -> Self {
+        Self {
+            conjunctions: self
+                .conjunctions
+                .into_iter()
+                .map(|expr| rewriter.rewrite_expr(expr))
+                .collect(),
         }
     }
 }
