@@ -60,7 +60,7 @@ where
     }
 
     async fn do_process(&mut self) -> Result<bool> {
-        let msg = self.read_message().await.unwrap();
+        let msg = self.read_message().await?;
         match msg {
             FeMessage::Ssl => {
                 self.write_message_no_flush(&BeMessage::EncryptionResponse)?;
