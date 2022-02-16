@@ -164,7 +164,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           RW_FORCE_TABLE_V1=1 ~/cargo-make/makers ci-3node
-          timeout 1m10s sqllogictest -p 4567 -d dev './e2e_test/batch/**/*.slt'
+          timeout 70s sqllogictest -p 4567 -d dev './e2e_test/batch/**/*.slt'
 
       - name: Kill cluster
         run: |
@@ -312,7 +312,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-1node
-          timeout 1m10s sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source/**/*.slt'
+          timeout 70s sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source/**/*.slt'
 
       - name: Kill cluster
         run: |
