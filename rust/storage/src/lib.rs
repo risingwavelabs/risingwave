@@ -20,7 +20,6 @@ use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use table::ScannableTable;
 
-pub mod bummock;
 pub mod hummock;
 pub mod keyspace;
 pub mod memory;

@@ -6,15 +6,17 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{DataChunk, Row};
+use risingwave_common::array::{DataChunk, DataChunkRef, Row};
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan::ColumnDesc;
 pub use simple_manager::*;
 
-use crate::bummock::BummockResult;
 use crate::TableColumnDesc;
+
+// TODO: should not be ref.
+pub type DataChunks = Vec<DataChunkRef>;
 
 #[async_trait::async_trait]
 /// `TableManager` is an abstraction of managing a collection of tables.
@@ -121,13 +123,15 @@ pub trait ScannableTable: Sync + Send + Any + core::fmt::Debug {
     /// This default implementation using iterator is not efficient, which project `column_ids` row
     /// by row. If the underlying storage is a column store, we may implement this function
     /// specifically.
-    async fn get_data_by_columns(&self, column_ids: &[i32]) -> Result<BummockResult> {
+    async fn get_data_by_columns(&self, column_ids: &[i32]) -> Result<Option<DataChunks>> {
         let indices = self.column_indices(column_ids);
         let mut iter = self.iter(u64::MAX).await?;
-        match self.collect_from_iter(&mut iter, &indices, None).await? {
-            Some(chunk) => Ok(BummockResult::Data(vec![chunk.into()])),
-            None => Ok(BummockResult::DataEof),
-        }
+        let chunks = self
+            .collect_from_iter(&mut iter, &indices, None)
+            .await?
+            .map(|chunk| vec![chunk.into()]);
+
+        Ok(chunks)
     }
 
     fn into_any(self: Arc<Self>) -> Arc<dyn Any + Sync + Send>;

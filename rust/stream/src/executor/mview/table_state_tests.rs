@@ -1,6 +1,5 @@
 use risingwave_common::array::Row;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_storage::bummock::BummockResult;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::mview::MViewTable;
 use risingwave_storage::table::{ScannableTable, TableIter};
@@ -419,13 +418,13 @@ async fn test_mview_scan_empty_column_ids_cardinality() {
     );
     state.flush(epoch).await.unwrap();
 
-    let chunk = table.get_data_by_columns(&[]).await.unwrap();
+    let chunks = table.get_data_by_columns(&[]).await.unwrap();
 
-    match chunk {
-        BummockResult::Data(chunks) => {
+    match chunks {
+        Some(chunks) => {
             let chunk = chunks.into_iter().next().unwrap();
             assert_eq!(chunk.cardinality(), 2);
         }
-        BummockResult::DataEof => panic!(),
+        None => panic!(),
     }
 }

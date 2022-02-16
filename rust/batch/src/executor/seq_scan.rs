@@ -5,7 +5,6 @@ use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_storage::bummock::BummockResult;
 use risingwave_storage::table::ScannableTableRef;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
@@ -82,7 +81,7 @@ impl Executor for SeqScanExecutor {
 
         let res = self.table.get_data_by_columns(&self.column_ids).await?;
 
-        if let BummockResult::Data(data) = res {
+        if let Some(data) = res {
             self.snapshot = VecDeque::from(data);
         }
         Ok(())
