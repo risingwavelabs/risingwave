@@ -42,7 +42,7 @@ sqllogictest -p 4567 -d dev './e2e_test/**/*.slt'
 To run end-to-end tests with state store, run the script:
 
 ```shell
-./risedev ci-streaming
+./risedev ci-1node
 sqllogictest -p 4567 -d dev './e2e_test/**/*.slt'
 ```
 

@@ -52,7 +52,7 @@ Then, simply run:
 
 ```
 ./risedev d # shortcut for ./risedev dev
-./risedev ci-streaming
+./risedev ci-1node
 ./risedev ci-3node
 ./risedev dev-compute-node # compute node will need to be started by you
 ```

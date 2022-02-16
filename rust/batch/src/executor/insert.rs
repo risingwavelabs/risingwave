@@ -19,6 +19,7 @@ pub struct InsertExecutor {
     /// target table id
     table_id: TableId,
     source_manager: SourceManagerRef,
+    worker_id: u32,
 
     child: BoxedExecutor,
     executed: bool,
@@ -27,10 +28,16 @@ pub struct InsertExecutor {
 }
 
 impl InsertExecutor {
-    pub fn new(table_id: TableId, source_manager: SourceManagerRef, child: BoxedExecutor) -> Self {
+    pub fn new(
+        table_id: TableId,
+        source_manager: SourceManagerRef,
+        child: BoxedExecutor,
+        worker_id: u32,
+    ) -> Self {
         Self {
             table_id,
             source_manager,
+            worker_id,
             child,
             executed: false,
             schema: Schema {
@@ -92,7 +99,7 @@ impl Executor for InsertExecutor {
 
         let next_row_id = || match source.source.as_ref() {
             SourceImpl::Table(t) => t.next_row_id(),
-            SourceImpl::TableV2(t) => t.next_row_id(),
+            SourceImpl::TableV2(t) => t.next_row_id(self.worker_id),
             _ => unreachable!(),
         };
 
@@ -104,7 +111,7 @@ impl Executor for InsertExecutor {
             // add row-id column as first column
             let mut builder = I64ArrayBuilder::new(len).unwrap();
             for _ in 0..len {
-                builder.append(Some(next_row_id() as i64)).unwrap();
+                builder.append(Some(next_row_id())).unwrap();
             }
 
             let rowid_column = once(Column::new(Arc::new(ArrayImpl::from(
@@ -180,6 +187,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
             table_id,
             source.global_task_env().source_manager_ref(),
             child,
+            source.global_task_env().worker_id(),
         )))
     }
 }
@@ -258,6 +266,7 @@ mod tests {
         let mut insert_executor = InsertExecutor {
             table_id: table_id.clone(),
             source_manager: source_manager.clone(),
+            worker_id: 0,
             child: Box::new(mock_executor),
             executed: false,
             schema: Schema {
@@ -332,6 +341,7 @@ mod tests {
         let mut insert_executor = InsertExecutor {
             table_id: table_id.clone(),
             source_manager: source_manager.clone(),
+            worker_id: 0,
             child: Box::new(mock_executor),
             executed: false,
             schema: Schema {
@@ -386,6 +396,7 @@ mod tests {
         let mut insert_executor = InsertExecutor {
             table_id: table_id2.clone(),
             source_manager: source_manager.clone(),
+            worker_id: 0,
             child: Box::new(mock_executor),
             executed: false,
             schema: Schema {
@@ -519,6 +530,7 @@ mod tests {
             table_id.clone(),
             source_manager.clone(),
             Box::new(mock_executor),
+            0,
         );
         insert_executor.open().await.unwrap();
         let fields = &insert_executor.schema().fields;
