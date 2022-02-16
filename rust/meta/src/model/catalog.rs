@@ -97,7 +97,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_database() -> Result<()> {
-        let store = &MetaSrvEnv::for_test().await.meta_store_ref();
+        let store = &MetaSrvEnv::for_test().await?.meta_store_ref();
         let databases = Database::list(store).await?;
         assert!(databases.is_empty());
         assert!(

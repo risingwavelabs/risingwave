@@ -70,7 +70,7 @@ mod tests {
     #[tokio::test]
     async fn test_mock_hummock_meta_client_creation() -> risingwave_common::error::Result<()> {
         let sled_root = tempfile::tempdir().unwrap();
-        let env = MetaSrvEnv::for_test_with_sled(sled_root).await;
+        let env = MetaSrvEnv::for_test_with_sled(sled_root).await?;
         let instance = HummockManager::new(env).await?;
         MockHummockMetaClient::new(instance);
         Ok(())

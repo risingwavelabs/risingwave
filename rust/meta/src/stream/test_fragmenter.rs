@@ -246,7 +246,7 @@ fn make_stream_node() -> StreamNode {
 
 #[tokio::test]
 async fn test_fragmenter() -> Result<()> {
-    let env = MetaSrvEnv::for_test().await;
+    let env = MetaSrvEnv::for_test().await?;
     let stream_node = make_stream_node();
     let fragment_manager_ref = Arc::new(FragmentManager::new(env.clone()).await?);
     let mut fragmenter = StreamFragmenter::new(env.id_gen_manager_ref(), fragment_manager_ref, 1);
@@ -319,7 +319,7 @@ async fn test_fragmenter() -> Result<()> {
 
 #[tokio::test]
 async fn test_fragmenter_multi_nodes() -> Result<()> {
-    let env = MetaSrvEnv::for_test().await;
+    let env = MetaSrvEnv::for_test().await?;
     let stream_node = make_stream_node();
     let fragment_manager_ref = Arc::new(FragmentManager::new(env.clone()).await?);
     let mut fragmenter = StreamFragmenter::new(env.id_gen_manager_ref(), fragment_manager_ref, 3);
