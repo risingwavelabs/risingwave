@@ -160,6 +160,35 @@ mod tests {
     use crate::row_nonnull;
 
     #[tokio::test]
+    async fn test_no_chunk() -> Result<()> {
+        let schema = schemas::iii();
+        let mut source = MockSource::new(schema, vec![2]);
+        source.push_barrier(1, false);
+        source.push_barrier(2, false);
+        source.push_barrier(3, false);
+
+        let agg_calls = vec![AggCall {
+            kind: AggKind::RowCount,
+            args: AggArgs::None,
+            return_type: DataType::Int64,
+        }];
+
+        let mut simple_agg = LocalSimpleAggExecutor::new(
+            Box::new(source),
+            agg_calls,
+            vec![],
+            1,
+            "LocalSimpleAggExecutor".to_string(),
+        )?;
+
+        assert_matches!(simple_agg.next().await.unwrap(), Message::Barrier { .. });
+        assert_matches!(simple_agg.next().await.unwrap(), Message::Barrier { .. });
+        assert_matches!(simple_agg.next().await.unwrap(), Message::Barrier { .. });
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_local_simple_agg() -> Result<()> {
         let chunk1 = StreamChunk::new(
             vec![Op::Insert, Op::Insert, Op::Insert],
