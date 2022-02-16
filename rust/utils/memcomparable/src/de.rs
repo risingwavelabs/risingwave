@@ -105,6 +105,22 @@ impl<B: Buf> Deserializer<B> {
             }
         }
     }
+    fn read_decimal(&mut self) -> Result<Vec<u8>> {
+        let flag = self.input.get_u8();
+        if !(0x8..=0x22).contains(&flag) {
+            return Err(Error::InvalidBytesEncoding(flag));
+        }
+        let mut byte_array = vec![flag];
+        loop {
+            let byte = self.input.get_u8();
+            if byte != 0 {
+                byte_array.push(byte);
+            } else {
+                break;
+            }
+        }
+        Ok(byte_array)
+    }
 }
 
 // Format Reference:
@@ -461,9 +477,7 @@ impl<'de, 'a, B: Buf + 'de> VariantAccess<'de> for &'a mut Deserializer<B> {
 impl<B: Buf> Deserializer<B> {
     /// Deserialize a decimal value. Returns `(mantissa, scale)`.
     pub fn deserialize_decimal(&mut self) -> Result<(i128, i8)> {
-        // TODO: change the way we get byte_array.
-        let mut byte_array: Vec<u8> = vec![0; self.input.input.remaining()];
-        self.input.copy_to_slice(&mut byte_array);
+        let mut byte_array = self.read_decimal()?;
 
         // indicate the beginning position of mantissa in `byte_array`.
         let mut begin: usize = 2;
@@ -702,9 +716,21 @@ mod tests {
     #[test]
     fn test_decimal() {
         // Notice: decimals like 100.00 will be decoding as 100.
-        // -12_3456_7890.1234, 100, 0.01_11_1, 12345
-        let mantissas: Vec<i128> = vec![-12_3456_7890_1234, 100, 1111, 12345];
-        let scales: Vec<i8> = vec![4, 0, 5, 0];
+
+        // Test: -1234_5678_9012_3456_7890_1234, -12_3456_7890.1234, -0.001, 0.001, 100, 0.01111,
+        // 12345, 1234_5678_9012_3456_7890_1234, -233.3
+        let mantissas: Vec<i128> = vec![
+            -1234_5678_9012_3456_7890_1234,
+            -12_3456_7890_1234,
+            -1,
+            1,
+            100,
+            1111,
+            12345,
+            1234_5678_9012_3456_7890_1234,
+            -2333,
+        ];
+        let scales: Vec<i8> = vec![0, 4, 3, 3, 0, 5, 0, 0, 1];
         for (mantissa, scale) in zip(mantissas, scales) {
             assert_eq!(
                 (mantissa, scale),

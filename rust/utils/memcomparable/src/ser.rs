@@ -56,10 +56,10 @@ impl<B: BufMut> MaybeFlip<B> {
     def_method!(put_u16, u16);
     def_method!(put_u32, u32);
     def_method!(put_u64, u64);
-    def_method!(put_i8, i8);
+    // def_method!(put_i8, i8);
     def_method!(put_i32, i32);
     def_method!(put_i64, i64);
-    def_method!(put_i128, i128);
+    // def_method!(put_i128, i128);
 
     fn put_slice(&mut self, src: &[u8]) {
         for &val in src {
@@ -471,7 +471,8 @@ impl<B: BufMut> Serializer<B> {
                 encoded_decimal.extend(significand.into_iter().map(|m| !m));
             }
         }
-        // TODO: change the way we put encoded_decimal.
+        // use 0x00 as the end marker.
+        encoded_decimal.push(0);
         self.output.put_slice(&encoded_decimal);
         Ok(())
     }
@@ -760,6 +761,7 @@ mod tests {
             ("100.0", 2, "02"),
             ("100.01", 2, "03 01 02"),
             ("100.1", 2, "03 01 14"),
+            ("111.11", 2, "03 17 16"),
             ("1234", 2, "19 44"),
             ("9999", 2, "c7 c6"),
             ("9999.000001", 2, "c7 c7 01 01 02"),
@@ -774,9 +776,9 @@ mod tests {
             ("10000", 3, "02"),
             ("10001", 3, "03 01 02"),
             ("12345", 3, "03 2f 5a"),
-            ("123450", 4, "19 45 64"),
-            ("1234.5", 3, "19 45 64"),
-            ("12.345", 2, "19 45 64"),
+            ("123450", 3, "19 45 64"),
+            ("1234.5", 2, "19 45 64"),
+            ("12.345", 1, "19 45 64"),
             ("0.123", 0, "19 3c"),
             ("0.0123", 0, "03 2e"),
             ("0.00123", -1, "19 3c"),
@@ -785,7 +787,7 @@ mod tests {
 
         for (decimal, exponets, significand) in cases {
             let d = decimal.parse::<rust_decimal::Decimal>().unwrap();
-            let (exp, sig) = decimal_e_m(d.mantissa(), d.scale() as i8);
+            let (exp, sig) = Serializer::<Vec<u8>>::decimal_e_m(d.mantissa(), d.scale() as i8);
             assert_eq!(exp, exponets, "wrong exponets for decimal: {decimal}");
             assert_eq!(
                 sig.iter()
@@ -796,56 +798,6 @@ mod tests {
                 "wrong significand for decimal: {decimal}"
             );
         }
-    }
-
-    fn decimal_e_m(mantissa: i128, scale: i8) -> (i8, Vec<u8>) {
-        let prec = {
-            let mut abs_man = mantissa.abs();
-            let mut cnt = 0;
-            while abs_man > 0 {
-                cnt += 1;
-                abs_man /= 10;
-            }
-            cnt
-        };
-        let scale = scale as i32;
-
-        let e10 = prec - scale;
-        let e100 = if e10 >= 0 { (e10 + 1) / 2 } else { e10 / 2 };
-        // Maybe need to add a zero at the beginning.
-        // e.g. 111.11 -> 2(exponent which is 100 based) + 0.011111(mantissa).
-        // So, the `digit_num` of 111.11 will be 6.
-        let mut digit_num = if e10 == 2 * e100 { prec } else { prec + 1 };
-
-        let mut byte_array: Vec<u8> = vec![];
-        let mut mantissa = mantissa.abs();
-        // Remove trailing zero.
-        while mantissa % 10 == 0 && mantissa != 0 {
-            mantissa /= 10;
-            digit_num -= 1;
-        }
-
-        // Cases like: 0.12345, not 0.01111.
-        if digit_num % 2 == 1 {
-            // let last_byte = (mantissa % 10) as u8 * 2 + 1;
-            // mantissa /= 10;
-            // byte_array.push(last_byte);
-            mantissa *= 10;
-            digit_num += 1;
-        }
-        println!(
-            "e10: {}, e100: {}, prec: {}, scale: {}, digit_num: {}, mantissa: {}",
-            e10, e100, prec, scale, digit_num, mantissa
-        );
-        while mantissa != 0 {
-            let byte = (mantissa % 100) as u8 * 2 + 1;
-            byte_array.push(byte);
-            mantissa /= 100;
-        }
-        byte_array[0] -= 1;
-        byte_array.reverse();
-
-        (e100 as i8, byte_array)
     }
 
     #[test]
