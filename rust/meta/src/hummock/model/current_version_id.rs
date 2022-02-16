@@ -5,7 +5,7 @@ use risingwave_storage::hummock::{HummockVersionId, FIRST_VERSION_ID};
 
 use crate::hummock::model::HUMMOCK_DEFAULT_CF_NAME;
 use crate::manager::SINGLE_VERSION_EPOCH;
-use crate::storage::{ColumnFamilyUtils, MetaStore, Operation, Transaction};
+use crate::storage::{MetaStore, Operation, Transaction};
 
 /// Hummock version id key.
 /// `cf(hummock_default)`: `hummock_version_id_key` -> `HummockVersionRefId`
@@ -22,11 +22,19 @@ impl CurrentHummockVersionId {
         }
     }
 
+    fn cf_name() -> &'static str {
+        HUMMOCK_DEFAULT_CF_NAME
+    }
+
+    fn key() -> &'static str {
+        HUMMOCK_VERSION_ID_LEY
+    }
+
     pub async fn get(meta_store_ref: &dyn MetaStore) -> Result<CurrentHummockVersionId> {
         let byte_vec = meta_store_ref
             .get_cf(
-                HUMMOCK_DEFAULT_CF_NAME,
-                HUMMOCK_VERSION_ID_LEY.as_bytes(),
+                CurrentHummockVersionId::cf_name(),
+                CurrentHummockVersionId::key().as_bytes(),
                 SINGLE_VERSION_EPOCH,
             )
             .await?;
@@ -45,7 +53,8 @@ impl CurrentHummockVersionId {
 
     pub fn update_in_transaction(&self, trx: &mut Transaction) {
         trx.add_operations(vec![Operation::Put(
-            ColumnFamilyUtils::prefix_key_with_cf(HUMMOCK_VERSION_ID_LEY, HUMMOCK_DEFAULT_CF_NAME),
+            CurrentHummockVersionId::cf_name().to_string(),
+            CurrentHummockVersionId::key().as_bytes().to_vec(),
             HummockVersionRefId { id: self.id }.encode_to_vec(),
             None,
         )]);

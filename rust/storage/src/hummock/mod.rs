@@ -399,7 +399,7 @@ impl HummockStorage {
 
         // TODO: do not generate epoch if `kv_pairs` is empty
         for (k, v) in kv_pairs {
-            builder.add_user_key(k, v, epoch).await?;
+            builder.add_user_key(k, v.as_slice(), epoch).await?;
         }
 
         let tables = {
@@ -451,10 +451,15 @@ impl HummockStorage {
 
         // TODO: #2336 The transaction flow is not ready yet. Before that we update_local_version
         // after each write_batch to make uncommitted write visible.
+        self.update_local_version().await?;
+
+        Ok(())
+    }
+
+    pub async fn update_local_version(&self) -> HummockResult<()> {
         self.local_version_manager
             .update_local_version(self.hummock_meta_client().as_ref())
             .await?;
-
         Ok(())
     }
 

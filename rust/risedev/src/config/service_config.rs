@@ -31,7 +31,6 @@ pub struct FrontendConfig {
     pub id: String,
     pub address: String,
     pub port: u16,
-    pub provide_compute_node: Option<Vec<ComputeNodeConfig>>,
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
     pub user_managed: bool,
 }

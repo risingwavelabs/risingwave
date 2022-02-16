@@ -45,14 +45,14 @@ engine, storage engine and meta service.
 RiseDev is the new tool for developing RisingWave. You'll need to install tmux (>= 3.2a) beforehand.
 
 ```
-brew install tmux wget
+brew install tmux
 ```
 
-Then, simply run:
+Then, in the root directory, simply run:
 
 ```
 ./risedev d # shortcut for ./risedev dev
-./risedev ci-streaming
+./risedev ci-1node
 ./risedev ci-3node
 ./risedev dev-compute-node # compute node will need to be started by you
 ```

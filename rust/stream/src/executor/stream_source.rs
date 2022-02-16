@@ -50,6 +50,7 @@ impl StreamSourceExecutor {
         barrier_receiver: UnboundedReceiver<Message>,
         executor_id: u64,
         operator_id: u64,
+        identity: String,
     ) -> Result<Self> {
         let source = source_desc.clone().source;
         let reader: Box<dyn StreamSourceReader> = match source.as_ref() {
@@ -84,7 +85,7 @@ impl StreamSourceExecutor {
             barrier_receiver,
             next_row_id: AtomicU64::from(0u64),
             first_execution: true,
-            identity: format!("StreamSourceExecutor {:X}", executor_id),
+            identity: format!("{} {:X}", identity, executor_id),
             attributes: vec![KeyValue::new("source_id", source_identify)],
             source_output_row_count: meter
                 .u64_counter("stream_source_output_rows_counts")
@@ -277,6 +278,7 @@ mod tests {
             barrier_receiver,
             1,
             1,
+            "StreamSourceExecutor".to_string(),
         )
         .unwrap();
 
@@ -400,6 +402,7 @@ mod tests {
             barrier_receiver,
             1,
             1,
+            "StreamSourceExecutor".to_string(),
         )
         .unwrap();
 

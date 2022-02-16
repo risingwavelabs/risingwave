@@ -1,4 +1,3 @@
-use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -6,8 +5,6 @@ use itertools::Itertools;
 use log::{debug, info};
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::try_match_expand;
-use risingwave_pb::common::{ActorInfo, WorkerNode};
-use risingwave_pb::meta::ActorLocation;
 use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::StreamNode;
@@ -17,7 +14,7 @@ use risingwave_pb::stream_service::{
 use uuid::Uuid;
 
 use crate::barrier::{BarrierManagerRef, Command};
-use crate::cluster::{NodeId, StoredClusterManager};
+use crate::cluster::StoredClusterManager;
 use crate::manager::{MetaSrvEnv, StreamClientsRef};
 use crate::model::{ActorId, TableFragments};
 use crate::stream::{FragmentManagerRef, ScheduleCategory, Scheduler};
@@ -103,51 +100,21 @@ impl StreamManager {
             .filter(|id| !source_actor_ids.contains(id))
             .collect::<Vec<_>>();
 
-        let nodes = self
+        let locations = self
             .scheduler
-            .schedule(&non_source_actor_ids, &source_actor_ids)
-            .await?;
+            .schedule(&non_source_actor_ids, &source_actor_ids)?;
 
-        // Re-sort actors by `non_source_actor_ids`::`source_actor_ids`.
-        let mut sorted_actor_ids = non_source_actor_ids.clone();
-        sorted_actor_ids.extend(source_actor_ids.iter().cloned());
-
-        let mut node_actors_map = HashMap::new();
-        let mut actor_locations = BTreeMap::new();
-        for (node, actor) in nodes.iter().zip_eq(sorted_actor_ids) {
-            node_actors_map
-                .entry(node.get_id())
-                .or_insert_with(Vec::new)
-                .push(actor);
-            actor_locations.insert(actor, node.get_id());
-        }
-
-        table_fragments.set_locations(actor_locations);
+        table_fragments.set_locations(locations.actor_locations.clone());
         let actor_map = table_fragments.actor_map();
 
-        let node_map = nodes
-            .iter()
-            .map(|n| (n.get_id(), n.clone()))
-            .collect::<HashMap<NodeId, WorkerNode>>();
-
-        let actor_infos = nodes
-            .iter()
-            .zip_eq(actor_ids.clone())
-            .map(|(n, actor_id)| ActorInfo {
-                actor_id,
-                host: n.host.clone(),
-            })
-            .collect_vec();
-
-        let actor_info_map = actor_infos
-            .iter()
-            .map(|actor_info| (actor_info.actor_id, actor_info.clone()))
-            .collect::<HashMap<ActorId, ActorInfo>>();
+        let actor_infos = locations.actor_infos();
+        let actor_host_infos = locations.actor_info_map();
+        let node_actors = locations.node_actors();
 
         let dispatches = up_down_ids.into_iter().into_grouping_map().fold(
             vec![],
             |mut actors, _up_id, down_id| {
-                let info = actor_info_map
+                let info = actor_host_infos
                     .get(&down_id)
                     .expect("downstream actor info not exist")
                     .clone();
@@ -156,22 +123,12 @@ impl StreamManager {
             },
         );
 
-        let mut actor_locations = Vec::with_capacity(actors.len());
-
-        // Debug usage: print the actor dependencies in log.
-        actors.iter().for_each(|e| {
-            debug!(
-                "actor {} with downstreams: {:?}",
-                e.actor_id, e.downstream_actor_id
-            );
-        });
-
         // We send RPC request in two stages.
         // The first stage does 2 things: broadcast actor info, and send local actor ids to
         // different WorkerNodes. Such that each WorkerNode knows the overall actor
         // allocation, but not actually builds it. We initialize all channels in this stage.
-        for (node_id, actors) in node_actors_map.clone() {
-            let node = node_map.get(&node_id).unwrap();
+        for (node_id, actors) in &node_actors {
+            let node = locations.node_locations.get(node_id).unwrap();
 
             let client = self.clients.get(node).await?;
             client
@@ -197,17 +154,12 @@ impl StreamManager {
                 })
                 .await
                 .to_rw_result_with(format!("failed to connect to {}", node_id))?;
-
-            actor_locations.push(ActorLocation {
-                node: Some(node.clone()),
-                actors: stream_actors,
-            });
         }
 
         // In the second stage, each [`WorkerNode`] builds local actors and connect them with
         // channels.
-        for (node_id, actors) in node_actors_map {
-            let node = node_map.get(&node_id).unwrap();
+        for (node_id, actors) in node_actors {
+            let node = locations.node_locations.get(&node_id).unwrap();
 
             let client = self.clients.get(node).await?;
             let request_id = Uuid::new_v4().to_string();
@@ -262,7 +214,7 @@ impl StreamManager {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
+    use std::collections::{BTreeMap, HashMap, HashSet};
     use std::net::SocketAddr;
     use std::sync::{Arc, Mutex};
     use std::thread::sleep;

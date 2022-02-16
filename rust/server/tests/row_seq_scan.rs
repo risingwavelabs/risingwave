@@ -41,7 +41,7 @@ async fn test_row_seq_scan() -> Result<()> {
     ));
 
     let mut executor =
-        RowSeqScanExecutor::new(table, vec![0, 1], 1, "RowSeqScanExecutor".to_string());
+        RowSeqScanExecutor::new(table, vec![0, 1], 1, true, "RowSeqScanExecutor".to_string());
 
     let epoch: u64 = 0;
     state.put(

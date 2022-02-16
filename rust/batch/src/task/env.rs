@@ -2,6 +2,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use risingwave_common::config::BatchConfig;
+use risingwave_common::worker_id::WorkerIdRef;
 use risingwave_source::{SourceManager, SourceManagerRef};
 use risingwave_storage::table::{TableManager, TableManagerRef};
 
@@ -16,6 +17,7 @@ pub struct BatchTaskEnv {
     task_manager: Arc<TaskManager>,
     source_manager: SourceManagerRef,
     config: Arc<BatchConfig>,
+    worker_id_ref: WorkerIdRef,
 }
 
 impl BatchTaskEnv {
@@ -25,6 +27,7 @@ impl BatchTaskEnv {
         task_manager: Arc<TaskManager>,
         server_addr: SocketAddr,
         config: Arc<BatchConfig>,
+        worker_id_ref: WorkerIdRef,
     ) -> Self {
         BatchTaskEnv {
             table_manager,
@@ -32,6 +35,7 @@ impl BatchTaskEnv {
             task_manager,
             source_manager,
             config,
+            worker_id_ref,
         }
     }
 
@@ -47,6 +51,7 @@ impl BatchTaskEnv {
             server_addr: SocketAddr::V4("127.0.0.1:5688".parse().unwrap()),
             source_manager: std::sync::Arc::new(MemSourceManager::new()),
             config: Arc::new(BatchConfig::default()),
+            worker_id_ref: WorkerIdRef::for_test(),
         }
     }
 
@@ -76,5 +81,9 @@ impl BatchTaskEnv {
 
     pub fn config(&self) -> &BatchConfig {
         self.config.as_ref()
+    }
+
+    pub fn worker_id(&self) -> u32 {
+        self.worker_id_ref.get()
     }
 }

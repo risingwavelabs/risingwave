@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::hummock::level_handler::{LevelHandler, SSTableStat};
 use crate::hummock::model::HUMMOCK_DEFAULT_CF_NAME;
 use crate::manager::SINGLE_VERSION_EPOCH;
-use crate::storage::{ColumnFamilyUtils, MetaStore, Operation, Transaction};
+use crate::storage::{MetaStore, Operation, Transaction};
 
 /// Hummock `compact_status` key
 /// `cf(hummock_default)`: `hummock_compact_status_key` -> `CompactStatus`
@@ -35,11 +35,19 @@ impl CompactStatus {
         }
     }
 
+    fn cf_name() -> &'static str {
+        HUMMOCK_DEFAULT_CF_NAME
+    }
+
+    fn key() -> &'static str {
+        HUMMOCK_COMPACT_STATUS_KEY
+    }
+
     pub async fn get(meta_store_ref: &dyn MetaStore) -> Result<CompactStatus> {
         meta_store_ref
             .get_cf(
-                HUMMOCK_DEFAULT_CF_NAME,
-                HUMMOCK_COMPACT_STATUS_KEY.as_bytes(),
+                CompactStatus::cf_name(),
+                CompactStatus::key().as_bytes(),
                 SINGLE_VERSION_EPOCH,
             )
             .await
@@ -49,10 +57,8 @@ impl CompactStatus {
 
     pub fn update_in_transaction(&self, trx: &mut Transaction) {
         trx.add_operations(vec![Operation::Put(
-            ColumnFamilyUtils::prefix_key_with_cf(
-                HUMMOCK_COMPACT_STATUS_KEY.as_bytes(),
-                HUMMOCK_DEFAULT_CF_NAME,
-            ),
+            CompactStatus::cf_name().to_string(),
+            CompactStatus::key().as_bytes().to_vec(),
             // TODO replace unwrap
             bincode::serialize(&self).unwrap(),
             None,

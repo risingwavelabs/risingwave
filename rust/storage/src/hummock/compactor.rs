@@ -201,11 +201,7 @@ impl Compactor {
             }
 
             builder
-                .add_full_key(
-                    FullKey::from_slice(iter_key),
-                    iter.value().to_owned_value(),
-                    is_new_user_key,
-                )
+                .add_full_key(FullKey::from_slice(iter_key), iter.value(), is_new_user_key)
                 .await?;
 
             iter.next().await?;

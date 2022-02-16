@@ -119,15 +119,17 @@ message StreamNode {
   // Child node in plan aka. upstream nodes in the streaming DAG
   repeated StreamNode input = 3;
   repeated uint32 pk_indices = 2;
+  string identity = 18;
 }
 
 // A dispatcher redistribute messages.
 // We encode both the type and other usage information in the proto.
 message Dispatcher {
   enum DispatcherType {
-    SIMPLE = 0;
+    INVALID = 0;
     HASH = 1;
     BROADCAST = 2;
+    SIMPLE = 3;
   }
   DispatcherType type = 1;
   repeated uint32 column_indices = 2;

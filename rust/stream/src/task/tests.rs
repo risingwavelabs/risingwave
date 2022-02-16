@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use futures::{SinkExt, StreamExt};
+use risingwave_common::worker_id::WorkerIdRef;
 use risingwave_pb::common::{ActorInfo, HostAddress};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
@@ -73,9 +74,11 @@ async fn test_stream_proto() {
                         input: vec![],
                         pk_indices: vec![],
                         operator_id: 1,
+                        identity: "MergeExecutor".to_string(),
                     }],
                     pk_indices: vec![],
                     operator_id: 2,
+                    identity: "ProjectExecutor".to_string(),
                 }),
                 dispatcher: Some(Dispatcher {
                     r#type: dispatcher::DispatcherType::Hash as i32,
@@ -104,9 +107,11 @@ async fn test_stream_proto() {
                         input: vec![],
                         pk_indices: vec![],
                         operator_id: 3,
+                        identity: "MergeExecutor".to_string(),
                     }],
                     pk_indices: vec![],
                     operator_id: 4,
+                    identity: "ProjectExecutor".to_string(),
                 }),
                 dispatcher: Some(Dispatcher {
                     r#type: dispatcher::DispatcherType::Hash as i32,
@@ -135,9 +140,11 @@ async fn test_stream_proto() {
                         input: vec![],
                         pk_indices: vec![],
                         operator_id: 5,
+                        identity: "MergeExecutor".to_string(),
                     }],
                     pk_indices: vec![],
                     operator_id: 6,
+                    identity: "ProjectExecutor".to_string(),
                 }),
                 dispatcher: Some(Dispatcher {
                     r#type: dispatcher::DispatcherType::Hash as i32,
@@ -166,9 +173,11 @@ async fn test_stream_proto() {
                         input: vec![],
                         pk_indices: vec![],
                         operator_id: 7,
+                        identity: "MergeExecutor".to_string(),
                     }],
                     pk_indices: vec![],
                     operator_id: 8,
+                    identity: "ProjectExecutor".to_string(),
                 }),
                 dispatcher: Some(Dispatcher {
                     r#type: dispatcher::DispatcherType::Simple as i32,
@@ -197,9 +206,11 @@ async fn test_stream_proto() {
                         input: vec![],
                         pk_indices: vec![],
                         operator_id: 9,
+                        identity: "MergeExecutor".to_string(),
                     }],
                     pk_indices: vec![],
                     operator_id: 10,
+                    identity: "ProjectExecutor".to_string(),
                 }),
                 dispatcher: Some(Dispatcher {
                     r#type: dispatcher::DispatcherType::Simple as i32,
@@ -215,6 +226,7 @@ async fn test_stream_proto() {
         Arc::new(SimpleTableManager::with_in_memory_store()),
         Arc::new(MemSourceManager::new()),
         std::net::SocketAddr::V4("127.0.0.1:5688".parse().unwrap()),
+        WorkerIdRef::for_test(),
     );
     stream_manager
         .build_actors(&[1, 3, 7, 11, 13], env)

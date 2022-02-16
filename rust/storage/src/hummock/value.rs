@@ -14,6 +14,8 @@ pub enum HummockValue<T> {
     Delete,
 }
 
+impl<T> Copy for HummockValue<T> where T: Copy {}
+
 impl<T: PartialEq> PartialEq for HummockValue<T> {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -72,6 +74,13 @@ impl HummockValue<Vec<u8>> {
             VALUE_PUT => Ok(Self::Put(Vec::from(buffer.chunk()))),
             VALUE_DELETE => Ok(Self::Delete),
             _ => Err(HummockError::DecodeError("non-empty but format error".to_string()).into()),
+        }
+    }
+
+    pub fn as_slice(&self) -> HummockValue<&[u8]> {
+        match self {
+            HummockValue::Put(x) => HummockValue::Put(x),
+            HummockValue::Delete => HummockValue::Delete,
         }
     }
 }

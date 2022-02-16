@@ -15,6 +15,8 @@ use crate::model::MetadataModel;
 /// Column family name for table fragments.
 const TABLE_FRAGMENTS_CF_NAME: &str = "cf/table_fragments";
 
+pub type ActorLocations = BTreeMap<ActorId, NodeId>;
+
 /// We store whole fragments in a single column family as follow:
 /// `table_id` => `TableFragments`.
 #[derive(Debug, Clone)]
@@ -26,7 +28,7 @@ pub struct TableFragments {
     /// The table fragments.
     fragments: BTreeMap<FragmentId, Fragment>,
     /// The actor location.
-    actor_locations: BTreeMap<ActorId, NodeId>,
+    actor_locations: ActorLocations,
 }
 
 impl MetadataModel for TableFragments {
@@ -82,7 +84,7 @@ impl TableFragments {
     }
 
     /// Set the actor locations.
-    pub fn set_locations(&mut self, actor_locations: BTreeMap<ActorId, NodeId>) {
+    pub fn set_locations(&mut self, actor_locations: ActorLocations) {
         self.actor_locations = actor_locations;
     }
 
