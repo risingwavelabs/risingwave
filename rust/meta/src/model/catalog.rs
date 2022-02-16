@@ -14,7 +14,7 @@ const SCHEMA_CF_NAME: &str = "cf/schema";
 /// Column family name for database.
 const DATABASE_CF_NAME: &str = "cf/database";
 
-pub struct Catalog(ProstCatalog);
+pub struct Catalog(pub ProstCatalog);
 
 macro_rules! impl_model_for_catalog {
     ($name:ident, $cf:ident, $key_ty:ty, $key_fn:ident) => {

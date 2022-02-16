@@ -1,10 +1,13 @@
 use std::sync::Arc;
 
+use risingwave_common::error::Result;
+
 use super::{StreamClients, StreamClientsRef};
 #[cfg(test)]
 use crate::manager::MemEpochGenerator;
 use crate::manager::{
     EpochGenerator, EpochGeneratorRef, IdGeneratorManager, IdGeneratorManagerRef,
+    StoredCatalogManager, StoredCatalogManagerRef,
 };
 #[cfg(test)]
 use crate::storage::MemStore;
@@ -22,55 +25,63 @@ pub struct MetaSrvEnv {
     epoch_generator: EpochGeneratorRef,
     /// stream clients memoization.
     stream_clients: StreamClientsRef,
+    // catalog manager.
+    stored_catalog_manager: StoredCatalogManagerRef,
 }
 
 impl MetaSrvEnv {
-    pub async fn new(meta_store: MetaStoreRef, epoch_generator: EpochGeneratorRef) -> Self {
+    pub async fn new(meta_store: MetaStoreRef, epoch_generator: EpochGeneratorRef) -> Result<Self> {
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let stream_clients = Arc::new(StreamClients::default());
+        let stored_catalog_manager = Arc::new(StoredCatalogManager::new(meta_store.clone()).await?);
 
-        Self {
+        Ok(Self {
             id_gen_manager,
             meta_store,
             epoch_generator,
             stream_clients,
-        }
+            stored_catalog_manager,
+        })
     }
 
     // Instance for test.
     #[cfg(test)]
-    pub async fn for_test() -> Self {
+    pub async fn for_test() -> Result<Self> {
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let meta_store = Arc::new(MemStore::new());
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let epoch_generator = Arc::new(MemEpochGenerator::new());
         let stream_clients = Arc::new(StreamClients::default());
+        let stored_catalog_manager = Arc::new(StoredCatalogManager::new(meta_store.clone()).await?);
 
-        Self {
+        Ok(Self {
             id_gen_manager,
             meta_store,
             epoch_generator,
             stream_clients,
-        }
+            stored_catalog_manager,
+        })
     }
 
     // Instance for test using sled as backend
     #[cfg(test)]
-    pub async fn for_test_with_sled(sled_root: impl AsRef<std::path::Path>) -> Self {
+    pub async fn for_test_with_sled(sled_root: impl AsRef<std::path::Path>) -> Result<Self> {
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let meta_store =
             Arc::new(crate::storage::SledMetaStore::new(Some(sled_root.as_ref())).unwrap());
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let epoch_generator = Arc::new(MemEpochGenerator::new());
         let stream_clients = Arc::new(StreamClients::default());
+        let stored_catalog_manager = Arc::new(StoredCatalogManager::new(meta_store.clone()).await?);
 
-        Self {
+        Ok(Self {
             id_gen_manager,
             meta_store,
             epoch_generator,
             stream_clients,
-        }
+            stored_catalog_manager,
+        })
     }
 
     #[allow(dead_code)]
@@ -96,5 +107,9 @@ impl MetaSrvEnv {
 
     pub fn stream_clients_ref(&self) -> StreamClientsRef {
         self.stream_clients.clone()
+    }
+
+    pub fn stored_catalog_manager_ref(&self) -> StoredCatalogManagerRef {
+        self.stored_catalog_manager.clone()
     }
 }

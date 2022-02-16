@@ -45,7 +45,9 @@ pub async fn rpc_serve(
         MetaStoreBackend::SledInMem => Arc::new(SledMetaStore::new(None).unwrap()),
     };
     let epoch_generator_ref = Arc::new(MemEpochGenerator::new());
-    let env = MetaSrvEnv::new(meta_store_ref, epoch_generator_ref.clone()).await;
+    let env = MetaSrvEnv::new(meta_store_ref, epoch_generator_ref.clone())
+        .await
+        .unwrap();
 
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
     let hummock_manager = Arc::new(hummock::HummockManager::new(env.clone()).await.unwrap());

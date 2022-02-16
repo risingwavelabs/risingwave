@@ -17,7 +17,9 @@ import com.risingwave.execution.result.DdlResult;
 import com.risingwave.pgwire.msg.StatementType;
 import com.risingwave.planner.planner.streaming.StreamPlanner;
 import com.risingwave.planner.rel.serialization.StreamingPlanSerializer;
+import com.risingwave.planner.rel.streaming.RwStreamChain;
 import com.risingwave.planner.rel.streaming.RwStreamMaterializedView;
+import com.risingwave.planner.rel.streaming.RwStreamTableSource;
 import com.risingwave.planner.rel.streaming.StreamingPlan;
 import com.risingwave.planner.sql.SqlConverter;
 import com.risingwave.proto.common.Status;
@@ -36,6 +38,8 @@ import com.risingwave.scheduler.streaming.StreamManager;
 import com.risingwave.sql.parser.SqlParser;
 import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.List;
+import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.ddl.SqlColumnDeclaration;
@@ -77,15 +81,29 @@ public class CreateTableHandler implements SqlHandler {
     StreamingPlan plan = planner.plan(ast, context);
 
     // Check whether the naming for columns in MV is valid.
-    boolean isAllAliased = isAllAliased(plan.getStreamingPlan());
+    RwStreamMaterializedView mv = plan.getStreamingPlan();
+    boolean isAllAliased = isAllAliased(mv);
     if (!isAllAliased) {
       throw new PgException(
           PgErrorCode.INVALID_COLUMN_DEFINITION,
           "An alias name must be specified for an aggregation function");
     }
 
+    // Get tables on which the MV depends.
+    ArrayList<Integer> dependencies = new ArrayList<>();
+    getDependencies(mv, dependencies);
+
+    ExecutionContext.Builder builder = ExecutionContext.builder();
+    builder
+        .withDatabase(context.getDatabase())
+        .withSchema(context.getSchema())
+        .withFrontendEnv(context.getFrontendEnv())
+        .withSessionConfig(context.getSessionConfiguration())
+        .withDependentTables(dependencies);
+    ExecutionContext newContext = builder.build();
+
     // Register the view on catalog.
-    TableCatalog catalog = convertPlanToCatalog(tableName, plan, context);
+    TableCatalog catalog = convertPlanToCatalog(tableName, plan, newContext);
 
     // Bind stream plan with materialized view catalog.
     var streamingPlan = plan.getStreamingPlan();
@@ -132,6 +150,8 @@ public class CreateTableHandler implements SqlHandler {
     builder.setCollation(rootNode.getCollation());
     builder.setMv(true);
     builder.setAssociated(true);
+    if (!context.getDependentTables().isEmpty())
+      builder.setDependentTables(context.getDependentTables());
     CreateMaterializedViewInfo mvInfo = builder.build();
     MaterializedViewCatalog viewCatalog =
         context.getCatalogService().createMaterializedView(schemaName, mvInfo);
@@ -209,5 +229,18 @@ public class CreateTableHandler implements SqlHandler {
     TableCatalog table = context.getCatalogService().createTable(schemaName, tableInfo);
     tableId = table.getId();
     return TableNodeSerializer.createProtoFromCatalog(table, true, null);
+  }
+
+  @VisibleForTesting
+  public void getDependencies(RelNode root, List<Integer> dependencies) {
+    if (root instanceof RwStreamTableSource)
+      dependencies.add(((RwStreamTableSource) root).getTableId().getValue());
+    else if (root instanceof RwStreamChain)
+      dependencies.add(((RwStreamChain) root).getTableId().getValue());
+    root.getInputs()
+        .forEach(
+            node -> {
+              getDependencies(root, dependencies);
+            });
   }
 }

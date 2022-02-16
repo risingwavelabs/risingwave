@@ -4,10 +4,12 @@ import static java.util.Objects.requireNonNull;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.risingwave.proto.plan.TableRefId;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 import org.apache.calcite.util.ImmutableIntList;
 import org.apache.calcite.util.Pair;
 
@@ -21,6 +23,7 @@ public class CreateTableInfo {
   private final boolean source;
   private final String rowFormat;
   private final String rowSchemaLocation;
+  private final ImmutableList<TableRefId> dependentTables;
 
   protected CreateTableInfo(
       String tableName,
@@ -30,7 +33,8 @@ public class CreateTableInfo {
       boolean appendOnly,
       boolean source,
       String rowFormat,
-      String rowSchemaLocation) {
+      String rowSchemaLocation,
+      ImmutableList<TableRefId> dependentTables) {
     this.name = tableName;
     this.columns = columns;
     this.primaryKeyIndices = primaryKeyIndices;
@@ -39,6 +43,7 @@ public class CreateTableInfo {
     this.source = source;
     this.rowFormat = rowFormat;
     this.rowSchemaLocation = rowSchemaLocation;
+    this.dependentTables = dependentTables;
   }
 
   public String getName() {
@@ -92,6 +97,7 @@ public class CreateTableInfo {
     protected boolean source = false;
     protected String rowFormat = "";
     protected String rowSchemaLocation = "";
+    protected List<TableRefId> dependentTables = new ArrayList<>();
 
     protected Builder(String tableName) {
       this.tableName = requireNonNull(tableName, "table name can't be null!");
@@ -134,6 +140,14 @@ public class CreateTableInfo {
       this.rowFormat = rowFormat;
     }
 
+    public void setDependentTables(List<Integer> dependentTables) {
+      TableRefId.Builder builder = TableRefId.newBuilder();
+      this.dependentTables =
+          dependentTables.stream()
+              .map(id -> builder.setTableId(id).build())
+              .collect(Collectors.toList());
+    }
+
     public CreateTableInfo build() {
       return new CreateTableInfo(
           tableName,
@@ -143,7 +157,8 @@ public class CreateTableInfo {
           appendOnly,
           source,
           rowFormat,
-          rowSchemaLocation);
+          rowSchemaLocation,
+          ImmutableList.copyOf(dependentTables));
     }
   }
 }

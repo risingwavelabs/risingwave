@@ -13,8 +13,7 @@ import com.risingwave.execution.result.DdlResult;
 import com.risingwave.pgwire.msg.StatementType;
 import com.risingwave.planner.planner.streaming.StreamPlanner;
 import com.risingwave.planner.rel.serialization.StreamingPlanSerializer;
-import com.risingwave.planner.rel.streaming.RwStreamMaterializedView;
-import com.risingwave.planner.rel.streaming.StreamingPlan;
+import com.risingwave.planner.rel.streaming.*;
 import com.risingwave.proto.common.Status;
 import com.risingwave.proto.computenode.CreateTaskRequest;
 import com.risingwave.proto.computenode.CreateTaskResponse;
@@ -27,6 +26,9 @@ import com.risingwave.rpc.ComputeClient;
 import com.risingwave.rpc.ComputeClientManager;
 import com.risingwave.rpc.Messages;
 import com.risingwave.scheduler.streaming.StreamManager;
+import java.util.ArrayList;
+import java.util.List;
+import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.ddl.SqlCreateMaterializedView;
@@ -57,15 +59,29 @@ public class CreateMaterializedViewHandler implements SqlHandler {
     StreamingPlan plan = planner.plan(ast, context);
 
     // Check whether the naming for columns in MV is valid.
-    boolean isAllAliased = isAllAliased(plan.getStreamingPlan());
+    RwStreamMaterializedView mv = plan.getStreamingPlan();
+    boolean isAllAliased = isAllAliased(mv);
     if (!isAllAliased) {
       throw new PgException(
           PgErrorCode.INVALID_COLUMN_DEFINITION,
           "An alias name must be specified for an aggregation function");
     }
 
+    // Get tables on which the MV depends.
+    ArrayList<Integer> dependencies = new ArrayList<>();
+    getDependencies(mv, dependencies);
+
+    ExecutionContext.Builder builder = ExecutionContext.builder();
+    builder
+        .withDatabase(context.getDatabase())
+        .withSchema(context.getSchema())
+        .withFrontendEnv(context.getFrontendEnv())
+        .withSessionConfig(context.getSessionConfiguration())
+        .withDependentTables(dependencies);
+    ExecutionContext newContext = builder.build();
+
     // Send create MV tasks to all compute nodes.
-    TableCatalog catalog = convertPlanToCatalog(tableName, plan, context);
+    TableCatalog catalog = convertPlanToCatalog(tableName, plan, newContext);
     PlanFragment planFragment =
         TableNodeSerializer.createProtoFromCatalog(catalog, false, plan.getStreamingPlan());
 
@@ -107,6 +123,8 @@ public class CreateMaterializedViewHandler implements SqlHandler {
     }
     builder.setCollation(rootNode.getCollation());
     builder.setMv(true);
+    if (!context.getDependentTables().isEmpty())
+      builder.setDependentTables(context.getDependentTables());
     rootNode.getPrimaryKeyIndices().forEach(builder::addPrimaryKey);
     CreateMaterializedViewInfo mvInfo = builder.build();
     MaterializedViewCatalog viewCatalog =
@@ -126,5 +144,18 @@ public class CreateMaterializedViewHandler implements SqlHandler {
       }
     }
     return true;
+  }
+
+  @VisibleForTesting
+  public void getDependencies(RelNode root, List<Integer> dependencies) {
+    if (root instanceof RwStreamTableSource)
+      dependencies.add(((RwStreamTableSource) root).getTableId().getValue());
+    else if (root instanceof RwStreamChain)
+      dependencies.add(((RwStreamChain) root).getTableId().getValue());
+    root.getInputs()
+        .forEach(
+            node -> {
+              getDependencies(root, dependencies);
+            });
   }
 }
