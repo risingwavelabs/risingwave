@@ -834,6 +834,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72feb31ffc86498dacdbd0fcebb56138e7177a8cc5cea4516031d15ae85a742e"
 
 [[package]]
+name = "bytemuck"
+version = "1.7.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "439989e6b8c38d1b6570a384ef1e49c8848128f5a97f3914baef02920842712f"
+
+[[package]]
 name = "byteorder"
 version = "1.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1523,6 +1529,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f35ce9c8fb9891c75ceadbc330752951a4e369b50af10775955aeb9af3eee34b"
 
 [[package]]
+name = "fasthash"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "032213946b4eaae09117ec63f020322b78ca7a31d8aa2cf64df3032e1579690f"
+dependencies = [
+ "cfg-if 0.1.10",
+ "fasthash-sys",
+ "num-traits",
+ "seahash",
+ "xoroshiro128",
+]
+
+[[package]]
+name = "fasthash-sys"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6de941abfe2e715cdd34009d90546f850597eb69ca628ddfbf616e53dda28f8"
+dependencies = [
+ "gcc",
+]
+
+[[package]]
 name = "fastrand"
 version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1631,6 +1659,12 @@ dependencies = [
  "libc",
  "winapi",
 ]
+
+[[package]]
+name = "fuchsia-cprng"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a06f77d526c1a601b7c4cdd98f54b5eaabffc14d5f2f0296febdc7f357c6d3ba"
 
 [[package]]
 name = "futures"
@@ -1769,6 +1803,12 @@ checksum = "c31b6d751ae2c7f11320402d34e41349dd1016f8d5d45e48c4312bc8625af50c"
 dependencies = [
  "byteorder",
 ]
+
+[[package]]
+name = "gcc"
+version = "0.3.55"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f5f3913fa0bfe7ee1fd8248b6b9f42a5af4b9d65ec2dd2c3c26132b950ecfc2"
 
 [[package]]
 name = "generic-array"
@@ -3519,6 +3559,19 @@ dependencies = [
 
 [[package]]
 name = "rand"
+version = "0.4.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "552840b97013b1a26992c11eac34bdd778e464601a4c2054b5f0bff7c6761293"
+dependencies = [
+ "fuchsia-cprng",
+ "libc",
+ "rand_core 0.3.1",
+ "rdrand",
+ "winapi",
+]
+
+[[package]]
+name = "rand"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a6b1679d49b24bbfe0c803429aa1874472f50d9b363131f0e89fc356b544d03"
@@ -3560,6 +3613,21 @@ dependencies = [
  "ppv-lite86",
  "rand_core 0.6.3",
 ]
+
+[[package]]
+name = "rand_core"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a6fdeb83b075e8266dcc8762c22776f6877a63111121f5f8c7411e5be7eed4b"
+dependencies = [
+ "rand_core 0.4.2",
+]
+
+[[package]]
+name = "rand_core"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9c33a3c44ca05fa6f1807d8e6743f3824e8509beca625669633be0acbdf509dc"
 
 [[package]]
 name = "rand_core"
@@ -3625,6 +3693,15 @@ dependencies = [
  "libz-sys",
  "num_enum",
  "pkg-config",
+]
+
+[[package]]
+name = "rdrand"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "678054eb77286b51581ba43620cc911abf02758c91f93f479767aed0f90458b2"
+dependencies = [
+ "rand_core 0.3.1",
 ]
 
 [[package]]
@@ -3730,6 +3807,12 @@ dependencies = [
  "web-sys",
  "winreg",
 ]
+
+[[package]]
+name = "retain_mut"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "51dd4445360338dab5116712bee1388dc727991d51969558a8882ab552e6db30"
 
 [[package]]
 name = "ring"
@@ -3967,6 +4050,7 @@ dependencies = [
  "crc32fast",
  "either",
  "farmhash",
+ "fasthash",
  "futures 0.3.21",
  "http",
  "httpmock",
@@ -3985,6 +4069,7 @@ dependencies = [
  "risingwave-pb",
  "risingwave_common",
  "risingwave_storage",
+ "roaring",
  "serde",
  "serde_derive",
  "serde_json",
@@ -4236,6 +4321,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "roaring"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "07a3e59715e2b06c2928321f418f57be1a1168cf304a9ba2890f306c19295cfd"
+dependencies = [
+ "bytemuck",
+ "byteorder",
+ "retain_mut",
+]
+
+[[package]]
 name = "rocksdb"
 version = "0.3.0"
 source = "git+https://github.com/tikv/rust-rocksdb.git?rev=fa83ff19#fa83ff1947fc5ae11b4862990c112c66d97b938f"
@@ -4450,6 +4546,12 @@ dependencies = [
  "ring",
  "untrusted",
 ]
+
+[[package]]
+name = "seahash"
+version = "3.0.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "58f57ca1d128a43733fd71d583e837b1f22239a37ebea09cde11d8d9a9080f47"
 
 [[package]]
 name = "security-framework"
@@ -5848,6 +5950,15 @@ name = "xmlparser"
 version = "0.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "114ba2b24d2167ef6d67d7d04c8cc86522b87f490025f39f0303b7db5bf5e3d8"
+
+[[package]]
+name = "xoroshiro128"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e0eeda34baec49c4f1eb2c04d59b761582fd6330010f9330ca696ca1a355dfcd"
+dependencies = [
+ "rand 0.4.6",
+]
 
 [[package]]
 name = "yaml-rust"

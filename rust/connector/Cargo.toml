@@ -19,6 +19,7 @@ chrono = "0.4"
 crc32fast = "1"
 either = "1"
 farmhash = "1"
+fasthash = "0.4.0"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 http = "0.2.6"
 hyper = "0.14.16"
@@ -35,6 +36,7 @@ rdkafka = { version = "0.28", features = ["cmake-build"] }
 risingwave-pb = { path = "../prost" }
 risingwave_common = { path = "../common" }
 risingwave_storage = { path = "../storage" }
+roaring = "0.8.1"
 serde = { version = "1", features = ["derive"] }
 serde_derive = "1"
 serde_json = "1"
