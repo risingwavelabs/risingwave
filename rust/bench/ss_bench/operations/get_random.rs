@@ -15,7 +15,7 @@ use crate::{Opts, WorkloadType};
 
 impl OperationRunner {
     pub(crate) async fn get_random(&self, store: &impl StateStore, opts: &Opts) {
-        let (prefixes, keys, values) = Workload::new(opts, WorkloadType::GetRandom, None);
+        let (_prefixes, keys, values) = Workload::new(opts, WorkloadType::GetRandom, None);
         let batch = Workload::make_batch(keys, values);
         store
             .ingest_batch(batch.clone(), get_epoch())

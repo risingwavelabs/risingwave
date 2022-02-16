@@ -18,7 +18,10 @@ impl OperationRunner {
                 let (prefixes, keys, values) =
                     Workload::new(opts, WorkloadType::WriteBatch, Some(i as u64));
 
+                // add new prefixes and keys to global prefixes and keys
                 self.merge_prefixes(prefixes);
+                self.merge_keys(keys.clone());
+
                 Workload::make_batch(keys, values)
             })
             .collect_vec();
