@@ -691,6 +691,7 @@ mod tests {
             ],
         );
         add_local_channels(ctx.clone(), vec![(233, 234), (233, 235)]);
+        add_remote_channels(ctx.clone(), 233, vec![238]);
 
         let b1 = Barrier::new(0).with_mutation(Mutation::UpdateOutputs(updates1));
         tx.send(Message::Barrier(b1)).await.unwrap();
