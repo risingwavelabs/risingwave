@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::error::Result;
+use risingwave_common::util::downcast_arc;
 
 use super::mview::MViewTable;
 use super::{ScannableTable, TableIterRef};
@@ -13,14 +14,22 @@ use crate::{Keyspace, Table, TableColumnDesc};
 
 #[derive(Debug)]
 pub struct TestTable {
-    inner: MViewTable<MemoryStateStore>,
+    inner: Arc<MViewTable<MemoryStateStore>>,
 }
 
 impl TestTable {
     pub fn new(table_id: &TableId, table_columns: Vec<TableColumnDesc>) -> Self {
         let keyspace = Keyspace::table_root(MemoryStateStore::new(), table_id);
         let inner = MViewTable::new_batch(keyspace, table_columns);
-        Self { inner }
+        Self {
+            inner: Arc::new(inner),
+        }
+    }
+
+    pub fn from_table_v2(table: Arc<dyn ScannableTable>) -> Self {
+        Self {
+            inner: downcast_arc::<MViewTable<MemoryStateStore>>(table.into_any()).unwrap(),
+        }
     }
 }
 

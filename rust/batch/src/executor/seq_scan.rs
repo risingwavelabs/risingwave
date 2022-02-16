@@ -10,6 +10,7 @@ use risingwave_storage::table::ScannableTableRef;
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::executor::{Executor, ExecutorBuilder};
 
+// TODO: this can be replaced entirely by `RowSeqScan` due to table_v2
 /// Sequential scan executor on column-oriented tables
 pub struct SeqScanExecutor {
     table: ScannableTableRef,
@@ -105,87 +106,88 @@ impl Executor for SeqScanExecutor {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use std::sync::Arc;
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
 
-//     use risingwave_common::array::{Array, I64Array};
-//     use risingwave_common::catalog::Field;
-//     use risingwave_common::column_nonnull;
-//     use risingwave_common::types::DataType;
-//     use risingwave_storage::bummock::BummockTable;
-//     use risingwave_storage::table::ScannableTable;
-//     use risingwave_storage::{Table, TableColumnDesc};
+    use risingwave_common::array::{Array, I64Array};
+    use risingwave_common::catalog::Field;
+    use risingwave_common::column_nonnull;
+    use risingwave_common::types::DataType;
+    use risingwave_storage::table::test::TestTable;
+    use risingwave_storage::table::ScannableTable;
+    use risingwave_storage::{Table, TableColumnDesc};
 
-//     use super::*;
-//     use crate::*;
+    use super::*;
+    use crate::*;
 
-//     #[tokio::test]
-//     async fn test_seq_scan_executor() -> Result<()> {
-//         let table_id = TableId::default();
-//         let schema = Schema {
-//             fields: vec![Field::unnamed(DataType::Decimal)],
-//         };
-//         let table_columns = schema
-//             .fields
-//             .iter()
-//             .enumerate()
-//             .map(|(i, f)| TableColumnDesc {
-//                 data_type: f.data_type,
-//                 column_id: i as i32, // use column index as column id
-//                 name: f.name.clone(),
-//             })
-//             .collect();
-//         let table = BummockTable::new(&table_id, table_columns);
+    #[tokio::test]
+    async fn test_seq_scan_executor() -> Result<()> {
+        let table_id = TableId::default();
+        let schema = Schema {
+            fields: vec![Field::unnamed(DataType::Decimal)],
+        };
+        let table_columns = schema
+            .fields
+            .iter()
+            .enumerate()
+            .map(|(i, f)| TableColumnDesc {
+                data_type: f.data_type,
+                column_id: i as i32, // use column index as column id
+                name: f.name.clone(),
+            })
+            .collect();
 
-//         let schema = table.schema().into_owned();
-//         let col1 = column_nonnull! { I64Array, [1, 3, 5, 7, 9] };
-//         let col2 = column_nonnull! { I64Array, [2, 4, 6, 8, 10] };
-//         let data_chunk1 = DataChunk::builder().columns(vec![col1]).build();
-//         let data_chunk2 = DataChunk::builder().columns(vec![col2]).build();
-//         table.append(data_chunk1).await?;
-//         table.append(data_chunk2).await?;
+        let table = TestTable::new(&table_id, table_columns);
 
-//         let mut seq_scan_executor = SeqScanExecutor {
-//             table: Arc::new(table),
-//             column_ids: vec![0],
-//             schema,
-//             snapshot: VecDeque::new(),
-//             identity: "SeqScanExecutor".to_string(),
-//         };
-//         seq_scan_executor.open().await.unwrap();
+        let schema = table.schema().into_owned();
+        let col1 = column_nonnull! { I64Array, [1, 3, 5, 7, 9] };
+        let col2 = column_nonnull! { I64Array, [2, 4, 6, 8, 10] };
+        let data_chunk1 = DataChunk::builder().columns(vec![col1]).build();
+        let data_chunk2 = DataChunk::builder().columns(vec![col2]).build();
+        table.append(data_chunk1).await?;
+        table.append(data_chunk2).await?;
 
-//         let fields = &seq_scan_executor.schema().fields;
-//         assert_eq!(fields[0].data_type, DataType::Decimal);
+        let mut seq_scan_executor = SeqScanExecutor {
+            table: Arc::new(table),
+            column_ids: vec![0],
+            schema,
+            snapshot: VecDeque::new(),
+            identity: "SeqScanExecutor".to_string(),
+        };
+        seq_scan_executor.open().await.unwrap();
 
-//         seq_scan_executor.open().await.unwrap();
+        let fields = &seq_scan_executor.schema().fields;
+        assert_eq!(fields[0].data_type, DataType::Decimal);
 
-//         let result_chunk1 = seq_scan_executor.next().await?.unwrap();
-//         assert_eq!(result_chunk1.dimension(), 1);
-//         assert_eq!(
-//             result_chunk1
-//                 .column_at(0)?
-//                 .array()
-//                 .as_int64()
-//                 .iter()
-//                 .collect::<Vec<_>>(),
-//             vec![Some(1), Some(3), Some(5), Some(7), Some(9)]
-//         );
+        seq_scan_executor.open().await.unwrap();
 
-//         let result_chunk2 = seq_scan_executor.next().await?.unwrap();
-//         assert_eq!(result_chunk2.dimension(), 1);
-//         assert_eq!(
-//             result_chunk2
-//                 .column_at(0)?
-//                 .array()
-//                 .as_int64()
-//                 .iter()
-//                 .collect::<Vec<_>>(),
-//             vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
-//         );
-//         seq_scan_executor.next().await.unwrap();
-//         seq_scan_executor.close().await.unwrap();
+        let result_chunk1 = seq_scan_executor.next().await?.unwrap();
+        assert_eq!(result_chunk1.dimension(), 1);
+        assert_eq!(
+            result_chunk1
+                .column_at(0)?
+                .array()
+                .as_int64()
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![Some(1), Some(3), Some(5), Some(7), Some(9)]
+        );
 
-//         Ok(())
-//     }
-// }
+        let result_chunk2 = seq_scan_executor.next().await?.unwrap();
+        assert_eq!(result_chunk2.dimension(), 1);
+        assert_eq!(
+            result_chunk2
+                .column_at(0)?
+                .array()
+                .as_int64()
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
+        );
+        seq_scan_executor.next().await.unwrap();
+        seq_scan_executor.close().await.unwrap();
+
+        Ok(())
+    }
+}

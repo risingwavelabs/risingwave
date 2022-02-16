@@ -93,10 +93,6 @@ impl<S: StateStore> MViewTable<S> {
         }
     }
 
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
     // TODO(MrCroxx): remove me after iter is impled.
     pub fn storage(&self) -> S {
         self.keyspace.state_store()

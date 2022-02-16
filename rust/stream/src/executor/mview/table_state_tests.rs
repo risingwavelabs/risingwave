@@ -2,7 +2,7 @@ use risingwave_common::array::Row;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::mview::MViewTable;
-use risingwave_storage::table::{ScannableTable, TableIter};
+use risingwave_storage::table::ScannableTable;
 use risingwave_storage::Keyspace;
 
 use crate::executor::test_utils::schemas;

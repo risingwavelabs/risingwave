@@ -27,8 +27,8 @@ use risingwave_pb::stream_plan::{
 };
 use risingwave_pb::stream_service::BroadcastActorInfoTableRequest;
 use risingwave_source::{MemSourceManager, SourceManager};
-use risingwave_storage::bummock::BummockTable;
 use risingwave_storage::memory::MemoryStateStore;
+use risingwave_storage::table::test::TestTable;
 use risingwave_storage::table::{SimpleTableManager, TableManager};
 use risingwave_storage::{Table, TableColumnDesc};
 
@@ -134,14 +134,11 @@ async fn test_stream_mv_proto() {
         TableColumnDesc::new_without_name(1, DataType::Int32),
     ];
     let table = table_manager
-        .create_table(&table_id, table_columns)
+        .create_table_v2(&table_id, table_columns)
         .await
         .unwrap();
     source_manager
-        .create_table_source(
-            &table_id,
-            downcast_arc::<BummockTable>(table.into_any()).unwrap(),
-        )
+        .create_table_source_v2(&table_id, table)
         .unwrap();
 
     // Create materialized view in the table manager in advance.
@@ -154,9 +151,7 @@ async fn test_stream_mv_proto() {
         )
         .unwrap();
 
-    let table_ref =
-        downcast_arc::<BummockTable>(table_manager.get_table(&table_id).unwrap().into_any())
-            .unwrap();
+    let table_ref = TestTable::from_table_v2(table_manager.get_table(&table_id).unwrap());
     // Mock initial data.
     // One row of (1,2)
     let mut array_builder1 = PrimitiveArrayBuilder::<i32>::new(1).unwrap();
