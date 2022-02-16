@@ -27,6 +27,9 @@ pub struct LocalSimpleAggExecutor {
     /// Aggregation states after last barrier.
     states: Vec<Box<dyn StreamingAggStateImpl>>,
 
+    /// Returns whether there is new data in the epoch.
+    is_dirty: bool,
+
     /// The input of the current operator.
     input: Box<dyn Executor>,
 
@@ -63,6 +66,7 @@ impl LocalSimpleAggExecutor {
             pk_indices,
             cached_barrier_message: None,
             states,
+            is_dirty: false,
             input,
             agg_calls,
             identity: format!("{} {:X}", identity, executor_id),
@@ -109,10 +113,14 @@ impl AggExecutor for LocalSimpleAggExecutor {
                     .collect_vec();
                 state.apply_batch(&ops, visibility.as_ref(), &cols[..])
             })?;
+        self.is_dirty = true;
         Ok(())
     }
 
     async fn flush_data(&mut self, _epoch: u64) -> Result<Option<StreamChunk>> {
+        if !self.is_dirty {
+            return Ok(None);
+        }
         let mut builders = self.schema.create_array_builders(1)?;
         self.states
             .iter_mut()
@@ -127,6 +135,7 @@ impl AggExecutor for LocalSimpleAggExecutor {
             .map(|builder| -> Result<_> { Ok(Column::new(Arc::new(builder.finish()?))) })
             .try_collect()?;
         let ops = vec![Op::Insert; 1];
+        self.is_dirty = false;
         Ok(Some(StreamChunk::new(ops, columns, None)))
     }
 
