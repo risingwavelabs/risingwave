@@ -16,18 +16,20 @@ use crate::{Opts, WorkloadType};
 
 impl OperationRunner {
     pub(crate) async fn prefix_scan_random(&self, store: &impl StateStore, opts: &Opts) {
-        let workload = Workload::new(opts, WorkloadType::PrefixScanRandom, None);
+        let (prefixes, keys, values) = Workload::new(opts, WorkloadType::PrefixScanRandom, None);
+        let batch = Workload::make_batch(keys, values);
+
         store
-            .ingest_batch(workload.batch.clone(), get_epoch())
+            .ingest_batch(batch.clone(), get_epoch())
             .await
             .unwrap();
 
         // generate queried prefixes
         let mut rng = StdRng::seed_from_u64(233);
-        let dist = Uniform::from(0..workload.prefixes.len());
+        let dist = Uniform::from(0..prefixes.len());
         let mut scan_prefixes = (0..opts.reads)
             .into_iter()
-            .map(|_| workload.prefixes[dist.sample(&mut rng)].clone())
+            .map(|_| prefixes[dist.sample(&mut rng)].clone())
             .collect_vec();
         let scan_prefixes_len = scan_prefixes.len();
 

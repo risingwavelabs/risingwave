@@ -12,7 +12,8 @@ use crate::{Opts, WorkloadType};
 
 impl OperationRunner {
     pub(crate) async fn get_seq(&self, store: &impl StateStore, opts: &Opts) {
-        let batch = Workload::new(opts, WorkloadType::GetSeq, None).batch;
+        let (prefixes, keys, values) = Workload::new(opts, WorkloadType::GetSeq, None);
+        let batch = Workload::make_batch(keys, values);
         store
             .ingest_batch(batch.clone(), get_epoch())
             .await

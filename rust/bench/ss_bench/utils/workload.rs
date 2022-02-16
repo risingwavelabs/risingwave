@@ -10,17 +10,33 @@ use risingwave_storage::hummock::key::next_key;
 use crate::WorkloadType::*;
 use crate::{Opts, WorkloadType};
 
-type Keys = Vec<Bytes>;
 type Prefixes = Vec<Bytes>;
+type Keys = Vec<Bytes>;
+type Values = Vec<Option<Bytes>>;
 
-#[derive(Clone, Default)]
-pub struct Workload {
-    pub batch: Vec<(Bytes, Option<Bytes>)>,
-    pub prefixes: Vec<Bytes>,
-}
+pub struct Workload; // (Prefixes, Keys, Values);
+                     //     prefixes: Vec<Bytes>,
+                     //     pub keys: Vec<Bytes>,
+                     //     pub values: Vec<Option<Bytes>>,
+                     // }
 
 impl Workload {
-    pub(crate) fn new(opts: &Opts, workload_type: WorkloadType, seed: Option<u64>) -> Workload {
+    pub(crate) fn make_batch(
+        keys: Vec<Bytes>,
+        values: Vec<Option<Bytes>>,
+    ) -> Vec<(Bytes, Option<Bytes>)> {
+        let mut batch = keys.into_iter().zip_eq(values.into_iter()).collect_vec();
+        batch.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+        // As duplication rate is low, ignore filling data after deduplicating.
+        batch.dedup_by(|(k1, _), (k2, _)| k1 == k2);
+        batch
+    }
+
+    pub(crate) fn new(
+        opts: &Opts,
+        workload_type: WorkloadType,
+        seed: Option<u64>,
+    ) -> (Prefixes, Keys, Values) {
         let base_seed = seed.unwrap_or(233);
 
         // get ceil result
@@ -38,25 +54,7 @@ impl Workload {
             _ => Self::new_values(opts, base_seed),
         };
 
-        let mut batch = keys.into_iter().zip_eq(values.into_iter()).collect_vec();
-        batch.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-        // As duplication rate is low, ignore filling data after deduplicating.
-        batch.dedup_by(|(k1, _), (k2, _)| k1 == k2);
-
-        Workload { batch, prefixes }
-    }
-
-    fn merge(&mut self, other: &mut Workload) {
-        // TODO(Sun Ting): ensure that the batch matches the prefixes
-        self.batch.append(&mut other.batch);
-        // use reverse order because new batch need to be appended to the front of the old batch
-        self.batch.sort_by(|(k1, _), (k2, _)| k2.cmp(k1));
-        // remove old KV pairs
-        self.batch.dedup_by(|(k1, _), (k2, _)| k1 == k2);
-
-        self.prefixes.append(&mut other.prefixes);
-        self.prefixes.sort_by(|k1, k2| k1.cmp(k2));
-        self.prefixes.dedup_by(|k1, k2| k1 == k2);
+        (prefixes, keys, values)
     }
 
     fn new_values(opts: &Opts, base_seed: u64) -> Vec<Option<Bytes>> {
