@@ -60,7 +60,8 @@ pub trait MetaStore: Sync + Send + 'static {
         self.list_cf(DEFAULT_COLUMN_FAMILY).await
     }
     async fn put(&self, key: &[u8], value: &[u8], version: Epoch) -> Result<()> {
-        self.put_cf(DEFAULT_COLUMN_FAMILY, key, value, version).await
+        self.put_cf(DEFAULT_COLUMN_FAMILY, key, value, version)
+            .await
     }
     // FIXME: we need a proper signature to forward the implementation to `put_batch_cf`.
     async fn put_batch(&self, tuples: Vec<(Vec<u8>, Vec<u8>, Epoch)>) -> Result<()>;
@@ -178,7 +179,6 @@ impl MemStore {
 
 #[async_trait]
 impl MetaStore for MemStore {
-
     async fn put_batch(&self, tuples: Vec<(Vec<u8>, Vec<u8>, Epoch)>) -> Result<()> {
         let mut entities = self.entities.lock().unwrap();
         for (key, value, version) in tuples {
