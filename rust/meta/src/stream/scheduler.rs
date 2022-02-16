@@ -86,13 +86,11 @@ impl Scheduler {
         }
     }
 
-    /// [`schedule`] schedules node for input actors.
+    /// [`schedule`] schedules input actors to different workers.
     /// The schedule procedure is two-fold:
     /// (1) For regular actors, we use some strategies to schedule them.
     /// (2) For source actors under certain cases (determined elsewhere), we enforce round robin
     /// strategy to ensure that each compute node will have one source node.
-    ///
-    /// Note that we assume there is no
     ///
     /// The result `Vec<WorkerNode>` contains two parts.
     /// The first part is the schedule result of `actors`, the second part is the schedule result of
