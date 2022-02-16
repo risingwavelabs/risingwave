@@ -5,7 +5,6 @@ import styled from '@emotion/styled';
 import LocationSearchingIcon from '@mui/icons-material/LocationSearching';
 import SearchIcon from '@mui/icons-material/Search';
 import { Tooltip, FormControl, Select, MenuItem, InputLabel, FormHelperText, Input, InputAdornment, IconButton, Autocomplete, TextField } from '@mui/material';
-import { highlightActorList } from "../lib/streamPlan/chartEffect";
 
 const width = 1000;
 const height = 1000;
@@ -42,8 +41,11 @@ export default function StreamingView(props) {
   const [selectedActor, setSelectedActor] = useState("Show All");
   const [searchType, setSearchType] = useState("Actor");
   const [searchContent, setSearchContent] = useState("");
-  const [mvTableIdToActorList, setMvTableIdToActorList] = useState(null);
+  const [mvTableIdToSingleViewActorList, setMvTableIdToSingleViewActorList] = useState(null);
+  const [mvTableIdToChainViewActorList, setMvTableIdToChainViewActorList] = useState(null);
   const [mviewTableList, setMviewTableList] = useState([]);
+  const [filterMode, setFilterMode] = useState("Full Graph");
+  const [selectedMvTableId, setSelectedMvTableId] = useState(null);
 
   const d3Container = useRef(null);
 
@@ -90,14 +92,40 @@ export default function StreamingView(props) {
   }
 
   const onSelectMvChange = (e, v) => {
-    if (v === null) {
-      return;
-    }
-    let actorIdList = mvTableIdToActorList.get(v.tableId) || [];
-    if (actorIdList.length !== 0) {
-      highlightActorList(actorIdList);
-      locateTo(`rect.actor-${actorIdList[0]}`);
-    }
+    setSelectedMvTableId(v === null ? null : v.tableId);
+  }
+
+  const onFilterModeChange = (e) => {
+    setFilterMode(e.target.value);
+  }
+
+  const onReset = () => {
+    svg.call(zoom.transform, orginalZoom);
+    view.highlightByActorIds([]);
+  }
+
+  const createSvg = (callback) => {
+    d3.select(d3Container.current).selectAll("*").remove();
+
+    svg = d3
+      .select(d3Container.current)
+      .attr("viewBox", [0, 0, width, height]);
+
+    const g = svg.append("g").attr("class", "top");
+    callback && callback(g);
+
+    let transform;
+    // Deal with zooming event
+    zoom = d3.zoom().on("zoom", e => {
+      transform = e.transform;
+      g.attr("transform", e.transform);
+    });
+
+    svg.call(zoom)
+      .call(zoom.transform, orginalZoom)
+      .on("pointermove", event => {
+        transform.invert(d3.pointer(event));
+      });
   }
 
   useEffect(() => {
@@ -105,43 +133,53 @@ export default function StreamingView(props) {
   }, [searchType, searchContent]);
 
   useEffect(() => {
-    if (mvTableIdToActorList !== null) {
+    if (mvTableIdToSingleViewActorList !== null) {
       let tmp = [];
-      for (let [tableId, _] of mvTableIdToActorList.entries()) {
+      for (let [tableId, _] of mvTableIdToSingleViewActorList.entries()) {
         tmp.push({ label: "mvtable " + tableId, tableId: tableId });
       }
       tmp.sort(x => x.label);
       setMviewTableList(tmp);
     }
-  }, [mvTableIdToActorList])
+  }, [mvTableIdToSingleViewActorList])
 
+  // render the full graph
   useEffect(() => {
-    if (d3Container.current) {
-      svg = d3
-        .select(d3Container.current)
-        .attr("viewBox", [0, 0, width, height]);
-
-      const g = svg.append("g").attr("class", "top");
-      view = createView(g, data, onNodeClick, selectedActor === "Show All" ? null : selectedActor);
-
-      let transform;
-      // Deal with zooming event
-      zoom = d3.zoom().on("zoom", e => {
-        transform = e.transform;
-        g.attr("transform", e.transform);
-      });
-
-      svg.call(zoom)
-        .call(zoom.transform, orginalZoom)
-        .on("pointermove", event => {
-          transform.invert(d3.pointer(event));
-        });
-
-      setMvTableIdToActorList(view.getMvTableIdToActorList());
+    if (d3Container.current && filterMode === "Full Graph") {
+      createSvg((g) => {
+        view = createView(g, data, onNodeClick, selectedActor === "Show All" ? null : selectedActor, null);
+      })
+      // assign once.
+      mvTableIdToSingleViewActorList || setMvTableIdToSingleViewActorList(view.getMvTableIdToSingleViewActorList());
+      mvTableIdToChainViewActorList || setMvTableIdToChainViewActorList(view.getMvTableIdToChainViewActorList());
 
       return () => d3.select(d3Container.current).selectAll("*").remove();
     }
-  }, [selectedActor]);
+  }, [selectedActor, filterMode]);
+
+  // render the partial graph
+  useEffect(() => {
+    if (selectedMvTableId === null) {
+      return;
+    }
+    if (filterMode === "Full Graph") {
+      let actorIdList = mvTableIdToSingleViewActorList.get(selectedMvTableId) || [];
+      if (actorIdList.length !== 0) {
+        view.highlightByActorIds(actorIdList);
+        locateTo(`rect.actor-${actorIdList[0]}`);
+      }
+    } else {
+      if (d3Container.current) {
+        let shownActorIdlist = filterMode === "Single View"
+          ? mvTableIdToSingleViewActorList.get(selectedMvTableId)
+          : mvTableIdToChainViewActorList.get(selectedMvTableId);
+        createSvg((g) => {
+          view = createView(g, data, onNodeClick, selectedActor === "Show All" ? null : selectedActor, shownActorIdlist);
+        });
+        locateTo(`rect.actor-${shownActorIdlist[0]}`);
+      }
+    }
+  }, [filterMode, selectedMvTableId])
 
   return (
     <SvgBox>
@@ -220,23 +258,36 @@ export default function StreamingView(props) {
           Filter materialized view
         </ToolBoxTitle>
         <div style={{ display: "flex", flexDirection: "row", alignItems: "center" }}>
-          <FormControl sx={{ m: 1, minWidth: 300 }}>
-            <Autocomplete
-              disablePortal
-              options={mviewTableList || []}
-              onChange={onSelectMvChange}
-              renderInput={(param) => <TextField {...param} label="Materialized View" />}
-            />
+          <FormControl sx={{ m: 1, width: 140 }}>
+            <InputLabel>Mode</InputLabel>
+            <Select
+              value={filterMode}
+              label="Mode"
+              onChange={onFilterModeChange}
+            >
+              <MenuItem value="Full Graph">Full Graph</MenuItem>
+              <MenuItem value="Single View">Single View</MenuItem>
+              <MenuItem value="Chain View">Chain View</MenuItem>
+            </Select>
           </FormControl>
+          <Autocomplete
+            sx={{ minWidth: 200 }}
+            disablePortal
+            options={mviewTableList || []}
+            onChange={onSelectMvChange}
+            renderInput={(param) => <TextField {...param} label="Materialized View" />}
+          />
         </div>
       </SvgBoxCover>
 
       <SvgBoxCover style={{ right: "10px", bottom: "10px", cursor: "pointer" }}>
+
         <Tooltip title="Reset">
-          <div onClick={() => { svg.call(zoom.transform, orginalZoom) }}>
+          <div onClick={() => onReset()}>
             <LocationSearchingIcon color="action" />
           </div>
         </Tooltip>
+
       </SvgBoxCover>
       <div style={{ zIndex: 5 }} className="noselect">
         <svg ref={d3Container}

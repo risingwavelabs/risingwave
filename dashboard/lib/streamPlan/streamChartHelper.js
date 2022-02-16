@@ -97,18 +97,32 @@ export class StreamChartHelper {
    * @param {*} data The raw response from the meta node
    * @param {(e, node) => void} onNodeClick The callback function trigged when a node is click
    * @param {{type: string, node: {host: {host: string, port: number}}, id?: number}} selectedActor
+   * @param {Array<number>} shownActorIdList
    */
-  constructor(g, data, onNodeClick, selectedActor) {
+  constructor(g, data, onNodeClick, selectedActor, shownActorIdList) {
     this.topGroup = g;
-    this.streamPlan = new StreamPlanParser(data);
+    this.streamPlan = new StreamPlanParser(data, shownActorIdList);
     this.onNodeClick = onNodeClick;
     this.selectedActor = selectedActor;
     this.selectedActorStr = this.selectedActor ? selectedActor.host.host + ":" + selectedActor.host.port : null;
     this.selectedActorList = new Set();
   }
 
-  getMvTableIdToActorList() {
-    return this.streamPlan.mvTableIdToActorList;
+  /**
+   * @public
+   * @param {Array<number>} actorIds
+   */
+  highlightByActorIds(actorIds) {
+    this.selectedActorList = new Set(actorIds);
+    highlightActorList(this.selectedActorList);
+  }
+
+  getMvTableIdToSingleViewActorList() {
+    return this.streamPlan.mvTableIdToSingleViewActorList;
+  }
+
+  getMvTableIdToChainViewActorList() {
+    return this.streamPlan.mvTableIdToChainViewActorList;
   }
 
   isInSelectedActor(actor) {
@@ -799,8 +813,9 @@ export class StreamChartHelper {
  * @param {{type: string, node: {host: {host: string, port: number}}, id?: number}} selectedActor
  * @returns {StreamChartHelper}
  */
-export default function createView(g, data, onNodeClick, selectedActor) {
-  let streamChartHelper = new StreamChartHelper(g, data, onNodeClick, selectedActor);
+export default function createView(g, data, onNodeClick, selectedActor, shownActorIdList) {
+  console.log(shownActorIdList);
+  let streamChartHelper = new StreamChartHelper(g, data, onNodeClick, selectedActor, shownActorIdList);
   streamChartHelper.drawManyFlow();
   return streamChartHelper;
 }

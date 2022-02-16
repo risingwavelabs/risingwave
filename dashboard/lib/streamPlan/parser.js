@@ -1,4 +1,4 @@
-import { treeBfs } from "../algo";
+import { graphBfs, treeBfs } from "../algo";
 
 let cnt = 0;
 function generateNewNodeId() {
@@ -86,25 +86,31 @@ export default class StreamPlanParser {
    * 
    * @param {[{node: any, actors: []}]} data raw response from the meta node
    */
-  constructor(data) {
-
-    this.parsedNodeMap = new Map();
-    this.parsedActorMap = new Map();
+  constructor(data, shownActorList) {
     this.actorId2Proto = new Map();
     /**
      * @type {Set<Actor>}
      * @private
      */
     this.actorIdTomviewNodes = new Map();
+    this.shownActorSet = new Set(shownActorList);
 
     for (let computeNodeData of data) {
       for (let singleActorProto of computeNodeData.actors) {
+        if (shownActorList && (!this.shownActorSet.has(singleActorProto.actorId))) {
+          continue;
+        }
         this.actorId2Proto.set(singleActorProto.actorId, {
           actorIdentifier: `${computeNodeData.node.host.host}:${computeNodeData.node.host.port}`,
           ...singleActorProto
         });
       }
     }
+
+    console.log(this.actorId2Proto)
+
+    this.parsedNodeMap = new Map();
+    this.parsedActorMap = new Map();
 
     for (let [_, singleActorProto] of this.actorId2Proto.entries()) {
       this.parseActor(singleActorProto);
@@ -118,11 +124,49 @@ export default class StreamPlanParser {
     /**
      * @type {Map<number, Array<number>}
      */
-    this.mvTableIdToActorList = this._constructMvList();
+    this.mvTableIdToSingleViewActorList = this._constructSingleViewMvList();
+    this.mvTableIdToChainViewActorList = this._constructChainViewMvList()
   }
 
-  _constructMvList() {
-    let mvTableIdToActorList = new Map();
+  _constructChainViewMvList() {
+    let mvTableIdToChainViewActorList = new Map();
+    let shellNodes = new Map();
+    const getShellNode = (actorId) => {
+      if (shellNodes.has(actorId)) {
+        return shellNodes.get(actorId);
+      }
+      let shellNode = {
+        id: actorId,
+        parentNodes: [],
+        nextNodes: []
+      };
+      for (let node of this.parsedActorMap.get(actorId).output) {
+        let nextNode = getShellNode(node.actorId);
+        nextNode.parentNodes.push(shellNode);
+        shellNode.nextNodes.push(nextNode);
+      }
+      shellNodes.set(actorId, shellNode);
+      return shellNode;
+    }
+
+    for (let [actorId, mviewNode] of this.actorIdTomviewNodes.entries()) {
+      let list = new Set();
+      let shellNode = getShellNode(actorId);
+      graphBfs(shellNode, (n) => {
+        list.add(n.id);
+      });
+      graphBfs(shellNode, (n) => {
+        list.add(n.id);
+      }, "parentNodes");
+      //TODO: chain view back
+      mvTableIdToChainViewActorList.set(mviewNode.typeInfo.tableRefId.tableId, [...list.values()]);
+    }
+
+    return mvTableIdToChainViewActorList;
+  }
+
+  _constructSingleViewMvList() {
+    let mvTableIdToSingleViewActorList = new Map();
     let shellNodes = new Map();
     const getShellNode = (actorId) => {
       if (shellNodes.has(actorId)) {
@@ -151,10 +195,10 @@ export default class StreamPlanParser {
           return true; // stop to traverse its next nodes
         }
       })
-      mvTableIdToActorList.set(mviewNode.typeInfo.tableRefId.tableId, list);
+      mvTableIdToSingleViewActorList.set(mviewNode.typeInfo.tableRefId.tableId, list);
     }
-    
-    return mvTableIdToActorList;
+
+    return mvTableIdToSingleViewActorList;
   }
 
   newDispatcher(actorId, type, downstreamActorId) {
@@ -212,12 +256,18 @@ export default class StreamPlanParser {
 
     if (newNode.type === "mergeNode" && newNode.typeInfo.upstreamActorId) {
       for (let upStreamActorId of newNode.typeInfo.upstreamActorId) {
+        if (!this.actorId2Proto.has(upStreamActorId)) {
+          continue;
+        }
         this.parseActor(this.actorId2Proto.get(upStreamActorId)).output.push(newNode);
       }
     }
 
     if (newNode.type === "chainNode" && newNode.typeInfo.upstreamActorIds) {
       for (let upStreamActorId of newNode.typeInfo.upstreamActorIds) {
+        if (!this.actorId2Proto.has(upStreamActorId)) {
+          continue;
+        }
         this.parseActor(this.actorId2Proto.get(upStreamActorId)).output.push(newNode);
       }
     }
