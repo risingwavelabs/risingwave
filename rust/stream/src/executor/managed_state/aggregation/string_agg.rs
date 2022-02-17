@@ -234,7 +234,13 @@ impl<S: StateStore> ManagedExtremeState<S> for ManagedStringAggState<S> {
     }
 
     fn flush(&mut self, write_batch: &mut WriteBatch<S>, epoch: u64) -> Result<()> {
-        self.epoch = self.epoch.max(epoch);
+        assert!(
+            epoch >= self.epoch,
+            "current epoch {} < previous epoch {}. ",
+            epoch,
+            self.epoch
+        );
+        self.epoch = epoch;
         if !self.is_dirty() {
             return Ok(());
         }

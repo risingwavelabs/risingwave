@@ -110,7 +110,13 @@ impl<S: StateStore> AllOrNoneState<S> {
 
     // Flush data to the state store
     pub fn flush(&mut self, write_batch: &mut WriteBatch<S>, epoch: u64) -> Result<()> {
-        self.epoch = self.epoch.max(epoch);
+        assert!(
+            epoch >= self.epoch,
+            "current epoch {} < previous epoch {}. ",
+            epoch,
+            self.epoch
+        );
+        self.epoch = epoch;
         let mut local = write_batch.prefixify(&self.keyspace);
 
         for (pk, v) in std::mem::take(&mut self.flush_buffer) {

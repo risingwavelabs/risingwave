@@ -294,7 +294,13 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
     /// `Flush` can be called by the executor when it receives a barrier and thus needs to
     /// checkpoint.
     pub async fn flush(&mut self, epoch: u64) -> Result<()> {
-        self.epoch = std::cmp::max(self.epoch, epoch);
+        assert!(
+            epoch >= self.epoch,
+            "current epoch {} < previous epoch {}. ",
+            epoch,
+            self.epoch
+        );
+        self.epoch = epoch;
         if !self.is_dirty() {
             // We don't retain `n` elements as we have a all-or-nothing policy for now.
             return Ok(());

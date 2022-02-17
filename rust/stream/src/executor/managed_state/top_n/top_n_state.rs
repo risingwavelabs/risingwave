@@ -378,7 +378,13 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
     /// TODO: `Flush` should also be called internally when `top_n` and `flush_buffer` exceeds
     /// certain limit.
     pub async fn flush(&mut self, epoch: u64) -> Result<()> {
-        self.epoch = std::cmp::max(self.epoch, epoch);
+        assert!(
+            epoch >= self.epoch,
+            "current epoch {} < previous epoch {}. ",
+            epoch,
+            self.epoch
+        );
+        self.epoch = epoch;
         if !self.is_dirty() {
             self.retain_top_n();
             return Ok(());
