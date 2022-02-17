@@ -30,7 +30,7 @@ class GrpcMetaClient(hostAddress: HostAddress, private val channel: Channel) : M
         if (response.status.code == Status.Code.OK) {
           break
         }
-      } catch (e: InterruptedException) {
+      } catch (e: Exception) { // InterruptedException from `sleep` and PgException from `addWorkerNode`.
         LOGGER.warn("meta service unreachable, wait for start.")
       }
     }
