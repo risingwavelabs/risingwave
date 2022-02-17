@@ -1,6 +1,5 @@
 use std::time::Instant;
 
-use async_std::task;
 use itertools::Itertools;
 use risingwave_storage::StateStore;
 
@@ -37,8 +36,6 @@ impl Operations {
             .map(|batches| (batches, store.clone()))
             .collect_vec();
 
-        let total_start = Instant::now();
-
         let futures = args
             .drain(..)
             .map(|(batches, store)| async move {
@@ -53,14 +50,18 @@ impl Operations {
             })
             .collect_vec();
 
-        let handles = futures.into_iter().map(task::spawn).collect_vec();
+        let total_start = Instant::now();
 
+        let handles = futures.into_iter().map(tokio::spawn).collect_vec();
         let latencies_list = futures::future::join_all(handles).await;
 
         let total_time_nano = total_start.elapsed().as_nanos();
 
         // calculate metrics
-        let latencies = latencies_list.into_iter().flatten().collect();
+        let latencies: Vec<u128> = latencies_list
+            .into_iter()
+            .flat_map(|res| res.unwrap())
+            .collect_vec();
         let stat = LatencyStat::new(latencies);
         // calculate operation per second
         let ops = opts.batch_size as u128 * 1_000_000_000 * batches_len as u128 / total_time_nano;
