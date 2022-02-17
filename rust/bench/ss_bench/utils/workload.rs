@@ -68,10 +68,10 @@ impl Workload {
             .collect()
     }
 
-    fn prefix_num(opts: &Opts,) -> u64{
+    fn prefix_num(opts: &Opts) -> u64 {
         // get ceil result
         (opts.batch_size + opts.keys_per_prefix - 1) as u64 / opts.keys_per_prefix as u64
-    } 
+    }
 
     pub(crate) fn new_random_keys(opts: &Opts, base_seed: u64) -> (Prefixes, Keys) {
         // --- get prefixes ---

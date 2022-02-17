@@ -11,17 +11,15 @@ use risingwave_storage::StateStore;
 
 use super::Operations;
 use crate::utils::latency_stat::LatencyStat;
-use crate::Opts;
 use crate::utils::workload::Workload;
+use crate::Opts;
 
 impl Operations {
     pub(crate) async fn prefix_scan_random(&self, store: &impl StateStore, opts: &Opts) {
         // generate queried prefixes
         let mut scan_prefixes = match self.prefixes.is_empty() {
             // if prefixes is empty, use default prefix: ["a"*key_prefix_size]
-            true => {
-                Workload::new_random_keys(opts, 233).0
-            },
+            true => Workload::new_random_keys(opts, 233).0,
             false => {
                 let mut rng = StdRng::seed_from_u64(233);
                 let dist = Uniform::from(0..self.prefixes.len());
