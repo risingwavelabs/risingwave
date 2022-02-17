@@ -41,6 +41,10 @@ impl StreamClients {
 
         Ok(client)
     }
+
+    pub fn get_by_node_id(&self, node_id: &NodeId) -> Option<StreamServiceClient<Channel>> {
+        self.clients.get(node_id).map(|client| client.to_owned())
+    }
 }
 
 pub type StreamClientsRef = Arc<StreamClients>;
