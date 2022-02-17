@@ -67,7 +67,6 @@ impl<B: Buf> MaybeFlip<B> {
     def_method!(get_u16, u16);
     def_method!(get_u32, u32);
     def_method!(get_u64, u64);
-    def_method!(get_i8, i8);
     def_method!(get_i32, i32);
     def_method!(get_i64, i64);
     def_method!(get_i128, i128);
@@ -460,8 +459,8 @@ impl<'de, 'a, B: Buf + 'de> VariantAccess<'de> for &'a mut Deserializer<B> {
 
 impl<B: Buf> Deserializer<B> {
     /// Deserialize a decimal value. Returns `(mantissa, scale)`.
-    pub fn deserialize_decimal(&mut self) -> Result<(i128, i8)> {
-        let scale = self.input.get_i8();
+    pub fn deserialize_decimal(&mut self) -> Result<(i128, u8)> {
+        let scale = self.input.get_u8();
         let mantissa = self.input.get_i128() ^ (1 << 127);
         Ok((mantissa, scale))
     }
@@ -643,18 +642,18 @@ mod tests {
     #[test]
     fn test_decimal_2() {
         let d = Decimal::from_str("41721.900909090909090909090909").unwrap();
-        let (mantissa, scale) = (d.mantissa(), d.scale() as i8);
+        let (mantissa, scale) = (d.mantissa(), d.scale() as u8);
         let (mantissa0, scale0) = deserialize_decimal(&serialize_decimal(mantissa, scale));
         assert_eq!((mantissa, scale), (mantissa0, scale0));
     }
 
-    fn serialize_decimal(mantissa: i128, scale: i8) -> Vec<u8> {
+    fn serialize_decimal(mantissa: i128, scale: u8) -> Vec<u8> {
         let mut serializer = crate::Serializer::new(vec![]);
         serializer.serialize_decimal(mantissa, scale).unwrap();
         serializer.into_inner()
     }
 
-    fn deserialize_decimal(bytes: &[u8]) -> (i128, i8) {
+    fn deserialize_decimal(bytes: &[u8]) -> (i128, u8) {
         let mut deserializer = Deserializer::new(bytes);
         deserializer.deserialize_decimal().unwrap()
     }
