@@ -9,7 +9,7 @@ use itertools::Itertools;
 mod sstable;
 pub use sstable::*;
 mod cloud;
-mod compactor;
+pub mod compactor;
 mod error;
 pub mod hummock_meta_client;
 mod iterator;
@@ -17,7 +17,7 @@ pub mod key;
 pub mod key_range;
 pub mod local_version_manager;
 #[cfg(test)]
-pub mod mock;
+pub(crate) mod mock;
 #[cfg(test)]
 mod snapshot_tests;
 mod state_store;
@@ -458,7 +458,7 @@ impl HummockStorage {
 
     pub async fn update_local_version(&self) -> HummockResult<()> {
         self.local_version_manager
-            .update_local_version(self.hummock_meta_client())
+            .update_local_version(self.hummock_meta_client().as_ref())
             .await?;
         Ok(())
     }
@@ -498,7 +498,17 @@ impl HummockStorage {
             .unwrap()
     }
 
-    pub fn hummock_meta_client(&self) -> &dyn HummockMetaClient {
-        self.hummock_meta_client.as_ref()
+    pub fn hummock_meta_client(&self) -> &Arc<dyn HummockMetaClient> {
+        &self.hummock_meta_client
+    }
+
+    pub fn options(&self) -> &Arc<HummockOptions> {
+        &self.options
+    }
+    pub fn local_version_manager(&self) -> &Arc<LocalVersionManager> {
+        &self.local_version_manager
+    }
+    pub fn obj_client(&self) -> &Arc<dyn ObjectStore> {
+        &self.obj_client
     }
 }

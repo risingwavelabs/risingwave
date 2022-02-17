@@ -15,7 +15,7 @@ As a RisingWave developer, you may need to start components and debug components
 
 #### Run e2e test
 
-Simply run:
+In root directory, simply run:
 
 ```bash
 ./risedev d # Default dev mode

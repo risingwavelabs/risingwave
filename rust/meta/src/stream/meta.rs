@@ -12,12 +12,11 @@ use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_plan::StreamActor;
 
 use crate::cluster::NodeId;
-use crate::manager::MetaSrvEnv;
 use crate::model::{ActorId, MetadataModel, TableFragments};
-use crate::storage::MetaStoreRef;
+use crate::storage::MetaStore;
 
-pub struct FragmentManager {
-    meta_store_ref: MetaStoreRef,
+pub struct FragmentManager<S> {
+    meta_store_ref: Arc<S>,
     table_fragments: DashMap<TableId, TableFragments>,
 }
 
@@ -29,13 +28,15 @@ pub struct ActorInfos {
     pub source_actor_maps: HashMap<NodeId, Vec<ActorId>>,
 }
 
-pub type FragmentManagerRef = Arc<FragmentManager>;
+pub type FragmentManagerRef<S> = Arc<FragmentManager<S>>;
 
-impl FragmentManager {
-    pub async fn new(env: MetaSrvEnv) -> Result<Self> {
-        let meta_store_ref = env.meta_store_ref();
+impl<S> FragmentManager<S>
+where
+    S: MetaStore,
+{
+    pub async fn new(meta_store_ref: Arc<S>) -> Result<Self> {
         let table_fragments = try_match_expand!(
-            TableFragments::list(&meta_store_ref).await,
+            TableFragments::list(&*meta_store_ref).await,
             Ok,
             "TableFragments::list fail"
         )?;
@@ -45,7 +46,7 @@ impl FragmentManager {
         }
 
         Ok(Self {
-            meta_store_ref: env.meta_store_ref(),
+            meta_store_ref,
             table_fragments: fragment_map,
         })
     }
@@ -56,7 +57,7 @@ impl FragmentManager {
                 "table_fragment already exist!".to_string(),
             ))),
             Entry::Vacant(v) => {
-                table_fragment.insert(&self.meta_store_ref).await?;
+                table_fragment.insert(&*self.meta_store_ref).await?;
                 v.insert(table_fragment);
                 Ok(())
             }
@@ -74,7 +75,7 @@ impl FragmentManager {
     pub async fn update_table_fragments(&self, table_fragment: TableFragments) -> Result<()> {
         match self.table_fragments.entry(table_fragment.table_id()) {
             Entry::Occupied(mut entry) => {
-                table_fragment.insert(&self.meta_store_ref).await?;
+                table_fragment.insert(&*self.meta_store_ref).await?;
                 entry.insert(table_fragment);
 
                 Ok(())
@@ -88,7 +89,7 @@ impl FragmentManager {
     pub async fn drop_table_fragments(&self, table_id: &TableId) -> Result<()> {
         match self.table_fragments.entry(table_id.clone()) {
             Entry::Occupied(entry) => {
-                TableFragments::delete(&self.meta_store_ref, &TableRefId::from(table_id)).await?;
+                TableFragments::delete(&*self.meta_store_ref, &TableRefId::from(table_id)).await?;
                 entry.remove();
 
                 Ok(())

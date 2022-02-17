@@ -13,7 +13,6 @@ use crate::storage::transaction::{Operation, Precondition, Transaction};
 use crate::storage::Operation::Delete;
 use crate::storage::{
     ColumnFamily, Key, KeyValue, KeyValueVersion, KeyWithVersion, MetaStore, Value,
-    DEFAULT_COLUMN_FAMILY,
 };
 
 impl From<sled::Error> for crate::storage::Error {
@@ -45,6 +44,12 @@ impl ColumnFamilyUtils {
 pub struct SledMetaStore {
     /// The rwlock is to ensure serializable isolation.
     db: RwLock<sled::Db>,
+}
+
+impl Clone for SledMetaStore {
+    fn clone(&self) -> Self {
+        unreachable!("FIXME: https://github.com/rust-lang/rust/issues/26925")
+    }
 }
 
 /// `SledMetaStore` stores a key composed of `KeyValue.key` and `KeyValue.version`.
@@ -291,14 +296,6 @@ impl MetaStore for SledMetaStore {
         .await
     }
 
-    async fn put_batch_cf(&self, tuples: Vec<(&str, Vec<u8>, Vec<u8>, Epoch)>) -> Result<()> {
-        let ops = tuples
-            .into_iter()
-            .map(|(cf, k, v, e)| (cf.to_owned(), k, e.into_inner(), v))
-            .collect_vec();
-        self.put_impl(ops).await
-    }
-
     async fn get_cf(&self, cf: &str, key: &[u8], version: Epoch) -> Result<Vec<u8>> {
         let result = self
             .get_impl_flatten(&[(
@@ -323,16 +320,6 @@ impl MetaStore for SledMetaStore {
     async fn delete_all_cf(&self, cf: &str, key: &[u8]) -> Result<()> {
         self.delete_impl(vec![(cf.to_owned(), key.to_owned(), None)])
             .await
-    }
-
-    async fn put_batch(&self, tuples: Vec<(Vec<u8>, Vec<u8>, Epoch)>) -> Result<()> {
-        self.put_batch_cf(
-            tuples
-                .into_iter()
-                .map(|(k, v, e)| (DEFAULT_COLUMN_FAMILY, k, v, e))
-                .collect_vec(),
-        )
-        .await
     }
 
     async fn commit_transaction(&self, trx: &mut Transaction) -> Result<()> {
@@ -467,55 +454,6 @@ mod tests {
                 SINGLE_VERSION_EPOCH.into_inner()
             )]
         );
-
-        meta_store
-            .put_batch_cf(vec![
-                (
-                    "cf/cf1",
-                    "k22".as_bytes().to_vec(),
-                    "v22".as_bytes().to_vec(),
-                    Epoch::from(15),
-                ),
-                (
-                    "cf/cf1",
-                    "k1".as_bytes().to_vec(),
-                    "v2".as_bytes().to_vec(),
-                    Epoch::from(20),
-                ),
-                (
-                    "cf/cf1",
-                    "k1".as_bytes().to_vec(),
-                    "v3".as_bytes().to_vec(),
-                    Epoch::from(30),
-                ),
-                (
-                    "cf/cf1",
-                    "k1".as_bytes().to_vec(),
-                    "v1".as_bytes().to_vec(),
-                    Epoch::from(10),
-                ),
-                (
-                    "cf/another_cf",
-                    "another_k1".as_bytes().to_vec(),
-                    "another_v1".as_bytes().to_vec(),
-                    Epoch::from(2),
-                ),
-            ])
-            .await?;
-        let result = meta_store
-            .list_batch_cf(vec!["cf/cf1", "cf/another_cf"])
-            .await?;
-        assert_eq!(2, result.len());
-        assert!(result[0]
-            .iter()
-            .map(|v| std::str::from_utf8(v).unwrap())
-            .sorted()
-            .eq(vec!["v22", "v3"]));
-        assert!(result[1]
-            .iter()
-            .map(|v| std::str::from_utf8(v).unwrap())
-            .sorted()
-            .eq(vec!["another_v1"]));
 
         Ok(())
     }

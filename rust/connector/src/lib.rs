@@ -12,6 +12,7 @@
 #![feature(binary_heap_drain_sorted)]
 
 mod base;
+mod filesystem;
 mod kafka;
 mod kinesis;
 mod pulsar;

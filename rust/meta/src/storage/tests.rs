@@ -28,14 +28,16 @@ async fn test_meta_store_basic(store: &dyn MetaStore) -> Result<()> {
     assert!(store.delete_cf("test_cf", k, version).await.is_ok());
     assert_eq!(store.list_cf("test_cf").await.unwrap().len(), 0);
 
-    let batch_values: Vec<(Vec<u8>, Vec<u8>, Epoch)> = vec![
+    let batch: Vec<(Vec<u8>, Vec<u8>, Epoch)> = vec![
         (b"key_1".to_vec(), b"value_1".to_vec(), Epoch::from(2)),
         (b"key_2".to_vec(), b"value_2".to_vec(), Epoch::from(2)),
         (b"key_3".to_vec(), b"value_3".to_vec(), Epoch::from(2)),
     ];
-    assert!(store.put_batch(batch_values).await.is_ok());
+    for (key, value, version) in batch {
+        store.put(&key[..], &value[..], version).await?;
+    }
 
-    let batch_values: Vec<(&str, Vec<u8>, Vec<u8>, Epoch)> = vec![
+    let batch: Vec<(&str, Vec<u8>, Vec<u8>, Epoch)> = vec![
         (
             "test_cf",
             b"key_1".to_vec(),
@@ -49,7 +51,9 @@ async fn test_meta_store_basic(store: &dyn MetaStore) -> Result<()> {
             Epoch::from(2),
         ),
     ];
-    assert!(store.put_batch_cf(batch_values).await.is_ok());
+    for (cf, key, value, version) in batch {
+        store.put_cf(cf, &key[..], &value[..], version).await?;
+    }
 
     assert_eq!(store.list().await.unwrap().len(), 3);
     assert_eq!(store.list_cf("test_cf").await.unwrap().len(), 2);
@@ -204,7 +208,9 @@ async fn test_meta_store_keys_share_prefix(meta_store: &dyn MetaStore) -> Result
             Epoch::from(1),
         ),
     ];
-    meta_store.put_batch_cf(batch.clone()).await.unwrap();
+    for (cf, key, value, version) in batch.clone() {
+        meta_store.put_cf(cf, &key[..], &value[..], version).await?;
+    }
     assert_eq!(3, meta_store.list_cf(cf).await.unwrap().len());
     // keys share the same prefix are not affected
     meta_store.delete_all_cf(cf, &batch[1].1).await.unwrap();
@@ -240,7 +246,9 @@ async fn test_meta_store_overlapped_cf(meta_store: &dyn MetaStore) -> Result<()>
             SINGLE_VERSION_EPOCH,
         ),
     ];
-    meta_store.put_batch_cf(batch.clone()).await.unwrap();
+    for (cf, key, value, version) in batch.clone() {
+        meta_store.put_cf(cf, &key[..], &value[..], version).await?;
+    }
     assert_eq!(1, meta_store.list_cf(cf1).await.unwrap().len());
     assert_eq!(1, meta_store.list_cf(cf2).await.unwrap().len());
     assert_eq!(1, meta_store.list_cf(cf3).await.unwrap().len());

@@ -6,7 +6,6 @@ version = "0.1.0"
 [dependencies]
 bytes = "1"
 pbjson = "0.2"
-pbjson-types = "0.2"
 prost = "0.9"
 prost-helpers = { path = "helpers" }
 prost-types = "0.9"

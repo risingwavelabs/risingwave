@@ -11,7 +11,7 @@ on:
     branches: [main]
 env:
   RUST_TOOLCHAIN: nightly-2022-01-13
-  CACHE_KEY_SUFFIX: v20220126
+  CACHE_KEY_SUFFIX: v20220216
   CARGO_TERM_COLOR: always
 jobs:
   frontend-check:
@@ -56,7 +56,7 @@ jobs:
       - compute-node-build
       - frontend-check
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -109,7 +109,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-1node
-          timeout 10m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
+          timeout 3m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
@@ -119,7 +119,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           RW_NO_CACHE=1 ~/cargo-make/makers ci-1node
-          timeout 10m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
+          timeout 3m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
@@ -129,7 +129,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-3node
-          timeout 10m sqllogictest -p 4567 -d dev './e2e_test/batch/**/*.slt'
+          timeout 5m sqllogictest -p 4567 -d dev './e2e_test/batch/**/*.slt'
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
@@ -139,7 +139,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           RW_FORCE_TABLE_V1=1 ~/cargo-make/makers ci-3node
-          timeout 10m sqllogictest -p 4567 -d dev './e2e_test/batch/**/*.slt'
+          timeout 70s sqllogictest -p 4567 -d dev './e2e_test/batch/**/*.slt'
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
@@ -160,7 +160,7 @@ jobs:
       - compute-node-build
       - frontend-check
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     env:
       PG_PORT: 5432
       RW_PORT: 4567
@@ -243,7 +243,7 @@ jobs:
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-3node
           psql --version
-          RUST_LOG=info cd rust && target/debug/risingwave_regress_test -h 127.0.0.1 \
+          RUST_LOG=info cd rust && timeout 40s target/debug/risingwave_regress_test -h 127.0.0.1 \
             -p ${{ env.RW_PORT }} \
             --input `pwd`/tests/regress/data \
             --output `pwd`/tests/regress/output \
@@ -257,7 +257,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-1node
-          timeout 10m sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source/**/*.slt'
+          timeout 70s sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source/**/*.slt'
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
@@ -267,7 +267,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-3node
-          timeout 10m sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source_distributed/**/*.slt'
+          timeout 30s sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source_distributed/**/*.slt'
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k

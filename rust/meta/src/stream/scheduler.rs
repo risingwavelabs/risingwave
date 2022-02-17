@@ -9,6 +9,7 @@ use risingwave_pb::common::{ActorInfo, WorkerType};
 
 use crate::cluster::{NodeId, NodeLocations, StoredClusterManager};
 use crate::model::{ActorId, ActorLocations};
+use crate::storage::MetaStore;
 
 /// [`ScheduleCategory`] defines all supported categories.
 pub enum ScheduleCategory {
@@ -23,8 +24,11 @@ pub enum ScheduleCategory {
 }
 
 /// [`Scheduler`] defines schedule logic for mv actors.
-pub struct Scheduler {
-    cluster_manager: Arc<StoredClusterManager>,
+pub struct Scheduler<S>
+where
+    S: MetaStore,
+{
+    cluster_manager: Arc<StoredClusterManager<S>>,
     category: ScheduleCategory,
 }
 
@@ -78,8 +82,11 @@ impl ScheduledLocations {
     }
 }
 
-impl Scheduler {
-    pub fn new(category: ScheduleCategory, cluster_manager: Arc<StoredClusterManager>) -> Self {
+impl<S> Scheduler<S>
+where
+    S: MetaStore,
+{
+    pub fn new(category: ScheduleCategory, cluster_manager: Arc<StoredClusterManager<S>>) -> Self {
         Self {
             cluster_manager,
             category,
