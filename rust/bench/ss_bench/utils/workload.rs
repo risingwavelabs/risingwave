@@ -35,14 +35,11 @@ impl Workload {
     ) -> (Prefixes, Keys, Values) {
         let base_seed = seed.unwrap_or(233);
 
-        // get ceil result
-        let prefix_num =
-            (opts.batch_size + opts.keys_per_prefix - 1) as u64 / opts.keys_per_prefix as u64;
         let (prefixes, keys) = match workload_type {
             WriteBatch | GetRandom | PrefixScanRandom | DeleteRandom => {
-                Self::new_random_keys(opts, base_seed, prefix_num)
+                Self::new_random_keys(opts, base_seed)
             }
-            GetSeq | DeleteSeq => Self::new_sequential_keys(opts, prefix_num),
+            GetSeq | DeleteSeq => Self::new_sequential_keys(opts),
         };
 
         let values = match workload_type {
@@ -71,10 +68,16 @@ impl Workload {
             .collect()
     }
 
-    fn new_random_keys(opts: &Opts, base_seed: u64, prefix_num: u64) -> (Prefixes, Keys) {
+    fn prefix_num(opts: &Opts,) -> u64{
+        // get ceil result
+        (opts.batch_size + opts.keys_per_prefix - 1) as u64 / opts.keys_per_prefix as u64
+    } 
+
+    pub(crate) fn new_random_keys(opts: &Opts, base_seed: u64) -> (Prefixes, Keys) {
         // --- get prefixes ---
         let str_dist = Uniform::new_inclusive(0, 255);
 
+        let prefix_num = Self::prefix_num(opts);
         let prefixes = (0..prefix_num)
             .into_iter()
             .map(|i| {
@@ -112,8 +115,9 @@ impl Workload {
         (prefixes, keys)
     }
 
-    fn new_sequential_keys(opts: &Opts, prefix_num: u64) -> (Prefixes, Keys) {
+    pub(crate) fn new_sequential_keys(opts: &Opts) -> (Prefixes, Keys) {
         // --- get prefixes ---
+        let prefix_num = Self::prefix_num(opts);
         let mut prefixes = Vec::with_capacity(prefix_num as usize);
         let mut prefix = vec![b'\0'; opts.key_prefix_size as usize];
         for _ in 0..prefix_num as u64 {

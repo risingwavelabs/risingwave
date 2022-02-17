@@ -11,16 +11,16 @@ use risingwave_storage::StateStore;
 use super::Operations;
 use crate::utils::latency_stat::LatencyStat;
 use crate::Opts;
+use crate::utils::workload::Workload;
 
 impl Operations {
     pub(crate) async fn get_random(&self, store: &impl StateStore, opts: &Opts) {
         // generate queried point get key
         let mut get_keys = match self.keys.is_empty() {
             // if state store is empty, use default key: ["a"*key_size]
-            true => (0..opts.reads)
-                .into_iter()
-                .map(|_| Bytes::from(String::from_utf8(vec![65; opts.key_size as usize]).unwrap()))
-                .collect_vec(),
+            true => {
+                Workload::new_random_keys(opts, 233).1
+            },
             false => {
                 let mut rng = StdRng::seed_from_u64(233);
                 let dist = Uniform::from(0..self.keys.len());
