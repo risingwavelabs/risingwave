@@ -9,7 +9,7 @@ use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_source::{Source, SourceImpl, SourceManagerRef, SourceWriter};
+use risingwave_source::{SourceImpl, SourceManagerRef};
 
 use super::BoxedExecutor;
 use crate::executor::{BoxedExecutorBuilder, Executor, ExecutorBuilder};
@@ -69,7 +69,7 @@ impl Executor for InsertExecutor {
                 SourceImpl::TableV2(t) => {
                     // All writers share a single `TableSourceV2Core` so it's okay to create it
                     // every time.
-                    let mut writer = t.create_writer()?;
+                    let mut writer = t.create_writer();
                     writer.write(chunk).await?;
                 }
                 _ => unreachable!(),
@@ -80,7 +80,7 @@ impl Executor for InsertExecutor {
         let do_flush = || async {
             match source.source.as_ref() {
                 SourceImpl::TableV2(t) => {
-                    let mut writer = t.create_writer()?;
+                    let mut writer = t.create_writer();
                     writer.flush().await?; // this is currently no op
                 }
                 _ => unreachable!(),
@@ -191,7 +191,7 @@ mod tests {
     use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
     use risingwave_source::{
-        MemSourceManager, SourceManager, StreamSourceReader, TableV2ReaderContext,
+        MemSourceManager, Source, SourceManager, StreamSourceReader, TableV2ReaderContext,
     };
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::{SimpleTableManager, TableManager};
