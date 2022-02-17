@@ -105,14 +105,8 @@ impl Executor for CreateTableExecutor {
             .collect::<Result<Vec<_>>>()?;
 
         if self.is_materialized_view {
-            let order_pairs = fetch_orders(&self.column_orders).unwrap();
-            let orderings = order_pairs
-                .iter()
-                .map(|order| order.order_type)
-                .collect::<Vec<_>>();
-
-            // Create associated materialized view.
             if self.associated_table_id.is_some() {
+                // Create associated materialized view for table_v2.
                 self.table_manager.register_associated_materialized_view(
                     self.associated_table_id.as_ref().unwrap(),
                     &self.table_id,
@@ -122,6 +116,13 @@ impl Executor for CreateTableExecutor {
                     &self.table_id,
                 )?;
             } else {
+                // Create normal MV.
+                let order_pairs = fetch_orders(&self.column_orders).unwrap();
+                let orderings = order_pairs
+                    .iter()
+                    .map(|order| order.order_type)
+                    .collect::<Vec<_>>();
+
                 self.table_manager.create_materialized_view(
                     &self.table_id,
                     &self.table_columns,
@@ -130,7 +131,9 @@ impl Executor for CreateTableExecutor {
                 )?;
             }
         } else {
+            // Create table_v2.
             info!("Create table id:{}", &self.table_id.table_id());
+
             let table = self
                 .table_manager
                 .create_table_v2(&self.table_id, table_columns)

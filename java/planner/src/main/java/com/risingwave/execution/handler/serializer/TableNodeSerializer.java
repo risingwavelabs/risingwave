@@ -141,7 +141,6 @@ public class TableNodeSerializer {
         builder.addColumnDescs(columnDescBuilder);
       }
       builder.setIsMaterializedView(false);
-      builder.setV2(isTableV2);
     }
 
     // Add exchange node on top.
