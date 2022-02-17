@@ -12,7 +12,7 @@ use risingwave_pb::stream_plan::dispatcher::DispatcherType;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{Dispatcher, StreamNode};
 
-use super::FragmentManagerRef;
+use super::{CreateMaterializedViewContext, FragmentManagerRef};
 use crate::manager::{IdCategory, IdGeneratorManagerRef};
 use crate::model::{ActorId, FragmentId};
 use crate::storage::MetaStore;
@@ -61,13 +61,15 @@ where
     pub async fn generate_graph(
         &mut self,
         stream_node: &StreamNode,
+        ctx: &mut CreateMaterializedViewContext,
     ) -> Result<BTreeMap<FragmentId, Fragment>> {
         self.generate_fragment_graph(stream_node).await?;
         self.build_graph_from_fragment(self.fragment_graph.get_root_fragment(), vec![])
             .await?;
 
-        let stream_graph = self.stream_graph.build()?;
-        stream_graph
+        let stream_graph = self.stream_graph.build(ctx)?;
+
+        Ok(stream_graph
             .iter()
             .map(|(&fragment_id, actors)| {
                 Ok::<_, RwError>((
@@ -80,7 +82,7 @@ where
                     },
                 ))
             })
-            .collect::<Result<BTreeMap<_, _>>>()
+            .collect::<Result<BTreeMap<_, _>>>()?)
     }
 
     /// Generate fragment DAG from input streaming plan by their dependency.
