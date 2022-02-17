@@ -15,14 +15,14 @@ use crate::barrier::BarrierManager;
 use crate::cluster::StoredClusterManager;
 use crate::dashboard::DashboardService;
 use crate::hummock;
-use crate::manager::{MemEpochGenerator, MetaSrvEnv};
+use crate::manager::{MemEpochGenerator, MetaSrvEnv, StoredCatalogManager};
 use crate::rpc::service::catalog_service::CatalogServiceImpl;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
 use crate::rpc::service::epoch_service::EpochServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
 use crate::rpc::service::hummock_service::HummockServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
-use crate::storage::{MetaStoreRef, SledMetaStore};
+use crate::storage::SledMetaStore;
 use crate::stream::{FragmentManager, StreamManager};
 
 pub enum MetaStoreBackend {
@@ -37,7 +37,7 @@ pub async fn rpc_serve(
     meta_store_backend: MetaStoreBackend,
 ) -> (JoinHandle<()>, UnboundedSender<()>) {
     let listener = TcpListener::bind(addr).await.unwrap();
-    let meta_store_ref: MetaStoreRef = match meta_store_backend {
+    let meta_store_ref = match meta_store_backend {
         MetaStoreBackend::Mem => panic!("Use SledMetaStore instead"),
         MetaStoreBackend::Sled(db_path) => {
             Arc::new(SledMetaStore::new(Some(db_path.as_path())).unwrap())
@@ -45,9 +45,10 @@ pub async fn rpc_serve(
         MetaStoreBackend::SledInMem => Arc::new(SledMetaStore::new(None).unwrap()),
     };
     let epoch_generator_ref = Arc::new(MemEpochGenerator::new());
-    let env = MetaSrvEnv::new(meta_store_ref, epoch_generator_ref.clone()).await;
+    let env =
+        MetaSrvEnv::<SledMetaStore>::new(meta_store_ref.clone(), epoch_generator_ref.clone()).await;
 
-    let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
+    let fragment_manager = Arc::new(FragmentManager::new(meta_store_ref.clone()).await.unwrap());
     let hummock_manager = Arc::new(hummock::HummockManager::new(env.clone()).await.unwrap());
     let cluster_manager = Arc::new(
         StoredClusterManager::new(env.clone(), Some(hummock_manager.clone()))
@@ -71,7 +72,7 @@ pub async fn rpc_serve(
         env.clone(),
         cluster_manager.clone(),
         fragment_manager.clone(),
-        epoch_generator_ref,
+        epoch_generator_ref.clone(),
     ));
     {
         let barrier_manager_ref = barrier_manager_ref.clone();
@@ -89,12 +90,17 @@ pub async fn rpc_serve(
         .await
         .unwrap(),
     );
+    let catalog_manager_ref = Arc::new(
+        StoredCatalogManager::new(meta_store_ref.clone())
+            .await
+            .unwrap(),
+    );
 
-    let epoch_srv = EpochServiceImpl::new(env.clone());
+    let epoch_srv = EpochServiceImpl::new(epoch_generator_ref.clone());
     let heartbeat_srv = HeartbeatServiceImpl::new();
-    let catalog_srv = CatalogServiceImpl::new(env.clone()).await.unwrap();
-    let cluster_srv = ClusterServiceImpl::new(cluster_manager.clone());
-    let stream_srv = StreamServiceImpl::new(
+    let catalog_srv = CatalogServiceImpl::<SledMetaStore>::new(env.clone(), catalog_manager_ref);
+    let cluster_srv = ClusterServiceImpl::<SledMetaStore>::new(cluster_manager.clone());
+    let stream_srv = StreamServiceImpl::<SledMetaStore>::new(
         stream_manager_ref,
         fragment_manager.clone(),
         cluster_manager,

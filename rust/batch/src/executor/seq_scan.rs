@@ -5,12 +5,12 @@ use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_storage::bummock::BummockResult;
 use risingwave_storage::table::ScannableTableRef;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::executor::{Executor, ExecutorBuilder};
 
+// TODO: this can be replaced entirely by `RowSeqScan` due to table_v2
 /// Sequential scan executor on column-oriented tables
 pub struct SeqScanExecutor {
     table: ScannableTableRef,
@@ -82,7 +82,7 @@ impl Executor for SeqScanExecutor {
 
         let res = self.table.get_data_by_columns(&self.column_ids).await?;
 
-        if let BummockResult::Data(data) = res {
+        if let Some(data) = res {
             self.snapshot = VecDeque::from(data);
         }
         Ok(())
@@ -114,9 +114,9 @@ mod tests {
     use risingwave_common::catalog::Field;
     use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
-    use risingwave_storage::bummock::BummockTable;
+    use risingwave_storage::table::test::TestTable;
     use risingwave_storage::table::ScannableTable;
-    use risingwave_storage::{Table, TableColumnDesc};
+    use risingwave_storage::TableColumnDesc;
 
     use super::*;
     use crate::*;
@@ -137,7 +137,8 @@ mod tests {
                 name: f.name.clone(),
             })
             .collect();
-        let table = BummockTable::new(&table_id, table_columns);
+
+        let table = TestTable::new(&table_id, table_columns);
 
         let schema = table.schema().into_owned();
         let col1 = column_nonnull! { I64Array, [1, 3, 5, 7, 9] };

@@ -11,20 +11,27 @@ use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
 use tokio::sync::Mutex;
 
 use crate::model::MetadataModel;
-use crate::storage::MetaStoreRef;
+use crate::storage::MetaStore;
 
 /// [`StoredCatalogManager`] manages meta operations including retrieving catalog info, creating
 /// a table and dropping a table. Besides, it contains a cache for meta info in the `core`.
-pub struct StoredCatalogManager {
+pub struct StoredCatalogManager<S> {
     core: Mutex<CatalogManagerCore>,
-    meta_store_ref: MetaStoreRef,
+    meta_store_ref: Arc<S>,
 }
 
-pub type StoredCatalogManagerRef = Arc<StoredCatalogManager>;
+pub type StoredCatalogManagerRef<S> = Arc<StoredCatalogManager<S>>;
 
-impl StoredCatalogManager {
-    pub async fn new(meta_store_ref: MetaStoreRef) -> Result<Self> {
-        let core = Mutex::new(CatalogManagerCore::new(&meta_store_ref).await?);
+impl<S> StoredCatalogManager<S>
+where
+    S: MetaStore,
+{
+    pub async fn new(meta_store_ref: Arc<S>) -> Result<Self> {
+        let databases = Database::list(&*meta_store_ref).await?;
+        let schemas = Schema::list(&*meta_store_ref).await?;
+        let tables = Table::list(&*meta_store_ref).await?;
+
+        let core = Mutex::new(CatalogManagerCore::new(databases, schemas, tables));
         Ok(Self {
             core,
             meta_store_ref,
@@ -40,7 +47,7 @@ impl StoredCatalogManager {
         let mut core = self.core.lock().await;
         let database_id = DatabaseId::from(&database.database_ref_id);
         if !core.has_database(&database_id) {
-            database.insert(&self.meta_store_ref).await?;
+            database.insert(&*self.meta_store_ref).await?;
             core.add_database(database);
             Ok(Some(CatalogId::DatabaseId(database_id)))
         } else {
@@ -55,7 +62,7 @@ impl StoredCatalogManager {
         let mut core = self.core.lock().await;
         let database_id = DatabaseId::from(&Some(database_ref_id.clone()));
         if core.has_database(&database_id) {
-            Database::delete(&self.meta_store_ref, database_ref_id).await?;
+            Database::delete(&*self.meta_store_ref, database_ref_id).await?;
             core.delete_database(&database_id);
             Ok(Some(CatalogId::DatabaseId(database_id)))
         } else {
@@ -67,7 +74,7 @@ impl StoredCatalogManager {
         let mut core = self.core.lock().await;
         let schema_id = SchemaId::from(&schema.schema_ref_id);
         if !core.has_schema(&schema_id) {
-            schema.insert(&self.meta_store_ref).await?;
+            schema.insert(&*self.meta_store_ref).await?;
             core.add_schema(schema);
             Ok(Some(CatalogId::SchemaId(schema_id)))
         } else {
@@ -79,7 +86,7 @@ impl StoredCatalogManager {
         let mut core = self.core.lock().await;
         let schema_id = SchemaId::from(&Some(schema_ref_id.clone()));
         if core.has_schema(&schema_id) {
-            Schema::delete(&self.meta_store_ref, schema_ref_id).await?;
+            Schema::delete(&*self.meta_store_ref, schema_ref_id).await?;
             core.delete_schema(&schema_id);
             Ok(Some(CatalogId::SchemaId(schema_id)))
         } else {
@@ -91,7 +98,7 @@ impl StoredCatalogManager {
         let mut core = self.core.lock().await;
         let table_id = TableId::from(&table.table_ref_id);
         if !core.has_table(&table_id) {
-            table.insert(&self.meta_store_ref).await?;
+            table.insert(&*self.meta_store_ref).await?;
             core.add_table(table.clone());
             for table_ref_id in table.dependent_tables {
                 let dependent_table_id = TableId::from(&Some(table_ref_id.clone()));
@@ -118,7 +125,7 @@ impl StoredCatalogManager {
                 )
                 .into()),
                 None => {
-                    Table::delete(&self.meta_store_ref, table_ref_id).await?;
+                    Table::delete(&*self.meta_store_ref, table_ref_id).await?;
                     let dependent_tables = core.delete_table(&table_id);
                     for dependent_table_id in dependent_tables {
                         core.decrease_ref_count(dependent_table_id);
@@ -142,11 +149,7 @@ struct CatalogManagerCore {
 }
 
 impl CatalogManagerCore {
-    async fn new(meta_store: &MetaStoreRef) -> Result<Self> {
-        let databases = Database::list(meta_store).await?;
-        let schemas = Schema::list(meta_store).await?;
-        let tables = Table::list(meta_store).await?;
-
+    fn new(databases: Vec<Database>, schemas: Vec<Schema>, tables: Vec<Table>) -> Self {
         let mut table_ref_count = HashMap::new();
         let databases = HashMap::from_iter(
             databases
@@ -166,12 +169,12 @@ impl CatalogManagerCore {
             }
             (TableId::from(&table.table_ref_id), table)
         }));
-        Ok(Self {
+        Self {
             databases,
             schemas,
             tables,
             table_ref_count,
-        })
+        }
     }
 
     fn get_catalog(&self) -> Catalog {
