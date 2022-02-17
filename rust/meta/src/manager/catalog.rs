@@ -6,11 +6,11 @@ use anyhow::anyhow;
 use risingwave_common::catalog::{CatalogId, DatabaseId, SchemaId, TableId};
 use risingwave_common::error::ErrorCode::CatalogError;
 use risingwave_common::error::Result;
-use risingwave_pb::meta::{Database, Schema, Table};
+use risingwave_pb::meta::{Catalog, Database, Schema, Table};
 use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
 use tokio::sync::Mutex;
 
-use crate::model::{Catalog, MetadataModel};
+use crate::model::MetadataModel;
 use crate::storage::MetaStoreRef;
 
 /// [`StoredCatalogManager`] manages meta operations including retrieving catalog info, creating
@@ -31,8 +31,9 @@ impl StoredCatalogManager {
         })
     }
 
-    pub async fn get_catalog(&self) -> Result<Catalog> {
-        Catalog::get(&self.meta_store_ref).await
+    pub async fn get_catalog(&self) -> Catalog {
+        let core = self.core.lock().await;
+        core.get_catalog()
     }
 
     pub async fn create_database(&self, database: Database) -> Result<Option<CatalogId>> {
@@ -142,23 +143,22 @@ struct CatalogManagerCore {
 
 impl CatalogManagerCore {
     async fn new(meta_store: &MetaStoreRef) -> Result<Self> {
-        let catalog = Catalog::get(meta_store).await?;
+        let databases = Database::list(meta_store).await?;
+        let schemas = Schema::list(meta_store).await?;
+        let tables = Table::list(meta_store).await?;
+
         let mut table_ref_count = HashMap::new();
         let databases = HashMap::from_iter(
-            catalog
-                .0
-                .databases
+            databases
                 .into_iter()
                 .map(|database| (DatabaseId::from(&database.database_ref_id), database)),
         );
         let schemas = HashMap::from_iter(
-            catalog
-                .0
-                .schemas
+            schemas
                 .into_iter()
                 .map(|schema| (SchemaId::from(&schema.schema_ref_id), schema)),
         );
-        let tables = HashMap::from_iter(catalog.0.tables.into_iter().map(|table| {
+        let tables = HashMap::from_iter(tables.into_iter().map(|table| {
             let dependencies = table.get_dependent_tables();
             for table_ref_id in dependencies {
                 let table_id = TableId::from(&Some(table_ref_id.clone()));
@@ -172,6 +172,14 @@ impl CatalogManagerCore {
             tables,
             table_ref_count,
         })
+    }
+
+    fn get_catalog(&self) -> Catalog {
+        Catalog {
+            databases: self.databases.values().cloned().collect(),
+            schemas: self.schemas.values().cloned().collect(),
+            tables: self.tables.values().cloned().collect(),
+        }
     }
 
     fn has_database(&self, database_id: &DatabaseId) -> bool {
@@ -232,7 +240,7 @@ impl CatalogManagerCore {
         match self.table_ref_count.entry(table_id) {
             Entry::Occupied(mut o) => {
                 *o.get_mut() -= 1;
-                if o.get() == &0 {
+                if *o.get() == 0 {
                     o.remove_entry();
                 }
             }

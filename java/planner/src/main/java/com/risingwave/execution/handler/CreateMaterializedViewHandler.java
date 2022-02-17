@@ -26,7 +26,6 @@ import com.risingwave.rpc.ComputeClient;
 import com.risingwave.rpc.ComputeClientManager;
 import com.risingwave.rpc.Messages;
 import com.risingwave.scheduler.streaming.StreamManager;
-import java.util.ArrayList;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.ddl.SqlCreateMaterializedView;
@@ -57,29 +56,15 @@ public class CreateMaterializedViewHandler implements SqlHandler {
     StreamingPlan plan = planner.plan(ast, context);
 
     // Check whether the naming for columns in MV is valid.
-    RwStreamMaterializedView mv = plan.getStreamingPlan();
-    boolean isAllAliased = isAllAliased(mv);
+    boolean isAllAliased = isAllAliased(plan.getStreamingPlan());
     if (!isAllAliased) {
       throw new PgException(
           PgErrorCode.INVALID_COLUMN_DEFINITION,
           "An alias name must be specified for an aggregation function");
     }
 
-    // Get tables on which the MV depends.
-    ArrayList<TableCatalog.TableId> dependencies = new ArrayList<>();
-    StreamingPlan.getDependencies(mv, dependencies);
-
-    ExecutionContext.Builder builder = ExecutionContext.builder();
-    builder
-        .withDatabase(context.getDatabase())
-        .withSchema(context.getSchema())
-        .withFrontendEnv(context.getFrontendEnv())
-        .withSessionConfig(context.getSessionConfiguration())
-        .withDependentTables(dependencies);
-    ExecutionContext newContext = builder.build();
-
     // Send create MV tasks to all compute nodes.
-    TableCatalog catalog = convertPlanToCatalog(tableName, plan, newContext);
+    TableCatalog catalog = convertPlanToCatalog(tableName, plan, context);
     PlanFragment planFragment =
         TableNodeSerializer.createProtoFromCatalog(catalog, false, plan.getStreamingPlan());
 
@@ -121,9 +106,7 @@ public class CreateMaterializedViewHandler implements SqlHandler {
     }
     builder.setCollation(rootNode.getCollation());
     builder.setMv(true);
-    if (!context.getDependentTables().isEmpty()) {
-      builder.setDependentTables(context.getDependentTables());
-    }
+    builder.setDependentTables(rootNode.getDependentTables());
     rootNode.getPrimaryKeyIndices().forEach(builder::addPrimaryKey);
     CreateMaterializedViewInfo mvInfo = builder.build();
     MaterializedViewCatalog viewCatalog =

@@ -4,15 +4,12 @@ import static java.util.Objects.requireNonNull;
 
 import com.risingwave.catalog.CatalogService;
 import com.risingwave.catalog.SchemaCatalog;
-import com.risingwave.catalog.TableCatalog;
 import com.risingwave.common.config.Configuration;
 import com.risingwave.execution.handler.SqlHandlerFactory;
 import com.risingwave.node.WorkerNodeManager;
 import com.risingwave.rpc.ComputeClientManager;
 import com.risingwave.scheduler.QueryManager;
 import com.risingwave.scheduler.streaming.StreamManager;
-import java.util.ArrayList;
-import java.util.List;
 import org.apache.calcite.plan.Context;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptPlanner;
@@ -27,7 +24,6 @@ public class ExecutionContext implements Context {
   private final String schema;
   private final FrontendEnv frontendEnv;
   private final SessionConfiguration sessionConfiguration;
-  private final List<TableCatalog.TableId> dependentTables;
 
   private ExecutionContext(Builder builder) {
     this.database = requireNonNull(builder.database, "Current database can't be null!");
@@ -35,19 +31,10 @@ public class ExecutionContext implements Context {
     this.frontendEnv = requireNonNull(builder.frontendEnv, "frontendEnv");
     this.sessionConfiguration =
         requireNonNull(builder.sessionConfiguration, "sessionConfiguration");
-    this.dependentTables = requireNonNull(builder.dependentTables, "dependentTables");
   }
 
   public static Builder builder() {
     return new Builder();
-  }
-
-  public FrontendEnv getFrontendEnv() {
-    return frontendEnv;
-  }
-
-  public List<TableCatalog.TableId> getDependentTables() {
-    return dependentTables;
   }
 
   public CatalogService getCatalogService() {
@@ -132,7 +119,6 @@ public class ExecutionContext implements Context {
     private String schema;
     private FrontendEnv frontendEnv;
     private SessionConfiguration sessionConfiguration;
-    private List<TableCatalog.TableId> dependentTables = new ArrayList<>();
 
     private Builder() {}
 
@@ -153,11 +139,6 @@ public class ExecutionContext implements Context {
 
     public Builder withSessionConfig(SessionConfiguration sessionConfig) {
       this.sessionConfiguration = sessionConfig;
-      return this;
-    }
-
-    public Builder withDependentTables(List<TableCatalog.TableId> dependentTables) {
-      this.dependentTables = dependentTables;
       return this;
     }
 

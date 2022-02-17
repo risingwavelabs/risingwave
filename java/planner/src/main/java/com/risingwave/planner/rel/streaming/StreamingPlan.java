@@ -1,8 +1,6 @@
 package com.risingwave.planner.rel.streaming;
 
-import com.risingwave.catalog.TableCatalog;
 import com.risingwave.planner.rel.common.IdentityExtractor;
-import java.util.List;
 import org.apache.calcite.rel.RelNode;
 
 /**
@@ -26,18 +24,5 @@ public class StreamingPlan {
 
   public static String getCurrentNodeIdentity(RelNode node) {
     return IdentityExtractor.getCurrentNodeIdentity(node, "RwStream");
-  }
-
-  public static void getDependencies(RelNode root, List<TableCatalog.TableId> dependencies) {
-    if (root instanceof RwStreamTableSource) {
-      dependencies.add(((RwStreamTableSource) root).getTableId());
-    } else if (root instanceof RwStreamChain) {
-      dependencies.add(((RwStreamChain) root).getTableId());
-    }
-    root.getInputs()
-        .forEach(
-            node -> {
-              getDependencies(root, dependencies);
-            });
   }
 }

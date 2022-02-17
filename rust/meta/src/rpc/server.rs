@@ -91,7 +91,7 @@ pub async fn rpc_serve(
     );
 
     let epoch_srv = EpochServiceImpl::new(env.clone());
-    let heartbeat_srv = HeartbeatServiceImpl::new(env.clone());
+    let heartbeat_srv = HeartbeatServiceImpl::new();
     let catalog_srv = CatalogServiceImpl::new(env.clone()).await.unwrap();
     let cluster_srv = ClusterServiceImpl::new(cluster_manager.clone());
     let stream_srv = StreamServiceImpl::new(

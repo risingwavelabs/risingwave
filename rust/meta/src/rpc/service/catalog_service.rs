@@ -45,13 +45,7 @@ impl CatalogService for CatalogServiceImpl {
         let _req = request.into_inner();
         Ok(Response::new(GetCatalogResponse {
             status: None,
-            catalog: Some(
-                self.stored_catalog_manager
-                    .get_catalog()
-                    .await
-                    .map_err(|e| e.to_grpc_status())?
-                    .inner(),
-            ),
+            catalog: Some(self.stored_catalog_manager.get_catalog().await),
         }))
     }
 

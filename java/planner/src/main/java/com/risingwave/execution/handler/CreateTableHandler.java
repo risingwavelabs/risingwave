@@ -77,29 +77,15 @@ public class CreateTableHandler implements SqlHandler {
     StreamingPlan plan = planner.plan(ast, context);
 
     // Check whether the naming for columns in MV is valid.
-    RwStreamMaterializedView mv = plan.getStreamingPlan();
-    boolean isAllAliased = isAllAliased(mv);
+    boolean isAllAliased = isAllAliased(plan.getStreamingPlan());
     if (!isAllAliased) {
       throw new PgException(
           PgErrorCode.INVALID_COLUMN_DEFINITION,
           "An alias name must be specified for an aggregation function");
     }
 
-    // Get tables on which the MV depends.
-    ArrayList<TableCatalog.TableId> dependencies = new ArrayList<>();
-    StreamingPlan.getDependencies(mv, dependencies);
-
-    ExecutionContext.Builder builder = ExecutionContext.builder();
-    builder
-        .withDatabase(context.getDatabase())
-        .withSchema(context.getSchema())
-        .withFrontendEnv(context.getFrontendEnv())
-        .withSessionConfig(context.getSessionConfiguration())
-        .withDependentTables(dependencies);
-    ExecutionContext newContext = builder.build();
-
     // Register the view on catalog.
-    TableCatalog catalog = convertPlanToCatalog(tableName, plan, newContext);
+    TableCatalog catalog = convertPlanToCatalog(tableName, plan, context);
 
     // Bind stream plan with materialized view catalog.
     var streamingPlan = plan.getStreamingPlan();
@@ -146,9 +132,7 @@ public class CreateTableHandler implements SqlHandler {
     builder.setCollation(rootNode.getCollation());
     builder.setMv(true);
     builder.setAssociated(true);
-    if (!context.getDependentTables().isEmpty()) {
-      builder.setDependentTables(context.getDependentTables());
-    }
+    builder.setDependentTables(rootNode.getDependentTables());
     CreateMaterializedViewInfo mvInfo = builder.build();
     MaterializedViewCatalog viewCatalog =
         context.getCatalogService().createMaterializedView(schemaName, mvInfo);

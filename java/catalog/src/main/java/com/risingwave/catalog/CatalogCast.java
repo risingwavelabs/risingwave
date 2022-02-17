@@ -89,18 +89,16 @@ public class CatalogCast {
 
       DatabaseRefId.Builder databaseRefIdBuilder = DatabaseRefId.newBuilder();
       databaseRefIdBuilder.setDatabaseId(databaseId.getValue());
-      DatabaseRefId databaseRefId = databaseRefIdBuilder.build();
 
       SchemaRefId.Builder schemaRefIdBuilder = SchemaRefId.newBuilder();
-      schemaRefIdBuilder.setSchemaId(tableId.getParent().getValue());
-      schemaRefIdBuilder.setDatabaseRefId(databaseRefId);
-      SchemaRefId schemaRefId = schemaRefIdBuilder.build();
+      schemaRefIdBuilder.setSchemaId(schemaId.getValue());
+      schemaRefIdBuilder.setDatabaseRefId(databaseRefIdBuilder);
 
       TableRefId.Builder tableRefIdBuilder = TableRefId.newBuilder();
       tableRefIdBuilder.setTableId(tableId.getValue());
-      tableRefIdBuilder.setSchemaRefId(schemaRefId);
-      TableRefId tableRefId = tableRefIdBuilder.build();
-      builder.addDependentTables(tableRefId);
+      tableRefIdBuilder.setSchemaRefId(schemaRefIdBuilder);
+
+      builder.addDependentTables(tableRefIdBuilder);
     }
 
     if (createTableInfo.isMv()) {
