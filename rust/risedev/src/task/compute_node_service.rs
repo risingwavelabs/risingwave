@@ -5,6 +5,7 @@ use std::process::Command;
 use anyhow::{anyhow, Result};
 
 use super::{ExecuteContext, Task};
+use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
 use crate::ComputeNodeConfig;
 
 pub struct ComputeNodeService {
@@ -104,6 +105,13 @@ impl Task for ComputeNodeService {
             ctx.pb.set_message("started");
         } else {
             ctx.pb.set_message("user managed");
+            writeln!(
+                &mut ctx.log,
+                "Please use the following parameters to start the compute node:\n{}\n{} {}\n\n",
+                get_program_env_cmd(&cmd),
+                get_program_name(&cmd),
+                get_program_args(&cmd)
+            )?;
         }
 
         Ok(())
