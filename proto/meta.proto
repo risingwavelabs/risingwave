@@ -31,6 +31,7 @@ message Table {
   repeated plan.ColumnOrder column_orders = 12;
   bool is_associated = 13;
   uint64 version = 14;
+  repeated plan.TableRefId dependent_tables = 15;
 }
 
 message Database {
@@ -117,9 +118,6 @@ message HeartbeatRequest {
 
 message HeartbeatResponse {
   common.Status status = 1;
-  oneof body {
-    Catalog catalog = 2;
-  }
 }
 
 service HeartbeatService {

@@ -15,7 +15,7 @@ use crate::barrier::BarrierManager;
 use crate::cluster::StoredClusterManager;
 use crate::dashboard::DashboardService;
 use crate::hummock;
-use crate::manager::{MemEpochGenerator, MetaSrvEnv};
+use crate::manager::{MemEpochGenerator, MetaSrvEnv, StoredCatalogManager};
 use crate::rpc::service::catalog_service::CatalogServiceImpl;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
 use crate::rpc::service::epoch_service::EpochServiceImpl;
@@ -90,10 +90,15 @@ pub async fn rpc_serve(
         .await
         .unwrap(),
     );
+    let catalog_manager_ref = Arc::new(
+        StoredCatalogManager::new(meta_store_ref.clone())
+            .await
+            .unwrap(),
+    );
 
     let epoch_srv = EpochServiceImpl::new(epoch_generator_ref.clone());
-    let heartbeat_srv = HeartbeatServiceImpl::<SledMetaStore>::new(meta_store_ref.clone());
-    let catalog_srv = CatalogServiceImpl::<SledMetaStore>::new(env.clone());
+    let heartbeat_srv = HeartbeatServiceImpl::new();
+    let catalog_srv = CatalogServiceImpl::<SledMetaStore>::new(env.clone(), catalog_manager_ref);
     let cluster_srv = ClusterServiceImpl::<SledMetaStore>::new(cluster_manager.clone());
     let stream_srv = StreamServiceImpl::<SledMetaStore>::new(
         stream_manager_ref,
