@@ -111,27 +111,27 @@ cd rust
 ```
 You can choose to use `minio` as the serving remote storage.
 ```shell
-./target/debug/compute-node --log4rs-config config/log4rs.yaml
-# With hummock state store
-./target/debug/compute-node --log4rs-config config/log4rs.yaml --state-store hummock+minio://key:secret@localhost:2333/bucket
+./target/debug/compute-node --config-path ../.risingwave/config/risingwave.toml
+# With hummock state store and use default settings as RiseDev
+./target/debug/compute-node --config-path ../.risingwave/config/risingwave.toml --state-store hummock+minio://hummock:12345678@localhost:9301/hummock001
 ```
 Alternatively, you can choose to use `Amazon S3` as the serving remote storage.
 ```shell
 # With Amazon S3 and test accounts, follow https://singularity-data.larksuite.com/docs/docuszYRfc00x6Q0QhqidP2AxEg to set up the test credentials.
-./target/debug/compute-node --log4rs-config config/log4rs.yaml --state-store hummock+s3://s3-ut
+./target/debug/compute-node --config-path ../.risingwave/config/risingwave.toml --state-store hummock+s3://s3-ut
 ```
 
 ```shell
 # With tikv state store
 tiup playground
 cargo build --features tikv
-./target/debug/compute-node --log4rs-config config/log4rs.yaml --state-store "tikv://<pd_address>"
+./target/debug/compute-node --config-path ../.risingwave/config/risingwave.toml --state-store "tikv://<pd_address>"
 ```
 
 ```shell
 # With rocksdb state store
 cargo build --features rocksdb-local
-./target/debug/compute-node --log4rs-config config/log4rs.yaml --state-store rocksdb_local:///tmp/default
+./target/debug/compute-node --config-path ../.risingwave/config/risingwave.toml --state-store rocksdb_local:///tmp/default
 ```
 
 To start the Postgres shell, create one terminal and then type:
