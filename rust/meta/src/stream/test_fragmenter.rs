@@ -248,7 +248,7 @@ fn make_stream_node() -> StreamNode {
 async fn test_fragmenter() -> Result<()> {
     let env = MetaSrvEnv::for_test().await;
     let stream_node = make_stream_node();
-    let fragment_manager_ref = Arc::new(FragmentManager::new(env.clone()).await?);
+    let fragment_manager_ref = Arc::new(FragmentManager::new(env.meta_store_ref()).await?);
     let mut fragmenter = StreamFragmenter::new(env.id_gen_manager_ref(), fragment_manager_ref, 1);
 
     let graph = fragmenter.generate_graph(&stream_node).await?;
@@ -321,7 +321,7 @@ async fn test_fragmenter() -> Result<()> {
 async fn test_fragmenter_multi_nodes() -> Result<()> {
     let env = MetaSrvEnv::for_test().await;
     let stream_node = make_stream_node();
-    let fragment_manager_ref = Arc::new(FragmentManager::new(env.clone()).await?);
+    let fragment_manager_ref = Arc::new(FragmentManager::new(env.meta_store_ref()).await?);
     let mut fragmenter = StreamFragmenter::new(env.id_gen_manager_ref(), fragment_manager_ref, 3);
 
     let graph = fragmenter.generate_graph(&stream_node).await?;

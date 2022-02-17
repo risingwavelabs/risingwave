@@ -10,28 +10,35 @@ use tonic::{Request, Response, Status};
 use crate::cluster::StoredClusterManager;
 use crate::manager::{EpochGeneratorRef, IdGeneratorManagerRef, MetaSrvEnv};
 use crate::model::TableFragments;
+use crate::storage::MetaStore;
 use crate::stream::{FragmentManagerRef, StreamFragmenter, StreamManagerRef};
 
 pub type TonicResponse<T> = Result<Response<T>, Status>;
 
 #[derive(Clone)]
-pub struct StreamServiceImpl {
-    sm: StreamManagerRef,
+pub struct StreamServiceImpl<S>
+where
+    S: MetaStore,
+{
+    sm: StreamManagerRef<S>,
 
-    id_gen_manager_ref: IdGeneratorManagerRef,
-    fragment_manager_ref: FragmentManagerRef,
-    cluster_manager: Arc<StoredClusterManager>,
+    id_gen_manager_ref: IdGeneratorManagerRef<S>,
+    fragment_manager_ref: FragmentManagerRef<S>,
+    cluster_manager: Arc<StoredClusterManager<S>>,
 
     #[allow(dead_code)]
     epoch_generator: EpochGeneratorRef,
 }
 
-impl StreamServiceImpl {
+impl<S> StreamServiceImpl<S>
+where
+    S: MetaStore,
+{
     pub fn new(
-        sm: StreamManagerRef,
-        fragment_manager_ref: FragmentManagerRef,
-        cluster_manager: Arc<StoredClusterManager>,
-        env: MetaSrvEnv,
+        sm: StreamManagerRef<S>,
+        fragment_manager_ref: FragmentManagerRef<S>,
+        cluster_manager: Arc<StoredClusterManager<S>>,
+        env: MetaSrvEnv<S>,
     ) -> Self {
         StreamServiceImpl {
             sm,
@@ -44,7 +51,10 @@ impl StreamServiceImpl {
 }
 
 #[async_trait::async_trait]
-impl StreamManagerService for StreamServiceImpl {
+impl<S> StreamManagerService for StreamServiceImpl<S>
+where
+    S: MetaStore,
+{
     #[cfg(not(tarpaulin_include))]
     async fn create_materialized_view(
         &self,

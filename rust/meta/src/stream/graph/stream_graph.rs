@@ -11,6 +11,7 @@ use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{Dispatcher, MergeNode, StreamActor, StreamNode};
 
 use crate::model::{ActorId, FragmentId, TableRawId};
+use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
 
 /// [`StreamActorBuilder`] build a stream actor in a stream DAG.
@@ -100,14 +101,17 @@ impl StreamActorBuilder {
 
 /// [`StreamGraphBuilder`] build a stream graph. It injects some information to achieve
 /// dependencies. See `build_inner` for more details.
-pub struct StreamGraphBuilder {
+pub struct StreamGraphBuilder<S> {
     actor_builders: BTreeMap<ActorId, StreamActorBuilder>,
     /// (ctx) fragment manager.
-    fragment_manager_ref: FragmentManagerRef,
+    fragment_manager_ref: FragmentManagerRef<S>,
 }
 
-impl StreamGraphBuilder {
-    pub fn new(fragment_manager_ref: FragmentManagerRef) -> Self {
+impl<S> StreamGraphBuilder<S>
+where
+    S: MetaStore,
+{
+    pub fn new(fragment_manager_ref: FragmentManagerRef<S>) -> Self {
         Self {
             actor_builders: BTreeMap::new(),
             fragment_manager_ref,

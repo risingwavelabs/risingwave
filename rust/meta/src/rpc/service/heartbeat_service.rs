@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use risingwave_common::array::RwError;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_pb::common::WorkerType;
@@ -6,25 +8,25 @@ use risingwave_pb::meta::heartbeat_service_server::HeartbeatService;
 use risingwave_pb::meta::{HeartbeatRequest, HeartbeatResponse};
 use tonic::{Request, Response, Status};
 
-use crate::manager::MetaSrvEnv;
 use crate::model::Catalog;
-use crate::storage::MetaStoreRef;
+use crate::storage::MetaStore;
 
 #[derive(Clone)]
-pub struct HeartbeatServiceImpl {
-    meta_store_ref: MetaStoreRef,
+pub struct HeartbeatServiceImpl<S> {
+    meta_store_ref: Arc<S>,
 }
 
-impl HeartbeatServiceImpl {
-    pub fn new(env: MetaSrvEnv) -> Self {
-        HeartbeatServiceImpl {
-            meta_store_ref: env.meta_store_ref(),
-        }
+impl<S> HeartbeatServiceImpl<S> {
+    pub fn new(meta_store_ref: Arc<S>) -> Self {
+        HeartbeatServiceImpl { meta_store_ref }
     }
 }
 
 #[async_trait::async_trait]
-impl HeartbeatService for HeartbeatServiceImpl {
+impl<S> HeartbeatService for HeartbeatServiceImpl<S>
+where
+    S: MetaStore,
+{
     #[cfg(not(tarpaulin_include))]
     async fn heartbeat(
         &self,
@@ -35,7 +37,7 @@ impl HeartbeatService for HeartbeatServiceImpl {
             Some(WorkerType::Frontend) => Ok(Response::new(HeartbeatResponse {
                 status: None,
                 body: Some(Body::Catalog(
-                    Catalog::get(&self.meta_store_ref)
+                    Catalog::get(&*self.meta_store_ref)
                         .await
                         .map_err(|e| e.to_grpc_status())?
                         .inner(),
