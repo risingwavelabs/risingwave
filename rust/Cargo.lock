@@ -3901,7 +3901,6 @@ dependencies = [
 name = "risingwave_bench"
 version = "0.1.0"
 dependencies = [
- "async-std",
  "bytes",
  "bytesize",
  "clap",
