@@ -127,6 +127,21 @@ NULL NULL NULL 2 4 6
 2 3 3 NULL NULL NULL
 
 statement ok
+drop materialized view mv1
+
+statement ok
+drop materialized view mv2
+
+statement ok
+drop materialized view mv3
+
+statement ok
+drop materialized view mv4
+
+statement ok
+drop materialized view mv_full_outer_cond
+
+statement ok
 drop table t1
 
 statement ok
@@ -155,18 +170,3 @@ drop table t9
 
 statement ok
 drop table t10
-
-statement ok
-drop materialized view mv1
-
-statement ok
-drop materialized view mv2
-
-statement ok
-drop materialized view mv3
-
-statement ok
-drop materialized view mv4
-
-statement ok
-drop materialized view mv_full_outer_cond
