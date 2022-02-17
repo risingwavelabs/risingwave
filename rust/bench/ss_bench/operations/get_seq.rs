@@ -51,12 +51,7 @@ impl Operations {
         let total_time_nano = total_start.elapsed().as_nanos();
 
         // calculate metrics
-        let mut latencies = vec![];
-        for list in latencies_list {
-            for latency in list {
-                latencies.push(latency);
-            }
-        }
+        let latencies = latencies_list.into_iter().flatten().collect();
         let stat = LatencyStat::new(latencies);
         let qps = get_keys_len as u128 * 1_000_000_000 / total_time_nano as u128;
 

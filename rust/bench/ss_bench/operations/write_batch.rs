@@ -54,12 +54,8 @@ impl Operations {
         let total_time_nano = total_start.elapsed().as_nanos();
 
         // calculate metrics
-        let mut latencies = vec![];
-        for list in latencies_list {
-            for latency in list {
-                latencies.push(latency);
-            }
-        }
+
+        let latencies = latencies_list.into_iter().flatten().collect();
         let stat = LatencyStat::new(latencies);
         // calculate operation per second
         let ops = opts.batch_size as u128 * 1_000_000_000 * batches_len as u128 / total_time_nano;

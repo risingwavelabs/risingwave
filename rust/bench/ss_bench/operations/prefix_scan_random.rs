@@ -12,18 +12,16 @@ use risingwave_storage::StateStore;
 use super::Operations;
 use crate::utils::latency_stat::LatencyStat;
 use crate::Opts;
+use crate::utils::workload::Workload;
 
 impl Operations {
     pub(crate) async fn prefix_scan_random(&self, store: &impl StateStore, opts: &Opts) {
         // generate queried prefixes
         let mut scan_prefixes = match self.prefixes.is_empty() {
             // if prefixes is empty, use default prefix: ["a"*key_prefix_size]
-            true => (0..opts.reads as usize)
-                .into_iter()
-                .map(|_| {
-                    Bytes::from(String::from_utf8(vec![65; opts.key_prefix_size as usize]).unwrap())
-                })
-                .collect_vec(),
+            true => {
+                Workload::new_random_keys(opts, 233).0
+            },
             false => {
                 let mut rng = StdRng::seed_from_u64(233);
                 let dist = Uniform::from(0..self.prefixes.len());
@@ -68,12 +66,7 @@ impl Operations {
         let total_time_nano = total_start.elapsed().as_nanos();
 
         // calculate metrics
-        let mut latencies = vec![];
-        for list in latencies_list {
-            for latency in list {
-                latencies.push(latency);
-            }
-        }
+        let latencies = latencies_list.into_iter().flatten().collect();
         let stat = LatencyStat::new(latencies);
         let qps = opts.reads as u128 * 1_000_000_000 / total_time_nano as u128;
 
