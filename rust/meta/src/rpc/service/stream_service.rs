@@ -65,7 +65,12 @@ impl StreamManagerService for StreamServiceImpl {
             .await
             .map_err(|e| e.to_grpc_status())?;
 
-        let table_fragments = TableFragments::new(TableId::from(&req.table_ref_id), graph);
+        let table_fragments = TableFragments::new(
+            TableId::from(&req.table_ref_id),
+            graph.graph,
+            graph.dispatches,
+            graph.upstream_node_actors,
+        );
         match self.sm.create_materialized_view(table_fragments).await {
             Ok(()) => Ok(Response::new(CreateMaterializedViewResponse {
                 status: None,
