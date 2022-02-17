@@ -20,17 +20,19 @@ import com.risingwave.node.WorkerNodeManager;
 import com.risingwave.pgserver.database.RisingWaveDatabaseManager;
 import com.risingwave.pgwire.PgServer;
 import com.risingwave.pgwire.database.DatabaseManager;
+import com.risingwave.proto.common.HostAddress;
 import com.risingwave.rpc.ComputeClientManager;
 import com.risingwave.rpc.ComputeClientManagerImpl;
+import com.risingwave.rpc.GrpcMetaClient;
 import com.risingwave.rpc.MetaClient;
-import com.risingwave.rpc.MetaClientManager;
-import com.risingwave.rpc.MetaClientManagerImpl;
 import com.risingwave.scheduler.QueryManager;
 import com.risingwave.scheduler.RemoteQueryManager;
 import com.risingwave.scheduler.streaming.RemoteStreamManager;
 import com.risingwave.scheduler.streaming.StreamManager;
 import com.risingwave.scheduler.task.RemoteTaskManager;
 import com.risingwave.scheduler.task.TaskManager;
+import io.grpc.ManagedChannel;
+import io.grpc.ManagedChannelBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -56,7 +58,6 @@ public class FrontendServerModule extends AbstractModule {
       bind(TaskManager.class).to(RemoteTaskManager.class).in(Singleton.class);
       bind(QueryManager.class).to(RemoteQueryManager.class).in(Singleton.class);
     }
-    bind(MetaClientManager.class).to(MetaClientManagerImpl.class).in(Singleton.class);
   }
 
   @Provides
@@ -81,8 +82,27 @@ public class FrontendServerModule extends AbstractModule {
 
   @Provides
   @Singleton
-  static CatalogService createCatalogService(
-      Configuration config, MetaClientManager metaClientManager) {
+  static MetaClient getMetaClient(Configuration config) {
+    String address = config.get(FrontendServerConfigurations.META_SERVICE_ADDRESS);
+    DefaultWorkerNode node = DefaultWorkerNode.from(address);
+    HostAddress hostAddress =
+        HostAddress.newBuilder()
+            // .setHost(config.get(FrontendServerConfigurations.))
+            // .setPort(config.get(FrontendServerConfigurations.))
+            .setHost("")
+            .setPort(0)
+            .build();
+    ManagedChannel channel =
+        ManagedChannelBuilder.forAddress(
+                node.getRpcEndPoint().getHost(), node.getRpcEndPoint().getPort())
+            .usePlaintext()
+            .build();
+    return new GrpcMetaClient(hostAddress, channel);
+  }
+
+  @Provides
+  @Singleton
+  static CatalogService createCatalogService(Configuration config, MetaClient client) {
     LOGGER.info("Creating catalog service.");
     FrontendServerConfigurations.CatalogMode mode =
         config.get(FrontendServerConfigurations.CATALOG_MODE);
@@ -93,11 +113,6 @@ public class FrontendServerModule extends AbstractModule {
       catalogService.createDatabase(CatalogService.DEFAULT_DATABASE_NAME);
       LOGGER.info("Creating default database: {}.", CatalogService.DEFAULT_DATABASE_NAME);
     } else {
-      String address = config.get(FrontendServerConfigurations.META_SERVICE_ADDRESS);
-      DefaultWorkerNode node = DefaultWorkerNode.from(address);
-      MetaClient client =
-          metaClientManager.getOrCreate(
-              node.getRpcEndPoint().getHost(), node.getRpcEndPoint().getPort());
       catalogService = new RemoteCatalogService(client);
 
       if (catalogService.getDatabase(
@@ -117,14 +132,8 @@ public class FrontendServerModule extends AbstractModule {
 
   @Provides
   @Singleton
-  static StreamManager createStreamManager(
-      Configuration config, MetaClientManager metaClientManager) {
+  static StreamManager createStreamManager(MetaClient client) {
     LOGGER.info("Creating stream manager.");
-    String address = config.get(FrontendServerConfigurations.META_SERVICE_ADDRESS);
-    DefaultWorkerNode node = DefaultWorkerNode.from(address);
-    MetaClient client =
-        metaClientManager.getOrCreate(
-            node.getRpcEndPoint().getHost(), node.getRpcEndPoint().getPort());
     return new RemoteStreamManager(client);
   }
 

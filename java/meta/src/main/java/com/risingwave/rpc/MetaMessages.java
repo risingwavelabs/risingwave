@@ -1,10 +1,13 @@
 package com.risingwave.rpc;
 
+import com.risingwave.proto.common.HostAddress;
 import com.risingwave.proto.common.WorkerType;
+import com.risingwave.proto.metanode.AddWorkerNodeRequest;
 import com.risingwave.proto.metanode.CreateRequest;
 import com.risingwave.proto.metanode.Database;
 import com.risingwave.proto.metanode.DropRequest;
 import com.risingwave.proto.metanode.HeartbeatRequest;
+import com.risingwave.proto.metanode.ListAllNodesRequest;
 import com.risingwave.proto.metanode.Schema;
 import com.risingwave.proto.metanode.Table;
 import com.risingwave.proto.plan.DatabaseRefId;
@@ -39,5 +42,13 @@ public class MetaMessages {
 
   public static DropRequest buildDropTableRequest(TableRefId tableRefId) {
     return DropRequest.newBuilder().setTableId(tableRefId).build();
+  }
+
+  public static AddWorkerNodeRequest buildAddWorkerNodeRequest(HostAddress hostAddress) {
+    return AddWorkerNodeRequest.newBuilder().setHost(hostAddress).build();
+  }
+
+  public static ListAllNodesRequest buildListAllNodesRequest(WorkerType workerType) {
+    return ListAllNodesRequest.newBuilder().setWorkerType(workerType).build();
   }
 }

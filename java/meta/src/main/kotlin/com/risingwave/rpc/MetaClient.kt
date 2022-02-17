@@ -20,5 +20,7 @@ interface MetaClient {
 
   fun flush(request: FlushRequest): FlushResponse
 
+  fun addWorkerNode(request: AddWorkerNodeRequest): AddWorkerNodeResponse
+
   fun listAllNodes(request: ListAllNodesRequest): ListAllNodesResponse
 }

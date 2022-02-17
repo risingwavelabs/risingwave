@@ -2,18 +2,37 @@ package com.risingwave.rpc
 
 import com.risingwave.common.exception.PgErrorCode
 import com.risingwave.common.exception.PgException
+import com.risingwave.proto.common.HostAddress
+import com.risingwave.proto.common.Status
 import com.risingwave.proto.metanode.*
 import io.grpc.Channel
 import io.grpc.StatusRuntimeException
 import org.slf4j.LoggerFactory
+import java.util.concurrent.TimeUnit
 
 /** A MetaClient implementation based on grpc. */
-class GrpcMetaClient(private val channel: Channel) : MetaClient {
+class GrpcMetaClient(hostAddress: HostAddress, private val channel: Channel) : MetaClient {
   companion object {
+    private const val startWaitInterval: Long = 1000
     private val LOGGER = LoggerFactory.getLogger(GrpcMetaClient::class.java)
 
     private fun rpcException(rpcName: String, e: StatusRuntimeException): PgException {
       throw PgException(PgErrorCode.INTERNAL_ERROR, "%s RPC failed: %s", rpcName, e.toString())
+    }
+  }
+
+  init {
+    val request = MetaMessages.buildAddWorkerNodeRequest(hostAddress)
+    while (true) {
+      try {
+        TimeUnit.MILLISECONDS.sleep(startWaitInterval)
+        val response = this.addWorkerNode(request)
+        if (response.status.code == Status.Code.OK) {
+          break
+        }
+      } catch (e: InterruptedException) {
+        LOGGER.warn("meta service unreachable, wait for start.")
+      }
     }
   }
 
@@ -94,6 +113,16 @@ class GrpcMetaClient(private val channel: Channel) : MetaClient {
     } catch (e: StatusRuntimeException) {
       LOGGER.warn("RPC failed: {}", e.status)
       throw rpcException("flush", e)
+    }
+  }
+
+  override fun addWorkerNode(request: AddWorkerNodeRequest): AddWorkerNodeResponse {
+    val stub = ClusterServiceGrpc.newBlockingStub(channel)
+    try {
+      return stub.addWorkerNode(request)
+    } catch (e: StatusRuntimeException) {
+      LOGGER.warn("RPC failed: {}", e.status)
+      throw rpcException("addWorkerNode", e)
     }
   }
 

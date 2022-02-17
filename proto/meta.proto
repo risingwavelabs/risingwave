@@ -222,3 +222,27 @@ service ClusterService {
   rpc DeleteWorkerNode(DeleteWorkerNodeRequest) returns (DeleteWorkerNodeResponse);
   rpc ListAllNodes(ListAllNodesRequest) returns (ListAllNodesResponse);
 }
+
+message InfoNotifyRequest {
+  enum Operation {
+    ADD = 0;
+    DELETE = 1;
+    UPDATE = 2;
+  }
+
+  Operation operation = 1;
+  oneof info {
+    common.WorkerNode node = 2;
+    Database database = 3;
+    Schema schema = 4;
+    Table table = 5;
+  }
+}
+
+message InfoNotifyResponse {
+  common.Status status = 1;
+}
+
+service InfoNotifyService {
+  rpc Notify(InfoNotifyRequest) returns (InfoNotifyResponse);
+}

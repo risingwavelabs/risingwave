@@ -41,7 +41,6 @@ import org.slf4j.LoggerFactory;
 public class RemoteCatalogService implements CatalogService {
   private static final Logger LOGGER = LoggerFactory.getLogger(RemoteCatalogService.class);
   private final MetaClient metaClient;
-  private static final long startWaitInterval = 1000;
   private static final long heartbeatInterval = 2000;
 
   private final ConcurrentMap<DatabaseCatalog.DatabaseId, DatabaseCatalog> databaseById;
@@ -53,6 +52,7 @@ public class RemoteCatalogService implements CatalogService {
     this.databaseById = new ConcurrentHashMap<>();
     this.databaseByName = new ConcurrentHashMap<>();
     this.creatingTable = new ConcurrentHashMap<>();
+
     initCatalog();
     /*
     FIXME: simply stop heartbeat here. There still got an asynchrony inconsistency between create table and
@@ -188,19 +188,11 @@ public class RemoteCatalogService implements CatalogService {
 
   private void initCatalog() {
     GetCatalogRequest request = GetCatalogRequest.newBuilder().build();
-    GetCatalogResponse response;
-    while (true) {
-      try {
-        TimeUnit.MILLISECONDS.sleep(startWaitInterval);
-        response = this.metaClient.getCatalog(request);
-        if (response.getStatus().getCode() == Status.Code.OK) {
-          break;
-        }
-      } catch (Exception e) {
-        LOGGER.warn("meta service unreachable, wait for start.");
-        // ignore and retry.
-      }
+    GetCatalogResponse response = this.metaClient.getCatalog(request);
+    if (response.getStatus().getCode() != Status.Code.OK) {
+      throw new PgException(PgErrorCode.INTERNAL_ERROR, "GetCatalog failed");
     }
+
     Catalog catalog = response.getCatalog();
     LOGGER.debug("Init catalog from meta service: {} ", catalog);
 

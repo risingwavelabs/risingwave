@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
+use futures::future;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
@@ -12,6 +13,7 @@ use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use crate::hummock::HummockManager;
 use crate::manager::{IdCategory, IdGeneratorManagerRef, MetaSrvEnv};
 use crate::model::{MetadataModel, Worker};
+use crate::rpc::client::InfoNotifyClient;
 use crate::storage::MetaStore;
 
 pub type NodeId = u32;
@@ -26,6 +28,7 @@ where
     id_gen_manager_ref: IdGeneratorManagerRef<S>,
     hummock_manager_ref: Option<Arc<HummockManager<S>>>,
     workers: DashMap<WorkerKey, Worker>,
+    clients: DashMap<WorkerKey, InfoNotifyClient>,
 }
 
 struct WorkerKey(HostAddress);
@@ -59,6 +62,7 @@ where
             "Worker::list fail"
         )?;
         let worker_map = DashMap::new();
+        let clients = DashMap::new();
 
         workers.iter().for_each(|w| {
             worker_map.insert(WorkerKey(w.key().unwrap()), w.clone());
@@ -69,7 +73,25 @@ where
             id_gen_manager_ref: env.id_gen_manager_ref(),
             hummock_manager_ref,
             workers: worker_map,
+            clients,
         })
+    }
+
+    async fn add_server(&self, host_address: HostAddress) -> Result<()> {
+        let infonotify_client = InfoNotifyClient::new(&host_address).await?;
+        self.clients
+            .insert(WorkerKey(host_address), infonotify_client);
+        Ok(())
+    }
+
+    async fn notify(&self, worker: &Worker) -> Result<()> {
+        future::join_all(self.clients.iter().map(|entry| async move {
+            entry.value().refresh_compute_addr(worker).await?;
+            Ok(())
+        }))
+        .await
+        .into_iter()
+        .collect::<Result<()>>()
     }
 
     pub async fn add_worker_node(
@@ -87,9 +109,17 @@ where
                 let worker = Worker::from_protobuf(WorkerNode {
                     id: id as u32,
                     r#type: r#type as i32,
-                    host: Some(host_address),
+                    host: Some(host_address.clone()),
                 });
+                
                 worker.insert(&*self.meta_store_ref).await?;
+
+                match r#type {
+                    // WorkerType::Frontend => self.add_server(host_address).await?,
+                    // WorkerType::ComputeNode => self.notify(&worker).await?,
+                    _ => (),
+                }
+
                 Ok((v.insert(worker).to_protobuf(), true))
             }
         }
