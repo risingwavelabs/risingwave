@@ -1,5 +1,6 @@
 use std::time::Instant;
 
+use async_std::task;
 use itertools::Itertools;
 use rand::distributions::Uniform;
 use rand::prelude::{Distribution, StdRng};
@@ -32,35 +33,34 @@ impl Operations {
             grouped_keys[i % opts.concurrency_num as usize].push(key);
         }
 
-        let total_start = Instant::now();
+        let mut args = grouped_keys
+            .into_iter()
+            .map(|keys| (keys, store.clone()))
+            .collect_vec();
 
-        let handles = grouped_keys
+        let total_start = Instant::now();
+        let futures = args
             .drain(..)
-            .map(|keys| {
-                // actual point get process
-                let store = store.clone();
-                std::thread::spawn(|| async move {
-                    let mut latencies: Vec<u128> = vec![];
-                    for key in keys {
-                        let start = Instant::now();
-                        store.get(&key, u64::MAX).await.unwrap();
-                        let time_nano = start.elapsed().as_nanos();
-                        latencies.push(time_nano);
-                    }
-                    latencies
-                })
+            .map(|(keys, store)| async move {
+                let mut latencies: Vec<u128> = vec![];
+                for key in keys {
+                    let start = Instant::now();
+                    store.get(&key, u64::MAX).await.unwrap();
+                    let time_nano = start.elapsed().as_nanos();
+                    latencies.push(time_nano);
+                }
+                latencies
             })
             .collect_vec();
 
-        let mut latencies: Vec<u128> = Vec::new();
-        for handle in handles {
-            let latency = handle.join().unwrap().await;
-            latencies.extend(latency);
-        }
+        let handles = futures.into_iter().map(task::spawn).collect_vec();
+
+        let latencies_list = futures::future::join_all(handles).await;
 
         let total_time_nano = total_start.elapsed().as_nanos();
 
         // calculate metrics
+        let latencies = latencies_list.into_iter().flatten().collect();
         let stat = LatencyStat::new(latencies);
         let qps = opts.reads as u128 * 1_000_000_000 / total_time_nano as u128;
 

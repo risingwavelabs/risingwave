@@ -36,14 +36,13 @@ impl Operations {
             grouped_prefixes[i % opts.concurrency_num as usize].push(prefix);
         }
 
-        let stores = (0..opts.concurrency_num as usize)
-            .map(|_| store.clone())
+        let mut args = grouped_prefixes
+            .into_iter()
+            .map(|prefixes| (prefixes, store.clone()))
             .collect_vec();
 
-        let mut grouped_prefixes = grouped_prefixes.into_iter().zip_eq(stores).collect_vec();
-
         let total_start = Instant::now();
-        let futures = grouped_prefixes
+        let futures = args
             .drain(..)
             .map(|(prefixes, store)| async move {
                 let mut latencies = vec![];
@@ -69,7 +68,6 @@ impl Operations {
 
         let latencies_list = futures::future::join_all(handles).await;
 
-        // let latencies_list: Vec<Vec<u128>> = future::join_all(futures).await;
         let total_time_nano = total_start.elapsed().as_nanos();
 
         // calculate metrics

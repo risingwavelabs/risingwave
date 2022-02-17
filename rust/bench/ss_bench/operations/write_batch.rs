@@ -1,7 +1,6 @@
 use std::time::Instant;
 
-use bytes::Bytes;
-use futures::future;
+use async_std::task;
 use itertools::Itertools;
 use risingwave_storage::StateStore;
 
@@ -33,28 +32,34 @@ impl Operations {
             grouped_batches[i % opts.concurrency_num as usize].push(batch);
         }
 
-        // actual batch ingestion process
-        let ingest_batch = |batches: Vec<Vec<(Bytes, Option<Bytes>)>>| async {
-            let mut latencies = vec![];
-            for batch in batches {
-                let start = Instant::now();
-                store.ingest_batch(batch, get_epoch()).await.unwrap();
-                let time_nano = start.elapsed().as_nanos();
-                latencies.push(time_nano);
-            }
-            latencies
-        };
+        let mut args = grouped_batches
+            .into_iter()
+            .map(|batches| (batches, store.clone()))
+            .collect_vec();
 
         let total_start = Instant::now();
-        let futures = grouped_batches
+
+        let futures = args
             .drain(..)
-            .map(|batches| ingest_batch(batches))
+            .map(|(batches, store)| async move {
+                let mut latencies: Vec<u128> = vec![];
+                for batch in batches {
+                    let start = Instant::now();
+                    store.ingest_batch(batch, get_epoch()).await.unwrap();
+                    let time_nano = start.elapsed().as_nanos();
+                    latencies.push(time_nano);
+                }
+                latencies
+            })
             .collect_vec();
-        let latencies_list: Vec<Vec<u128>> = future::join_all(futures).await;
+
+        let handles = futures.into_iter().map(task::spawn).collect_vec();
+
+        let latencies_list = futures::future::join_all(handles).await;
+
         let total_time_nano = total_start.elapsed().as_nanos();
 
         // calculate metrics
-
         let latencies = latencies_list.into_iter().flatten().collect();
         let stat = LatencyStat::new(latencies);
         // calculate operation per second
