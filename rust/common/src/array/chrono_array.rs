@@ -4,7 +4,9 @@ use std::mem::size_of;
 use risingwave_pb::data::buffer::CompressionType;
 use risingwave_pb::data::{Array as ProstArray, ArrayType, Buffer};
 
-use crate::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayIterator, NULL_VAL_FOR_HASH};
+use crate::array::{
+    Array, ArrayBuilder, ArrayBuilderImpl, ArrayIterator, ArrayMeta, NULL_VAL_FOR_HASH,
+};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::error::Result;
 use crate::for_all_chrono_variants;
@@ -67,6 +69,7 @@ macro_rules! get_chrono_array {
                         null_bitmap: Some(null_bitmap),
                         values: vec![buffer],
                         array_type: Self::get_array_type() as i32,
+                        children_array: vec![],
                     })
                 }
 
@@ -97,7 +100,7 @@ macro_rules! get_chrono_array {
             impl ArrayBuilder for $builder {
                 type ArrayType = $array;
 
-                fn new(capacity: usize) -> Result<Self> {
+                fn new_with_meta(capacity: usize, _meta: ArrayMeta) -> Result<Self> {
                     Ok(Self {
                         bitmap: BitmapBuilder::with_capacity(capacity),
                         data: Vec::with_capacity(capacity),

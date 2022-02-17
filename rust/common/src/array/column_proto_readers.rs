@@ -1,5 +1,4 @@
 use std::io::{Cursor, Read};
-use std::sync::Arc;
 
 use byteorder::{BigEndian, ReadBytesExt};
 use paste::paste;
@@ -7,9 +6,9 @@ use risingwave_pb::data::Array as ProstArray;
 
 use crate::array::value_reader::{PrimitiveValueReader, VarSizedValueReader};
 use crate::array::{
-    ArrayBuilder, ArrayRef, BoolArrayBuilder, NaiveDateArrayBuilder, NaiveDateTimeArrayBuilder,
-    NaiveTimeArrayBuilder, PrimitiveArrayBuilder, PrimitiveArrayItemType,
-};
+    ArrayBuilder, ArrayImpl, ArrayMeta, BoolArrayBuilder, NaiveDateArrayBuilder,
+    NaiveDateTimeArrayBuilder, NaiveTimeArrayBuilder, PrimitiveArrayBuilder,
+    PrimitiveArrayItemType};
 use crate::buffer::Bitmap;
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
@@ -21,7 +20,7 @@ use crate::types::{NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper};
 pub fn read_numeric_array<T: PrimitiveArrayItemType, R: PrimitiveValueReader<T>>(
     array: &ProstArray,
     cardinality: usize,
-) -> Result<ArrayRef> {
+) -> Result<ArrayImpl> {
     ensure!(
         array.get_values().len() == 1,
         "Must have only 1 buffer in a numeric array"
@@ -46,7 +45,7 @@ pub fn read_numeric_array<T: PrimitiveArrayItemType, R: PrimitiveValueReader<T>>
         }
     }
     let arr = builder.finish()?;
-    Ok(Arc::new(arr.into()))
+    Ok(arr.into())
 }
 
 fn read_bool(cursor: &mut Cursor<&[u8]>) -> Result<bool> {
@@ -90,7 +89,7 @@ macro_rules! read_one_value_array {
     ($({ $type:ident, $builder:ty }),*) => {
       paste! {
         $(
-          pub fn [<read_ $type:lower _array>](array: &ProstArray, cardinality: usize) -> Result<ArrayRef> {
+          pub fn [<read_ $type:lower _array>](array: &ProstArray, cardinality: usize) -> Result<ArrayImpl> {
             ensure!(
               array.get_values().len() == 1,
               "Must have only 1 buffer in a {} array", stringify!($type)
@@ -109,7 +108,7 @@ macro_rules! read_one_value_array {
               }
             }
             let arr = builder.finish()?;
-            Ok(Arc::new(arr.into()))
+            Ok(arr.into())
           }
         )*
       }
@@ -133,7 +132,7 @@ fn read_offset(offset_cursor: &mut Cursor<&[u8]>) -> Result<i64> {
 pub fn read_string_array<B: ArrayBuilder, R: VarSizedValueReader<B>>(
     array: &ProstArray,
     cardinality: usize,
-) -> Result<ArrayRef> {
+) -> Result<ArrayImpl> {
     ensure!(
         array.get_values().len() == 2,
         "Must have exactly 2 buffers in a string array"
@@ -141,7 +140,7 @@ pub fn read_string_array<B: ArrayBuilder, R: VarSizedValueReader<B>>(
     let offset_buff = array.get_values()[0].get_body().as_slice();
     let data_buf = array.get_values()[1].get_body().as_slice();
 
-    let mut builder = B::new(cardinality)?;
+    let mut builder = B::new_with_meta(cardinality, ArrayMeta::Simple)?;
     let bitmap: Bitmap = array.get_null_bitmap()?.try_into()?;
     let mut offset_cursor = Cursor::new(offset_buff);
     let mut data_cursor = Cursor::new(data_buf);
@@ -170,5 +169,5 @@ pub fn read_string_array<B: ArrayBuilder, R: VarSizedValueReader<B>>(
         }
     }
     let arr = builder.finish()?;
-    Ok(Arc::new(arr.into()))
+    Ok(arr.into())
 }

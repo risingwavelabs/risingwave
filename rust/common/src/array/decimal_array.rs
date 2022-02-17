@@ -6,7 +6,7 @@ use risingwave_pb::data::buffer::CompressionType;
 use risingwave_pb::data::{Array as ProstArray, ArrayType, Buffer};
 
 use super::{Array, ArrayBuilder, ArrayIterator, NULL_VAL_FOR_HASH};
-use crate::array::ArrayBuilderImpl;
+use crate::array::{ArrayBuilderImpl, ArrayMeta};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::error::Result;
 use crate::types::Decimal;
@@ -79,6 +79,7 @@ impl Array for DecimalArray {
             null_bitmap: Some(null_bitmap),
             values,
             array_type: ArrayType::Decimal as i32,
+            children_array: vec![],
         })
     }
 
@@ -111,7 +112,7 @@ pub struct DecimalArrayBuilder {
 impl ArrayBuilder for DecimalArrayBuilder {
     type ArrayType = DecimalArray;
 
-    fn new(capacity: usize) -> Result<Self> {
+    fn new_with_meta(capacity: usize, _meta: ArrayMeta) -> Result<Self> {
         Ok(Self {
             bitmap: BitmapBuilder::with_capacity(capacity),
             data: Vec::with_capacity(capacity),

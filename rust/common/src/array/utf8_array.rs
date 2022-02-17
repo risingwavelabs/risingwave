@@ -6,7 +6,7 @@ use itertools::Itertools;
 use risingwave_pb::data::buffer::CompressionType;
 use risingwave_pb::data::{Array as ProstArray, ArrayType, Buffer};
 
-use super::{Array, ArrayBuilder, ArrayIterator, NULL_VAL_FOR_HASH};
+use super::{Array, ArrayBuilder, ArrayIterator, ArrayMeta, NULL_VAL_FOR_HASH};
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::error::Result;
@@ -81,6 +81,7 @@ impl Array for Utf8Array {
             null_bitmap: Some(null_bitmap),
             values,
             array_type: ArrayType::Utf8 as i32,
+            children_array: vec![],
         })
     }
 
@@ -125,7 +126,7 @@ pub struct Utf8ArrayBuilder {
 impl ArrayBuilder for Utf8ArrayBuilder {
     type ArrayType = Utf8Array;
 
-    fn new(capacity: usize) -> Result<Self> {
+    fn new_with_meta(capacity: usize, _meta: ArrayMeta) -> Result<Self> {
         let mut offset = Vec::with_capacity(capacity + 1);
         offset.push(0);
         Ok(Self {

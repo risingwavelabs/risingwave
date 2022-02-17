@@ -200,10 +200,7 @@ mod tests {
         };
         let return_type = risingwave_pb::data::DataType {
             type_name: risingwave_pb::data::data_type::TypeName::Boolean as i32,
-            precision: 0,
-            scale: 0,
-            is_nullable: false,
-            interval_type: 0,
+            ..Default::default()
         };
         ExprNode {
             expr_type: kind as i32,

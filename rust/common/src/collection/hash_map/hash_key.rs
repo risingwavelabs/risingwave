@@ -6,7 +6,7 @@ use std::io::{Cursor, Read};
 use chrono::{Datelike, Timelike};
 use itertools::Itertools;
 
-use crate::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, StructValue};
+use crate::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, StructRef};
 use crate::error::Result;
 use crate::types::{
     Datum, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
@@ -355,7 +355,7 @@ impl HashKeySerDe<'_> for NaiveTimeWrapper {
     }
 }
 
-impl<'a> HashKeySerDe<'_> for StructValue {
+impl<'a> HashKeySerDe<'a> for StructRef<'a> {
     type S = Vec<u8>;
 
     /// This should never be called
