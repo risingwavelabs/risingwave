@@ -2,16 +2,16 @@ use risingwave_pb::meta::epoch_service_server::EpochService;
 use risingwave_pb::meta::{GetEpochRequest, GetEpochResponse};
 use tonic::{Request, Response, Status};
 
-use crate::manager::MetaSrvEnv;
+use crate::manager::EpochGeneratorRef;
 
 #[derive(Clone)]
 pub struct EpochServiceImpl {
-    env: MetaSrvEnv,
+    epoch_generator: EpochGeneratorRef,
 }
 
 impl EpochServiceImpl {
-    pub fn new(env: MetaSrvEnv) -> Self {
-        EpochServiceImpl { env }
+    pub fn new(epoch_generator: EpochGeneratorRef) -> Self {
+        EpochServiceImpl { epoch_generator }
     }
 }
 
@@ -26,8 +26,7 @@ impl EpochService for EpochServiceImpl {
         Ok(Response::new(GetEpochResponse {
             status: None,
             epoch: self
-                .env
-                .epoch_generator()
+                .epoch_generator
                 .generate()
                 .map_err(|e| e.to_grpc_status())?
                 .into_inner(),

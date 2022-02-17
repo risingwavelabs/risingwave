@@ -10,20 +10,30 @@ use risingwave_pb::meta::{
 use tonic::{Request, Response, Status};
 
 use crate::cluster::StoredClusterManager;
+use crate::storage::MetaStore;
 
 #[derive(Clone)]
-pub struct ClusterServiceImpl {
-    scm: Arc<StoredClusterManager>,
+pub struct ClusterServiceImpl<S>
+where
+    S: MetaStore,
+{
+    scm: Arc<StoredClusterManager<S>>,
 }
 
-impl ClusterServiceImpl {
-    pub fn new(scm: Arc<StoredClusterManager>) -> Self {
+impl<S> ClusterServiceImpl<S>
+where
+    S: MetaStore,
+{
+    pub fn new(scm: Arc<StoredClusterManager<S>>) -> Self {
         ClusterServiceImpl { scm }
     }
 }
 
 #[async_trait::async_trait]
-impl ClusterService for ClusterServiceImpl {
+impl<S> ClusterService for ClusterServiceImpl<S>
+where
+    S: MetaStore,
+{
     async fn add_worker_node(
         &self,
         request: Request<AddWorkerNodeRequest>,

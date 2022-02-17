@@ -10,7 +10,7 @@ use risingwave_common::error::{ErrorCode, Result};
 pub use stream::*;
 
 use crate::manager::{Epoch, SINGLE_VERSION_EPOCH};
-use crate::storage::{MetaStoreRef, Operation, Transaction};
+use crate::storage::{MetaStore, Operation, Transaction};
 
 pub type TableRawId = i32;
 pub type ActorId = u32;
@@ -47,7 +47,10 @@ pub trait MetadataModel: Sized {
     }
 
     /// `list` returns all records in this model.
-    async fn list(store: &MetaStoreRef) -> Result<Vec<Self>> {
+    async fn list<S>(store: &S) -> Result<Vec<Self>>
+    where
+        S: MetaStore,
+    {
         let bytes_vec = store.list_cf(&Self::cf_name()).await?;
         Ok(bytes_vec
             .iter()
@@ -56,7 +59,10 @@ pub trait MetadataModel: Sized {
     }
 
     /// `insert` insert a new record in meta store, replaced it if the record already exist.
-    async fn insert(&self, store: &MetaStoreRef) -> Result<()> {
+    async fn insert<S>(&self, store: &S) -> Result<()>
+    where
+        S: MetaStore,
+    {
         store
             .put_cf(
                 &Self::cf_name(),
@@ -68,18 +74,20 @@ pub trait MetadataModel: Sized {
     }
 
     /// `delete` drop records (in multi-version if has) from meta store with associated key.
-    async fn delete(store: &MetaStoreRef, key: &Self::KeyType) -> Result<()> {
+    async fn delete<S>(store: &S, key: &Self::KeyType) -> Result<()>
+    where
+        S: MetaStore,
+    {
         store
             .delete_all_cf(&Self::cf_name(), &key.encode_to_vec())
             .await
     }
 
     /// `select` query a record with associated key and version.
-    async fn select(
-        store: &MetaStoreRef,
-        key: &Self::KeyType,
-        version: Epoch,
-    ) -> Result<Option<Self>> {
+    async fn select<S>(store: &S, key: &Self::KeyType, version: Epoch) -> Result<Option<Self>>
+    where
+        S: MetaStore,
+    {
         let byte_vec = match store
             .get_cf(&Self::cf_name(), &key.encode_to_vec(), version)
             .await

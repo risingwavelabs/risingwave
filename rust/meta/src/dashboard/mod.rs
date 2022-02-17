@@ -14,21 +14,25 @@ use tower_http::add_extension::AddExtensionLayer;
 use tower_http::cors::{self, CorsLayer};
 
 use crate::cluster::StoredClusterManager;
-use crate::storage::MetaStoreRef;
+use crate::storage::{MemStore, MetaStore};
 use crate::stream::FragmentManager;
 
 #[derive(Clone)]
-pub struct DashboardService {
+pub struct DashboardService<S>
+where
+    S: MetaStore,
+{
     pub dashboard_addr: SocketAddr,
-    pub cluster_manager: Arc<StoredClusterManager>,
-    pub fragment_manager: Arc<FragmentManager>,
+    pub cluster_manager: Arc<StoredClusterManager<S>>,
+    pub fragment_manager: Arc<FragmentManager<S>>,
 
     // TODO: replace with catalog manager.
-    pub meta_store_ref: MetaStoreRef,
+    pub meta_store_ref: Arc<S>,
     pub has_test_data: Arc<AtomicBool>,
 }
 
-pub type Service = Arc<DashboardService>;
+// FIXME
+pub type Service = Arc<DashboardService<MemStore>>;
 
 mod handlers {
     use axum::Json;
@@ -80,7 +84,7 @@ mod handlers {
     ) -> Result<Json<Vec<(TableId, Table)>>> {
         use crate::model::MetadataModel;
 
-        let materialized_views = Table::list(&srv.meta_store_ref)
+        let materialized_views = Table::list(&*srv.meta_store_ref)
             .await
             .map_err(err)?
             .iter()
@@ -125,7 +129,10 @@ mod handlers {
     }
 }
 
-impl DashboardService {
+impl<S> DashboardService<S>
+where
+    S: MetaStore,
+{
     pub async fn serve(self) -> Result<()> {
         use handlers::*;
         let srv = Arc::new(self);

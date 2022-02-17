@@ -8,15 +8,16 @@ use risingwave_storage::hummock::{
 };
 
 use crate::hummock::HummockManager;
+use crate::storage::SledMetaStore;
 
 pub(crate) struct MockHummockMetaClient {
-    hummock_manager: Arc<HummockManager>,
+    hummock_manager: Arc<HummockManager<SledMetaStore>>,
     context_id: HummockContextId,
 }
 
 impl MockHummockMetaClient {
     pub fn new(
-        hummock_manager: Arc<HummockManager>,
+        hummock_manager: Arc<HummockManager<SledMetaStore>>,
         context_id: HummockContextId,
     ) -> MockHummockMetaClient {
         MockHummockMetaClient {
