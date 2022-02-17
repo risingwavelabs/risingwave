@@ -61,9 +61,6 @@ impl StreamSourceExecutor {
                 },
                 column_ids.clone(),
             )?),
-            SourceImpl::Table(s) => {
-                Box::new(s.stream_reader(TableReaderContext {}, column_ids.clone())?)
-            }
             SourceImpl::TableV2(s) => {
                 Box::new(s.stream_reader(TableV2ReaderContext, column_ids.clone())?)
             }
@@ -143,7 +140,7 @@ impl Executor for StreamSourceExecutor {
             // but rows from tables (by insert statements) are filled in InsertExecutor.
             //
             // TODO: in the future, we may add row_id column here for TableV2 as well
-            if !matches!(self.source_desc.source.as_ref(), SourceImpl::Table(_) | SourceImpl::TableV2(_)) {
+            if !matches!(self.source_desc.source.as_ref(), SourceImpl::TableV2(_)) {
               chunk = self.refill_row_id_column(chunk);
             }
             self.source_output_row_count.add(chunk.cardinality() as u64, &self.attributes);
@@ -190,7 +187,7 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
     use risingwave_source::*;
-    use risingwave_storage::bummock::BummockTable;
+    use risingwave_storage::table::test::TestTable;
     use risingwave_storage::TableColumnDesc;
     use tokio::sync::mpsc::unbounded_channel;
 
@@ -222,13 +219,13 @@ mod tests {
                 name: String::new(),
             },
         ];
-        let table = Arc::new(BummockTable::new(&table_id, table_columns));
+        let table = Arc::new(TestTable::new(&table_id, table_columns));
 
         let source_manager = MemSourceManager::new();
-        source_manager.create_table_source(&table_id, table.clone())?;
+        source_manager.create_table_source_v2(&table_id, table.clone())?;
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.clone().source;
-        let table_source = source.as_table();
+        let table_source = source.as_table_v2();
 
         // Prepare test data chunks
         let rowid_arr1: Arc<ArrayImpl> = Arc::new(array_nonnull! { I64Array, [0, 0, 0] }.into());
@@ -359,13 +356,13 @@ mod tests {
                 name: String::new(),
             },
         ];
-        let table = Arc::new(BummockTable::new(&table_id, table_columns));
+        let table = Arc::new(TestTable::new(&table_id, table_columns));
 
         let source_manager = MemSourceManager::new();
-        source_manager.create_table_source(&table_id, table.clone())?;
+        source_manager.create_table_source_v2(&table_id, table.clone())?;
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.clone().source;
-        let table_source = source.as_table();
+        let table_source = source.as_table_v2();
 
         // Prepare test data chunks
         let rowid_arr1: Arc<ArrayImpl> = Arc::new(array_nonnull! { I64Array, [0, 0, 0] }.into());
