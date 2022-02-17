@@ -2,6 +2,7 @@ package com.risingwave.rpc
 
 import com.risingwave.common.exception.PgErrorCode
 import com.risingwave.common.exception.PgException
+import com.risingwave.proto.hummock.*
 import com.risingwave.proto.metanode.*
 import io.grpc.Channel
 import io.grpc.StatusRuntimeException
@@ -104,6 +105,26 @@ class GrpcMetaClient(private val channel: Channel) : MetaClient {
     } catch (e: StatusRuntimeException) {
       LOGGER.warn("RPC failed: {}", e.status)
       throw rpcException("listAllNodes", e)
+    }
+  }
+
+  override fun pinSnapshot(request: PinSnapshotRequest): PinSnapshotResponse {
+    val stub = HummockManagerServiceGrpc.newBlockingStub(channel)
+    try {
+      return stub.pinSnapshot(request)
+    } catch (e: StatusRuntimeException) {
+      LOGGER.warn("RPC failed: {}", e.status)
+      throw rpcException("pinSnapshot", e)
+    }
+  }
+
+  override fun unpinSnapshot(request: UnpinSnapshotRequest): UnpinSnapshotResponse {
+    val stub = HummockManagerServiceGrpc.newBlockingStub(channel)
+    try {
+      return stub.unpinSnapshot(request)
+    } catch (e: StatusRuntimeException) {
+      LOGGER.warn("RPC failed: {}", e.status)
+      throw rpcException("unpinSnapshot", e)
     }
   }
 }

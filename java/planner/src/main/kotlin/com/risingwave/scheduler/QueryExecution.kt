@@ -30,6 +30,7 @@ class QueryExecution(
   private val taskManager: TaskManager,
   private val resourceManager: ResourceManager,
   private val resultFuture: CompletableFuture<QueryResultLocation>,
+  private val epoch: Long,
 ) {
   companion object {
     private val log = LoggerFactory.getLogger(QueryExecution::class.java)
@@ -94,7 +95,7 @@ class QueryExecution(
   private fun createOrGetStageExecution(stageId: StageId): StageExecution {
     val augmentedStage = resourceManager.schedule(query, stageId, getStageChildren(stageId))
     return stageExecutions.computeIfAbsent(stageId) {
-      StageExecution(taskManager, augmentedStage)
+      StageExecution(taskManager, augmentedStage, this.epoch)
     }
   }
 
