@@ -13,12 +13,21 @@ use risingwave_pb::stream_service::{
 use uuid::Uuid;
 
 use crate::barrier::{BarrierManagerRef, Command};
-use crate::cluster::StoredClusterManager;
+use crate::cluster::{NodeId, StoredClusterManager};
 use crate::manager::{MetaSrvEnv, StreamClientsRef};
-use crate::model::TableFragments;
+use crate::model::{ActorId, TableFragments};
 use crate::stream::{FragmentManagerRef, ScheduleCategory, Scheduler};
 
 pub type StreamManagerRef = Arc<StreamManager>;
+
+/// [`Context`] carries one-time infos.
+#[derive(Default)]
+pub struct CreateMaterializedViewContext {
+    /// New dispatches to add from upstream actors to downstream actors.
+    pub dispatches: HashMap<ActorId, Vec<ActorId>>,
+    /// Upstream mview actor ids grouped by node id.
+    pub upstream_node_actors: HashMap<NodeId, Vec<ActorId>>,
+}
 
 pub struct StreamManager {
     fragment_manager_ref: FragmentManagerRef,
@@ -51,6 +60,7 @@ impl StreamManager {
     pub async fn create_materialized_view(
         &self,
         mut table_fragments: TableFragments,
+        ctx: CreateMaterializedViewContext,
     ) -> Result<()> {
         let actor_ids = table_fragments.actor_ids();
         let source_actor_ids = table_fragments.source_actor_ids();
@@ -73,7 +83,7 @@ impl StreamManager {
         let actor_host_infos = locations.actor_info_map();
         let node_actors = locations.node_actors();
 
-        let dispatches = table_fragments
+        let dispatches = ctx
             .dispatches
             .iter()
             .map(|(up_id, down_ids)| {
@@ -92,7 +102,7 @@ impl StreamManager {
             })
             .collect::<HashMap<_, _>>();
 
-        let mut node_hanging_channels = table_fragments
+        let mut node_hanging_channels = ctx
             .upstream_node_actors
             .iter()
             .map(|(node_id, up_ids)| {
@@ -450,12 +460,13 @@ mod tests {
                 actors: actors.clone(),
             },
         );
-        let table_fragments =
-            TableFragments::new(table_id.clone(), fragments, HashMap::new(), HashMap::new());
+        let table_fragments = TableFragments::new(table_id.clone(), fragments);
+
+        let ctx = CreateMaterializedViewContext::default();
 
         services
             .stream_manager
-            .create_materialized_view(table_fragments)
+            .create_materialized_view(table_fragments, ctx)
             .await?;
 
         for actor in actors {
