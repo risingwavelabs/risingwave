@@ -4,11 +4,7 @@ use crate::expr::{get_inputs_col_index, Expr, ExprImpl, ExprType, FunctionCall, 
 use crate::utils::Condition;
 #[derive(Debug, Clone)]
 /// the join predicate used in optimizer
-pub struct JoinPredicate {
-    /// the conditions that all columns in the left side,
-    left_cond: Condition,
-    /// the conditions that all columns in the right side,
-    right_cond: Condition,
+pub struct EqJoinPredicate {
     /// other conditions, linked with AND conjunction.
     other_cond: Condition,
 
@@ -18,29 +14,12 @@ pub struct JoinPredicate {
     eq_keys: Vec<(InputRef, InputRef)>,
 }
 #[allow(dead_code)]
-impl JoinPredicate {
+impl EqJoinPredicate {
     /// the new method for `JoinPredicate` without any analysis, check or rewrite.
-    pub fn new(
-        left_cond: Condition,
-        right_cond: Condition,
-        other_cond: Condition,
-        eq_keys: Vec<(InputRef, InputRef)>,
-    ) -> Self {
+    pub fn new(other_cond: Condition, eq_keys: Vec<(InputRef, InputRef)>) -> Self {
         Self {
-            left_cond,
-            right_cond,
             other_cond,
             eq_keys,
-        }
-    }
-
-    /// Construct a empty predicate. Condition always true -- do not filter rows.
-    pub fn true_predicate() -> Self {
-        JoinPredicate {
-            left_cond: Condition::true_cond(),
-            right_cond: Condition::true_cond(),
-            other_cond: Condition::true_cond(),
-            eq_keys: vec![],
         }
     }
 
@@ -60,11 +39,8 @@ impl JoinPredicate {
     ///   keys= Vec[(1,1)]
     /// ```
     #[allow(unused_variables)]
-    pub fn create(left_cols_num: usize, right_cols_num: usize, on_clause: ExprImpl) -> Self {
-        let on_clause = Condition::with_expr(on_clause);
+    pub fn create(left_cols_num: usize, right_cols_num: usize, on_clause: Condition) -> Self {
         let mut other_cond = Condition::true_cond();
-        let mut left_cond = Condition::true_cond();
-        let mut right_cond = Condition::true_cond();
         let mut eq_keys = vec![];
 
         for cond_expr in on_clause.conjunctions {
@@ -102,12 +78,12 @@ impl JoinPredicate {
                         other_cond.conjunctions.push(cond_expr)
                     }
                 }
-                (true, false) => left_cond.conjunctions.push(cond_expr),
-                (false, true) => right_cond.conjunctions.push(cond_expr),
+                (true, false) => other_cond.conjunctions.push(cond_expr),
+                (false, true) => other_cond.conjunctions.push(cond_expr),
                 (false, false) => other_cond.conjunctions.push(cond_expr),
             }
         }
-        Self::new(left_cond, right_cond, other_cond, eq_keys)
+        Self::new(other_cond, eq_keys)
     }
 
     /// Get join predicate's eq conds.
@@ -127,10 +103,7 @@ impl JoinPredicate {
     }
 
     pub fn non_eq_cond(&self) -> Condition {
-        let mut cond = self.left_cond.clone();
-        cond.and(self.right_cond.clone());
-        cond.and(self.other_cond.clone());
-        cond
+        self.other_cond.clone()
     }
 
     pub fn all_cond(&self) -> Condition {
@@ -144,28 +117,19 @@ impl JoinPredicate {
     }
 
     pub fn has_non_eq(&self) -> bool {
-        !self.left_cond.always_true()
-            || !self.right_cond.always_true()
-            || !self.other_cond.always_true()
-    }
-    /// Get a reference to the join predicate's left cond.
-    pub fn left_cond(&self) -> &Condition {
-        &self.left_cond
-    }
-
-    /// Get a reference to the join predicate's right cond.
-    pub fn right_cond(&self) -> &Condition {
-        &self.right_cond
+        !self.other_cond.always_true()
     }
 
     /// Get a reference to the join predicate's other cond.
     pub fn other_cond(&self) -> &Condition {
         &self.other_cond
     }
+
     /// Get a reference to the join predicate's eq keys.
     pub fn eq_keys(&self) -> &[(InputRef, InputRef)] {
         self.eq_keys.as_ref()
     }
+
     pub fn eq_indexes(&self) -> Vec<(usize, usize)> {
         self.eq_keys
             .iter()

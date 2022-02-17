@@ -3,20 +3,26 @@ use std::fmt;
 use risingwave_common::catalog::Schema;
 
 use super::{
-    IntoPlanRef, JoinPredicate, LogicalJoin, PlanRef, PlanTreeNodeBinary, ToDistributedBatch,
+    EqJoinPredicate, IntoPlanRef, LogicalJoin, PlanRef, PlanTreeNodeBinary, ToDistributedBatch,
 };
 use crate::optimizer::property::{Distribution, WithDistribution, WithOrder, WithSchema};
 
 #[derive(Debug, Clone)]
 pub struct BatchHashJoin {
     logical: LogicalJoin,
+    eq_join_predicate: EqJoinPredicate,
 }
 impl BatchHashJoin {
-    pub fn new(logical: LogicalJoin) -> Self {
-        Self { logical }
+    pub fn new(logical: LogicalJoin, eq_join_predicate: EqJoinPredicate) -> Self {
+        Self {
+            logical,
+            eq_join_predicate,
+        }
     }
-    pub fn predicate(&self) -> &JoinPredicate {
-        self.logical.predicate()
+
+    /// Get a reference to the batch hash join's eq join predicate.
+    pub fn eq_join_predicate(&self) -> &EqJoinPredicate {
+        &self.eq_join_predicate
     }
 }
 
@@ -34,7 +40,10 @@ impl PlanTreeNodeBinary for BatchHashJoin {
         self.logical.right()
     }
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_left_right(left, right))
+        Self::new(
+            self.logical.clone_with_left_right(left, right),
+            self.eq_join_predicate.clone(),
+        )
     }
     fn left_dist_required(&self) -> &Distribution {
         todo!()
@@ -56,11 +65,11 @@ impl ToDistributedBatch for BatchHashJoin {
     fn to_distributed(&self) -> PlanRef {
         let left = self.left().to_distributed_with_required(
             self.left_order_required(),
-            &Distribution::HashShard(self.predicate().left_eq_indexes()),
+            &Distribution::HashShard(self.eq_join_predicate().left_eq_indexes()),
         );
         let right = self.right().to_distributed_with_required(
             self.right_order_required(),
-            &Distribution::HashShard(self.predicate().right_eq_indexes()),
+            &Distribution::HashShard(self.eq_join_predicate().right_eq_indexes()),
         );
 
         self.clone_with_left_right(left, right).into_plan_ref()

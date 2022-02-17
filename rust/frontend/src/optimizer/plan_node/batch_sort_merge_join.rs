@@ -3,7 +3,7 @@ use std::fmt;
 use risingwave_common::catalog::Schema;
 
 use super::{
-    IntoPlanRef, JoinPredicate, LogicalJoin, PlanRef, PlanTreeNodeBinary, ToDistributedBatch,
+    EqJoinPredicate, IntoPlanRef, LogicalJoin, PlanRef, PlanTreeNodeBinary, ToDistributedBatch,
 };
 use crate::optimizer::property::{
     Direction, Distribution, FieldOrder, Order, WithDistribution, WithOrder, WithSchema,
@@ -11,12 +11,17 @@ use crate::optimizer::property::{
 #[derive(Debug, Clone)]
 pub struct BatchSortMergeJoin {
     logical: LogicalJoin,
+    eq_join_predicate: EqJoinPredicate,
     order: Order,
 }
 impl BatchSortMergeJoin {
-    pub fn new(logical: LogicalJoin) -> Self {
+    pub fn new(logical: LogicalJoin, eq_join_predicate: EqJoinPredicate) -> Self {
         let order = Self::derive_order(logical.left().order(), logical.right().order());
-        Self { logical, order }
+        Self {
+            logical,
+            order,
+            eq_join_predicate,
+        }
     }
 
     // Panic if input orders can't satisfy sortMergeJoin
@@ -24,9 +29,9 @@ impl BatchSortMergeJoin {
         todo!()
     }
 
-    pub fn left_required_order(join_predicate: &JoinPredicate) -> Order {
+    pub fn left_required_order(eq_join_predicate: &EqJoinPredicate) -> Order {
         Order {
-            field_order: join_predicate
+            field_order: eq_join_predicate
                 .left_eq_indexes()
                 .into_iter()
                 .map(|index| FieldOrder {
@@ -38,7 +43,7 @@ impl BatchSortMergeJoin {
     }
     pub fn right_required_order_from_left_order(
         _left_order: &Order,
-        _join_predicate: &JoinPredicate,
+        _eq_join_predicate: &EqJoinPredicate,
     ) -> Order {
         todo!()
     }
@@ -58,7 +63,10 @@ impl PlanTreeNodeBinary for BatchSortMergeJoin {
         self.logical.right()
     }
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_left_right(left, right))
+        Self::new(
+            self.logical.clone_with_left_right(left, right),
+            self.eq_join_predicate.clone(),
+        )
     }
     fn right_order_required(&self) -> &Order {
         todo!()

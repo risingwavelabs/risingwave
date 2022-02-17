@@ -257,7 +257,7 @@ mod tests {
             batch_exchange_node1.clone(),
             batch_exchange_node2.clone(),
             JoinType::Inner,
-            JoinPredicate::true_predicate(),
+            JoinPredicate::create(0, 0, Condition),
         ))
         .into_plan_ref();
         let batch_exchange_node3 = BatchExchange::new(
