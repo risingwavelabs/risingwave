@@ -286,7 +286,7 @@ mod tests {
             }))
             .unwrap();
 
-        let mut writer = table_source.create_writer()?;
+        let mut writer = table_source.create_writer();
         // Write 1st chunk
         writer.write(chunk1).await?;
 
@@ -403,7 +403,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut writer = table_source.create_writer()?;
+        let mut writer = table_source.create_writer();
         writer.write(chunk1.clone()).await?;
 
         barrier_sender
