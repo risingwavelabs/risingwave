@@ -106,20 +106,20 @@ jobs:
           mv ~/cargo-make-v0.35.7-x86_64-unknown-linux-musl ~/cargo-make
       - name: Prepare RiseDev playground
         run: ~/cargo-make/makers pre-start-playground
-      - name: e2e test w/ Hummock
+      - name: e2e test w/ Hummock 3-node
         run: |
           ~/cargo-make/makers clean-data
-          ~/cargo-make/makers ci-1node
+          ~/cargo-make/makers ci-3node
           timeout 3m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
           ~/cargo-make/makers logs
           ~/cargo-make/makers check-logs
-      - name: e2e test w/ Hummock w/o cache
+      - name: e2e test w/ Hummock w/o cache 3-node
         run: |
           ~/cargo-make/makers clean-data
-          RW_NO_CACHE=1 ~/cargo-make/makers ci-1node
+          RW_NO_CACHE=1 ~/cargo-make/makers ci-3node
           timeout 3m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
       - name: Kill cluster
         run: |
