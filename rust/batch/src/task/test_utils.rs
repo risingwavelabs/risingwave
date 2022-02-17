@@ -18,10 +18,11 @@ use risingwave_pb::plan::{
 };
 use risingwave_pb::task_service::GetDataResponse;
 use risingwave_storage::table::test::TestTable;
-use risingwave_storage::Table;
 
 use super::*;
 use crate::rpc::service::exchange::ExchangeWriter;
+
+// TODO: rewrite these tests without relying on `PlanFragment`.
 
 fn get_num_sinks(plan: &PlanFragment) -> Result<u32> {
     Ok(match plan.get_exchange_info()?.get_mode()? {
@@ -352,7 +353,7 @@ impl<'a> SelectBuilder<'a> {
             .unwrap();
 
         if let Ok(column_table_ref) = downcast_arc::<TestTable>(table_ref.into_any()) {
-            let column_ids = column_table_ref.get_column_ids();
+            let column_ids = column_table_ref.column_ids();
             let scan = SeqScanNode {
                 table_ref_id: None,
                 column_ids,

@@ -26,7 +26,7 @@ pub struct CreateTableExecutor {
 }
 
 impl CreateTableExecutor {
-    pub fn new_v2(
+    pub fn new(
         table_id: TableId,
         table_manager: TableManagerRef,
         source_manager: SourceManagerRef,

@@ -93,12 +93,12 @@ async fn test_table_v2_materialize() -> Result<()> {
     ];
 
     // Create table v2 using `CreateTableExecutor`
-    let mut create_table = CreateTableExecutor::new_v2(
+    let mut create_table = CreateTableExecutor::new(
         source_table_id.clone(),
         table_manager.clone(),
         source_manager.clone(),
         table_columns,
-        "CreateTableExecutorV2".to_string(),
+        "CreateTableExecutor".to_string(),
     );
     // Execute
     create_table.open().await?;

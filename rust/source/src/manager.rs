@@ -210,7 +210,7 @@ mod tests {
     use risingwave_storage::table::mview::MViewTable;
     use risingwave_storage::table::test::TestTable;
     use risingwave_storage::table::ScannableTable;
-    use risingwave_storage::{Keyspace, Table, TableColumnDesc};
+    use risingwave_storage::{Keyspace, TableColumnDesc};
 
     use crate::*;
 
@@ -238,8 +238,10 @@ mod tests {
             vec![TableColumnDesc::new_without_name(0, DataType::Int64)],
         ));
 
-        let chunk0 = StreamChunk::new(vec![Op::Insert], vec![column_nonnull!(I64Array, [0])], None);
-        table.write(&chunk0).unwrap();
+        let chunk0 = DataChunk::builder()
+            .columns(vec![column_nonnull!(I64Array, [0])])
+            .build();
+        table.append(chunk0).await.unwrap();
 
         let source_columns = table
             .column_descs()

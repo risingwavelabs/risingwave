@@ -2,41 +2,45 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use risingwave_common::array::{DataChunk, StreamChunk};
-use risingwave_common::catalog::{Schema, TableId};
+use risingwave_common::array::DataChunk;
+use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::Result;
-use risingwave_common::util::downcast_arc;
+use tokio::sync::RwLock;
 
-use super::mview::MViewTable;
-use super::{ScannableTable, TableIterRef};
-use crate::memory::MemoryStateStore;
-use crate::{Keyspace, Table, TableColumnDesc};
+use super::{DataChunks, ScannableTable, TableIterRef};
+use crate::TableColumnDesc;
 
 #[derive(Debug)]
 pub struct TestTable {
-    inner: Arc<MViewTable<MemoryStateStore>>,
+    chunks: Arc<RwLock<DataChunks>>,
+
+    column_descs: Vec<TableColumnDesc>,
+
+    schema: Schema,
 }
 
 impl TestTable {
-    pub fn new(table_id: &TableId, table_columns: Vec<TableColumnDesc>) -> Self {
-        let keyspace = Keyspace::table_root(MemoryStateStore::new(), table_id);
-        let inner = MViewTable::new_batch(keyspace, table_columns);
-        Self {
-            inner: Arc::new(inner),
-        }
-    }
+    pub fn new(_table_id: &TableId, column_descs: Vec<TableColumnDesc>) -> Self {
+        let schema = {
+            let fields = column_descs
+                .iter()
+                .map(|c| Field::with_name(c.data_type, c.name.clone()))
+                .collect();
+            Schema::new(fields)
+        };
 
-    pub fn from_table_v2(table: Arc<dyn ScannableTable>) -> Self {
         Self {
-            inner: downcast_arc::<MViewTable<MemoryStateStore>>(table.into_any()).unwrap(),
+            chunks: Arc::new(RwLock::new(Default::default())),
+            column_descs,
+            schema,
         }
     }
 }
 
 #[async_trait]
 impl ScannableTable for TestTable {
-    async fn iter(&self, epoch: u64) -> Result<TableIterRef> {
-        self.inner.iter(epoch).await
+    async fn iter(&self, _epoch: u64) -> Result<TableIterRef> {
+        unimplemented!()
     }
 
     fn into_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Sync + Send> {
@@ -44,33 +48,30 @@ impl ScannableTable for TestTable {
     }
 
     fn schema(&self) -> Cow<Schema> {
-        self.inner.schema()
+        Cow::Borrowed(&self.schema)
     }
 
     fn column_descs(&self) -> Cow<[TableColumnDesc]> {
-        self.inner.column_descs()
+        Cow::Borrowed(&self.column_descs)
     }
 
     fn is_shared_storage(&self) -> bool {
-        self.inner.is_shared_storage()
+        false
+    }
+
+    async fn get_data_by_columns(&self, column_ids: &[i32]) -> Result<Option<DataChunks>> {
+        assert_eq!(column_ids, self.column_ids());
+        Ok(Some(self.chunks.read().await.clone()))
     }
 }
 
-#[async_trait]
-impl Table for TestTable {
-    async fn append(&self, data: DataChunk) -> Result<usize> {
-        todo!()
+impl TestTable {
+    pub async fn append(&self, data: DataChunk) -> Result<()> {
+        self.chunks.write().await.push(data.into());
+        Ok(())
     }
 
-    fn write(&self, chunk: &StreamChunk) -> Result<usize> {
-        todo!()
-    }
-
-    fn get_column_ids(&self) -> Vec<i32> {
-        todo!()
-    }
-
-    fn index_of_column_id(&self, column_id: i32) -> Result<usize> {
-        todo!()
+    pub fn column_ids(&self) -> Vec<i32> {
+        self.column_descs.iter().map(|c| c.column_id).collect()
     }
 }

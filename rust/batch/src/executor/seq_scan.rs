@@ -116,7 +116,7 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_storage::table::test::TestTable;
     use risingwave_storage::table::ScannableTable;
-    use risingwave_storage::{Table, TableColumnDesc};
+    use risingwave_storage::TableColumnDesc;
 
     use super::*;
     use crate::*;
