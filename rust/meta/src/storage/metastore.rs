@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 use std::str;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use async_trait::async_trait;
 use risingwave_common::array::RwError;
@@ -97,8 +97,6 @@ impl From<Error> for RwError {
     }
 }
 
-pub type MetaStoreRef = Arc<dyn MetaStore>;
-
 // TODO: introduce etcd as storage engine here.
 
 pub(crate) struct KeyWithVersion {}
@@ -165,6 +163,12 @@ type KeyForMem = (Vec<u8>, String);
 
 pub struct MemStore {
     entities: Mutex<HashMap<KeyForMem, BTreeMap<Epoch, Vec<u8>>>>,
+}
+
+impl Clone for MemStore {
+    fn clone(&self) -> Self {
+        unreachable!("FIXME: https://github.com/rust-lang/rust/issues/26925")
+    }
 }
 
 impl MemStore {

@@ -16,9 +16,10 @@ use crate::barrier::{BarrierManagerRef, Command};
 use crate::cluster::{NodeId, StoredClusterManager};
 use crate::manager::{MetaSrvEnv, StreamClientsRef};
 use crate::model::{ActorId, TableFragments};
+use crate::storage::MetaStore;
 use crate::stream::{FragmentManagerRef, ScheduleCategory, Scheduler};
 
-pub type StreamManagerRef = Arc<StreamManager>;
+pub type StreamManagerRef<S> = Arc<StreamManager<S>>;
 
 /// [`Context`] carries one-time infos.
 #[derive(Default)]
@@ -29,20 +30,26 @@ pub struct CreateMaterializedViewContext {
     pub upstream_node_actors: HashMap<NodeId, Vec<ActorId>>,
 }
 
-pub struct StreamManager {
-    fragment_manager_ref: FragmentManagerRef,
+pub struct StreamManager<S>
+where
+    S: MetaStore,
+{
+    fragment_manager_ref: FragmentManagerRef<S>,
 
-    barrier_manager_ref: BarrierManagerRef,
-    scheduler: Scheduler,
+    barrier_manager_ref: BarrierManagerRef<S>,
+    scheduler: Scheduler<S>,
     clients: StreamClientsRef,
 }
 
-impl StreamManager {
+impl<S> StreamManager<S>
+where
+    S: MetaStore,
+{
     pub async fn new(
-        env: MetaSrvEnv,
-        fragment_manager_ref: FragmentManagerRef,
-        barrier_manager_ref: BarrierManagerRef,
-        cluster_manager: Arc<StoredClusterManager>,
+        env: MetaSrvEnv<S>,
+        fragment_manager_ref: FragmentManagerRef<S>,
+        barrier_manager_ref: BarrierManagerRef<S>,
+        cluster_manager: Arc<StoredClusterManager<S>>,
     ) -> Result<Self> {
         Ok(Self {
             fragment_manager_ref,
@@ -264,6 +271,7 @@ mod tests {
     use crate::barrier::BarrierManager;
     use crate::manager::MetaSrvEnv;
     use crate::model::ActorId;
+    use crate::storage::MemStore;
     use crate::stream::FragmentManager;
 
     struct FakeFragmentState {
@@ -344,8 +352,8 @@ mod tests {
     }
 
     struct MockServices {
-        stream_manager: StreamManager,
-        fragment_manager: FragmentManagerRef,
+        stream_manager: StreamManager<MemStore>,
+        fragment_manager: FragmentManagerRef<MemStore>,
         state: Arc<FakeFragmentState>,
         join_handle: JoinHandle<()>,
         shutdown_tx: UnboundedSender<()>,
@@ -388,7 +396,7 @@ mod tests {
                 )
                 .await?;
 
-            let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await?);
+            let fragment_manager = Arc::new(FragmentManager::new(env.meta_store_ref()).await?);
 
             let barrier_manager_ref = Arc::new(BarrierManager::new(
                 env.clone(),

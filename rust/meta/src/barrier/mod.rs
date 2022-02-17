@@ -19,6 +19,7 @@ use self::command::CommandContext;
 use self::info::BarrierActorInfo;
 use crate::cluster::StoredClusterManager;
 use crate::manager::{EpochGeneratorRef, MetaSrvEnv, StreamClientsRef};
+use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
 
 mod command;
@@ -60,10 +61,13 @@ type Scheduled = (Command, Notifier);
 /// carries info to build [`Mutation`]. To keep the consistency between barrier manager and meta
 /// store, some actions like "drop materialized view" or "create mv on mv" must be done in barrier
 /// manager transactionally using [`Command`].
-pub struct BarrierManager {
-    cluster_manager: Arc<StoredClusterManager>,
+pub struct BarrierManager<S>
+where
+    S: MetaStore,
+{
+    cluster_manager: Arc<StoredClusterManager<S>>,
 
-    fragment_manager: FragmentManagerRef,
+    fragment_manager: FragmentManagerRef<S>,
 
     epoch_generator: EpochGeneratorRef,
 
@@ -80,12 +84,15 @@ pub struct BarrierManager {
     extra_notifiers: Mutex<Vec<Notifier>>,
 }
 
-impl BarrierManager {
+impl<S> BarrierManager<S>
+where
+    S: MetaStore,
+{
     /// Create a new [`BarrierManager`].
     pub fn new(
-        env: MetaSrvEnv,
-        cluster_manager: Arc<StoredClusterManager>,
-        fragment_manager: FragmentManagerRef,
+        env: MetaSrvEnv<S>,
+        cluster_manager: Arc<StoredClusterManager<S>>,
+        fragment_manager: FragmentManagerRef<S>,
         epoch_generator: EpochGeneratorRef,
     ) -> Self {
         let (tx, rx) = unbounded_channel();
@@ -201,7 +208,10 @@ impl BarrierManager {
     }
 }
 
-impl BarrierManager {
+impl<S> BarrierManager<S>
+where
+    S: MetaStore,
+{
     fn do_schedule(&self, command: Command, notifier: Notifier) -> Result<()> {
         self.scheduled_barriers_tx
             .send((command, notifier))
@@ -257,4 +267,4 @@ impl BarrierManager {
     }
 }
 
-pub type BarrierManagerRef = Arc<BarrierManager>;
+pub type BarrierManagerRef<S> = Arc<BarrierManager<S>>;
