@@ -24,11 +24,11 @@ impl MockHummockMetaClient {
 
 #[async_trait]
 impl HummockMetaClient for MockHummockMetaClient {
-    async fn pin_version(&self) -> HummockResult<(HummockVersionId, HummockVersion)> {
+    async fn pin_version(&self) -> HummockResult<HummockVersion> {
         let response = self
             .mock_hummock_meta_service
             .pin_version(PinVersionRequest { context_id: 0 });
-        Ok((response.pinned_version_id, response.pinned_version.unwrap()))
+        Ok(response.pinned_version.unwrap())
     }
 
     async fn unpin_version(&self, pinned_version_id: HummockVersionId) -> HummockResult<()> {
@@ -73,13 +73,13 @@ impl HummockMetaClient for MockHummockMetaClient {
         &self,
         epoch: HummockEpoch,
         sstables: Vec<SstableInfo>,
-    ) -> HummockResult<()> {
-        self.mock_hummock_meta_service.add_tables(AddTablesRequest {
+    ) -> HummockResult<HummockVersion> {
+        let resp = self.mock_hummock_meta_service.add_tables(AddTablesRequest {
             context_id: 0,
             tables: sstables.to_vec(),
             epoch,
         });
-        Ok(())
+        Ok(resp.version.unwrap())
     }
 
     async fn get_compaction_task(&self) -> HummockResult<Option<CompactTask>> {

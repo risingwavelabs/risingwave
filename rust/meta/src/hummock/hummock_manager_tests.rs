@@ -25,9 +25,8 @@ async fn test_hummock_pin_unpin() -> Result<()> {
         .await?
         .is_empty());
     for _ in 0..2 {
-        let (version_id_0, hummock_version) =
-            hummock_manager.pin_version(context_id).await.unwrap();
-        assert_eq!(version_id, version_id_0);
+        let hummock_version = hummock_manager.pin_version(context_id).await.unwrap();
+        assert_eq!(version_id, hummock_version.id);
         assert_eq!(2, hummock_version.levels.len());
         assert_eq!(0, hummock_version.levels[0].table_ids.len());
         assert_eq!(0, hummock_version.levels[1].table_ids.len());
@@ -92,10 +91,7 @@ async fn test_hummock_get_compact_task() -> Result<()> {
         .add_tables(context_id, original_tables.clone(), epoch)
         .await
         .unwrap();
-    hummock_manager
-        .commit_epoch(context_id, epoch)
-        .await
-        .unwrap();
+    hummock_manager.commit_epoch(epoch).await.unwrap();
 
     let task = hummock_manager.get_compact_task(context_id).await?;
     let compact_task = task.unwrap();
@@ -125,10 +121,7 @@ async fn test_hummock_table() -> Result<()> {
         .add_tables(context_id, original_tables.clone(), epoch)
         .await
         .unwrap();
-    hummock_manager
-        .commit_epoch(context_id, epoch)
-        .await
-        .unwrap();
+    hummock_manager.commit_epoch(epoch).await.unwrap();
 
     // Confirm tables are successfully added
     let fetched_tables = SstableInfo::list(&*env.meta_store_ref())
@@ -138,7 +131,7 @@ async fn test_hummock_table() -> Result<()> {
         .collect_vec();
     assert_eq!(original_tables, fetched_tables);
 
-    let (_, pinned_version) = hummock_manager.pin_version(context_id).await?;
+    let pinned_version = hummock_manager.pin_version(context_id).await?;
     assert_eq!(
         Ordering::Equal,
         pinned_version
@@ -153,7 +146,7 @@ async fn test_hummock_table() -> Result<()> {
     // Confirm tables got are equal to original tables
     assert_eq!(
         get_sorted_sstable_ids(&original_tables),
-        get_sorted_committed_sstable_ids(pinned_version)
+        get_sorted_committed_sstable_ids(&pinned_version)
     );
 
     Ok(())
@@ -181,38 +174,34 @@ async fn test_hummock_transaction() -> Result<()> {
             .unwrap();
 
         // Get tables before committing epoch1. No tables should be returned.
-        let (pinned_version_id, mut pinned_version) =
-            hummock_manager.pin_version(context_id).await?;
+        let mut pinned_version = hummock_manager.pin_version(context_id).await?;
         let uncommitted_epoch = pinned_version.uncommitted_epochs.first_mut().unwrap();
         assert_eq!(epoch1, uncommitted_epoch.epoch);
         assert_eq!(pinned_version.max_committed_epoch, INVALID_EPOCH);
         uncommitted_epoch.table_ids.sort_unstable();
         let table_ids_in_epoch1: Vec<u64> = tables_in_epoch1.iter().map(|t| t.id).collect();
         assert_eq!(table_ids_in_epoch1, uncommitted_epoch.table_ids);
-        assert!(get_sorted_committed_sstable_ids(pinned_version).is_empty());
+        assert!(get_sorted_committed_sstable_ids(&pinned_version).is_empty());
 
         hummock_manager
-            .unpin_version(context_id, pinned_version_id)
+            .unpin_version(context_id, pinned_version.id)
             .await?;
 
         // Commit epoch1
-        hummock_manager
-            .commit_epoch(context_id, epoch1)
-            .await
-            .unwrap();
+        hummock_manager.commit_epoch(epoch1).await.unwrap();
         committed_tables.extend(tables_in_epoch1.clone());
 
         // Get tables after committing epoch1. All tables committed in epoch1 should be returned
-        let (pinned_version_id, pinned_version) = hummock_manager.pin_version(context_id).await?;
+        let pinned_version = hummock_manager.pin_version(context_id).await?;
         assert!(pinned_version.uncommitted_epochs.is_empty());
         assert_eq!(pinned_version.max_committed_epoch, epoch1);
         assert_eq!(
             get_sorted_sstable_ids(&committed_tables),
-            get_sorted_committed_sstable_ids(pinned_version)
+            get_sorted_committed_sstable_ids(&pinned_version)
         );
 
         hummock_manager
-            .unpin_version(context_id, pinned_version_id)
+            .unpin_version(context_id, pinned_version.id)
             .await?;
     }
 
@@ -231,8 +220,7 @@ async fn test_hummock_transaction() -> Result<()> {
 
         // Get tables before committing epoch2. tables_in_epoch1 should be returned and
         // tables_in_epoch2 should be invisible.
-        let (pinned_version_id, mut pinned_version) =
-            hummock_manager.pin_version(context_id).await?;
+        let mut pinned_version = hummock_manager.pin_version(context_id).await?;
         let uncommitted_epoch = pinned_version.uncommitted_epochs.first_mut().unwrap();
         assert_eq!(epoch2, uncommitted_epoch.epoch);
         uncommitted_epoch.table_ids.sort_unstable();
@@ -241,30 +229,27 @@ async fn test_hummock_transaction() -> Result<()> {
         assert_eq!(pinned_version.max_committed_epoch, epoch1);
         assert_eq!(
             get_sorted_sstable_ids(&committed_tables),
-            get_sorted_committed_sstable_ids(pinned_version)
+            get_sorted_committed_sstable_ids(&pinned_version)
         );
         hummock_manager
-            .unpin_version(context_id, pinned_version_id)
+            .unpin_version(context_id, pinned_version.id)
             .await?;
 
         // Commit epoch2
-        hummock_manager
-            .commit_epoch(context_id, epoch2)
-            .await
-            .unwrap();
+        hummock_manager.commit_epoch(epoch2).await.unwrap();
         committed_tables.extend(tables_in_epoch2);
 
         // Get tables after committing epoch2. tables_in_epoch1 and tables_in_epoch2 should be
         // returned
-        let (pinned_version_id, pinned_version) = hummock_manager.pin_version(context_id).await?;
+        let pinned_version = hummock_manager.pin_version(context_id).await?;
         assert!(pinned_version.uncommitted_epochs.is_empty());
         assert_eq!(pinned_version.max_committed_epoch, epoch2);
         assert_eq!(
             get_sorted_sstable_ids(&committed_tables),
-            get_sorted_committed_sstable_ids(pinned_version)
+            get_sorted_committed_sstable_ids(&pinned_version)
         );
         hummock_manager
-            .unpin_version(context_id, pinned_version_id)
+            .unpin_version(context_id, pinned_version.id)
             .await?;
     }
 
@@ -289,8 +274,7 @@ async fn test_hummock_transaction() -> Result<()> {
 
         // Get tables before committing epoch3 and epoch4. tables_in_epoch1 and tables_in_epoch2
         // should be returned
-        let (pinned_version_id, mut pinned_version) =
-            hummock_manager.pin_version(context_id).await?;
+        let mut pinned_version = hummock_manager.pin_version(context_id).await?;
         let uncommitted_epoch3 = pinned_version
             .uncommitted_epochs
             .iter_mut()
@@ -310,22 +294,18 @@ async fn test_hummock_transaction() -> Result<()> {
         assert_eq!(pinned_version.max_committed_epoch, epoch2);
         assert_eq!(
             get_sorted_sstable_ids(&committed_tables),
-            get_sorted_committed_sstable_ids(pinned_version)
+            get_sorted_committed_sstable_ids(&pinned_version)
         );
         hummock_manager
-            .unpin_version(context_id, pinned_version_id)
+            .unpin_version(context_id, pinned_version.id)
             .await?;
 
         // Abort epoch3
-        hummock_manager
-            .abort_epoch(context_id, epoch3)
-            .await
-            .unwrap();
+        hummock_manager.abort_epoch(epoch3).await.unwrap();
 
         // Get tables after aborting epoch3. tables_in_epoch1 and tables_in_epoch2 should be
         // returned
-        let (pinned_version_id, mut pinned_version) =
-            hummock_manager.pin_version(context_id).await?;
+        let mut pinned_version = hummock_manager.pin_version(context_id).await?;
         assert!(pinned_version
             .uncommitted_epochs
             .iter_mut()
@@ -340,30 +320,27 @@ async fn test_hummock_transaction() -> Result<()> {
         assert_eq!(pinned_version.max_committed_epoch, epoch2);
         assert_eq!(
             get_sorted_sstable_ids(&committed_tables),
-            get_sorted_committed_sstable_ids(pinned_version)
+            get_sorted_committed_sstable_ids(&pinned_version)
         );
         hummock_manager
-            .unpin_version(context_id, pinned_version_id)
+            .unpin_version(context_id, pinned_version.id)
             .await?;
 
         // Commit epoch4
-        hummock_manager
-            .commit_epoch(context_id, epoch4)
-            .await
-            .unwrap();
+        hummock_manager.commit_epoch(epoch4).await.unwrap();
         committed_tables.extend(tables_in_epoch4);
 
         // Get tables after committing epoch4. tables_in_epoch1, tables_in_epoch2, tables_in_epoch4
         // should be returned.
-        let (pinned_version_id, pinned_version) = hummock_manager.pin_version(context_id).await?;
+        let pinned_version = hummock_manager.pin_version(context_id).await?;
         assert!(pinned_version.uncommitted_epochs.is_empty());
         assert_eq!(pinned_version.max_committed_epoch, epoch4);
         assert_eq!(
             get_sorted_sstable_ids(&committed_tables),
-            get_sorted_committed_sstable_ids(pinned_version)
+            get_sorted_committed_sstable_ids(&pinned_version)
         );
         hummock_manager
-            .unpin_version(context_id, pinned_version_id)
+            .unpin_version(context_id, pinned_version.id)
             .await?;
     }
     Ok(())
