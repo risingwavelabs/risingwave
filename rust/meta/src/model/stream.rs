@@ -29,12 +29,6 @@ pub struct TableFragments {
     fragments: BTreeMap<FragmentId, Fragment>,
     /// The actor location.
     actor_locations: ActorLocations,
-    /// New dispatches to add from upstream actors to downstream actors.
-    /// Used by creating MV on MV.
-    pub dispatches: HashMap<ActorId, Vec<ActorId>>,
-    /// Upstream mview actor ids grouped by node id.
-    /// Used by creating MV on MV.
-    pub upstream_node_actors: HashMap<NodeId, Vec<ActorId>>,
 }
 
 impl MetadataModel for TableFragments {
@@ -71,8 +65,6 @@ impl MetadataModel for TableFragments {
                 .actor_locations
                 .into_iter()
                 .collect::<BTreeMap<_, _>>(),
-            dispatches: HashMap::new(),
-            upstream_node_actors: HashMap::new(),
         }
     }
 
@@ -82,19 +74,12 @@ impl MetadataModel for TableFragments {
 }
 
 impl TableFragments {
-    pub fn new(
-        table_id: TableId,
-        fragments: BTreeMap<FragmentId, Fragment>,
-        dispatches: HashMap<ActorId, Vec<ActorId>>,
-        upstream_node_actors: HashMap<NodeId, Vec<ActorId>>,
-    ) -> Self {
+    pub fn new(table_id: TableId, fragments: BTreeMap<FragmentId, Fragment>) -> Self {
         Self {
             table_id,
             state: State::Creating,
             fragments,
             actor_locations: BTreeMap::default(),
-            dispatches,
-            upstream_node_actors,
         }
     }
 

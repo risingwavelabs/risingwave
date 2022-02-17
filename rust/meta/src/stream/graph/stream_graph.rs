@@ -12,7 +12,7 @@ use risingwave_pb::stream_plan::{Dispatcher, MergeNode, StreamActor, StreamNode}
 
 use crate::cluster::NodeId;
 use crate::model::{ActorId, FragmentId, TableRawId};
-use crate::stream::FragmentManagerRef;
+use crate::stream::{CreateMaterializedViewContext, FragmentManagerRef};
 
 /// [`StreamActorBuilder`] build a stream actor in a stream DAG.
 pub struct StreamActorBuilder {
@@ -99,19 +99,6 @@ impl StreamActorBuilder {
     }
 }
 
-/// [`StreamGraph`] stores a mapping from fragment id to [`StreamActor`]s with extra infos.
-#[derive(Debug, Clone)]
-pub struct StreamGraph {
-    /// Stream graph
-    pub graph: HashMap<FragmentId, Vec<StreamActor>>,
-    /// New dispatches to add from upstream actors to downstream actors.
-    /// Used by creating MV on MV.
-    pub dispatches: HashMap<ActorId, Vec<ActorId>>,
-    /// Upstream mview actor ids grouped by node id.
-    /// Used by creating MV on MV.
-    pub upstream_node_actors: HashMap<NodeId, Vec<ActorId>>,
-}
-
 /// [`StreamGraphBuilder`] build a stream graph. It injects some information to achieve
 /// dependencies. See `build_inner` for more details.
 pub struct StreamGraphBuilder {
@@ -152,7 +139,10 @@ impl StreamGraphBuilder {
     }
 
     /// Build final stream DAG with dependencies with current actor builders.
-    pub fn build(&self) -> Result<StreamGraph> {
+    pub fn build(
+        &self,
+        ctx: &mut CreateMaterializedViewContext,
+    ) -> Result<HashMap<FragmentId, Vec<StreamActor>>> {
         let mut graph = HashMap::new();
         let mut table_sink_map = HashMap::new();
         let mut dispatches: HashMap<ActorId, Vec<ActorId>> = HashMap::new();
@@ -194,11 +184,9 @@ impl StreamGraphBuilder {
             actor_ids.sort_unstable();
             actor_ids.dedup();
         }
-        Ok(StreamGraph {
-            graph,
-            dispatches,
-            upstream_node_actors,
-        })
+        ctx.dispatches = dispatches;
+        ctx.upstream_node_actors = upstream_node_actors;
+        Ok(graph)
     }
 
     /// Build stream actor inside, two works will be done:
