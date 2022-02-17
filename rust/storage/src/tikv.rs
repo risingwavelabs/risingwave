@@ -74,7 +74,7 @@ impl StateStore for TikvStateStore {
         }
         let scan_limit = match limit {
             Some(x) => x as u32,
-            None => return Ok(vec![]),
+            None => u32::MAX,
         };
 
         let range = (
