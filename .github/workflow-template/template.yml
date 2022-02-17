@@ -124,10 +124,10 @@ jobs:
       # please double check whether there is performance degradation. Only increase the timeout
       # if the degradation is reasonable or to be fixed soon.
 
-      - name: e2e test w/ Hummock # Note: RiseDev cluster cannot be used to run e2e coverage unless we rebuild frontend in this workflow
+      - name: e2e test w/ Hummock 3-node # Note: RiseDev cluster cannot be used to run e2e coverage unless we rebuild frontend in this workflow
         run: |
           ~/cargo-make/makers clean-data
-          ~/cargo-make/makers ci-1node
+          ~/cargo-make/makers ci-3node
           timeout 3m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
 
       - name: Kill cluster
@@ -136,10 +136,10 @@ jobs:
           ~/cargo-make/makers logs
           ~/cargo-make/makers check-logs
 
-      - name: e2e test w/ Hummock w/o cache
+      - name: e2e test w/ Hummock w/o cache 3-node
         run: |
           ~/cargo-make/makers clean-data
-          RW_NO_CACHE=1 ~/cargo-make/makers ci-1node
+          RW_NO_CACHE=1 ~/cargo-make/makers ci-3node
           timeout 3m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
 
       - name: Kill cluster
