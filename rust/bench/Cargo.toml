@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+async-std = {version = "1.7.0", features = ["std"]}
 bytes = "1"
 bytesize = { version = "1", features = ["serde"] }
 clap = { version = "3", features = ["derive"] }

@@ -1,7 +1,7 @@
 use std::time::Instant;
 
-use bytes::{Buf, Bytes};
-use futures::future;
+use async_std::task;
+use bytes::Buf;
 use itertools::Itertools;
 use rand::distributions::Uniform;
 use rand::prelude::{Distribution, StdRng};
@@ -36,31 +36,40 @@ impl Operations {
             grouped_prefixes[i % opts.concurrency_num as usize].push(prefix);
         }
 
-        // actual prefix scan process
-        let epoch = u64::MAX;
-        let prefix_scan = |prefixes: Vec<Bytes>| async {
-            let mut latencies = vec![];
-            for prefix in prefixes {
-                let start = Instant::now();
-                store
-                    .scan(
-                        prefix.chunk().to_vec()..next_key(prefix.chunk()),
-                        None,
-                        epoch,
-                    )
-                    .await
-                    .unwrap();
-                let time_nano = start.elapsed().as_nanos();
-                latencies.push(time_nano);
-            }
-            latencies
-        };
+        let stores = (0..opts.concurrency_num as usize)
+            .map(|_| store.clone())
+            .collect_vec();
+
+        let mut grouped_prefixes = grouped_prefixes.into_iter().zip_eq(stores).collect_vec();
+
         let total_start = Instant::now();
         let futures = grouped_prefixes
             .drain(..)
-            .map(|prefixes| prefix_scan(prefixes))
+            .map(|(prefixes, store)| async move {
+                let mut latencies = vec![];
+                // actual prefix scan process
+                for prefix in prefixes {
+                    let start = Instant::now();
+                    store
+                        .scan(
+                            prefix.chunk().to_vec()..next_key(prefix.chunk()),
+                            None,
+                            u64::MAX,
+                        )
+                        .await
+                        .unwrap();
+                    let time_nano = start.elapsed().as_nanos();
+                    latencies.push(time_nano);
+                }
+                latencies
+            })
             .collect_vec();
-        let latencies_list: Vec<Vec<u128>> = future::join_all(futures).await;
+
+        let handles = futures.into_iter().map(task::spawn).collect_vec();
+
+        let latencies_list = futures::future::join_all(handles).await;
+
+        // let latencies_list: Vec<Vec<u128>> = future::join_all(futures).await;
         let total_time_nano = total_start.elapsed().as_nanos();
 
         // calculate metrics
