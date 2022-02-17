@@ -367,7 +367,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
         for side in [&mut self.side_l, &mut self.side_r] {
             let mut write_batch = side.keyspace.state_store().start_write_batch();
             for state in side.ht.values_mut() {
-                state.flush(&mut write_batch)?;
+                state.flush(&mut write_batch, epoch)?;
             }
             write_batch.ingest(epoch).await.unwrap();
         }

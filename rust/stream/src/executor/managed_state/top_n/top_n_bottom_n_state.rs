@@ -37,6 +37,8 @@ pub struct ManagedTopNBottomNState<S: StateStore> {
     data_types: Vec<DataType>,
     /// For deserializing `OrderedRow`.
     ordered_row_deserializer: OrderedRowDeserializer,
+    /// epoch
+    epoch: u64,
 }
 
 impl<S: StateStore> ManagedTopNBottomNState<S> {
@@ -46,6 +48,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         keyspace: Keyspace<S>,
         data_types: Vec<DataType>,
         ordered_row_deserializer: OrderedRowDeserializer,
+        epoch: u64,
     ) -> Self {
         Self {
             top_n: BTreeMap::new(),
@@ -57,6 +60,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
             keyspace,
             data_types,
             ordered_row_deserializer,
+            epoch,
         }
     }
 
@@ -236,13 +240,11 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         &mut self,
         number_rows: Option<usize>,
     ) -> Result<Vec<(OrderedRow, Row)>> {
-        // TODO: use the correct epoch
-        let epoch = u64::MAX;
         let pk_row_bytes = self
             .keyspace
             .scan_strip_prefix(
                 number_rows.map(|top_n_count| top_n_count * self.data_types.len()),
-                epoch,
+                self.epoch,
             )
             .await?;
         let data_type_num = self.data_types.len();
@@ -292,6 +294,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
     /// `Flush` can be called by the executor when it receives a barrier and thus needs to
     /// checkpoint.
     pub async fn flush(&mut self, epoch: u64) -> Result<()> {
+        self.epoch = std::cmp::max(self.epoch, epoch);
         if !self.is_dirty() {
             // We don't retain `n` elements as we have a all-or-nothing policy for now.
             return Ok(());
@@ -323,7 +326,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
             }
         }
 
-        write_batch.ingest(epoch).await.unwrap();
+        write_batch.ingest(self.epoch).await.unwrap();
 
         // We don't retain `n` elements as we have a all-or-nothing policy for now.
         Ok(())
@@ -373,6 +376,7 @@ mod tests {
             Keyspace::executor_root(store.clone(), 0x2333),
             data_types,
             ordered_row_deserializer,
+            0,
         )
     }
 

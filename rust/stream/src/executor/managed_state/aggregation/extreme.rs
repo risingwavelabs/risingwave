@@ -66,6 +66,9 @@ where
 
     /// The sort key serializer
     serializer: ExtremeSerializer<A::OwnedItem, EXTREME_TYPE>,
+
+    /// Epoch
+    epoch: u64,
 }
 
 /// A trait over all extreme states.
@@ -90,7 +93,7 @@ pub trait ManagedExtremeState<S: StateStore>: Send + Sync + 'static {
     fn is_dirty(&self) -> bool;
 
     /// Flush the internal state to a write batch.
-    fn flush(&mut self, write_batch: &mut WriteBatch<S>) -> Result<()>;
+    fn flush(&mut self, write_batch: &mut WriteBatch<S>, epoch: u64) -> Result<()>;
 }
 
 impl<S: StateStore, A: Array, const EXTREME_TYPE: usize> GenericManagedState<S, A, EXTREME_TYPE>
@@ -107,6 +110,7 @@ where
         top_n_count: Option<usize>,
         row_count: usize,
         pk_data_types: PkDataTypes,
+        epoch: u64,
     ) -> Result<Self> {
         // Create the internal state based on the value we get.
         Ok(Self {
@@ -117,6 +121,7 @@ where
             top_n_count,
             data_type,
             serializer: ExtremeSerializer::new(data_type, pk_data_types),
+            epoch,
         })
     }
 
@@ -273,11 +278,9 @@ where
             // To future developers: please make **SURE** you have taken `EXTREME_TYPE` into
             // account. EXTREME_MIN and EXTREME_MAX will significantly impact the
             // following logic.
-            // TODO: use the correct epoch
-            let epoch = u64::MAX;
             let all_data = self
                 .keyspace
-                .scan_strip_prefix(self.top_n_count, epoch)
+                .scan_strip_prefix(self.top_n_count, self.epoch)
                 .await?;
 
             for (raw_key, raw_value) in all_data {
@@ -358,7 +361,8 @@ where
         !self.flush_buffer.is_empty()
     }
 
-    fn flush(&mut self, write_batch: &mut WriteBatch<S>) -> Result<()> {
+    fn flush(&mut self, write_batch: &mut WriteBatch<S>, epoch: u64) -> Result<()> {
+        self.epoch = self.epoch.max(epoch);
         self.flush_inner(write_batch)
     }
 }
@@ -419,10 +423,10 @@ pub async fn create_streaming_extreme_state<S: StateStore>(
             match (agg_call.kind, agg_call.return_type) {
                 $(
                     (AggKind::Max, $( $kind )|+) => Ok(Box::new(
-                        ManagedMaxState::<_, $array>::new(keyspace, agg_call.return_type, top_n_count, row_count, pk_data_types).await?,
+                        ManagedMaxState::<_, $array>::new(keyspace, agg_call.return_type, top_n_count, row_count, pk_data_types, 0).await?,
                     )),
                     (AggKind::Min, $( $kind )|+) => Ok(Box::new(
-                        ManagedMinState::<_, $array>::new(keyspace, agg_call.return_type, top_n_count, row_count, pk_data_types).await?,
+                        ManagedMinState::<_, $array>::new(keyspace, agg_call.return_type, top_n_count, row_count, pk_data_types, 0).await?,
                     )),
                 )*
                 (kind, return_type) => unimplemented!("unsupported extreme agg, kind: {:?}, return type: {:?}", kind, return_type),
@@ -466,6 +470,7 @@ mod tests {
             Some(5),
             0,
             PkDataTypes::new(),
+            0,
         )
         .await
         .unwrap();
@@ -485,9 +490,9 @@ mod tests {
         assert!(managed_state.is_dirty());
 
         // flush to write batch and write to state store
-        let mut write_batch = store.start_write_batch();
-        managed_state.flush(&mut write_batch).unwrap();
         let mut epoch: u64 = 0;
+        let mut write_batch = store.start_write_batch();
+        managed_state.flush(&mut write_batch, epoch).unwrap();
         write_batch.ingest(epoch).await.unwrap();
 
         // The minimum should be 0
@@ -514,7 +519,7 @@ mod tests {
         // flush to write batch and write to state store
         epoch += 1;
         let mut write_batch = store.start_write_batch();
-        managed_state.flush(&mut write_batch).unwrap();
+        managed_state.flush(&mut write_batch, epoch).unwrap();
         write_batch.ingest(epoch).await.unwrap();
 
         // The minimum should be 0
@@ -540,7 +545,7 @@ mod tests {
         // flush to write batch and write to state store
         epoch += 1;
         let mut write_batch = store.start_write_batch();
-        managed_state.flush(&mut write_batch).unwrap();
+        managed_state.flush(&mut write_batch, epoch).unwrap();
         write_batch.ingest(epoch).await.unwrap();
 
         // The minimum should be 20
@@ -562,7 +567,7 @@ mod tests {
         // flush to write batch and write to state store
         epoch += 1;
         let mut write_batch = store.start_write_batch();
-        managed_state.flush(&mut write_batch).unwrap();
+        managed_state.flush(&mut write_batch, epoch).unwrap();
         write_batch.ingest(epoch).await.unwrap();
 
         // The minimum should be 25
@@ -584,7 +589,7 @@ mod tests {
         // flush to write batch and write to state store
         epoch += 1;
         let mut write_batch = store.start_write_batch();
-        managed_state.flush(&mut write_batch).unwrap();
+        managed_state.flush(&mut write_batch, epoch).unwrap();
         write_batch.ingest(epoch).await.unwrap();
 
         // The minimum should be 30
@@ -603,6 +608,7 @@ mod tests {
             Some(5),
             row_count,
             PkDataTypes::new(),
+            0,
         )
         .await
         .unwrap();
@@ -634,6 +640,7 @@ mod tests {
             Some(3),
             0,
             smallvec![DataType::Int64],
+            0,
         )
         .await
         .unwrap();
@@ -685,7 +692,7 @@ mod tests {
         // flush
         let mut epoch: u64 = 0;
         let mut write_batch = store.start_write_batch();
-        managed_state.flush(&mut write_batch).unwrap();
+        managed_state.flush(&mut write_batch, epoch).unwrap();
         write_batch.ingest(epoch).await.unwrap();
 
         // The minimum should be 1, or the maximum should be 5
@@ -703,7 +710,7 @@ mod tests {
         // flush
         epoch += 1;
         let mut write_batch = store.start_write_batch();
-        managed_state.flush(&mut write_batch).unwrap();
+        managed_state.flush(&mut write_batch, epoch).unwrap();
         write_batch.ingest(epoch).await.unwrap();
 
         // The minimum should still be 1, or the maximum should still be 5
@@ -720,6 +727,7 @@ mod tests {
             Some(3),
             0,
             PkDataTypes::new(),
+            0,
         )
         .await
         .unwrap();
@@ -752,7 +760,7 @@ mod tests {
                 // flush to write batch and write to state store
                 epoch += 1;
                 let mut write_batch = store.start_write_batch();
-                managed_state.flush(&mut write_batch).unwrap();
+                managed_state.flush(&mut write_batch, epoch).unwrap();
                 write_batch.ingest(epoch).await.unwrap();
             }
 
@@ -764,7 +772,7 @@ mod tests {
             // flush to write batch and write to state store
             epoch += 1;
             let mut write_batch = store.start_write_batch();
-            managed_state.flush(&mut write_batch).unwrap();
+            managed_state.flush(&mut write_batch, epoch).unwrap();
             write_batch.ingest(epoch).await.unwrap();
 
             // The minimum should be 6
@@ -799,6 +807,7 @@ mod tests {
             Some(3),
             0,
             PkDataTypes::new(),
+            0,
         )
         .await
         .unwrap();
@@ -854,7 +863,7 @@ mod tests {
             // flush to write batch and write to state store
             let epoch: u64 = 0;
             let mut write_batch = store.start_write_batch();
-            managed_state.flush(&mut write_batch).unwrap();
+            managed_state.flush(&mut write_batch, epoch).unwrap();
             write_batch.ingest(epoch).await.unwrap();
 
             let value = managed_state
@@ -877,7 +886,7 @@ mod tests {
         epoch: u64,
     ) {
         let mut write_batch = keyspace.state_store().start_write_batch();
-        managed_state.flush(&mut write_batch).unwrap();
+        managed_state.flush(&mut write_batch, epoch).unwrap();
         write_batch.ingest(epoch).await.unwrap();
     }
 
@@ -896,6 +905,7 @@ mod tests {
             Some(3),
             0,
             PkDataTypes::new(),
+            0,
         )
         .await
         .unwrap();

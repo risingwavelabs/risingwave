@@ -157,7 +157,7 @@ impl<S: StateStore> AggExecutor for SimpleAggExecutor<S> {
 
         let mut write_batch = self.keyspace.state_store().start_write_batch();
         for state in &mut states.managed_states {
-            state.flush(&mut write_batch)?;
+            state.flush(&mut write_batch, epoch)?;
         }
         write_batch.ingest(epoch).await.unwrap();
 

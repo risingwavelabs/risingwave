@@ -40,10 +40,18 @@ pub struct AllOrNoneState<S: StateStore> {
 
     /// The keyspace to operate on.
     keyspace: Keyspace<S>,
+
+    /// Epoch
+    epoch: u64,
 }
 
 impl<S: StateStore> AllOrNoneState<S> {
-    pub fn new(keyspace: Keyspace<S>, data_types: Vec<DataType>, pk_indices: Vec<usize>) -> Self {
+    pub fn new(
+        keyspace: Keyspace<S>,
+        data_types: Vec<DataType>,
+        pk_indices: Vec<usize>,
+        epoch: u64,
+    ) -> Self {
         let pk_data_types = pk_indices.iter().map(|idx| data_types[*idx]).collect_vec();
         Self {
             cached: None,
@@ -53,6 +61,7 @@ impl<S: StateStore> AllOrNoneState<S> {
             pk_data_types,
             pk_indices,
             keyspace,
+            epoch,
         }
     }
 
@@ -100,7 +109,8 @@ impl<S: StateStore> AllOrNoneState<S> {
     }
 
     // Flush data to the state store
-    pub fn flush(&mut self, write_batch: &mut WriteBatch<S>) -> Result<()> {
+    pub fn flush(&mut self, write_batch: &mut WriteBatch<S>, epoch: u64) -> Result<()> {
+        self.epoch = self.epoch.max(epoch);
         let mut local = write_batch.prefixify(&self.keyspace);
 
         for (pk, v) in std::mem::take(&mut self.flush_buffer) {
@@ -121,10 +131,9 @@ impl<S: StateStore> AllOrNoneState<S> {
 
     // Fetch cache from the state store.
     async fn fetch_cache(&mut self) -> Result<()> {
-        let epoch = u64::MAX;
         assert!(self.cached.is_none());
 
-        let all_data = self.keyspace.scan_strip_prefix(None, epoch).await?;
+        let all_data = self.keyspace.scan_strip_prefix(None, self.epoch).await?;
 
         // Fetch cached states.
         let mut cached = BTreeMap::new();
@@ -198,7 +207,7 @@ mod tests {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
         let mut managed_state =
-            AllOrNoneState::new(keyspace, vec![DataType::Int64, DataType::Int64], vec![0]);
+            AllOrNoneState::new(keyspace, vec![DataType::Int64, DataType::Int64], vec![0], 0);
         assert!(!managed_state.is_dirty());
         let columns = vec![
             column_nonnull! { I64Array, [3, 2, 1] },
@@ -231,7 +240,7 @@ mod tests {
         // flush to write batch and write to state store
         let epoch: u64 = 0;
         let mut write_batch = store.start_write_batch();
-        managed_state.flush(&mut write_batch).unwrap();
+        managed_state.flush(&mut write_batch, epoch).unwrap();
         write_batch.ingest(epoch).await.unwrap();
 
         assert!(!managed_state.is_dirty());

@@ -72,10 +72,10 @@ impl<S: StateStore> ManagedStateImpl<S> {
     }
 
     /// Flush the internal state to a write batch.
-    pub fn flush(&mut self, write_batch: &mut WriteBatch<S>) -> Result<()> {
+    pub fn flush(&mut self, write_batch: &mut WriteBatch<S>, epoch: u64) -> Result<()> {
         match self {
             Self::Value(state) => state.flush(write_batch),
-            Self::Extreme(state) => state.flush(write_batch),
+            Self::Extreme(state) => state.flush(write_batch, epoch),
         }
     }
 

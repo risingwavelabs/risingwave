@@ -235,7 +235,7 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
                 if states.is_dirty() {
                     dirty_cnt += 1;
                     for state in &mut states.managed_states {
-                        state.flush(&mut write_batch)?;
+                        state.flush(&mut write_batch, epoch)?;
                     }
                 }
             }

@@ -53,6 +53,9 @@ pub struct ManagedStringAggState<S: StateStore> {
 
     /// Serializer to get the bytes of sorted columns.
     sorted_arrays_serializer: OrderedArraysSerializer,
+
+    /// Epoch
+    epoch: u64,
 }
 
 impl<S: StateStore> ManagedStringAggState<S> {
@@ -66,6 +69,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
         value_index: usize,
         delimiter: String,
         sort_key_serializer: OrderedArraysSerializer,
+        epoch: u64,
     ) -> Result<Self> {
         Ok(Self {
             cache: BTreeMap::new(),
@@ -77,6 +81,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
             delimiter,
             keyspace,
             sorted_arrays_serializer: sort_key_serializer,
+            epoch,
         })
     }
 
@@ -101,9 +106,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
         // storage.
         assert!(!self.is_dirty());
         // Read all.
-        // TODO: use the correct epoch
-        let epoch = u64::MAX;
-        let all_data = self.keyspace.scan_strip_prefix(None, epoch).await?;
+        let all_data = self.keyspace.scan_strip_prefix(None, self.epoch).await?;
         for (raw_key, raw_value) in all_data {
             // We only need to deserialize the value, and keep the key as bytes.
             let mut deserializer = memcomparable::Deserializer::new(&raw_value[..]);
@@ -230,7 +233,8 @@ impl<S: StateStore> ManagedExtremeState<S> for ManagedStringAggState<S> {
         self.dirty
     }
 
-    fn flush(&mut self, write_batch: &mut WriteBatch<S>) -> Result<()> {
+    fn flush(&mut self, write_batch: &mut WriteBatch<S>, epoch: u64) -> Result<()> {
+        self.epoch = self.epoch.max(epoch);
         if !self.is_dirty() {
             return Ok(());
         }
@@ -288,6 +292,7 @@ mod tests {
             value_index,
             "||".to_string(),
             sort_key_serializer,
+            0,
         )
         .await
         .unwrap();
@@ -327,7 +332,7 @@ mod tests {
 
         let mut epoch: u64 = 0;
         let mut write_batch = store.start_write_batch();
-        managed_state.flush(&mut write_batch).unwrap();
+        managed_state.flush(&mut write_batch, epoch).unwrap();
         write_batch.ingest(epoch).await.unwrap();
         assert!(!managed_state.is_dirty());
 
@@ -357,7 +362,7 @@ mod tests {
 
         epoch += 1;
         let mut write_batch = store.start_write_batch();
-        managed_state.flush(&mut write_batch).unwrap();
+        managed_state.flush(&mut write_batch, epoch).unwrap();
         write_batch.ingest(epoch).await.unwrap();
         assert!(!managed_state.is_dirty());
 
@@ -388,7 +393,7 @@ mod tests {
 
         epoch += 1;
         let mut write_batch = store.start_write_batch();
-        managed_state.flush(&mut write_batch).unwrap();
+        managed_state.flush(&mut write_batch, epoch).unwrap();
         write_batch.ingest(epoch).await.unwrap();
         assert!(!managed_state.is_dirty());
 
@@ -470,7 +475,7 @@ mod tests {
 
         epoch += 1;
         let mut write_batch = store.start_write_batch();
-        managed_state.flush(&mut write_batch).unwrap();
+        managed_state.flush(&mut write_batch, epoch).unwrap();
         write_batch.ingest(epoch).await.unwrap();
         assert!(!managed_state.is_dirty());
         let row_count = managed_state.get_row_count();
@@ -498,7 +503,7 @@ mod tests {
 
         epoch += 1;
         let mut write_batch = store.start_write_batch();
-        managed_state.flush(&mut write_batch).unwrap();
+        managed_state.flush(&mut write_batch, epoch).unwrap();
         write_batch.ingest(epoch).await.unwrap();
         assert!(!managed_state.is_dirty());
 

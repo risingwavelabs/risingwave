@@ -100,6 +100,7 @@ impl<S: StateStore> TopNExecutor<S> {
             middle_sub_keyspace,
             row_data_types.clone(),
             ordered_row_deserializer.clone(),
+            0,
         );
         let managed_highest_state = ManagedTopNState::<S, TOP_N_MIN>::new(
             cache_size,
