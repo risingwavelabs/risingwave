@@ -207,6 +207,10 @@ impl StreamManagerCore {
         Self::with_store_and_context(state_store, SharedContext::new(addr))
     }
 
+    fn get_actor_info(&mut self) -> &mut HashMap<u32, ActorInfo>{
+        &mut self.actor_infos
+    }
+
     fn with_store_and_context(state_store: StateStoreImpl, context: SharedContext) -> Self {
         let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
 
@@ -241,7 +245,7 @@ impl StreamManagerCore {
             .iter()
             .map(|down_id| {
                 let host_addr = self
-                    .actor_infos
+                    .get_actor_info()
                     .get(down_id)
                     .ok_or_else(|| {
                         RwError::from(ErrorCode::InternalError(format!(
@@ -701,7 +705,7 @@ impl StreamManagerCore {
                     Ok(self.mock_source.1.take().unwrap())
                 } else {
                     let upstream_addr = self
-                        .actor_infos
+                        .get_actor_info()
                         .get(up_id)
                         .ok_or_else(|| {
                             RwError::from(ErrorCode::InternalError(
@@ -809,14 +813,7 @@ impl StreamManagerCore {
         req: stream_service::BroadcastActorInfoTableRequest,
     ) -> Result<()> {
         for actor in req.get_info() {
-            let ret = self.actor_infos.insert(actor.get_actor_id(), actor.clone());
-            if ret.is_some() {
-                return Err(ErrorCode::InternalError(format!(
-                    "duplicated actor {}",
-                    actor.get_actor_id()
-                ))
-                .into());
-            }
+            self.get_actor_info().insert(actor.get_actor_id(), actor.clone());
         }
         Ok(())
     }
@@ -827,14 +824,14 @@ impl StreamManagerCore {
         let handle = self.handles.remove(&actor_id).unwrap();
         self.context.retain(|&(up_id, _)| up_id != actor_id);
 
-        self.actor_infos.remove(&actor_id);
+        self.get_actor_info().remove(&actor_id);
         self.actors.remove(&actor_id);
         // Task should have already stopped when this method is invoked.
         handle.abort();
     }
 
     fn build_channel_for_chain_node(
-        &self,
+        &mut self,
         actor_id: u32,
         stream_node: &stream_plan::StreamNode,
     ) -> Result<()> {
@@ -847,7 +844,7 @@ impl StreamManagerCore {
                 "first input of chain node should be merge node"
             )?;
             for upstream_actor_id in &merge.upstream_actor_id {
-                if !self.actor_infos.contains_key(upstream_actor_id) {
+                if !self.get_actor_info().contains_key(upstream_actor_id) {
                     return Err(ErrorCode::InternalError(format!(
                         "chain upstream actor {} not exists",
                         upstream_actor_id
@@ -886,7 +883,7 @@ impl StreamManagerCore {
             }
         }
 
-        for (current_id, actor) in &self.actors {
+        for (current_id, actor) in & self.actors.clone() {
             self.build_channel_for_chain_node(*current_id, actor.nodes.as_ref().unwrap())?;
 
             for downstream_id in actor.get_downstream_actor_id() {

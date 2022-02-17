@@ -13,3 +13,4 @@
 
 mod meta_client;
 pub use meta_client::MetaClient;
+pub mod compute_client;
