@@ -14,9 +14,7 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 
 use crate::common::SourceChunkBuilder;
-use crate::{
-    BatchSourceReader, Source, SourceColumnDesc, SourceParser, SourceWriter, StreamSourceReader,
-};
+use crate::{BatchSourceReader, Source, SourceColumnDesc, SourceParser, StreamSourceReader};
 
 /// `KAFKA_SYNC_CALL_TIMEOUT` provides a timeout parameter for `rdkafka` calls, note that currently
 /// we only use `committed_offsets` and `fetch_metadata` for synchronization calls, these two calls
@@ -52,9 +50,6 @@ pub struct HighLevelKafkaSourceReaderContext {
     pub query_id: Option<String>,
     pub bound_timestamp_ms: Option<i64>,
 }
-
-/// `HighLevelKafkaSourceWriter` currently does not have any implementation
-pub struct HighLevelKafkaSourceWriter {}
 
 /// `HighLevelKafkaSourceStreamReader` is used to generate `StreamChunk` messages, when there are
 /// messages will be stacked up to `DEFAULT_CHUNK_BUFFER_SIZE` messages and generate `StreamChunk`,
@@ -226,22 +221,10 @@ impl HighLevelKafkaSource {
 }
 
 #[async_trait]
-impl SourceWriter for HighLevelKafkaSourceWriter {
-    async fn write(&mut self, _chunk: StreamChunk) -> Result<()> {
-        todo!()
-    }
-
-    async fn flush(&mut self) -> Result<()> {
-        todo!()
-    }
-}
-
-#[async_trait]
 impl Source for HighLevelKafkaSource {
     type ReaderContext = HighLevelKafkaSourceReaderContext;
     type BatchReader = HighLevelKafkaSourceBatchReader;
     type StreamReader = HighLevelKafkaSourceStreamReader;
-    type Writer = HighLevelKafkaSourceWriter;
 
     fn batch_reader(
         &self,
@@ -305,10 +288,6 @@ impl Source for HighLevelKafkaSource {
             parser: self.parser.clone(),
             columns: Arc::new(columns),
         })
-    }
-
-    fn create_writer(&self) -> Result<Self::Writer> {
-        todo!()
     }
 }
 

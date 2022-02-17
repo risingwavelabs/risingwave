@@ -65,7 +65,6 @@ pub trait Source: Send + Sync + 'static {
     type ReaderContext;
     type BatchReader: BatchSourceReader;
     type StreamReader: StreamSourceReader;
-    type Writer: SourceWriter;
 
     /// Create a batch reader
     fn batch_reader(
@@ -80,18 +79,6 @@ pub trait Source: Send + Sync + 'static {
         context: Self::ReaderContext,
         column_ids: Vec<i32>,
     ) -> Result<Self::StreamReader>;
-
-    /// Create a writer
-    fn create_writer(&self) -> Result<Self::Writer>;
-}
-
-#[async_trait]
-pub trait SourceWriter: Send + Sync + 'static {
-    /// `write` a stream chunk into table
-    async fn write(&mut self, chunk: StreamChunk) -> Result<()>;
-
-    /// `flush` ensures data flushed and make sure writer can be closed safely
-    async fn flush(&mut self) -> Result<()>;
 }
 
 #[async_trait]
