@@ -4,6 +4,7 @@ import static java.util.Objects.requireNonNull;
 
 import com.risingwave.catalog.CatalogService;
 import com.risingwave.catalog.SchemaCatalog;
+import com.risingwave.catalog.TableCatalog;
 import com.risingwave.common.config.Configuration;
 import com.risingwave.execution.handler.SqlHandlerFactory;
 import com.risingwave.node.WorkerNodeManager;
@@ -26,7 +27,7 @@ public class ExecutionContext implements Context {
   private final String schema;
   private final FrontendEnv frontendEnv;
   private final SessionConfiguration sessionConfiguration;
-  private final List<Integer> dependentTables;
+  private final List<TableCatalog.TableId> dependentTables;
 
   private ExecutionContext(Builder builder) {
     this.database = requireNonNull(builder.database, "Current database can't be null!");
@@ -45,7 +46,7 @@ public class ExecutionContext implements Context {
     return frontendEnv;
   }
 
-  public List<Integer> getDependentTables() {
+  public List<TableCatalog.TableId> getDependentTables() {
     return dependentTables;
   }
 
@@ -131,7 +132,7 @@ public class ExecutionContext implements Context {
     private String schema;
     private FrontendEnv frontendEnv;
     private SessionConfiguration sessionConfiguration;
-    private List<Integer> dependentTables = new ArrayList<>();
+    private List<TableCatalog.TableId> dependentTables = new ArrayList<>();
 
     private Builder() {}
 
@@ -155,7 +156,7 @@ public class ExecutionContext implements Context {
       return this;
     }
 
-    public Builder withDependentTables(List<Integer> dependentTables) {
+    public Builder withDependentTables(List<TableCatalog.TableId> dependentTables) {
       this.dependentTables = dependentTables;
       return this;
     }

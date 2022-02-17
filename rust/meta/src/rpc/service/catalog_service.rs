@@ -1,3 +1,6 @@
+use std::sync::Arc;
+
+use risingwave_common::array::RwError;
 use risingwave_common::error::tonic_err;
 use risingwave_pb::meta::catalog_service_server::CatalogService;
 use risingwave_pb::meta::create_request::CatalogBody;
@@ -9,7 +12,8 @@ use risingwave_pb::plan::DatabaseRefId;
 use tonic::{Request, Response, Status};
 
 use crate::manager::{
-    EpochGeneratorRef, IdCategory, IdGeneratorManagerRef, MetaSrvEnv, StoredCatalogManagerRef,
+    EpochGeneratorRef, IdCategory, IdGeneratorManagerRef, MetaSrvEnv, StoredCatalogManager,
+    StoredCatalogManagerRef,
 };
 
 #[derive(Clone)]
@@ -20,12 +24,14 @@ pub struct CatalogServiceImpl {
 }
 
 impl CatalogServiceImpl {
-    pub fn new(env: MetaSrvEnv) -> Self {
-        CatalogServiceImpl {
+    pub async fn new(env: MetaSrvEnv) -> Result<Self, RwError> {
+        Ok(CatalogServiceImpl {
             id_gen_manager: env.id_gen_manager_ref(),
             epoch_generator: env.epoch_generator_ref(),
-            stored_catalog_manager: env.stored_catalog_manager_ref(),
-        }
+            stored_catalog_manager: Arc::new(
+                StoredCatalogManager::new(env.meta_store_ref()).await?,
+            ),
+        })
     }
 }
 

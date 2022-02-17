@@ -27,8 +27,6 @@ import com.risingwave.rpc.ComputeClientManager;
 import com.risingwave.rpc.Messages;
 import com.risingwave.scheduler.streaming.StreamManager;
 import java.util.ArrayList;
-import java.util.List;
-import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.ddl.SqlCreateMaterializedView;
@@ -68,8 +66,8 @@ public class CreateMaterializedViewHandler implements SqlHandler {
     }
 
     // Get tables on which the MV depends.
-    ArrayList<Integer> dependencies = new ArrayList<>();
-    getDependencies(mv, dependencies);
+    ArrayList<TableCatalog.TableId> dependencies = new ArrayList<>();
+    StreamingPlan.getDependencies(mv, dependencies);
 
     ExecutionContext.Builder builder = ExecutionContext.builder();
     builder
@@ -123,8 +121,9 @@ public class CreateMaterializedViewHandler implements SqlHandler {
     }
     builder.setCollation(rootNode.getCollation());
     builder.setMv(true);
-    if (!context.getDependentTables().isEmpty())
+    if (!context.getDependentTables().isEmpty()) {
       builder.setDependentTables(context.getDependentTables());
+    }
     rootNode.getPrimaryKeyIndices().forEach(builder::addPrimaryKey);
     CreateMaterializedViewInfo mvInfo = builder.build();
     MaterializedViewCatalog viewCatalog =
@@ -144,18 +143,5 @@ public class CreateMaterializedViewHandler implements SqlHandler {
       }
     }
     return true;
-  }
-
-  @VisibleForTesting
-  public void getDependencies(RelNode root, List<Integer> dependencies) {
-    if (root instanceof RwStreamTableSource)
-      dependencies.add(((RwStreamTableSource) root).getTableId().getValue());
-    else if (root instanceof RwStreamChain)
-      dependencies.add(((RwStreamChain) root).getTableId().getValue());
-    root.getInputs()
-        .forEach(
-            node -> {
-              getDependencies(root, dependencies);
-            });
   }
 }

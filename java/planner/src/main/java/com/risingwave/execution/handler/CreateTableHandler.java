@@ -17,9 +17,7 @@ import com.risingwave.execution.result.DdlResult;
 import com.risingwave.pgwire.msg.StatementType;
 import com.risingwave.planner.planner.streaming.StreamPlanner;
 import com.risingwave.planner.rel.serialization.StreamingPlanSerializer;
-import com.risingwave.planner.rel.streaming.RwStreamChain;
 import com.risingwave.planner.rel.streaming.RwStreamMaterializedView;
-import com.risingwave.planner.rel.streaming.RwStreamTableSource;
 import com.risingwave.planner.rel.streaming.StreamingPlan;
 import com.risingwave.planner.sql.SqlConverter;
 import com.risingwave.proto.common.Status;
@@ -38,8 +36,6 @@ import com.risingwave.scheduler.streaming.StreamManager;
 import com.risingwave.sql.parser.SqlParser;
 import java.util.ArrayList;
 import java.util.Iterator;
-import java.util.List;
-import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.ddl.SqlColumnDeclaration;
@@ -90,8 +86,8 @@ public class CreateTableHandler implements SqlHandler {
     }
 
     // Get tables on which the MV depends.
-    ArrayList<Integer> dependencies = new ArrayList<>();
-    getDependencies(mv, dependencies);
+    ArrayList<TableCatalog.TableId> dependencies = new ArrayList<>();
+    StreamingPlan.getDependencies(mv, dependencies);
 
     ExecutionContext.Builder builder = ExecutionContext.builder();
     builder
@@ -150,8 +146,9 @@ public class CreateTableHandler implements SqlHandler {
     builder.setCollation(rootNode.getCollation());
     builder.setMv(true);
     builder.setAssociated(true);
-    if (!context.getDependentTables().isEmpty())
+    if (!context.getDependentTables().isEmpty()) {
       builder.setDependentTables(context.getDependentTables());
+    }
     CreateMaterializedViewInfo mvInfo = builder.build();
     MaterializedViewCatalog viewCatalog =
         context.getCatalogService().createMaterializedView(schemaName, mvInfo);
@@ -229,18 +226,5 @@ public class CreateTableHandler implements SqlHandler {
     TableCatalog table = context.getCatalogService().createTable(schemaName, tableInfo);
     tableId = table.getId();
     return TableNodeSerializer.createProtoFromCatalog(table, true, null);
-  }
-
-  @VisibleForTesting
-  public void getDependencies(RelNode root, List<Integer> dependencies) {
-    if (root instanceof RwStreamTableSource)
-      dependencies.add(((RwStreamTableSource) root).getTableId().getValue());
-    else if (root instanceof RwStreamChain)
-      dependencies.add(((RwStreamChain) root).getTableId().getValue());
-    root.getInputs()
-        .forEach(
-            node -> {
-              getDependencies(root, dependencies);
-            });
   }
 }

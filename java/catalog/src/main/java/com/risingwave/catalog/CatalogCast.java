@@ -83,6 +83,25 @@ public class CatalogCast {
       colBuilder.setColumnType(columns.right.getDataType().getProtobufType());
       builder.addColumnDescs(colBuilder.build());
     }
+    for (var tableId : createTableInfo.getDependentTables()) {
+      SchemaCatalog.SchemaId schemaId = tableId.getParent();
+      DatabaseCatalog.DatabaseId databaseId = schemaId.getParent();
+
+      DatabaseRefId.Builder databaseRefIdBuilder = DatabaseRefId.newBuilder();
+      databaseRefIdBuilder.setDatabaseId(databaseId.getValue());
+      DatabaseRefId databaseRefId = databaseRefIdBuilder.build();
+
+      SchemaRefId.Builder schemaRefIdBuilder = SchemaRefId.newBuilder();
+      schemaRefIdBuilder.setSchemaId(tableId.getParent().getValue());
+      schemaRefIdBuilder.setDatabaseRefId(databaseRefId);
+      SchemaRefId schemaRefId = schemaRefIdBuilder.build();
+
+      TableRefId.Builder tableRefIdBuilder = TableRefId.newBuilder();
+      tableRefIdBuilder.setTableId(tableId.getValue());
+      tableRefIdBuilder.setSchemaRefId(schemaRefId);
+      TableRefId tableRefId = tableRefIdBuilder.build();
+      builder.addDependentTables(tableRefId);
+    }
 
     if (createTableInfo.isMv()) {
       CreateMaterializedViewInfo createMaterializedViewInfo =
@@ -130,6 +149,18 @@ public class CatalogCast {
     for (com.risingwave.proto.plan.ColumnDesc desc : table.getColumnDescsList()) {
       builder.addColumn(desc.getName(), new com.risingwave.catalog.ColumnDesc(desc));
     }
+    List<TableCatalog.TableId> dependentTables = new ArrayList<>();
+    for (var tableRefId : table.getDependentTablesList()) {
+      SchemaRefId schemaRefId = tableRefId.getSchemaRefId();
+      DatabaseRefId databaseRefId = schemaRefId.getDatabaseRefId();
+      DatabaseCatalog.DatabaseId databaseId =
+          new DatabaseCatalog.DatabaseId(databaseRefId.getDatabaseId());
+      SchemaCatalog.SchemaId schemaId =
+          new SchemaCatalog.SchemaId(schemaRefId.getSchemaId(), databaseId);
+      TableCatalog.TableId tableId = new TableCatalog.TableId(tableRefId.getTableId(), schemaId);
+      dependentTables.add(tableId);
+    }
+    builder.setDependentTables(dependentTables);
     if (!table.getIsMaterializedView()) {
       return builder.build();
     }

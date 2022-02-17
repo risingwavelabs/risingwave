@@ -21,7 +21,7 @@ use crate::model::MetadataModel;
 #[tokio::test]
 async fn test_hummock_pin_unpin() -> Result<()> {
     let sled_root = tempfile::tempdir().unwrap();
-    let env = MetaSrvEnv::for_test_with_sled(sled_root).await?;
+    let env = MetaSrvEnv::for_test_with_sled(sled_root).await;
     let hummock_manager = HummockManager::new(env.clone()).await?;
     let context_id = 0;
     let version_id = FIRST_VERSION_ID;
@@ -85,7 +85,7 @@ async fn test_hummock_pin_unpin() -> Result<()> {
 #[tokio::test]
 async fn test_hummock_get_compact_task() -> Result<()> {
     let sled_root = tempfile::tempdir().unwrap();
-    let env = MetaSrvEnv::for_test_with_sled(sled_root).await?;
+    let env = MetaSrvEnv::for_test_with_sled(sled_root).await;
     let hummock_manager = HummockManager::new(env.clone()).await?;
     let context_id = 0;
 
@@ -182,7 +182,7 @@ fn generate_test_tables(epoch: u64, table_id: &mut u64) -> Vec<SstableInfo> {
 #[tokio::test]
 async fn test_hummock_table() -> Result<()> {
     let sled_root = tempfile::tempdir().unwrap();
-    let env = MetaSrvEnv::for_test_with_sled(sled_root).await?;
+    let env = MetaSrvEnv::for_test_with_sled(sled_root).await;
     let hummock_manager = HummockManager::new(env.clone()).await?;
     let context_id = 0;
 
@@ -230,7 +230,7 @@ async fn test_hummock_table() -> Result<()> {
 #[tokio::test]
 async fn test_hummock_transaction() -> Result<()> {
     let sled_root = tempfile::tempdir().unwrap();
-    let env = MetaSrvEnv::for_test_with_sled(sled_root).await?;
+    let env = MetaSrvEnv::for_test_with_sled(sled_root).await;
     let hummock_manager = HummockManager::new(env.clone()).await?;
     let context_id = 0;
     let mut table_id = 1;
@@ -441,7 +441,7 @@ async fn test_hummock_transaction() -> Result<()> {
 #[tokio::test]
 async fn test_release_context_resource() -> Result<()> {
     let sled_root = tempfile::tempdir().unwrap();
-    let env = MetaSrvEnv::for_test_with_sled(sled_root).await?;
+    let env = MetaSrvEnv::for_test_with_sled(sled_root).await;
     let hummock_manager = Arc::new(HummockManager::new(env.clone()).await?);
     let context_id_1 = 1;
     let context_id_2 = 2;

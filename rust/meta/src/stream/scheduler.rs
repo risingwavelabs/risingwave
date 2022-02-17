@@ -156,7 +156,7 @@ mod test {
 
     #[tokio::test]
     async fn test_schedule() -> Result<()> {
-        let env = MetaSrvEnv::for_test().await?;
+        let env = MetaSrvEnv::for_test().await;
         let cluster_manager = Arc::new(StoredClusterManager::new(env.clone(), None).await?);
         let actors = (0..15).collect::<Vec<u32>>();
         let source_actors = (20..30).collect::<Vec<u32>>();

@@ -2,7 +2,6 @@ package com.risingwave.catalog;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import com.risingwave.proto.plan.TableRefId;
 import javax.annotation.Nullable;
 import org.apache.calcite.rel.RelCollation;
 import org.apache.calcite.util.ImmutableIntList;
@@ -34,7 +33,7 @@ public class CreateMaterializedViewInfo extends CreateTableInfo {
       boolean appendOnly,
       String rowFormat,
       String rowSchemaLocation,
-      ImmutableList<TableRefId> dependentTables,
+      ImmutableList<TableCatalog.TableId> dependentTables,
       @Nullable RelCollation collation,
       boolean associated) {
     super(
