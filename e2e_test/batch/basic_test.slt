@@ -275,14 +275,14 @@ query RI
 select * from t
 ----
 12345.01234 1
-12345.00000 2
-3.03000 3
-4.04000 4
+12345 2
+3.03 3
+4.04 4
 
 query R
 select min(v1) from t
 ----
-3.03000
+3.03
 
 statement ok
 drop table t

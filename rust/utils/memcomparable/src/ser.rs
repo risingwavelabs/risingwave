@@ -56,10 +56,8 @@ impl<B: BufMut> MaybeFlip<B> {
     def_method!(put_u16, u16);
     def_method!(put_u32, u32);
     def_method!(put_u64, u64);
-    // def_method!(put_i8, i8);
     def_method!(put_i32, i32);
     def_method!(put_i64, i64);
-    // def_method!(put_i128, i128);
 
     fn put_slice(&mut self, src: &[u8]) {
         for &val in src {

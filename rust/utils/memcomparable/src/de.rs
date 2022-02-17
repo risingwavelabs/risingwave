@@ -67,10 +67,8 @@ impl<B: Buf> MaybeFlip<B> {
     def_method!(get_u16, u16);
     def_method!(get_u32, u32);
     def_method!(get_u64, u64);
-    // def_method!(get_i8, i8);
     def_method!(get_i32, i32);
     def_method!(get_i64, i64);
-    // def_method!(get_i128, i128);
 
     fn copy_to_slice(&mut self, dst: &mut [u8]) {
         self.input.copy_to_slice(dst);
