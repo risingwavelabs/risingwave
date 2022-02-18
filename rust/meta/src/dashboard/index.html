@@ -314,7 +314,7 @@ const mvActors = (actors, mvId) => `
         const fragmentId = fragmentIdOf(actor)
 
         if (actor.nodes.chainNode) {
-          let upstreamActorIds = actor.nodes.chainNode.upstreamActorIds
+          let upstreamActorIds = actor.nodes.input[0].mergeNode.upstreamActorId
           if (upstreamActorIds.length != 0) {
             let upstreamFragmentId = fragmentIdOf(actorMap.get(upstreamActorIds[0]))
             actorNodes.get(upstreamFragmentId).parents.push(fragmentId)
@@ -398,6 +398,7 @@ const mvActors = (actors, mvId) => `
         `<a target="_blank" rel="noopener noreferrer" class="text-sky-600" href="http://localhost:16680/search?service=compute&tags=%7B%22actor_id%22%3A%22${actorId}%22%2C%22msg%22%3A%22chunk%22%7D">Trace Message of Actor #${actorId}</a><br>
          <a target="_blank" rel="noopener noreferrer" class="text-sky-600" href="http://localhost:16680/search?service=compute&tags=%7B%22actor_id%22%3A%22${actorId}%22%2C%22epoch%22%3A%22-1%22%7D">Trace Epoch "-1" of Actor #${actorId}</a><br>`
       return `<div class="flex-1 overflow-x-scroll border border-gray-200 p-1">
+        <p class="text-xs font-mono">@${selectedActor.node.host.host}:${selectedActor.node.host.port}</p>
         <p>${actorJump()}</p>
         <p class="whitespace-pre text-xs font-mono">${JSON.stringify(node, null, 2)}</p>
       </div>`

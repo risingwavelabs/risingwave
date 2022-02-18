@@ -174,6 +174,7 @@ impl_aggregator! { F32Array, Float32, F32Array, Float32 }
 impl_aggregator! { F64Array, Float64, F64Array, Float64 }
 impl_aggregator! { DecimalArray, Decimal, DecimalArray, Decimal }
 impl_aggregator! { Utf8Array, Utf8, Utf8Array, Utf8 }
+impl_aggregator! { BoolArray, Bool, BoolArray, Bool } // TODO(#359): remove once unnecessary
 impl_aggregator! { I16Array, Int16, I64Array, Int64 }
 impl_aggregator! { I32Array, Int32, I64Array, Int64 }
 impl_aggregator! { F32Array, Float32, I64Array, Int64 }

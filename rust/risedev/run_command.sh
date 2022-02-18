@@ -7,7 +7,7 @@ echo "logging to $1, and status to $2"
 
 "${@:3}" 2>&1 | tee "$1"
 
-RET_STATUS="$?"
+RET_STATUS="${PIPESTATUS[0]}"
 
 echo "status ${RET_STATUS}" > "$2"
 

@@ -31,7 +31,7 @@ async fn gen_and_upload_table(
     for kv in kv_pairs {
         b.add(
             &iterator_test_key_of_epoch(TEST_KEY_TABLE_ID, kv.0, epoch),
-            kv.1,
+            kv.1.as_slice(),
         );
     }
     let (data, meta) = b.finish();

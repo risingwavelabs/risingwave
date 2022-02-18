@@ -290,7 +290,7 @@ pub async fn gen_test_sstable_base(
     for i in 0..TEST_KEYS_COUNT {
         b.add(
             &iterator_test_key_of(table_idx, idx_mapping(i)),
-            HummockValue::Put(test_value_of(table_idx, idx_mapping(i))),
+            HummockValue::Put(&test_value_of(table_idx, idx_mapping(i))),
         );
     }
 

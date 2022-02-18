@@ -5,6 +5,7 @@ use std::thread::sleep;
 use std::time::Duration;
 
 use anyhow::anyhow;
+use console::style;
 use isahc::prelude::*;
 use isahc::Request;
 
@@ -44,10 +45,11 @@ pub fn wait_tcp(
         if detect_failure && p.exists() {
             let mut buf = String::new();
             std::fs::File::open(p)?.read_to_string(&mut buf)?;
+
             return Err(anyhow!(
                 "{} exited while waiting for connection: {}",
-                id,
-                buf
+                style(id).red().bold(),
+                buf,
             ));
         }
 

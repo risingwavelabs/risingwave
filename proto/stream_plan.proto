@@ -126,9 +126,10 @@ message StreamNode {
 // We encode both the type and other usage information in the proto.
 message Dispatcher {
   enum DispatcherType {
-    SIMPLE = 0;
+    INVALID = 0;
     HASH = 1;
     BROADCAST = 2;
+    SIMPLE = 3;
   }
   DispatcherType type = 1;
   repeated uint32 column_indices = 2;

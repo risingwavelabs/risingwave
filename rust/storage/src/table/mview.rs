@@ -93,10 +93,6 @@ impl<S: StateStore> MViewTable<S> {
         }
     }
 
-    pub fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
     // TODO(MrCroxx): remove me after iter is impled.
     pub fn storage(&self) -> S {
         self.keyspace.state_store()
@@ -104,7 +100,7 @@ impl<S: StateStore> MViewTable<S> {
 
     // TODO(MrCroxx): Refactor this after statestore iter is finished.
     // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`
-    pub async fn iter(&self, epoch: u64) -> Result<MViewTableIter<S>> {
+    async fn iter(&self, epoch: u64) -> Result<MViewTableIter<S>> {
         MViewTableIter::new(
             self.keyspace.clone(),
             self.schema.clone(),
