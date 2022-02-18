@@ -12,7 +12,19 @@ pub fn get_program_name(cmd: &Command) -> String {
 }
 
 pub fn get_program_args(cmd: &Command) -> String {
-    cmd.get_args().map(|x| x.to_string_lossy()).join(" ")
+    cmd.get_args().map(|x| x.to_string_lossy()).join(" \\\n  ")
+}
+
+pub fn get_program_env_cmd(cmd: &Command) -> String {
+    cmd.get_envs()
+        .map(|(k, v)| {
+            format!(
+                "export {}={}",
+                k.to_string_lossy(),
+                v.map(|v| v.to_string_lossy()).unwrap_or_default()
+            )
+        })
+        .join("\n")
 }
 
 pub fn new_spinner() -> ProgressBar {

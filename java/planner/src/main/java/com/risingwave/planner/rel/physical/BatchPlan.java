@@ -2,9 +2,11 @@ package com.risingwave.planner.rel.physical;
 
 import static java.util.Objects.requireNonNull;
 
+import com.risingwave.planner.rel.common.IdentityExtractor;
 import com.risingwave.proto.plan.ExchangeInfo;
 import com.risingwave.proto.plan.PlanFragment;
 import com.risingwave.proto.plan.PlanNode;
+import org.apache.calcite.rel.RelNode;
 
 /**
  * Plan for adhoc query execution. The counterpart is streaming plan, which is designed for
@@ -28,5 +30,9 @@ public class BatchPlan {
     PlanNode rootNode = root.serialize();
 
     return PlanFragment.newBuilder().setRoot(rootNode).setExchangeInfo(exchangeInfo).build();
+  }
+
+  public static String getCurrentNodeIdentity(RelNode node) {
+    return IdentityExtractor.getCurrentNodeIdentity(node, "RwBatch");
   }
 }

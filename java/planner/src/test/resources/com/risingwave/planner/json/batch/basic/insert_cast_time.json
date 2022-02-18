@@ -19,7 +19,8 @@
           },
           "name": "ZERO"
         }]
-      }
+      },
+      "identity": "RwBatchValuesExecutor"
     }],
     "project": {
       "selectList": [{
@@ -91,7 +92,8 @@
           }]
         }
       }]
-    }
+    },
+    "identity": "RwBatchProject(v1\u003d[CAST(\u00271970-01-01\u0027):DATE NOT NULL], v2\u003d[CAST(\u002704:05:06\u0027):TIME(0) NOT NULL], v3\u003d[CAST(\u00271970-01-01 04:05:06\u0027):TIMESTAMP(0) NOT NULL], v4\u003d[CAST(\u00271970-01-01 04:05:06 -08:00\u0027):TIMESTAMP_WITH_LOCAL_TIME_ZONE(0) NOT NULL])"
   }],
   "insert": {
     "tableRefId": {
@@ -101,5 +103,6 @@
       }
     },
     "columnIds": [1, 2, 3, 4]
-  }
+  },
+  "identity": "RwBatchInsertExecutor(TableName:[test_schema, t],ColumnIds:[1, 2, 3, 4])"
 }

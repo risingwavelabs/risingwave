@@ -55,7 +55,7 @@ where
     pub async fn add_user_key(
         &mut self,
         user_key: Vec<u8>,
-        value: HummockValue<Vec<u8>>,
+        value: HummockValue<&[u8]>,
         epoch: Epoch,
     ) -> HummockResult<()> {
         assert!(!user_key.is_empty());
@@ -74,15 +74,15 @@ where
     pub async fn add_full_key(
         &mut self,
         full_key: FullKey<&[u8]>,
-        value: HummockValue<Vec<u8>>,
+        value: HummockValue<&[u8]>,
         allow_split: bool,
     ) -> HummockResult<()> {
-        let new_builder_required = allow_split
-            && self
-                .builders
-                .last()
-                .map(|b| b.builder.reach_capacity() || b.sealed)
-                .unwrap_or(true);
+        let last_is_full = self
+            .builders
+            .last()
+            .map(|b| b.builder.reach_capacity() || b.sealed)
+            .unwrap_or(true);
+        let new_builder_required = self.builders.is_empty() || (allow_split && last_is_full);
 
         if new_builder_required {
             let (id, builder) = (self.get_id_and_builder)().await?;
@@ -154,7 +154,7 @@ mod tests {
 
         for _ in 0..table_capacity {
             builder
-                .add_user_key(b"key".to_vec(), Put(b"value".to_vec()), 233)
+                .add_user_key(b"key".to_vec(), Put(b"value"), 233)
                 .await
                 .unwrap();
         }
@@ -177,7 +177,7 @@ mod tests {
         macro_rules! add {
             () => {
                 builder
-                    .add_user_key(b"k".to_vec(), Put(b"v".to_vec()), 233)
+                    .add_user_key(b"k".to_vec(), Put(b"v"), 233)
                     .await
                     .unwrap();
             };
@@ -201,5 +201,25 @@ mod tests {
 
         let results = builder.finish();
         assert_eq!(results.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_initial_not_allowed_split() {
+        let next_id = AtomicU64::new(1001);
+        let mut builder = CapacitySplitTableBuilder::new(|| async {
+            Ok((
+                next_id.fetch_add(1, SeqCst),
+                SSTableBuilder::new(default_builder_opt_for_test()),
+            ))
+        });
+
+        builder
+            .add_full_key(
+                FullKey::from_user_key_slice(b"k", 233).as_slice(),
+                HummockValue::Put(b"v"),
+                false,
+            )
+            .await
+            .unwrap();
     }
 }

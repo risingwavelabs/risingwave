@@ -14,28 +14,38 @@ use tower_http::add_extension::AddExtensionLayer;
 use tower_http::cors::{self, CorsLayer};
 
 use crate::cluster::StoredClusterManager;
+use crate::storage::MetaStore;
 use crate::stream::FragmentManager;
 
 #[derive(Clone)]
-pub struct DashboardService {
+pub struct DashboardService<S>
+where
+    S: MetaStore,
+{
     pub dashboard_addr: SocketAddr,
-    pub cluster_manager: Arc<StoredClusterManager>,
-    pub fragment_manager: Arc<FragmentManager>,
+    pub cluster_manager: Arc<StoredClusterManager<S>>,
+    pub fragment_manager: Arc<FragmentManager<S>>,
+
+    // TODO: replace with catalog manager.
+    pub meta_store_ref: Arc<S>,
     pub has_test_data: Arc<AtomicBool>,
 }
 
-pub type Service = Arc<DashboardService>;
+pub type Service<S> = Arc<DashboardService<S>>;
 
 mod handlers {
     use axum::Json;
     use risingwave_pb::common::WorkerNode;
-    use risingwave_pb::meta::ActorLocation;
+    use risingwave_pb::meta::{ActorLocation, Table};
+    use risingwave_pb::stream_plan::StreamActor;
     use serde_json::json;
 
     use super::*;
 
     pub struct DashboardError(anyhow::Error);
     pub type Result<T> = std::result::Result<T, DashboardError>;
+    type TableId = i32;
+    type TableActors = (TableId, Vec<StreamActor>);
 
     fn err(err: impl Into<anyhow::Error>) -> DashboardError {
         DashboardError(err.into())
@@ -53,9 +63,9 @@ mod handlers {
         }
     }
 
-    pub async fn list_clusters(
+    pub async fn list_clusters<S: MetaStore>(
         Path(ty): Path<i32>,
-        Extension(srv): Extension<Service>,
+        Extension(srv): Extension<Service<S>>,
     ) -> Result<Json<Vec<WorkerNode>>> {
         srv.add_test_data().await.map_err(err)?;
 
@@ -68,8 +78,23 @@ mod handlers {
         Ok(result.into())
     }
 
-    pub async fn list_actors(
-        Extension(srv): Extension<Service>,
+    pub async fn list_materialized_views<S: MetaStore>(
+        Extension(srv): Extension<Service<S>>,
+    ) -> Result<Json<Vec<(TableId, Table)>>> {
+        use crate::model::MetadataModel;
+
+        let materialized_views = Table::list(&*srv.meta_store_ref)
+            .await
+            .map_err(err)?
+            .iter()
+            .filter(|t| t.is_materialized_view)
+            .map(|mv| (mv.table_ref_id.as_ref().unwrap().table_id, mv.clone()))
+            .collect::<Vec<_>>();
+        Ok(Json(materialized_views))
+    }
+
+    pub async fn list_actors<S: MetaStore>(
+        Extension(srv): Extension<Service<S>>,
     ) -> Result<Json<Vec<ActorLocation>>> {
         use risingwave_pb::common::WorkerType;
 
@@ -87,15 +112,34 @@ mod handlers {
 
         Ok(Json(actors))
     }
+
+    pub async fn list_table_fragments<S: MetaStore>(
+        Extension(srv): Extension<Service<S>>,
+    ) -> Result<Json<Vec<TableActors>>> {
+        let table_fragments = srv
+            .fragment_manager
+            .list_table_fragments()
+            .map_err(err)?
+            .iter()
+            .map(|f| (f.table_id().table_id(), f.actors()))
+            .collect::<Vec<_>>();
+
+        Ok(Json(table_fragments))
+    }
 }
 
-impl DashboardService {
+impl<S> DashboardService<S>
+where
+    S: MetaStore,
+{
     pub async fn serve(self) -> Result<()> {
         use handlers::*;
         let srv = Arc::new(self);
         let app = Router::new()
-            .route("/api/clusters/:ty", get(list_clusters))
-            .route("/api/actors", get(list_actors))
+            .route("/api/clusters/:ty", get(list_clusters::<S>))
+            .route("/api/actors", get(list_actors::<S>))
+            .route("/api/fragments", get(list_table_fragments::<S>))
+            .route("/api/materialized_views", get(list_materialized_views::<S>))
             .route(
                 "/",
                 get(|| async { Html::from(include_str!("index.html")) }),

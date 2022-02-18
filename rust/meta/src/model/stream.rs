@@ -6,15 +6,16 @@ use risingwave_pb::meta::table_fragments::fragment::FragmentType;
 use risingwave_pb::meta::table_fragments::{Fragment, State};
 use risingwave_pb::meta::TableFragments as ProstTableFragments;
 use risingwave_pb::plan::TableRefId;
-use risingwave_pb::stream_plan::stream_node::Node;
-use risingwave_pb::stream_plan::{StreamActor, StreamNode};
+use risingwave_pb::stream_plan::StreamActor;
 
 use super::{ActorId, FragmentId};
 use crate::cluster::NodeId;
-use crate::model::{MetadataModel, TableRawId};
+use crate::model::MetadataModel;
 
 /// Column family name for table fragments.
 const TABLE_FRAGMENTS_CF_NAME: &str = "cf/table_fragments";
+
+pub type ActorLocations = BTreeMap<ActorId, NodeId>;
 
 /// We store whole fragments in a single column family as follow:
 /// `table_id` => `TableFragments`.
@@ -27,7 +28,7 @@ pub struct TableFragments {
     /// The table fragments.
     fragments: BTreeMap<FragmentId, Fragment>,
     /// The actor location.
-    actor_locations: BTreeMap<ActorId, NodeId>,
+    actor_locations: ActorLocations,
 }
 
 impl MetadataModel for TableFragments {
@@ -83,7 +84,7 @@ impl TableFragments {
     }
 
     /// Set the actor locations.
-    pub fn set_locations(&mut self, actor_locations: BTreeMap<ActorId, NodeId>) {
+    pub fn set_locations(&mut self, actor_locations: ActorLocations) {
         self.actor_locations = actor_locations;
     }
 
@@ -207,34 +208,5 @@ impl TableFragments {
             });
         });
         actor_map
-    }
-
-    /// Update chain upstream actor ids.
-    pub fn update_chain_upstream_actor_ids(
-        &mut self,
-        table_sink_map: &HashMap<TableRawId, Vec<ActorId>>,
-    ) -> Result<()> {
-        fn resolve_update_inner(
-            stream_node: &mut StreamNode,
-            table_sink_map: &HashMap<TableRawId, Vec<ActorId>>,
-        ) {
-            if let Node::ChainNode(chain) = stream_node.node.as_mut().unwrap() {
-                chain.upstream_actor_ids = table_sink_map
-                    .get(&chain.table_ref_id.as_ref().unwrap().table_id)
-                    .expect("table id not exists")
-                    .clone();
-            }
-            for child in &mut stream_node.input {
-                resolve_update_inner(child, table_sink_map)
-            }
-        }
-        self.fragments.iter_mut().for_each(|(_id, fragment)| {
-            for actor in &mut fragment.actors {
-                let stream_node = actor.nodes.as_mut().unwrap();
-                resolve_update_inner(stream_node, table_sink_map);
-            }
-        });
-
-        Ok(())
     }
 }

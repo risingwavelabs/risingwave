@@ -77,6 +77,26 @@ public class RwStreamMaterializedView extends SingleRel implements RisingWaveStr
     return collation;
   }
 
+  private static void generateDependentTables(
+      RelNode root, List<TableCatalog.TableId> dependencies) {
+    if (root instanceof RwStreamTableSource) {
+      dependencies.add(((RwStreamTableSource) root).getTableId());
+    } else if (root instanceof RwStreamChain) {
+      dependencies.add(((RwStreamChain) root).getTableId());
+    }
+    root.getInputs()
+        .forEach(
+            node -> {
+              generateDependentTables(node, dependencies);
+            });
+  }
+
+  public List<TableCatalog.TableId> getDependentTables() {
+    List<TableCatalog.TableId> dependencies = new ArrayList<>();
+    generateDependentTables(this, dependencies);
+    return dependencies;
+  }
+
   /**
    * Serialize to protobuf
    *
@@ -161,7 +181,10 @@ public class RwStreamMaterializedView extends SingleRel implements RisingWaveStr
     // Sort key serialization ends
     // Build and return.
     MViewNode materializedViewNode = materializedViewNodeBuilder.build();
-    return StreamNode.newBuilder().setMviewNode(materializedViewNode).build();
+    return StreamNode.newBuilder()
+        .setMviewNode(materializedViewNode)
+        .setIdentity(StreamingPlan.getCurrentNodeIdentity(this))
+        .build();
   }
 
   public void setTableId(TableCatalog.TableId tableId) {

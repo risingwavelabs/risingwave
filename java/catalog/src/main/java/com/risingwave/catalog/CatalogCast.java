@@ -83,6 +83,23 @@ public class CatalogCast {
       colBuilder.setColumnType(columns.right.getDataType().getProtobufType());
       builder.addColumnDescs(colBuilder.build());
     }
+    for (var tableId : createTableInfo.getDependentTables()) {
+      SchemaCatalog.SchemaId schemaId = tableId.getParent();
+      DatabaseCatalog.DatabaseId databaseId = schemaId.getParent();
+
+      DatabaseRefId.Builder databaseRefIdBuilder = DatabaseRefId.newBuilder();
+      databaseRefIdBuilder.setDatabaseId(databaseId.getValue());
+
+      SchemaRefId.Builder schemaRefIdBuilder = SchemaRefId.newBuilder();
+      schemaRefIdBuilder.setSchemaId(schemaId.getValue());
+      schemaRefIdBuilder.setDatabaseRefId(databaseRefIdBuilder);
+
+      TableRefId.Builder tableRefIdBuilder = TableRefId.newBuilder();
+      tableRefIdBuilder.setTableId(tableId.getValue());
+      tableRefIdBuilder.setSchemaRefId(schemaRefIdBuilder);
+
+      builder.addDependentTables(tableRefIdBuilder);
+    }
 
     if (createTableInfo.isMv()) {
       CreateMaterializedViewInfo createMaterializedViewInfo =
@@ -106,8 +123,8 @@ public class CatalogCast {
               ColumnOrder.newBuilder().setOrderType(orderType).setInputRef(inputRefExpr).build();
           builder.addColumnOrders(columnOrder);
         }
-        builder.setIsAssociated(createMaterializedViewInfo.isAssociated());
       }
+      builder.setIsAssociated(createMaterializedViewInfo.isAssociated());
     }
 
     return builder.build();
@@ -130,6 +147,18 @@ public class CatalogCast {
     for (com.risingwave.proto.plan.ColumnDesc desc : table.getColumnDescsList()) {
       builder.addColumn(desc.getName(), new com.risingwave.catalog.ColumnDesc(desc));
     }
+    List<TableCatalog.TableId> dependentTables = new ArrayList<>();
+    for (var tableRefId : table.getDependentTablesList()) {
+      SchemaRefId schemaRefId = tableRefId.getSchemaRefId();
+      DatabaseRefId databaseRefId = schemaRefId.getDatabaseRefId();
+      DatabaseCatalog.DatabaseId databaseId =
+          new DatabaseCatalog.DatabaseId(databaseRefId.getDatabaseId());
+      SchemaCatalog.SchemaId schemaId =
+          new SchemaCatalog.SchemaId(schemaRefId.getSchemaId(), databaseId);
+      TableCatalog.TableId tableId = new TableCatalog.TableId(tableRefId.getTableId(), schemaId);
+      dependentTables.add(tableId);
+    }
+    builder.setDependentTables(dependentTables);
     if (!table.getIsMaterializedView()) {
       return builder.build();
     }

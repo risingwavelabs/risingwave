@@ -16,6 +16,7 @@ use uuid::Uuid;
 use super::info::BarrierActorInfo;
 use crate::manager::StreamClientsRef;
 use crate::model::{ActorId, TableFragments};
+use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
 
 /// [`Command`] is the action of [`BarrierManager`]. For different commands, we'll build different
@@ -45,8 +46,8 @@ impl Command {
 
 /// [`CommandContext`] is used for generating barrier and doing post stuffs according to the given
 /// [`Command`].
-pub struct CommandContext<'a> {
-    fragment_manager: FragmentManagerRef,
+pub struct CommandContext<'a, S> {
+    fragment_manager: FragmentManagerRef<S>,
 
     clients: StreamClientsRef,
 
@@ -57,9 +58,9 @@ pub struct CommandContext<'a> {
     command: Command,
 }
 
-impl<'a> CommandContext<'a> {
+impl<'a, S> CommandContext<'a, S> {
     pub fn new(
-        fragment_manager: FragmentManagerRef,
+        fragment_manager: FragmentManagerRef<S>,
         clients: StreamClientsRef,
         info: &'a BarrierActorInfo,
         command: Command,
@@ -73,17 +74,19 @@ impl<'a> CommandContext<'a> {
     }
 }
 
-impl CommandContext<'_> {
+impl<S> CommandContext<'_, S>
+where
+    S: MetaStore,
+{
     /// Generate a mutation for the given command.
-    pub async fn to_mutation(&self) -> Result<Mutation> {
+    pub fn to_mutation(&self) -> Result<Mutation> {
         let mutation = match &self.command {
             Command::Plain(mutation) => mutation.clone(),
 
             Command::DropMaterializedView(table_id) => {
                 let table_actors = self
                     .fragment_manager
-                    .get_table_actor_ids(&TableId::from(&Some(table_id.clone())))
-                    .await?;
+                    .get_table_actor_ids(&TableId::from(&Some(table_id.clone())))?;
                 Mutation::Stop(StopMutation {
                     actors: table_actors,
                 })
@@ -116,10 +119,7 @@ impl CommandContext<'_> {
             Command::DropMaterializedView(table_ref_id) => {
                 // Tell compute nodes to drop actors.
                 let table_id = TableId::from(&Some(table_ref_id.clone()));
-                let node_actors = self
-                    .fragment_manager
-                    .get_table_node_actors(&table_id)
-                    .await?;
+                let node_actors = self.fragment_manager.get_table_node_actors(&table_id)?;
                 let futures = node_actors.iter().map(|(node_id, actors)| {
                     let node = self.info.node_map.get(node_id).unwrap();
                     let request_id = Uuid::new_v4().to_string();

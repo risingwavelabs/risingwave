@@ -64,6 +64,7 @@ public class RwBatchSortAgg extends RwAggregate implements RisingWaveBatchPhyRel
     return PlanNode.newBuilder()
         .setSortAgg(serializeSortAgg())
         .addChildren(((RisingWaveBatchPhyRel) input).serialize())
+        .setIdentity(BatchPlan.getCurrentNodeIdentity(this))
         .build();
   }
 

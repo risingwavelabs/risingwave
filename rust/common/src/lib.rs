@@ -30,3 +30,4 @@ pub mod expr;
 pub mod test_utils;
 pub mod types;
 pub mod vector_op;
+pub mod worker_id;

@@ -8,7 +8,7 @@ use risingwave_storage::table::ScannableTableRef;
 use risingwave_storage::TableColumnDesc;
 use tokio::sync::mpsc;
 
-use crate::{BatchSourceReader, Source, SourceWriter, StreamSourceReader};
+use crate::{BatchSourceReader, Source, StreamSourceReader};
 
 #[derive(Debug)]
 struct TableSourceV2Core {
@@ -54,8 +54,17 @@ impl TableSourceV2 {
         }
     }
 
-    pub fn next_row_id(&self) -> usize {
-        self.next_row_id.fetch_add(1, Ordering::SeqCst)
+    pub fn next_row_id(&self, worker_id: u32) -> i64 {
+        let local_row_id = self.next_row_id.fetch_add(1, Ordering::SeqCst) as u32;
+
+        // Concatenate worker_id and local_row_id to produce a global unique row_id
+        (((worker_id as u64) << 32) + (local_row_id as u64)) as i64
+    }
+
+    pub fn create_writer(&self) -> TableV2Writer {
+        TableV2Writer {
+            core: self.core.clone(),
+        }
     }
 }
 
@@ -127,9 +136,8 @@ pub struct TableV2Writer {
     core: Arc<RwLock<TableSourceV2Core>>,
 }
 
-#[async_trait]
-impl SourceWriter for TableV2Writer {
-    async fn write(&mut self, chunk: StreamChunk) -> Result<()> {
+impl TableV2Writer {
+    pub async fn write(&mut self, chunk: StreamChunk) -> Result<()> {
         use rand::Rng;
         let core = self.core.read().unwrap();
         assert!(!core.changes_txs.is_empty(), "table reader not exists");
@@ -140,7 +148,7 @@ impl SourceWriter for TableV2Writer {
         Ok(())
     }
 
-    async fn flush(&mut self) -> Result<()> {
+    pub async fn flush(&mut self) -> Result<()> {
         Ok(())
     }
 }
@@ -150,7 +158,6 @@ impl Source for TableSourceV2 {
     type ReaderContext = TableV2ReaderContext;
     type BatchReader = TableV2BatchReader;
     type StreamReader = TableV2StreamReader;
-    type Writer = TableV2Writer;
 
     fn batch_reader(
         &self,
@@ -180,12 +187,6 @@ impl Source for TableSourceV2 {
         core.changes_txs.push(tx);
 
         Ok(TableV2StreamReader { rx, column_indices })
-    }
-
-    fn create_writer(&self) -> Result<Self::Writer> {
-        Ok(TableV2Writer {
-            core: self.core.clone(),
-        })
     }
 }
 
@@ -217,7 +218,7 @@ mod tests {
     async fn test_table_source_v2() -> Result<()> {
         let source = new_source();
         let mut reader = source.stream_reader(TableV2ReaderContext, vec![0])?;
-        let mut writer = source.create_writer()?;
+        let mut writer = source.create_writer();
 
         macro_rules! write_chunk {
             ($i:expr) => {{

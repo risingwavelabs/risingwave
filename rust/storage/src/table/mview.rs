@@ -93,10 +93,6 @@ impl<S: StateStore> MViewTable<S> {
         }
     }
 
-    pub fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
     // TODO(MrCroxx): remove me after iter is impled.
     pub fn storage(&self) -> S {
         self.keyspace.state_store()
@@ -104,13 +100,14 @@ impl<S: StateStore> MViewTable<S> {
 
     // TODO(MrCroxx): Refactor this after statestore iter is finished.
     // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`
-    pub async fn iter(&self, epoch: u64) -> Result<MViewTableIter<S>> {
-        Ok(MViewTableIter::new(
+    async fn iter(&self, epoch: u64) -> Result<MViewTableIter<S>> {
+        MViewTableIter::new(
             self.keyspace.clone(),
             self.schema.clone(),
             self.pk_columns.clone(),
             epoch,
-        ))
+        )
+        .await
     }
 
     // TODO(MrCroxx): More interfaces are needed besides cell get.
@@ -168,8 +165,18 @@ impl<'a, S: StateStore> MViewTableIter<S> {
     // TODO: adjustable limit
     const SCAN_LIMIT: usize = 1024;
 
-    fn new(keyspace: Keyspace<S>, schema: Schema, pk_columns: Vec<usize>, epoch: u64) -> Self {
-        Self {
+    async fn new(
+        keyspace: Keyspace<S>,
+        schema: Schema,
+        pk_columns: Vec<usize>,
+        epoch: u64,
+    ) -> Result<Self> {
+        // The table might be updated from other compute nodes, and we are not aware of the latest
+        // version in Hummock's local version manager.
+        // TODO: remove this after we implement periodical version updating.
+        keyspace.state_store().update_local_version().await?;
+
+        let iter = Self {
             keyspace,
             schema,
             pk_columns,
@@ -178,7 +185,8 @@ impl<'a, S: StateStore> MViewTableIter<S> {
             done: false,
             err_msg: None,
             epoch,
-        }
+        };
+        Ok(iter)
     }
 
     async fn consume_more(&mut self) -> Result<()> {
@@ -298,5 +306,9 @@ where
 
     fn column_descs(&self) -> Cow<[TableColumnDesc]> {
         Cow::Borrowed(&self.column_descs)
+    }
+
+    fn is_shared_storage(&self) -> bool {
+        true
     }
 }

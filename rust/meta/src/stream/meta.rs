@@ -12,12 +12,11 @@ use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_plan::StreamActor;
 
 use crate::cluster::NodeId;
-use crate::manager::MetaSrvEnv;
 use crate::model::{ActorId, MetadataModel, TableFragments};
-use crate::storage::MetaStoreRef;
+use crate::storage::MetaStore;
 
-pub struct FragmentManager {
-    meta_store_ref: MetaStoreRef,
+pub struct FragmentManager<S> {
+    meta_store_ref: Arc<S>,
     table_fragments: DashMap<TableId, TableFragments>,
 }
 
@@ -29,13 +28,15 @@ pub struct ActorInfos {
     pub source_actor_maps: HashMap<NodeId, Vec<ActorId>>,
 }
 
-pub type FragmentManagerRef = Arc<FragmentManager>;
+pub type FragmentManagerRef<S> = Arc<FragmentManager<S>>;
 
-impl FragmentManager {
-    pub async fn new(env: MetaSrvEnv) -> Result<Self> {
-        let meta_store_ref = env.meta_store_ref();
+impl<S> FragmentManager<S>
+where
+    S: MetaStore,
+{
+    pub async fn new(meta_store_ref: Arc<S>) -> Result<Self> {
         let table_fragments = try_match_expand!(
-            TableFragments::list(&meta_store_ref).await,
+            TableFragments::list(&*meta_store_ref).await,
             Ok,
             "TableFragments::list fail"
         )?;
@@ -45,7 +46,7 @@ impl FragmentManager {
         }
 
         Ok(Self {
-            meta_store_ref: env.meta_store_ref(),
+            meta_store_ref,
             table_fragments: fragment_map,
         })
     }
@@ -56,17 +57,25 @@ impl FragmentManager {
                 "table_fragment already exist!".to_string(),
             ))),
             Entry::Vacant(v) => {
-                table_fragment.insert(&self.meta_store_ref).await?;
+                table_fragment.insert(&*self.meta_store_ref).await?;
                 v.insert(table_fragment);
                 Ok(())
             }
         }
     }
 
+    pub fn list_table_fragments(&self) -> Result<Vec<TableFragments>> {
+        Ok(self
+            .table_fragments
+            .iter()
+            .map(|f| f.value().clone())
+            .collect())
+    }
+
     pub async fn update_table_fragments(&self, table_fragment: TableFragments) -> Result<()> {
         match self.table_fragments.entry(table_fragment.table_id()) {
             Entry::Occupied(mut entry) => {
-                table_fragment.insert(&self.meta_store_ref).await?;
+                table_fragment.insert(&*self.meta_store_ref).await?;
                 entry.insert(table_fragment);
 
                 Ok(())
@@ -78,11 +87,14 @@ impl FragmentManager {
     }
 
     pub async fn drop_table_fragments(&self, table_id: &TableId) -> Result<()> {
-        match self.table_fragments.remove(table_id) {
-            Some(_) => {
-                TableFragments::delete(&self.meta_store_ref, &TableRefId::from(table_id)).await
+        match self.table_fragments.entry(table_id.clone()) {
+            Entry::Occupied(entry) => {
+                TableFragments::delete(&*self.meta_store_ref, &TableRefId::from(table_id)).await?;
+                entry.remove();
+
+                Ok(())
             }
-            None => Err(RwError::from(InternalError(
+            Entry::Vacant(_) => Err(RwError::from(InternalError(
                 "table_fragment not exist!".to_string(),
             ))),
         }
@@ -131,7 +143,7 @@ impl FragmentManager {
         Ok(actor_maps)
     }
 
-    pub async fn get_table_node_actors(
+    pub fn get_table_node_actors(
         &self,
         table_id: &TableId,
     ) -> Result<BTreeMap<NodeId, Vec<ActorId>>> {
@@ -143,7 +155,7 @@ impl FragmentManager {
         }
     }
 
-    pub async fn get_table_actor_ids(&self, table_id: &TableId) -> Result<Vec<ActorId>> {
+    pub fn get_table_actor_ids(&self, table_id: &TableId) -> Result<Vec<ActorId>> {
         match self.table_fragments.get(table_id) {
             Some(table_fragment) => Ok(table_fragment.actor_ids()),
             None => Err(RwError::from(InternalError(
@@ -152,7 +164,7 @@ impl FragmentManager {
         }
     }
 
-    pub async fn get_table_sink_actor_ids(&self, table_id: &TableId) -> Result<Vec<ActorId>> {
+    pub fn get_table_sink_actor_ids(&self, table_id: &TableId) -> Result<Vec<ActorId>> {
         match self.table_fragments.get(table_id) {
             Some(table_fragment) => Ok(table_fragment.sink_actor_ids()),
             None => Err(RwError::from(InternalError(

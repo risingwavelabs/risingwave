@@ -51,7 +51,7 @@ pub type PlanRef = Rc<dyn PlanNode>;
 impl dyn PlanNode {
     /// Write explain the whole plan tree.
     pub fn explain(&self, level: usize, f: &mut dyn std::fmt::Write) -> std::fmt::Result {
-        write!(f, "{}{}", " ".repeat(level * 2), self)?;
+        writeln!(f, "{}{}", " ".repeat(level * 2), self)?;
         for input in self.inputs() {
             input.explain(level + 1, f)?;
         }
@@ -66,8 +66,8 @@ mod col_pruning;
 pub use col_pruning::*;
 mod convert;
 pub use convert::*;
-mod join_predicate;
-pub use join_predicate::*;
+mod eq_join_predicate;
+pub use eq_join_predicate::*;
 
 // SOME Intellisense DONT UNDERSTAND THIS.
 //
@@ -91,6 +91,7 @@ mod batch_sort;
 mod batch_sort_merge_join;
 mod logical_agg;
 mod logical_filter;
+mod logical_insert;
 mod logical_join;
 mod logical_limit;
 mod logical_project;
@@ -110,6 +111,7 @@ pub use batch_sort::BatchSort;
 pub use batch_sort_merge_join::BatchSortMergeJoin;
 pub use logical_agg::LogicalAgg;
 pub use logical_filter::LogicalFilter;
+pub use logical_insert::LogicalInsert;
 pub use logical_join::LogicalJoin;
 pub use logical_limit::LogicalLimit;
 pub use logical_project::LogicalProject;
@@ -142,6 +144,7 @@ macro_rules! for_all_plan_nodes {
           ,{ Logical, Filter}
           ,{ Logical, Project}
           ,{ Logical, Scan}
+          ,{ Logical, Insert}
           ,{ Logical, Join}
           ,{ Logical, Values}
           ,{ Logical, Limit}
@@ -171,6 +174,7 @@ macro_rules! for_logical_plan_nodes {
             ,{ Logical, Filter}
             ,{ Logical, Project}
             ,{ Logical, Scan}
+            ,{ Logical, Insert}
             ,{ Logical, Join}
             ,{ Logical, Values}
             ,{ Logical, Limit}

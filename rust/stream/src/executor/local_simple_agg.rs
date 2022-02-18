@@ -27,6 +27,9 @@ pub struct LocalSimpleAggExecutor {
     /// Aggregation states after last barrier.
     states: Vec<Box<dyn StreamingAggStateImpl>>,
 
+    /// Represents whether there is new data in the epoch.
+    is_dirty: bool,
+
     /// The input of the current operator.
     input: Box<dyn Executor>,
 
@@ -43,6 +46,7 @@ impl LocalSimpleAggExecutor {
         agg_calls: Vec<AggCall>,
         pk_indices: PkIndices,
         executor_id: u64,
+        identity: String,
     ) -> Result<Self> {
         // simple agg does not have group key
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
@@ -62,9 +66,10 @@ impl LocalSimpleAggExecutor {
             pk_indices,
             cached_barrier_message: None,
             states,
+            is_dirty: false,
             input,
             agg_calls,
-            identity: format!("LocalSimpleAggExecutor {:X}", executor_id),
+            identity: format!("{} {:X}", identity, executor_id),
         })
     }
 }
@@ -108,10 +113,14 @@ impl AggExecutor for LocalSimpleAggExecutor {
                     .collect_vec();
                 state.apply_batch(&ops, visibility.as_ref(), &cols[..])
             })?;
+        self.is_dirty = true;
         Ok(())
     }
 
     async fn flush_data(&mut self, _epoch: u64) -> Result<Option<StreamChunk>> {
+        if !self.is_dirty {
+            return Ok(None);
+        }
         let mut builders = self.schema.create_array_builders(1)?;
         self.states
             .iter_mut()
@@ -126,6 +135,7 @@ impl AggExecutor for LocalSimpleAggExecutor {
             .map(|builder| -> Result<_> { Ok(Column::new(Arc::new(builder.finish()?))) })
             .try_collect()?;
         let ops = vec![Op::Insert; 1];
+        self.is_dirty = false;
         Ok(Some(StreamChunk::new(ops, columns, None)))
     }
 
@@ -148,6 +158,35 @@ mod tests {
     use crate::executor::test_utils::{schemas, MockSource};
     use crate::executor::{AggArgs, AggCall, Executor, Message};
     use crate::row_nonnull;
+
+    #[tokio::test]
+    async fn test_no_chunk() -> Result<()> {
+        let schema = schemas::iii();
+        let mut source = MockSource::new(schema, vec![2]);
+        source.push_barrier(1, false);
+        source.push_barrier(2, false);
+        source.push_barrier(3, false);
+
+        let agg_calls = vec![AggCall {
+            kind: AggKind::RowCount,
+            args: AggArgs::None,
+            return_type: DataType::Int64,
+        }];
+
+        let mut simple_agg = LocalSimpleAggExecutor::new(
+            Box::new(source),
+            agg_calls,
+            vec![],
+            1,
+            "LocalSimpleAggExecutor".to_string(),
+        )?;
+
+        assert_matches!(simple_agg.next().await.unwrap(), Message::Barrier { .. });
+        assert_matches!(simple_agg.next().await.unwrap(), Message::Barrier { .. });
+        assert_matches!(simple_agg.next().await.unwrap(), Message::Barrier { .. });
+
+        Ok(())
+    }
 
     #[tokio::test]
     async fn test_local_simple_agg() -> Result<()> {
@@ -198,7 +237,13 @@ mod tests {
             },
         ];
 
-        let mut simple_agg = LocalSimpleAggExecutor::new(Box::new(source), agg_calls, vec![], 1)?;
+        let mut simple_agg = LocalSimpleAggExecutor::new(
+            Box::new(source),
+            agg_calls,
+            vec![],
+            1,
+            "LocalSimpleAggExecutor".to_string(),
+        )?;
 
         let msg = simple_agg.next().await?;
         if let Message::Chunk(chunk) = msg {

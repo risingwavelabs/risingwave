@@ -65,7 +65,7 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
                 },
                 column_ids.clone(),
             )?),
-            SourceImpl::Table(_) | SourceImpl::TableV2(_) => {
+            SourceImpl::TableV2(_) => {
                 panic!("use table_scan to scan a table")
             }
         };
@@ -74,7 +74,7 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
             reader,
             done: false,
             schema: Schema { fields },
-            identity: "StreamScanExecutor".to_string(),
+            identity: source.plan_node().get_identity().clone(),
         }))
     }
 }

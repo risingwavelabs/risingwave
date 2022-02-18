@@ -14,6 +14,8 @@ pub struct TableCatalog {
     column_by_name: HashMap<String, ColumnCatalog>,
 }
 
+pub const ROWID_NAME: &str = "_row_id";
+
 impl TableCatalog {
     pub fn new(table_id: TableId) -> Self {
         Self {

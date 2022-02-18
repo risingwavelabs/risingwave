@@ -8,13 +8,14 @@ use crate::optimizer::plan_node::{BatchExchange, PlanNodeType, PlanTreeNode};
 use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
 
-type StageId = u64;
+pub(crate) type StageId = u64;
 
 struct BatchPlanFragmenter {
     stage_graph_builder: StageGraphBuilder,
     next_stage_id: u64,
 }
 
+/// Split query into fragments.
 impl BatchPlanFragmenter {
     pub fn new() -> Self {
         Self {
@@ -24,25 +25,44 @@ impl BatchPlanFragmenter {
     }
 }
 
-struct Query {
+/// Contains the connection info of each stage.
+pub(crate) struct Query {
     /// Query id should always be unique.
     query_id: Uuid,
-    stage_graph: StageGraph,
+    pub(crate) stage_graph: StageGraph,
 }
 
-struct QueryStage {
+impl Query {
+    pub fn leaf_stages(&self) -> Vec<StageId> {
+        let mut ret_leaf_stages = Vec::new();
+        for stage_id in self.stage_graph.stages.keys() {
+            if self
+                .stage_graph
+                .get_child_stages_unchecked(stage_id)
+                .is_empty()
+            {
+                ret_leaf_stages.push(*stage_id);
+            }
+        }
+        ret_leaf_stages
+    }
+
+    pub fn get_parents(&self, stage_id: &StageId) -> &HashSet<StageId> {
+        self.stage_graph.parent_edges.get(stage_id).unwrap()
+    }
+}
+
+/// Fragment part of `Query`.
+pub(crate) struct QueryStage {
     pub id: StageId,
     pub root: PlanRef,
-    /// Fill exchange source to augment phase.
-    /// TODO(Bowen): Introduce augment phase to fill in exchange node info (#73).
-    exchange_source: HashMap<StageId, QueryStage>,
-    distribution: Distribution,
+    pub distribution: Distribution,
 }
+pub(crate) type QueryStageRef = Arc<QueryStage>;
 
-type QueryStageRef = Arc<QueryStage>;
-
-struct StageGraph {
-    id: StageId,
+/// Maintains how each stage are connected.
+pub(crate) struct StageGraph {
+    pub(crate) id: StageId,
     stages: HashMap<StageId, QueryStageRef>,
     /// Traverse from top to down. Used in split plan into stages.
     child_edges: HashMap<StageId, HashSet<StageId>>,
@@ -51,6 +71,16 @@ struct StageGraph {
     /// Indicates which stage the exchange executor is running on.
     /// Look up child stage for exchange source so that parent stage knows where to pull data.
     exchange_id_to_stage: HashMap<u64, StageId>,
+}
+
+impl StageGraph {
+    pub fn get_stage_unchecked(&self, stage_id: &StageId) -> QueryStageRef {
+        self.stages.get(stage_id).unwrap().clone()
+    }
+
+    pub fn get_child_stages_unchecked(&self, stage_id: &StageId) -> &HashSet<StageId> {
+        self.child_edges.get(stage_id).unwrap()
+    }
 }
 
 struct StageGraphBuilder {
@@ -122,7 +152,7 @@ impl StageGraphBuilder {
 
             None => {
                 let mut parents = HashSet::new();
-                parents.insert(child_id);
+                parents.insert(parent_id);
                 self.parent_edges.insert(child_id, parents);
             }
         };
@@ -153,7 +183,6 @@ impl BatchPlanFragmenter {
         let stage = Arc::new(QueryStage {
             id: next_stage_id,
             root: node.clone(),
-            exchange_source: HashMap::new(),
             distribution,
         });
         self.stage_graph_builder.add_node(stage.clone());
@@ -191,14 +220,17 @@ impl BatchPlanFragmenter {
 #[cfg(test)]
 mod tests {
 
+    use risingwave_pb::common::{WorkerNode, WorkerType};
     use risingwave_pb::plan::JoinType;
 
     use crate::optimizer::plan_node::{
-        BatchExchange, BatchHashJoin, BatchSeqScan, IntoPlanRef, JoinPredicate, LogicalJoin,
+        BatchExchange, BatchHashJoin, BatchSeqScan, EqJoinPredicate, IntoPlanRef, LogicalJoin,
         PlanNodeType,
     };
     use crate::optimizer::property::{Distribution, Order};
     use crate::scheduler::plan_fragmenter::BatchPlanFragmenter;
+    use crate::scheduler::schedule::BatchScheduler;
+    use crate::utils::Condition;
 
     #[test]
     fn test_fragmenter() {
@@ -222,12 +254,15 @@ mod tests {
             Distribution::AnyShard,
         )
         .into_plan_ref();
-        let hash_join_node = BatchHashJoin::new(LogicalJoin::new(
-            batch_exchange_node1.clone(),
-            batch_exchange_node2.clone(),
-            JoinType::Inner,
-            JoinPredicate::new_empty(),
-        ))
+        let hash_join_node = BatchHashJoin::new(
+            LogicalJoin::new(
+                batch_exchange_node1.clone(),
+                batch_exchange_node2.clone(),
+                JoinType::Inner,
+                Condition::true_cond(),
+            ),
+            EqJoinPredicate::create(0, 0, Condition::true_cond()),
+        )
         .into_plan_ref();
         let batch_exchange_node3 = BatchExchange::new(
             hash_join_node.clone(),
@@ -264,5 +299,54 @@ mod tests {
         assert_eq!(scan_node1.root.node_type(), PlanNodeType::BatchSeqScan);
         let scan_node2 = query.stage_graph.stages.get(&3).unwrap();
         assert_eq!(scan_node2.root.node_type(), PlanNodeType::BatchSeqScan);
+
+        // -- Check augment phase --
+        let worker1 = WorkerNode {
+            id: 0,
+            r#type: WorkerType::ComputeNode as i32,
+            host: None,
+        };
+        let worker2 = WorkerNode {
+            id: 1,
+            r#type: WorkerType::ComputeNode as i32,
+            host: None,
+        };
+        let worker3 = WorkerNode {
+            id: 2,
+            r#type: WorkerType::ComputeNode as i32,
+            host: None,
+        };
+        let workers = vec![worker1.clone(), worker2.clone(), worker3.clone()];
+        let mut scheduler = BatchScheduler::mock(workers);
+        let _query_result_loc = scheduler.schedule(&query);
+
+        let root = scheduler.get_scheduled_stage_unchecked(&0);
+        assert_eq!(root.augmented_stage.exchange_source.len(), 1);
+        assert!(root.augmented_stage.exchange_source.get(&1).is_some());
+        assert_eq!(root.assignments.len(), 1);
+        assert_eq!(root.assignments.get(&0).unwrap(), &worker1);
+
+        let join_node = scheduler.get_scheduled_stage_unchecked(&1);
+        assert_eq!(join_node.augmented_stage.exchange_source.len(), 2);
+        assert!(join_node.augmented_stage.exchange_source.get(&2).is_some());
+        assert!(join_node.augmented_stage.exchange_source.get(&3).is_some());
+        assert_eq!(join_node.assignments.len(), 3);
+        assert_eq!(join_node.assignments.get(&0).unwrap(), &worker1);
+        assert_eq!(join_node.assignments.get(&1).unwrap(), &worker2);
+        assert_eq!(join_node.assignments.get(&2).unwrap(), &worker3);
+
+        let scan_node_1 = scheduler.get_scheduled_stage_unchecked(&2);
+        assert_eq!(scan_node_1.augmented_stage.exchange_source.len(), 0);
+        assert_eq!(scan_node_1.assignments.len(), 3);
+        assert_eq!(scan_node_1.assignments.get(&0).unwrap(), &worker1);
+        assert_eq!(scan_node_1.assignments.get(&1).unwrap(), &worker2);
+        assert_eq!(scan_node_1.assignments.get(&2).unwrap(), &worker3);
+
+        let scan_node_2 = scheduler.get_scheduled_stage_unchecked(&2);
+        assert_eq!(scan_node_2.augmented_stage.exchange_source.len(), 0);
+        assert_eq!(scan_node_2.assignments.len(), 3);
+        assert_eq!(scan_node_2.assignments.get(&0).unwrap(), &worker1);
+        assert_eq!(scan_node_2.assignments.get(&1).unwrap(), &worker2);
+        assert_eq!(scan_node_2.assignments.get(&2).unwrap(), &worker3);
     }
 }

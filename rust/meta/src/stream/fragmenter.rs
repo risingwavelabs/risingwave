@@ -12,8 +12,10 @@ use risingwave_pb::stream_plan::dispatcher::DispatcherType;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{Dispatcher, StreamNode};
 
+use super::{CreateMaterializedViewContext, FragmentManagerRef};
 use crate::manager::{IdCategory, IdGeneratorManagerRef};
 use crate::model::{ActorId, FragmentId};
+use crate::storage::MetaStore;
 use crate::stream::graph::{
     StreamActorBuilder, StreamFragment, StreamFragmentGraph, StreamGraphBuilder,
 };
@@ -21,23 +23,30 @@ use crate::stream::graph::{
 const PARALLEL_DEGREE_LOW_BOUND: u32 = 4;
 
 /// [`StreamFragmenter`] generates the proto for interconnected actors for a streaming pipeline.
-pub struct StreamFragmenter {
+pub struct StreamFragmenter<S> {
     /// fragment graph field, transformed from input streaming plan.
     fragment_graph: StreamFragmentGraph,
     /// stream graph builder, to build streaming DAG.
-    stream_graph: StreamGraphBuilder,
+    stream_graph: StreamGraphBuilder<S>,
 
     /// id generator, used to generate actor id.
-    id_gen_manager_ref: IdGeneratorManagerRef,
+    id_gen_manager_ref: IdGeneratorManagerRef<S>,
     /// worker count, used to init actor parallelization.
     worker_count: u32,
 }
 
-impl StreamFragmenter {
-    pub fn new(id_gen_manager_ref: IdGeneratorManagerRef, worker_count: u32) -> Self {
+impl<S> StreamFragmenter<S>
+where
+    S: MetaStore,
+{
+    pub fn new(
+        id_gen_manager_ref: IdGeneratorManagerRef<S>,
+        fragment_manager_ref: FragmentManagerRef<S>,
+        worker_count: u32,
+    ) -> Self {
         Self {
             fragment_graph: StreamFragmentGraph::new(None),
-            stream_graph: StreamGraphBuilder::new(),
+            stream_graph: StreamGraphBuilder::new(fragment_manager_ref),
             id_gen_manager_ref,
             worker_count,
         }
@@ -52,13 +61,15 @@ impl StreamFragmenter {
     pub async fn generate_graph(
         &mut self,
         stream_node: &StreamNode,
+        ctx: &mut CreateMaterializedViewContext,
     ) -> Result<BTreeMap<FragmentId, Fragment>> {
         self.generate_fragment_graph(stream_node).await?;
         self.build_graph_from_fragment(self.fragment_graph.get_root_fragment(), vec![])
             .await?;
 
-        let stream_graph = self.stream_graph.build()?;
-        stream_graph
+        let stream_graph = self.stream_graph.build(ctx)?;
+
+        Ok(stream_graph
             .iter()
             .map(|(&fragment_id, actors)| {
                 Ok::<_, RwError>((
@@ -71,7 +82,7 @@ impl StreamFragmenter {
                     },
                 ))
             })
-            .collect::<Result<BTreeMap<_, _>>>()
+            .collect::<Result<BTreeMap<_, _>>>()?)
     }
 
     /// Generate fragment DAG from input streaming plan by their dependency.

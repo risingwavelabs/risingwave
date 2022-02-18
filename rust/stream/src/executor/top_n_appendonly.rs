@@ -99,6 +99,7 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
         cache_size: Option<usize>,
         total_count: (usize, usize),
         executor_id: u64,
+        identity: String,
     ) -> Self {
         let pk_data_types = pk_indices
             .iter()
@@ -137,7 +138,7 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
             ),
             pk_indices,
             first_execution: true,
-            identity: format!("AppendOnlyTopNExecutor {:X}", executor_id),
+            identity: format!("{} {:X}", identity, executor_id),
         }
     }
 
@@ -386,6 +387,7 @@ mod tests {
             Some(2),
             (0, 0),
             1,
+            "AppendOnlyTopNExecutor".to_string(),
         );
         let res = top_n_executor.next().await.unwrap();
         assert_matches!(res, Message::Chunk(_));
@@ -458,6 +460,7 @@ mod tests {
             Some(2),
             (0, 0),
             1,
+            "AppendOnlyTopNExecutor".to_string(),
         );
         let res = top_n_executor.next().await.unwrap();
         assert_matches!(res, Message::Chunk(_));
@@ -553,6 +556,7 @@ mod tests {
             Some(2),
             (0, 0),
             1,
+            "AppendOnlyTopNExecutor".to_string(),
         );
         let res = top_n_executor.next().await.unwrap();
         assert_matches!(res, Message::Chunk(_));

@@ -2,7 +2,6 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
-use risingwave_common::util::downcast_arc;
 use risingwave_common::util::sort_util::fetch_orders;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::{ColumnDesc, ColumnOrder};
@@ -18,7 +17,6 @@ pub struct CreateTableExecutor {
     table_manager: TableManagerRef,
     source_manager: SourceManagerRef,
     table_columns: Vec<ColumnDesc>,
-    v2: bool,
     identity: String,
     /// Below for materialized views.
     is_materialized_view: bool,
@@ -28,7 +26,7 @@ pub struct CreateTableExecutor {
 }
 
 impl CreateTableExecutor {
-    pub fn new_v2(
+    pub fn new(
         table_id: TableId,
         table_manager: TableManagerRef,
         source_manager: SourceManagerRef,
@@ -40,7 +38,6 @@ impl CreateTableExecutor {
             table_manager,
             source_manager,
             table_columns,
-            v2: true,
             identity,
             is_materialized_view: false,
             associated_table_id: None,
@@ -75,7 +72,6 @@ impl BoxedExecutorBuilder for CreateTableExecutor {
             table_manager: source.global_task_env().table_manager_ref(),
             source_manager: source.global_task_env().source_manager_ref(),
             table_columns: node.column_descs.clone(),
-            v2: node.v2,
             identity: "CreateTableExecutor".to_string(),
             is_materialized_view: node.is_materialized_view,
             associated_table_id,
@@ -108,22 +104,9 @@ impl Executor for CreateTableExecutor {
             })
             .collect::<Result<Vec<_>>>()?;
 
-        if self.v2 {
-            let table = self
-                .table_manager
-                .create_table_v2(&self.table_id, table_columns)
-                .await?;
-            self.source_manager
-                .create_table_source_v2(&self.table_id, table)?;
-        } else if self.is_materialized_view {
-            let order_pairs = fetch_orders(&self.column_orders).unwrap();
-            let orderings = order_pairs
-                .iter()
-                .map(|order| order.order_type)
-                .collect::<Vec<_>>();
-
-            // Create associated materialized view.
+        if self.is_materialized_view {
             if self.associated_table_id.is_some() {
+                // Create associated materialized view for table_v2.
                 self.table_manager.register_associated_materialized_view(
                     self.associated_table_id.as_ref().unwrap(),
                     &self.table_id,
@@ -133,6 +116,13 @@ impl Executor for CreateTableExecutor {
                     &self.table_id,
                 )?;
             } else {
+                // Create normal MV.
+                let order_pairs = fetch_orders(&self.column_orders).unwrap();
+                let orderings = order_pairs
+                    .iter()
+                    .map(|order| order.order_type)
+                    .collect::<Vec<_>>();
+
                 self.table_manager.create_materialized_view(
                     &self.table_id,
                     &self.table_columns,
@@ -141,13 +131,15 @@ impl Executor for CreateTableExecutor {
                 )?;
             }
         } else {
+            // Create table_v2.
             info!("Create table id:{}", &self.table_id.table_id());
+
             let table = self
                 .table_manager
-                .create_table(&self.table_id, table_columns)
+                .create_table_v2(&self.table_id, table_columns)
                 .await?;
             self.source_manager
-                .create_table_source(&self.table_id, downcast_arc(table.into_any())?)?;
+                .create_table_source_v2(&self.table_id, table)?;
         }
         Ok(())
     }

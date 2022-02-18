@@ -114,7 +114,7 @@ impl BoxedExecutorBuilder for ValuesExecutor {
         Ok(Box::new(Self {
             rows,
             schema: Schema { fields },
-            identity: "ValuesExecutor".to_string(),
+            identity: source.plan_node().get_identity().clone(),
             chunk_size: source.global_task_env().config().chunk_size as usize,
         }))
     }

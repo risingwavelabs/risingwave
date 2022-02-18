@@ -71,6 +71,9 @@ public class RwBatchTableScan extends RwScan implements RisingWaveBatchPhyRel {
                   .build());
           ;
         });
-    return PlanNode.newBuilder().setSeqScan(seqScanNodeBuilder.build()).build();
+    return PlanNode.newBuilder()
+        .setSeqScan(seqScanNodeBuilder.build())
+        .setIdentity(BatchPlan.getCurrentNodeIdentity(this))
+        .build();
   }
 }

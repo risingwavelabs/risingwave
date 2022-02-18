@@ -76,7 +76,7 @@ impl BoxedExecutorBuilder for SortAggExecutor {
             child,
             child_done: false,
             schema: Schema { fields },
-            identity: "SortAggExecutor".to_string(),
+            identity: source.plan_node().get_identity().clone(),
         }))
     }
 }

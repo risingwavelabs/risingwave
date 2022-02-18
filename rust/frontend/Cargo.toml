@@ -18,6 +18,7 @@ log = "0.4"
 parking_lot = "0.12"
 paste = "1"
 pgwire = { path = "../utils/pgwire" }
+rand = "0.8.0"
 risingwave-pb = { path = "../prost" }
 risingwave_common = { path = "../common" }
 risingwave_meta = { path = "../meta" }
@@ -43,4 +44,3 @@ uuid = "0.8"
 [dev-dependencies]
 serial_test = "*"
 tempfile = "3"
-tokio-postgres = "0.7"
