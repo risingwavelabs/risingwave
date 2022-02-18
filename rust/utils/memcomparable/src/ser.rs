@@ -56,10 +56,8 @@ impl<B: BufMut> MaybeFlip<B> {
     def_method!(put_u16, u16);
     def_method!(put_u32, u32);
     def_method!(put_u64, u64);
-    def_method!(put_i8, i8);
     def_method!(put_i32, i32);
     def_method!(put_i64, i64);
-    def_method!(put_i128, i128);
 
     fn put_slice(&mut self, src: &[u8]) {
         for &val in src {
@@ -427,13 +425,117 @@ impl<B: BufMut> Serializer<B> {
     /// - `scale`: From `rust_decimal::Decimal::scale()`. A power of 10 ranging from 0 to 28.
     ///
     /// The decimal will be encoded to 13 bytes.
-    /// It is memcomparable only when two decimals have the same scale.
-    pub fn serialize_decimal(&mut self, mantissa: i128, scale: i8) -> Result<()> {
-        // TODO(wrj): variable-length encoding
+    pub fn serialize_decimal(&mut self, mantissa: i128, scale: u8) -> Result<()> {
         // https://github.com/pingcap/tidb/blob/fec2938c1379270bf9939822c1abfe3d7244c174/types/mydecimal.go#L1133
-        self.output.put_i8(scale);
-        self.output.put_i128(mantissa ^ (1 << 127));
+        // https://sqlite.org/src4/doc/trunk/www/key_encoding.wiki
+        let (exponent, significand) = Serializer::<B>::decimal_e_m(mantissa, scale);
+        let mut encoded_decimal = vec![];
+        match mantissa {
+            1.. => {
+                match exponent {
+                    11.. => {
+                        encoded_decimal.push(0x22);
+                        encoded_decimal.push(exponent as u8);
+                    }
+                    0..=10 => {
+                        encoded_decimal.push(0x17 + exponent as u8);
+                    }
+                    _ => {
+                        encoded_decimal.push(0x16);
+                        encoded_decimal.push(!(-exponent) as u8);
+                    }
+                }
+                encoded_decimal.extend(significand.iter());
+            }
+            0 => {
+                match scale {
+                    29 => {
+                        // Negative INF
+                        encoded_decimal.push(0x07);
+                    }
+                    30 => {
+                        // Positive INF
+                        encoded_decimal.push(0x23);
+                    }
+                    31 => {
+                        // NaN
+                        encoded_decimal.push(0x06);
+                    }
+                    _ => {
+                        // 0
+                        // Maybe need to change.
+                        encoded_decimal.push(0x15);
+                    }
+                }
+            }
+            _ => {
+                match exponent {
+                    11.. => {
+                        encoded_decimal.push(0x8);
+                        encoded_decimal.push(!exponent as u8);
+                    }
+                    0..=10 => {
+                        encoded_decimal.push(0x13 - exponent as u8);
+                    }
+                    _ => {
+                        encoded_decimal.push(0x14);
+                        encoded_decimal.push(-exponent as u8);
+                    }
+                }
+                encoded_decimal.extend(significand.into_iter().map(|m| !m));
+            }
+        }
+        // use 0x00 as the end marker.
+        encoded_decimal.push(0);
+        self.output.put_slice(&encoded_decimal);
         Ok(())
+    }
+
+    /// Get the exponent and byte_array form of mantissa.
+    pub fn decimal_e_m(mantissa: i128, scale: u8) -> (i8, Vec<u8>) {
+        if mantissa == 0 {
+            return (0, vec![]);
+        }
+        let prec = {
+            let mut abs_man = mantissa.abs();
+            let mut cnt = 0;
+            while abs_man > 0 {
+                cnt += 1;
+                abs_man /= 10;
+            }
+            cnt
+        };
+        let scale = scale as i32;
+
+        let e10 = prec - scale;
+        let e100 = if e10 >= 0 { (e10 + 1) / 2 } else { e10 / 2 };
+        // Maybe need to add a zero at the beginning.
+        // e.g. 111.11 -> 2(exponent which is 100 based) + 0.011111(mantissa).
+        // So, the `digit_num` of 111.11 will be 6.
+        let mut digit_num = if e10 == 2 * e100 { prec } else { prec + 1 };
+
+        let mut byte_array: Vec<u8> = vec![];
+        let mut mantissa = mantissa.abs();
+        // Remove trailing zero.
+        while mantissa % 10 == 0 && mantissa != 0 {
+            mantissa /= 10;
+            digit_num -= 1;
+        }
+
+        // Cases like: 0.12345, not 0.01111.
+        if digit_num % 2 == 1 {
+            mantissa *= 10;
+            // digit_num += 1;
+        }
+        while mantissa != 0 {
+            let byte = (mantissa % 100) as u8 * 2 + 1;
+            byte_array.push(byte);
+            mantissa /= 100;
+        }
+        byte_array[0] -= 1;
+        byte_array.reverse();
+
+        (e100 as i8, byte_array)
     }
 
     /// Serialize a NaiveDateWrapper value.
@@ -654,10 +756,63 @@ mod tests {
         assert!(a > b && b > c);
     }
 
-    fn serialize_decimal(mantissa: i128, scale: i8) -> Vec<u8> {
+    fn serialize_decimal(mantissa: i128, scale: u8) -> Vec<u8> {
         let mut serializer = Serializer::new(vec![]);
         serializer.serialize_decimal(mantissa, scale).unwrap();
         serializer.into_inner()
+    }
+
+    #[test]
+    fn test_decimal_e_m() {
+        // from: https://sqlite.org/src4/doc/trunk/www/key_encoding.wiki
+        let cases = vec![
+            // (decimal, exponets, significand)
+            ("1.0", 1, "02"),
+            ("10.0", 1, "14"),
+            ("10", 1, "14"),
+            ("99.0", 1, "c6"),
+            ("99.01", 1, "c7 02"),
+            ("99.0001", 1, "c7 01 02"),
+            ("100.0", 2, "02"),
+            ("100.01", 2, "03 01 02"),
+            ("100.1", 2, "03 01 14"),
+            ("111.11", 2, "03 17 16"),
+            ("1234", 2, "19 44"),
+            ("9999", 2, "c7 c6"),
+            ("9999.000001", 2, "c7 c7 01 01 02"),
+            ("9999.000009", 2, "c7 c7 01 01 12"),
+            ("9999.00001", 2, "c7 c7 01 01 14"),
+            ("9999.00009", 2, "c7 c7 01 01 b4"),
+            ("9999.000099", 2, "c7 c7 01 01 c6"),
+            ("9999.0001", 2, "c7 c7 01 02"),
+            ("9999.001", 2, "c7 c7 01 14"),
+            ("9999.01", 2, "c7 c7 02"),
+            ("9999.1", 2, "c7 c7 14"),
+            ("10000", 3, "02"),
+            ("10001", 3, "03 01 02"),
+            ("12345", 3, "03 2f 5a"),
+            ("123450", 3, "19 45 64"),
+            ("1234.5", 2, "19 45 64"),
+            ("12.345", 1, "19 45 64"),
+            ("0.123", 0, "19 3c"),
+            ("0.0123", 0, "03 2e"),
+            ("0.00123", -1, "19 3c"),
+            ("9223372036854775807", 10, "13 2d 43 91 07 89 6d 9b 75 0e"),
+        ];
+
+        for (decimal, exponets, significand) in cases {
+            let d = decimal.parse::<rust_decimal::Decimal>().unwrap();
+            let (exp, sig) = Serializer::<Vec<u8>>::decimal_e_m(d.mantissa(), d.scale() as u8);
+            assert_eq!(exp, exponets, "wrong exponets for decimal: {decimal}");
+            assert_eq!(
+                sig.iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                significand,
+                "wrong significand for decimal: {decimal}"
+            );
+        }
     }
 
     #[test]
