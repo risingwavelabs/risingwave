@@ -1,6 +1,6 @@
 {
   "children": [{
-    "seqScan": {
+    "rowSeqScan": {
       "tableRefId": {
         "schemaRefId": {
           "databaseRefId": {
@@ -19,7 +19,7 @@
         "name": "v1"
       }]
     },
-    "identity": "RwBatchTableScan(table\u003d[[test_schema, t5]], columns\u003d[v1])"
+    "identity": "RwBatchScan(table\u003d[[test_schema, t5]], columns\u003d[v1])"
   }],
   "limit": {
     "limit": 1,

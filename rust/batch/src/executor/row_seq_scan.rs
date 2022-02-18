@@ -39,7 +39,6 @@ impl RowSeqScanExecutor {
         // behavior of column ids of mviews.
         // FIXME: remove this hack
         let column_indices = column_ids.iter().map(|&id| id as usize).collect_vec();
-        // let column_indices = table.column_indices(&column_ids);
 
         let table_schema = table.schema();
         let schema = Schema::new(

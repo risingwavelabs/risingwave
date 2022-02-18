@@ -1,7 +1,7 @@
 control sortmode rowsort
 
 statement ok
-create table_v2 t1v2 (v1 real not null, v2 int not null, v3 real not null);
+create table t1v2 (v1 real not null, v2 int not null, v3 real not null);
 
 statement ok
 insert into t1v2 values (1,1,4), (5,1,4);
@@ -9,7 +9,8 @@ insert into t1v2 values (1,1,4), (5,1,4);
 statement ok
 flush;
 
-# issue #402
+# FIXME: Schema for `Table` is a mess.
+#
 # query RIR
 # select * from _rw_source_t1v2;
 # ----

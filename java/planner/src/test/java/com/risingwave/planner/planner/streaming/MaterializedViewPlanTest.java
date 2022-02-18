@@ -87,7 +87,7 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     String resultPlan = ExplainWriter.explainPlan(plan.getRoot());
     String expectedPlan =
         "RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])\n"
-            + "  RwBatchMaterializedViewScan(table=[[test_schema, t_test]], columns=[v,$f0,$f1])";
+            + "  RwBatchScan(table=[[test_schema, t_test]], columns=[v,$f0,$f1])";
     testLogger.debug("result plan:\n" + resultPlan);
     Assertions.assertEquals(expectedPlan, resultPlan);
   }
@@ -189,7 +189,7 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     String resultPlan = ExplainWriter.explainPlan(plan.getRoot());
     String expectedPlan =
         "RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[0, 1]])\n"
-            + "  RwBatchMaterializedViewScan(table=[[test_schema, t_test_order_limit]], columns=[v1,v2,v3,_row_id])";
+            + "  RwBatchScan(table=[[test_schema, t_test_order_limit]], columns=[v1,v2,v3,_row_id])";
     testLogger.debug("result plan:\n" + resultPlan);
     Assertions.assertEquals(expectedPlan, resultPlan);
   }
@@ -205,7 +205,7 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     String resultPlan = ExplainWriter.explainPlan(plan.getRoot());
     String expectedPlan =
         "RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[0, 1]])\n"
-            + "  RwBatchMaterializedViewScan(table=[[test_schema, t_test_order_limit]], columns=[v1,v2,v3,_row_id])";
+            + "  RwBatchScan(table=[[test_schema, t_test_order_limit]], columns=[v1,v2,v3,_row_id])";
     testLogger.debug("result plan:\n" + resultPlan);
     Assertions.assertEquals(expectedPlan, resultPlan);
   }
@@ -221,7 +221,7 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     String expectedPlan =
         "RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[2, 1, 0]])\n"
             + "  RwBatchSort(sort0=[$2], sort1=[$1], sort2=[$0], dir0=[ASC], dir1=[ASC], dir2=[ASC])\n"
-            + "    RwBatchMaterializedViewScan(table=[[test_schema, t_test_order_limit]], columns=[v1,v2,v3,_row_id])";
+            + "    RwBatchScan(table=[[test_schema, t_test_order_limit]], columns=[v1,v2,v3,_row_id])";
     testLogger.debug("result plan:\n" + resultPlan);
     Assertions.assertEquals(expectedPlan, resultPlan);
   }
@@ -258,7 +258,7 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     String resultPlan = ExplainWriter.explainPlan(plan.getRoot());
     String expectedPlan =
         "RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[0, 1]])\n"
-            + "  RwBatchMaterializedViewScan(table=[[test_schema, t_test_order_zero_limit]], columns=[v1,v2,v3,_row_id])";
+            + "  RwBatchScan(table=[[test_schema, t_test_order_zero_limit]], columns=[v1,v2,v3,_row_id])";
     testLogger.debug("result plan:\n" + resultPlan);
     Assertions.assertEquals(expectedPlan, resultPlan);
   }
