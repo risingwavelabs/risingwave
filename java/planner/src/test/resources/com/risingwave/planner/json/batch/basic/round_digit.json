@@ -8,7 +8,16 @@
         },
         "tableId": 9
       },
-      "columnIds": [0]
+      "columnIds": [0],
+      "fields": [{
+        "dataType": {
+          "typeName": "DECIMAL",
+          "precision": 28,
+          "scale": 10,
+          "isNullable": true
+        },
+        "name": "v1"
+      }]
     },
     "identity": "RwBatchScan(table\u003d[[test_schema, t5]], columns\u003d[v1])"
   }],

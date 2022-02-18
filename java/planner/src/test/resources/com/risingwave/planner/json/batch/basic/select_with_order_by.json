@@ -8,7 +8,23 @@
         },
         "tableId": 1
       },
-      "columnIds": [0, 1, 2]
+      "columnIds": [0, 1, 2],
+      "fields": [{
+        "dataType": {
+          "typeName": "INT32"
+        },
+        "name": "v1"
+      }, {
+        "dataType": {
+          "typeName": "INT32"
+        },
+        "name": "v2"
+      }, {
+        "dataType": {
+          "typeName": "FLOAT"
+        },
+        "name": "v3"
+      }]
     },
     "identity": "RwBatchScan(table\u003d[[test_schema, t]], columns\u003d[v1,v2,v3])"
   }],
