@@ -1,3 +1,5 @@
+control sortmode rowsort
+
 statement ok
 create table_v2 t1v2 (v1 real not null, v2 int not null, v3 real not null);
 
@@ -7,11 +9,12 @@ insert into t1v2 values (1,1,4), (5,1,4);
 statement ok
 flush;
 
-query RIR
-select * from _rw_source_t1v2;
-----
-1 1 4
-5 1 4
+# issue #402
+# query RIR
+# select * from _rw_source_t1v2;
+# ----
+# 1 1 4
+# 5 1 4
 
 query RIR
 select * from t1v2;

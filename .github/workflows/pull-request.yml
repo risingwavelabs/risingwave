@@ -11,7 +11,7 @@ on:
     branches: [main]
 env:
   RUST_TOOLCHAIN: nightly-2022-01-13
-  CACHE_KEY_SUFFIX: v20220216
+  CACHE_KEY_SUFFIX: v20220218
   CARGO_TERM_COLOR: always
 jobs:
   frontend-check:
@@ -96,7 +96,9 @@ jobs:
           cp risedev-components.ci.env risedev-components.user.env
       - name: Download sqllogictest
         run: |
-          curl -fL -o ~/.cargo/bin/sqllogictest https://github.com/singularity-data/sqllogictest-rs/releases/download/v0.2.0/sqllogictest-linux-amd64
+          # reply on #25, download release archive after new version release
+          # curl -fL -o ~/.cargo/bin/sqllogictest https://github.com/singularity-data/sqllogictest-rs/releases/download/v0.2.0/sqllogictest-linux-amd64
+          cargo install sqllogictest --features bin --git https://github.com/singularity-data/sqllogictest-rs --rev 21357d4
           chmod +x ~/.cargo/bin/sqllogictest
       - name: Download cargo-make
         run: |
@@ -105,21 +107,21 @@ jobs:
           mv ~/cargo-make-v0.35.7-x86_64-unknown-linux-musl ~/cargo-make
       - name: Prepare RiseDev playground
         run: ~/cargo-make/makers pre-start-playground
-      - name: e2e test w/ Hummock
+      - name: e2e test w/ Hummock 3-node
         run: |
           ~/cargo-make/makers clean-data
-          ~/cargo-make/makers ci-1node
-          timeout 3m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
+          ~/cargo-make/makers ci-3node
+          timeout 6m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
           ~/cargo-make/makers logs
           ~/cargo-make/makers check-logs
-      - name: e2e test w/ Hummock w/o cache
+      - name: e2e test w/ Hummock w/o cache 3-node
         run: |
           ~/cargo-make/makers clean-data
-          RW_NO_CACHE=1 ~/cargo-make/makers ci-1node
-          timeout 3m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
+          RW_NO_CACHE=1 ~/cargo-make/makers ci-3node
+          timeout 6m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
