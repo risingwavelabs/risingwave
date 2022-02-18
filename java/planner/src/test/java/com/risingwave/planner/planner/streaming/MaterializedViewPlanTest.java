@@ -70,7 +70,7 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     CreateMaterializedViewHandler handler = new CreateMaterializedViewHandler();
     SqlCreateMaterializedView createMaterializedView = (SqlCreateMaterializedView) ast;
     String tableName = createMaterializedView.name.getSimple();
-    handler.convertPlanToCatalog(tableName, plan, executionContext);
+    handler.convertPlanToCatalog(tableName, plan, executionContext, false);
 
     StreamNode serializedProto = plan.getStreamingPlan().serialize();
     String serializedJsonPlan = Messages.jsonFormat(serializedProto);
@@ -110,7 +110,7 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     CreateMaterializedViewHandler handler = new CreateMaterializedViewHandler();
     SqlCreateMaterializedView createMaterializedView = (SqlCreateMaterializedView) ast;
     String tableName = createMaterializedView.name.getSimple();
-    handler.convertPlanToCatalog(tableName, plan, executionContext);
+    handler.convertPlanToCatalog(tableName, plan, executionContext, false);
 
     String explainExchangePlan = ExplainWriter.explainPlan(plan.getStreamingPlan());
     String expectedPlan =
@@ -142,7 +142,7 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     CreateMaterializedViewHandler handler = new CreateMaterializedViewHandler();
     SqlCreateMaterializedView createMaterializedView = (SqlCreateMaterializedView) ast;
     String tableName = createMaterializedView.name.getSimple();
-    handler.convertPlanToCatalog(tableName, plan, executionContext);
+    handler.convertPlanToCatalog(tableName, plan, executionContext, false);
 
     String explainExchangePlan = ExplainWriter.explainPlan(plan.getStreamingPlan());
     String expectedPlan =
@@ -176,7 +176,7 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     CreateMaterializedViewHandler handler = new CreateMaterializedViewHandler();
     SqlCreateMaterializedView createMaterializedView = (SqlCreateMaterializedView) ast;
     String tableName = createMaterializedView.name.getSimple();
-    handler.convertPlanToCatalog(tableName, plan, executionContext);
+    handler.convertPlanToCatalog(tableName, plan, executionContext, false);
   }
 
   @Test
@@ -245,7 +245,7 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     CreateMaterializedViewHandler handler = new CreateMaterializedViewHandler();
     SqlCreateMaterializedView createMaterializedView = (SqlCreateMaterializedView) ast;
     String tableName = createMaterializedView.name.getSimple();
-    handler.convertPlanToCatalog(tableName, plan, executionContext);
+    handler.convertPlanToCatalog(tableName, plan, executionContext, false);
   }
 
   @Test

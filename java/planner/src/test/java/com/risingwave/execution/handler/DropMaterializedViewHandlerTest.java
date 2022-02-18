@@ -50,7 +50,7 @@ public class DropMaterializedViewHandlerTest {
             .build();
     String sql = "create table t(v1 int not null, v2 int not null, v3 float not null)";
     SqlNode ast = SqlParser.createCalciteStatement(sql);
-    var handler = ((CreateTableV1Handler) sqlHandlerFactory.create(ast, executionContext));
+    var handler = ((CreateTableHandler) sqlHandlerFactory.create(ast, executionContext));
     handler.execute(ast, executionContext);
 
     // Add materialized view.
@@ -64,7 +64,7 @@ public class DropMaterializedViewHandlerTest {
         ((CreateMaterializedViewHandler) sqlHandlerFactory.create(createAst, executionContext));
     StreamPlanner planner = new StreamPlanner();
     StreamingPlan plan = planner.plan(createAst, executionContext);
-    createMaterializedViewHandler.convertPlanToCatalog(tableName, plan, executionContext);
+    createMaterializedViewHandler.convertPlanToCatalog(tableName, plan, executionContext, false);
   }
 
   @Test

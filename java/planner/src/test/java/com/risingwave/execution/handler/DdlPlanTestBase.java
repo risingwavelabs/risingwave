@@ -60,11 +60,10 @@ public class DdlPlanTestBase {
   protected void runTestCase(PlannerTestCase testCase) {
     String sql = testCase.getSql();
     SqlNode ast = parseSql(sql);
-    PlanFragment ret;
+    PlanFragment ret = null;
     if (ast.getKind() == SqlKind.CREATE_TABLE) {
-      ret =
-          ((CreateTableHandler) sqlHandlerFactory.create(ast, executionContext))
-              .execute(ast, executionContext);
+      ((CreateTableHandler) sqlHandlerFactory.create(ast, executionContext))
+          .execute(ast, executionContext);
     } else if (ast.getKind() == SqlKind.DROP_TABLE) {
       ret =
           ((DropTableHandler) sqlHandlerFactory.create(ast, executionContext))

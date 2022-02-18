@@ -37,7 +37,7 @@ public class CreateSourceHandler implements SqlHandler {
   @Override
   public DdlResult handle(SqlNode ast, ExecutionContext context) {
     PlanFragment planFragment = execute(ast, context);
-    CreateTaskBroadcaster.BroadCastTaskFromPlanFragment(planFragment, context);
+    CreateTaskBroadcaster.broadCastTaskFromPlanFragment(planFragment, context);
     return new DdlResult(StatementType.CREATE_STREAM, 0);
   }
 

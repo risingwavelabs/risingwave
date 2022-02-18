@@ -38,7 +38,7 @@ public class DropTableHandler implements SqlHandler {
   public PgResult handle(SqlNode ast, ExecutionContext context) {
     var planFragments = execute(ast, context);
     for (var planFragment : planFragments) {
-      CreateTaskBroadcaster.BroadCastTaskFromPlanFragment(planFragment, context);
+      CreateTaskBroadcaster.broadCastTaskFromPlanFragment(planFragment, context);
     }
 
     return new DdlResult(StatementType.DROP_TABLE, 0);
@@ -106,8 +106,7 @@ public class DropTableHandler implements SqlHandler {
           RemoteStreamManager remoteStreamManager = (RemoteStreamManager) streamManager;
           remoteStreamManager.dropMaterializedView(Messages.getTableRefId(table.getId()));
         } else {
-          throw new PgException(
-              PgErrorCode.INTERNAL_ERROR, "Not available in local stream manager");
+          log.debug("Local stream manager remove materialized view:\n" + name);
         }
       } else {
         var planFragment = serialize(table);

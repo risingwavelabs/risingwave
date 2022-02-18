@@ -30,9 +30,7 @@ import org.slf4j.LoggerFactory;
  * A `CreateMaterializedViewHandler` handles the <code>Create Materialized View</code> statement in
  * following steps. (1) Generating a (distributed) stream plan representing the dataflow of the
  * stream processing. (2) Register the materialized view as a table in the storage catalog. (3)
- * Generating a stream DAG consists of stream fragments and their dependency. Each fragment
- * translates to an actor on the compute-node. (4) Allocating these actors to different
- * compute-nodes.
+ * Sending the streaming plan to meta service and let it do the following steps.
  */
 @HandlerSignature(sqlKinds = {SqlKind.CREATE_MATERIALIZED_VIEW})
 public class CreateMaterializedViewHandler implements SqlHandler {
@@ -58,11 +56,10 @@ public class CreateMaterializedViewHandler implements SqlHandler {
     }
 
     // Send create MV tasks to all compute nodes.
-    TableCatalog catalog = convertPlanToCatalog(tableName, plan, context);
+    TableCatalog catalog = convertPlanToCatalog(tableName, plan, context, false);
     PlanFragment planFragment =
         TableNodeSerializer.createProtoFromCatalog(catalog, false, plan.getStreamingPlan());
-
-    CreateTaskBroadcaster.BroadCastTaskFromPlanFragment(planFragment, context);
+    CreateTaskBroadcaster.broadCastTaskFromPlanFragment(planFragment, context);
 
     // Bind stream plan with materialized view catalog.
     plan.getStreamingPlan().setTableId(catalog.getId());
@@ -76,8 +73,8 @@ public class CreateMaterializedViewHandler implements SqlHandler {
   }
 
   @VisibleForTesting
-  public MaterializedViewCatalog convertPlanToCatalog(
-      String tableName, StreamingPlan plan, ExecutionContext context) {
+  public static MaterializedViewCatalog convertPlanToCatalog(
+      String tableName, StreamingPlan plan, ExecutionContext context, boolean hasAssociated) {
     SchemaCatalog.SchemaName schemaName = context.getCurrentSchema();
 
     CreateMaterializedViewInfo.Builder builder = CreateMaterializedViewInfo.builder(tableName);
@@ -88,6 +85,7 @@ public class CreateMaterializedViewHandler implements SqlHandler {
     }
     builder.setCollation(rootNode.getCollation());
     builder.setMv(true);
+    builder.setAssociated(hasAssociated);
     builder.setDependentTables(rootNode.getDependentTables());
     rootNode.getPrimaryKeyIndices().forEach(builder::addPrimaryKey);
     CreateMaterializedViewInfo mvInfo = builder.build();
@@ -98,7 +96,7 @@ public class CreateMaterializedViewHandler implements SqlHandler {
   }
 
   @VisibleForTesting
-  public boolean isAllAliased(RwStreamMaterializedView root) {
+  public static boolean isAllAliased(RwStreamMaterializedView root) {
     // Trick for checking whether is there any un-aliased aggregations: check the name pattern of
     // columns. Un-aliased column is named as EXPR$1 etc.
     var columns = root.getColumns();
