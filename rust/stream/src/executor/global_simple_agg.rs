@@ -93,7 +93,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             agg_calls,
             identity: format!("GlobalSimpleAggExecutor {:X}", executor_id),
             op_info,
-            epoch: 0
+            epoch: 0,
         }
     }
 

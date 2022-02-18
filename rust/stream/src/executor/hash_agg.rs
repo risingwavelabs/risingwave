@@ -90,7 +90,7 @@ impl<S: StateStore> HashAggExecutor<S> {
             pk_indices,
             identity: format!("HashAggExecutor {:X}", executor_id),
             op_info,
-            epoch: 0
+            epoch: 0,
         }
     }
 

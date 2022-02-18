@@ -227,7 +227,7 @@ pub struct HashJoinExecutor<S: StateStore, const T: JoinTypePrimitive> {
 
     /// Logical Operator Info
     op_info: String,
-    
+
     /// Epoch
     epoch: u64,
 }
