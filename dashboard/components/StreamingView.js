@@ -74,6 +74,10 @@ export default function StreamingView(props) {
     if (type === "actor") {
       locateTo(`rect.${type}-${searchContent}`);
     }
+
+    if (type === "fragment"){
+      locateTo(`rect.${type}-${searchContent}`);
+    }
   }
 
   const onNodeClick = (e, node) => {
@@ -251,6 +255,7 @@ export default function StreamingView(props) {
               onChange={onSearchTypeChange}
             >
               <MenuItem value="Actor">Actor</MenuItem>
+              <MenuItem value="Fragment">Fragment</MenuItem>
             </Select>
           </FormControl>
           <Input
