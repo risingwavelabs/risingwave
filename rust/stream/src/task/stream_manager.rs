@@ -831,7 +831,7 @@ impl StreamManagerCore {
     }
 
     fn build_channel_for_chain_node(
-        &mut self,
+        & self,
         actor_id: u32,
         stream_node: &stream_plan::StreamNode,
     ) -> Result<()> {
@@ -844,7 +844,7 @@ impl StreamManagerCore {
                 "first input of chain node should be merge node"
             )?;
             for upstream_actor_id in &merge.upstream_actor_id {
-                if !self.get_actor_info().contains_key(upstream_actor_id) {
+                if !self.actor_infos.contains_key(upstream_actor_id) {
                     return Err(ErrorCode::InternalError(format!(
                         "chain upstream actor {} not exists",
                         upstream_actor_id
@@ -883,7 +883,7 @@ impl StreamManagerCore {
             }
         }
 
-        for (current_id, actor) in & self.actors.clone() {
+        for (current_id, actor) in & self.actors {
             self.build_channel_for_chain_node(*current_id, actor.nodes.as_ref().unwrap())?;
 
             for downstream_id in actor.get_downstream_actor_id() {
