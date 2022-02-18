@@ -228,7 +228,6 @@ impl<S: StateStore> TableIter for MViewTableIter<S> {
 
         let mut pk_buf = vec![];
         let mut restored = 0;
-        // let mut row_bytes = vec![];
         let mut row = vec![];
         loop {
             let (key, value) = match self.buf.get(self.next_idx) {
@@ -275,7 +274,6 @@ impl<S: StateStore> TableIter for MViewTableIter<S> {
                 return Err(ErrorCode::InternalError("primary key incorrect".to_owned()).into());
             }
 
-            // row_bytes.extend_from_slice(value);
             let datum = deserialize_cell(&value[..], &self.schema.data_types()[restored])?;
             row.push(datum);
 
@@ -284,8 +282,6 @@ impl<S: StateStore> TableIter for MViewTableIter<S> {
                 break;
             }
         }
-        // let row_deserializer = RowDeserializer::new(self.schema.data_types());
-        // let row = row_deserializer.deserialize(&row_bytes)?;
         Ok(Some(Row::new(row)))
     }
 }

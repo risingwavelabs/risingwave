@@ -578,6 +578,7 @@ impl<B: Buf> Deserializer<B> {
 
 #[cfg(test)]
 mod tests {
+    use std::iter::zip;
     use std::str::FromStr;
 
     use rust_decimal::Decimal;
@@ -724,9 +725,29 @@ mod tests {
 
     #[test]
     fn test_decimal() {
-        let (mantissa, scale) = (-12_3456_7890_1234, 4);
-        let (mantissa0, scale0) = deserialize_decimal(&serialize_decimal(mantissa, scale));
-        assert_eq!((mantissa, scale), (mantissa0, scale0));
+        // Notice: decimals like 100.00 will be decoding as 100.
+
+        // Test: -1234_5678_9012_3456_7890_1234, -12_3456_7890.1234, -0.001, 0.001, 100, 0.01111,
+        // 12345, 1234_5678_9012_3456_7890_1234, -233.3, 50
+        let mantissas: Vec<i128> = vec![
+            -1234_5678_9012_3456_7890_1234,
+            -12_3456_7890_1234,
+            -1,
+            1,
+            100,
+            1111,
+            12345,
+            1234_5678_9012_3456_7890_1234,
+            -2333,
+            50,
+        ];
+        let scales: Vec<u8> = vec![0, 4, 3, 3, 0, 5, 0, 0, 1, 0];
+        for (mantissa, scale) in zip(mantissas, scales) {
+            assert_eq!(
+                (mantissa, scale),
+                deserialize_decimal(&serialize_decimal(mantissa, scale))
+            );
+        }
     }
 
     #[test]
