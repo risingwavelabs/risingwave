@@ -7,7 +7,7 @@ use risingwave_pb::hummock::{
     UnpinVersionRequest,
 };
 
-use crate::hummock::hummock_meta_client::HummockMetaClient;
+use crate::hummock::hummock_meta_client::{HummockMetaClient, GLOBAL_COLUMN_FAMILY_ID};
 use crate::hummock::mock::MockHummockMetaService;
 use crate::hummock::{HummockEpoch, HummockResult, HummockSSTableId, HummockVersionId};
 
@@ -28,13 +28,17 @@ impl HummockMetaClient for MockHummockMetaClient {
     async fn pin_version(&self) -> HummockResult<HummockVersion> {
         let response = self
             .mock_hummock_meta_service
-            .pin_version(PinVersionRequest { context_id: 0 });
+            .pin_version(PinVersionRequest {
+                column_family: String::from(GLOBAL_COLUMN_FAMILY_ID),
+                context_id: 0,
+            });
         Ok(response.pinned_version.unwrap())
     }
 
     async fn unpin_version(&self, pinned_version_id: HummockVersionId) -> HummockResult<()> {
         self.mock_hummock_meta_service
             .unpin_version(UnpinVersionRequest {
+                column_family: String::from(GLOBAL_COLUMN_FAMILY_ID),
                 context_id: 0,
                 pinned_version_id,
             });
@@ -44,7 +48,10 @@ impl HummockMetaClient for MockHummockMetaClient {
     async fn pin_snapshot(&self) -> HummockResult<HummockEpoch> {
         let epoch = self
             .mock_hummock_meta_service
-            .pin_snapshot(PinSnapshotRequest { context_id: 0 })
+            .pin_snapshot(PinSnapshotRequest {
+                column_family: String::from(GLOBAL_COLUMN_FAMILY_ID),
+                context_id: 0,
+            })
             .snapshot
             .unwrap()
             .epoch;
@@ -54,6 +61,7 @@ impl HummockMetaClient for MockHummockMetaClient {
     async fn unpin_snapshot(&self, pinned_epoch: HummockEpoch) -> HummockResult<()> {
         self.mock_hummock_meta_service
             .unpin_snapshot(UnpinSnapshotRequest {
+                column_family: String::from(GLOBAL_COLUMN_FAMILY_ID),
                 context_id: 0,
                 snapshot: Some(HummockSnapshot {
                     epoch: pinned_epoch,
@@ -76,8 +84,9 @@ impl HummockMetaClient for MockHummockMetaClient {
         sstables: Vec<SstableInfo>,
     ) -> HummockResult<HummockVersion> {
         let resp = self.mock_hummock_meta_service.add_tables(AddTablesRequest {
+            column_family: String::from(GLOBAL_COLUMN_FAMILY_ID),
             context_id: 0,
-            tables: sstables.to_vec(),
+            sstable_info: sstables.to_vec(),
             epoch,
         });
         Ok(resp.version.unwrap())

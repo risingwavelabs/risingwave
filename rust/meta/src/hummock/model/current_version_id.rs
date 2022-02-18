@@ -56,11 +56,14 @@ impl CurrentHummockVersionId {
     }
 
     pub fn update_in_transaction(&self, trx: &mut Transaction) {
-        trx.add_operations(vec![Operation::Put(
-            cf: ColumnFamilyUtils::get_composed_cf(CurrentHummockVersionId::cf_name(), &self.cf_ident),
+        trx.add_operations(vec![Operation::Put {
+            cf: ColumnFamilyUtils::get_composed_cf(
+                CurrentHummockVersionId::cf_name(),
+                &self.cf_ident,
+            ),
             key: CurrentHummockVersionId::key().as_bytes().to_vec(),
             value: HummockVersionRefId { id: self.id }.encode_to_vec(),
-        )]);
+        }]);
     }
 
     pub fn id(&self) -> HummockVersionId {

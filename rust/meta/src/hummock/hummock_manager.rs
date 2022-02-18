@@ -22,7 +22,7 @@ use crate::hummock::model::{
     CurrentHummockVersionId, HummockContextPinnedSnapshotExt, HummockContextPinnedVersionExt,
 };
 use crate::manager::{IdCategory, IdGeneratorManagerRef, MetaSrvEnv};
-use crate::model::{MetadataUserCfModel, TransactionalUserCf};
+use crate::model::{MetadataModel, MetadataUserCfModel, TransactionalUserCf};
 use crate::storage::{MetaStore, Transaction, DEFAULT_COLUMN_FAMILY_ID};
 
 pub struct HummockManager<S> {
@@ -160,11 +160,10 @@ where
         context_id: HummockContextId,
         cf_ident: &str,
     ) -> Result<HummockVersion> {
-        let cf_inner;
-        {
+        let cf_inner = {
             let cf_map_rd_guard = self.cf_map.read().await;
-            cf_inner = cf_map_rd_guard.get(cf_ident).unwrap().clone();
-        }
+            cf_map_rd_guard.get(cf_ident).unwrap().clone()
+        };
         let versioning_guard = cf_inner.versioning.write().await;
         let version_id =
             CurrentHummockVersionId::get(versioning_guard.meta_store_ref.as_ref(), cf_ident)
@@ -207,11 +206,10 @@ where
         cf_ident: &str,
         pinned_version_id: HummockVersionId,
     ) -> Result<()> {
-        let cf_inner;
-        {
+        let cf_inner = {
             let cf_map_rd_guard = self.cf_map.read().await;
-            cf_inner = cf_map_rd_guard.get(cf_ident).unwrap().clone();
-        }
+            cf_map_rd_guard.get(cf_ident).unwrap().clone()
+        };
         let versioning_guard = cf_inner.versioning.write().await;
         let mut transaction = versioning_guard.meta_store_ref.get_transaction();
         let mut context_pinned_version = match HummockContextPinnedVersion::select_with_cf_suffix(
@@ -247,11 +245,10 @@ where
 
         // Hold the compact status lock so that no one else could add/drop SST or search compaction
         // plan.
-        let cf_inner;
-        {
+        let cf_inner = {
             let cf_map_rd_guard = self.cf_map.read().await;
-            cf_inner = cf_map_rd_guard.get(cf_ident).unwrap().clone();
-        }
+            cf_map_rd_guard.get(cf_ident).unwrap().clone()
+        };
         let compaction_guard = cf_inner.compaction.lock().await;
         let mut compact_status =
             CompactStatus::get(compaction_guard.meta_store_ref.as_ref(), cf_ident).await?;
@@ -351,11 +348,10 @@ where
         context_id: HummockContextId,
         cf_ident: &str,
     ) -> Result<HummockSnapshot> {
-        let cf_inner;
-        {
+        let cf_inner = {
             let cf_map_rd_guard = self.cf_map.read().await;
-            cf_inner = cf_map_rd_guard.get(cf_ident).unwrap().clone();
-        }
+            cf_map_rd_guard.get(cf_ident).unwrap().clone()
+        };
         let versioning_guard = cf_inner.versioning.write().await;
 
         // Use the max_committed_epoch in storage as the snapshot ts so only committed changes are
@@ -402,11 +398,10 @@ where
         cf_ident: &str,
         hummock_snapshot: HummockSnapshot,
     ) -> Result<()> {
-        let cf_inner;
-        {
+        let cf_inner = {
             let cf_map_rd_guard = self.cf_map.read().await;
-            cf_inner = cf_map_rd_guard.get(cf_ident).unwrap().clone();
-        }
+            cf_map_rd_guard.get(cf_ident).unwrap().clone()
+        };
         let versioning_guard = cf_inner.versioning.write().await;
 
         let mut context_pinned_snapshot = match HummockContextPinnedSnapshot::select_with_cf_suffix(
@@ -437,11 +432,10 @@ where
         context_id: HummockContextId,
         cf_ident: &str,
     ) -> Result<Option<CompactTask>> {
-        let cf_inner;
-        {
+        let cf_inner = {
             let cf_map_rd_guard = self.cf_map.read().await;
-            cf_inner = cf_map_rd_guard.get(cf_ident).unwrap().clone();
-        }
+            cf_map_rd_guard.get(cf_ident).unwrap().clone()
+        };
         let watermark = {
             let versioning_guard = cf_inner.versioning.read().await;
             let current_version_id =
@@ -494,11 +488,10 @@ where
         compact_task: CompactTask,
         task_result: bool,
     ) -> Result<()> {
-        let cf_inner;
-        {
+        let cf_inner = {
             let cf_map_rd_guard = self.cf_map.read().await;
-            cf_inner = cf_map_rd_guard.get(cf_ident).unwrap().clone();
-        }
+            cf_map_rd_guard.get(cf_ident).unwrap().clone()
+        };
         let output_table_compact_entries: Vec<_> = compact_task
             .sorted_output_ssts
             .iter()
@@ -587,16 +580,11 @@ where
         Ok(())
     }
 
-    pub async fn commit_epoch(
-        &self,
-        cf_ident: &str,
-        epoch: HummockEpoch,
-    ) -> Result<()> {
-        let cf_inner;
-        {
+    pub async fn commit_epoch(&self, cf_ident: &str, epoch: HummockEpoch) -> Result<()> {
+        let cf_inner = {
             let cf_map_rd_guard = self.cf_map.read().await;
-            cf_inner = cf_map_rd_guard.get(cf_ident).unwrap().clone();
-        }
+            cf_map_rd_guard.get(cf_ident).unwrap().clone()
+        };
         let versioning_guard = cf_inner.versioning.write().await;
         let mut transaction = versioning_guard.meta_store_ref.get_transaction();
         let mut current_version_id =
@@ -656,16 +644,11 @@ where
         Ok(())
     }
 
-    pub async fn abort_epoch(
-        &self,
-        cf_ident: &str,
-        epoch: HummockEpoch,
-    ) -> Result<()> {
-        let cf_inner;
-        {
+    pub async fn abort_epoch(&self, cf_ident: &str, epoch: HummockEpoch) -> Result<()> {
+        let cf_inner = {
             let cf_map_rd_guard = self.cf_map.read().await;
-            cf_inner = cf_map_rd_guard.get(cf_ident).unwrap().clone();
-        }
+            cf_map_rd_guard.get(cf_ident).unwrap().clone()
+        };
         let versioning_guard = cf_inner.versioning.write().await;
         let mut transaction = versioning_guard.meta_store_ref.get_transaction();
         let mut current_version_id =

@@ -14,6 +14,8 @@ use crate::hummock::{
 };
 use crate::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
 
+pub const GLOBAL_COLUMN_FAMILY_ID: &str = "global";
+
 #[derive(Default)]
 pub struct RetryableError {}
 
@@ -72,6 +74,7 @@ impl HummockMetaClient for RPCHummockMetaClient {
             .to_owned()
             .hummock_client
             .pin_version(PinVersionRequest {
+                column_family: String::from(GLOBAL_COLUMN_FAMILY_ID),
                 context_id: self.meta_client.worker_id(),
             })
             .await
@@ -88,6 +91,7 @@ impl HummockMetaClient for RPCHummockMetaClient {
             .to_owned()
             .hummock_client
             .unpin_version(UnpinVersionRequest {
+                column_family: String::from(GLOBAL_COLUMN_FAMILY_ID),
                 context_id: self.meta_client.worker_id(),
                 pinned_version_id,
             })
@@ -105,6 +109,7 @@ impl HummockMetaClient for RPCHummockMetaClient {
             .to_owned()
             .hummock_client
             .pin_snapshot(PinSnapshotRequest {
+                column_family: String::from(GLOBAL_COLUMN_FAMILY_ID),
                 context_id: self.meta_client.worker_id(),
             })
             .await
@@ -121,6 +126,7 @@ impl HummockMetaClient for RPCHummockMetaClient {
             .to_owned()
             .hummock_client
             .unpin_snapshot(UnpinSnapshotRequest {
+                column_family: String::from(GLOBAL_COLUMN_FAMILY_ID),
                 context_id: self.meta_client.worker_id(),
                 snapshot: Some(HummockSnapshot {
                     epoch: pinned_epoch,
@@ -159,8 +165,9 @@ impl HummockMetaClient for RPCHummockMetaClient {
             .to_owned()
             .hummock_client
             .add_tables(AddTablesRequest {
+                column_family: String::from(GLOBAL_COLUMN_FAMILY_ID),
                 context_id: self.meta_client.worker_id(),
-                tables: sstables,
+                sstable_info: sstables,
                 epoch,
             })
             .await
@@ -177,6 +184,7 @@ impl HummockMetaClient for RPCHummockMetaClient {
             .to_owned()
             .hummock_client
             .get_compaction_tasks(GetCompactionTasksRequest {
+                column_family: String::from(GLOBAL_COLUMN_FAMILY_ID),
                 context_id: self.meta_client.worker_id(),
             })
             .await
@@ -197,6 +205,7 @@ impl HummockMetaClient for RPCHummockMetaClient {
             .to_owned()
             .hummock_client
             .report_compaction_tasks(ReportCompactionTasksRequest {
+                column_family: String::from(GLOBAL_COLUMN_FAMILY_ID),
                 context_id: self.meta_client.worker_id(),
                 compact_task: Some(compact_task),
                 task_result,

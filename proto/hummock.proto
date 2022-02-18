@@ -77,9 +77,10 @@ message HummockSnapshot {
 }
 
 message AddTablesRequest {
-  uint32 context_id = 1;
-  repeated SstableInfo tables = 2;
-  uint64 epoch = 3;
+  string column_family = 1;
+  uint32 context_id = 2;
+  repeated SstableInfo sstable_info = 3;
+  uint64 epoch = 4;
 }
 
 message AddTablesResponse {
@@ -88,7 +89,8 @@ message AddTablesResponse {
 }
 
 message PinVersionRequest {
-  uint32 context_id = 1;
+  string column_family = 1;
+  uint32 context_id = 2;
 }
 
 message PinVersionResponse {
@@ -97,8 +99,9 @@ message PinVersionResponse {
 }
 
 message UnpinVersionRequest {
-  uint32 context_id = 1;
-  uint64 pinned_version_id = 2;
+  string column_family = 1;
+  uint32 context_id = 2;
+  uint64 pinned_version_id = 3;
 }
 
 message UnpinVersionResponse {
@@ -106,7 +109,8 @@ message UnpinVersionResponse {
 }
 
 message PinSnapshotRequest {
-  uint32 context_id = 1;
+  string column_family = 1;
+  uint32 context_id = 2;
 }
 
 message PinSnapshotResponse {
@@ -115,8 +119,9 @@ message PinSnapshotResponse {
 }
 
 message UnpinSnapshotRequest {
-  uint32 context_id = 1;
-  HummockSnapshot snapshot = 2;
+  string column_family = 1;
+  uint32 context_id = 2;
+  HummockSnapshot snapshot = 3;
 }
 
 message UnpinSnapshotResponse {
@@ -152,7 +157,8 @@ message CompactTask {
 }
 
 message GetCompactionTasksRequest {
-  uint32 context_id = 1;
+  string column_family = 1;
+  uint32 context_id = 2;
 }
 
 message GetCompactionTasksResponse {
@@ -161,9 +167,10 @@ message GetCompactionTasksResponse {
 }
 
 message ReportCompactionTasksRequest {
-  uint32 context_id = 1;
-  CompactTask compact_task = 2;
-  bool task_result = 3;
+  string column_family = 1;
+  uint32 context_id = 2;
+  CompactTask compact_task = 3;
+  bool task_result = 4;
 }
 
 message ReportCompactionTasksResponse {
@@ -191,7 +198,8 @@ message HummockTablesToDelete {
 }
 
 message CommitEpochRequest {
-  uint64 epoch = 1;
+  string column_family = 1;
+  uint64 epoch = 2;
 }
 
 message CommitEpochResponse {
@@ -199,7 +207,8 @@ message CommitEpochResponse {
 }
 
 message AbortEpochRequest {
-  uint64 epoch = 1;
+  string column_family = 1;
+  uint64 epoch = 2;
 }
 
 message AbortEpochResponse {

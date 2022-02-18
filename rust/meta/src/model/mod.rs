@@ -9,7 +9,6 @@ use prost::Message;
 use risingwave_common::error::Result;
 pub use stream::*;
 
-use crate::manager::Epoch;
 use crate::storage::{self, ColumnFamilyUtils, MetaStore, Operation, Transaction};
 
 pub type ActorId = u32;
@@ -93,10 +92,7 @@ pub trait MetadataModel: Sized {
     where
         S: MetaStore,
     {
-        let byte_vec = match store
-            .get_cf(eventual_cf, &key.encode_to_vec())
-            .await
-        {
+        let byte_vec = match store.get_cf(eventual_cf, &key.encode_to_vec()).await {
             Ok(byte_vec) => byte_vec,
             Err(err) => {
                 if !matches!(err, storage::Error::ItemNotFound(_)) {
@@ -110,11 +106,11 @@ pub trait MetadataModel: Sized {
     }
 
     /// `select` query a record with associated key and version.
-    async fn select<S>(store: &S, key: &Self::KeyType, version: Epoch) -> Result<Option<Self>>
+    async fn select<S>(store: &S, key: &Self::KeyType) -> Result<Option<Self>>
     where
         S: MetaStore,
     {
-        Self::select_by_cf(store, &Self::cf_name(), key, version).await
+        Self::select_by_cf(store, &Self::cf_name(), key).await
     }
 }
 
@@ -137,7 +133,6 @@ pub trait MetadataUserCfModel: MetadataModel {
         store: &S,
         cf_ident: &str,
         key: &Self::KeyType,
-        version: Epoch,
     ) -> Result<Option<Self>>
     where
         S: MetaStore,
@@ -146,7 +141,6 @@ pub trait MetadataUserCfModel: MetadataModel {
             store,
             &ColumnFamilyUtils::get_composed_cf(&Self::cf_name(), cf_ident),
             key,
-            version,
         )
         .await
     }
@@ -160,7 +154,7 @@ pub trait Transactional: MetadataModel {
         eventual_cf: String,
         trx: &mut Transaction,
     ) -> risingwave_common::error::Result<()> {
-        trx.add_operations(vec![Operation::Put{
+        trx.add_operations(vec![Operation::Put {
             cf: eventual_cf,
             key: self.key()?.encode_to_vec(),
             value: self.to_protobuf_encoded_vec(),
@@ -180,11 +174,10 @@ pub trait Transactional: MetadataModel {
         eventual_cf: String,
         trx: &mut Transaction,
     ) -> risingwave_common::error::Result<()> {
-        trx.add_operations(vec![Operation::Delete(
-            eventual_cf,
-            self.key()?.encode_to_vec(),
-            None,
-        )]);
+        trx.add_operations(vec![Operation::Delete {
+            cf: eventual_cf,
+            key: self.key()?.encode_to_vec(),
+        }]);
         Ok(())
     }
     fn delete_in_transaction(&self, trx: &mut Transaction) -> risingwave_common::error::Result<()> {

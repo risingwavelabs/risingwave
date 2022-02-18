@@ -29,7 +29,10 @@ async fn test_hummock_pin_unpin() -> Result<()> {
     .await?
     .is_empty());
     for _ in 0..2 {
-        let hummock_version = hummock_manager.pin_version(context_id, DEFAULT_COLUMN_FAMILY_ID).await.unwrap();
+        let hummock_version = hummock_manager
+            .pin_version(context_id, DEFAULT_COLUMN_FAMILY_ID)
+            .await
+            .unwrap();
         assert_eq!(version_id, hummock_version.id);
         assert_eq!(2, hummock_version.levels.len());
         assert_eq!(0, hummock_version.levels[0].table_ids.len());
@@ -230,7 +233,7 @@ async fn test_hummock_transaction() -> Result<()> {
             .unwrap();
 
         // Get tables before committing epoch1. No tables should be returned.
-        let pinned_version = hummock_manager
+        let mut pinned_version = hummock_manager
             .pin_version(context_id, DEFAULT_COLUMN_FAMILY_ID)
             .await?;
         let uncommitted_epoch = pinned_version.uncommitted_epochs.first_mut().unwrap();
@@ -288,7 +291,7 @@ async fn test_hummock_transaction() -> Result<()> {
 
         // Get tables before committing epoch2. tables_in_epoch1 should be returned and
         // tables_in_epoch2 should be invisible.
-        let pinned_version = hummock_manager
+        let mut pinned_version = hummock_manager
             .pin_version(context_id, DEFAULT_COLUMN_FAMILY_ID)
             .await?;
         let uncommitted_epoch = pinned_version.uncommitted_epochs.first_mut().unwrap();
@@ -359,7 +362,7 @@ async fn test_hummock_transaction() -> Result<()> {
 
         // Get tables before committing epoch3 and epoch4. tables_in_epoch1 and tables_in_epoch2
         // should be returned
-        let pinned_version = hummock_manager
+        let mut pinned_version = hummock_manager
             .pin_version(context_id, DEFAULT_COLUMN_FAMILY_ID)
             .await?;
         let uncommitted_epoch3 = pinned_version
@@ -395,7 +398,7 @@ async fn test_hummock_transaction() -> Result<()> {
 
         // Get tables after aborting epoch3. tables_in_epoch1 and tables_in_epoch2 should be
         // returned
-        let pinned_version = hummock_manager
+        let mut pinned_version = hummock_manager
             .pin_version(context_id, DEFAULT_COLUMN_FAMILY_ID)
             .await?;
         assert!(pinned_version

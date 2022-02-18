@@ -35,7 +35,7 @@ where
         let req = request.into_inner();
         let result = self
             .hummock_manager
-            .pin_version(req.context_id, DEFAULT_COLUMN_FAMILY_ID)
+            .pin_version(req.context_id, req.get_column_family())
             .await;
         match result {
             Ok(pinned_version) => Ok(Response::new(PinVersionResponse {
@@ -45,7 +45,6 @@ where
             Err(e) => Err(e.to_grpc_status()),
         }
     }
-
     async fn unpin_version(
         &self,
         request: Request<UnpinVersionRequest>,
@@ -55,7 +54,7 @@ where
             .hummock_manager
             .unpin_version(
                 req.context_id,
-                DEFAULT_COLUMN_FAMILY_ID,
+                req.get_column_family(),
                 req.pinned_version_id,
             )
             .await;
@@ -70,14 +69,10 @@ where
         request: Request<AddTablesRequest>,
     ) -> Result<Response<AddTablesResponse>, Status> {
         let req = request.into_inner();
+        let cf_ident = String::from(req.get_column_family());
         let result = self
             .hummock_manager
-            .add_tables(
-                req.context_id,
-                DEFAULT_COLUMN_FAMILY_ID,
-                req.tables,
-                req.epoch,
-            )
+            .add_tables(req.context_id, &cf_ident, req.sstable_info, req.epoch)
             .await;
         match result {
             Ok(version) => Ok(Response::new(AddTablesResponse {
@@ -95,7 +90,7 @@ where
         let req = request.into_inner();
         let result = self
             .hummock_manager
-            .get_compact_task(req.context_id, DEFAULT_COLUMN_FAMILY_ID)
+            .get_compact_task(req.context_id, req.get_column_family())
             .await;
         match result {
             Ok(compact_task) => Ok(Response::new(GetCompactionTasksResponse {
@@ -111,6 +106,7 @@ where
         request: Request<ReportCompactionTasksRequest>,
     ) -> Result<Response<ReportCompactionTasksResponse>, Status> {
         let req = request.into_inner();
+        let cf_ident = String::from(req.get_column_family());
         match req.compact_task {
             None => Ok(Response::new(ReportCompactionTasksResponse {
                 status: None,
@@ -118,12 +114,7 @@ where
             Some(compact_task) => {
                 let result = self
                     .hummock_manager
-                    .report_compact_task(
-                        req.context_id,
-                        DEFAULT_COLUMN_FAMILY_ID,
-                        compact_task,
-                        req.task_result,
-                    )
+                    .report_compact_task(req.context_id, &cf_ident, compact_task, req.task_result)
                     .await;
                 match result {
                     Ok(_) => Ok(Response::new(ReportCompactionTasksResponse {
@@ -179,7 +170,7 @@ where
         let req = request.into_inner();
         let result = self
             .hummock_manager
-            .commit_epoch(req.epoch, DEFAULT_COLUMN_FAMILY_ID, req.epoch)
+            .commit_epoch(req.get_column_family(), req.epoch)
             .await;
         match result {
             Ok(_) => Ok(Response::new(CommitEpochResponse { status: None })),
@@ -194,7 +185,7 @@ where
         let req = request.into_inner();
         let result = self
             .hummock_manager
-            .abort_epoch(req.epoch, DEFAULT_COLUMN_FAMILY_ID, req.epoch)
+            .abort_epoch(req.get_column_family(), req.epoch)
             .await;
         match result {
             Ok(_) => Ok(Response::new(AbortEpochResponse { status: None })),

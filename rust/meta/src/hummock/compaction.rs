@@ -57,7 +57,7 @@ impl CompactStatus {
     }
 
     pub fn update_in_transaction(&self, trx: &mut Transaction) {
-        trx.add_operations(vec![Operation::Put{
+        trx.add_operations(vec![Operation::Put {
             cf: ColumnFamilyUtils::get_composed_cf(CompactStatus::cf_name(), &self.cf_ident),
             key: CompactStatus::key().as_bytes().to_vec(),
             // TODO replace unwrap
