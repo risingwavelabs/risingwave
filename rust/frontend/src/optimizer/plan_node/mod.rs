@@ -41,6 +41,7 @@ pub trait PlanNode:
     + ToBatch
     + ToStream
     + ToDistributedBatch
+    + ToProst
 {
     fn node_type(&self) -> PlanNodeType;
 }
@@ -68,6 +69,8 @@ mod convert;
 pub use convert::*;
 mod eq_join_predicate;
 pub use eq_join_predicate::*;
+mod to_prost;
+pub use to_prost::*;
 
 // SOME Intellisense DONT UNDERSTAND THIS.
 //
