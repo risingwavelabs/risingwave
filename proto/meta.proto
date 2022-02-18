@@ -203,11 +203,35 @@ message FlushResponse {
   common.Status status = 1;
 }
 
+message CreateSourceRequest {
+  uint32 node_id = 1;
+  plan.TableRefId table_ref_id = 2;
+  stream_plan.StreamNode stream_node = 3;
+}
+
+message CreateSourceResponse {
+  common.Status status = 1;
+}
+
+
+message DropSourceRequest {
+  uint32 node_id = 1;
+  plan.TableRefId table_ref_id = 2;
+}
+
+message DropSourceResponse {
+  common.Status status = 1;
+}
+
 service StreamManagerService {
   // will be deprecated and replaced by catalog.CreateMaterializedSource and catalog.CreateMaterializedView
   rpc CreateMaterializedView(CreateMaterializedViewRequest) returns (CreateMaterializedViewResponse);
   // will be deprecated and replaced by catalog.DropMaterializedSource and catalog.DropMaterializedView
   rpc DropMaterializedView(DropMaterializedViewRequest) returns (DropMaterializedViewResponse);
+
+  rpc CreateSource(CreateSourceRequest) returns (CreateSourceResponse);
+  rpc DropSource(DropSourceRequest) returns (DropSourceResponse);
+  
   rpc Flush(FlushRequest) returns (FlushResponse);
 }
 
