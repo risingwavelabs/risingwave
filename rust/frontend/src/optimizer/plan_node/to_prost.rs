@@ -8,13 +8,13 @@ use crate::{
 };
 pub trait ToProst: ToBatchProst + ToStreamProst {}
 pub trait ToBatchProst {
-    fn to_batch_prost(&self) -> pb_batch_node::NodeBody {
+    fn to_batch_prost_body(&self) -> pb_batch_node::NodeBody {
         unimplemented!()
     }
 }
 
 pub trait ToStreamProst {
-    fn to_stream_prost(&self) -> pb_stream_node::Node {
+    fn to_stream_prost_body(&self) -> pb_stream_node::Node {
         unimplemented!()
     }
 }
@@ -33,7 +33,7 @@ macro_rules! ban_to_batch_prost {
     ([], $( { $convention:ident, $name:ident }),*) => {
       paste!{
         $(impl ToBatchProst for [<$convention $name>] {
-            fn to_batch_prost(&self) -> pb_batch_node::NodeBody {
+            fn to_batch_prost_body(&self) -> pb_batch_node::NodeBody {
                 panic!("convert into distributed is only allowed on batch plan")
             }
        })*
@@ -47,7 +47,7 @@ macro_rules! ban_to_stream_prost {
     ([], $( { $convention:ident, $name:ident }),*) => {
       paste!{
         $(impl ToStreamProst for [<$convention $name>] {
-            fn to_stream_prost(&self) -> pb_stream_node::Node {
+            fn to_stream_prost_body(&self) -> pb_stream_node::Node {
                 panic!("convert into distributed is only allowed on stream plan")
             }
        })*
