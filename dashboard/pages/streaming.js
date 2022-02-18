@@ -23,7 +23,7 @@ export async function getStaticProps(context) {
     }
   }
 }
-
+ 
 export default function Streaming(props) {
   console.log(props.fragments);
   return (

@@ -40,7 +40,7 @@ export default function StreamingView(props) {
 
   const [nodeJson, setNodeJson] = useState("");
   const [showInfoPane, setShowInfoPane] = useState(false);
-  const [selectedActor, setSelectedActor] = useState("Show All");
+  const [selectedWorkerNode, setSelectedWorkerNode] = useState("Show All");
   const [searchType, setSearchType] = useState("Actor");
   const [searchContent, setSearchContent] = useState("");
   const [mvTableIdToSingleViewActorList, setMvTableIdToSingleViewActorList] = useState(null);
@@ -63,7 +63,7 @@ export default function StreamingView(props) {
   const locateTo = (selector) => {
     let selection = d3.select(selector);
     if (!selection.empty()) {
-      svg.call(zoom).call(zoom.transform, new d3.ZoomTransform(1, -selection.attr("x"), -selection.attr("y") + height / 2));
+      svg.call(zoom).call(zoom.transform, new d3.ZoomTransform(0.7, - 0.7 * selection.attr("x"), 0.7 *(-selection.attr("y") + height / 2) ));
     }
   }
 
@@ -83,8 +83,8 @@ export default function StreamingView(props) {
       : JSON.stringify(exprNode(node.nodeProto), null, 2));
   };
 
-  const onActorSelect = (e) => {
-    setSelectedActor(e.target.value);
+  const onWorkerNodeSelect = (e) => {
+    setSelectedWorkerNode(e.target.value);
   }
 
   const onSearchTypeChange = (e) => {
@@ -167,7 +167,7 @@ export default function StreamingView(props) {
   useEffect(() => {
     if (d3Container.current && showFullGraph) {
       createSvg((g) => {
-        view = createView(g, data, onNodeClick, selectedActor === "Show All" ? null : selectedActor, null);
+        view = createView(g, data, onNodeClick, selectedWorkerNode === "Show All" ? null : selectedWorkerNode, null);
       })
       // assign once.
       mvTableIdToSingleViewActorList || setMvTableIdToSingleViewActorList(view.getMvTableIdToSingleViewActorList());
@@ -175,7 +175,7 @@ export default function StreamingView(props) {
 
       return () => d3.select(d3Container.current).selectAll("*").remove();
     }
-  }, [selectedActor, showFullGraph]);
+  }, [selectedWorkerNode, showFullGraph]);
 
   // locate and render partial graph on mview query
   useEffect(() => {
@@ -192,12 +192,12 @@ export default function StreamingView(props) {
     } else {
       if (d3Container.current) {
         createSvg((g) => {
-          view = createView(g, data, onNodeClick, selectedActor === "Show All" ? null : selectedActor, shownActorIdList);
+          view = createView(g, data, onNodeClick, selectedWorkerNode === "Show All" ? null : selectedWorkerNode, shownActorIdList);
         });
       }
     }
     locateToCurrentMviewActor();
-  }, [filterMode, selectedMvTableId, showFullGraph])
+  }, [selectedWorkerNode, filterMode, selectedMvTableId, showFullGraph])
 
   return (
     <SvgBox>
@@ -219,9 +219,9 @@ export default function StreamingView(props) {
         <FormControl sx={{ m: 1, minWidth: 300 }}>
           <InputLabel>Actor</InputLabel>
           <Select
-            value={selectedActor || "Show All"}
+            value={selectedWorkerNode || "Show All"}
             label="Actor"
-            onChange={onActorSelect}
+            onChange={onWorkerNodeSelect}
           >
             <MenuItem value="Show All" key="all">
               Show All
