@@ -91,7 +91,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         WriteBatch::new(self.clone())
     }
 
-    /// Wait until the local hummock version contains the given committed epoch
+    /// Wait until the epoch is committed and its data is ready to read.
     async fn wait_epoch(&self, _epoch: u64) {}
 }
 

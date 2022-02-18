@@ -521,6 +521,7 @@ where
         .await?
         .unwrap();
 
+        // TODO #447: the epoch should fail and rollback if previous any epoch is uncommitted.
         // get tables in the committing epoch
         if let Some(idx) = hummock_version
             .uncommitted_epochs

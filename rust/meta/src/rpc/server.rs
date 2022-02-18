@@ -70,6 +70,7 @@ pub async fn rpc_serve(
         cluster_manager.clone(),
         fragment_manager.clone(),
         epoch_generator_ref.clone(),
+        hummock_manager.clone(),
     ));
     {
         let barrier_manager_ref = barrier_manager_ref.clone();

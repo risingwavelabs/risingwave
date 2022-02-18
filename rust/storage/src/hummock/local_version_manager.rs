@@ -134,6 +134,7 @@ impl LocalVersionManager {
         return true;
     }
 
+    /// Wait until the local hummock version contains the given committed epoch
     pub async fn wait_epoch(&self, epoch: HummockEpoch) {
         // TODO: review usage of all HummockEpoch::MAX
         if epoch == HummockEpoch::MAX {
