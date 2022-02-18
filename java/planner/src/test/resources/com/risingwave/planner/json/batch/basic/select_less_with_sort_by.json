@@ -1,27 +1,17 @@
 {
   "children": [{
     "children": [{
-      "seqScan": {
+      "rowSeqScan": {
         "tableRefId": {
           "schemaRefId": {
             "databaseRefId": {
             }
-          }
+          },
+          "tableId": 1
         },
-        "columnIds": [1, 2],
-        "fields": [{
-          "dataType": {
-            "typeName": "INT32"
-          },
-          "name": "v1"
-        }, {
-          "dataType": {
-            "typeName": "INT32"
-          },
-          "name": "v2"
-        }]
+        "columnIds": [0, 1]
       },
-      "identity": "RwBatchTableScan(table\u003d[[test_schema, t]], columns\u003d[v1,v2])"
+      "identity": "RwBatchMaterializedViewScan(table\u003d[[test_schema, t]], columns\u003d[v1,v2])"
     }],
     "orderBy": {
       "columnOrders": [{

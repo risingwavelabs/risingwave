@@ -7,7 +7,7 @@ select * from t
         </Resource>
         <Resource name="physical">
             <![CDATA[
-RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2,v3])
+RwBatchMaterializedViewScan(table=[[test_schema, t]], columns=[v1,v2,v3])
 ]]>
         </Resource>
     </TestCase>
@@ -37,7 +37,7 @@ select v3, v1+v2, v1-v2, v1*v2, v1/v2 from t
         <Resource name="physical">
             <![CDATA[
 RwBatchProject(v3=[$2], EXPR$1=[+($0, $1)], EXPR$2=[-($0, $1)], EXPR$3=[*($0, $1)], EXPR$4=[/($0, $1)])
-  RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2,v3])
+  RwBatchMaterializedViewScan(table=[[test_schema, t]], columns=[v1,v2,v3])
             ]]>
         </Resource>
     </TestCase>
@@ -51,7 +51,7 @@ select * from t where v1 > 1 and v2 > 1 and v3 > 1
         <Resource name="physical">
             <![CDATA[
 RwBatchFilter(condition=[AND(>($0, 1), >($1, 1), >($2, 1))])
-  RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2,v3])
+  RwBatchMaterializedViewScan(table=[[test_schema, t]], columns=[v1,v2,v3])
             ]]>
         </Resource>
         <Resource name="json" path="batch/basic/select_with_filter">
@@ -66,7 +66,7 @@ select sum(v3) from t
         <Resource name="physical">
             <![CDATA[
 RwBatchSortAgg(group=[{}], EXPR$0=[SUM($0)])
-  RwBatchTableScan(table=[[test_schema, t]], columns=[v3])
+  RwBatchMaterializedViewScan(table=[[test_schema, t]], columns=[v3])
 ]]>
         </Resource>
     </TestCase>
@@ -80,7 +80,7 @@ select sum(v3), sum(v2), max(v1), min(v3) from t
         <Resource name="physical">
             <![CDATA[
 RwBatchSortAgg(group=[{}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)], EXPR$2=[MAX($2)], EXPR$3=[MIN($0)])
-  RwBatchTableScan(table=[[test_schema, t]], columns=[v3,v2,v1])
+  RwBatchMaterializedViewScan(table=[[test_schema, t]], columns=[v3,v2,v1])
 ]]>
         </Resource>
     </TestCase>
@@ -95,7 +95,7 @@ select sum(v1), sum(v2) from t group by v1
             <![CDATA[
 RwBatchProject(EXPR$0=[$1], EXPR$1=[$2])
   RwBatchHashAgg(group=[{0}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)])
-    RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2])
+    RwBatchMaterializedViewScan(table=[[test_schema, t]], columns=[v1,v2])
 ]]>
         </Resource>
     </TestCase>
@@ -110,7 +110,7 @@ select sum(v1+v2),sum(v1+v3) from t
             <![CDATA[
 RwBatchSortAgg(group=[{}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)])
   RwBatchProject($f0=[+($0, $1)], $f1=[+($0, $2)])
-    RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2,v3])
+    RwBatchMaterializedViewScan(table=[[test_schema, t]], columns=[v1,v2,v3])
 ]]>
         </Resource>
     </TestCase>
@@ -124,7 +124,7 @@ select sum(v1), sum(v3) from t
         <Resource name="physical">
             <![CDATA[
 RwBatchSortAgg(group=[{}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)])
-  RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v3])
+  RwBatchMaterializedViewScan(table=[[test_schema, t]], columns=[v1,v3])
 ]]>
         </Resource>
     </TestCase>
@@ -138,7 +138,7 @@ select min(v1) from t
         <Resource name="physical">
             <![CDATA[
 RwBatchSortAgg(group=[{}], EXPR$0=[MIN($0)])
-  RwBatchTableScan(table=[[test_schema, t]], columns=[v1])
+  RwBatchMaterializedViewScan(table=[[test_schema, t]], columns=[v1])
 ]]>
         </Resource>
     </TestCase>
@@ -152,7 +152,7 @@ select max(v1) from t
         <Resource name="physical">
             <![CDATA[
 RwBatchSortAgg(group=[{}], EXPR$0=[MAX($0)])
-  RwBatchTableScan(table=[[test_schema, t]], columns=[v1])
+  RwBatchMaterializedViewScan(table=[[test_schema, t]], columns=[v1])
 ]]>
         </Resource>
     </TestCase>
@@ -168,7 +168,7 @@ select max(v1) from t where v2>3
 RwBatchSortAgg(group=[{}], EXPR$0=[MAX($0)])
   RwBatchProject(v1=[$0])
     RwBatchFilter(condition=[>($1, 3)])
-      RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2])
+      RwBatchMaterializedViewScan(table=[[test_schema, t]], columns=[v1,v2])
             ]]>
         </Resource>
     </TestCase>
@@ -182,7 +182,7 @@ select avg(v2) from t
         <Resource name="physical">
             <![CDATA[
 RwBatchSortAgg(group=[{}], EXPR$0=[AVG($0)])
-  RwBatchTableScan(table=[[test_schema, t]], columns=[v2])
+  RwBatchMaterializedViewScan(table=[[test_schema, t]], columns=[v2])
 ]]>
         </Resource>
     </TestCase>
@@ -197,7 +197,7 @@ select sum(v1), v2 from t group by v2
             <![CDATA[
 RwBatchProject(EXPR$0=[$1], v2=[$0])
   RwBatchHashAgg(group=[{0}], EXPR$0=[SUM($1)])
-    RwBatchTableScan(table=[[test_schema, t]], columns=[v2,v1])
+    RwBatchMaterializedViewScan(table=[[test_schema, t]], columns=[v2,v1])
 ]]>
         </Resource>
     </TestCase>
@@ -211,7 +211,7 @@ select * from t order by v1;
         <Resource name="physical">
             <![CDATA[
 RwBatchSort(sort0=[$0], dir0=[ASC])
-  RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2,v3])
+  RwBatchMaterializedViewScan(table=[[test_schema, t]], columns=[v1,v2,v3])
 ]]>
         </Resource>>
         <Resource name="json" path="batch/basic/select_with_order_by">
@@ -227,7 +227,7 @@ select * from t order by v1 limit 1;
         <Resource name="physical">
             <![CDATA[
 RwBatchSort(sort0=[$0], dir0=[ASC], fetch=[1])
-  RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2,v3])
+  RwBatchMaterializedViewScan(table=[[test_schema, t]], columns=[v1,v2,v3])
 ]]>
         </Resource>>
         <Resource name="json" path="batch/basic/select_with_order_by_limit">
@@ -257,7 +257,7 @@ RwBatchProject(EXPR$0=[/(100.0:DOUBLE, 8.0:DOUBLE)])
         <Resource name="physical">
             <![CDATA[
 RwBatchFilter(condition=[>=($0, CAST('1970-01-01'):DATE NOT NULL)])
-  RwBatchTableScan(table=[[test_schema, t2]], columns=[v1])
+  RwBatchMaterializedViewScan(table=[[test_schema, t2]], columns=[v1])
             ]]>
         </Resource>
     </TestCase>
@@ -270,8 +270,8 @@ RwBatchFilter(condition=[>=($0, CAST('1970-01-01'):DATE NOT NULL)])
         <Resource name="physical">
             <![CDATA[
 RwBatchNestedLoopJoin(condition=[>($0, $3)], joinType=[inner])
-  RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2,v3])
-  RwBatchTableScan(table=[[test_schema, t3]], columns=[v1])
+  RwBatchMaterializedViewScan(table=[[test_schema, t]], columns=[v1,v2,v3])
+  RwBatchMaterializedViewScan(table=[[test_schema, t3]], columns=[v1])
 ]]>
         </Resource>
         <Resource name="json" path="batch/basic/nested_loop_join">
@@ -301,8 +301,8 @@ RwBatchInsert(table=[[test_schema, t4]], operation=[INSERT], flattened=[false])
         <Resource name="physical">
             <![CDATA[
 RwBatchHashJoin(condition=[=($0, $3)], joinType=[inner])
-  RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2,v3])
-  RwBatchTableScan(table=[[test_schema, t3]], columns=[v1])]]>
+  RwBatchMaterializedViewScan(table=[[test_schema, t]], columns=[v1,v2,v3])
+  RwBatchMaterializedViewScan(table=[[test_schema, t3]], columns=[v1])]]>
         </Resource>
         <Resource name="json" path="batch/basic/hash_inner_join">
         </Resource>
@@ -346,7 +346,7 @@ RwBatchProject(EXPR$0=[EXTRACT(FLAG(DAY), CAST('1999-1-2'):DATE NOT NULL)])
         <Resource name="plan">
             <![CDATA[
 RwBatchProject(EXPR$0=[ROUND($0, 4)])
-  RwBatchTableScan(table=[[test_schema, t5]], columns=[v1])
+  RwBatchMaterializedViewScan(table=[[test_schema, t5]], columns=[v1])
 ]]>
         </Resource>
         <Resource name="json" path="batch/basic/round_digit">
@@ -361,7 +361,7 @@ RwBatchProject(EXPR$0=[ROUND($0, 4)])
         <Resource name="plan">
             <![CDATA[
 RwBatchLimit(offset=[1], fetch=[1])
-  RwBatchTableScan(table=[[test_schema, t5]], columns=[v1])
+  RwBatchMaterializedViewScan(table=[[test_schema, t5]], columns=[v1])
 ]]>
         </Resource>
         <Resource name="json" path="batch/basic/limit">
@@ -392,7 +392,7 @@ select v1 from t order by v2;
             <![CDATA[
 RwBatchProject(v1=[$0])
   RwBatchSort(sort0=[$1], dir0=[ASC])
-    RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2])
+    RwBatchMaterializedViewScan(table=[[test_schema, t]], columns=[v1,v2])
 ]]>
         </Resource>
         <Resource name="distributed">
@@ -400,7 +400,7 @@ RwBatchProject(v1=[$0])
 RwBatchProject(v1=[$0])
   RwBatchExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[1]])
     RwBatchSort(sort0=[$1], dir0=[ASC])
-      RwBatchTableScan(table=[[test_schema, t]], columns=[v1,v2])
+      RwBatchMaterializedViewScan(table=[[test_schema, t]], columns=[v1,v2])
 ]]>
         </Resource>
         <Resource name="json" path="batch/basic/select_less_with_sort_by">

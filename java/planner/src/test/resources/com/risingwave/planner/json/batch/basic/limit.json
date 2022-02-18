@@ -1,25 +1,16 @@
 {
   "children": [{
-    "seqScan": {
+    "rowSeqScan": {
       "tableRefId": {
         "schemaRefId": {
           "databaseRefId": {
           }
         },
-        "tableId": 4
+        "tableId": 9
       },
-      "columnIds": [1],
-      "fields": [{
-        "dataType": {
-          "typeName": "DECIMAL",
-          "precision": 28,
-          "scale": 10,
-          "isNullable": true
-        },
-        "name": "v1"
-      }]
+      "columnIds": [0]
     },
-    "identity": "RwBatchTableScan(table\u003d[[test_schema, t5]], columns\u003d[v1])"
+    "identity": "RwBatchMaterializedViewScan(table\u003d[[test_schema, t5]], columns\u003d[v1])"
   }],
   "limit": {
     "limit": 1,

@@ -1,49 +1,28 @@
 {
   "children": [{
-    "seqScan": {
+    "rowSeqScan": {
       "tableRefId": {
         "schemaRefId": {
           "databaseRefId": {
           }
-        }
+        },
+        "tableId": 1
       },
-      "columnIds": [1, 2, 3],
-      "fields": [{
-        "dataType": {
-          "typeName": "INT32"
-        },
-        "name": "v1"
-      }, {
-        "dataType": {
-          "typeName": "INT32"
-        },
-        "name": "v2"
-      }, {
-        "dataType": {
-          "typeName": "FLOAT"
-        },
-        "name": "v3"
-      }]
+      "columnIds": [0, 1, 2]
     },
-    "identity": "RwBatchTableScan(table\u003d[[test_schema, t]], columns\u003d[v1,v2,v3])"
+    "identity": "RwBatchMaterializedViewScan(table\u003d[[test_schema, t]], columns\u003d[v1,v2,v3])"
   }, {
-    "seqScan": {
+    "rowSeqScan": {
       "tableRefId": {
         "schemaRefId": {
           "databaseRefId": {
           }
         },
-        "tableId": 2
+        "tableId": 5
       },
-      "columnIds": [1],
-      "fields": [{
-        "dataType": {
-          "typeName": "INT32"
-        },
-        "name": "v1"
-      }]
+      "columnIds": [0]
     },
-    "identity": "RwBatchTableScan(table\u003d[[test_schema, t3]], columns\u003d[v1])"
+    "identity": "RwBatchMaterializedViewScan(table\u003d[[test_schema, t3]], columns\u003d[v1])"
   }],
   "hashJoin": {
     "leftKey": [0],
