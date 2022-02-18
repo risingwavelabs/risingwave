@@ -35,7 +35,7 @@ public class DropMaterializedViewHandlerTest {
   public void initAll() {
     catalogService = new SimpleCatalogService();
     catalogService.createDatabase(TEST_DB_NAME, TEST_SCHEMA_NAME);
-    sqlHandlerFactory = new DefaultSqlHandlerFactory(false);
+    sqlHandlerFactory = new DefaultSqlHandlerFactory();
 
     var cfg = new Configuration();
     cfg.set(LeaderServerConfigurations.COMPUTE_NODES, Lists.newArrayList("127.0.0.1:1234"));

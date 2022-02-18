@@ -207,7 +207,9 @@ public class CreateTableHandler implements SqlHandler {
     }
     CreateTableInfo tableInfo = createTableInfoBuilder.build();
     // Build a plan distribute to compute node.
+    System.out.println("Yanghao get here create table handler");
     TableCatalog table = context.getCatalogService().createTable(schemaName, tableInfo);
+
     tableId = table.getId();
     return TableNodeSerializer.createProtoFromCatalog(table, true, null);
   }

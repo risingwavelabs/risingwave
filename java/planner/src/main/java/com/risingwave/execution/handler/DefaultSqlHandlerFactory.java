@@ -5,7 +5,6 @@ import com.risingwave.common.error.ExecutionError;
 import com.risingwave.common.exception.RisingWaveException;
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.sql.node.SqlCreateSource;
-import com.risingwave.sql.node.SqlCreateTableV1;
 import com.risingwave.sql.node.SqlFlush;
 import com.risingwave.sql.node.SqlShowParameters;
 import java.lang.reflect.Constructor;
@@ -44,30 +43,10 @@ public class DefaultSqlHandlerFactory implements SqlHandlerFactory {
   private static final Logger LOGGER = LoggerFactory.getLogger(DefaultSqlHandlerFactory.class);
   private static final String PACKAGE_NAME = DefaultSqlHandlerFactory.class.getPackage().getName();
 
-  private static final String FORCE_TABLE_V1_ENV_VAR_KEY = "RW_FORCE_TABLE_V1";
-
   private static final ImmutableMap<SqlKind, Constructor<? extends SqlHandler>>
       SQL_HANDLER_FACTORY = createSqlHandlerFactory();
 
-  private boolean useV2 = true;
-
-  DefaultSqlHandlerFactory() {
-    // TODO: remove this hack after distributed table_v2 is implemented.
-    var forceTableV1 = System.getenv(FORCE_TABLE_V1_ENV_VAR_KEY) != null;
-    if (forceTableV1) {
-      useV2 = false;
-      LOGGER.info("Env var `{}` is set, will not create table_v2.", FORCE_TABLE_V1_ENV_VAR_KEY);
-    }
-  }
-
-  DefaultSqlHandlerFactory(boolean useV2) {
-    this.useV2 = useV2;
-  }
-
-  @Override
-  public void setUseV2(boolean useV2) {
-    this.useV2 = useV2;
-  }
+  DefaultSqlHandlerFactory() {}
 
   @Override
   public SqlHandler create(SqlNode ast, ExecutionContext context) {
@@ -81,10 +60,8 @@ public class DefaultSqlHandlerFactory implements SqlHandlerFactory {
       return new ShowParameterHandler();
     }
 
-    if (ast instanceof SqlCreateTableV1) {
-      return new CreateTableV1Handler();
-    } else if (ast instanceof SqlCreateTable && !useV2) {
-      return new CreateTableV1Handler();
+    if (ast instanceof SqlCreateTable) {
+      return new CreateTableHandler();
     }
 
     if (ast instanceof SqlFlush) {

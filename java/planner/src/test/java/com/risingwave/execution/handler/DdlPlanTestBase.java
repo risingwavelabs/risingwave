@@ -36,7 +36,7 @@ public class DdlPlanTestBase {
 
   protected void init() {
     initCatalog();
-    sqlHandlerFactory = new DefaultSqlHandlerFactory(false);
+    sqlHandlerFactory = new DefaultSqlHandlerFactory();
 
     var cfg = new Configuration();
     cfg.set(LeaderServerConfigurations.COMPUTE_NODES, Lists.newArrayList("127.0.0.1:1234"));
@@ -63,7 +63,7 @@ public class DdlPlanTestBase {
     PlanFragment ret;
     if (ast.getKind() == SqlKind.CREATE_TABLE) {
       ret =
-          ((CreateTableV1Handler) sqlHandlerFactory.create(ast, executionContext))
+          ((CreateTableHandler) sqlHandlerFactory.create(ast, executionContext))
               .execute(ast, executionContext);
     } else if (ast.getKind() == SqlKind.DROP_TABLE) {
       ret =
