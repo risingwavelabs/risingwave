@@ -119,11 +119,36 @@ export default class StreamPlanParser {
       this.parsedActorList.push(actor);
     }
 
+    this.fragmentRepresentedActors = this._constructRepresentedActorList();
+
     /**
      * @type {Map<number, Array<number>}
      */
     this.mvTableIdToSingleViewActorList = this._constructSingleViewMvList();
     this.mvTableIdToChainViewActorList = this._constructChainViewMvList()
+  }
+
+  _constructRepresentedActorList() {
+    const fragmentId2actorList = new Map();
+    let fragmentRepresentedActors = new Set();
+    for (let actor of this.parsedActorList) {
+      if (!fragmentId2actorList.has(actor.fragmentId)) {
+        fragmentRepresentedActors.add(actor);
+        fragmentId2actorList.set(actor.fragmentId, [actor]);
+      } else {
+        if (this.selectedActor && actor.actorIdentifier === this.selectedActorStr) {
+          fragmentRepresentedActors.delete(fragmentId2actorList.get(actor.fragmentId)[0]);
+          fragmentRepresentedActors.add(actor);
+          fragmentId2actorList.get(actor.fragmentId).unshift(actor);
+        } else {
+          fragmentId2actorList.get(actor.fragmentId).push(actor);
+        }
+      }
+    }
+    for (let actor of fragmentRepresentedActors) {
+      actor.representedActorList = fragmentId2actorList.get(actor.fragmentId).map(x => x.actorId).sort();
+    }
+    return fragmentRepresentedActors;
   }
 
   _constructChainViewMvList() {
@@ -160,6 +185,9 @@ export default class StreamPlanParser {
       graphBfs(shellNode, (n) => {
         list.add(n.id);
       }, "parentNodes");
+      for(let id of this.parsedActorMap.get(actorId).representedActorList){
+        list.add(id);
+      }
       mvTableIdToChainViewActorList.set(mviewNode.typeInfo.tableRefId.tableId, [...list.values()]);
     }
 
@@ -200,6 +228,9 @@ export default class StreamPlanParser {
           return true; // stop to traverse its next nodes
         }
       }, "parentNodes");
+      for(let id of this.parsedActorMap.get(actorId).representedActorList){
+        list.push(id);
+      }
       mvTableIdToSingleViewActorList.set(mviewNode.typeInfo.tableRefId.tableId, list);
     }
 

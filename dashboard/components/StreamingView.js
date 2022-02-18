@@ -297,7 +297,7 @@ export default function StreamingView(props) {
               />
             </div>
             <Autocomplete
-              isOptionEqualToValue={() => false}
+              isOptionEqualToValue={(option, value) => {return option.tableId === value.tableId}}
               disablePortal
               options={mvList.map(mv => {return {label: mv[1].tableName, tableId: mv[0]}}) || []}
               onChange={onSelectMvChange}

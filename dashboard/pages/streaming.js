@@ -1,16 +1,18 @@
 import Layout from '../components/Layout';
 import StreamingView from '../components/StreamingView';
 import NoData from '../components/NoData';
-import { getActors, getMaterializedViews } from './api/streaming';
+import { getActors, getFragments, getMaterializedViews } from './api/streaming';
 
 export async function getStaticProps(context) {
   try {
     let actorProtoList = await getActors();
     let mvList = await getMaterializedViews();
+    let fragments = await getFragments();
     return {
       props: {
         actorProtoList,
-        mvList
+        mvList,
+        fragments
       }
     }
   } catch (e) {
@@ -23,6 +25,7 @@ export async function getStaticProps(context) {
 }
 
 export default function Streaming(props) {
+  console.log(props.fragments);
   return (
     <>
       <Layout currentPage="streaming">

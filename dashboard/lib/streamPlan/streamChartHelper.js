@@ -747,27 +747,28 @@ export class StreamChartHelper {
 
     g.attr("id", "");
 
-    const allActors = this.streamPlan.getParsedActorList();
+    // const allActors = this.streamPlan.getParsedActorList();
 
-    const fragmentId2actorList = new Map();
-    const fragmentRepresentedActors = new Set();
-    for (let actor of allActors) {
-      if (!fragmentId2actorList.has(actor.fragmentId)) {
-        fragmentRepresentedActors.add(actor);
-        fragmentId2actorList.set(actor.fragmentId, [actor]);
-      } else {
-        if (this.selectedActor && actor.actorIdentifier === this.selectedActorStr) {
-          fragmentRepresentedActors.delete(fragmentId2actorList.get(actor.fragmentId)[0]);
-          fragmentRepresentedActors.add(actor);
-          fragmentId2actorList.get(actor.fragmentId).unshift(actor);
-        } else {
-          fragmentId2actorList.get(actor.fragmentId).push(actor);
-        }
-      }
-    }
-    for (let actor of fragmentRepresentedActors) {
-      actor.representedActorList = fragmentId2actorList.get(actor.fragmentId).map(x => x.actorId).sort();
-    }
+    // const fragmentId2actorList = new Map();
+    // const fragmentRepresentedActors = new Set();
+    // for (let actor of allActors) {
+    //   if (!fragmentId2actorList.has(actor.fragmentId)) {
+    //     fragmentRepresentedActors.add(actor);
+    //     fragmentId2actorList.set(actor.fragmentId, [actor]);
+    //   } else {
+    //     if (this.selectedActor && actor.actorIdentifier === this.selectedActorStr) {
+    //       fragmentRepresentedActors.delete(fragmentId2actorList.get(actor.fragmentId)[0]);
+    //       fragmentRepresentedActors.add(actor);
+    //       fragmentId2actorList.get(actor.fragmentId).unshift(actor);
+    //     } else {
+    //       fragmentId2actorList.get(actor.fragmentId).push(actor);
+    //     }
+    //   }
+    // }
+    // for (let actor of fragmentRepresentedActors) {
+    //   actor.representedActorList = fragmentId2actorList.get(actor.fragmentId).map(x => x.actorId).sort();
+    // }
+    let fragmentRepresentedActors = this.streamPlan.fragmentRepresentedActors;
     // get dag layout of these actors
     let dagNodeMap = new Map();
     for (let actor of fragmentRepresentedActors) {
