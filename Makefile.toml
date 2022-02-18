@@ -123,7 +123,8 @@ script = '''
 set -e
 
 cp "java/pgserver/src/main/resources/logback.xml" "${PREFIX_CONFIG}/logback.xml"
-cp "grafana/dashboard.json" "${PREFIX_CONFIG}/grafana_dashboard.json"
+cp "grafana/risingwave-dashboard.json" "${PREFIX_CONFIG}/grafana_dashboard.json"
+cp "grafana/aws-s3.json" "${PREFIX_CONFIG}/aws-s3.json"
 cp "rust/config/risingwave.toml" "${PREFIX_CONFIG}/risingwave.toml"
 cp "rust/risedev/run_command.sh" "${PREFIX_BIN}/run_command.sh"
 cp "rust/risedev/welcome.sh" "${PREFIX_BIN}/welcome.sh"
