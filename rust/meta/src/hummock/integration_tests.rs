@@ -13,14 +13,16 @@ use risingwave_storage::object::InMemObjectStore;
 use crate::cluster::StoredClusterManager;
 use crate::hummock::mock_hummock_meta_client::MockHummockMetaClient;
 use crate::hummock::HummockManager;
-use crate::manager::MetaSrvEnv;
+use crate::manager::{MetaSrvEnv, NotificationManager};
 
 async fn get_hummock_meta_client() -> MockHummockMetaClient {
     let env = MetaSrvEnv::for_test().await;
     let hummock_manager = Arc::new(HummockManager::new(env.clone()).await.unwrap());
-    let cluster_manager = StoredClusterManager::new(env, Some(hummock_manager.clone()))
-        .await
-        .unwrap();
+    let notification_manager = Arc::new(NotificationManager::new());
+    let cluster_manager =
+        StoredClusterManager::new(env, Some(hummock_manager.clone()), notification_manager)
+            .await
+            .unwrap();
     let fake_host_address = HostAddress {
         host: "127.0.0.1".to_string(),
         port: 80,

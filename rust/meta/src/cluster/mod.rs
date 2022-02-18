@@ -8,9 +8,10 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
+use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
 use crate::hummock::HummockManager;
-use crate::manager::{IdCategory, IdGeneratorManagerRef, MetaSrvEnv};
+use crate::manager::{IdCategory, IdGeneratorManagerRef, MetaSrvEnv, NotificationManagerRef};
 use crate::model::{MetadataModel, Worker};
 use crate::storage::MetaStore;
 
@@ -26,9 +27,10 @@ where
     id_gen_manager_ref: IdGeneratorManagerRef<S>,
     hummock_manager_ref: Option<Arc<HummockManager<S>>>,
     workers: DashMap<WorkerKey, Worker>,
+    nm: NotificationManagerRef,
 }
 
-struct WorkerKey(HostAddress);
+pub struct WorkerKey(pub HostAddress);
 
 impl PartialEq<Self> for WorkerKey {
     fn eq(&self, other: &Self) -> bool {
@@ -51,6 +53,7 @@ where
     pub async fn new(
         env: MetaSrvEnv<S>,
         hummock_manager_ref: Option<Arc<HummockManager<S>>>,
+        nm: NotificationManagerRef,
     ) -> Result<Self> {
         let meta_store_ref = env.meta_store_ref();
         let workers = try_match_expand!(
@@ -69,6 +72,7 @@ where
             id_gen_manager_ref: env.id_gen_manager_ref(),
             hummock_manager_ref,
             workers: worker_map,
+            nm,
         })
     }
 
@@ -84,12 +88,24 @@ where
                     .id_gen_manager_ref
                     .generate::<{ IdCategory::Worker }>()
                     .await?;
-                let worker = Worker::from_protobuf(WorkerNode {
+                let workernode = WorkerNode {
                     id: id as u32,
                     r#type: r#type as i32,
-                    host: Some(host_address),
-                });
+                    host: Some(host_address.clone()),
+                };
+                let worker = Worker::from_protobuf(workernode.clone());
                 worker.insert(&*self.meta_store_ref).await?;
+
+                if r#type == WorkerType::ComputeNode {
+                    self.nm
+                        .notify(
+                            Operation::Add,
+                            &Info::Node(workernode),
+                            crate::manager::NotificationTarget::Frontend,
+                        )
+                        .await?
+                }
+
                 Ok((v.insert(worker).to_protobuf(), true))
             }
         }

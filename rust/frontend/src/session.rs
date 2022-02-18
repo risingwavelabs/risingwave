@@ -1,6 +1,7 @@
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{Session, SessionManager};
 use risingwave_common::error::Result;
+use risingwave_pb::common::WorkerType;
 use risingwave_rpc_client::MetaClient;
 use risingwave_sqlparser::parser::Parser;
 
@@ -21,6 +22,11 @@ pub struct FrontendEnv {
 impl FrontendEnv {
     pub async fn init(opts: &FrontendOpts) -> Result<Self> {
         let meta_client = MetaClient::new(opts.meta_addr.clone().as_str()).await?;
+        meta_client
+            .register(opts.host.parse().unwrap(), WorkerType::Frontend)
+            .await
+            .unwrap();
+
         // Create default database when env init.
         let catalog_manager = CatalogConnector::new(meta_client.clone());
         catalog_manager

@@ -11,11 +11,14 @@ use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::create_request::CatalogBody;
 use risingwave_pb::meta::drop_request::CatalogId;
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
+use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
 use risingwave_pb::meta::{
-    AddWorkerNodeRequest, CreateRequest, Database, DropRequest, HeartbeatRequest, Schema, Table,
+    AddWorkerNodeRequest, CreateRequest, Database, DropRequest, HeartbeatRequest, Schema,
+    SubscribeRequest, SubscribeResponse, Table,
 };
 use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
 use tonic::transport::{Channel, Endpoint};
+use tonic::Streaming;
 
 type DatabaseId = i32;
 type SchemaId = i32;
@@ -28,6 +31,7 @@ pub struct MetaClient {
     pub heartbeat_client: HeartbeatServiceClient<Channel>,
     pub catalog_client: CatalogServiceClient<Channel>,
     pub hummock_client: HummockManagerServiceClient<Channel>,
+    pub notification_client: NotificationServiceClient<Channel>,
 }
 
 impl MetaClient {
@@ -42,23 +46,49 @@ impl MetaClient {
         let cluster_client = ClusterServiceClient::new(channel.clone());
         let heartbeat_client = HeartbeatServiceClient::new(channel.clone());
         let catalog_client = CatalogServiceClient::new(channel.clone());
-        let hummock_client = HummockManagerServiceClient::new(channel);
+        let hummock_client = HummockManagerServiceClient::new(channel.clone());
+        let notification_client = NotificationServiceClient::new(channel);
         Ok(Self {
             cluster_client,
             heartbeat_client,
             catalog_client,
             hummock_client,
+            notification_client,
         })
     }
 
+    /// Subscribe the current node to meta.
+    pub async fn subscribe(
+        &self,
+        addr: SocketAddr,
+        worker_type: WorkerType,
+    ) -> Result<Streaming<SubscribeResponse>> {
+        let host = Some(HostAddress {
+            host: addr.ip().to_string(),
+            port: addr.port() as i32,
+        });
+        let request = SubscribeRequest {
+            worker_type: worker_type as i32,
+            host,
+        };
+        let rx = self
+            .notification_client
+            .to_owned()
+            .subscribe(request)
+            .await
+            .to_rw_result()?
+            .into_inner();
+        Ok(rx)
+    }
+
     /// Register the current node to the cluster and return the corresponding worker id.
-    pub async fn register(&self, addr: SocketAddr) -> Result<u32> {
+    pub async fn register(&self, addr: SocketAddr, worker_type: WorkerType) -> Result<u32> {
         let host_address = HostAddress {
             host: addr.ip().to_string(),
             port: addr.port() as i32,
         };
         let request = AddWorkerNodeRequest {
-            worker_type: WorkerType::ComputeNode as i32,
+            worker_type: worker_type as i32,
             host: Some(host_address),
         };
         let resp = self
