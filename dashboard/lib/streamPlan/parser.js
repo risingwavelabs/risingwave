@@ -158,7 +158,6 @@ export default class StreamPlanParser {
         list.add(n.id);
       });
       graphBfs(shellNode, (n) => {
-        console.log(n);
         list.add(n.id);
       }, "parentNodes");
       mvTableIdToChainViewActorList.set(mviewNode.typeInfo.tableRefId.tableId, [...list.values()]);

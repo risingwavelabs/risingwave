@@ -814,7 +814,6 @@ export class StreamChartHelper {
  * @returns {StreamChartHelper}
  */
 export default function createView(g, data, onNodeClick, selectedActor, shownActorIdList) {
-  console.log(shownActorIdList);
   let streamChartHelper = new StreamChartHelper(g, data, onNodeClick, selectedActor, shownActorIdList);
   streamChartHelper.drawManyFlow();
   return streamChartHelper;

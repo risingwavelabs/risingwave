@@ -35,6 +35,7 @@ const ToolBoxTitle = styled('div')(() => ({
 
 export default function StreamingView(props) {
   const data = props.data || [];
+  const mvList = props.mvList || [];
   const actorList = data.map(x => x.node);
 
   const [nodeJson, setNodeJson] = useState("");
@@ -44,19 +45,24 @@ export default function StreamingView(props) {
   const [searchContent, setSearchContent] = useState("");
   const [mvTableIdToSingleViewActorList, setMvTableIdToSingleViewActorList] = useState(null);
   const [mvTableIdToChainViewActorList, setMvTableIdToChainViewActorList] = useState(null);
-  const [mviewTableList, setMviewTableList] = useState([]);
   const [filterMode, setFilterMode] = useState("Chain View");
   const [selectedMvTableId, setSelectedMvTableId] = useState(null);
   const [showFullGraph, setShowFullGraph] = useState(true);
 
   const d3Container = useRef(null);
 
+  // let tmp = [];
+  // for(let mv of mvList){
+  //   tmp.push({
+  //     label: mv[1].tableName, tableId: mv[0]
+  //   })
+  // }
+
   const exprNode = (actorNode) => (({ input, ...o }) => o)(actorNode)
 
   const locateTo = (selector) => {
     let selection = d3.select(selector);
     if (!selection.empty()) {
-      console.log(selection.attr("x"), selection.attr("y"));
       svg.call(zoom).call(zoom.transform, new d3.ZoomTransform(1, -selection.attr("x"), -selection.attr("y") + height / 2));
     }
   }
@@ -146,16 +152,16 @@ export default function StreamingView(props) {
     locateSearchPosition();
   }, [searchType, searchContent]);
 
-  useEffect(() => {
-    if (mvTableIdToSingleViewActorList !== null) {
-      let tmp = [];
-      for (let [tableId, _] of mvTableIdToSingleViewActorList.entries()) {
-        tmp.push({ label: "mvtable " + tableId, tableId: tableId });
-      }
-      tmp.sort(x => x.label);
-      setMviewTableList(tmp);
-    }
-  }, [mvTableIdToSingleViewActorList])
+  // useEffect(() => {
+  //   if (mvTableIdToSingleViewActorList !== null) {
+  //     let tmp = [];
+  //     for (let [tableId, _] of mvTableIdToSingleViewActorList.entries()) {
+  //       tmp.push({ label: "mvtable " + tableId, tableId: tableId });
+  //     }
+  //     tmp.sort(x => x.label);
+  //     setMviewTableList(tmp);
+  //   }
+  // }, [mvTableIdToSingleViewActorList])
 
   // render the full graph
   useEffect(() => {
@@ -291,8 +297,9 @@ export default function StreamingView(props) {
               />
             </div>
             <Autocomplete
+              isOptionEqualToValue={() => false}
               disablePortal
-              options={mviewTableList || []}
+              options={mvList.map(mv => {return {label: mv[1].tableName, tableId: mv[0]}}) || []}
               onChange={onSelectMvChange}
               renderInput={(param) => <TextField {...param} label="Materialized View" />}
             />
