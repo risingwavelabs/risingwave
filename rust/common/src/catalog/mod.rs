@@ -2,6 +2,12 @@ pub mod schema;
 
 pub use schema::*;
 
+pub enum CatalogId {
+    DatabaseId(DatabaseId),
+    SchemaId(SchemaId),
+    TableId(TableId),
+}
+
 #[derive(Clone, Debug, Default, Hash, PartialOrd, PartialEq, Eq)]
 pub struct DatabaseId {
     database_id: i32,

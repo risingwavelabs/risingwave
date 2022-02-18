@@ -66,8 +66,8 @@ mod col_pruning;
 pub use col_pruning::*;
 mod convert;
 pub use convert::*;
-mod join_predicate;
-pub use join_predicate::*;
+mod eq_join_predicate;
+pub use eq_join_predicate::*;
 
 // SOME Intellisense DONT UNDERSTAND THIS.
 //

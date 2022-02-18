@@ -314,7 +314,7 @@ const mvActors = (actors, mvId) => `
         const fragmentId = fragmentIdOf(actor)
 
         if (actor.nodes.chainNode) {
-          let upstreamActorIds = actor.nodes.chainNode.upstreamActorIds
+          let upstreamActorIds = actor.nodes.input[0].mergeNode.upstreamActorId
           if (upstreamActorIds.length != 0) {
             let upstreamFragmentId = fragmentIdOf(actorMap.get(upstreamActorIds[0]))
             actorNodes.get(upstreamFragmentId).parents.push(fragmentId)

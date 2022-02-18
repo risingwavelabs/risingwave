@@ -13,27 +13,43 @@ use risingwave_pb::stream_service::{
 use uuid::Uuid;
 
 use crate::barrier::{BarrierManagerRef, Command};
-use crate::cluster::StoredClusterManager;
+use crate::cluster::{NodeId, StoredClusterManager};
 use crate::manager::{MetaSrvEnv, StreamClientsRef};
-use crate::model::TableFragments;
+use crate::model::{ActorId, TableFragments};
+use crate::storage::MetaStore;
 use crate::stream::{FragmentManagerRef, ScheduleCategory, Scheduler};
 
-pub type StreamManagerRef = Arc<StreamManager>;
+pub type StreamManagerRef<S> = Arc<StreamManager<S>>;
 
-pub struct StreamManager {
-    fragment_manager_ref: FragmentManagerRef,
+/// [`Context`] carries one-time infos.
+#[derive(Default)]
+pub struct CreateMaterializedViewContext {
+    /// New dispatches to add from upstream actors to downstream actors.
+    pub dispatches: HashMap<ActorId, Vec<ActorId>>,
+    /// Upstream mview actor ids grouped by node id.
+    pub upstream_node_actors: HashMap<NodeId, Vec<ActorId>>,
+}
 
-    barrier_manager_ref: BarrierManagerRef,
-    scheduler: Scheduler,
+pub struct StreamManager<S>
+where
+    S: MetaStore,
+{
+    fragment_manager_ref: FragmentManagerRef<S>,
+
+    barrier_manager_ref: BarrierManagerRef<S>,
+    scheduler: Scheduler<S>,
     clients: StreamClientsRef,
 }
 
-impl StreamManager {
+impl<S> StreamManager<S>
+where
+    S: MetaStore,
+{
     pub async fn new(
-        env: MetaSrvEnv,
-        fragment_manager_ref: FragmentManagerRef,
-        barrier_manager_ref: BarrierManagerRef,
-        cluster_manager: Arc<StoredClusterManager>,
+        env: MetaSrvEnv<S>,
+        fragment_manager_ref: FragmentManagerRef<S>,
+        barrier_manager_ref: BarrierManagerRef<S>,
+        cluster_manager: Arc<StoredClusterManager<S>>,
     ) -> Result<Self> {
         Ok(Self {
             fragment_manager_ref,
@@ -51,6 +67,7 @@ impl StreamManager {
     pub async fn create_materialized_view(
         &self,
         mut table_fragments: TableFragments,
+        ctx: CreateMaterializedViewContext,
     ) -> Result<()> {
         let actor_ids = table_fragments.actor_ids();
         let source_actor_ids = table_fragments.source_actor_ids();
@@ -73,7 +90,7 @@ impl StreamManager {
         let actor_host_infos = locations.actor_info_map();
         let node_actors = locations.node_actors();
 
-        let dispatches = table_fragments
+        let dispatches = ctx
             .dispatches
             .iter()
             .map(|(up_id, down_ids)| {
@@ -92,7 +109,7 @@ impl StreamManager {
             })
             .collect::<HashMap<_, _>>();
 
-        let mut node_hanging_channels = table_fragments
+        let mut node_hanging_channels = ctx
             .upstream_node_actors
             .iter()
             .map(|(node_id, up_ids)| {
@@ -254,6 +271,7 @@ mod tests {
     use crate::barrier::BarrierManager;
     use crate::manager::MetaSrvEnv;
     use crate::model::ActorId;
+    use crate::storage::MemStore;
     use crate::stream::FragmentManager;
 
     struct FakeFragmentState {
@@ -334,8 +352,8 @@ mod tests {
     }
 
     struct MockServices {
-        stream_manager: StreamManager,
-        fragment_manager: FragmentManagerRef,
+        stream_manager: StreamManager<MemStore>,
+        fragment_manager: FragmentManagerRef<MemStore>,
         state: Arc<FakeFragmentState>,
         join_handle: JoinHandle<()>,
         shutdown_tx: UnboundedSender<()>,
@@ -378,7 +396,7 @@ mod tests {
                 )
                 .await?;
 
-            let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await?);
+            let fragment_manager = Arc::new(FragmentManager::new(env.meta_store_ref()).await?);
 
             let barrier_manager_ref = Arc::new(BarrierManager::new(
                 env.clone(),
@@ -450,12 +468,13 @@ mod tests {
                 actors: actors.clone(),
             },
         );
-        let table_fragments =
-            TableFragments::new(table_id.clone(), fragments, HashMap::new(), HashMap::new());
+        let table_fragments = TableFragments::new(table_id.clone(), fragments);
+
+        let ctx = CreateMaterializedViewContext::default();
 
         services
             .stream_manager
-            .create_materialized_view(table_fragments)
+            .create_materialized_view(table_fragments, ctx)
             .await?;
 
         for actor in actors {

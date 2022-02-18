@@ -5,19 +5,29 @@ use risingwave_pb::hummock::*;
 use tonic::{Request, Response, Status};
 
 use crate::hummock::HummockManager;
+use crate::storage::MetaStore;
 
-pub struct HummockServiceImpl {
-    hummock_manager: Arc<HummockManager>,
+pub struct HummockServiceImpl<S>
+where
+    S: MetaStore,
+{
+    hummock_manager: Arc<HummockManager<S>>,
 }
 
-impl HummockServiceImpl {
-    pub fn new(hummock_manager: Arc<HummockManager>) -> Self {
+impl<S> HummockServiceImpl<S>
+where
+    S: MetaStore,
+{
+    pub fn new(hummock_manager: Arc<HummockManager<S>>) -> Self {
         HummockServiceImpl { hummock_manager }
     }
 }
 
 #[async_trait::async_trait]
-impl HummockManagerService for HummockServiceImpl {
+impl<S> HummockManagerService for HummockServiceImpl<S>
+where
+    S: MetaStore,
+{
     async fn pin_version(
         &self,
         request: Request<PinVersionRequest>,

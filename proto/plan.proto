@@ -95,7 +95,6 @@ message ValuesNode {
 message CreateTableNode {
   TableRefId table_ref_id = 1;
   repeated ColumnDesc column_descs = 2;
-  bool v2 = 3;
   // Other fields not included yet:
   // primarykey_col_ids, dist_type, distkey_col_id, append_only
 
