@@ -47,11 +47,10 @@ impl KeyValue {
 #[async_trait]
 pub trait MetaStore: Sync + Send + 'static {
     async fn list_cf(&self, cf: &str) -> Result<Vec<Vec<u8>>>;
-    /// We will need a proper implementation for `list`, `list_cf` and `list_batch_cf` in etcd
-    /// MetaStore. In a naive implementation, we need to select the latest version for each key
+    /// We will need a proper implementation for `list` and `list_cf` in etcd MetaStore.
+    /// In a naive implementation, we need to select the latest version for each key
     /// locally after fetching all versions of it from etcd, which may not meet our
     /// performance expectation.
-    async fn list_batch_cf(&self, cfs: Vec<&str>) -> Result<Vec<Vec<Vec<u8>>>>;
     async fn put_cf(&self, cf: &str, key: &[u8], value: &[u8], version: Epoch) -> Result<()>;
     async fn get_cf(&self, cf: &str, key: &[u8], version: Epoch) -> Result<Vec<u8>>;
     async fn delete_cf(&self, cf: &str, key: &[u8], version: Epoch) -> Result<()>;
@@ -188,21 +187,6 @@ impl MetaStore for MemStore {
             .iter()
             .filter(|(k, v)| k.1 == cf && !v.is_empty())
             .map(|(_, v)| v.iter().last().unwrap().1.clone())
-            .collect::<Vec<_>>())
-    }
-
-    async fn list_batch_cf(&self, cfs: Vec<&str>) -> Result<Vec<Vec<Vec<u8>>>> {
-        let entities = self.entities.lock().unwrap();
-
-        Ok(cfs
-            .iter()
-            .map(|&cf| {
-                entities
-                    .iter()
-                    .filter(|(k, v)| k.1 == cf && !v.is_empty())
-                    .map(|(_, v)| v.iter().last().unwrap().1.clone())
-                    .collect::<Vec<_>>()
-            })
             .collect::<Vec<_>>())
     }
 

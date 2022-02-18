@@ -57,14 +57,6 @@ async fn test_meta_store_basic(store: &dyn MetaStore) -> Result<()> {
 
     assert_eq!(store.list().await.unwrap().len(), 3);
     assert_eq!(store.list_cf("test_cf").await.unwrap().len(), 2);
-    assert_eq!(
-        store
-            .list_batch_cf(vec!["test_cf", DEFAULT_COLUMN_FAMILY])
-            .await
-            .unwrap()
-            .len(),
-        2
-    );
 
     assert!(store
         .put(b"key_3", b"value_3_new", Epoch::from(3))

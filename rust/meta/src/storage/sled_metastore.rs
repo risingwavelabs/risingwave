@@ -270,20 +270,13 @@ impl SledMetaStore {
 #[async_trait]
 impl MetaStore for SledMetaStore {
     async fn list_cf(&self, cf: &str) -> Result<Vec<Vec<u8>>> {
-        Ok(self.list_batch_cf(vec![cf]).await?.pop().unwrap())
-    }
-
-    async fn list_batch_cf(&self, cfs: Vec<&str>) -> Result<Vec<Vec<Vec<u8>>>> {
-        let keys_with_opts = cfs
-            .iter()
-            .map(|cf| (cf.to_string(), vec![], None, true))
-            .collect_vec();
-        self.get_impl(&keys_with_opts).map(|batch| {
-            batch
-                .into_iter()
-                .map(|result| result.into_iter().map(|kv| kv.into_value()).collect_vec())
-                .collect_vec()
-        })
+        Ok(self
+            .get_impl(&[(cf.to_string(), vec![], None, true)])?
+            .pop()
+            .unwrap()
+            .into_iter()
+            .map(|kv| kv.into_value())
+            .collect_vec())
     }
 
     async fn put_cf(&self, cf: &str, key: &[u8], value: &[u8], version: Epoch) -> Result<()> {
