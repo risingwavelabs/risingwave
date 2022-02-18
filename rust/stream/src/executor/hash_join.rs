@@ -224,6 +224,9 @@ pub struct HashJoinExecutor<S: StateStore, const T: JoinTypePrimitive> {
 
     /// Identity string
     identity: String,
+
+    /// Logical Operator Info
+    op_info: String,
 }
 
 impl<S: StateStore, const T: JoinTypePrimitive> std::fmt::Debug for HashJoinExecutor<S, T> {
@@ -272,6 +275,10 @@ impl<S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<S,
         self.identity.as_str()
     }
 
+    fn logical_operator_info(&self) -> &str {
+        &self.op_info
+    }
+
     fn clear_cache(&mut self) -> Result<()> {
         self.side_l.clear_cache();
         self.side_r.clear_cache();
@@ -291,7 +298,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
         keyspace: Keyspace<S>,
         executor_id: u64,
         cond: Option<RowExpression>,
-        identity: String,
+        op_info: String,
     ) -> Self {
         let debug_l = format!("{:#?}", &input_l);
         let debug_r = format!("{:#?}", &input_r);
@@ -351,7 +358,8 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
             cond,
             debug_l,
             debug_r,
-            identity: format!("{} {:X}", identity, executor_id),
+            identity: format!("HashJoinExecutor {:X}", executor_id),
+            op_info,
         }
     }
 

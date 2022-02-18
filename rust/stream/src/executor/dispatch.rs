@@ -668,7 +668,12 @@ mod tests {
     async fn test_configuration_change() {
         let schema = Schema { fields: vec![] };
         let (mut tx, rx) = channel(16);
-        let input = Box::new(ReceiverExecutor::new(schema.clone(), vec![], rx));
+        let input = Box::new(ReceiverExecutor::new(
+            schema.clone(),
+            vec![],
+            rx,
+            "ReceiverExecutor".to_string(),
+        ));
         let data_sink = Arc::new(Mutex::new(vec![]));
         let output = Box::new(MockOutput::new(data_sink));
         let actor_id = 233;

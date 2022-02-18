@@ -46,6 +46,10 @@ where
         self.input().identity()
     }
 
+    fn logical_operator_info(&self) -> &str {
+        self.input().logical_operator_info()
+    }
+
     fn clear_cache(&mut self) -> Result<()> {
         self.input_mut().clear_cache()
     }
