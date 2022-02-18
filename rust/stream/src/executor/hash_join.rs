@@ -535,7 +535,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
                             entry_value.insert(pk, JoinRow::new(value, degree));
                         }
                         Op::Delete | Op::UpdateDelete => {
-                            if let Some(v) = side_update.ht.get_mut(&key).await {
+                            if let Some(v) = side_update.ht.get_mut_without_cached(&key).await {
                                 // remove the row by it's primary key
                                 v.remove(pk);
 
@@ -585,7 +585,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
                     let mut null_row_updated = false;
                     match *op {
                         Op::Insert | Op::UpdateInsert => {
-                            let entry = side_update.ht.get_mut(&key).await;
+                            let entry = side_update.ht.get_mut_without_cached(&key).await;
                             // FIXME: when state is empty for the entry, the entry is not deleted.
                             let entry_value = match entry {
                                 Some(state) => state,
@@ -607,14 +607,14 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
                                         null_row_updated = true;
                                     };
                                     side_update.ht.init_without_cache(&key).await?;
-                                    side_update.ht.get_mut(&key).await.unwrap()
+                                    side_update.ht.get_mut_without_cached(&key).await.unwrap()
                                 }
                             };
                             entry_value
                                 .insert(pk, JoinRow::new(value, matched_rows.len().await as u64));
                         }
                         Op::Delete | Op::UpdateDelete => {
-                            if let Some(v) = side_update.ht.get_mut(&key).await {
+                            if let Some(v) = side_update.ht.get_mut_without_cached(&key).await {
                                 v.remove(pk);
                                 if outer_side_null(T, SIDE) && v.is_empty().await {
                                     for matched_row in matched_rows.values().await {
@@ -651,7 +651,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
                         state.insert(pk, JoinRow::new(value, 0));
                     }
                     Op::Delete | Op::UpdateDelete => {
-                        if let Some(v) = side_update.ht.get_mut(&key).await {
+                        if let Some(v) = side_update.ht.get_mut_without_cached(&key).await {
                             v.remove(pk);
                         }
                     }

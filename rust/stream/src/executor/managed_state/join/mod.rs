@@ -172,6 +172,40 @@ impl<S: StateStore> JoinHashMap<S> {
         }
     }
 
+    /// Returns a mutable reference to the value of the key in the memory, if does not exist, look
+    /// up in remote storage and return the [`AllOrNoneState`] without cached state, if still not
+    /// exist, return None.
+    pub async fn get_mut_without_cached(
+        &mut self,
+        key: &HashKeyType,
+    ) -> Option<&mut HashValueType<S>> {
+        let state = self.inner.get(key);
+        // TODO: we should probably implement a entry function for `LruCache`
+        match state {
+            Some(_) => self.inner.get_mut(key),
+            None => {
+                let keyspace = self.get_state_keyspace(key);
+                let all_data = keyspace
+                    .scan_strip_prefix(None, self.current_epoch)
+                    .await
+                    .unwrap();
+                let total_count = all_data.len();
+                if total_count > 0 {
+                    let state = AllOrNoneState::new(
+                        keyspace,
+                        total_count,
+                        self.data_types.clone(),
+                        self.pk_data_types.clone(),
+                    );
+                    self.inner.put(key.clone(), state);
+                    Some(self.inner.get_mut(key).unwrap())
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
     #[allow(dead_code)]
     /// Returns true if the key in the memory or remote storage, otherwise false.
     pub async fn contains(&mut self, key: &HashKeyType) -> bool {
