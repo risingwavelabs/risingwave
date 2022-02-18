@@ -1,71 +1,77 @@
 use std::time::Instant;
 
-use bytes::Bytes;
-use futures::future;
 use itertools::Itertools;
 use rand::distributions::Uniform;
 use rand::prelude::{Distribution, StdRng};
 use rand::SeedableRng;
 use risingwave_storage::StateStore;
 
+use super::Operations;
 use crate::utils::latency_stat::LatencyStat;
-use crate::utils::workload::{get_epoch, Workload};
-use crate::{Opts, WorkloadType};
+use crate::utils::workload::Workload;
+use crate::Opts;
 
-pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
-    let batch = Workload::new(opts, WorkloadType::GetRandom, None).batch;
-    store
-        .ingest_batch(batch.clone(), get_epoch())
-        .await
-        .unwrap();
+impl Operations {
+    pub(crate) async fn get_random(&self, store: &impl StateStore, opts: &Opts) {
+        // generate queried point get key
+        let mut get_keys = match self.keys.is_empty() {
+            true => Workload::new_random_keys(opts, 233).1,
+            false => {
+                let mut rng = StdRng::seed_from_u64(233);
+                let dist = Uniform::from(0..self.keys.len());
+                (0..opts.reads)
+                    .into_iter()
+                    .map(|_| self.keys[dist.sample(&mut rng)].clone())
+                    .collect_vec()
+            }
+        };
 
-    // generate queried point get key
-    let mut rng = StdRng::seed_from_u64(233);
-    let dist = Uniform::from(0..opts.batch_size as usize);
-    let mut get_keys = (0..opts.reads)
-        .into_iter()
-        .map(|_| batch[dist.sample(&mut rng)].0.clone())
-        .collect_vec();
-    let get_keys_len = get_keys.len();
-
-    // partitioned these keys for each concurrency
-    let mut grouped_keys = vec![vec![]; opts.concurrency_num as usize];
-    for (i, key) in get_keys.drain(..).enumerate() {
-        grouped_keys[i % opts.concurrency_num as usize].push(key);
-    }
-
-    // actual point get process
-    let epoch = u64::MAX;
-    let get = |keys: Vec<Bytes>| async {
-        let mut latencies = vec![];
-        for key in keys {
-            let start = Instant::now();
-            store.get(&key, epoch).await.unwrap();
-            let time_nano = start.elapsed().as_nanos();
-            latencies.push(time_nano);
+        // partitioned these keys for each concurrency
+        let mut grouped_keys = vec![vec![]; opts.concurrency_num as usize];
+        for (i, key) in get_keys.drain(..).enumerate() {
+            grouped_keys[i % opts.concurrency_num as usize].push(key);
         }
-        latencies
-    };
-    let total_start = Instant::now();
-    let futures = grouped_keys.drain(..).map(|keys| get(keys)).collect_vec();
-    let latencies_list: Vec<Vec<u128>> = future::join_all(futures).await;
-    let total_time_nano = total_start.elapsed().as_nanos();
 
-    // calculate metrics
-    let mut latencies = vec![];
-    for list in latencies_list {
-        for latency in list {
-            latencies.push(latency);
-        }
-    }
-    let stat = LatencyStat::new(latencies);
-    let qps = get_keys_len as u128 * 1_000_000_000 / total_time_nano as u128;
+        let mut args = grouped_keys
+            .into_iter()
+            .map(|keys| (keys, store.clone()))
+            .collect_vec();
 
-    println!(
-        "
+        let futures = args
+            .drain(..)
+            .map(|(keys, store)| async move {
+                let mut latencies: Vec<u128> = vec![];
+                for key in keys {
+                    let start = Instant::now();
+                    store.get(&key, u64::MAX).await.unwrap();
+                    let time_nano = start.elapsed().as_nanos();
+                    latencies.push(time_nano);
+                }
+                latencies
+            })
+            .collect_vec();
+
+        let total_start = Instant::now();
+
+        let handles = futures.into_iter().map(tokio::spawn).collect_vec();
+        let latencies_list = futures::future::join_all(handles).await;
+
+        let total_time_nano = total_start.elapsed().as_nanos();
+
+        // calculate metrics
+        let latencies: Vec<u128> = latencies_list
+            .into_iter()
+            .flat_map(|res| res.unwrap())
+            .collect_vec();
+        let stat = LatencyStat::new(latencies);
+        let qps = opts.reads as u128 * 1_000_000_000 / total_time_nano as u128;
+
+        println!(
+            "
     getrandom
       {}
       QPS: {}",
-        stat, qps
-    );
+            stat, qps
+        );
+    }
 }

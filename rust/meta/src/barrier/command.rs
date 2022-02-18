@@ -16,6 +16,7 @@ use uuid::Uuid;
 use super::info::BarrierActorInfo;
 use crate::manager::StreamClientsRef;
 use crate::model::{ActorId, TableFragments};
+use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
 
 /// [`Command`] is the action of [`BarrierManager`]. For different commands, we'll build different
@@ -45,8 +46,8 @@ impl Command {
 
 /// [`CommandContext`] is used for generating barrier and doing post stuffs according to the given
 /// [`Command`].
-pub struct CommandContext<'a> {
-    fragment_manager: FragmentManagerRef,
+pub struct CommandContext<'a, S> {
+    fragment_manager: FragmentManagerRef<S>,
 
     clients: StreamClientsRef,
 
@@ -57,9 +58,9 @@ pub struct CommandContext<'a> {
     command: Command,
 }
 
-impl<'a> CommandContext<'a> {
+impl<'a, S> CommandContext<'a, S> {
     pub fn new(
-        fragment_manager: FragmentManagerRef,
+        fragment_manager: FragmentManagerRef<S>,
         clients: StreamClientsRef,
         info: &'a BarrierActorInfo,
         command: Command,
@@ -73,7 +74,10 @@ impl<'a> CommandContext<'a> {
     }
 }
 
-impl CommandContext<'_> {
+impl<S> CommandContext<'_, S>
+where
+    S: MetaStore,
+{
     /// Generate a mutation for the given command.
     pub fn to_mutation(&self) -> Result<Mutation> {
         let mutation = match &self.command {

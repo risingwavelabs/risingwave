@@ -128,9 +128,13 @@ impl StreamManager {
         core.context.take_receiver(&ids)
     }
 
-    pub fn update_actors(&self, actors: &[stream_plan::StreamActor]) -> Result<()> {
+    pub fn update_actors(
+        &self,
+        actors: &[stream_plan::StreamActor],
+        hanging_channels: &[stream_service::HangingChannel],
+    ) -> Result<()> {
         let mut core = self.core.lock().unwrap();
-        core.update_actors(actors)
+        core.update_actors(actors, hanging_channels)
     }
 
     /// This function was called while [`StreamManager`] exited.
@@ -866,7 +870,11 @@ impl StreamManagerCore {
         Ok(())
     }
 
-    fn update_actors(&mut self, actors: &[stream_plan::StreamActor]) -> Result<()> {
+    fn update_actors(
+        &mut self,
+        actors: &[stream_plan::StreamActor],
+        hanging_channels: &[stream_service::HangingChannel],
+    ) -> Result<()> {
         let local_actor_ids: HashSet<u32> = HashSet::from_iter(
             actors
                 .iter()
@@ -905,6 +913,42 @@ impl StreamManagerCore {
                     let up_down_ids = (*upstream_id, *current_id);
                     self.context
                         .add_channel_pairs(up_down_ids, (Some(tx), Some(rx)));
+                }
+            }
+        }
+
+        for hanging_channel in hanging_channels {
+            match (&hanging_channel.upstream, &hanging_channel.downstream) {
+                (
+                    Some(up),
+                    Some(ActorInfo {
+                        actor_id: down_id,
+                        host: None,
+                    }),
+                ) => {
+                    let up_down_ids = (up.actor_id, *down_id);
+                    let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
+                    self.context
+                        .add_channel_pairs(up_down_ids, (Some(tx), Some(rx)));
+                }
+                (
+                    Some(ActorInfo {
+                        actor_id: up_id,
+                        host: None,
+                    }),
+                    Some(down),
+                ) => {
+                    let up_down_ids = (*up_id, down.actor_id);
+                    let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
+                    self.context
+                        .add_channel_pairs(up_down_ids, (Some(tx), Some(rx)));
+                }
+                _ => {
+                    return Err(ErrorCode::InternalError(format!(
+                        "hanging channel should has exactly one remote side: {:?}",
+                        hanging_channel,
+                    ))
+                    .into())
                 }
             }
         }

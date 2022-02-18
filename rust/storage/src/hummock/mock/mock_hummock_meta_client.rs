@@ -83,7 +83,7 @@ impl HummockMetaClient for MockHummockMetaClient {
     }
 
     async fn get_compaction_task(&self) -> HummockResult<Option<CompactTask>> {
-        panic!();
+        unimplemented!()
     }
 
     async fn report_compaction_task(
@@ -91,6 +91,14 @@ impl HummockMetaClient for MockHummockMetaClient {
         _compact_task: CompactTask,
         _task_result: bool,
     ) -> HummockResult<()> {
-        panic!();
+        unimplemented!()
+    }
+
+    async fn commit_epoch(&self, _epoch: HummockEpoch) -> HummockResult<()> {
+        unimplemented!()
+    }
+
+    async fn abort_epoch(&self, _epoch: HummockEpoch) -> HummockResult<()> {
+        unimplemented!()
     }
 }

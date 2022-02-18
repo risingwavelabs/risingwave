@@ -132,6 +132,7 @@ public class CreateTableHandler implements SqlHandler {
     builder.setCollation(rootNode.getCollation());
     builder.setMv(true);
     builder.setAssociated(true);
+    builder.setDependentTables(rootNode.getDependentTables());
     CreateMaterializedViewInfo mvInfo = builder.build();
     MaterializedViewCatalog viewCatalog =
         context.getCatalogService().createMaterializedView(schemaName, mvInfo);

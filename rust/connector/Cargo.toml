@@ -19,10 +19,9 @@ chrono = "0.4"
 crc32fast = "1"
 either = "1"
 farmhash = "1"
-fasthash = "0.4.0"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-http = "0.2.6"
-hyper = "0.14.16"
+http = "0.2"
+hyper = "0.14"
 itertools = "0.10"
 lazy_static = "1"
 log = "0.4"
@@ -36,11 +35,9 @@ rdkafka = { version = "0.28", features = ["cmake-build"] }
 risingwave-pb = { path = "../prost" }
 risingwave_common = { path = "../common" }
 risingwave_storage = { path = "../storage" }
-roaring = "0.8.1"
 serde = { version = "1", features = ["derive"] }
 serde_derive = "1"
 serde_json = "1"
-serde_with = "1"
 smallvec = "1"
 static_assertions = "1"
 tempfile = "3"
@@ -50,10 +47,9 @@ tokio-stream = "0.1"
 tonic = "0.6"
 twox-hash = "1"
 url = "2"
-urlencoding = "2.1.0"
+urlencoding = "2"
 
 [dev-dependencies]
-assert_matches = "1"
-httpmock = "0.6.5"
+httpmock = "0.6"
 rand = "0.8"
 tempfile = "3"

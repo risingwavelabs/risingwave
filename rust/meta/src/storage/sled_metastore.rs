@@ -46,6 +46,12 @@ pub struct SledMetaStore {
     db: RwLock<sled::Db>,
 }
 
+impl Clone for SledMetaStore {
+    fn clone(&self) -> Self {
+        unreachable!("FIXME: https://github.com/rust-lang/rust/issues/26925")
+    }
+}
+
 /// `SledMetaStore` stores a key composed of `KeyValue.key` and `KeyValue.version`.
 /// Currently the implementation involves some additional Vec<u8> copy or clone, but it should be OK
 /// for now because `SledMetaStore` is for testing purpose only and performance is not the major

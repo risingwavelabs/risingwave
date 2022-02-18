@@ -33,6 +33,7 @@ public class CreateMaterializedViewInfo extends CreateTableInfo {
       boolean appendOnly,
       String rowFormat,
       String rowSchemaLocation,
+      ImmutableList<TableCatalog.TableId> dependentTables,
       @Nullable RelCollation collation,
       boolean associated) {
     super(
@@ -43,7 +44,8 @@ public class CreateMaterializedViewInfo extends CreateTableInfo {
         appendOnly,
         false,
         rowFormat,
-        rowSchemaLocation);
+        rowSchemaLocation,
+        dependentTables);
     this.collation = collation;
     this.associated = associated;
   }
@@ -92,6 +94,7 @@ public class CreateMaterializedViewInfo extends CreateTableInfo {
           appendOnly,
           rowFormat,
           rowSchemaLocation,
+          ImmutableList.copyOf(dependentTables),
           collation,
           associated);
     }
