@@ -53,6 +53,9 @@ pub struct SimpleAggExecutor<S: StateStore> {
 
     /// Identity string
     identity: String,
+
+    /// Logical Operator Info
+    op_info: String,
 }
 
 impl<S: StateStore> std::fmt::Debug for SimpleAggExecutor<S> {
@@ -73,7 +76,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         keyspace: Keyspace<S>,
         pk_indices: PkIndices,
         executor_id: u64,
-        identity: String,
+        op_info: String,
     ) -> Self {
         // simple agg does not have group key
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
@@ -86,7 +89,8 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             states: None,
             input,
             agg_calls,
-            identity: format!("{} {:X}", identity, executor_id),
+            identity: format!("GlobalSimpleAggExecutor {:X}", executor_id),
+            op_info,
         }
     }
 
@@ -199,6 +203,10 @@ impl<S: StateStore> Executor for SimpleAggExecutor<S> {
 
     fn identity(&self) -> &str {
         self.identity.as_str()
+    }
+
+    fn logical_operator_info(&self) -> &str {
+        &self.op_info
     }
 
     fn clear_cache(&mut self) -> Result<()> {

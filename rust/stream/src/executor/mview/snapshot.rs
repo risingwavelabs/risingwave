@@ -27,6 +27,8 @@ pub struct BatchQueryExecutor {
     schema: Schema,
 
     epoch: Option<u64>,
+    /// Logical Operator Info
+    op_info: String,
 }
 
 impl std::fmt::Debug for BatchQueryExecutor {
@@ -40,14 +42,15 @@ impl std::fmt::Debug for BatchQueryExecutor {
 }
 
 impl BatchQueryExecutor {
-    pub fn new(table: ScannableTableRef, pk_indices: PkIndices) -> Self {
-        Self::new_with_batch_size(table, pk_indices, DEFAULT_BATCH_SIZE)
+    pub fn new(table: ScannableTableRef, pk_indices: PkIndices, op_info: String) -> Self {
+        Self::new_with_batch_size(table, pk_indices, DEFAULT_BATCH_SIZE, op_info)
     }
 
     pub fn new_with_batch_size(
         table: ScannableTableRef,
         pk_indices: PkIndices,
         batch_size: usize,
+        op_info: String,
     ) -> Self {
         let schema = table.schema().into_owned();
         Self {
@@ -57,6 +60,7 @@ impl BatchQueryExecutor {
             iter: None,
             schema,
             epoch: None,
+            op_info,
         }
     }
 }
@@ -120,6 +124,10 @@ impl Executor for BatchQueryExecutor {
         "BatchQueryExecutor"
     }
 
+    fn logical_operator_info(&self) -> &str {
+        &self.op_info
+    }
+
     fn init(&mut self, epoch: u64) -> Result<()> {
         match self.epoch {
             None => {
@@ -148,7 +156,12 @@ mod test {
         let test_batch_count = 5;
         let table = Arc::new(gen_basic_table(test_batch_count * test_batch_size).await)
             as ScannableTableRef;
-        let mut node = BatchQueryExecutor::new_with_batch_size(table, vec![0, 1], test_batch_size);
+        let mut node = BatchQueryExecutor::new_with_batch_size(
+            table,
+            vec![0, 1],
+            test_batch_size,
+            "BatchQueryExecutor".to_string(),
+        );
         node.init(u64::MAX).unwrap();
         let mut batch_cnt = 0;
         while let Ok(Message::Chunk(sc)) = node.next().await {
@@ -166,7 +179,12 @@ mod test {
         let test_batch_count = 5;
         let table = Arc::new(gen_basic_table(test_batch_count * test_batch_size).await)
             as ScannableTableRef;
-        let mut node = BatchQueryExecutor::new_with_batch_size(table, vec![0, 1], test_batch_size);
+        let mut node = BatchQueryExecutor::new_with_batch_size(
+            table,
+            vec![0, 1],
+            test_batch_size,
+            "BatchQueryExecutor".to_string(),
+        );
         node.init(u64::MAX).unwrap();
         node.init(0).unwrap();
     }

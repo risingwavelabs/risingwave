@@ -10,7 +10,7 @@
       },
       "columnIds": [0]
     },
-    "identity": "RwBatchMaterializedViewScan(table\u003d[[test_schema, t5]], columns\u003d[v1])"
+    "identity": "RwBatchScan(table\u003d[[test_schema, t5]], columns\u003d[v1])"
   }],
   "project": {
     "selectList": [{

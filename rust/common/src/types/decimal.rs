@@ -415,21 +415,21 @@ impl Decimal {
 
     /// TODO: 1. test whether the decimal in rust, any crate, has the same behavior as PG.
     /// 2. support memcomparable encoding for dynamic decimal.
-    pub fn mantissa_scale_for_serialization(&self) -> (i128, i8) {
+    pub fn mantissa_scale_for_serialization(&self) -> (i128, u8) {
         // Since the largest scale supported by `rust_decimal` is 28,
         // and we first compare scale, we use 29 and 30 to denote +Inf and NaN.
         match self {
-            Self::NegativeINF => (0, -1),
+            Self::NegativeINF => (0, 29),
             Self::Normalized(d) => {
                 // We remark that we do not dynamic numeric, i.e. the scale of all the numeric in
                 // the system is fixed. So we don't need to do any rescale, just use
                 // the `scale` of `rust_decimal`. However, it is possible that scale
                 // may overflow during calculation as `rust_decimal`'s max scale is
                 // 28.
-                (d.mantissa(), d.scale() as i8)
+                (d.mantissa(), d.scale() as u8)
             }
-            Self::PositiveINF => (0, 29),
-            Self::NaN => (0, 30),
+            Self::PositiveINF => (0, 30),
+            Self::NaN => (0, 31),
         }
     }
 

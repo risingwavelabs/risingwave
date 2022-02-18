@@ -10,7 +10,7 @@
       },
       "columnIds": [0, 1, 2]
     },
-    "identity": "RwBatchMaterializedViewScan(table\u003d[[test_schema, t]], columns\u003d[v1,v2,v3])"
+    "identity": "RwBatchScan(table\u003d[[test_schema, t]], columns\u003d[v1,v2,v3])"
   }, {
     "rowSeqScan": {
       "tableRefId": {
@@ -22,7 +22,7 @@
       },
       "columnIds": [0]
     },
-    "identity": "RwBatchMaterializedViewScan(table\u003d[[test_schema, t3]], columns\u003d[v1])"
+    "identity": "RwBatchScan(table\u003d[[test_schema, t3]], columns\u003d[v1])"
   }],
   "nestedLoopJoin": {
     "joinCond": {

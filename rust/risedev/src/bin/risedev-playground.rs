@@ -14,8 +14,8 @@ use indicatif::{MultiProgress, ProgressBar};
 use risedev::util::complete_spin;
 use risedev::{
     ComputeNodeService, ConfigExpander, ConfigureTmuxTask, EnsureStopService, ExecuteContext,
-    FrontendService, GrafanaService, JaegerService, MetaNodeService, MinioService,
-    PrometheusService, ServiceConfig, Task, RISEDEV_SESSION_NAME,
+    FrontendService, FrontendServiceV2, GrafanaService, JaegerService, MetaNodeService,
+    MinioService, PrometheusService, ServiceConfig, Task, RISEDEV_SESSION_NAME,
 };
 use tempfile::tempdir;
 use yaml_rust::YamlEmitter;
@@ -103,6 +103,7 @@ fn task_main(
             ServiceConfig::ComputeNode(c) => (c.port, c.id.clone()),
             ServiceConfig::MetaNode(c) => (c.port, c.id.clone()),
             ServiceConfig::Frontend(c) => (c.port, c.id.clone()),
+            ServiceConfig::FrontendV2(c) => (c.port, c.id.clone()),
             ServiceConfig::Grafana(c) => (c.port, c.id.clone()),
             ServiceConfig::Jaeger(c) => (c.dashboard_port, c.id.clone()),
         });
@@ -169,6 +170,24 @@ fn task_main(
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
                 let mut service = FrontendService::new(c.clone())?;
+                service.execute(&mut ctx)?;
+                let mut task = risedev::ConfigureGrpcNodeTask::new(c.port, c.user_managed)?;
+                task.execute(&mut ctx)?;
+                ctx.pb
+                    .set_message(format!("api postgres://{}:{}/", c.address, c.port));
+
+                writeln!(
+                    log_buffer,
+                    "* Run {} to start Postgres interactive shell.",
+                    style(format!("psql -h localhost -p {} -d dev", c.port))
+                        .blue()
+                        .bold()
+                )?;
+            }
+            ServiceConfig::FrontendV2(c) => {
+                let mut ctx =
+                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
+                let mut service = FrontendServiceV2::new(c.clone())?;
                 service.execute(&mut ctx)?;
                 let mut task = risedev::ConfigureGrpcNodeTask::new(c.port, c.user_managed)?;
                 task.execute(&mut ctx)?;

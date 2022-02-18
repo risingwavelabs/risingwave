@@ -2,7 +2,7 @@ use std::fmt;
 
 use risingwave_common::catalog::Schema;
 
-use super::{IntoPlanRef, PlanRef, PlanTreeNodeUnary, ToDistributedBatch};
+use super::{IntoPlanRef, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::property::{Distribution, Order, WithDistribution, WithOrder, WithSchema};
 
 #[derive(Debug, Clone)]
@@ -61,3 +61,4 @@ impl ToDistributedBatch for BatchSort {
         self.clone_with_input(new_input).into_plan_ref()
     }
 }
+impl ToBatchProst for BatchSort {}

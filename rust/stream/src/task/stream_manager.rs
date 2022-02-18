@@ -314,7 +314,7 @@ impl StreamManagerCore {
         env: StreamTaskEnv,
         store: impl StateStore,
     ) -> Result<Box<dyn Executor>> {
-        let identity = node.get_identity().clone();
+        let op_info = node.get_identity().clone();
         // Create the input executor before creating itself
         // The node with no input must be a `MergeNode`
         let mut input: Vec<Box<dyn Executor>> = node
@@ -381,7 +381,7 @@ impl StreamManagerCore {
                     barrier_receiver,
                     executor_id,
                     operator_id,
-                    identity,
+                    op_info,
                 )?))
             }
             Node::ProjectNode(project_node) => {
@@ -395,7 +395,7 @@ impl StreamManagerCore {
                     pk_indices,
                     project_exprs,
                     executor_id,
-                    identity,
+                    op_info,
                 )))
             }
             Node::FilterNode(filter_node) => {
@@ -404,7 +404,7 @@ impl StreamManagerCore {
                     input.remove(0),
                     search_condition,
                     executor_id,
-                    identity,
+                    op_info,
                 )))
             }
             Node::LocalSimpleAggNode(aggr_node) => {
@@ -418,7 +418,7 @@ impl StreamManagerCore {
                     agg_calls,
                     pk_indices,
                     executor_id,
-                    identity,
+                    op_info,
                 )?))
             }
             Node::GlobalSimpleAggNode(aggr_node) => {
@@ -434,7 +434,7 @@ impl StreamManagerCore {
                     Keyspace::executor_root(store.clone(), executor_id),
                     pk_indices,
                     executor_id,
-                    identity,
+                    op_info,
                 )))
             }
             Node::HashAggNode(aggr_node) => {
@@ -457,7 +457,7 @@ impl StreamManagerCore {
                     Keyspace::shared_executor_root(store.clone(), operator_id),
                     pk_indices,
                     executor_id,
-                    identity,
+                    op_info,
                 )))
             }
             Node::AppendOnlyTopNNode(top_n_node) => {
@@ -483,7 +483,7 @@ impl StreamManagerCore {
                     cache_size,
                     total_count,
                     executor_id,
-                    identity,
+                    op_info,
                 )))
             }
             Node::TopNNode(top_n_node) => {
@@ -509,7 +509,7 @@ impl StreamManagerCore {
                     cache_size,
                     total_count,
                     executor_id,
-                    identity,
+                    op_info,
                 )))
             }
             Node::HashJoinNode(hash_join_node) => {
@@ -548,7 +548,7 @@ impl StreamManagerCore {
                                 Keyspace::shared_executor_root(store.clone(), operator_id),
                                 executor_id,
                                 condition,
-                                identity,
+                                op_info,
                             )) as Box<dyn Executor>, )*
                             _ => todo!("Join type {:?} not implemented", typ),
                         }
@@ -603,14 +603,14 @@ impl StreamManagerCore {
                     pks,
                     orderings,
                     executor_id,
-                    identity,
+                    op_info,
                 ));
                 Ok(executor)
             }
             Node::MergeNode(merge_node) => {
                 let schema = Schema::try_from(merge_node.get_input_column_descs())?;
                 let upstreams = merge_node.get_upstream_actor_id();
-                self.create_merge_node(actor_id, schema, upstreams, pk_indices)
+                self.create_merge_node(actor_id, schema, upstreams, pk_indices, op_info)
             }
             Node::ChainNode(chain_node) => {
                 let snapshot = input.remove(1);
@@ -635,12 +635,17 @@ impl StreamManagerCore {
                     mview,
                     schema,
                     column_idxs,
+                    op_info,
                 )))
             }
             Node::BatchPlanNode(batch_plan_node) => {
                 let table_id = TableId::from(&batch_plan_node.table_ref_id);
                 let table = table_manager.get_table(&table_id)?;
-                Ok(Box::new(BatchQueryExecutor::new(table.clone(), pk_indices)))
+                Ok(Box::new(BatchQueryExecutor::new(
+                    table.clone(),
+                    pk_indices,
+                    op_info,
+                )))
             }
             _ => Err(RwError::from(ErrorCode::InternalError(format!(
                 "unsupported node:{:?}",
@@ -695,6 +700,7 @@ impl StreamManagerCore {
         schema: Schema,
         upstreams: &[u32],
         pk_indices: PkIndices,
+        op_info: String,
     ) -> Result<Box<dyn Executor>> {
         assert!(!upstreams.is_empty());
 
@@ -757,10 +763,11 @@ impl StreamManagerCore {
                 schema,
                 pk_indices,
                 rxs.remove(0),
+                op_info,
             )))
         } else {
             Ok(Box::new(MergeExecutor::new(
-                schema, pk_indices, actor_id, rxs,
+                schema, pk_indices, actor_id, rxs, op_info,
             )))
         }
     }

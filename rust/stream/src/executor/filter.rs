@@ -22,6 +22,9 @@ pub struct FilterExecutor {
 
     /// Identity string
     identity: String,
+
+    /// Logical Operator Info
+    op_info: String,
 }
 
 impl FilterExecutor {
@@ -29,12 +32,13 @@ impl FilterExecutor {
         input: Box<dyn Executor>,
         expr: BoxedExpression,
         executor_id: u64,
-        identity: String,
+        op_info: String,
     ) -> Self {
         Self {
             input,
             expr,
-            identity: format!("{} {:X}", identity, executor_id),
+            identity: format!("FilterExecutor {:X}", executor_id),
+            op_info,
         }
     }
 }
@@ -64,6 +68,10 @@ impl Executor for FilterExecutor {
 
     fn identity(&self) -> &str {
         self.identity.as_str()
+    }
+
+    fn logical_operator_info(&self) -> &str {
+        &self.op_info
     }
 }
 

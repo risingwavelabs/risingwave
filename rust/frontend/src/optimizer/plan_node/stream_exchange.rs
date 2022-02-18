@@ -2,7 +2,7 @@ use std::fmt;
 
 use risingwave_common::catalog::Schema;
 
-use super::{IntoPlanRef, PlanRef, PlanTreeNodeUnary};
+use super::{IntoPlanRef, PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::optimizer::property::{Distribution, WithDistribution, WithOrder, WithSchema};
 
 #[derive(Debug, Clone)]
@@ -47,3 +47,4 @@ impl WithSchema for StreamExchange {
         &self.schema
     }
 }
+impl ToStreamProst for StreamExchange {}

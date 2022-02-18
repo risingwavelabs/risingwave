@@ -3,7 +3,8 @@ use std::fmt;
 use risingwave_common::catalog::Schema;
 
 use super::{
-    EqJoinPredicate, IntoPlanRef, LogicalJoin, PlanRef, PlanTreeNodeBinary, ToDistributedBatch,
+    EqJoinPredicate, IntoPlanRef, LogicalJoin, PlanRef, PlanTreeNodeBinary, ToBatchProst,
+    ToDistributedBatch,
 };
 use crate::optimizer::property::{
     Direction, Distribution, FieldOrder, Order, WithDistribution, WithOrder, WithSchema,
@@ -99,3 +100,4 @@ impl ToDistributedBatch for BatchSortMergeJoin {
         todo!()
     }
 }
+impl ToBatchProst for BatchSortMergeJoin {}
