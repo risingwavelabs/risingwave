@@ -221,17 +221,16 @@ export default function StreamingView(props) {
           Select a worker node
         </ToolBoxTitle>
         <FormControl sx={{ m: 1, minWidth: 300 }}>
-          <InputLabel>Actor</InputLabel>
+          <InputLabel>Worker Node</InputLabel>
           <Select
             value={selectedWorkerNode || "Show All"}
-            label="Actor"
+            label="Woker Node"
             onChange={onWorkerNodeSelect}
           >
             <MenuItem value="Show All" key="all">
               Show All
             </MenuItem>
             {actorList.map((x, index) => {
-              let v = `${x.type} ${x.host.host}:${x.host.port}`;
               return (
                 <MenuItem value={x} key={index} sx={{display: "flex", flexDirection: "row", alignItems: "center"}}>
                   {x.type}&nbsp; <span style={{ fontWeight: 700 }}>{x.host.host + ":" + x.host.port}</span>
