@@ -78,8 +78,10 @@ script = '''
 set -e
 rm -f "${PREFIX_BIN}/compute-node"
 rm -f "${PREFIX_BIN}/meta-node"
+rm -f "${PREFIX_BIN}/frontend-v2"
 ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/compute-node" "${PREFIX_BIN}/compute-node"
 ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/meta-node" "${PREFIX_BIN}/meta-node"
+ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/frontend-v2" "${PREFIX_BIN}/frontend-v2"
 '''
 
 [tasks.build-risingwave]
@@ -158,6 +160,15 @@ alias = "dev"
 
 [tasks.d]
 alias = "dev"
+
+[tasks.ci-v2]
+category = "RiseDev - Start"
+dependencies = [
+  "pre-start-playground"
+]
+command = "rust/target/${BUILD_MODE_DIR}/risedev-playground"
+args = ["ci-v2"]
+description = "Start a RisingWave playground ci-v2 config"
 
 [tasks.dev]
 category = "RiseDev - Start"

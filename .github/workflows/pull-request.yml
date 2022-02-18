@@ -73,6 +73,11 @@ jobs:
           name: meta-node
           path: ./.risingwave/bin
       - uses: actions/download-artifact@v2
+        name: Download rust frontend binary
+        with:
+          name: frontend-v2
+          path: ./.risingwave/bin
+      - uses: actions/download-artifact@v2
         name: Download frontend binary
         with:
           name: risingwave-fe-runnable.jar
@@ -86,6 +91,7 @@ jobs:
         run: |
           chmod +x ./.risingwave/bin/meta-node
           chmod +x ./.risingwave/bin/compute-node
+          chmod +x ./.risingwave/bin/frontend-v2
           chmod +x ./rust/target/debug/risedev-playground
       - name: Install required components
         run: |
@@ -112,6 +118,16 @@ jobs:
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-3node
           timeout 6m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
+      - name: Kill cluster
+        run: |
+          ~/cargo-make/makers k
+          ~/cargo-make/makers logs
+          ~/cargo-make/makers check-logs
+      - name: e2e test w/ rust frontend
+        run: |
+          ~/cargo-make/makers clean-data
+          ~/cargo-make/makers ci-v2
+          timeout 3m sqllogictest -p 4566 -d dev './e2e_test/v2/*.slt'
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
@@ -375,6 +391,12 @@ jobs:
           if-no-files-found: error
           path: |
             rust/target/debug/meta-node
+      - uses: actions/upload-artifact@v2
+        with:
+          name: frontend-v2
+          if-no-files-found: error
+          path: |
+            rust/target/debug/frontend-v2
       - uses: actions/upload-artifact@v2
         with:
           name: risingwave_regress_test
