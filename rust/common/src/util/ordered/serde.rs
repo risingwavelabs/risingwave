@@ -5,8 +5,8 @@ use itertools::Itertools;
 
 use super::OrderedDatum::{NormalOrder, ReversedOrder};
 use super::OrderedRow;
-use crate::array::{ArrayImpl, Row};
-use crate::error::Result;
+use crate::array::{ArrayImpl, Row, RwError};
+use crate::error::{ErrorCode, Result};
 use crate::types::{
     deserialize_datum_from, serialize_datum_into, serialize_datum_ref_into, DataType, Datum,
     Decimal, ScalarImpl,
@@ -133,7 +133,7 @@ fn serialize_decimal(decimal: &Decimal) -> Result<Vec<u8>> {
         // We use the most significant bit of `scale` to denote whether decimal is negative or not.
         scale += 1 << 7;
     }
-    let mut byte_array = vec![scale];
+    let mut byte_array = vec![1, scale];
     while mantissa != 0 {
         let byte = (mantissa % 100) as u8;
         byte_array.push(byte);
@@ -155,7 +155,20 @@ pub fn deserialize_cell(bytes: &[u8], ty: &DataType) -> Result<Datum> {
 
 fn deserialize_decimal(bytes: &[u8]) -> Result<Datum> {
     // None denotes NULL which is a valid value while Err means invalid encoding.
-    let mut scale = bytes[0];
+    let null_tag = bytes[0];
+    match null_tag {
+        0 => {
+            return Ok(None);
+        }
+        1 => {}
+        _ => {
+            return Err(RwError::from(ErrorCode::InternalError(format!(
+                "Invalid null tag: {}",
+                null_tag
+            ))));
+        }
+    }
+    let mut scale = bytes[1];
     let neg = if (scale & 1 << 7) > 0 {
         scale &= !(1 << 7);
         true
@@ -163,7 +176,7 @@ fn deserialize_decimal(bytes: &[u8]) -> Result<Datum> {
         false
     };
     let mut mantissa: i128 = 0;
-    for (exp, byte) in bytes.iter().skip(1).enumerate() {
+    for (exp, byte) in bytes.iter().skip(2).enumerate() {
         mantissa += (*byte as i128) * 100i128.pow(exp as u32);
     }
     if neg {
