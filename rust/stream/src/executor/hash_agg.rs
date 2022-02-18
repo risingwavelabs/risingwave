@@ -59,6 +59,9 @@ pub struct HashAggExecutor<S: StateStore> {
 
     /// Identity string
     identity: String,
+
+    /// Logical Operator Info
+    op_info: String,
 }
 
 impl<S: StateStore> HashAggExecutor<S> {
@@ -69,7 +72,7 @@ impl<S: StateStore> HashAggExecutor<S> {
         keyspace: Keyspace<S>,
         pk_indices: PkIndices,
         executor_id: u64,
-        identity: String,
+        op_info: String,
     ) -> Self {
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&key_indices));
 
@@ -82,7 +85,8 @@ impl<S: StateStore> HashAggExecutor<S> {
             key_indices,
             state_map: EvictableHashMap::new(1 << 16), // TODO: decide the target cap
             pk_indices,
-            identity: format!("{} {:X}", identity, executor_id),
+            identity: format!("HashAggExecutor {:X}", executor_id),
+            op_info,
         }
     }
 
@@ -320,6 +324,10 @@ impl<S: StateStore> Executor for HashAggExecutor<S> {
         );
         self.state_map.clear();
         Ok(())
+    }
+
+    fn logical_operator_info(&self) -> &str {
+        &self.op_info
     }
 }
 

@@ -38,6 +38,9 @@ pub struct LocalSimpleAggExecutor {
 
     /// Identity string
     identity: String,
+
+    /// Logical Operator Info
+    op_info: String,
 }
 
 impl LocalSimpleAggExecutor {
@@ -46,7 +49,7 @@ impl LocalSimpleAggExecutor {
         agg_calls: Vec<AggCall>,
         pk_indices: PkIndices,
         executor_id: u64,
-        identity: String,
+        op_info: String,
     ) -> Result<Self> {
         // simple agg does not have group key
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
@@ -69,7 +72,8 @@ impl LocalSimpleAggExecutor {
             is_dirty: false,
             input,
             agg_calls,
-            identity: format!("{} {:X}", identity, executor_id),
+            identity: format!("LocalSimpleAggExecutor {:X}", executor_id),
+            op_info,
         })
     }
 }
@@ -90,6 +94,10 @@ impl Executor for LocalSimpleAggExecutor {
 
     fn identity(&self) -> &str {
         self.identity.as_str()
+    }
+
+    fn logical_operator_info(&self) -> &str {
+        &self.op_info
     }
 }
 

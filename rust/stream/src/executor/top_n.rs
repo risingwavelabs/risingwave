@@ -41,6 +41,9 @@ pub struct TopNExecutor<S: StateStore> {
 
     /// Identity string.
     identity: String,
+
+    /// Logical Operator Info
+    op_info: String,
 }
 
 impl<S: StateStore> std::fmt::Debug for TopNExecutor<S> {
@@ -66,7 +69,7 @@ impl<S: StateStore> TopNExecutor<S> {
         cache_size: Option<usize>,
         total_count: (usize, usize, usize),
         executor_id: u64,
-        identity: String,
+        op_info: String,
     ) -> Self {
         let pk_data_types = pk_indices
             .iter()
@@ -116,7 +119,8 @@ impl<S: StateStore> TopNExecutor<S> {
             managed_highest_state,
             pk_indices,
             first_execution: true,
-            identity: format!("{} {:X}", identity, executor_id),
+            identity: format!("TopNExecutor {:X}", executor_id),
+            op_info,
         }
     }
 
@@ -142,7 +146,11 @@ impl<S: StateStore> Executor for TopNExecutor<S> {
     }
 
     fn identity(&self) -> &str {
-        self.identity.as_str()
+        &self.identity
+    }
+
+    fn logical_operator_info(&self) -> &str {
+        &self.op_info
     }
 
     fn clear_cache(&mut self) -> Result<()> {
