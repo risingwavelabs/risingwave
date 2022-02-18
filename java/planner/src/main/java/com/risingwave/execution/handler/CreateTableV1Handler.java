@@ -10,7 +10,7 @@ import com.risingwave.common.datatype.RisingWaveDataType;
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
 import com.risingwave.execution.context.ExecutionContext;
-import com.risingwave.execution.handler.serializer.TableNodeSerializer;
+import com.risingwave.execution.handler.util.TableNodeSerializer;
 import com.risingwave.execution.result.DdlResult;
 import com.risingwave.pgwire.msg.StatementType;
 import com.risingwave.planner.sql.SqlConverter;

@@ -12,7 +12,7 @@ import com.risingwave.common.datatype.RisingWaveDataType;
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
 import com.risingwave.execution.context.ExecutionContext;
-import com.risingwave.execution.handler.serializer.TableNodeSerializer;
+import com.risingwave.execution.handler.util.TableNodeSerializer;
 import com.risingwave.execution.result.DdlResult;
 import com.risingwave.pgwire.msg.StatementType;
 import com.risingwave.planner.planner.streaming.StreamPlanner;
@@ -207,7 +207,6 @@ public class CreateTableHandler implements SqlHandler {
     }
     CreateTableInfo tableInfo = createTableInfoBuilder.build();
     // Build a plan distribute to compute node.
-    System.out.println("Yanghao get here create table handler");
     TableCatalog table = context.getCatalogService().createTable(schemaName, tableInfo);
 
     tableId = table.getId();
