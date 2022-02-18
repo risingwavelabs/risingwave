@@ -19,16 +19,6 @@ use risingwave_storage::tikv::TikvStateStore;
 
 use crate::utils::store_statistics::print_statistics;
 
-#[allow(dead_code)]
-enum WorkloadType {
-    WriteBatch = 0,
-    GetRandom = 1,
-    GetSeq = 2,
-    PrefixScanRandom = 3,
-    DeleteRandom = 4,
-    DeleteSeq = 5,
-}
-
 #[derive(Parser, Debug)]
 pub(crate) struct Opts {
     // ----- backend type  -----
