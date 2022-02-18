@@ -99,5 +99,5 @@ pub fn create_hash_join_state<S: StateStore>(
 
     let ks = keyspace.with_segment(Segment::VariantLength(key_encoded));
 
-    AllOrNoneState::new(ks, data_types, pk_indices, 0)
+    AllOrNoneState::new(ks, data_types, pk_indices)
 }

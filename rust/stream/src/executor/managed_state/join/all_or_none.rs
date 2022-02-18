@@ -40,18 +40,10 @@ pub struct AllOrNoneState<S: StateStore> {
 
     /// The keyspace to operate on.
     keyspace: Keyspace<S>,
-
-    /// Epoch
-    epoch: u64,
 }
 
 impl<S: StateStore> AllOrNoneState<S> {
-    pub fn new(
-        keyspace: Keyspace<S>,
-        data_types: Vec<DataType>,
-        pk_indices: Vec<usize>,
-        epoch: u64,
-    ) -> Self {
+    pub fn new(keyspace: Keyspace<S>, data_types: Vec<DataType>, pk_indices: Vec<usize>) -> Self {
         let pk_data_types = pk_indices.iter().map(|idx| data_types[*idx]).collect_vec();
         Self {
             cached: None,
@@ -61,17 +53,16 @@ impl<S: StateStore> AllOrNoneState<S> {
             pk_data_types,
             pk_indices,
             keyspace,
-            epoch,
         }
     }
 
-    pub async fn is_empty(&mut self) -> bool {
-        self.len().await == 0
+    pub async fn is_empty(&mut self, epoch: u64) -> bool {
+        self.len(epoch).await == 0
     }
 
-    pub async fn len(&mut self) -> usize {
+    pub async fn len(&mut self, epoch: u64) -> usize {
         if self.cached.is_none() {
-            self.fetch_cache().await.unwrap();
+            self.fetch_cache(epoch).await.unwrap();
         }
         self.total_count as usize
     }
@@ -109,14 +100,7 @@ impl<S: StateStore> AllOrNoneState<S> {
     }
 
     // Flush data to the state store
-    pub fn flush(&mut self, write_batch: &mut WriteBatch<S>, epoch: u64) -> Result<()> {
-        assert!(
-            epoch >= self.epoch,
-            "current epoch {} < previous epoch {}. ",
-            epoch,
-            self.epoch
-        );
-        self.epoch = epoch;
+    pub fn flush(&mut self, write_batch: &mut WriteBatch<S>) -> Result<()> {
         let mut local = write_batch.prefixify(&self.keyspace);
 
         for (pk, v) in std::mem::take(&mut self.flush_buffer) {
@@ -136,10 +120,10 @@ impl<S: StateStore> AllOrNoneState<S> {
     }
 
     // Fetch cache from the state store.
-    async fn fetch_cache(&mut self) -> Result<()> {
+    async fn fetch_cache(&mut self, epoch: u64) -> Result<()> {
         assert!(self.cached.is_none());
 
-        let all_data = self.keyspace.scan_strip_prefix(None, self.epoch).await?;
+        let all_data = self.keyspace.scan_strip_prefix(None, epoch).await?;
 
         // Fetch cached states.
         let mut cached = BTreeMap::new();
@@ -177,23 +161,23 @@ impl<S: StateStore> AllOrNoneState<S> {
     }
 
     #[allow(dead_code)]
-    pub async fn iter(&mut self) -> AllOrNoneStateIter<'_> {
+    pub async fn iter(&mut self, epoch: u64) -> AllOrNoneStateIter<'_> {
         if self.cached.is_none() {
-            self.fetch_cache().await.unwrap();
+            self.fetch_cache(epoch).await.unwrap();
         }
         self.cached.as_ref().unwrap().iter()
     }
 
-    pub async fn values(&mut self) -> AllOrNoneStateValues<'_> {
+    pub async fn values(&mut self, epoch: u64) -> AllOrNoneStateValues<'_> {
         if self.cached.is_none() {
-            self.fetch_cache().await.unwrap();
+            self.fetch_cache(epoch).await.unwrap();
         }
         self.cached.as_ref().unwrap().values()
     }
 
-    pub async fn values_mut(&mut self) -> AllOrNoneStateValuesMut<'_> {
+    pub async fn values_mut(&mut self, epoch: u64) -> AllOrNoneStateValuesMut<'_> {
         if self.cached.is_none() {
-            self.fetch_cache().await.unwrap();
+            self.fetch_cache(epoch).await.unwrap();
         }
         self.cached.as_mut().unwrap().values_mut()
     }
@@ -213,7 +197,7 @@ mod tests {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
         let mut managed_state =
-            AllOrNoneState::new(keyspace, vec![DataType::Int64, DataType::Int64], vec![0], 0);
+            AllOrNoneState::new(keyspace, vec![DataType::Int64, DataType::Int64], vec![0]);
         assert!(!managed_state.is_dirty());
         let columns = vec![
             column_nonnull! { I64Array, [3, 2, 1] },
@@ -231,8 +215,9 @@ mod tests {
             managed_state.insert(join_row);
         }
 
+        let epoch = 0;
         for state in managed_state
-            .iter()
+            .iter(epoch)
             .await
             .zip_eq(col1.iter().zip_eq(col2.iter()))
         {
@@ -244,9 +229,8 @@ mod tests {
         }
 
         // flush to write batch and write to state store
-        let epoch: u64 = 0;
         let mut write_batch = store.start_write_batch();
-        managed_state.flush(&mut write_batch, epoch).unwrap();
+        managed_state.flush(&mut write_batch).unwrap();
         write_batch.ingest(epoch).await.unwrap();
 
         assert!(!managed_state.is_dirty());

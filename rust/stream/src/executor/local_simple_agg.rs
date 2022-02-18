@@ -41,6 +41,8 @@ pub struct LocalSimpleAggExecutor {
 
     /// Logical Operator Info
     op_info: String,
+    /// Epoch
+    epoch: u64,
 }
 
 impl LocalSimpleAggExecutor {
@@ -74,6 +76,7 @@ impl LocalSimpleAggExecutor {
             agg_calls,
             identity: format!("LocalSimpleAggExecutor {:X}", executor_id),
             op_info,
+            epoch: 0,
         })
     }
 }
@@ -103,6 +106,14 @@ impl Executor for LocalSimpleAggExecutor {
 
 #[async_trait]
 impl AggExecutor for LocalSimpleAggExecutor {
+    fn current_epoch(&self) -> u64 {
+        self.epoch
+    }
+
+    fn update_epoch(&mut self, new_epoch: u64) {
+        self.epoch = new_epoch;
+    }
+
     fn cached_barrier_message_mut(&mut self) -> &mut Option<Barrier> {
         &mut self.cached_barrier_message
     }
@@ -125,7 +136,7 @@ impl AggExecutor for LocalSimpleAggExecutor {
         Ok(())
     }
 
-    async fn flush_data(&mut self, _epoch: u64) -> Result<Option<StreamChunk>> {
+    async fn flush_data(&mut self) -> Result<Option<StreamChunk>> {
         if !self.is_dirty {
             return Ok(None);
         }

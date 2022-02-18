@@ -48,18 +48,19 @@ impl<S: StateStore> ManagedStateImpl<S> {
         ops: Ops<'_>,
         visibility: Option<&Bitmap>,
         data: &[&ArrayImpl],
+        epoch: u64,
     ) -> Result<()> {
         match self {
             Self::Value(state) => state.apply_batch(ops, visibility, data).await,
-            Self::Extreme(state) => state.apply_batch(ops, visibility, data).await,
+            Self::Extreme(state) => state.apply_batch(ops, visibility, data, epoch).await,
         }
     }
 
     /// Get the output of the state. Must flush before getting output.
-    pub async fn get_output(&mut self) -> Result<Datum> {
+    pub async fn get_output(&mut self, epoch: u64) -> Result<Datum> {
         match self {
             Self::Value(state) => state.get_output().await,
-            Self::Extreme(state) => state.get_output().await,
+            Self::Extreme(state) => state.get_output(epoch).await,
         }
     }
 
@@ -72,10 +73,10 @@ impl<S: StateStore> ManagedStateImpl<S> {
     }
 
     /// Flush the internal state to a write batch.
-    pub fn flush(&mut self, write_batch: &mut WriteBatch<S>, epoch: u64) -> Result<()> {
+    pub fn flush(&mut self, write_batch: &mut WriteBatch<S>) -> Result<()> {
         match self {
             Self::Value(state) => state.flush(write_batch),
-            Self::Extreme(state) => state.flush(write_batch, epoch),
+            Self::Extreme(state) => state.flush(write_batch),
         }
     }
 

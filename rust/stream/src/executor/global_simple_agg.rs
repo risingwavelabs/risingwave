@@ -56,6 +56,8 @@ pub struct SimpleAggExecutor<S: StateStore> {
 
     /// Logical Operator Info
     op_info: String,
+    /// Epoch
+    epoch: u64,
 }
 
 impl<S: StateStore> std::fmt::Debug for SimpleAggExecutor<S> {
@@ -91,6 +93,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             agg_calls,
             identity: format!("GlobalSimpleAggExecutor {:X}", executor_id),
             op_info,
+            epoch: 0
         }
     }
 
@@ -101,11 +104,20 @@ impl<S: StateStore> SimpleAggExecutor<S> {
 
 #[async_trait]
 impl<S: StateStore> AggExecutor for SimpleAggExecutor<S> {
+    fn current_epoch(&self) -> u64 {
+        self.epoch
+    }
+
+    fn update_epoch(&mut self, new_epoch: u64) {
+        self.epoch = new_epoch;
+    }
+
     fn cached_barrier_message_mut(&mut self) -> &mut Option<Barrier> {
         &mut self.cached_barrier_message
     }
 
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> Result<()> {
+        let epoch = self.current_epoch();
         let (ops, columns, visibility) = chunk.into_inner();
 
         // --- Retrieve all aggregation inputs in advance ---
@@ -125,31 +137,37 @@ impl<S: StateStore> AggExecutor for SimpleAggExecutor<S> {
         // 1. Retrieve previous state from the KeyedState. If they didn't exist, the ManagedState
         // will automatically create new ones for them.
         if self.states.is_none() {
-            let state =
-                generate_agg_state(None, &self.agg_calls, &self.keyspace, input_pk_data_types)
-                    .await?;
+            let state = generate_agg_state(
+                None,
+                &self.agg_calls,
+                &self.keyspace,
+                input_pk_data_types,
+                epoch,
+            )
+            .await?;
             self.states = Some(state);
         }
         let states = self.states.as_mut().unwrap();
 
         // 2. Mark the state as dirty by filling prev states
-        states.may_mark_as_dirty().await?;
+        states.may_mark_as_dirty(epoch).await?;
 
         // 3. Apply batch to each of the state (per agg_call)
         for (agg_state, data) in states.managed_states.iter_mut().zip_eq(all_agg_data.iter()) {
             agg_state
-                .apply_batch(&ops, visibility.as_ref(), data)
+                .apply_batch(&ops, visibility.as_ref(), data, epoch)
                 .await?;
         }
 
         Ok(())
     }
 
-    async fn flush_data(&mut self, epoch: u64) -> Result<Option<StreamChunk>> {
+    async fn flush_data(&mut self) -> Result<Option<StreamChunk>> {
         // --- Flush states to the state store ---
         // Some state will have the correct output only after their internal states have been fully
         // flushed.
 
+        let epoch = self.current_epoch();
         let states = match self.states.as_mut() {
             Some(states) if states.is_dirty() => states,
             _ => return Ok(None), // Nothing to flush.
@@ -157,7 +175,7 @@ impl<S: StateStore> AggExecutor for SimpleAggExecutor<S> {
 
         let mut write_batch = self.keyspace.state_store().start_write_batch();
         for state in &mut states.managed_states {
-            state.flush(&mut write_batch, epoch)?;
+            state.flush(&mut write_batch)?;
         }
         write_batch.ingest(epoch).await.unwrap();
 
@@ -169,7 +187,7 @@ impl<S: StateStore> AggExecutor for SimpleAggExecutor<S> {
 
         // --- Retrieve modified states and put the changes into the builders ---
         let _is_empty = states
-            .build_changes(&mut builders, &mut new_ops, None)
+            .build_changes(&mut builders, &mut new_ops, None, epoch)
             .await?;
 
         let columns: Vec<Column> = builders
