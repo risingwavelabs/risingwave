@@ -82,6 +82,10 @@ function hashIpv4Index(addr) {
   return Number(s + port);
 }
 
+export function computeNodeAddrToSideColor(addr){
+  return color.TwoGradient(hashIpv4Index(addr))[1];
+}
+
 /**
  * Work flow
  *   1. Get the layout for actor boxes (Calculate the base coordination of each actor box)
@@ -149,7 +153,7 @@ export class StreamChartHelper {
     let addr = actor.representedWorkNodes.has(this.selectedWokerNodeStr) ? this.selectedWokerNodeStr : actor.computeNodeAddress;
     return color.TwoGradient(hashIpv4Index(addr))[0];
   }
-  
+
   _sideColor(actor) {
     let addr = actor.representedWorkNodes.has(this.selectedWokerNodeStr) ? this.selectedWokerNodeStr : actor.computeNodeAddress;
     return color.TwoGradient(hashIpv4Index(addr))[1];
@@ -507,6 +511,33 @@ export class StreamChartHelper {
       props.onMouseOver && props.onMouseOver(e, node);
     }
 
+    /**
+     * @param {d3.Selection} g actor box group 
+     * @param {number} x top-right corner of the label
+     * @param {number} y top-right corner of the label
+     * @param {Array<number>} actorIds 
+     * @param {string} color 
+     * @returns {number} width of this label
+     */
+    const drawActorIdLabel = (g, x, y, actorIds, color) => {
+      y = y - actorBoxStroke;
+      let actorStr = actorIds.toString();
+      let padding = 10;
+      let height = fontSize + 2 * padding;
+      let gap = 30;
+      let polygon = g.append("polygon");
+      let textEle = g.append("text")
+        .attr("text-anchor", "end")
+        .attr("font-size", fontSize)
+        .attr("x", x - padding - 5)
+        .attr("y", y + fontSize + padding)
+        .text(actorStr);
+      let width = textEle.node().getComputedTextLength() + 2 * padding;
+      polygon.attr("points", `${x},${y} ${x - width - gap},${y}, ${x - width},${y + height}, ${x},${y + height}`)
+        .attr("fill", color);
+      return width + gap;
+    }
+
 
     // draw box
     group.attr("id", "actor-" + actor.actorId);
@@ -529,14 +560,25 @@ export class StreamChartHelper {
       .attr("x", baseX)
       .attr("y", baseY - actorBoxStroke)
       .attr("font-size", fontSize)
-      .text(`Actor ${actor.representedActorList.map(x => x.actorId)}`);
-
-    group.append("text")
-      .attr("text-anchor", "end")
-      .attr("x", baseX + boxWidth - actorBoxRadius)
-      .attr("y", baseY + 2 * actorBoxStroke + boxHeight)
-      .attr("font-size", fontSize)
       .text(`Fragment ${actor.fragmentId}`);
+
+
+    // draw compute node label
+    let computeNodeToActorIds = new Map();
+    for (let representedActor of actor.representedActorList) {
+      if (computeNodeToActorIds.has(representedActor.computeNodeAddress)) {
+        computeNodeToActorIds.get(representedActor.computeNodeAddress).push(representedActor.actorId)
+      }else{
+        computeNodeToActorIds.set(representedActor.computeNodeAddress, [representedActor.actorId]);
+      }
+    }
+    let labelStartX = baseX + boxWidth - actorBoxStroke;
+    for(let [addr, actorIds] of computeNodeToActorIds.entries()){
+      let w = drawActorIdLabel(group, labelStartX, baseY + boxHeight, actorIds, color.TwoGradient(hashIpv4Index(addr))[1]);
+      labelStartX -= w;
+    }
+
+    
 
     // draw links
     const linkData = [];
@@ -581,7 +623,7 @@ export class StreamChartHelper {
         .text(node.type ? node.type : node.dispatcherType);
     })
 
-    return { 
+    return {
       g: group,
       x: baseX - boxWidth - actorBoxPadding,
       y: baseY - boxHeight / 2 - actorBoxPadding,

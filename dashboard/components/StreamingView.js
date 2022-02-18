@@ -1,5 +1,5 @@
 import * as d3 from "d3";
-import createView from "../lib/streamPlan/streamChartHelper";
+import createView, { computeNodeAddrToSideColor } from "../lib/streamPlan/streamChartHelper";
 import { useEffect, useRef, useState } from 'react';
 import styled from '@emotion/styled';
 import LocationSearchingIcon from '@mui/icons-material/LocationSearching';
@@ -233,8 +233,13 @@ export default function StreamingView(props) {
             {actorList.map((x, index) => {
               let v = `${x.type} ${x.host.host}:${x.host.port}`;
               return (
-                <MenuItem value={x} key={index}>
+                <MenuItem value={x} key={index} sx={{display: "flex", flexDirection: "row", alignItems: "center"}}>
                   {x.type}&nbsp; <span style={{ fontWeight: 700 }}>{x.host.host + ":" + x.host.port}</span>
+                  <div style={{
+                    margin: 5,
+                    height: 10, width: 10, borderRadius: 5,
+                    backgroundColor: computeNodeAddrToSideColor(x.host.host + ":" + x.host.port)}} 
+                  />
                 </MenuItem>
               )
             })}
