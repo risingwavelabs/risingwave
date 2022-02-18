@@ -12,6 +12,7 @@ import com.risingwave.common.datatype.RisingWaveDataType;
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
 import com.risingwave.execution.context.ExecutionContext;
+import com.risingwave.execution.handler.util.CreateTaskBroadcaster;
 import com.risingwave.execution.handler.util.TableNodeSerializer;
 import com.risingwave.execution.result.DdlResult;
 import com.risingwave.pgwire.msg.StatementType;
@@ -20,16 +21,10 @@ import com.risingwave.planner.rel.serialization.StreamingPlanSerializer;
 import com.risingwave.planner.rel.streaming.RwStreamMaterializedView;
 import com.risingwave.planner.rel.streaming.StreamingPlan;
 import com.risingwave.planner.sql.SqlConverter;
-import com.risingwave.proto.common.Status;
-import com.risingwave.proto.computenode.CreateTaskRequest;
-import com.risingwave.proto.computenode.CreateTaskResponse;
-import com.risingwave.proto.computenode.GetDataRequest;
 import com.risingwave.proto.computenode.GetDataResponse;
 import com.risingwave.proto.plan.PlanFragment;
 import com.risingwave.proto.plan.TableRefId;
-import com.risingwave.proto.plan.TaskSinkId;
 import com.risingwave.proto.streaming.plan.StreamNode;
-import com.risingwave.rpc.ComputeClient;
 import com.risingwave.rpc.ComputeClientManager;
 import com.risingwave.rpc.Messages;
 import com.risingwave.scheduler.streaming.StreamManager;
@@ -96,18 +91,7 @@ public class CreateTableHandler implements SqlHandler {
     PlanFragment planFragment =
         TableNodeSerializer.createProtoFromCatalog(catalog, false, streamingPlan);
     ComputeClientManager clientManager = context.getComputeClientManager();
-    for (var node : context.getWorkerNodeManager().allNodes()) {
-      ComputeClient client = clientManager.getOrCreate(node);
-      CreateTaskRequest createTaskRequest = Messages.buildCreateTaskRequest(planFragment);
-      log.info("Send request to:" + node.getRpcEndPoint().toString());
-      log.info("Create task request:\n" + Messages.jsonFormat(createTaskRequest));
-      CreateTaskResponse createTaskResponse = client.createTask(createTaskRequest);
-      if (createTaskResponse.getStatus().getCode() != Status.Code.OK) {
-        throw new PgException(PgErrorCode.INTERNAL_ERROR, "Create Task failed");
-      }
-      TaskSinkId taskSinkId = Messages.buildTaskSinkId(createTaskRequest.getTaskId());
-      client.getData(GetDataRequest.newBuilder().setSinkId(taskSinkId).build());
-    }
+    CreateTaskBroadcaster.BroadCastTaskFromPlanFragment(planFragment, context);
 
     // Send the create MV request meta.
     StreamManager streamManager = context.getStreamManager();
@@ -160,19 +144,7 @@ public class CreateTableHandler implements SqlHandler {
     ComputeClientManager clientManager = context.getComputeClientManager();
 
     var responseIterators = new ArrayList<Iterator<GetDataResponse>>();
-    for (var node : context.getWorkerNodeManager().allNodes()) {
-      ComputeClient client = clientManager.getOrCreate(node);
-      CreateTaskRequest createTaskRequest = Messages.buildCreateTaskRequest(planFragment);
-      log.info("Send request to:" + node.getRpcEndPoint().toString());
-      log.info("Create task request:\n" + Messages.jsonFormat(createTaskRequest));
-      CreateTaskResponse createTaskResponse = client.createTask(createTaskRequest);
-      if (createTaskResponse.getStatus().getCode() != Status.Code.OK) {
-        throw new PgException(PgErrorCode.INTERNAL_ERROR, "Create Task failed");
-      }
-      TaskSinkId taskSinkId = Messages.buildTaskSinkId(createTaskRequest.getTaskId());
-      var iterator = client.getData(GetDataRequest.newBuilder().setSinkId(taskSinkId).build());
-      responseIterators.add(iterator);
-    }
+    CreateTaskBroadcaster.BroadCastTaskFromPlanFragment(planFragment, context);
 
     // Wait for create table task finished.
     for (var iterator : responseIterators) {

@@ -12,20 +12,14 @@ import com.risingwave.common.datatype.RisingWaveDataType;
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
 import com.risingwave.execution.context.ExecutionContext;
+import com.risingwave.execution.handler.util.CreateTaskBroadcaster;
 import com.risingwave.execution.result.DdlResult;
 import com.risingwave.pgwire.msg.StatementType;
 import com.risingwave.planner.sql.SqlConverter;
-import com.risingwave.proto.common.Status;
-import com.risingwave.proto.computenode.CreateTaskRequest;
-import com.risingwave.proto.computenode.CreateTaskResponse;
-import com.risingwave.proto.computenode.GetDataRequest;
 import com.risingwave.proto.plan.CreateSourceNode;
 import com.risingwave.proto.plan.ExchangeInfo;
 import com.risingwave.proto.plan.PlanFragment;
 import com.risingwave.proto.plan.PlanNode;
-import com.risingwave.proto.plan.TaskSinkId;
-import com.risingwave.rpc.ComputeClient;
-import com.risingwave.rpc.ComputeClientManager;
 import com.risingwave.rpc.Messages;
 import com.risingwave.sql.node.SqlCreateSource;
 import com.risingwave.sql.node.SqlTableOption;
@@ -43,19 +37,7 @@ public class CreateSourceHandler implements SqlHandler {
   @Override
   public DdlResult handle(SqlNode ast, ExecutionContext context) {
     PlanFragment planFragment = execute(ast, context);
-    ComputeClientManager clientManager = context.getComputeClientManager();
-
-    for (var node : context.getWorkerNodeManager().allNodes()) {
-      ComputeClient client = clientManager.getOrCreate(node);
-      CreateTaskRequest createTaskRequest = Messages.buildCreateTaskRequest(planFragment);
-      CreateTaskResponse createTaskResponse = client.createTask(createTaskRequest);
-      if (createTaskResponse.getStatus().getCode() != Status.Code.OK) {
-        throw new PgException(PgErrorCode.INTERNAL_ERROR, "Create Task failed");
-      }
-      TaskSinkId taskSinkId = Messages.buildTaskSinkId(createTaskRequest.getTaskId());
-      client.getData(GetDataRequest.newBuilder().setSinkId(taskSinkId).build());
-    }
-
+    CreateTaskBroadcaster.BroadCastTaskFromPlanFragment(planFragment, context);
     return new DdlResult(StatementType.CREATE_STREAM, 0);
   }
 

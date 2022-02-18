@@ -8,22 +8,16 @@ import com.risingwave.catalog.TableCatalog;
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
 import com.risingwave.execution.context.ExecutionContext;
+import com.risingwave.execution.handler.util.CreateTaskBroadcaster;
 import com.risingwave.execution.handler.util.TableNodeSerializer;
 import com.risingwave.execution.result.DdlResult;
 import com.risingwave.pgwire.msg.StatementType;
 import com.risingwave.planner.planner.streaming.StreamPlanner;
 import com.risingwave.planner.rel.serialization.StreamingPlanSerializer;
 import com.risingwave.planner.rel.streaming.*;
-import com.risingwave.proto.common.Status;
-import com.risingwave.proto.computenode.CreateTaskRequest;
-import com.risingwave.proto.computenode.CreateTaskResponse;
-import com.risingwave.proto.computenode.GetDataRequest;
 import com.risingwave.proto.plan.PlanFragment;
 import com.risingwave.proto.plan.TableRefId;
-import com.risingwave.proto.plan.TaskSinkId;
 import com.risingwave.proto.streaming.plan.StreamNode;
-import com.risingwave.rpc.ComputeClient;
-import com.risingwave.rpc.ComputeClientManager;
 import com.risingwave.rpc.Messages;
 import com.risingwave.scheduler.streaming.StreamManager;
 import org.apache.calcite.sql.SqlKind;
@@ -68,19 +62,7 @@ public class CreateMaterializedViewHandler implements SqlHandler {
     PlanFragment planFragment =
         TableNodeSerializer.createProtoFromCatalog(catalog, false, plan.getStreamingPlan());
 
-    ComputeClientManager clientManager = context.getComputeClientManager();
-    for (var node : context.getWorkerNodeManager().allNodes()) {
-      ComputeClient client = clientManager.getOrCreate(node);
-      CreateTaskRequest createTaskRequest = Messages.buildCreateTaskRequest(planFragment);
-      log.info("Send request to:" + node.getRpcEndPoint().toString());
-      log.info("Create task request:\n" + Messages.jsonFormat(createTaskRequest));
-      CreateTaskResponse createTaskResponse = client.createTask(createTaskRequest);
-      if (createTaskResponse.getStatus().getCode() != Status.Code.OK) {
-        throw new PgException(PgErrorCode.INTERNAL_ERROR, "Create Task failed");
-      }
-      TaskSinkId taskSinkId = Messages.buildTaskSinkId(createTaskRequest.getTaskId());
-      client.getData(GetDataRequest.newBuilder().setSinkId(taskSinkId).build());
-    }
+    CreateTaskBroadcaster.BroadCastTaskFromPlanFragment(planFragment, context);
 
     // Bind stream plan with materialized view catalog.
     plan.getStreamingPlan().setTableId(catalog.getId());
