@@ -34,9 +34,9 @@
         "databaseRefId": {
         }
       },
-      "tableId": 1
+      "tableId": 3
     },
-    "columnIds": [1]
+    "columnIds": [0]
   },
-  "identity": "RwBatchInsertExecutor(TableName:[test_schema, f],ColumnIds:[1])"
+  "identity": "RwBatchInsertExecutor(TableName:[test_schema, f],ColumnIds:[0])"
 }
