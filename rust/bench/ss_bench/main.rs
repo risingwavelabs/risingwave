@@ -179,18 +179,6 @@ fn preprocess_options(opts: &mut Opts) {
     if opts.deletes < 0 {
         opts.deletes = opts.num;
     }
-
-    // check illegal configurations
-    for operation in opts.benchmarks.split(',') {
-        if operation == "getseq" {
-            // TODO(sun ting): eliminate this limitation
-            if opts.batch_size < opts.reads as u32 {
-                panic!(
-                    "In sequential mode, `batch_size` should be greater than or equal to `reads`"
-                );
-            }
-        }
-    }
 }
 
 /// This is used to benchmark the state store performance.

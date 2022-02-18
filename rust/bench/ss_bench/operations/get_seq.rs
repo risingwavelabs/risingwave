@@ -14,7 +14,10 @@ impl Operations {
         let mut get_keys = match self.keys.is_empty() {
             true => Workload::new_sequential_keys(opts).1,
             false => {
-                assert!(opts.reads as usize >= self.keys.len());
+                assert!(
+                    opts.reads as usize >= self.keys.len(),
+                    "getseq cannot read more data than KV pairs in the state store"
+                );
 
                 (0..opts.reads as usize)
                     .into_iter()
