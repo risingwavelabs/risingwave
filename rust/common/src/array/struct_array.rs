@@ -12,7 +12,7 @@ use super::{
 };
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::error::Result;
-use crate::types::{Datum, ScalarRefImpl};
+use crate::types::{Datum, DatumRef, ScalarRefImpl};
 
 /// This is a naive implementation of struct array.
 /// We will eventually move to a more efficient flatten implementation.
@@ -26,6 +26,16 @@ pub struct StructArrayBuilder {
 
 impl ArrayBuilder for StructArrayBuilder {
     type ArrayType = StructArray;
+
+    #[cfg(not(test))]
+    fn new(_capacity: usize) -> Result<Self> {
+        panic!("Must use new_with_meta.")
+    }
+
+    #[cfg(test)]
+    fn new(capacity: usize) -> Result<Self> {
+        Self::new_with_meta(capacity, ArrayMeta::Struct { children: vec![] })
+    }
 
     fn new_with_meta(capacity: usize, meta: ArrayMeta) -> Result<Self> {
         if let ArrayMeta::Struct { children } = meta {
@@ -44,8 +54,25 @@ impl ArrayBuilder for StructArrayBuilder {
         }
     }
 
-    fn append(&mut self, _value: Option<StructRef<'_>>) -> Result<()> {
-        todo!()
+    fn append(&mut self, value: Option<StructRef<'_>>) -> Result<()> {
+        match value {
+            None => {
+                self.bitmap.append(false);
+                for child in &mut self.children_array {
+                    child.append_datum_ref(None)?;
+                }
+            }
+            Some(v) => {
+                self.bitmap.append(true);
+                let fields = v.fields_ref();
+                assert_eq!(fields.len(), self.children_array.len());
+                for (field_idx, f) in fields.into_iter().enumerate() {
+                    self.children_array[field_idx].append_datum_ref(f)?;
+                }
+            }
+        }
+        self.len += 1;
+        Ok(())
     }
 
     fn append_array(&mut self, other: &StructArray) -> Result<()> {
@@ -92,7 +119,7 @@ impl Array for StructArray {
 
     fn value_at(&self, idx: usize) -> Option<StructRef<'_>> {
         if !self.is_null(idx) {
-            Some(StructRef { arr: self, idx })
+            Some(StructRef::Indexed { arr: self, idx })
         } else {
             None
         }
@@ -150,12 +177,13 @@ impl Array for StructArray {
 }
 
 impl StructArray {
-    pub fn from_protobuf(array: &ProstArray, cardinality: usize) -> Result<ArrayImpl> {
+    pub fn from_protobuf(array: &ProstArray) -> Result<ArrayImpl> {
         ensure!(
             array.get_values().is_empty(),
             "Must have no buffer in a struct array"
         );
-        let mut builder = StructArrayBuilder::new_with_meta(cardinality, ArrayMeta::Simple)?;
+        let bitmap: Bitmap = array.get_null_bitmap()?.try_into()?;
+        let cardinality = bitmap.len();
         let children = array
             .children_array
             .iter()
@@ -166,16 +194,36 @@ impl StructArray {
             .iter()
             .map(ArrayType::from_protobuf)
             .collect::<Result<Vec<ArrayType>>>()?;
-        let bitmap: Bitmap = array.get_null_bitmap()?.try_into()?;
         let arr = StructArray {
             bitmap,
             children,
             children_types,
             len: cardinality,
         };
-        builder.append_array(&arr)?;
-        let arr = builder.finish()?;
         Ok(arr.into())
+    }
+
+    pub fn children_array_types(&self) -> &[ArrayType] {
+        &self.children_types
+    }
+
+    #[cfg(test)]
+    pub fn from_slices(null_bitmap: &[bool], children: Vec<ArrayImpl>) -> Result<StructArray> {
+        let cardinality = null_bitmap.len();
+        let bitmap = Bitmap::try_from(null_bitmap.to_vec())?;
+        let children_types = children
+            .iter()
+            .map(|a| {
+                assert_eq!(a.len(), cardinality);
+                ArrayType::from_array_impl(a)
+            })
+            .collect::<Result<Vec<ArrayType>>>()?;
+        Ok(StructArray {
+            bitmap,
+            children_types,
+            len: cardinality,
+            children,
+        })
     }
 }
 
@@ -197,56 +245,44 @@ impl StructValue {
 }
 
 #[derive(Copy, Clone)]
-pub struct StructRef<'a> {
-    arr: &'a StructArray,
-    idx: usize,
+pub enum StructRef<'a> {
+    Indexed { arr: &'a StructArray, idx: usize },
+    ValueRef { val: &'a StructValue },
 }
 
 impl<'a> StructRef<'a> {
-    pub fn field_value(&self, field_idx: usize) -> Option<ScalarRefImpl> {
-        self.arr.children[field_idx].value_at(self.idx)
-    }
-
-    pub fn fields_num(&self) -> usize {
-        self.arr.children.len()
+    pub fn fields_ref(&self) -> Vec<DatumRef<'a>> {
+        match self {
+            StructRef::Indexed { arr, idx } => {
+                arr.children.iter().map(|a| a.value_at(*idx)).collect()
+            }
+            StructRef::ValueRef { val } => val
+                .fields
+                .iter()
+                .map(|d| d.as_ref().map(|s| s.as_scalar_ref_impl()))
+                .collect::<Vec<DatumRef<'a>>>(),
+        }
     }
 }
 
 impl Hash for StructRef<'_> {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.arr.hash_at(self.idx, state);
+        match self {
+            StructRef::Indexed { arr, idx } => arr.hash_at(*idx, state),
+            StructRef::ValueRef { val } => val.hash(state),
+        }
     }
 }
 
 impl PartialEq for StructRef<'_> {
     fn eq(&self, other: &Self) -> bool {
-        debug_assert!(
-            self.arr.children_types == other.arr.children_types,
-            "cannot compare dissimilar composite types"
-        );
-        if self.arr.children.len() != other.arr.children.len() {
-            return false;
-        }
-        self.arr.children.iter().enumerate().all(|(col_idx, arr)| {
-            let other_arr = &other.arr.children[col_idx];
-            arr.value_at(self.idx) == other_arr.value_at(self.idx)
-        })
+        self.fields_ref().eq(&other.fields_ref())
     }
 }
 
 impl PartialOrd for StructRef<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        debug_assert!(
-            self.arr.children_types == other.arr.children_types,
-            "cannot compare dissimilar composite types"
-        );
-        for field_idx in 0..self.fields_num() {
-            let ord = cmp_struct_field(&self.field_value(field_idx), &other.field_value(field_idx));
-            if ord != Ordering::Equal {
-                return Some(ord);
-            }
-        }
-        Some(Ordering::Equal)
+        self.fields_ref().partial_cmp(&other.fields_ref())
     }
 }
 
@@ -263,10 +299,13 @@ fn cmp_struct_field(l: &Option<ScalarRefImpl>, r: &Option<ScalarRefImpl>) -> Ord
 
 impl Debug for StructRef<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.arr
-            .children
-            .iter()
-            .try_for_each(|a| a.value_at(self.idx).fmt(f))
+        match self {
+            StructRef::Indexed { arr, idx } => arr
+                .children
+                .iter()
+                .try_for_each(|a| a.value_at(*idx).fmt(f)),
+            StructRef::ValueRef { val } => write!(f, "{:?}", val),
+        }
     }
 }
 
@@ -282,5 +321,56 @@ impl Ord for StructRef<'_> {
     fn cmp(&self, other: &Self) -> Ordering {
         // The order between two structs is deterministic.
         self.partial_cmp(other).unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{array, try_match_expand};
+
+    // Empty struct is allowed in postgres.
+    // `CREATE TYPE foo_empty as ();`, e.g.
+    #[test]
+    fn test_struct_new_empty() {
+        let arr = StructArray::from_slices(&[true, false, true, false], vec![]).unwrap();
+        let actual = StructArray::from_protobuf(&arr.to_protobuf().unwrap()).unwrap();
+        assert_eq!(ArrayImpl::Struct(arr), actual);
+    }
+
+    #[test]
+    fn test_struct_with_fields() {
+        use crate::array::*;
+        let arr = StructArray::from_slices(
+            &[false, true, false, true],
+            vec![
+                array! { I32Array, [None, Some(1), None, Some(2)] }.into(),
+                array! { F32Array, [None, Some(3.0), None, Some(4.0)] }.into(),
+            ],
+        )
+        .unwrap();
+        let actual = StructArray::from_protobuf(&arr.to_protobuf().unwrap()).unwrap();
+        assert_eq!(ArrayImpl::Struct(arr), actual);
+
+        let arr = try_match_expand!(actual, ArrayImpl::Struct).unwrap();
+        let struct_values = arr
+            .iter()
+            .map(|v| v.map(|s| s.to_owned_scalar()))
+            .collect_vec();
+        assert_eq!(
+            struct_values,
+            vec![
+                None,
+                Some(StructValue::new(vec![
+                    Some(ScalarImpl::Int32(1)),
+                    Some(ScalarImpl::Float32(3.0.into())),
+                ])),
+                None,
+                Some(StructValue::new(vec![
+                    Some(ScalarImpl::Int32(2)),
+                    Some(ScalarImpl::Float32(4.0.into())),
+                ])),
+            ]
+        );
     }
 }

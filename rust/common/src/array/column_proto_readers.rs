@@ -8,7 +8,8 @@ use crate::array::value_reader::{PrimitiveValueReader, VarSizedValueReader};
 use crate::array::{
     ArrayBuilder, ArrayImpl, ArrayMeta, BoolArrayBuilder, NaiveDateArrayBuilder,
     NaiveDateTimeArrayBuilder, NaiveTimeArrayBuilder, PrimitiveArrayBuilder,
-    PrimitiveArrayItemType};
+    PrimitiveArrayItemType,
+};
 use crate::buffer::Bitmap;
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};

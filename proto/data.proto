@@ -62,8 +62,6 @@ message DataType {
   uint32 scale = 3;
   bool is_nullable = 4;
   IntervalType interval_type = 5;
-  // For struct type.
-  repeated DataType fields = 6;
 }
 
 enum ArrayType {

@@ -1,5 +1,6 @@
 //! `Array` defines all in-memory representations of vectorized execution framework.
 
+mod array_type;
 mod bool_array;
 mod chrono_array;
 pub mod column;
@@ -21,6 +22,7 @@ use std::convert::From;
 use std::hash::Hasher;
 use std::sync::Arc;
 
+pub use array_type::*;
 pub use bool_array::{BoolArray, BoolArrayBuilder};
 pub use chrono_array::{
     NaiveDateArray, NaiveDateArrayBuilder, NaiveDateTimeArray, NaiveDateTimeArrayBuilder,
@@ -194,81 +196,6 @@ impl<A: Array> CompactableArray for A {
             }
         }
         builder.finish()
-    }
-}
-
-#[derive(Clone)]
-pub enum ArrayMeta {
-    Simple, // Simple array without given any extra metadata.
-    Struct { children: Vec<ArrayType> },
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ArrayType {
-    Int16,
-    Int32,
-    Int64,
-    Float32,
-    Float64,
-    Utf8,
-    Bool,
-    Decimal,
-    Interval,
-    NaiveDate,
-    NaiveDateTime,
-    NaiveTime,
-    Struct { children: Vec<ArrayType> },
-}
-
-impl ArrayType {
-    fn create_array_builder(&self, capacity: usize) -> Result<ArrayBuilderImpl> {
-        use crate::array::*;
-        let builder = match self {
-            ArrayType::Bool => BoolArrayBuilder::new(capacity)?.into(),
-            ArrayType::Int16 => PrimitiveArrayBuilder::<i16>::new(capacity)?.into(),
-            ArrayType::Int32 => PrimitiveArrayBuilder::<i32>::new(capacity)?.into(),
-            ArrayType::Int64 => PrimitiveArrayBuilder::<i64>::new(capacity)?.into(),
-            ArrayType::Float32 => PrimitiveArrayBuilder::<OrderedF32>::new(capacity)?.into(),
-            ArrayType::Float64 => PrimitiveArrayBuilder::<OrderedF64>::new(capacity)?.into(),
-            ArrayType::Decimal => DecimalArrayBuilder::new(capacity)?.into(),
-            ArrayType::NaiveDate => NaiveDateArrayBuilder::new(capacity)?.into(),
-            ArrayType::Utf8 => Utf8ArrayBuilder::new(capacity)?.into(),
-            ArrayType::NaiveTime => NaiveTimeArrayBuilder::new(capacity)?.into(),
-            ArrayType::NaiveDateTime => NaiveDateTimeArrayBuilder::new(capacity)?.into(),
-            ArrayType::Interval => IntervalArrayBuilder::new(capacity)?.into(),
-            ArrayType::Struct { children } => StructArrayBuilder::new_with_meta(
-                capacity,
-                ArrayMeta::Struct {
-                    children: children.clone(),
-                },
-            )?
-            .into(),
-        };
-        Ok(builder)
-    }
-
-    fn from_protobuf(array: &ProstArray) -> Result<ArrayType> {
-        let t = match array.get_array_type()? {
-            ProstArrayType::Int16 => ArrayType::Int16,
-            ProstArrayType::Int32 => ArrayType::Int32,
-            ProstArrayType::Int64 => ArrayType::Int64,
-            ProstArrayType::Float32 => ArrayType::Float32,
-            ProstArrayType::Float64 => ArrayType::Float64,
-            ProstArrayType::Bool => ArrayType::Bool,
-            ProstArrayType::Utf8 => ArrayType::Utf8,
-            ProstArrayType::Decimal => ArrayType::Decimal,
-            ProstArrayType::Date => ArrayType::NaiveDate,
-            ProstArrayType::Time => ArrayType::NaiveTime,
-            ProstArrayType::Timestamp => ArrayType::NaiveDateTime,
-            ProstArrayType::Struct => ArrayType::Struct {
-                children: array
-                    .children_array
-                    .iter()
-                    .map(ArrayType::from_protobuf)
-                    .collect::<Result<Vec<ArrayType>>>()?,
-            },
-        };
-        Ok(t)
     }
 }
 
@@ -608,7 +535,7 @@ impl ArrayImpl {
             ProstArrayType::Date => read_naivedate_array(array, cardinality)?,
             ProstArrayType::Time => read_naivetime_array(array, cardinality)?,
             ProstArrayType::Timestamp => read_naivedatetime_array(array, cardinality)?,
-            ProstArrayType::Struct => StructArray::from_protobuf(array, cardinality)?,
+            ProstArrayType::Struct => StructArray::from_protobuf(array)?,
         };
         Ok(array)
     }

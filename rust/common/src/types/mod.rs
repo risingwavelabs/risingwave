@@ -26,7 +26,7 @@ pub use interval::*;
 pub use ordered_float::IntoOrdered;
 use paste::paste;
 
-use crate::array::{ArrayBuilderImpl, PrimitiveArrayItemType, StructValue};
+use crate::array::{ArrayBuilderImpl, PrimitiveArrayItemType, StructRef, StructValue};
 
 pub type OrderedF32 = ordered_float::OrderedFloat<f32>;
 pub type OrderedF64 = ordered_float::OrderedFloat<f64>;
@@ -248,7 +248,7 @@ macro_rules! for_all_scalar_variants {
       { NaiveDate, naivedate, NaiveDateWrapper, NaiveDateWrapper },
       { NaiveDateTime, naivedatetime, NaiveDateTimeWrapper, NaiveDateTimeWrapper },
       { NaiveTime, naivetime, NaiveTimeWrapper, NaiveTimeWrapper },
-      { Struct, struct, StructValue, StructValue }
+      { Struct, struct, StructValue, StructRef<'scalar> }
     }
   };
 }
@@ -577,7 +577,9 @@ impl ScalarRefImpl<'_> {
             &Self::NaiveTime(v) => {
                 ser.serialize_naivetime(v.0.num_seconds_from_midnight(), v.0.nanosecond())?
             }
-            Self::Struct(v) => v.serialize(ser)?,
+            _ => {
+                panic!("Type is unable to be serialized.")
+            }
         };
         Ok(())
     }
@@ -629,7 +631,9 @@ impl ScalarImpl {
                 let days = de.deserialize_naivedate()?;
                 NaiveDateWrapper::new_with_days(days)?
             }),
-            Ty::Struct => Self::Struct(StructValue::deserialize(de)?),
+            _ => {
+                panic!("Type is unable to be deserialized.")
+            }
         })
     }
 }

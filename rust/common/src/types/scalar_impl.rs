@@ -58,7 +58,7 @@ impl Scalar for StructValue {
     type ScalarRefType<'a> = StructRef<'a>;
 
     fn as_scalar_ref(&self) -> StructRef<'_> {
-        todo!()
+        StructRef::ValueRef { val: self }
     }
 
     fn to_scalar_value(self) -> ScalarImpl {
@@ -262,12 +262,10 @@ impl<'a> ScalarRef<'a> for StructRef<'a> {
     type ScalarType = StructValue;
 
     fn to_owned_scalar(&self) -> StructValue {
-        let fields = (0..self.fields_num())
-            .into_iter()
-            .map(|field_idx| {
-                self.field_value(field_idx)
-                    .map(ScalarRefImpl::into_scalar_impl)
-            })
+        let fields = self
+            .fields_ref()
+            .iter()
+            .map(|f| f.map(|s| s.into_scalar_impl()))
             .collect();
         StructValue::new(fields)
     }
