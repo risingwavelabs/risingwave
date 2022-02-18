@@ -6,7 +6,7 @@ use itertools::Itertools;
 use risingwave_common::array::{Row, RowDeserializer};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::{deserialize_datum_from, Datum};
+use risingwave_common::types::Datum;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 
@@ -133,16 +133,13 @@ impl<S: StateStore> MViewTable<S> {
             .await
             .map_err(|err| ErrorCode::InternalError(err.to_string()))?;
 
-        match buf {
-            Some(buf) => {
-                let mut deserializer = memcomparable::Deserializer::new(buf);
-                let datum = deserialize_datum_from(
-                    &self.schema.fields[cell_idx].data_type,
-                    &mut deserializer,
-                )?;
-                Ok(Some(datum))
-            }
-            None => Ok(None),
+        if let Some(buf) = buf {
+            Ok(Some(deserialize_cell(
+                &buf[..],
+                &self.schema.fields[cell_idx].data_type,
+            )?))
+        } else {
+            Ok(None)
         }
     }
 }
@@ -231,8 +228,8 @@ impl<S: StateStore> TableIter for MViewTableIter<S> {
 
         let mut pk_buf = vec![];
         let mut restored = 0;
-        let mut row_bytes = vec![];
-
+        // let mut row_bytes = vec![];
+        let mut row = vec![];
         loop {
             let (key, value) = match self.buf.get(self.next_idx) {
                 Some(kv) => kv,
@@ -278,16 +275,18 @@ impl<S: StateStore> TableIter for MViewTableIter<S> {
                 return Err(ErrorCode::InternalError("primary key incorrect".to_owned()).into());
             }
 
-            row_bytes.extend_from_slice(value);
+            // row_bytes.extend_from_slice(value);
+            let datum = deserialize_cell(&value[..], &self.schema.data_types()[restored])?;
+            row.push(datum);
 
             restored += 1;
             if restored == self.schema.len() {
                 break;
             }
         }
-        let row_deserializer = RowDeserializer::new(self.schema.data_types());
-        let row = row_deserializer.deserialize(&row_bytes)?;
-        Ok(Some(row))
+        // let row_deserializer = RowDeserializer::new(self.schema.data_types());
+        // let row = row_deserializer.deserialize(&row_bytes)?;
+        Ok(Some(Row::new(row)))
     }
 }
 
