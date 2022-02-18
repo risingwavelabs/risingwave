@@ -6,7 +6,7 @@ use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::{GetDataRequest, GetDataResponse};
 use risingwave_rpc_client::compute_client::create_compute_client;
-use tonic::transport::{Channel};
+use tonic::transport::Channel;
 use tonic::Streaming;
 
 use crate::task::{BatchTaskEnv, TaskId, TaskSink, TaskSinkId};

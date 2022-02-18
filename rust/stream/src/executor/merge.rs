@@ -12,7 +12,7 @@ use risingwave_common::error::ToRwResult;
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::{GetStreamRequest, GetStreamResponse};
 use risingwave_rpc_client::compute_client::create_compute_client;
-use tonic::transport::{Channel};
+use tonic::transport::Channel;
 use tonic::{Request, Streaming};
 use tracing_futures::Instrument;
 

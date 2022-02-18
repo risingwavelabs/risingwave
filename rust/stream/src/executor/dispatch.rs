@@ -208,10 +208,10 @@ pub trait DataDispatcher: Debug + 'static {
     }
 
     fn get_outputs(&mut self) -> &mut Vec<Box<dyn Output>>;
-    fn update_outputs(&mut self, outputs: Vec<Box<dyn Output>>){
+    fn update_outputs(&mut self, outputs: Vec<Box<dyn Output>>) {
         *self.get_outputs() = outputs;
     }
-    fn add_outputs(&mut self, outputs: Vec<Box<dyn Output>>){
+    fn add_outputs(&mut self, outputs: Vec<Box<dyn Output>>) {
         self.get_outputs().extend(outputs.into_iter());
     }
 }
@@ -237,7 +237,6 @@ impl RoundRobinDataDispatcher {
 
 #[async_trait]
 impl DataDispatcher for RoundRobinDataDispatcher {
-
     fn get_outputs(&mut self) -> &mut Vec<Box<dyn Output>> {
         &mut self.outputs
     }
@@ -277,7 +276,6 @@ impl HashDataDispatcher {
 
 #[async_trait]
 impl DataDispatcher for HashDataDispatcher {
-
     fn get_outputs(&mut self) -> &mut Vec<Box<dyn Output>> {
         &mut self.outputs
     }
@@ -404,7 +402,6 @@ impl BroadcastDispatcher {
 
 #[async_trait]
 impl DataDispatcher for BroadcastDispatcher {
-
     fn get_outputs(&mut self) -> &mut Vec<Box<dyn Output>> {
         &mut self.outputs
     }
@@ -432,13 +429,14 @@ impl Debug for SimpleDispatcher {
 
 impl SimpleDispatcher {
     pub fn new(output: Box<dyn Output>) -> Self {
-        Self { outputs: vec![output] }
+        Self {
+            outputs: vec![output],
+        }
     }
 }
 
 #[async_trait]
 impl DataDispatcher for SimpleDispatcher {
-
     fn add_outputs(&mut self, outputs: Vec<Box<dyn Output>>) {
         self.update_outputs(outputs);
     }

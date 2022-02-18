@@ -207,7 +207,7 @@ impl StreamManagerCore {
         Self::with_store_and_context(state_store, SharedContext::new(addr))
     }
 
-    fn get_actor_info(&mut self) -> &mut HashMap<u32, ActorInfo>{
+    fn get_actor_info(&mut self) -> &mut HashMap<u32, ActorInfo> {
         &mut self.actor_infos
     }
 
@@ -813,7 +813,8 @@ impl StreamManagerCore {
         req: stream_service::BroadcastActorInfoTableRequest,
     ) -> Result<()> {
         for actor in req.get_info() {
-            self.get_actor_info().insert(actor.get_actor_id(), actor.clone());
+            self.get_actor_info()
+                .insert(actor.get_actor_id(), actor.clone());
         }
         Ok(())
     }
@@ -831,7 +832,7 @@ impl StreamManagerCore {
     }
 
     fn build_channel_for_chain_node(
-        & self,
+        &self,
         actor_id: u32,
         stream_node: &stream_plan::StreamNode,
     ) -> Result<()> {
@@ -883,7 +884,7 @@ impl StreamManagerCore {
             }
         }
 
-        for (current_id, actor) in & self.actors {
+        for (current_id, actor) in &self.actors {
             self.build_channel_for_chain_node(*current_id, actor.nodes.as_ref().unwrap())?;
 
             for downstream_id in actor.get_downstream_actor_id() {
