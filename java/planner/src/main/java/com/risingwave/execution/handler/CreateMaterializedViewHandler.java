@@ -13,8 +13,7 @@ import com.risingwave.execution.result.DdlResult;
 import com.risingwave.pgwire.msg.StatementType;
 import com.risingwave.planner.planner.streaming.StreamPlanner;
 import com.risingwave.planner.rel.serialization.StreamingPlanSerializer;
-import com.risingwave.planner.rel.streaming.RwStreamMaterializedView;
-import com.risingwave.planner.rel.streaming.StreamingPlan;
+import com.risingwave.planner.rel.streaming.*;
 import com.risingwave.proto.common.Status;
 import com.risingwave.proto.computenode.CreateTaskRequest;
 import com.risingwave.proto.computenode.CreateTaskResponse;
@@ -107,6 +106,7 @@ public class CreateMaterializedViewHandler implements SqlHandler {
     }
     builder.setCollation(rootNode.getCollation());
     builder.setMv(true);
+    builder.setDependentTables(rootNode.getDependentTables());
     rootNode.getPrimaryKeyIndices().forEach(builder::addPrimaryKey);
     CreateMaterializedViewInfo mvInfo = builder.build();
     MaterializedViewCatalog viewCatalog =

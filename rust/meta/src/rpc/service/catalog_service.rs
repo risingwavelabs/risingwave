@@ -1,36 +1,34 @@
-use std::sync::Arc;
-
 use risingwave_common::error::tonic_err;
 use risingwave_pb::meta::catalog_service_server::CatalogService;
 use risingwave_pb::meta::create_request::CatalogBody;
 use risingwave_pb::meta::drop_request::CatalogId;
 use risingwave_pb::meta::{
-    CreateRequest, CreateResponse, Database, DropRequest, DropResponse, GetCatalogRequest,
-    GetCatalogResponse, Schema, Table,
+    CreateRequest, CreateResponse, DropRequest, DropResponse, GetCatalogRequest, GetCatalogResponse,
 };
 use risingwave_pb::plan::DatabaseRefId;
 use tonic::{Request, Response, Status};
 
-use crate::manager::{EpochGeneratorRef, IdCategory, IdGeneratorManagerRef, MetaSrvEnv};
-use crate::model::{Catalog, MetadataModel};
+use crate::manager::{
+    EpochGeneratorRef, IdCategory, IdGeneratorManagerRef, MetaSrvEnv, StoredCatalogManagerRef,
+};
 use crate::storage::MetaStore;
 
 #[derive(Clone)]
 pub struct CatalogServiceImpl<S> {
-    meta_store_ref: Arc<S>,
     id_gen_manager: IdGeneratorManagerRef<S>,
     epoch_generator: EpochGeneratorRef,
+    stored_catalog_manager: StoredCatalogManagerRef<S>,
 }
 
 impl<S> CatalogServiceImpl<S>
 where
     S: MetaStore,
 {
-    pub fn new(env: MetaSrvEnv<S>) -> Self {
+    pub fn new(env: MetaSrvEnv<S>, scm: StoredCatalogManagerRef<S>) -> Self {
         CatalogServiceImpl::<S> {
-            meta_store_ref: env.meta_store_ref(),
             id_gen_manager: env.id_gen_manager_ref(),
             epoch_generator: env.epoch_generator_ref(),
+            stored_catalog_manager: scm,
         }
     }
 }
@@ -48,12 +46,7 @@ where
         let _req = request.into_inner();
         Ok(Response::new(GetCatalogResponse {
             status: None,
-            catalog: Some(
-                Catalog::get(&*self.meta_store_ref)
-                    .await
-                    .map_err(|e| e.to_grpc_status())?
-                    .inner(),
-            ),
+            catalog: Some(self.stored_catalog_manager.get_catalog().await),
         }))
     }
 
@@ -78,7 +71,7 @@ where
                 let mut database = database.clone();
                 database.database_ref_id = Some(DatabaseRefId { database_id: id });
                 database.version = version.into_inner();
-                database.insert(&*self.meta_store_ref).await
+                self.stored_catalog_manager.create_database(database).await
             }
             CatalogBody::Schema(schema) => {
                 id = self
@@ -91,7 +84,7 @@ where
                 let mut schema = schema.clone();
                 schema.schema_ref_id = Some(schema_ref_id);
                 schema.version = version.into_inner();
-                schema.insert(&*self.meta_store_ref).await
+                self.stored_catalog_manager.create_schema(schema).await
             }
             CatalogBody::Table(table) => {
                 id = self
@@ -104,7 +97,7 @@ where
                 let mut table = table.clone();
                 table.table_ref_id = Some(table_ref_id);
                 table.version = version.into_inner();
-                table.insert(&*self.meta_store_ref).await
+                self.stored_catalog_manager.create_table(table).await
             }
         };
 
@@ -122,13 +115,19 @@ where
     async fn drop(&self, request: Request<DropRequest>) -> Result<Response<DropResponse>, Status> {
         let req = request.into_inner();
         let result = match req.get_catalog_id().map_err(tonic_err)? {
-            CatalogId::DatabaseId(database_id) => {
-                Database::delete(&*self.meta_store_ref, database_id).await
+            CatalogId::DatabaseId(database_ref_id) => {
+                self.stored_catalog_manager
+                    .delete_database(database_ref_id)
+                    .await
             }
-            CatalogId::SchemaId(schema_id) => {
-                Schema::delete(&*self.meta_store_ref, schema_id).await
+            CatalogId::SchemaId(schema_ref_id) => {
+                self.stored_catalog_manager
+                    .delete_schema(schema_ref_id)
+                    .await
             }
-            CatalogId::TableId(table_id) => Table::delete(&*self.meta_store_ref, table_id).await,
+            CatalogId::TableId(table_ref_id) => {
+                self.stored_catalog_manager.delete_table(table_ref_id).await
+            }
         };
 
         match result {

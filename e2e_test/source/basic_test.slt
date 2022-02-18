@@ -115,4 +115,10 @@ sleep 30s
 # 78 12
 
 statement ok
+drop materialized view source_mv1
+
+statement ok
+drop materialized view source_mv2
+
+statement ok
 drop source s
