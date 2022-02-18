@@ -1,8 +1,10 @@
 use std::cmp::max;
 use std::collections::BTreeMap;
+use std::ops::Range;
 use std::sync::Arc;
 
 use async_recursion::async_recursion;
+use itertools::Itertools;
 use risingwave_common::array::RwError;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
@@ -103,7 +105,7 @@ where
         Ok(fragment)
     }
 
-    /// Build new fragment and link dependency with its parent (current) fragment, update
+    /// Build new fragment and link dependencies by visiting children recursively, update
     /// `is_singleton` and `fragment_type` properties for current fragment.
     // TODO: Should we store the concurrency in StreamFragment directly?
     #[async_recursion]
@@ -112,6 +114,7 @@ where
         current_fragment: &mut StreamFragment,
         stream_node: &StreamNode,
     ) -> Result<()> {
+        // Update current fragment based on the node we're visiting.
         match stream_node.get_node()? {
             Node::SourceNode(_) => current_fragment.set_fragment_type(FragmentType::Source),
             Node::MviewNode(_) => current_fragment.set_fragment_type(FragmentType::Sink),
@@ -125,8 +128,10 @@ where
             _ => {}
         };
 
+        // Visit children.
         for child_node in stream_node.get_input() {
             match child_node.get_node()? {
+                // Exchange node indicates a new child fragment.
                 Node::ExchangeNode(exchange_node) => {
                     let child_fragment = self.build_and_add_fragment(child_node, false).await?;
                     self.fragment_graph.link_child(
@@ -141,6 +146,7 @@ where
                     }
                 }
 
+                // For other children, visit recursively.
                 _ => self.build_fragment(current_fragment, child_node).await?,
             };
         }
@@ -148,27 +154,25 @@ where
         Ok(())
     }
 
+    /// Create a new stream fragment with given node with generating a fragment id.
     async fn new_stream_fragment(&self, node: StreamNode) -> Result<StreamFragment> {
-        Ok(StreamFragment::new(
-            self.gen_fragment_id().await?,
-            Arc::new(node),
-        ))
-    }
-
-    /// Generate fragment id for each fragment.
-    async fn gen_fragment_id(&self) -> Result<FragmentId> {
-        Ok(self
+        let fragment_id = self
             .id_gen_manager_ref
             .generate::<{ IdCategory::Fragment }>()
-            .await? as _)
+            .await? as _;
+        let fragment = StreamFragment::new(fragment_id, Arc::new(node));
+
+        Ok(fragment)
     }
 
     /// Generate actor id from id generator.
-    async fn gen_actor_id(&self, parallel_degree: u32) -> Result<ActorId> {
-        Ok(self
+    async fn gen_actor_ids(&self, parallel_degree: u32) -> Result<Range<ActorId>> {
+        let start_actor_id = self
             .id_gen_manager_ref
             .generate_interval::<{ IdCategory::Actor }>(parallel_degree as i32)
-            .await? as _)
+            .await? as _;
+
+        Ok(start_actor_id..start_actor_id + parallel_degree)
     }
 
     /// Build stream graph from fragment graph recursively. Setup dispatcher in actor and generate
@@ -180,8 +184,8 @@ where
         last_fragment_actors: Vec<ActorId>,
     ) -> Result<()> {
         let root_fragment = self.fragment_graph.get_root_fragment();
-        let mut current_actor_ids = vec![];
         let current_fragment_id = current_fragment.get_fragment_id();
+
         let parallel_degree = if current_fragment.is_singleton() {
             1
         } else {
@@ -189,9 +193,9 @@ where
             // more worker nodes added.
             max(self.worker_count * 2, PARALLEL_DEGREE_LOW_BOUND)
         };
+        let actor_ids = self.gen_actor_ids(parallel_degree).await?;
 
         let node = current_fragment.get_node();
-        let actor_ids = self.gen_actor_id(parallel_degree).await?;
         let blackhole_dispatcher = Dispatcher {
             r#type: DispatcherType::Broadcast as i32,
             ..Default::default()
@@ -210,13 +214,13 @@ where
             }
         };
 
-        for id in actor_ids..actor_ids + parallel_degree {
+        for id in actor_ids.clone() {
             let mut actor_builder = StreamActorBuilder::new(id, current_fragment_id, node.clone());
             actor_builder.set_dispatcher(dispatcher.clone());
             self.stream_graph.add_actor(actor_builder);
-            current_actor_ids.push(id);
         }
 
+        let current_actor_ids = actor_ids.collect_vec();
         self.stream_graph
             .add_dependency(&current_actor_ids, &last_fragment_actors);
 
