@@ -19,7 +19,7 @@ type AllOrNoneStateValuesMut<'a> = btree_map::ValuesMut<'a, PkType, StateValueTy
 
 /// Manages a `BTreeMap` in memory for all entries. When evicted, `BTreeMap` does not hold any
 /// entries.
-pub struct AllOrNoneState<S: StateStore> {
+pub struct JoinEntryState<S: StateStore> {
     /// The full copy of the state. If evicted, it will be `None`.
     cached: Option<BTreeMap<PkType, StateValueType>>,
 
@@ -39,7 +39,7 @@ pub struct AllOrNoneState<S: StateStore> {
     keyspace: Keyspace<S>,
 }
 
-impl<S: StateStore> AllOrNoneState<S> {
+impl<S: StateStore> JoinEntryState<S> {
     pub fn new(
         keyspace: Keyspace<S>,
         total_count: usize,
@@ -228,7 +228,7 @@ mod tests {
     async fn test_managed_all_or_none_state() {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
-        let mut managed_state = AllOrNoneState::new(
+        let mut managed_state = JoinEntryState::new(
             keyspace,
             0,
             vec![DataType::Int64, DataType::Int64].into(),

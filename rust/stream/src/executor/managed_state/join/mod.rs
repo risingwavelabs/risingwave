@@ -2,7 +2,7 @@ mod all_or_none;
 use std::ops::{Deref, DerefMut, Index};
 use std::sync::Arc;
 
-pub use all_or_none::AllOrNoneState;
+pub use all_or_none::JoinEntryState;
 use itertools::Itertools;
 use risingwave_common::array::Row;
 use risingwave_common::collection::evictable::EvictableHashMap;
@@ -92,7 +92,7 @@ type PkType = Row;
 
 pub type StateValueType = JoinRow;
 pub type HashKeyType = Row;
-pub type HashValueType<S> = AllOrNoneState<S>;
+pub type HashValueType<S> = JoinEntryState<S>;
 
 pub struct JoinHashMap<S: StateStore> {
     /// Store the join states.
@@ -173,7 +173,7 @@ impl<S: StateStore> JoinHashMap<S> {
     }
 
     /// Returns a mutable reference to the value of the key in the memory, if does not exist, look
-    /// up in remote storage and return the [`AllOrNoneState`] without cached state, if still not
+    /// up in remote storage and return the [`JoinEntryState`] without cached state, if still not
     /// exist, return None.
     pub async fn get_mut_without_cached(
         &mut self,
@@ -191,7 +191,7 @@ impl<S: StateStore> JoinHashMap<S> {
                     .unwrap();
                 let total_count = all_data.len();
                 if total_count > 0 {
-                    let state = AllOrNoneState::new(
+                    let state = JoinEntryState::new(
                         keyspace,
                         total_count,
                         self.data_types.clone(),
@@ -225,9 +225,9 @@ impl<S: StateStore> JoinHashMap<S> {
     }
 
     /// Fetch cache from the state store. Should only be called if the key does not exist in memory.
-    async fn fetch_cached_state(&self, key: &HashKeyType) -> RWResult<Option<AllOrNoneState<S>>> {
+    async fn fetch_cached_state(&self, key: &HashKeyType) -> RWResult<Option<JoinEntryState<S>>> {
         let keyspace = self.get_state_keyspace(key);
-        Ok(AllOrNoneState::with_cached_state(
+        Ok(JoinEntryState::with_cached_state(
             keyspace,
             self.data_types.clone(),
             self.pk_data_types.clone(),
@@ -236,13 +236,13 @@ impl<S: StateStore> JoinHashMap<S> {
         .await?)
     }
 
-    /// Create a [`AllOrNoneState`] without cached state. Should only be called if the key
+    /// Create a [`JoinEntryState`] without cached state. Should only be called if the key
     /// does not exist in memory or remote storage.
     pub async fn init_without_cache(&mut self, key: &HashKeyType) -> RWResult<()> {
         let keyspace = self.get_state_keyspace(key);
         let all_data = keyspace.scan_strip_prefix(None, self.current_epoch).await?;
         let total_count = all_data.len();
-        let state = AllOrNoneState::new(
+        let state = JoinEntryState::new(
             keyspace,
             total_count,
             self.data_types.clone(),
@@ -252,12 +252,12 @@ impl<S: StateStore> JoinHashMap<S> {
         Ok(())
     }
 
-    /// Get or create a [`AllOrNoneState`] without cached state. Should only be called if the key
+    /// Get or create a [`JoinEntryState`] without cached state. Should only be called if the key
     /// does not exist in memory or remote storage.
     pub async fn get_or_init_without_cache(
         &mut self,
         key: &HashKeyType,
-    ) -> RWResult<&mut AllOrNoneState<S>> {
+    ) -> RWResult<&mut JoinEntryState<S>> {
         // TODO: we should probably implement a entry function for `LruCache`
         let contains = self.inner.contains(key);
         if contains {
