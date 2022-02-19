@@ -12,7 +12,6 @@ import java.util.Arrays;
 import javax.inject.Singleton;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlNode;
-import org.apache.calcite.sql.ddl.SqlCreateTable;
 import org.reflections.Reflections;
 import org.reflections.scanners.SubTypesScanner;
 import org.reflections.scanners.TypeAnnotationsScanner;
@@ -58,10 +57,6 @@ public class DefaultSqlHandlerFactory implements SqlHandlerFactory {
     // TODO(Bowen): Use operator name to find the handler
     if (ast instanceof SqlShowParameters) {
       return new ShowParameterHandler();
-    }
-
-    if (ast instanceof SqlCreateTable) {
-      return new CreateTableHandler();
     }
 
     if (ast instanceof SqlFlush) {
