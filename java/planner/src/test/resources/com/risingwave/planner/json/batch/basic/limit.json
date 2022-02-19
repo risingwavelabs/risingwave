@@ -6,9 +6,9 @@
           "databaseRefId": {
           }
         },
-        "tableId": 4
+        "tableId": 9
       },
-      "columnIds": [1],
+      "columnIds": [0],
       "fields": [{
         "dataType": {
           "typeName": "DECIMAL",

@@ -5,9 +5,10 @@
         "schemaRefId": {
           "databaseRefId": {
           }
-        }
+        },
+        "tableId": 1
       },
-      "columnIds": [1, 2, 3],
+      "columnIds": [0, 1, 2],
       "fields": [{
         "dataType": {
           "typeName": "INT32"
@@ -33,9 +34,9 @@
           "databaseRefId": {
           }
         },
-        "tableId": 2
+        "tableId": 5
       },
-      "columnIds": [1],
+      "columnIds": [0],
       "fields": [{
         "dataType": {
           "typeName": "INT32"

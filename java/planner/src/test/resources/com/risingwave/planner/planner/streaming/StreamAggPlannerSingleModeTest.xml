@@ -10,7 +10,8 @@ create materialized view T_no_group_no_count_single as select sum(v1) as V from 
 RwStreamMaterializedView(name=[t_no_group_no_count_single])
   RwStreamProject(v=[$STREAM_NULL_BY_ROW_COUNT($0, $1)], $f0=[$0], v_copy=[$1])
     RwStreamAgg(group=[{}], agg#0=[COUNT()], v=[SUM($0)])
-      RwStreamTableSource(table=[[test_schema, t]], columns=[v1,_row_id])
+      RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[1]], columnIds=[[0.0.1.0, 0.0.1.3]], upstreamColumnDescs=[[ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=FLOAT, primary=false}, ColumnDesc{dataType=BIGINT, primary=false}]])
+        RwStreamBatchPlan(table=[[test_schema, t]], tableId=[0.0.1], primaryKeyIndices=[[1]], columnIds=[[0.0.1.0, 0.0.1.3]])
 ]]>
         </Resource>
     </TestCase>
@@ -25,7 +26,8 @@ create materialized view T_no_group_has_count_single as select Count(*), Sum(v1)
 RwStreamMaterializedView(name=[t_no_group_has_count_single])
   RwStreamProject(EXPR$0=[$0], v=[$STREAM_NULL_BY_ROW_COUNT($0, $1)], v_copy=[$1])
     RwStreamAgg(group=[{}], agg#0=[COUNT()], v=[SUM($0)])
-      RwStreamTableSource(table=[[test_schema, t]], columns=[v1,_row_id])
+      RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[1]], columnIds=[[0.0.1.0, 0.0.1.3]], upstreamColumnDescs=[[ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=FLOAT, primary=false}, ColumnDesc{dataType=BIGINT, primary=false}]])
+        RwStreamBatchPlan(table=[[test_schema, t]], tableId=[0.0.1], primaryKeyIndices=[[1]], columnIds=[[0.0.1.0, 0.0.1.3]])
 ]]>
         </Resource>
     </TestCase>
@@ -39,7 +41,8 @@ create materialized view T_has_group_has_count_single as select v2, Count(*), Su
             <![CDATA[
 RwStreamMaterializedView(name=[t_has_group_has_count_single])
   RwStreamAgg(group=[{0}], agg#0=[COUNT()], v=[SUM($1)])
-    RwStreamTableSource(table=[[test_schema, t]], columns=[v2,v1,_row_id])
+    RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.1, 0.0.1.0, 0.0.1.3]], upstreamColumnDescs=[[ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=FLOAT, primary=false}, ColumnDesc{dataType=BIGINT, primary=false}]])
+      RwStreamBatchPlan(table=[[test_schema, t]], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.1, 0.0.1.0, 0.0.1.3]])
 ]]>
         </Resource>
     </TestCase>
@@ -54,7 +57,8 @@ create materialized view T_has_group_no_count_single as select v2, Sum(v1) as V 
 RwStreamMaterializedView(name=[t_has_group_no_count_single])
   RwStreamProject(v2=[$0], v=[$2])
     RwStreamAgg(group=[{0}], agg#0=[COUNT()], v=[SUM($1)])
-      RwStreamTableSource(table=[[test_schema, t]], columns=[v2,v1,_row_id])
+      RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.1, 0.0.1.0, 0.0.1.3]], upstreamColumnDescs=[[ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=FLOAT, primary=false}, ColumnDesc{dataType=BIGINT, primary=false}]])
+        RwStreamBatchPlan(table=[[test_schema, t]], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.1, 0.0.1.0, 0.0.1.3]])
 ]]>
         </Resource>
     </TestCase>

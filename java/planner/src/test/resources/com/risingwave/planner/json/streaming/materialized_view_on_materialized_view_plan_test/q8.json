@@ -7,9 +7,9 @@
           "databaseRefId": {
           }
         },
-        "tableId": 1
+        "tableId": 3
       },
-      "columnIds": [1, 2, 3, 0]
+      "columnIds": [0, 1, 2, 3]
     },
     "identity": "RwStreamTableSource(table\u003d[[test_schema, t2]], columns\u003d[v1,v2,v3,_row_id])"
   }],
@@ -19,7 +19,7 @@
         "databaseRefId": {
         }
       },
-      "tableId": 9
+      "tableId": 11
     },
     "columnDescs": [{
       "columnType": {

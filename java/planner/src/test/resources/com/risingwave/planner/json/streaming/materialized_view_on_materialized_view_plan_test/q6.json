@@ -14,12 +14,12 @@
                 "databaseRefId": {
                 }
               },
-              "tableId": 6
+              "tableId": 8
             },
             "pkIndices": [2],
             "columnIds": [2, 1, 3]
           },
-          "identity": "RwStreamBatchPlan(table\u003d[[test_schema, m5]], tableId\u003d[0.0.6], primaryKeyIndices\u003d[[2]], columnIds\u003d[[0.0.6.2, 0.0.6.1, 0.0.6.3]])"
+          "identity": "RwStreamBatchPlan(table\u003d[[test_schema, m5]], tableId\u003d[0.0.8], primaryKeyIndices\u003d[[2]], columnIds\u003d[[0.0.8.2, 0.0.8.1, 0.0.8.3]])"
         }],
         "chainNode": {
           "tableRefId": {
@@ -27,7 +27,7 @@
               "databaseRefId": {
               }
             },
-            "tableId": 6
+            "tableId": 8
           },
           "upstreamColumnDescs": [{
             "columnType": {
@@ -49,7 +49,7 @@
           "pkIndices": [2],
           "columnIds": [2, 1, 3]
         },
-        "identity": "RwStreamChain(all\u003d[true], tableId\u003d[0.0.6], primaryKeyIndices\u003d[[2]], columnIds\u003d[[0.0.6.2, 0.0.6.1, 0.0.6.3]], upstreamColumnDescs\u003d[[ColumnDesc{dataType\u003dINTEGER, primary\u003dfalse}, ColumnDesc{dataType\u003dFLOAT, primary\u003dfalse}, ColumnDesc{dataType\u003dFLOAT, primary\u003dfalse}, ColumnDesc{dataType\u003dBIGINT, primary\u003dfalse}]])"
+        "identity": "RwStreamChain(all\u003d[true], tableId\u003d[0.0.8], primaryKeyIndices\u003d[[2]], columnIds\u003d[[0.0.8.2, 0.0.8.1, 0.0.8.3]], upstreamColumnDescs\u003d[[ColumnDesc{dataType\u003dINTEGER, primary\u003dfalse}, ColumnDesc{dataType\u003dFLOAT, primary\u003dfalse}, ColumnDesc{dataType\u003dFLOAT, primary\u003dfalse}, ColumnDesc{dataType\u003dBIGINT, primary\u003dfalse}]])"
       }],
       "hashAggNode": {
         "groupKeys": [{
@@ -159,7 +159,7 @@
         "databaseRefId": {
         }
       },
-      "tableId": 7
+      "tableId": 9
     },
     "columnDescs": [{
       "columnType": {
