@@ -2639,6 +2639,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "more-asserts"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7843ec2de400bcbc6a6328c958dc38e5359da6e93e72e37bc5246bf1ae776389"
+
+[[package]]
 name = "multimap"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4012,6 +4018,7 @@ dependencies = [
  "log",
  "lru",
  "memcomparable",
+ "more-asserts",
  "num-traits",
  "paste",
  "prettytable-rs",

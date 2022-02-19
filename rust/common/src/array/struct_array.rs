@@ -12,7 +12,7 @@ use super::{
 };
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::error::Result;
-use crate::types::{Datum, DatumRef, ScalarRefImpl};
+use crate::types::{Datum, DatumRef, Scalar, ScalarRefImpl};
 
 /// This is a naive implementation of struct array.
 /// We will eventually move to a more efficient flatten implementation.
@@ -236,7 +236,7 @@ impl StructArray {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialOrd, Ord, Default, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, Ord, Default, PartialEq, Hash)]
 pub struct StructValue {
     fields: Vec<Datum>,
 }
@@ -244,6 +244,12 @@ pub struct StructValue {
 impl fmt::Display for StructValue {
     fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
         Ok(())
+    }
+}
+
+impl PartialOrd for StructValue {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.as_scalar_ref().partial_cmp(&other.as_scalar_ref())
     }
 }
 
@@ -291,7 +297,22 @@ impl PartialEq for StructRef<'_> {
 
 impl PartialOrd for StructRef<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.fields_ref().partial_cmp(&other.fields_ref())
+        let l = self.fields_ref();
+        let r = other.fields_ref();
+        debug_assert_eq!(
+            l.len(),
+            r.len(),
+            "Structs must have the same length to be compared"
+        );
+        let it = l.iter().enumerate().find_map(|(idx, v)| {
+            let ord = cmp_struct_field(v, &r[idx]);
+            if let Ordering::Equal = ord {
+                None
+            } else {
+                Some(ord)
+            }
+        });
+        it.or(Some(Ordering::Equal))
     }
 }
 
@@ -335,6 +356,8 @@ impl Ord for StructRef<'_> {
 
 #[cfg(test)]
 mod tests {
+    use more_asserts::assert_gt;
+
     use super::*;
     use crate::{array, try_match_expand};
 
@@ -393,5 +416,46 @@ mod tests {
         });
         let arr = builder.finish().unwrap();
         assert_eq!(arr.values_vec(), struct_values);
+    }
+
+    // Ensure `create_builder` exactly copies the same metadata.
+    #[test]
+    fn test_struct_create_builder() {
+        use crate::array::*;
+        let arr = StructArray::from_slices(
+            &[true],
+            vec![
+                array! { I32Array, [Some(1)] }.into(),
+                array! { F32Array, [Some(2.0)] }.into(),
+            ],
+        )
+        .unwrap();
+        let builder = arr.create_builder(4).unwrap();
+        let arr2 = try_match_expand!(builder.finish().unwrap(), ArrayImpl::Struct).unwrap();
+        assert_eq!(arr.array_meta(), arr2.array_meta());
+    }
+
+    #[test]
+    fn test_struct_value_cmp() {
+        // (1, 2.0) > (1, 1.0)
+        assert_gt!(
+            StructValue::new(vec![Some(1.into()), Some(2.0.into())]),
+            StructValue::new(vec![Some(1.into()), Some(1.0.into())]),
+        );
+        // null > 1
+        assert_eq!(
+            cmp_struct_field(&None, &Some(ScalarRefImpl::Int32(1))),
+            Ordering::Greater
+        );
+        // (1, null, 3) > (1, 1.0, 2)
+        assert_gt!(
+            StructValue::new(vec![Some(1.into()), None, Some(3.into())]),
+            StructValue::new(vec![Some(1.into()), Some(1.0.into()), Some(2.into())]),
+        );
+        // (1, null) == (1, null)
+        assert_eq!(
+            StructValue::new(vec![Some(1.into()), None]),
+            StructValue::new(vec![Some(1.into()), None]),
+        );
     }
 }

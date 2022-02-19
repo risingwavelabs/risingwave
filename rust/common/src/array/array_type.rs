@@ -3,7 +3,7 @@ use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType};
 use super::{ArrayBuilderImpl, ArrayImpl};
 use crate::error::Result;
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ArrayMeta {
     Simple, // Simple array without given any extra metadata.
     Struct { children: Vec<ArrayType> },
