@@ -39,8 +39,7 @@ async fn main() {
             .with_target("hyper", Level::WARN)
             .with_target("h2", Level::WARN)
             .with_target("tower", Level::WARN)
-            .with_target("isahc", Level::WARN)
-            .with_target("sled", Level::WARN);
+            .with_target("isahc", Level::WARN);
 
         // Configure RisingWave's own crates to log at TRACE level, uncomment the following line if
         // needed.
@@ -60,6 +59,6 @@ async fn main() {
     let dashboard_addr = opts.dashboard_host.parse().unwrap();
     info!("Starting meta server at {}", addr);
     let (join_handle, _shutdown_send) =
-        rpc_serve(addr, Some(dashboard_addr), MetaStoreBackend::SledInMem).await;
+        rpc_serve(addr, Some(dashboard_addr), MetaStoreBackend::Mem).await;
     join_handle.await.unwrap();
 }

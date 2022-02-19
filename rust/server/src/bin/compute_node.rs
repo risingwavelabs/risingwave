@@ -38,8 +38,7 @@ async fn main() {
             .with_target("hyper", Level::WARN)
             .with_target("h2", Level::WARN)
             .with_target("tower", Level::WARN)
-            .with_target("isahc", Level::WARN)
-            .with_target("sled", Level::WARN);
+            .with_target("isahc", Level::WARN);
 
         // Configure RisingWave's own crates to log at TRACE level, uncomment the following line if
         // needed.

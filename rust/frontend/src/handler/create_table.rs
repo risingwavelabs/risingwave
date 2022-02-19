@@ -74,7 +74,7 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn test_create_table_handler() {
-        let meta = LocalMeta::start_in_tempdir().await;
+        let meta = LocalMeta::start().await;
         let sql = "create table t (v1 smallint, v2 int, v3 bigint, v4 float, v5 double);";
         let frontend = LocalFrontend::new().await;
         frontend.run_sql(sql).await.unwrap();
