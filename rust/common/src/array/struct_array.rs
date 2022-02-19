@@ -179,7 +179,7 @@ impl Array for StructArray {
 impl StructArray {
     pub fn from_protobuf(array: &ProstArray) -> Result<ArrayImpl> {
         ensure!(
-            array.get_values().is_empty(),
+            array.values.is_empty(),
             "Must have no buffer in a struct array"
         );
         let bitmap: Bitmap = array.get_null_bitmap()?.try_into()?;
@@ -224,6 +224,15 @@ impl StructArray {
             len: cardinality,
             children,
         })
+    }
+
+    #[cfg(test)]
+    pub fn values_vec(&self) -> Vec<Option<StructValue>> {
+        use crate::types::ScalarRef;
+
+        self.iter()
+            .map(|v| v.map(|s| s.to_owned_scalar()))
+            .collect_vec()
     }
 }
 
@@ -353,10 +362,7 @@ mod tests {
         assert_eq!(ArrayImpl::Struct(arr), actual);
 
         let arr = try_match_expand!(actual, ArrayImpl::Struct).unwrap();
-        let struct_values = arr
-            .iter()
-            .map(|v| v.map(|s| s.to_owned_scalar()))
-            .collect_vec();
+        let struct_values = arr.values_vec();
         assert_eq!(
             struct_values,
             vec![
@@ -372,5 +378,20 @@ mod tests {
                 ])),
             ]
         );
+
+        let mut builder = StructArrayBuilder::new_with_meta(
+            4,
+            ArrayMeta::Struct {
+                children: vec![ArrayType::Int32, ArrayType::Float32],
+            },
+        )
+        .unwrap();
+        struct_values.iter().for_each(|v| {
+            builder
+                .append(v.as_ref().map(|s| s.as_scalar_ref()))
+                .unwrap()
+        });
+        let arr = builder.finish().unwrap();
+        assert_eq!(arr.values_vec(), struct_values);
     }
 }
