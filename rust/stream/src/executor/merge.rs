@@ -11,7 +11,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::ToRwResult;
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::{GetStreamRequest, GetStreamResponse};
-use risingwave_rpc_client::compute_client::create_compute_client;
+use risingwave_rpc_client::ComputeClient;
 use tonic::transport::Channel;
 use tonic::{Request, Streaming};
 use tracing_futures::Instrument;
@@ -37,7 +37,7 @@ impl RemoteInput {
         up_down_ids: UpDownActorIds,
         sender: Sender<Message>,
     ) -> Result<Self> {
-        let mut client = create_compute_client(&addr).await.unwrap();
+        let mut client = ComputeClient::new(&addr).await.unwrap().get_channel();
         let req = GetStreamRequest {
             up_fragment_id: up_down_ids.0,
             down_fragment_id: up_down_ids.1,

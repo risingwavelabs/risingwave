@@ -5,7 +5,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::{GetDataRequest, GetDataResponse};
-use risingwave_rpc_client::compute_client::create_compute_client;
+use risingwave_rpc_client::ComputeClient;
 use tonic::transport::Channel;
 use tonic::Streaming;
 
@@ -32,7 +32,7 @@ pub struct GrpcExchangeSource {
 
 impl GrpcExchangeSource {
     pub async fn create(addr: SocketAddr, task_id: TaskId, sink_id: TaskSinkId) -> Result<Self> {
-        let mut client = create_compute_client(&addr).await.unwrap();
+        let mut client = ComputeClient::new(&addr).await.unwrap().get_channel();
         let stream = client
             .get_data(GetDataRequest {
                 sink_id: Some(sink_id.to_prost()),
