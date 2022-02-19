@@ -100,6 +100,10 @@ impl Executor for MockSource {
     fn identity(&self) -> &'static str {
         "MockSource"
     }
+
+    fn logical_operator_info(&self) -> &str {
+        self.identity()
+    }
 }
 
 /// This source takes message from users asynchronously
@@ -183,6 +187,10 @@ impl Executor for MockAsyncSource {
 
     fn identity(&self) -> &'static str {
         "MockAsyncSource"
+    }
+
+    fn logical_operator_info(&self) -> &str {
+        self.identity()
     }
 }
 

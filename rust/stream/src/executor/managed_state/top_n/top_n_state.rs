@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
-use risingwave_common::array::{Row, RowDeserializer};
+use risingwave_common::array::Row;
 use risingwave_common::error::Result;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::ordered::*;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -286,19 +286,22 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
                 epoch,
             )
             .await?;
+        let data_type_num = self.data_types.len();
         // We must have enough cells to restore a complete row.
-        debug_assert_eq!(pk_row_bytes.len() % self.data_types.len(), 0);
+        debug_assert_eq!(pk_row_bytes.len() % data_type_num, 0);
         // cell-based storage format, so `self.data_types.len()`
-        let mut row_bytes = vec![];
         let mut cell_restored = 0;
         let mut res = vec![];
-        for (pk, cell_bytes) in pk_row_bytes {
-            row_bytes.extend_from_slice(&cell_bytes);
+        let mut datum_vec: Vec<Datum> = vec![];
+        for (i, (pk, cell_bytes)) in pk_row_bytes.into_iter().enumerate() {
+            let datum = deserialize_cell(&cell_bytes[..], &self.data_types[i % data_type_num])?;
+            datum_vec.push(datum);
+
             cell_restored += 1;
-            if cell_restored == self.data_types.len() {
+            if cell_restored == data_type_num {
                 cell_restored = 0;
-                let deserializer = RowDeserializer::new(self.data_types.clone());
-                let row = deserializer.deserialize(&std::mem::take(&mut row_bytes))?;
+
+                let row = Row::new(std::mem::take(&mut datum_vec));
                 // format: [pk_buf | cell_idx (4B)]
                 // Take `pk_buf` out.
                 let mut pk_vec = pk.to_vec();

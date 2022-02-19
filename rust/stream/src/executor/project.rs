@@ -23,6 +23,9 @@ pub struct ProjectExecutor {
 
     /// Identity string
     identity: String,
+
+    /// Logical Operator Info
+    op_info: String,
 }
 
 impl std::fmt::Debug for ProjectExecutor {
@@ -42,7 +45,7 @@ impl ProjectExecutor {
         pk_indices: PkIndices,
         exprs: Vec<BoxedExpression>,
         executor_id: u64,
-        identity: String,
+        op_info: String,
     ) -> Self {
         let schema = Schema {
             fields: exprs
@@ -55,7 +58,8 @@ impl ProjectExecutor {
             pk_indices,
             input,
             exprs,
-            identity: format!("{} {:X}", identity, executor_id),
+            identity: format!("ProjectExecutor {:X}", executor_id),
+            op_info,
         }
     }
 }
@@ -76,6 +80,10 @@ impl Executor for ProjectExecutor {
 
     fn identity(&self) -> &str {
         self.identity.as_str()
+    }
+
+    fn logical_operator_info(&self) -> &str {
+        &self.op_info
     }
 }
 

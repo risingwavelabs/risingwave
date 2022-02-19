@@ -1,5 +1,5 @@
 import * as d3 from "d3";
-import createView from "../lib/streamPlan/streamChartHelper";
+import createView, { computeNodeAddrToSideColor } from "../lib/streamPlan/streamChartHelper";
 import { useEffect, useRef, useState } from 'react';
 import styled from '@emotion/styled';
 import LocationSearchingIcon from '@mui/icons-material/LocationSearching';
@@ -35,29 +35,35 @@ const ToolBoxTitle = styled('div')(() => ({
 
 export default function StreamingView(props) {
   const data = props.data || [];
+  const mvList = props.mvList || [];
   const actorList = data.map(x => x.node);
 
   const [nodeJson, setNodeJson] = useState("");
   const [showInfoPane, setShowInfoPane] = useState(false);
-  const [selectedActor, setSelectedActor] = useState("Show All");
+  const [selectedWorkerNode, setSelectedWorkerNode] = useState("Show All");
   const [searchType, setSearchType] = useState("Actor");
   const [searchContent, setSearchContent] = useState("");
   const [mvTableIdToSingleViewActorList, setMvTableIdToSingleViewActorList] = useState(null);
   const [mvTableIdToChainViewActorList, setMvTableIdToChainViewActorList] = useState(null);
-  const [mviewTableList, setMviewTableList] = useState([]);
   const [filterMode, setFilterMode] = useState("Chain View");
   const [selectedMvTableId, setSelectedMvTableId] = useState(null);
   const [showFullGraph, setShowFullGraph] = useState(true);
 
   const d3Container = useRef(null);
 
+  // let tmp = [];
+  // for(let mv of mvList){
+  //   tmp.push({
+  //     label: mv[1].tableName, tableId: mv[0]
+  //   })
+  // }
+
   const exprNode = (actorNode) => (({ input, ...o }) => o)(actorNode)
 
   const locateTo = (selector) => {
     let selection = d3.select(selector);
     if (!selection.empty()) {
-      console.log(selection.attr("x"), selection.attr("y"));
-      svg.call(zoom).call(zoom.transform, new d3.ZoomTransform(1, -selection.attr("x"), -selection.attr("y") + height / 2));
+      svg.call(zoom).call(zoom.transform, new d3.ZoomTransform(0.7, - 0.7 * selection.attr("x"), 0.7 *(-selection.attr("y") + height / 2) ));
     }
   }
 
@@ -66,6 +72,10 @@ export default function StreamingView(props) {
     type = type.toLocaleLowerCase();
 
     if (type === "actor") {
+      locateTo(`rect.${type}-${searchContent}`);
+    }
+
+    if (type === "fragment"){
       locateTo(`rect.${type}-${searchContent}`);
     }
   }
@@ -77,8 +87,8 @@ export default function StreamingView(props) {
       : JSON.stringify(exprNode(node.nodeProto), null, 2));
   };
 
-  const onActorSelect = (e) => {
-    setSelectedActor(e.target.value);
+  const onWorkerNodeSelect = (e) => {
+    setSelectedWorkerNode(e.target.value);
   }
 
   const onSearchTypeChange = (e) => {
@@ -146,22 +156,22 @@ export default function StreamingView(props) {
     locateSearchPosition();
   }, [searchType, searchContent]);
 
-  useEffect(() => {
-    if (mvTableIdToSingleViewActorList !== null) {
-      let tmp = [];
-      for (let [tableId, _] of mvTableIdToSingleViewActorList.entries()) {
-        tmp.push({ label: "mvtable " + tableId, tableId: tableId });
-      }
-      tmp.sort(x => x.label);
-      setMviewTableList(tmp);
-    }
-  }, [mvTableIdToSingleViewActorList])
+  // useEffect(() => {
+  //   if (mvTableIdToSingleViewActorList !== null) {
+  //     let tmp = [];
+  //     for (let [tableId, _] of mvTableIdToSingleViewActorList.entries()) {
+  //       tmp.push({ label: "mvtable " + tableId, tableId: tableId });
+  //     }
+  //     tmp.sort(x => x.label);
+  //     setMviewTableList(tmp);
+  //   }
+  // }, [mvTableIdToSingleViewActorList])
 
   // render the full graph
   useEffect(() => {
     if (d3Container.current && showFullGraph) {
       createSvg((g) => {
-        view = createView(g, data, onNodeClick, selectedActor === "Show All" ? null : selectedActor, null);
+        view = createView(g, data, onNodeClick, selectedWorkerNode === "Show All" ? null : selectedWorkerNode, null);
       })
       // assign once.
       mvTableIdToSingleViewActorList || setMvTableIdToSingleViewActorList(view.getMvTableIdToSingleViewActorList());
@@ -169,7 +179,7 @@ export default function StreamingView(props) {
 
       return () => d3.select(d3Container.current).selectAll("*").remove();
     }
-  }, [selectedActor, showFullGraph]);
+  }, [selectedWorkerNode, showFullGraph]);
 
   // locate and render partial graph on mview query
   useEffect(() => {
@@ -186,12 +196,12 @@ export default function StreamingView(props) {
     } else {
       if (d3Container.current) {
         createSvg((g) => {
-          view = createView(g, data, onNodeClick, selectedActor === "Show All" ? null : selectedActor, shownActorIdList);
+          view = createView(g, data, onNodeClick, selectedWorkerNode === "Show All" ? null : selectedWorkerNode, shownActorIdList);
         });
       }
     }
     locateToCurrentMviewActor();
-  }, [filterMode, selectedMvTableId, showFullGraph])
+  }, [selectedWorkerNode, filterMode, selectedMvTableId, showFullGraph])
 
   return (
     <SvgBox>
@@ -211,20 +221,24 @@ export default function StreamingView(props) {
           Select a worker node
         </ToolBoxTitle>
         <FormControl sx={{ m: 1, minWidth: 300 }}>
-          <InputLabel>Actor</InputLabel>
+          <InputLabel>Worker Node</InputLabel>
           <Select
-            value={selectedActor || "Show All"}
-            label="Actor"
-            onChange={onActorSelect}
+            value={selectedWorkerNode || "Show All"}
+            label="Woker Node"
+            onChange={onWorkerNodeSelect}
           >
             <MenuItem value="Show All" key="all">
               Show All
             </MenuItem>
             {actorList.map((x, index) => {
-              let v = `${x.type} ${x.host.host}:${x.host.port}`;
               return (
-                <MenuItem value={x} key={index}>
+                <MenuItem value={x} key={index} sx={{display: "flex", flexDirection: "row", alignItems: "center"}}>
                   {x.type}&nbsp; <span style={{ fontWeight: 700 }}>{x.host.host + ":" + x.host.port}</span>
+                  <div style={{
+                    margin: 5,
+                    height: 10, width: 10, borderRadius: 5,
+                    backgroundColor: computeNodeAddrToSideColor(x.host.host + ":" + x.host.port)}} 
+                  />
                 </MenuItem>
               )
             })}
@@ -245,6 +259,7 @@ export default function StreamingView(props) {
               onChange={onSearchTypeChange}
             >
               <MenuItem value="Actor">Actor</MenuItem>
+              <MenuItem value="Fragment">Fragment</MenuItem>
             </Select>
           </FormControl>
           <Input
@@ -291,8 +306,9 @@ export default function StreamingView(props) {
               />
             </div>
             <Autocomplete
+              isOptionEqualToValue={(option, value) => {return option.tableId === value.tableId}}
               disablePortal
-              options={mviewTableList || []}
+              options={mvList.map(mv => {return {label: mv[1].tableName, tableId: mv[0]}}) || []}
               onChange={onSelectMvChange}
               renderInput={(param) => <TextField {...param} label="Materialized View" />}
             />
