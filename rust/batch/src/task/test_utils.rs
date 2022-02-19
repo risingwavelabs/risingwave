@@ -13,15 +13,16 @@ use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::values_node::ExprTuple;
 use risingwave_pb::plan::{
     exchange_info, ColumnDesc, CreateTableNode, ExchangeInfo, Field as NodeField, InsertNode,
-    PlanFragment, PlanNode, QueryId, SeqScanNode, StageId, TaskId as ProstTaskId,
+    PlanFragment, PlanNode, QueryId, RowSeqScanNode, StageId, TaskId as ProstTaskId,
     TaskSinkId as ProstSinkId, ValuesNode,
 };
 use risingwave_pb::task_service::GetDataResponse;
-use risingwave_storage::bummock::BummockTable;
-use risingwave_storage::Table;
+use risingwave_storage::table::test::TestTable;
 
 use super::*;
 use crate::rpc::service::exchange::ExchangeWriter;
+
+// TODO: rewrite these tests without relying on `PlanFragment`.
 
 fn get_num_sinks(plan: &PlanFragment) -> Result<u32> {
     Ok(match plan.get_exchange_info()?.get_mode()? {
@@ -208,7 +209,6 @@ impl<'a> TableBuilder<'a> {
                     ..CoreDefault::default()
                 })
                 .collect_vec(),
-            v2: false,
             is_materialized_view: false,
             ..Default::default()
         };
@@ -350,9 +350,10 @@ impl<'a> SelectBuilder<'a> {
             .table_manager_ref()
             .get_table(&TableId::default())
             .unwrap();
-        if let Ok(column_table_ref) = downcast_arc::<BummockTable>(table_ref.into_any()) {
-            let column_ids = column_table_ref.get_column_ids();
-            let scan = SeqScanNode {
+
+        if let Ok(column_table_ref) = downcast_arc::<TestTable>(table_ref.into_any()) {
+            let column_ids = column_table_ref.column_ids();
+            let scan = RowSeqScanNode {
                 table_ref_id: None,
                 column_ids,
                 fields: vec![],
@@ -361,7 +362,7 @@ impl<'a> SelectBuilder<'a> {
             self.plan = PlanFragment {
                 root: Some(PlanNode {
                     children: vec![],
-                    node_body: Some(NodeBody::SeqScan(scan)),
+                    node_body: Some(NodeBody::RowSeqScan(scan)),
                     identity: "SeqScanExecutor".to_string(),
                 }),
                 exchange_info: Some(ExchangeInfo {
@@ -371,7 +372,7 @@ impl<'a> SelectBuilder<'a> {
             };
             self
         } else {
-            todo!()
+            unreachable!()
         }
     }
 

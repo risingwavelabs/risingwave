@@ -611,9 +611,9 @@ impl ScalarImpl {
             Ty::Decimal => Self::Decimal({
                 let (mantissa, scale) = de.deserialize_decimal()?;
                 match scale {
-                    -1 => Decimal::NegativeINF,
-                    29 => Decimal::PositiveINF,
-                    30 => Decimal::NaN,
+                    29 => Decimal::NegativeINF,
+                    30 => Decimal::PositiveINF,
+                    31 => Decimal::NaN,
                     _ => Decimal::from_i128_with_scale(mantissa, scale as u32),
                 }
             }),

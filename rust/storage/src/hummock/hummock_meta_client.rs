@@ -9,8 +9,8 @@ use risingwave_pb::hummock::{
 use risingwave_rpc_client::MetaClient;
 
 use crate::hummock::{
-    HummockEpoch, HummockError, HummockResult, HummockSSTableId, HummockVersionId,
-    TracedHummockError,
+    HummockContextId, HummockEpoch, HummockError, HummockResult, HummockSSTableId,
+    HummockVersionId, TracedHummockError,
 };
 use crate::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
 
@@ -28,9 +28,9 @@ impl tokio_retry::Condition<TracedHummockError> for RetryableError {
 #[async_trait]
 pub trait HummockMetaClient: Send + Sync + 'static {
     async fn pin_version(&self) -> HummockResult<(HummockVersionId, HummockVersion)>;
-    async fn unpin_version(&self, pinned_version_id: HummockVersionId) -> HummockResult<()>;
+    async fn unpin_version(&self, _pinned_version_id: HummockVersionId) -> HummockResult<()>;
     async fn pin_snapshot(&self) -> HummockResult<HummockEpoch>;
-    async fn unpin_snapshot(&self, pinned_epoch: HummockEpoch) -> HummockResult<()>;
+    async fn unpin_snapshot(&self, _pinned_epoch: HummockEpoch) -> HummockResult<()>;
     async fn get_new_table_id(&self) -> HummockResult<HummockSSTableId>;
     async fn add_tables(
         &self,
@@ -43,23 +43,28 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         compact_task: CompactTask,
         task_result: bool,
     ) -> HummockResult<()>;
+    async fn commit_epoch(&self, epoch: HummockEpoch) -> HummockResult<()>;
+    async fn abort_epoch(&self, epoch: HummockEpoch) -> HummockResult<()>;
 }
 
 pub struct RPCHummockMetaClient {
     meta_client: MetaClient,
+    context_id: HummockContextId,
     stats: Arc<StateStoreStats>,
 }
 
 impl RPCHummockMetaClient {
+    // TODO use worker node id as context_id
     pub fn new(meta_client: MetaClient) -> RPCHummockMetaClient {
         RPCHummockMetaClient {
             meta_client,
+            context_id: 0,
             stats: DEFAULT_STATE_STORE_STATS.clone(),
         }
     }
 }
 
-// TODO #2720 idempotent retry
+// TODO #93 idempotent retry
 #[async_trait]
 impl HummockMetaClient for RPCHummockMetaClient {
     async fn pin_version(&self) -> HummockResult<(HummockVersionId, HummockVersion)> {
@@ -69,7 +74,9 @@ impl HummockMetaClient for RPCHummockMetaClient {
             .meta_client
             .to_owned()
             .hummock_client
-            .pin_version(PinVersionRequest { context_id: 0 })
+            .pin_version(PinVersionRequest {
+                context_id: self.context_id,
+            })
             .await
             .map_err(HummockError::meta_error)?
             .into_inner();
@@ -84,7 +91,7 @@ impl HummockMetaClient for RPCHummockMetaClient {
             .to_owned()
             .hummock_client
             .unpin_version(UnpinVersionRequest {
-                context_id: 0,
+                context_id: self.context_id,
                 pinned_version_id,
             })
             .await
@@ -100,7 +107,9 @@ impl HummockMetaClient for RPCHummockMetaClient {
             .meta_client
             .to_owned()
             .hummock_client
-            .pin_snapshot(PinSnapshotRequest { context_id: 0 })
+            .pin_snapshot(PinSnapshotRequest {
+                context_id: self.context_id,
+            })
             .await
             .map_err(HummockError::meta_error)?
             .into_inner();
@@ -115,7 +124,7 @@ impl HummockMetaClient for RPCHummockMetaClient {
             .to_owned()
             .hummock_client
             .unpin_snapshot(UnpinSnapshotRequest {
-                context_id: 0,
+                context_id: self.context_id,
                 snapshot: Some(HummockSnapshot {
                     epoch: pinned_epoch,
                 }),
@@ -152,7 +161,7 @@ impl HummockMetaClient for RPCHummockMetaClient {
             .to_owned()
             .hummock_client
             .add_tables(AddTablesRequest {
-                context_id: 0,
+                context_id: self.context_id,
                 tables: sstables,
                 epoch,
             })
@@ -169,7 +178,9 @@ impl HummockMetaClient for RPCHummockMetaClient {
             .meta_client
             .to_owned()
             .hummock_client
-            .get_compaction_tasks(GetCompactionTasksRequest { context_id: 0 })
+            .get_compaction_tasks(GetCompactionTasksRequest {
+                context_id: self.context_id,
+            })
             .await
             .map_err(HummockError::meta_error)?
             .into_inner();
@@ -188,7 +199,7 @@ impl HummockMetaClient for RPCHummockMetaClient {
             .to_owned()
             .hummock_client
             .report_compaction_tasks(ReportCompactionTasksRequest {
-                context_id: 0,
+                context_id: self.context_id,
                 compact_task: Some(compact_task),
                 task_result,
             })
@@ -196,5 +207,13 @@ impl HummockMetaClient for RPCHummockMetaClient {
             .map_err(HummockError::meta_error)?;
         timer.observe_duration();
         Ok(())
+    }
+
+    async fn commit_epoch(&self, _epoch: HummockEpoch) -> HummockResult<()> {
+        unimplemented!()
+    }
+
+    async fn abort_epoch(&self, _epoch: HummockEpoch) -> HummockResult<()> {
+        unimplemented!()
     }
 }

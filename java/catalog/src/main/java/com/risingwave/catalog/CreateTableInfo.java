@@ -21,6 +21,7 @@ public class CreateTableInfo {
   private final boolean source;
   private final String rowFormat;
   private final String rowSchemaLocation;
+  private final ImmutableList<TableCatalog.TableId> dependentTables;
 
   protected CreateTableInfo(
       String tableName,
@@ -30,7 +31,8 @@ public class CreateTableInfo {
       boolean appendOnly,
       boolean source,
       String rowFormat,
-      String rowSchemaLocation) {
+      String rowSchemaLocation,
+      ImmutableList<TableCatalog.TableId> dependentTables) {
     this.name = tableName;
     this.columns = columns;
     this.primaryKeyIndices = primaryKeyIndices;
@@ -39,6 +41,7 @@ public class CreateTableInfo {
     this.source = source;
     this.rowFormat = rowFormat;
     this.rowSchemaLocation = rowSchemaLocation;
+    this.dependentTables = dependentTables;
   }
 
   public String getName() {
@@ -81,6 +84,10 @@ public class CreateTableInfo {
     return rowSchemaLocation;
   }
 
+  public ImmutableList<TableCatalog.TableId> getDependentTables() {
+    return dependentTables;
+  }
+
   /** Builder class for CreateTableInfo. */
   public static class Builder {
     protected final String tableName;
@@ -92,6 +99,7 @@ public class CreateTableInfo {
     protected boolean source = false;
     protected String rowFormat = "";
     protected String rowSchemaLocation = "";
+    protected List<TableCatalog.TableId> dependentTables = new ArrayList<>();
 
     protected Builder(String tableName) {
       this.tableName = requireNonNull(tableName, "table name can't be null!");
@@ -134,6 +142,10 @@ public class CreateTableInfo {
       this.rowFormat = rowFormat;
     }
 
+    public void setDependentTables(List<TableCatalog.TableId> dependentTables) {
+      this.dependentTables = dependentTables;
+    }
+
     public CreateTableInfo build() {
       return new CreateTableInfo(
           tableName,
@@ -143,7 +155,8 @@ public class CreateTableInfo {
           appendOnly,
           source,
           rowFormat,
-          rowSchemaLocation);
+          rowSchemaLocation,
+          ImmutableList.copyOf(dependentTables));
     }
   }
 }

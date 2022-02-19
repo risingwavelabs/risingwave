@@ -1,11 +1,8 @@
-use prost::Message;
 use risingwave_common::error::Result;
-use risingwave_pb::meta::{Catalog as ProstCatalog, Database, Schema, Table};
+use risingwave_pb::meta::{Database, Schema, Table};
 use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
 
-use crate::manager::Epoch;
 use crate::model::MetadataModel;
-use crate::storage::MetaStoreRef;
 
 /// Column family name for table.
 const TABLE_CF_NAME: &str = "cf/table";
@@ -13,8 +10,6 @@ const TABLE_CF_NAME: &str = "cf/table";
 const SCHEMA_CF_NAME: &str = "cf/schema";
 /// Column family name for database.
 const DATABASE_CF_NAME: &str = "cf/database";
-
-pub struct Catalog(ProstCatalog);
 
 macro_rules! impl_model_for_catalog {
     ($name:ident, $cf:ident, $key_ty:ty, $key_fn:ident) => {
@@ -37,10 +32,6 @@ macro_rules! impl_model_for_catalog {
             fn key(&self) -> Result<Self::KeyType> {
                 Ok(self.$key_fn()?.clone())
             }
-
-            fn version(&self) -> Epoch {
-                Epoch::from(self.version)
-            }
         }
     };
 }
@@ -54,40 +45,6 @@ impl_model_for_catalog!(
 impl_model_for_catalog!(Schema, SCHEMA_CF_NAME, SchemaRefId, get_schema_ref_id);
 impl_model_for_catalog!(Table, TABLE_CF_NAME, TableRefId, get_table_ref_id);
 
-impl Catalog {
-    pub fn inner(&self) -> ProstCatalog {
-        self.0.clone()
-    }
-
-    pub async fn get(store: &MetaStoreRef) -> Result<Self> {
-        let catalog_pb = store
-            .list_batch_cf(vec![DATABASE_CF_NAME, SCHEMA_CF_NAME, TABLE_CF_NAME])
-            .await?;
-        assert_eq!(catalog_pb.len(), 3);
-
-        Ok(Catalog(ProstCatalog {
-            databases: catalog_pb
-                .get(0)
-                .unwrap()
-                .iter()
-                .map(|d| Database::decode(d.as_slice()).unwrap())
-                .collect::<Vec<_>>(),
-            schemas: catalog_pb
-                .get(1)
-                .unwrap()
-                .iter()
-                .map(|d| Schema::decode(d.as_slice()).unwrap())
-                .collect::<Vec<_>>(),
-            tables: catalog_pb
-                .get(2)
-                .unwrap()
-                .iter()
-                .map(|d| Table::decode(d.as_slice()).unwrap())
-                .collect::<Vec<_>>(),
-        }))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use futures::future;
@@ -98,10 +55,10 @@ mod tests {
     #[tokio::test]
     async fn test_database() -> Result<()> {
         let store = &MetaSrvEnv::for_test().await.meta_store_ref();
-        let databases = Database::list(store).await?;
+        let databases = Database::list(&**store).await?;
         assert!(databases.is_empty());
         assert!(
-            Database::select(store, &DatabaseRefId { database_id: 0 }, Epoch::from(0))
+            Database::select(&**store, &DatabaseRefId { database_id: 0 })
                 .await
                 .unwrap()
                 .is_none()
@@ -113,7 +70,7 @@ mod tests {
                 database_name: format!("database_{}", i),
                 version: i as u64,
             }
-            .insert(store)
+            .insert(&**store)
             .await
         }))
         .await
@@ -121,11 +78,10 @@ mod tests {
         .collect::<Result<Vec<_>>>()?;
         for i in 0..100 {
             let database = Database::select(
-                store,
+                &**store,
                 &DatabaseRefId {
                     database_id: i as i32,
                 },
-                Epoch::from(i as u64),
             )
             .await?
             .unwrap();
@@ -144,18 +100,20 @@ mod tests {
             database_name: "database_0".to_string(),
             version: 101,
         }
-        .insert(store)
+        .insert(&**store)
         .await?;
 
-        let databases = Database::list(store).await?;
+        let databases = Database::list(&**store).await?;
         assert_eq!(databases.len(), 100);
 
         for i in 0..100 {
-            assert!(Database::delete(store, &DatabaseRefId { database_id: i })
-                .await
-                .is_ok());
+            assert!(
+                Database::delete(&**store, &DatabaseRefId { database_id: i })
+                    .await
+                    .is_ok()
+            );
         }
-        let databases = Database::list(store).await?;
+        let databases = Database::list(&**store).await?;
         assert!(databases.is_empty());
 
         Ok(())

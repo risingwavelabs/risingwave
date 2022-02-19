@@ -18,8 +18,9 @@ impl Task for ConfigureGrpcNodeTask {
         let address = format!("127.0.0.1:{}", self.port);
 
         if self.user_managed {
-            ctx.pb
-                .set_message("waiting for user-managed service online... (you should start it!)");
+            ctx.pb.set_message(
+                "waiting for user-managed service online... (see `risedev.log` for cli args)",
+            );
             ctx.wait_tcp_user(&address)?;
         } else {
             ctx.pb.set_message("waiting for online...");

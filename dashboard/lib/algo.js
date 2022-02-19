@@ -5,17 +5,18 @@ import { newMatrix } from "./util";
  * by calling the step function.
  * Every node will be visted only once.
  * @param {{nextNodes: []}} root The root node of the tree
- * @param {(node: any) => void} step callback when a node is visited.
+ * @param {(node: any) => boolean} step callback when a node is visited.
+ * return true if you want to stop to traverse its next nodes.
  */
 export function treeBfs(root, step) {
   let bfsList = [root];
   while (bfsList.length !== 0) {
     let c = bfsList.shift();
 
-    step(c);
-
-    for (let nextNode of c.nextNodes) {
-      bfsList.push(nextNode);
+    if (!step(c)) {
+      for (let nextNode of c.nextNodes) {
+        bfsList.push(nextNode);
+      }
     }
   }
 }
@@ -26,20 +27,23 @@ export function treeBfs(root, step) {
  * operation by calling the step function.
  * Every node will be visted only once.
  * @param {{nextNodes: []}} root A random node in the graph
- * @param {(node: any) => void} step callback when a node is visited
+ * @param {(node: any) => boolean} step callback when a node is visited.
+ * @param {string} [neighborListKey="nextNodes"] 
+ * return true if you want to stop traverse its next nodes
  */
-export function graphBfs(root, step) {
+export function graphBfs(root, step, neighborListKey) {
+  let key = neighborListKey || "nextNodes";
   let visitedNodes = new Set();
   let bfsList = [root];
   while (bfsList.length !== 0) {
     let c = bfsList.shift();
 
-    step(c);
     visitedNodes.add(c);
-
-    for (let nextNode of c.nextNodes) {
-      if (!visitedNodes.has(nextNode)) {
-        bfsList.push(nextNode);
+    if (!step(c)) {
+      for (let nextNode of c[key]) {
+        if (!visitedNodes.has(nextNode)) {
+          bfsList.push(nextNode);
+        }
       }
     }
   }

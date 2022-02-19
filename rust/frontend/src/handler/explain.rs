@@ -33,7 +33,7 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn test_handle_explain() {
-        let meta = risingwave_meta::test_utils::LocalMeta::start_in_tempdir().await;
+        let meta = risingwave_meta::test_utils::LocalMeta::start().await;
         let frontend = crate::test_utils::LocalFrontend::new().await;
 
         let sql = "values (11, 22), (33+(1+2), 44);";
@@ -52,7 +52,7 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn test_handle_explain_scan() {
-        let meta = risingwave_meta::test_utils::LocalMeta::start_in_tempdir().await;
+        let meta = risingwave_meta::test_utils::LocalMeta::start().await;
         let frontend = crate::test_utils::LocalFrontend::new().await;
 
         let sql_scan = "explain select * from t";
@@ -79,7 +79,7 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn test_handle_explain_insert() {
-        let meta = risingwave_meta::test_utils::LocalMeta::start_in_tempdir().await;
+        let meta = risingwave_meta::test_utils::LocalMeta::start().await;
         let frontend = crate::test_utils::LocalFrontend::new().await;
 
         frontend

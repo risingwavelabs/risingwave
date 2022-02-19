@@ -4,30 +4,24 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_pb::hummock::{
-    HummockContextPinnedSnapshot, HummockContextPinnedVersion, HummockSnapshot, HummockVersion,
-    KeyRange, SstableInfo,
+    HummockContextPinnedSnapshot, HummockContextPinnedVersion, HummockSnapshot, SstableInfo,
 };
-use risingwave_storage::hummock::key::key_with_epoch;
-use risingwave_storage::hummock::value::HummockValue;
-use risingwave_storage::hummock::{
-    HummockEpoch, HummockSSTableId, SSTableBuilder, SSTableBuilderOptions, FIRST_VERSION_ID,
-    INVALID_EPOCH,
-};
+use risingwave_storage::hummock::{FIRST_VERSION_ID, INVALID_EPOCH};
 
+use crate::hummock::test_utils::*;
 use crate::hummock::HummockManager;
 use crate::manager::MetaSrvEnv;
 use crate::model::MetadataModel;
 
 #[tokio::test]
 async fn test_hummock_pin_unpin() -> Result<()> {
-    let sled_root = tempfile::tempdir().unwrap();
-    let env = MetaSrvEnv::for_test_with_sled(sled_root).await;
+    let env = MetaSrvEnv::for_test().await;
     let hummock_manager = HummockManager::new(env.clone()).await?;
     let context_id = 0;
     let version_id = FIRST_VERSION_ID;
     let epoch = INVALID_EPOCH;
 
-    assert!(HummockContextPinnedVersion::list(&env.meta_store_ref())
+    assert!(HummockContextPinnedVersion::list(&*env.meta_store_ref())
         .await?
         .is_empty());
     for _ in 0..2 {
@@ -38,7 +32,7 @@ async fn test_hummock_pin_unpin() -> Result<()> {
         assert_eq!(0, hummock_version.levels[0].table_ids.len());
         assert_eq!(0, hummock_version.levels[1].table_ids.len());
 
-        let pinned_versions = HummockContextPinnedVersion::list(&env.meta_store_ref()).await?;
+        let pinned_versions = HummockContextPinnedVersion::list(&*env.meta_store_ref()).await?;
         assert_eq!(pinned_versions.len(), 1);
         assert_eq!(pinned_versions[0].context_id, context_id);
         assert_eq!(pinned_versions[0].version_id.len(), 1);
@@ -51,18 +45,18 @@ async fn test_hummock_pin_unpin() -> Result<()> {
             .unpin_version(context_id, version_id)
             .await
             .unwrap();
-        assert!(HummockContextPinnedVersion::list(&env.meta_store_ref())
+        assert!(HummockContextPinnedVersion::list(&*env.meta_store_ref())
             .await?
             .is_empty());
     }
 
-    assert!(HummockContextPinnedSnapshot::list(&env.meta_store_ref())
+    assert!(HummockContextPinnedSnapshot::list(&*env.meta_store_ref())
         .await?
         .is_empty());
     for _ in 0..2 {
         let pin_result = hummock_manager.pin_snapshot(context_id).await.unwrap();
         assert_eq!(pin_result.epoch, epoch);
-        let pinned_snapshots = HummockContextPinnedSnapshot::list(&env.meta_store_ref()).await?;
+        let pinned_snapshots = HummockContextPinnedSnapshot::list(&*env.meta_store_ref()).await?;
         assert_eq!(pinned_snapshots.len(), 1);
         assert_eq!(pinned_snapshots[0].context_id, context_id);
         assert_eq!(pinned_snapshots[0].snapshot_id.len(), 1);
@@ -74,7 +68,7 @@ async fn test_hummock_pin_unpin() -> Result<()> {
             .unpin_snapshot(context_id, HummockSnapshot { epoch })
             .await
             .unwrap();
-        assert!(HummockContextPinnedSnapshot::list(&env.meta_store_ref())
+        assert!(HummockContextPinnedSnapshot::list(&*env.meta_store_ref())
             .await?
             .is_empty());
     }
@@ -84,8 +78,7 @@ async fn test_hummock_pin_unpin() -> Result<()> {
 
 #[tokio::test]
 async fn test_hummock_get_compact_task() -> Result<()> {
-    let sled_root = tempfile::tempdir().unwrap();
-    let env = MetaSrvEnv::for_test_with_sled(sled_root).await;
+    let env = MetaSrvEnv::for_test().await;
     let hummock_manager = HummockManager::new(env.clone()).await?;
     let context_id = 0;
 
@@ -119,70 +112,9 @@ async fn test_hummock_get_compact_task() -> Result<()> {
     Ok(())
 }
 
-/// Generate keys like `001_key_test_00002` with timestamp `epoch`.
-fn iterator_test_key_of_epoch(table: u64, idx: usize, ts: HummockEpoch) -> Vec<u8> {
-    // key format: {prefix_index}_version
-    key_with_epoch(
-        format!("{:03}_key_test_{:05}", table, idx)
-            .as_bytes()
-            .to_vec(),
-        ts,
-    )
-}
-
-fn get_sorted_sstable_ids(sstables: &[SstableInfo]) -> Vec<HummockSSTableId> {
-    sstables.iter().map(|table| table.id).sorted().collect_vec()
-}
-
-fn get_sorted_committed_sstable_ids(hummock_version: HummockVersion) -> Vec<HummockSSTableId> {
-    hummock_version
-        .levels
-        .iter()
-        .flat_map(|level| level.table_ids.clone())
-        .sorted()
-        .collect_vec()
-}
-
-fn generate_test_tables(epoch: u64, table_id: &mut u64) -> Vec<SstableInfo> {
-    // Tables to add
-    let opt = SSTableBuilderOptions {
-        bloom_false_positive: 0.1,
-        block_size: 4096,
-        table_capacity: 0,
-        checksum_algo: risingwave_pb::hummock::checksum::Algorithm::XxHash64,
-    };
-
-    let mut tables = vec![];
-    for i in 0..2 {
-        let mut b = SSTableBuilder::new(opt.clone());
-        let kv_pairs = vec![
-            (i, HummockValue::Put(b"test".to_vec())),
-            (i * 10, HummockValue::Put(b"test".to_vec())),
-        ];
-        for kv in kv_pairs {
-            b.add(
-                &iterator_test_key_of_epoch(*table_id, kv.0, epoch),
-                kv.1.as_slice(),
-            );
-        }
-        let (_data, meta) = b.finish();
-        tables.push(SstableInfo {
-            id: *table_id,
-            key_range: Some(KeyRange {
-                left: meta.smallest_key,
-                right: meta.largest_key,
-                inf: false,
-            }),
-        });
-        (*table_id) += 1;
-    }
-    tables
-}
-
 #[tokio::test]
 async fn test_hummock_table() -> Result<()> {
-    let sled_root = tempfile::tempdir().unwrap();
-    let env = MetaSrvEnv::for_test_with_sled(sled_root).await;
+    let env = MetaSrvEnv::for_test().await;
     let hummock_manager = HummockManager::new(env.clone()).await?;
     let context_id = 0;
 
@@ -199,7 +131,7 @@ async fn test_hummock_table() -> Result<()> {
         .unwrap();
 
     // Confirm tables are successfully added
-    let fetched_tables = SstableInfo::list(&env.meta_store_ref())
+    let fetched_tables = SstableInfo::list(&*env.meta_store_ref())
         .await?
         .into_iter()
         .sorted_by_key(|t| t.id)
@@ -229,8 +161,7 @@ async fn test_hummock_table() -> Result<()> {
 
 #[tokio::test]
 async fn test_hummock_transaction() -> Result<()> {
-    let sled_root = tempfile::tempdir().unwrap();
-    let env = MetaSrvEnv::for_test_with_sled(sled_root).await;
+    let env = MetaSrvEnv::for_test().await;
     let hummock_manager = HummockManager::new(env.clone()).await?;
     let context_id = 0;
     let mut table_id = 1;
@@ -440,20 +371,19 @@ async fn test_hummock_transaction() -> Result<()> {
 
 #[tokio::test]
 async fn test_release_context_resource() -> Result<()> {
-    let sled_root = tempfile::tempdir().unwrap();
-    let env = MetaSrvEnv::for_test_with_sled(sled_root).await;
+    let env = MetaSrvEnv::for_test().await;
     let hummock_manager = Arc::new(HummockManager::new(env.clone()).await?);
     let context_id_1 = 1;
     let context_id_2 = 2;
     assert_eq!(
-        HummockContextPinnedVersion::list(&env.meta_store_ref())
+        HummockContextPinnedVersion::list(&*env.meta_store_ref())
             .await
             .unwrap()
             .len(),
         0
     );
     assert_eq!(
-        HummockContextPinnedSnapshot::list(&env.meta_store_ref())
+        HummockContextPinnedSnapshot::list(&*env.meta_store_ref())
             .await
             .unwrap()
             .len(),
@@ -464,14 +394,14 @@ async fn test_release_context_resource() -> Result<()> {
     hummock_manager.pin_snapshot(context_id_1).await.unwrap();
     hummock_manager.pin_snapshot(context_id_2).await.unwrap();
     assert_eq!(
-        HummockContextPinnedVersion::list(&env.meta_store_ref())
+        HummockContextPinnedVersion::list(&*env.meta_store_ref())
             .await
             .unwrap()
             .len(),
         2
     );
     assert_eq!(
-        HummockContextPinnedSnapshot::list(&env.meta_store_ref())
+        HummockContextPinnedSnapshot::list(&*env.meta_store_ref())
             .await
             .unwrap()
             .len(),
@@ -481,12 +411,12 @@ async fn test_release_context_resource() -> Result<()> {
         .release_context_resource(context_id_1)
         .await
         .unwrap();
-    let pinned_versions = HummockContextPinnedVersion::list(&env.meta_store_ref())
+    let pinned_versions = HummockContextPinnedVersion::list(&*env.meta_store_ref())
         .await
         .unwrap();
     assert_eq!(pinned_versions.len(), 1);
     assert_eq!(pinned_versions[0].context_id, context_id_2);
-    let pinned_snapshots = HummockContextPinnedSnapshot::list(&env.meta_store_ref())
+    let pinned_snapshots = HummockContextPinnedSnapshot::list(&*env.meta_store_ref())
         .await
         .unwrap();
     assert_eq!(pinned_snapshots.len(), 1);
@@ -501,14 +431,14 @@ async fn test_release_context_resource() -> Result<()> {
         .await
         .unwrap();
     assert_eq!(
-        HummockContextPinnedVersion::list(&env.meta_store_ref())
+        HummockContextPinnedVersion::list(&*env.meta_store_ref())
             .await
             .unwrap()
             .len(),
         0
     );
     assert_eq!(
-        HummockContextPinnedSnapshot::list(&env.meta_store_ref())
+        HummockContextPinnedSnapshot::list(&*env.meta_store_ref())
             .await
             .unwrap()
             .len(),

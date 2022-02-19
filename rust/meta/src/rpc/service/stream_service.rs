@@ -10,28 +10,35 @@ use tonic::{Request, Response, Status};
 use crate::cluster::StoredClusterManager;
 use crate::manager::{EpochGeneratorRef, IdGeneratorManagerRef, MetaSrvEnv};
 use crate::model::TableFragments;
+use crate::storage::MetaStore;
 use crate::stream::{FragmentManagerRef, StreamFragmenter, StreamManagerRef};
 
 pub type TonicResponse<T> = Result<Response<T>, Status>;
 
 #[derive(Clone)]
-pub struct StreamServiceImpl {
-    sm: StreamManagerRef,
+pub struct StreamServiceImpl<S>
+where
+    S: MetaStore,
+{
+    sm: StreamManagerRef<S>,
 
-    id_gen_manager_ref: IdGeneratorManagerRef,
-    fragment_manager_ref: FragmentManagerRef,
-    cluster_manager: Arc<StoredClusterManager>,
+    id_gen_manager_ref: IdGeneratorManagerRef<S>,
+    fragment_manager_ref: FragmentManagerRef<S>,
+    cluster_manager: Arc<StoredClusterManager<S>>,
 
     #[allow(dead_code)]
     epoch_generator: EpochGeneratorRef,
 }
 
-impl StreamServiceImpl {
+impl<S> StreamServiceImpl<S>
+where
+    S: MetaStore,
+{
     pub fn new(
-        sm: StreamManagerRef,
-        fragment_manager_ref: FragmentManagerRef,
-        cluster_manager: Arc<StoredClusterManager>,
-        env: MetaSrvEnv,
+        sm: StreamManagerRef<S>,
+        fragment_manager_ref: FragmentManagerRef<S>,
+        cluster_manager: Arc<StoredClusterManager<S>>,
+        env: MetaSrvEnv<S>,
     ) -> Self {
         StreamServiceImpl {
             sm,
@@ -44,16 +51,22 @@ impl StreamServiceImpl {
 }
 
 #[async_trait::async_trait]
-impl StreamManagerService for StreamServiceImpl {
+impl<S> StreamManagerService for StreamServiceImpl<S>
+where
+    S: MetaStore,
+{
     #[cfg(not(tarpaulin_include))]
     async fn create_materialized_view(
         &self,
         request: Request<CreateMaterializedViewRequest>,
     ) -> TonicResponse<CreateMaterializedViewResponse> {
+        use crate::stream::CreateMaterializedViewContext;
+
         let req = request.into_inner();
         let worker_count = self
             .cluster_manager
             .get_worker_count(WorkerType::ComputeNode);
+        let mut ctx = CreateMaterializedViewContext::default();
 
         let mut fragmenter = StreamFragmenter::new(
             self.id_gen_manager_ref.clone(),
@@ -61,12 +74,12 @@ impl StreamManagerService for StreamServiceImpl {
             worker_count as u32,
         );
         let graph = fragmenter
-            .generate_graph(req.get_stream_node().map_err(tonic_err)?)
+            .generate_graph(req.get_stream_node().map_err(tonic_err)?, &mut ctx)
             .await
             .map_err(|e| e.to_grpc_status())?;
 
         let table_fragments = TableFragments::new(TableId::from(&req.table_ref_id), graph);
-        match self.sm.create_materialized_view(table_fragments).await {
+        match self.sm.create_materialized_view(table_fragments, ctx).await {
             Ok(()) => Ok(Response::new(CreateMaterializedViewResponse {
                 status: None,
             })),
