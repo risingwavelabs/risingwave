@@ -7,7 +7,6 @@ import com.risingwave.proto.hummock.HummockSnapshot;
 import com.risingwave.proto.hummock.PinSnapshotRequest;
 import com.risingwave.proto.hummock.UnpinSnapshotRequest;
 import com.risingwave.rpc.MetaClient;
-import java.util.Collections;
 import java.util.TreeMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -30,7 +29,7 @@ public class HummockSnapshotManagerImpl implements HummockSnapshotManager {
   @Inject
   public HummockSnapshotManagerImpl(MetaClient metaClient) {
     this.metaClient = metaClient;
-    this.referenceCounts = new TreeMap<>(Collections.reverseOrder());
+    this.referenceCounts = new TreeMap<>(new EpochComparator().reversed());
     // TODO: use correct worker_node_id
     this.workerNodeId = 0;
     // Start a background worker to fetch the latest snapshot from meta periodically.
