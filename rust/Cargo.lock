@@ -3971,6 +3971,7 @@ dependencies = [
  "risingwave_common",
  "serde",
  "serde_json",
+ "walkdir",
 ]
 
 [[package]]
