@@ -372,7 +372,7 @@ impl StreamManagerCore {
                 }
                 let schema = Schema::new(fields);
 
-                Ok(Box::new(StreamSourceExecutor::new(
+                Ok(Box::new(SourceExecutor::new(
                     source_id,
                     source_desc,
                     column_ids,

@@ -31,7 +31,7 @@ use risingwave_pb::data::{
     StreamMessage as ProstStreamMessage, UpdateMutation,
 };
 use smallvec::SmallVec;
-pub use stream_source::*;
+pub use source::*;
 pub use top_n::*;
 pub use top_n_appendonly::*;
 use tracing::trace_span;
@@ -54,7 +54,7 @@ mod merge;
 pub mod monitor;
 mod mview;
 mod project;
-mod stream_source;
+mod source;
 mod top_n;
 mod top_n_appendonly;
 
