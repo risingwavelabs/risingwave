@@ -1,8 +1,8 @@
-mod all_or_none;
+mod join_entry_state;
 use std::ops::{Deref, DerefMut, Index};
 use std::sync::Arc;
 
-pub use all_or_none::JoinEntryState;
+pub use join_entry_state::JoinEntryState;
 use itertools::Itertools;
 use risingwave_common::array::Row;
 use risingwave_common::collection::evictable::EvictableHashMap;
