@@ -6,12 +6,13 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
+use risingwave_pb::stream_plan;
 
 use super::{
     agg_executor_next, create_streaming_agg_state, generate_agg_schema, AggCall, AggExecutor,
     Barrier, Executor, Message, PkIndices, PkIndicesRef, StreamingAggStateImpl,
 };
-
+use crate::task::{build_agg_call_from_prost, ExecutorParams};
 #[derive(Debug)]
 pub struct LocalSimpleAggExecutor {
     /// Schema of the executor.
@@ -44,6 +45,21 @@ pub struct LocalSimpleAggExecutor {
 }
 
 impl LocalSimpleAggExecutor {
+    pub fn create(mut params: ExecutorParams, node: &stream_plan::SimpleAggNode) -> Result<Self> {
+        let agg_calls: Vec<AggCall> = node
+            .get_agg_calls()
+            .iter()
+            .map(build_agg_call_from_prost)
+            .try_collect()?;
+        Ok(Self::new(
+            params.input.remove(0),
+            agg_calls,
+            params.pk_indices,
+            params.executor_id,
+            params.op_info,
+        )?)
+    }
+
     pub fn new(
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,

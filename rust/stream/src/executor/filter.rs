@@ -5,9 +5,11 @@ use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
-use risingwave_common::expr::BoxedExpression;
+use risingwave_common::expr::{build_from_prost, BoxedExpression};
+use risingwave_pb::stream_plan;
 
 use super::{Executor, Message, PkIndicesRef, SimpleExecutor, StreamChunk};
+use crate::task::ExecutorParams;
 
 /// `FilterExecutor` filters data with the `expr`. The `expr` takes a chunk of data,
 /// and returns a boolean array on whether each item should be retained. And then,
@@ -28,6 +30,16 @@ pub struct FilterExecutor {
 }
 
 impl FilterExecutor {
+    pub fn create(mut params: ExecutorParams, node: &stream_plan::FilterNode) -> Result<Self> {
+        let search_condition = build_from_prost(node.get_search_condition()?)?;
+        Ok(FilterExecutor::new(
+            params.input.remove(0),
+            search_condition,
+            params.executor_id,
+            params.op_info,
+        ))
+    }
+
     pub fn new(
         input: Box<dyn Executor>,
         expr: BoxedExpression,

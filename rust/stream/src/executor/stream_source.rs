@@ -9,13 +9,15 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{
     ArrayBuilder, ArrayImpl, I64ArrayBuilder, InternalError, RwError, StreamChunk,
 };
-use risingwave_common::catalog::{Schema, TableId};
+use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::Result;
+use risingwave_pb::stream_plan;
 use risingwave_source::*;
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
 use crate::executor::monitor::DEFAULT_COMPUTE_STATS;
 use crate::executor::{Executor, Message, PkIndices, PkIndicesRef};
+use crate::task::ExecutorParams;
 
 /// `StreamSourceExecutor` is a streaming source from external systems such as Kafka
 pub struct StreamSourceExecutor {
@@ -43,6 +45,40 @@ pub struct StreamSourceExecutor {
 }
 
 impl StreamSourceExecutor {
+    pub fn create(params: ExecutorParams, node: &stream_plan::SourceNode) -> Result<Self> {
+        let source_id = TableId::from(&node.table_ref_id);
+        let source_desc = params.env.source_manager().get_source(&source_id)?;
+
+        let (_sender, barrier_receiver) = unbounded_channel();
+
+        let column_ids = node.get_column_ids().to_vec();
+        let mut fields = Vec::with_capacity(column_ids.len());
+        for &column_id in &column_ids {
+            let column_desc = source_desc
+                .columns
+                .iter()
+                .find(|c| c.column_id == column_id)
+                .unwrap();
+            fields.push(Field::with_name(
+                column_desc.data_type,
+                column_desc.name.clone(),
+            ));
+        }
+        let schema = Schema::new(fields);
+
+        Ok(Self::new(
+            source_id,
+            source_desc,
+            column_ids,
+            schema,
+            params.pk_indices,
+            barrier_receiver,
+            params.executor_id,
+            params.operator_id,
+            params.op_info,
+        )?)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         source_id: TableId,

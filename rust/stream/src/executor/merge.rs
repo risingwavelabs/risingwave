@@ -8,9 +8,11 @@ use async_trait::async_trait;
 use futures::channel::mpsc::{Receiver, Sender};
 use futures::future::select_all;
 use futures::{SinkExt, StreamExt};
+use opentelemetry::trace::FutureExt;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::ToRwResult;
+use risingwave_pb::stream_plan;
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::{GetStreamRequest, GetStreamResponse};
 use tonic::transport::{Channel, Endpoint};
@@ -19,7 +21,7 @@ use tracing_futures::Instrument;
 
 use super::{Barrier, Executor, Message, PkIndicesRef, Result};
 use crate::executor::{Mutation, PkIndices};
-use crate::task::UpDownActorIds;
+use crate::task::{ExecutorParams, StreamManagerCore, UpDownActorIds};
 
 /// Receive data from `gRPC` and forwards to `MergerExecutor`/`ReceiverExecutor`
 pub struct RemoteInput {
@@ -121,6 +123,25 @@ impl std::fmt::Debug for ReceiverExecutor {
 }
 
 impl ReceiverExecutor {
+    pub fn create(
+        params: ExecutorParams,
+        node: &stream_plan::MergeNode,
+        stream_manager_core: &mut StreamManagerCore,
+        actor_id: u32,
+        upstreams: &[u32],
+    ) -> Result<Self> {
+        let schema = Schema::try_from(node.get_input_column_descs())?;
+        let mut rxs = stream_manager_core
+            .get_receive_message(actor_id, upstreams)
+            .unwrap();
+        Ok(Self::new(
+            schema,
+            params.pk_indices,
+            rxs.remove(0),
+            params.op_info,
+        ))
+    }
+
     pub fn new(
         schema: Schema,
         pk_indices: PkIndices,
@@ -208,6 +229,26 @@ impl std::fmt::Debug for MergeExecutor {
 }
 
 impl MergeExecutor {
+    pub fn create(
+        params: ExecutorParams,
+        node: &stream_plan::MergeNode,
+        stream_manager_core: &mut StreamManagerCore,
+        actor_id: u32,
+        upstreams: &[u32],
+    ) -> Result<Self> {
+        let schema = Schema::try_from(node.get_input_column_descs())?;
+        let rxs = stream_manager_core
+            .get_receive_message(actor_id, upstreams)
+            .unwrap();
+        Ok(Self::new(
+            schema,
+            params.pk_indices,
+            actor_id,
+            rxs,
+            params.op_info,
+        ))
+    }
+
     pub fn new(
         schema: Schema,
         pk_indices: PkIndices,

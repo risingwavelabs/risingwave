@@ -5,15 +5,12 @@ use std::sync::{Arc, Mutex};
 
 use futures::channel::mpsc::{channel, Receiver};
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, Schema, TableId};
+use risingwave_common::catalog::TableId;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::expr::{build_from_prost as build_expr_from_prost, AggKind, RowExpression};
+use risingwave_common::expr::{build_from_prost, AggKind, RowExpression};
 use risingwave_common::try_match_expand;
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::is_local_address;
-use risingwave_common::util::sort_util::{
-    build_from_prost as build_order_type_from_prost, fetch_orders,
-};
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::plan::JoinType as JoinTypeProto;
 use risingwave_pb::stream_plan::stream_node::Node;
@@ -59,6 +56,15 @@ pub struct StreamManagerCore {
 /// `StreamManager` manages all stream executors in this project.
 pub struct StreamManager {
     core: Mutex<StreamManagerCore>,
+}
+
+pub struct ExecutorParams {
+    pub env: StreamTaskEnv,
+    pub pk_indices: PkIndices,
+    pub executor_id: u64,
+    pub operator_id: u64,
+    pub op_info: String,
+    pub input: Vec<Box<dyn Executor>>,
 }
 
 impl StreamManager {
@@ -183,7 +189,7 @@ impl StreamManager {
     }
 }
 
-fn build_agg_call_from_prost(agg_call_proto: &expr::AggCall) -> Result<AggCall> {
+pub fn build_agg_call_from_prost(agg_call_proto: &expr::AggCall) -> Result<AggCall> {
     let args = {
         let args = &agg_call_proto.get_args()[..];
         match args {
@@ -317,7 +323,7 @@ impl StreamManagerCore {
         let op_info = node.get_identity().clone();
         // Create the input executor before creating itself
         // The node with no input must be a `MergeNode`
-        let mut input: Vec<Box<dyn Executor>> = node
+        let input: Vec<Box<dyn Executor>> = node
             .input
             .iter()
             .enumerate()
@@ -333,9 +339,6 @@ impl StreamManagerCore {
             })
             .try_collect()?;
 
-        let table_manager = env.table_manager();
-        let source_manager = env.source_manager();
-
         let pk_indices = node
             .get_pk_indices()
             .iter()
@@ -347,311 +350,97 @@ impl StreamManagerCore {
         let executor_id = ((actor_id as u64) << 32) + node.get_operator_id();
         let operator_id = ((fragment_id as u64) << 32) + node.get_operator_id();
 
-        let executor: Result<Box<dyn Executor>> = match node.get_node()? {
-            Node::SourceNode(node) => {
-                let source_id = TableId::from(&node.table_ref_id);
-                let source_desc = source_manager.get_source(&source_id)?;
+        let executor_params = ExecutorParams {
+            env: env.clone(),
+            pk_indices: pk_indices.clone(),
+            executor_id: executor_id,
+            operator_id: operator_id,
+            op_info: op_info.clone(),
+            input: input,
+        };
 
-                let (sender, barrier_receiver) = unbounded_channel();
-                self.context
-                    .lock_barrier_manager()
-                    .register_sender(actor_id, sender);
-
-                let column_ids = node.get_column_ids().to_vec();
-                let mut fields = Vec::with_capacity(column_ids.len());
-                for &column_id in &column_ids {
-                    let column_desc = source_desc
-                        .columns
-                        .iter()
-                        .find(|c| c.column_id == column_id)
-                        .unwrap();
-                    fields.push(Field::with_name(
-                        column_desc.data_type,
-                        column_desc.name.clone(),
-                    ));
+        let executor: Result<Box<dyn Executor>> =
+            match node.get_node()? {
+                Node::SourceNode(node) => {
+                    let (sender, _barrier_receiver) = unbounded_channel();
+                    self.context
+                        .lock_barrier_manager()
+                        .register_sender(actor_id, sender);
+                    Ok(Box::new(StreamSourceExecutor::create(
+                        executor_params,
+                        &node,
+                    )?))
                 }
-                let schema = Schema::new(fields);
-
-                Ok(Box::new(StreamSourceExecutor::new(
-                    source_id,
-                    source_desc,
-                    column_ids,
-                    schema,
-                    pk_indices,
-                    barrier_receiver,
-                    executor_id,
-                    operator_id,
-                    op_info,
-                )?))
-            }
-            Node::ProjectNode(project_node) => {
-                let project_exprs = project_node
-                    .get_select_list()
-                    .iter()
-                    .map(build_expr_from_prost)
-                    .collect::<Result<Vec<_>>>()?;
-                Ok(Box::new(ProjectExecutor::new(
-                    input.remove(0),
-                    pk_indices,
-                    project_exprs,
-                    executor_id,
-                    op_info,
-                )))
-            }
-            Node::FilterNode(filter_node) => {
-                let search_condition = build_expr_from_prost(filter_node.get_search_condition()?)?;
-                Ok(Box::new(FilterExecutor::new(
-                    input.remove(0),
-                    search_condition,
-                    executor_id,
-                    op_info,
-                )))
-            }
-            Node::LocalSimpleAggNode(aggr_node) => {
-                let agg_calls: Vec<AggCall> = aggr_node
-                    .get_agg_calls()
-                    .iter()
-                    .map(build_agg_call_from_prost)
-                    .try_collect()?;
-                Ok(Box::new(LocalSimpleAggExecutor::new(
-                    input.remove(0),
-                    agg_calls,
-                    pk_indices,
-                    executor_id,
-                    op_info,
-                )?))
-            }
-            Node::GlobalSimpleAggNode(aggr_node) => {
-                let agg_calls: Vec<AggCall> = aggr_node
-                    .get_agg_calls()
-                    .iter()
-                    .map(build_agg_call_from_prost)
-                    .try_collect()?;
-
-                Ok(Box::new(SimpleAggExecutor::new(
-                    input.remove(0),
-                    agg_calls,
-                    Keyspace::executor_root(store.clone(), executor_id),
-                    pk_indices,
-                    executor_id,
-                    op_info,
-                )))
-            }
-            Node::HashAggNode(aggr_node) => {
-                let keys = aggr_node
-                    .get_group_keys()
-                    .iter()
-                    .map(|key| key.column_idx as usize)
-                    .collect::<Vec<_>>();
-
-                let agg_calls: Vec<AggCall> = aggr_node
-                    .get_agg_calls()
-                    .iter()
-                    .map(build_agg_call_from_prost)
-                    .try_collect()?;
-
-                Ok(Box::new(HashAggExecutor::new(
-                    input.remove(0),
-                    agg_calls,
-                    keys,
-                    Keyspace::shared_executor_root(store.clone(), operator_id),
-                    pk_indices,
-                    executor_id,
-                    op_info,
-                )))
-            }
-            Node::AppendOnlyTopNNode(top_n_node) => {
-                let order_types = top_n_node
-                    .get_order_types()
-                    .iter()
-                    .map(build_order_type_from_prost)
-                    .collect::<Result<Vec<_>>>()?;
-                assert_eq!(order_types.len(), pk_indices.len());
-                let limit = if top_n_node.limit == 0 {
-                    None
-                } else {
-                    Some(top_n_node.limit as usize)
-                };
-                let cache_size = Some(1024);
-                let total_count = (0, 0);
-                Ok(Box::new(AppendOnlyTopNExecutor::new(
-                    input.remove(0),
-                    order_types,
-                    (top_n_node.offset as usize, limit),
-                    pk_indices,
-                    Keyspace::executor_root(store.clone(), executor_id),
-                    cache_size,
-                    total_count,
-                    executor_id,
-                    op_info,
-                )))
-            }
-            Node::TopNNode(top_n_node) => {
-                let order_types = top_n_node
-                    .get_order_types()
-                    .iter()
-                    .map(build_order_type_from_prost)
-                    .collect::<Result<Vec<_>>>()?;
-                assert_eq!(order_types.len(), pk_indices.len());
-                let limit = if top_n_node.limit == 0 {
-                    None
-                } else {
-                    Some(top_n_node.limit as usize)
-                };
-                let cache_size = Some(1024);
-                let total_count = (0, 0, 0);
-                Ok(Box::new(TopNExecutor::new(
-                    input.remove(0),
-                    order_types,
-                    (top_n_node.offset as usize, limit),
-                    pk_indices,
-                    Keyspace::executor_root(store.clone(), executor_id),
-                    cache_size,
-                    total_count,
-                    executor_id,
-                    op_info,
-                )))
-            }
-            Node::HashJoinNode(hash_join_node) => {
-                let source_r = input.remove(1);
-                let source_l = input.remove(0);
-                let params_l = JoinParams::new(
-                    hash_join_node
-                        .get_left_key()
-                        .iter()
-                        .map(|key| *key as usize)
-                        .collect::<Vec<_>>(),
-                );
-                let params_r = JoinParams::new(
-                    hash_join_node
-                        .get_right_key()
-                        .iter()
-                        .map(|key| *key as usize)
-                        .collect::<Vec<_>>(),
-                );
-
-                let condition = match hash_join_node.get_condition() {
-                    Ok(cond_prost) => Some(RowExpression::new(build_expr_from_prost(cond_prost)?)),
-                    Err(_) => None,
-                };
-                trace!("Join non-equi condition: {:?}", condition);
-
-                macro_rules! impl_create_hash_join_executor {
-                    ($( { $join_type_proto:ident, $join_type:ident } ),*) => {
-                        |typ| match typ {
-                            $( JoinTypeProto::$join_type_proto => Box::new(HashJoinExecutor::<_, { JoinType::$join_type }>::new(
-                                source_l,
-                                source_r,
-                                params_l,
-                                params_r,
-                                pk_indices,
-                                Keyspace::shared_executor_root(store.clone(), operator_id),
-                                executor_id,
-                                condition,
-                                op_info,
-                            )) as Box<dyn Executor>, )*
-                            _ => todo!("Join type {:?} not implemented", typ),
-                        }
+                Node::ProjectNode(project_node) => Ok(Box::new(ProjectExecutor::create(
+                    executor_params,
+                    &project_node,
+                )?)),
+                Node::FilterNode(filter_node) => Ok(Box::new(FilterExecutor::create(
+                    executor_params,
+                    &filter_node,
+                )?)),
+                Node::LocalSimpleAggNode(aggr_node) => Ok(Box::new(
+                    LocalSimpleAggExecutor::create(executor_params, &aggr_node)?,
+                )),
+                Node::GlobalSimpleAggNode(aggr_node) => Ok(Box::new(SimpleAggExecutor::create(
+                    executor_params,
+                    &aggr_node,
+                    store,
+                )?)),
+                Node::HashAggNode(aggr_node) => Ok(Box::new(HashAggExecutor::create(
+                    executor_params,
+                    &aggr_node,
+                    store,
+                )?)),
+                Node::AppendOnlyTopNNode(top_n_node) => Ok(Box::new(
+                    AppendOnlyTopNExecutor::create(executor_params, &top_n_node, store)?,
+                )),
+                Node::TopNNode(top_n_node) => Ok(Box::new(TopNExecutor::create(
+                    executor_params,
+                    &top_n_node,
+                    store,
+                )?)),
+                Node::HashJoinNode(hash_join_node) => Ok(Self::create_hash_join_node(
+                    executor_params,
+                    &hash_join_node,
+                    store,
+                )?),
+                Node::MviewNode(materialized_view_node) => Ok(Box::new(
+                    MaterializeExecutor::create(executor_params, &materialized_view_node, store)?,
+                )),
+                Node::MergeNode(merge_node) => {
+                    let upstreams = merge_node.get_upstream_actor_id();
+                    if upstreams.len() == 1 {
+                        Ok(Box::new(ReceiverExecutor::create(
+                            executor_params,
+                            &merge_node,
+                            self,
+                            actor_id,
+                            upstreams,
+                        )?))
+                    } else {
+                        Ok(Box::new(MergeExecutor::create(
+                            executor_params,
+                            &merge_node,
+                            self,
+                            actor_id,
+                            upstreams,
+                        )?))
                     }
                 }
-
-                macro_rules! for_all_join_types {
-                    ($macro:tt) => {
-                        $macro! {
-                            { Inner, Inner },
-                            { LeftOuter, LeftOuter },
-                            { RightOuter, RightOuter },
-                            { FullOuter, FullOuter }
-                        }
-                    };
-                }
-                let create_hash_join_executor =
-                    for_all_join_types! { impl_create_hash_join_executor };
-                let join_type_proto = hash_join_node.get_join_type()?;
-                let executor = create_hash_join_executor(join_type_proto);
-                Ok(executor)
-            }
-            Node::MviewNode(materialized_view_node) => {
-                let table_id = TableId::from(&materialized_view_node.table_ref_id);
-                let columns = materialized_view_node.get_column_descs();
-                let pks = materialized_view_node
-                    .pk_indices
-                    .iter()
-                    .map(|key| *key as usize)
-                    .collect::<Vec<_>>();
-
-                let column_orders = materialized_view_node.get_column_orders();
-                let order_pairs = fetch_orders(column_orders).unwrap();
-                let orderings = order_pairs
-                    .iter()
-                    .map(|order| order.order_type)
-                    .collect::<Vec<_>>();
-
-                let keyspace = if materialized_view_node.associated_table_ref_id.is_some() {
-                    // share the keyspace between mview and table v2
-                    let associated_table_id =
-                        TableId::from(&materialized_view_node.associated_table_ref_id);
-                    Keyspace::table_root(store, &associated_table_id)
-                } else {
-                    Keyspace::table_root(store, &table_id)
-                };
-
-                let executor = Box::new(MaterializeExecutor::new(
-                    input.remove(0),
-                    keyspace,
-                    Schema::try_from(columns)?,
-                    pks,
-                    orderings,
-                    executor_id,
-                    op_info,
-                ));
-                Ok(executor)
-            }
-            Node::MergeNode(merge_node) => {
-                let schema = Schema::try_from(merge_node.get_input_column_descs())?;
-                let upstreams = merge_node.get_upstream_actor_id();
-                self.create_merge_node(actor_id, schema, upstreams, pk_indices, op_info)
-            }
-            Node::ChainNode(chain_node) => {
-                let snapshot = input.remove(1);
-                let mview = input.remove(0);
-
-                let upstream_schema = snapshot.schema();
-                // TODO(MrCroxx): Use column_descs to get idx after mv planner can generate stable
-                // column_ids. Now simply treat column_id as column_idx.
-                let column_idxs: Vec<usize> = chain_node
-                    .column_ids
-                    .iter()
-                    .map(|id| *id as usize)
-                    .collect();
-                let schema = Schema::new(
-                    column_idxs
-                        .iter()
-                        .map(|i| upstream_schema.fields()[*i].clone())
-                        .collect_vec(),
-                );
-                Ok(Box::new(ChainExecutor::new(
-                    snapshot,
-                    mview,
-                    schema,
-                    column_idxs,
-                    op_info,
-                )))
-            }
-            Node::BatchPlanNode(batch_plan_node) => {
-                let table_id = TableId::from(&batch_plan_node.table_ref_id);
-                let table = table_manager.get_table(&table_id)?;
-                Ok(Box::new(BatchQueryExecutor::new(
-                    table.clone(),
-                    pk_indices,
-                    op_info,
-                )))
-            }
-            _ => Err(RwError::from(ErrorCode::InternalError(format!(
-                "unsupported node:{:?}",
-                node
-            )))),
-        };
+                Node::ChainNode(chain_node) => Ok(Box::new(ChainExecutor::create(
+                    executor_params,
+                    &chain_node,
+                )?)),
+                Node::BatchPlanNode(batch_plan_node) => Ok(Box::new(BatchQueryExecutor::create(
+                    executor_params,
+                    &batch_plan_node,
+                )?)),
+                _ => Err(RwError::from(ErrorCode::InternalError(format!(
+                    "unsupported node:{:?}",
+                    node
+                )))),
+            };
 
         let executor = Self::wrap_executor_for_debug(executor?, actor_id, input_pos)?;
         Ok(executor)
@@ -694,17 +483,75 @@ impl StreamManagerCore {
         Ok(executor)
     }
 
-    fn create_merge_node(
+    pub(crate) fn create_hash_join_node(
+        mut params: ExecutorParams,
+        node: &stream_plan::HashJoinNode,
+        store: impl StateStore,
+    ) -> Result<Box<dyn Executor>> {
+        let source_r = params.input.remove(1);
+        let source_l = params.input.remove(0);
+        let params_l = JoinParams::new(
+            node.get_left_key()
+                .iter()
+                .map(|key| *key as usize)
+                .collect::<Vec<_>>(),
+        );
+        let params_r = JoinParams::new(
+            node.get_right_key()
+                .iter()
+                .map(|key| *key as usize)
+                .collect::<Vec<_>>(),
+        );
+
+        let condition = match node.get_condition() {
+            Ok(cond_prost) => Some(RowExpression::new(build_from_prost(cond_prost)?)),
+            Err(_) => None,
+        };
+        trace!("Join non-equi condition: {:?}", condition);
+
+        macro_rules! impl_create_hash_join_executor {
+                    ($( { $join_type_proto:ident, $join_type:ident } ),*) => {
+                        |typ| match typ {
+                            $( JoinTypeProto::$join_type_proto => Box::new(HashJoinExecutor::<_, { JoinType::$join_type }>::new(
+                                source_l,
+                                source_r,
+                                params_l,
+                                params_r,
+                                params.pk_indices,
+                                Keyspace::shared_executor_root(store.clone(), params.operator_id),
+                                params.executor_id,
+                                condition,
+                                params.op_info,
+                            )) as Box<dyn Executor>, )*
+                            _ => todo!("Join type {:?} not implemented", typ),
+                        }
+                    }
+                }
+
+        macro_rules! for_all_join_types {
+            ($macro:tt) => {
+                $macro! {
+                    { Inner, Inner },
+                    { LeftOuter, LeftOuter },
+                    { RightOuter, RightOuter },
+                    { FullOuter, FullOuter }
+                }
+            };
+        }
+        let create_hash_join_executor = for_all_join_types! { impl_create_hash_join_executor };
+        let join_type_proto = node.get_join_type()?;
+        let executor = create_hash_join_executor(join_type_proto);
+        Ok(executor)
+    }
+
+    pub(crate) fn get_receive_message(
         &mut self,
         actor_id: u32,
-        schema: Schema,
         upstreams: &[u32],
-        pk_indices: PkIndices,
-        op_info: String,
-    ) -> Result<Box<dyn Executor>> {
+    ) -> Result<Vec<Receiver<Message>>> {
         assert!(!upstreams.is_empty());
 
-        let mut rxs = upstreams
+        let rxs = upstreams
             .iter()
             .map(|up_id| {
                 if *up_id == 0 {
@@ -756,20 +603,7 @@ impl StreamManagerCore {
             actor_id
         );
 
-        if upstreams.len() == 1 {
-            // Only one upstream, use `ReceiverExecutor`.
-            // FIXME: after merger is refactored in proto, put pk_indices into it.
-            Ok(Box::new(ReceiverExecutor::new(
-                schema,
-                pk_indices,
-                rxs.remove(0),
-                op_info,
-            )))
-        } else {
-            Ok(Box::new(MergeExecutor::new(
-                schema, pk_indices, actor_id, rxs, op_info,
-            )))
-        }
+        Ok(rxs)
     }
 
     fn build_actors(&mut self, actors: &[u32], env: StreamTaskEnv) -> Result<()> {

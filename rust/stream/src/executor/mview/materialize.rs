@@ -2,14 +2,17 @@ use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::Op::*;
 use risingwave_common::array::Row;
-use risingwave_common::catalog::Schema;
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::catalog::{Schema, TableId};
+use risingwave_common::util::sort_util::{fetch_orders, OrderType};
+use risingwave_pb::stream_plan;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::state::ManagedMViewState;
 use crate::executor::{
     Barrier, Executor, Message, PkIndicesRef, Result, SimpleExecutor, StreamChunk,
 };
+use crate::task::ExecutorParams;
+
 /// `MaterializeExecutor` writes data to a row-based memtable, so that data could
 /// be queried by the AP engine.
 pub struct MaterializeExecutor<S: StateStore> {
@@ -26,6 +29,45 @@ pub struct MaterializeExecutor<S: StateStore> {
 }
 
 impl<S: StateStore> MaterializeExecutor<S> {
+    pub fn create(
+        mut params: ExecutorParams,
+        node: &stream_plan::MViewNode,
+        store: S,
+    ) -> Result<Self> {
+        let table_id = TableId::from(&node.table_ref_id);
+        let columns = node.get_column_descs();
+        let pks = node
+            .pk_indices
+            .iter()
+            .map(|key| *key as usize)
+            .collect::<Vec<_>>();
+
+        let column_orders = node.get_column_orders();
+        let order_pairs = fetch_orders(column_orders).unwrap();
+        let orderings = order_pairs
+            .iter()
+            .map(|order| order.order_type)
+            .collect::<Vec<_>>();
+
+        let keyspace = if node.associated_table_ref_id.is_some() {
+            // share the keyspace between mview and table v2
+            let associated_table_id = TableId::from(&node.associated_table_ref_id);
+            Keyspace::table_root(store, &associated_table_id)
+        } else {
+            Keyspace::table_root(store, &table_id)
+        };
+
+        Ok(MaterializeExecutor::new(
+            params.input.remove(0),
+            keyspace,
+            Schema::try_from(columns)?,
+            pks,
+            orderings,
+            params.executor_id,
+            params.op_info,
+        ))
+    }
+
     pub fn new(
         input: Box<dyn Executor>,
         keyspace: Keyspace<S>,

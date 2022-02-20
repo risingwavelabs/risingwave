@@ -4,11 +4,13 @@ use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{Op, RwError, StreamChunk};
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_pb::stream_plan;
 use risingwave_storage::table::{ScannableTableRef, TableIterRef};
 
 use crate::executor::{Executor, Message, PkIndices, PkIndicesRef};
+use crate::task::ExecutorParams;
 
 const DEFAULT_BATCH_SIZE: usize = 100;
 
@@ -42,6 +44,14 @@ impl std::fmt::Debug for BatchQueryExecutor {
 }
 
 impl BatchQueryExecutor {
+    pub fn create(params: ExecutorParams, node: &stream_plan::BatchPlanNode) -> Result<Self> {
+        let table_id = TableId::from(&node.table_ref_id);
+        let table_manager = params.env.table_manager();
+        let table = table_manager.get_table(&table_id)?;
+
+        Ok(Self::new(table.clone(), params.pk_indices, params.op_info))
+    }
+
     pub fn new(table: ScannableTableRef, pk_indices: PkIndices, op_info: String) -> Self {
         Self::new_with_batch_size(table, pk_indices, DEFAULT_BATCH_SIZE, op_info)
     }

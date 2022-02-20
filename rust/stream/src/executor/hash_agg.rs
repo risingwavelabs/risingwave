@@ -11,6 +11,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::error::Result;
+use risingwave_pb::stream_plan;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::aggregation::{AggState, HashKey};
@@ -19,6 +20,7 @@ use super::{
     AggCall, AggExecutor, Barrier, Executor, Message, PkIndicesRef,
 };
 use crate::executor::PkIndices;
+use crate::task::{build_agg_call_from_prost, ExecutorParams};
 
 /// [`HashAggExecutor`] could process large amounts of data using a state backend. It works as
 /// follows:
@@ -65,6 +67,33 @@ pub struct HashAggExecutor<S: StateStore> {
 }
 
 impl<S: StateStore> HashAggExecutor<S> {
+    pub fn create(
+        mut params: ExecutorParams,
+        node: &stream_plan::HashAggNode,
+        store: S,
+    ) -> Result<Self> {
+        let keys = node
+            .get_group_keys()
+            .iter()
+            .map(|key| key.column_idx as usize)
+            .collect::<Vec<_>>();
+        let agg_calls: Vec<AggCall> = node
+            .get_agg_calls()
+            .iter()
+            .map(build_agg_call_from_prost)
+            .try_collect()?;
+        let keyspace = Keyspace::executor_root(store.clone(), params.executor_id);
+        Ok(Self::new(
+            params.input.remove(0),
+            agg_calls,
+            keys,
+            keyspace,
+            params.pk_indices,
+            params.executor_id,
+            params.op_info,
+        ))
+    }
+
     pub fn new(
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,

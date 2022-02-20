@@ -9,7 +9,8 @@ use risingwave_common::error::Result;
 use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::sort_util::{build_from_prost, OrderType};
+use risingwave_pb::stream_plan;
 use risingwave_storage::keyspace::Segment;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -17,6 +18,7 @@ use super::PkIndicesRef;
 use crate::executor::managed_state::top_n::variants::*;
 use crate::executor::managed_state::top_n::ManagedTopNState;
 use crate::executor::{Executor, Message, PkIndices, StreamChunk};
+use crate::task::ExecutorParams;
 
 #[async_trait]
 pub trait TopNExecutorBase: Executor {
@@ -92,6 +94,38 @@ impl<S: StateStore> std::fmt::Debug for AppendOnlyTopNExecutor<S> {
 }
 
 impl<S: StateStore> AppendOnlyTopNExecutor<S> {
+    pub fn create(
+        mut params: ExecutorParams,
+        node: &stream_plan::TopNNode,
+        store: S,
+    ) -> Result<Self> {
+        let order_types = node
+            .get_order_types()
+            .iter()
+            .map(build_from_prost)
+            .collect::<Result<Vec<_>>>()?;
+        assert_eq!(order_types.len(), params.pk_indices.len());
+        let limit = if node.limit == 0 {
+            None
+        } else {
+            Some(node.limit as usize)
+        };
+        let cache_size = Some(1024);
+        let total_count = (0, 0);
+        let keyspace = Keyspace::executor_root(store.clone(), params.executor_id);
+        Ok(Self::new(
+            params.input.remove(0),
+            order_types,
+            (node.offset as usize, limit),
+            params.pk_indices,
+            keyspace,
+            cache_size,
+            total_count,
+            params.executor_id,
+            params.op_info,
+        ))
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         input: Box<dyn Executor>,

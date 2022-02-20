@@ -1,9 +1,12 @@
 use async_trait::async_trait;
+use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_pb::stream_plan;
 
 use super::{Executor, Message, PkIndicesRef};
+use crate::task::ExecutorParams;
 
 #[derive(Debug)]
 enum ChainState {
@@ -28,6 +31,29 @@ pub struct ChainExecutor {
 }
 
 impl ChainExecutor {
+    pub fn create(mut params: ExecutorParams, node: &stream_plan::ChainNode) -> Result<Self> {
+        let snapshot = params.input.remove(1);
+        let mview = params.input.remove(0);
+
+        let upstream_schema = snapshot.schema();
+        // TODO(MrCroxx): Use column_descs to get idx after mv planner can generate stable
+        // column_ids. Now simply treat column_id as column_idx.
+        let column_idxs: Vec<usize> = node.column_ids.iter().map(|id| *id as usize).collect();
+        let schema = Schema::new(
+            column_idxs
+                .iter()
+                .map(|i| upstream_schema.fields()[*i].clone())
+                .collect_vec(),
+        );
+        Ok(Self::new(
+            snapshot,
+            mview,
+            schema,
+            column_idxs,
+            params.op_info,
+        ))
+    }
+
     pub fn new(
         snapshot: Box<dyn Executor>,
         mview: Box<dyn Executor>,

@@ -4,10 +4,12 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
-use risingwave_common::expr::BoxedExpression;
+use risingwave_common::expr::{build_from_prost, BoxedExpression};
+use risingwave_pb::stream_plan;
 
 use super::{Executor, Message, PkIndicesRef, SimpleExecutor, StreamChunk};
 use crate::executor::PkIndices;
+use crate::task::ExecutorParams;
 
 /// `ProjectExecutor` project data with the `expr`. The `expr` takes a chunk of data,
 /// and returns a new data chunk. And then, `ProjectExecutor` will insert, delete
@@ -40,6 +42,21 @@ impl std::fmt::Debug for ProjectExecutor {
 }
 
 impl ProjectExecutor {
+    pub fn create(mut params: ExecutorParams, node: &stream_plan::ProjectNode) -> Result<Self> {
+        let project_exprs = node
+            .get_select_list()
+            .iter()
+            .map(build_from_prost)
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Self::new(
+            params.input.remove(0),
+            params.pk_indices,
+            project_exprs,
+            params.executor_id,
+            params.op_info,
+        ))
+    }
+
     pub fn new(
         input: Box<dyn Executor>,
         pk_indices: PkIndices,
