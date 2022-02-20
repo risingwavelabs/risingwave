@@ -1,0 +1,5 @@
+query TII
+select * from tpch_q12;
+----
+FOB   4  3
+SHIP  5  10
