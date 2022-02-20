@@ -2,8 +2,8 @@ mod join_entry_state;
 use std::ops::{Deref, DerefMut, Index};
 use std::sync::Arc;
 
-pub use join_entry_state::JoinEntryState;
 use itertools::Itertools;
+pub use join_entry_state::JoinEntryState;
 use risingwave_common::array::Row;
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::error::Result as RWResult;
