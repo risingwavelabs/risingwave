@@ -1,5 +1,6 @@
 // Data-driven tests.
 
+use anyhow::{anyhow, Result};
 use itertools::Itertools;
 use risingwave_sqlparser::parser::Parser;
 
@@ -51,28 +52,67 @@ fn parse_test_case(case_str: &str) -> TestCase {
     }
 }
 
-fn run_test_case(case_str: &str) {
-    let c = parse_test_case(case_str);
-
+fn run_test_case(c: &TestCase) -> Result<()> {
     let result = Parser::parse_sql(&c.input);
-    if let Some(error_msg) = c.error_msg {
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err().to_string(), error_msg);
+    if let Some(error_msg) = &c.error_msg {
+        if !result.is_err() {
+            return Err(anyhow!("Expected failure:\n  {}", error_msg));
+        }
+        let actual_error_msg = result.unwrap_err().to_string();
+        if &actual_error_msg != error_msg {
+            return Err(anyhow!(
+                "Expected error message: {}\n  Actual error message: {}",
+                error_msg,
+                actual_error_msg
+            ));
+        }
     } else {
-        assert!(result.is_ok());
+        if c.formatted_sql.is_none() {
+            return Err(anyhow!("Illegal test case without given the formatted sql"));
+        }
+        if c.formatted_ast.is_none() {
+            return Err(anyhow!("Illegal test case without given the formatted ast"));
+        }
+        if let Err(e) = result {
+            return Err(anyhow!("Unexpected failure:\n  {}", e));
+        }
         let ast = &result.unwrap()[0];
         let formatted_sql = format!("{}", ast);
-        assert_eq!(c.formatted_sql, Some(formatted_sql));
+        let expected_formatted_sql = c.formatted_sql.as_ref().unwrap();
+        if &formatted_sql != expected_formatted_sql {
+            return Err(anyhow!(
+                "Expected formatted sql: {}\n  Actual formatted sql: {}",
+                expected_formatted_sql,
+                formatted_sql
+            ));
+        }
         let formatted_ast = format!("{:?}", ast);
-        assert_eq!(c.formatted_ast, Some(formatted_ast));
+        let expected_formatted_ast = c.formatted_ast.as_ref().unwrap();
+        if &formatted_ast != expected_formatted_ast {
+            return Err(anyhow!(
+                "Expected formatted ast: {}\n  Actual formatted ast: {}",
+                expected_formatted_sql,
+                formatted_ast
+            ));
+        }
     }
+    Ok(())
 }
 
 fn run_test_file(_file_name: &str, file_content: &str) {
     let file_content = remove_comments(file_content);
     let cases = split_test_cases(&file_content);
-    for case in cases {
-        run_test_case(&case);
+    let mut failed_num = 0;
+    for case_str in cases {
+        let c = parse_test_case(&case_str);
+        if let Err(e) = run_test_case(&c) {
+            println!("\nThe input SQL:\n  {}\n{}", c.input, e);
+            failed_num += 1;
+        }
+    }
+    if failed_num > 0 {
+        println!("\n");
+        panic!("{} test cases failed", failed_num);
     }
 }
 
@@ -96,6 +136,7 @@ fn remove_comments(file_content: &str) -> String {
 fn split_test_cases(file_content: &str) -> Vec<String> {
     file_content
         .lines()
+        .map(|l| l.trim().to_string())
         .collect_vec()
         .split(|l| l.is_empty())
         .map(|slice| slice.join("\n"))

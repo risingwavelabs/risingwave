@@ -21,7 +21,6 @@
 #[macro_use]
 mod test_utils;
 use matches::assert_matches;
-use risingwave_common::try_match_expand;
 use risingwave_sqlparser::ast::*;
 use risingwave_sqlparser::keywords::ALL_KEYWORDS;
 use risingwave_sqlparser::parser::ParserError;
@@ -86,16 +85,6 @@ fn parse_insert_values() {
     }
 
     verified_stmt("INSERT INTO customer WITH foo AS (SELECT 1) SELECT * FROM foo UNION VALUES (1)");
-}
-
-#[test]
-fn parse_insert_invalid() {
-    let sql = "INSERT public.customer (id, name, active) VALUES (1, 2, 3)";
-    let res = parse_sql_statements(sql);
-    assert_eq!(
-        ParserError::ParserError("Expected INTO, found: public".to_string()),
-        res.unwrap_err()
-    );
 }
 
 #[test]

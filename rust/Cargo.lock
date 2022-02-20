@@ -3965,6 +3965,7 @@ dependencies = [
 name = "risingwave_sqlparser"
 version = "0.1.2"
 dependencies = [
+ "anyhow",
  "itertools 0.10.3",
  "log",
  "matches",
