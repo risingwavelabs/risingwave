@@ -26,7 +26,8 @@ use tokio::task::JoinHandle;
 use crate::executor::snapshot::BatchQueryExecutor;
 use crate::executor::*;
 use crate::task::{
-    ConsumableChannelPair, SharedContext, StreamTaskEnv, UpDownActorIds, LOCAL_OUTPUT_CHANNEL_SIZE,
+    ConsumableChannelPair, SharedContext, StreamEnvironment, UpDownActorIds,
+    LOCAL_OUTPUT_CHANNEL_SIZE,
 };
 
 #[cfg(test)]
@@ -117,7 +118,7 @@ impl StreamManager {
     pub async fn drop_materialized_view(
         &self,
         table_id: &TableId,
-        env: StreamTaskEnv,
+        env: StreamEnvironment,
     ) -> Result<()> {
         let table_manager = env.table_manager();
         table_manager.drop_materialized_view(table_id).await
@@ -165,7 +166,7 @@ impl StreamManager {
     }
 
     /// This function could only be called once during the lifecycle of `StreamManager` for now.
-    pub fn build_actors(&self, actors: &[u32], env: StreamTaskEnv) -> Result<()> {
+    pub fn build_actors(&self, actors: &[u32], env: StreamEnvironment) -> Result<()> {
         let mut core = self.core.lock().unwrap();
         core.build_actors(actors, env)
     }
@@ -311,7 +312,7 @@ impl StreamManagerCore {
         actor_id: u32,
         node: &stream_plan::StreamNode,
         input_pos: usize,
-        env: StreamTaskEnv,
+        env: StreamEnvironment,
         store: impl StateStore,
     ) -> Result<Box<dyn Executor>> {
         let op_info = node.get_identity().clone();
@@ -663,7 +664,7 @@ impl StreamManagerCore {
         fragment_id: u32,
         actor_id: u32,
         node: &stream_plan::StreamNode,
-        env: StreamTaskEnv,
+        env: StreamEnvironment,
     ) -> Result<Box<dyn Executor>> {
         dispatch_state_store!(self.state_store.clone(), store, {
             self.create_nodes_inner(fragment_id, actor_id, node, 0, env, store)
@@ -772,7 +773,7 @@ impl StreamManagerCore {
         }
     }
 
-    fn build_actors(&mut self, actors: &[u32], env: StreamTaskEnv) -> Result<()> {
+    fn build_actors(&mut self, actors: &[u32], env: StreamEnvironment) -> Result<()> {
         for actor_id in actors {
             let actor_id = *actor_id;
             let actor = self.actors.remove(&actor_id).unwrap();

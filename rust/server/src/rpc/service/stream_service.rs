@@ -9,17 +9,17 @@ use risingwave_pb::stream_service::{
     InjectBarrierResponse, UpdateActorsRequest, UpdateActorsResponse,
 };
 use risingwave_stream::executor::Barrier;
-use risingwave_stream::task::{StreamManager, StreamTaskEnv};
+use risingwave_stream::task::{StreamEnvironment, StreamManager};
 use tonic::{Request, Response, Status};
 
 #[derive(Clone)]
 pub struct StreamServiceImpl {
     mgr: Arc<StreamManager>,
-    env: StreamTaskEnv,
+    env: StreamEnvironment,
 }
 
 impl StreamServiceImpl {
-    pub fn new(mgr: Arc<StreamManager>, env: StreamTaskEnv) -> Self {
+    pub fn new(mgr: Arc<StreamManager>, env: StreamEnvironment) -> Self {
         StreamServiceImpl { mgr, env }
     }
 }

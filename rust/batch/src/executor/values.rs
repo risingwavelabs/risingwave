@@ -115,7 +115,7 @@ impl BoxedExecutorBuilder for ValuesExecutor {
             rows,
             schema: Schema { fields },
             identity: source.plan_node().get_identity().clone(),
-            chunk_size: source.global_task_env().config().chunk_size as usize,
+            chunk_size: source.global_batch_env().config().chunk_size as usize,
         }))
     }
 }

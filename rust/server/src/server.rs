@@ -5,8 +5,8 @@ use std::sync::Arc;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Request, Response, Server};
 use prometheus::{Encoder, TextEncoder};
-use risingwave_batch::rpc::service::task_service::TaskServiceImpl;
-use risingwave_batch::task::{BatchTaskEnv, TaskManager};
+use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
+use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::ComputeNodeConfig;
 use risingwave_common::worker_id::WorkerIdRef;
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
@@ -16,7 +16,7 @@ use risingwave_rpc_client::MetaClient;
 use risingwave_source::MemSourceManager;
 use risingwave_storage::table::SimpleTableManager;
 use risingwave_storage::StateStoreImpl;
-use risingwave_stream::task::{StreamManager, StreamTaskEnv};
+use risingwave_stream::task::{StreamEnvironment, StreamManager};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 
@@ -37,37 +37,52 @@ pub async fn compute_node_serve(
     addr: SocketAddr,
     opts: ComputeNodeOpts,
 ) -> (JoinHandle<()>, UnboundedSender<()>) {
-    let config = load_config(&opts);
+    // Load the configuration.
     let worker_id_ref = WorkerIdRef::new();
-
+    let config = load_config(&opts);
     let meta_client = MetaClient::new(&opts.meta_address).await.unwrap();
+
+    // Initialize state store.
     let state_store = StateStoreImpl::from_str(&opts.state_store, meta_client.clone())
         .await
         .unwrap();
+
+    // Initialize the managers.
     let table_mgr = Arc::new(SimpleTableManager::new(state_store.clone()));
-    let task_mgr = Arc::new(TaskManager::new());
+    let batch_mgr = Arc::new(BatchManager::new());
     let stream_mgr = Arc::new(StreamManager::new(addr, state_store));
     let source_mgr = Arc::new(MemSourceManager::new());
 
+    // Initialize batch environment.
     let batch_config = Arc::new(config.batch.clone());
-    let batch_env = BatchTaskEnv::new(
+    let batch_env = BatchEnvironment::new(
         table_mgr.clone(),
         source_mgr.clone(),
-        task_mgr.clone(),
+        batch_mgr.clone(),
         addr,
         batch_config,
         worker_id_ref.clone(),
     );
-    let stream_env = StreamTaskEnv::new(table_mgr, source_mgr, addr, worker_id_ref.clone());
-    let task_srv = TaskServiceImpl::new(task_mgr.clone(), batch_env);
-    let exchange_srv = ExchangeServiceImpl::new(task_mgr, stream_mgr.clone());
+
+    // Initialize the streaming environment.
+    let stream_config = Arc::new(config.streaming.clone());
+    let stream_env = StreamEnvironment::new(
+        table_mgr,
+        source_mgr,
+        addr,
+        stream_config,
+        worker_id_ref.clone(),
+    );
+
+    // Boot the runtime gRPC services.
+    let batch_srv = BatchServiceImpl::new(batch_mgr.clone(), batch_env);
+    let exchange_srv = ExchangeServiceImpl::new(batch_mgr, stream_mgr.clone());
     let stream_srv = StreamServiceImpl::new(stream_mgr, stream_env.clone());
 
-    // Start gRPC services.
     let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
     let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()
-            .add_service(TaskServiceServer::new(task_srv))
+            .add_service(TaskServiceServer::new(batch_srv))
             .add_service(ExchangeServiceServer::new(exchange_srv))
             .add_service(StreamServiceServer::new(stream_srv))
             .serve_with_shutdown(addr, async move {
@@ -85,7 +100,7 @@ pub async fn compute_node_serve(
         MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone());
     }
 
-    // After all services booted, register self to meta service
+    // All set, let the meta service know we're ready.
     let worker_id = meta_client.register(addr).await.unwrap();
     worker_id_ref.set(worker_id);
 

@@ -24,7 +24,7 @@ impl WorkerIdRef {
     pub fn get(&self) -> u32 {
         let worker_id = self.0.load(Ordering::SeqCst);
         if worker_id == Self::INVALID_WORKER_ID {
-            panic!("invalid worker id, maybe not have registered with meta service");
+            panic!("Fatal error: worker id is not set. Please set it before using it.");
         }
         worker_id
     }
