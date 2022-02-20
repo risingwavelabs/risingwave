@@ -831,35 +831,49 @@ impl StreamManagerCore {
         handle.abort();
     }
 
+    fn find_all_chain_nodes(
+        stream_node: &stream_plan::StreamNode,
+    ) -> Result<Vec<&stream_plan::StreamNode>> {
+        let mut result = vec![];
+        if let Node::ChainNode(_) = stream_node.node.as_ref().unwrap() {
+            result.push(stream_node);
+        }
+        for child in &stream_node.input {
+            result.extend(Self::find_all_chain_nodes(child).unwrap());
+        }
+        Ok(result)
+    }
+
+    fn add_chain_node(&self, actor_id: u32, node: &stream_plan::StreamNode) -> Result<()> {
+        let merge = try_match_expand!(
+            node.input.get(0).unwrap().node.as_ref().unwrap(),
+            Node::MergeNode,
+            "first input of chain node should be merge node"
+        )?;
+        for upstream_actor_id in &merge.upstream_actor_id {
+            if !self.actor_infos.contains_key(upstream_actor_id) {
+                return Err(ErrorCode::InternalError(format!(
+                    "chain upstream actor {} not exists",
+                    upstream_actor_id
+                ))
+                .into());
+            }
+            let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
+            let up_down_ids = (*upstream_actor_id, actor_id);
+            self.context
+                .add_channel_pairs(up_down_ids, (Some(tx), Some(rx)));
+        }
+
+        Ok(())
+    }
+
     fn build_channel_for_chain_node(
         &self,
         actor_id: u32,
         stream_node: &stream_plan::StreamNode,
     ) -> Result<()> {
-        if let Node::ChainNode(_) = stream_node.node.as_ref().unwrap() {
-            // Create channel based on upstream actor id for [`ChainNode`], check if upstream
-            // exists.
-            let merge = try_match_expand!(
-                stream_node.input.get(0).unwrap().node.as_ref().unwrap(),
-                Node::MergeNode,
-                "first input of chain node should be merge node"
-            )?;
-            for upstream_actor_id in &merge.upstream_actor_id {
-                if !self.actor_infos.contains_key(upstream_actor_id) {
-                    return Err(ErrorCode::InternalError(format!(
-                        "chain upstream actor {} not exists",
-                        upstream_actor_id
-                    ))
-                    .into());
-                }
-                let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-                let up_down_ids = (*upstream_actor_id, actor_id);
-                self.context
-                    .add_channel_pairs(up_down_ids, (Some(tx), Some(rx)));
-            }
-        }
-        for child in &stream_node.input {
-            self.build_channel_for_chain_node(actor_id, child)?;
+        for node in Self::find_all_chain_nodes(stream_node).unwrap() {
+            self.add_chain_node(actor_id, node)?;
         }
         Ok(())
     }
