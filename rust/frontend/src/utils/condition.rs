@@ -29,11 +29,11 @@ impl Condition {
             for expr in iter {
                 ret = FunctionCall::new(ExprType::And, vec![ret, expr])
                     .unwrap()
-                    .bound_expr();
+                    .to_expr_impl();
             }
             ret
         } else {
-            Literal::new(Some(ScalarImpl::Bool(true)), DataType::Boolean).bound_expr()
+            Literal::new(Some(ScalarImpl::Bool(true)), DataType::Boolean).to_expr_impl()
         }
     }
 
