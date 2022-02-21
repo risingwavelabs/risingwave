@@ -13,7 +13,8 @@ RwStreamMaterializedView(name=[t_no_group_no_count])
       RwStreamExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
         RwStreamAgg(group=[{}], agg#0=[COUNT()], v=[SUM($0)])
           RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
-            RwStreamTableSource(table=[[test_schema, t]], columns=[v1,_row_id])
+            RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[1]], columnIds=[[0.0.1.0, 0.0.1.3]], upstreamColumnDescs=[[ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=FLOAT, primary=false}, ColumnDesc{dataType=BIGINT, primary=false}]])
+              RwStreamBatchPlan(table=[[test_schema, t]], tableId=[0.0.1], primaryKeyIndices=[[1]], columnIds=[[0.0.1.0, 0.0.1.3]])
 ]]>
         </Resource>
     </TestCase>
@@ -31,7 +32,8 @@ RwStreamMaterializedView(name=[t_no_group_has_count])
       RwStreamExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
         RwStreamAgg(group=[{}], agg#0=[COUNT()], v=[SUM($0)])
           RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
-            RwStreamTableSource(table=[[test_schema, t]], columns=[v1,_row_id])
+            RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[1]], columnIds=[[0.0.1.0, 0.0.1.3]], upstreamColumnDescs=[[ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=FLOAT, primary=false}, ColumnDesc{dataType=BIGINT, primary=false}]])
+              RwStreamBatchPlan(table=[[test_schema, t]], tableId=[0.0.1], primaryKeyIndices=[[1]], columnIds=[[0.0.1.0, 0.0.1.3]])
 ]]>
         </Resource>
     </TestCase>
@@ -48,7 +50,8 @@ RwStreamMaterializedView(name=[t_has_group_has_count])
     RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
       RwStreamAgg(group=[{0}], agg#0=[COUNT()], v=[SUM($1)])
         RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
-          RwStreamTableSource(table=[[test_schema, t]], columns=[v2,v1,_row_id])
+          RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.1, 0.0.1.0, 0.0.1.3]], upstreamColumnDescs=[[ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=FLOAT, primary=false}, ColumnDesc{dataType=BIGINT, primary=false}]])
+            RwStreamBatchPlan(table=[[test_schema, t]], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.1, 0.0.1.0, 0.0.1.3]])
 ]]>
         </Resource>
     </TestCase>
@@ -66,7 +69,8 @@ RwStreamMaterializedView(name=[t_has_group_no_count])
       RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
         RwStreamAgg(group=[{0}], agg#0=[COUNT()], v=[SUM($1)])
           RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
-            RwStreamTableSource(table=[[test_schema, t]], columns=[v2,v1,_row_id])
+            RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.1, 0.0.1.0, 0.0.1.3]], upstreamColumnDescs=[[ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=FLOAT, primary=false}, ColumnDesc{dataType=BIGINT, primary=false}]])
+              RwStreamBatchPlan(table=[[test_schema, t]], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.1, 0.0.1.0, 0.0.1.3]])
 ]]>
         </Resource>
     </TestCase>
@@ -82,7 +86,8 @@ RwStreamMaterializedView(name=[t_has_three_group])
   RwStreamProject(v1=[$0], v2=[$1], v3=[$2], EXPR$3=[$4], EXPR$4=[/(CAST($5):DECIMAL(28,10) NOT NULL, $6)], v=[$3])
     RwStreamAgg(group=[{0, 1, 2}], agg#0=[COUNT()], EXPR$3=[SUM($0)], agg#2=[SUM($1)], agg#3=[COUNT($1)])
       RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1, 2]}], collation=[[]])
-        RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])
+        RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[3]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.2, 0.0.1.3]], upstreamColumnDescs=[[ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=FLOAT, primary=false}, ColumnDesc{dataType=BIGINT, primary=false}]])
+          RwStreamBatchPlan(table=[[test_schema, t]], tableId=[0.0.1], primaryKeyIndices=[[3]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.2, 0.0.1.3]])
 ]]>
         </Resource>
     </TestCase>
@@ -101,7 +106,8 @@ RwStreamMaterializedView(name=[t_one_group_avg])
       RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
         RwStreamAgg(group=[{0}], agg#0=[COUNT()], agg#1=[SUM($1)], agg#2=[COUNT($1)])
           RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
-            RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v3,_row_id])
+            RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.2, 0.0.1.3]], upstreamColumnDescs=[[ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=FLOAT, primary=false}, ColumnDesc{dataType=BIGINT, primary=false}]])
+              RwStreamBatchPlan(table=[[test_schema, t]], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.2, 0.0.1.3]])
 ]]>
         </Resource>
     </TestCase>
@@ -118,7 +124,8 @@ RwStreamMaterializedView(name=[t_one_count_star])
   RwStreamAgg(group=[{}], agg#0=[$SUM0($0)])
     RwStreamExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
       RwStreamAgg(group=[{}], agg#0=[COUNT()])
-        RwStreamTableSource(table=[[test_schema, t]], columns=[_row_id])
+        RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[0]], columnIds=[[0.0.1.3]], upstreamColumnDescs=[[ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=FLOAT, primary=false}, ColumnDesc{dataType=BIGINT, primary=false}]])
+          RwStreamBatchPlan(table=[[test_schema, t]], tableId=[0.0.1], primaryKeyIndices=[[0]], columnIds=[[0.0.1.3]])
             ]]>
         </Resource>
     </TestCase>

@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
-use risingwave_common::array::{Row, RowDeserializer};
+use risingwave_common::array::Row;
 use risingwave_common::error::Result;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::ordered::*;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -36,8 +36,6 @@ pub struct ManagedTopNState<S: StateStore, const TOP_N_TYPE: usize> {
     data_types: Vec<DataType>,
     /// For deserializing `OrderedRow`.
     ordered_row_deserializer: OrderedRowDeserializer,
-    /// epoch
-    epoch: u64,
 }
 
 impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
@@ -47,7 +45,6 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         keyspace: Keyspace<S>,
         data_types: Vec<DataType>,
         ordered_row_deserializer: OrderedRowDeserializer,
-        epoch: u64,
     ) -> Self {
         Self {
             top_n: BTreeMap::new(),
@@ -57,7 +54,6 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
             keyspace,
             data_types,
             ordered_row_deserializer,
-            epoch,
         }
     }
 
@@ -85,7 +81,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         }
     }
 
-    pub async fn pop_top_element(&mut self) -> Result<Option<(OrderedRow, Row)>> {
+    pub async fn pop_top_element(&mut self, epoch: u64) -> Result<Option<(OrderedRow, Row)>> {
         if self.total_count == 0 {
             Ok(None)
         } else {
@@ -98,7 +94,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
                 TOP_N_MAX => self.top_n.last_key_value().unwrap().0.clone(),
                 _ => unreachable!(),
             };
-            let value = self.delete(&key).await?;
+            let value = self.delete(&key, epoch).await?;
             Ok(Some((key, value.unwrap())))
         }
     }
@@ -127,7 +123,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         }
     }
 
-    pub async fn insert(&mut self, key: OrderedRow, value: Row) -> Result<()> {
+    pub async fn insert(&mut self, key: OrderedRow, value: Row, epoch: u64) -> Result<()> {
         let have_key_on_storage = self.total_count > self.top_n.len();
         let need_to_flush = if have_key_on_storage {
             // It is impossible that the cache is empty.
@@ -147,7 +143,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         if need_to_flush {
             let flush_status = FlushStatus::Insert(value);
             let iter = vec![(key, flush_status)].into_iter();
-            self.flush_inner(iter).await?;
+            self.flush_inner(iter, epoch).await?;
         } else {
             self.top_n.insert(key.clone(), value.clone());
             FlushStatus::do_insert(self.flush_buffer.entry(key), value);
@@ -161,7 +157,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
     ///
     /// This function scans kv pairs from the storage, and properly deal with them
     /// according to the flush buffer.
-    pub async fn scan_and_merge(&mut self) -> Result<()> {
+    pub async fn scan_and_merge(&mut self, epoch: u64) -> Result<()> {
         // For a key scanned from the storage,
         // 1. Not touched by flush buffer. Do nothing.
         // 2. Deleted by flush buffer. Do not go into cache.
@@ -173,7 +169,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         // This `order` is defined by the order between two `OrderedRow`.
         // We have to scan all because the top n on the storage may have been deleted by the flush
         // buffer.
-        let kv_pairs = self.scan_from_storage(None).await?;
+        let kv_pairs = self.scan_from_storage(None, epoch).await?;
         let mut inserted = 0;
         match TOP_N_TYPE {
             TOP_N_MIN => {
@@ -261,13 +257,13 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         Ok(())
     }
 
-    pub async fn delete(&mut self, key: &OrderedRow) -> Result<Option<Row>> {
+    pub async fn delete(&mut self, key: &OrderedRow, epoch: u64) -> Result<Option<Row>> {
         let prev_entry = self.top_n.remove(key);
         FlushStatus::do_delete(self.flush_buffer.entry(key.clone()));
         self.total_count -= 1;
         // If we have nothing in the cache, we have to scan from the storage.
         if self.top_n.is_empty() && self.total_count > 0 {
-            self.scan_and_merge().await?;
+            self.scan_and_merge(epoch).await?;
             self.retain_top_n();
         }
         Ok(prev_entry)
@@ -276,9 +272,8 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
     async fn scan_from_storage(
         &mut self,
         number_rows: Option<usize>,
+        epoch: u64,
     ) -> Result<Vec<(OrderedRow, Row)>> {
-        // TODO: use the correct epoch
-        let epoch = u64::MAX;
         let pk_row_bytes = self
             .keyspace
             .scan_strip_prefix(
@@ -286,19 +281,22 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
                 epoch,
             )
             .await?;
+        let data_type_num = self.data_types.len();
         // We must have enough cells to restore a complete row.
-        debug_assert_eq!(pk_row_bytes.len() % self.data_types.len(), 0);
+        debug_assert_eq!(pk_row_bytes.len() % data_type_num, 0);
         // cell-based storage format, so `self.data_types.len()`
-        let mut row_bytes = vec![];
         let mut cell_restored = 0;
         let mut res = vec![];
-        for (pk, cell_bytes) in pk_row_bytes {
-            row_bytes.extend_from_slice(&cell_bytes);
+        let mut datum_vec: Vec<Datum> = vec![];
+        for (i, (pk, cell_bytes)) in pk_row_bytes.into_iter().enumerate() {
+            let datum = deserialize_cell(&cell_bytes[..], &self.data_types[i % data_type_num])?;
+            datum_vec.push(datum);
+
             cell_restored += 1;
-            if cell_restored == self.data_types.len() {
+            if cell_restored == data_type_num {
                 cell_restored = 0;
-                let deserializer = RowDeserializer::new(self.data_types.clone());
-                let row = deserializer.deserialize(&std::mem::take(&mut row_bytes))?;
+
+                let row = Row::new(std::mem::take(&mut datum_vec));
                 // format: [pk_buf | cell_idx (4B)]
                 // Take `pk_buf` out.
                 let mut pk_vec = pk.to_vec();
@@ -324,9 +322,9 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
     /// We don't need to care about whether `self.top_n` is empty or not as the key is unique.
     /// An element with duplicated key scanned from the storage would just override the element with
     /// the same key in the cache, and their value must be the same.
-    pub async fn fill_in_cache(&mut self) -> Result<()> {
+    pub async fn fill_in_cache(&mut self, epoch: u64) -> Result<()> {
         debug_assert!(!self.is_dirty());
-        let kv_pairs = self.scan_from_storage(self.top_n_count).await?;
+        let kv_pairs = self.scan_from_storage(self.top_n_count, epoch).await?;
         for (key, value) in kv_pairs {
             let prev_row = self.top_n.insert(key, value.clone());
             if let Some(prev_row) = prev_row {
@@ -340,6 +338,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
     async fn flush_inner(
         &mut self,
         iterator: impl Iterator<Item = (OrderedRow, FlushStatus<Row>)>,
+        epoch: u64,
     ) -> Result<()> {
         let mut write_batch = self.keyspace.state_store().start_write_batch();
         let mut local = write_batch.prefixify(&self.keyspace);
@@ -367,7 +366,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
             }
         }
 
-        write_batch.ingest(self.epoch).await.unwrap();
+        write_batch.ingest(epoch).await.unwrap();
         Ok(())
     }
 
@@ -377,14 +376,13 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
     /// TODO: `Flush` should also be called internally when `top_n` and `flush_buffer` exceeds
     /// certain limit.
     pub async fn flush(&mut self, epoch: u64) -> Result<()> {
-        self.epoch = std::cmp::max(self.epoch, epoch);
         if !self.is_dirty() {
             self.retain_top_n();
             return Ok(());
         }
 
         let iterator = std::mem::take(&mut self.flush_buffer).into_iter();
-        self.flush_inner(iterator).await?;
+        self.flush_inner(iterator, epoch).await?;
 
         self.retain_top_n();
         Ok(())
@@ -433,7 +431,6 @@ mod tests {
             Keyspace::executor_root(store.clone(), 0x2333),
             data_types,
             ordered_row_deserializer,
-            0,
         )
     }
 
@@ -461,8 +458,9 @@ mod tests {
             .map(|row| OrderedRow::new(row, &order_types))
             .collect::<Vec<_>>();
 
+        let epoch = 0;
         managed_state
-            .insert(ordered_rows[3].clone(), rows[3].clone())
+            .insert(ordered_rows[3].clone(), rows[3].clone(), epoch)
             .await
             .unwrap();
         // now ("ab", 4)
@@ -475,7 +473,7 @@ mod tests {
         assert_eq!(managed_state.get_cache_len(), 1);
 
         managed_state
-            .insert(ordered_rows[2].clone(), rows[2].clone())
+            .insert(ordered_rows[2].clone(), rows[2].clone(), epoch)
             .await
             .unwrap();
         // now ("abd", 3) -> ("ab", 4)
@@ -488,7 +486,7 @@ mod tests {
         assert_eq!(managed_state.get_cache_len(), 2);
 
         managed_state
-            .insert(ordered_rows[1].clone(), rows[1].clone())
+            .insert(ordered_rows[1].clone(), rows[1].clone(), epoch)
             .await
             .unwrap();
         // now ("abd", 3) -> ("abc", 3) -> ("ab", 4)
@@ -514,7 +512,7 @@ mod tests {
             order_types.clone(),
         );
         assert_eq!(managed_state.top_element(), None);
-        managed_state.fill_in_cache().await.unwrap();
+        managed_state.fill_in_cache(epoch).await.unwrap();
         // now ("abd", 3) on storage -> ("abc", 3) in memory -> ("ab", 4) in memory
         assert_eq!(
             managed_state.top_element(),
@@ -526,7 +524,7 @@ mod tests {
         assert_eq!(managed_state.total_count, 3);
 
         assert_eq!(
-            managed_state.pop_top_element().await.unwrap(),
+            managed_state.pop_top_element(epoch).await.unwrap(),
             Some((ordered_rows[3].clone(), rows[3].clone()))
         );
         // now ("abd", 3) on storage -> ("abc", 3) in memory
@@ -534,7 +532,7 @@ mod tests {
         assert_eq!(managed_state.total_count, 2);
         assert_eq!(managed_state.get_cache_len(), 1);
         assert_eq!(
-            managed_state.pop_top_element().await.unwrap(),
+            managed_state.pop_top_element(epoch).await.unwrap(),
             Some((ordered_rows[1].clone(), rows[1].clone()))
         );
         // now ("abd", 3) on storage
@@ -552,7 +550,7 @@ mod tests {
         );
 
         managed_state
-            .insert(ordered_rows[0].clone(), rows[0].clone())
+            .insert(ordered_rows[0].clone(), rows[0].clone(), epoch)
             .await
             .unwrap();
         // now ("abd", 3) in memory -> ("abc", 2)
@@ -566,7 +564,7 @@ mod tests {
         drop(managed_state);
         let mut managed_state =
             create_managed_top_n_state::<_, TOP_N_MAX>(&store, row_count, data_types, order_types);
-        managed_state.fill_in_cache().await.unwrap();
+        managed_state.fill_in_cache(epoch).await.unwrap();
         assert_eq!(
             managed_state.top_element(),
             Some((&ordered_rows[3], &rows[3]))

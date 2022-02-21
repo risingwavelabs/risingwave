@@ -13,7 +13,7 @@ pub trait ColPrunable: WithSchema + IntoPlanRef {
         let schema = self.schema();
         let exprs: Vec<ExprImpl> = required_cols
             .ones()
-            .map(|i| InputRef::new(i, schema.fields()[i].data_type()).bound_expr())
+            .map(|i| InputRef::new(i, schema.fields()[i].data_type()).to_expr_impl())
             .collect();
         let alias = vec![None; required_cols.len()];
         LogicalProject::create(self.clone_as_plan_ref(), exprs, alias)

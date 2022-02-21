@@ -1,8 +1,5 @@
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::{Op, RwError, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
@@ -27,6 +24,8 @@ pub struct BatchQueryExecutor {
     schema: Schema,
 
     epoch: Option<u64>,
+    /// Logical Operator Info
+    op_info: String,
 }
 
 impl std::fmt::Debug for BatchQueryExecutor {
@@ -40,14 +39,15 @@ impl std::fmt::Debug for BatchQueryExecutor {
 }
 
 impl BatchQueryExecutor {
-    pub fn new(table: ScannableTableRef, pk_indices: PkIndices) -> Self {
-        Self::new_with_batch_size(table, pk_indices, DEFAULT_BATCH_SIZE)
+    pub fn new(table: ScannableTableRef, pk_indices: PkIndices, op_info: String) -> Self {
+        Self::new_with_batch_size(table, pk_indices, DEFAULT_BATCH_SIZE, op_info)
     }
 
     pub fn new_with_batch_size(
         table: ScannableTableRef,
         pk_indices: PkIndices,
         batch_size: usize,
+        op_info: String,
     ) -> Self {
         let schema = table.schema().into_owned();
         Self {
@@ -57,11 +57,14 @@ impl BatchQueryExecutor {
             iter: None,
             schema,
             epoch: None,
+            op_info,
         }
     }
 }
-impl BatchQueryExecutor {
-    async fn next_inner(&mut self) -> Result<Message> {
+
+#[async_trait]
+impl Executor for BatchQueryExecutor {
+    async fn next(&mut self) -> Result<Message> {
         if self.iter.is_none() {
             self.iter = Some(
                 self.table
@@ -70,42 +73,19 @@ impl BatchQueryExecutor {
                     .unwrap(),
             );
         }
+
         let iter = self.iter.as_mut().unwrap();
-        let mut count = 0;
-        let mut builders = self.table.schema().create_array_builders(self.batch_size)?;
+        let column_indices = (0..self.table.schema().len()).collect_vec();
 
-        while let Some(row) = iter.next().await.unwrap() {
-            builders
-                .iter_mut()
-                .zip_eq(row.0.iter())
-                .for_each(|(builder, data)| builder.append_datum(data).unwrap());
-            count += 1;
-            if count >= self.batch_size {
-                break;
-            }
-        }
-        if count == 0 {
-            // TODO: May be refactored in the future.
-            Err(RwError::from(ErrorCode::EOF))
-        } else {
-            let columns: Vec<Column> = builders
-                .into_iter()
-                .map(|builder| -> Result<_> { Ok(Column::new(Arc::new(builder.finish()?))) })
-                .try_collect()?;
+        let data_chunk = self
+            .table
+            .collect_from_iter(iter, &column_indices, Some(self.batch_size))
+            .await?
+            .ok_or_else(|| RwError::from(ErrorCode::EOF))?;
 
-            Ok(Message::Chunk(StreamChunk::new(
-                vec![Op::Insert; count],
-                columns,
-                None,
-            )))
-        }
-    }
-}
-
-#[async_trait]
-impl Executor for BatchQueryExecutor {
-    async fn next(&mut self) -> Result<Message> {
-        self.next_inner().await
+        let ops = vec![Op::Insert; data_chunk.cardinality()];
+        let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
+        Ok(Message::Chunk(stream_chunk))
     }
 
     fn schema(&self) -> &Schema {
@@ -120,16 +100,15 @@ impl Executor for BatchQueryExecutor {
         "BatchQueryExecutor"
     }
 
+    fn logical_operator_info(&self) -> &str {
+        &self.op_info
+    }
+
     fn init(&mut self, epoch: u64) -> Result<()> {
-        match self.epoch {
-            None => {
-                self.epoch = Some(epoch);
-                Ok(())
-            }
-            Some(_) => {
-                Err(ErrorCode::InternalError("epoch cannot be initialized twice".to_owned()).into())
-            }
+        if let Some(_old) = self.epoch.replace(epoch) {
+            panic!("epoch cannot be initialized twice");
         }
+        Ok(())
     }
 }
 
@@ -148,7 +127,12 @@ mod test {
         let test_batch_count = 5;
         let table = Arc::new(gen_basic_table(test_batch_count * test_batch_size).await)
             as ScannableTableRef;
-        let mut node = BatchQueryExecutor::new_with_batch_size(table, vec![0, 1], test_batch_size);
+        let mut node = BatchQueryExecutor::new_with_batch_size(
+            table,
+            vec![0, 1],
+            test_batch_size,
+            "BatchQueryExecutor".to_string(),
+        );
         node.init(u64::MAX).unwrap();
         let mut batch_cnt = 0;
         while let Ok(Message::Chunk(sc)) = node.next().await {
@@ -166,7 +150,12 @@ mod test {
         let test_batch_count = 5;
         let table = Arc::new(gen_basic_table(test_batch_count * test_batch_size).await)
             as ScannableTableRef;
-        let mut node = BatchQueryExecutor::new_with_batch_size(table, vec![0, 1], test_batch_size);
+        let mut node = BatchQueryExecutor::new_with_batch_size(
+            table,
+            vec![0, 1],
+            test_batch_size,
+            "BatchQueryExecutor".to_string(),
+        );
         node.init(u64::MAX).unwrap();
         node.init(0).unwrap();
     }

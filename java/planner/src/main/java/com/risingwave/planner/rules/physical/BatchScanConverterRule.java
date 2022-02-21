@@ -6,9 +6,8 @@ import static com.risingwave.planner.rel.physical.RisingWaveBatchPhyRel.BATCH_PH
 import com.risingwave.catalog.MaterializedViewCatalog;
 import com.risingwave.catalog.TableCatalog;
 import com.risingwave.planner.rel.logical.RwLogicalScan;
-import com.risingwave.planner.rel.physical.RwBatchMaterializedViewScan;
+import com.risingwave.planner.rel.physical.RwBatchScan;
 import com.risingwave.planner.rel.physical.RwBatchSourceScan;
-import com.risingwave.planner.rel.physical.RwBatchTableScan;
 import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.convert.ConverterRule;
@@ -38,17 +37,18 @@ public class BatchScanConverterRule extends ConverterRule {
     if (table.isSource()) {
       return RwBatchSourceScan.create(
           source.getCluster(), source.getTraitSet(), source.getTable(), source.getColumnIds());
-    } else if (table.isMaterializedView()) {
-      MaterializedViewCatalog view = (MaterializedViewCatalog) table;
-      RelTraitSet scanTraitSet = source.getTraitSet();
-      if (view.getCollation() != null) {
-        scanTraitSet = scanTraitSet.plus(view.getCollation());
-      }
-      return RwBatchMaterializedViewScan.create(
-          source.getCluster(), scanTraitSet, source.getTable(), source.getColumnIds());
     } else {
-      return RwBatchTableScan.create(
-          source.getCluster(), source.getTraitSet(), source.getTable(), source.getColumnIds());
+      RelTraitSet scanTraitSet = source.getTraitSet();
+
+      if (table.isMaterializedView()) {
+        var view = (MaterializedViewCatalog) table;
+        if (view.getCollation() != null) {
+          scanTraitSet = scanTraitSet.plus(view.getCollation());
+        }
+      }
+
+      return RwBatchScan.create(
+          source.getCluster(), scanTraitSet, source.getTable(), source.getColumnIds());
     }
   }
 }

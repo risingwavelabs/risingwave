@@ -2,6 +2,7 @@ package com.risingwave.execution.handler;
 
 import com.risingwave.catalog.TableCatalog;
 import com.risingwave.execution.context.ExecutionContext;
+import com.risingwave.execution.handler.cache.ScopedSnapshot;
 import com.risingwave.execution.result.BatchDataChunkResult;
 import com.risingwave.execution.result.CommandResult;
 import com.risingwave.pgwire.database.PgResult;
@@ -33,29 +34,37 @@ public class QueryHandler implements SqlHandler {
     BatchPlanner planner = new BatchPlanner();
     BatchPlan plan = planner.plan(ast, context);
 
-    QueryResultLocation resultLocation;
-    try {
-      QueryManager queryManager = context.getQueryManager();
-      resultLocation = queryManager.schedule(plan).get();
-    } catch (Exception exp) {
-      throw new RuntimeException(exp);
+    BatchDataChunkResult result;
+    try (ScopedSnapshot scopedSnapshot = context.getHummockSnapshotManager().getScopedSnapshot()) {
+      QueryResultLocation resultLocation;
+      try {
+        QueryManager queryManager = context.getQueryManager();
+        resultLocation = queryManager.schedule(plan, scopedSnapshot.getEpoch()).get();
+      } catch (Exception exp) {
+        throw new RuntimeException(exp);
+      }
+
+      TaskSinkId taskSinkId = Messages.buildTaskSinkId(resultLocation.getTaskId().toTaskIdProto());
+      ComputeClient client =
+          context.getComputeClientManager().getOrCreate(resultLocation.getNode());
+      Iterator<GetDataResponse> iter =
+          client.getData(GetDataRequest.newBuilder().setSinkId(taskSinkId).build());
+
+      // Convert task data to list to iterate it multiple times.
+      // FIXME: use Iterator<TaskData>
+      ArrayList<GetDataResponse> responses = new ArrayList<>();
+      while (iter.hasNext()) {
+        responses.add(iter.next());
+      }
+
+      result =
+          new BatchDataChunkResult(
+              SqlHandler.getStatementType(ast), responses, plan.getRoot().getRowType());
+    } catch (RuntimeException e) {
+      throw e;
+    } catch (Exception e) {
+      throw new RuntimeException(e);
     }
-
-    TaskSinkId taskSinkId = Messages.buildTaskSinkId(resultLocation.getTaskId().toTaskIdProto());
-    ComputeClient client = context.getComputeClientManager().getOrCreate(resultLocation.getNode());
-    Iterator<GetDataResponse> iter =
-        client.getData(GetDataRequest.newBuilder().setSinkId(taskSinkId).build());
-
-    // Convert task data to list to iterate it multiple times.
-    // FIXME: use Iterator<TaskData>
-    ArrayList<GetDataResponse> responses = new ArrayList<>();
-    while (iter.hasNext()) {
-      responses.add(iter.next());
-    }
-
-    var result =
-        new BatchDataChunkResult(
-            SqlHandler.getStatementType(ast), responses, plan.getRoot().getRowType());
 
     // For inserting into TABLE_V2, we call `FLUSH` implicitly to ensure the data is inserted.
     var isInsert = plan.getRoot() instanceof RwBatchInsert;

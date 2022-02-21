@@ -57,8 +57,16 @@ impl Task for GrafanaService {
                 .join("conf")
                 .join("provisioning")
                 .join("dashboards")
-                .join("dashboards.yaml"),
+                .join("risingwave-dashboards.yaml"),
             &GrafanaGen.gen_dashboard_yml(&self.config)?,
+        )?;
+        std::fs::write(
+            self.grafana_root
+                .join("conf")
+                .join("provisioning")
+                .join("dashboards")
+                .join("aws-s3-dashboards.yaml"),
+            &GrafanaGen.gen_s3_dashboard_yml(&self.config)?,
         )?;
 
         let cmd = self.grafana()?;

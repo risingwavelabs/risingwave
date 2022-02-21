@@ -60,7 +60,7 @@ impl super::DebugExecutor for SchemaCheckExecutor {
                         match (array, &builder) {
                             $( (Some(ArrayImpl::$variant_name(_)), Some(ArrayBuilderImpl::$variant_name(_))) => {} ),*
                             _ => panic!("schema check failed on {}: column {} should be {:?}, while stream chunk gives {:?}",
-                                                    self.input.identity(), i, builder.map(|b| b.get_ident()), array.map(|a| a.get_ident())),
+                                                    self.input.logical_operator_info(), i, builder.map(|b| b.get_ident()), array.map(|a| a.get_ident())),
                         }
                     };
                 }

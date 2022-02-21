@@ -142,6 +142,11 @@ impl StreamChunk {
         (data_chunk, ops)
     }
 
+    pub fn from_parts(ops: Vec<Op>, data_chunk: DataChunk) -> Self {
+        let (columns, visibility) = data_chunk.into_parts();
+        Self::new(ops, columns, visibility)
+    }
+
     pub fn into_inner(self) -> (Vec<Op>, Vec<Column>, Option<Bitmap>) {
         let StreamChunk {
             ops,

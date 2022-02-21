@@ -50,7 +50,7 @@ impl Task for ConfigureMinioTask {
 
         // Wait for server to be configured, otherwise there might be `Server uninitialized` error.
 
-        for _ in 0..10 {
+        for _ in 0..100 {
             let mut cmd = self.mcli();
             cmd.arg("alias")
                 .arg("set")

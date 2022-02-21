@@ -418,13 +418,13 @@ async fn test_mview_scan_empty_column_ids_cardinality() {
     );
     state.flush(epoch).await.unwrap();
 
-    let chunks = table.get_data_by_columns(&[]).await.unwrap();
-
-    match chunks {
-        Some(chunks) => {
-            let chunk = chunks.into_iter().next().unwrap();
-            assert_eq!(chunk.cardinality(), 2);
-        }
-        None => panic!(),
-    }
+    let chunk = {
+        let mut iter = table.iter(u64::MAX).await.unwrap();
+        table
+            .collect_from_iter(&mut iter, &[0, 1, 2], None)
+            .await
+            .unwrap()
+            .unwrap()
+    };
+    assert_eq!(chunk.cardinality(), 2);
 }

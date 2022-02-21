@@ -6,6 +6,7 @@ import com.risingwave.catalog.CatalogService;
 import com.risingwave.catalog.SchemaCatalog;
 import com.risingwave.common.config.Configuration;
 import com.risingwave.execution.handler.SqlHandlerFactory;
+import com.risingwave.execution.handler.cache.HummockSnapshotManager;
 import com.risingwave.node.WorkerNodeManager;
 import com.risingwave.rpc.ComputeClientManager;
 import com.risingwave.scheduler.QueryManager;
@@ -47,6 +48,10 @@ public class ExecutionContext implements Context {
 
   public ComputeClientManager getComputeClientManager() {
     return frontendEnv.getComputeClientManager();
+  }
+
+  public HummockSnapshotManager getHummockSnapshotManager() {
+    return frontendEnv.getHummockSnapshotManager();
   }
 
   public String getDatabase() {

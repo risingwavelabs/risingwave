@@ -4,9 +4,9 @@
 use std::collections::BTreeMap;
 use std::vec::Drain;
 
-use risingwave_common::array::{Row, RowDeserializer};
+use risingwave_common::array::Row;
 use risingwave_common::error::Result;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::ordered::*;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -91,7 +91,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         }
     }
 
-    pub async fn pop_top_element(&mut self) -> Result<Option<(OrderedRow, Row)>> {
+    pub async fn pop_top_element(&mut self, epoch: u64) -> Result<Option<(OrderedRow, Row)>> {
         if self.total_count == 0 {
             Ok(None)
         } else {
@@ -101,12 +101,12 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
                 &self.top_n
             };
             let key = cache_to_pop.last_key_value().unwrap().0.clone();
-            let value = self.delete(&key).await?;
+            let value = self.delete(&key, epoch).await?;
             Ok(Some((key, value.unwrap())))
         }
     }
 
-    pub async fn pop_bottom_element(&mut self) -> Result<Option<(OrderedRow, Row)>> {
+    pub async fn pop_bottom_element(&mut self, epoch: u64) -> Result<Option<(OrderedRow, Row)>> {
         if self.total_count == 0 {
             Ok(None)
         } else {
@@ -116,7 +116,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
                 &self.bottom_n
             };
             let key = cache_to_pop.first_key_value().unwrap().0.clone();
-            let value = self.delete(&key).await?;
+            let value = self.delete(&key, epoch).await?;
             Ok(Some((key, value.unwrap())))
         }
     }
@@ -164,14 +164,14 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         self.total_count += 1;
     }
 
-    pub async fn delete(&mut self, key: &OrderedRow) -> Result<Option<Row>> {
+    pub async fn delete(&mut self, key: &OrderedRow, epoch: u64) -> Result<Option<Row>> {
         let prev_top_n_entry = self.top_n.remove(key);
         let prev_bottom_n_entry = self.bottom_n.remove(key);
         FlushStatus::do_delete(self.flush_buffer.entry(key.clone()));
         self.total_count -= 1;
         // If we have nothing in both caches, we have to scan from the storage.
         if self.top_n.is_empty() && self.bottom_n.is_empty() && self.total_count > 0 {
-            self.scan_and_merge().await?;
+            self.scan_and_merge(epoch).await?;
         }
         let value = match (prev_top_n_entry, prev_bottom_n_entry) {
             (None, None) => None,
@@ -182,8 +182,8 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
     }
 
     /// The same as the one in `ManagedTopNState`.
-    pub async fn scan_and_merge(&mut self) -> Result<()> {
-        let mut kv_pairs = self.scan_from_storage(None).await?;
+    pub async fn scan_and_merge(&mut self, epoch: u64) -> Result<()> {
+        let mut kv_pairs = self.scan_from_storage(None, epoch).await?;
         let mut flush_buffer_iter = self.flush_buffer.iter().peekable();
         let mut insert_process =
             |cache: &mut BTreeMap<OrderedRow, Row>, part_kv_pairs: Drain<(OrderedRow, Row)>| {
@@ -235,9 +235,8 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
     async fn scan_from_storage(
         &mut self,
         number_rows: Option<usize>,
+        epoch: u64,
     ) -> Result<Vec<(OrderedRow, Row)>> {
-        // TODO: use the correct epoch
-        let epoch = u64::MAX;
         let pk_row_bytes = self
             .keyspace
             .scan_strip_prefix(
@@ -245,19 +244,22 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
                 epoch,
             )
             .await?;
+        let data_type_num = self.data_types.len();
         // We must have enough cells to restore a complete row.
-        debug_assert_eq!(pk_row_bytes.len() % self.data_types.len(), 0);
+        debug_assert_eq!(pk_row_bytes.len() % data_type_num, 0);
         // cell-based storage format, so `self.schema.len()`
-        let mut row_bytes = vec![];
         let mut cell_restored = 0;
         let mut res = vec![];
-        for (pk, cell_bytes) in pk_row_bytes {
-            row_bytes.extend_from_slice(&cell_bytes);
+        let mut datum_vec: Vec<Datum> = vec![];
+        for (i, (pk, cell_bytes)) in pk_row_bytes.into_iter().enumerate() {
+            let datum = deserialize_cell(&cell_bytes[..], &self.data_types[i % data_type_num])?;
+            datum_vec.push(datum);
+
             cell_restored += 1;
-            if cell_restored == self.data_types.len() {
+            if cell_restored == data_type_num {
                 cell_restored = 0;
-                let deserializer = RowDeserializer::new(self.data_types.clone());
-                let row = deserializer.deserialize(&std::mem::take(&mut row_bytes))?;
+
+                let row = Row::new(std::mem::take(&mut datum_vec));
                 // format: [pk_buf | cell_idx (4B)]
                 // Take `pk_buf` out.
                 let pk_without_cell_idx = pk.slice(0..pk.len() - 4);
@@ -272,9 +274,9 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
 
     /// We can fill in the cache from storage only when state is not dirty, i.e. right after
     /// `flush`.
-    pub async fn fill_in_cache(&mut self) -> Result<()> {
+    pub async fn fill_in_cache(&mut self, epoch: u64) -> Result<()> {
         debug_assert!(!self.is_dirty());
-        let mut pk_row_bytes = self.scan_from_storage(None).await?;
+        let mut pk_row_bytes = self.scan_from_storage(None, epoch).await?;
         // cell-based storage format, so `self.schema.len()`
         for (pk, row) in pk_row_bytes.drain(0..pk_row_bytes.len() / 2) {
             self.bottom_n.insert(pk, row);
@@ -453,7 +455,7 @@ mod tests {
             order_types.clone(),
         );
         assert_eq!(managed_state.top_element(), None);
-        managed_state.fill_in_cache().await.unwrap();
+        managed_state.fill_in_cache(epoch).await.unwrap();
         // now ("abd", 3) -> ("abc", 3) -> ("ab", 4)
         assert_eq!(
             managed_state.top_element(),
@@ -468,7 +470,7 @@ mod tests {
         assert_eq!(managed_state.get_cache_len(), 3);
 
         assert_eq!(
-            managed_state.pop_top_element().await.unwrap(),
+            managed_state.pop_top_element(epoch).await.unwrap(),
             Some((ordered_rows[3].clone(), rows[3].clone()))
         );
         // now ("abd", 3) -> ("abc", 3)
@@ -484,7 +486,7 @@ mod tests {
         assert_eq!(managed_state.total_count, 2);
         assert_eq!(managed_state.get_cache_len(), 2);
         assert_eq!(
-            managed_state.pop_top_element().await.unwrap(),
+            managed_state.pop_top_element(epoch).await.unwrap(),
             Some((ordered_rows[1].clone(), rows[1].clone()))
         );
         // now ("abd", 3)
@@ -525,7 +527,7 @@ mod tests {
             data_types.clone(),
             order_types.clone(),
         );
-        managed_state.fill_in_cache().await.unwrap();
+        managed_state.fill_in_cache(epoch).await.unwrap();
         assert_eq!(
             managed_state.top_element(),
             Some((&ordered_rows[2], &rows[2]))

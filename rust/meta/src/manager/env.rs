@@ -4,9 +4,9 @@ use super::{StreamClients, StreamClientsRef};
 #[cfg(test)]
 use crate::manager::MemEpochGenerator;
 use crate::manager::{EpochGeneratorRef, IdGeneratorManager, IdGeneratorManagerRef};
-use crate::storage::MetaStore;
 #[cfg(test)]
-use crate::storage::{MemStore, SledMetaStore};
+use crate::storage::MemStore;
+use crate::storage::MetaStore;
 
 /// [`MetaSrcEnv`] is the global environment in Meta service. The instance will be shared by all
 /// kind of managers inside Meta.
@@ -64,27 +64,7 @@ impl MetaSrvEnv<MemStore> {
     // Instance for test.
     pub async fn for_test() -> Self {
         // change to sync after refactor `IdGeneratorManager::new` sync.
-        let meta_store = Arc::new(MemStore::new());
-        let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
-        let epoch_generator = Arc::new(MemEpochGenerator::new());
-        let stream_clients = Arc::new(StreamClients::default());
-
-        Self {
-            id_gen_manager,
-            meta_store,
-            epoch_generator,
-            stream_clients,
-        }
-    }
-}
-
-#[cfg(test)]
-impl MetaSrvEnv<SledMetaStore> {
-    // Instance for test using sled as backend
-    #[cfg(test)]
-    pub async fn for_test_with_sled() -> Self {
-        // change to sync after refactor `IdGeneratorManager::new` sync.
-        let meta_store = Arc::new(SledMetaStore::new(None).unwrap());
+        let meta_store = Arc::new(MemStore::default());
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let epoch_generator = Arc::new(MemEpochGenerator::new());
         let stream_clients = Arc::new(StreamClients::default());

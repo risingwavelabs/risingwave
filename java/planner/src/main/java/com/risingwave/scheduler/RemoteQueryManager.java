@@ -28,18 +28,18 @@ public class RemoteQueryManager implements QueryManager {
   }
 
   @Override
-  public CompletableFuture<QueryResultLocation> schedule(BatchPlan plan) {
+  public CompletableFuture<QueryResultLocation> schedule(BatchPlan plan, long epoch) {
     CompletableFuture<QueryResultLocation> resultFuture = new CompletableFuture<>();
-    createQueryExecution(plan, resultFuture);
+    createQueryExecution(plan, resultFuture, epoch);
     return resultFuture;
   }
 
   private void createQueryExecution(
-      BatchPlan plan, CompletableFuture<QueryResultLocation> resultFuture) {
+      BatchPlan plan, CompletableFuture<QueryResultLocation> resultFuture, long epoch) {
     Query query = PlanFragmenter.planDistribution(plan);
 
     QueryExecution queryExecution =
-        new QueryExecution(query, taskManager, resourceManager, resultFuture);
+        new QueryExecution(query, taskManager, resourceManager, resultFuture, epoch);
     queryExecution.start();
     queries.put(query.getQueryId(), queryExecution);
   }
