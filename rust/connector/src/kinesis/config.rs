@@ -1,6 +1,5 @@
 use anyhow::Result;
 use aws_config::default_provider::credentials::DefaultCredentialsChain;
-use aws_config::default_provider::region::DefaultRegionChain;
 use aws_config::sts::AssumeRoleProvider;
 use aws_types::credentials::SharedCredentialsProvider;
 use aws_types::region::Region;
@@ -53,7 +52,7 @@ impl AwsConfigInfo {
                     .await,
             ),
         };
-        
+
         if let Some(AwsAssumeRole { arn, external_id }) = &self.assume_role {
             let mut role = AssumeRoleProvider::builder(arn).session_name("RisingWave");
             if let Some(region) = &region {
@@ -111,13 +110,20 @@ mod tests {
             stream_name: STREAM_NAME.into(),
             region: Some("cn-north-1".to_string()),
             credentials: None,
-            assume_role: Some(AwsAssumeRole{arn: KINESIS_ROLE_ARN.into(), external_id: None}),
+            assume_role: Some(AwsAssumeRole {
+                arn: KINESIS_ROLE_ARN.into(),
+                external_id: None,
+            }),
         };
         let config = demo_config.load().await.unwrap();
         println!("config {:#?}", config);
         let client = aws_sdk_kinesis::Client::new(&config);
-        
-        let resp = client.describe_stream().stream_name(&demo_config.stream_name).send().await;
+
+        let resp = client
+            .describe_stream()
+            .stream_name(&demo_config.stream_name)
+            .send()
+            .await;
         println!("{:#?}", resp);
     }
 }
