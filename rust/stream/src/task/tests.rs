@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use futures::{SinkExt, StreamExt};
+use risingwave_common::config::StreamingConfig;
 use risingwave_common::worker_id::WorkerIdRef;
 use risingwave_pb::common::{ActorInfo, HostAddress};
 use risingwave_pb::data::data_type::TypeName;
@@ -15,7 +16,7 @@ use risingwave_storage::table::SimpleTableManager;
 
 use super::*;
 use crate::executor::{Barrier, Message, Mutation};
-use crate::task::env::StreamTaskEnv;
+use crate::task::env::StreamEnvironment;
 
 fn helper_make_local_actor(actor_id: u32) -> ActorInfo {
     ActorInfo {
@@ -225,10 +226,11 @@ async fn test_stream_proto() {
         )
         .unwrap();
 
-    let env = StreamTaskEnv::new(
+    let env = StreamEnvironment::new(
         Arc::new(SimpleTableManager::with_in_memory_store()),
         Arc::new(MemSourceManager::new()),
         std::net::SocketAddr::V4("127.0.0.1:5688".parse().unwrap()),
+        Arc::new(StreamingConfig::default()),
         WorkerIdRef::for_test(),
     );
     stream_manager

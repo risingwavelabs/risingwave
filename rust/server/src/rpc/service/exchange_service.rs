@@ -4,7 +4,7 @@ use std::sync::Arc;
 use futures::channel::mpsc::Receiver;
 use futures::StreamExt;
 use risingwave_batch::rpc::service::exchange::GrpcExchangeWriter;
-use risingwave_batch::task::{TaskManager, TaskSinkId};
+use risingwave_batch::task::{BatchManager, TaskSinkId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan::TaskSinkId as ProtoTaskSinkId;
 use risingwave_pb::task_service::exchange_service_server::ExchangeService;
@@ -18,7 +18,7 @@ use tonic::{Request, Response, Status};
 
 #[derive(Clone)]
 pub struct ExchangeServiceImpl {
-    mgr: Arc<TaskManager>,
+    batch_mgr: Arc<BatchManager>,
     stream_mgr: Arc<StreamManager>,
 }
 
@@ -79,8 +79,11 @@ impl ExchangeService for ExchangeServiceImpl {
 }
 
 impl ExchangeServiceImpl {
-    pub fn new(mgr: Arc<TaskManager>, stream_mgr: Arc<StreamManager>) -> Self {
-        ExchangeServiceImpl { mgr, stream_mgr }
+    pub fn new(mgr: Arc<BatchManager>, stream_mgr: Arc<StreamManager>) -> Self {
+        ExchangeServiceImpl {
+            batch_mgr: mgr,
+            stream_mgr,
+        }
     }
 
     #[cfg(not(tarpaulin_include))]
@@ -93,7 +96,7 @@ impl ExchangeServiceImpl {
 
         let tsid = TaskSinkId::try_from(&pb_tsid)?;
         debug!("Serve exchange RPC from {} [{:?}]", peer_addr, tsid);
-        let mut task_sink = self.mgr.take_sink(&pb_tsid)?;
+        let mut task_sink = self.batch_mgr.take_sink(&pb_tsid)?;
         tokio::spawn(async move {
             let mut writer = GrpcExchangeWriter::new(tx.clone());
             match task_sink.take_data(&mut writer).await {

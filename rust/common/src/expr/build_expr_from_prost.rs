@@ -7,7 +7,7 @@ use crate::expr::expr_binary_bytes::new_substr_start;
 use crate::expr::expr_binary_nonnull::{new_binary_expr, new_like_default, new_position_expr};
 use crate::expr::expr_binary_nullable::new_nullable_binary_expr;
 use crate::expr::expr_case::{CaseExpression, WhenClause};
-use crate::expr::expr_search::SearchExpression;
+use crate::expr::expr_in::InExpression;
 use crate::expr::expr_ternary_bytes::{new_replace_expr, new_substr_start_end, new_translate_expr};
 use crate::expr::expr_unary::{
     new_ascii_expr, new_length_default, new_ltrim_expr, new_rtrim_expr, new_trim_expr,
@@ -140,26 +140,24 @@ pub fn build_ascii_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     Ok(new_ascii_expr(child, ret_type))
 }
 
-pub fn build_search_expr(prost: &ExprNode) -> Result<BoxedExpression> {
+pub fn build_in_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_return_type_and_children(prost)?;
-    ensure!(children.len() == 2);
     ensure!(ret_type == DataType::Boolean);
     ensure!(children[0].get_expr_type()? == expr_node::Type::InputRef);
     let input_ref_expr = expr_build_from_prost(&children[0])?;
-    ensure!(children[1].get_expr_type()? == expr_node::Type::Sarg);
-    // Here we abuse a bit of `FuncCall` to store all the values in Sarg.
-    let sarg = try_match_expand!(children[1].get_rex_node()?, expr_node::RexNode::FuncCall)?;
+    for child in &children[1..] {
+        ensure!(child.get_expr_type()? == expr_node::Type::ConstantValue);
+    }
     let mut data = Vec::new();
     // Used for literal expression below to generate datum
     let data_chunk = DataChunk::new_dummy(1);
-    for expr in &sarg.children {
-        ensure!(expr.get_expr_type()? == expr_node::Type::ConstantValue);
-        let mut literal_expr = expr_build_from_prost(expr)?;
+    for child in &children[1..] {
+        let mut literal_expr = expr_build_from_prost(child)?;
         let array = literal_expr.eval(&data_chunk)?;
         let datum = array.value_at(0).to_owned_datum();
         data.push(datum);
     }
-    Ok(Box::new(SearchExpression::new(
+    Ok(Box::new(InExpression::new(
         input_ref_expr,
         data.into_iter(),
         ret_type,
@@ -228,66 +226,54 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_build_search_expr() {
+    fn test_build_in_expr() {
         let input_ref = InputRefExpr { column_idx: 0 };
-        let sarg_values_in_func_call = FunctionCall {
-            children: vec![
-                ExprNode {
-                    expr_type: Type::ConstantValue as i32,
-                    return_type: Some(ProstDataType {
-                        type_name: TypeName::Char as i32,
-                        precision: 0,
-                        scale: 0,
-                        is_nullable: false,
-                        interval_type: IntervalType::Invalid as i32,
-                    }),
-                    rex_node: Some(RexNode::Constant(ConstantValue {
-                        body: "ABC".as_bytes().to_vec(),
-                    })),
-                },
-                ExprNode {
-                    expr_type: Type::ConstantValue as i32,
-                    return_type: Some(ProstDataType {
-                        type_name: TypeName::Char as i32,
-                        precision: 0,
-                        scale: 0,
-                        is_nullable: false,
-                        interval_type: IntervalType::Invalid as i32,
-                    }),
-                    rex_node: Some(RexNode::Constant(ConstantValue {
-                        body: "def".as_bytes().to_vec(),
-                    })),
-                },
-            ],
+        let input_ref_expr_node = ExprNode {
+            expr_type: Type::InputRef as i32,
+            return_type: Some(ProstDataType {
+                type_name: TypeName::Char as i32,
+                precision: 0,
+                scale: 0,
+                is_nullable: false,
+                interval_type: IntervalType::Invalid as i32,
+            }),
+            rex_node: Some(RexNode::InputRef(input_ref)),
         };
+        let constant_values = vec![
+            ExprNode {
+                expr_type: Type::ConstantValue as i32,
+                return_type: Some(ProstDataType {
+                    type_name: TypeName::Char as i32,
+                    precision: 0,
+                    scale: 0,
+                    is_nullable: false,
+                    interval_type: IntervalType::Invalid as i32,
+                }),
+                rex_node: Some(RexNode::Constant(ConstantValue {
+                    body: "ABC".as_bytes().to_vec(),
+                })),
+            },
+            ExprNode {
+                expr_type: Type::ConstantValue as i32,
+                return_type: Some(ProstDataType {
+                    type_name: TypeName::Char as i32,
+                    precision: 0,
+                    scale: 0,
+                    is_nullable: false,
+                    interval_type: IntervalType::Invalid as i32,
+                }),
+                rex_node: Some(RexNode::Constant(ConstantValue {
+                    body: "def".as_bytes().to_vec(),
+                })),
+            },
+        ];
+        let mut in_children = vec![input_ref_expr_node];
+        in_children.extend(constant_values.into_iter());
         let call = FunctionCall {
-            children: vec![
-                ExprNode {
-                    expr_type: Type::InputRef as i32,
-                    return_type: Some(ProstDataType {
-                        type_name: TypeName::Char as i32,
-                        precision: 0,
-                        scale: 0,
-                        is_nullable: false,
-                        interval_type: IntervalType::Invalid as i32,
-                    }),
-                    rex_node: Some(RexNode::InputRef(input_ref)),
-                },
-                ExprNode {
-                    expr_type: Type::Sarg as i32,
-                    return_type: Some(ProstDataType {
-                        type_name: TypeName::Char as i32,
-                        precision: 0,
-                        scale: 0,
-                        is_nullable: false,
-                        interval_type: IntervalType::Invalid as i32,
-                    }),
-                    rex_node: Some(RexNode::FuncCall(sarg_values_in_func_call)),
-                },
-            ],
+            children: in_children,
         };
         let p = ExprNode {
-            expr_type: Type::Search as i32,
+            expr_type: Type::In as i32,
             return_type: Some(ProstDataType {
                 type_name: TypeName::Boolean as i32,
                 precision: 0,
@@ -297,7 +283,7 @@ mod tests {
             }),
             rex_node: Some(RexNode::FuncCall(call)),
         };
-        assert!(build_search_expr(&p).is_ok());
+        assert!(build_in_expr(&p).is_ok());
     }
 
     #[test]

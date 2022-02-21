@@ -125,7 +125,7 @@ impl BoxedExecutorBuilder for CreateSourceExecutor {
             table_id,
             config,
             format,
-            source_manager: source.global_task_env().source_manager_ref(),
+            source_manager: source.global_batch_env().source_manager_ref(),
             columns,
             schema: Schema { fields: vec![] },
             properties: properties.clone(),

@@ -19,7 +19,7 @@ use crate::executor::{
     BoxedExecutor, BoxedExecutorBuilder, CreateSource, DefaultCreateSource, Executor,
     ExecutorBuilder,
 };
-use crate::task::{BatchTaskEnv, TaskId};
+use crate::task::{BatchEnvironment, TaskId};
 
 pub(super) type MergeSortExchangeExecutor = MergeSortExchangeExecutorImpl<DefaultCreateSource>;
 
@@ -30,7 +30,7 @@ pub(super) type MergeSortExchangeExecutor = MergeSortExchangeExecutorImpl<Defaul
 /// TODO: Does not handle `visibility` for now.
 pub(super) struct MergeSortExchangeExecutorImpl<C> {
     server_addr: SocketAddr,
-    env: BatchTaskEnv,
+    env: BatchEnvironment,
     /// keeps one data chunk of each source if any
     source_inputs: Vec<Option<DataChunkRef>>,
     order_pairs: Arc<Vec<OrderPair>>,
@@ -251,7 +251,7 @@ mod tests {
         #[async_trait::async_trait]
         impl CreateSource for FakeCreateSource {
             async fn create_source(
-                _: BatchTaskEnv,
+                _: BatchEnvironment,
                 _: &ProstExchangeSource,
                 _: TaskId,
             ) -> Result<Box<dyn ExchangeSource>> {
@@ -277,7 +277,7 @@ mod tests {
 
         let mut executor = MergeSortExchangeExecutorImpl::<FakeCreateSource> {
             server_addr: SocketAddr::V4("127.0.0.1:5688".parse().unwrap()),
-            env: BatchTaskEnv::for_test(),
+            env: BatchEnvironment::for_test(),
             source_inputs: vec![None; proto_sources.len()],
             order_pairs,
             min_heap: BinaryHeap::new(),
