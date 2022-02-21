@@ -11,6 +11,7 @@ import com.risingwave.planner.rel.physical.join.BatchJoinUtils;
 import com.risingwave.planner.rel.serialization.RexToProtoSerializer;
 import com.risingwave.planner.rel.streaming.RisingWaveStreamingRel;
 import com.risingwave.planner.rel.streaming.RwStreamingRelVisitor;
+import com.risingwave.planner.rel.streaming.StreamingPlan;
 import com.risingwave.proto.streaming.plan.HashJoinNode;
 import com.risingwave.proto.streaming.plan.StreamNode;
 import java.util.Collections;
@@ -72,6 +73,7 @@ public class RwStreamHashJoin extends Join implements RisingWaveStreamingRel {
     return StreamNode.newBuilder()
         .setHashJoinNode(hashJoinNode)
         .addAllPkIndices(primaryKeyIndices)
+        .setIdentity(StreamingPlan.getCurrentNodeIdentity(this))
         .build();
   }
 

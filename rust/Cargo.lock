@@ -3872,6 +3872,7 @@ dependencies = [
  "num-traits",
  "parking_lot 0.12.0",
  "paste",
+ "prometheus 0.13.0",
  "prost 0.9.0",
  "rand 0.8.5",
  "risingwave-pb",
@@ -3965,12 +3966,14 @@ dependencies = [
 name = "risingwave_sqlparser"
 version = "0.1.2"
 dependencies = [
+ "anyhow",
  "itertools 0.10.3",
  "log",
  "matches",
  "risingwave_common",
  "serde",
  "serde_json",
+ "walkdir",
 ]
 
 [[package]]

@@ -69,8 +69,8 @@ impl BoxedExecutorBuilder for CreateTableExecutor {
 
         Ok(Box::new(Self {
             table_id,
-            table_manager: source.global_task_env().table_manager_ref(),
-            source_manager: source.global_task_env().source_manager_ref(),
+            table_manager: source.global_batch_env().table_manager_ref(),
+            source_manager: source.global_batch_env().source_manager_ref(),
             table_columns: node.column_descs.clone(),
             identity: "CreateTableExecutor".to_string(),
             is_materialized_view: node.is_materialized_view,
