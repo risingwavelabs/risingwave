@@ -81,7 +81,10 @@ impl PgResponse {
     }
 
     pub fn is_query(&self) -> bool {
-        self.stmt_type == StatementType::SELECT || self.stmt_type == StatementType::EXPLAIN
+        matches!(
+            self.stmt_type,
+            StatementType::SELECT | StatementType::EXPLAIN
+        )
     }
 
     pub fn get_row_desc(&self) -> Vec<PgFieldDescriptor> {
