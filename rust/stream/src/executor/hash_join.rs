@@ -1,4 +1,3 @@
-use std::collections::hash_map::{Entry, HashMap};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -146,9 +145,6 @@ const fn outer_side_null(join_type: JoinTypePrimitive, side_type: SideTypePrimit
         || (join_type == JoinType::RightOuter && side_type == SideType::Left)
 }
 
-type HashKeyType = Row;
-type HashValueType<S> = AllOrNoneState<S>;
-
 pub struct JoinParams {
     /// Indices of the join columns
     key_indices: Vec<usize>,
@@ -162,8 +158,7 @@ impl JoinParams {
 
 struct JoinSide<S: StateStore> {
     /// Store all data from a one side stream
-    // TODO: use `EvictableHashMap`.
-    ht: HashMap<HashKeyType, HashValueType<S>>,
+    ht: JoinHashMap<S>,
     /// Indices of the join key columns
     key_indices: Vec<usize>,
     /// The primary key indices of this side, used for state store
@@ -194,9 +189,11 @@ impl<S: StateStore> JoinSide<S> {
     }
 
     fn clear_cache(&mut self) {
-        // TODO: should clear the hashmap entirely after cache eviction of hash join is fixed,
-        // instead of clear cache for all states.
-        self.ht.values_mut().for_each(|s| s.clear_cache());
+        assert!(
+            !self.is_dirty(),
+            "cannot clear cache while states of hash join are dirty"
+        );
+        self.ht.clear();
     }
 }
 
@@ -221,7 +218,6 @@ pub struct HashJoinExecutor<S: StateStore, const T: JoinTypePrimitive> {
     debug_l: String,
     /// Debug info for the right executor
     debug_r: String,
-
     /// Identity string
     identity: String,
 
@@ -261,7 +257,10 @@ impl<S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<S,
             },
             AlignedMessage::Barrier(barrier) => {
                 self.flush_data().await?;
-                self.update_epoch(barrier.epoch);
+                let epoch = barrier.epoch;
+                self.side_l.ht.update_epoch(epoch);
+                self.side_r.ht.update_epoch(epoch);
+                self.update_epoch(epoch);
                 Ok(Message::Barrier(barrier))
             }
         }
@@ -324,13 +323,13 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
             .fields
             .iter()
             .map(|field| field.data_type)
-            .collect();
+            .collect_vec();
         let col_r_datatypes = input_r
             .schema()
             .fields
             .iter()
             .map(|field| field.data_type)
-            .collect();
+            .collect_vec();
         let pk_indices_l = input_l.pk_indices().to_vec();
         let pk_indices_r = input_r.pk_indices().to_vec();
 
@@ -343,7 +342,12 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
                 fields: schema_fields,
             },
             side_l: JoinSide {
-                ht: HashMap::new(),
+                ht: JoinHashMap::new(
+                    1 << 16,
+                    pk_indices_l.clone(),
+                    col_l_datatypes.clone(),
+                    ks_l.clone(),
+                ), // TODO: decide the target cap
                 key_indices: params_l.key_indices,
                 col_types: col_l_datatypes,
                 pk_indices: pk_indices_l,
@@ -351,7 +355,12 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
                 keyspace: ks_l,
             },
             side_r: JoinSide {
-                ht: HashMap::new(),
+                ht: JoinHashMap::new(
+                    1 << 16,
+                    pk_indices_r.clone(),
+                    col_r_datatypes.clone(),
+                    ks_r.clone(),
+                ), // TODO: decide the target cap
                 key_indices: params_r.key_indices,
                 col_types: col_r_datatypes,
                 pk_indices: pk_indices_r,
@@ -377,16 +386,22 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
             }
             write_batch.ingest(epoch).await.unwrap();
         }
+
+        // evict the LRU cache
+        assert!(!self.side_l.is_dirty());
+        self.side_l.ht.evict_to_target_cap();
+        assert!(!self.side_r.is_dirty());
+        self.side_r.ht.evict_to_target_cap();
         Ok(())
     }
 
     /// the data the hash table and match the coming
     /// data chunk with the executor state
-    fn hash_eq_match<'a>(
+    async fn hash_eq_match<'a>(
         key: &Row,
-        ht: &'a mut HashMap<HashKeyType, HashValueType<S>>,
+        ht: &'a mut JoinHashMap<S>,
     ) -> Option<&'a mut HashValueType<S>> {
-        ht.get_mut(key)
+        ht.get_mut(key).await
     }
 
     fn hash_key_from_row_ref(row: &RowRef, key_indices: &[usize]) -> HashKeyType {
@@ -481,21 +496,15 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
         for (row, op) in data_chunk.rows().zip_eq(ops.iter()) {
             let key = Self::hash_key_from_row_ref(&row, &side_update.key_indices);
             let value = Self::row_from_row_ref(&row);
-            let matched_rows = Self::hash_eq_match(&key, &mut side_match.ht);
+            let pk = Self::pk_from_row_ref(&row, &side_update.pk_indices);
+            let matched_rows = Self::hash_eq_match(&key, &mut side_match.ht).await;
             if let Some(matched_rows) = matched_rows {
                 // if there are non-equi expressions
                 if let Some(ref mut cond) = self.cond {
                     match *op {
                         Op::Insert | Op::UpdateInsert => {
                             let entry_value =
-                                side_update.ht.entry(key.clone()).or_insert_with(|| {
-                                    create_hash_join_state(
-                                        key,
-                                        &side_update.keyspace.clone(),
-                                        side_update.pk_indices.clone(),
-                                        side_update.col_types.clone(),
-                                    )
-                                });
+                                side_update.ht.get_or_init_without_cache(&key).await?;
                             let mut degree = 0;
                             for matched_row in matched_rows.values_mut(epoch).await {
                                 // TODO(yuhao-su): We should find a better way to eval the
@@ -539,12 +548,11 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
                                     }
                                 }
                             }
-                            entry_value.insert(JoinRow::new(value, degree));
+                            entry_value.insert(pk, JoinRow::new(value, degree));
                         }
                         Op::Delete | Op::UpdateDelete => {
-                            if let Some(v) = side_update.ht.get_mut(&key) {
+                            if let Some(v) = side_update.ht.get_mut_without_cached(&key).await {
                                 // remove the row by it's primary key
-                                let pk = Self::pk_from_row_ref(&row, &side_update.pk_indices);
                                 v.remove(pk);
 
                                 for matched_row in matched_rows.values_mut(epoch).await {
@@ -593,13 +601,13 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
                     let mut null_row_updated = false;
                     match *op {
                         Op::Insert | Op::UpdateInsert => {
-                            let entry = side_update.ht.entry(key.clone());
+                            let entry = side_update.ht.get_mut_without_cached(&key).await;
                             // FIXME: when state is empty for the entry, the entry is not deleted.
                             let entry_value = match entry {
-                                Entry::Occupied(entry) => entry.into_mut(),
+                                Some(state) => state,
                                 // if outer join and not its the first to insert, meaning there must
                                 // be corresponding nulls.
-                                Entry::Vacant(entry) => {
+                                None => {
                                     if outer_side_null(T, SIDE) {
                                         for matched_row in matched_rows.values(epoch).await {
                                             stream_chunk_builder.append_row_matched(
@@ -614,20 +622,17 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
                                         }
                                         null_row_updated = true;
                                     };
-                                    entry.insert(create_hash_join_state(
-                                        key,
-                                        &side_update.keyspace.clone(),
-                                        side_update.pk_indices.clone(),
-                                        side_update.col_types.clone(),
-                                    ))
+                                    side_update.ht.init_without_cache(&key).await?;
+                                    side_update.ht.get_mut_without_cached(&key).await.unwrap()
                                 }
                             };
-                            entry_value
-                                .insert(JoinRow::new(value, matched_rows.len(epoch).await as u64));
+                            entry_value.insert(
+                                pk,
+                                JoinRow::new(value, matched_rows.len(epoch).await as u64),
+                            );
                         }
                         Op::Delete | Op::UpdateDelete => {
-                            if let Some(v) = side_update.ht.get_mut(&key) {
-                                let pk = Self::pk_from_row_ref(&row, &side_update.pk_indices);
+                            if let Some(v) = side_update.ht.get_mut_without_cached(&key).await {
                                 v.remove(pk);
                                 if outer_side_null(T, SIDE) && v.is_empty(epoch).await {
                                     for matched_row in matched_rows.values(epoch).await {
@@ -660,22 +665,11 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
                 // should handle this!
                 match *op {
                     Op::Insert | Op::UpdateInsert => {
-                        side_update
-                            .ht
-                            .entry(key.clone())
-                            .or_insert_with(|| {
-                                create_hash_join_state(
-                                    key,
-                                    &side_update.keyspace.clone(),
-                                    side_update.pk_indices.clone(),
-                                    side_update.col_types.clone(),
-                                )
-                            })
-                            .insert(JoinRow::new(value, 0));
+                        let state = side_update.ht.get_or_init_without_cache(&key).await?;
+                        state.insert(pk, JoinRow::new(value, 0));
                     }
                     Op::Delete | Op::UpdateDelete => {
-                        if let Some(v) = side_update.ht.get_mut(&key) {
-                            let pk = Self::pk_from_row_ref(&row, &side_update.pk_indices);
+                        if let Some(v) = side_update.ht.get_mut_without_cached(&key).await {
                             v.remove(pk);
                         }
                     }

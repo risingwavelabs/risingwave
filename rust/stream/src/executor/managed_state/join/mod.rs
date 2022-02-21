@@ -1,8 +1,12 @@
-mod all_or_none;
-use std::ops::Index;
+mod join_entry_state;
+use std::ops::{Deref, DerefMut, Index};
+use std::sync::Arc;
 
-pub use all_or_none::AllOrNoneState;
+use itertools::Itertools;
+pub use join_entry_state::JoinEntryState;
 use risingwave_common::array::Row;
+use risingwave_common::collection::evictable::EvictableHashMap;
+use risingwave_common::error::Result as RWResult;
 use risingwave_common::types::{deserialize_datum_from, serialize_datum_into, DataType, Datum};
 use risingwave_storage::keyspace::Segment;
 use risingwave_storage::{Keyspace, StateStore};
@@ -87,17 +91,194 @@ impl JoinRowDeserializer {
 type PkType = Row;
 
 pub type StateValueType = JoinRow;
+pub type HashKeyType = Row;
+pub type HashValueType<S> = JoinEntryState<S>;
 
-pub fn create_hash_join_state<S: StateStore>(
-    key: PkType,
-    keyspace: &Keyspace<S>,
-    pk_indices: Vec<usize>,
-    data_types: Vec<DataType>,
-) -> AllOrNoneState<S> {
-    // TODO: in pure in-memory engine, we should not do this serialization.
-    let key_encoded = key.serialize().unwrap();
+pub struct JoinHashMap<S: StateStore> {
+    /// Store the join states.
+    inner: EvictableHashMap<HashKeyType, HashValueType<S>>,
+    /// Data types of the columns
+    data_types: Arc<[DataType]>,
+    /// Data types of primary keys
+    pk_data_types: Arc<[DataType]>,
+    /// The keyspace to operate on.
+    keyspace: Keyspace<S>,
+    /// Current epoch
+    current_epoch: u64,
+}
 
-    let ks = keyspace.with_segment(Segment::VariantLength(key_encoded));
+impl<S: StateStore> JoinHashMap<S> {
+    /// Create a [`JoinHashMap`] with the given LRU capacity.
+    pub fn new(
+        target_cap: usize,
+        pk_indices: Vec<usize>,
+        data_types: Vec<DataType>,
+        keyspace: Keyspace<S>,
+    ) -> Self {
+        let pk_data_types = pk_indices.iter().map(|idx| data_types[*idx]).collect_vec();
 
-    AllOrNoneState::new(ks, data_types, pk_indices)
+        Self {
+            inner: EvictableHashMap::new(target_cap),
+            data_types: data_types.into(),
+            pk_data_types: pk_data_types.into(),
+            keyspace,
+            current_epoch: 0,
+        }
+    }
+
+    pub fn update_epoch(&mut self, epoch: u64) {
+        self.current_epoch = epoch;
+    }
+
+    fn get_state_keyspace(&self, key: &HashKeyType) -> Keyspace<S> {
+        // TODO: in pure in-memory engine, we should not do this serialization.
+        let key_encoded = key.serialize().unwrap();
+        self.keyspace
+            .with_segment(Segment::VariantLength(key_encoded))
+    }
+
+    #[allow(dead_code)]
+    /// Returns a mutable reference to the value of the key in the memory, if does not exist, look
+    /// up in remote storage and return, if still not exist, return None.
+    pub async fn get(&mut self, key: &HashKeyType) -> Option<&HashValueType<S>> {
+        let state = self.inner.get(key);
+        // TODO: we should probably implement a entry function for `LruCache`
+        match state {
+            Some(_) => self.inner.get(key),
+            None => {
+                let remote_state = self.fetch_cached_state(key).await.unwrap();
+                remote_state.map(|rv| {
+                    self.inner.put(key.clone(), rv);
+                    self.inner.get(key).unwrap()
+                })
+            }
+        }
+    }
+
+    /// Returns a mutable reference to the value of the key in the memory, if does not exist, look
+    /// up in remote storage and return, if still not exist, return None.
+    pub async fn get_mut(&mut self, key: &HashKeyType) -> Option<&mut HashValueType<S>> {
+        let state = self.inner.get(key);
+        // TODO: we should probably implement a entry function for `LruCache`
+        match state {
+            Some(_) => self.inner.get_mut(key),
+            None => {
+                let remote_state = self.fetch_cached_state(key).await.unwrap();
+                remote_state.map(|rv| {
+                    self.inner.put(key.clone(), rv);
+                    self.inner.get_mut(key).unwrap()
+                })
+            }
+        }
+    }
+
+    /// Returns a mutable reference to the value of the key in the memory, if does not exist, look
+    /// up in remote storage and return the [`JoinEntryState`] without cached state, if still not
+    /// exist, return None.
+    pub async fn get_mut_without_cached(
+        &mut self,
+        key: &HashKeyType,
+    ) -> Option<&mut HashValueType<S>> {
+        let state = self.inner.get(key);
+        // TODO: we should probably implement a entry function for `LruCache`
+        match state {
+            Some(_) => self.inner.get_mut(key),
+            None => {
+                let keyspace = self.get_state_keyspace(key);
+                let all_data = keyspace
+                    .scan_strip_prefix(None, self.current_epoch)
+                    .await
+                    .unwrap();
+                let total_count = all_data.len();
+                if total_count > 0 {
+                    let state = JoinEntryState::new(
+                        keyspace,
+                        total_count,
+                        self.data_types.clone(),
+                        self.pk_data_types.clone(),
+                    );
+                    self.inner.put(key.clone(), state);
+                    Some(self.inner.get_mut(key).unwrap())
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    #[allow(dead_code)]
+    /// Returns true if the key in the memory or remote storage, otherwise false.
+    pub async fn contains(&mut self, key: &HashKeyType) -> bool {
+        let contains = self.inner.contains(key);
+        if contains {
+            true
+        } else {
+            let remote_state = self.fetch_cached_state(key).await.unwrap();
+            match remote_state {
+                Some(rv) => {
+                    self.inner.put(key.clone(), rv);
+                    true
+                }
+                None => false,
+            }
+        }
+    }
+
+    /// Fetch cache from the state store. Should only be called if the key does not exist in memory.
+    async fn fetch_cached_state(&self, key: &HashKeyType) -> RWResult<Option<JoinEntryState<S>>> {
+        let keyspace = self.get_state_keyspace(key);
+        Ok(JoinEntryState::with_cached_state(
+            keyspace,
+            self.data_types.clone(),
+            self.pk_data_types.clone(),
+            self.current_epoch,
+        )
+        .await?)
+    }
+
+    /// Create a [`JoinEntryState`] without cached state. Should only be called if the key
+    /// does not exist in memory or remote storage.
+    pub async fn init_without_cache(&mut self, key: &HashKeyType) -> RWResult<()> {
+        let keyspace = self.get_state_keyspace(key);
+        let all_data = keyspace.scan_strip_prefix(None, self.current_epoch).await?;
+        let total_count = all_data.len();
+        let state = JoinEntryState::new(
+            keyspace,
+            total_count,
+            self.data_types.clone(),
+            self.pk_data_types.clone(),
+        );
+        self.inner.put(key.clone(), state);
+        Ok(())
+    }
+
+    /// Get or create a [`JoinEntryState`] without cached state. Should only be called if the key
+    /// does not exist in memory or remote storage.
+    pub async fn get_or_init_without_cache(
+        &mut self,
+        key: &HashKeyType,
+    ) -> RWResult<&mut JoinEntryState<S>> {
+        // TODO: we should probably implement a entry function for `LruCache`
+        let contains = self.inner.contains(key);
+        if contains {
+            Ok(self.inner.get_mut(key).unwrap())
+        } else {
+            self.init_without_cache(key).await?;
+            Ok(self.inner.get_mut(key).unwrap())
+        }
+    }
+}
+
+impl<S: StateStore> Deref for JoinHashMap<S> {
+    type Target = EvictableHashMap<HashKeyType, HashValueType<S>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<S: StateStore> DerefMut for JoinHashMap<S> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
 }
