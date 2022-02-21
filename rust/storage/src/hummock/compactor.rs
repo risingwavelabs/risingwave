@@ -252,14 +252,6 @@ impl Compactor {
             .report_compaction_task(compact_task, is_task_ok)
             .await;
 
-        // TODO: #2336 The transaction flow is not ready yet. Before that we
-        // update_local_version after each write_batch to make uncommitted write
-        // visible.
-        context
-            .local_version_manager
-            .update_local_version(context.hummock_meta_client.as_ref())
-            .await?;
-
         report_result?;
 
         if is_task_ok {
