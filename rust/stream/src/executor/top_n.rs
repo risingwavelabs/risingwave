@@ -41,6 +41,9 @@ pub struct TopNExecutor<S: StateStore> {
 
     /// Identity string.
     identity: String,
+
+    /// Logical Operator Info
+    op_info: String,
 }
 
 impl<S: StateStore> std::fmt::Debug for TopNExecutor<S> {
@@ -66,6 +69,7 @@ impl<S: StateStore> TopNExecutor<S> {
         cache_size: Option<usize>,
         total_count: (usize, usize, usize),
         executor_id: u64,
+        op_info: String,
     ) -> Self {
         let pk_data_types = pk_indices
             .iter()
@@ -116,6 +120,7 @@ impl<S: StateStore> TopNExecutor<S> {
             pk_indices,
             first_execution: true,
             identity: format!("TopNExecutor {:X}", executor_id),
+            op_info,
         }
     }
 
@@ -141,7 +146,11 @@ impl<S: StateStore> Executor for TopNExecutor<S> {
     }
 
     fn identity(&self) -> &str {
-        self.identity.as_str()
+        &self.identity
+    }
+
+    fn logical_operator_info(&self) -> &str {
+        &self.op_info
     }
 
     fn clear_cache(&mut self) -> Result<()> {
@@ -438,6 +447,7 @@ mod tests {
             Some(2),
             (0, 0, 0),
             1,
+            "TopNExecutor".to_string(),
         );
         let res = top_n_executor.next().await.unwrap();
         assert_matches!(res, Message::Chunk(_));
@@ -532,6 +542,7 @@ mod tests {
             Some(2),
             (0, 0, 0),
             1,
+            "TopNExecutor".to_string(),
         );
         let res = top_n_executor.next().await.unwrap();
         assert_matches!(res, Message::Chunk(_));
@@ -664,6 +675,7 @@ mod tests {
             Some(2),
             (0, 0, 0),
             1,
+            "TopNExecutor".to_string(),
         );
         let res = top_n_executor.next().await.unwrap();
         assert_matches!(res, Message::Chunk(_));

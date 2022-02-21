@@ -48,15 +48,10 @@ message ColumnDesc {
   int32 column_id = 5;
 }
 
-message SeqScanNode {
-  TableRefId table_ref_id = 1;
-  repeated int32 column_ids = 2;
-  repeated plan.Field fields = 3;
-}
-
 message RowSeqScanNode {
   TableRefId table_ref_id = 1;
   repeated int32 column_ids = 2;
+  repeated plan.Field fields = 3;
 }
 
 message SourceScanNode {
@@ -95,7 +90,6 @@ message ValuesNode {
 message CreateTableNode {
   TableRefId table_ref_id = 1;
   repeated ColumnDesc column_descs = 2;
-  bool v2 = 3;
   // Other fields not included yet:
   // primarykey_col_ids, dist_type, distkey_col_id, append_only
 
@@ -246,7 +240,6 @@ message PlanNode {
   repeated PlanNode children = 1;
   oneof node_body {
     InsertNode insert = 2;
-    SeqScanNode seq_scan = 3;
     ProjectNode project = 4;
     CreateTableNode create_table = 5;
     DropTableNode drop_table = 6;

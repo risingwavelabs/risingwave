@@ -3,29 +3,33 @@ use std::sync::Arc;
 use super::{StreamClients, StreamClientsRef};
 #[cfg(test)]
 use crate::manager::MemEpochGenerator;
-use crate::manager::{
-    EpochGenerator, EpochGeneratorRef, IdGeneratorManager, IdGeneratorManagerRef,
-};
+use crate::manager::{EpochGeneratorRef, IdGeneratorManager, IdGeneratorManagerRef};
 #[cfg(test)]
 use crate::storage::MemStore;
-use crate::storage::{MetaStore, MetaStoreRef};
+use crate::storage::MetaStore;
 
 /// [`MetaSrcEnv`] is the global environment in Meta service. The instance will be shared by all
 /// kind of managers inside Meta.
 #[derive(Clone)]
-pub struct MetaSrvEnv {
+pub struct MetaSrvEnv<S>
+where
+    S: MetaStore,
+{
     /// id generator manager.
-    id_gen_manager: IdGeneratorManagerRef,
+    id_gen_manager: IdGeneratorManagerRef<S>,
     /// meta store.
-    meta_store: MetaStoreRef,
+    meta_store: Arc<S>,
     /// epoch generator.
     epoch_generator: EpochGeneratorRef,
     /// stream clients memoization.
     stream_clients: StreamClientsRef,
 }
 
-impl MetaSrvEnv {
-    pub async fn new(meta_store: MetaStoreRef, epoch_generator: EpochGeneratorRef) -> Self {
+impl<S> MetaSrvEnv<S>
+where
+    S: MetaStore,
+{
+    pub async fn new(meta_store: Arc<S>, epoch_generator: EpochGeneratorRef) -> Self {
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let stream_clients = Arc::new(StreamClients::default());
@@ -38,56 +42,12 @@ impl MetaSrvEnv {
         }
     }
 
-    // Instance for test.
-    #[cfg(test)]
-    pub async fn for_test() -> Self {
-        // change to sync after refactor `IdGeneratorManager::new` sync.
-        let meta_store = Arc::new(MemStore::new());
-        let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
-        let epoch_generator = Arc::new(MemEpochGenerator::new());
-        let stream_clients = Arc::new(StreamClients::default());
-
-        Self {
-            id_gen_manager,
-            meta_store,
-            epoch_generator,
-            stream_clients,
-        }
-    }
-
-    // Instance for test using sled as backend
-    #[cfg(test)]
-    pub async fn for_test_with_sled(sled_root: impl AsRef<std::path::Path>) -> Self {
-        // change to sync after refactor `IdGeneratorManager::new` sync.
-        let meta_store =
-            Arc::new(crate::storage::SledMetaStore::new(Some(sled_root.as_ref())).unwrap());
-        let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
-        let epoch_generator = Arc::new(MemEpochGenerator::new());
-        let stream_clients = Arc::new(StreamClients::default());
-
-        Self {
-            id_gen_manager,
-            meta_store,
-            epoch_generator,
-            stream_clients,
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn meta_store(&self) -> &dyn MetaStore {
-        &*self.meta_store
-    }
-
-    pub fn meta_store_ref(&self) -> MetaStoreRef {
+    pub fn meta_store_ref(&self) -> Arc<S> {
         self.meta_store.clone()
     }
 
-    pub fn id_gen_manager_ref(&self) -> IdGeneratorManagerRef {
+    pub fn id_gen_manager_ref(&self) -> IdGeneratorManagerRef<S> {
         self.id_gen_manager.clone()
-    }
-
-    pub fn epoch_generator(&self) -> &dyn EpochGenerator {
-        &*self.epoch_generator
     }
 
     pub fn epoch_generator_ref(&self) -> EpochGeneratorRef {
@@ -96,5 +56,24 @@ impl MetaSrvEnv {
 
     pub fn stream_clients_ref(&self) -> StreamClientsRef {
         self.stream_clients.clone()
+    }
+}
+
+#[cfg(test)]
+impl MetaSrvEnv<MemStore> {
+    // Instance for test.
+    pub async fn for_test() -> Self {
+        // change to sync after refactor `IdGeneratorManager::new` sync.
+        let meta_store = Arc::new(MemStore::default());
+        let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
+        let epoch_generator = Arc::new(MemEpochGenerator::new());
+        let stream_clients = Arc::new(StreamClients::default());
+
+        Self {
+            id_gen_manager,
+            meta_store,
+            epoch_generator,
+            stream_clients,
+        }
     }
 }

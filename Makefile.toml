@@ -78,8 +78,10 @@ script = '''
 set -e
 rm -f "${PREFIX_BIN}/compute-node"
 rm -f "${PREFIX_BIN}/meta-node"
+rm -f "${PREFIX_BIN}/frontend-v2"
 ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/compute-node" "${PREFIX_BIN}/compute-node"
 ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/meta-node" "${PREFIX_BIN}/meta-node"
+ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/frontend-v2" "${PREFIX_BIN}/frontend-v2"
 '''
 
 [tasks.build-risingwave]
@@ -123,7 +125,8 @@ script = '''
 set -e
 
 cp "java/pgserver/src/main/resources/logback.xml" "${PREFIX_CONFIG}/logback.xml"
-cp "grafana/dashboard.json" "${PREFIX_CONFIG}/grafana_dashboard.json"
+cp "grafana/risingwave-dashboard.json" "${PREFIX_CONFIG}/grafana_dashboard.json"
+cp "grafana/aws-s3.json" "${PREFIX_CONFIG}/aws-s3.json"
 cp "rust/config/risingwave.toml" "${PREFIX_CONFIG}/risingwave.toml"
 cp "rust/risedev/run_command.sh" "${PREFIX_BIN}/run_command.sh"
 cp "rust/risedev/welcome.sh" "${PREFIX_BIN}/welcome.sh"
@@ -158,6 +161,15 @@ alias = "dev"
 [tasks.d]
 alias = "dev"
 
+[tasks.ci-v2]
+category = "RiseDev - Start"
+dependencies = [
+  "pre-start-playground"
+]
+command = "rust/target/${BUILD_MODE_DIR}/risedev-playground"
+args = ["ci-v2"]
+description = "Start a RisingWave playground ci-v2 config"
+
 [tasks.dev]
 category = "RiseDev - Start"
 dependencies = [
@@ -176,7 +188,6 @@ command = "rust/target/${BUILD_MODE_DIR}/risedev-playground"
 args = ["ci-3node"]
 description = "Start a RisingWave playground with ci-3node config"
 
-
 [tasks.ci-1node]
 category = "RiseDev - Start"
 dependencies = [
@@ -186,14 +197,6 @@ command = "rust/target/${BUILD_MODE_DIR}/risedev-playground"
 args = ["ci-1node"]
 description = "Start a RisingWave playground ci-1node config"
 
-[tasks.ci-streaming]
-category = "RiseDev - Start"
-dependencies = [
-  "pre-start-playground"
-]
-command = "rust/target/${BUILD_MODE_DIR}/risedev-playground"
-args = ["ci-streaming"]
-description = "Start a RisingWave playground ci-streaming config"
 
 [tasks.dev-compute-node]
 category = "RiseDev - Start"

@@ -61,6 +61,7 @@ public class RwStreamExchange extends Exchange implements RisingWaveStreamingRel
     return StreamNode.newBuilder()
         .setMergeNode(mergeNode)
         .addAllPkIndices(primaryKeyIndices)
+        .setIdentity(StreamingPlan.getCurrentNodeIdentity(this))
         .build();
   }
 

@@ -8,6 +8,7 @@ use prometheus::{Encoder, TextEncoder};
 use risingwave_batch::rpc::service::task_service::TaskServiceImpl;
 use risingwave_batch::task::{BatchTaskEnv, TaskManager};
 use risingwave_common::config::ComputeNodeConfig;
+use risingwave_common::worker_id::WorkerIdRef;
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
@@ -37,6 +38,7 @@ pub async fn compute_node_serve(
     opts: ComputeNodeOpts,
 ) -> (JoinHandle<()>, UnboundedSender<()>) {
     let config = load_config(&opts);
+    let worker_id_ref = WorkerIdRef::new();
 
     let meta_client = MetaClient::new(&opts.meta_address).await.unwrap();
     let state_store = StateStoreImpl::from_str(&opts.state_store, meta_client.clone())
@@ -54,8 +56,9 @@ pub async fn compute_node_serve(
         task_mgr.clone(),
         addr,
         batch_config,
+        worker_id_ref.clone(),
     );
-    let stream_env = StreamTaskEnv::new(table_mgr, source_mgr, addr);
+    let stream_env = StreamTaskEnv::new(table_mgr, source_mgr, addr, worker_id_ref.clone());
     let task_srv = TaskServiceImpl::new(task_mgr.clone(), batch_env);
     let exchange_srv = ExchangeServiceImpl::new(task_mgr, stream_mgr.clone());
     let stream_srv = StreamServiceImpl::new(stream_mgr, stream_env.clone());
@@ -84,7 +87,7 @@ pub async fn compute_node_serve(
 
     // After all services booted, register self to meta service
     let worker_id = meta_client.register(addr).await.unwrap();
-    stream_env.set_worker_id(worker_id);
+    worker_id_ref.set(worker_id);
 
     (join_handle, shutdown_send)
 }
@@ -148,7 +151,7 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn test_server_shutdown() {
-        let meta = LocalMeta::start_in_tempdir().await;
+        let meta = LocalMeta::start().await;
         let (join, shutdown) = start_compute_node().await;
         shutdown.send(()).unwrap();
         join.await.unwrap();

@@ -67,7 +67,7 @@ public abstract class StreamPlanTestBase extends SqlTestBase {
     CreateMaterializedViewHandler handler = new CreateMaterializedViewHandler();
     SqlCreateMaterializedView createMaterializedView = (SqlCreateMaterializedView) ast;
     String tableName = createMaterializedView.name.getSimple();
-    handler.convertPlanToCatalog(tableName, plan, executionContext);
+    handler.convertPlanToCatalog(tableName, plan, executionContext, false);
 
     // Do not error if no json test.
     if (testCase.getJson().isPresent()) {

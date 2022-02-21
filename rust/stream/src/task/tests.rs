@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use futures::{SinkExt, StreamExt};
+use risingwave_common::worker_id::WorkerIdRef;
 use risingwave_pb::common::{ActorInfo, HostAddress};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
@@ -52,169 +53,183 @@ async fn test_stream_proto() {
         .unwrap();
 
     stream_manager
-        .update_actors(&[
-            // create 0 -> (1) -> 3
-            StreamActor {
-                actor_id: 1,
-                fragment_id: 1,
-                nodes: Some(StreamNode {
-                    node: Some(Node::ProjectNode(ProjectNode::default())),
-                    input: vec![StreamNode {
-                        node: Some(Node::MergeNode(MergeNode {
-                            upstream_actor_id: vec![0],
-                            input_column_descs: vec![ColumnDesc {
-                                column_type: Some(DataType {
-                                    type_name: TypeName::Int32 as i32,
+        .update_actors(
+            &[
+                // create 0 -> (1) -> 3
+                StreamActor {
+                    actor_id: 1,
+                    fragment_id: 1,
+                    nodes: Some(StreamNode {
+                        node: Some(Node::ProjectNode(ProjectNode::default())),
+                        input: vec![StreamNode {
+                            node: Some(Node::MergeNode(MergeNode {
+                                upstream_actor_id: vec![0],
+                                input_column_descs: vec![ColumnDesc {
+                                    column_type: Some(DataType {
+                                        type_name: TypeName::Int32 as i32,
+                                        ..Default::default()
+                                    }),
                                     ..Default::default()
-                                }),
-                                ..Default::default()
-                            }],
-                        })),
-                        input: vec![],
+                                }],
+                            })),
+                            input: vec![],
+                            pk_indices: vec![],
+                            operator_id: 1,
+                            identity: "MergeExecutor".to_string(),
+                        }],
                         pk_indices: vec![],
-                        operator_id: 1,
-                    }],
-                    pk_indices: vec![],
-                    operator_id: 2,
-                }),
-                dispatcher: Some(Dispatcher {
-                    r#type: dispatcher::DispatcherType::Hash as i32,
-                    column_indices: vec![0],
-                }),
-                downstream_actor_id: vec![3],
-                upstream_actor_id: vec![0],
-            },
-            // create 1 -> (3) -> 7, 11
-            StreamActor {
-                actor_id: 3,
-                fragment_id: 1,
-                nodes: Some(StreamNode {
-                    node: Some(Node::ProjectNode(ProjectNode::default())),
-                    input: vec![StreamNode {
-                        node: Some(Node::MergeNode(MergeNode {
-                            upstream_actor_id: vec![1],
-                            input_column_descs: vec![ColumnDesc {
-                                column_type: Some(DataType {
-                                    type_name: TypeName::Int32 as i32,
+                        operator_id: 2,
+                        identity: "ProjectExecutor".to_string(),
+                    }),
+                    dispatcher: Some(Dispatcher {
+                        r#type: dispatcher::DispatcherType::Hash as i32,
+                        column_indices: vec![0],
+                    }),
+                    downstream_actor_id: vec![3],
+                    upstream_actor_id: vec![0],
+                },
+                // create 1 -> (3) -> 7, 11
+                StreamActor {
+                    actor_id: 3,
+                    fragment_id: 1,
+                    nodes: Some(StreamNode {
+                        node: Some(Node::ProjectNode(ProjectNode::default())),
+                        input: vec![StreamNode {
+                            node: Some(Node::MergeNode(MergeNode {
+                                upstream_actor_id: vec![1],
+                                input_column_descs: vec![ColumnDesc {
+                                    column_type: Some(DataType {
+                                        type_name: TypeName::Int32 as i32,
+                                        ..Default::default()
+                                    }),
                                     ..Default::default()
-                                }),
-                                ..Default::default()
-                            }],
-                        })),
-                        input: vec![],
+                                }],
+                            })),
+                            input: vec![],
+                            pk_indices: vec![],
+                            operator_id: 3,
+                            identity: "MergeExecutor".to_string(),
+                        }],
                         pk_indices: vec![],
-                        operator_id: 3,
-                    }],
-                    pk_indices: vec![],
-                    operator_id: 4,
-                }),
-                dispatcher: Some(Dispatcher {
-                    r#type: dispatcher::DispatcherType::Hash as i32,
-                    column_indices: vec![0],
-                }),
-                downstream_actor_id: vec![7, 11],
-                upstream_actor_id: vec![1],
-            },
-            // create 3 -> (7) -> 13
-            StreamActor {
-                actor_id: 7,
-                fragment_id: 2,
-                nodes: Some(StreamNode {
-                    node: Some(Node::ProjectNode(ProjectNode::default())),
-                    input: vec![StreamNode {
-                        node: Some(Node::MergeNode(MergeNode {
-                            upstream_actor_id: vec![3],
-                            input_column_descs: vec![ColumnDesc {
-                                column_type: Some(DataType {
-                                    type_name: TypeName::Int32 as i32,
+                        operator_id: 4,
+                        identity: "ProjectExecutor".to_string(),
+                    }),
+                    dispatcher: Some(Dispatcher {
+                        r#type: dispatcher::DispatcherType::Hash as i32,
+                        column_indices: vec![0],
+                    }),
+                    downstream_actor_id: vec![7, 11],
+                    upstream_actor_id: vec![1],
+                },
+                // create 3 -> (7) -> 13
+                StreamActor {
+                    actor_id: 7,
+                    fragment_id: 2,
+                    nodes: Some(StreamNode {
+                        node: Some(Node::ProjectNode(ProjectNode::default())),
+                        input: vec![StreamNode {
+                            node: Some(Node::MergeNode(MergeNode {
+                                upstream_actor_id: vec![3],
+                                input_column_descs: vec![ColumnDesc {
+                                    column_type: Some(DataType {
+                                        type_name: TypeName::Int32 as i32,
+                                        ..Default::default()
+                                    }),
                                     ..Default::default()
-                                }),
-                                ..Default::default()
-                            }],
-                        })),
-                        input: vec![],
+                                }],
+                            })),
+                            input: vec![],
+                            pk_indices: vec![],
+                            operator_id: 5,
+                            identity: "MergeExecutor".to_string(),
+                        }],
                         pk_indices: vec![],
-                        operator_id: 5,
-                    }],
-                    pk_indices: vec![],
-                    operator_id: 6,
-                }),
-                dispatcher: Some(Dispatcher {
-                    r#type: dispatcher::DispatcherType::Hash as i32,
-                    column_indices: vec![0],
-                }),
-                downstream_actor_id: vec![13],
-                upstream_actor_id: vec![3],
-            },
-            // create 3 -> (11) -> 13
-            StreamActor {
-                actor_id: 11,
-                fragment_id: 2,
-                nodes: Some(StreamNode {
-                    node: Some(Node::ProjectNode(ProjectNode::default())),
-                    input: vec![StreamNode {
-                        node: Some(Node::MergeNode(MergeNode {
-                            upstream_actor_id: vec![3],
-                            input_column_descs: vec![ColumnDesc {
-                                column_type: Some(DataType {
-                                    type_name: TypeName::Int32 as i32,
+                        operator_id: 6,
+                        identity: "ProjectExecutor".to_string(),
+                    }),
+                    dispatcher: Some(Dispatcher {
+                        r#type: dispatcher::DispatcherType::Hash as i32,
+                        column_indices: vec![0],
+                    }),
+                    downstream_actor_id: vec![13],
+                    upstream_actor_id: vec![3],
+                },
+                // create 3 -> (11) -> 13
+                StreamActor {
+                    actor_id: 11,
+                    fragment_id: 2,
+                    nodes: Some(StreamNode {
+                        node: Some(Node::ProjectNode(ProjectNode::default())),
+                        input: vec![StreamNode {
+                            node: Some(Node::MergeNode(MergeNode {
+                                upstream_actor_id: vec![3],
+                                input_column_descs: vec![ColumnDesc {
+                                    column_type: Some(DataType {
+                                        type_name: TypeName::Int32 as i32,
+                                        ..Default::default()
+                                    }),
                                     ..Default::default()
-                                }),
-                                ..Default::default()
-                            }],
-                        })),
-                        input: vec![],
+                                }],
+                            })),
+                            input: vec![],
+                            pk_indices: vec![],
+                            operator_id: 7,
+                            identity: "MergeExecutor".to_string(),
+                        }],
                         pk_indices: vec![],
-                        operator_id: 7,
-                    }],
-                    pk_indices: vec![],
-                    operator_id: 8,
-                }),
-                dispatcher: Some(Dispatcher {
-                    r#type: dispatcher::DispatcherType::Simple as i32,
-                    ..Default::default()
-                }),
-                downstream_actor_id: vec![13],
-                upstream_actor_id: vec![3],
-            },
-            // create 7, 11 -> (13) -> 233
-            StreamActor {
-                actor_id: 13,
-                fragment_id: 3,
-                nodes: Some(StreamNode {
-                    node: Some(Node::ProjectNode(ProjectNode::default())),
-                    input: vec![StreamNode {
-                        node: Some(Node::MergeNode(MergeNode {
-                            upstream_actor_id: vec![7, 11],
-                            input_column_descs: vec![ColumnDesc {
-                                column_type: Some(DataType {
-                                    type_name: TypeName::Int32 as i32,
+                        operator_id: 8,
+                        identity: "ProjectExecutor".to_string(),
+                    }),
+                    dispatcher: Some(Dispatcher {
+                        r#type: dispatcher::DispatcherType::Simple as i32,
+                        ..Default::default()
+                    }),
+                    downstream_actor_id: vec![13],
+                    upstream_actor_id: vec![3],
+                },
+                // create 7, 11 -> (13) -> 233
+                StreamActor {
+                    actor_id: 13,
+                    fragment_id: 3,
+                    nodes: Some(StreamNode {
+                        node: Some(Node::ProjectNode(ProjectNode::default())),
+                        input: vec![StreamNode {
+                            node: Some(Node::MergeNode(MergeNode {
+                                upstream_actor_id: vec![7, 11],
+                                input_column_descs: vec![ColumnDesc {
+                                    column_type: Some(DataType {
+                                        type_name: TypeName::Int32 as i32,
+                                        ..Default::default()
+                                    }),
                                     ..Default::default()
-                                }),
-                                ..Default::default()
-                            }],
-                        })),
-                        input: vec![],
+                                }],
+                            })),
+                            input: vec![],
+                            pk_indices: vec![],
+                            operator_id: 9,
+                            identity: "MergeExecutor".to_string(),
+                        }],
                         pk_indices: vec![],
-                        operator_id: 9,
-                    }],
-                    pk_indices: vec![],
-                    operator_id: 10,
-                }),
-                dispatcher: Some(Dispatcher {
-                    r#type: dispatcher::DispatcherType::Simple as i32,
-                    ..Default::default()
-                }),
-                downstream_actor_id: vec![233],
-                upstream_actor_id: vec![11],
-            },
-        ])
+                        operator_id: 10,
+                        identity: "ProjectExecutor".to_string(),
+                    }),
+                    dispatcher: Some(Dispatcher {
+                        r#type: dispatcher::DispatcherType::Simple as i32,
+                        ..Default::default()
+                    }),
+                    downstream_actor_id: vec![233],
+                    upstream_actor_id: vec![11],
+                },
+            ],
+            &[],
+        )
         .unwrap();
 
     let env = StreamTaskEnv::new(
         Arc::new(SimpleTableManager::with_in_memory_store()),
         Arc::new(MemSourceManager::new()),
         std::net::SocketAddr::V4("127.0.0.1:5688".parse().unwrap()),
+        WorkerIdRef::for_test(),
     );
     stream_manager
         .build_actors(&[1, 3, 7, 11, 13], env)

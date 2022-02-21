@@ -2,7 +2,7 @@ use std::fmt;
 
 use risingwave_common::catalog::Schema;
 
-use super::{IntoPlanRef, PlanRef, ToDistributedBatch};
+use super::{IntoPlanRef, PlanRef, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::plan_node::LogicalScan;
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 
@@ -35,3 +35,4 @@ impl ToDistributedBatch for BatchSeqScan {
         self.clone().into_plan_ref()
     }
 }
+impl ToBatchProst for BatchSeqScan {}

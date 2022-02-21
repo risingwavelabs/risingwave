@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::env;
+use std::fmt::Write;
 use std::fs::{File, OpenOptions};
 use std::io::Read;
 use std::path::Path;
@@ -13,8 +14,8 @@ use indicatif::{MultiProgress, ProgressBar};
 use risedev::util::complete_spin;
 use risedev::{
     ComputeNodeService, ConfigExpander, ConfigureTmuxTask, EnsureStopService, ExecuteContext,
-    FrontendService, GrafanaService, JaegerService, MetaNodeService, MinioService,
-    PrometheusService, ServiceConfig, Task, RISEDEV_SESSION_NAME,
+    FrontendService, FrontendServiceV2, GrafanaService, JaegerService, MetaNodeService,
+    MinioService, PrometheusService, ServiceConfig, Task, RISEDEV_SESSION_NAME,
 };
 use tempfile::tempdir;
 use yaml_rust::YamlEmitter;
@@ -63,7 +64,7 @@ fn task_main(
     manager: &mut ProgressManager,
     steps: &[String],
     services: &HashMap<String, ServiceConfig>,
-) -> Result<Vec<(String, Duration)>> {
+) -> Result<(Vec<(String, Duration)>, String)> {
     let log_path = env::var("PREFIX_LOG")?;
 
     let mut logger = OpenOptions::new()
@@ -74,11 +75,21 @@ fn task_main(
 
     let status_dir = Arc::new(tempdir()?);
 
+    let mut log_buffer = String::new();
+
     // Start Tmux and kill previous services
     {
         let mut ctx = ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
         let mut service = ConfigureTmuxTask::new()?;
         service.execute(&mut ctx)?;
+
+        writeln!(
+            log_buffer,
+            "* Run {} to attach to the tmux console.",
+            style(format!("tmux a -t {}", RISEDEV_SESSION_NAME))
+                .blue()
+                .bold()
+        )?;
     }
 
     // Firstly, ensure that all ports needed is not occupied by previous runs.
@@ -92,6 +103,7 @@ fn task_main(
             ServiceConfig::ComputeNode(c) => (c.port, c.id.clone()),
             ServiceConfig::MetaNode(c) => (c.port, c.id.clone()),
             ServiceConfig::Frontend(c) => (c.port, c.id.clone()),
+            ServiceConfig::FrontendV2(c) => (c.port, c.id.clone()),
             ServiceConfig::Grafana(c) => (c.port, c.id.clone()),
             ServiceConfig::Jaeger(c) => (c.dashboard_port, c.id.clone()),
         });
@@ -163,6 +175,32 @@ fn task_main(
                 task.execute(&mut ctx)?;
                 ctx.pb
                     .set_message(format!("api postgres://{}:{}/", c.address, c.port));
+
+                writeln!(
+                    log_buffer,
+                    "* Run {} to start Postgres interactive shell.",
+                    style(format!("psql -h localhost -p {} -d dev", c.port))
+                        .blue()
+                        .bold()
+                )?;
+            }
+            ServiceConfig::FrontendV2(c) => {
+                let mut ctx =
+                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
+                let mut service = FrontendServiceV2::new(c.clone())?;
+                service.execute(&mut ctx)?;
+                let mut task = risedev::ConfigureGrpcNodeTask::new(c.port, c.user_managed)?;
+                task.execute(&mut ctx)?;
+                ctx.pb
+                    .set_message(format!("api postgres://{}:{}/", c.address, c.port));
+
+                writeln!(
+                    log_buffer,
+                    "* Run {} to start Postgres interactive shell.",
+                    style(format!("psql -h localhost -p {} -d dev", c.port))
+                        .blue()
+                        .bold()
+                )?;
             }
             ServiceConfig::Grafana(c) => {
                 let mut ctx =
@@ -193,7 +231,7 @@ fn task_main(
         stat.push((service_id, duration));
     }
 
-    Ok(stat)
+    Ok((stat, log_buffer))
 }
 
 fn main() -> Result<()> {
@@ -237,32 +275,20 @@ fn main() -> Result<()> {
     let log_path = env::var("PREFIX_LOG")?;
 
     match task_result {
-        Ok(stat) => {
-            if let Ok(ci) = env::var("CARGO_MAKE_CI") {
-                if ci == "true" {
-                    println!("--- summary of startup time ---");
-                    for (task_name, duration) in stat {
-                        println!("{}: {:.2}s", task_name, duration.as_secs_f64());
-                    }
-                }
+        Ok((stat, log_buffer)) => {
+            println!("--- summary of startup time ---");
+            for (task_name, duration) in stat {
+                println!("{}: {:.2}s", task_name, duration.as_secs_f64());
             }
+            println!("-------------------------------");
+            println!();
 
             println!("All services started successfully.");
 
-            println!("\nPRO TIPS:");
-            println!(
-                "* Run {} to attach to the tmux console.",
-                style(format!("tmux a -t {}", RISEDEV_SESSION_NAME))
-                    .blue()
-                    .bold()
-            );
+            print!("{}", log_buffer);
+
             println!("* You may find logs at {}", style(log_path).blue().bold());
-            println!(
-                "* Run {} to start Postgres interactive shell.",
-                style(format!("psql -h localhost -p {} -d dev", 4567))
-                    .blue()
-                    .bold()
-            );
+
             println!(
                 "* Run {} or {} to kill cluster.",
                 style("./risedev kill").blue().bold(),

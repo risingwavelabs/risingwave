@@ -3,10 +3,10 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
-use risingwave_common::array::{Row, RowDeserializer};
+use risingwave_common::array::Row;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::{deserialize_datum_from, Datum};
+use risingwave_common::types::Datum;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 
@@ -93,10 +93,6 @@ impl<S: StateStore> MViewTable<S> {
         }
     }
 
-    pub fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
     // TODO(MrCroxx): remove me after iter is impled.
     pub fn storage(&self) -> S {
         self.keyspace.state_store()
@@ -104,13 +100,14 @@ impl<S: StateStore> MViewTable<S> {
 
     // TODO(MrCroxx): Refactor this after statestore iter is finished.
     // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`
-    pub async fn iter(&self, epoch: u64) -> Result<MViewTableIter<S>> {
-        Ok(MViewTableIter::new(
+    async fn iter(&self, epoch: u64) -> Result<MViewTableIter<S>> {
+        MViewTableIter::new(
             self.keyspace.clone(),
             self.schema.clone(),
             self.pk_columns.clone(),
             epoch,
-        ))
+        )
+        .await
     }
 
     // TODO(MrCroxx): More interfaces are needed besides cell get.
@@ -132,16 +129,13 @@ impl<S: StateStore> MViewTable<S> {
             .await
             .map_err(|err| ErrorCode::InternalError(err.to_string()))?;
 
-        match buf {
-            Some(buf) => {
-                let mut deserializer = memcomparable::Deserializer::new(buf);
-                let datum = deserialize_datum_from(
-                    &self.schema.fields[cell_idx].data_type,
-                    &mut deserializer,
-                )?;
-                Ok(Some(datum))
-            }
-            None => Ok(None),
+        if let Some(buf) = buf {
+            Ok(Some(deserialize_cell(
+                &buf[..],
+                &self.schema.fields[cell_idx].data_type,
+            )?))
+        } else {
+            Ok(None)
         }
     }
 }
@@ -168,8 +162,18 @@ impl<'a, S: StateStore> MViewTableIter<S> {
     // TODO: adjustable limit
     const SCAN_LIMIT: usize = 1024;
 
-    fn new(keyspace: Keyspace<S>, schema: Schema, pk_columns: Vec<usize>, epoch: u64) -> Self {
-        Self {
+    async fn new(
+        keyspace: Keyspace<S>,
+        schema: Schema,
+        pk_columns: Vec<usize>,
+        epoch: u64,
+    ) -> Result<Self> {
+        // The table might be updated from other compute nodes, and we are not aware of the latest
+        // version in Hummock's local version manager.
+        // TODO: remove this after we implement periodical version updating.
+        keyspace.state_store().update_local_version().await?;
+
+        let iter = Self {
             keyspace,
             schema,
             pk_columns,
@@ -178,7 +182,8 @@ impl<'a, S: StateStore> MViewTableIter<S> {
             done: false,
             err_msg: None,
             epoch,
-        }
+        };
+        Ok(iter)
     }
 
     async fn consume_more(&mut self) -> Result<()> {
@@ -219,8 +224,7 @@ impl<S: StateStore> TableIter for MViewTableIter<S> {
 
         let mut pk_buf = vec![];
         let mut restored = 0;
-        let mut row_bytes = vec![];
-
+        let mut row = vec![];
         loop {
             let (key, value) = match self.buf.get(self.next_idx) {
                 Some(kv) => kv,
@@ -266,16 +270,15 @@ impl<S: StateStore> TableIter for MViewTableIter<S> {
                 return Err(ErrorCode::InternalError("primary key incorrect".to_owned()).into());
             }
 
-            row_bytes.extend_from_slice(value);
+            let datum = deserialize_cell(&value[..], &self.schema.data_types()[restored])?;
+            row.push(datum);
 
             restored += 1;
             if restored == self.schema.len() {
                 break;
             }
         }
-        let row_deserializer = RowDeserializer::new(self.schema.data_types());
-        let row = row_deserializer.deserialize(&row_bytes)?;
-        Ok(Some(row))
+        Ok(Some(Row::new(row)))
     }
 }
 
@@ -298,5 +301,9 @@ where
 
     fn column_descs(&self) -> Cow<[TableColumnDesc]> {
         Cow::Borrowed(&self.column_descs)
+    }
+
+    fn is_shared_storage(&self) -> bool {
+        true
     }
 }

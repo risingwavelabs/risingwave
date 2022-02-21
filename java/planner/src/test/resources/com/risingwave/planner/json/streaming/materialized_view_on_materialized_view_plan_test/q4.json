@@ -23,7 +23,8 @@
           "encoding": "RAW",
           "name": "_row_id"
         }]
-      }
+      },
+      "identity": "RwStreamExchange(distribution\u003d[RwDistributionTrait{type\u003dHASH_DISTRIBUTED, keys\u003d[0]}], collation\u003d[[]])"
     }, {
       "pkIndices": [2],
       "mergeNode": {
@@ -46,7 +47,8 @@
           "encoding": "RAW",
           "name": "_row_id"
         }]
-      }
+      },
+      "identity": "RwStreamExchange(distribution\u003d[RwDistributionTrait{type\u003dHASH_DISTRIBUTED, keys\u003d[0]}], collation\u003d[[]])"
     }],
     "hashJoinNode": {
       "leftKey": [0],
@@ -59,7 +61,7 @@
         "databaseRefId": {
         }
       },
-      "tableId": 5
+      "tableId": 7
     },
     "columnDescs": [{
       "columnType": {
@@ -116,5 +118,6 @@
         "typeName": "INT64"
       }
     }]
-  }
+  },
+  "identity": "RwStreamMaterializedView(name\u003d[m4])"
 }

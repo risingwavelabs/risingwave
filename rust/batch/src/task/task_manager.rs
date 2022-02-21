@@ -86,35 +86,7 @@ mod tests {
     use risingwave_pb::plan::{QueryId, StageId, TaskSinkId as ProstTaskSinkId};
     use tonic::Code;
 
-    use crate::task::test_utils::{ResultChecker, TestRunner};
     use crate::task::{TaskId, TaskManager};
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_select_all() {
-        let mut runner = TestRunner::new();
-        runner
-            .prepare_table()
-            .create_table_int32s(3)
-            .insert_i32s(&[1, 4, 2])
-            .insert_i32s(&[2, 3, 3])
-            .insert_i32s(&[3, 4, 4])
-            .insert_i32s(&[4, 3, 5])
-            .run()
-            .await;
-
-        let res = runner
-            .prepare_scan()
-            .scan_all()
-            .await
-            .run_and_collect_single_output()
-            .await;
-        ResultChecker::new()
-            .add_i64_column(false, &[0, 1, 2, 3])
-            .add_i32_column(false, &[1, 2, 3, 4])
-            .add_i32_column(false, &[4, 3, 4, 3])
-            .add_i32_column(false, &[2, 3, 4, 5])
-            .check_result(&res);
-    }
 
     #[test]
     fn test_task_not_found() {

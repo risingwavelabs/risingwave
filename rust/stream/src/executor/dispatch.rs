@@ -2,7 +2,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::channel::mpsc::{channel, Sender};
+use futures::channel::mpsc::Sender;
 use futures::SinkExt;
 use itertools::Itertools;
 use risingwave_common::array::Op;
@@ -11,7 +11,7 @@ use risingwave_common::util::hash_util::CRC32FastBuilder;
 use tracing::event;
 
 use super::{Barrier, Executor, Message, Mutation, Result, StreamChunk, StreamConsumer};
-use crate::task::{SharedContext, LOCAL_OUTPUT_CHANNEL_SIZE};
+use crate::task::SharedContext;
 
 /// `Output` provides an interface for `Dispatcher` to send data into downstream actors.
 #[async_trait]
@@ -19,25 +19,25 @@ pub trait Output: Debug + Send + Sync + 'static {
     async fn send(&mut self, message: Message) -> Result<()>;
 }
 
-/// `ChannelOutput` sends data to a local `mpsc::Channel`
-pub struct ChannelOutput {
+/// `LocalOutput` sends data to a local `mpsc::Channel`
+pub struct LocalOutput {
     ch: Sender<Message>,
 }
 
-impl Debug for ChannelOutput {
+impl Debug for LocalOutput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ChannelOutput").finish()
+        f.debug_struct("LocalOutput").finish()
     }
 }
 
-impl ChannelOutput {
+impl LocalOutput {
     pub fn new(ch: Sender<Message>) -> Self {
         Self { ch }
     }
 }
 
 #[async_trait]
-impl Output for ChannelOutput {
+impl Output for LocalOutput {
     async fn send(&mut self, message: Message) -> Result<()> {
         // local channel should never fail
         self.ch.send(message).await.unwrap();
@@ -139,14 +139,11 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
                         let down_id = actor_info.get_actor_id();
                         let up_down_ids = (actor_id, down_id);
                         let downstream_addr = actor_info.get_host()?.to_socket_addr()?;
-
                         if is_local_address(&downstream_addr, &self.context.addr) {
                             let tx = self.context.take_sender(&up_down_ids)?;
-                            new_outputs.push(Box::new(ChannelOutput::new(tx)) as Box<dyn Output>)
+                            new_outputs.push(Box::new(LocalOutput::new(tx)) as Box<dyn Output>)
                         } else {
-                            let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-                            self.context
-                                .add_channel_pairs(up_down_ids, (Some(tx.clone()), Some(rx)));
+                            let tx = self.context.take_sender(&up_down_ids)?;
                             new_outputs.push(Box::new(RemoteOutput::new(tx)) as Box<dyn Output>)
                         }
                     }
@@ -163,11 +160,9 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
                         let downstream_addr = downstream_actor_info.get_host()?.to_socket_addr()?;
                         if is_local_address(&downstream_addr, &self.context.addr) {
                             let tx = self.context.take_sender(&up_down_ids)?;
-                            outputs_to_add.push(Box::new(ChannelOutput::new(tx)) as Box<dyn Output>)
+                            outputs_to_add.push(Box::new(LocalOutput::new(tx)) as Box<dyn Output>)
                         } else {
-                            let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-                            self.context
-                                .add_channel_pairs(up_down_ids, (Some(tx.clone()), Some(rx)));
+                            let tx = self.context.take_sender(&up_down_ids)?;
                             outputs_to_add.push(Box::new(RemoteOutput::new(tx)) as Box<dyn Output>)
                         }
                     }
@@ -513,6 +508,7 @@ mod tests {
     use std::hash::{BuildHasher, Hasher};
     use std::sync::{Arc, Mutex};
 
+    use futures::channel::mpsc::channel;
     use itertools::Itertools;
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, I64Array, Op};
@@ -523,7 +519,7 @@ mod tests {
 
     use super::*;
     use crate::executor::ReceiverExecutor;
-    use crate::task::LOCAL_TEST_ADDR;
+    use crate::task::{LOCAL_OUTPUT_CHANNEL_SIZE, LOCAL_TEST_ADDR};
 
     #[derive(Debug)]
     pub struct MockOutput {
@@ -672,7 +668,12 @@ mod tests {
     async fn test_configuration_change() {
         let schema = Schema { fields: vec![] };
         let (mut tx, rx) = channel(16);
-        let input = Box::new(ReceiverExecutor::new(schema.clone(), vec![], rx));
+        let input = Box::new(ReceiverExecutor::new(
+            schema.clone(),
+            vec![],
+            rx,
+            "ReceiverExecutor".to_string(),
+        ));
         let data_sink = Arc::new(Mutex::new(vec![]));
         let output = Box::new(MockOutput::new(data_sink));
         let actor_id = 233;
@@ -695,6 +696,7 @@ mod tests {
             ],
         );
         add_local_channels(ctx.clone(), vec![(233, 234), (233, 235)]);
+        add_remote_channels(ctx.clone(), 233, vec![238]);
 
         let b1 = Barrier::new(0).with_mutation(Mutation::UpdateOutputs(updates1));
         tx.send(Message::Barrier(b1)).await.unwrap();

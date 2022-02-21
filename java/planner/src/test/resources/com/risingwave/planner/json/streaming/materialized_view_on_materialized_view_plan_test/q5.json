@@ -7,10 +7,11 @@
           "databaseRefId": {
           }
         },
-        "tableId": 1
+        "tableId": 3
       },
-      "columnIds": [2, 3, 1, 0]
-    }
+      "columnIds": [1, 2, 0, 3]
+    },
+    "identity": "RwStreamTableSource(table\u003d[[test_schema, t2]], columns\u003d[v2,v3,v1,_row_id])"
   }],
   "mviewNode": {
     "tableRefId": {
@@ -18,7 +19,7 @@
         "databaseRefId": {
         }
       },
-      "tableId": 6
+      "tableId": 8
     },
     "columnDescs": [{
       "columnType": {
@@ -55,5 +56,6 @@
         "typeName": "INT64"
       }
     }]
-  }
+  },
+  "identity": "RwStreamMaterializedView(name\u003d[m5])"
 }

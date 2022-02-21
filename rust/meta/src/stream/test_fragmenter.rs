@@ -24,7 +24,7 @@ use risingwave_pb::stream_plan::{
 use crate::manager::MetaSrvEnv;
 use crate::model::TableFragments;
 use crate::stream::fragmenter::StreamFragmenter;
-use crate::stream::FragmentManager;
+use crate::stream::{CreateMaterializedViewContext, FragmentManager};
 
 fn make_table_ref_id(id: i32) -> TableRefId {
     TableRefId {
@@ -135,6 +135,7 @@ fn make_stream_node() -> StreamNode {
         input: vec![source_node],
         pk_indices: vec![2],
         operator_id: 1,
+        identity: "ExchangeExecutor".to_string(),
     };
 
     // filter node
@@ -155,6 +156,7 @@ fn make_stream_node() -> StreamNode {
         input: vec![exchange_node],
         pk_indices: vec![0, 1],
         operator_id: 2,
+        identity: "FilterExecutor".to_string(),
     };
 
     // simple agg node
@@ -165,6 +167,7 @@ fn make_stream_node() -> StreamNode {
         input: vec![filter_node],
         pk_indices: vec![0, 1],
         operator_id: 3,
+        identity: "GlobalSimpleAggExecutor".to_string(),
     };
 
     // exchange node
@@ -182,6 +185,7 @@ fn make_stream_node() -> StreamNode {
         input: vec![simple_agg_node],
         pk_indices: vec![0, 1],
         operator_id: 4,
+        identity: "ExchangeExecutor".to_string(),
     };
 
     // agg node
@@ -192,6 +196,7 @@ fn make_stream_node() -> StreamNode {
         input: vec![exchange_node_1],
         pk_indices: vec![0, 1],
         operator_id: 5,
+        identity: "GlobalSimpleAggExecutor".to_string(),
     };
 
     // project node
@@ -216,6 +221,7 @@ fn make_stream_node() -> StreamNode {
         input: vec![simple_agg_node_1],
         pk_indices: vec![1, 2],
         operator_id: 6,
+        identity: "ProjectExecutor".to_string(),
     };
 
     // mview node
@@ -234,6 +240,7 @@ fn make_stream_node() -> StreamNode {
             column_orders: vec![make_column_order(1), make_column_order(2)],
         })),
         operator_id: 7,
+        identity: "MviewExecutor".to_string(),
     }
 }
 
@@ -241,10 +248,11 @@ fn make_stream_node() -> StreamNode {
 async fn test_fragmenter() -> Result<()> {
     let env = MetaSrvEnv::for_test().await;
     let stream_node = make_stream_node();
-    let fragment_manager_ref = Arc::new(FragmentManager::new(env.clone()).await?);
+    let fragment_manager_ref = Arc::new(FragmentManager::new(env.meta_store_ref()).await?);
     let mut fragmenter = StreamFragmenter::new(env.id_gen_manager_ref(), fragment_manager_ref, 1);
 
-    let graph = fragmenter.generate_graph(&stream_node).await?;
+    let mut ctx = CreateMaterializedViewContext::default();
+    let graph = fragmenter.generate_graph(&stream_node, &mut ctx).await?;
     let table_fragments = TableFragments::new(TableId::default(), graph);
     let actors = table_fragments.actors();
     let source_actor_ids = table_fragments.source_actor_ids();
@@ -314,10 +322,11 @@ async fn test_fragmenter() -> Result<()> {
 async fn test_fragmenter_multi_nodes() -> Result<()> {
     let env = MetaSrvEnv::for_test().await;
     let stream_node = make_stream_node();
-    let fragment_manager_ref = Arc::new(FragmentManager::new(env.clone()).await?);
+    let fragment_manager_ref = Arc::new(FragmentManager::new(env.meta_store_ref()).await?);
     let mut fragmenter = StreamFragmenter::new(env.id_gen_manager_ref(), fragment_manager_ref, 3);
 
-    let graph = fragmenter.generate_graph(&stream_node).await?;
+    let mut ctx = CreateMaterializedViewContext::default();
+    let graph = fragmenter.generate_graph(&stream_node, &mut ctx).await?;
     let table_fragments = TableFragments::new(TableId::default(), graph);
     let actors = table_fragments.actors();
     let source_actor_ids = table_fragments.source_actor_ids();

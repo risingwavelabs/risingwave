@@ -22,14 +22,23 @@ pub struct FilterExecutor {
 
     /// Identity string
     identity: String,
+
+    /// Logical Operator Info
+    op_info: String,
 }
 
 impl FilterExecutor {
-    pub fn new(input: Box<dyn Executor>, expr: BoxedExpression, executor_id: u64) -> Self {
+    pub fn new(
+        input: Box<dyn Executor>,
+        expr: BoxedExpression,
+        executor_id: u64,
+        op_info: String,
+    ) -> Self {
         Self {
             input,
             expr,
             identity: format!("FilterExecutor {:X}", executor_id),
+            op_info,
         }
     }
 }
@@ -59,6 +68,10 @@ impl Executor for FilterExecutor {
 
     fn identity(&self) -> &str {
         self.identity.as_str()
+    }
+
+    fn logical_operator_info(&self) -> &str {
+        &self.op_info
     }
 }
 
@@ -201,7 +214,8 @@ mod tests {
             Box::new(left_expr),
             Box::new(right_expr),
         );
-        let mut filter = FilterExecutor::new(Box::new(source), test_expr, 1);
+        let mut filter =
+            FilterExecutor::new(Box::new(source), test_expr, 1, "FilterExecutor".to_string());
 
         if let Message::Chunk(chunk) = filter.next().await.unwrap() {
             assert_eq!(

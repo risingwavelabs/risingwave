@@ -20,6 +20,9 @@ pub struct MaterializeExecutor<S: StateStore> {
 
     /// Identity string
     identity: String,
+
+    /// Logical Operator Info
+    op_info: String,
 }
 
 impl<S: StateStore> MaterializeExecutor<S> {
@@ -30,6 +33,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
         pk_columns: Vec<usize>,
         orderings: Vec<OrderType>,
         executor_id: u64,
+        op_info: String,
     ) -> Self {
         Self {
             input,
@@ -42,6 +46,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
             schema,
             pk_columns,
             identity: format!("MaterializeExecutor {:X}", executor_id),
+            op_info,
         }
     }
 
@@ -73,6 +78,10 @@ impl<S: StateStore> Executor for MaterializeExecutor<S> {
 
     fn identity(&self) -> &str {
         self.identity.as_str()
+    }
+
+    fn logical_operator_info(&self) -> &str {
+        &self.op_info
     }
 }
 
@@ -226,6 +235,7 @@ mod tests {
             pks,
             vec![OrderType::Ascending],
             1,
+            "MaterializeExecutor".to_string(),
         ));
 
         let table = downcast_arc::<MViewTable<MemoryStateStore>>(

@@ -142,7 +142,7 @@ impl SSTableBuilder {
         self.meta.block_metas.push(block_meta);
     }
 
-    fn should_finish_block(&self, key: &[u8], value: &HummockValue<Vec<u8>>) -> bool {
+    fn should_finish_block(&self, key: &[u8], value: HummockValue<&[u8]>) -> bool {
         // If there is no entry till now, we will return false.
         if self.entry_offsets.is_empty() {
             return false;
@@ -175,8 +175,8 @@ impl SSTableBuilder {
     /// Add adds a key-value pair to the block.
     /// Note: the passed key-value pairs should be ordered,
     /// though we do not check that yet.
-    pub fn add(&mut self, key: &[u8], value: HummockValue<Vec<u8>>) {
-        if self.should_finish_block(key, &value) {
+    pub fn add(&mut self, key: &[u8], value: HummockValue<&[u8]>) {
+        if self.should_finish_block(key, value) {
             self.finish_block();
             self.base_key.clear();
             assert!(self.data_buf.len() < u32::MAX as usize);
@@ -291,7 +291,10 @@ pub(super) mod tests {
         let mut b = SSTableBuilder::new(default_builder_opt_for_test());
 
         for i in 0..TEST_KEYS_COUNT {
-            b.add(&builder_test_key_of(i), HummockValue::Put(test_value_of(i)));
+            b.add(
+                &builder_test_key_of(i),
+                HummockValue::Put(&test_value_of(i)),
+            );
         }
 
         assert_eq!(builder_test_key_of(0), b.meta.smallest_key);
@@ -338,7 +341,10 @@ pub(super) mod tests {
         let mut b = SSTableBuilder::new(opts);
 
         for i in 0..TEST_KEYS_COUNT {
-            b.add(&builder_test_key_of(i), HummockValue::Put(test_value_of(i)));
+            b.add(
+                &builder_test_key_of(i),
+                HummockValue::Put(&test_value_of(i)),
+            );
         }
 
         // get remote table

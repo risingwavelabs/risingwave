@@ -15,7 +15,7 @@ As a RisingWave developer, you may need to start components and debug components
 
 #### Run e2e test
 
-Simply run:
+In root directory, simply run:
 
 ```bash
 ./risedev d # Default dev mode
@@ -267,7 +267,7 @@ This expanded config will serve as a base config for the following config genera
 
 ### Config Generator
 
-RiseDev will generate config of each service using modules in risedev/src/config_gen. Given the above frontend meta-config, the server.properties will be generated:
+RiseDev will generate config of each service using modules in risedev/src/config_gen. Given the above frontend meta-config, the server.properties will be generated (`risingwave.leader.computenodes` is no longer used):
 
 ```apache
 risingwave.pgserver.ip=127.0.0.1

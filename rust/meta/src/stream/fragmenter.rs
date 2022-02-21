@@ -1,8 +1,10 @@
 use std::cmp::max;
 use std::collections::BTreeMap;
+use std::ops::Range;
 use std::sync::Arc;
 
 use async_recursion::async_recursion;
+use itertools::Itertools;
 use risingwave_common::array::RwError;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
@@ -12,9 +14,10 @@ use risingwave_pb::stream_plan::dispatcher::DispatcherType;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{Dispatcher, StreamNode};
 
-use super::FragmentManagerRef;
+use super::{CreateMaterializedViewContext, FragmentManagerRef};
 use crate::manager::{IdCategory, IdGeneratorManagerRef};
 use crate::model::{ActorId, FragmentId};
+use crate::storage::MetaStore;
 use crate::stream::graph::{
     StreamActorBuilder, StreamFragment, StreamFragmentGraph, StreamGraphBuilder,
 };
@@ -22,22 +25,25 @@ use crate::stream::graph::{
 const PARALLEL_DEGREE_LOW_BOUND: u32 = 4;
 
 /// [`StreamFragmenter`] generates the proto for interconnected actors for a streaming pipeline.
-pub struct StreamFragmenter {
+pub struct StreamFragmenter<S> {
     /// fragment graph field, transformed from input streaming plan.
     fragment_graph: StreamFragmentGraph,
     /// stream graph builder, to build streaming DAG.
-    stream_graph: StreamGraphBuilder,
+    stream_graph: StreamGraphBuilder<S>,
 
     /// id generator, used to generate actor id.
-    id_gen_manager_ref: IdGeneratorManagerRef,
+    id_gen_manager_ref: IdGeneratorManagerRef<S>,
     /// worker count, used to init actor parallelization.
     worker_count: u32,
 }
 
-impl StreamFragmenter {
+impl<S> StreamFragmenter<S>
+where
+    S: MetaStore,
+{
     pub fn new(
-        id_gen_manager_ref: IdGeneratorManagerRef,
-        fragment_manager_ref: FragmentManagerRef,
+        id_gen_manager_ref: IdGeneratorManagerRef<S>,
+        fragment_manager_ref: FragmentManagerRef<S>,
         worker_count: u32,
     ) -> Self {
         Self {
@@ -57,13 +63,15 @@ impl StreamFragmenter {
     pub async fn generate_graph(
         &mut self,
         stream_node: &StreamNode,
+        ctx: &mut CreateMaterializedViewContext,
     ) -> Result<BTreeMap<FragmentId, Fragment>> {
         self.generate_fragment_graph(stream_node).await?;
         self.build_graph_from_fragment(self.fragment_graph.get_root_fragment(), vec![])
             .await?;
 
-        let stream_graph = self.stream_graph.build()?;
-        stream_graph
+        let stream_graph = self.stream_graph.build(ctx)?;
+
+        Ok(stream_graph
             .iter()
             .map(|(&fragment_id, actors)| {
                 Ok::<_, RwError>((
@@ -76,108 +84,95 @@ impl StreamFragmenter {
                     },
                 ))
             })
-            .collect::<Result<BTreeMap<_, _>>>()
+            .collect::<Result<BTreeMap<_, _>>>()?)
     }
 
     /// Generate fragment DAG from input streaming plan by their dependency.
     async fn generate_fragment_graph(&mut self, stream_node: &StreamNode) -> Result<()> {
-        let mut root_fragment = self
-            .new_stream_fragment(Arc::new(stream_node.clone()))
-            .await?;
-        let (is_singleton, is_source) =
-            self.build_fragment(&mut root_fragment, stream_node).await?;
-        root_fragment.set_singleton(is_singleton);
-
-        if is_source {
-            root_fragment.set_fragment_type(FragmentType::Source);
-        }
-        self.fragment_graph.add_root_fragment(root_fragment.clone());
-
+        self.build_and_add_fragment(stream_node, true).await?;
         Ok(())
     }
 
-    /// Build new fragment and link dependency with its parent fragment.
-    /// Return two flags.
-    /// The first flag indicates that whether the parent should be singleton.
-    /// The second flag indicates that whether the parent is a source.
+    /// Use the given `stream_node` to create a fragment and add it to graph.
+    async fn build_and_add_fragment(
+        &mut self,
+        stream_node: &StreamNode,
+        is_root: bool,
+    ) -> Result<StreamFragment> {
+        let mut fragment = self.new_stream_fragment(stream_node.clone()).await?;
+        self.build_fragment(&mut fragment, stream_node).await?;
+        self.fragment_graph.add_fragment(fragment.clone(), is_root);
+        Ok(fragment)
+    }
+
+    /// Build new fragment and link dependencies by visiting children recursively, update
+    /// `is_singleton` and `fragment_type` properties for current fragment.
     // TODO: Should we store the concurrency in StreamFragment directly?
     #[async_recursion]
     async fn build_fragment(
         &mut self,
-        parent_fragment: &mut StreamFragment,
+        current_fragment: &mut StreamFragment,
         stream_node: &StreamNode,
-    ) -> Result<(bool, bool)> {
-        if let Some(Node::MviewNode(_)) = stream_node.node {
-            parent_fragment.set_fragment_type(FragmentType::Sink);
-        }
+    ) -> Result<()> {
+        // Update current fragment based on the node we're visiting.
+        match stream_node.get_node()? {
+            Node::SourceNode(_) => current_fragment.set_fragment_type(FragmentType::Source),
+            Node::MviewNode(_) => current_fragment.set_fragment_type(FragmentType::Sink),
 
-        let mut is_singleton = false;
-        let mut is_source = false;
+            // TODO: Force singleton for TopN as a workaround. We should implement two phase TopN.
+            Node::TopNNode(_) => current_fragment.set_singleton(true),
+            // TODO: Force Chain to be singleton as a workaround. Remove this if parallel Chain is
+            // supported
+            Node::ChainNode(_) => current_fragment.set_singleton(true),
 
-        for node in stream_node.get_input() {
-            let (is_singleton1, is_source1) = match node.get_node()? {
+            _ => {}
+        };
+
+        // Visit children.
+        for child_node in stream_node.get_input() {
+            match child_node.get_node()? {
+                // Exchange node indicates a new child fragment.
                 Node::ExchangeNode(exchange_node) => {
-                    let mut child_fragment =
-                        self.new_stream_fragment(Arc::new(node.clone())).await?;
-                    let (child_is_singleton, child_is_source) =
-                        self.build_fragment(&mut child_fragment, node).await?;
-                    child_fragment.set_singleton(child_is_singleton);
-                    if child_is_source {
-                        child_fragment.set_fragment_type(FragmentType::Source);
-                    }
-                    self.fragment_graph.add_fragment(child_fragment.clone());
+                    let child_fragment = self.build_and_add_fragment(child_node, false).await?;
                     self.fragment_graph.link_child(
-                        parent_fragment.get_fragment_id(),
+                        current_fragment.get_fragment_id(),
                         child_fragment.get_fragment_id(),
                     );
-                    (
-                        exchange_node.get_dispatcher()?.get_type()? == DispatcherType::Simple,
-                        false,
-                    )
+
+                    let is_simple_dispatcher =
+                        exchange_node.get_dispatcher()?.get_type()? == DispatcherType::Simple;
+                    if is_simple_dispatcher {
+                        current_fragment.set_singleton(true);
+                    }
                 }
-                Node::SourceNode(_) => {
-                    let (parent_is_singleton, _) =
-                        self.build_fragment(parent_fragment, node).await?;
-                    (parent_is_singleton, true)
-                }
-                Node::TopNNode(_) => {
-                    let (_, child_is_source) = self.build_fragment(parent_fragment, node).await?;
-                    // TODO: Force singleton for TopN as a workaround.
-                    // We should implement two phase TopN.
-                    (true, child_is_source)
-                }
-                Node::ChainNode(_) => {
-                    let (_, child_is_source) = self.build_fragment(parent_fragment, node).await?;
-                    // TODO: Force Chain to be singleton as a workaround.
-                    // Remove this if parallel Chain is supported
-                    (true, child_is_source)
-                }
-                _ => self.build_fragment(parent_fragment, node).await?,
+
+                // For other children, visit recursively.
+                _ => self.build_fragment(current_fragment, child_node).await?,
             };
-            is_singleton |= is_singleton1;
-            is_source |= is_source1;
         }
-        Ok((is_singleton, is_source))
+
+        Ok(())
     }
 
-    async fn new_stream_fragment(&self, node: Arc<StreamNode>) -> Result<StreamFragment> {
-        Ok(StreamFragment::new(self.gen_fragment_id().await?, node))
-    }
-
-    /// Generate fragment id for each fragment.
-    async fn gen_fragment_id(&self) -> Result<FragmentId> {
-        Ok(self
+    /// Create a new stream fragment with given node with generating a fragment id.
+    async fn new_stream_fragment(&self, node: StreamNode) -> Result<StreamFragment> {
+        let fragment_id = self
             .id_gen_manager_ref
             .generate::<{ IdCategory::Fragment }>()
-            .await? as _)
+            .await? as _;
+        let fragment = StreamFragment::new(fragment_id, Arc::new(node));
+
+        Ok(fragment)
     }
 
     /// Generate actor id from id generator.
-    async fn gen_actor_id(&self, parallel_degree: u32) -> Result<ActorId> {
-        Ok(self
+    async fn gen_actor_ids(&self, parallel_degree: u32) -> Result<Range<ActorId>> {
+        let start_actor_id = self
             .id_gen_manager_ref
             .generate_interval::<{ IdCategory::Actor }>(parallel_degree as i32)
-            .await? as _)
+            .await? as _;
+
+        Ok(start_actor_id..start_actor_id + parallel_degree)
     }
 
     /// Build stream graph from fragment graph recursively. Setup dispatcher in actor and generate
@@ -189,8 +184,8 @@ impl StreamFragmenter {
         last_fragment_actors: Vec<ActorId>,
     ) -> Result<()> {
         let root_fragment = self.fragment_graph.get_root_fragment();
-        let mut current_actor_ids = vec![];
         let current_fragment_id = current_fragment.get_fragment_id();
+
         let parallel_degree = if current_fragment.is_singleton() {
             1
         } else {
@@ -198,9 +193,9 @@ impl StreamFragmenter {
             // more worker nodes added.
             max(self.worker_count * 2, PARALLEL_DEGREE_LOW_BOUND)
         };
+        let actor_ids = self.gen_actor_ids(parallel_degree).await?;
 
         let node = current_fragment.get_node();
-        let actor_ids = self.gen_actor_id(parallel_degree).await?;
         let blackhole_dispatcher = Dispatcher {
             r#type: DispatcherType::Broadcast as i32,
             ..Default::default()
@@ -218,13 +213,14 @@ impl StreamFragmenter {
                 }
             }
         };
-        for id in actor_ids..actor_ids + parallel_degree {
+
+        for id in actor_ids.clone() {
             let mut actor_builder = StreamActorBuilder::new(id, current_fragment_id, node.clone());
             actor_builder.set_dispatcher(dispatcher.clone());
             self.stream_graph.add_actor(actor_builder);
-            current_actor_ids.push(id);
         }
 
+        let current_actor_ids = actor_ids.collect_vec();
         self.stream_graph
             .add_dependency(&current_actor_ids, &last_fragment_actors);
 

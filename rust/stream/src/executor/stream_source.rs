@@ -33,6 +33,9 @@ pub struct StreamSourceExecutor {
     /// Identity string
     identity: String,
 
+    /// Logical Operator Info
+    op_info: String,
+
     // monitor
     /// attributes of the OpenTelemetry monitor
     attributes: Vec<KeyValue>,
@@ -50,6 +53,7 @@ impl StreamSourceExecutor {
         barrier_receiver: UnboundedReceiver<Message>,
         executor_id: u64,
         operator_id: u64,
+        op_info: String,
     ) -> Result<Self> {
         let source = source_desc.clone().source;
         let reader: Box<dyn StreamSourceReader> = match source.as_ref() {
@@ -60,9 +64,6 @@ impl StreamSourceExecutor {
                 },
                 column_ids.clone(),
             )?),
-            SourceImpl::Table(s) => {
-                Box::new(s.stream_reader(TableReaderContext {}, column_ids.clone())?)
-            }
             SourceImpl::TableV2(s) => {
                 Box::new(s.stream_reader(TableV2ReaderContext, column_ids.clone())?)
             }
@@ -90,6 +91,7 @@ impl StreamSourceExecutor {
                 .u64_counter("stream_source_output_rows_counts")
                 .with_description("")
                 .init(),
+            op_info,
         })
     }
 
@@ -142,7 +144,7 @@ impl Executor for StreamSourceExecutor {
             // but rows from tables (by insert statements) are filled in InsertExecutor.
             //
             // TODO: in the future, we may add row_id column here for TableV2 as well
-            if !matches!(self.source_desc.source.as_ref(), SourceImpl::Table(_) | SourceImpl::TableV2(_)) {
+            if !matches!(self.source_desc.source.as_ref(), SourceImpl::TableV2(_)) {
               chunk = self.refill_row_id_column(chunk);
             }
             self.source_output_row_count.add(chunk.cardinality() as u64, &self.attributes);
@@ -164,6 +166,10 @@ impl Executor for StreamSourceExecutor {
 
     fn identity(&self) -> &str {
         self.identity.as_str()
+    }
+
+    fn logical_operator_info(&self) -> &str {
+        &self.op_info
     }
 }
 
@@ -189,7 +195,7 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
     use risingwave_source::*;
-    use risingwave_storage::bummock::BummockTable;
+    use risingwave_storage::table::test::TestTable;
     use risingwave_storage::TableColumnDesc;
     use tokio::sync::mpsc::unbounded_channel;
 
@@ -221,13 +227,13 @@ mod tests {
                 name: String::new(),
             },
         ];
-        let table = Arc::new(BummockTable::new(&table_id, table_columns));
+        let table = Arc::new(TestTable::new(&table_id, table_columns));
 
         let source_manager = MemSourceManager::new();
-        source_manager.create_table_source(&table_id, table.clone())?;
+        source_manager.create_table_source_v2(&table_id, table.clone())?;
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.clone().source;
-        let table_source = source.as_table();
+        let table_source = source.as_table_v2();
 
         // Prepare test data chunks
         let rowid_arr1: Arc<ArrayImpl> = Arc::new(array_nonnull! { I64Array, [0, 0, 0] }.into());
@@ -277,6 +283,7 @@ mod tests {
             barrier_receiver,
             1,
             1,
+            "StreamSourceExecutor".to_string(),
         )
         .unwrap();
 
@@ -287,7 +294,7 @@ mod tests {
             }))
             .unwrap();
 
-        let mut writer = table_source.create_writer()?;
+        let mut writer = table_source.create_writer();
         // Write 1st chunk
         writer.write(chunk1).await?;
 
@@ -357,13 +364,13 @@ mod tests {
                 name: String::new(),
             },
         ];
-        let table = Arc::new(BummockTable::new(&table_id, table_columns));
+        let table = Arc::new(TestTable::new(&table_id, table_columns));
 
         let source_manager = MemSourceManager::new();
-        source_manager.create_table_source(&table_id, table.clone())?;
+        source_manager.create_table_source_v2(&table_id, table.clone())?;
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.clone().source;
-        let table_source = source.as_table();
+        let table_source = source.as_table_v2();
 
         // Prepare test data chunks
         let rowid_arr1: Arc<ArrayImpl> = Arc::new(array_nonnull! { I64Array, [0, 0, 0] }.into());
@@ -400,10 +407,11 @@ mod tests {
             barrier_receiver,
             1,
             1,
+            "StreamSourceExecutor".to_string(),
         )
         .unwrap();
 
-        let mut writer = table_source.create_writer()?;
+        let mut writer = table_source.create_writer();
         writer.write(chunk1.clone()).await?;
 
         barrier_sender

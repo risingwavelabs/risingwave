@@ -100,9 +100,10 @@
       "schemaRefId": {
         "databaseRefId": {
         }
-      }
+      },
+      "tableId": 1
     },
-    "columnIds": [1, 2, 3, 4]
+    "columnIds": [0, 1, 2, 3]
   },
-  "identity": "RwBatchInsertExecutor(TableName:[test_schema, t],ColumnIds:[1, 2, 3, 4])"
+  "identity": "RwBatchInsertExecutor(TableName:[test_schema, t],ColumnIds:[0, 1, 2, 3])"
 }

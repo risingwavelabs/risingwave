@@ -59,6 +59,9 @@ pub struct HashAggExecutor<S: StateStore> {
 
     /// Identity string
     identity: String,
+
+    /// Logical Operator Info
+    op_info: String,
 }
 
 impl<S: StateStore> HashAggExecutor<S> {
@@ -69,6 +72,7 @@ impl<S: StateStore> HashAggExecutor<S> {
         keyspace: Keyspace<S>,
         pk_indices: PkIndices,
         executor_id: u64,
+        op_info: String,
     ) -> Self {
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&key_indices));
 
@@ -82,6 +86,7 @@ impl<S: StateStore> HashAggExecutor<S> {
             state_map: EvictableHashMap::new(1 << 16), // TODO: decide the target cap
             pk_indices,
             identity: format!("HashAggExecutor {:X}", executor_id),
+            op_info,
         }
     }
 
@@ -320,6 +325,10 @@ impl<S: StateStore> Executor for HashAggExecutor<S> {
         self.state_map.clear();
         Ok(())
     }
+
+    fn logical_operator_info(&self) -> &str {
+        &self.op_info
+    }
 }
 
 #[cfg(test)]
@@ -395,8 +404,15 @@ mod tests {
             },
         ];
 
-        let mut hash_agg =
-            HashAggExecutor::new(Box::new(source), agg_calls, keys, keyspace, vec![], 1);
+        let mut hash_agg = HashAggExecutor::new(
+            Box::new(source),
+            agg_calls,
+            keys,
+            keyspace,
+            vec![],
+            1,
+            "HashAggExecutor".to_string(),
+        );
 
         let msg = hash_agg.next().await.unwrap();
         if let Message::Chunk(chunk) = msg {
@@ -504,6 +520,7 @@ mod tests {
             keyspace,
             vec![],
             1,
+            "HashAggExecutor".to_string(),
         );
 
         if let Message::Chunk(chunk) = hash_agg.next().await.unwrap() {
@@ -607,8 +624,15 @@ mod tests {
             },
         ];
 
-        let mut hash_agg =
-            HashAggExecutor::new(Box::new(source), agg_calls, keys, keyspace, vec![], 1);
+        let mut hash_agg = HashAggExecutor::new(
+            Box::new(source),
+            agg_calls,
+            keys,
+            keyspace,
+            vec![],
+            1,
+            "HashAggExecutor".to_string(),
+        );
 
         let msg = hash_agg.next().await.unwrap();
         if let Message::Chunk(chunk) = msg {

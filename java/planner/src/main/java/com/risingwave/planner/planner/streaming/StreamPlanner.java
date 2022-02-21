@@ -115,8 +115,9 @@ public class StreamPlanner implements Planner<StreamingPlan> {
       if (source != null && source.isMaterializedView()) {
         // source is a materialized view source
         assert source instanceof MaterializedViewCatalog;
-        assert parent != null;
-        assert indexInParent >= 0;
+        if (parent != null) {
+          assert indexInParent >= 0;
+        }
 
         var tableSourceNode = (RwStreamTableSource) node;
         var sourceColumnIds = source.getAllColumnIds();
@@ -169,7 +170,9 @@ public class StreamPlanner implements Planner<StreamingPlan> {
                 tableSourceNode.getColumnIds(),
                 upstreamColumnDescsBuilder.build(),
                 List.of(batchPlan));
-        parent.replaceInput(indexInParent, chain);
+        if (parent != null) {
+          parent.replaceInput(indexInParent, chain);
+        }
       }
     }
 

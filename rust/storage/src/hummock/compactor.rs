@@ -17,6 +17,7 @@ use crate::hummock::cloud::gen_remote_sstable;
 use crate::object::ObjectStore;
 
 pub struct SubCompactContext {
+    // TODO: remove Arc?
     pub options: Arc<HummockOptions>,
     pub local_version_manager: Arc<LocalVersionManager>,
     pub obj_client: Arc<dyn ObjectStore>,
@@ -26,7 +27,7 @@ pub struct SubCompactContext {
 pub struct Compactor;
 
 impl Compactor {
-    async fn run_compact(
+    pub async fn run_compact(
         context: &SubCompactContext,
         compact_task: &mut CompactTask,
     ) -> HummockResult<()> {
@@ -200,11 +201,7 @@ impl Compactor {
             }
 
             builder
-                .add_full_key(
-                    FullKey::from_slice(iter_key),
-                    iter.value().to_owned_value(),
-                    is_new_user_key,
-                )
+                .add_full_key(FullKey::from_slice(iter_key), iter.value(), is_new_user_key)
                 .await?;
 
             iter.next().await?;
@@ -271,78 +268,5 @@ impl Compactor {
             // FIXME: error message in `result` should not be ignored
             Err(HummockError::object_io_error("compaction failed."))
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::iter::once;
-    use std::sync::Arc;
-
-    use super::*;
-    use crate::hummock::key::Epoch;
-    use crate::hummock::local_version_manager::LocalVersionManager;
-    use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
-    use crate::hummock::{HummockOptions, HummockResult, HummockStorage};
-    use crate::object::InMemObjectStore;
-
-    #[tokio::test]
-    // TODO #2649 compactor test should base on HummockManager in meta crate
-    #[ignore]
-    async fn test_same_key_not_splitted() -> HummockResult<()> {
-        let options = HummockOptions::small_for_test();
-        let object_client = Arc::new(InMemObjectStore::new());
-        let local_version_manager = Arc::new(LocalVersionManager::new(
-            object_client.clone(),
-            &options.remote_dir,
-            None,
-        ));
-        let hummock_meta_client = Arc::new(MockHummockMetaClient::new(Arc::new(
-            MockHummockMetaService::new(),
-        )));
-        let mut storage = HummockStorage::new(
-            object_client,
-            options,
-            local_version_manager,
-            hummock_meta_client,
-        )
-        .await
-        .unwrap();
-        storage.shutdown_compactor().await.unwrap();
-        let sub_compact_context = SubCompactContext {
-            options: storage.options.clone(),
-            local_version_manager: storage.local_version_manager.clone(),
-            obj_client: storage.obj_client.clone(),
-            hummock_meta_client: storage.hummock_meta_client.clone(),
-        };
-
-        let kv_count = 8192;
-        let epoch: u64 = 1;
-        for _ in 0..kv_count {
-            storage
-                .write_batch(
-                    once((b"same_key".to_vec(), HummockValue::Put(b"value".to_vec()))),
-                    epoch,
-                )
-                .await?;
-        }
-
-        let mut compact_task = storage
-            .hummock_meta_client
-            .get_compaction_task()
-            .await?
-            .unwrap();
-        compact_task.watermark = Epoch::MIN; // do not gc these records
-        Compactor::run_compact(&sub_compact_context, &mut compact_task).await?;
-
-        let output_table_count = compact_task.sorted_output_ssts.len();
-        assert_eq!(output_table_count, 1); // should not split into multiple tables
-
-        let _table = compact_task.sorted_output_ssts.get(0).unwrap();
-        // todo: assert that output table reaches the target size
-        // assert!(table.meta.estimated_size > target_table_size); // even if it reaches the target
-        // size
-
-        Ok(())
     }
 }

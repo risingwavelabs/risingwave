@@ -9,7 +9,7 @@ use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_source::{Source, SourceImpl, SourceManagerRef, SourceWriter};
+use risingwave_source::{SourceImpl, SourceManagerRef};
 
 use super::BoxedExecutor;
 use crate::executor::{BoxedExecutorBuilder, Executor, ExecutorBuilder};
@@ -19,6 +19,7 @@ pub struct InsertExecutor {
     /// target table id
     table_id: TableId,
     source_manager: SourceManagerRef,
+    worker_id: u32,
 
     child: BoxedExecutor,
     executed: bool,
@@ -27,10 +28,16 @@ pub struct InsertExecutor {
 }
 
 impl InsertExecutor {
-    pub fn new(table_id: TableId, source_manager: SourceManagerRef, child: BoxedExecutor) -> Self {
+    pub fn new(
+        table_id: TableId,
+        source_manager: SourceManagerRef,
+        child: BoxedExecutor,
+        worker_id: u32,
+    ) -> Self {
         Self {
             table_id,
             source_manager,
+            worker_id,
             child,
             executed: false,
             schema: Schema {
@@ -49,6 +56,7 @@ impl Executor for InsertExecutor {
         Ok(())
     }
 
+    // TODO: refactor this function since we only have `TableV2` now.
     async fn next(&mut self) -> Result<Option<DataChunk>> {
         if self.executed {
             return Ok(None);
@@ -58,16 +66,10 @@ impl Executor for InsertExecutor {
 
         let do_insert = |chunk: StreamChunk| async {
             match source.source.as_ref() {
-                SourceImpl::Table(t) => {
-                    // All writers share a single `TableSourceCore` so it's okay to create it every
-                    // time.
-                    let mut writer = t.create_writer()?;
-                    writer.write(chunk).await?;
-                }
                 SourceImpl::TableV2(t) => {
                     // All writers share a single `TableSourceV2Core` so it's okay to create it
                     // every time.
-                    let mut writer = t.create_writer()?;
+                    let mut writer = t.create_writer();
                     writer.write(chunk).await?;
                 }
                 _ => unreachable!(),
@@ -77,12 +79,8 @@ impl Executor for InsertExecutor {
 
         let do_flush = || async {
             match source.source.as_ref() {
-                SourceImpl::Table(t) => {
-                    let mut writer = t.create_writer()?;
-                    writer.flush().await?;
-                }
                 SourceImpl::TableV2(t) => {
-                    let mut writer = t.create_writer()?;
+                    let mut writer = t.create_writer();
                     writer.flush().await?; // this is currently no op
                 }
                 _ => unreachable!(),
@@ -91,8 +89,7 @@ impl Executor for InsertExecutor {
         };
 
         let next_row_id = || match source.source.as_ref() {
-            SourceImpl::Table(t) => t.next_row_id(),
-            SourceImpl::TableV2(t) => t.next_row_id(),
+            SourceImpl::TableV2(t) => t.next_row_id(self.worker_id),
             _ => unreachable!(),
         };
 
@@ -104,7 +101,7 @@ impl Executor for InsertExecutor {
             // add row-id column as first column
             let mut builder = I64ArrayBuilder::new(len).unwrap();
             for _ in 0..len {
-                builder.append(Some(next_row_id() as i64)).unwrap();
+                builder.append(Some(next_row_id())).unwrap();
             }
 
             let rowid_column = once(Column::new(Arc::new(ArrayImpl::from(
@@ -113,7 +110,6 @@ impl Executor for InsertExecutor {
             let child_columns = child_chunk.columns().iter().map(|c| c.to_owned());
 
             let columns = match source.source.as_ref() {
-                SourceImpl::Table(_) => rowid_column.chain(child_columns).collect(),
                 SourceImpl::TableV2(_) => {
                     // put row id column to the last to match the behavior of mview
                     child_columns.chain(rowid_column).collect()
@@ -180,6 +176,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
             table_id,
             source.global_task_env().source_manager_ref(),
             child,
+            source.global_task_env().worker_id(),
         )))
     }
 }
@@ -193,275 +190,16 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema, SchemaId};
     use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
-    use risingwave_common::util::downcast_arc;
     use risingwave_source::{
-        MemSourceManager, SourceManager, StreamSourceReader, TableV2ReaderContext,
+        MemSourceManager, Source, SourceManager, StreamSourceReader, TableV2ReaderContext,
     };
-    use risingwave_storage::bummock::{BummockResult, BummockTable};
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::{ScannableTable, SimpleTableManager, TableManager};
+    use risingwave_storage::table::{SimpleTableManager, TableManager};
     use risingwave_storage::*;
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
     use crate::*;
-
-    #[tokio::test]
-    async fn test_insert_executor() -> Result<()> {
-        let table_manager = Arc::new(SimpleTableManager::with_in_memory_store());
-        let source_manager = Arc::new(MemSourceManager::new());
-
-        // Schema for mock executor.
-        let schema = Schema {
-            fields: vec![
-                Field::unnamed(DataType::Int64),
-                Field::unnamed(DataType::Int64),
-            ],
-        };
-        let mut mock_executor = MockExecutor::new(schema.clone());
-
-        // Schema of first table
-        let schema = Schema {
-            fields: vec![
-                Field::unnamed(DataType::Decimal),
-                Field::unnamed(DataType::Decimal),
-                Field::unnamed(DataType::Decimal),
-            ],
-        };
-
-        let table_columns: Vec<_> = schema
-            .fields
-            .iter()
-            .enumerate()
-            .map(|(i, f)| TableColumnDesc {
-                data_type: f.data_type,
-                column_id: i as i32, // use column index as column id
-                name: f.name.clone(),
-            })
-            .collect();
-
-        let col1 = column_nonnull! { I64Array, [1, 3, 5, 7, 9] };
-        let col2 = column_nonnull! { I64Array, [2, 4, 6, 8, 10] };
-        let data_chunk: DataChunk = DataChunk::builder().columns(vec![col1, col2]).build();
-        mock_executor.add(data_chunk.clone());
-
-        // Create the first table.
-        let table_id = TableId::new(SchemaId::default(), 0);
-        let table = downcast_arc::<BummockTable>(
-            table_manager
-                .create_table(&table_id, table_columns.to_vec())
-                .await?
-                .into_any(),
-        )?;
-        source_manager.create_table_source(&table_id, table)?;
-
-        let mut insert_executor = InsertExecutor {
-            table_id: table_id.clone(),
-            source_manager: source_manager.clone(),
-            child: Box::new(mock_executor),
-            executed: false,
-            schema: Schema {
-                fields: vec![Field::unnamed(DataType::Int64)],
-            },
-            identity: "InsertExecutor".to_string(),
-        };
-        insert_executor.open().await.unwrap();
-        let fields = &insert_executor.schema().fields;
-        assert_eq!(fields[0].data_type, DataType::Int64);
-        let result = insert_executor.next().await?.unwrap();
-        insert_executor.close().await.unwrap();
-        assert_eq!(
-            result
-                .column_at(0)?
-                .array()
-                .as_int64()
-                .iter()
-                .collect::<Vec<_>>(),
-            vec![Some(5)]
-        );
-        let table_ref = downcast_arc::<BummockTable>(
-            table_manager
-                .get_table(&insert_executor.table_id)?
-                .into_any(),
-        )?;
-        match table_ref
-            .get_data_by_columns(&table_ref.get_column_ids())
-            .await?
-        {
-            BummockResult::Data(data_ref) => {
-                assert_eq!(
-                    data_ref[0]
-                        .column_at(0)?
-                        .array()
-                        .as_int64()
-                        .iter()
-                        .collect::<Vec<_>>(),
-                    vec![Some(0), Some(1), Some(2), Some(3), Some(4)]
-                );
-
-                assert_eq!(
-                    data_ref[0]
-                        .column_at(1)?
-                        .array()
-                        .as_int64()
-                        .iter()
-                        .collect::<Vec<_>>(),
-                    vec![Some(1), Some(3), Some(5), Some(7), Some(9)]
-                );
-                assert_eq!(
-                    data_ref[0]
-                        .column_at(2)?
-                        .array()
-                        .as_int64()
-                        .iter()
-                        .collect::<Vec<_>>(),
-                    vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
-                );
-            }
-            BummockResult::DataEof => {
-                panic!("Empty data returned.")
-            }
-        }
-
-        // First insertion test ends.
-
-        // Insert to the same table by a new executor. The result should have growing row ids from
-        // the last one seen.
-        let mut mock_executor = MockExecutor::new(schema.clone());
-        mock_executor.add(data_chunk.clone());
-        let mut insert_executor = InsertExecutor {
-            table_id: table_id.clone(),
-            source_manager: source_manager.clone(),
-            child: Box::new(mock_executor),
-            executed: false,
-            schema: Schema {
-                fields: vec![Field::unnamed(DataType::Int64)],
-            },
-            identity: "InsertExecutor".to_string(),
-        };
-        insert_executor.open().await.unwrap();
-        let fields = &insert_executor.schema().fields;
-        assert_eq!(fields[0].data_type, DataType::Int64);
-        let result = insert_executor.next().await?.unwrap();
-        insert_executor.close().await.unwrap();
-        assert_eq!(
-            result
-                .column_at(0)?
-                .array()
-                .as_int64()
-                .iter()
-                .collect::<Vec<_>>(),
-            vec![Some(5)]
-        );
-        let table_ref = downcast_arc::<BummockTable>(
-            table_manager
-                .get_table(&insert_executor.table_id)?
-                .into_any(),
-        )?;
-        match table_ref
-            .get_data_by_columns(&table_ref.get_column_ids())
-            .await?
-        {
-            BummockResult::Data(data_ref) => {
-                assert_eq!(
-                    data_ref[1]
-                        .column_at(0)?
-                        .array()
-                        .as_int64()
-                        .iter()
-                        .collect::<Vec<_>>(),
-                    vec![Some(5), Some(6), Some(7), Some(8), Some(9)]
-                );
-            }
-            BummockResult::DataEof => {
-                panic!("Empty data returned.")
-            }
-        }
-        // Second insertion test ends.
-
-        // Insert into another table. It should have new row ids starting from 0.
-        let table_id2 = TableId::new(SchemaId::default(), 1);
-        let mut mock_executor = MockExecutor::new(schema.clone());
-        mock_executor.add(data_chunk);
-        let mut insert_executor = InsertExecutor {
-            table_id: table_id2.clone(),
-            source_manager: source_manager.clone(),
-            child: Box::new(mock_executor),
-            executed: false,
-            schema: Schema {
-                fields: vec![Field::unnamed(DataType::Int64)],
-            },
-            identity: "InsertExecutor".to_string(),
-        };
-        let table2 = downcast_arc::<BummockTable>(
-            table_manager
-                .create_table(&table_id2, table_columns)
-                .await?
-                .into_any(),
-        )?;
-        source_manager.create_table_source(&table_id2, table2)?;
-
-        insert_executor.open().await.unwrap();
-        let fields = &insert_executor.schema().fields;
-        assert_eq!(fields[0].data_type, DataType::Int64);
-        let result = insert_executor.next().await?.unwrap();
-        insert_executor.close().await.unwrap();
-        assert_eq!(
-            result
-                .column_at(0)?
-                .array()
-                .as_int64()
-                .iter()
-                .collect::<Vec<_>>(),
-            vec![Some(5)]
-        );
-        let table_ref = downcast_arc::<BummockTable>(
-            table_manager
-                .get_table(&insert_executor.table_id)?
-                .into_any(),
-        )?;
-        match table_ref
-            .get_data_by_columns(&table_ref.get_column_ids())
-            .await?
-        {
-            BummockResult::Data(data_ref) => {
-                assert_eq!(
-                    data_ref[0]
-                        .column_at(0)?
-                        .array()
-                        .as_int64()
-                        .iter()
-                        .collect::<Vec<_>>(),
-                    vec![Some(0), Some(1), Some(2), Some(3), Some(4)]
-                );
-
-                assert_eq!(
-                    data_ref[0]
-                        .column_at(1)?
-                        .array()
-                        .as_int64()
-                        .iter()
-                        .collect::<Vec<_>>(),
-                    vec![Some(1), Some(3), Some(5), Some(7), Some(9)]
-                );
-                assert_eq!(
-                    data_ref[0]
-                        .column_at(2)?
-                        .array()
-                        .as_int64()
-                        .iter()
-                        .collect::<Vec<_>>(),
-                    vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
-                );
-            }
-            BummockResult::DataEof => {
-                panic!("Empty data returned.")
-            }
-        }
-        // Third insertion test ends.
-
-        Ok(())
-    }
 
     #[tokio::test]
     async fn test_insert_executor_for_table_v2() -> Result<()> {
@@ -519,6 +257,7 @@ mod tests {
             table_id.clone(),
             source_manager.clone(),
             Box::new(mock_executor),
+            0,
         );
         insert_executor.open().await.unwrap();
         let fields = &insert_executor.schema().fields;
@@ -571,8 +310,6 @@ mod tests {
         let full_range = (Bound::<Vec<u8>>::Unbounded, Bound::<Vec<u8>>::Unbounded);
         let store_content = store.scan(full_range, None, epoch).await?;
         assert!(store_content.is_empty());
-
-        // First insertion test ends.
 
         Ok(())
     }

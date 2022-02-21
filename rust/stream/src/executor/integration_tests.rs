@@ -57,7 +57,7 @@ async fn test_merger_sum_aggr() {
         let schema = Schema {
             fields: vec![Field::unnamed(DataType::Int64)],
         };
-        let input = ReceiverExecutor::new(schema, vec![], input_rx);
+        let input = ReceiverExecutor::new(schema, vec![], input_rx, "ReceiverExecutor".to_string());
         // for the local aggregator, we need two states: row count and sum
         let aggregator = LocalSimpleAggExecutor::new(
             Box::new(input),
@@ -75,10 +75,11 @@ async fn test_merger_sum_aggr() {
             ],
             vec![],
             1,
+            "LocalSimpleAggExecutor".to_string(),
         )
         .unwrap();
         let (tx, rx) = channel(16);
-        let consumer = SenderConsumer::new(Box::new(aggregator), Box::new(ChannelOutput::new(tx)));
+        let consumer = SenderConsumer::new(Box::new(aggregator), Box::new(LocalOutput::new(tx)));
         let context = SharedContext::for_test().into();
         let actor = Actor::new(Box::new(consumer), 0, context);
         (actor, rx)
@@ -99,7 +100,7 @@ async fn test_merger_sum_aggr() {
         let (actor, channel) = make_actor(rx);
         outputs.push(channel);
         handles.push(tokio::spawn(actor.run()));
-        inputs.push(Box::new(ChannelOutput::new(tx)) as Box<dyn Output>);
+        inputs.push(Box::new(LocalOutput::new(tx)) as Box<dyn Output>);
     }
 
     // create a round robin dispatcher, which dispatches messages to the actors
@@ -107,7 +108,8 @@ async fn test_merger_sum_aggr() {
     let schema = Schema {
         fields: vec![Field::unnamed(DataType::Int64)],
     };
-    let receiver_op = ReceiverExecutor::new(schema.clone(), vec![], rx);
+    let receiver_op =
+        ReceiverExecutor::new(schema.clone(), vec![], rx, "ReceiverExecutor".to_string());
     let dispatcher = DispatchExecutor::new(
         Box::new(receiver_op),
         RoundRobinDataDispatcher::new(inputs),
@@ -119,7 +121,7 @@ async fn test_merger_sum_aggr() {
     handles.push(tokio::spawn(actor.run()));
 
     // use a merge operator to collect data from dispatchers before sending them to aggregator
-    let merger = MergeExecutor::new(schema, vec![], 0, outputs);
+    let merger = MergeExecutor::new(schema, vec![], 0, outputs, "MergerExecutor".to_string());
 
     // for global aggregator, we need to sum data and sum row count
     let aggregator = SimpleAggExecutor::new(
@@ -139,6 +141,7 @@ async fn test_merger_sum_aggr() {
         create_in_memory_keyspace(),
         vec![],
         2,
+        "SimpleAggExecutor".to_string(),
     );
 
     let projection = ProjectExecutor::new(
@@ -149,6 +152,7 @@ async fn test_merger_sum_aggr() {
             Box::new(InputRefExpression::new(DataType::Int64, 1)),
         ],
         3,
+        "ProjectExecutor".to_string(),
     );
     let items = Arc::new(Mutex::new(vec![]));
     let consumer = MockConsumer::new(Box::new(projection), items.clone());
@@ -308,10 +312,21 @@ async fn test_tpch_q6() {
     // make an actor after dispatcher, which includes filter, projection, and local aggregator.
     let make_actor = |input_rx| {
         let (and, multiply) = make_tpchq6_expr();
-        let input = ReceiverExecutor::new(schema.clone(), vec![], input_rx);
+        let input = ReceiverExecutor::new(
+            schema.clone(),
+            vec![],
+            input_rx,
+            "ReceiverExecutor".to_string(),
+        );
 
-        let filter = FilterExecutor::new(Box::new(input), and, 1);
-        let projection = ProjectExecutor::new(Box::new(filter), vec![], vec![multiply], 2);
+        let filter = FilterExecutor::new(Box::new(input), and, 1, "FilterExecutor".to_string());
+        let projection = ProjectExecutor::new(
+            Box::new(filter),
+            vec![],
+            vec![multiply],
+            2,
+            "ProjectExecutor".to_string(),
+        );
 
         // for local aggregator, we need to sum data and count rows
         let aggregator = LocalSimpleAggExecutor::new(
@@ -330,10 +345,11 @@ async fn test_tpch_q6() {
             ],
             vec![],
             3,
+            "LocalSimpleAggExecutor".to_string(),
         )
         .unwrap();
         let (tx, rx) = channel(16);
-        let consumer = SenderConsumer::new(Box::new(aggregator), Box::new(ChannelOutput::new(tx)));
+        let consumer = SenderConsumer::new(Box::new(aggregator), Box::new(LocalOutput::new(tx)));
         let context = SharedContext::for_test().into();
         let actor = Actor::new(Box::new(consumer), 0, context);
         (actor, rx)
@@ -353,12 +369,13 @@ async fn test_tpch_q6() {
         let (actor, channel) = make_actor(rx);
         outputs.push(channel);
         handles.push(tokio::spawn(actor.run()));
-        inputs.push(Box::new(ChannelOutput::new(tx)) as Box<dyn Output>);
+        inputs.push(Box::new(LocalOutput::new(tx)) as Box<dyn Output>);
     }
 
     // create a round robin dispatcher, which dispatches messages to the actors
     let (mut input, rx) = channel(16);
-    let receiver_op = ReceiverExecutor::new(schema.clone(), vec![], rx);
+    let receiver_op =
+        ReceiverExecutor::new(schema.clone(), vec![], rx, "ReceiverExecutor".to_string());
     let dispatcher = DispatchExecutor::new(
         Box::new(receiver_op),
         RoundRobinDataDispatcher::new(inputs),
@@ -370,7 +387,13 @@ async fn test_tpch_q6() {
     handles.push(tokio::spawn(actor.run()));
 
     // use a merge operator to collect data from dispatchers before sending them to aggregator
-    let merger = MergeExecutor::new(schema.clone(), vec![], 0, outputs);
+    let merger = MergeExecutor::new(
+        schema.clone(),
+        vec![],
+        0,
+        outputs,
+        "MergerExecutor".to_string(),
+    );
 
     // create a global aggregator to sum data and sum row count
     let aggregator = SimpleAggExecutor::new(
@@ -390,6 +413,7 @@ async fn test_tpch_q6() {
         create_in_memory_keyspace(),
         vec![],
         4,
+        "SimpleAggExecutor".to_string(),
     );
     let projection = ProjectExecutor::new(
         Box::new(aggregator),
@@ -399,6 +423,7 @@ async fn test_tpch_q6() {
             Box::new(InputRefExpression::new(DataType::Float64, 1)),
         ],
         5,
+        "ProjectExecutor".to_string(),
     );
 
     let items = Arc::new(Mutex::new(vec![]));

@@ -23,6 +23,9 @@ pub struct ProjectExecutor {
 
     /// Identity string
     identity: String,
+
+    /// Logical Operator Info
+    op_info: String,
 }
 
 impl std::fmt::Debug for ProjectExecutor {
@@ -42,6 +45,7 @@ impl ProjectExecutor {
         pk_indices: PkIndices,
         exprs: Vec<BoxedExpression>,
         executor_id: u64,
+        op_info: String,
     ) -> Self {
         let schema = Schema {
             fields: exprs
@@ -55,6 +59,7 @@ impl ProjectExecutor {
             input,
             exprs,
             identity: format!("ProjectExecutor {:X}", executor_id),
+            op_info,
         }
     }
 }
@@ -75,6 +80,10 @@ impl Executor for ProjectExecutor {
 
     fn identity(&self) -> &str {
         self.identity.as_str()
+    }
+
+    fn logical_operator_info(&self) -> &str {
+        &self.op_info
     }
 }
 
@@ -159,7 +168,13 @@ mod tests {
             Box::new(right_expr),
         );
 
-        let mut project = ProjectExecutor::new(Box::new(source), vec![], vec![test_expr], 1);
+        let mut project = ProjectExecutor::new(
+            Box::new(source),
+            vec![],
+            vec![test_expr],
+            1,
+            "ProjectExecutor".to_string(),
+        );
 
         if let Message::Chunk(chunk) = project.next().await.unwrap() {
             assert_eq!(chunk.ops(), vec![Op::Insert, Op::Insert, Op::Insert]);

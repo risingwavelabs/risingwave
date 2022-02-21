@@ -250,7 +250,7 @@ mod tests {
             Some(ScalarImpl::Interval(IntervalUnit::new(7, 8, 9))),
         ]);
         let bytes = row.serialize_not_null().unwrap();
-        assert_eq!(bytes.len(), 10 + 1 + 2 + 4 + 8 + 4 + 8 + 17 + 16);
+        assert_eq!(bytes.len(), 10 + 1 + 2 + 4 + 8 + 4 + 8 + 5 + 16);
 
         let de = RowDeserializer::new(vec![
             Ty::Varchar,
@@ -281,7 +281,7 @@ mod tests {
             Some(ScalarImpl::Interval(IntervalUnit::new(7, 8, 9))),
         ]);
         let bytes = row.serialize().unwrap();
-        assert_eq!(bytes.len(), 10 + 1 + 2 + 4 + 8 + 4 + 8 + 17 + 16 + 9);
+        assert_eq!(bytes.len(), 10 + 1 + 2 + 4 + 8 + 4 + 8 + 5 + 16 + 9);
 
         let de = RowDeserializer::new(vec![
             Ty::Varchar,

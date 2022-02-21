@@ -2,6 +2,7 @@ package com.risingwave.planner.rel.physical;
 
 import static java.util.Objects.requireNonNull;
 
+import com.risingwave.planner.rel.common.IdentityExtractor;
 import com.risingwave.proto.plan.ExchangeInfo;
 import com.risingwave.proto.plan.PlanFragment;
 import com.risingwave.proto.plan.PlanNode;
@@ -32,17 +33,6 @@ public class BatchPlan {
   }
 
   public static String getCurrentNodeIdentity(RelNode node) {
-    var nodeWithItsChildren = node.explain();
-    var endIndex = nodeWithItsChildren.indexOf("\n  RwBatch");
-    String identity = "";
-    if (endIndex != -1) {
-      identity = nodeWithItsChildren.substring(0, endIndex);
-    } else {
-      identity = nodeWithItsChildren;
-    }
-    if (identity.charAt(identity.length() - 1) == '\n') {
-      identity = identity.substring(0, identity.length() - 1);
-    }
-    return identity;
+    return IdentityExtractor.getCurrentNodeIdentity(node, "RwBatch");
   }
 }

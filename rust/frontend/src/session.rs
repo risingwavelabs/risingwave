@@ -114,7 +114,7 @@ mod tests {
 
         use super::*;
 
-        let meta = LocalMeta::start_in_tempdir().await;
+        let meta = LocalMeta::start().await;
         let args: [OsString; 0] = []; // No argument.
         let mut opts = FrontendOpts::parse_from(args);
         opts.meta_addr = format!("http://{}", LocalMeta::meta_addr());

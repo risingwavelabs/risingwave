@@ -14,11 +14,12 @@
                 "databaseRefId": {
                 }
               },
-              "tableId": 6
+              "tableId": 8
             },
             "pkIndices": [2],
             "columnIds": [0, 2, 3]
-          }
+          },
+          "identity": "RwStreamBatchPlan(table\u003d[[test_schema, m5]], tableId\u003d[0.0.8], primaryKeyIndices\u003d[[2]], columnIds\u003d[[0.0.8.0, 0.0.8.2, 0.0.8.3]])"
         }],
         "chainNode": {
           "tableRefId": {
@@ -26,7 +27,7 @@
               "databaseRefId": {
               }
             },
-            "tableId": 6
+            "tableId": 8
           },
           "upstreamColumnDescs": [{
             "columnType": {
@@ -47,7 +48,8 @@
           }],
           "pkIndices": [2],
           "columnIds": [0, 2, 3]
-        }
+        },
+        "identity": "RwStreamChain(all\u003d[true], tableId\u003d[0.0.8], primaryKeyIndices\u003d[[2]], columnIds\u003d[[0.0.8.0, 0.0.8.2, 0.0.8.3]], upstreamColumnDescs\u003d[[ColumnDesc{dataType\u003dINTEGER, primary\u003dfalse}, ColumnDesc{dataType\u003dFLOAT, primary\u003dfalse}, ColumnDesc{dataType\u003dFLOAT, primary\u003dfalse}, ColumnDesc{dataType\u003dBIGINT, primary\u003dfalse}]])"
       }],
       "hashAggNode": {
         "groupKeys": [{
@@ -71,7 +73,8 @@
             "typeName": "FLOAT"
           }
         }]
-      }
+      },
+      "identity": "RwStreamAgg(group\u003d[{0}], agg#0\u003d[COUNT()], sum_v1\u003d[SUM($1)])"
     }],
     "projectNode": {
       "selectList": [{
@@ -90,7 +93,8 @@
         "inputRef": {
         }
       }]
-    }
+    },
+    "identity": "RwStreamProject(sum_v1\u003d[$2], v2\u003d[$0])"
   }],
   "mviewNode": {
     "tableRefId": {
@@ -98,7 +102,7 @@
         "databaseRefId": {
         }
       },
-      "tableId": 8
+      "tableId": 10
     },
     "columnDescs": [{
       "columnType": {
@@ -123,5 +127,6 @@
         "typeName": "INT32"
       }
     }]
-  }
+  },
+  "identity": "RwStreamMaterializedView(name\u003d[m7])"
 }

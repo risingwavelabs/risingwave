@@ -11,10 +11,16 @@ import "data.proto";
 import "plan.proto";
 import "stream_plan.proto";
 
+message HangingChannel {
+  common.ActorInfo upstream = 1;
+  common.ActorInfo downstream = 2;
+}
+
 // Describe the fragments which will be running on this node
 message UpdateActorsRequest {
   string request_id = 1;
   repeated stream_plan.StreamActor actors = 2;
+  repeated HangingChannel hanging_channels = 3;
 }
 
 message UpdateActorsResponse {

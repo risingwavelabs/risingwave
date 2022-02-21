@@ -93,12 +93,12 @@ async fn test_table_v2_materialize() -> Result<()> {
     ];
 
     // Create table v2 using `CreateTableExecutor`
-    let mut create_table = CreateTableExecutor::new_v2(
+    let mut create_table = CreateTableExecutor::new(
         source_table_id.clone(),
         table_manager.clone(),
         source_manager.clone(),
         table_columns,
-        "CreateTableExecutorV2".to_string(),
+        "CreateTableExecutor".to_string(),
     );
     // Execute
     create_table.open().await?;
@@ -138,6 +138,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         barrier_rx,
         1,
         1,
+        "StreamSourceExecutor".to_string(),
     )?;
 
     // Create a `Materialize` to write the changes to storage
@@ -149,6 +150,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         vec![1],
         vec![OrderType::Ascending],
         2,
+        "MaterializeExecutor".to_string(),
     );
 
     // Add some data using `InsertExecutor`, assuming we are inserting into the "mv"
@@ -161,6 +163,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         mview_id.clone(),
         source_manager.clone(),
         Box::new(insert_inner),
+        0,
     );
 
     insert.open().await?;
@@ -175,6 +178,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         table.clone(),
         data_column_ids.clone(),
         1024,
+        true,
         "RowSeqExecutor".to_string(),
     );
     scan.open().await?;
@@ -210,6 +214,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         table.clone(),
         data_column_ids.clone(),
         1024,
+        true,
         "RowSeqScanExecutor".to_string(),
     );
     scan.open().await?;

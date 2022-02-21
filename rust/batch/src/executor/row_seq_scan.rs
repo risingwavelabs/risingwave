@@ -15,6 +15,8 @@ pub struct RowSeqScanExecutor {
     table: Arc<dyn ScannableTable>,
     /// An iterator to scan StateStore.
     iter: Option<TableIterRef>,
+    primary: bool,
+
     column_ids: Vec<i32>,
     column_indices: Vec<usize>,
     chunk_size: usize,
@@ -30,13 +32,13 @@ impl RowSeqScanExecutor {
         table: Arc<dyn ScannableTable>,
         column_ids: Vec<i32>,
         chunk_size: usize,
+        primary: bool,
         identity: String,
     ) -> Self {
         // Currently row_id for table_v2 is totally a mess, we override this function to match the
         // behavior of column ids of mviews.
         // FIXME: remove this hack
         let column_indices = column_ids.iter().map(|&id| id as usize).collect_vec();
-        // let column_indices = table.column_indices(&column_ids);
 
         let table_schema = table.schema();
         let schema = Schema::new(
@@ -49,11 +51,23 @@ impl RowSeqScanExecutor {
         Self {
             table,
             iter: None,
+            primary,
             column_ids,
             column_indices,
             chunk_size,
             schema,
             identity,
+        }
+    }
+
+    // TODO: Remove this when we support real partition-scan.
+    // For shared storage like Hummock, we are using a fake partition-scan now. If `self.primary` is
+    // false, we'll ignore this scanning and yield no chunk.
+    fn should_ignore(&self) -> bool {
+        if self.table.is_shared_storage() {
+            !self.primary
+        } else {
+            false
         }
     }
 }
@@ -78,6 +92,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutor {
             table,
             column_ids,
             Self::DEFAULT_CHUNK_SIZE,
+            source.task_id.task_id == 0,
             source.plan_node().get_identity().clone(),
         )))
     }
@@ -86,11 +101,20 @@ impl BoxedExecutorBuilder for RowSeqScanExecutor {
 #[async_trait::async_trait]
 impl Executor for RowSeqScanExecutor {
     async fn open(&mut self) -> Result<()> {
+        if self.should_ignore() {
+            info!("non-primary row seq scan, ignored");
+            return Ok(());
+        }
+
         self.iter = Some(self.table.iter(u64::MAX).await?);
         Ok(())
     }
 
     async fn next(&mut self) -> Result<Option<DataChunk>> {
+        if self.should_ignore() {
+            return Ok(None);
+        }
+
         let iter = self.iter.as_mut().expect("executor not open");
 
         self.table

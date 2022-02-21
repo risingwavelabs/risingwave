@@ -1,4 +1,4 @@
-package com.risingwave.execution.handler.serializer;
+package com.risingwave.execution.handler.util;
 
 import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.ColumnDesc;
@@ -141,7 +141,6 @@ public class TableNodeSerializer {
         builder.addColumnDescs(columnDescBuilder);
       }
       builder.setIsMaterializedView(false);
-      builder.setV2(isTableV2);
     }
 
     // Add exchange node on top.

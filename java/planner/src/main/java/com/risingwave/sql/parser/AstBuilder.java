@@ -195,26 +195,6 @@ class AstBuilder extends SqlBaseBaseVisitor<Node> {
   }
 
   @Override
-  public Node visitCreateTableV1(SqlBaseParser.CreateTableV1Context context) {
-    boolean notExists = context.EXISTS() != null;
-    SqlBaseParser.PartitionedByOrClusteredIntoContext tableOptsCtx =
-        context.partitionedByOrClusteredInto();
-    Optional<ClusteredBy> clusteredBy =
-        visitIfPresent(tableOptsCtx.clusteredBy(), ClusteredBy.class);
-    Optional<PartitionedBy> partitionedBy =
-        visitIfPresent(tableOptsCtx.partitionedBy(), PartitionedBy.class);
-    List tableElements =
-        Lists2.map(context.tableElement(), x -> (TableElement<Expression>) visit(x));
-    return new CreateTableV1(
-        (Table) visit(context.table()),
-        tableElements,
-        partitionedBy,
-        clusteredBy,
-        extractGenericProperties(context.withProperties()),
-        notExists);
-  }
-
-  @Override
   public Node visitFlush(SqlBaseParser.FlushContext context) {
     return new Flush();
   }

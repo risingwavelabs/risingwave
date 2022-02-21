@@ -2,7 +2,9 @@ use std::fmt;
 
 use risingwave_common::catalog::Schema;
 
-use super::{IntoPlanRef, LogicalLimit, PlanRef, PlanTreeNodeUnary, ToDistributedBatch};
+use super::{
+    IntoPlanRef, LogicalLimit, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
+};
 use crate::optimizer::property::{Distribution, WithDistribution, WithOrder, WithSchema};
 
 #[derive(Debug, Clone)]
@@ -43,3 +45,4 @@ impl ToDistributedBatch for BatchLimit {
         self.clone_with_input(new_input).into_plan_ref()
     }
 }
+impl ToBatchProst for BatchLimit {}

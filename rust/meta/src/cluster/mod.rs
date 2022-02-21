@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
@@ -11,15 +12,19 @@ use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use crate::hummock::HummockManager;
 use crate::manager::{IdCategory, IdGeneratorManagerRef, MetaSrvEnv};
 use crate::model::{MetadataModel, Worker};
-use crate::storage::MetaStoreRef;
+use crate::storage::MetaStore;
 
 pub type NodeId = u32;
+pub type NodeLocations = HashMap<NodeId, WorkerNode>;
 
 /// [`StoredClusterManager`] manager cluster/worker meta data in [`MetaStore`].
-pub struct StoredClusterManager {
-    meta_store_ref: MetaStoreRef,
-    id_gen_manager_ref: IdGeneratorManagerRef,
-    hummock_manager_ref: Option<Arc<HummockManager>>,
+pub struct StoredClusterManager<S>
+where
+    S: MetaStore,
+{
+    meta_store_ref: Arc<S>,
+    id_gen_manager_ref: IdGeneratorManagerRef<S>,
+    hummock_manager_ref: Option<Arc<HummockManager<S>>>,
     workers: DashMap<WorkerKey, Worker>,
 }
 
@@ -39,14 +44,20 @@ impl Hash for WorkerKey {
     }
 }
 
-impl StoredClusterManager {
+impl<S> StoredClusterManager<S>
+where
+    S: MetaStore,
+{
     pub async fn new(
-        env: MetaSrvEnv,
-        hummock_manager_ref: Option<Arc<HummockManager>>,
+        env: MetaSrvEnv<S>,
+        hummock_manager_ref: Option<Arc<HummockManager<S>>>,
     ) -> Result<Self> {
         let meta_store_ref = env.meta_store_ref();
-        let workers =
-            try_match_expand!(Worker::list(&meta_store_ref).await, Ok, "Worker::list fail")?;
+        let workers = try_match_expand!(
+            Worker::list(&*meta_store_ref).await,
+            Ok,
+            "Worker::list fail"
+        )?;
         let worker_map = DashMap::new();
 
         workers.iter().for_each(|w| {
@@ -78,7 +89,7 @@ impl StoredClusterManager {
                     r#type: r#type as i32,
                     host: Some(host_address),
                 });
-                worker.insert(&self.meta_store_ref).await?;
+                worker.insert(&*self.meta_store_ref).await?;
                 Ok((v.insert(worker).to_protobuf(), true))
             }
         }
@@ -90,7 +101,7 @@ impl StoredClusterManager {
                 "Worker node does not exist!".to_string(),
             ))),
             Some(entry) => {
-                Worker::delete(&self.meta_store_ref, &host_address).await?;
+                Worker::delete(&*self.meta_store_ref, &host_address).await?;
                 if let Some(hummock_manager_ref) = self.hummock_manager_ref.as_ref() {
                     // It's desirable these operations are committed atomically.
                     // But meta store transaction across *Manager is not intuitive.

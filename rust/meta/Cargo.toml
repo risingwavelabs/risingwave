@@ -18,13 +18,16 @@ crc32fast = "1"
 dashmap = "5"
 either = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
+hex = "0.4"
 hyper = "0.14"
 itertools = "0.10"
 lazy_static = "1"
 log = "0.4"
 memcomparable = { path = "../utils/memcomparable" }
+moka = { version = "0.7", features = ["future"] }
 num-integer = "0.1"
 num-traits = "0.2"
+parking_lot = { version = "0.12", features = ["arc_lock"] }
 paste = "1"
 prost = "0.9"
 risingwave-pb = { path = "../prost" }
@@ -32,11 +35,8 @@ risingwave_common = { path = "../common" }
 risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_storage = { path = "../storage" }
 serde = { version = "1", features = ["derive"] }
-serde-value = "0.7"
 serde_derive = "1"
 serde_json = "1"
-serde_with = "1"
-sled = "0.34.7"
 smallvec = "1"
 tempfile = "3"
 thiserror = "1"
@@ -57,9 +57,7 @@ tracing-subscriber = "0.3"
 uuid = { version = "0.8", features = ["v4"] }
 
 [dev-dependencies]
-assert_matches = "1"
 rand = "0.8"
-serial_test = "*"
 
 [[bin]]
 name = "meta-node"
