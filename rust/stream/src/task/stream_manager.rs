@@ -23,7 +23,6 @@ use tokio::sync::mpsc::unbounded_channel;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
-use crate::executor::snapshot::BatchQueryExecutor;
 use crate::executor::*;
 use crate::task::{
     ConsumableChannelPair, SharedContext, StreamTaskEnv, UpDownActorIds, LOCAL_OUTPUT_CHANNEL_SIZE,
@@ -372,7 +371,7 @@ impl StreamManagerCore {
                 }
                 let schema = Schema::new(fields);
 
-                Ok(Box::new(StreamSourceExecutor::new(
+                Ok(Box::new(SourceExecutor::new(
                     source_id,
                     source_desc,
                     column_ids,
