@@ -39,7 +39,7 @@ async fn gen_and_upload_table(
     let table = gen_remote_sstable(obj_client, table_id, data, meta, remote_dir, None)
         .await
         .unwrap();
-    hummock_meta_client
+    let _version = hummock_meta_client
         .add_tables(
             epoch,
             vec![SstableInfo {

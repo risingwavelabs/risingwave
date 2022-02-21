@@ -84,6 +84,7 @@ message AddTablesRequest {
 
 message AddTablesResponse {
   common.Status status = 1;
+  HummockVersion version = 2;
 }
 
 message PinVersionRequest {
@@ -92,8 +93,7 @@ message PinVersionRequest {
 
 message PinVersionResponse {
   common.Status status = 1;
-  uint64 pinned_version_id = 2;
-  HummockVersion pinned_version = 3;
+  HummockVersion pinned_version = 2;
 }
 
 message UnpinVersionRequest {
@@ -191,8 +191,7 @@ message HummockTablesToDelete {
 }
 
 message CommitEpochRequest {
-  uint32 context_id = 1;
-  uint64 epoch = 2;
+  uint64 epoch = 1;
 }
 
 message CommitEpochResponse {
@@ -200,8 +199,7 @@ message CommitEpochResponse {
 }
 
 message AbortEpochRequest {
-  uint32 context_id = 1;
-  uint64 epoch = 2;
+  uint64 epoch = 1;
 }
 
 message AbortEpochResponse {
