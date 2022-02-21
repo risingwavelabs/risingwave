@@ -44,14 +44,18 @@ impl Operations {
                 let mut sizes: Vec<usize> = vec![];
                 for key in keys {
                     let start = Instant::now();
-                    let len = match store.get(&key, u64::MAX).await.unwrap() {
+                    let size = match store.get(&key, u64::MAX).await.unwrap() {
                         Some(v) => v.len(),
                         None => 0,
                     };
                     let time_nano = start.elapsed().as_nanos();
                     latencies.push(time_nano);
-                    sizes.push(len);
+                    sizes.push(size);
                 }
+
+                // dbg!(&latencies);
+                // dbg!(&sizes);
+
                 (latencies, sizes)
             })
             .collect_vec();
@@ -64,22 +68,26 @@ impl Operations {
         let total_time_nano = total_start.elapsed().as_nanos();
 
         // calculate metrics
-        let mut total_latencies: Vec<u128> = Vec::new();
-        let mut total_sizes: usize = 0;
+        let mut total_latencies = vec![];
+        let mut total_size: usize = 0;
         let _ = results.into_iter().map(|res| {
             let (latencies, sizes) = res.unwrap();
-            total_latencies.extend(latencies);
-            total_sizes += sizes.iter().sum::<usize>();
+            dbg!(&latencies);
+            dbg!(&sizes);
+            total_latencies.extend(latencies.into_iter());
+            total_size += sizes.iter().sum::<usize>();
         });
+        dbg!(&total_latencies);
+        dbg!(&total_size);
         let stat = LatencyStat::new(total_latencies);
         let qps = opts.reads as u128 * 1_000_000_000 / total_time_nano as u128;
-        let bytes_pre_sec = total_sizes as u128 * 1_000_000_000 / total_time_nano as u128;
+        let bytes_pre_sec = total_size as u128 * 1_000_000_000 / total_time_nano as u128;
 
         println!(
             "
     getrandom
       {}
-      QPS: {} {} ",
+      QPS: {}  {} bytes/sec",
             stat, qps, bytes_pre_sec
         );
     }
