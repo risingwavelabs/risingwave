@@ -6,6 +6,7 @@ import com.google.inject.Inject;
 import com.risingwave.catalog.CatalogService;
 import com.risingwave.common.config.Configuration;
 import com.risingwave.execution.handler.SqlHandlerFactory;
+import com.risingwave.execution.handler.cache.HummockSnapshotManager;
 import com.risingwave.node.WorkerNodeManager;
 import com.risingwave.rpc.ComputeClientManager;
 import com.risingwave.scheduler.QueryManager;
@@ -21,6 +22,7 @@ public class FrontendEnv {
   private final Configuration conf;
   private final QueryManager queryManager;
   private final StreamManager streamManager;
+  private final HummockSnapshotManager hummockSnapshotManager;
 
   @Inject
   public FrontendEnv(
@@ -30,7 +32,8 @@ public class FrontendEnv {
       WorkerNodeManager nodeManager,
       Configuration conf,
       QueryManager queryManager,
-      StreamManager streamManager) {
+      StreamManager streamManager,
+      HummockSnapshotManager hummockSnapshotManager) {
     this.catalogService = requireNonNull(catalogService, "catalogService");
     this.sqlHandlerFactory = requireNonNull(sqlHandlerFactory, "sqlHandlerFactory");
     this.clientManager = Objects.requireNonNull(clientManager);
@@ -39,6 +42,7 @@ public class FrontendEnv {
     this.conf = requireNonNull(conf, "conf");
     this.queryManager = requireNonNull(queryManager, "queryManager");
     this.streamManager = requireNonNull(streamManager, "streamManager");
+    this.hummockSnapshotManager = requireNonNull(hummockSnapshotManager, "hummockSnapshotManager");
   }
 
   public CatalogService getCatalogService() {
@@ -67,5 +71,9 @@ public class FrontendEnv {
 
   public StreamManager getStreamManager() {
     return streamManager;
+  }
+
+  public HummockSnapshotManager getHummockSnapshotManager() {
+    return hummockSnapshotManager;
   }
 }
