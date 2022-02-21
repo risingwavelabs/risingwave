@@ -32,6 +32,7 @@ impl JoinRow {
         Self { row, degree }
     }
 
+    #[allow(dead_code)]
     pub fn size(&self) -> usize {
         self.row.size()
     }
@@ -193,7 +194,6 @@ impl<S: StateStore> JoinHashMap<S> {
                 if total_count > 0 {
                     let state = JoinEntryState::new(
                         keyspace,
-                        total_count,
                         self.data_types.clone(),
                         self.pk_data_types.clone(),
                     );
@@ -240,11 +240,8 @@ impl<S: StateStore> JoinHashMap<S> {
     /// does not exist in memory or remote storage.
     pub async fn init_without_cache(&mut self, key: &HashKeyType) -> RWResult<()> {
         let keyspace = self.get_state_keyspace(key);
-        let all_data = keyspace.scan_strip_prefix(None, self.current_epoch).await?;
-        let total_count = all_data.len();
         let state = JoinEntryState::new(
             keyspace,
-            total_count,
             self.data_types.clone(),
             self.pk_data_types.clone(),
         );

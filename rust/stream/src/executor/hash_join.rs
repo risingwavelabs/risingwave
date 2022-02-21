@@ -499,37 +499,82 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
             let pk = Self::pk_from_row_ref(&row, &side_update.pk_indices);
             let matched_rows = Self::hash_eq_match(&key, &mut side_match.ht).await;
             if let Some(matched_rows) = matched_rows {
-                // if there are non-equi expressions
-                if let Some(ref mut cond) = self.cond {
-                    match *op {
-                        Op::Insert | Op::UpdateInsert => {
-                            let entry_value =
-                                side_update.ht.get_or_init_without_cache(&key).await?;
-                            let mut degree = 0;
+                match *op {
+                    Op::Insert | Op::UpdateInsert => {
+                        let entry_value = side_update.ht.get_or_init_without_cache(&key).await?;
+                        let mut degree = 0;
+                        for matched_row in matched_rows.values_mut(epoch).await {
+                            // TODO(yuhao-su): We should find a better way to eval the
+                            // expression without concat
+                            // two rows.
+                            let new_row = Self::row_concat(
+                                &row,
+                                side_update.start_pos,
+                                &matched_row.row,
+                                side_match.start_pos,
+                            );
+                            let mut cond_match = true;
+                            // if there are non-equi expressions
+                            if let Some(ref mut cond) = self.cond {
+                                cond_match = Self::bool_from_array_ref(
+                                    cond.eval(&new_row, &self.output_data_types)?,
+                                );
+                            }
+                            if cond_match {
+                                degree += 1;
+                                if matched_row.is_zero_degree() && outer_side_null(T, SIDE) {
+                                    // if the matched_row does not have any current matches
+                                    stream_chunk_builder
+                                        .append_row_matched(Op::UpdateDelete, &matched_row.row)?;
+                                    stream_chunk_builder.append_row(
+                                        Op::UpdateInsert,
+                                        &row,
+                                        &matched_row.row,
+                                    )?;
+                                } else {
+                                    // concat with the matched_row and append the new row
+                                    stream_chunk_builder.append_row(*op, &row, &matched_row.row)?;
+                                }
+                                matched_row.inc_degree();
+                            } else {
+                                // not matched
+                                if outer_side_keep(T, SIDE) {
+                                    stream_chunk_builder.append_row_update(*op, &row)?;
+                                }
+                            }
+                        }
+                        entry_value.insert(pk, JoinRow::new(value, degree));
+                    }
+                    Op::Delete | Op::UpdateDelete => {
+                        if let Some(v) = side_update.ht.get_mut_without_cached(&key).await {
+                            // remove the row by it's primary key
+                            v.remove(pk);
+
                             for matched_row in matched_rows.values_mut(epoch).await {
-                                // TODO(yuhao-su): We should find a better way to eval the
-                                // expression without concat
-                                // two rows.
                                 let new_row = Self::row_concat(
                                     &row,
                                     side_update.start_pos,
                                     &matched_row.row,
                                     side_match.start_pos,
                                 );
-                                let cond_match = Self::bool_from_array_ref(
-                                    cond.eval(&new_row, &self.output_data_types)?,
-                                );
+
+                                let mut cond_match = true;
+                                // if there are non-equi expressions
+                                if let Some(ref mut cond) = self.cond {
+                                    cond_match = Self::bool_from_array_ref(
+                                        cond.eval(&new_row, &self.output_data_types)?,
+                                    );
+                                }
                                 if cond_match {
-                                    degree += 1;
                                     if matched_row.is_zero_degree() && outer_side_null(T, SIDE) {
                                         // if the matched_row does not have any current matches
-                                        stream_chunk_builder.append_row_matched(
+                                        stream_chunk_builder.append_row(
                                             Op::UpdateDelete,
+                                            &row,
                                             &matched_row.row,
                                         )?;
-                                        stream_chunk_builder.append_row(
+                                        stream_chunk_builder.append_row_matched(
                                             Op::UpdateInsert,
-                                            &row,
                                             &matched_row.row,
                                         )?;
                                     } else {
@@ -540,7 +585,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
                                             &matched_row.row,
                                         )?;
                                     }
-                                    matched_row.inc_degree();
+                                    matched_row.dec_degree();
                                 } else {
                                     // not matched
                                     if outer_side_keep(T, SIDE) {
@@ -548,116 +593,9 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
                                     }
                                 }
                             }
-                            entry_value.insert(pk, JoinRow::new(value, degree));
-                        }
-                        Op::Delete | Op::UpdateDelete => {
-                            if let Some(v) = side_update.ht.get_mut_without_cached(&key).await {
-                                // remove the row by it's primary key
-                                v.remove(pk);
-
-                                for matched_row in matched_rows.values_mut(epoch).await {
-                                    let new_row = Self::row_concat(
-                                        &row,
-                                        side_update.start_pos,
-                                        &matched_row.row,
-                                        side_match.start_pos,
-                                    );
-                                    let expr_match = Self::bool_from_array_ref(
-                                        cond.eval(&new_row, &self.output_data_types)?,
-                                    );
-                                    if expr_match {
-                                        if matched_row.is_zero_degree() && outer_side_null(T, SIDE)
-                                        {
-                                            // if the matched_row does not have any current matches
-                                            stream_chunk_builder.append_row(
-                                                Op::UpdateDelete,
-                                                &row,
-                                                &matched_row.row,
-                                            )?;
-                                            stream_chunk_builder.append_row_matched(
-                                                Op::UpdateInsert,
-                                                &matched_row.row,
-                                            )?;
-                                        } else {
-                                            // concat with the matched_row and append the new row
-                                            stream_chunk_builder.append_row(
-                                                *op,
-                                                &row,
-                                                &matched_row.row,
-                                            )?;
-                                        }
-                                        matched_row.dec_degree();
-                                    } else {
-                                        // not matched
-                                        if outer_side_keep(T, SIDE) {
-                                            stream_chunk_builder.append_row_update(*op, &row)?;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    };
-                } else {
-                    let mut null_row_updated = false;
-                    match *op {
-                        Op::Insert | Op::UpdateInsert => {
-                            let entry = side_update.ht.get_mut_without_cached(&key).await;
-                            // FIXME: when state is empty for the entry, the entry is not deleted.
-                            let entry_value = match entry {
-                                Some(state) => state,
-                                // if outer join and not its the first to insert, meaning there must
-                                // be corresponding nulls.
-                                None => {
-                                    if outer_side_null(T, SIDE) {
-                                        for matched_row in matched_rows.values(epoch).await {
-                                            stream_chunk_builder.append_row_matched(
-                                                Op::UpdateDelete,
-                                                &matched_row.row,
-                                            )?;
-                                            stream_chunk_builder.append_row(
-                                                Op::UpdateInsert,
-                                                &row,
-                                                &matched_row.row,
-                                            )?;
-                                        }
-                                        null_row_updated = true;
-                                    };
-                                    side_update.ht.init_without_cache(&key).await?;
-                                    side_update.ht.get_mut_without_cached(&key).await.unwrap()
-                                }
-                            };
-                            entry_value.insert(
-                                pk,
-                                JoinRow::new(value, matched_rows.len(epoch).await as u64),
-                            );
-                        }
-                        Op::Delete | Op::UpdateDelete => {
-                            if let Some(v) = side_update.ht.get_mut_without_cached(&key).await {
-                                v.remove(pk);
-                                if outer_side_null(T, SIDE) && v.is_empty(epoch).await {
-                                    for matched_row in matched_rows.values(epoch).await {
-                                        stream_chunk_builder.append_row(
-                                            Op::UpdateDelete,
-                                            &row,
-                                            &matched_row.row,
-                                        )?;
-                                        stream_chunk_builder.append_row_matched(
-                                            Op::UpdateInsert,
-                                            &matched_row.row,
-                                        )?;
-                                    }
-                                    null_row_updated = true;
-                                }
-                            }
-                        }
-                    };
-                    if !outer_side_null(T, SIDE) || !null_row_updated {
-                        for matched_row in matched_rows.values(epoch).await {
-                            assert_eq!(matched_row.size(), side_match.col_types.len());
-                            stream_chunk_builder.append_row(*op, &row, &matched_row.row)?;
                         }
                     }
-                }
+                };
             } else {
                 // if there are no matched rows, just update the hash table
                 //
