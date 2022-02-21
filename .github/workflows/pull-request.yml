@@ -102,8 +102,13 @@ jobs:
           cp risedev-components.ci.env risedev-components.user.env
       - name: Download sqllogictest
         run: |
-          curl -fL -o ~/.cargo/bin/sqllogictest https://github.com/singularity-data/sqllogictest-rs/releases/download/v0.3.0-pre/sqllogictest-linux-amd64
+          cargo install sqllogictest --features bin --git https://github.com/singularity-data/sqllogictest-rs --rev 21357d4
           chmod +x ~/.cargo/bin/sqllogictest
+      - uses: actions/upload-artifact@v2
+        name: Upload sqllogictest bin (You may find it in artifacts)
+        with:
+          path: ~/.cargo/bin/sqllogictest
+          name: sqllogictest-linux-amd64
       - name: Download cargo-make
         run: |
           curl -fL https://github.com/sagiegurari/cargo-make/releases/download/0.35.7/cargo-make-v0.35.7-x86_64-unknown-linux-musl.zip -o ~/cargo-make-v0.35.7-x86_64-unknown-linux-musl.zip

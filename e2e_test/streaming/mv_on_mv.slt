@@ -1,4 +1,4 @@
-control sortmode rowsort
+# control sortmode rowsort
 
 statement ok
 create table mom_t1(v1 int not null, v2 int not null);
