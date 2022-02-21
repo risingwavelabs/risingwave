@@ -200,20 +200,16 @@ pub trait Dispatcher: Debug + 'static {
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> Result<()>;
     async fn dispatch_barrier(&mut self, barrier: Barrier) -> Result<()> {
         // always broadcast barrier by default
-        let outputs = self.get_outputs().unwrap();
+        let outputs = self.get_outputs();
         for output in outputs {
             output.send(Message::Barrier(barrier.clone())).await?;
         }
         Ok(())
     }
 
-    fn get_outputs(&mut self) -> Result<&mut Vec<Box<dyn Output>>>;
-    fn update_outputs(&mut self, outputs: Vec<Box<dyn Output>>) {
-        *self.get_outputs().unwrap() = outputs;
-    }
-    fn add_outputs(&mut self, outputs: Vec<Box<dyn Output>>) {
-        self.get_outputs().unwrap().extend(outputs.into_iter());
-    }
+    fn get_outputs(&mut self) -> &mut [Box<dyn Output>];
+    fn update_outputs(&mut self, outputs: Vec<Box<dyn Output>>);
+    fn add_outputs(&mut self, outputs: Vec<Box<dyn Output>>);
 }
 
 pub struct RoundRobinDataDispatcher {
@@ -237,8 +233,16 @@ impl RoundRobinDataDispatcher {
 
 #[async_trait]
 impl Dispatcher for RoundRobinDataDispatcher {
-    fn get_outputs(&mut self) -> Result<&mut Vec<Box<dyn Output>>> {
-        Ok(&mut self.outputs)
+    fn update_outputs(&mut self, outputs: Vec<Box<dyn Output>>) {
+        self.outputs = outputs
+    }
+
+    fn add_outputs(&mut self, outputs: Vec<Box<dyn Output>>) {
+        self.outputs.extend(outputs.into_iter());
+    }
+
+    fn get_outputs(&mut self) -> &mut [Box<dyn Output>] {
+        &mut self.outputs
     }
 
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> Result<()> {
@@ -276,8 +280,16 @@ impl HashDataDispatcher {
 
 #[async_trait]
 impl Dispatcher for HashDataDispatcher {
-    fn get_outputs(&mut self) -> Result<&mut Vec<Box<dyn Output>>> {
-        Ok(&mut self.outputs)
+    fn update_outputs(&mut self, outputs: Vec<Box<dyn Output>>) {
+        self.outputs = outputs
+    }
+
+    fn add_outputs(&mut self, outputs: Vec<Box<dyn Output>>) {
+        self.outputs.extend(outputs.into_iter());
+    }
+
+    fn get_outputs(&mut self) -> &mut [Box<dyn Output>] {
+        &mut self.outputs
     }
 
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> Result<()> {
@@ -402,8 +414,16 @@ impl BroadcastDispatcher {
 
 #[async_trait]
 impl Dispatcher for BroadcastDispatcher {
-    fn get_outputs(&mut self) -> Result<&mut Vec<Box<dyn Output>>> {
-        Ok(&mut self.outputs)
+    fn update_outputs(&mut self, outputs: Vec<Box<dyn Output>>) {
+        self.outputs = outputs
+    }
+
+    fn add_outputs(&mut self, outputs: Vec<Box<dyn Output>>) {
+        self.outputs.extend(outputs.into_iter());
+    }
+
+    fn get_outputs(&mut self) -> &mut [Box<dyn Output>] {
+        &mut self.outputs
     }
 
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> Result<()> {
@@ -416,39 +436,39 @@ impl Dispatcher for BroadcastDispatcher {
 
 /// `SimpleDispatcher` dispatches message to a single output.
 pub struct SimpleDispatcher {
-    outputs: Vec<Box<dyn Output>>,
+    output: Box<dyn Output>,
 }
 
 impl Debug for SimpleDispatcher {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SimpleDispatcher")
-            .field("outputs", &self.outputs)
+            .field("output", &self.output)
             .finish()
     }
 }
 
 impl SimpleDispatcher {
     pub fn new(output: Box<dyn Output>) -> Self {
-        Self {
-            outputs: vec![output],
-        }
+        Self { output }
     }
 }
 
 #[async_trait]
 impl Dispatcher for SimpleDispatcher {
-    fn add_outputs(&mut self, outputs: Vec<Box<dyn Output>>) {
-        self.update_outputs(outputs);
+    fn update_outputs(&mut self, outputs: Vec<Box<dyn Output>>) {
+        self.output = outputs.into_iter().next().unwrap();
     }
 
-    fn get_outputs(&mut self) -> Result<&mut Vec<Box<dyn Output>>> {
-        Ok(&mut self.outputs)
+    fn add_outputs(&mut self, outputs: Vec<Box<dyn Output>>) {
+        self.output = outputs.into_iter().next().unwrap();
+    }
+
+    fn get_outputs(&mut self) -> &mut [Box<dyn Output>] {
+        std::slice::from_mut(&mut self.output)
     }
 
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> Result<()> {
-        for output in &mut self.outputs {
-            output.send(Message::Chunk(chunk.clone())).await?;
-        }
+        self.output.send(Message::Chunk(chunk)).await?;
         Ok(())
     }
 }
