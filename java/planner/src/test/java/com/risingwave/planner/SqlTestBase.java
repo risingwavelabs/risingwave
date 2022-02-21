@@ -33,7 +33,6 @@ public abstract class SqlTestBase {
             .withFrontendEnv(frontendEnv)
             .withSessionConfig(new SessionConfiguration(frontendEnv.getConfiguration()))
             .build();
-    executionContext.getSqlHandlerFactory().setUseV2(false);
   }
 
   protected static SqlNode parseDdl(String sql) {

@@ -5,9 +5,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use risingwave_common::error::Result;
 
-/// Epoch keeping for some specific key types.
-pub(crate) const SINGLE_VERSION_EPOCH: Epoch = Epoch(0);
-
 pub const EPOCH_PHYSICAL_SHIFT_BITS: u8 = 16;
 
 #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Hash, Debug)]

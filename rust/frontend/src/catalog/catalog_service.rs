@@ -380,7 +380,7 @@ mod tests {
     #[serial_test::serial]
     async fn test_create_and_drop_table() {
         // Init meta and catalog.
-        let meta = LocalMeta::start_in_tempdir().await;
+        let meta = LocalMeta::start().await;
         let mut meta_client = LocalMeta::create_client().await;
         let catalog_mgr = CatalogConnector::new(meta_client.clone());
 

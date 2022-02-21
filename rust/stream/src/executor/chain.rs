@@ -23,6 +23,8 @@ pub struct ChainExecutor {
     state: ChainState,
     schema: Schema,
     column_idxs: Vec<usize>,
+    /// Logical Operator Info
+    op_info: String,
 }
 
 impl ChainExecutor {
@@ -31,6 +33,7 @@ impl ChainExecutor {
         mview: Box<dyn Executor>,
         schema: Schema,
         column_idxs: Vec<usize>,
+        op_info: String,
     ) -> Self {
         Self {
             snapshot,
@@ -38,6 +41,7 @@ impl ChainExecutor {
             state: ChainState::Init,
             schema,
             column_idxs,
+            op_info,
         }
     }
 
@@ -123,6 +127,10 @@ impl Executor for ChainExecutor {
     fn identity(&self) -> &str {
         "Chain"
     }
+
+    fn logical_operator_info(&self) -> &str {
+        &self.op_info
+    }
 }
 
 #[cfg(test)]
@@ -188,6 +196,10 @@ mod test {
             "MockSnapshot"
         }
 
+        fn logical_operator_info(&self) -> &str {
+            self.identity()
+        }
+
         fn init(&mut self, _: u64) -> Result<()> {
             Ok(())
         }
@@ -241,7 +253,8 @@ mod test {
             ],
         ));
 
-        let mut chain = ChainExecutor::new(first, second, schema, vec![0]);
+        let mut chain =
+            ChainExecutor::new(first, second, schema, vec![0], "ChainExecutor".to_string());
         let mut count = 0;
         loop {
             let k = &chain.next().await.unwrap();

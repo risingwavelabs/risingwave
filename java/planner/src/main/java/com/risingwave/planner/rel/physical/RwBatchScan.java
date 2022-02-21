@@ -5,9 +5,9 @@ import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.TableCatalog;
 import com.risingwave.planner.rel.common.RwScan;
 import com.risingwave.planner.rel.common.dist.RwDistributions;
+import com.risingwave.proto.plan.Field;
 import com.risingwave.proto.plan.PlanNode;
 import com.risingwave.proto.plan.RowSeqScanNode;
-import com.risingwave.proto.plan.TableRefId;
 import com.risingwave.rpc.Messages;
 import java.util.Collections;
 import java.util.List;
@@ -18,9 +18,9 @@ import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.hint.RelHint;
 
 /** Executor to scan from Materialized View */
-public class RwBatchMaterializedViewScan extends RwScan implements RisingWaveBatchPhyRel {
+public class RwBatchScan extends RwScan implements RisingWaveBatchPhyRel {
 
-  protected RwBatchMaterializedViewScan(
+  protected RwBatchScan(
       RelOptCluster cluster,
       RelTraitSet traitSet,
       List<RelHint> hints,
@@ -31,7 +31,7 @@ public class RwBatchMaterializedViewScan extends RwScan implements RisingWaveBat
     checkConvention();
   }
 
-  public static RwBatchMaterializedViewScan create(
+  public static RwBatchScan create(
       RelOptCluster cluster,
       RelTraitSet traitSet,
       RelOptTable table,
@@ -39,12 +39,12 @@ public class RwBatchMaterializedViewScan extends RwScan implements RisingWaveBat
     TableCatalog tableCatalog = table.unwrapOrThrow(TableCatalog.class);
 
     RelTraitSet newTraitSet = traitSet.plus(RisingWaveBatchPhyRel.BATCH_PHYSICAL);
-    return new RwBatchMaterializedViewScan(
+    return new RwBatchScan(
         cluster, newTraitSet, Collections.emptyList(), table, tableCatalog.getId(), columnIds);
   }
 
-  public RwBatchMaterializedViewScan copy(RelTraitSet traitSet) {
-    return new RwBatchMaterializedViewScan(
+  public RwBatchScan copy(RelTraitSet traitSet) {
+    return new RwBatchScan(
         getCluster(), traitSet, getHints(), getTable(), getTableId(), getColumnIds());
   }
 
@@ -55,9 +55,21 @@ public class RwBatchMaterializedViewScan extends RwScan implements RisingWaveBat
 
   @Override
   public PlanNode serialize() {
-    TableRefId tableRefId = Messages.getTableRefId(tableId);
-    RowSeqScanNode.Builder builder = RowSeqScanNode.newBuilder().setTableRefId(tableRefId);
-    columnIds.forEach(c -> builder.addColumnIds(c.getValue()));
+    var table = getTable().unwrapOrThrow(TableCatalog.class);
+    var tableRefId = Messages.getTableRefId(tableId);
+    var builder = RowSeqScanNode.newBuilder().setTableRefId(tableRefId);
+
+    columnIds.forEach(
+        c -> {
+          builder.addColumnIds(c.getValue());
+          var dataType = table.getColumnChecked(c).getDesc().getDataType().getProtobufType();
+          builder.addFields(
+              Field.newBuilder()
+                  .setDataType(dataType)
+                  .setName(table.getColumnChecked(c).getName())
+                  .build());
+        });
+
     return PlanNode.newBuilder()
         .setRowSeqScan(builder.build())
         .setIdentity(BatchPlan.getCurrentNodeIdentity(this))

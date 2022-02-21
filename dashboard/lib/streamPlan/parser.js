@@ -1,4 +1,5 @@
 import { graphBfs, treeBfs } from "../algo";
+import { cloneDeep } from "lodash";
 
 let cnt = 0;
 function generateNewNodeId() {
@@ -55,8 +56,8 @@ class Dispatcher extends Node {
   }
 }
 
-class Actor {
-  constructor(actorId, output, rootNode, fragmentId, actorIdentifier) {
+export class Actor {
+  constructor(actorId, output, rootNode, fragmentId, computeNodeAddress) {
     /**
      * @type {number}
      */
@@ -74,9 +75,18 @@ class Actor {
      */
     this.fragmentId = fragmentId;
     /**
-     * @type {string | number}
+     * @type {string}
      */
-    this.actorIdentifier = actorIdentifier;
+    this.computeNodeAddress = computeNodeAddress;
+    /**
+     * @type {Array<Actor>}
+     */
+    this.representedActorList = null;
+    /**
+     * @type {Set<string>}
+     */
+    this.representedWorkNodes = null;
+
   }
 }
 
@@ -101,7 +111,7 @@ export default class StreamPlanParser {
           continue;
         }
         this.actorId2Proto.set(singleActorProto.actorId, {
-          actorIdentifier: `${computeNodeData.node.host.host}:${computeNodeData.node.host.port}`,
+          computeNodeAddress: `${computeNodeData.node.host.host}:${computeNodeData.node.host.port}`,
           ...singleActorProto
         });
       }
@@ -119,11 +129,34 @@ export default class StreamPlanParser {
       this.parsedActorList.push(actor);
     }
 
+    this.fragmentRepresentedActors = this._constructRepresentedActorList();
+
     /**
      * @type {Map<number, Array<number>}
      */
     this.mvTableIdToSingleViewActorList = this._constructSingleViewMvList();
     this.mvTableIdToChainViewActorList = this._constructChainViewMvList()
+  }
+
+  _constructRepresentedActorList() {
+    const fragmentId2actorList = new Map();
+    let fragmentRepresentedActors = new Set();
+    for (let actor of this.parsedActorList) {
+      if (!fragmentId2actorList.has(actor.fragmentId)) {
+        fragmentRepresentedActors.add(actor);
+        fragmentId2actorList.set(actor.fragmentId, [actor]);
+      } else {
+        fragmentId2actorList.get(actor.fragmentId).push(actor);
+      }
+    }
+    for (let actor of fragmentRepresentedActors) {
+      actor.representedActorList = cloneDeep(fragmentId2actorList.get(actor.fragmentId)).sort(x => x.actorId);
+      actor.representedWorkNodes = new Set();
+      for (let representedActor of actor.representedActorList) {
+        actor.representedWorkNodes.add(representedActor.computeNodeAddress);
+      }
+    }
+    return fragmentRepresentedActors;
   }
 
   _constructChainViewMvList() {
@@ -147,7 +180,7 @@ export default class StreamPlanParser {
       return shellNode;
     }
 
-    for(let actorId of this.actorId2Proto.keys()){
+    for (let actorId of this.actorId2Proto.keys()) {
       getShellNode(actorId);
     }
 
@@ -158,9 +191,11 @@ export default class StreamPlanParser {
         list.add(n.id);
       });
       graphBfs(shellNode, (n) => {
-        console.log(n);
         list.add(n.id);
       }, "parentNodes");
+      for (let actor of this.parsedActorMap.get(actorId).representedActorList) {
+        list.add(actor.actorId);
+      }
       mvTableIdToChainViewActorList.set(mviewNode.typeInfo.tableRefId.tableId, [...list.values()]);
     }
 
@@ -188,7 +223,7 @@ export default class StreamPlanParser {
       getShellNode(actor.actorId);
     }
 
-    for(let actorId of this.actorId2Proto.keys()){
+    for (let actorId of this.actorId2Proto.keys()) {
       getShellNode(actorId);
     }
 
@@ -201,6 +236,9 @@ export default class StreamPlanParser {
           return true; // stop to traverse its next nodes
         }
       }, "parentNodes");
+      for (let actor of this.parsedActorMap.get(actorId).representedActorList) {
+        list.push(actor.actorId);
+      }
       mvTableIdToSingleViewActorList.set(mviewNode.typeInfo.tableRefId.tableId, list);
     }
 
@@ -230,7 +268,7 @@ export default class StreamPlanParser {
       return this.parsedActorMap.get(actorId);
     }
 
-    let actor = new Actor(actorId, [], null, actorProto.fragmentId, actorProto.actorIdentifier);
+    let actor = new Actor(actorId, [], null, actorProto.fragmentId, actorProto.computeNodeAddress);
 
     let rootNode;
     this.parsedActorMap.set(actorId, actor);

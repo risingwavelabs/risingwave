@@ -286,6 +286,9 @@ pub trait Executor: Send + Debug + 'static {
     /// Identity string of the executor.
     fn identity(&self) -> &str;
 
+    /// Logical Operator Information of the executor
+    fn logical_operator_info(&self) -> &str;
+
     /// Clears the in-memory cache of the executor. It's no-op by default.
     fn clear_cache(&mut self) -> Result<()> {
         Ok(())

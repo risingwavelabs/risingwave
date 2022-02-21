@@ -33,6 +33,9 @@ pub struct StreamSourceExecutor {
     /// Identity string
     identity: String,
 
+    /// Logical Operator Info
+    op_info: String,
+
     // monitor
     /// attributes of the OpenTelemetry monitor
     attributes: Vec<KeyValue>,
@@ -50,7 +53,7 @@ impl StreamSourceExecutor {
         barrier_receiver: UnboundedReceiver<Message>,
         executor_id: u64,
         operator_id: u64,
-        identity: String,
+        op_info: String,
     ) -> Result<Self> {
         let source = source_desc.clone().source;
         let reader: Box<dyn StreamSourceReader> = match source.as_ref() {
@@ -82,12 +85,13 @@ impl StreamSourceExecutor {
             barrier_receiver,
             next_row_id: AtomicU64::from(0u64),
             first_execution: true,
-            identity: format!("{} {:X}", identity, executor_id),
+            identity: format!("StreamSourceExecutor {:X}", executor_id),
             attributes: vec![KeyValue::new("source_id", source_identify)],
             source_output_row_count: meter
                 .u64_counter("stream_source_output_rows_counts")
                 .with_description("")
                 .init(),
+            op_info,
         })
     }
 
@@ -162,6 +166,10 @@ impl Executor for StreamSourceExecutor {
 
     fn identity(&self) -> &str {
         self.identity.as_str()
+    }
+
+    fn logical_operator_info(&self) -> &str {
+        &self.op_info
     }
 }
 

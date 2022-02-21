@@ -14,7 +14,6 @@ use risingwave_common::error::Result;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::PlanNode;
 pub use row_seq_scan::*;
-pub use seq_scan::*;
 use sort_agg::*;
 use top_n::*;
 
@@ -45,7 +44,6 @@ mod merge_sort_exchange;
 mod order_by;
 mod projection;
 mod row_seq_scan;
-mod seq_scan;
 mod sort_agg;
 mod stream_scan;
 #[cfg(test)]
@@ -129,7 +127,6 @@ impl<'a> ExecutorBuilder<'a> {
     fn try_build(&self) -> Result<BoxedExecutor> {
         let real_executor = build_executor! { self,
           NodeBody::CreateTable => CreateTableExecutor,
-          NodeBody::SeqScan => SeqScanExecutor,
           NodeBody::RowSeqScan => RowSeqScanExecutor,
           NodeBody::Insert => InsertExecutor,
           NodeBody::DropTable => DropTableExecutor,

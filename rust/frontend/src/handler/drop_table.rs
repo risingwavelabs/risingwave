@@ -34,7 +34,7 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn test_drop_table_handler() {
-        let meta = LocalMeta::start_in_tempdir().await;
+        let meta = LocalMeta::start().await;
         let sql_create_table = "create table t (v1 smallint);";
         let sql_drop_table = "drop table t;";
         let frontend = LocalFrontend::new().await;

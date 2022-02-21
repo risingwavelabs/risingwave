@@ -48,10 +48,18 @@ pub async fn pg_serve(addr: &str, session_mgr: Arc<dyn SessionManager>) -> io::R
 async fn pg_serve_conn(socket: TcpStream, session_mgr: Arc<dyn SessionManager>) {
     let mut pg_proto = PgProtocol::new(socket, session_mgr);
     loop {
-        let terminate = pg_proto.process().await.unwrap();
-        if terminate {
-            println!("Connection closed!");
-            break;
+        let terminate = pg_proto.process().await;
+        match terminate {
+            Ok(is_ter) => {
+                if is_ter {
+                    println!("Connection closed by terminate cmd!");
+                    break;
+                }
+            }
+            Err(_) => {
+                println!("Connection closed by error!");
+                break;
+            }
         }
     }
 }

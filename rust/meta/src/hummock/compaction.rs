@@ -9,7 +9,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::hummock::level_handler::{LevelHandler, SSTableStat};
 use crate::hummock::model::HUMMOCK_DEFAULT_CF_NAME;
-use crate::manager::SINGLE_VERSION_EPOCH;
 use crate::storage::{MetaStore, Operation, Transaction};
 
 /// Hummock `compact_status` key
@@ -43,26 +42,22 @@ impl CompactStatus {
         HUMMOCK_COMPACT_STATUS_KEY
     }
 
-    pub async fn get(meta_store_ref: &dyn MetaStore) -> Result<CompactStatus> {
+    pub async fn get<S: MetaStore>(meta_store_ref: &S) -> Result<CompactStatus> {
         meta_store_ref
-            .get_cf(
-                CompactStatus::cf_name(),
-                CompactStatus::key().as_bytes(),
-                SINGLE_VERSION_EPOCH,
-            )
+            .get_cf(CompactStatus::cf_name(), CompactStatus::key().as_bytes())
             .await
             // TODO replace unwrap
             .map(|v| bincode::deserialize(&v).unwrap())
+            .map_err(Into::into)
     }
 
     pub fn update_in_transaction(&self, trx: &mut Transaction) {
-        trx.add_operations(vec![Operation::Put(
-            CompactStatus::cf_name().to_string(),
-            CompactStatus::key().as_bytes().to_vec(),
+        trx.add_operations(vec![Operation::Put {
+            cf: CompactStatus::cf_name().to_string(),
+            key: CompactStatus::key().as_bytes().to_vec(),
             // TODO replace unwrap
-            bincode::serialize(&self).unwrap(),
-            None,
-        )]);
+            value: bincode::serialize(&self).unwrap(),
+        }]);
     }
 
     pub fn get_compact_task(&mut self) -> Option<CompactTask> {

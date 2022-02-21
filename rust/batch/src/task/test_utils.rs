@@ -13,7 +13,7 @@ use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::values_node::ExprTuple;
 use risingwave_pb::plan::{
     exchange_info, ColumnDesc, CreateTableNode, ExchangeInfo, Field as NodeField, InsertNode,
-    PlanFragment, PlanNode, QueryId, SeqScanNode, StageId, TaskId as ProstTaskId,
+    PlanFragment, PlanNode, QueryId, RowSeqScanNode, StageId, TaskId as ProstTaskId,
     TaskSinkId as ProstSinkId, ValuesNode,
 };
 use risingwave_pb::task_service::GetDataResponse;
@@ -353,7 +353,7 @@ impl<'a> SelectBuilder<'a> {
 
         if let Ok(column_table_ref) = downcast_arc::<TestTable>(table_ref.into_any()) {
             let column_ids = column_table_ref.column_ids();
-            let scan = SeqScanNode {
+            let scan = RowSeqScanNode {
                 table_ref_id: None,
                 column_ids,
                 fields: vec![],
@@ -362,7 +362,7 @@ impl<'a> SelectBuilder<'a> {
             self.plan = PlanFragment {
                 root: Some(PlanNode {
                     children: vec![],
-                    node_body: Some(NodeBody::SeqScan(scan)),
+                    node_body: Some(NodeBody::RowSeqScan(scan)),
                     identity: "SeqScanExecutor".to_string(),
                 }),
                 exchange_info: Some(ExchangeInfo {
