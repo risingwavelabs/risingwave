@@ -103,7 +103,7 @@ jobs:
           cp risedev-components.ci.env risedev-components.user.env
       - name: Download sqllogictest
         run: |
-          curl -fL -o ~/.cargo/bin/sqllogictest https://github.com/singularity-data/sqllogictest-rs/releases/download/v0.3.0-pre/sqllogictest-linux-amd64
+          curl -fL -o ~/.cargo/bin/sqllogictest https://github.com/MrCroxx/sqllogictest-rs/releases/download/v0.3.0-pre/sqllogictest-linux-amd64
           chmod +x ~/.cargo/bin/sqllogictest
       - name: Download cargo-make
         run: |
