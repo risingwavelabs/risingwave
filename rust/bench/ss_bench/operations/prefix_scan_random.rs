@@ -49,7 +49,7 @@ impl Operations {
                 // actual prefix scan process
                 for prefix in prefixes {
                     let start = Instant::now();
-                    let entry = store
+                    let kv_pairs = store
                         .scan(
                             prefix.chunk().to_vec()..next_key(prefix.chunk()),
                             None,
@@ -57,7 +57,7 @@ impl Operations {
                         )
                         .await
                         .unwrap();
-                    let size = size_of_val(&entry);
+                    let size = size_of_val(&kv_pairs);
                     let time_nano = start.elapsed().as_nanos();
                     latencies.push(time_nano);
                     sizes.push(size);
