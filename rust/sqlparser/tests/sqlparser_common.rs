@@ -1739,23 +1739,6 @@ fn parse_bad_constraint() {
     );
 }
 
-#[test]
-fn parse_scalar_function_in_projection() {
-    let sql = "SELECT sqrt(id) FROM foo";
-    let select = verified_only_select(sql);
-    assert_eq!(
-        &Expr::Function(Function {
-            name: ObjectName(vec![Ident::new("sqrt")]),
-            args: vec![FunctionArg::Unnamed(FunctionArgExpr::Expr(
-                Expr::Identifier(Ident::new("id"))
-            ))],
-            over: None,
-            distinct: false,
-        }),
-        expr_from_projection(only(&select.projection))
-    );
-}
-
 fn run_explain_analyze(query: &str, expected_verbose: bool, expected_analyze: bool) {
     match verified_stmt(query) {
         Statement::Explain {
