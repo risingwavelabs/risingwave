@@ -9,7 +9,7 @@ use crate::task::env::BatchEnvironment;
 use crate::task::task::{BatchTaskExecution, TaskId};
 use crate::task::TaskSink;
 
-/// `BatchTaskManager` is responsible for managing all batch tasks.
+/// `BatchManager` is responsible for managing all batch tasks.
 #[derive(Clone)]
 pub struct BatchManager {
     /// Every task id has a corresponding task execution.
