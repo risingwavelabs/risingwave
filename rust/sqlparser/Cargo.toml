@@ -28,9 +28,9 @@ serde = { version = "1.0", features = ["derive"], optional = true }
 serde_json = { version = "1.0", optional = true }
 
 [dev-dependencies]
+anyhow = "1"
 matches = "0.1"
 walkdir = "2"
-anyhow = "1"
 
 [package.metadata.release]
 # Instruct `cargo release` to not run `cargo publish` locally:
