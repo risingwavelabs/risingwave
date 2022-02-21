@@ -2,7 +2,11 @@ package com.risingwave.rpc
 
 import com.risingwave.common.exception.PgErrorCode
 import com.risingwave.common.exception.PgException
-import com.risingwave.proto.hummock.*
+import com.risingwave.proto.hummock.HummockManagerServiceGrpc
+import com.risingwave.proto.hummock.PinSnapshotRequest
+import com.risingwave.proto.hummock.PinSnapshotResponse
+import com.risingwave.proto.hummock.UnpinSnapshotRequest
+import com.risingwave.proto.hummock.UnpinSnapshotResponse
 import com.risingwave.proto.metanode.*
 import io.grpc.Channel
 import io.grpc.StatusRuntimeException
