@@ -200,19 +200,19 @@ pub trait DataDispatcher: Debug + 'static {
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> Result<()>;
     async fn dispatch_barrier(&mut self, barrier: Barrier) -> Result<()> {
         // always broadcast barrier by default
-        let outputs = self.get_outputs();
+        let outputs = self.get_outputs().unwrap();
         for output in outputs {
             output.send(Message::Barrier(barrier.clone())).await?;
         }
         Ok(())
     }
 
-    fn get_outputs(&mut self) -> &mut Vec<Box<dyn Output>>;
+    fn get_outputs(&mut self) -> Result<&mut Vec<Box<dyn Output>>>;
     fn update_outputs(&mut self, outputs: Vec<Box<dyn Output>>) {
-        *self.get_outputs() = outputs;
+        *self.get_outputs().unwrap() = outputs;
     }
     fn add_outputs(&mut self, outputs: Vec<Box<dyn Output>>) {
-        self.get_outputs().extend(outputs.into_iter());
+        self.get_outputs().unwrap().extend(outputs.into_iter());
     }
 }
 
@@ -237,8 +237,8 @@ impl RoundRobinDataDispatcher {
 
 #[async_trait]
 impl DataDispatcher for RoundRobinDataDispatcher {
-    fn get_outputs(&mut self) -> &mut Vec<Box<dyn Output>> {
-        &mut self.outputs
+    fn get_outputs(&mut self) -> Result<&mut Vec<Box<dyn Output>>> {
+        Ok(&mut self.outputs)
     }
 
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> Result<()> {
@@ -276,8 +276,8 @@ impl HashDataDispatcher {
 
 #[async_trait]
 impl DataDispatcher for HashDataDispatcher {
-    fn get_outputs(&mut self) -> &mut Vec<Box<dyn Output>> {
-        &mut self.outputs
+    fn get_outputs(&mut self) -> Result<&mut Vec<Box<dyn Output>>> {
+        Ok(&mut self.outputs)
     }
 
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> Result<()> {
@@ -402,8 +402,8 @@ impl BroadcastDispatcher {
 
 #[async_trait]
 impl DataDispatcher for BroadcastDispatcher {
-    fn get_outputs(&mut self) -> &mut Vec<Box<dyn Output>> {
-        &mut self.outputs
+    fn get_outputs(&mut self) -> Result<&mut Vec<Box<dyn Output>>> {
+        Ok(&mut self.outputs)
     }
 
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> Result<()> {
@@ -441,8 +441,8 @@ impl DataDispatcher for SimpleDispatcher {
         self.update_outputs(outputs);
     }
 
-    fn get_outputs(&mut self) -> &mut Vec<Box<dyn Output>> {
-        &mut self.outputs
+    fn get_outputs(&mut self) -> Result<&mut Vec<Box<dyn Output>>> {
+        Ok(&mut self.outputs)
     }
 
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> Result<()> {
