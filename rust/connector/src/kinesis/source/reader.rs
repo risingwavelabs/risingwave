@@ -244,6 +244,7 @@ mod tests {
     use super::*;
 
     const STREAM_NAME: &str = "kinesis_test_stream";
+    const KINESIS_ARN: &str = "";
 
     async fn push_to_mq(client: &kinesis_client) -> Result<(String, String)> {
         let mut first_sequence_num: String = "".into();
@@ -299,6 +300,7 @@ mod tests {
             stream_name: STREAM_NAME.to_string(),
             region: Some("cn-north-1".to_string()),
             credentials: None,
+            assume_role: None,
         };
         let mut split_reader = KinesisSplitReader::new(demo_aws_config_info, None).await;
         split_reader.assign_split(mock_split).await.unwrap();
@@ -330,6 +332,7 @@ mod tests {
             stream_name: STREAM_NAME.to_string(),
             region: Some("cn-north-1".to_string()),
             credentials: None,
+            assume_role: None,
         };
         let mut split_reader = KinesisSplitReader::new(demo_aws_config_info, None).await;
         split_reader.assign_split(mock_split).await.unwrap();
