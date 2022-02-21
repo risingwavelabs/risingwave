@@ -12,9 +12,9 @@ use tokio::net::TcpListener;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 
-use super::service::notification_service::NotificationServiceImpl;
 use super::intercept::MetricsMiddlewareLayer;
 use super::metrics::MetaMetrics;
+use super::service::notification_service::NotificationServiceImpl;
 use crate::barrier::BarrierManager;
 use crate::cluster::StoredClusterManager;
 use crate::dashboard::DashboardService;
