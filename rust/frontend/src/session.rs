@@ -22,6 +22,7 @@ pub struct FrontendEnv {
 impl FrontendEnv {
     pub async fn init(opts: &FrontendOpts) -> Result<Self> {
         let meta_client = MetaClient::new(opts.meta_addr.clone().as_str()).await?;
+        // Register in meta by calling `AddWorkerNode` RPC.
         meta_client
             .register(opts.host.parse().unwrap(), WorkerType::Frontend)
             .await

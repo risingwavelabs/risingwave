@@ -21,6 +21,7 @@ impl NotificationServiceImpl {
 impl NotificationService for NotificationServiceImpl {
     type SubscribeStream = ReceiverStream<Notification>;
 
+    #[cfg(not(tarpaulin_include))]
     async fn subscribe(
         &self,
         request: Request<SubscribeRequest>,

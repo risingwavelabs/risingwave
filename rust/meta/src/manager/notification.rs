@@ -33,6 +33,7 @@ pub enum NotificationTarget {
 
 pub type NotificationManagerRef = Arc<NotificationManager>;
 
+/// [`NotificationManager`] manager notification meta data.
 impl NotificationManager {
     pub fn new() -> Self {
         Self {
@@ -86,6 +87,7 @@ impl NotificationManager {
         .collect::<RwResult<()>>()
     }
 
+    /// Return iter of frontend observers or compute node observers or their combination.
     pub fn get_iter(
         &self,
         target_type: NotificationTarget,

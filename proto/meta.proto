@@ -233,7 +233,6 @@ message SubscribeResponse {
     DELETE = 2;
     UPDATE = 3;
   }
-
   common.Status status = 1;
   Operation operation = 2;
   oneof info {

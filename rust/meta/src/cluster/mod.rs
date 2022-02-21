@@ -96,6 +96,7 @@ where
                 let worker = Worker::from_protobuf(workernode.clone());
                 worker.insert(&*self.meta_store_ref).await?;
 
+                // Notify frontends of new compute node
                 if r#type == WorkerType::ComputeNode {
                     self.nm
                         .notify(
