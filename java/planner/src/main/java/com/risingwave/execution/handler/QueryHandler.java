@@ -66,17 +66,6 @@ public class QueryHandler implements SqlHandler {
       throw new RuntimeException(e);
     }
 
-    // For inserting into TABLE_V2, we call `FLUSH` implicitly to ensure the data is inserted.
-    var isInsert = plan.getRoot() instanceof RwBatchInsert;
-    if (isInsert) {
-      var insert = (RwBatchInsert) plan.getRoot();
-      var table = insert.getTable().unwrapOrThrow(TableCatalog.class);
-      if (table.isAssociatedMaterializedView()) {
-        log.debug("flush after inserting into table_v2 / associated materialized view");
-        new FlushHandler().handle(null, context);
-      }
-    }
-
     // TODO: We need a better solution for this.
     if (result.getStatementType().isCommand()) {
       var effectedRowCount =
