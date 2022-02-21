@@ -139,9 +139,9 @@ impl BoxedExecutorBuilder for InsertExecutor {
 
         Ok(Box::new(Self::new(
             table_id,
-            source.global_task_env().source_manager_ref(),
+            source.global_batch_env().source_manager_ref(),
             child,
-            source.global_task_env().worker_id(),
+            source.global_batch_env().worker_id(),
         )))
     }
 }
