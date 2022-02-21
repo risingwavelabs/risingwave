@@ -55,7 +55,7 @@ fn parse_test_case(case_str: &str) -> TestCase {
 fn run_test_case(c: &TestCase) -> Result<()> {
     let result = Parser::parse_sql(&c.input);
     if let Some(error_msg) = &c.error_msg {
-        if !result.is_err() {
+        if result.is_ok() {
             return Err(anyhow!("Expected failure:\n  {}", error_msg));
         }
         let actual_error_msg = result.unwrap_err().to_string();
@@ -121,7 +121,7 @@ fn remove_comments(file_content: &str) -> String {
     let mut lines = file_content
         .lines()
         .map(|l| l.trim())
-        .filter(|line| !line.starts_with("#"))
+        .filter(|line| !line.starts_with('#'))
         .map(|s| s.to_string())
         .collect::<Vec<String>>();
     lines.iter_mut().for_each(|line| {
