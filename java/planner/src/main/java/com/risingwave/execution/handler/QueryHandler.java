@@ -1,6 +1,5 @@
 package com.risingwave.execution.handler;
 
-import com.risingwave.catalog.TableCatalog;
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.execution.handler.cache.ScopedSnapshot;
 import com.risingwave.execution.result.BatchDataChunkResult;
@@ -8,7 +7,6 @@ import com.risingwave.execution.result.CommandResult;
 import com.risingwave.pgwire.database.PgResult;
 import com.risingwave.planner.planner.batch.BatchPlanner;
 import com.risingwave.planner.rel.physical.BatchPlan;
-import com.risingwave.planner.rel.physical.RwBatchInsert;
 import com.risingwave.proto.computenode.GetDataRequest;
 import com.risingwave.proto.computenode.GetDataResponse;
 import com.risingwave.proto.plan.TaskSinkId;
