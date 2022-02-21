@@ -22,6 +22,8 @@ pub struct MetaNodeConfig {
     pub port: u16,
     pub dashboard_address: String,
     pub dashboard_port: u16,
+    pub exporter_address: String,
+    pub exporter_port: u16,
     pub user_managed: bool,
 }
 
@@ -58,6 +60,7 @@ pub struct PrometheusConfig {
     pub address: String,
     pub port: u16,
     pub provide_compute_node: Option<Vec<ComputeNodeConfig>>,
+    pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
     pub provide_minio: Option<Vec<MinioConfig>>,
 }
 

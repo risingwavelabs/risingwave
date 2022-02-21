@@ -31,7 +31,7 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
         let table_id = TableId::from(&stream_scan_node.table_ref_id);
 
         let source_desc = source
-            .global_task_env()
+            .global_batch_env()
             .source_manager()
             .get_source(&table_id)?;
 

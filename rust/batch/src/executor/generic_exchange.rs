@@ -11,14 +11,14 @@ use risingwave_pb::plan::{ExchangeSource as ProstExchangeSource, Field as NodeFi
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::execution::exchange_source::{ExchangeSource, GrpcExchangeSource, LocalExchangeSource};
 use crate::executor::{Executor, ExecutorBuilder};
-use crate::task::{BatchTaskEnv, TaskId};
+use crate::task::{BatchEnvironment, TaskId};
 
 pub(super) type ExchangeExecutor = GenericExchangeExecutor<DefaultCreateSource>;
 
 pub struct GenericExchangeExecutor<C> {
     sources: Vec<ProstExchangeSource>,
     server_addr: SocketAddr,
-    env: BatchTaskEnv,
+    env: BatchEnvironment,
 
     source_idx: usize,
     current_source: Option<Box<dyn ExchangeSource>>,
@@ -34,7 +34,7 @@ pub struct GenericExchangeExecutor<C> {
 #[async_trait::async_trait]
 pub trait CreateSource: Send {
     async fn create_source(
-        env: BatchTaskEnv,
+        env: BatchEnvironment,
         value: &ProstExchangeSource,
         task_id: TaskId,
     ) -> Result<Box<dyn ExchangeSource>>;
@@ -45,7 +45,7 @@ pub struct DefaultCreateSource {}
 #[async_trait::async_trait]
 impl CreateSource for DefaultCreateSource {
     async fn create_source(
-        env: BatchTaskEnv,
+        env: BatchEnvironment,
         value: &ProstExchangeSource,
         task_id: TaskId,
     ) -> Result<Box<dyn ExchangeSource>> {
@@ -173,7 +173,7 @@ mod tests {
         #[async_trait::async_trait]
         impl CreateSource for FakeCreateSource {
             async fn create_source(
-                _: BatchTaskEnv,
+                _: BatchEnvironment,
                 _: &ProstExchangeSource,
                 _: TaskId,
             ) -> Result<Box<dyn ExchangeSource>> {
@@ -197,7 +197,7 @@ mod tests {
             source_idx: 0,
             current_source: None,
             source_creator: PhantomData,
-            env: BatchTaskEnv::for_test(),
+            env: BatchEnvironment::for_test(),
             schema: Schema {
                 fields: vec![Field::unnamed(DataType::Int32)],
             },

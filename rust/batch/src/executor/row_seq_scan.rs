@@ -82,7 +82,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutor {
         let table_id = TableId::from(&seq_scan_node.table_ref_id);
 
         let table = source
-            .global_task_env()
+            .global_batch_env()
             .table_manager()
             .get_table(&table_id)?;
 
