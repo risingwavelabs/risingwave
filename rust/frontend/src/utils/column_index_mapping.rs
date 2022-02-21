@@ -3,6 +3,7 @@
 use std::vec;
 
 use fixedbitset::FixedBitSet;
+use itertools::Itertools;
 
 use crate::expr::{ExprRewriter, InputRef};
 
@@ -10,9 +11,18 @@ use crate::expr::{ExprRewriter, InputRef};
 /// in optimizer for transformation of column index. if the value in the vec is None, the source is
 /// illegal.
 pub struct ColIndexMapping {
-    map: Vec<Option<usize>>,
+    pub target_upper: usize,
+    pub map: Vec<Option<usize>>,
 }
 impl ColIndexMapping {
+    pub fn new(map: Vec<Option<usize>>) -> Self {
+        let target_upper = map
+            .iter()
+            .filter_map(|x| *x)
+            .max_by_key(|x| *x)
+            .unwrap_or(0);
+        Self { map, target_upper }
+    }
     pub fn with_shift_offset(source_num: usize, offset: isize) -> Self {
         let map = (0..source_num)
             .into_iter()
@@ -20,8 +30,8 @@ impl ColIndexMapping {
                 let target = source as isize + offset;
                 usize::try_from(target).ok()
             })
-            .collect();
-        Self { map }
+            .collect_vec();
+        Self::new(map)
     }
 
     pub fn with_remaining_columns(cols: &FixedBitSet) -> Self {
@@ -29,7 +39,7 @@ impl ColIndexMapping {
         for (tar, src) in cols.ones().enumerate() {
             map[src] = Some(tar);
         }
-        Self { map }
+        Self::new(map)
     }
 
     pub fn with_removed_columns(cols: &FixedBitSet) -> Self {
@@ -43,7 +53,7 @@ impl ColIndexMapping {
         for tar in &mut map {
             *tar = tar.and_then(|index| following.try_map(index));
         }
-        Self { map }
+        Self::new(map)
     }
 
     pub fn try_map(&self, index: usize) -> Option<usize> {
