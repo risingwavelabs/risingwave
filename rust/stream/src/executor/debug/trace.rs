@@ -32,6 +32,9 @@ pub struct TraceExecutor {
     /// attributes of the OpenTelemetry monitor
     attributes: Vec<KeyValue>,
     actor_row_count: Counter<u64>,
+
+    span_name: String,
+    logical_operator_info: String,
 }
 
 impl Debug for TraceExecutor {
@@ -55,6 +58,10 @@ impl TraceExecutor {
             .provider()
             .unwrap()
             .meter("compute_monitor", None);
+
+        let span_name = format!("{input_desc}_{input_pos}_next");
+        let logical_operator_info = input.logical_operator_info().to_string();
+
         Self {
             input,
             input_desc,
@@ -65,6 +72,8 @@ impl TraceExecutor {
                 .u64_counter("stream_actor_row_count")
                 .with_description("Total number of rows that have been ouput from each actor")
                 .init(),
+            span_name,
+            logical_operator_info,
         }
     }
 }
@@ -72,20 +81,21 @@ impl TraceExecutor {
 #[async_trait]
 impl super::DebugExecutor for TraceExecutor {
     async fn next(&mut self) -> Result<Message> {
+        let span_name = self.span_name.as_str();
         let input_desc = self.input_desc.as_str();
         let input_pos = self.input_pos;
-        let span_name = format!("{}_{}_next", input_desc, input_pos);
-        let logical_operator_info = self.input.logical_operator_info().to_string();
+        let logical_operator_info = self.logical_operator_info.as_str();
+
         let input_message = self
             .input
             .next()
             .instrument(tracing::trace_span!(
                 "next",
-                otel.name = span_name.as_str(),
+                otel.name = span_name,
                 // For the upstream trace pipe, its output is our input.
                 next = input_desc,
                 input_pos = input_pos,
-                logical_operator = logical_operator_info.as_str(),
+                logical_operator = logical_operator_info,
             ))
             .await;
         match input_message {
