@@ -16,6 +16,11 @@ impl Row {
         self.0.len()
     }
 
+    /// Returns `true` if the row contains no values. Required by clippy.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
     /// Returns the values.
     pub fn values(&self) -> &[Option<String>] {
         &self.0

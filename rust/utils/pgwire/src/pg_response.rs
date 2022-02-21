@@ -81,7 +81,7 @@ impl PgResponse {
     }
 
     pub fn is_query(&self) -> bool {
-        self.stmt_type == StatementType::SELECT
+        self.stmt_type == StatementType::SELECT || self.stmt_type == StatementType::EXPLAIN
     }
 
     pub fn get_row_desc(&self) -> Vec<PgFieldDescriptor> {
@@ -90,21 +90,5 @@ impl PgResponse {
 
     pub fn iter(&self) -> impl Iterator<Item = &Row> + '_ {
         self.values.iter()
-    }
-}
-
-/// Helper to return a 1-row-1-col string at early stage of developement.
-impl From<String> for PgResponse {
-    fn from(s: String) -> Self {
-        use crate::pg_field_descriptor::TypeOid;
-        PgResponse::new(
-            StatementType::SELECT,
-            1,
-            vec![Row::new(vec![Some(s)])],
-            vec![PgFieldDescriptor::new(
-                "varchar".to_owned(),
-                TypeOid::Varchar,
-            )],
-        )
     }
 }
