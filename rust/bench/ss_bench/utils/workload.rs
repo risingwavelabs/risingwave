@@ -7,12 +7,10 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use risingwave_storage::hummock::key::next_key;
 
-use crate::WorkloadType::*;
-use crate::{Opts, WorkloadType};
+use crate::Opts;
 
 type Prefixes = Vec<Bytes>;
 type Keys = Vec<Bytes>;
-type Values = Vec<Option<Bytes>>;
 
 pub struct Workload;
 
@@ -28,29 +26,7 @@ impl Workload {
         batch
     }
 
-    pub(crate) fn gen(
-        opts: &Opts,
-        workload_type: WorkloadType,
-        seed: Option<u64>,
-    ) -> (Prefixes, Keys, Values) {
-        let base_seed = seed.unwrap_or(233);
-
-        let (prefixes, keys) = match workload_type {
-            WriteBatch | GetRandom | PrefixScanRandom | DeleteRandom => {
-                Self::new_random_keys(opts, base_seed)
-            }
-            GetSeq | DeleteSeq => Self::new_sequential_keys(opts),
-        };
-
-        let values = match workload_type {
-            DeleteRandom | DeleteSeq => vec![None; keys.len()],
-            _ => Self::new_values(opts, base_seed),
-        };
-
-        (prefixes, keys, values)
-    }
-
-    fn new_values(opts: &Opts, base_seed: u64) -> Vec<Option<Bytes>> {
+    pub(crate) fn new_values(opts: &Opts, base_seed: u64) -> Vec<Option<Bytes>> {
         let str_dist = Uniform::new_inclusive(0, 255);
         let value_num = opts.batch_size as u64;
         (0..value_num)
@@ -123,7 +99,7 @@ impl Workload {
         for _ in 0..prefix_num as u64 {
             prefix = next_key(&prefix);
             // ensure next prefix exist
-            assert_ne!(prefix.len(), 0);
+            assert!(!prefix.is_empty());
             prefixes.push(Bytes::from(prefix.clone()));
         }
 
@@ -134,9 +110,9 @@ impl Workload {
         for _ in 0..opts.keys_per_prefix as u64 {
             user_key = next_key(&user_key);
             // ensure next key exist
-            assert_ne!(user_key.len(), 0);
+            assert!(!user_key.is_empty());
 
-            // keys in a keyspace should be sequential
+            // keys in a key range should be sequential
             for prefix in &prefixes {
                 let mut key =
                     BytesMut::with_capacity((opts.key_prefix_size + opts.key_size) as usize);

@@ -6,15 +6,15 @@ use risingwave_storage::StateStore;
 use super::Operations;
 use crate::utils::latency_stat::LatencyStat;
 use crate::utils::workload::{get_epoch, Workload};
-use crate::{Opts, WorkloadType};
+use crate::Opts;
 
 impl Operations {
     pub(crate) async fn write_batch(&mut self, store: &impl StateStore, opts: &Opts) {
         let mut batches = (0..opts.write_batches)
             .into_iter()
             .map(|i| {
-                let (prefixes, keys, values) =
-                    Workload::gen(opts, WorkloadType::WriteBatch, Some(i as u64));
+                let (prefixes, keys) = Workload::new_random_keys(opts, i);
+                let values = Workload::new_values(opts, i);
 
                 // add new prefixes and keys to global prefixes and keys
                 self.merge_prefixes(prefixes);

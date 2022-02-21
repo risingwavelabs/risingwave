@@ -20,7 +20,7 @@ impl Expr for Literal {
     fn return_type(&self) -> DataType {
         self.data_type
     }
-    fn bound_expr(self) -> ExprImpl {
+    fn to_expr_impl(self) -> ExprImpl {
         ExprImpl::Literal(Box::new(self))
     }
 }

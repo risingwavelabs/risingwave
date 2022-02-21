@@ -1,5 +1,4 @@
 risedev:
-
   ci-v2:
     - use: minio
     - use: meta-node
@@ -123,7 +122,6 @@ template:
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
 
-
   meta-node:
     # Meta-node listen address
     address: "127.0.0.1"
@@ -136,6 +134,12 @@ template:
 
     # Dashboard listen port
     dashboard-port: 5691
+
+    # Prometheus exporter listen address
+    exporter-address: "127.0.0.1"
+
+    # Prometheus exporter listen port
+    exporter-port: 1250
 
     # Id of this instance
     id: meta-node-${port}
@@ -156,6 +160,9 @@ template:
     # Compute-nodes used by this Prometheus instance
     provide-compute-node: "compute-node*"
 
+    # Meta-nodes used by this Prometheus instance
+    provide-meta-node: "meta-node*"
+
     # Minio instances used by this Prometheus instance
     provide-minio: "minio*"
 
@@ -174,7 +181,7 @@ template:
 
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
-  
+
   frontend-v2:
     # Listen address of frontend
     address: "127.0.0.1"

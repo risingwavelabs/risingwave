@@ -35,7 +35,7 @@ public class QueryManagerTest {
     QueryManager queryManager = injector.getInstance(QueryManager.class);
 
     QueryResultLocation resultLocation =
-        queryManager.schedule(newSingleNodePlan()).get(10, TimeUnit.SECONDS);
+        queryManager.schedule(newSingleNodePlan(), 0).get(10, TimeUnit.SECONDS);
 
     assertEquals(
         new DefaultWorkerNode("localhost", 1234).getRpcEndPoint(),

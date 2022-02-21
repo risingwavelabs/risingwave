@@ -94,9 +94,9 @@ impl EqJoinPredicate {
                 .iter()
                 .cloned()
                 .map(|(l, r)| {
-                    FunctionCall::new(ExprType::Equal, vec![l.bound_expr(), r.bound_expr()])
+                    FunctionCall::new(ExprType::Equal, vec![l.to_expr_impl(), r.to_expr_impl()])
                         .unwrap()
-                        .bound_expr()
+                        .to_expr_impl()
                 })
                 .collect(),
         }

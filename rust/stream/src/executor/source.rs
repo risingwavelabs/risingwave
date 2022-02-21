@@ -17,8 +17,9 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use crate::executor::monitor::DEFAULT_COMPUTE_STATS;
 use crate::executor::{Executor, Message, PkIndices, PkIndicesRef};
 
-/// `StreamSourceExecutor` is a streaming source from external systems such as Kafka
-pub struct StreamSourceExecutor {
+/// [`SourceExecutor`] is a streaming source, from risingwave's batch table, or external systems
+/// such as Kafka.
+pub struct SourceExecutor {
     source_id: TableId,
     source_desc: SourceDesc,
     column_ids: Vec<i32>,
@@ -42,7 +43,7 @@ pub struct StreamSourceExecutor {
     source_output_row_count: Counter<u64>,
 }
 
-impl StreamSourceExecutor {
+impl SourceExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         source_id: TableId,
@@ -85,7 +86,7 @@ impl StreamSourceExecutor {
             barrier_receiver,
             next_row_id: AtomicU64::from(0u64),
             first_execution: true,
-            identity: format!("StreamSourceExecutor {:X}", executor_id),
+            identity: format!("SourceExecutor {:X}", executor_id),
             attributes: vec![KeyValue::new("source_id", source_identify)],
             source_output_row_count: meter
                 .u64_counter("stream_source_output_rows_counts")
@@ -126,7 +127,7 @@ impl StreamSourceExecutor {
 }
 
 #[async_trait]
-impl Executor for StreamSourceExecutor {
+impl Executor for SourceExecutor {
     async fn next(&mut self) -> Result<Message> {
         if self.first_execution {
             self.reader.open().await?;
@@ -173,9 +174,9 @@ impl Executor for StreamSourceExecutor {
     }
 }
 
-impl Debug for StreamSourceExecutor {
+impl Debug for SourceExecutor {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("StreamSourceExecutor")
+        f.debug_struct("SourceExecutor")
             .field("source_id", &self.source_id)
             .field("column_ids", &self.column_ids)
             .field("pk_indices", &self.pk_indices)
@@ -200,7 +201,7 @@ mod tests {
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::*;
-    use crate::executor::{Barrier, Mutation, StreamSourceExecutor};
+    use crate::executor::{Barrier, Mutation, SourceExecutor};
 
     #[tokio::test]
     async fn test_table_source() -> Result<()> {
@@ -274,7 +275,7 @@ mod tests {
 
         let (barrier_sender, barrier_receiver) = unbounded_channel();
 
-        let mut source = StreamSourceExecutor::new(
+        let mut source = SourceExecutor::new(
             table_id,
             source_desc,
             column_ids,
@@ -283,7 +284,7 @@ mod tests {
             barrier_receiver,
             1,
             1,
-            "StreamSourceExecutor".to_string(),
+            "SourceExecutor".to_string(),
         )
         .unwrap();
 
@@ -294,9 +295,8 @@ mod tests {
             }))
             .unwrap();
 
-        let mut writer = table_source.create_writer();
         // Write 1st chunk
-        writer.write(chunk1).await?;
+        table_source.write_chunk(chunk1).await?;
 
         for _ in 0..2 {
             match source.next().await.unwrap() {
@@ -319,7 +319,7 @@ mod tests {
         }
 
         // Write 2nd chunk
-        writer.write(chunk2).await?;
+        table_source.write_chunk(chunk2).await?;
 
         if let Message::Chunk(chunk) = source.next().await.unwrap() {
             assert_eq!(3, chunk.columns().len());
@@ -378,7 +378,7 @@ mod tests {
         let col2_arr1: Arc<ArrayImpl> =
             Arc::new(array_nonnull! { Utf8Array, ["foo", "bar", "baz"] }.into());
 
-        let chunk1 = {
+        let chunk = {
             let rowid = Column::new(rowid_arr1.clone());
             let col1 = Column::new(col1_arr1.clone());
             let col2 = Column::new(col2_arr1.clone());
@@ -398,7 +398,7 @@ mod tests {
         let pk_indices = vec![0];
 
         let (barrier_sender, barrier_receiver) = unbounded_channel();
-        let mut source = StreamSourceExecutor::new(
+        let mut source = SourceExecutor::new(
             table_id,
             source_desc,
             column_ids,
@@ -407,12 +407,11 @@ mod tests {
             barrier_receiver,
             1,
             1,
-            "StreamSourceExecutor".to_string(),
+            "SourceExecutor".to_string(),
         )
         .unwrap();
 
-        let mut writer = table_source.create_writer();
-        writer.write(chunk1.clone()).await?;
+        table_source.write_chunk(chunk.clone()).await?;
 
         barrier_sender
             .send(Message::Barrier(
@@ -422,7 +421,7 @@ mod tests {
 
         source.next().await.unwrap();
         source.next().await.unwrap();
-        writer.write(chunk1).await?;
+        table_source.write_chunk(chunk).await?;
 
         Ok(())
     }

@@ -17,8 +17,6 @@ pub enum HummockError {
     ObjectIoError(String),
     #[error("Meta error {0}.")]
     MetaError(String),
-    #[error("No compact task.")]
-    NoCompactTaskFound,
     #[error("Invalid WriteBatch.")]
     InvalidWriteBatch,
 }
@@ -38,10 +36,6 @@ impl HummockError {
 
     pub fn checksum_mismatch(expected: u64, found: u64) -> TracedHummockError {
         Self::ChecksumMismatch { expected, found }.into()
-    }
-
-    pub fn no_compact_task_found() -> TracedHummockError {
-        Self::NoCompactTaskFound.into()
     }
 
     pub fn meta_error(error: impl ToString) -> TracedHummockError {

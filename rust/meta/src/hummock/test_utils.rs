@@ -54,7 +54,7 @@ pub fn get_sorted_sstable_ids(sstables: &[SstableInfo]) -> Vec<HummockSSTableId>
     sstables.iter().map(|table| table.id).sorted().collect_vec()
 }
 
-pub fn get_sorted_committed_sstable_ids(hummock_version: HummockVersion) -> Vec<HummockSSTableId> {
+pub fn get_sorted_committed_sstable_ids(hummock_version: &HummockVersion) -> Vec<HummockSSTableId> {
     hummock_version
         .levels
         .iter()

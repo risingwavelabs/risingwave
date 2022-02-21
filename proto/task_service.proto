@@ -27,6 +27,7 @@ message TaskInfo {
 message CreateTaskRequest {
   plan.TaskId task_id = 1;
   plan.PlanFragment plan = 2;
+  uint64 epoch = 3;
 }
 
 message CreateTaskResponse {

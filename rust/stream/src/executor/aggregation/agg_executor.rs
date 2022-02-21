@@ -29,9 +29,9 @@ pub struct AggState<S: StateStore> {
 const ROW_COUNT_COLUMN: usize = 0;
 
 impl<S: StateStore> AggState<S> {
-    pub async fn row_count(&mut self) -> Result<i64> {
+    pub async fn row_count(&mut self, epoch: u64) -> Result<i64> {
         Ok(self.managed_states[ROW_COUNT_COLUMN]
-            .get_output()
+            .get_output(epoch)
             .await?
             .map(|x| *x.as_int64())
             .unwrap_or(0))
@@ -56,14 +56,14 @@ impl<S: StateStore> AggState<S> {
     /// changes to the state. If the state is already marked dirty in this epoch, this function does
     /// no-op.
     /// After calling this function, `self.is_dirty()` will return `true`.
-    pub async fn may_mark_as_dirty(&mut self) -> Result<()> {
+    pub async fn may_mark_as_dirty(&mut self, epoch: u64) -> Result<()> {
         if self.is_dirty() {
             return Ok(());
         }
 
         let mut outputs = vec![];
         for state in &mut self.managed_states {
-            outputs.push(state.get_output().await?);
+            outputs.push(state.get_output(epoch).await?);
         }
         self.prev_states = Some(outputs);
         Ok(())
@@ -77,12 +77,13 @@ impl<S: StateStore> AggState<S> {
         builders: &mut [ArrayBuilderImpl],
         new_ops: &mut Vec<Op>,
         key: Option<&HashKey>,
+        epoch: u64,
     ) -> Result<bool> {
         if !self.is_dirty() {
             return Ok(false);
         }
 
-        let row_count = self.row_count().await?;
+        let row_count = self.row_count(epoch).await?;
         let prev_row_count = self.prev_row_count();
 
         // First several columns are used for group keys in HashAgg.
@@ -118,7 +119,7 @@ impl<S: StateStore> AggState<S> {
                     .iter_mut()
                     .zip_eq(self.managed_states.iter_mut())
                 {
-                    let data = state.get_output().await?;
+                    let data = state.get_output(epoch).await?;
                     trace!("append_datum (0 -> N): {:?}", &data);
                     builder.append_datum(&data)?;
                 }
@@ -166,7 +167,7 @@ impl<S: StateStore> AggState<S> {
                     self.prev_states.as_ref().unwrap().iter(),
                     self.managed_states.iter_mut(),
                 )) {
-                    let cur_state = cur_state.get_output().await?;
+                    let cur_state = cur_state.get_output(epoch).await?;
                     trace!(
                         "append_datum (N -> N): prev = {:?}, cur = {:?}",
                         prev_state,
@@ -199,9 +200,16 @@ pub trait AggExecutor: Executor {
 
     /// Flush the buffered chunk to the storage backend, and get the edits of the states. If there's
     /// no dirty states to flush, return `Ok(None)`.
-    async fn flush_data(&mut self, epoch: u64) -> Result<Option<StreamChunk>>;
+    async fn flush_data(&mut self) -> Result<Option<StreamChunk>>;
 
     fn input(&mut self) -> &mut dyn Executor;
+
+    /// Get back the current epoch used for storage reads and writes.
+    /// This epoch is the one carried by most recent barrier flowing through the executor.
+    fn current_epoch(&self) -> u64;
+
+    /// Update the current epoch to `new_epoch`, which is carried by a barrier.
+    fn update_epoch(&mut self, new_epoch: u64);
 }
 
 /// Get aggregation inputs by `agg_calls` and `columns`.
@@ -235,12 +243,15 @@ pub async fn agg_executor_next<E: AggExecutor>(executor: &mut E) -> Result<Messa
                 return Ok(Message::Barrier(barrier));
             }
             Message::Barrier(barrier) => {
-                if let Some(chunk) = executor.flush_data(barrier.epoch).await? {
+                let epoch = barrier.epoch;
+                if let Some(chunk) = executor.flush_data().await? {
                     // Cache the barrier_msg and send it later.
                     *executor.cached_barrier_message_mut() = Some(barrier);
+                    executor.update_epoch(epoch);
                     return Ok(Message::Chunk(chunk));
                 } else {
                     // No fresh data need to flush, just forward the barrier.
+                    executor.update_epoch(epoch);
                     return Ok(Message::Barrier(barrier));
                 }
             }
@@ -277,6 +288,7 @@ pub async fn generate_agg_state<S: StateStore>(
     agg_calls: &[AggCall],
     keyspace: &Keyspace<S>,
     pk_data_types: PkDataTypes,
+    epoch: u64,
 ) -> Result<AggState<S>> {
     let mut managed_states = vec![];
 
@@ -309,7 +321,7 @@ pub async fn generate_agg_state<S: StateStore>(
 
         if idx == ROW_COUNT_COLUMN {
             // For the rowcount state, we should record the rowcount.
-            let output = managed_state.get_output().await?;
+            let output = managed_state.get_output(epoch).await?;
             row_count = Some(output.as_ref().map(|x| *x.as_int64() as usize).unwrap_or(0));
         }
 

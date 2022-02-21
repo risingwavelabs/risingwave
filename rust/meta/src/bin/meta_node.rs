@@ -11,8 +11,11 @@ struct Opts {
     #[clap(long, default_value = "127.0.0.1:5690")]
     host: String,
 
-    #[clap(long, default_value = "127.0.0.1:5691")]
-    dashboard_host: String,
+    #[clap(long)]
+    dashboard_host: Option<String>,
+
+    #[clap(long)]
+    prometheus_host: Option<String>,
 }
 
 /// Configure log targets for all `RisingWave` crates. When new crates are added and TRACE level
@@ -56,9 +59,11 @@ async fn main() {
     tracing_subscriber::registry().with(fmt_layer).init();
 
     let addr = opts.host.parse().unwrap();
-    let dashboard_addr = opts.dashboard_host.parse().unwrap();
+    let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
+    let prometheus_addr = opts.prometheus_host.map(|x| x.parse().unwrap());
+
     info!("Starting meta server at {}", addr);
     let (join_handle, _shutdown_send) =
-        rpc_serve(addr, Some(dashboard_addr), MetaStoreBackend::Mem).await;
+        rpc_serve(addr, prometheus_addr, dashboard_addr, MetaStoreBackend::Mem).await;
     join_handle.await.unwrap();
 }

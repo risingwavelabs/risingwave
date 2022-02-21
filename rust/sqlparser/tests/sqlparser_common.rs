@@ -21,7 +21,6 @@
 #[macro_use]
 mod test_utils;
 use matches::assert_matches;
-use risingwave_common::try_match_expand;
 use risingwave_sqlparser::ast::*;
 use risingwave_sqlparser::keywords::ALL_KEYWORDS;
 use risingwave_sqlparser::parser::ParserError;
@@ -86,16 +85,6 @@ fn parse_insert_values() {
     }
 
     verified_stmt("INSERT INTO customer WITH foo AS (SELECT 1) SELECT * FROM foo UNION VALUES (1)");
-}
-
-#[test]
-fn parse_insert_invalid() {
-    let sql = "INSERT public.customer (id, name, active) VALUES (1, 2, 3)";
-    let res = parse_sql_statements(sql);
-    assert_eq!(
-        ParserError::ParserError("Expected INTO, found: public".to_string()),
-        res.unwrap_err()
-    );
 }
 
 #[test]
@@ -1475,35 +1464,6 @@ fn parse_create_table_as() {
 }
 
 #[test]
-fn parse_create_or_replace_table() {
-    let sql = "CREATE OR REPLACE TABLE t (a INT)";
-
-    match verified_stmt(sql) {
-        Statement::CreateTable {
-            name, or_replace, ..
-        } => {
-            assert_eq!(name.to_string(), "t".to_string());
-            assert!(or_replace);
-        }
-        _ => unreachable!(),
-    }
-
-    let sql = "CREATE TABLE t (a INT, b INT) AS SELECT 1 AS b, 2 AS a";
-    match verified_stmt(sql) {
-        Statement::CreateTable { columns, query, .. } => {
-            assert_eq!(columns.len(), 2);
-            assert_eq!(columns[0].to_string(), "a INT".to_string());
-            assert_eq!(columns[1].to_string(), "b INT".to_string());
-            assert_eq!(
-                query,
-                Some(Box::new(verified_query("SELECT 1 AS b, 2 AS a")))
-            );
-        }
-        _ => unreachable!(),
-    }
-}
-
-#[test]
 fn parse_create_table_with_on_delete_on_update_2in_any_order() -> Result<(), ParserError> {
     let sql = |options: &str| -> String {
         format!("create table X (y_id int references Y (id) {})", options)
@@ -1776,23 +1736,6 @@ fn parse_bad_constraint() {
             "Expected column name or constraint definition, found: EOF".to_string()
         ),
         res.unwrap_err()
-    );
-}
-
-#[test]
-fn parse_scalar_function_in_projection() {
-    let sql = "SELECT sqrt(id) FROM foo";
-    let select = verified_only_select(sql);
-    assert_eq!(
-        &Expr::Function(Function {
-            name: ObjectName(vec![Ident::new("sqrt")]),
-            args: vec![FunctionArg::Unnamed(FunctionArgExpr::Expr(
-                Expr::Identifier(Ident::new("id"))
-            ))],
-            over: None,
-            distinct: false,
-        }),
-        expr_from_projection(only(&select.projection))
     );
 }
 
@@ -3465,17 +3408,6 @@ fn parse_create_index() {
         _ => unreachable!(),
     }
 }
-#[test]
-fn parse_drop_index() {
-    let sql = "DROP INDEX idx_a";
-    match verified_stmt(sql) {
-        Statement::Drop(stmt) => {
-            assert_eq!(Ident::new("idx_a"), stmt.name);
-            assert_eq!(ObjectType::Index, stmt.object_type);
-        }
-        _ => unreachable!(),
-    }
-}
 
 #[test]
 fn parse_grant() {
@@ -3679,63 +3611,4 @@ fn all_keywords_sorted() {
     let mut copy = Vec::from(ALL_KEYWORDS);
     copy.sort_unstable();
     assert_eq!(copy, ALL_KEYWORDS)
-}
-
-#[test]
-fn parse_create_source() {
-    let res = parse_sql_statements("CREATE SOURCE");
-    assert_eq!(
-        ParserError::ParserError("Expected identifier, found: EOF".to_string()),
-        res.unwrap_err()
-    );
-
-    let res = parse_sql_statements("CREATE SOURCE src");
-    assert_eq!(
-        ParserError::ParserError("Expected ROW, found: EOF".to_string()),
-        res.unwrap_err()
-    );
-
-    let stmt = try_match_expand!(
-        verified_stmt("CREATE SOURCE src ROW FORMAT JSON",),
-        Statement::CreateSource
-    )
-    .unwrap();
-    assert_eq!(
-        stmt,
-        CreateSourceStatement {
-            source_name: Ident::new("src".to_string()),
-            if_not_exists: false,
-            with_properties: WithProperties(vec![]),
-            source_schema: SourceSchema::Json,
-        }
-    );
-
-    let stmt = try_match_expand!(
-    verified_stmt(
-      "CREATE SOURCE IF NOT EXISTS src WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001') ROW FORMAT PROTOBUF MESSAGE 'Foo' ROW SCHEMA LOCATION 'file://'",
-    ),
-    Statement::CreateSource
-  )
-  .unwrap();
-    assert_eq!(
-        stmt,
-        CreateSourceStatement {
-            source_name: Ident::new("src".to_string()),
-            if_not_exists: true,
-            with_properties: WithProperties(vec![
-                SqlOption {
-                    name: Ident::with_quote('\'', "kafka.topic"),
-                    value: Value::SingleQuotedString("abc".to_string()),
-                },
-                SqlOption {
-                    name: Ident::with_quote('\'', "kafka.servers"),
-                    value: Value::SingleQuotedString("localhost:1001".to_string()),
-                },
-            ]),
-            source_schema: SourceSchema::Protobuf(ProtobufSchema {
-                message_name: AstString("Foo".to_string()),
-                row_schema_location: AstString("file://".to_string()),
-            })
-        }
-    );
 }
