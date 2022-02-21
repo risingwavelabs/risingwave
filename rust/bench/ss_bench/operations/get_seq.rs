@@ -81,8 +81,8 @@ impl Operations {
         println!(
             "
     getseq
-    {}
-    QPS: {}  {} bytes/sec",
+      {}
+      QPS: {}  {} bytes/sec",
             stat, qps, bytes_pre_sec
         );
     }
