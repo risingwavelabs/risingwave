@@ -236,7 +236,7 @@ impl StructArray {
     }
 }
 
-#[derive(Clone, Debug, Eq, Ord, Default, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, Default, PartialEq, Hash)]
 pub struct StructValue {
     fields: Vec<Datum>,
 }
@@ -250,6 +250,12 @@ impl fmt::Display for StructValue {
 impl PartialOrd for StructValue {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         self.as_scalar_ref().partial_cmp(&other.as_scalar_ref())
+    }
+}
+
+impl Ord for StructValue {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.partial_cmp(other).unwrap()
     }
 }
 
