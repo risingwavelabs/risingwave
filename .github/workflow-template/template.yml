@@ -113,8 +113,9 @@ jobs:
 
       - name: Download sqllogictest
         run: |
-          curl -fL -o ~/.cargo/bin/sqllogictest https://github.com/singularity-data/sqllogictest-rs/releases/download/v0.3.0-pre/sqllogictest-linux-amd64
-          chmod +x ~/.cargo/bin/sqllogictest
+          cargo install sqllogictest --features bin --git https://github.com/BugenZhao/sqllogictest-rs
+          # curl -fL -o ~/.cargo/bin/sqllogictest https://github.com/singularity-data/sqllogictest-rs/releases/download/v0.3.0-pre/sqllogictest-linux-amd64
+          # chmod +x ~/.cargo/bin/sqllogictest
 
       - name: Download cargo-make
         run: |
@@ -235,8 +236,9 @@ jobs:
 
       - name: Download sqllogictest
         run: |
-          curl -fL -o ~/.cargo/bin/sqllogictest https://github.com/singularity-data/sqllogictest-rs/releases/download/v0.2.0/sqllogictest-linux-amd64
-          chmod +x ~/.cargo/bin/sqllogictest
+          cargo install sqllogictest --features bin --git https://github.com/BugenZhao/sqllogictest-rs
+          # curl -fL -o ~/.cargo/bin/sqllogictest https://github.com/singularity-data/sqllogictest-rs/releases/download/v0.2.0/sqllogictest-linux-amd64
+          # chmod +x ~/.cargo/bin/sqllogictest
 
       - name: Download cargo-make
         run: |
