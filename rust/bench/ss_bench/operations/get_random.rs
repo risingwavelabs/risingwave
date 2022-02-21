@@ -53,9 +53,6 @@ impl Operations {
                     sizes.push(size);
                 }
 
-                // dbg!(&latencies);
-                // dbg!(&sizes);
-
                 (latencies, sizes)
             })
             .collect_vec();
@@ -70,15 +67,14 @@ impl Operations {
         // calculate metrics
         let mut total_latencies = vec![];
         let mut total_size: usize = 0;
-        let _ = results.into_iter().map(|res| {
-            let (latencies, sizes) = res.unwrap();
-            dbg!(&latencies);
-            dbg!(&sizes);
-            total_latencies.extend(latencies.into_iter());
-            total_size += sizes.iter().sum::<usize>();
-        });
-        dbg!(&total_latencies);
-        dbg!(&total_size);
+        let _ = results
+            .into_iter()
+            .map(|res| {
+                let (latencies, sizes) = res.unwrap();
+                total_latencies.extend(latencies.into_iter());
+                total_size += sizes.iter().sum::<usize>();
+            })
+            .collect::<Vec<_>>();
         let stat = LatencyStat::new(total_latencies);
         let qps = opts.reads as u128 * 1_000_000_000 / total_time_nano as u128;
         let bytes_pre_sec = total_size as u128 * 1_000_000_000 / total_time_nano as u128;

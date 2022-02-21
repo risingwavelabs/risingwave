@@ -76,11 +76,14 @@ impl Operations {
         // calculate metrics
         let mut total_latencies = vec![];
         let mut total_sizes: usize = 0;
-        let _ = results.into_iter().map(|res| {
-            let (latencies, sizes) = res.unwrap();
-            total_latencies.extend(latencies);
-            total_sizes += sizes.iter().sum::<usize>();
-        });
+        let _ = results
+            .into_iter()
+            .map(|res| {
+                let (latencies, sizes) = res.unwrap();
+                total_latencies.extend(latencies);
+                total_sizes += sizes.iter().sum::<usize>();
+            })
+            .collect::<Vec<_>>();
         let stat = LatencyStat::new(total_latencies);
         let qps = opts.reads as u128 * 1_000_000_000 / total_time_nano as u128;
         let bytes_pre_sec = total_sizes as u128 * 1_000_000_000 / total_time_nano as u128;
