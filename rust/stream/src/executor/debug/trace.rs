@@ -34,7 +34,6 @@ pub struct TraceExecutor {
     actor_row_count: Counter<u64>,
 
     span_name: String,
-    logical_operator_info: String,
 }
 
 impl Debug for TraceExecutor {
@@ -60,7 +59,6 @@ impl TraceExecutor {
             .meter("compute_monitor", None);
 
         let span_name = format!("{input_desc}_{input_pos}_next");
-        let logical_operator_info = input.logical_operator_info().to_string();
 
         Self {
             input,
@@ -73,7 +71,6 @@ impl TraceExecutor {
                 .with_description("Total number of rows that have been ouput from each actor")
                 .init(),
             span_name,
-            logical_operator_info,
         }
     }
 }
@@ -84,7 +81,6 @@ impl super::DebugExecutor for TraceExecutor {
         let span_name = self.span_name.as_str();
         let input_desc = self.input_desc.as_str();
         let input_pos = self.input_pos;
-        let logical_operator_info = self.logical_operator_info.as_str();
 
         let input_message = self
             .input
@@ -95,7 +91,6 @@ impl super::DebugExecutor for TraceExecutor {
                 // For the upstream trace pipe, its output is our input.
                 next = input_desc,
                 input_pos = input_pos,
-                logical_operator = logical_operator_info,
             ))
             .await;
         match input_message {
