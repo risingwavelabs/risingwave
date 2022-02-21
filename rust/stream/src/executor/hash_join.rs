@@ -227,6 +227,9 @@ pub struct HashJoinExecutor<S: StateStore, const T: JoinTypePrimitive> {
 
     /// Logical Operator Info
     op_info: String,
+
+    /// Epoch
+    epoch: u64,
 }
 
 impl<S: StateStore, const T: JoinTypePrimitive> std::fmt::Debug for HashJoinExecutor<S, T> {
@@ -257,7 +260,8 @@ impl<S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<S,
                 Err(e) => Err(e),
             },
             AlignedMessage::Barrier(barrier) => {
-                self.flush_data(barrier.epoch).await?;
+                self.flush_data().await?;
+                self.update_epoch(barrier.epoch);
                 Ok(Message::Barrier(barrier))
             }
         }
@@ -360,10 +364,12 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
             debug_r,
             identity: format!("HashJoinExecutor {:X}", executor_id),
             op_info,
+            epoch: 0,
         }
     }
 
-    async fn flush_data(&mut self, epoch: u64) -> Result<()> {
+    async fn flush_data(&mut self) -> Result<()> {
+        let epoch = self.current_epoch();
         for side in [&mut self.side_l, &mut self.side_r] {
             let mut write_batch = side.keyspace.state_store().start_write_batch();
             for state in side.ht.values_mut() {
@@ -442,6 +448,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
         &mut self,
         chunk: StreamChunk,
     ) -> Result<Message> {
+        let epoch = self.current_epoch();
         let chunk = chunk.compact()?;
         let (ops, columns, visibility) = chunk.into_inner();
 
@@ -490,7 +497,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
                                     )
                                 });
                             let mut degree = 0;
-                            for matched_row in matched_rows.values_mut().await {
+                            for matched_row in matched_rows.values_mut(epoch).await {
                                 // TODO(yuhao-su): We should find a better way to eval the
                                 // expression without concat
                                 // two rows.
@@ -540,7 +547,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
                                 let pk = Self::pk_from_row_ref(&row, &side_update.pk_indices);
                                 v.remove(pk);
 
-                                for matched_row in matched_rows.values_mut().await {
+                                for matched_row in matched_rows.values_mut(epoch).await {
                                     let new_row = Self::row_concat(
                                         &row,
                                         side_update.start_pos,
@@ -594,7 +601,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
                                 // be corresponding nulls.
                                 Entry::Vacant(entry) => {
                                     if outer_side_null(T, SIDE) {
-                                        for matched_row in matched_rows.values().await {
+                                        for matched_row in matched_rows.values(epoch).await {
                                             stream_chunk_builder.append_row_matched(
                                                 Op::UpdateDelete,
                                                 &matched_row.row,
@@ -616,14 +623,14 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
                                 }
                             };
                             entry_value
-                                .insert(JoinRow::new(value, matched_rows.len().await as u64));
+                                .insert(JoinRow::new(value, matched_rows.len(epoch).await as u64));
                         }
                         Op::Delete | Op::UpdateDelete => {
                             if let Some(v) = side_update.ht.get_mut(&key) {
                                 let pk = Self::pk_from_row_ref(&row, &side_update.pk_indices);
                                 v.remove(pk);
-                                if outer_side_null(T, SIDE) && v.is_empty().await {
-                                    for matched_row in matched_rows.values().await {
+                                if outer_side_null(T, SIDE) && v.is_empty(epoch).await {
+                                    for matched_row in matched_rows.values(epoch).await {
                                         stream_chunk_builder.append_row(
                                             Op::UpdateDelete,
                                             &row,
@@ -640,7 +647,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
                         }
                     };
                     if !outer_side_null(T, SIDE) || !null_row_updated {
-                        for matched_row in matched_rows.values().await {
+                        for matched_row in matched_rows.values(epoch).await {
                             assert_eq!(matched_row.size(), side_match.col_types.len());
                             stream_chunk_builder.append_row(*op, &row, &matched_row.row)?;
                         }
@@ -683,6 +690,17 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
         let new_chunk = stream_chunk_builder.finish()?;
 
         Ok(Message::Chunk(new_chunk))
+    }
+
+    /// Get back the current epoch used for storage reads and writes.
+    /// This epoch is the one carried by most recent barrier flowing through the executor.
+    fn current_epoch(&self) -> u64 {
+        self.epoch
+    }
+
+    /// Update the current epoch to `new_epoch`, which is carried by a barrier.
+    fn update_epoch(&mut self, new_epoch: u64) {
+        self.epoch = new_epoch;
     }
 }
 
