@@ -7,6 +7,7 @@ use risingwave_pb::meta::SubscribeResponse;
 use risingwave_rpc_client::MetaClient;
 use tonic::Streaming;
 
+/// Used to update based on notification from meta.
 pub(crate) struct ObserverManager {
     rx: Streaming<SubscribeResponse>,
     worker_nodes: Option<Arc<RwLock<Vec<WorkerNode>>>>,
