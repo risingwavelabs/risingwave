@@ -138,10 +138,12 @@ impl Executor for OrderByExecutor {
         self.child.open().await?;
 
         if !self.disable_encoding {
+            let schema = self.schema();
             self.encodable = self
                 .order_pairs
                 .iter()
-                .all(|pair| is_type_encodable(pair.column.return_type()))
+                .map(|pair| schema.fields[pair.column_idx].data_type)
+                .all(|t| is_type_encodable(t))
         }
 
         self.collect_child_data().await?;
@@ -288,15 +290,13 @@ mod tests {
         };
         let mut mock_executor = MockExecutor::new(schema);
         mock_executor.add(data_chunk);
-        let input_ref_1 = InputRefExpression::new(DataType::Int32, 0);
-        let input_ref_2 = InputRefExpression::new(DataType::Int32, 1);
         let order_pairs = vec![
             OrderPair {
-                column: Box::new(input_ref_2),
+                column_idx: 1,
                 order_type: OrderType::Ascending,
             },
             OrderPair {
-                column: Box::new(input_ref_1),
+                column_idx: 0,
                 order_type: OrderType::Ascending,
             },
         ];
@@ -342,15 +342,13 @@ mod tests {
         };
         let mut mock_executor = MockExecutor::new(schema);
         mock_executor.add(data_chunk);
-        let input_ref_1 = InputRefExpression::new(DataType::Float32, 0);
-        let input_ref_2 = InputRefExpression::new(DataType::Float64, 1);
         let order_pairs = vec![
             OrderPair {
-                column: Box::new(input_ref_2),
+                column_idx: 1,
                 order_type: OrderType::Ascending,
             },
             OrderPair {
-                column: Box::new(input_ref_1),
+                column_idx: 0,
                 order_type: OrderType::Ascending,
             },
         ];
@@ -405,15 +403,13 @@ mod tests {
         };
         let mut mock_executor = MockExecutor::new(schema);
         mock_executor.add(data_chunk);
-        let input_ref_1 = InputRefExpression::new(DataType::Varchar, 0);
-        let input_ref_2 = InputRefExpression::new(DataType::Varchar, 1);
         let order_pairs = vec![
             OrderPair {
-                column: Box::new(input_ref_2),
+                column_idx: 1,
                 order_type: OrderType::Ascending,
             },
             OrderPair {
-                column: Box::new(input_ref_1),
+                column_idx: 0,
                 order_type: OrderType::Ascending,
             },
         ];
@@ -490,25 +486,21 @@ mod tests {
             };
             let mut mock_executor = MockExecutor::new(schema);
             mock_executor.add(data_chunk);
-            let input_ref_0 = InputRefExpression::new(DataType::Int16, 0);
-            let input_ref_1 = InputRefExpression::new(DataType::Boolean, 1);
-            let input_ref_2 = InputRefExpression::new(DataType::Float32, 2);
-            let input_ref_3 = InputRefExpression::new(DataType::Varchar, 3);
             let order_pairs = vec![
                 OrderPair {
-                    column: Box::new(input_ref_1),
+                    column_idx: 1,
                     order_type: OrderType::Ascending,
                 },
                 OrderPair {
-                    column: Box::new(input_ref_0),
+                    column_idx: 0,
                     order_type: OrderType::Descending,
                 },
                 OrderPair {
-                    column: Box::new(input_ref_3),
+                    column_idx: 3,
                     order_type: OrderType::Descending,
                 },
                 OrderPair {
-                    column: Box::new(input_ref_2),
+                    column_idx: 2,
                     order_type: OrderType::Ascending,
                 },
             ];

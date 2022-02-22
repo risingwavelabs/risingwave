@@ -31,7 +31,7 @@ impl OrderType {
 #[derive(Debug)]
 pub struct OrderPair {
     pub order_type: OrderType,
-    pub column: Box<InputRefExpression>,
+    pub column_idx: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -125,8 +125,8 @@ pub fn compare_two_row(
     rhs_idx: usize,
 ) -> Result<Ordering> {
     for order_pair in order_pairs.iter() {
-        let lhs_array = order_pair.column.eval_immut(lhs_datachunk)?;
-        let rhs_array = order_pair.column.eval_immut(rhs_datachunk)?;
+        let lhs_array = lhs_datachunk.column_at(order_pair.column_idx)?.array();
+        let rhs_array = rhs_datachunk.column_at(order_pair.column_idx)?.array();
         macro_rules! gen_match {
         ($lhs: ident, $rhs: ident, [$( $tt: ident), *]) => {
             match ($lhs, $rhs) {
@@ -165,9 +165,7 @@ pub fn fetch_orders(column_orders: &[ColumnOrder]) -> Result<Vec<OrderPair>> {
     let mut order_pairs = Vec::<OrderPair>::new();
     for column_order in column_orders {
         let order_type: ProstOrderType = column_order.get_order_type()?;
-        let return_type = DataType::from(column_order.get_return_type()?);
         let input_ref: &InputRefExpr = column_order.get_input_ref()?;
-        let input_ref_expr = InputRefExpression::new(return_type, input_ref.column_idx as usize);
         order_pairs.push(OrderPair {
             order_type: match order_type {
                 ProstOrderType::Ascending => Ok(OrderType::Ascending),
@@ -176,7 +174,7 @@ pub fn fetch_orders(column_orders: &[ColumnOrder]) -> Result<Vec<OrderPair>> {
                     "Invalid OrderType",
                 )))),
             }?,
-            column: Box::new(input_ref_expr),
+            column_idx: input_ref.column_idx as usize,
         });
     }
     Ok(order_pairs)

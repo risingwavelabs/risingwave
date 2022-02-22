@@ -269,9 +269,8 @@ mod tests {
         for _ in 0..num_sources {
             proto_sources.push(ProstExchangeSource::default());
         }
-        let input_ref_1 = InputRefExpression::new(DataType::Int32, 0);
         let order_pairs = Arc::new(vec![OrderPair {
-            column: Box::new(input_ref_1),
+            column_idx: 0,
             order_type: OrderType::Ascending,
         }]);
 

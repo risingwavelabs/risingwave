@@ -176,15 +176,13 @@ mod tests {
         };
         let mut mock_executor = MockExecutor::new(schema);
         mock_executor.add(data_chunk);
-        let input_ref_0 = InputRefExpression::new(DataType::Int32, 0);
-        let input_ref_1 = InputRefExpression::new(DataType::Int32, 1);
         let order_pairs = vec![
             OrderPair {
-                column: Box::new(input_ref_1),
+                column_idx: 1,
                 order_type: OrderType::Ascending,
             },
             OrderPair {
-                column: Box::new(input_ref_0),
+                column_idx: 0,
                 order_type: OrderType::Ascending,
             },
         ];
