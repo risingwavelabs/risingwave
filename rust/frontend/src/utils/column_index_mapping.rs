@@ -56,7 +56,7 @@ impl ColIndexMapping {
         Self::new(map)
     }
 
-    /// return iter of (src, dst) with no order
+    /// return iter of (src, dst) order by src
     pub fn mapping_pairs(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
         self.map
             .iter()
