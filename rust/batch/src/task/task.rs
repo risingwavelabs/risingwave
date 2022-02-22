@@ -230,10 +230,8 @@ impl BatchTaskExecution {
                 }
             });
 
-            if let Err(join_error) = join_handle.await {
-                if join_error.is_panic() {
-                    error!("Batch task {:?} panic!", task_id_cloned);
-                }
+            if let Err(join_error) = join_handle.await && join_error.is_panic() {
+                error!("Batch task {:?} panic!", task_id_cloned);
             }
         });
         Ok(())
