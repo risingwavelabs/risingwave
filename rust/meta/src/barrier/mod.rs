@@ -208,6 +208,8 @@ where
             notifiers.iter_mut().for_each(Notifier::notify_to_send);
             // wait all barriers collected
             let collect_result = try_join_all(collect_futures).await;
+            // TODO #96: This is a temporary implementation of commit epoch. Refactor after hummock
+            // shared buffer is deployed.
             match collect_result {
                 Ok(_) => {
                     self.hummock_manager.commit_epoch(epoch).await?;

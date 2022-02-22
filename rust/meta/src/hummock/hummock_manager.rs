@@ -520,8 +520,15 @@ where
         )
         .await?
         .unwrap();
+        // TODO: return error instead of panic
+        if epoch <= hummock_version.max_committed_epoch {
+            panic!(
+                "Epoch {} <= max_committed_epoch {}",
+                epoch, hummock_version.max_committed_epoch
+            );
+        }
 
-        // TODO #447: the epoch should fail and rollback if previous any epoch is uncommitted.
+        // TODO #447: the epoch should fail and rollback if any precedent epoch is uncommitted.
         // get tables in the committing epoch
         if let Some(idx) = hummock_version
             .uncommitted_epochs
@@ -546,19 +553,15 @@ where
 
             // remove the epoch from uncommitted_epochs and update max_committed_epoch
             hummock_version.uncommitted_epochs.swap_remove(idx);
-            if epoch > hummock_version.max_committed_epoch {
-                hummock_version.max_committed_epoch = epoch;
-            }
-
-            // create new_version
-            hummock_version.id = new_version_id;
-            hummock_version.upsert_in_transaction(&mut transaction)?;
-
-            self.commit_trx(versioning_guard.meta_store_ref.as_ref(), transaction, None)
-                .await
-        } else {
-            Ok(())
         }
+        // Create a new_version, possibly merely to bump up the version id and max_committed_epoch.
+        hummock_version.max_committed_epoch = epoch;
+        hummock_version.id = new_version_id;
+        hummock_version.upsert_in_transaction(&mut transaction)?;
+        self.commit_trx(versioning_guard.meta_store_ref.as_ref(), transaction, None)
+            .await?;
+        tracing::trace!("new committed epoch {}", epoch);
+        Ok(())
     }
 
     pub async fn abort_epoch(&self, epoch: HummockEpoch) -> Result<()> {

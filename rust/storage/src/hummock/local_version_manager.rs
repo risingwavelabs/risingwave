@@ -1,19 +1,20 @@
 use std::collections::btree_map::BTreeMap;
-use std::ops::{Deref, DerefMut};
+use std::ops::DerefMut;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
-use itertools::Itertools;
 use moka::future::Cache;
 use parking_lot::{Mutex, RwLock};
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tokio::sync::mpsc::error::TryRecvError;
 use risingwave_pb::hummock::{HummockVersion, Level, LevelType};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use super::Block;
 use crate::hummock::cloud::{get_sst_data_path, get_sst_meta};
-use crate::hummock::{HummockRefCount, HummockResult, HummockSSTableId, HummockVersionId, SSTable, HummockEpoch, INVALID_VERSION_ID, HummockError};
 use crate::hummock::hummock_meta_client::HummockMetaClient;
+use crate::hummock::{
+    HummockEpoch, HummockError, HummockResult, HummockSSTableId, HummockVersionId, SSTable,
+    INVALID_VERSION_ID,
+};
 use crate::object::ObjectStore;
 
 pub struct ScopedLocalVersion {
@@ -28,10 +29,13 @@ impl Drop for ScopedLocalVersion {
 }
 
 impl ScopedLocalVersion {
-    fn new(version: Arc<HummockVersion>, unpin_worker: UnboundedSender<HummockVersionId>) -> ScopedLocalVersion {
+    fn new(
+        version: Arc<HummockVersion>,
+        unpin_worker: UnboundedSender<HummockVersionId>,
+    ) -> ScopedLocalVersion {
         ScopedLocalVersion {
             version,
-            unpin_worker_tx: unpin_worker
+            unpin_worker_tx: unpin_worker,
         }
     }
 
@@ -39,6 +43,7 @@ impl ScopedLocalVersion {
         self.version.id
     }
 
+    // TODO: may return only committed levels in some cases.
     pub fn levels(&self) -> Vec<Level> {
         let uncommitted_level = self
             .version
@@ -81,7 +86,8 @@ impl LocalVersionManager {
     ) -> LocalVersionManager {
         let (update_notifier_tx, _) = tokio::sync::watch::channel(INVALID_VERSION_ID);
         let (unpin_worker_tx, unpin_worker_rx) = tokio::sync::mpsc::unbounded_channel();
-        let instance = LocalVersionManager {
+
+        LocalVersionManager {
             current_version: RwLock::new(None),
             sstables: RwLock::new(BTreeMap::new()),
             obj_client,
@@ -90,36 +96,41 @@ impl LocalVersionManager {
                 block_cache
             } else {
                 #[cfg(test)]
-                    {
-                        Arc::new(Cache::new(2333))
-                    }
+                {
+                    Arc::new(Cache::new(2333))
+                }
                 #[cfg(not(test))]
-                    {
-                        panic!("must enable block cache in production mode")
-                    }
+                {
+                    panic!("must enable block cache in production mode")
+                }
             },
             update_notifier_tx,
             unpin_worker_tx,
-            unpin_worker_rx: Mutex::new(Some(unpin_worker_rx))
-        };
-        instance
+            unpin_worker_rx: Mutex::new(Some(unpin_worker_rx)),
+        }
     }
 
-    pub async fn start_workers(local_version_manager: Arc<LocalVersionManager>, hummock_meta_client: Arc<dyn HummockMetaClient>) {
+    pub async fn start_workers(
+        local_version_manager: Arc<LocalVersionManager>,
+        hummock_meta_client: Arc<dyn HummockMetaClient>,
+    ) {
         let unpin_worker_rx = local_version_manager.unpin_worker_rx.lock().take();
         if let Some(unpin_worker_rx) = unpin_worker_rx {
             // Pin and get latest version.
-            tokio::spawn(LocalVersionManager::start_pin_worker(Arc::downgrade(&local_version_manager), hummock_meta_client.clone()));
+            tokio::spawn(LocalVersionManager::start_pin_worker(
+                Arc::downgrade(&local_version_manager),
+                hummock_meta_client.clone(),
+            ));
             // Unpin unused version.
-            tokio::spawn(LocalVersionManager::start_unpin_worker(unpin_worker_rx, hummock_meta_client));
+            tokio::spawn(LocalVersionManager::start_unpin_worker(
+                unpin_worker_rx,
+                hummock_meta_client,
+            ));
         }
     }
 
     /// Update cached version if the new version is of greater id
-    pub fn try_set_version(
-        &self,
-        hummock_version: HummockVersion,
-    ) -> bool {
+    pub fn try_set_version(&self, hummock_version: HummockVersion) -> bool {
         let new_version_id = hummock_version.id;
         let mut guard = self.current_version.write();
         match guard.as_ref() {
@@ -129,9 +140,12 @@ impl LocalVersionManager {
             _ => {}
         }
         // Update cached version
-        *guard.deref_mut() = Some(Arc::new(ScopedLocalVersion::new(Arc::new(hummock_version), self.unpin_worker_tx.clone())));
+        *guard.deref_mut() = Some(Arc::new(ScopedLocalVersion::new(
+            Arc::new(hummock_version),
+            self.unpin_worker_tx.clone(),
+        )));
         self.update_notifier_tx.send(new_version_id).ok();
-        return true;
+        true
     }
 
     /// Wait until the local hummock version contains the given committed epoch
@@ -156,10 +170,8 @@ impl LocalVersionManager {
 
     pub fn get_version(self: &Arc<LocalVersionManager>) -> HummockResult<Arc<ScopedLocalVersion>> {
         match self.current_version.read().as_ref() {
-            None => { Err(HummockError::meta_error("No version found.")) }
-            Some(current_version) => {
-                Ok(current_version.clone())
-            }
+            None => Err(HummockError::meta_error("No version found.")),
+            Some(current_version) => Ok(current_version.clone()),
         }
     }
 
@@ -217,7 +229,10 @@ impl LocalVersionManager {
         Ok(out)
     }
 
-    async fn start_pin_worker(local_version_manager: Weak<LocalVersionManager>, hummock_meta_client: Arc<dyn HummockMetaClient>) {
+    async fn start_pin_worker(
+        local_version_manager: Weak<LocalVersionManager>,
+        hummock_meta_client: Arc<dyn HummockMetaClient>,
+    ) {
         let mut min_interval = tokio::time::interval(Duration::from_millis(100));
         loop {
             min_interval.tick().await;
@@ -229,7 +244,10 @@ impl LocalVersionManager {
         }
     }
 
-    async fn start_unpin_worker(mut rx: UnboundedReceiver<HummockVersionId>, hummock_meta_client: Arc<dyn HummockMetaClient>) {
+    async fn start_unpin_worker(
+        mut rx: UnboundedReceiver<HummockVersionId>,
+        hummock_meta_client: Arc<dyn HummockMetaClient>,
+    ) {
         loop {
             match rx.recv().await {
                 None => {

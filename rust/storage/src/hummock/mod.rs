@@ -47,7 +47,7 @@ use self::multi_builder::CapacitySplitTableBuilder;
 pub use self::state_store::*;
 use self::utils::bloom_filter_sstables;
 use super::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
-use crate::hummock::hummock_meta_client::{HummockMetaClient};
+use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::iterator::ReverseUserIterator;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::object::ObjectStore;
@@ -146,7 +146,11 @@ impl HummockStorage {
         let rx = Arc::new(PLMutex::new(Some(trigger_compact_rx)));
         let rx_for_compact = rx.clone();
 
-        LocalVersionManager::start_workers(local_version_manager.clone(), hummock_meta_client.clone()).await;
+        LocalVersionManager::start_workers(
+            local_version_manager.clone(),
+            hummock_meta_client.clone(),
+        )
+        .await;
         // Ensure at least one available version in cache.
         local_version_manager.wait_epoch(HummockEpoch::MIN).await;
 
@@ -417,7 +421,8 @@ impl HummockStorage {
 
         // Add all tables at once.
         let timer = self.stats.batch_write_add_l0_latency.start_timer();
-        let version = self.hummock_meta_client()
+        let version = self
+            .hummock_meta_client()
             .add_tables(
                 epoch,
                 tables
@@ -435,6 +440,7 @@ impl HummockStorage {
             .await?;
         timer.observe_duration();
 
+        // TODO #93: enable compactor
         // Notify the compactor
         self.tx.send(()).ok();
 
