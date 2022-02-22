@@ -254,7 +254,7 @@ jobs:
       - name: Run 3-node regress tests (batch)
         run: |
           ~/cargo-make/makers clean-data
-          ~/cargo-make/makers ci-3node
+          RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-3node
           psql --version
           RUST_LOG=info cd rust && timeout 40s target/debug/risingwave_regress_test -h 127.0.0.1 \
             -p ${{ env.RW_PORT }} \

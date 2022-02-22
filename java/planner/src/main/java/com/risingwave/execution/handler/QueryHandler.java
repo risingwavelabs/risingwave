@@ -1,5 +1,6 @@
 package com.risingwave.execution.handler;
 
+import com.risingwave.catalog.TableCatalog;
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.execution.handler.cache.ScopedSnapshot;
 import com.risingwave.execution.result.BatchDataChunkResult;
@@ -7,6 +8,7 @@ import com.risingwave.execution.result.CommandResult;
 import com.risingwave.pgwire.database.PgResult;
 import com.risingwave.planner.planner.batch.BatchPlanner;
 import com.risingwave.planner.rel.physical.BatchPlan;
+import com.risingwave.planner.rel.physical.RwBatchInsert;
 import com.risingwave.proto.computenode.GetDataRequest;
 import com.risingwave.proto.computenode.GetDataResponse;
 import com.risingwave.proto.plan.TaskSinkId;
@@ -26,6 +28,11 @@ import org.slf4j.LoggerFactory;
 public class QueryHandler implements SqlHandler {
 
   private static final Logger log = LoggerFactory.getLogger(QueryHandler.class);
+
+  // When this env var is set, for inserting into TABLE_V2, we call `FLUSH` implicitly to ensure the
+  // data is inserted.
+  // Used for regression tests.
+  private static final String IMPLICIT_FLUSH_ENV_VAR_KEY = "RW_IMPLICIT_FLUSH";
 
   @Override
   public PgResult handle(SqlNode ast, ExecutionContext context) {
@@ -62,6 +69,19 @@ public class QueryHandler implements SqlHandler {
       throw e;
     } catch (Exception e) {
       throw new RuntimeException(e);
+    }
+
+    var implicitFlush = System.getenv(IMPLICIT_FLUSH_ENV_VAR_KEY) != null;
+    if (implicitFlush) {
+      var isInsert = plan.getRoot() instanceof RwBatchInsert;
+      if (isInsert) {
+        var insert = (RwBatchInsert) plan.getRoot();
+        var table = insert.getTable().unwrapOrThrow(TableCatalog.class);
+        if (table.isAssociatedMaterializedView()) {
+          log.debug("flush after inserting into table_v2 / associated materialized view");
+          new FlushHandler().handle(null, context);
+        }
+      }
     }
 
     // TODO: We need a better solution for this.
