@@ -37,7 +37,7 @@ impl RemoteInput {
         up_down_ids: UpDownActorIds,
         sender: Sender<Message>,
     ) -> Result<Self> {
-        let mut client = ComputeClient::new(&addr).await.unwrap().get_channel();
+        let mut client = ComputeClient::new(&addr).await?.get_channel();
         let req = GetStreamRequest {
             up_fragment_id: up_down_ids.0,
             down_fragment_id: up_down_ids.1,

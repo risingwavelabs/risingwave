@@ -207,8 +207,12 @@ impl StreamManagerCore {
         Self::with_store_and_context(state_store, SharedContext::new(addr))
     }
 
-    fn get_actor_info(&mut self) -> &mut HashMap<u32, ActorInfo> {
-        &mut self.actor_infos
+    fn get_actor_info(&self, actor_id: &u32) -> Result<&ActorInfo> {
+        self.actor_infos.get(actor_id).ok_or_else(|| {
+            RwError::from(ErrorCode::InternalError(
+                "upstream actor not found in info table".into(),
+            ))
+        })
     }
 
     fn with_store_and_context(state_store: StateStoreImpl, context: SharedContext) -> Self {
@@ -244,16 +248,7 @@ impl StreamManagerCore {
         let outputs = downstreams
             .iter()
             .map(|down_id| {
-                let host_addr = self
-                    .get_actor_info()
-                    .get(down_id)
-                    .ok_or_else(|| {
-                        RwError::from(ErrorCode::InternalError(format!(
-                            "create dispatcher error: channel between {} and {} does not exist",
-                            actor_id, down_id
-                        )))
-                    })?
-                    .get_host()?;
+                let host_addr = self.get_actor_info(down_id)?.get_host()?;
                 let downstream_addr = host_addr.to_socket_addr()?;
                 let tx = self.context.take_sender(&(actor_id, *down_id))?;
                 if is_local_address(&downstream_addr, &self.context.addr) {
@@ -704,15 +699,7 @@ impl StreamManagerCore {
                 if *up_id == 0 {
                     Ok(self.mock_source.1.take().unwrap())
                 } else {
-                    let upstream_addr = self
-                        .get_actor_info()
-                        .get(up_id)
-                        .ok_or_else(|| {
-                            RwError::from(ErrorCode::InternalError(
-                                "upstream actor not found in info table".into(),
-                            ))
-                        })?
-                        .get_host()?;
+                    let upstream_addr = self.get_actor_info(up_id)?.get_host()?;
                     let upstream_socket_addr = upstream_addr.to_socket_addr()?;
                     if !is_local_address(&upstream_socket_addr, &self.context.addr) {
                         // Get the sender for `RemoteInput` to forward received messages to
@@ -813,8 +800,7 @@ impl StreamManagerCore {
         req: stream_service::BroadcastActorInfoTableRequest,
     ) -> Result<()> {
         for actor in req.get_info() {
-            self.get_actor_info()
-                .insert(actor.get_actor_id(), actor.clone());
+            self.actor_infos.insert(actor.get_actor_id(), actor.clone());
         }
         Ok(())
     }
@@ -825,7 +811,7 @@ impl StreamManagerCore {
         let handle = self.handles.remove(&actor_id).unwrap();
         self.context.retain(|&(up_id, _)| up_id != actor_id);
 
-        self.get_actor_info().remove(&actor_id);
+        self.actor_infos.remove(&actor_id);
         self.actors.remove(&actor_id);
         // Task should have already stopped when this method is invoked.
         handle.abort();

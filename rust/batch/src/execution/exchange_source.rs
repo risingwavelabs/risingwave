@@ -32,7 +32,7 @@ pub struct GrpcExchangeSource {
 
 impl GrpcExchangeSource {
     pub async fn create(addr: SocketAddr, task_id: TaskId, sink_id: TaskSinkId) -> Result<Self> {
-        let mut client = ComputeClient::new(&addr).await.unwrap().get_channel();
+        let mut client = ComputeClient::new(&addr).await?.get_channel();
         let stream = client
             .get_data(GetDataRequest {
                 sink_id: Some(sink_id.to_prost()),

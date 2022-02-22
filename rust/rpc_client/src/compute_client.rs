@@ -23,7 +23,7 @@ impl ComputeClient {
         Ok(Self { channel: client })
     }
 
-    pub fn get_channel(&mut self) -> ExchangeServiceClient<Channel> {
+    pub fn get_channel(&self) -> ExchangeServiceClient<Channel> {
         self.channel.clone()
     }
 }
