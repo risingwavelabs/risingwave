@@ -1,6 +1,7 @@
 use super::super::plan_node::*;
 use super::Convention;
 use crate::optimizer::PlanRef;
+use itertools::Itertools;
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
@@ -52,7 +53,7 @@ impl Order {
         if self.field_order.len() < other.field_order.len() {
             return false;
         }
-        for (order, other_order) in self.field_order.iter().zip(other.field_order.iter()) {
+        for (order, other_order) in self.field_order.iter().zip_eq(other.field_order.iter()) {
             if order.index != other_order.index || !order.direct.satisfies(&other_order.direct) {
                 return false;
             }
