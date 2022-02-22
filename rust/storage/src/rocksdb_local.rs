@@ -103,7 +103,8 @@ impl RocksDBStateStoreIter {
             } else {
                 seek_key = SeekKey::from(start_key.as_slice());
             }
-            iter.seek(seek_key).map_err(|e| RwError::from(InternalError(e)))?;
+            iter.seek(seek_key)
+                .map_err(|e| RwError::from(InternalError(e)))?;
             Ok(Self {
                 store,
                 iter: Some(Box::new(iter)),
