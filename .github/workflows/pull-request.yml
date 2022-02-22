@@ -129,7 +129,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-3node
-          timeout 6m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
+          timeout 3m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
@@ -139,7 +139,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-v2
-          timeout 3m sqllogictest -p 4566 -d dev './e2e_test/v2/*.slt'
+          timeout 1m sqllogictest -p 4566 -d dev './e2e_test/v2/*.slt'
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
@@ -149,7 +149,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           RW_NO_CACHE=1 ~/cargo-make/makers ci-3node
-          timeout 6m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
+          timeout 3m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
@@ -159,7 +159,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-3node
-          timeout 5m sqllogictest -p 4567 -d dev './e2e_test/batch/**/*.slt'
+          timeout 3m sqllogictest -p 4567 -d dev './e2e_test/batch/**/*.slt'
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
