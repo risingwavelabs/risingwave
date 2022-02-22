@@ -89,7 +89,7 @@ impl TestRunner {
 
     pub fn run_task(&mut self, plan: &PlanFragment) -> Result<()> {
         let task_manager = self.env.task_manager();
-        task_manager.fire_task(self.env.clone(), &self.tid, plan.clone())
+        task_manager.fire_task(self.env.clone(), &self.tid, plan.clone(), u64::MAX)
     }
 
     pub async fn collect_task_output(

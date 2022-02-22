@@ -308,16 +308,7 @@ where
         )
         .await?
         .unwrap();
-        // TODO #2336 Because e2e checkpoint is not ready yet, we temporarily return the maximum
-        // write_batch epoch to enable uncommitted read.
-        let max_committed_epoch = version
-            .uncommitted_epochs
-            .iter()
-            .map(|u| u.epoch)
-            .max()
-            .unwrap_or(INVALID_EPOCH);
-        // let max_committed_epoch = version.max_committed_epoch;
-
+        let max_committed_epoch = version.max_committed_epoch;
         let mut context_pinned_snapshot = HummockContextPinnedSnapshot::select(
             &*versioning_guard.meta_store_ref,
             &HummockContextRefId { id: context_id },

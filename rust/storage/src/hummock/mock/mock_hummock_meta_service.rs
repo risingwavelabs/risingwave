@@ -90,23 +90,14 @@ impl MockHummockMetaService {
     }
 
     pub fn pin_snapshot(&self, _request: PinSnapshotRequest) -> PinSnapshotResponse {
-        // let mut guard = self.inner.lock();
-        // let ref_count_entry = guard.snapshot_ref_counts.entry(guard.max_committed_epoch);
-        // *ref_count_entry.or_insert(0) += 1;
-        // TODO #2336 Because e2e checkpoint is not ready yet, we temporarily return the maximum
-        // write_batch epoch to enable uncommitted read.
-        let guard = self.inner.lock();
-        let greatest_version = guard.versions.values().last().unwrap().clone();
-        let maximum_uncommitted_epoch = greatest_version
-            .uncommitted_epochs
-            .iter()
-            .map(|uncommitted_epoch| uncommitted_epoch.epoch)
-            .max()
-            .unwrap_or(INVALID_EPOCH);
+        let mut guard = self.inner.lock();
+        let max_committed_epoch = guard.max_committed_epoch;
+        let ref_count_entry = guard.snapshot_ref_counts.entry(max_committed_epoch);
+        *ref_count_entry.or_insert(0) += 1;
         PinSnapshotResponse {
             status: None,
             snapshot: Some(HummockSnapshot {
-                epoch: maximum_uncommitted_epoch,
+                epoch: max_committed_epoch,
             }),
         }
     }
