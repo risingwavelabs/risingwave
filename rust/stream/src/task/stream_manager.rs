@@ -800,7 +800,14 @@ impl StreamManagerCore {
         req: stream_service::BroadcastActorInfoTableRequest,
     ) -> Result<()> {
         for actor in req.get_info() {
-            self.actor_infos.insert(actor.get_actor_id(), actor.clone());
+            let ret = self.actor_infos.insert(actor.get_actor_id(), actor.clone());
+            if ret.is_some() {
+                return Err(ErrorCode::InternalError(format!(
+                    "duplicated actor {}",
+                    actor.get_actor_id()
+                ))
+                .into());
+            }
         }
         Ok(())
     }
