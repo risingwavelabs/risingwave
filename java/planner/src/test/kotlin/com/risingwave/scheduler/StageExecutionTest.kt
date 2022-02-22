@@ -21,11 +21,11 @@ class StageExecutionTest {
     Mockito.`when`(stage.stageId).thenReturn(StageId(QueryId("abc"), 1))
 
     val tasks = IntStream.range(0, 4)
-      .mapToObj { idx: Int -> QueryTask(TaskId(stage.stageId, idx), stage) }
+      .mapToObj { idx: Int -> QueryTask(TaskId(stage.stageId, idx), stage, 0) }
       .collect(ImmutableList.toImmutableList())
     Mockito.`when`(taskManager.schedule(tasks[3])).thenThrow(RuntimeException("task failure"))
 
-    val stageExecution = StageExecution(taskManager, stage)
+    val stageExecution = StageExecution(taskManager, stage, 0)
     try {
       stageExecution.doExecute(tasks)
     } catch (e: Exception) {

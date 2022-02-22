@@ -11,6 +11,8 @@ use tokio::net::TcpListener;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 
+use super::intercept::MetricsMiddlewareLayer;
+use super::metrics::MetaMetrics;
 use crate::barrier::BarrierManager;
 use crate::cluster::StoredClusterManager;
 use crate::dashboard::DashboardService;
@@ -31,6 +33,7 @@ pub enum MetaStoreBackend {
 
 pub async fn rpc_serve(
     addr: SocketAddr,
+    prometheus_addr: Option<SocketAddr>,
     dashboard_addr: Option<SocketAddr>,
     meta_store_backend: MetaStoreBackend,
 ) -> (JoinHandle<()>, UnboundedSender<()>) {
@@ -101,10 +104,16 @@ pub async fn rpc_serve(
         env,
     );
     let hummock_srv = HummockServiceImpl::new(hummock_manager);
+    let meta_metrics = Arc::new(MetaMetrics::new());
+
+    if let Some(prometheus_addr) = prometheus_addr {
+        meta_metrics.boot_metrics_service(prometheus_addr);
+    }
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
     let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()
+            .layer(MetricsMiddlewareLayer::new(meta_metrics.clone()))
             .add_service(EpochServiceServer::new(epoch_srv))
             .add_service(HeartbeatServiceServer::new(heartbeat_srv))
             .add_service(CatalogServiceServer::new(catalog_srv))
@@ -134,7 +143,7 @@ mod tests {
     #[tokio::test]
     async fn test_server_shutdown() {
         let addr = "127.0.0.1:9527".parse().unwrap();
-        let (join_handle, shutdown_send) = rpc_serve(addr, None, MetaStoreBackend::Mem).await;
+        let (join_handle, shutdown_send) = rpc_serve(addr, None, None, MetaStoreBackend::Mem).await;
         shutdown_send.send(()).unwrap();
         join_handle.await.unwrap();
     }

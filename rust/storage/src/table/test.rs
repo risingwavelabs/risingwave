@@ -58,11 +58,6 @@ impl ScannableTable for TestTable {
     fn is_shared_storage(&self) -> bool {
         false
     }
-
-    async fn get_data_by_columns(&self, column_ids: &[i32]) -> Result<Option<DataChunks>> {
-        assert_eq!(column_ids, self.column_ids());
-        Ok(Some(self.chunks.read().await.clone()))
-    }
 }
 
 impl TestTable {

@@ -5,29 +5,31 @@ use risingwave_common::error::ErrorCode::TaskNotFound;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::plan::{PlanFragment, TaskId as ProstTaskId, TaskSinkId as ProstSinkId};
 
-use crate::task::env::BatchTaskEnv;
-use crate::task::task::{TaskExecution, TaskId};
+use crate::task::env::BatchEnvironment;
+use crate::task::task::{BatchTaskExecution, TaskId};
 use crate::task::TaskSink;
 
+/// `BatchManager` is responsible for managing all batch tasks.
 #[derive(Clone)]
-pub struct TaskManager {
-    tasks: Arc<Mutex<HashMap<TaskId, Box<TaskExecution>>>>,
+pub struct BatchManager {
+    /// Every task id has a corresponding task execution.
+    tasks: Arc<Mutex<HashMap<TaskId, Box<BatchTaskExecution>>>>,
 }
 
-impl TaskManager {
+impl BatchManager {
     pub fn new() -> Self {
-        TaskManager {
+        BatchManager {
             tasks: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
     pub fn fire_task(
         &self,
-        env: BatchTaskEnv,
+        env: BatchEnvironment,
         tid: &ProstTaskId,
         plan: PlanFragment,
     ) -> Result<()> {
-        let task = TaskExecution::new(tid, plan, env)?;
+        let task = BatchTaskExecution::new(tid, plan, env)?;
 
         task.async_execute()?;
         self.tasks
@@ -49,7 +51,7 @@ impl TaskManager {
     }
 
     #[cfg(test)]
-    pub fn remove_task(&self, sid: &ProstTaskId) -> Result<Option<Box<TaskExecution>>> {
+    pub fn remove_task(&self, sid: &ProstTaskId) -> Result<Option<Box<BatchTaskExecution>>> {
         let task_id = TaskId::try_from(sid)?;
         match self.tasks.lock().unwrap().remove(&task_id) {
             Some(t) => Ok(Some(t)),
@@ -75,9 +77,9 @@ impl TaskManager {
     }
 }
 
-impl Default for TaskManager {
+impl Default for BatchManager {
     fn default() -> Self {
-        TaskManager::new()
+        BatchManager::new()
     }
 }
 
@@ -86,11 +88,11 @@ mod tests {
     use risingwave_pb::plan::{QueryId, StageId, TaskSinkId as ProstTaskSinkId};
     use tonic::Code;
 
-    use crate::task::{TaskId, TaskManager};
+    use crate::task::{BatchManager, TaskId};
 
     #[test]
     fn test_task_not_found() {
-        let manager = TaskManager::new();
+        let manager = BatchManager::new();
         let task_id = TaskId {
             task_id: 0,
             stage_id: 0,

@@ -54,7 +54,7 @@ impl ExchangeWriter for FakeExchangeWriter {
 
 pub struct TestRunner {
     tid: ProstTaskId,
-    env: BatchTaskEnv,
+    env: BatchEnvironment,
 }
 
 impl TestRunner {
@@ -70,7 +70,7 @@ impl TestRunner {
         };
         Self {
             tid,
-            env: BatchTaskEnv::for_test(),
+            env: BatchEnvironment::for_test(),
         }
     }
 
@@ -115,7 +115,7 @@ impl TestRunner {
         Ok(res)
     }
 
-    fn get_global_env(&self) -> BatchTaskEnv {
+    fn get_global_env(&self) -> BatchEnvironment {
         self.env.clone()
     }
 

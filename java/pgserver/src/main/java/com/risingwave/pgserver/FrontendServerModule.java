@@ -14,6 +14,8 @@ import com.risingwave.common.config.FrontendServerConfigurations;
 import com.risingwave.common.config.LeaderServerConfigurations;
 import com.risingwave.execution.handler.DefaultSqlHandlerFactory;
 import com.risingwave.execution.handler.SqlHandlerFactory;
+import com.risingwave.execution.handler.cache.HummockSnapshotManager;
+import com.risingwave.execution.handler.cache.HummockSnapshotManagerImpl;
 import com.risingwave.node.DefaultWorkerNode;
 import com.risingwave.node.RemoteWorkerNodeManager;
 import com.risingwave.node.WorkerNodeManager;
@@ -126,6 +128,19 @@ public class FrontendServerModule extends AbstractModule {
         metaClientManager.getOrCreate(
             node.getRpcEndPoint().getHost(), node.getRpcEndPoint().getPort());
     return new RemoteStreamManager(client);
+  }
+
+  @Provides
+  @Singleton
+  static HummockSnapshotManager createHummockSnapshotManager(
+      Configuration config, MetaClientManager metaClientManager) {
+    LOGGER.info("Creating hummock snapshot manager.");
+    String address = config.get(FrontendServerConfigurations.META_SERVICE_ADDRESS);
+    DefaultWorkerNode node = DefaultWorkerNode.from(address);
+    MetaClient client =
+        metaClientManager.getOrCreate(
+            node.getRpcEndPoint().getHost(), node.getRpcEndPoint().getPort());
+    return new HummockSnapshotManagerImpl(client);
   }
 
   // Required by QueryManager.

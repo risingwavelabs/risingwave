@@ -5,8 +5,8 @@ name:
 on:
 
 env:
-  RUST_TOOLCHAIN: nightly-2022-01-13
-  CACHE_KEY_SUFFIX: v20220218
+  RUST_TOOLCHAIN: nightly-2022-02-21
+  CACHE_KEY_SUFFIX: v20220222
   CARGO_TERM_COLOR: always
 
 jobs:
@@ -113,9 +113,7 @@ jobs:
 
       - name: Download sqllogictest
         run: |
-          # reply on #25, download release archive after new version release
-          # curl -fL -o ~/.cargo/bin/sqllogictest https://github.com/singularity-data/sqllogictest-rs/releases/download/v0.2.0/sqllogictest-linux-amd64
-          cargo install sqllogictest --features bin --git https://github.com/singularity-data/sqllogictest-rs --rev 21357d4
+          curl -fL -o ~/.cargo/bin/sqllogictest https://github.com/singularity-data/sqllogictest-rs/releases/download/v0.3.0-pre/sqllogictest-linux-amd64
           chmod +x ~/.cargo/bin/sqllogictest
 
       - name: Download cargo-make

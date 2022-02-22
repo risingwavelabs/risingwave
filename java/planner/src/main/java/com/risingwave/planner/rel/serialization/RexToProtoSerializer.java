@@ -5,6 +5,7 @@ import static java.util.Objects.requireNonNull;
 import com.google.common.collect.ImmutableMap;
 import com.google.protobuf.ByteString;
 import com.risingwave.common.datatype.RisingWaveDataType;
+import com.risingwave.common.datatype.RisingWaveTypeFactory;
 import com.risingwave.common.exception.PgErrorCode;
 import com.risingwave.common.exception.PgException;
 import com.risingwave.proto.data.DataType;
@@ -20,10 +21,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
-import org.apache.calcite.rex.RexCall;
-import org.apache.calcite.rex.RexInputRef;
-import org.apache.calcite.rex.RexLiteral;
-import org.apache.calcite.rex.RexVisitorImpl;
+import org.apache.calcite.rel.type.RelDataType;
+import org.apache.calcite.rex.*;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.util.*;
@@ -231,41 +230,6 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
     return bb.array();
   }
 
-  private ExprNode visitSarg(Sarg<?> sarg, DataType protoDataType) {
-    var rangeSet = sarg.rangeSet;
-    var children = new ArrayList<ExprNode>();
-    for (var range : rangeSet.asRanges()) {
-      var nodeBuilder =
-          ExprNode.newBuilder()
-              .setExprType(ExprNode.Type.CONSTANT_VALUE)
-              .setReturnType(protoDataType);
-      if (!range.hasLowerBound()
-          || !range.hasUpperBound()
-          || (range.lowerEndpoint() != range.upperEndpoint())) {
-        throw new UnsupportedOperationException("We haven't support SARG other than in");
-      }
-      // Here we only support `in` expression. The two endpoints of arguments in the range must be
-      // the same.
-      var lower = range.lowerEndpoint();
-      String valueString = "";
-      if (lower instanceof NlsString) {
-        valueString = ((NlsString) lower).getValue();
-      } else {
-        valueString = lower.toString();
-      }
-      var bb = ByteBuffer.wrap(valueString.getBytes(StandardCharsets.UTF_8));
-      var constValue = ConstantValue.newBuilder().setBody(ByteString.copyFrom(bb)).build();
-      nodeBuilder.setConstant(constValue);
-      children.add(nodeBuilder.build());
-    }
-    FunctionCall func = FunctionCall.newBuilder().addAllChildren(children).build();
-    return ExprNode.newBuilder()
-        .setExprType(ExprNode.Type.SARG)
-        .setReturnType(protoDataType)
-        .setFuncCall(func)
-        .build();
-  }
-
   @Override
   public ExprNode visitLiteral(RexLiteral literal) {
     RisingWaveDataType dataType = (RisingWaveDataType) literal.getType();
@@ -292,12 +256,6 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
       children.add(constExpr);
       var callExpr = makeFunctionCallExpr(children, protoDataType, ExprNode.Type.CAST);
       return callExpr;
-    } else if (literal.getValue() instanceof Sarg<?>) {
-      // We remark that sqlTypeName == SqlTypeName.SARG is expected, but the reality does not work
-      // in this way.
-      // We have to judge on the type of value.
-      Sarg<?> value = (Sarg<?>) literal.getValue();
-      return visitSarg(value, protoDataType);
     }
     var retExpr = makeConstantExpr(literal, protoDataType, protoDataType);
     return retExpr;
@@ -317,12 +275,77 @@ public class RexToProtoSerializer extends RexVisitorImpl<ExprNode> {
 
   @Override
   public ExprNode visitCall(RexCall call) {
+    if (call.getKind() == SqlKind.SEARCH) {
+      // Here we want to check whether this is actually a `In` function. We remark that
+      // Calcite prohibits us from constructing a RexCall with `In` operator. Therefore, we have to
+      // make special
+      // case for `In` at certain places and putting it in the processing of serialization is
+      // probably the most convenient.
+      var children = call.getOperands();
+      if (children.size() == 2) {
+        final RexNode leftOperand = call.operands.get(0);
+        final RexNode rightOperand = call.operands.get(1);
+        if (rightOperand instanceof RexLiteral) {
+          final RexLiteral literal = (RexLiteral) rightOperand;
+          final var type = literal.getType();
+          final Sarg<?> sarg = requireNonNull(literal.getValueAs(Sarg.class), "Sarg");
+          boolean isInFunction = isInExpression(sarg);
+          if (isInFunction) {
+            return convertSearchToIn(leftOperand, literal, type);
+          }
+        }
+      }
+    }
     DataType protoDataType = ((RisingWaveDataType) call.getType()).getProtobufType();
     List<ExprNode> children =
         call.getOperands().stream()
             .map(rexNode -> rexNode.accept(this))
             .collect(Collectors.toList());
     return makeFunctionCallExpr(children, protoDataType, funcCallOf(call));
+  }
+
+  private ExprNode convertSearchToIn(RexNode leftOperand, RexLiteral literal, RelDataType type) {
+    final var protoDataType = ((RisingWaveDataType) literal.getType()).getProtobufType();
+    final Sarg<?> sarg = requireNonNull(literal.getValueAs(Sarg.class), "Sarg");
+    var rangeSet = sarg.rangeSet;
+    var children = new ArrayList<ExprNode>();
+    children.add(leftOperand.accept(this));
+    var rexBuilder = new RexBuilder(RisingWaveTypeFactory.INSTANCE);
+    for (var range : rangeSet.asRanges()) {
+      var nodeBuilder =
+          ExprNode.newBuilder()
+              .setExprType(ExprNode.Type.CONSTANT_VALUE)
+              .setReturnType(protoDataType);
+      assert range.hasLowerBound() && range.hasUpperBound();
+      assert range.lowerEndpoint().equals(range.upperEndpoint());
+      // Here we only support `in` expression. The two endpoints of arguments in the range must be
+      // the same.
+      var lower = range.lowerEndpoint();
+      byte[] bytes;
+      if (lower instanceof NlsString) {
+        bytes = ((NlsString) lower).getValue().getBytes(StandardCharsets.UTF_8);
+      } else {
+        var constant = rexBuilder.makeLiteral(lower, type);
+        bytes = getBytesRepresentation(constant, protoDataType);
+      }
+      var constValue = ConstantValue.newBuilder().setBody(ByteString.copyFrom(bytes)).build();
+      nodeBuilder.setConstant(constValue);
+      children.add(nodeBuilder.build());
+    }
+    FunctionCall body = FunctionCall.newBuilder().addAllChildren(children).build();
+    return ExprNode.newBuilder()
+        .setExprType(ExprNode.Type.IN)
+        .setReturnType(
+            DataType.newBuilder()
+                .setTypeName(DataType.TypeName.BOOLEAN)
+                .setIsNullable(false)
+                .build())
+        .setFuncCall(body)
+        .build();
+  }
+
+  private static boolean isInExpression(Sarg sarg) {
+    return sarg.isPoints();
   }
 
   private static ExprNode.Type funcCallOf(SqlKind kind, String name) {

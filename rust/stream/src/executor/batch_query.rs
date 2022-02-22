@@ -1,8 +1,5 @@
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::{Op, RwError, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
@@ -64,8 +61,10 @@ impl BatchQueryExecutor {
         }
     }
 }
-impl BatchQueryExecutor {
-    async fn next_inner(&mut self) -> Result<Message> {
+
+#[async_trait]
+impl Executor for BatchQueryExecutor {
+    async fn next(&mut self) -> Result<Message> {
         if self.iter.is_none() {
             self.iter = Some(
                 self.table
@@ -74,42 +73,19 @@ impl BatchQueryExecutor {
                     .unwrap(),
             );
         }
+
         let iter = self.iter.as_mut().unwrap();
-        let mut count = 0;
-        let mut builders = self.table.schema().create_array_builders(self.batch_size)?;
+        let column_indices = (0..self.table.schema().len()).collect_vec();
 
-        while let Some(row) = iter.next().await.unwrap() {
-            builders
-                .iter_mut()
-                .zip_eq(row.0.iter())
-                .for_each(|(builder, data)| builder.append_datum(data).unwrap());
-            count += 1;
-            if count >= self.batch_size {
-                break;
-            }
-        }
-        if count == 0 {
-            // TODO: May be refactored in the future.
-            Err(RwError::from(ErrorCode::EOF))
-        } else {
-            let columns: Vec<Column> = builders
-                .into_iter()
-                .map(|builder| -> Result<_> { Ok(Column::new(Arc::new(builder.finish()?))) })
-                .try_collect()?;
+        let data_chunk = self
+            .table
+            .collect_from_iter(iter, &column_indices, Some(self.batch_size))
+            .await?
+            .ok_or_else(|| RwError::from(ErrorCode::EOF))?;
 
-            Ok(Message::Chunk(StreamChunk::new(
-                vec![Op::Insert; count],
-                columns,
-                None,
-            )))
-        }
-    }
-}
-
-#[async_trait]
-impl Executor for BatchQueryExecutor {
-    async fn next(&mut self) -> Result<Message> {
-        self.next_inner().await
+        let ops = vec![Op::Insert; data_chunk.cardinality()];
+        let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
+        Ok(Message::Chunk(stream_chunk))
     }
 
     fn schema(&self) -> &Schema {
@@ -129,15 +105,10 @@ impl Executor for BatchQueryExecutor {
     }
 
     fn init(&mut self, epoch: u64) -> Result<()> {
-        match self.epoch {
-            None => {
-                self.epoch = Some(epoch);
-                Ok(())
-            }
-            Some(_) => {
-                Err(ErrorCode::InternalError("epoch cannot be initialized twice".to_owned()).into())
-            }
+        if let Some(_old) = self.epoch.replace(epoch) {
+            panic!("epoch cannot be initialized twice");
         }
+        Ok(())
     }
 }
 

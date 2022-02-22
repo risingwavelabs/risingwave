@@ -53,7 +53,8 @@
     "hashJoinNode": {
       "leftKey": [0],
       "rightKey": [0]
-    }
+    },
+    "identity": "RwStreamHashJoin(condition\u003d[\u003d($0, $3)], joinType\u003d[inner])"
   }],
   "mviewNode": {
     "tableRefId": {
