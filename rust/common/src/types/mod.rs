@@ -26,10 +26,7 @@ pub use interval::*;
 pub use ordered_float::IntoOrdered;
 use paste::paste;
 
-mod struct_type;
-pub use struct_type::FieldDesc;
-
-use crate::array::{ArrayBuilderImpl, PrimitiveArrayItemType, StructRef, StructValue};
+use crate::array::{ArrayBuilderImpl, PrimitiveArrayItemType, StructValue};
 
 pub type OrderedF32 = ordered_float::OrderedFloat<f32>;
 pub type OrderedF64 = ordered_float::OrderedFloat<f64>;
@@ -178,6 +175,27 @@ impl DataType {
     pub fn is_date_or_timestamp(&self) -> bool {
         matches!(self, DataType::Date | DataType::Timestamp)
     }
+
+    /// Type index is used to find the least restrictive type that is of the larger index.
+    pub fn type_index(&self) -> i32 {
+        match self {
+            DataType::Boolean => 1,
+            DataType::Int16 => 2,
+            DataType::Int32 => 3,
+            DataType::Int64 => 4,
+            DataType::Float32 => 5,
+            DataType::Float64 => 6,
+            DataType::Decimal => 7,
+            DataType::Date => 8,
+            DataType::Char => 9,
+            DataType::Varchar => 10,
+            DataType::Time => 11,
+            DataType::Timestamp => 12,
+            DataType::Timestampz => 13,
+            DataType::Interval => 14,
+            DataType::Struct { .. } => 15,
+        }
+    }
 }
 
 /// `Scalar` is a trait over all possible owned types in the evaluation
@@ -253,7 +271,7 @@ macro_rules! for_all_scalar_variants {
       { NaiveDate, naivedate, NaiveDateWrapper, NaiveDateWrapper },
       { NaiveDateTime, naivedatetime, NaiveDateTimeWrapper, NaiveDateTimeWrapper },
       { NaiveTime, naivetime, NaiveTimeWrapper, NaiveTimeWrapper },
-      { Struct, struct, StructValue, StructRef<'scalar> }
+      { Struct, struct, StructValue, StructValue }
     }
   };
 }

@@ -170,7 +170,7 @@ pub fn build_case_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let len = children.len();
     let else_clause = if len % 2 == 1 {
         let else_clause = expr_build_from_prost(&children[len - 1])?;
-        if matches!(else_clause.return_type(), ret_type) {
+        if else_clause.return_type() == ret_type {
             return Err(RwError::from(ErrorCode::ProtocolError(
                 "the return type of else and case not match".to_string(),
             )));
@@ -185,12 +185,12 @@ pub fn build_case_expr(prost: &ExprNode) -> Result<BoxedExpression> {
         let then_index = i * 2 + 1;
         let when_expr = expr_build_from_prost(&children[when_index])?;
         let then_expr = expr_build_from_prost(&children[then_index])?;
-        if matches!(when_expr.return_type(), DataType::Boolean) {
+        if when_expr.return_type() == DataType::Boolean {
             return Err(RwError::from(ErrorCode::ProtocolError(
                 "the return type of when clause and condition not match".to_string(),
             )));
         }
-        if matches!(then_expr.return_type(), ret_type) {
+        if then_expr.return_type() == ret_type {
             return Err(RwError::from(ErrorCode::ProtocolError(
                 "the return type of then clause and case not match".to_string(),
             )));
