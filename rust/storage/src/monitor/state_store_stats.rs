@@ -205,7 +205,9 @@ impl StateStoreStats {
         let batch_write_build_table_latency =
             register_histogram_with_registry!(opts, registry).unwrap();
 
-        let buckets = DEFAULT_BUCKETS.map(|x| x * BATCH_WRITE_ADD_L0_LATENCT_SCALE).to_vec();
+        let buckets = DEFAULT_BUCKETS
+            .map(|x| x * BATCH_WRITE_ADD_L0_LATENCT_SCALE)
+            .to_vec();
         let opts = histogram_opts!(
             "state_store_batch_write_add_l0_ssts_latency",
             "Total time of add_l0_ssts that have been issued to state store",
