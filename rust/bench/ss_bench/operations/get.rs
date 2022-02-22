@@ -76,7 +76,7 @@ impl Operations {
     pub(crate) async fn get_random(&self, store: &impl StateStore, opts: &Opts) {
         // generate queried point get key
         let get_keys = match self.keys.is_empty() {
-            true => Workload::new_random_keys(opts, 233).1,
+            true => Workload::new_random_keys(opts, 233, opts.reads as u64).1,
             false => {
                 let mut rng = StdRng::seed_from_u64(233);
                 let dist = Uniform::from(0..self.keys.len());
@@ -101,7 +101,7 @@ impl Operations {
     pub(crate) async fn get_seq(&self, store: &impl StateStore, opts: &Opts) {
         // generate queried point get key
         let get_keys = match self.keys.is_empty() {
-            true => Workload::new_sequential_keys(opts).1,
+            true => Workload::new_sequential_keys(opts, opts.reads as u64).1,
             false => {
                 assert!(
                     opts.reads as usize <= self.keys.len(),
