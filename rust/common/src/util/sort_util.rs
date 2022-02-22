@@ -7,7 +7,6 @@ use risingwave_pb::plan::{ColumnOrder, OrderType as ProstOrderType};
 use crate::array::{Array, ArrayImpl, DataChunk, DataChunkRef};
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
-
 use crate::types::{ScalarPartialOrd, ScalarRef};
 
 pub const K_PROCESSING_WINDOW_SIZE: usize = 1024;
@@ -119,14 +118,14 @@ where
 
 pub fn compare_two_row(
     order_pairs: &[OrderPair],
-    lhs_datachunk: &DataChunk,
+    lhs_data_chunk: &DataChunk,
     lhs_idx: usize,
-    rhs_datachunk: &DataChunk,
+    rhs_data_chunk: &DataChunk,
     rhs_idx: usize,
 ) -> Result<Ordering> {
     for order_pair in order_pairs.iter() {
-        let lhs_array = lhs_datachunk.column_at(order_pair.column_idx)?.array();
-        let rhs_array = rhs_datachunk.column_at(order_pair.column_idx)?.array();
+        let lhs_array = lhs_data_chunk.column_at(order_pair.column_idx)?.array();
+        let rhs_array = rhs_data_chunk.column_at(order_pair.column_idx)?.array();
         macro_rules! gen_match {
         ($lhs: ident, $rhs: ident, [$( $tt: ident), *]) => {
             match ($lhs, $rhs) {
