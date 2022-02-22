@@ -71,7 +71,7 @@ where
 
         let stream_graph = self.stream_graph.build(ctx)?;
 
-        Ok(stream_graph
+        stream_graph
             .iter()
             .map(|(&fragment_id, actors)| {
                 Ok::<_, RwError>((
@@ -84,7 +84,7 @@ where
                     },
                 ))
             })
-            .collect::<Result<BTreeMap<_, _>>>()?)
+            .collect::<Result<BTreeMap<_, _>>>()
     }
 
     /// Generate fragment DAG from input streaming plan by their dependency.
