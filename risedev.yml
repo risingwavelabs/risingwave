@@ -48,6 +48,7 @@ risedev:
       user-managed: true
     - use: prometheus
     - use: frontend
+    - use: grafana
 
   # `dev-frontend` have the same settings as default except the the frontend node will be started by user.
   dev-frontend:
