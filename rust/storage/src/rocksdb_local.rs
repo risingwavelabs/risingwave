@@ -1,10 +1,11 @@
+use std::ops::{Bound, RangeBounds};
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
-use rocksdb::{DBIterator, ReadOptions, SeekKey, Writable, WriteBatch, DB};
+use rocksdb::{DBIterator, ReadOptions, SeekKey, Writable, WriteBatch, WriteOptions, DB};
 use tokio::sync::OnceCell;
 use tokio::task;
 
@@ -36,9 +37,9 @@ impl RocksDBStateStore {
 
 #[async_trait]
 impl StateStore for RocksDBStateStore {
-    type Iter = RocksDBStateStoreIter;
+    type Iter<'a> = RocksDBStateStoreIter;
 
-    async fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
+    async fn get(&self, key: &[u8], _epoch: u64) -> Result<Option<Bytes>> {
         self.stats.get_counts.inc();
         self.storage().await.get(key).await
     }
@@ -47,8 +48,16 @@ impl StateStore for RocksDBStateStore {
         self.storage().await.write_batch(kv_pairs).await
     }
 
-    async fn iter(&self, prefix: &[u8]) -> Result<Self::Iter> {
-        RocksDBStateStoreIter::new(self.clone(), prefix.to_owned()).await
+    async fn iter<R, B>(&self, key_range: R, _epoch: u64) -> Result<Self::Iter<'_>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]>,
+    {
+        let range = (
+            key_range.start_bound().map(|b| b.as_ref().to_owned()),
+            key_range.end_bound().map(|b| b.as_ref().to_owned()),
+        );
+        RocksDBStateStoreIter::new(self.clone(), range).await
     }
 }
 
@@ -64,23 +73,43 @@ pub fn next_prefix(prefix: &[u8]) -> Vec<u8> {
 pub struct RocksDBStateStoreIter {
     store: RocksDBStateStore,
     iter: Option<Box<DBIterator<Arc<DB>>>>,
-    end_key: Bytes,
+    key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
 }
 
 impl RocksDBStateStoreIter {
-    async fn new(store: RocksDBStateStore, prefix: Vec<u8>) -> Result<Self> {
+    async fn new(
+        store: RocksDBStateStore,
+        range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+    ) -> Result<Self> {
+        let mut start_key = vec![];
+        let mut is_start_unbounded = false;
+        match range.start_bound() {
+            Bound::Included(s_key) => {
+                start_key = s_key.clone();
+            }
+            Bound::Unbounded => {
+                is_start_unbounded = true;
+            }
+            _ => {
+                return Err(InternalError("invalid range start".to_string()).into());
+            }
+        };
+
         let mut iter = store.storage().await.iter().await;
-        let end_key = Bytes::from(next_prefix(prefix.as_slice()));
         task::spawn_blocking(move || {
-            return if iter.seek(SeekKey::from(prefix.as_slice())).unwrap() {
-                Ok(Self {
-                    store,
-                    iter: Some(Box::new(iter)),
-                    end_key,
-                })
+            let seek_key;
+            if is_start_unbounded {
+                seek_key = SeekKey::Start;
             } else {
-                Err(InternalError("prefix not found".to_string()).into())
-            };
+                seek_key = SeekKey::from(start_key.as_slice());
+            }
+            iter.seek(seek_key)
+                .map_err(|e| RwError::from(InternalError(e)))?;
+            Ok(Self {
+                store,
+                iter: Some(Box::new(iter)),
+                key_range: range,
+            })
         })
         .await?
     }
@@ -91,8 +120,23 @@ impl StateStoreIter for RocksDBStateStoreIter {
     type Item = (Bytes, Bytes);
 
     async fn next(&mut self) -> Result<Option<Self::Item>> {
+        let mut end_key = Bytes::new();
+        let mut is_end_exclude = false;
+        let mut is_end_unbounded = false;
+        match self.key_range.end_bound() {
+            Bound::Included(e_key) => {
+                end_key = Bytes::from(e_key.clone());
+            }
+            Bound::Excluded(e_key) => {
+                end_key = Bytes::from(e_key.clone());
+                is_end_exclude = true;
+            }
+            Bound::Unbounded => {
+                is_end_unbounded = true;
+            }
+        }
+
         let mut iter = self.iter.take().unwrap();
-        let end_key = self.end_key.clone();
         let (kv, iter) = tokio::task::spawn_blocking(move || {
             let result = iter.valid().map_err(|e| RwError::from(InternalError(e)));
             if let Err(e) = result {
@@ -103,7 +147,11 @@ impl StateStoreIter for RocksDBStateStoreIter {
             }
             let k = Bytes::from(iter.key().to_vec());
             let v = Bytes::from(iter.value().to_vec());
-            if k >= end_key {
+
+            if is_end_unbounded {
+                return (Ok(Some((k, v))), iter);
+            }
+            if k > end_key || (k == end_key && is_end_exclude) {
                 return (Ok(None), iter);
             }
             if let Err(e) = iter.next().map_err(|e| RwError::from(InternalError(e))) {
@@ -165,7 +213,13 @@ impl RocksDBStorage {
         }
 
         let db = self.db.clone();
-        task::spawn_blocking(move || db.write(&wb).map_err(|e| InternalError(e).into())).await?
+        task::spawn_blocking(move || {
+            let mut opts = WriteOptions::default();
+            opts.set_sync(true);
+            db.write_opt(&wb, &opts)
+                .map_err(|e| InternalError(e).into())
+        })
+        .await?
     }
 
     async fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
