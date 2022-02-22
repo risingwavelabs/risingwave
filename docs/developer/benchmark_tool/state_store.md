@@ -112,12 +112,12 @@ Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
   - Number of written key/values. If negative, do `--num` reads.
   - Default: -1
 
-## Single Batch
-
 - `--batch-size`
 
-  - **Max** number of key/values in a batch.
+  - **Max** number of key/values in a batch. When the key/values are not evenly divided by the `--batch-size`, the last batch will be the remainder.
   - Default: 100
+
+## Key/values Sizes
 
 - `--key-size`
   
