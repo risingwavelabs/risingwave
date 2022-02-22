@@ -4,22 +4,18 @@ use std::time::Instant;
 use itertools::Itertools;
 use risingwave_storage::StateStore;
 
-use super::Operations;
+use super::{Batch, Operations};
 use crate::utils::latency_stat::LatencyStat;
 use crate::utils::workload::{get_epoch, Workload};
 use crate::Opts;
 
 impl Operations {
-    pub(crate) async fn write_batch(&mut self, store: &impl StateStore, opts: &Opts) {
-        let (prefixes, keys) = Workload::new_random_keys(opts, 233, opts.writes as u64);
-        let values = Workload::new_values(opts, 234, opts.writes as u64);
-
-        // add new prefixes and keys to global prefixes and keys
-        self.merge_prefixes(prefixes);
-        self.merge_keys(keys.clone());
-
-        let mut batches = Workload::make_batches(opts, keys, values);
-
+    async fn run_write_batch(
+        &mut self,
+        store: &impl StateStore,
+        opts: &Opts,
+        mut batches: Vec<Batch>,
+    ) -> (LatencyStat, u128, u128) {
         let batches_len = batches.len();
         let size = size_of_val(&batches);
 
@@ -64,6 +60,21 @@ impl Operations {
         // calculate operation per second
         let ops = opts.batch_size as u128 * 1_000_000_000 * batches_len as u128 / total_time_nano;
         let throughput = size as u128 * 1_000_000_000 / total_time_nano;
+
+        (stat, ops, throughput)
+    }
+
+    pub(crate) async fn write_batch(&mut self, store: &impl StateStore, opts: &Opts) {
+        let (prefixes, keys) = Workload::new_random_keys(opts, 233, opts.writes as u64);
+        let values = Workload::new_values(opts, 234, opts.writes as u64);
+
+        // add new prefixes and keys to global prefixes and keys
+        self.merge_prefixes(prefixes);
+        self.merge_keys(keys.clone());
+
+        let batches = Workload::make_batches(opts, keys, values);
+
+        let (stat, ops, throughput) = self.run_write_batch(store, opts, batches).await;
 
         println!(
             "

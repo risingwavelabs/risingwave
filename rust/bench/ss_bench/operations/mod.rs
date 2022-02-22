@@ -13,6 +13,8 @@ pub(crate) struct Operations {
     pub(crate) prefixes: Vec<Bytes>,
 }
 
+type Batch = Vec<(Bytes, Option<Bytes>)>;
+
 impl Operations {
     pub(crate) async fn run(store: impl StateStore, opts: &Opts) {
         let mut runner = Operations::default();
