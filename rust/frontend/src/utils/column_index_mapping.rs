@@ -11,8 +11,8 @@ use crate::expr::{ExprRewriter, InputRef};
 /// in optimizer for transformation of column index. if the value in the vec is None, the source is
 /// illegal.
 pub struct ColIndexMapping {
-    pub target_upper: usize,
-    pub map: Vec<Option<usize>>,
+    target_upper: usize,
+    map: Vec<Option<usize>>,
 }
 impl ColIndexMapping {
     pub fn new(map: Vec<Option<usize>>) -> Self {
@@ -56,12 +56,30 @@ impl ColIndexMapping {
         Self::new(map)
     }
 
+    /// return iter of (src, dst) with no order
+    pub fn mapping_pairs(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
+        self.map
+            .iter()
+            .cloned()
+            .enumerate()
+            .filter_map(|(src, tar)| match tar {
+                Some(tar) => Some((src, tar)),
+                None => None,
+            })
+    }
     pub fn try_map(&self, index: usize) -> Option<usize> {
         *self.map.get(index)?
     }
 
     pub fn map(&self, index: usize) -> usize {
         self.try_map(index).unwrap()
+    }
+
+    pub fn target_upper(&self) -> usize {
+        self.target_upper
+    }
+    pub fn source_upper(&self) -> usize {
+        self.map.len()
     }
 }
 
