@@ -1,7 +1,8 @@
+use itertools::Itertools;
+
 use super::super::plan_node::*;
 use super::Convention;
 use crate::optimizer::PlanRef;
-use itertools::Itertools;
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
