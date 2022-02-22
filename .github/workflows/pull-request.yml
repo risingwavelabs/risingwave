@@ -55,7 +55,11 @@ jobs:
     needs:
       - compute-node-build
       - frontend-check
-    runs-on: ubuntu-latest
+      - start-runner-a
+    runs-on: ${{ needs.start-runner-a.outputs.label }}
+    container:
+      image: public.ecr.aws/x5u3w5h6/risingwave-build-env:latest
+      options: --security-opt seccomp=unconfined
     timeout-minutes: 20
     steps:
       - name: Checkout
@@ -483,13 +487,12 @@ jobs:
         run: |
           buf lint
         working-directory: proto
-  stop-runner:
-    name: ec2-stop
+  stop-runner-a:
+    name: ec2-stop-a
     needs:
       - start-runner-a
-      - start-runner-b
       - compute-node-build
-      - compute-node-test
+      - end-to-end-risedev
     runs-on: ubuntu-latest
     if: ${{ always() }}
     steps:
@@ -507,6 +510,20 @@ jobs:
           label: ${{ needs.start-runner-a.outputs.label }}
           ec2-instance-id: ${{ needs.start-runner-a.outputs.ec2-instance-id }}
         if: ${{ always() }}
+  stop-runner-b:
+    name: ec2-stop-b
+    needs:
+      - start-runner-b
+      - compute-node-test
+    runs-on: ubuntu-latest
+    if: ${{ always() }}
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-2
       - name: Stop EC2 runner B
         uses: machulav/ec2-github-runner@v2
         with:
