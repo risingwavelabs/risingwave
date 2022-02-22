@@ -24,21 +24,36 @@ impl Operations {
                 "writebatch" => runner.write_batch(&store, opts).await,
                 "getrandom" => runner.get_random(&store, opts).await,
                 "getseq" => runner.get_seq(&store, opts).await,
+                "deleterandom" => runner.delete_random(&store, opts).await,
                 "prefixscanrandom" => runner.prefix_scan_random(&store, opts).await,
                 other => unimplemented!("operation \"{}\" is not supported.", other),
             }
         }
     }
 
-    fn merge_prefixes(&mut self, mut other: Vec<Bytes>) {
+    /// Track new prefixes
+    fn track_prefixes(&mut self, mut other: Vec<Bytes>) {
         self.prefixes.append(&mut other);
         self.prefixes.sort();
         self.prefixes.dedup_by(|k1, k2| k1 == k2);
     }
 
-    fn merge_keys(&mut self, mut other: Vec<Bytes>) {
+    /// Track new keys
+    fn track_keys(&mut self, mut other: Vec<Bytes>) {
         self.keys.append(&mut other);
         self.keys.sort();
         self.keys.dedup_by(|k1, k2| k1 == k2);
     }
+
+    /// Untrack deleted keys
+    fn untrack_keys(&mut self, mut other: Vec<Bytes>) {
+        // TODO(Ting Sun): consider use Set as the data structure for keys and prefixes
+        for keys in other.drain(..) {
+            self.keys.retain(|k| k != &keys);
+        }
+    }
+
+    /// Untrack prefixes
+    // TODO(Ting Sun): decide whether and how to implement untrack_prefixes
+    fn untrack_prefixes(&mut self, mut _other: Vec<Bytes>) {}
 }
