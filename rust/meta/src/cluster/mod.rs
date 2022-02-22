@@ -118,7 +118,19 @@ where
                 "Worker node does not exist!".to_string(),
             ))),
             Some(entry) => {
+                let workernode = entry.1.to_protobuf();
                 Worker::delete(&*self.meta_store_ref, &host_address).await?;
+
+                if workernode.r#type == WorkerType::ComputeNode as i32 {
+                    self.nm
+                        .notify(
+                            Operation::Delete,
+                            &Info::Node(workernode),
+                            crate::manager::NotificationTarget::Frontend,
+                        )
+                        .await?
+                }
+
                 if let Some(hummock_manager_ref) = self.hummock_manager_ref.as_ref() {
                     // It's desirable these operations are committed atomically.
                     // But meta store transaction across *Manager is not intuitive.

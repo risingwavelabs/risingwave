@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::channel;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use rand::distributions::{Distribution as RandDistribution, Uniform};
 use risingwave_pb::common::WorkerNode;
@@ -75,7 +75,7 @@ impl BatchScheduler {
         let (sender, receiver) = channel();
         Self {
             worker_manager: WorkerNodeManager {
-                worker_nodes: workers,
+                worker_nodes: Arc::new(RwLock::new(workers)),
             },
             scheduled_stage_sender: sender,
             scheduled_stage_receiver: receiver,
@@ -88,20 +88,26 @@ impl BatchScheduler {
     }
 }
 
+/// the manager of living worker node.
 pub(crate) struct WorkerNodeManager {
-    worker_nodes: Vec<WorkerNode>,
+    worker_nodes: Arc<RwLock<Vec<WorkerNode>>>,
 }
 
 impl WorkerNodeManager {
-    pub fn all_nodes(&self) -> &[WorkerNode] {
-        &self.worker_nodes
+    pub fn all_nodes(&self) -> Vec<WorkerNode> {
+        self.worker_nodes.read().unwrap().clone()
     }
 
     /// Get a random worker node.
-    pub fn next_random(&self) -> &WorkerNode {
+    pub fn next_random(&self) -> WorkerNode {
         let mut rng = rand::thread_rng();
-        let die = Uniform::from(0..self.worker_nodes.len());
-        self.worker_nodes.get(die.sample(&mut rng)).unwrap()
+        let die = Uniform::from(0..self.worker_nodes.read().unwrap().len());
+        self.worker_nodes
+            .read()
+            .unwrap()
+            .get(die.sample(&mut rng))
+            .unwrap()
+            .clone()
     }
 }
 
@@ -186,10 +192,10 @@ impl BatchScheduler {
         if scheduled_children.is_empty() {
             // If current plan has scan node, use all workers (the data may be in any of them).
             if Self::include_table_scan(query_stage_ref.root.clone()) {
-                cur_stage_worker_nodes = all_nodes.to_vec();
+                cur_stage_worker_nodes = all_nodes;
             } else {
                 // Otherwise just choose a random worker.
-                cur_stage_worker_nodes.push(self.worker_manager.next_random().clone());
+                cur_stage_worker_nodes.push(self.worker_manager.next_random());
             }
         } else {
             let mut use_num_nodes = all_nodes.len();
@@ -202,9 +208,9 @@ impl BatchScheduler {
             }
 
             if use_num_nodes == all_nodes.len() {
-                cur_stage_worker_nodes = all_nodes.to_vec();
+                cur_stage_worker_nodes = all_nodes;
             } else {
-                cur_stage_worker_nodes.push(self.worker_manager.next_random().clone());
+                cur_stage_worker_nodes.push(self.worker_manager.next_random());
             }
         }
 

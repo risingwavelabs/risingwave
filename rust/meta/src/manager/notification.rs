@@ -19,6 +19,7 @@ pub type Notification = Result<SubscribeResponse, Status>;
 
 const BUFFER_SIZE: usize = 4;
 
+/// [`NotificationManager`] manager notification meta data.
 pub struct NotificationManager {
     fe_observers: DashMap<WorkerKey, Sender<Notification>>,
     be_observers: DashMap<WorkerKey, Sender<Notification>>,
@@ -33,7 +34,6 @@ pub enum NotificationTarget {
 
 pub type NotificationManagerRef = Arc<NotificationManager>;
 
-/// [`NotificationManager`] manager notification meta data.
 impl NotificationManager {
     pub fn new() -> Self {
         Self {

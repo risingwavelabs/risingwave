@@ -57,7 +57,7 @@ impl MetaClient {
         })
     }
 
-    /// Subscribe the current node to meta.
+    /// Subscribe to notification from meta.
     pub async fn subscribe(
         &self,
         addr: SocketAddr,
