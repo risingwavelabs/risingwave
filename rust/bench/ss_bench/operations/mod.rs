@@ -54,7 +54,7 @@ impl Operations {
         }
     }
 
-    /// Untrack prefixes
+    /// Untrack prefixes of deleted keys
     // TODO(Ting Sun): decide whether and how to implement untrack_prefixes
     fn untrack_prefixes(&mut self, mut _other: Vec<Bytes>) {}
 }
