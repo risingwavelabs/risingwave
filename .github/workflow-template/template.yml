@@ -134,7 +134,7 @@ jobs:
       # please double check whether there is performance degradation. Only increase the timeout
       # if the degradation is reasonable or to be fixed soon.
 
-      - name: e2e test w/ Hummock 3-node # Note: RiseDev cluster cannot be used to run e2e coverage unless we rebuild frontend in this workflow
+      - name: e2e test streaming 3-node # Note: RiseDev cluster cannot be used to run e2e coverage unless we rebuild frontend in this workflow
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-3node
@@ -146,7 +146,7 @@ jobs:
           ~/cargo-make/makers logs
           ~/cargo-make/makers check-logs
 
-      - name: e2e test w/ rust frontend
+      - name: e2e test rust frontend
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-v2
@@ -158,7 +158,7 @@ jobs:
           ~/cargo-make/makers logs
           ~/cargo-make/makers check-logs
 
-      - name: e2e test w/ Hummock w/o cache 3-node
+      - name: e2e test streaming 3-node w/o cache
         run: |
           ~/cargo-make/makers clean-data
           RW_NO_CACHE=1 ~/cargo-make/makers ci-3node
@@ -170,10 +170,10 @@ jobs:
           ~/cargo-make/makers logs
           ~/cargo-make/makers check-logs
 
-      - name: e2e test batch 3-node (table_v2)
+      - name: e2e test batch 3-node
         run: |
           ~/cargo-make/makers clean-data
-          ~/cargo-make/makers ci-3node
+          RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-3node
           timeout 5m sqllogictest -p 4567 -d dev './e2e_test/batch/**/*.slt'
 
       - name: Kill cluster
@@ -305,7 +305,7 @@ jobs:
       # if the degradation is reasonable or to be fixed soon.
 
       # When running regress tests, do `FLUSH` implicitly after every insertion.
-      - name: Run 3-node regress tests (batch)
+      - name: regress test batch 3-node
         run: |
           ~/cargo-make/makers clean-data
           RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-3node
@@ -322,7 +322,7 @@ jobs:
           ~/cargo-make/makers logs
           # ~/cargo-make/makers check-logs # regression test is bound to produce errors, so we don't check logs
 
-      - name: e2e test w/ source and Hummock
+      - name: e2e test source
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-1node
@@ -334,7 +334,7 @@ jobs:
           ~/cargo-make/makers logs
           ~/cargo-make/makers check-logs
 
-      - name: e2e test w/ source 3-node
+      - name: e2e test source 3-node
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-3node
