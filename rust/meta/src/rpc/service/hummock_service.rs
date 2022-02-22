@@ -35,9 +35,8 @@ where
         let req = request.into_inner();
         let result = self.hummock_manager.pin_version(req.context_id).await;
         match result {
-            Ok((pinned_version_id, pinned_version)) => Ok(Response::new(PinVersionResponse {
+            Ok(pinned_version) => Ok(Response::new(PinVersionResponse {
                 status: None,
-                pinned_version_id,
                 pinned_version: Some(pinned_version),
             })),
             Err(e) => Err(e.to_grpc_status()),
@@ -69,7 +68,10 @@ where
             .add_tables(req.context_id, req.tables, req.epoch)
             .await;
         match result {
-            Ok(_) => Ok(Response::new(AddTablesResponse { status: None })),
+            Ok(version) => Ok(Response::new(AddTablesResponse {
+                status: None,
+                version: Some(version),
+            })),
             Err(e) => Err(e.to_grpc_status()),
         }
     }
@@ -148,10 +150,7 @@ where
         request: Request<CommitEpochRequest>,
     ) -> Result<Response<CommitEpochResponse>, Status> {
         let req = request.into_inner();
-        let result = self
-            .hummock_manager
-            .commit_epoch(req.context_id, req.epoch)
-            .await;
+        let result = self.hummock_manager.commit_epoch(req.epoch).await;
         match result {
             Ok(_) => Ok(Response::new(CommitEpochResponse { status: None })),
             Err(e) => Err(e.to_grpc_status()),
@@ -163,10 +162,7 @@ where
         request: Request<AbortEpochRequest>,
     ) -> Result<Response<AbortEpochResponse>, Status> {
         let req = request.into_inner();
-        let result = self
-            .hummock_manager
-            .abort_epoch(req.context_id, req.epoch)
-            .await;
+        let result = self.hummock_manager.abort_epoch(req.epoch).await;
         match result {
             Ok(_) => Ok(Response::new(AbortEpochResponse { status: None })),
             Err(e) => Err(e.to_grpc_status()),

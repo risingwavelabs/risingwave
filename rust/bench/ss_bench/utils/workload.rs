@@ -14,21 +14,39 @@ type Keys = Vec<Bytes>;
 
 pub struct Workload;
 
+type Batch = Vec<(Bytes, Option<Bytes>)>;
+
 impl Workload {
-    pub(crate) fn make_batch(
+    pub(crate) fn make_batches(
+        opts: &Opts,
         keys: Vec<Bytes>,
         values: Vec<Option<Bytes>>,
-    ) -> Vec<(Bytes, Option<Bytes>)> {
-        let mut batch = keys.into_iter().zip_eq(values.into_iter()).collect_vec();
-        batch.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-        // As duplication rate is low, ignore filling data after deduplicating.
-        batch.dedup_by(|(k1, _), (k2, _)| k1 == k2);
-        batch
+    ) -> Vec<Batch> {
+        let mut batches = vec![];
+        let mut batch = vec![];
+
+        let pairs = keys.into_iter().zip_eq(values.into_iter()).collect_vec();
+        for (k, v) in pairs {
+            batch.push((k, v));
+            if batch.len() == opts.batch_size as usize {
+                batch.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+                // As duplication rate is low, ignore filling data after deduplicating.
+                batch.dedup_by(|(k1, _), (k2, _)| k1 == k2);
+
+                batches.push(batch);
+                batch = vec![];
+            }
+        }
+        if !batch.is_empty() {
+            batches.push(batch);
+        }
+
+        batches
     }
 
-    pub(crate) fn new_values(opts: &Opts, base_seed: u64) -> Vec<Option<Bytes>> {
+    /// Generate the values of given number
+    pub(crate) fn new_values(opts: &Opts, base_seed: u64, value_num: u64) -> Vec<Option<Bytes>> {
         let str_dist = Uniform::new_inclusive(0, 255);
-        let value_num = opts.batch_size as u64;
         (0..value_num)
             .into_iter()
             .map(|i| {
@@ -44,16 +62,18 @@ impl Workload {
             .collect()
     }
 
-    fn prefix_num(opts: &Opts) -> u64 {
+    /// Determine the prefix number of given keys
+    fn prefix_num(opts: &Opts, keys_num: u64) -> u64 {
         // get ceil result
-        (opts.batch_size + opts.keys_per_prefix - 1) as u64 / opts.keys_per_prefix as u64
+        (keys_num + opts.keys_per_prefix as u64 - 1) / opts.keys_per_prefix as u64
     }
 
-    pub(crate) fn new_random_keys(opts: &Opts, base_seed: u64) -> (Prefixes, Keys) {
+    /// Generate the random keys of given number
+    pub(crate) fn new_random_keys(opts: &Opts, base_seed: u64, key_num: u64) -> (Prefixes, Keys) {
         // --- get prefixes ---
         let str_dist = Uniform::new_inclusive(0, 255);
 
-        let prefix_num = Self::prefix_num(opts);
+        let prefix_num = Self::prefix_num(opts, key_num);
         let prefixes = (0..prefix_num)
             .into_iter()
             .map(|i| {
@@ -69,7 +89,7 @@ impl Workload {
             .collect_vec();
 
         // --- get keys ---
-        let keys = (0..opts.batch_size as u64)
+        let keys = (0..key_num as u64)
             .into_iter()
             .map(|i| {
                 // set random seed to make bench reproducable
@@ -91,9 +111,10 @@ impl Workload {
         (prefixes, keys)
     }
 
-    pub(crate) fn new_sequential_keys(opts: &Opts) -> (Prefixes, Keys) {
+    /// Generate the sequential keys of given number
+    pub(crate) fn new_sequential_keys(opts: &Opts, key_num: u64) -> (Prefixes, Keys) {
         // --- get prefixes ---
-        let prefix_num = Self::prefix_num(opts);
+        let prefix_num = Self::prefix_num(opts, key_num);
         let mut prefixes = Vec::with_capacity(prefix_num as usize);
         let mut prefix = vec![b'\0'; opts.key_prefix_size as usize];
         for _ in 0..prefix_num as u64 {
@@ -104,7 +125,7 @@ impl Workload {
         }
 
         // --- get keys ---
-        let mut keys = Vec::with_capacity(opts.batch_size as usize);
+        let mut keys = Vec::with_capacity(key_num as usize);
         let mut user_key = vec![b'\0'; opts.key_size as usize];
 
         for _ in 0..opts.keys_per_prefix as u64 {
@@ -128,6 +149,7 @@ impl Workload {
     }
 }
 
+/// generate epoch for the whole crate
 pub(crate) fn get_epoch() -> u64 {
     static EPOCH: AtomicU64 = AtomicU64::new(0);
     EPOCH.fetch_add(1, std::sync::atomic::Ordering::SeqCst)

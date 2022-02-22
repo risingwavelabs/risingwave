@@ -14,6 +14,7 @@
 #![feature(bound_map)]
 #![feature(backtrace)]
 #![feature(map_first_last)]
+#![feature(let_chains)]
 
 use risingwave_common::types::DataType;
 

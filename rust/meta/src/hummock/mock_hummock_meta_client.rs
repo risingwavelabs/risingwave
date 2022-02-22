@@ -29,7 +29,7 @@ impl MockHummockMetaClient {
 
 #[async_trait]
 impl HummockMetaClient for MockHummockMetaClient {
-    async fn pin_version(&self) -> HummockResult<(HummockVersionId, HummockVersion)> {
+    async fn pin_version(&self) -> HummockResult<HummockVersion> {
         self.hummock_manager
             .pin_version(self.context_id)
             .await
@@ -74,7 +74,7 @@ impl HummockMetaClient for MockHummockMetaClient {
         &self,
         epoch: HummockEpoch,
         sstables: Vec<SstableInfo>,
-    ) -> HummockResult<()> {
+    ) -> HummockResult<HummockVersion> {
         self.hummock_manager
             .add_tables(self.context_id, sstables, epoch)
             .await
@@ -101,14 +101,14 @@ impl HummockMetaClient for MockHummockMetaClient {
 
     async fn commit_epoch(&self, epoch: HummockEpoch) -> HummockResult<()> {
         self.hummock_manager
-            .commit_epoch(self.context_id, epoch)
+            .commit_epoch(epoch)
             .await
             .map_err(HummockError::meta_error)
     }
 
     async fn abort_epoch(&self, epoch: HummockEpoch) -> HummockResult<()> {
         self.hummock_manager
-            .abort_epoch(self.context_id, epoch)
+            .abort_epoch(epoch)
             .await
             .map_err(HummockError::meta_error)
     }

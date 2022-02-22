@@ -6852,7 +6852,7 @@
 		]
 	},
 	"time": {
-		"from": "now-6h",
+		"from": "now-15min",
 		"to": "now"
 	},
 	"timepicker": {},

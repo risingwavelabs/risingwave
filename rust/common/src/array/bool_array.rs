@@ -210,7 +210,7 @@ mod tests {
                 None => NULL_VAL_FOR_HASH.hash(state),
             })
         });
-        let hashes = hash_finish(&mut states);
+        let hashes = hash_finish(&mut states[..]);
 
         let count = hashes.iter().counts().len();
         assert_eq!(count, 6);

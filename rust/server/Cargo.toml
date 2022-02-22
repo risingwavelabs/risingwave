@@ -49,6 +49,7 @@ smallvec = "1"
 static_assertions = "1"
 thiserror = "1"
 thrift = "0.15" # thift is used for our implementation of `RwTokio` runtime. Always set it as the same version as opentelemetry-jaeger's.
+tikv-jemallocator = "0.4"
 tokio = { version = "1", features = [
     "rt",
     "rt-multi-thread",
