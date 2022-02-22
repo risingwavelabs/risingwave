@@ -103,15 +103,12 @@ impl RocksDBStateStoreIter {
             } else {
                 seek_key = SeekKey::from(start_key.as_slice());
             }
-            return if iter.seek(seek_key).unwrap() {
-                Ok(Self {
-                    store,
-                    iter: Some(Box::new(iter)),
-                    key_range: range,
-                })
-            } else {
-                Err(InternalError("prefix not found".to_string()).into())
-            };
+            iter.seek(seek_key).map_err(|e| RwError::from(InternalError(e)))?;
+            Ok(Self {
+                store,
+                iter: Some(Box::new(iter)),
+                key_range: range,
+            })
         })
         .await?
     }
