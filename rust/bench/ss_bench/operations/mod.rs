@@ -3,8 +3,7 @@ use risingwave_storage::StateStore;
 
 use crate::Opts;
 
-pub(crate) mod get_random;
-pub(crate) mod get_seq;
+pub(crate) mod get;
 pub(crate) mod prefix_scan_random;
 pub(crate) mod write_batch;
 
