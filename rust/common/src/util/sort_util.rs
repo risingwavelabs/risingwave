@@ -1,13 +1,12 @@
 use std::cmp::{Ord, Ordering};
 use std::sync::Arc;
 
-use prost::DecodeError;
 use risingwave_pb::expr::InputRefExpr;
 use risingwave_pb::plan::{ColumnOrder, OrderType as ProstOrderType};
 
 use crate::array::{Array, ArrayImpl, DataChunk, DataChunkRef};
 use crate::error::ErrorCode::InternalError;
-use crate::error::{ErrorCode, Result, RwError};
+use crate::error::{Result, RwError};
 use crate::expr::InputRefExpression;
 use crate::types::{DataType, ScalarPartialOrd, ScalarRef};
 
@@ -19,17 +18,14 @@ pub enum OrderType {
     Descending,
 }
 
-pub fn build_from_prost(order_type: &i32) -> Result<OrderType> {
-    let res = match ProstOrderType::from_i32(*order_type) {
-        Some(ProstOrderType::Ascending) => OrderType::Ascending,
-        Some(ProstOrderType::Descending) => OrderType::Descending,
-        _ => {
-            return Err(RwError::from(ErrorCode::ProstError(DecodeError::new(
-                "No such order type",
-            ))))
+impl OrderType {
+    pub fn from_prost(order_type: &ProstOrderType) -> OrderType {
+        match order_type {
+            ProstOrderType::Ascending => OrderType::Ascending,
+            ProstOrderType::Descending => OrderType::Descending,
+            ProstOrderType::Invalid => panic!("invalid order type"),
         }
-    };
-    Ok(res)
+    }
 }
 
 #[derive(Debug)]
