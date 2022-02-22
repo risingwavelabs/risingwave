@@ -22,9 +22,9 @@ impl Operations {
         for operation in opts.benchmarks.split(',') {
             match operation {
                 "writebatch" => runner.write_batch(&store, opts).await,
+                "deleterandom" => runner.delete_random(&store, opts).await,
                 "getrandom" => runner.get_random(&store, opts).await,
                 "getseq" => runner.get_seq(&store, opts).await,
-                "deleterandom" => runner.delete_random(&store, opts).await,
                 "prefixscanrandom" => runner.prefix_scan_random(&store, opts).await,
                 other => unimplemented!("operation \"{}\" is not supported.", other),
             }
