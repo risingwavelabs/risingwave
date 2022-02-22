@@ -376,7 +376,12 @@ impl Parser {
                         self.prev_token();
                         Expr::Subquery(Box::new(self.parse_query()?))
                     } else {
-                        Expr::Nested(Box::new(self.parse_expr()?))
+                        let mut exprs = self.parse_parenthesized_exprs()?;
+                        if exprs.len() == 1 {
+                            Expr::Nested(Box::new(exprs.pop().unwrap()))
+                        } else {
+                            Expr::Row(exprs)
+                        }
                     };
                 self.expect_token(&Token::RParen)?;
                 Ok(expr)
@@ -1948,6 +1953,13 @@ impl Parser {
         } else {
             self.expected("a list of columns in parentheses", self.peek_token())
         }
+    }
+
+    pub fn parse_parenthesized_exprs(&mut self) -> Result<Vec<Expr>, ParserError> {
+        self.expect_token(&Token::LParen)?;
+        let exprs = self.parse_comma_separated(Parser::parse_expr)?;
+        self.expect_token(&Token::RParen)?;
+        Ok(exprs)
     }
 
     pub fn parse_optional_precision(&mut self) -> Result<Option<u64>, ParserError> {
