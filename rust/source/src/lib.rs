@@ -36,7 +36,7 @@ pub enum SourceConfig {
     Kafka(HighLevelKafkaSourceConfig),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SourceFormat {
     Invalid,
     Json,

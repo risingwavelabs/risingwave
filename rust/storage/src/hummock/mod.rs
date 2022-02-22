@@ -204,7 +204,7 @@ impl HummockStorage {
 
         let version = self.local_version_manager.get_scoped_local_version();
 
-        for level in &version.merged_version() {
+        for level in &version.levels() {
             match level.level_type() {
                 LevelType::Overlapping => {
                     let tables = bloom_filter_sstables(
@@ -269,14 +269,12 @@ impl HummockStorage {
     {
         self.stats.range_scan_counts.inc();
 
-        // self.get_snapshot().await?.range_scan(key_range).await
-
         let version = self.local_version_manager.get_scoped_local_version();
 
         // Filter out tables that overlap with given `key_range`
         let overlapped_tables = self
             .local_version_manager
-            .tables(&version.merged_version())
+            .tables(&version.levels())
             .await?
             .into_iter()
             .filter(|t| {
@@ -334,7 +332,7 @@ impl HummockStorage {
         // Filter out tables that overlap with given `key_range`
         let overlapped_tables = self
             .local_version_manager
-            .tables(&version.merged_version())
+            .tables(&version.levels())
             .await?
             .into_iter()
             .filter(|t| {

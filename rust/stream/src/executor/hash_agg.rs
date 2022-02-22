@@ -123,10 +123,8 @@ impl<S: StateStore> HashAggExecutor<S> {
         for (row_idx, key) in keys.iter().enumerate() {
             // if the visibility map has already shadowed this row,
             // then we pass
-            if let Some(vis_map) = visibility {
-                if !vis_map.is_set(row_idx)? {
-                    continue;
-                }
+            if let Some(vis_map) = visibility && !vis_map.is_set(row_idx)? {
+                continue;
             }
             let vis_map = key_to_vis_maps.entry(key).or_insert_with(|| {
                 unique_keys.push(key);

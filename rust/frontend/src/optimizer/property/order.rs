@@ -52,6 +52,7 @@ impl Order {
         if self.field_order.len() < other.field_order.len() {
             return false;
         }
+        #[allow(clippy::disallowed_methods)]
         for (order, other_order) in self.field_order.iter().zip(other.field_order.iter()) {
             if order.index != other_order.index || !order.direct.satisfies(&other_order.direct) {
                 return false;

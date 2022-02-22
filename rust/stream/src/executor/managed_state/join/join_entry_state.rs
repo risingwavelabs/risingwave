@@ -11,11 +11,11 @@ use risingwave_storage::{Keyspace, StateStore};
 use super::*;
 use crate::executor::managed_state::flush_status::BtreeMapFlushStatus as FlushStatus;
 
-type AllOrNoneStateIter<'a> = btree_map::Iter<'a, PkType, StateValueType>;
+type JoinEntryStateIter<'a> = btree_map::Iter<'a, PkType, StateValueType>;
 
-type AllOrNoneStateValues<'a> = btree_map::Values<'a, PkType, StateValueType>;
+type JoinEntryStateValues<'a> = btree_map::Values<'a, PkType, StateValueType>;
 
-type AllOrNoneStateValuesMut<'a> = btree_map::ValuesMut<'a, PkType, StateValueType>;
+type JoinEntryStateValuesMut<'a> = btree_map::ValuesMut<'a, PkType, StateValueType>;
 
 /// Manages a `BTreeMap` in memory for all entries. When evicted, `BTreeMap` does not hold any
 /// entries.
@@ -25,9 +25,6 @@ pub struct JoinEntryState<S: StateStore> {
 
     /// The actions that will be taken on next flush
     flush_buffer: BTreeMap<PkType, FlushStatus<StateValueType>>,
-
-    /// Number of items in the state including the cache and state store.
-    total_count: usize,
 
     /// Data types of the sort column
     data_types: Arc<[DataType]>,
@@ -42,14 +39,12 @@ pub struct JoinEntryState<S: StateStore> {
 impl<S: StateStore> JoinEntryState<S> {
     pub fn new(
         keyspace: Keyspace<S>,
-        total_count: usize,
         data_types: Arc<[DataType]>,
         pk_data_types: Arc<[DataType]>,
     ) -> Self {
         Self {
             cached: None,
             flush_buffer: BTreeMap::new(),
-            total_count,
             data_types,
             pk_data_types,
             keyspace,
@@ -66,11 +61,9 @@ impl<S: StateStore> JoinEntryState<S> {
         if !all_data.is_empty() {
             // Insert cached states.
             let cached = Self::fill_cached(all_data, data_types.clone(), pk_data_types.clone())?;
-            let total_count = cached.len();
             Ok(Some(Self {
-                cached: None,
+                cached: Some(cached),
                 flush_buffer: BTreeMap::new(),
-                total_count,
                 data_types,
                 pk_data_types,
                 keyspace,
@@ -96,17 +89,6 @@ impl<S: StateStore> JoinEntryState<S> {
         Ok(cached)
     }
 
-    pub async fn is_empty(&mut self, epoch: u64) -> bool {
-        self.len(epoch).await == 0
-    }
-
-    pub async fn len(&mut self, epoch: u64) -> usize {
-        if self.cached.is_none() {
-            self.populate_cache(epoch).await.unwrap();
-        }
-        self.total_count as usize
-    }
-
     /// The state is dirty means there are unflush
     #[allow(dead_code)]
     pub fn is_dirty(&self) -> bool {
@@ -119,7 +101,6 @@ impl<S: StateStore> JoinEntryState<S> {
             cached.insert(key.clone(), value.clone());
         }
         // If no cache maintained, only update the flush buffer.
-        self.total_count += 1;
         FlushStatus::do_insert(self.flush_buffer.entry(key), value);
     }
 
@@ -128,7 +109,6 @@ impl<S: StateStore> JoinEntryState<S> {
             cached.remove(&pk);
         }
         // If no cache maintained, only update the flush buffer.
-        self.total_count -= 1;
         FlushStatus::do_delete(self.flush_buffer.entry(pk));
     }
 
@@ -177,7 +157,6 @@ impl<S: StateStore> JoinEntryState<S> {
             }
         }
 
-        self.total_count = cached.len();
         self.cached = Some(cached);
         Ok(())
     }
@@ -192,21 +171,22 @@ impl<S: StateStore> JoinEntryState<S> {
     }
 
     #[allow(dead_code)]
-    pub async fn iter(&mut self, epoch: u64) -> AllOrNoneStateIter<'_> {
+    pub async fn iter(&mut self, epoch: u64) -> JoinEntryStateIter<'_> {
         if self.cached.is_none() {
             self.populate_cache(epoch).await.unwrap();
         }
         self.cached.as_ref().unwrap().iter()
     }
 
-    pub async fn values(&mut self, epoch: u64) -> AllOrNoneStateValues<'_> {
+    #[allow(dead_code)]
+    pub async fn values(&mut self, epoch: u64) -> JoinEntryStateValues<'_> {
         if self.cached.is_none() {
             self.populate_cache(epoch).await.unwrap();
         }
         self.cached.as_ref().unwrap().values()
     }
 
-    pub async fn values_mut(&mut self, epoch: u64) -> AllOrNoneStateValuesMut<'_> {
+    pub async fn values_mut(&mut self, epoch: u64) -> JoinEntryStateValuesMut<'_> {
         if self.cached.is_none() {
             self.populate_cache(epoch).await.unwrap();
         }
@@ -229,7 +209,6 @@ mod tests {
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
         let mut managed_state = JoinEntryState::new(
             keyspace,
-            0,
             vec![DataType::Int64, DataType::Int64].into(),
             vec![DataType::Int64].into(),
         );
