@@ -14,8 +14,6 @@
 #![feature(is_sorted)]
 #![feature(backtrace)]
 
-extern crate core;
-
 #[macro_use]
 pub mod error;
 #[macro_use]
