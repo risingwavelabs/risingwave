@@ -62,10 +62,7 @@ impl ColIndexMapping {
             .iter()
             .cloned()
             .enumerate()
-            .filter_map(|(src, tar)| match tar {
-                Some(tar) => Some((src, tar)),
-                None => None,
-            })
+            .filter_map(|(src, tar)| tar.map(|tar| (src, tar)))
     }
     pub fn try_map(&self, index: usize) -> Option<usize> {
         *self.map.get(index)?
