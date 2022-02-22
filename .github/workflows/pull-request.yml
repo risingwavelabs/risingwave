@@ -116,8 +116,12 @@ jobs:
           cp risedev-components.ci.env risedev-components.user.env
       - name: Download sqllogictest
         run: |
-          curl -fL -o /usr/local/bin/sqllogictest https://github.com/singularity-data/sqllogictest-rs/releases/download/v0.3.0-pre/sqllogictest-linux-amd64
-          chmod +x /usr/local/bin/sqllogictest
+          wget ${URL} -O - | tar xz && mv ${BINARY} ${DIR}/${BINARY}
+          chmod +x ${DIR}/${BINARY}
+        env:
+          URL: https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.3.0-pre-2/sqllogictest-linux-amd64.tar.gz
+          DIR: /usr/local/bin
+          BINARY: sqllogictest
       - name: Download cargo-make
         run: |
           curl -fL https://github.com/sagiegurari/cargo-make/releases/download/0.35.7/cargo-make-v0.35.7-x86_64-unknown-linux-musl.zip -o ~/cargo-make-v0.35.7-x86_64-unknown-linux-musl.zip
@@ -125,7 +129,7 @@ jobs:
           mv ~/cargo-make-v0.35.7-x86_64-unknown-linux-musl ~/cargo-make
       - name: Prepare RiseDev playground
         run: ~/cargo-make/makers pre-start-playground
-      - name: e2e test w/ Hummock 3-node
+      - name: e2e test streaming 3-node
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-3node
@@ -135,7 +139,7 @@ jobs:
           ~/cargo-make/makers k
           ~/cargo-make/makers logs
           ~/cargo-make/makers check-logs
-      - name: e2e test w/ rust frontend
+      - name: e2e test rust frontend
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-v2
@@ -145,7 +149,7 @@ jobs:
           ~/cargo-make/makers k
           ~/cargo-make/makers logs
           ~/cargo-make/makers check-logs
-      - name: e2e test w/ Hummock w/o cache 3-node
+      - name: e2e test streaming 3-node w/o cache
         run: |
           ~/cargo-make/makers clean-data
           RW_NO_CACHE=1 ~/cargo-make/makers ci-3node
@@ -155,10 +159,10 @@ jobs:
           ~/cargo-make/makers k
           ~/cargo-make/makers logs
           ~/cargo-make/makers check-logs
-      - name: e2e test batch 3-node (table_v2)
+      - name: e2e test batch 3-node
         run: |
           ~/cargo-make/makers clean-data
-          ~/cargo-make/makers ci-3node
+          RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-3node
           timeout 3m sqllogictest -p 4567 -d dev './e2e_test/batch/**/*.slt'
       - name: Kill cluster
         run: |
@@ -212,8 +216,12 @@ jobs:
         run: ./scripts/source/prepare_source.sh
       - name: Download sqllogictest
         run: |
-          curl -fL -o ~/.cargo/bin/sqllogictest https://github.com/singularity-data/sqllogictest-rs/releases/download/v0.2.0/sqllogictest-linux-amd64
-          chmod +x ~/.cargo/bin/sqllogictest
+          wget ${URL} -O - | tar xz && mv ${BINARY} ${DIR}/${BINARY}
+          chmod +x ${DIR}/${BINARY}
+        env:
+          URL: https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.3.0-pre-2/sqllogictest-linux-amd64.tar.gz
+          DIR: /usr/local/bin
+          BINARY: sqllogictest
       - name: Download cargo-make
         run: |
           curl -fL https://github.com/sagiegurari/cargo-make/releases/download/0.35.7/cargo-make-v0.35.7-x86_64-unknown-linux-musl.zip -o ~/cargo-make-v0.35.7-x86_64-unknown-linux-musl.zip
@@ -258,10 +266,10 @@ jobs:
           cp risedev-components.ci.env risedev-components.user.env
       - name: Prepare RiseDev playground
         run: ~/cargo-make/makers pre-start-playground
-      - name: Run 3-node regress tests (batch)
+      - name: regress test batch 3-node
         run: |
           ~/cargo-make/makers clean-data
-          ~/cargo-make/makers ci-3node
+          RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-3node
           psql --version
           RUST_LOG=info cd rust && timeout 40s target/debug/risingwave_regress_test -h 127.0.0.1 \
             -p ${{ env.RW_PORT }} \
@@ -273,7 +281,7 @@ jobs:
           ~/cargo-make/makers k
           ~/cargo-make/makers logs
           # ~/cargo-make/makers check-logs # regression test is bound to produce errors, so we don't check logs
-      - name: e2e test w/ source and Hummock
+      - name: e2e test source
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-1node
@@ -283,7 +291,7 @@ jobs:
           ~/cargo-make/makers k
           ~/cargo-make/makers logs
           ~/cargo-make/makers check-logs
-      - name: e2e test w/ source 3-node
+      - name: e2e test source 3-node
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-3node
