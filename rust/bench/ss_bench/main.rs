@@ -55,8 +55,8 @@ pub(crate) struct Opts {
     #[clap(long, default_value_t = -1)]
     reads: i64,
 
-    #[clap(long, default_value_t = 100)]
-    write_batches: u64,
+    #[clap(long, default_value_t = -1)]
+    writes: i64,
 
     // ----- single batch -----
     #[clap(long, default_value_t = 100)]
@@ -178,6 +178,9 @@ fn preprocess_options(opts: &mut Opts) {
     }
     if opts.deletes < 0 {
         opts.deletes = opts.num;
+    }
+    if opts.writes < 0 {
+        opts.writes = opts.num;
     }
 }
 

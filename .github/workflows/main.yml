@@ -56,13 +56,27 @@ jobs:
     needs:
       - compute-node-build
       - frontend-check
-    runs-on: ubuntu-latest
+      - start-runner-a
+    runs-on: ${{ needs.start-runner-a.outputs.label }}
+    container:
+      image: public.ecr.aws/x5u3w5h6/risingwave-build-env:latest
+      options: --security-opt seccomp=unconfined
     timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v2
         with:
           fetch-depth: 0
+      - name: Install rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: rustfmt, clippy
+      - name: Set up JDK 11
+        uses: actions/setup-java@v2
+        with:
+          java-version: "11"
+          distribution: "adopt"
       - uses: actions/download-artifact@v2
         name: Download compute-node binary
         with:
@@ -96,17 +110,18 @@ jobs:
           chmod +x ./rust/target/debug/risedev-playground
       - name: Install required components
         run: |
-          sudo apt-get update -yy
-          sudo apt-get install --upgrade -yy tmux postgresql
+          apt-get update -yy
+          apt-get install --upgrade -yy tmux postgresql
       - name: Generate RiseDev CI config
         run: |
           cp risedev-components.ci.env risedev-components.user.env
       - name: Download sqllogictest
         run: |
-          wget ${URL} -O - | tar xz && sudo mv ${BINARY} ~/.cargo/bin/${BINARY}
-          chmod +x ~/.cargo/bin/${BINARY}
+          wget ${URL} -O - | tar xz && sudo mv ${BINARY} ${PATH}/${BINARY}
+          chmod +x ${PATH}/${BINARY}
         env:
           URL: https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.3.0-pre-2/sqllogictest-linux-amd64.tar.gz
+          PATH: /usr/local/bin
           BINARY: sqllogictest
       - name: Download cargo-make
         run: |
@@ -119,7 +134,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-3node
-          timeout 6m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
+          timeout 3m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
@@ -129,7 +144,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-v2
-          timeout 3m sqllogictest -p 4566 -d dev './e2e_test/v2/*.slt'
+          timeout 1m sqllogictest -p 4566 -d dev './e2e_test/v2/*.slt'
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
@@ -139,7 +154,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           RW_NO_CACHE=1 ~/cargo-make/makers ci-3node
-          timeout 6m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
+          timeout 3m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
@@ -149,7 +164,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-3node
-          timeout 5m sqllogictest -p 4567 -d dev './e2e_test/batch/**/*.slt'
+          timeout 3m sqllogictest -p 4567 -d dev './e2e_test/batch/**/*.slt'
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
@@ -490,13 +505,12 @@ jobs:
         run: |
           buf lint
         working-directory: proto
-  stop-runner:
-    name: ec2-stop
+  stop-runner-a:
+    name: ec2-stop-a
     needs:
       - start-runner-a
-      - start-runner-b
       - compute-node-build
-      - compute-node-test
+      - end-to-end-risedev
     runs-on: ubuntu-latest
     if: ${{ always() }}
     steps:
@@ -514,6 +528,20 @@ jobs:
           label: ${{ needs.start-runner-a.outputs.label }}
           ec2-instance-id: ${{ needs.start-runner-a.outputs.ec2-instance-id }}
         if: ${{ always() }}
+  stop-runner-b:
+    name: ec2-stop-b
+    needs:
+      - start-runner-b
+      - compute-node-test
+    runs-on: ubuntu-latest
+    if: ${{ always() }}
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-2
       - name: Stop EC2 runner B
         uses: machulav/ec2-github-runner@v2
         with:
