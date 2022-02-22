@@ -122,12 +122,12 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
             .schema()
             .fields
             .iter()
-            .map(|field| field.data_type)
+            .map(|field| field.data_type.clone())
             .collect::<Vec<_>>();
         let lower_sub_keyspace = keyspace.with_segment(Segment::FixedLength(b"l/".to_vec()));
         let higher_sub_keyspace = keyspace.with_segment(Segment::FixedLength(b"h/".to_vec()));
         let ordered_row_deserializer =
-            OrderedRowDeserializer::new(pk_data_types, pk_order_types.clone());
+            OrderedRowDeserializer::new(pk_data_types.clone(), pk_order_types.clone());
         Self {
             input,
             pk_order_types,

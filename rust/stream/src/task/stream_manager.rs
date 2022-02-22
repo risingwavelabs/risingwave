@@ -366,7 +366,7 @@ impl StreamManagerCore {
                         .find(|c| c.column_id == column_id)
                         .unwrap();
                     fields.push(Field::with_name(
-                        column_desc.data_type,
+                        column_desc.data_type.clone(),
                         column_desc.name.clone(),
                     ));
                 }

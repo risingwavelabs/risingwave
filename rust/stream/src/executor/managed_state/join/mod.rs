@@ -78,8 +78,8 @@ impl JoinRowDeserializer {
         let mut values = vec![];
         values.reserve(self.data_types.len());
         let mut deserializer = memcomparable::Deserializer::new(data);
-        for &ty in &self.data_types {
-            values.push(deserialize_datum_from(&ty, &mut deserializer)?);
+        for ty in &self.data_types {
+            values.push(deserialize_datum_from(ty, &mut deserializer)?);
         }
         let degree = u64::deserialize(&mut deserializer)?;
         Ok(JoinRow {

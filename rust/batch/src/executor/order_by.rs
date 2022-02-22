@@ -141,7 +141,7 @@ impl Executor for OrderByExecutor {
             self.encodable = self
                 .order_pairs
                 .iter()
-                .all(|pair| is_type_encodable(pair.order.return_type()))
+                .all(|pair| is_type_encodable(pair.order.return_type().clone()))
         }
 
         self.collect_child_data().await?;
@@ -155,7 +155,7 @@ impl Executor for OrderByExecutor {
             .schema()
             .fields()
             .iter()
-            .map(|f| f.data_type)
+            .map(|f| f.data_type.clone())
             .collect_vec();
         let mut builders = data_types
             .iter()

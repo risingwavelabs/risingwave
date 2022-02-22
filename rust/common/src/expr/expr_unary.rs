@@ -35,12 +35,12 @@ use crate::vector_op::upper::upper;
 ///   type of `$input, $cast`
 macro_rules! gen_cast_impl {
   ([$child:expr, $ret:expr], $( { $input:tt, $cast:tt, $func:expr } ),*) => {
-    match ($child.return_type(), $ret) {
+    match ($child.return_type(), $ret.clone()) {
       $(
           ($input! { type_match_pattern }, $cast! { type_match_pattern }) => {
             Box::new(UnaryExpression::< $input! { type_array }, $cast! { type_array }, _> {
               expr_ia1: $child,
-              return_type: $ret,
+              return_type: $ret.clone(),
               func: $func,
               _phantom: PhantomData,
             })
@@ -112,7 +112,7 @@ macro_rules! gen_neg_impl {
                 $input! {type_match_pattern} => {
                     Box::new(UnaryExpression::<$input! {type_array}, $input! {type_array}, _> {
                         expr_ia1: $child,
-                        return_type: $ret,
+                        return_type: $ret.clone(),
                         func: general_neg,
                         _phantom: PhantomData,
                     })
@@ -147,7 +147,7 @@ pub fn new_unary_expr(
 ) -> BoxedExpression {
     use crate::expr::data_types::*;
 
-    match (expr_type, return_type, child_expr.return_type()) {
+    match (expr_type, return_type.clone(), child_expr.return_type()) {
         // FIXME: We can not unify char and varchar because they are different in PG while share the
         // same logical type (String type) in our system (#2414).
         (ProstType::Cast, DataType::Date, DataType::Char) => {

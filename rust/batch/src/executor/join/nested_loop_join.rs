@@ -207,7 +207,7 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
                     .iter()
                     .chain(right_child.schema().fields.iter())
                     .map(|f| Field {
-                        data_type: f.data_type,
+                        data_type: f.data_type.clone(),
                         name: f.name.clone(),
                     })
                     .collect();

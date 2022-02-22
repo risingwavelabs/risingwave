@@ -46,6 +46,23 @@ message ColumnDesc {
   bool is_primary = 3;
   string name = 4;
   int32 column_id = 5;
+  CompositeTypeDesc composite_type = 6;
+}
+
+message CompositeTypeDesc {
+  string type_name = 1;
+  repeated FieldTypeDesc fields = 2;
+}
+
+message FieldTypeDesc {
+  string name = 1;
+  int32 field_id = 2;
+  oneof type {
+    // Builtin type.
+    data.DataType builtin = 3;
+    // Composite type.
+    CompositeTypeDesc composite = 4;
+  }
 }
 
 message RowSeqScanNode {

@@ -116,7 +116,7 @@ where
             total_count: row_count,
             keyspace,
             top_n_count,
-            data_type,
+            data_type: data_type.clone(),
             serializer: ExtremeSerializer::new(data_type, pk_data_types),
         })
     }
@@ -282,7 +282,8 @@ where
             for (raw_key, raw_value) in all_data {
                 let mut deserializer = memcomparable::Deserializer::new(&raw_value[..]);
                 let value =
-                    deserialize_datum_not_null_from(self.data_type, &mut deserializer)?.unwrap();
+                    deserialize_datum_not_null_from(self.data_type.clone(), &mut deserializer)?
+                        .unwrap();
                 let key = value.clone().try_into().unwrap();
                 let pks = self.serializer.get_pk(&raw_key[..])?;
                 self.top_n.insert((key, pks), value);
@@ -416,13 +417,13 @@ pub async fn create_streaming_extreme_state<S: StateStore>(
             use DataType::*;
             use risingwave_common::array::*;
 
-            match (agg_call.kind, agg_call.return_type) {
+            match (agg_call.kind, agg_call.return_type.clone()) {
                 $(
                     (AggKind::Max, $( $kind )|+) => Ok(Box::new(
-                        ManagedMaxState::<_, $array>::new(keyspace, agg_call.return_type, top_n_count, row_count, pk_data_types).await?,
+                        ManagedMaxState::<_, $array>::new(keyspace, agg_call.return_type.clone(), top_n_count, row_count, pk_data_types).await?,
                     )),
                     (AggKind::Min, $( $kind )|+) => Ok(Box::new(
-                        ManagedMinState::<_, $array>::new(keyspace, agg_call.return_type, top_n_count, row_count, pk_data_types).await?,
+                        ManagedMinState::<_, $array>::new(keyspace, agg_call.return_type.clone(), top_n_count, row_count, pk_data_types).await?,
                     )),
                 )*
                 (kind, return_type) => unimplemented!("unsupported extreme agg, kind: {:?}, return type: {:?}", kind, return_type),

@@ -45,7 +45,7 @@ fn name_of(ty: &DataType) -> DataTypeName {
         DataType::Timestampz => DataTypeName::Timestampz,
         DataType::Decimal => DataTypeName::Decimal,
         DataType::Interval => DataTypeName::Interval,
-        DataType::Struct => DataTypeName::Struct,
+        DataType::Struct { .. } => DataTypeName::Struct,
     }
 }
 
@@ -70,7 +70,7 @@ pub fn infer_type(func_type: ExprType, inputs_type: Vec<DataType>) -> Option<Dat
         DataTypeName::Timestampz => DataType::Timestampz,
         DataTypeName::Decimal => DataType::Decimal,
         DataTypeName::Interval => DataType::Interval,
-        DataTypeName::Struct => DataType::Struct,
+        DataTypeName::Struct => DataType::Struct { fields: vec![] },
     })
 }
 

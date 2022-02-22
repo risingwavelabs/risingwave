@@ -26,12 +26,15 @@ pub use interval::*;
 pub use ordered_float::IntoOrdered;
 use paste::paste;
 
-use crate::array::{ArrayBuilderImpl, PrimitiveArrayItemType, StructValue};
+mod struct_type;
+pub use struct_type::FieldDesc;
+
+use crate::array::{ArrayBuilderImpl, PrimitiveArrayItemType, StructRef, StructValue};
 
 pub type OrderedF32 = ordered_float::OrderedFloat<f32>;
 pub type OrderedF64 = ordered_float::OrderedFloat<f64>;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum DataType {
     Boolean,
     Int16,
@@ -47,7 +50,7 @@ pub enum DataType {
     Timestamp,
     Timestampz,
     Interval,
-    Struct,
+    Struct { fields: Vec<DataType> },
 }
 
 const DECIMAL_DEFAULT_PRECISION: u32 = 20;
@@ -79,7 +82,7 @@ impl From<&ProstDataType> for DataType {
             TypeName::Decimal => DataType::Decimal,
             TypeName::Interval => DataType::Interval,
             TypeName::Symbol => DataType::Varchar,
-            TypeName::Struct => DataType::Struct,
+            TypeName::Struct => DataType::Struct { fields: vec![] },
         }
     }
 }
@@ -101,7 +104,9 @@ impl DataType {
             DataType::Timestamp => NaiveDateTimeArrayBuilder::new(capacity)?.into(),
             DataType::Timestampz => PrimitiveArrayBuilder::<i64>::new(capacity)?.into(),
             DataType::Interval => IntervalArrayBuilder::new(capacity)?.into(),
-            DataType::Struct => StructArrayBuilder::new(capacity)?.into(),
+            DataType::Struct { .. } => {
+                todo!()
+            }
         })
     }
 
@@ -121,7 +126,7 @@ impl DataType {
             DataType::Timestampz => TypeName::Timestampz,
             DataType::Decimal => TypeName::Decimal,
             DataType::Interval => TypeName::Interval,
-            DataType::Struct => TypeName::Struct,
+            DataType::Struct { .. } => TypeName::Struct,
         }
     }
 
@@ -150,7 +155,7 @@ impl DataType {
             DataType::Timestamp => DataSize::Fixed(size_of::<i64>()),
             DataType::Timestampz => DataSize::Fixed(size_of::<i64>()),
             DataType::Interval => DataSize::Variable,
-            DataType::Struct => DataSize::Variable,
+            DataType::Struct { .. } => DataSize::Variable,
         }
     }
 
@@ -248,7 +253,7 @@ macro_rules! for_all_scalar_variants {
       { NaiveDate, naivedate, NaiveDateWrapper, NaiveDateWrapper },
       { NaiveDateTime, naivedatetime, NaiveDateTimeWrapper, NaiveDateTimeWrapper },
       { NaiveTime, naivetime, NaiveTimeWrapper, NaiveTimeWrapper },
-      { Struct, struct, StructValue, StructValue }
+      { Struct, struct, StructValue, StructRef<'scalar> }
     }
   };
 }
@@ -334,7 +339,7 @@ pub fn deserialize_datum_from(
     let null_tag = u8::deserialize(&mut *deserializer)?;
     match null_tag {
         0 => Ok(None),
-        1 => Ok(Some(ScalarImpl::deserialize(*ty, deserializer)?)),
+        1 => Ok(Some(ScalarImpl::deserialize(ty.clone(), deserializer)?)),
         _ => Err(memcomparable::Error::InvalidTagEncoding(null_tag as _)),
     }
 }
@@ -577,7 +582,9 @@ impl ScalarRefImpl<'_> {
             &Self::NaiveTime(v) => {
                 ser.serialize_naivetime(v.0.num_seconds_from_midnight(), v.0.nanosecond())?
             }
-            Self::Struct(v) => v.serialize(ser)?,
+            _ => {
+                panic!("Type is unable to be serialized.")
+            }
         };
         Ok(())
     }
@@ -629,7 +636,9 @@ impl ScalarImpl {
                 let days = de.deserialize_naivedate()?;
                 NaiveDateWrapper::new_with_days(days)?
             }),
-            Ty::Struct => Self::Struct(StructValue::deserialize(de)?),
+            _ => {
+                panic!("Type is unable to be deserialized.")
+            }
         })
     }
 }

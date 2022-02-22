@@ -49,7 +49,7 @@ impl From<&TableColumnDesc> for SourceColumnDesc {
     fn from(c: &TableColumnDesc) -> Self {
         Self {
             name: c.name.clone(),
-            data_type: c.data_type,
+            data_type: c.data_type.clone(),
             column_id: c.column_id,
             skip_parse: false,
             is_primary: false,

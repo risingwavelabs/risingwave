@@ -214,8 +214,7 @@ mod test {
             }),
             encoding: ColumnEncodingType::Raw as i32,
             name: "v1".to_string(),
-            is_primary: false,
-            column_id: 0,
+            ..Default::default()
         }];
         let schema = Schema::try_from(&columns).unwrap();
         let first = Box::new(MockSnapshot::with_chunks(
