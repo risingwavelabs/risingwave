@@ -11,7 +11,7 @@ use risingwave_pb::expr::expr_node::Type::{Add, GreaterThan, InputRef};
 use risingwave_pb::expr::{AggCall, ExprNode, FunctionCall, InputRefExpr};
 use risingwave_pb::plan::column_desc::ColumnEncodingType;
 use risingwave_pb::plan::{
-    ColumnDesc, ColumnOrder, DatabaseRefId, OrderType, SchemaRefId, TableRefId,
+    ColumnDesc, ColumnOrder, DatabaseRefId, Field, OrderType, SchemaRefId, TableRefId,
 };
 use risingwave_pb::stream_plan::dispatcher::DispatcherType;
 use risingwave_pb::stream_plan::source_node::SourceType;
@@ -77,6 +77,16 @@ fn make_column_desc(id: i32, type_name: TypeName) -> ColumnDesc {
     }
 }
 
+fn make_field(type_name: TypeName) -> Field {
+    Field {
+        data_type: Some(DataType {
+            type_name: type_name as i32,
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
+}
+
 fn make_column_order(idx: i32) -> ColumnOrder {
     ColumnOrder {
         order_type: OrderType::Ascending as i32,
@@ -126,10 +136,10 @@ fn make_stream_node() -> StreamNode {
                 r#type: DispatcherType::Hash as i32,
                 column_indices: vec![0],
             }),
-            input_column_descs: vec![
-                make_column_desc(1, TypeName::Int32),
-                make_column_desc(2, TypeName::Int32),
-                make_column_desc(0, TypeName::Int64),
+            fields: vec![
+                make_field(TypeName::Int32),
+                make_field(TypeName::Int32),
+                make_field(TypeName::Int64),
             ],
         })),
         input: vec![source_node],
@@ -177,10 +187,7 @@ fn make_stream_node() -> StreamNode {
                 r#type: DispatcherType::Simple as i32,
                 ..Default::default()
             }),
-            input_column_descs: vec![
-                make_column_desc(0, TypeName::Int64),
-                make_column_desc(0, TypeName::Int64),
-            ],
+            fields: vec![make_field(TypeName::Int64), make_field(TypeName::Int64)],
         })),
         input: vec![simple_agg_node],
         pk_indices: vec![0, 1],
