@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use futures::channel::mpsc::{channel, Receiver};
 use itertools::Itertools;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::expr::{build_from_prost, AggKind, RowExpression};
 use risingwave_common::try_match_expand;
@@ -65,6 +65,7 @@ pub struct ExecutorParams {
     pub operator_id: u64,
     pub op_info: String,
     pub input: Vec<Box<dyn Executor>>,
+    pub actor_id: u32,
 }
 
 impl StreamManager {
@@ -357,6 +358,7 @@ impl StreamManagerCore {
             operator_id: operator_id,
             op_info: op_info.clone(),
             input: input,
+            actor_id: actor_id,
         };
 
         let executor: Result<Box<dyn Executor>> =
@@ -400,33 +402,14 @@ impl StreamManagerCore {
                     &top_n_node,
                     store,
                 )?)),
-                Node::HashJoinNode(hash_join_node) => Ok(Self::create_hash_join_node(
-                    executor_params,
-                    &hash_join_node,
-                    store,
-                )?),
+                Node::HashJoinNode(hash_join_node) => {
+                    Ok(self.create_hash_join_node(executor_params, &hash_join_node, store)?)
+                }
                 Node::MviewNode(materialized_view_node) => Ok(Box::new(
                     MaterializeExecutor::create(executor_params, &materialized_view_node, store)?,
                 )),
                 Node::MergeNode(merge_node) => {
-                    let upstreams = merge_node.get_upstream_actor_id();
-                    if upstreams.len() == 1 {
-                        Ok(Box::new(ReceiverExecutor::create(
-                            executor_params,
-                            &merge_node,
-                            self,
-                            actor_id,
-                            upstreams,
-                        )?))
-                    } else {
-                        Ok(Box::new(MergeExecutor::create(
-                            executor_params,
-                            &merge_node,
-                            self,
-                            actor_id,
-                            upstreams,
-                        )?))
-                    }
+                    Ok(self.create_merge_node(executor_params, &merge_node)?)
                 }
                 Node::ChainNode(chain_node) => Ok(Box::new(ChainExecutor::create(
                     executor_params,
@@ -484,6 +467,7 @@ impl StreamManagerCore {
     }
 
     pub(crate) fn create_hash_join_node(
+        &mut self,
         mut params: ExecutorParams,
         node: &stream_plan::HashJoinNode,
         store: impl StateStore,
@@ -542,6 +526,33 @@ impl StreamManagerCore {
         let join_type_proto = node.get_join_type()?;
         let executor = create_hash_join_executor(join_type_proto);
         Ok(executor)
+    }
+
+    pub fn create_merge_node(
+        &mut self,
+        params: ExecutorParams,
+        node: &stream_plan::MergeNode,
+    ) -> Result<Box<dyn Executor>> {
+        let upstreams = node.get_upstream_actor_id();
+        let schema = Schema::try_from(node.get_input_column_descs())?;
+        let mut rxs = self.get_receive_message(params.actor_id, upstreams)?;
+
+        if upstreams.len() == 1 {
+            Ok(Box::new(ReceiverExecutor::new(
+                schema,
+                params.pk_indices,
+                rxs.remove(0),
+                params.op_info,
+            )))
+        } else {
+            Ok(Box::new(MergeExecutor::new(
+                schema,
+                params.pk_indices,
+                params.actor_id,
+                rxs,
+                params.op_info,
+            )))
+        }
     }
 
     pub(crate) fn get_receive_message(
