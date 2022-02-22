@@ -69,6 +69,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: rustfmt, clippy
+
       - uses: actions/download-artifact@v2
         name: Download compute-node binary
         with:
