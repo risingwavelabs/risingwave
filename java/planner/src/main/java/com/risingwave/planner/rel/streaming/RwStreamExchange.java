@@ -2,12 +2,9 @@ package com.risingwave.planner.rel.streaming;
 
 import static com.google.common.base.Verify.verify;
 
-import com.risingwave.catalog.ColumnDesc;
-import com.risingwave.catalog.ColumnEncoding;
 import com.risingwave.common.datatype.RisingWaveDataType;
 import com.risingwave.planner.metadata.RisingWaveRelMetadataQuery;
 import com.risingwave.planner.rel.common.dist.RwDistributionTrait;
-import com.risingwave.proto.data.DataType;
 import com.risingwave.proto.plan.Field;
 import com.risingwave.proto.streaming.plan.Dispatcher;
 import com.risingwave.proto.streaming.plan.ExchangeNode;
@@ -23,7 +20,6 @@ import org.apache.calcite.rel.RelDistribution;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.RelWriter;
 import org.apache.calcite.rel.core.Exchange;
-import org.apache.calcite.util.Pair;
 
 /** The exchange node in a streaming plan. */
 public class RwStreamExchange extends Exchange implements RisingWaveStreamingRel {
@@ -117,7 +113,8 @@ public class RwStreamExchange extends Exchange implements RisingWaveStreamingRel
     for (int i = 0; i < rowType.getFieldCount(); i++) {
       var field = rowType.getFieldList().get(i);
       var dataType = (RisingWaveDataType) field.getType();
-      list.add(Field.newBuilder()
+      list.add(
+          Field.newBuilder()
               .setDataType(dataType.getProtobufType())
               .setName(field.getName())
               .build());

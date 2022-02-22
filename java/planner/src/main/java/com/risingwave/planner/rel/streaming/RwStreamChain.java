@@ -2,7 +2,6 @@ package com.risingwave.planner.rel.streaming;
 
 import com.google.common.collect.ImmutableList;
 import com.risingwave.catalog.ColumnCatalog;
-import com.risingwave.catalog.ColumnDesc;
 import com.risingwave.catalog.TableCatalog;
 import com.risingwave.proto.plan.Field;
 import com.risingwave.proto.streaming.plan.*;

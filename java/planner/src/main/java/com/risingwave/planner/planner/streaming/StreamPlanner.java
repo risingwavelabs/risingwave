@@ -24,11 +24,10 @@ import com.risingwave.planner.rel.streaming.*;
 import com.risingwave.planner.rules.physical.BatchRuleSets;
 import com.risingwave.planner.rules.streaming.StreamingRuleSets;
 import com.risingwave.planner.sql.SqlConverter;
+import com.risingwave.proto.plan.Field;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Stream;
-
-import com.risingwave.proto.plan.Field;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.SqlNode;
@@ -155,7 +154,8 @@ public class StreamPlanner implements Planner<StreamingPlan> {
         if (!source.isAssociatedMaterializedView()) {
           for (int i = 0; i < source.getAllColumns().size(); i++) {
             var column = source.getAllColumns().get(i);
-            var field = Field.newBuilder()
+            var field =
+                Field.newBuilder()
                     .setDataType(column.getDesc().getDataType().getProtobufType())
                     .setName(column.getName())
                     .build();
@@ -164,7 +164,8 @@ public class StreamPlanner implements Planner<StreamingPlan> {
         } else {
           for (int i = 0; i < source.getAllColumnsV2().size(); i++) {
             var column = source.getAllColumnsV2().get(i);
-            var field = Field.newBuilder()
+            var field =
+                Field.newBuilder()
                     .setDataType(column.getDesc().getDataType().getProtobufType())
                     .setName(column.getName())
                     .build();
