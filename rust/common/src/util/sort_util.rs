@@ -31,7 +31,7 @@ impl OrderType {
 #[derive(Debug)]
 pub struct OrderPair {
     pub order_type: OrderType,
-    pub order: Box<InputRefExpression>,
+    pub column: Box<InputRefExpression>,
 }
 
 #[derive(Clone, Debug)]
@@ -125,8 +125,8 @@ pub fn compare_two_row(
     rhs_idx: usize,
 ) -> Result<Ordering> {
     for order_pair in order_pairs.iter() {
-        let lhs_array = order_pair.order.eval_immut(lhs_datachunk)?;
-        let rhs_array = order_pair.order.eval_immut(rhs_datachunk)?;
+        let lhs_array = order_pair.column.eval_immut(lhs_datachunk)?;
+        let rhs_array = order_pair.column.eval_immut(rhs_datachunk)?;
         macro_rules! gen_match {
         ($lhs: ident, $rhs: ident, [$( $tt: ident), *]) => {
             match ($lhs, $rhs) {
@@ -176,7 +176,7 @@ pub fn fetch_orders(column_orders: &[ColumnOrder]) -> Result<Vec<OrderPair>> {
                     "Invalid OrderType",
                 )))),
             }?,
-            order: Box::new(input_ref_expr),
+            column: Box::new(input_ref_expr),
         });
     }
     Ok(order_pairs)

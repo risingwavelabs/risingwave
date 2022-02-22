@@ -46,7 +46,7 @@ fn encode_array(array: &ArrayImpl, order: &OrderType) -> Result<EncodedColumn> {
 pub fn encode_chunk(chunk: &DataChunk, order_pairs: Arc<Vec<OrderPair>>) -> Arc<Vec<Vec<u8>>> {
     let encoded_columns = order_pairs
         .iter()
-        .map(|o| encode_array(o.order.eval_immut(chunk).unwrap().as_ref(), &o.order_type).unwrap())
+        .map(|o| encode_array(o.column.eval_immut(chunk).unwrap().as_ref(), &o.order_type).unwrap())
         .collect_vec();
 
     let mut encoded_chunk = vec![vec![]; chunk.capacity()];

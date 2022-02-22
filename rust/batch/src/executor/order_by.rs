@@ -141,7 +141,7 @@ impl Executor for OrderByExecutor {
             self.encodable = self
                 .order_pairs
                 .iter()
-                .all(|pair| is_type_encodable(pair.order.return_type()))
+                .all(|pair| is_type_encodable(pair.column.return_type()))
         }
 
         self.collect_child_data().await?;
@@ -292,11 +292,11 @@ mod tests {
         let input_ref_2 = InputRefExpression::new(DataType::Int32, 1);
         let order_pairs = vec![
             OrderPair {
-                order: Box::new(input_ref_2),
+                column: Box::new(input_ref_2),
                 order_type: OrderType::Ascending,
             },
             OrderPair {
-                order: Box::new(input_ref_1),
+                column: Box::new(input_ref_1),
                 order_type: OrderType::Ascending,
             },
         ];
@@ -346,11 +346,11 @@ mod tests {
         let input_ref_2 = InputRefExpression::new(DataType::Float64, 1);
         let order_pairs = vec![
             OrderPair {
-                order: Box::new(input_ref_2),
+                column: Box::new(input_ref_2),
                 order_type: OrderType::Ascending,
             },
             OrderPair {
-                order: Box::new(input_ref_1),
+                column: Box::new(input_ref_1),
                 order_type: OrderType::Ascending,
             },
         ];
@@ -409,11 +409,11 @@ mod tests {
         let input_ref_2 = InputRefExpression::new(DataType::Varchar, 1);
         let order_pairs = vec![
             OrderPair {
-                order: Box::new(input_ref_2),
+                column: Box::new(input_ref_2),
                 order_type: OrderType::Ascending,
             },
             OrderPair {
-                order: Box::new(input_ref_1),
+                column: Box::new(input_ref_1),
                 order_type: OrderType::Ascending,
             },
         ];
@@ -496,19 +496,19 @@ mod tests {
             let input_ref_3 = InputRefExpression::new(DataType::Varchar, 3);
             let order_pairs = vec![
                 OrderPair {
-                    order: Box::new(input_ref_1),
+                    column: Box::new(input_ref_1),
                     order_type: OrderType::Ascending,
                 },
                 OrderPair {
-                    order: Box::new(input_ref_0),
+                    column: Box::new(input_ref_0),
                     order_type: OrderType::Descending,
                 },
                 OrderPair {
-                    order: Box::new(input_ref_3),
+                    column: Box::new(input_ref_3),
                     order_type: OrderType::Descending,
                 },
                 OrderPair {
-                    order: Box::new(input_ref_2),
+                    column: Box::new(input_ref_2),
                     order_type: OrderType::Ascending,
                 },
             ];

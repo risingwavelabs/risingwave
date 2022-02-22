@@ -271,7 +271,7 @@ mod tests {
         }
         let input_ref_1 = InputRefExpression::new(DataType::Int32, 0);
         let order_pairs = Arc::new(vec![OrderPair {
-            order: Box::new(input_ref_1),
+            column: Box::new(input_ref_1),
             order_type: OrderType::Ascending,
         }]);
 
