@@ -1,3 +1,4 @@
+use std::mem::size_of_val;
 use std::time::Instant;
 
 use bytes::Buf;
@@ -44,10 +45,11 @@ impl Operations {
             .drain(..)
             .map(|(prefixes, store)| async move {
                 let mut latencies = vec![];
+                let mut sizes = vec![];
                 // actual prefix scan process
                 for prefix in prefixes {
                     let start = Instant::now();
-                    store
+                    let kv_pairs = store
                         .scan(
                             prefix.chunk().to_vec()..next_key(prefix.chunk()),
                             None,
@@ -55,34 +57,43 @@ impl Operations {
                         )
                         .await
                         .unwrap();
+                    let size = size_of_val(&kv_pairs);
                     let time_nano = start.elapsed().as_nanos();
                     latencies.push(time_nano);
+                    sizes.push(size);
                 }
-                latencies
+                (latencies, sizes)
             })
             .collect_vec();
 
         let total_start = Instant::now();
 
         let handles = futures.into_iter().map(tokio::spawn).collect_vec();
-        let latencies_list = futures::future::join_all(handles).await;
+        let results = futures::future::join_all(handles).await;
 
         let total_time_nano = total_start.elapsed().as_nanos();
 
         // calculate metrics
-        let latencies: Vec<u128> = latencies_list
+        let mut total_latencies = vec![];
+        let mut total_sizes: usize = 0;
+        let _ = results
             .into_iter()
-            .flat_map(|res| res.unwrap())
+            .map(|res| {
+                let (latencies, sizes) = res.unwrap();
+                total_latencies.extend(latencies);
+                total_sizes += sizes.iter().sum::<usize>();
+            })
             .collect_vec();
-        let stat = LatencyStat::new(latencies);
+        let stat = LatencyStat::new(total_latencies);
         let qps = opts.reads as u128 * 1_000_000_000 / total_time_nano as u128;
+        let bytes_pre_sec = total_sizes as u128 * 1_000_000_000 / total_time_nano as u128;
 
         println!(
             "
     prefixscanrandom
       {}
-      QPS: {}",
-            stat, qps
+      QPS: {}  {} bytes/sec",
+            stat, qps, bytes_pre_sec
         );
     }
 }

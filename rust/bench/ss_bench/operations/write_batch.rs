@@ -1,3 +1,4 @@
+use std::mem::size_of_val;
 use std::time::Instant;
 
 use itertools::Itertools;
@@ -24,6 +25,7 @@ impl Operations {
             })
             .collect_vec();
         let batches_len = batches.len();
+        let size = size_of_val(&batches);
 
         // partitioned these batches for each concurrency
         let mut grouped_batches = vec![vec![]; opts.concurrency_num as usize];
@@ -65,13 +67,14 @@ impl Operations {
         let stat = LatencyStat::new(latencies);
         // calculate operation per second
         let ops = opts.batch_size as u128 * 1_000_000_000 * batches_len as u128 / total_time_nano;
+        let throughput = size as u128 * 1_000_000_000 / total_time_nano;
 
         println!(
             "
     writebatch
       {}
-      KV ingestion OPS: {}",
-            stat, ops
+      KV ingestion OPS: {}  {} bytes/sec",
+            stat, ops, throughput
         );
     }
 }

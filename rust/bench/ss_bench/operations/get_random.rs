@@ -41,37 +41,50 @@ impl Operations {
             .drain(..)
             .map(|(keys, store)| async move {
                 let mut latencies: Vec<u128> = vec![];
+                let mut sizes: Vec<usize> = vec![];
                 for key in keys {
                     let start = Instant::now();
-                    store.get(&key, u64::MAX).await.unwrap();
+                    let size = match store.get(&key, u64::MAX).await.unwrap() {
+                        Some(v) => v.len(),
+                        None => 0,
+                    };
                     let time_nano = start.elapsed().as_nanos();
                     latencies.push(time_nano);
+                    sizes.push(size);
                 }
-                latencies
+
+                (latencies, sizes)
             })
             .collect_vec();
 
         let total_start = Instant::now();
 
         let handles = futures.into_iter().map(tokio::spawn).collect_vec();
-        let latencies_list = futures::future::join_all(handles).await;
+        let results = futures::future::join_all(handles).await;
 
         let total_time_nano = total_start.elapsed().as_nanos();
 
         // calculate metrics
-        let latencies: Vec<u128> = latencies_list
+        let mut total_latencies = vec![];
+        let mut total_size: usize = 0;
+        let _ = results
             .into_iter()
-            .flat_map(|res| res.unwrap())
+            .map(|res| {
+                let (latencies, sizes) = res.unwrap();
+                total_latencies.extend(latencies.into_iter());
+                total_size += sizes.iter().sum::<usize>();
+            })
             .collect_vec();
-        let stat = LatencyStat::new(latencies);
+        let stat = LatencyStat::new(total_latencies);
         let qps = opts.reads as u128 * 1_000_000_000 / total_time_nano as u128;
+        let bytes_pre_sec = total_size as u128 * 1_000_000_000 / total_time_nano as u128;
 
         println!(
             "
     getrandom
       {}
-      QPS: {}",
-            stat, qps
+      QPS: {}  {} bytes/sec",
+            stat, qps, bytes_pre_sec
         );
     }
 }
