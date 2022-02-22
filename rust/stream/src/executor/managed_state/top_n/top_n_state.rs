@@ -177,17 +177,13 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
                 for (key_from_storage, row_from_storage) in kv_pairs {
                     // If we inserted enough values, break as we will only retain `top_n_count`
                     // elements in the cache.
-                    if let Some(top_n_count) = self.top_n_count {
-                        if inserted >= top_n_count {
-                            break;
-                        }
+                    if let Some(top_n_count) = self.top_n_count && inserted >= top_n_count {
+                        break;
                     }
-                    while let Some((key_from_buffer, _)) = flush_buffer_iter.peek() {
-                        if **key_from_buffer >= key_from_storage {
-                            break;
-                        } else {
-                            flush_buffer_iter.next();
-                        }
+                    while let Some((key_from_buffer, _)) = flush_buffer_iter.peek()
+                        && **key_from_buffer < key_from_storage
+                    {
+                        flush_buffer_iter.next();
                     }
                     if flush_buffer_iter.peek().is_none() {
                         self.top_n.insert(key_from_storage, row_from_storage);
@@ -222,12 +218,10 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
                             break;
                         }
                     }
-                    while let Some((key_from_buffer, _)) = flush_buffer_iter.peek() {
-                        if **key_from_buffer <= key_from_storage {
-                            break;
-                        } else {
-                            flush_buffer_iter.next();
-                        }
+                    while let Some((key_from_buffer, _)) = flush_buffer_iter.peek()
+                        && **key_from_buffer > key_from_storage
+                    {
+                        flush_buffer_iter.next();
                     }
                     if flush_buffer_iter.peek().is_none() {
                         self.top_n.insert(key_from_storage, row_from_storage);

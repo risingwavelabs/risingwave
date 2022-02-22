@@ -12,6 +12,7 @@
 #![feature(binary_heap_drain_sorted)]
 #![feature(test)]
 #![feature(map_first_last)]
+#![feature(let_chains)]
 
 pub mod execution;
 pub mod executor;

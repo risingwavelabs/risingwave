@@ -304,16 +304,14 @@ impl NestedLoopJoinExecutor {
             let ret_chunk = new_chunk.with_visibility(sel_vector.as_bool().try_into()?);
             // Check the eval result and record some flags to prepare for outer/semi join.
             for (row_idx, vis_opt) in sel_vector.as_bool().iter().enumerate() {
-                if let Some(vis) = vis_opt {
-                    if vis {
-                        if self.join_type.need_join_remaining() {
-                            self.build_table.set_build_matched(RowId::new(
-                                self.build_table.get_chunk_idx(),
-                                row_idx,
-                            ))?;
-                        }
-                        self.probe_side_source.set_cur_row_matched(true);
+                if vis_opt == Some(true) {
+                    if self.join_type.need_join_remaining() {
+                        self.build_table.set_build_matched(RowId::new(
+                            self.build_table.get_chunk_idx(),
+                            row_idx,
+                        ))?;
                     }
+                    self.probe_side_source.set_cur_row_matched(true);
                 }
             }
             self.build_table.advance_chunk();

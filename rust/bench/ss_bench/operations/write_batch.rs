@@ -11,19 +11,15 @@ use crate::Opts;
 
 impl Operations {
     pub(crate) async fn write_batch(&mut self, store: &impl StateStore, opts: &Opts) {
-        let mut batches = (0..opts.write_batches)
-            .into_iter()
-            .map(|i| {
-                let (prefixes, keys) = Workload::new_random_keys(opts, i);
-                let values = Workload::new_values(opts, i);
+        let (prefixes, keys) = Workload::new_random_keys(opts, 233, opts.writes as u64);
+        let values = Workload::new_values(opts, 234, opts.writes as u64);
 
-                // add new prefixes and keys to global prefixes and keys
-                self.merge_prefixes(prefixes);
-                self.merge_keys(keys.clone());
+        // add new prefixes and keys to global prefixes and keys
+        self.merge_prefixes(prefixes);
+        self.merge_keys(keys.clone());
 
-                Workload::make_batch(keys, values)
-            })
-            .collect_vec();
+        let mut batches = Workload::make_batches(opts, keys, values);
+
         let batches_len = batches.len();
         let size = size_of_val(&batches);
 
