@@ -3,6 +3,7 @@
 use std::vec;
 
 use fixedbitset::FixedBitSet;
+use itertools::Itertools;
 
 use crate::expr::{ExprRewriter, InputRef};
 
@@ -10,9 +11,18 @@ use crate::expr::{ExprRewriter, InputRef};
 /// in optimizer for transformation of column index. if the value in the vec is None, the source is
 /// illegal.
 pub struct ColIndexMapping {
+    target_upper: usize,
     map: Vec<Option<usize>>,
 }
 impl ColIndexMapping {
+    pub fn new(map: Vec<Option<usize>>) -> Self {
+        let target_upper = map
+            .iter()
+            .filter_map(|x| *x)
+            .max_by_key(|x| *x)
+            .unwrap_or(0);
+        Self { map, target_upper }
+    }
     pub fn with_shift_offset(source_num: usize, offset: isize) -> Self {
         let map = (0..source_num)
             .into_iter()
@@ -20,8 +30,8 @@ impl ColIndexMapping {
                 let target = source as isize + offset;
                 usize::try_from(target).ok()
             })
-            .collect();
-        Self { map }
+            .collect_vec();
+        Self::new(map)
     }
 
     pub fn with_remaining_columns(cols: &FixedBitSet) -> Self {
@@ -29,7 +39,7 @@ impl ColIndexMapping {
         for (tar, src) in cols.ones().enumerate() {
             map[src] = Some(tar);
         }
-        Self { map }
+        Self::new(map)
     }
 
     pub fn with_removed_columns(cols: &FixedBitSet) -> Self {
@@ -43,15 +53,30 @@ impl ColIndexMapping {
         for tar in &mut map {
             *tar = tar.and_then(|index| following.try_map(index));
         }
-        Self { map }
+        Self::new(map)
     }
 
+    /// return iter of (src, dst) order by src
+    pub fn mapping_pairs(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
+        self.map
+            .iter()
+            .cloned()
+            .enumerate()
+            .filter_map(|(src, tar)| tar.map(|tar| (src, tar)))
+    }
     pub fn try_map(&self, index: usize) -> Option<usize> {
         *self.map.get(index)?
     }
 
     pub fn map(&self, index: usize) -> usize {
         self.try_map(index).unwrap()
+    }
+
+    pub fn target_upper(&self) -> usize {
+        self.target_upper
+    }
+    pub fn source_upper(&self) -> usize {
+        self.map.len()
     }
 }
 
