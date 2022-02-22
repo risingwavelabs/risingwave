@@ -12,7 +12,7 @@ use risingwave_common::array::{
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
-use risingwave_common::expr::Expression;
+
 use risingwave_common::util::encoding_for_comparison::{encode_chunk, is_type_encodable};
 use risingwave_common::util::sort_util::{
     compare_two_row, fetch_orders, HeapElem, OrderPair, K_PROCESSING_WINDOW_SIZE,
@@ -143,7 +143,7 @@ impl Executor for OrderByExecutor {
                 .order_pairs
                 .iter()
                 .map(|pair| schema.fields[pair.column_idx].data_type)
-                .all(|t| is_type_encodable(t))
+                .all(is_type_encodable)
         }
 
         self.collect_child_data().await?;
@@ -233,7 +233,7 @@ mod tests {
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{BoolArray, DataChunk, PrimitiveArray, Utf8Array};
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::expr::InputRefExpression;
+    
     use risingwave_common::types::{DataType, OrderedF32, OrderedF64};
     use risingwave_common::util::sort_util::OrderType;
     use test::Bencher;

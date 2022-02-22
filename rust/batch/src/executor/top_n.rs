@@ -151,7 +151,7 @@ mod tests {
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{Array, DataChunk, PrimitiveArray};
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::expr::InputRefExpression;
+    
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
 

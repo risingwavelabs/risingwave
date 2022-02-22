@@ -226,7 +226,7 @@ mod tests {
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{Array, DataChunk, I32Array};
     use risingwave_common::array_nonnull;
-    use risingwave_common::expr::InputRefExpression;
+    
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
 
