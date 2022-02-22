@@ -51,13 +51,13 @@ impl LocalSimpleAggExecutor {
             .iter()
             .map(build_agg_call_from_prost)
             .try_collect()?;
-        Ok(Self::new(
+        Self::new(
             params.input.remove(0),
             agg_calls,
             params.pk_indices,
             params.executor_id,
             params.op_info,
-        )?)
+        )
     }
 
     pub fn new(

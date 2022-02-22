@@ -66,7 +66,7 @@ impl StreamSourceExecutor {
         }
         let schema = Schema::new(fields);
 
-        Ok(Self::new(
+        Self::new(
             source_id,
             source_desc,
             column_ids,
@@ -76,7 +76,7 @@ impl StreamSourceExecutor {
             params.executor_id,
             params.operator_id,
             params.op_info,
-        )?)
+        )
     }
 
     #[allow(clippy::too_many_arguments)]

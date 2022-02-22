@@ -353,12 +353,12 @@ impl StreamManagerCore {
 
         let executor_params = ExecutorParams {
             env: env.clone(),
-            pk_indices: pk_indices.clone(),
-            executor_id: executor_id,
-            operator_id: operator_id,
-            op_info: op_info.clone(),
-            input: input,
-            actor_id: actor_id,
+            pk_indices,
+            executor_id,
+            operator_id,
+            op_info,
+            input,
+            actor_id,
         };
 
         let executor: Result<Box<dyn Executor>> =
@@ -370,54 +370,54 @@ impl StreamManagerCore {
                         .register_sender(actor_id, sender);
                     Ok(Box::new(StreamSourceExecutor::create(
                         executor_params,
-                        &node,
+                        node,
                     )?))
                 }
                 Node::ProjectNode(project_node) => Ok(Box::new(ProjectExecutor::create(
                     executor_params,
-                    &project_node,
+                    project_node,
                 )?)),
                 Node::FilterNode(filter_node) => Ok(Box::new(FilterExecutor::create(
                     executor_params,
-                    &filter_node,
+                    filter_node,
                 )?)),
                 Node::LocalSimpleAggNode(aggr_node) => Ok(Box::new(
-                    LocalSimpleAggExecutor::create(executor_params, &aggr_node)?,
+                    LocalSimpleAggExecutor::create(executor_params, aggr_node)?,
                 )),
                 Node::GlobalSimpleAggNode(aggr_node) => Ok(Box::new(SimpleAggExecutor::create(
                     executor_params,
-                    &aggr_node,
+                    aggr_node,
                     store,
                 )?)),
                 Node::HashAggNode(aggr_node) => Ok(Box::new(HashAggExecutor::create(
                     executor_params,
-                    &aggr_node,
+                    aggr_node,
                     store,
                 )?)),
                 Node::AppendOnlyTopNNode(top_n_node) => Ok(Box::new(
-                    AppendOnlyTopNExecutor::create(executor_params, &top_n_node, store)?,
+                    AppendOnlyTopNExecutor::create(executor_params, top_n_node, store)?,
                 )),
                 Node::TopNNode(top_n_node) => Ok(Box::new(TopNExecutor::create(
                     executor_params,
-                    &top_n_node,
+                    top_n_node,
                     store,
                 )?)),
                 Node::HashJoinNode(hash_join_node) => {
-                    Ok(self.create_hash_join_node(executor_params, &hash_join_node, store)?)
+                    Ok(self.create_hash_join_node(executor_params, hash_join_node, store)?)
                 }
                 Node::MviewNode(materialized_view_node) => Ok(Box::new(
-                    MaterializeExecutor::create(executor_params, &materialized_view_node, store)?,
+                    MaterializeExecutor::create(executor_params, materialized_view_node, store)?,
                 )),
                 Node::MergeNode(merge_node) => {
-                    Ok(self.create_merge_node(executor_params, &merge_node)?)
+                    Ok(self.create_merge_node(executor_params, merge_node)?)
                 }
                 Node::ChainNode(chain_node) => Ok(Box::new(ChainExecutor::create(
                     executor_params,
-                    &chain_node,
+                    chain_node,
                 )?)),
                 Node::BatchPlanNode(batch_plan_node) => Ok(Box::new(BatchQueryExecutor::create(
                     executor_params,
-                    &batch_plan_node,
+                    batch_plan_node,
                 )?)),
                 _ => Err(RwError::from(ErrorCode::InternalError(format!(
                     "unsupported node:{:?}",

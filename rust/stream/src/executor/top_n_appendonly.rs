@@ -112,7 +112,7 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
         };
         let cache_size = Some(1024);
         let total_count = (0, 0);
-        let keyspace = Keyspace::executor_root(store.clone(), params.executor_id);
+        let keyspace = Keyspace::executor_root(store, params.executor_id);
         Ok(Self::new(
             params.input.remove(0),
             order_types,

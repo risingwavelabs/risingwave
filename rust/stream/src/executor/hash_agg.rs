@@ -82,7 +82,7 @@ impl<S: StateStore> HashAggExecutor<S> {
             .iter()
             .map(build_agg_call_from_prost)
             .try_collect()?;
-        let keyspace = Keyspace::executor_root(store.clone(), params.executor_id);
+        let keyspace = Keyspace::executor_root(store, params.executor_id);
         Ok(Self::new(
             params.input.remove(0),
             agg_calls,
