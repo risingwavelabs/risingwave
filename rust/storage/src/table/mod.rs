@@ -118,24 +118,6 @@ pub trait ScannableTable: Sync + Send + Any + core::fmt::Debug {
         }
     }
 
-    /// Scan data of specified column ids
-    ///
-    /// In future, it will accept `predicates` for interested filtering conditions.
-    ///
-    /// This default implementation using iterator is not efficient, which project `column_ids` row
-    /// by row. If the underlying storage is a column store, we may implement this function
-    /// specifically.
-    async fn get_data_by_columns(&self, column_ids: &[i32]) -> Result<Option<DataChunks>> {
-        let indices = self.column_indices(column_ids);
-        let mut iter = self.iter(u64::MAX).await?;
-        let chunks = self
-            .collect_from_iter(&mut iter, &indices, None)
-            .await?
-            .map(|chunk| vec![chunk.into()]);
-
-        Ok(chunks)
-    }
-
     fn into_any(self: Arc<Self>) -> Arc<dyn Any + Sync + Send>;
 
     fn schema(&self) -> Cow<Schema>;

@@ -18,8 +18,7 @@ use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::{SimpleTableManager, TableManager};
 use risingwave_storage::{Keyspace, StateStoreImpl};
 use risingwave_stream::executor::{
-    Barrier, Executor as StreamExecutor, MaterializeExecutor, Message, PkIndices,
-    StreamSourceExecutor,
+    Barrier, Executor as StreamExecutor, MaterializeExecutor, Message, PkIndices, SourceExecutor,
 };
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -125,11 +124,11 @@ async fn test_table_v2_materialize() -> Result<()> {
     table_manager.register_associated_materialized_view(&source_table_id, &mview_id)?;
     source_manager.register_associated_materialized_view(&source_table_id, &mview_id)?;
 
-    // Create a `StreamSourceExecutor` to read the changes
+    // Create a `SourceExecutor` to read the changes
     let all_column_ids = vec![0, 1];
     let all_schema = get_schema(&all_column_ids);
     let (barrier_tx, barrier_rx) = unbounded_channel();
-    let stream_source = StreamSourceExecutor::new(
+    let stream_source = SourceExecutor::new(
         source_table_id.clone(),
         source_desc.clone(),
         all_column_ids.clone(),
@@ -138,7 +137,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         barrier_rx,
         1,
         1,
-        "StreamSourceExecutor".to_string(),
+        "SourceExecutor".to_string(),
     )?;
 
     // Create a `Materialize` to write the changes to storage

@@ -19,7 +19,8 @@ import java.util.stream.IntStream
 
 class StageExecution(
   private val taskManager: TaskManager,
-  private val stage: QueryStage
+  private val stage: QueryStage,
+  private val epoch: Long
 ) {
   companion object {
     private val log = LoggerFactory.getLogger(StageExecution::class.java)
@@ -32,7 +33,7 @@ class StageExecution(
   suspend fun execute() {
     // We remark that the task id is a consecutive number from 0 to stage.parallelism - 1.
     val tasks = IntStream.range(0, stage.parallelism)
-      .mapToObj { idx: Int -> QueryTask(TaskId(stage.stageId, idx), stage) }
+      .mapToObj { idx: Int -> QueryTask(TaskId(stage.stageId, idx), stage, this.epoch) }
       .collect(ImmutableList.toImmutableList())
     doExecute(tasks)
   }

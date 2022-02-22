@@ -12,6 +12,8 @@ import com.risingwave.common.config.Configuration;
 import com.risingwave.common.config.LeaderServerConfigurations;
 import com.risingwave.execution.handler.DefaultSqlHandlerFactory;
 import com.risingwave.execution.handler.SqlHandlerFactory;
+import com.risingwave.execution.handler.cache.HummockSnapshotManager;
+import com.risingwave.execution.handler.cache.MockHummockSnapshotManager;
 import com.risingwave.node.LocalWorkerNodeManager;
 import com.risingwave.node.WorkerNodeManager;
 import com.risingwave.rpc.ComputeClientManager;
@@ -40,6 +42,7 @@ public class TestPlannerModule extends AbstractModule {
     bind(WorkerNodeManager.class).to(LocalWorkerNodeManager.class).in(Singleton.class);
     bind(SqlHandlerFactory.class).to(DefaultSqlHandlerFactory.class).in(Singleton.class);
     bind(StreamManager.class).to(MockStreamManager.class).in(Singleton.class);
+    bind(HummockSnapshotManager.class).to(MockHummockSnapshotManager.class).in(Singleton.class);
   }
 
   @Singleton

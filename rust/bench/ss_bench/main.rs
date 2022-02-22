@@ -19,16 +19,6 @@ use risingwave_storage::tikv::TikvStateStore;
 
 use crate::utils::store_statistics::print_statistics;
 
-#[allow(dead_code)]
-enum WorkloadType {
-    WriteBatch = 0,
-    GetRandom = 1,
-    GetSeq = 2,
-    PrefixScanRandom = 3,
-    DeleteRandom = 4,
-    DeleteSeq = 5,
-}
-
 #[derive(Parser, Debug)]
 pub(crate) struct Opts {
     // ----- backend type  -----
@@ -188,18 +178,6 @@ fn preprocess_options(opts: &mut Opts) {
     }
     if opts.deletes < 0 {
         opts.deletes = opts.num;
-    }
-
-    // check illegal configurations
-    for operation in opts.benchmarks.split(',') {
-        if operation == "getseq" {
-            // TODO(sun ting): eliminate this limitation
-            if opts.batch_size < opts.reads as u32 {
-                panic!(
-                    "In sequential mode, `batch_size` should be greater than or equal to `reads`"
-                );
-            }
-        }
     }
 }
 

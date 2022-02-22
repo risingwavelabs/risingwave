@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::btree_map::BTreeMap;
 
 use itertools::Itertools;
 use parking_lot::Mutex;
@@ -76,7 +76,6 @@ impl MockHummockMetaService {
         *ref_count_entry.or_insert(0) += 1;
         PinVersionResponse {
             status: None,
-            pinned_version_id: greatest_version_id,
             pinned_version: Some(greatest_version),
         }
     }
@@ -150,9 +149,13 @@ impl MockHummockMetaService {
             epoch: request.epoch,
             table_ids: request.tables.iter().map(|table| table.id).collect_vec(),
         });
-        guard.versions.insert(new_version_id, greatest_version);
-        AddTablesResponse { status: None }
+        greatest_version.id = new_version_id;
+        guard
+            .versions
+            .insert(new_version_id, greatest_version.clone());
+        AddTablesResponse {
+            status: None,
+            version: Some(greatest_version),
+        }
     }
 }
-
-// TODO #2156 add MockMockHummockMetaService tests

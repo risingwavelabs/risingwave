@@ -25,7 +25,7 @@ impl BoxedExecutorBuilder for DropTableExecutor {
 
         Ok(Box::new(Self {
             table_id,
-            table_manager: source.global_task_env().table_manager_ref(),
+            table_manager: source.global_batch_env().table_manager_ref(),
             schema: Schema { fields: vec![] },
             identity: "DropTableExecutor".to_string(),
         }))

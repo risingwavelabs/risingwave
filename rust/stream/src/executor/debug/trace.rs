@@ -75,6 +75,7 @@ impl super::DebugExecutor for TraceExecutor {
         let input_desc = self.input_desc.as_str();
         let input_pos = self.input_pos;
         let span_name = format!("{}_{}_next", input_desc, input_pos);
+        let logical_operator_info = self.input.logical_operator_info().to_string();
         let input_message = self
             .input
             .next()
@@ -83,7 +84,8 @@ impl super::DebugExecutor for TraceExecutor {
                 otel.name = span_name.as_str(),
                 // For the upstream trace pipe, its output is our input.
                 next = input_desc,
-                input_pos = input_pos
+                input_pos = input_pos,
+                logical_operator = logical_operator_info.as_str(),
             ))
             .await;
         match input_message {

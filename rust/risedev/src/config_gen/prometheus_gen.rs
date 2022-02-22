@@ -15,6 +15,15 @@ impl PrometheusGen {
             .iter()
             .map(|node| format!("\"{}:{}\"", node.exporter_address, node.exporter_port))
             .join(",");
+
+        let meta_node_targets = config
+            .provide_meta_node
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(|node| format!("\"{}:{}\"", node.exporter_address, node.exporter_port))
+            .join(",");
+
         let minio_targets = config
             .provide_minio
             .as_ref()
@@ -34,10 +43,14 @@ scrape_configs:
     static_configs:
       - targets: ["{prometheus_host}:{prometheus_port}"]
 
-  - job_name: "hummock_monitor"
+  - job_name: compute-job
     static_configs:
       - targets: [{compute_node_targets}]
 
+  - job_name: meta-job
+    static_configs:
+      - targets: [{meta_node_targets}]
+  
   - job_name: minio-job
     metrics_path: /minio/v2/metrics/cluster
     static_configs:
