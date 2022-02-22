@@ -1,6 +1,7 @@
 use std::ops::Bound::Excluded;
 use std::ops::{Bound, RangeBounds};
 use std::sync::Arc;
+use std::mem::size_of_val;
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -46,15 +47,24 @@ impl StateStore for TikvStateStore {
 
     async fn get(&self, key: &[u8], _epoch: u64) -> Result<Option<Bytes>> {
         self.stats.get_counts.inc();
+
+        let timer = self.stats.get_latency.start_timer();
         let mut txn = self.client().await.begin_optimistic().await.unwrap();
         let res = txn
             .get(key.to_owned())
             .await
             .map(|x| x.map(Bytes::from))
-            .map_err(anyhow::Error::new)
-            .to_rw_result();
+            .map_err(anyhow::Error::new);
+        timer.observe_duration();
         txn.commit().await.unwrap();
-        res
+
+        self.stats.get_key_size.observe(key.len() as f64);
+        if res.is_ok() && res.unwrap().is_some() {
+            self.stats
+                .get_value_size
+                .observe( size_of_val(res.as_ref().unwrap()) as f64);
+        }
+        res.to_rw_result()
     }
 
     async fn scan<R, B>(
@@ -105,14 +115,20 @@ impl StateStore for TikvStateStore {
     }
 
     async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>, _epoch: u64) -> Result<()> {
+        self.stats.batched_write_counts.inc();
+        let mut write_batch_size = 0_usize;
+
+        let timer = self.stats.batch_write_latency.start_timer();
         let mut txn = self.client().await.begin_optimistic().await.unwrap();
         for (key, value) in kv_pairs {
+            write_batch_size += size_of_val(key.as_ref());
             match value {
                 Some(value) => {
                     txn.put(tikv_client::Key::from(key.to_vec()), value.to_vec())
                         .await
                         .map_err(anyhow::Error::new)
                         .to_rw_result()?;
+                    write_batch_size += size_of_val(value.as_ref().unwrap());
                 }
                 None => {
                     txn.delete(tikv_client::Key::from(key.to_vec()))
@@ -123,6 +139,9 @@ impl StateStore for TikvStateStore {
             }
         }
         txn.commit().await.unwrap();
+        timer.observe_duration();
+
+        self.stats.batch_write_size.observe(batch_write_size as f64);
         Ok(())
     }
 
