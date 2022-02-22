@@ -56,27 +56,25 @@ impl ProvideExpander {
                     .into_hash()
                     .ok_or_else(|| anyhow!("expect a hashmap"))?;
                 let map = map.into_iter().map(|(k, v)| {
-                    if let Some(k) = k.as_str() {
-                        if k.starts_with("provide-") {
-                            let array = v
-                                .as_vec()
-                                .ok_or_else(|| anyhow!("expect an array of provide-"))?;
-                            let array = array.iter().map(|item| {
-                                let item = item
-                                    .as_str()
-                                    .ok_or_else(|| anyhow!("expect a string from provide"))?;
-                                Ok::<_, anyhow::Error>(
-                                    self.all_items
-                                        .get(item)
-                                        .ok_or_else(|| anyhow!("{} not found", item))?
-                                        .clone(),
-                                )
-                            });
-                            return Ok::<_, anyhow::Error>((
-                                Yaml::String(k.to_string()),
-                                Yaml::Array(array.try_collect()?),
-                            ));
-                        }
+                    if let Some(k) = k.as_str() && k.starts_with("provide-") {
+                        let array = v
+                            .as_vec()
+                            .ok_or_else(|| anyhow!("expect an array of provide-"))?;
+                        let array = array.iter().map(|item| {
+                            let item = item
+                                .as_str()
+                                .ok_or_else(|| anyhow!("expect a string from provide"))?;
+                            Ok::<_, anyhow::Error>(
+                                self.all_items
+                                    .get(item)
+                                    .ok_or_else(|| anyhow!("{} not found", item))?
+                                    .clone(),
+                            )
+                        });
+                        return Ok::<_, anyhow::Error>((
+                            Yaml::String(k.to_string()),
+                            Yaml::Array(array.try_collect()?),
+                        ));
                     }
                     Ok::<_, anyhow::Error>((k, v))
                 });
