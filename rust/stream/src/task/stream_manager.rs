@@ -608,7 +608,7 @@ impl StreamManagerCore {
                 Ok(executor)
             }
             Node::MergeNode(merge_node) => {
-                let fields = merge_node.fields.iter().map(|f| Field::from(f)).collect();
+                let fields = merge_node.fields.iter().map(Field::from).collect();
                 let schema = Schema::new(fields);
                 let upstreams = merge_node.get_upstream_actor_id();
                 self.create_merge_node(actor_id, schema, upstreams, pk_indices, op_info)
