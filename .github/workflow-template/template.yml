@@ -108,8 +108,8 @@ jobs:
 
       - name: Install required components
         run: |
-          sudo apt-get update -yy
-          sudo apt-get install --upgrade -yy tmux postgresql
+          apt-get update -yy
+          apt-get install --upgrade -yy tmux postgresql
 
       - name: Generate RiseDev CI config
         run: |

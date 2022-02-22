@@ -100,8 +100,8 @@ jobs:
           chmod +x ./rust/target/debug/risedev-playground
       - name: Install required components
         run: |
-          sudo apt-get update -yy
-          sudo apt-get install --upgrade -yy tmux postgresql
+          apt-get update -yy
+          apt-get install --upgrade -yy tmux postgresql
       - name: Generate RiseDev CI config
         run: |
           cp risedev-components.ci.env risedev-components.user.env
