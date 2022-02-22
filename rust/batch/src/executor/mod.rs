@@ -101,12 +101,17 @@ macro_rules! build_executor {
 }
 
 impl<'a> ExecutorBuilder<'a> {
-    pub fn new(plan_node: &'a PlanNode, task_id: &'a TaskId, env: BatchEnvironment, epoch: u64) -> Self {
+    pub fn new(
+        plan_node: &'a PlanNode,
+        task_id: &'a TaskId,
+        env: BatchEnvironment,
+        epoch: u64,
+    ) -> Self {
         Self {
             plan_node,
             task_id,
             env,
-            epoch
+            epoch,
         }
     }
 
@@ -180,7 +185,8 @@ mod tests {
             stage_id: 1,
             query_id: "test_query_id".to_string(),
         };
-        let builder = ExecutorBuilder::new(&plan_node, task_id, BatchEnvironment::for_test(), u64::MAX);
+        let builder =
+            ExecutorBuilder::new(&plan_node, task_id, BatchEnvironment::for_test(), u64::MAX);
         let child_plan = &PlanNode {
             ..Default::default()
         };

@@ -171,7 +171,12 @@ pub struct BatchTaskExecution {
 }
 
 impl BatchTaskExecution {
-    pub fn new(prost_tid: &ProstTaskId, plan: PlanFragment, env: BatchEnvironment, epoch: u64) -> Result<Self> {
+    pub fn new(
+        prost_tid: &ProstTaskId,
+        plan: PlanFragment,
+        env: BatchEnvironment,
+        epoch: u64,
+    ) -> Result<Self> {
         Ok(BatchTaskExecution {
             task_id: TaskId::try_from(prost_tid)?,
             plan,

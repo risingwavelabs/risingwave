@@ -14,4 +14,7 @@ public class MockHummockSnapshotManager implements HummockSnapshotManager {
 
   @Override
   public void unpinSnapshot(long epoch) {}
+
+  @Override
+  public void force_update() {}
 }
