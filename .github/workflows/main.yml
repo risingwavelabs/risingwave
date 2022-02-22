@@ -117,7 +117,7 @@ jobs:
           cp risedev-components.ci.env risedev-components.user.env
       - name: Download sqllogictest
         run: |
-          wget ${URL} -O - | tar xz && sudo mv ${BINARY} ${PATH}/${BINARY}
+          wget ${URL} -O - | tar xz && mv ${BINARY} ${PATH}/${BINARY}
           chmod +x ${PATH}/${BINARY}
         env:
           URL: https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.3.0-pre-2/sqllogictest-linux-amd64.tar.gz
@@ -217,10 +217,11 @@ jobs:
         run: ./scripts/source/prepare_source.sh
       - name: Download sqllogictest
         run: |
-          wget ${URL} -O - | tar xz && sudo mv ${BINARY} ~/.cargo/bin/${BINARY}
-          chmod +x ~/.cargo/bin/${BINARY}
+          wget ${URL} -O - | tar xz && mv ${BINARY} ${PATH}/${BINARY}
+          chmod +x ${PATH}/${BINARY}
         env:
           URL: https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.3.0-pre-2/sqllogictest-linux-amd64.tar.gz
+          PATH: /usr/local/bin
           BINARY: sqllogictest
       - name: Download cargo-make
         run: |
