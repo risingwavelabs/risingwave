@@ -3,7 +3,7 @@ use std::time::Instant;
 use bytes::Bytes;
 use itertools::Itertools;
 use rand::distributions::Uniform;
-use rand::prelude::{Distribution, StdRng};
+use rand::prelude::{Distribution};
 use risingwave_storage::StateStore;
 
 use super::{Operations, PerfMetrics};

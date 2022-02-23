@@ -1,5 +1,5 @@
 use std::collections::BTreeSet;
-use std::sync::atomic::{AtomicU64, Ordering};
+
 
 use bytes::Bytes;
 use rand::SeedableRng;
@@ -68,7 +68,7 @@ impl Operations {
     /// Untrack deleted keys
     #[allow(clippy::mutable_key_type)]
     fn untrack_keys(&mut self, other: &Vec<Bytes>) {
-        let untrack_set = other.into_iter().collect::<BTreeSet<_>>();
+        let untrack_set = other.iter().collect::<BTreeSet<_>>();
         self.keys.retain(|k| !untrack_set.contains(k));
     }
 
