@@ -241,6 +241,9 @@ impl LocalVersionManager {
                     local_version_manager.try_set_version(version);
                 }
             }
+            else {
+                return;
+            }
         }
     }
 
