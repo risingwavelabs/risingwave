@@ -3,15 +3,15 @@
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ColumnId(i32);
 
-impl From<i32> for ColumnId {
-    fn from(column_id: i32) -> Self {
-        ColumnId(column_id)
+impl ColumnId {
+    pub fn get_id(&self) -> i32 {
+        self.0
     }
 }
 
-impl Into<i32> for ColumnId {
-    fn into(self) -> i32 {
-        self.0
+impl From<i32> for ColumnId {
+    fn from(column_id: i32) -> Self {
+        ColumnId(column_id)
     }
 }
 

@@ -67,7 +67,7 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
                     query_id: Some(source.task_id.clone().query_id),
                     bound_timestamp_ms: Some(stream_scan_node.timestamp_ms),
                 },
-                column_ids.clone(),
+                column_ids,
             )?),
             SourceImpl::TableV2(_) => {
                 panic!("use table_scan to scan a table")

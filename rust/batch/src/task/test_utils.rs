@@ -356,7 +356,7 @@ impl<'a> SelectBuilder<'a> {
             let column_ids = column_table_ref
                 .column_descs()
                 .iter()
-                .map(|c| c.column_id.into())
+                .map(|c| c.column_id.get_id())
                 .collect();
             let scan = RowSeqScanNode {
                 table_ref_id: None,
