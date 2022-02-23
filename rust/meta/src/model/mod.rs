@@ -39,23 +39,16 @@ pub trait MetadataModel: Sized {
     /// Current record key.
     fn key(&self) -> Result<Self::KeyType>;
 
-    async fn list_by_cf<S>(store: &S, eventual_cf: &str) -> Result<Vec<Self>>
-    where
-        S: MetaStore,
-    {
-        let bytes_vec = store.list_cf(eventual_cf).await?;
-        Ok(bytes_vec
-            .iter()
-            .map(|bytes| Self::from_protobuf(Self::ProstType::decode(bytes.as_slice()).unwrap()))
-            .collect::<Vec<_>>())
-    }
-
     /// `list` returns all records in this model.
     async fn list<S>(store: &S) -> Result<Vec<Self>>
     where
         S: MetaStore,
     {
-        Self::list_by_cf(store, &Self::cf_name()).await
+        let bytes_vec = store.list_cf(&Self::cf_name()).await?;
+        Ok(bytes_vec
+            .iter()
+            .map(|bytes| Self::from_protobuf(Self::ProstType::decode(bytes.as_slice()).unwrap()))
+            .collect::<Vec<_>>())
     }
 
     /// `insert` insert a new record in meta store, replaced it if the record already exist.
@@ -84,15 +77,12 @@ pub trait MetadataModel: Sized {
             .map_err(Into::into)
     }
 
-    async fn select_by_cf<S>(
-        store: &S,
-        eventual_cf: &str,
-        key: &Self::KeyType,
-    ) -> Result<Option<Self>>
+    /// `select` query a record with associated key and version.
+    async fn select<S>(store: &S, key: &Self::KeyType) -> Result<Option<Self>>
     where
         S: MetaStore,
     {
-        let byte_vec = match store.get_cf(eventual_cf, &key.encode_to_vec()).await {
+        let byte_vec = match store.get_cf(&Self::cf_name(), &key.encode_to_vec()).await {
             Ok(byte_vec) => byte_vec,
             Err(err) => {
                 if !matches!(err, storage::Error::ItemNotFound(_)) {
@@ -104,14 +94,6 @@ pub trait MetadataModel: Sized {
         let model = Self::from_protobuf(Self::ProstType::decode(byte_vec.as_slice())?);
         Ok(Some(model))
     }
-
-    /// `select` query a record with associated key and version.
-    async fn select<S>(store: &S, key: &Self::KeyType) -> Result<Option<Self>>
-    where
-        S: MetaStore,
-    {
-        Self::select_by_cf(store, &Self::cf_name(), key).await
-    }
 }
 
 #[async_trait]
@@ -121,11 +103,16 @@ pub trait MetadataUserCfModel: MetadataModel {
     where
         S: MetaStore,
     {
-        Self::list_by_cf(
-            store,
-            &ColumnFamilyUtils::get_composed_cf(&Self::cf_name(), cf_ident),
-        )
-        .await
+        let bytes_vec = store
+            .list_cf(&ColumnFamilyUtils::get_composed_cf(
+                &Self::cf_name(),
+                cf_ident,
+            ))
+            .await?;
+        Ok(bytes_vec
+            .iter()
+            .map(|bytes| Self::from_protobuf(Self::ProstType::decode(bytes.as_slice()).unwrap()))
+            .collect::<Vec<_>>())
     }
 
     /// `select_with_cf_suffix` query a record with associated key and version.
@@ -137,12 +124,23 @@ pub trait MetadataUserCfModel: MetadataModel {
     where
         S: MetaStore,
     {
-        Self::select_by_cf(
-            store,
-            &ColumnFamilyUtils::get_composed_cf(&Self::cf_name(), cf_ident),
-            key,
-        )
-        .await
+        let byte_vec = match store
+            .get_cf(
+                &ColumnFamilyUtils::get_composed_cf(&Self::cf_name(), cf_ident),
+                &key.encode_to_vec(),
+            )
+            .await
+        {
+            Ok(byte_vec) => byte_vec,
+            Err(err) => {
+                if !matches!(err, storage::Error::ItemNotFound(_)) {
+                    return Err(err.into());
+                }
+                return Ok(None);
+            }
+        };
+        let model = Self::from_protobuf(Self::ProstType::decode(byte_vec.as_slice())?);
+        Ok(Some(model))
     }
 }
 
