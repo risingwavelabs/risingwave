@@ -42,3 +42,6 @@ drop materialized view tpch_q17;
 
 statement ok
 drop materialized view tpch_q18;
+
+statement ok
+drop materialized view tpch_q20;
