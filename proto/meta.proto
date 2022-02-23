@@ -129,8 +129,6 @@ message TableFragments {
   enum State {
     CREATING = 0;
     CREATED = 1;
-    DROPPING = 2;
-    DROPPED = 3;
   }
   message Fragment {
     enum FragmentType {

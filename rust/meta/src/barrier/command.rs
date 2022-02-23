@@ -24,14 +24,26 @@ use crate::stream::FragmentManagerRef;
 #[derive(Debug, Clone)]
 pub enum Command {
     /// `Plain` command generates a barrier with the mutation it carries.
+    ///
+    /// Barriers from all actors marked as `Created` state will be collected.
     /// After the barrier is collected, it does nothing.
     Plain(Mutation),
 
-    /// `DropMaterializedView` command generates a `Stop` barrier by the given [`TableRefId`].
+    /// `DropMaterializedView` command generates a `Stop` barrier by the given [`TableRefId`]. The
+    /// catalog has ensured that this materialized view is safe to be dropped by reference counts
+    /// before.
+    ///
+    /// Barriers from the actors to be dropped will STILL be collected.
     /// After the barrier is collected, it notifies the local stream manager of compute nodes to
-    /// drop actors, and then delete the info from meta store.
+    /// drop actors, and then delete the table fragments info from meta store.
     DropMaterializedView(TableRefId),
 
+    /// `CreateMaterializedView` command generates a `Add` barrier by given info.
+    ///
+    /// Barriers from the actors to be created, which is marked as `Creating` at first, will NOT be
+    /// collected.
+    /// After the barrier is collected, these newly created actors will be marked as `Created`. And
+    /// it adds the table fragments info to meta store.
     CreateMaterializedView {
         table_fragments: TableFragments,
         dispatches: HashMap<ActorId, Vec<ActorInfo>>,
@@ -84,12 +96,10 @@ where
             Command::Plain(mutation) => mutation.clone(),
 
             Command::DropMaterializedView(table_id) => {
-                let table_actors = self
+                let actors = self
                     .fragment_manager
                     .get_table_actor_ids(&TableId::from(&Some(table_id.clone())))?;
-                Mutation::Stop(StopMutation {
-                    actors: table_actors,
-                })
+                Mutation::Stop(StopMutation { actors })
             }
 
             Command::CreateMaterializedView { dispatches, .. } => {
@@ -103,7 +113,7 @@ where
                             },
                         )
                     })
-                    .collect::<HashMap<_, _>>();
+                    .collect();
                 Mutation::Add(AddMutation { actors })
             }
         };

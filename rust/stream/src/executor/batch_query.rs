@@ -81,7 +81,7 @@ impl Executor for BatchQueryExecutor {
             .table
             .collect_from_iter(iter, &column_indices, Some(self.batch_size))
             .await?
-            .ok_or_else(|| RwError::from(ErrorCode::EOF))?;
+            .ok_or_else(|| RwError::from(ErrorCode::Eof))?;
 
         let ops = vec![Op::Insert; data_chunk.cardinality()];
         let stream_chunk = StreamChunk::from_parts(ops, data_chunk);

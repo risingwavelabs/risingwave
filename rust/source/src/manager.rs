@@ -105,7 +105,7 @@ impl SourceManager for MemSourceManager {
             row_id_index,
         };
 
-        tables.insert(source_id.clone(), desc);
+        tables.insert(*source_id, desc);
 
         Ok(())
     }
@@ -135,7 +135,7 @@ impl SourceManager for MemSourceManager {
             row_id_index: Some(0), // always use the first column as row_id
         };
 
-        sources.insert(table_id.clone(), desc);
+        sources.insert(*table_id, desc);
         Ok(())
     }
 
@@ -158,7 +158,7 @@ impl SourceManager for MemSourceManager {
             .clone();
 
         // Simply associate the mview id to the table source
-        sources.insert(mview_id.clone(), source);
+        sources.insert(*mview_id, source);
         Ok(())
     }
 

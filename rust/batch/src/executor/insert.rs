@@ -152,7 +152,7 @@ mod tests {
     use std::sync::Arc;
 
     use risingwave_common::array::{Array, I64Array};
-    use risingwave_common::catalog::{ColumnId, Field, Schema, SchemaId};
+    use risingwave_common::catalog::{ColumnId, Field, Schema};
     use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
     use risingwave_source::{
@@ -207,7 +207,7 @@ mod tests {
         mock_executor.add(data_chunk.clone());
 
         // Create the first table.
-        let table_id = TableId::new(SchemaId::default(), 0);
+        let table_id = TableId::new(0);
         let table = table_manager
             .create_table_v2(&table_id, table_columns.to_vec())
             .await?;
@@ -221,12 +221,8 @@ mod tests {
             vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)],
         )?;
 
-        let mut insert_executor = InsertExecutor::new(
-            table_id.clone(),
-            source_manager.clone(),
-            Box::new(mock_executor),
-            0,
-        );
+        let mut insert_executor =
+            InsertExecutor::new(table_id, source_manager.clone(), Box::new(mock_executor), 0);
         insert_executor.open().await.unwrap();
         let fields = &insert_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Int64);

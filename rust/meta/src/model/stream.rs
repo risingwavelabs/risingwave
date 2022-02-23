@@ -90,7 +90,7 @@ impl TableFragments {
 
     /// Returns the table id.
     pub fn table_id(&self) -> TableId {
-        self.table_id.clone()
+        self.table_id
     }
 
     /// Returns whether the table finished creating.

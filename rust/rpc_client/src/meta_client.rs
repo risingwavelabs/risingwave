@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 use std::time::Duration;
 
+use risingwave_common::catalog::TableId;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::try_match_expand;
@@ -22,7 +23,6 @@ use tonic::Streaming;
 
 type DatabaseId = i32;
 type SchemaId = i32;
-type TableId = i32;
 
 /// Client to meta server. Cloning the instance is lightweight.
 #[derive(Clone)]
@@ -119,7 +119,9 @@ impl MetaClient {
     }
 
     pub async fn create_table(&self, table: Table) -> Result<TableId> {
-        self.create_catalog_body(CatalogBody::Table(table)).await
+        Ok(TableId {
+            table_id: self.create_catalog_body(CatalogBody::Table(table)).await? as u32,
+        })
     }
 
     pub async fn create_database(&self, db: Database) -> Result<DatabaseId> {

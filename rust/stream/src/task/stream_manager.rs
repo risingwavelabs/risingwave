@@ -109,6 +109,7 @@ impl StreamManager {
         for id in actors {
             core.drop_actor(*id);
         }
+        debug!("drop actors: {:?}", actors);
         Ok(())
     }
 
