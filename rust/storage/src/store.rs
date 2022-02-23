@@ -90,9 +90,6 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     fn start_write_batch(&self) -> WriteBatch<Self> {
         WriteBatch::new(self.clone())
     }
-
-    /// Wait until the epoch is committed and its data is ready to read.
-    async fn wait_epoch(&self, _epoch: u64) {}
 }
 
 #[async_trait]

@@ -54,6 +54,7 @@ async fn gen_and_upload_table(
         .await
         .unwrap();
     vm.try_set_version(version);
+    hummock_meta_client.commit_epoch(epoch).await.ok();
 }
 
 macro_rules! assert_count_range_scan {

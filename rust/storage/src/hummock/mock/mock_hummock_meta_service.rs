@@ -3,10 +3,10 @@ use std::collections::btree_map::BTreeMap;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_pb::hummock::{
-    AddTablesRequest, AddTablesResponse, GetNewTableIdRequest, GetNewTableIdResponse,
-    HummockSnapshot, HummockVersion, PinSnapshotRequest, PinSnapshotResponse, PinVersionRequest,
-    PinVersionResponse, UncommittedEpoch, UnpinSnapshotRequest, UnpinSnapshotResponse,
-    UnpinVersionRequest, UnpinVersionResponse,
+    AddTablesRequest, AddTablesResponse, CommitEpochRequest, CommitEpochResponse,
+    GetNewTableIdRequest, GetNewTableIdResponse, HummockSnapshot, HummockVersion, Level, LevelType,
+    PinSnapshotRequest, PinSnapshotResponse, PinVersionRequest, PinVersionResponse,
+    UnpinSnapshotRequest, UnpinSnapshotResponse, UnpinVersionRequest, UnpinVersionResponse,
 };
 
 use crate::hummock::{
@@ -39,7 +39,10 @@ impl MockHummockMetaServiceInner {
             FIRST_VERSION_ID,
             HummockVersion {
                 id: FIRST_VERSION_ID,
-                levels: vec![],
+                levels: vec![Level {
+                    level_type: LevelType::Overlapping as i32,
+                    table_ids: vec![],
+                }],
                 uncommitted_epochs: vec![],
                 max_committed_epoch: INVALID_EPOCH,
             },
@@ -123,30 +126,36 @@ impl MockHummockMetaService {
 
     pub fn add_tables(&self, request: AddTablesRequest) -> AddTablesResponse {
         let mut guard = self.inner.lock();
-        let old_version_id = guard.current_version_id;
+        let mut new_version = guard
+            .versions
+            .get(&guard.current_version_id)
+            .cloned()
+            .unwrap();
+        new_version.levels[0]
+            .table_ids
+            .extend(request.tables.iter().map(|table| table.id).collect_vec());
         guard.current_version_id += 1;
-        let new_version_id = guard.current_version_id;
-        let mut greatest_version = guard
-            .versions
-            .get(&old_version_id)
-            .unwrap_or(&HummockVersion {
-                id: FIRST_VERSION_ID,
-                levels: vec![],
-                uncommitted_epochs: vec![],
-                max_committed_epoch: guard.max_committed_epoch,
-            })
-            .clone();
-        greatest_version.uncommitted_epochs.push(UncommittedEpoch {
-            epoch: request.epoch,
-            table_ids: request.tables.iter().map(|table| table.id).collect_vec(),
-        });
-        greatest_version.id = new_version_id;
-        guard
-            .versions
-            .insert(new_version_id, greatest_version.clone());
+        new_version.id = guard.current_version_id;
+        guard.versions.insert(new_version.id, new_version.clone());
         AddTablesResponse {
             status: None,
-            version: Some(greatest_version),
+            version: Some(new_version),
         }
+    }
+
+    pub fn commit_epoch(&self, request: CommitEpochRequest) -> CommitEpochResponse {
+        let mut guard = self.inner.lock();
+        if request.epoch > guard.max_committed_epoch {
+            let mut new_version = guard
+                .versions
+                .get(&guard.current_version_id)
+                .cloned()
+                .unwrap();
+            guard.current_version_id += 1;
+            new_version.max_committed_epoch = request.epoch;
+            new_version.id = guard.current_version_id;
+            guard.versions.insert(new_version.id, new_version);
+        }
+        CommitEpochResponse { status: None }
     }
 }
