@@ -12,7 +12,7 @@ use crate::Opts;
 impl Operations {
     pub(crate) async fn write_batch(&mut self, store: &impl StateStore, opts: &Opts) {
         let (prefixes, keys) = Workload::new_random_keys(opts, opts.writes as u64);
-        let values = Workload::new_values(opts,  opts.writes as u64);
+        let values = Workload::new_values(opts, opts.writes as u64);
 
         // add new prefixes and keys to global prefixes and keys
         self.track_prefixes(prefixes);
