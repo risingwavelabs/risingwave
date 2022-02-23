@@ -214,11 +214,11 @@ fn make_tpchq6_expr() -> (BoxedExpression, BoxedExpression) {
         LiteralExpression::new(DataType::Float64, Some(ScalarImpl::Float64(0.07.into())));
     let const_24 = LiteralExpression::new(DataType::Int32, Some(ScalarImpl::Int32(24)));
     let t_shipdate = DataType::Timestamp;
-    let l_shipdate = InputRefExpression::new(t_shipdate, 0);
+    let l_shipdate = InputRefExpression::new(t_shipdate.clone(), 0);
     let l_shipdate_2 = InputRefExpression::new(t_shipdate, 0);
     let t_discount = DataType::Float64;
-    let l_discount = InputRefExpression::new(t_discount, 1);
-    let l_discount_2 = InputRefExpression::new(t_discount, 1);
+    let l_discount = InputRefExpression::new(t_discount.clone(), 1);
+    let l_discount_2 = InputRefExpression::new(t_discount.clone(), 1);
     let l_discount_3 = InputRefExpression::new(t_discount, 1);
     let t_quantity = DataType::Float64;
     let l_quantity = InputRefExpression::new(t_quantity, 2);

@@ -214,17 +214,17 @@ mod tests {
         let table_columns = vec![
             TableColumnDesc {
                 column_id: 0,
-                data_type: rowid_type,
+                data_type: rowid_type.clone(),
                 name: String::new(),
             },
             TableColumnDesc {
                 column_id: 1,
-                data_type: col1_type,
+                data_type: col1_type.clone(),
                 name: String::new(),
             },
             TableColumnDesc {
                 column_id: 2,
-                data_type: col2_type,
+                data_type: col2_type.clone(),
                 name: String::new(),
             },
         ];
@@ -350,17 +350,17 @@ mod tests {
         let table_columns = vec![
             TableColumnDesc {
                 column_id: 0,
-                data_type: rowid_type,
+                data_type: rowid_type.clone(),
                 name: String::new(),
             },
             TableColumnDesc {
                 column_id: 1,
-                data_type: col1_type,
+                data_type: col1_type.clone(),
                 name: String::new(),
             },
             TableColumnDesc {
                 column_id: 2,
-                data_type: col2_type,
+                data_type: col2_type.clone(),
                 name: String::new(),
             },
         ];

@@ -1,4 +1,5 @@
 use std::convert::TryFrom;
+use std::sync::Arc;
 
 use bytes::{Buf, BufMut};
 use risingwave_pb::data::DataType as ProstDataType;
@@ -31,7 +32,7 @@ use crate::array::{ArrayBuilderImpl, PrimitiveArrayItemType, StructValue};
 pub type OrderedF32 = ordered_float::OrderedFloat<f32>;
 pub type OrderedF64 = ordered_float::OrderedFloat<f64>;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum DataType {
     Boolean,
     Int16,
@@ -47,7 +48,7 @@ pub enum DataType {
     Timestamp,
     Timestampz,
     Interval,
-    Struct,
+    Struct { fields: Arc<[DataType]> },
 }
 
 const DECIMAL_DEFAULT_PRECISION: u32 = 20;
@@ -79,7 +80,9 @@ impl From<&ProstDataType> for DataType {
             TypeName::Decimal => DataType::Decimal,
             TypeName::Interval => DataType::Interval,
             TypeName::Symbol => DataType::Varchar,
-            TypeName::Struct => DataType::Struct,
+            TypeName::Struct => DataType::Struct {
+                fields: Arc::new([]),
+            },
         }
     }
 }
@@ -101,7 +104,9 @@ impl DataType {
             DataType::Timestamp => NaiveDateTimeArrayBuilder::new(capacity)?.into(),
             DataType::Timestampz => PrimitiveArrayBuilder::<i64>::new(capacity)?.into(),
             DataType::Interval => IntervalArrayBuilder::new(capacity)?.into(),
-            DataType::Struct => StructArrayBuilder::new(capacity)?.into(),
+            DataType::Struct { .. } => {
+                todo!()
+            }
         })
     }
 
@@ -121,7 +126,7 @@ impl DataType {
             DataType::Timestampz => TypeName::Timestampz,
             DataType::Decimal => TypeName::Decimal,
             DataType::Interval => TypeName::Interval,
-            DataType::Struct => TypeName::Struct,
+            DataType::Struct { .. } => TypeName::Struct,
         }
     }
 
@@ -150,7 +155,7 @@ impl DataType {
             DataType::Timestamp => DataSize::Fixed(size_of::<i64>()),
             DataType::Timestampz => DataSize::Fixed(size_of::<i64>()),
             DataType::Interval => DataSize::Variable,
-            DataType::Struct => DataSize::Variable,
+            DataType::Struct { .. } => DataSize::Variable,
         }
     }
 
@@ -172,6 +177,27 @@ impl DataType {
 
     pub fn is_date_or_timestamp(&self) -> bool {
         matches!(self, DataType::Date | DataType::Timestamp)
+    }
+
+    /// Type index is used to find the least restrictive type that is of the larger index.
+    pub fn type_index(&self) -> i32 {
+        match self {
+            DataType::Boolean => 1,
+            DataType::Int16 => 2,
+            DataType::Int32 => 3,
+            DataType::Int64 => 4,
+            DataType::Float32 => 5,
+            DataType::Float64 => 6,
+            DataType::Decimal => 7,
+            DataType::Date => 8,
+            DataType::Char => 9,
+            DataType::Varchar => 10,
+            DataType::Time => 11,
+            DataType::Timestamp => 12,
+            DataType::Timestampz => 13,
+            DataType::Interval => 14,
+            DataType::Struct { .. } => 15,
+        }
     }
 }
 
@@ -334,7 +360,7 @@ pub fn deserialize_datum_from(
     let null_tag = u8::deserialize(&mut *deserializer)?;
     match null_tag {
         0 => Ok(None),
-        1 => Ok(Some(ScalarImpl::deserialize(*ty, deserializer)?)),
+        1 => Ok(Some(ScalarImpl::deserialize(ty.clone(), deserializer)?)),
         _ => Err(memcomparable::Error::InvalidTagEncoding(null_tag as _)),
     }
 }
@@ -577,7 +603,9 @@ impl ScalarRefImpl<'_> {
             &Self::NaiveTime(v) => {
                 ser.serialize_naivetime(v.0.num_seconds_from_midnight(), v.0.nanosecond())?
             }
-            Self::Struct(v) => v.serialize(ser)?,
+            _ => {
+                panic!("Type is unable to be serialized.")
+            }
         };
         Ok(())
     }
@@ -629,7 +657,9 @@ impl ScalarImpl {
                 let days = de.deserialize_naivedate()?;
                 NaiveDateWrapper::new_with_days(days)?
             }),
-            Ty::Struct => Self::Struct(StructValue::deserialize(de)?),
+            _ => {
+                panic!("Type is unable to be deserialized.")
+            }
         })
     }
 }

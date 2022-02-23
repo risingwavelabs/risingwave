@@ -45,7 +45,7 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
                     .iter()
                     .find(|c| c.column_id == *id)
                     .map(|col| Field {
-                        data_type: col.data_type,
+                        data_type: col.data_type.clone(),
                         name: col.name.clone(),
                     })
                     .ok_or_else(|| {

@@ -177,8 +177,8 @@ mod tests {
                 }),
                 encoding: ColumnEncodingType::Raw as i32,
                 name: "v1".to_string(),
-                is_primary: false,
                 column_id: 0,
+                ..Default::default()
             },
             ColumnDesc {
                 column_type: Some(DataType {
@@ -187,8 +187,8 @@ mod tests {
                 }),
                 encoding: ColumnEncodingType::Raw as i32,
                 name: "v2".to_string(),
-                is_primary: false,
                 column_id: 1,
+                ..Default::default()
             },
         ];
         let pks = vec![0_usize];
