@@ -214,17 +214,17 @@ mod tests {
         let table_columns = vec![
             TableColumnDesc {
                 column_id: ColumnId::from(0),
-                data_type: rowid_type,
+                data_type: rowid_type.clone(),
                 name: String::new(),
             },
             TableColumnDesc {
                 column_id: ColumnId::from(1),
-                data_type: col1_type,
+                data_type: col1_type.clone(),
                 name: String::new(),
             },
             TableColumnDesc {
                 column_id: ColumnId::from(2),
-                data_type: col2_type,
+                data_type: col2_type.clone(),
                 name: String::new(),
             },
         ];
@@ -304,11 +304,11 @@ mod tests {
                     assert_eq!(3, chunk.columns().len());
                     assert_eq!(
                         col1_arr1.iter().collect_vec(),
-                        chunk.column(1).array_ref().iter().collect_vec(),
+                        chunk.column_at(1).array_ref().iter().collect_vec(),
                     );
                     assert_eq!(
                         col2_arr1.iter().collect_vec(),
-                        chunk.column(2).array_ref().iter().collect_vec()
+                        chunk.column_at(2).array_ref().iter().collect_vec()
                     );
                     assert_eq!(vec![Op::Insert; 3], chunk.ops());
                 }
@@ -325,11 +325,11 @@ mod tests {
             assert_eq!(3, chunk.columns().len());
             assert_eq!(
                 col1_arr2.iter().collect_vec(),
-                chunk.column(1).array_ref().iter().collect_vec()
+                chunk.column_at(1).array_ref().iter().collect_vec()
             );
             assert_eq!(
                 col2_arr2.iter().collect_vec(),
-                chunk.column(2).array_ref().iter().collect_vec()
+                chunk.column_at(2).array_ref().iter().collect_vec()
             );
             assert_eq!(vec![Op::Insert; 3], chunk.ops());
         } else {
@@ -350,17 +350,17 @@ mod tests {
         let table_columns = vec![
             TableColumnDesc {
                 column_id: ColumnId::from(0),
-                data_type: rowid_type,
+                data_type: rowid_type.clone(),
                 name: String::new(),
             },
             TableColumnDesc {
                 column_id: ColumnId::from(1),
-                data_type: col1_type,
+                data_type: col1_type.clone(),
                 name: String::new(),
             },
             TableColumnDesc {
                 column_id: ColumnId::from(2),
-                data_type: col2_type,
+                data_type: col2_type.clone(),
                 name: String::new(),
             },
         ];

@@ -57,7 +57,7 @@ impl<S: StateStore> MViewTable<S> {
             .map(|(column_index, f)| {
                 // For mview, column id is exactly the index, so we perform conversion here.
                 let column_id = ColumnId::from(column_index as i32);
-                TableColumnDesc::unnamed(column_id, f.data_type)
+                TableColumnDesc::unnamed(column_id, f.data_type.clone())
             })
             .collect_vec();
 
@@ -75,7 +75,7 @@ impl<S: StateStore> MViewTable<S> {
         let schema = {
             let fields = column_descs
                 .iter()
-                .map(|c| Field::with_name(c.data_type, c.name.clone()))
+                .map(|c| Field::with_name(c.data_type.clone(), c.name.clone()))
                 .collect();
             Schema::new(fields)
         };

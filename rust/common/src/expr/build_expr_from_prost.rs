@@ -218,7 +218,7 @@ pub fn build_translate_expr(prost: &ExprNode) -> Result<BoxedExpression> {
 mod tests {
     use std::vec;
 
-    use risingwave_pb::data::data_type::{IntervalType, TypeName};
+    use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType as ProstDataType;
     use risingwave_pb::expr::expr_node::{RexNode, Type};
     use risingwave_pb::expr::{ConstantValue, ExprNode, FunctionCall, InputRefExpr};
@@ -232,10 +232,7 @@ mod tests {
             expr_type: Type::InputRef as i32,
             return_type: Some(ProstDataType {
                 type_name: TypeName::Char as i32,
-                precision: 0,
-                scale: 0,
-                is_nullable: false,
-                interval_type: IntervalType::Invalid as i32,
+                ..Default::default()
             }),
             rex_node: Some(RexNode::InputRef(input_ref)),
         };
@@ -244,10 +241,7 @@ mod tests {
                 expr_type: Type::ConstantValue as i32,
                 return_type: Some(ProstDataType {
                     type_name: TypeName::Char as i32,
-                    precision: 0,
-                    scale: 0,
-                    is_nullable: false,
-                    interval_type: IntervalType::Invalid as i32,
+                    ..Default::default()
                 }),
                 rex_node: Some(RexNode::Constant(ConstantValue {
                     body: "ABC".as_bytes().to_vec(),
@@ -257,10 +251,7 @@ mod tests {
                 expr_type: Type::ConstantValue as i32,
                 return_type: Some(ProstDataType {
                     type_name: TypeName::Char as i32,
-                    precision: 0,
-                    scale: 0,
-                    is_nullable: false,
-                    interval_type: IntervalType::Invalid as i32,
+                    ..Default::default()
                 }),
                 rex_node: Some(RexNode::Constant(ConstantValue {
                     body: "def".as_bytes().to_vec(),
@@ -276,10 +267,7 @@ mod tests {
             expr_type: Type::In as i32,
             return_type: Some(ProstDataType {
                 type_name: TypeName::Boolean as i32,
-                precision: 0,
-                scale: 0,
-                is_nullable: false,
-                interval_type: IntervalType::Invalid as i32,
+                ..Default::default()
             }),
             rex_node: Some(RexNode::FuncCall(call)),
         };
@@ -294,10 +282,7 @@ mod tests {
                     expr_type: Type::ConstantValue as i32,
                     return_type: Some(ProstDataType {
                         type_name: TypeName::Boolean as i32,
-                        precision: 0,
-                        scale: 0,
-                        is_nullable: false,
-                        interval_type: IntervalType::Invalid as i32,
+                        ..Default::default()
                     }),
                     rex_node: None,
                 },
@@ -305,10 +290,7 @@ mod tests {
                     expr_type: Type::ConstantValue as i32,
                     return_type: Some(ProstDataType {
                         type_name: TypeName::Int32 as i32,
-                        precision: 0,
-                        scale: 0,
-                        is_nullable: false,
-                        interval_type: IntervalType::Invalid as i32,
+                        ..Default::default()
                     }),
                     rex_node: None,
                 },
@@ -318,10 +300,7 @@ mod tests {
             expr_type: Type::Case as i32,
             return_type: Some(ProstDataType {
                 type_name: TypeName::Int32 as i32,
-                precision: 0,
-                scale: 0,
-                is_nullable: false,
-                interval_type: IntervalType::Invalid as i32,
+                ..Default::default()
             }),
             rex_node: Some(RexNode::FuncCall(call)),
         };
@@ -335,9 +314,7 @@ mod tests {
             return_type: Some(ProstDataType {
                 type_name: TypeName::Symbol as i32,
                 precision: 11,
-                scale: 0,
-                is_nullable: false,
-                interval_type: IntervalType::Invalid as i32,
+                ..Default::default()
             }),
             rex_node: Some(RexNode::Constant(ConstantValue {
                 body: "DAY".as_bytes().to_vec(),
@@ -347,10 +324,7 @@ mod tests {
             expr_type: Type::ConstantValue as i32,
             return_type: Some(ProstDataType {
                 type_name: TypeName::Date as i32,
-                precision: 0,
-                scale: 0,
-                is_nullable: false,
-                interval_type: IntervalType::Invalid as i32,
+                ..Default::default()
             }),
             rex_node: None,
         };
@@ -358,10 +332,7 @@ mod tests {
             expr_type: Type::ConstantValue as i32,
             return_type: Some(ProstDataType {
                 type_name: TypeName::Timestamp as i32,
-                precision: 0,
-                scale: 0,
-                is_nullable: false,
-                interval_type: IntervalType::Invalid as i32,
+                ..Default::default()
             }),
             rex_node: None,
         };
@@ -370,10 +341,7 @@ mod tests {
             expr_type: Type::Extract as i32,
             return_type: Some(ProstDataType {
                 type_name: TypeName::Int64 as i32,
-                precision: 0,
-                scale: 0,
-                is_nullable: false,
-                interval_type: IntervalType::Invalid as i32,
+                ..Default::default()
             }),
             rex_node: Some(RexNode::FuncCall(FunctionCall {
                 children: vec![left.clone(), right_date],
@@ -384,10 +352,7 @@ mod tests {
             expr_type: Type::Extract as i32,
             return_type: Some(ProstDataType {
                 type_name: TypeName::Int64 as i32,
-                precision: 0,
-                scale: 0,
-                is_nullable: false,
-                interval_type: IntervalType::Invalid as i32,
+                ..Default::default()
             }),
             rex_node: Some(RexNode::FuncCall(FunctionCall {
                 children: vec![left, right_time],

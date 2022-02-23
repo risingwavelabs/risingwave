@@ -198,8 +198,8 @@ impl RowDeserializer {
         let mut values = vec![];
         values.reserve(self.data_types.len());
         let mut deserializer = memcomparable::Deserializer::new(data);
-        for &ty in &self.data_types {
-            values.push(deserialize_datum_from(&ty, &mut deserializer)?);
+        for ty in &self.data_types {
+            values.push(deserialize_datum_from(ty, &mut deserializer)?);
         }
         Ok(Row(values))
     }
@@ -209,8 +209,11 @@ impl RowDeserializer {
         let mut values = vec![];
         values.reserve(self.data_types.len());
         let mut deserializer = memcomparable::Deserializer::new(data);
-        for &ty in &self.data_types {
-            values.push(deserialize_datum_not_null_from(ty, &mut deserializer)?);
+        for ty in &self.data_types {
+            values.push(deserialize_datum_not_null_from(
+                ty.clone(),
+                &mut deserializer,
+            )?);
         }
         Ok(Row(values))
     }

@@ -124,8 +124,8 @@ pub fn compare_two_row(
     rhs_idx: usize,
 ) -> Result<Ordering> {
     for order_pair in order_pairs.iter() {
-        let lhs_array = lhs_data_chunk.column_at(order_pair.column_idx)?.array();
-        let rhs_array = rhs_data_chunk.column_at(order_pair.column_idx)?.array();
+        let lhs_array = lhs_data_chunk.column_at(order_pair.column_idx).array();
+        let rhs_array = rhs_data_chunk.column_at(order_pair.column_idx).array();
         macro_rules! gen_match {
         ($lhs: ident, $rhs: ident, [$( $tt: ident), *]) => {
             match ($lhs, $rhs) {

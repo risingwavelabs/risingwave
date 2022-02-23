@@ -24,7 +24,7 @@ impl TestTable {
         let schema = {
             let fields = column_descs
                 .iter()
-                .map(|c| Field::with_name(c.data_type, c.name.clone()))
+                .map(|c| Field::with_name(c.data_type.clone(), c.name.clone()))
                 .collect();
             Schema::new(fields)
         };

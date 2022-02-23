@@ -199,7 +199,7 @@ mod tests {
         assert!(matches!(res, Some(_)));
         if let Some(res) = res {
             assert_eq!(res.cardinality(), 2);
-            let col0 = res.column_at(0).unwrap();
+            let col0 = res.column_at(0);
             assert_eq!(col0.array().as_int32().value_at(0), Some(3));
             assert_eq!(col0.array().as_int32().value_at(1), Some(2));
         }

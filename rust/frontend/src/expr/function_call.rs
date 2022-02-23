@@ -59,7 +59,7 @@ impl FunctionCall {
 }
 impl Expr for FunctionCall {
     fn return_type(&self) -> DataType {
-        self.return_type
+        self.return_type.clone()
     }
     fn to_expr_impl(self) -> ExprImpl {
         ExprImpl::FunctionCall(Box::new(self))
