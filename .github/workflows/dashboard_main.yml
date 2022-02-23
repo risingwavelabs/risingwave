@@ -4,7 +4,7 @@ on:
     branches: [main]
     paths: [dashboard/**]
 jobs:
-  dashboard-ui-build:
+  dashboard-ui-deploy:
     runs-on: ubuntu-latest
     steps: 
       - uses: actions/checkout@v2
@@ -24,3 +24,4 @@ jobs:
           BRANCH: dashboard-artifact
           FOLDER: dashboard/out
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SQUASH_HISTORY: true
