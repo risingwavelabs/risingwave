@@ -231,6 +231,14 @@ impl StreamManagerCore {
         )
     }
 
+    fn get_actor_info(&self, actor_id: &u32) -> Result<&ActorInfo> {
+        self.actor_infos.get(actor_id).ok_or_else(|| {
+            RwError::from(ErrorCode::InternalError(
+                "actor not found in info table".into(),
+            ))
+        })
+    }
+
     /// Create dispatchers with downstream information registered before
     fn create_dispatcher(
         &mut self,
@@ -243,16 +251,7 @@ impl StreamManagerCore {
         let outputs = downstreams
             .iter()
             .map(|down_id| {
-                let host_addr = self
-                    .actor_infos
-                    .get(down_id)
-                    .ok_or_else(|| {
-                        RwError::from(ErrorCode::InternalError(format!(
-                            "create dispatcher error: channel between {} and {} does not exist",
-                            actor_id, down_id
-                        )))
-                    })?
-                    .get_host()?;
+                let host_addr = self.get_actor_info(down_id)?.get_host()?;
                 let downstream_addr = host_addr.to_socket_addr()?;
                 new_output(&self.context, downstream_addr, actor_id, down_id)
             })
@@ -710,15 +709,7 @@ impl StreamManagerCore {
                 if *up_id == 0 {
                     Ok(self.mock_source.1.take().unwrap())
                 } else {
-                    let upstream_addr = self
-                        .actor_infos
-                        .get(up_id)
-                        .ok_or_else(|| {
-                            RwError::from(ErrorCode::InternalError(
-                                "upstream actor not found in info table".into(),
-                            ))
-                        })?
-                        .get_host()?;
+                    let upstream_addr = self.get_actor_info(up_id)?.get_host()?;
                     let upstream_socket_addr = upstream_addr.to_socket_addr()?;
                     if !is_local_address(&upstream_socket_addr, &self.context.addr) {
                         // Get the sender for `RemoteInput` to forward received messages to
