@@ -72,7 +72,7 @@ pub fn infer_type(func_type: ExprType, inputs_type: Vec<DataType>) -> Option<Dat
         DataTypeName::Decimal => DataType::Decimal,
         DataTypeName::Interval => DataType::Interval,
         DataTypeName::Struct => DataType::Struct {
-            fields: Arc::new(vec![]),
+            fields: Arc::new([]),
         },
     })
 }

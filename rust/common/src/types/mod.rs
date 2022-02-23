@@ -48,7 +48,7 @@ pub enum DataType {
     Timestamp,
     Timestampz,
     Interval,
-    Struct { fields: Arc<Vec<DataType>> },
+    Struct { fields: Arc<[DataType]> },
 }
 
 const DECIMAL_DEFAULT_PRECISION: u32 = 20;
@@ -81,7 +81,7 @@ impl From<&ProstDataType> for DataType {
             TypeName::Interval => DataType::Interval,
             TypeName::Symbol => DataType::Varchar,
             TypeName::Struct => DataType::Struct {
-                fields: Arc::new(vec![]),
+                fields: Arc::new([]),
             },
         }
     }
