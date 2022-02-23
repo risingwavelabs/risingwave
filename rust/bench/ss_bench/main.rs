@@ -56,6 +56,9 @@ pub(crate) struct Opts {
     reads: i64,
 
     #[clap(long, default_value_t = -1)]
+    scans: i64,
+
+    #[clap(long, default_value_t = -1)]
     writes: i64,
 
     // ----- single batch -----
@@ -178,6 +181,9 @@ async fn get_state_store_impl(opts: &Opts) -> Result<StateStoreImpl> {
 fn preprocess_options(opts: &mut Opts) {
     if opts.reads < 0 {
         opts.reads = opts.num;
+    }
+    if opts.scans < 0 {
+        opts.scans = opts.num;
     }
     if opts.deletes < 0 {
         opts.deletes = opts.num;
