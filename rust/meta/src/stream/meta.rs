@@ -108,7 +108,7 @@ where
             //  the filter logic.
             let fragments = entry.value();
 
-            if fragments.is_created() || creating_table_id == Some(fragments.table_id()) {
+            if fragments.is_created() || creating_table_id.contains(&fragments.table_id()) {
                 let node_actors = fragments.node_actor_ids();
                 node_actors.iter().for_each(|(node_id, actor_ids)| {
                     let node_actor_ids = actor_maps.entry(*node_id).or_insert_with(Vec::new);
