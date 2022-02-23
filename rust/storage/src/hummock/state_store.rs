@@ -70,6 +70,10 @@ impl StateStore for HummockStateStore {
         res.rewind().await?;
         Ok(HummockStateStoreIter(DirectedUserIterator::Backward(res)))
     }
+
+    async fn wait_epoch(&self, epoch: u64) {
+        self.storage.wait_epoch(epoch).await;
+    }
 }
 
 pub struct HummockStateStoreIter<'a>(DirectedUserIterator<'a>);

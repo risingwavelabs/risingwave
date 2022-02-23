@@ -164,7 +164,10 @@ impl LocalVersionManager {
                     }
                 }
             }
-            receiver.changed().await.ok();
+            if receiver.changed().await.is_err() {
+                // The tx is dropped.
+                return;
+            }
         }
     }
 

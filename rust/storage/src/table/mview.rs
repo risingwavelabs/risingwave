@@ -168,6 +168,8 @@ impl<'a, S: StateStore> MViewTableIter<S> {
         pk_columns: Vec<usize>,
         epoch: u64,
     ) -> Result<Self> {
+        keyspace.state_store().wait_epoch(epoch).await;
+
         let iter = Self {
             keyspace,
             schema,

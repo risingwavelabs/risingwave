@@ -151,6 +151,8 @@ impl HummockStorage {
             hummock_meta_client.clone(),
         )
         .await;
+        // Ensure at least one available version in cache.
+        local_version_manager.wait_epoch(HummockEpoch::MIN).await;
 
         let instance = Self {
             options: arc_options,
@@ -195,7 +197,6 @@ impl HummockStorage {
 
         let mut table_iters: Vec<BoxedHummockIterator> = Vec::new();
 
-        self.local_version_manager.wait_epoch(epoch).await;
         let version = self.local_version_manager.get_version()?;
 
         for level in &version.levels() {
@@ -263,7 +264,6 @@ impl HummockStorage {
     {
         self.stats.range_scan_counts.inc();
 
-        self.local_version_manager.wait_epoch(epoch).await;
         let version = self.local_version_manager.get_version()?;
 
         // Filter out tables that overlap with given `key_range`
@@ -322,7 +322,6 @@ impl HummockStorage {
     {
         self.stats.range_scan_counts.inc();
 
-        self.local_version_manager.wait_epoch(epoch).await;
         let version = self.local_version_manager.get_version()?;
 
         // Filter out tables that overlap with given `key_range`
@@ -498,5 +497,9 @@ impl HummockStorage {
     }
     pub fn obj_client(&self) -> &Arc<dyn ObjectStore> {
         &self.obj_client
+    }
+
+    pub async fn wait_epoch(&self, epoch: HummockEpoch) {
+        self.local_version_manager.wait_epoch(epoch).await;
     }
 }
