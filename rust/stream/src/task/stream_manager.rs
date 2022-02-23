@@ -23,7 +23,7 @@ use tokio::task::JoinHandle;
 
 use crate::executor::*;
 use crate::task::{
-    ConsumableChannelPair, SharedContext, StreamEnvironment, UpDownActorIds,
+    ChannelManager, ConsumableChannelPair, SharedContext, StreamEnvironment, UpDownActorIds,
     LOCAL_OUTPUT_CHANNEL_SIZE,
 };
 
@@ -895,24 +895,23 @@ impl StreamManagerCore {
         for (current_id, actor) in &self.actors {
             self.build_channel_for_chain_node(*current_id, actor.nodes.as_ref().unwrap())?;
 
-            for downstream_id in actor.get_downstream_actor_id() {
-                // At this time, the graph might not be complete, so we do not check if downstream
-                // has `current_id` as upstream.
-                let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-                let up_down_ids = (*current_id, *downstream_id);
-                self.context
-                    .add_channel_pairs(up_down_ids, (Some(tx), Some(rx)));
-            }
+            // At this time, the graph might not be complete, so we do not check if downstream
+            // has `current_id` as upstream.
+            let down_id = actor
+                .get_downstream_actor_id()
+                .iter()
+                .map(|id| (*current_id, *id))
+                .collect_vec();
+            ChannelManager::update_upstreams(self.context.clone(), &down_id);
 
             // Add remote input channels.
+            let mut up_id = vec![];
             for upstream_id in actor.get_upstream_actor_id() {
                 if !local_actor_ids.contains(upstream_id) {
-                    let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-                    let up_down_ids = (*upstream_id, *current_id);
-                    self.context
-                        .add_channel_pairs(up_down_ids, (Some(tx), Some(rx)));
+                    up_id.push((*upstream_id, *current_id));
                 }
             }
+            ChannelManager::update_upstreams(self.context.clone(), &up_id);
         }
 
         for hanging_channel in hanging_channels {

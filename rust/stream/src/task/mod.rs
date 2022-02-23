@@ -13,8 +13,10 @@ mod stream_manager;
 pub use barrier_manager::*;
 pub use env::*;
 pub use stream_manager::*;
+mod channel_manager;
 #[cfg(test)]
 mod tests;
+pub use channel_manager::*;
 
 /// Default capacity of channel if two actors are on the same node
 pub const LOCAL_OUTPUT_CHANNEL_SIZE: usize = 16;
