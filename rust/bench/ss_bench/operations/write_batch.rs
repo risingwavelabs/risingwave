@@ -14,9 +14,9 @@ use crate::Opts;
 
 impl Operations {
     pub(crate) async fn write_batch(&mut self, store: &impl StateStore, opts: &Opts) {
-        let (prefixes, keys) =
-            Workload::new_random_keys(opts, opts.writes as u64, self.auto_inc_seed());
-        let values = Workload::new_values(opts, opts.writes as u64, self.auto_inc_seed());
+        let ( prefixes,  keys) =
+            Workload::new_random_keys(opts, opts.writes as u64, &mut StdRng::from_rng(&mut self.rng).unwrap());
+        let values = Workload::new_values(opts, opts.writes as u64, &mut self.rng);
 
         // add new prefixes and keys to global prefixes and keys
         self.track_prefixes(prefixes);
@@ -37,17 +37,17 @@ impl Operations {
 
     pub(crate) async fn delete_random(&mut self, store: &impl StateStore, opts: &Opts) {
         let delete_keys = match self.keys.is_empty() {
-            true => Workload::new_random_keys(opts, opts.deletes as u64, self.auto_inc_seed()).1,
+            true => Workload::new_random_keys(opts, opts.deletes as u64, &mut self.rng).1,
             false => {
-                let mut rng = StdRng::seed_from_u64(self.auto_inc_seed());
+                // let mut rng = StdRng::seed_from_u64(self.auto_inc_seed());
                 let dist = Uniform::from(0..self.keys.len());
                 (0..opts.deletes)
                     .into_iter()
-                    .map(|_| self.keys[dist.sample(&mut rng)].clone())
+                    .map(|_| self.keys[dist.sample(&mut self.rng)].clone())
                     .collect_vec()
             }
         };
-        self.untrack_keys(delete_keys.clone());
+        self.untrack_keys(&delete_keys);
 
         let values = vec![None; opts.deletes as usize];
 

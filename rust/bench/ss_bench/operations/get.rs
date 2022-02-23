@@ -4,7 +4,6 @@ use bytes::Bytes;
 use itertools::Itertools;
 use rand::distributions::Uniform;
 use rand::prelude::{Distribution, StdRng};
-use rand::SeedableRng;
 use risingwave_storage::StateStore;
 
 use super::{Operations, PerfMetrics};
@@ -16,13 +15,13 @@ impl Operations {
     pub(crate) async fn get_random(&mut self, store: &impl StateStore, opts: &Opts) {
         // generate queried point get key
         let get_keys = match self.keys.is_empty() {
-            true => Workload::new_random_keys(opts, opts.reads as u64, self.auto_inc_seed()).1,
+            true => Workload::new_random_keys(opts, opts.reads as u64, &mut self.rng).1,
             false => {
-                let mut rng = StdRng::seed_from_u64(self.auto_inc_seed());
+                // let mut rng = StdRng::seed_from_u64(self.auto_inc_seed());
                 let dist = Uniform::from(0..self.keys.len());
                 (0..opts.reads)
                     .into_iter()
-                    .map(|_| self.keys[dist.sample(&mut rng)].clone())
+                    .map(|_| self.keys[dist.sample(&mut self.rng)].clone())
                     .collect_vec()
             }
         };
