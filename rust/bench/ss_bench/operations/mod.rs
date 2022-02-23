@@ -67,7 +67,7 @@ impl Operations {
 
     /// Untrack deleted keys
     #[allow(clippy::mutable_key_type)]
-    fn untrack_keys(&mut self, other: &Vec<Bytes>) {
+    fn untrack_keys(&mut self, other: &[Bytes]) {
         let untrack_set = other.iter().collect::<BTreeSet<_>>();
         self.keys.retain(|k| !untrack_set.contains(k));
     }
@@ -75,10 +75,5 @@ impl Operations {
     /// Untrack prefixes of deleted keys
     // TODO(Ting Sun): decide whether and how to implement untrack_prefixes
     #[allow(dead_code)]
-    fn untrack_prefixes(&mut self, mut _other: &Vec<Bytes>) {}
-
-    // fn auto_inc_seed(&mut self) -> u64 {
-    //     dbg!(&self.seed);
-    //     self.seed.fetch_add(1, Ordering::SeqCst)
-    // }
+    fn untrack_prefixes(&mut self, mut _other: &[Bytes]) {}
 }
