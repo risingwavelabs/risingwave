@@ -189,7 +189,7 @@ async fn test_merger_sum_aggr() {
     }
 
     let data = items.lock().unwrap();
-    let array = data.last().unwrap().column(0).array_ref().as_int64();
+    let array = data.last().unwrap().column_at(0).array_ref().as_int64();
     assert_eq!(array.value_at(array.len() - 1), Some((0..10).sum()));
 }
 
@@ -540,7 +540,7 @@ async fn test_tpch_q6() {
         assert_eq!(chunk.ops(), vec![Insert]);
         assert_eq!(chunk.columns().len(), 1);
         assert_eq!(
-            chunk.column(0).array_ref().as_float64().value_at(0),
+            chunk.column_at(0).array_ref().as_float64().value_at(0),
             Some(1.1.into())
         );
 
@@ -549,7 +549,7 @@ async fn test_tpch_q6() {
         assert_eq!(chunk.columns().len(), 1);
         assert_relative_eq!(
             chunk
-                .column(0)
+                .column_at(0)
                 .array_ref()
                 .as_float64()
                 .value_at(1)

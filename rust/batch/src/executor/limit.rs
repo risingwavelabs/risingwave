@@ -179,7 +179,7 @@ mod tests {
             DataChunk::rechunk(results.into_iter().collect_vec().as_slice(), row_num).unwrap();
         assert_eq!(chunks.len(), 1);
         let result = chunks.into_iter().next().unwrap();
-        let col = result.column_at(0).unwrap();
+        let col = result.column_at(0);
         assert_eq!(result.cardinality(), min(limit, row_num - offset));
         for i in 0..result.cardinality() {
             assert_eq!(
@@ -292,11 +292,7 @@ mod tests {
             .into_iter()
             .for_each(|x| {
                 mock_executor.add(
-                    x.with_visibility(
-                        (x.column_at(1).unwrap().array_ref().as_bool())
-                            .try_into()
-                            .unwrap(),
-                    ),
+                    x.with_visibility((x.column_at(1).array_ref().as_bool()).try_into().unwrap()),
                 )
             });
 
@@ -327,8 +323,8 @@ mod tests {
         }
         assert_eq!(chunks.len(), 1);
         let result = chunks.into_iter().next().unwrap();
-        let col0 = result.column_at(0).unwrap();
-        let col1 = result.column_at(1).unwrap();
+        let col0 = result.column_at(0);
+        let col1 = result.column_at(1);
         assert_eq!(
             MockLimitIter::new(row_num, limit, offset, visible.clone()).count(),
             result.cardinality()

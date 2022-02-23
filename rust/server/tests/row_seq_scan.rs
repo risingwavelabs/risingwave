@@ -69,7 +69,7 @@ async fn test_row_seq_scan() -> Result<()> {
     assert_eq!(res_chunk.dimension(), 2);
     assert_eq!(
         res_chunk
-            .column_at(0)?
+            .column_at(0)
             .array()
             .as_int32()
             .iter()
@@ -78,7 +78,7 @@ async fn test_row_seq_scan() -> Result<()> {
     );
     assert_eq!(
         res_chunk
-            .column_at(1)?
+            .column_at(1)
             .array()
             .as_int32()
             .iter()
@@ -90,7 +90,7 @@ async fn test_row_seq_scan() -> Result<()> {
     assert_eq!(res_chunk2.dimension(), 2);
     assert_eq!(
         res_chunk2
-            .column_at(0)?
+            .column_at(0)
             .array()
             .as_int32()
             .iter()
@@ -99,7 +99,7 @@ async fn test_row_seq_scan() -> Result<()> {
     );
     assert_eq!(
         res_chunk2
-            .column_at(1)?
+            .column_at(1)
             .array()
             .as_int32()
             .iter()

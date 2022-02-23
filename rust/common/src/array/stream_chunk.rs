@@ -97,7 +97,7 @@ impl StreamChunk {
         &self.columns
     }
 
-    pub fn column(&self, index: usize) -> &Column {
+    pub fn column_at(&self, index: usize) -> &Column {
         &self.columns[index]
     }
 

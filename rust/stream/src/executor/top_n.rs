@@ -513,7 +513,7 @@ mod tests {
                 Op::Insert,
             ];
             assert_eq!(
-                res.column(0).array_ref().as_int64().iter().collect_vec(),
+                res.column_at(0).array_ref().as_int64().iter().collect_vec(),
                 expected_values
             );
             assert_eq!(res.ops(), expected_ops);
