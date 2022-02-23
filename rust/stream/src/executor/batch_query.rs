@@ -136,7 +136,7 @@ mod test {
         node.init(u64::MAX).unwrap();
         let mut batch_cnt = 0;
         while let Ok(Message::Chunk(sc)) = node.next().await {
-            let data = *sc.column(0).array_ref().datum_at(0).unwrap().as_int32();
+            let data = *sc.column_at(0).array_ref().datum_at(0).unwrap().as_int32();
             assert_eq!(data, (batch_cnt * test_batch_size) as i32);
             batch_cnt += 1;
         }

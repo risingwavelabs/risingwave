@@ -231,7 +231,7 @@ mod tests {
         insert_executor.close().await.unwrap();
         assert_eq!(
             result
-                .column_at(0)?
+                .column_at(0)
                 .array()
                 .as_int64()
                 .iter()

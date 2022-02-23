@@ -742,7 +742,12 @@ mod tests {
             assert_eq!(chunk.columns().len(), 4);
             for i in 0..4 {
                 assert_eq!(
-                    chunk.column(i).array_ref().as_int64().iter().collect_vec(),
+                    chunk
+                        .column_at(i)
+                        .array_ref()
+                        .as_int64()
+                        .iter()
+                        .collect_vec(),
                     vec![]
                 );
             }
@@ -757,7 +762,12 @@ mod tests {
             assert_eq!(chunk.columns().len(), 4);
             for i in 0..4 {
                 assert_eq!(
-                    chunk.column(i).array_ref().as_int64().iter().collect_vec(),
+                    chunk
+                        .column_at(i)
+                        .array_ref()
+                        .as_int64()
+                        .iter()
+                        .collect_vec(),
                     vec![]
                 );
             }
@@ -771,19 +781,39 @@ mod tests {
             assert_eq!(chunk.ops(), vec![Op::Insert]);
             assert_eq!(chunk.columns().len(), 4);
             assert_eq!(
-                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(0)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(2)]
             );
             assert_eq!(
-                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(1)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(5)]
             );
             assert_eq!(
-                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(2)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(2)]
             );
             assert_eq!(
-                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(3)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(7)]
             );
         } else {
@@ -796,19 +826,39 @@ mod tests {
             assert_eq!(chunk.ops(), vec![Op::Insert]);
             assert_eq!(chunk.columns().len(), 4);
             assert_eq!(
-                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(0)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(3)]
             );
             assert_eq!(
-                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(1)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(6)]
             );
             assert_eq!(
-                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(2)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(3)]
             );
             assert_eq!(
-                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(3)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(10)]
             );
         } else {
@@ -887,7 +937,12 @@ mod tests {
             assert_eq!(chunk.columns().len(), 4);
             for i in 0..4 {
                 assert_eq!(
-                    chunk.column(i).array_ref().as_int64().iter().collect_vec(),
+                    chunk
+                        .column_at(i)
+                        .array_ref()
+                        .as_int64()
+                        .iter()
+                        .collect_vec(),
                     vec![]
                 );
             }
@@ -907,19 +962,39 @@ mod tests {
             assert_eq!(chunk.ops(), vec![Op::Insert]);
             assert_eq!(chunk.columns().len(), 4);
             assert_eq!(
-                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(0)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(2)]
             );
             assert_eq!(
-                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(1)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(5)]
             );
             assert_eq!(
-                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(2)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(2)]
             );
             assert_eq!(
-                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(3)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(7)]
             );
         } else {
@@ -944,19 +1019,39 @@ mod tests {
             assert_eq!(chunk.ops(), vec![Op::Insert]);
             assert_eq!(chunk.columns().len(), 4);
             assert_eq!(
-                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(0)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(6)]
             );
             assert_eq!(
-                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(1)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(8)]
             );
             assert_eq!(
-                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(2)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(6)]
             );
             assert_eq!(
-                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(3)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(9)]
             );
         } else {
@@ -969,19 +1064,39 @@ mod tests {
             assert_eq!(chunk.ops(), vec![Op::Insert, Op::Insert, Op::Insert]);
             assert_eq!(chunk.columns().len(), 4);
             assert_eq!(
-                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(0)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(3), Some(3), Some(6)]
             );
             assert_eq!(
-                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(1)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(6), Some(8), Some(8)]
             );
             assert_eq!(
-                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(2)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(3), Some(3), Some(6)]
             );
             assert_eq!(
-                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(3)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(10), Some(10), Some(11)]
             );
         } else {
@@ -1059,19 +1174,39 @@ mod tests {
             assert_eq!(chunk.ops(), vec![Op::Insert, Op::Insert, Op::Insert]);
             assert_eq!(chunk.columns().len(), 4);
             assert_eq!(
-                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(0)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(1), Some(2), Some(3)]
             );
             assert_eq!(
-                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(1)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(4), Some(5), Some(6)]
             );
             assert_eq!(
-                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(2)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![None, None, None]
             );
             assert_eq!(
-                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(3)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![None, None, None]
             );
         } else {
@@ -1084,19 +1219,39 @@ mod tests {
             assert_eq!(chunk.ops(), vec![Op::Insert, Op::Delete]);
             assert_eq!(chunk.columns().len(), 4);
             assert_eq!(
-                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(0)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(3), Some(3)]
             );
             assert_eq!(
-                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(1)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(8), Some(8)]
             );
             assert_eq!(
-                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(2)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![None, None]
             );
             assert_eq!(
-                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(3)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![None, None]
             );
         } else {
@@ -1109,19 +1264,39 @@ mod tests {
             assert_eq!(chunk.ops(), vec![Op::UpdateDelete, Op::UpdateInsert]);
             assert_eq!(chunk.columns().len(), 4);
             assert_eq!(
-                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(0)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(2), Some(2)]
             );
             assert_eq!(
-                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(1)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(5), Some(5)]
             );
             assert_eq!(
-                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(2)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![None, Some(2)]
             );
             assert_eq!(
-                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(3)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![None, Some(7)]
             );
         } else {
@@ -1134,19 +1309,39 @@ mod tests {
             assert_eq!(chunk.ops(), vec![Op::UpdateDelete, Op::UpdateInsert]);
             assert_eq!(chunk.columns().len(), 4);
             assert_eq!(
-                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(0)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(3), Some(3)]
             );
             assert_eq!(
-                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(1)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(6), Some(6)]
             );
             assert_eq!(
-                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(2)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![None, Some(3)]
             );
             assert_eq!(
-                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(3)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![None, Some(10)]
             );
         } else {
@@ -1225,7 +1420,12 @@ mod tests {
             assert_eq!(chunk.columns().len(), 4);
             for i in 0..4 {
                 assert_eq!(
-                    chunk.column(i).array_ref().as_int64().iter().collect_vec(),
+                    chunk
+                        .column_at(i)
+                        .array_ref()
+                        .as_int64()
+                        .iter()
+                        .collect_vec(),
                     vec![]
                 );
             }
@@ -1240,7 +1440,12 @@ mod tests {
             assert_eq!(chunk.columns().len(), 4);
             for i in 0..4 {
                 assert_eq!(
-                    chunk.column(i).array_ref().as_int64().iter().collect_vec(),
+                    chunk
+                        .column_at(i)
+                        .array_ref()
+                        .as_int64()
+                        .iter()
+                        .collect_vec(),
                     vec![]
                 );
             }
@@ -1254,19 +1459,39 @@ mod tests {
             assert_eq!(chunk.ops(), vec![Op::Insert, Op::Insert, Op::Insert]);
             assert_eq!(chunk.columns().len(), 4);
             assert_eq!(
-                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(0)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(2), None, None]
             );
             assert_eq!(
-                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(1)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(5), None, None]
             );
             assert_eq!(
-                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(2)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(2), Some(4), Some(6)]
             );
             assert_eq!(
-                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(3)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(7), Some(8), Some(9)]
             );
         } else {
@@ -1279,19 +1504,39 @@ mod tests {
             assert_eq!(chunk.ops(), vec![Op::Insert, Op::Delete]);
             assert_eq!(chunk.columns().len(), 4);
             assert_eq!(
-                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(0)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![None, None]
             );
             assert_eq!(
-                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(1)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![None, None]
             );
             assert_eq!(
-                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(2)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(5), Some(5)]
             );
             assert_eq!(
-                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(3)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(10), Some(10)]
             );
         } else {
@@ -1369,19 +1614,39 @@ mod tests {
             assert_eq!(chunk.ops(), vec![Op::Insert, Op::Insert, Op::Insert]);
             assert_eq!(chunk.columns().len(), 4);
             assert_eq!(
-                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(0)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(1), Some(2), Some(3)]
             );
             assert_eq!(
-                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(1)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(4), Some(5), Some(6)]
             );
             assert_eq!(
-                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(2)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![None, None, None]
             );
             assert_eq!(
-                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(3)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![None, None, None]
             );
         } else {
@@ -1394,19 +1659,39 @@ mod tests {
             assert_eq!(chunk.ops(), vec![Op::Insert, Op::Delete]);
             assert_eq!(chunk.columns().len(), 4);
             assert_eq!(
-                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(0)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(3), Some(3)]
             );
             assert_eq!(
-                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(1)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(8), Some(8)]
             );
             assert_eq!(
-                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(2)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![None, None]
             );
             assert_eq!(
-                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(3)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![None, None]
             );
         } else {
@@ -1422,19 +1707,39 @@ mod tests {
             );
             assert_eq!(chunk.columns().len(), 4);
             assert_eq!(
-                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(0)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(2), Some(2), None, None]
             );
             assert_eq!(
-                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(1)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(5), Some(5), None, None]
             );
             assert_eq!(
-                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(2)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![None, Some(2), Some(4), Some(6)]
             );
             assert_eq!(
-                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(3)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![None, Some(7), Some(8), Some(9)]
             );
         } else {
@@ -1447,19 +1752,39 @@ mod tests {
             assert_eq!(chunk.ops(), vec![Op::Insert, Op::Delete]);
             assert_eq!(chunk.columns().len(), 4);
             assert_eq!(
-                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(0)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![None, None]
             );
             assert_eq!(
-                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(1)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![None, None]
             );
             assert_eq!(
-                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(2)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(5), Some(5)]
             );
             assert_eq!(
-                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(3)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(10), Some(10)]
             );
         } else {
@@ -1539,19 +1864,39 @@ mod tests {
             assert_eq!(chunk.ops(), vec![Op::Insert, Op::Insert, Op::Insert]);
             assert_eq!(chunk.columns().len(), 4);
             assert_eq!(
-                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(0)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(1), Some(2), Some(3)]
             );
             assert_eq!(
-                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(1)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(4), Some(5), Some(6)]
             );
             assert_eq!(
-                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(2)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![None, None, None]
             );
             assert_eq!(
-                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(3)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![None, None, None]
             );
         } else {
@@ -1564,19 +1909,39 @@ mod tests {
             assert_eq!(chunk.ops(), vec![Op::Insert, Op::Delete]);
             assert_eq!(chunk.columns().len(), 4);
             assert_eq!(
-                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(0)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(3), Some(3)]
             );
             assert_eq!(
-                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(1)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(8), Some(8)]
             );
             assert_eq!(
-                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(2)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![None, None]
             );
             assert_eq!(
-                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(3)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![None, None]
             );
         } else {
@@ -1592,19 +1957,39 @@ mod tests {
             );
             assert_eq!(chunk.columns().len(), 4);
             assert_eq!(
-                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(0)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(2), Some(2), None, None]
             );
             assert_eq!(
-                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(1)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(5), Some(5), None, None]
             );
             assert_eq!(
-                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(2)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![None, Some(2), Some(4), Some(3)]
             );
             assert_eq!(
-                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(3)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![None, Some(6), Some(8), Some(4)]
             );
         } else {
@@ -1617,19 +2002,39 @@ mod tests {
             assert_eq!(chunk.ops(), vec![Op::Insert, Op::Delete]);
             assert_eq!(chunk.columns().len(), 4);
             assert_eq!(
-                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(0)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![None, None]
             );
             assert_eq!(
-                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(1)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![None, None]
             );
             assert_eq!(
-                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(2)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(5), Some(5)]
             );
             assert_eq!(
-                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(3)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(10), Some(10)]
             );
         } else {
@@ -1710,7 +2115,12 @@ mod tests {
             assert_eq!(chunk.columns().len(), 4);
             for i in 0..4 {
                 assert_eq!(
-                    chunk.column(i).array_ref().as_int64().iter().collect_vec(),
+                    chunk
+                        .column_at(i)
+                        .array_ref()
+                        .as_int64()
+                        .iter()
+                        .collect_vec(),
                     vec![]
                 );
             }
@@ -1725,7 +2135,12 @@ mod tests {
             assert_eq!(chunk.columns().len(), 4);
             for i in 0..4 {
                 assert_eq!(
-                    chunk.column(i).array_ref().as_int64().iter().collect_vec(),
+                    chunk
+                        .column_at(i)
+                        .array_ref()
+                        .as_int64()
+                        .iter()
+                        .collect_vec(),
                     vec![]
                 );
             }
@@ -1740,7 +2155,12 @@ mod tests {
             assert_eq!(chunk.columns().len(), 4);
             for i in 0..4 {
                 assert_eq!(
-                    chunk.column(i).array_ref().as_int64().iter().collect_vec(),
+                    chunk
+                        .column_at(i)
+                        .array_ref()
+                        .as_int64()
+                        .iter()
+                        .collect_vec(),
                     vec![]
                 );
             }
@@ -1754,19 +2174,39 @@ mod tests {
             assert_eq!(chunk.ops(), vec![Op::Insert]);
             assert_eq!(chunk.columns().len(), 4);
             assert_eq!(
-                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(0)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(3)]
             );
             assert_eq!(
-                chunk.column(1).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(1)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(6)]
             );
             assert_eq!(
-                chunk.column(2).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(2)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(3)]
             );
             assert_eq!(
-                chunk.column(3).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(3)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(10)]
             );
         } else {

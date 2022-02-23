@@ -180,7 +180,12 @@ mod tests {
             assert_eq!(chunk.ops(), vec![Op::Insert, Op::Insert, Op::Insert]);
             assert_eq!(chunk.columns().len(), 1);
             assert_eq!(
-                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(0)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(5), Some(7), Some(9)]
             );
         } else {
@@ -191,7 +196,12 @@ mod tests {
             assert_eq!(chunk.ops(), vec![Op::Insert, Op::Delete]);
             assert_eq!(chunk.columns().len(), 1);
             assert_eq!(
-                chunk.column(0).array_ref().as_int64().iter().collect_vec(),
+                chunk
+                    .column_at(0)
+                    .array_ref()
+                    .as_int64()
+                    .iter()
+                    .collect_vec(),
                 vec![Some(15), Some(9)]
             );
         } else {

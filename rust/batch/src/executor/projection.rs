@@ -139,7 +139,7 @@ mod tests {
         assert_eq!(result_chunk.dimension(), 1);
         assert_eq!(
             result_chunk
-                .column_at(0)?
+                .column_at(0)
                 .array()
                 .as_int32()
                 .iter()

@@ -198,8 +198,7 @@ public class PrimaryKeyDerivationVisitor
     RisingWaveStreamingRel rightInput = (RisingWaveStreamingRel) hashJoin.getInput(1);
     var originalRightFieldCount = rightInput.getRowType().getFieldCount();
     var rightRes = rightInput.accept(this);
-    var rightPositionMap = leftRes.info.getPositionMap();
-    var originalTotalFieldCount = originalLeftFieldCount + originalRightFieldCount;
+    var rightPositionMap = rightRes.info.getPositionMap();
 
     var joinInfo = hashJoin.analyzeCondition();
     var joinCondition = hashJoin.getCondition();
@@ -207,8 +206,10 @@ public class PrimaryKeyDerivationVisitor
     var joinType = hashJoin.getJoinType();
     LOGGER.debug("originalLeftInput row type:" + leftInput.getRowType());
     LOGGER.debug("newLeftInput row type:" + leftRes.node.getRowType());
+    LOGGER.debug("leftPositionMap:" + leftPositionMap);
     LOGGER.debug("originalRightInput row type:" + rightInput.getRowType());
-    LOGGER.debug("newLeftInput row type:" + rightRes.node.getRowType());
+    LOGGER.debug("newRightInput row type:" + rightRes.node.getRowType());
+    LOGGER.debug("rightPositionMap:" + rightPositionMap);
 
     // Since the left child may add new columns, this would invalidate rightJoinKeyIndices.
     // Therefore, we need to renumber it. Besides, the new children may itself has reordered
@@ -238,9 +239,14 @@ public class PrimaryKeyDerivationVisitor
           }
         };
     RexNode newJoinCondition = joinCondition.accept(inputRefReplaceShuttle);
+    // This PositionMap is returned by this join to its parent.
     var newJoinPositionMap = new HashMap<Integer, Integer>();
-    for (int i = originalLeftFieldCount; i < originalTotalFieldCount; i++) {
-      newJoinPositionMap.putIfAbsent(i, i + newLeftFieldCount - originalLeftFieldCount);
+    for (int i = 0; i < originalLeftFieldCount; i++) {
+      newJoinPositionMap.put(i, leftPositionMap.getOrDefault(i, i));
+    }
+    for (int i = 0; i < originalRightFieldCount; i++) {
+      newJoinPositionMap.put(
+          i + originalLeftFieldCount, rightPositionMap.getOrDefault(i, i) + newLeftFieldCount);
     }
     LOGGER.debug("new join position map:" + newJoinPositionMap);
     LOGGER.debug("join condition:" + joinCondition);
@@ -698,7 +704,7 @@ public class PrimaryKeyDerivationVisitor
             chain.getTableId(),
             node.getPrimaryKeyIndices(),
             node.getColumnIds(),
-            chain.getUpstreamColumnDescs(),
+            chain.getUpstreamFields(),
             List.of(node));
     LOGGER.debug("leave RwStreamChain");
     return new Result<>(newChain, info);

@@ -4,23 +4,20 @@
     "input": [{
       "pkIndices": [2],
       "mergeNode": {
-        "inputColumnDescs": [{
-          "columnType": {
+        "fields": [{
+          "dataType": {
             "typeName": "INT32"
           },
-          "encoding": "RAW",
           "name": "v1"
         }, {
-          "columnType": {
+          "dataType": {
             "typeName": "INT32"
           },
-          "encoding": "RAW",
           "name": "v2"
         }, {
-          "columnType": {
+          "dataType": {
             "typeName": "INT64"
           },
-          "encoding": "RAW",
           "name": "_row_id"
         }]
       },
@@ -28,23 +25,20 @@
     }, {
       "pkIndices": [2],
       "mergeNode": {
-        "inputColumnDescs": [{
-          "columnType": {
+        "fields": [{
+          "dataType": {
             "typeName": "INT32"
           },
-          "encoding": "RAW",
           "name": "v1"
         }, {
-          "columnType": {
+          "dataType": {
             "typeName": "INT32"
           },
-          "encoding": "RAW",
           "name": "v2"
         }, {
-          "columnType": {
+          "dataType": {
             "typeName": "INT64"
           },
-          "encoding": "RAW",
           "name": "_row_id"
         }]
       },
