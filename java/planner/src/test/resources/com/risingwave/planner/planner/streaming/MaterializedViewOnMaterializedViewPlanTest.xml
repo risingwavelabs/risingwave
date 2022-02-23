@@ -9,7 +9,8 @@ create materialized view m1 as select v1, v2 from t1 where v1 = 1;
             <![CDATA[
 RwStreamMaterializedView(name=[m1])
   RwStreamFilter(condition=[=($0, 1)])
-    RwStreamTableSource(table=[[test_schema, t1]], columns=[v1,v2,_row_id])
+    RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.2]])
+      RwStreamBatchPlan(table=[[test_schema, t1]], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.2]])
 ]]>
         </Resource>
         <Resource name="json" path="streaming/materialized_view_on_materialized_view_plan_test/q1">
@@ -31,7 +32,8 @@ create materialized view m2 as select v1, v2 from t1 where v2 = 1;
             <![CDATA[
 RwStreamMaterializedView(name=[m2])
   RwStreamFilter(condition=[=($1, 1)])
-    RwStreamTableSource(table=[[test_schema, t1]], columns=[v1,v2,_row_id])
+    RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.2]])
+      RwStreamBatchPlan(table=[[test_schema, t1]], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.2]])
 ]]>
         </Resource>
         <Resource name="json" path="streaming/materialized_view_on_materialized_view_plan_test/q2">
@@ -54,9 +56,8 @@ create materialized view m3 as select sum(M1.v1) as sum_m1_v1, sum(m1.v2) as sum
 RwStreamMaterializedView(name=[m3])
   RwStreamProject(sum_m1_v1=[$STREAM_NULL_BY_ROW_COUNT($0, $1)], sum_m1_v2=[$STREAM_NULL_BY_ROW_COUNT($0, $2)], $f0=[$0], sum_m1_v1_copy=[$1], sum_m1_v2_copy=[$2])
     RwStreamAgg(group=[{}], agg#0=[COUNT()], sum_m1_v1=[SUM($0)], sum_m1_v2=[SUM($1)])
-      RwStreamChain(all=[true], tableId=[0.0.2], primaryKeyIndices=[[2]], columnIds=[[0.0.2.0, 0.0.2.1, 0.0.2.2]], upstreamColumnDescs=[[ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=BIGINT, primary=false}]])
-        RwStreamBatchPlan(table=[[test_schema, m1]], tableId=[0.0.2], primaryKeyIndices=[[2]], columnIds=[[0.0.2.0, 0.0.2.1, 0.0.2.2]])
-]]>
+      RwStreamChain(all=[true], tableId=[0.0.4], primaryKeyIndices=[[2]], columnIds=[[0.0.4.0, 0.0.4.1, 0.0.4.2]])
+        RwStreamBatchPlan(table=[[test_schema, m1]], tableId=[0.0.4], primaryKeyIndices=[[2]], columnIds=[[0.0.4.0, 0.0.4.1, 0.0.4.2]])]]>
         </Resource>
         <Resource name="json" path="streaming/materialized_view_on_materialized_view_plan_test/q3">
         </Resource>>
@@ -78,12 +79,11 @@ create materialized view m4 as select m1.v1, m1.v2, m2.v1, m2.v2 from m1 join m2
 RwStreamMaterializedView(name=[m4])
   RwStreamHashJoin(condition=[=($0, $3)], joinType=[inner])
     RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
-      RwStreamChain(all=[true], tableId=[0.0.2], primaryKeyIndices=[[2]], columnIds=[[0.0.2.0, 0.0.2.1, 0.0.2.2]], upstreamColumnDescs=[[ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=BIGINT, primary=false}]])
-        RwStreamBatchPlan(table=[[test_schema, m1]], tableId=[0.0.2], primaryKeyIndices=[[2]], columnIds=[[0.0.2.0, 0.0.2.1, 0.0.2.2]])
+      RwStreamChain(all=[true], tableId=[0.0.4], primaryKeyIndices=[[2]], columnIds=[[0.0.4.0, 0.0.4.1, 0.0.4.2]])
+        RwStreamBatchPlan(table=[[test_schema, m1]], tableId=[0.0.4], primaryKeyIndices=[[2]], columnIds=[[0.0.4.0, 0.0.4.1, 0.0.4.2]])
     RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
-      RwStreamChain(all=[true], tableId=[0.0.3], primaryKeyIndices=[[2]], columnIds=[[0.0.3.0, 0.0.3.1, 0.0.3.2]], upstreamColumnDescs=[[ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=BIGINT, primary=false}]])
-        RwStreamBatchPlan(table=[[test_schema, m2]], tableId=[0.0.3], primaryKeyIndices=[[2]], columnIds=[[0.0.3.0, 0.0.3.1, 0.0.3.2]])
-]]>
+      RwStreamChain(all=[true], tableId=[0.0.5], primaryKeyIndices=[[2]], columnIds=[[0.0.5.0, 0.0.5.1, 0.0.5.2]])
+        RwStreamBatchPlan(table=[[test_schema, m2]], tableId=[0.0.5], primaryKeyIndices=[[2]], columnIds=[[0.0.5.0, 0.0.5.1, 0.0.5.2]])]]>
         </Resource>
         <Resource name="json" path="streaming/materialized_view_on_materialized_view_plan_test/q4">
         </Resource>>
@@ -124,9 +124,8 @@ create materialized view m6 as select sum(v1) as sum_v1, avg(v3) as avg_v3 from 
 RwStreamMaterializedView(name=[m6])
   RwStreamProject(sum_v1=[$2], avg_v3=[/(CAST($3):DOUBLE NOT NULL, $4)], v1=[$0])
     RwStreamAgg(group=[{0}], agg#0=[COUNT()], sum_v1=[SUM($0)], agg#2=[SUM($1)], agg#3=[COUNT($1)])
-      RwStreamChain(all=[true], tableId=[0.0.6], primaryKeyIndices=[[2]], columnIds=[[0.0.6.2, 0.0.6.1, 0.0.6.3]], upstreamColumnDescs=[[ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=FLOAT, primary=false}, ColumnDesc{dataType=FLOAT, primary=false}, ColumnDesc{dataType=BIGINT, primary=false}]])
-        RwStreamBatchPlan(table=[[test_schema, m5]], tableId=[0.0.6], primaryKeyIndices=[[2]], columnIds=[[0.0.6.2, 0.0.6.1, 0.0.6.3]])
-]]>
+      RwStreamChain(all=[true], tableId=[0.0.8], primaryKeyIndices=[[2]], columnIds=[[0.0.8.2, 0.0.8.1, 0.0.8.3]])
+        RwStreamBatchPlan(table=[[test_schema, m5]], tableId=[0.0.8], primaryKeyIndices=[[2]], columnIds=[[0.0.8.2, 0.0.8.1, 0.0.8.3]])]]>
         </Resource>
         <Resource name="json" path="streaming/materialized_view_on_materialized_view_plan_test/q6">
         </Resource>>
@@ -147,9 +146,8 @@ create materialized view m7 as select sum(v1) as sum_v1 from m5 group by v2;
 RwStreamMaterializedView(name=[m7])
   RwStreamProject(sum_v1=[$2], v2=[$0])
     RwStreamAgg(group=[{0}], agg#0=[COUNT()], sum_v1=[SUM($1)])
-      RwStreamChain(all=[true], tableId=[0.0.6], primaryKeyIndices=[[2]], columnIds=[[0.0.6.0, 0.0.6.2, 0.0.6.3]], upstreamColumnDescs=[[ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=FLOAT, primary=false}, ColumnDesc{dataType=FLOAT, primary=false}, ColumnDesc{dataType=BIGINT, primary=false}]])
-        RwStreamBatchPlan(table=[[test_schema, m5]], tableId=[0.0.6], primaryKeyIndices=[[2]], columnIds=[[0.0.6.0, 0.0.6.2, 0.0.6.3]])
-]]>
+      RwStreamChain(all=[true], tableId=[0.0.8], primaryKeyIndices=[[2]], columnIds=[[0.0.8.0, 0.0.8.2, 0.0.8.3]])
+        RwStreamBatchPlan(table=[[test_schema, m5]], tableId=[0.0.8], primaryKeyIndices=[[2]], columnIds=[[0.0.8.0, 0.0.8.2, 0.0.8.3]])]]>
         </Resource>
         <Resource name="json" path="streaming/materialized_view_on_materialized_view_plan_test/q7">
         </Resource>>
@@ -190,9 +188,8 @@ create materialized view m9 as select round(avg(v1), 1) as avg_v1, sum(v2) as su
 RwStreamMaterializedView(name=[m9])
   RwStreamProject(avg_v1=[ROUND($STREAM_NULL_BY_ROW_COUNT($0, /(CAST($1):DOUBLE, $2)), 1)], sum_v2=[$STREAM_NULL_BY_ROW_COUNT($0, $3)], count_v3=[$0], $f1=[$1], $f2=[$2], sum_v2_copy=[$3])
     RwStreamAgg(group=[{}], agg#0=[COUNT()], agg#1=[SUM($0)], agg#2=[COUNT($0)], sum_v2=[SUM($1)])
-      RwStreamChain(all=[true], tableId=[0.0.9], primaryKeyIndices=[[2]], columnIds=[[0.0.9.0, 0.0.9.1, 0.0.9.3]], upstreamColumnDescs=[[ColumnDesc{dataType=FLOAT, primary=false}, ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=FLOAT, primary=false}, ColumnDesc{dataType=BIGINT, primary=false}]])
-        RwStreamBatchPlan(table=[[test_schema, m8]], tableId=[0.0.9], primaryKeyIndices=[[2]], columnIds=[[0.0.9.0, 0.0.9.1, 0.0.9.3]])
-]]>
+      RwStreamChain(all=[true], tableId=[0.0.11], primaryKeyIndices=[[2]], columnIds=[[0.0.11.0, 0.0.11.1, 0.0.11.3]])
+        RwStreamBatchPlan(table=[[test_schema, m8]], tableId=[0.0.11], primaryKeyIndices=[[2]], columnIds=[[0.0.11.0, 0.0.11.1, 0.0.11.3]])]]>
         </Resource>
         <Resource name="json" path="streaming/materialized_view_on_materialized_view_plan_test/q9">
         </Resource>>

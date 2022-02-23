@@ -14,12 +14,12 @@
                 "databaseRefId": {
                 }
               },
-              "tableId": 9
+              "tableId": 11
             },
             "pkIndices": [2],
             "columnIds": [0, 1, 3]
           },
-          "identity": "RwStreamBatchPlan(table\u003d[[test_schema, m8]], tableId\u003d[0.0.9], primaryKeyIndices\u003d[[2]], columnIds\u003d[[0.0.9.0, 0.0.9.1, 0.0.9.3]])"
+          "identity": "RwStreamBatchPlan(table\u003d[[test_schema, m8]], tableId\u003d[0.0.11], primaryKeyIndices\u003d[[2]], columnIds\u003d[[0.0.11.0, 0.0.11.1, 0.0.11.3]])"
         }],
         "chainNode": {
           "tableRefId": {
@@ -27,29 +27,33 @@
               "databaseRefId": {
               }
             },
-            "tableId": 9
+            "tableId": 11
           },
-          "upstreamColumnDescs": [{
-            "columnType": {
+          "upstreamFields": [{
+            "dataType": {
               "typeName": "FLOAT"
-            }
+            },
+            "name": "v1"
           }, {
-            "columnType": {
+            "dataType": {
               "typeName": "INT32"
-            }
+            },
+            "name": "v2"
           }, {
-            "columnType": {
+            "dataType": {
               "typeName": "FLOAT"
-            }
+            },
+            "name": "v3"
           }, {
-            "columnType": {
+            "dataType": {
               "typeName": "INT64"
-            }
+            },
+            "name": "_row_id"
           }],
           "pkIndices": [2],
           "columnIds": [0, 1, 3]
         },
-        "identity": "RwStreamChain(all\u003d[true], tableId\u003d[0.0.9], primaryKeyIndices\u003d[[2]], columnIds\u003d[[0.0.9.0, 0.0.9.1, 0.0.9.3]], upstreamColumnDescs\u003d[[ColumnDesc{dataType\u003dFLOAT, primary\u003dfalse}, ColumnDesc{dataType\u003dINTEGER, primary\u003dfalse}, ColumnDesc{dataType\u003dFLOAT, primary\u003dfalse}, ColumnDesc{dataType\u003dBIGINT, primary\u003dfalse}]])"
+        "identity": "RwStreamChain(all\u003d[true], tableId\u003d[0.0.11], primaryKeyIndices\u003d[[2]], columnIds\u003d[[0.0.11.0, 0.0.11.1, 0.0.11.3]])"
       }],
       "globalSimpleAggNode": {
         "aggCalls": [{
@@ -225,7 +229,7 @@
         "databaseRefId": {
         }
       },
-      "tableId": 10
+      "tableId": 12
     },
     "columnDescs": [{
       "columnType": {

@@ -116,7 +116,7 @@ mod tests {
 
         let input_types = input_indices
             .iter()
-            .map(|idx| all_types[*idx])
+            .map(|idx| all_types[*idx].clone())
             .collect::<Vec<DataType>>();
 
         let calculated_kind = calc_hash_key_kind(&input_types);

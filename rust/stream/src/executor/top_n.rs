@@ -46,6 +46,8 @@ pub struct TopNExecutor<S: StateStore> {
 
     /// Logical Operator Info
     op_info: String,
+    /// Epoch
+    epoch: u64,
 }
 
 impl<S: StateStore> std::fmt::Debug for TopNExecutor<S> {
@@ -113,7 +115,7 @@ impl<S: StateStore> TopNExecutor<S> {
             .schema()
             .fields
             .iter()
-            .map(|field| field.data_type)
+            .map(|field| field.data_type.clone())
             .collect::<Vec<_>>();
         let ordered_row_deserializer =
             OrderedRowDeserializer::new(pk_data_types, pk_order_types.clone());
@@ -126,7 +128,6 @@ impl<S: StateStore> TopNExecutor<S> {
             lower_sub_keyspace,
             row_data_types.clone(),
             ordered_row_deserializer.clone(),
-            0,
         );
         let managed_middle_state = ManagedTopNBottomNState::new(
             cache_size,
@@ -141,7 +142,6 @@ impl<S: StateStore> TopNExecutor<S> {
             higher_sub_keyspace,
             row_data_types,
             ordered_row_deserializer,
-            0,
         );
         Self {
             input,
@@ -155,10 +155,12 @@ impl<S: StateStore> TopNExecutor<S> {
             first_execution: true,
             identity: format!("TopNExecutor {:X}", executor_id),
             op_info,
+            epoch: 0,
         }
     }
 
-    async fn flush_inner(&mut self, epoch: u64) -> Result<()> {
+    async fn flush_inner(&mut self) -> Result<()> {
+        let epoch = self.current_epoch();
         self.managed_highest_state.flush(epoch).await?;
         self.managed_middle_state.flush(epoch).await?;
         self.managed_lowest_state.flush(epoch).await
@@ -200,10 +202,11 @@ impl<S: StateStore> Executor for TopNExecutor<S> {
 #[async_trait]
 impl<S: StateStore> TopNExecutorBase for TopNExecutor<S> {
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> Result<StreamChunk> {
+        let epoch = self.current_epoch();
         if self.first_execution {
-            self.managed_lowest_state.fill_in_cache().await?;
-            self.managed_middle_state.fill_in_cache().await?;
-            self.managed_highest_state.fill_in_cache().await?;
+            self.managed_lowest_state.fill_in_cache(epoch).await?;
+            self.managed_middle_state.fill_in_cache(epoch).await?;
+            self.managed_highest_state.fill_in_cache(epoch).await?;
             self.first_execution = false;
         }
 
@@ -231,7 +234,7 @@ impl<S: StateStore> TopNExecutorBase for TopNExecutor<S> {
                         // `elem` is in the range of `[0, offset)`,
                         // we ignored it for now as it is not in the result set.
                         self.managed_lowest_state
-                            .insert(ordered_pk_row, row)
+                            .insert(ordered_pk_row, row, epoch)
                             .await?;
                         continue;
                     }
@@ -243,9 +246,13 @@ impl<S: StateStore> TopNExecutorBase for TopNExecutor<S> {
                     {
                         // If the new element is smaller than the largest element in [0, offset),
                         // the largest element need to move to [offset, offset+limit).
-                        let res = self.managed_lowest_state.pop_top_element().await?.unwrap();
+                        let res = self
+                            .managed_lowest_state
+                            .pop_top_element(epoch)
+                            .await?
+                            .unwrap();
                         self.managed_lowest_state
-                            .insert(ordered_pk_row, row)
+                            .insert(ordered_pk_row, row, epoch)
                             .await?;
                         res
                     } else {
@@ -268,7 +275,11 @@ impl<S: StateStore> TopNExecutorBase for TopNExecutor<S> {
                     let element_to_compare_with_highest = if &element_to_compare_with_middle.0
                         < self.managed_middle_state.top_element().unwrap().0
                     {
-                        let res = self.managed_middle_state.pop_top_element().await?.unwrap();
+                        let res = self
+                            .managed_middle_state
+                            .pop_top_element(epoch)
+                            .await?
+                            .unwrap();
                         new_ops.push(Op::Delete);
                         new_rows.push(res.1.clone());
                         new_ops.push(Op::Insert);
@@ -289,6 +300,7 @@ impl<S: StateStore> TopNExecutorBase for TopNExecutor<S> {
                         .insert(
                             element_to_compare_with_highest.0,
                             element_to_compare_with_highest.1,
+                            epoch,
                         )
                         .await?;
                 }
@@ -303,19 +315,26 @@ impl<S: StateStore> TopNExecutorBase for TopNExecutor<S> {
                         && ordered_pk_row > *self.managed_middle_state.top_element().unwrap().0
                     {
                         // The current element in in the range of `[offset+limit, +inf)`
-                        self.managed_highest_state.delete(&ordered_pk_row).await?;
+                        self.managed_highest_state
+                            .delete(&ordered_pk_row, epoch)
+                            .await?;
                     } else if self.managed_lowest_state.total_count() == self.offset
                         && (self.offset == 0
                             || ordered_pk_row > *self.managed_lowest_state.top_element().unwrap().0)
                     {
                         // The current element in in the range of `[offset, offset+limit)`
-                        self.managed_middle_state.delete(&ordered_pk_row).await?;
+                        self.managed_middle_state
+                            .delete(&ordered_pk_row, epoch)
+                            .await?;
                         new_ops.push(Op::Delete);
                         new_rows.push(row.clone());
                         // We need to bring one, if any, from highest to lowest.
                         if self.managed_highest_state.total_count() > 0 {
-                            let smallest_element_from_highest_state =
-                                self.managed_highest_state.pop_top_element().await?.unwrap();
+                            let smallest_element_from_highest_state = self
+                                .managed_highest_state
+                                .pop_top_element(epoch)
+                                .await?
+                                .unwrap();
                             new_ops.push(Op::Insert);
                             new_rows.push(smallest_element_from_highest_state.1.clone());
                             self.managed_middle_state
@@ -327,12 +346,14 @@ impl<S: StateStore> TopNExecutorBase for TopNExecutor<S> {
                         }
                     } else {
                         // The current element in in the range of `[0, offset)`
-                        self.managed_lowest_state.delete(&ordered_pk_row).await?;
+                        self.managed_lowest_state
+                            .delete(&ordered_pk_row, epoch)
+                            .await?;
                         // We need to bring one, if any, from middle to lowest.
                         if self.managed_middle_state.total_count() > 0 {
                             let smallest_element_from_middle_state = self
                                 .managed_middle_state
-                                .pop_bottom_element()
+                                .pop_bottom_element(epoch)
                                 .await?
                                 .unwrap();
                             new_ops.push(Op::Delete);
@@ -341,6 +362,7 @@ impl<S: StateStore> TopNExecutorBase for TopNExecutor<S> {
                                 .insert(
                                     smallest_element_from_middle_state.0,
                                     smallest_element_from_middle_state.1,
+                                    epoch,
                                 )
                                 .await?;
                         }
@@ -350,8 +372,11 @@ impl<S: StateStore> TopNExecutorBase for TopNExecutor<S> {
                         if self.managed_middle_state.total_count() == (num_limit - 1)
                             && self.managed_highest_state.total_count() > 0
                         {
-                            let smallest_element_from_highest_state =
-                                self.managed_highest_state.pop_top_element().await?.unwrap();
+                            let smallest_element_from_highest_state = self
+                                .managed_highest_state
+                                .pop_top_element(epoch)
+                                .await?
+                                .unwrap();
                             new_ops.push(Op::Insert);
                             new_rows.push(smallest_element_from_highest_state.1.clone());
                             self.managed_middle_state
@@ -368,12 +393,20 @@ impl<S: StateStore> TopNExecutorBase for TopNExecutor<S> {
         generate_output(new_rows, new_ops, self.schema())
     }
 
-    async fn flush_data(&mut self, epoch: u64) -> Result<()> {
-        self.flush_inner(epoch).await
+    async fn flush_data(&mut self) -> Result<()> {
+        self.flush_inner().await
     }
 
     fn input(&mut self) -> &mut dyn Executor {
         &mut *self.input
+    }
+
+    fn current_epoch(&self) -> u64 {
+        self.epoch
+    }
+
+    fn update_epoch(&mut self, new_epoch: u64) {
+        self.epoch = new_epoch;
     }
 }
 
@@ -514,7 +547,7 @@ mod tests {
                 Op::Insert,
             ];
             assert_eq!(
-                res.column(0).array_ref().as_int64().iter().collect_vec(),
+                res.column_at(0).array_ref().as_int64().iter().collect_vec(),
                 expected_values
             );
             assert_eq!(res.ops(), expected_ops);

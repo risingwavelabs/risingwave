@@ -1,5 +1,6 @@
 package com.risingwave.rpc
 
+import com.risingwave.proto.hummock.*
 import com.risingwave.proto.metanode.*
 
 /** A client connecting to meta node. */
@@ -21,4 +22,8 @@ interface MetaClient {
   fun flush(request: FlushRequest): FlushResponse
 
   fun listAllNodes(request: ListAllNodesRequest): ListAllNodesResponse
+
+  fun pinSnapshot(request: PinSnapshotRequest): PinSnapshotResponse
+
+  fun unpinSnapshot(request: UnpinSnapshotRequest): UnpinSnapshotResponse
 }

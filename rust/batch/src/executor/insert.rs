@@ -9,7 +9,7 @@ use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_source::{SourceImpl, SourceManagerRef};
+use risingwave_source::SourceManagerRef;
 
 use super::BoxedExecutor;
 use crate::executor::{BoxedExecutorBuilder, Executor, ExecutorBuilder};
@@ -62,36 +62,8 @@ impl Executor for InsertExecutor {
             return Ok(None);
         }
 
-        let source = self.source_manager.get_source(&self.table_id)?;
-
-        let do_insert = |chunk: StreamChunk| async {
-            match source.source.as_ref() {
-                SourceImpl::TableV2(t) => {
-                    // All writers share a single `TableSourceV2Core` so it's okay to create it
-                    // every time.
-                    let mut writer = t.create_writer();
-                    writer.write(chunk).await?;
-                }
-                _ => unreachable!(),
-            };
-            Ok::<_, RwError>(())
-        };
-
-        let do_flush = || async {
-            match source.source.as_ref() {
-                SourceImpl::TableV2(t) => {
-                    let mut writer = t.create_writer();
-                    writer.flush().await?; // this is currently no op
-                }
-                _ => unreachable!(),
-            };
-            Ok::<_, RwError>(())
-        };
-
-        let next_row_id = || match source.source.as_ref() {
-            SourceImpl::TableV2(t) => t.next_row_id(self.worker_id),
-            _ => unreachable!(),
-        };
+        let source_desc = self.source_manager.get_source(&self.table_id)?;
+        let source = source_desc.source.as_table_v2();
 
         let mut rows_inserted = 0;
         while let Some(child_chunk) = self.child.next().await? {
@@ -101,7 +73,9 @@ impl Executor for InsertExecutor {
             // add row-id column as first column
             let mut builder = I64ArrayBuilder::new(len).unwrap();
             for _ in 0..len {
-                builder.append(Some(next_row_id())).unwrap();
+                builder
+                    .append(Some(source.next_row_id(self.worker_id)))
+                    .unwrap();
             }
 
             let rowid_column = once(Column::new(Arc::new(ArrayImpl::from(
@@ -109,22 +83,13 @@ impl Executor for InsertExecutor {
             ))));
             let child_columns = child_chunk.columns().iter().map(|c| c.to_owned());
 
-            let columns = match source.source.as_ref() {
-                SourceImpl::TableV2(_) => {
-                    // put row id column to the last to match the behavior of mview
-                    child_columns.chain(rowid_column).collect()
-                }
-                _ => unreachable!(),
-            };
-
+            // put row id column to the last to match the behavior of mview
+            let columns = child_columns.chain(rowid_column).collect();
             let chunk = StreamChunk::new(vec![Op::Insert; len], columns, None);
 
-            do_insert(chunk).await?;
+            source.write_chunk(chunk).await?;
             rows_inserted += len;
         }
-
-        // FIXME: should do flush on checkpoint in the future
-        do_flush().await?;
 
         // create ret value
         {
@@ -174,9 +139,9 @@ impl BoxedExecutorBuilder for InsertExecutor {
 
         Ok(Box::new(Self::new(
             table_id,
-            source.global_task_env().source_manager_ref(),
+            source.global_batch_env().source_manager_ref(),
             child,
-            source.global_task_env().worker_id(),
+            source.global_batch_env().worker_id(),
         )))
     }
 }
@@ -187,7 +152,7 @@ mod tests {
     use std::sync::Arc;
 
     use risingwave_common::array::{Array, I64Array};
-    use risingwave_common::catalog::{Field, Schema, SchemaId};
+    use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
     use risingwave_source::{
@@ -230,7 +195,7 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(i, f)| TableColumnDesc {
-                data_type: f.data_type,
+                data_type: f.data_type.clone(),
                 column_id: i as i32, // use column index as column id
                 name: f.name.clone(),
             })
@@ -242,7 +207,7 @@ mod tests {
         mock_executor.add(data_chunk.clone());
 
         // Create the first table.
-        let table_id = TableId::new(SchemaId::default(), 0);
+        let table_id = TableId::new(0);
         let table = table_manager
             .create_table_v2(&table_id, table_columns.to_vec())
             .await?;
@@ -253,12 +218,8 @@ mod tests {
         let source = source_desc.source.as_table_v2();
         let mut reader = source.stream_reader(TableV2ReaderContext, vec![0, 1, 2])?;
 
-        let mut insert_executor = InsertExecutor::new(
-            table_id.clone(),
-            source_manager.clone(),
-            Box::new(mock_executor),
-            0,
-        );
+        let mut insert_executor =
+            InsertExecutor::new(table_id, source_manager.clone(), Box::new(mock_executor), 0);
         insert_executor.open().await.unwrap();
         let fields = &insert_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Int64);
@@ -266,7 +227,7 @@ mod tests {
         insert_executor.close().await.unwrap();
         assert_eq!(
             result
-                .column_at(0)?
+                .column_at(0)
                 .array()
                 .as_int64()
                 .iter()

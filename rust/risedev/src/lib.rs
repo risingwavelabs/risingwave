@@ -1,4 +1,5 @@
 #![feature(exit_status_error)]
+#![feature(let_chains)]
 
 mod config;
 pub use config::*;

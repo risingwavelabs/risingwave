@@ -6,13 +6,11 @@ use async_trait::async_trait;
 pub use catalog::*;
 pub use cluster::*;
 use prost::Message;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::Result;
 pub use stream::*;
 
-use crate::manager::{Epoch, SINGLE_VERSION_EPOCH};
-use crate::storage::{MetaStore, Operation, Transaction};
+use crate::storage::{self, MetaStore, Operation, Transaction};
 
-pub type TableRawId = i32;
 pub type ActorId = u32;
 pub type FragmentId = u32;
 
@@ -41,11 +39,6 @@ pub trait MetadataModel: Sized {
     /// Current record key.
     fn key(&self) -> Result<Self::KeyType>;
 
-    /// Version for current record, only one version by default.
-    fn version(&self) -> Epoch {
-        SINGLE_VERSION_EPOCH
-    }
-
     /// `list` returns all records in this model.
     async fn list<S>(store: &S) -> Result<Vec<Self>>
     where
@@ -66,36 +59,34 @@ pub trait MetadataModel: Sized {
         store
             .put_cf(
                 &Self::cf_name(),
-                &self.key()?.encode_to_vec(),
-                &self.to_protobuf().encode_to_vec(),
-                self.version(),
+                self.key()?.encode_to_vec(),
+                self.to_protobuf().encode_to_vec(),
             )
             .await
+            .map_err(Into::into)
     }
 
-    /// `delete` drop records (in multi-version if has) from meta store with associated key.
+    /// `delete` drop records from meta store with associated key.
     async fn delete<S>(store: &S, key: &Self::KeyType) -> Result<()>
     where
         S: MetaStore,
     {
         store
-            .delete_all_cf(&Self::cf_name(), &key.encode_to_vec())
+            .delete_cf(&Self::cf_name(), &key.encode_to_vec())
             .await
+            .map_err(Into::into)
     }
 
     /// `select` query a record with associated key and version.
-    async fn select<S>(store: &S, key: &Self::KeyType, version: Epoch) -> Result<Option<Self>>
+    async fn select<S>(store: &S, key: &Self::KeyType) -> Result<Option<Self>>
     where
         S: MetaStore,
     {
-        let byte_vec = match store
-            .get_cf(&Self::cf_name(), &key.encode_to_vec(), version)
-            .await
-        {
+        let byte_vec = match store.get_cf(&Self::cf_name(), &key.encode_to_vec()).await {
             Ok(byte_vec) => byte_vec,
             Err(err) => {
-                if !matches!(err.inner(), ErrorCode::ItemNotFound(_)) {
-                    return Err(err);
+                if !matches!(err, storage::Error::ItemNotFound(_)) {
+                    return Err(err.into());
                 }
                 return Ok(None);
             }
@@ -109,20 +100,18 @@ pub trait MetadataModel: Sized {
 /// Read operations can be supported if necessary.
 pub trait Transactional: MetadataModel {
     fn upsert_in_transaction(&self, trx: &mut Transaction) -> risingwave_common::error::Result<()> {
-        trx.add_operations(vec![Operation::Put(
-            Self::cf_name(),
-            self.key()?.encode_to_vec(),
-            self.to_protobuf_encoded_vec(),
-            None,
-        )]);
+        trx.add_operations(vec![Operation::Put {
+            cf: Self::cf_name(),
+            key: self.key()?.encode_to_vec(),
+            value: self.to_protobuf_encoded_vec(),
+        }]);
         Ok(())
     }
     fn delete_in_transaction(&self, trx: &mut Transaction) -> risingwave_common::error::Result<()> {
-        trx.add_operations(vec![Operation::Delete(
-            Self::cf_name(),
-            self.key()?.encode_to_vec(),
-            None,
-        )]);
+        trx.add_operations(vec![Operation::Delete {
+            cf: Self::cf_name(),
+            key: self.key()?.encode_to_vec(),
+        }]);
         Ok(())
     }
 }

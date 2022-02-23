@@ -99,12 +99,10 @@ impl BoxedExecutorBuilder for CreateSourceExecutor {
 
         let schema_location = node.get_schema_location();
 
-        if let SourceFormat::Protobuf = format {
-            if schema_location.is_empty() {
-                return Err(RwError::from(ProtocolError(
-                    "protobuf file location not provided".to_string(),
-                )));
-            }
+        if format == SourceFormat::Protobuf && schema_location.is_empty() {
+            return Err(RwError::from(ProtocolError(
+                "protobuf file location not provided".to_string(),
+            )));
         }
 
         let config = match get_from_properties!(properties, UPSTREAM_SOURCE_KEY).as_str() {
@@ -125,7 +123,7 @@ impl BoxedExecutorBuilder for CreateSourceExecutor {
             table_id,
             config,
             format,
-            source_manager: source.global_task_env().source_manager_ref(),
+            source_manager: source.global_batch_env().source_manager_ref(),
             columns,
             schema: Schema { fields: vec![] },
             properties: properties.clone(),

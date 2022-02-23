@@ -1,8 +1,8 @@
 use std::collections::{btree_map, BTreeMap};
+use std::sync::Arc;
 
-use itertools::Itertools;
+use bytes::Bytes;
 use risingwave_common::array::data_chunk_iter::RowDeserializer;
-use risingwave_common::array::Row;
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_storage::write_batch::WriteBatch;
@@ -11,60 +11,82 @@ use risingwave_storage::{Keyspace, StateStore};
 use super::*;
 use crate::executor::managed_state::flush_status::BtreeMapFlushStatus as FlushStatus;
 
-type AllOrNoneStateIter<'a> = btree_map::Iter<'a, PkType, StateValueType>;
+type JoinEntryStateIter<'a> = btree_map::Iter<'a, PkType, StateValueType>;
 
-type AllOrNoneStateValues<'a> = btree_map::Values<'a, PkType, StateValueType>;
+type JoinEntryStateValues<'a> = btree_map::Values<'a, PkType, StateValueType>;
 
-type AllOrNoneStateValuesMut<'a> = btree_map::ValuesMut<'a, PkType, StateValueType>;
+type JoinEntryStateValuesMut<'a> = btree_map::ValuesMut<'a, PkType, StateValueType>;
 
 /// Manages a `BTreeMap` in memory for all entries. When evicted, `BTreeMap` does not hold any
 /// entries.
-pub struct AllOrNoneState<S: StateStore> {
+pub struct JoinEntryState<S: StateStore> {
     /// The full copy of the state. If evicted, it will be `None`.
     cached: Option<BTreeMap<PkType, StateValueType>>,
 
     /// The actions that will be taken on next flush
     flush_buffer: BTreeMap<PkType, FlushStatus<StateValueType>>,
 
-    /// Number of items in the state including the cache and state store.
-    total_count: isize,
-
     /// Data types of the sort column
-    data_types: Vec<DataType>,
+    data_types: Arc<[DataType]>,
 
     /// Data types of primary keys
-    pk_data_types: Vec<DataType>,
-
-    /// Indices of primary keys
-    pk_indices: Vec<usize>,
+    pk_data_types: Arc<[DataType]>,
 
     /// The keyspace to operate on.
     keyspace: Keyspace<S>,
 }
 
-impl<S: StateStore> AllOrNoneState<S> {
-    pub fn new(keyspace: Keyspace<S>, data_types: Vec<DataType>, pk_indices: Vec<usize>) -> Self {
-        let pk_data_types = pk_indices.iter().map(|idx| data_types[*idx]).collect_vec();
+impl<S: StateStore> JoinEntryState<S> {
+    pub fn new(
+        keyspace: Keyspace<S>,
+        data_types: Arc<[DataType]>,
+        pk_data_types: Arc<[DataType]>,
+    ) -> Self {
         Self {
             cached: None,
             flush_buffer: BTreeMap::new(),
-            total_count: 0,
             data_types,
             pk_data_types,
-            pk_indices,
             keyspace,
         }
     }
 
-    pub async fn is_empty(&mut self) -> bool {
-        self.len().await == 0
+    pub async fn with_cached_state(
+        keyspace: Keyspace<S>,
+        data_types: Arc<[DataType]>,
+        pk_data_types: Arc<[DataType]>,
+        epoch: u64,
+    ) -> Result<Option<Self>> {
+        let all_data = keyspace.scan_strip_prefix(None, epoch).await?;
+        if !all_data.is_empty() {
+            // Insert cached states.
+            let cached = Self::fill_cached(all_data, data_types.clone(), pk_data_types.clone())?;
+            Ok(Some(Self {
+                cached: Some(cached),
+                flush_buffer: BTreeMap::new(),
+                data_types,
+                pk_data_types,
+                keyspace,
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
-    pub async fn len(&mut self) -> usize {
-        if self.cached.is_none() {
-            self.fetch_cache().await.unwrap();
+    fn fill_cached(
+        data: Vec<(Bytes, Bytes)>,
+        data_types: Arc<[DataType]>,
+        pk_data_types: Arc<[DataType]>,
+    ) -> Result<BTreeMap<PkType, StateValueType>> {
+        let mut cached = BTreeMap::new();
+        for (raw_key, raw_value) in data {
+            let pk_deserializer = RowDeserializer::new(pk_data_types.to_vec());
+            let key = pk_deserializer.deserialize_not_null(&raw_key)?;
+            let deserializer = JoinRowDeserializer::new(data_types.to_vec());
+            let value = deserializer.deserialize(&raw_value)?;
+            cached.insert(key, value);
         }
-        self.total_count as usize
+        Ok(cached)
     }
 
     /// The state is dirty means there are unflush
@@ -74,20 +96,12 @@ impl<S: StateStore> AllOrNoneState<S> {
     }
 
     // Insert into the cache and flush buffer.
-    pub fn insert(&mut self, value: StateValueType) {
-        let pk = self
-            .pk_indices
-            .iter()
-            .map(|idx| value[*idx].clone())
-            .collect_vec();
-        let pk = Row(pk);
-
+    pub fn insert(&mut self, key: PkType, value: StateValueType) {
         if let Some(cached) = self.cached.as_mut() {
-            cached.insert(pk.clone(), value.clone());
+            cached.insert(key.clone(), value.clone());
         }
         // If no cache maintained, only update the flush buffer.
-        self.total_count += 1;
-        FlushStatus::do_insert(self.flush_buffer.entry(pk), value);
+        FlushStatus::do_insert(self.flush_buffer.entry(key), value);
     }
 
     pub fn remove(&mut self, pk: PkType) {
@@ -95,7 +109,6 @@ impl<S: StateStore> AllOrNoneState<S> {
             cached.remove(&pk);
         }
         // If no cache maintained, only update the flush buffer.
-        self.total_count -= 1;
         FlushStatus::do_delete(self.flush_buffer.entry(pk));
     }
 
@@ -120,21 +133,17 @@ impl<S: StateStore> AllOrNoneState<S> {
     }
 
     // Fetch cache from the state store.
-    async fn fetch_cache(&mut self) -> Result<()> {
-        let epoch = u64::MAX;
+    async fn populate_cache(&mut self, epoch: u64) -> Result<()> {
         assert!(self.cached.is_none());
 
         let all_data = self.keyspace.scan_strip_prefix(None, epoch).await?;
 
-        // Fetch cached states.
-        let mut cached = BTreeMap::new();
-        for (raw_key, raw_value) in all_data {
-            let pk_deserializer = RowDeserializer::new(self.pk_data_types.clone());
-            let key = pk_deserializer.deserialize_not_null(&raw_key)?;
-            let deserializer = JoinRowDeserializer::new(self.data_types.clone());
-            let value = deserializer.deserialize(&raw_value)?;
-            cached.insert(key, value);
-        }
+        // Insert cached states.
+        let mut cached = Self::fill_cached(
+            all_data,
+            self.data_types.clone(),
+            self.pk_data_types.clone(),
+        )?;
 
         // Apply current flush buffer to cached states.
         for (pk, row) in &self.flush_buffer {
@@ -148,11 +157,11 @@ impl<S: StateStore> AllOrNoneState<S> {
             }
         }
 
-        self.total_count = cached.len() as isize;
         self.cached = Some(cached);
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn clear_cache(&mut self) {
         assert!(
             !self.is_dirty(),
@@ -162,23 +171,24 @@ impl<S: StateStore> AllOrNoneState<S> {
     }
 
     #[allow(dead_code)]
-    pub async fn iter(&mut self) -> AllOrNoneStateIter<'_> {
+    pub async fn iter(&mut self, epoch: u64) -> JoinEntryStateIter<'_> {
         if self.cached.is_none() {
-            self.fetch_cache().await.unwrap();
+            self.populate_cache(epoch).await.unwrap();
         }
         self.cached.as_ref().unwrap().iter()
     }
 
-    pub async fn values(&mut self) -> AllOrNoneStateValues<'_> {
+    #[allow(dead_code)]
+    pub async fn values(&mut self, epoch: u64) -> JoinEntryStateValues<'_> {
         if self.cached.is_none() {
-            self.fetch_cache().await.unwrap();
+            self.populate_cache(epoch).await.unwrap();
         }
         self.cached.as_ref().unwrap().values()
     }
 
-    pub async fn values_mut(&mut self) -> AllOrNoneStateValuesMut<'_> {
+    pub async fn values_mut(&mut self, epoch: u64) -> JoinEntryStateValuesMut<'_> {
         if self.cached.is_none() {
-            self.fetch_cache().await.unwrap();
+            self.populate_cache(epoch).await.unwrap();
         }
         self.cached.as_mut().unwrap().values_mut()
     }
@@ -197,27 +207,33 @@ mod tests {
     async fn test_managed_all_or_none_state() {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
-        let mut managed_state =
-            AllOrNoneState::new(keyspace, vec![DataType::Int64, DataType::Int64], vec![0]);
+        let mut managed_state = JoinEntryState::new(
+            keyspace,
+            vec![DataType::Int64, DataType::Int64].into(),
+            vec![DataType::Int64].into(),
+        );
         assert!(!managed_state.is_dirty());
         let columns = vec![
             column_nonnull! { I64Array, [3, 2, 1] },
             column_nonnull! { I64Array, [4, 5, 6] },
         ];
-
+        let pk_indices = [0];
         let col1 = [1, 2, 3];
         let col2 = [6, 5, 4];
         let data_chunk_builder = DataChunk::builder().columns(columns);
         let data_chunk = data_chunk_builder.build();
 
         for row_ref in data_chunk.rows() {
-            let row = row_ref.into();
+            let row: Row = row_ref.into();
+            let pk = pk_indices.iter().map(|idx| row[*idx].clone()).collect_vec();
+            let pk = Row(pk);
             let join_row = JoinRow { row, degree: 0 };
-            managed_state.insert(join_row);
+            managed_state.insert(pk, join_row);
         }
 
+        let epoch = 0;
         for state in managed_state
-            .iter()
+            .iter(epoch)
             .await
             .zip_eq(col1.iter().zip_eq(col2.iter()))
         {
@@ -229,7 +245,6 @@ mod tests {
         }
 
         // flush to write batch and write to state store
-        let epoch: u64 = 0;
         let mut write_batch = store.start_write_batch();
         managed_state.flush(&mut write_batch).unwrap();
         write_batch.ingest(epoch).await.unwrap();

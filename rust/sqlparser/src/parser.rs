@@ -308,6 +308,7 @@ impl Parser {
                     op: UnaryOperator::Not,
                     expr: Box::new(self.parse_subexpr(Self::UNARY_NOT_PREC)?),
                 }),
+                Keyword::ROW => Ok(Expr::Row(self.parse_parenthesized_exprs()?)),
                 // Here `w` is a word, check if it's a part of a multi-part
                 // identifier, a function call, or a simple identifier:
                 _ => match self.peek_token() {
@@ -376,7 +377,12 @@ impl Parser {
                         self.prev_token();
                         Expr::Subquery(Box::new(self.parse_query()?))
                     } else {
-                        Expr::Nested(Box::new(self.parse_expr()?))
+                        let mut exprs = self.parse_comma_separated(Parser::parse_expr)?;
+                        if exprs.len() == 1 {
+                            Expr::Nested(Box::new(exprs.pop().unwrap()))
+                        } else {
+                            Expr::Row(exprs)
+                        }
                     };
                 self.expect_token(&Token::RParen)?;
                 Ok(expr)
@@ -1947,6 +1953,16 @@ impl Parser {
             Ok(vec![])
         } else {
             self.expected("a list of columns in parentheses", self.peek_token())
+        }
+    }
+
+    pub fn parse_parenthesized_exprs(&mut self) -> Result<Vec<Expr>, ParserError> {
+        if self.consume_token(&Token::LParen) {
+            let exprs = self.parse_comma_separated(Parser::parse_expr)?;
+            self.expect_token(&Token::RParen)?;
+            Ok(exprs)
+        } else {
+            self.expected("a list of expressions in parentheses", self.peek_token())
         }
     }
 

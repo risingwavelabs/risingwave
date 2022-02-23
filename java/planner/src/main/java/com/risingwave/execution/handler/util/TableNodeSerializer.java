@@ -1,4 +1,4 @@
-package com.risingwave.execution.handler.serializer;
+package com.risingwave.execution.handler.util;
 
 import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.ColumnDesc;

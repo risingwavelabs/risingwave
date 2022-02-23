@@ -26,9 +26,16 @@ pub trait TopNExecutorBase: Executor {
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> Result<StreamChunk>;
 
     /// Flush the buffered chunk to the storage backend.
-    async fn flush_data(&mut self, epoch: u64) -> Result<()>;
+    async fn flush_data(&mut self) -> Result<()>;
 
     fn input(&mut self) -> &mut dyn Executor;
+
+    /// Get back the current epoch used for storage reads and writes.
+    /// This epoch is the one carried by most recent barrier flowing through the executor.
+    fn current_epoch(&self) -> u64;
+
+    /// Update the current epoch to `new_epoch`, which is carried by a barrier.
+    fn update_epoch(&mut self, new_epoch: u64);
 }
 
 /// We remark that topN executor diffs from aggregate executor as it must output diffs
@@ -40,7 +47,8 @@ pub(super) async fn top_n_executor_next(executor: &mut dyn TopNExecutorBase) -> 
         Message::Chunk(chunk) => Ok(Message::Chunk(executor.apply_chunk(chunk).await?)),
         Message::Barrier(barrier) if barrier.is_stop_mutation() => Ok(Message::Barrier(barrier)),
         Message::Barrier(barrier) => {
-            executor.flush_data(barrier.epoch).await?;
+            executor.flush_data().await?;
+            executor.update_epoch(barrier.epoch);
             Ok(Message::Barrier(barrier))
         }
     };
@@ -79,6 +87,8 @@ pub struct AppendOnlyTopNExecutor<S: StateStore> {
 
     /// Logical Operator Info
     op_info: String,
+    /// Epoch
+    epoch: u64,
 }
 
 impl<S: StateStore> std::fmt::Debug for AppendOnlyTopNExecutor<S> {
@@ -146,7 +156,7 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
             .schema()
             .fields
             .iter()
-            .map(|field| field.data_type)
+            .map(|field| field.data_type.clone())
             .collect::<Vec<_>>();
         let lower_sub_keyspace = keyspace.with_segment(Segment::FixedLength(b"l/".to_vec()));
         let higher_sub_keyspace = keyspace.with_segment(Segment::FixedLength(b"h/".to_vec()));
@@ -163,7 +173,6 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
                 lower_sub_keyspace,
                 row_data_types.clone(),
                 ordered_row_deserializer.clone(),
-                0,
             ),
             managed_higher_state: ManagedTopNState::<S, TOP_N_MAX>::new(
                 cache_size,
@@ -171,16 +180,17 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
                 higher_sub_keyspace,
                 row_data_types,
                 ordered_row_deserializer,
-                0,
             ),
             pk_indices,
             first_execution: true,
             identity: format!("TopNAppendonlyExecutor {:X}", executor_id),
             op_info,
+            epoch: 0,
         }
     }
 
-    async fn flush_inner(&mut self, epoch: u64) -> Result<()> {
+    async fn flush_inner(&mut self) -> Result<()> {
+        let epoch = self.current_epoch();
         self.managed_higher_state.flush(epoch).await?;
         self.managed_lower_state.flush(epoch).await
     }
@@ -220,9 +230,10 @@ impl<S: StateStore> Executor for AppendOnlyTopNExecutor<S> {
 #[async_trait]
 impl<S: StateStore> TopNExecutorBase for AppendOnlyTopNExecutor<S> {
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> Result<StreamChunk> {
+        let epoch = self.current_epoch();
         if self.first_execution {
-            self.managed_lower_state.fill_in_cache().await?;
-            self.managed_higher_state.fill_in_cache().await?;
+            self.managed_lower_state.fill_in_cache(epoch).await?;
+            self.managed_higher_state.fill_in_cache(epoch).await?;
             self.first_execution = false;
         }
 
@@ -254,7 +265,9 @@ impl<S: StateStore> TopNExecutorBase for AppendOnlyTopNExecutor<S> {
             if self.managed_lower_state.total_count() < self.offset {
                 // `elem` is in the range of `[0, offset)`,
                 // we ignored it for now as it is not in the result set.
-                self.managed_lower_state.insert(ordered_pk_row, row).await?;
+                self.managed_lower_state
+                    .insert(ordered_pk_row, row, epoch)
+                    .await?;
                 continue;
             }
 
@@ -265,8 +278,14 @@ impl<S: StateStore> TopNExecutorBase for AppendOnlyTopNExecutor<S> {
             {
                 // If the new element is smaller than the largest element in [0, offset),
                 // the largest element may need to move to [offset, offset+limit).
-                let res = self.managed_lower_state.pop_top_element().await?.unwrap();
-                self.managed_lower_state.insert(ordered_pk_row, row).await?;
+                let res = self
+                    .managed_lower_state
+                    .pop_top_element(epoch)
+                    .await?
+                    .unwrap();
+                self.managed_lower_state
+                    .insert(ordered_pk_row, row, epoch)
+                    .await?;
                 res
             } else {
                 (ordered_pk_row, row)
@@ -277,6 +296,7 @@ impl<S: StateStore> TopNExecutorBase for AppendOnlyTopNExecutor<S> {
                     .insert(
                         element_to_compare_with_upper.0,
                         element_to_compare_with_upper.1.clone(),
+                        epoch,
                     )
                     .await?;
                 new_ops.push(Op::Insert);
@@ -284,7 +304,11 @@ impl<S: StateStore> TopNExecutorBase for AppendOnlyTopNExecutor<S> {
             } else if self.managed_higher_state.top_element().unwrap().0
                 > &element_to_compare_with_upper.0
             {
-                let element_to_pop = self.managed_higher_state.pop_top_element().await?.unwrap();
+                let element_to_pop = self
+                    .managed_higher_state
+                    .pop_top_element(epoch)
+                    .await?
+                    .unwrap();
                 new_ops.push(Op::Delete);
                 new_rows.push(element_to_pop.1);
                 new_ops.push(Op::Insert);
@@ -293,6 +317,7 @@ impl<S: StateStore> TopNExecutorBase for AppendOnlyTopNExecutor<S> {
                     .insert(
                         element_to_compare_with_upper.0,
                         element_to_compare_with_upper.1,
+                        epoch,
                     )
                     .await?;
             }
@@ -303,12 +328,20 @@ impl<S: StateStore> TopNExecutorBase for AppendOnlyTopNExecutor<S> {
         generate_output(new_rows, new_ops, self.schema())
     }
 
-    async fn flush_data(&mut self, epoch: u64) -> Result<()> {
-        self.flush_inner(epoch).await
+    async fn flush_data(&mut self) -> Result<()> {
+        self.flush_inner().await
     }
 
     fn input(&mut self) -> &mut dyn Executor {
         &mut *self.input
+    }
+
+    fn current_epoch(&self) -> u64 {
+        self.epoch
+    }
+
+    fn update_epoch(&mut self, new_epoch: u64) {
+        self.epoch = new_epoch;
     }
 }
 

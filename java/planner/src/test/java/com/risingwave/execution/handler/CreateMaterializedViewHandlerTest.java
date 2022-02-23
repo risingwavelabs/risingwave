@@ -38,7 +38,7 @@ public class CreateMaterializedViewHandlerTest {
   public void initAll() {
     catalogService = new SimpleCatalogService();
     catalogService.createDatabase(TEST_DB_NAME, TEST_SCHEMA_NAME);
-    sqlHandlerFactory = new DefaultSqlHandlerFactory(false);
+    sqlHandlerFactory = new DefaultSqlHandlerFactory();
 
     var cfg = new Configuration();
     cfg.set(LeaderServerConfigurations.COMPUTE_NODES, Lists.newArrayList("127.0.0.1:1234"));
@@ -53,7 +53,7 @@ public class CreateMaterializedViewHandlerTest {
             .build();
     String sql = "create table t(v1 int not null, v2 int not null, v3 float not null)";
     SqlNode ast = SqlParser.createCalciteStatement(sql);
-    var handler = ((CreateTableV1Handler) sqlHandlerFactory.create(ast, executionContext));
+    var handler = ((CreateTableHandler) sqlHandlerFactory.create(ast, executionContext));
     handler.execute(ast, executionContext);
   }
 
@@ -68,7 +68,7 @@ public class CreateMaterializedViewHandlerTest {
     String tableName = createMaterializedView.name.getSimple();
     StreamPlanner planner = new StreamPlanner();
     StreamingPlan plan = planner.plan(ast, executionContext);
-    TableCatalog catalog = handler.convertPlanToCatalog(tableName, plan, executionContext);
+    TableCatalog catalog = handler.convertPlanToCatalog(tableName, plan, executionContext, false);
 
     Assertions.assertEquals(catalog.isMaterializedView(), true);
 
@@ -100,7 +100,7 @@ public class CreateMaterializedViewHandlerTest {
     String tableName = createMaterializedView.name.getSimple();
     StreamPlanner planner = new StreamPlanner();
     StreamingPlan plan = planner.plan(ast, executionContext);
-    TableCatalog catalog = handler.convertPlanToCatalog(tableName, plan, executionContext);
+    TableCatalog catalog = handler.convertPlanToCatalog(tableName, plan, executionContext, false);
 
     Assertions.assertEquals(catalog.isMaterializedView(), true);
 

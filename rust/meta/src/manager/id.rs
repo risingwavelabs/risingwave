@@ -1,11 +1,10 @@
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::Result;
 use tokio::sync::RwLock;
 
-use crate::manager::SINGLE_VERSION_EPOCH;
-use crate::storage::MetaStore;
+use crate::storage::{self, MetaStore, DEFAULT_COLUMN_FAMILY};
 
 pub const ID_PREALLOCATE_INTERVAL: i32 = 1000;
 
@@ -38,28 +37,24 @@ where
     pub async fn new(meta_store_ref: Arc<S>, category: &str, start: Option<Id>) -> Self {
         let category_gen_key = format!("{}_id_next_generator", category);
         let res = meta_store_ref
-            .get(category_gen_key.as_bytes(), SINGLE_VERSION_EPOCH)
+            .get_cf(DEFAULT_COLUMN_FAMILY, category_gen_key.as_bytes())
             .await;
         let current_id = match res {
             Ok(value) => i32::from_be_bytes(value.as_slice().try_into().unwrap()),
-            Err(err) => {
-                if !matches!(err.inner(), ErrorCode::ItemNotFound(_)) {
-                    panic!("{}", err)
-                }
-                start.unwrap_or(0)
-            }
+            Err(storage::Error::ItemNotFound(_)) => start.unwrap_or(0),
+            Err(e) => panic!("{:?}", e),
         };
 
         let next_allocate_id = current_id + ID_PREALLOCATE_INTERVAL;
         if let Err(err) = meta_store_ref
-            .put(
-                category_gen_key.as_bytes(),
-                &next_allocate_id.to_be_bytes(),
-                SINGLE_VERSION_EPOCH,
+            .put_cf(
+                DEFAULT_COLUMN_FAMILY,
+                category_gen_key.clone().into_bytes(),
+                next_allocate_id.to_be_bytes().to_vec(),
             )
             .await
         {
-            panic!("{}", err)
+            panic!("{:?}", err)
         }
 
         StoredIdGenerator {
@@ -88,10 +83,10 @@ where
                 );
                 let next_allocate_id = *next + ID_PREALLOCATE_INTERVAL * weight;
                 self.meta_store_ref
-                    .put(
-                        self.category_gen_key.as_bytes(),
-                        &next_allocate_id.to_be_bytes(),
-                        SINGLE_VERSION_EPOCH,
+                    .put_cf(
+                        DEFAULT_COLUMN_FAMILY,
+                        self.category_gen_key.clone().into_bytes(),
+                        next_allocate_id.to_be_bytes().to_vec(),
                     )
                     .await?;
                 *next = next_allocate_id;
@@ -205,7 +200,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_id_generator() -> Result<()> {
-        let meta_store_ref = Arc::new(MemStore::new());
+        let meta_store_ref = Arc::new(MemStore::default());
         let id_generator = StoredIdGenerator::new(meta_store_ref.clone(), "default", None).await;
         let ids = future::join_all((0..10000).map(|_i| {
             let id_generator = &id_generator;
@@ -268,7 +263,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_id_generator_manager() -> Result<()> {
-        let meta_store_ref = Arc::new(MemStore::new());
+        let meta_store_ref = Arc::new(MemStore::default());
         let manager = IdGeneratorManager::new(meta_store_ref.clone()).await;
         let ids = future::join_all((0..10000).map(|_i| {
             let manager = &manager;

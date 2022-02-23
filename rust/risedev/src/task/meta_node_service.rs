@@ -36,6 +36,11 @@ impl Task for MetaNodeService {
                 self.config.dashboard_address, self.config.dashboard_port
             ));
 
+        cmd.arg("--prometheus-host").arg(format!(
+            "{}:{}",
+            self.config.exporter_address, self.config.exporter_port
+        ));
+
         if !self.config.user_managed {
             ctx.run_command(ctx.tmux_run(cmd)?)?;
             ctx.pb.set_message("started");

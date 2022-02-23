@@ -1,35 +1,47 @@
 statement ok
-drop table tpch_q1;
+drop materialized view tpch_q1;
 
 statement ok
-drop table tpch_q3;
+drop materialized view tpch_q2;
 
 statement ok
-drop table tpch_q5;
+drop materialized view tpch_q3;
 
 statement ok
-drop table tpch_q6;
+drop materialized view tpch_q4;
 
 statement ok
-drop table tpch_q7;
+drop materialized view tpch_q5;
 
 statement ok
-drop table tpch_q8;
+drop materialized view tpch_q6;
 
 statement ok
-drop table tpch_q9;
+drop materialized view tpch_q7;
 
 statement ok
-drop table tpch_q10;
+drop materialized view tpch_q8;
 
 statement ok
-drop table tpch_q13;
+drop materialized view tpch_q9;
 
 statement ok
-drop table tpch_q14;
+drop materialized view tpch_q10;
 
 statement ok
-drop table tpch_q17;
+drop materialized view tpch_q12;
 
 statement ok
-drop table tpch_q18;
+drop materialized view tpch_q13;
+
+statement ok
+drop materialized view tpch_q14;
+
+statement ok
+drop materialized view tpch_q17;
+
+statement ok
+drop materialized view tpch_q18;
+
+statement ok
+drop materialized view tpch_q20;

@@ -20,7 +20,7 @@ use crate::hummock::level_handler::{LevelHandler, SSTableStat};
 use crate::hummock::model::{
     CurrentHummockVersionId, HummockContextPinnedSnapshotExt, HummockContextPinnedVersionExt,
 };
-use crate::manager::{IdCategory, IdGeneratorManagerRef, MetaSrvEnv, SINGLE_VERSION_EPOCH};
+use crate::manager::{IdCategory, IdGeneratorManagerRef, MetaSrvEnv};
 use crate::model::{MetadataModel, Transactional};
 use crate::storage::{MetaStore, Transaction};
 
@@ -115,31 +115,24 @@ where
         };
         init_version.upsert_in_transaction(&mut transaction)?;
 
-        self.commit_trx(
-            compaction_guard.meta_store_ref.as_ref(),
-            &mut transaction,
-            None,
-        )
-        .await
+        self.commit_trx(compaction_guard.meta_store_ref.as_ref(), transaction, None)
+            .await
     }
 
     async fn commit_trx(
         &self,
-        meta_store_ref: &dyn MetaStore,
-        trx: &mut Transaction,
+        meta_store_ref: &S,
+        mut trx: Transaction,
         context_id: Option<HummockContextId>,
     ) -> Result<()> {
         if let Some(_context_id) = context_id {
             // TODO check context validity
             trx.add_preconditions(vec![]);
         }
-        meta_store_ref.commit_transaction(trx).await
+        meta_store_ref.txn(trx).await.map_err(Into::into)
     }
 
-    pub async fn pin_version(
-        &self,
-        context_id: HummockContextId,
-    ) -> Result<(HummockVersionId, HummockVersion)> {
+    pub async fn pin_version(&self, context_id: HummockContextId) -> Result<HummockVersion> {
         let versioning_guard = self.versioning.write().await;
         let version_id = CurrentHummockVersionId::get(versioning_guard.meta_store_ref.as_ref())
             .await?
@@ -147,7 +140,6 @@ where
         let hummock_version = HummockVersion::select(
             &*versioning_guard.meta_store_ref,
             &HummockVersionRefId { id: version_id },
-            SINGLE_VERSION_EPOCH,
         )
         .await?
         .unwrap();
@@ -155,7 +147,6 @@ where
         let mut context_pinned_version = HummockContextPinnedVersion::select(
             &*versioning_guard.meta_store_ref,
             &HummockContextRefId { id: context_id },
-            SINGLE_VERSION_EPOCH,
         )
         .await?
         .unwrap_or(HummockContextPinnedVersion {
@@ -167,12 +158,12 @@ where
         context_pinned_version.update_in_transaction(&mut transaction)?;
         self.commit_trx(
             versioning_guard.meta_store_ref.as_ref(),
-            &mut transaction,
+            transaction,
             Some(context_id),
         )
         .await?;
 
-        Ok((version_id, hummock_version))
+        Ok(hummock_version)
     }
 
     pub async fn unpin_version(
@@ -185,7 +176,6 @@ where
         let mut context_pinned_version = match HummockContextPinnedVersion::select(
             &*versioning_guard.meta_store_ref,
             &HummockContextRefId { id: context_id },
-            SINGLE_VERSION_EPOCH,
         )
         .await?
         {
@@ -198,7 +188,7 @@ where
         context_pinned_version.update_in_transaction(&mut transaction)?;
         self.commit_trx(
             versioning_guard.meta_store_ref.as_ref(),
-            &mut transaction,
+            transaction,
             Some(context_id),
         )
         .await
@@ -209,7 +199,7 @@ where
         context_id: HummockContextId,
         tables: Vec<SstableInfo>,
         epoch: HummockEpoch,
-    ) -> Result<()> {
+    ) -> Result<HummockVersion> {
         let stats = tables.iter().map(SSTableStat::from).collect_vec();
 
         // Hold the compact status lock so that no one else could add/drop SST or search compaction
@@ -238,26 +228,24 @@ where
         compact_status.update_in_transaction(&mut transaction);
 
         let versioning_guard = self.versioning.write().await;
+        let mut current_version_id =
+            CurrentHummockVersionId::get(versioning_guard.meta_store_ref.as_ref()).await?;
+        let old_version_id = current_version_id.id();
+        let mut hummock_version = HummockVersion::select(
+            &*versioning_guard.meta_store_ref,
+            &HummockVersionRefId { id: old_version_id },
+        )
+        .await?
+        .unwrap();
+
         let current_tables = SstableInfo::list(&*versioning_guard.meta_store_ref).await?;
         if tables
             .iter()
             .any(|t| current_tables.iter().any(|ct| ct.id == t.id))
         {
             // Retry an add_tables request is OK if the original request has completed successfully.
-            return Ok(());
+            return Ok(hummock_version);
         }
-        let mut current_version_id =
-            CurrentHummockVersionId::get(versioning_guard.meta_store_ref.as_ref()).await?;
-        let old_version_id = current_version_id.increase();
-        let new_version_id = current_version_id.id();
-        current_version_id.update_in_transaction(&mut transaction);
-        let mut hummock_version = HummockVersion::select(
-            &*versioning_guard.meta_store_ref,
-            &HummockVersionRefId { id: old_version_id },
-            SINGLE_VERSION_EPOCH,
-        )
-        .await?
-        .unwrap();
 
         // check whether the epoch is valid
         // TODO: return error instead of panic
@@ -290,18 +278,20 @@ where
                 table_ids: tables.iter().map(|t| t.id).collect(),
             }),
         };
-        hummock_version.id = new_version_id;
+        current_version_id.increase();
+        current_version_id.update_in_transaction(&mut transaction);
+        hummock_version.id = current_version_id.id();
         hummock_version.upsert_in_transaction(&mut transaction)?;
 
         // the trx contain update for both tables and compact_status
         self.commit_trx(
             compaction_guard.meta_store_ref.as_ref(),
-            &mut transaction,
+            transaction,
             Some(context_id),
         )
         .await?;
 
-        Ok(())
+        Ok(hummock_version)
     }
 
     pub async fn pin_snapshot(&self, context_id: HummockContextId) -> Result<HummockSnapshot> {
@@ -315,7 +305,6 @@ where
         let version = HummockVersion::select(
             &*versioning_guard.meta_store_ref,
             &HummockVersionRefId { id: version_id },
-            SINGLE_VERSION_EPOCH,
         )
         .await?
         .unwrap();
@@ -332,7 +321,6 @@ where
         let mut context_pinned_snapshot = HummockContextPinnedSnapshot::select(
             &*versioning_guard.meta_store_ref,
             &HummockContextRefId { id: context_id },
-            SINGLE_VERSION_EPOCH,
         )
         .await?
         .unwrap_or(HummockContextPinnedSnapshot {
@@ -344,7 +332,7 @@ where
         context_pinned_snapshot.update_in_transaction(&mut transaction)?;
         self.commit_trx(
             versioning_guard.meta_store_ref.as_ref(),
-            &mut transaction,
+            transaction,
             Some(context_id),
         )
         .await?;
@@ -363,7 +351,6 @@ where
         let mut context_pinned_snapshot = match HummockContextPinnedSnapshot::select(
             &*versioning_guard.meta_store_ref,
             &HummockContextRefId { id: context_id },
-            SINGLE_VERSION_EPOCH,
         )
         .await?
         {
@@ -377,7 +364,7 @@ where
         context_pinned_snapshot.update_in_transaction(&mut transaction)?;
         self.commit_trx(
             versioning_guard.meta_store_ref.as_ref(),
-            &mut transaction,
+            transaction,
             Some(context_id),
         )
         .await
@@ -398,7 +385,6 @@ where
                 &HummockVersionRefId {
                     id: current_version_id,
                 },
-                SINGLE_VERSION_EPOCH,
             )
             .await?
             .unwrap();
@@ -419,7 +405,7 @@ where
                 compact_status.update_in_transaction(&mut transaction);
                 self.commit_trx(
                     compaction_guard.meta_store_ref.as_ref(),
-                    &mut transaction,
+                    transaction,
                     Some(context_id),
                 )
                 .await?;
@@ -460,7 +446,6 @@ where
             let old_version = HummockVersion::select(
                 &*versioning_guard.meta_store_ref,
                 &HummockVersionRefId { id: old_version_id },
-                SINGLE_VERSION_EPOCH,
             )
             .await?
             .unwrap();
@@ -499,7 +484,6 @@ where
             let mut tables_to_delete = HummockTablesToDelete::select(
                 &*versioning_guard.meta_store_ref,
                 &HummockVersionRefId { id: new_version_id },
-                SINGLE_VERSION_EPOCH,
             )
             .await?
             .unwrap_or(HummockTablesToDelete {
@@ -515,18 +499,14 @@ where
         }
         self.commit_trx(
             compaction_guard.meta_store_ref.as_ref(),
-            &mut transaction,
+            transaction,
             Some(context_id),
         )
         .await?;
         Ok(())
     }
 
-    pub async fn commit_epoch(
-        &self,
-        context_id: HummockContextId,
-        epoch: HummockEpoch,
-    ) -> Result<()> {
+    pub async fn commit_epoch(&self, epoch: HummockEpoch) -> Result<()> {
         let versioning_guard = self.versioning.write().await;
         let mut transaction = versioning_guard.meta_store_ref.get_transaction();
         let mut current_version_id =
@@ -537,7 +517,6 @@ where
         let mut hummock_version = HummockVersion::select(
             &*versioning_guard.meta_store_ref,
             &HummockVersionRefId { id: old_version_id },
-            SINGLE_VERSION_EPOCH,
         )
         .await?
         .unwrap();
@@ -574,22 +553,14 @@ where
             hummock_version.id = new_version_id;
             hummock_version.upsert_in_transaction(&mut transaction)?;
 
-            self.commit_trx(
-                versioning_guard.meta_store_ref.as_ref(),
-                &mut transaction,
-                Some(context_id),
-            )
-            .await
+            self.commit_trx(versioning_guard.meta_store_ref.as_ref(), transaction, None)
+                .await
         } else {
             Ok(())
         }
     }
 
-    pub async fn abort_epoch(
-        &self,
-        context_id: HummockContextId,
-        epoch: HummockEpoch,
-    ) -> Result<()> {
+    pub async fn abort_epoch(&self, epoch: HummockEpoch) -> Result<()> {
         let versioning_guard = self.versioning.write().await;
         let mut transaction = versioning_guard.meta_store_ref.get_transaction();
         let mut current_version_id =
@@ -600,7 +571,6 @@ where
         let mut hummock_version = HummockVersion::select(
             &*versioning_guard.meta_store_ref,
             &HummockVersionRefId { id: old_version_id },
-            SINGLE_VERSION_EPOCH,
         )
         .await?
         .unwrap();
@@ -628,12 +598,8 @@ where
                 hummock_version.id = new_version_id;
                 hummock_version.upsert_in_transaction(&mut transaction)?;
 
-                self.commit_trx(
-                    versioning_guard.meta_store_ref.as_ref(),
-                    &mut transaction,
-                    Some(context_id),
-                )
-                .await
+                self.commit_trx(versioning_guard.meta_store_ref.as_ref(), transaction, None)
+                    .await
             }
             None => Ok(()),
         }
@@ -653,7 +619,6 @@ where
         let pinned_version = HummockContextPinnedVersion::select(
             &*versioning_guard.meta_store_ref,
             &HummockContextRefId { id: context_id },
-            SINGLE_VERSION_EPOCH,
         )
         .await?;
         let mut to_commit = false;
@@ -664,7 +629,6 @@ where
         let pinned_snapshot = HummockContextPinnedSnapshot::select(
             &*versioning_guard.meta_store_ref,
             &HummockContextRefId { id: context_id },
-            SINGLE_VERSION_EPOCH,
         )
         .await?;
         if let Some(pinned_snapshot) = pinned_snapshot {
@@ -674,11 +638,7 @@ where
         if !to_commit {
             return Ok(());
         }
-        self.commit_trx(
-            versioning_guard.meta_store_ref.as_ref(),
-            &mut transaction,
-            None,
-        )
-        .await
+        self.commit_trx(versioning_guard.meta_store_ref.as_ref(), transaction, None)
+            .await
     }
 }

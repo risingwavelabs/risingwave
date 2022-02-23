@@ -64,13 +64,14 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
             + "  RwStreamProject(v=[+($STREAM_NULL_BY_ROW_COUNT($0, $1), 1)], $f0=[$0], $f1=[$1])\n"
             + "    RwStreamAgg(group=[{}], agg#0=[COUNT()], agg#1=[SUM($0)])\n"
             + "      RwStreamFilter(condition=[>($0, $1)])\n"
-            + "        RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,_row_id])";
+            + "        RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.3]])\n"
+            + "          RwStreamBatchPlan(table=[[test_schema, t]], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.3]])";
     Assertions.assertEquals(expectedPlan, resultPlan);
 
     CreateMaterializedViewHandler handler = new CreateMaterializedViewHandler();
     SqlCreateMaterializedView createMaterializedView = (SqlCreateMaterializedView) ast;
     String tableName = createMaterializedView.name.getSimple();
-    handler.convertPlanToCatalog(tableName, plan, executionContext);
+    handler.convertPlanToCatalog(tableName, plan, executionContext, false);
 
     StreamNode serializedProto = plan.getStreamingPlan().serialize();
     String serializedJsonPlan = Messages.jsonFormat(serializedProto);
@@ -110,7 +111,7 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     CreateMaterializedViewHandler handler = new CreateMaterializedViewHandler();
     SqlCreateMaterializedView createMaterializedView = (SqlCreateMaterializedView) ast;
     String tableName = createMaterializedView.name.getSimple();
-    handler.convertPlanToCatalog(tableName, plan, executionContext);
+    handler.convertPlanToCatalog(tableName, plan, executionContext, false);
 
     String explainExchangePlan = ExplainWriter.explainPlan(plan.getStreamingPlan());
     String expectedPlan =
@@ -121,7 +122,8 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
             + "        RwStreamAgg(group=[{}], agg#0=[COUNT()], agg#1=[SUM($0)])\n"
             + "          RwStreamFilter(condition=[>($0, $1)])\n"
             + "            RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])\n"
-            + "              RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,_row_id])";
+            + "              RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.3]])\n"
+            + "                RwStreamBatchPlan(table=[[test_schema, t]], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.3]])";
     testLogger.debug("explain the exchange plan:\n" + explainExchangePlan);
     Assertions.assertEquals(expectedPlan, explainExchangePlan);
   }
@@ -142,7 +144,7 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     CreateMaterializedViewHandler handler = new CreateMaterializedViewHandler();
     SqlCreateMaterializedView createMaterializedView = (SqlCreateMaterializedView) ast;
     String tableName = createMaterializedView.name.getSimple();
-    handler.convertPlanToCatalog(tableName, plan, executionContext);
+    handler.convertPlanToCatalog(tableName, plan, executionContext, false);
 
     String explainExchangePlan = ExplainWriter.explainPlan(plan.getStreamingPlan());
     String expectedPlan =
@@ -152,7 +154,8 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
             + "      RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])\n"
             + "        RwStreamAgg(group=[{0}], agg#0=[COUNT()], v=[SUM($1)])\n"
             + "          RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])\n"
-            + "            RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,_row_id])";
+            + "            RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.3]])\n"
+            + "              RwStreamBatchPlan(table=[[test_schema, t]], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.3]])";
     testLogger.debug("explain the exchange plan:\n" + explainExchangePlan);
     Assertions.assertEquals(expectedPlan, explainExchangePlan);
   }
@@ -169,14 +172,15 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
         "RwStreamMaterializedView(name=[t_test_order_limit], collation=[[0, 1]])\n"
             + "  RwStreamSort(sort0=[$0], sort1=[$1], dir0=[ASC], dir1=[ASC], offset=[10], fetch=[100])\n"
             + "    RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])\n"
-            + "      RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])";
+            + "      RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[3]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.2, 0.0.1.3]])\n"
+            + "        RwStreamBatchPlan(table=[[test_schema, t]], tableId=[0.0.1], primaryKeyIndices=[[3]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.2, 0.0.1.3]])";
     testLogger.debug("result plan:\n" + resultPlan);
     Assertions.assertEquals(expectedPlan, resultPlan);
 
     CreateMaterializedViewHandler handler = new CreateMaterializedViewHandler();
     SqlCreateMaterializedView createMaterializedView = (SqlCreateMaterializedView) ast;
     String tableName = createMaterializedView.name.getSimple();
-    handler.convertPlanToCatalog(tableName, plan, executionContext);
+    handler.convertPlanToCatalog(tableName, plan, executionContext, false);
   }
 
   @Test
@@ -238,14 +242,15 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
         "RwStreamMaterializedView(name=[t_test_order_zero_limit], collation=[[0, 1]])\n"
             + "  RwStreamSort(sort0=[$0], sort1=[$1], dir0=[ASC], dir1=[ASC], offset=[10])\n"
             + "    RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])\n"
-            + "      RwStreamTableSource(table=[[test_schema, t]], columns=[v1,v2,v3,_row_id])";
+            + "      RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[3]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.2, 0.0.1.3]])\n"
+            + "        RwStreamBatchPlan(table=[[test_schema, t]], tableId=[0.0.1], primaryKeyIndices=[[3]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.2, 0.0.1.3]])";
     testLogger.debug("result plan:\n" + resultPlan);
     Assertions.assertEquals(expectedPlan, resultPlan);
 
     CreateMaterializedViewHandler handler = new CreateMaterializedViewHandler();
     SqlCreateMaterializedView createMaterializedView = (SqlCreateMaterializedView) ast;
     String tableName = createMaterializedView.name.getSimple();
-    handler.convertPlanToCatalog(tableName, plan, executionContext);
+    handler.convertPlanToCatalog(tableName, plan, executionContext, false);
   }
 
   @Test

@@ -1,19 +1,10 @@
 package com.risingwave.planner.sql;
 
 import static java.util.Objects.requireNonNull;
-import static org.apache.calcite.rex.RexUtil.composeConjunction;
-import static org.apache.calcite.rex.RexUtil.composeDisjunction;
-import static org.apache.calcite.rex.RexUtil.sargRef;
+import static org.apache.calcite.rex.RexUtil.*;
 
 import java.util.List;
-import org.apache.calcite.rex.RexBuilder;
-import org.apache.calcite.rex.RexCall;
-import org.apache.calcite.rex.RexLiteral;
-import org.apache.calcite.rex.RexLocalRef;
-import org.apache.calcite.rex.RexNode;
-import org.apache.calcite.rex.RexProgram;
-import org.apache.calcite.rex.RexShuttle;
-import org.apache.calcite.rex.RexUnknownAs;
+import org.apache.calcite.rex.*;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.util.Sarg;
 import org.checkerframework.checker.nullness.qual.Nullable;
@@ -90,7 +81,9 @@ public class RisingWaveRexUtil {
           final RexNode ref = call.operands.get(0);
           final RexLiteral literal = (RexLiteral) deref(program, call.operands.get(1));
           final Sarg sarg = requireNonNull(literal.getValueAs(Sarg.class), "Sarg");
-          if (maxComplexity < 0 || sarg.complexity() < maxComplexity) {
+
+          // If sarg isPoints, then it means it can be turned into an In expression.
+          if (!sarg.isPoints() && (maxComplexity < 0 || sarg.complexity() < maxComplexity)) {
             return sargRef(rexBuilder, ref, sarg, literal.getType(), RexUnknownAs.UNKNOWN);
           }
           // Sarg is complex (therefore useful); fall through
@@ -100,7 +93,7 @@ public class RisingWaveRexUtil {
     }
   }
 
-  private static RexNode deref(@Nullable RexProgram program, RexNode node) {
+  public static RexNode deref(@Nullable RexProgram program, RexNode node) {
     while (node instanceof RexLocalRef) {
       node = requireNonNull(program, "program").getExprList().get(((RexLocalRef) node).getIndex());
     }

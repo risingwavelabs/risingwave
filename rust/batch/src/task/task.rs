@@ -14,7 +14,7 @@ use tracing_futures::Instrument;
 use crate::executor::{BoxedExecutor, ExecutorBuilder};
 use crate::rpc::service::exchange::ExchangeWriter;
 use crate::task::channel::{create_output_channel, BoxChanReceiver, BoxChanSender};
-use crate::task::{BatchTaskEnv, TaskManager};
+use crate::task::{BatchEnvironment, BatchManager};
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug, Default)]
 pub struct TaskId {
@@ -92,7 +92,7 @@ impl TaskSinkId {
 }
 
 pub struct TaskSink {
-    task_manager: Arc<TaskManager>,
+    task_manager: Arc<BatchManager>,
     receiver: BoxChanReceiver,
     sink_id: TaskSinkId,
 }
@@ -147,19 +147,30 @@ impl TaskSink {
     }
 }
 
-pub struct TaskExecution {
+/// `BatchTaskExecution` represents a single task execution.
+pub struct BatchTaskExecution {
+    /// Task id.
     task_id: TaskId,
+
+    /// Inner plan to execute.
     plan: PlanFragment,
+
+    /// Task state.
     state: Mutex<TaskStatus>,
+
+    /// Receivers data of the task.   
     receivers: Mutex<Vec<Option<BoxChanReceiver>>>,
-    env: BatchTaskEnv,
-    // The execution failure.
+
+    /// Global environment of task execution.
+    env: BatchEnvironment,
+
+    /// The execution failure.
     failure: Arc<Mutex<Option<RwError>>>,
 }
 
-impl TaskExecution {
-    pub fn new(prost_tid: &ProstTaskId, plan: PlanFragment, env: BatchTaskEnv) -> Result<Self> {
-        Ok(TaskExecution {
+impl BatchTaskExecution {
+    pub fn new(prost_tid: &ProstTaskId, plan: PlanFragment, env: BatchEnvironment) -> Result<Self> {
+        Ok(BatchTaskExecution {
             task_id: TaskId::try_from(prost_tid)?,
             plan,
             state: Mutex::new(TaskStatus::Pending),
@@ -204,7 +215,7 @@ impl TaskExecution {
             let join_handle = tokio::spawn(async move {
                 // We should only pass a reference of sender to execution because we should only
                 // close it after task error has been set.
-                if let Err(e) = TaskExecution::try_execute(exec, &mut sender)
+                if let Err(e) = BatchTaskExecution::try_execute(exec, &mut sender)
                     .instrument(tracing::trace_span!(
                       "batch_execute",
                       task_id = ?task_id.task_id,
@@ -219,10 +230,8 @@ impl TaskExecution {
                 }
             });
 
-            if let Err(join_error) = join_handle.await {
-                if join_error.is_panic() {
-                    error!("Batch task {:?} panic!", task_id_cloned);
-                }
+            if let Err(join_error) = join_handle.await && join_error.is_panic() {
+                error!("Batch task {:?} panic!", task_id_cloned);
             }
         });
         Ok(())

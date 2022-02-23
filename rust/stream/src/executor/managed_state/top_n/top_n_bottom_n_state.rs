@@ -91,7 +91,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         }
     }
 
-    pub async fn pop_top_element(&mut self) -> Result<Option<(OrderedRow, Row)>> {
+    pub async fn pop_top_element(&mut self, epoch: u64) -> Result<Option<(OrderedRow, Row)>> {
         if self.total_count == 0 {
             Ok(None)
         } else {
@@ -101,12 +101,12 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
                 &self.top_n
             };
             let key = cache_to_pop.last_key_value().unwrap().0.clone();
-            let value = self.delete(&key).await?;
+            let value = self.delete(&key, epoch).await?;
             Ok(Some((key, value.unwrap())))
         }
     }
 
-    pub async fn pop_bottom_element(&mut self) -> Result<Option<(OrderedRow, Row)>> {
+    pub async fn pop_bottom_element(&mut self, epoch: u64) -> Result<Option<(OrderedRow, Row)>> {
         if self.total_count == 0 {
             Ok(None)
         } else {
@@ -116,7 +116,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
                 &self.bottom_n
             };
             let key = cache_to_pop.first_key_value().unwrap().0.clone();
-            let value = self.delete(&key).await?;
+            let value = self.delete(&key, epoch).await?;
             Ok(Some((key, value.unwrap())))
         }
     }
@@ -164,14 +164,14 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         self.total_count += 1;
     }
 
-    pub async fn delete(&mut self, key: &OrderedRow) -> Result<Option<Row>> {
+    pub async fn delete(&mut self, key: &OrderedRow, epoch: u64) -> Result<Option<Row>> {
         let prev_top_n_entry = self.top_n.remove(key);
         let prev_bottom_n_entry = self.bottom_n.remove(key);
         FlushStatus::do_delete(self.flush_buffer.entry(key.clone()));
         self.total_count -= 1;
         // If we have nothing in both caches, we have to scan from the storage.
         if self.top_n.is_empty() && self.bottom_n.is_empty() && self.total_count > 0 {
-            self.scan_and_merge().await?;
+            self.scan_and_merge(epoch).await?;
         }
         let value = match (prev_top_n_entry, prev_bottom_n_entry) {
             (None, None) => None,
@@ -182,18 +182,16 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
     }
 
     /// The same as the one in `ManagedTopNState`.
-    pub async fn scan_and_merge(&mut self) -> Result<()> {
-        let mut kv_pairs = self.scan_from_storage(None).await?;
+    pub async fn scan_and_merge(&mut self, epoch: u64) -> Result<()> {
+        let mut kv_pairs = self.scan_from_storage(None, epoch).await?;
         let mut flush_buffer_iter = self.flush_buffer.iter().peekable();
         let mut insert_process =
             |cache: &mut BTreeMap<OrderedRow, Row>, part_kv_pairs: Drain<(OrderedRow, Row)>| {
                 for (key_from_storage, row_from_storage) in part_kv_pairs {
-                    while let Some((key_from_buffer, _)) = flush_buffer_iter.peek() {
-                        if **key_from_buffer >= key_from_storage {
-                            break;
-                        } else {
-                            flush_buffer_iter.next();
-                        }
+                    while let Some((key_from_buffer, _)) = flush_buffer_iter.peek()
+                        && **key_from_buffer < key_from_storage
+                    {
+                        flush_buffer_iter.next();
                     }
                     if flush_buffer_iter.peek().is_none() {
                         cache.insert(key_from_storage, row_from_storage);
@@ -235,9 +233,8 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
     async fn scan_from_storage(
         &mut self,
         number_rows: Option<usize>,
+        epoch: u64,
     ) -> Result<Vec<(OrderedRow, Row)>> {
-        // TODO: use the correct epoch
-        let epoch = u64::MAX;
         let pk_row_bytes = self
             .keyspace
             .scan_strip_prefix(
@@ -275,9 +272,9 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
 
     /// We can fill in the cache from storage only when state is not dirty, i.e. right after
     /// `flush`.
-    pub async fn fill_in_cache(&mut self) -> Result<()> {
+    pub async fn fill_in_cache(&mut self, epoch: u64) -> Result<()> {
         debug_assert!(!self.is_dirty());
-        let mut pk_row_bytes = self.scan_from_storage(None).await?;
+        let mut pk_row_bytes = self.scan_from_storage(None, epoch).await?;
         // cell-based storage format, so `self.schema.len()`
         for (pk, row) in pk_row_bytes.drain(0..pk_row_bytes.len() / 2) {
             self.bottom_n.insert(pk, row);
@@ -456,7 +453,7 @@ mod tests {
             order_types.clone(),
         );
         assert_eq!(managed_state.top_element(), None);
-        managed_state.fill_in_cache().await.unwrap();
+        managed_state.fill_in_cache(epoch).await.unwrap();
         // now ("abd", 3) -> ("abc", 3) -> ("ab", 4)
         assert_eq!(
             managed_state.top_element(),
@@ -471,7 +468,7 @@ mod tests {
         assert_eq!(managed_state.get_cache_len(), 3);
 
         assert_eq!(
-            managed_state.pop_top_element().await.unwrap(),
+            managed_state.pop_top_element(epoch).await.unwrap(),
             Some((ordered_rows[3].clone(), rows[3].clone()))
         );
         // now ("abd", 3) -> ("abc", 3)
@@ -487,7 +484,7 @@ mod tests {
         assert_eq!(managed_state.total_count, 2);
         assert_eq!(managed_state.get_cache_len(), 2);
         assert_eq!(
-            managed_state.pop_top_element().await.unwrap(),
+            managed_state.pop_top_element(epoch).await.unwrap(),
             Some((ordered_rows[1].clone(), rows[1].clone()))
         );
         // now ("abd", 3)
@@ -528,7 +525,7 @@ mod tests {
             data_types.clone(),
             order_types.clone(),
         );
-        managed_state.fill_in_cache().await.unwrap();
+        managed_state.fill_in_cache(epoch).await.unwrap();
         assert_eq!(
             managed_state.top_element(),
             Some((&ordered_rows[2], &rows[2]))

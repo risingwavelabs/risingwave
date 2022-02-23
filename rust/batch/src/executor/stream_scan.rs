@@ -31,7 +31,7 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
         let table_id = TableId::from(&stream_scan_node.table_ref_id);
 
         let source_desc = source
-            .global_task_env()
+            .global_batch_env()
             .source_manager()
             .get_source(&table_id)?;
 
@@ -45,7 +45,7 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
                     .iter()
                     .find(|c| c.column_id == *id)
                     .map(|col| Field {
-                        data_type: col.data_type,
+                        data_type: col.data_type.clone(),
                         name: col.name.clone(),
                     })
                     .ok_or_else(|| {
@@ -161,13 +161,7 @@ mod tests {
         let chunk1 = chunk1.unwrap();
         assert_eq!(1, chunk1.dimension());
         assert_eq!(
-            chunk1
-                .column_at(0)
-                .unwrap()
-                .array()
-                .as_int32()
-                .iter()
-                .collect_vec(),
+            chunk1.column_at(0).array().as_int32().iter().collect_vec(),
             vec![Some(1), Some(2), Some(3)]
         );
 
@@ -176,13 +170,7 @@ mod tests {
         let chunk2 = chunk2.unwrap();
         assert_eq!(1, chunk2.dimension());
         assert_eq!(
-            chunk2
-                .column_at(0)
-                .unwrap()
-                .array()
-                .as_int32()
-                .iter()
-                .collect_vec(),
+            chunk2.column_at(0).array().as_int32().iter().collect_vec(),
             vec![Some(1), Some(2), Some(3)]
         );
 

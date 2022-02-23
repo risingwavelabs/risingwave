@@ -9,13 +9,13 @@ use crate::expr::{BoxedExpression, Expression};
 use crate::types::{DataType, Datum, ToOwnedDatum};
 
 #[derive(Debug)]
-pub(crate) struct SearchExpression {
+pub(crate) struct InExpression {
     input_ref: BoxedExpression,
-    sarg: HashSet<Datum>,
+    set: HashSet<Datum>,
     return_type: DataType,
 }
 
-impl SearchExpression {
+impl InExpression {
     pub fn new(
         input_ref: BoxedExpression,
         data: impl Iterator<Item = Datum>,
@@ -27,19 +27,19 @@ impl SearchExpression {
         }
         Self {
             input_ref,
-            sarg,
+            set: sarg,
             return_type,
         }
     }
 
     fn check_in_sarg(&self, datum: &Datum) -> bool {
-        self.sarg.contains(datum)
+        self.set.contains(datum)
     }
 }
 
-impl Expression for SearchExpression {
+impl Expression for InExpression {
     fn return_type(&self) -> DataType {
-        self.return_type
+        self.return_type.clone()
     }
 
     fn eval(&mut self, input: &DataChunk) -> crate::error::Result<ArrayRef> {
@@ -71,7 +71,7 @@ impl Expression for SearchExpression {
 mod tests {
     use crate::array::{DataChunk, Utf8Array};
     use crate::column;
-    use crate::expr::expr_search::SearchExpression;
+    use crate::expr::expr_in::InExpression;
     use crate::expr::{Expression, InputRefExpression};
     use crate::types::{DataType, ScalarImpl};
 
@@ -82,7 +82,7 @@ mod tests {
             Some(ScalarImpl::Utf8("abc".to_string())),
             Some(ScalarImpl::Utf8("def".to_string())),
         ];
-        let mut search_expr = SearchExpression::new(input_ref, data.into_iter(), DataType::Boolean);
+        let mut search_expr = InExpression::new(input_ref, data.into_iter(), DataType::Boolean);
         let column = column! {Utf8Array, [Some("abc"), Some("a"), Some("def"), Some("abc")]};
         let data_chunk = DataChunk::builder().columns(vec![column]).build();
         let res = search_expr.eval(&data_chunk).unwrap();

@@ -2,7 +2,6 @@ use risingwave_common::error::Result;
 use risingwave_pb::meta::{Database, Schema, Table};
 use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
 
-use crate::manager::Epoch;
 use crate::model::MetadataModel;
 
 /// Column family name for table.
@@ -33,10 +32,6 @@ macro_rules! impl_model_for_catalog {
             fn key(&self) -> Result<Self::KeyType> {
                 Ok(self.$key_fn()?.clone())
             }
-
-            fn version(&self) -> Epoch {
-                Epoch::from(self.version)
-            }
         }
     };
 }
@@ -63,7 +58,7 @@ mod tests {
         let databases = Database::list(&**store).await?;
         assert!(databases.is_empty());
         assert!(
-            Database::select(&**store, &DatabaseRefId { database_id: 0 }, Epoch::from(0))
+            Database::select(&**store, &DatabaseRefId { database_id: 0 })
                 .await
                 .unwrap()
                 .is_none()
@@ -87,7 +82,6 @@ mod tests {
                 &DatabaseRefId {
                     database_id: i as i32,
                 },
-                Epoch::from(i as u64),
             )
             .await?
             .unwrap();

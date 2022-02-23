@@ -2,8 +2,8 @@ package com.risingwave.planner.rel.streaming;
 
 import com.google.common.collect.ImmutableList;
 import com.risingwave.catalog.ColumnCatalog;
-import com.risingwave.catalog.ColumnDesc;
 import com.risingwave.catalog.TableCatalog;
+import com.risingwave.proto.plan.Field;
 import com.risingwave.proto.streaming.plan.*;
 import com.risingwave.rpc.Messages;
 import java.util.List;
@@ -21,7 +21,7 @@ public class RwStreamChain extends Union implements RisingWaveStreamingRel {
   private final TableCatalog.TableId tableId;
   private final ImmutableList<ColumnCatalog.ColumnId> columnIds;
   private final ImmutableIntList primaryKeyIndices;
-  private final ImmutableList<ColumnDesc> upstreamColumnDescs;
+  private final ImmutableList<Field> upstreamFields;
 
   /**
    * ChainNode is used to scan materialized view snapshot and its further stream chunks.
@@ -36,13 +36,13 @@ public class RwStreamChain extends Union implements RisingWaveStreamingRel {
       TableCatalog.TableId tableId,
       ImmutableIntList primaryKeyIndices,
       ImmutableList<ColumnCatalog.ColumnId> columnIds,
-      ImmutableList<ColumnDesc> upstreamColumnDescs,
+      ImmutableList<Field> upstreamFields,
       List<RelNode> inputs) {
     super(cluster, traitSet, inputs, true);
     this.tableId = tableId;
     this.primaryKeyIndices = primaryKeyIndices;
     this.columnIds = columnIds;
-    this.upstreamColumnDescs = upstreamColumnDescs;
+    this.upstreamFields = upstreamFields;
   }
 
   public TableCatalog.TableId getTableId() {
@@ -57,26 +57,23 @@ public class RwStreamChain extends Union implements RisingWaveStreamingRel {
     return columnIds;
   }
 
-  public ImmutableList<ColumnDesc> getUpstreamColumnDescs() {
-    return upstreamColumnDescs;
+  public ImmutableList<Field> getUpstreamFields() {
+    return upstreamFields;
   }
 
   @Override
   public SetOp copy(RelTraitSet traitSet, List<RelNode> inputs, boolean all) {
     return new RwStreamChain(
-        getCluster(), traitSet, tableId, primaryKeyIndices, columnIds, upstreamColumnDescs, inputs);
+        getCluster(), traitSet, tableId, primaryKeyIndices, columnIds, upstreamFields, inputs);
   }
 
   /** Explain */
   @Override
   public RelWriter explainTerms(RelWriter pw) {
-    var writer =
-        super.explainTerms(pw)
-            .item("tableId", tableId)
-            .item("primaryKeyIndices", primaryKeyIndices)
-            .item("columnIds", columnIds)
-            .item("upstreamColumnDescs", upstreamColumnDescs);
-    return writer;
+    return super.explainTerms(pw)
+        .item("tableId", tableId)
+        .item("primaryKeyIndices", primaryKeyIndices)
+        .item("columnIds", columnIds);
   }
 
   @Override
@@ -84,12 +81,7 @@ public class RwStreamChain extends Union implements RisingWaveStreamingRel {
     ChainNode.Builder builder = ChainNode.newBuilder();
     builder.setTableRefId(Messages.getTableRefId(tableId)).addAllPkIndices(primaryKeyIndices);
     columnIds.forEach(c -> builder.addColumnIds(c.getValue()));
-    for (ColumnDesc upstreamColumnDesc : upstreamColumnDescs) {
-      com.risingwave.proto.plan.ColumnDesc.Builder columnDescBuilder =
-          com.risingwave.proto.plan.ColumnDesc.newBuilder();
-      columnDescBuilder.setColumnType(upstreamColumnDesc.getDataType().getProtobufType());
-      builder.addUpstreamColumnDescs(columnDescBuilder.build());
-    }
+    builder.addAllUpstreamFields(upstreamFields);
     ChainNode chainNode = builder.build();
     return StreamNode.newBuilder()
         .setChainNode(chainNode)

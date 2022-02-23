@@ -10,6 +10,7 @@ import "common.proto";
 import "data.proto";
 import "expr.proto";
 
+// Field is a column in the streaming or batch plan.
 message Field {
   data.DataType data_type = 1;
   string name = 2;

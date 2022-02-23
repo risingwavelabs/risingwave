@@ -1,29 +1,74 @@
+use std::mem::size_of_val;
 use std::time::Instant;
 
 use itertools::Itertools;
+use rand::distributions::Uniform;
+use rand::prelude::Distribution;
 use risingwave_storage::StateStore;
 
-use super::Operations;
+use super::{Batch, Operations, PerfMetrics};
 use crate::utils::latency_stat::LatencyStat;
 use crate::utils::workload::{get_epoch, Workload};
-use crate::{Opts, WorkloadType};
+use crate::Opts;
 
 impl Operations {
     pub(crate) async fn write_batch(&mut self, store: &impl StateStore, opts: &Opts) {
-        let mut batches = (0..opts.write_batches)
-            .into_iter()
-            .map(|i| {
-                let (prefixes, keys, values) =
-                    Workload::gen(opts, WorkloadType::WriteBatch, Some(i as u64));
+        let (prefixes, keys) = Workload::new_random_keys(opts, opts.writes as u64, &mut self.rng);
+        let values = Workload::new_values(opts, opts.writes as u64, &mut self.rng);
 
-                // add new prefixes and keys to global prefixes and keys
-                self.merge_prefixes(prefixes);
-                self.merge_keys(keys.clone());
+        // add new prefixes and keys to global prefixes and keys
+        self.track_prefixes(prefixes);
+        self.track_keys(keys.clone());
 
-                Workload::make_batch(keys, values)
-            })
-            .collect_vec();
+        let batches = Workload::make_batches(opts, keys, values);
+
+        let perf = self.run_batches(store, opts, batches).await;
+
+        println!(
+            "
+    writebatch
+      {}
+      KV ingestion OPS: {}  {} bytes/sec",
+            perf.stat, perf.qps, perf.bytes_pre_sec
+        );
+    }
+
+    pub(crate) async fn delete_random(&mut self, store: &impl StateStore, opts: &Opts) {
+        let delete_keys = match self.keys.is_empty() {
+            true => Workload::new_random_keys(opts, opts.deletes as u64, &mut self.rng).1,
+            false => {
+                let dist = Uniform::from(0..self.keys.len());
+                (0..opts.deletes)
+                    .into_iter()
+                    .map(|_| self.keys[dist.sample(&mut self.rng)].clone())
+                    .collect_vec()
+            }
+        };
+        self.untrack_keys(&delete_keys);
+
+        let values = vec![None; opts.deletes as usize];
+
+        let batches = Workload::make_batches(opts, delete_keys, values);
+
+        let perf = self.run_batches(store, opts, batches).await;
+
+        println!(
+            "
+    deleterandom
+      {}
+      KV ingestion OPS: {}  {} bytes/sec",
+            perf.stat, perf.qps, perf.bytes_pre_sec
+        );
+    }
+
+    async fn run_batches(
+        &mut self,
+        store: &impl StateStore,
+        opts: &Opts,
+        mut batches: Vec<Batch>,
+    ) -> PerfMetrics {
         let batches_len = batches.len();
+        let size = size_of_val(&batches);
 
         // partitioned these batches for each concurrency
         let mut grouped_batches = vec![vec![]; opts.concurrency_num as usize];
@@ -65,13 +110,12 @@ impl Operations {
         let stat = LatencyStat::new(latencies);
         // calculate operation per second
         let ops = opts.batch_size as u128 * 1_000_000_000 * batches_len as u128 / total_time_nano;
+        let bytes_pre_sec = size as u128 * 1_000_000_000 / total_time_nano;
 
-        println!(
-            "
-    writebatch
-      {}
-      KV ingestion OPS: {}",
-            stat, ops
-        );
+        PerfMetrics {
+            stat,
+            qps: ops,
+            bytes_pre_sec,
+        }
     }
 }
