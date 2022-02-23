@@ -1,6 +1,7 @@
 //! This type inference is just to infer the return type of function calls, and make sure the
 //! functionCall expressions have same input type requirement and return type definition as backend.
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::vec;
 
 use itertools::iproduct;
@@ -70,7 +71,9 @@ pub fn infer_type(func_type: ExprType, inputs_type: Vec<DataType>) -> Option<Dat
         DataTypeName::Timestampz => DataType::Timestampz,
         DataTypeName::Decimal => DataType::Decimal,
         DataTypeName::Interval => DataType::Interval,
-        DataTypeName::Struct => DataType::Struct { fields: vec![] },
+        DataTypeName::Struct => DataType::Struct {
+            fields: Arc::new(vec![]),
+        },
     })
 }
 

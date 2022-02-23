@@ -273,9 +273,9 @@ mod tests {
                 .build(),
             Schema {
                 fields: vec![
-                    Field::unnamed(t32),
-                    Field::unnamed(t32),
-                    Field::unnamed(t32),
+                    Field::unnamed(t32.clone()),
+                    Field::unnamed(t32.clone()),
+                    Field::unnamed(t32.clone()),
                 ],
             },
         );
@@ -311,7 +311,7 @@ mod tests {
 
         let schema = Schema {
             fields: vec![
-                Field::unnamed(t32),
+                Field::unnamed(t32.clone()),
                 Field::unnamed(t32),
                 Field::unnamed(t64),
             ],
@@ -342,7 +342,7 @@ mod tests {
         let src_exec = MockExecutor::with_chunk(
             DataChunk::builder().columns(vec![Column::new(col)]).build(),
             Schema {
-                fields: vec![Field::unnamed(t32)],
+                fields: vec![Field::unnamed(t32.clone())],
             },
         );
 

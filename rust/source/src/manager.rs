@@ -248,7 +248,7 @@ mod tests {
             .iter()
             .map(|c| SourceColumnDesc {
                 name: "123".to_string(),
-                data_type: c.data_type,
+                data_type: c.data_type.clone(),
                 column_id: c.column_id,
                 skip_parse: false,
                 is_primary: false,
@@ -297,7 +297,7 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(i, f)| TableColumnDesc {
-                data_type: f.data_type,
+                data_type: f.data_type.clone(),
                 column_id: i as i32, // use column index as column id
                 name: f.name.clone(),
             })

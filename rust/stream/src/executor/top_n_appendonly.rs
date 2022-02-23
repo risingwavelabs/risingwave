@@ -127,7 +127,7 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
         let lower_sub_keyspace = keyspace.with_segment(Segment::FixedLength(b"l/".to_vec()));
         let higher_sub_keyspace = keyspace.with_segment(Segment::FixedLength(b"h/".to_vec()));
         let ordered_row_deserializer =
-            OrderedRowDeserializer::new(pk_data_types.clone(), pk_order_types.clone());
+            OrderedRowDeserializer::new(pk_data_types, pk_order_types.clone());
         Self {
             input,
             pk_order_types,

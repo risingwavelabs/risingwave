@@ -377,8 +377,8 @@ where
 
         for (raw_key, raw_value) in all_data {
             let mut deserializer = memcomparable::Deserializer::new(&raw_value[..]);
-            let value =
-                deserialize_datum_not_null_from(self.data_type, &mut deserializer)?.unwrap();
+            let value = deserialize_datum_not_null_from(self.data_type.clone(), &mut deserializer)?
+                .unwrap();
             let key = value.clone().try_into().unwrap();
             let pks = self.serializer.get_pk(&raw_key[..])?;
             result.push((key, pks));

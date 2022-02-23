@@ -593,8 +593,8 @@ mod tests {
             output_columns
                 .iter()
                 .map(|column| match column {
-                    Either::Left(idx) => self.left_types[*idx],
-                    Either::Right(idx) => self.right_types[*idx],
+                    Either::Left(idx) => self.left_types[*idx].clone(),
+                    Either::Right(idx) => self.right_types[*idx].clone(),
                 })
                 .collect::<Vec<DataType>>()
         }
@@ -612,9 +612,9 @@ mod tests {
             let params = EquiJoinParams {
                 join_type,
                 left_key_columns: vec![0],
-                left_key_types: vec![self.left_types[0]],
+                left_key_types: vec![self.left_types[0].clone()],
                 right_key_columns: vec![0],
-                right_key_types: vec![self.right_types[0]],
+                right_key_types: vec![self.right_types[0].clone()],
                 output_columns,
                 output_data_types,
                 batch_size: 2,

@@ -1,4 +1,5 @@
 use std::convert::TryFrom;
+use std::sync::Arc;
 
 use bytes::{Buf, BufMut};
 use risingwave_pb::data::DataType as ProstDataType;
@@ -47,7 +48,7 @@ pub enum DataType {
     Timestamp,
     Timestampz,
     Interval,
-    Struct { fields: Vec<DataType> },
+    Struct { fields: Arc<Vec<DataType>> },
 }
 
 const DECIMAL_DEFAULT_PRECISION: u32 = 20;
@@ -79,7 +80,9 @@ impl From<&ProstDataType> for DataType {
             TypeName::Decimal => DataType::Decimal,
             TypeName::Interval => DataType::Interval,
             TypeName::Symbol => DataType::Varchar,
-            TypeName::Struct => DataType::Struct { fields: vec![] },
+            TypeName::Struct => DataType::Struct {
+                fields: Arc::new(vec![]),
+            },
         }
     }
 }

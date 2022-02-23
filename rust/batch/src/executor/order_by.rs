@@ -141,7 +141,7 @@ impl Executor for OrderByExecutor {
             self.encodable = self
                 .order_pairs
                 .iter()
-                .all(|pair| is_type_encodable(pair.order.return_type().clone()))
+                .all(|pair| is_type_encodable(pair.order.return_type()))
         }
 
         self.collect_child_data().await?;

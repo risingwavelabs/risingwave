@@ -251,10 +251,7 @@ mod tests {
                 expr_type: Type::ConstantValue as i32,
                 return_type: Some(ProstDataType {
                     type_name: TypeName::Char as i32,
-                    precision: 0,
-                    scale: 0,
-                    is_nullable: false,
-                    interval_type: IntervalType::Invalid as i32,
+                    ..Default::default()
                 }),
                 rex_node: Some(RexNode::Constant(ConstantValue {
                     body: "def".as_bytes().to_vec(),

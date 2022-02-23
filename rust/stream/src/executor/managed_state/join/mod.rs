@@ -116,7 +116,10 @@ impl<S: StateStore> JoinHashMap<S> {
         data_types: Vec<DataType>,
         keyspace: Keyspace<S>,
     ) -> Self {
-        let pk_data_types = pk_indices.iter().map(|idx| data_types[*idx]).collect_vec();
+        let pk_data_types = pk_indices
+            .iter()
+            .map(|idx| data_types[*idx].clone())
+            .collect_vec();
 
         Self {
             inner: EvictableHashMap::new(target_cap),
