@@ -3,8 +3,7 @@ use std::time::Instant;
 
 use itertools::Itertools;
 use rand::distributions::Uniform;
-use rand::prelude::{Distribution, StdRng};
-use rand::SeedableRng;
+use rand::prelude::Distribution;
 use risingwave_storage::StateStore;
 
 use super::{Batch, Operations, PerfMetrics};
@@ -14,8 +13,7 @@ use crate::Opts;
 
 impl Operations {
     pub(crate) async fn write_batch(&mut self, store: &impl StateStore, opts: &Opts) {
-        let ( prefixes,  keys) =
-            Workload::new_random_keys(opts, opts.writes as u64, &mut StdRng::from_rng(&mut self.rng).unwrap());
+        let (prefixes, keys) = Workload::new_random_keys(opts, opts.writes as u64, &mut self.rng);
         let values = Workload::new_values(opts, opts.writes as u64, &mut self.rng);
 
         // add new prefixes and keys to global prefixes and keys

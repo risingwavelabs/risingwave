@@ -1,9 +1,8 @@
 use std::collections::BTreeSet;
 
-
 use bytes::Bytes;
-use rand::SeedableRng;
 use rand::prelude::StdRng;
+use rand::SeedableRng;
 use risingwave_storage::StateStore;
 
 use crate::utils::latency_stat::LatencyStat;
@@ -33,7 +32,6 @@ impl Operations {
     /// Run operations in the `--benchmarks` option
     pub(crate) async fn run(store: impl StateStore, opts: &Opts) {
         let mut runner = Operations {
-            // seed: AtomicU64::new(opts.seed),
             keys: vec![],
             prefixes: vec![],
             rng: StdRng::seed_from_u64(opts.seed),
