@@ -11,11 +11,9 @@ use risingwave_common::expr::{build_from_prost as build_expr_from_prost, AggKind
 use risingwave_common::try_match_expand;
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::is_local_address;
-use risingwave_common::util::sort_util::{
-    build_from_prost as build_order_type_from_prost, fetch_orders,
-};
+use risingwave_common::util::sort_util::{fetch_orders, OrderType};
 use risingwave_pb::common::ActorInfo;
-use risingwave_pb::plan::JoinType as JoinTypeProto;
+use risingwave_pb::plan::{JoinType as JoinTypeProto, OrderType as ProstOrderType};
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::{expr, stream_plan, stream_service};
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
@@ -461,11 +459,12 @@ impl StreamManagerCore {
                 )))
             }
             Node::AppendOnlyTopNNode(top_n_node) => {
-                let order_types = top_n_node
+                let order_types: Vec<_> = top_n_node
                     .get_order_types()
                     .iter()
-                    .map(build_order_type_from_prost)
-                    .collect::<Result<Vec<_>>>()?;
+                    .map(|v| ProstOrderType::from_i32(*v).unwrap())
+                    .map(|v| OrderType::from_prost(&v))
+                    .collect();
                 assert_eq!(order_types.len(), pk_indices.len());
                 let limit = if top_n_node.limit == 0 {
                     None
@@ -487,11 +486,12 @@ impl StreamManagerCore {
                 )))
             }
             Node::TopNNode(top_n_node) => {
-                let order_types = top_n_node
+                let order_types: Vec<_> = top_n_node
                     .get_order_types()
                     .iter()
-                    .map(build_order_type_from_prost)
-                    .collect::<Result<Vec<_>>>()?;
+                    .map(|v| ProstOrderType::from_i32(*v).unwrap())
+                    .map(|v| OrderType::from_prost(&v))
+                    .collect();
                 assert_eq!(order_types.len(), pk_indices.len());
                 let limit = if top_n_node.limit == 0 {
                     None
@@ -608,7 +608,8 @@ impl StreamManagerCore {
                 Ok(executor)
             }
             Node::MergeNode(merge_node) => {
-                let schema = Schema::try_from(merge_node.get_input_column_descs())?;
+                let fields = merge_node.fields.iter().map(Field::from).collect();
+                let schema = Schema::new(fields);
                 let upstreams = merge_node.get_upstream_actor_id();
                 self.create_merge_node(actor_id, schema, upstreams, pk_indices, op_info)
             }

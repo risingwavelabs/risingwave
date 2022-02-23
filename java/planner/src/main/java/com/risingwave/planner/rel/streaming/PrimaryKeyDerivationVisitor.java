@@ -698,7 +698,7 @@ public class PrimaryKeyDerivationVisitor
             chain.getTableId(),
             node.getPrimaryKeyIndices(),
             node.getColumnIds(),
-            chain.getUpstreamColumnDescs(),
+            chain.getUpstreamFields(),
             List.of(node));
     LOGGER.debug("leave RwStreamChain");
     return new Result<>(newChain, info);

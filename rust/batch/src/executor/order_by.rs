@@ -12,7 +12,6 @@ use risingwave_common::array::{
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
-use risingwave_common::expr::Expression;
 use risingwave_common::util::encoding_for_comparison::{encode_chunk, is_type_encodable};
 use risingwave_common::util::sort_util::{
     compare_two_row, fetch_orders, HeapElem, OrderPair, K_PROCESSING_WINDOW_SIZE,
@@ -138,10 +137,12 @@ impl Executor for OrderByExecutor {
         self.child.open().await?;
 
         if !self.disable_encoding {
+            let schema = self.schema();
             self.encodable = self
                 .order_pairs
                 .iter()
-                .all(|pair| is_type_encodable(pair.order.return_type()))
+                .map(|pair| schema.fields[pair.column_idx].data_type)
+                .all(is_type_encodable)
         }
 
         self.collect_child_data().await?;
@@ -231,7 +232,6 @@ mod tests {
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{BoolArray, DataChunk, PrimitiveArray, Utf8Array};
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::expr::InputRefExpression;
     use risingwave_common::types::{DataType, OrderedF32, OrderedF64};
     use risingwave_common::util::sort_util::OrderType;
     use test::Bencher;
@@ -288,15 +288,13 @@ mod tests {
         };
         let mut mock_executor = MockExecutor::new(schema);
         mock_executor.add(data_chunk);
-        let input_ref_1 = InputRefExpression::new(DataType::Int32, 0);
-        let input_ref_2 = InputRefExpression::new(DataType::Int32, 1);
         let order_pairs = vec![
             OrderPair {
-                order: Box::new(input_ref_2),
+                column_idx: 1,
                 order_type: OrderType::Ascending,
             },
             OrderPair {
-                order: Box::new(input_ref_1),
+                column_idx: 0,
                 order_type: OrderType::Ascending,
             },
         ];
@@ -342,15 +340,13 @@ mod tests {
         };
         let mut mock_executor = MockExecutor::new(schema);
         mock_executor.add(data_chunk);
-        let input_ref_1 = InputRefExpression::new(DataType::Float32, 0);
-        let input_ref_2 = InputRefExpression::new(DataType::Float64, 1);
         let order_pairs = vec![
             OrderPair {
-                order: Box::new(input_ref_2),
+                column_idx: 1,
                 order_type: OrderType::Ascending,
             },
             OrderPair {
-                order: Box::new(input_ref_1),
+                column_idx: 0,
                 order_type: OrderType::Ascending,
             },
         ];
@@ -405,15 +401,13 @@ mod tests {
         };
         let mut mock_executor = MockExecutor::new(schema);
         mock_executor.add(data_chunk);
-        let input_ref_1 = InputRefExpression::new(DataType::Varchar, 0);
-        let input_ref_2 = InputRefExpression::new(DataType::Varchar, 1);
         let order_pairs = vec![
             OrderPair {
-                order: Box::new(input_ref_2),
+                column_idx: 1,
                 order_type: OrderType::Ascending,
             },
             OrderPair {
-                order: Box::new(input_ref_1),
+                column_idx: 0,
                 order_type: OrderType::Ascending,
             },
         ];
@@ -490,25 +484,21 @@ mod tests {
             };
             let mut mock_executor = MockExecutor::new(schema);
             mock_executor.add(data_chunk);
-            let input_ref_0 = InputRefExpression::new(DataType::Int16, 0);
-            let input_ref_1 = InputRefExpression::new(DataType::Boolean, 1);
-            let input_ref_2 = InputRefExpression::new(DataType::Float32, 2);
-            let input_ref_3 = InputRefExpression::new(DataType::Varchar, 3);
             let order_pairs = vec![
                 OrderPair {
-                    order: Box::new(input_ref_1),
+                    column_idx: 1,
                     order_type: OrderType::Ascending,
                 },
                 OrderPair {
-                    order: Box::new(input_ref_0),
+                    column_idx: 0,
                     order_type: OrderType::Descending,
                 },
                 OrderPair {
-                    order: Box::new(input_ref_3),
+                    column_idx: 3,
                     order_type: OrderType::Descending,
                 },
                 OrderPair {
-                    order: Box::new(input_ref_2),
+                    column_idx: 2,
                     order_type: OrderType::Ascending,
                 },
             ];
