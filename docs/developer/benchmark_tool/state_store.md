@@ -84,8 +84,8 @@
 Comma-separated list of operations to run in the specified order. Following operations are supported:
 
 - `writebatch`: write N key/values in sequential key order in async mode.
-- `deleterandom`: delete N key/values in random order. May delete a key/values many times even it has been deleted at the first times.
-- `getrandom`: read N times in random order. May read a key/value many times.
+- `deleterandom`: delete N key/values in random order. May delete a key/values many times even it has been deleted at the first times. If no valid key/values in the state store before this operation, randomly-generated keys would be deleted.
+- `getrandom`: read N times in random order. May read a key/value many times. If no valid key/values in the state store before this operation, randomly-generated keys would be read.
 - `getseq`: read N times sequentially.
 - `prefixscanrandom`: prefix scan N times in random order.
 
