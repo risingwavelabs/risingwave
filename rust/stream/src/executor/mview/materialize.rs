@@ -116,7 +116,7 @@ impl<S: StateStore> SimpleExecutor for MaterializeExecutor<S> {
             let pk_row = Row(self
                 .pk_columns
                 .iter()
-                .map(|c_id| chunk.column(*c_id).array_ref().datum_at(idx))
+                .map(|c_id| chunk.column_at(*c_id).array_ref().datum_at(idx))
                 .collect_vec());
 
             // assemble row

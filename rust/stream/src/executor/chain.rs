@@ -260,7 +260,7 @@ mod test {
             let k = &chain.next().await.unwrap();
             count += 1;
             if let Message::Chunk(ck) = k {
-                let target = ck.column(0).array_ref().as_int32().value_at(0).unwrap();
+                let target = ck.column_at(0).array_ref().as_int32().value_at(0).unwrap();
                 assert_eq!(target, count);
             } else {
                 assert!(matches!(k, Message::Barrier(_)));
