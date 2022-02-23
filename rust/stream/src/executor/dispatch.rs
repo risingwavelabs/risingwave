@@ -148,6 +148,7 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
         Ok(())
     }
 
+    /// For `Add` and `Update`, update the outputs before we dispatch the barrier.
     async fn pre_mutate_outputs(&mut self, mutation: &Option<Arc<Mutation>>) -> Result<()> {
         match mutation.as_deref() {
             Some(Mutation::UpdateOutputs(updates)) => {
@@ -202,9 +203,12 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
         Ok(())
     }
 
+    /// For `Stop`, update the outputs after we dispatch the barrier.
     async fn post_mutate_outputs(&mut self, mutation: &Option<Arc<Mutation>>) -> Result<()> {
+        #[allow(clippy::single_match)]
         match mutation.as_deref() {
             Some(Mutation::Stop(stops)) => {
+                // Remove outputs only if this actor itself is not to be stopped.
                 if !stops.contains(&self.actor_id) {
                     self.inner.remove_outputs(stops);
                 }
@@ -238,9 +242,7 @@ pub trait DataDispatcher: Debug + 'static {
 
     fn set_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>);
     fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>);
-    fn remove_outputs(&mut self, _actor_ids: &HashSet<ActorId>) {
-        trace!("{:?} does not support removing outputs, ignored", self)
-    }
+    fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>);
 }
 
 pub struct RoundRobinDataDispatcher {
@@ -286,6 +288,12 @@ impl DataDispatcher for RoundRobinDataDispatcher {
 
     fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
         self.outputs.extend(outputs.into_iter());
+    }
+
+    fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>) {
+        self.outputs
+            .drain_filter(|output| actor_ids.contains(&output.actor_id()))
+            .count();
     }
 }
 
@@ -431,6 +439,12 @@ impl DataDispatcher for HashDataDispatcher {
         }
         Ok(())
     }
+
+    fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>) {
+        self.outputs
+            .drain_filter(|output| actor_ids.contains(&output.actor_id()))
+            .count();
+    }
 }
 
 /// `BroadcastDispatcher` dispatches message to all outputs.
@@ -530,6 +544,12 @@ impl DataDispatcher for SimpleDispatcher {
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> Result<()> {
         self.output.send(Message::Chunk(chunk)).await?;
         Ok(())
+    }
+
+    fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>) {
+        if actor_ids.contains(&self.output.actor_id()) {
+            panic!("cannot remove outputs from SimpleDispatcher");
+        }
     }
 }
 
