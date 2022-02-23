@@ -19,12 +19,13 @@ pub type Notification = Result<SubscribeResponse, Status>;
 
 const BUFFER_SIZE: usize = 4;
 
-/// [`NotificationManager`] manager notification meta data.
+/// [`NotificationManager`] is used to send notification to frontend and backend.
 pub struct NotificationManager {
     fe_observers: DashMap<WorkerKey, Sender<Notification>>,
     be_observers: DashMap<WorkerKey, Sender<Notification>>,
 }
 
+/// Used in `NotificationManager::get_iter`.
 #[allow(dead_code)]
 pub enum NotificationTarget {
     ComputeNode,
@@ -42,6 +43,8 @@ impl NotificationManager {
         }
     }
 
+    /// Create a pair of sender and receiver using `mpsc::channel`.
+    /// Save sender in `NotificationManager` and use receiver to create a stream sent to rpc client.
     pub fn subscribe(
         &self,
         host_address: HostAddress,
@@ -62,6 +65,8 @@ impl NotificationManager {
         Ok(ReceiverStream::new(rx))
     }
 
+    /// Send a `SubscribeResponse`.
+    /// `target_type` is used to call `get_iter` method.
     pub async fn notify(
         &self,
         operation: Operation,

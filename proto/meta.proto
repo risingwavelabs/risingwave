@@ -221,7 +221,7 @@ service ClusterService {
   rpc ListAllNodes(ListAllNodesRequest) returns (ListAllNodesResponse);
 }
 
-// below for notification service.
+// Below for notification service.
 message SubscribeRequest {
   common.WorkerType worker_type = 1;
   common.HostAddress host = 2;

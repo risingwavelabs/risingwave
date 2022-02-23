@@ -4,7 +4,7 @@ use std::time::Duration;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::try_match_expand;
-use risingwave_pb::common::{HostAddress, WorkerType};
+use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::meta::catalog_service_client::CatalogServiceClient;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
@@ -13,8 +13,8 @@ use risingwave_pb::meta::drop_request::CatalogId;
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
 use risingwave_pb::meta::{
-    AddWorkerNodeRequest, CreateRequest, Database, DropRequest, HeartbeatRequest, Schema,
-    SubscribeRequest, SubscribeResponse, Table,
+    AddWorkerNodeRequest, CreateRequest, Database, DropRequest, HeartbeatRequest,
+    ListAllNodesRequest, Schema, SubscribeRequest, SubscribeResponse, Table,
 };
 use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
 use tonic::transport::{Channel, Endpoint};
@@ -172,5 +172,20 @@ impl MetaClient {
             .to_rw_result()?
             .into_inner();
         Ok(())
+    }
+
+    /// Get live nodes with the specified type.
+    pub async fn list_all_nodes(&self, worker_type: WorkerType) -> Result<Vec<WorkerNode>> {
+        let request = ListAllNodesRequest {
+            worker_type: worker_type as i32,
+        };
+        let resp = self
+            .cluster_client
+            .to_owned()
+            .list_all_nodes(request)
+            .await
+            .to_rw_result()?
+            .into_inner();
+        Ok(resp.nodes)
     }
 }

@@ -3,7 +3,9 @@ use std::sync::mpsc::channel;
 use std::sync::{Arc, RwLock};
 
 use rand::distributions::{Distribution as RandDistribution, Uniform};
-use risingwave_pb::common::WorkerNode;
+use risingwave_common::error::Result;
+use risingwave_pb::common::{WorkerNode, WorkerType};
+use risingwave_rpc_client::MetaClient;
 
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::optimizer::property::Distribution;
@@ -15,7 +17,7 @@ type ScheduledStageReceiver = std::sync::mpsc::Receiver<ScheduledStage>;
 pub(crate) type TaskId = u64;
 
 pub(crate) struct BatchScheduler {
-    worker_manager: WorkerNodeManager,
+    worker_manager: WorkerNodeManagerRef,
     scheduled_stage_sender: ScheduledStageSender,
     scheduled_stage_receiver: ScheduledStageReceiver,
     scheduled_stages_map: HashMap<StageId, ScheduledStageRef>,
@@ -71,12 +73,10 @@ pub(crate) type AugmentedStageRef = Arc<AugmentedStage>;
 
 impl BatchScheduler {
     /// Used in tests.
-    pub fn mock(workers: Vec<WorkerNode>) -> Self {
+    pub fn mock(worker_manager: WorkerNodeManagerRef) -> Self {
         let (sender, receiver) = channel();
         Self {
-            worker_manager: WorkerNodeManager {
-                worker_nodes: Arc::new(RwLock::new(workers)),
-            },
+            worker_manager,
             scheduled_stage_sender: sender,
             scheduled_stage_receiver: receiver,
             scheduled_stages_map: HashMap::new(),
@@ -88,14 +88,35 @@ impl BatchScheduler {
     }
 }
 
-/// the manager of living worker node.
+/// `WorkerNodeManager` manages live worker nodes.
 pub(crate) struct WorkerNodeManager {
-    worker_nodes: Arc<RwLock<Vec<WorkerNode>>>,
+    worker_nodes: RwLock<Vec<WorkerNode>>,
 }
 
+pub(crate) type WorkerNodeManagerRef = Arc<WorkerNodeManager>;
+
 impl WorkerNodeManager {
-    pub fn all_nodes(&self) -> Vec<WorkerNode> {
+    pub async fn new(client: MetaClient) -> Result<Self> {
+        let worker_nodes = RwLock::new(client.list_all_nodes(WorkerType::ComputeNode).await?);
+        Ok(Self { worker_nodes })
+    }
+
+    /// Used in tests.
+    pub fn mock(worker_nodes: Vec<WorkerNode>) -> Self {
+        let worker_nodes = RwLock::new(worker_nodes);
+        Self { worker_nodes }
+    }
+
+    pub fn list_worker_nodes(&self) -> Vec<WorkerNode> {
         self.worker_nodes.read().unwrap().clone()
+    }
+
+    pub fn add_worker_node(&self, node: WorkerNode) {
+        self.worker_nodes.write().unwrap().push(node);
+    }
+
+    pub fn remove_worker_node(&self, node: WorkerNode) {
+        self.worker_nodes.write().unwrap().retain(|x| *x == node);
     }
 
     /// Get a random worker node.
@@ -178,13 +199,13 @@ impl BatchScheduler {
         query_stage_ref: QueryStageRef,
         child_scheduled_stage: &HashSet<StageId>,
     ) {
+        let all_nodes = self.worker_manager.list_worker_nodes();
         let distribution_schema = query_stage_ref.distribution.clone();
         let mut next_stage_parallelism = 1;
         if distribution_schema != Distribution::Single {
-            next_stage_parallelism = self.worker_manager.all_nodes().len();
+            next_stage_parallelism = all_nodes.len();
         }
 
-        let all_nodes = self.worker_manager.all_nodes();
         let scheduled_children = self.get_scheduled_stages(child_scheduled_stage);
 
         // Determine how many worker nodes for current stage.

@@ -88,12 +88,12 @@ where
                     .id_gen_manager_ref
                     .generate::<{ IdCategory::Worker }>()
                     .await?;
-                let workernode = WorkerNode {
+                let worker_node = WorkerNode {
                     id: id as u32,
                     r#type: r#type as i32,
                     host: Some(host_address.clone()),
                 };
-                let worker = Worker::from_protobuf(workernode.clone());
+                let worker = Worker::from_protobuf(worker_node.clone());
                 worker.insert(&*self.meta_store_ref).await?;
 
                 // Notify frontends of new compute node
@@ -101,7 +101,7 @@ where
                     self.nm
                         .notify(
                             Operation::Add,
-                            &Info::Node(workernode),
+                            &Info::Node(worker_node),
                             crate::manager::NotificationTarget::Frontend,
                         )
                         .await?
@@ -118,14 +118,14 @@ where
                 "Worker node does not exist!".to_string(),
             ))),
             Some(entry) => {
-                let workernode = entry.1.to_protobuf();
+                let worker_node = entry.1.to_protobuf();
                 Worker::delete(&*self.meta_store_ref, &host_address).await?;
 
-                if workernode.r#type == WorkerType::ComputeNode as i32 {
+                if worker_node.r#type == WorkerType::ComputeNode as i32 {
                     self.nm
                         .notify(
                             Operation::Delete,
-                            &Info::Node(workernode),
+                            &Info::Node(worker_node),
                             crate::manager::NotificationTarget::Frontend,
                         )
                         .await?
