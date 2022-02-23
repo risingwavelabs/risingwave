@@ -34,6 +34,7 @@ impl SourceParser for JSONParser {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::catalog::ColumnId;
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::vector_op::cast::str_to_date;
 
@@ -48,63 +49,63 @@ mod tests {
             SourceColumnDesc {
                 name: "i32".to_string(),
                 data_type: DataType::Int32,
-                column_id: 0,
+                column_id: ColumnId::from(0),
                 skip_parse: false,
                 is_primary: false,
             },
             SourceColumnDesc {
                 name: "char".to_string(),
                 data_type: DataType::Char,
-                column_id: 1,
+                column_id: ColumnId::from(1),
                 skip_parse: false,
                 is_primary: false,
             },
             SourceColumnDesc {
                 name: "bool".to_string(),
                 data_type: DataType::Boolean,
-                column_id: 2,
+                column_id: ColumnId::from(2),
                 skip_parse: false,
                 is_primary: false,
             },
             SourceColumnDesc {
                 name: "i16".to_string(),
                 data_type: DataType::Int16,
-                column_id: 3,
+                column_id: ColumnId::from(3),
                 skip_parse: false,
                 is_primary: false,
             },
             SourceColumnDesc {
                 name: "i64".to_string(),
                 data_type: DataType::Int64,
-                column_id: 4,
+                column_id: ColumnId::from(4),
                 skip_parse: false,
                 is_primary: false,
             },
             SourceColumnDesc {
                 name: "f32".to_string(),
                 data_type: DataType::Float32,
-                column_id: 5,
+                column_id: ColumnId::from(5),
                 skip_parse: false,
                 is_primary: false,
             },
             SourceColumnDesc {
                 name: "f64".to_string(),
                 data_type: DataType::Float64,
-                column_id: 6,
+                column_id: ColumnId::from(6),
                 skip_parse: false,
                 is_primary: false,
             },
             SourceColumnDesc {
                 name: "varchar".to_string(),
                 data_type: DataType::Varchar,
-                column_id: 7,
+                column_id: ColumnId::from(7),
                 skip_parse: false,
                 is_primary: false,
             },
             SourceColumnDesc {
                 name: "date".to_string(),
                 data_type: DataType::Date,
-                column_id: 8,
+                column_id: ColumnId::from(8),
                 skip_parse: false,
                 is_primary: false,
             },

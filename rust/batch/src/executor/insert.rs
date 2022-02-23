@@ -152,7 +152,7 @@ mod tests {
     use std::sync::Arc;
 
     use risingwave_common::array::{Array, I64Array};
-    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::catalog::{ColumnId, Field, Schema};
     use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
     use risingwave_source::{
@@ -196,7 +196,7 @@ mod tests {
             .enumerate()
             .map(|(i, f)| TableColumnDesc {
                 data_type: f.data_type.clone(),
-                column_id: i as i32, // use column index as column id
+                column_id: ColumnId::from(i as i32), // use column index as column id
                 name: f.name.clone(),
             })
             .collect();
@@ -216,7 +216,8 @@ mod tests {
         // Create reader
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.source.as_table_v2();
-        let mut reader = source.stream_reader(TableV2ReaderContext, vec![0, 1, 2])?;
+        let mut reader =
+            source.stream_reader(TableV2ReaderContext, vec![0.into(), 1.into(), 2.into()])?;
 
         let mut insert_executor =
             InsertExecutor::new(table_id, source_manager.clone(), Box::new(mock_executor), 0);

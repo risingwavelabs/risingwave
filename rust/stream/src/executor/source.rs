@@ -9,7 +9,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{
     ArrayBuilder, ArrayImpl, I64ArrayBuilder, InternalError, RwError, StreamChunk,
 };
-use risingwave_common::catalog::{Schema, TableId};
+use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::Result;
 use risingwave_source::*;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -22,7 +22,7 @@ use crate::executor::{Executor, Message, PkIndices, PkIndicesRef};
 pub struct SourceExecutor {
     source_id: TableId,
     source_desc: SourceDesc,
-    column_ids: Vec<i32>,
+    column_ids: Vec<ColumnId>,
     schema: Schema,
     pk_indices: PkIndices,
     reader: Box<dyn StreamSourceReader>,
@@ -48,7 +48,7 @@ impl SourceExecutor {
     pub fn new(
         source_id: TableId,
         source_desc: SourceDesc,
-        column_ids: Vec<i32>,
+        column_ids: Vec<ColumnId>,
         schema: Schema,
         pk_indices: PkIndices,
         barrier_receiver: UnboundedReceiver<Message>,
@@ -213,17 +213,17 @@ mod tests {
 
         let table_columns = vec![
             TableColumnDesc {
-                column_id: 0,
+                column_id: ColumnId::from(0),
                 data_type: rowid_type.clone(),
                 name: String::new(),
             },
             TableColumnDesc {
-                column_id: 1,
+                column_id: ColumnId::from(1),
                 data_type: col1_type.clone(),
                 name: String::new(),
             },
             TableColumnDesc {
-                column_id: 2,
+                column_id: ColumnId::from(2),
                 data_type: col2_type.clone(),
                 name: String::new(),
             },
@@ -270,7 +270,7 @@ mod tests {
             ],
         };
 
-        let column_ids = vec![0, 1, 2];
+        let column_ids = vec![0, 1, 2].into_iter().map(ColumnId::from).collect();
         let pk_indices = vec![0];
 
         let (barrier_sender, barrier_receiver) = unbounded_channel();
@@ -349,17 +349,17 @@ mod tests {
 
         let table_columns = vec![
             TableColumnDesc {
-                column_id: 0,
+                column_id: ColumnId::from(0),
                 data_type: rowid_type.clone(),
                 name: String::new(),
             },
             TableColumnDesc {
-                column_id: 1,
+                column_id: ColumnId::from(1),
                 data_type: col1_type.clone(),
                 name: String::new(),
             },
             TableColumnDesc {
-                column_id: 2,
+                column_id: ColumnId::from(2),
                 data_type: col2_type.clone(),
                 name: String::new(),
             },
@@ -394,7 +394,7 @@ mod tests {
             ],
         };
 
-        let column_ids = vec![0, 1, 2];
+        let column_ids = vec![0.into(), 1.into(), 2.into()];
         let pk_indices = vec![0];
 
         let (barrier_sender, barrier_receiver) = unbounded_channel();

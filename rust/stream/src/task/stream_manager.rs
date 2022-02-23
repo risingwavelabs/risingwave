@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use futures::channel::mpsc::{channel, Receiver};
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, Schema, TableId};
+use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::expr::{build_from_prost as build_expr_from_prost, AggKind, RowExpression};
 use risingwave_common::try_match_expand;
@@ -349,7 +349,11 @@ impl StreamManagerCore {
                     .lock_barrier_manager()
                     .register_sender(actor_id, sender);
 
-                let column_ids = node.get_column_ids().to_vec();
+                let column_ids: Vec<_> = node
+                    .get_column_ids()
+                    .iter()
+                    .map(|i| ColumnId::from(*i))
+                    .collect();
                 let mut fields = Vec::with_capacity(column_ids.len());
                 for &column_id in &column_ids {
                     let column_desc = source_desc
