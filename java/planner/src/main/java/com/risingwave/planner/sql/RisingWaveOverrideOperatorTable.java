@@ -1,7 +1,5 @@
 package com.risingwave.planner.sql;
 
-import static org.apache.calcite.sql.type.OperandTypes.family;
-
 import com.risingwave.common.datatype.RwReturnTypes;
 import com.risingwave.planner.sql.fun.RwSqlExtractFunction;
 import org.apache.calcite.sql.SqlAggFunction;
