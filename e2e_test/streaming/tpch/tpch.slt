@@ -15,6 +15,7 @@ statement ok
 flush;
 
 include ./q1.slt.part
+include ./q2.slt.part
 include ./q3.slt.part
 include ./q4.slt.part
 include ./q5.slt.part
@@ -28,6 +29,7 @@ include ./q13.slt.part
 include ./q14.slt.part
 include ./q17.slt.part
 include ./q18.slt.part
+include ./q20.slt.part
 
 include ./drop_views.slt.part
 include ../../tpch/drop_tables.slt.part

@@ -1,0 +1,7 @@
+query TT
+select
+        s_name,
+	s_address
+from tpch_q20;
+----
+Supplier#000000006 tQxuVm7s7CnK
