@@ -139,15 +139,17 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
                 self.inner.dispatch_data(chunk).await?;
             }
             Message::Barrier(barrier) => {
-                self.mutate_outputs(&barrier).await?;
+                let mutation = barrier.mutation.clone();
+                self.pre_mutate_outputs(&mutation).await?;
                 self.inner.dispatch_barrier(barrier).await?;
+                self.post_mutate_outputs(&mutation).await?;
             }
         };
         Ok(())
     }
 
-    async fn mutate_outputs(&mut self, barrier: &Barrier) -> Result<()> {
-        match barrier.mutation.as_deref() {
+    async fn pre_mutate_outputs(&mut self, mutation: &Option<Arc<Mutation>>) -> Result<()> {
+        match mutation.as_deref() {
             Some(Mutation::UpdateOutputs(updates)) => {
                 if let Some((_, actor_infos)) = updates.get_key_value(&self.actor_id) {
                     let mut new_outputs = vec![];
@@ -173,7 +175,6 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
                     }
                     self.inner.set_outputs(new_outputs)
                 }
-                Ok(())
             }
             Some(Mutation::AddOutput(adds)) => {
                 if let Some(downstream_actor_infos) = adds.get(&self.actor_id) {
@@ -194,10 +195,22 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
                     }
                     self.inner.add_outputs(outputs_to_add);
                 }
-                Ok(())
             }
-            _ => Ok(()),
+            _ => {}
+        };
+
+        Ok(())
+    }
+
+    async fn post_mutate_outputs(&mut self, mutation: &Option<Arc<Mutation>>) -> Result<()> {
+        match mutation.as_deref() {
+            Some(Mutation::Stop(stops)) => {
+                self.inner.remove_outputs(stops);
+            }
+            _ => {}
         }
+
+        Ok(())
     }
 }
 
