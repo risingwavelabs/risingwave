@@ -1,4 +1,8 @@
+use std::collections::BTreeSet;
+
 use bytes::Bytes;
+use rand::prelude::StdRng;
+use rand::SeedableRng;
 use risingwave_storage::StateStore;
 
 use crate::utils::latency_stat::LatencyStat;
@@ -8,10 +12,12 @@ pub(crate) mod get;
 pub(crate) mod prefix_scan_random;
 pub(crate) mod write_batch;
 
-#[derive(Clone, Default)]
 pub(crate) struct Operations {
     pub(crate) keys: Vec<Bytes>,
     pub(crate) prefixes: Vec<Bytes>,
+
+    // TODO(Sun Ting): exploit specified (no need to support encryption) rng to speed up
+    rng: StdRng,
 }
 
 type Batch = Vec<(Bytes, Option<Bytes>)>;
@@ -25,7 +31,11 @@ pub(crate) struct PerfMetrics {
 impl Operations {
     /// Run operations in the `--benchmarks` option
     pub(crate) async fn run(store: impl StateStore, opts: &Opts) {
-        let mut runner = Operations::default();
+        let mut runner = Operations {
+            keys: vec![],
+            prefixes: vec![],
+            rng: StdRng::seed_from_u64(opts.seed),
+        };
 
         for operation in opts.benchmarks.split(',') {
             match operation {
@@ -54,14 +64,14 @@ impl Operations {
     }
 
     /// Untrack deleted keys
-    fn untrack_keys(&mut self, mut other: Vec<Bytes>) {
-        // TODO(Ting Sun): consider use Set as the data structure for keys and prefixes
-        for keys in other.drain(..) {
-            self.keys.retain(|k| k != &keys);
-        }
+    #[allow(clippy::mutable_key_type)]
+    fn untrack_keys(&mut self, other: &[Bytes]) {
+        let untrack_set = other.iter().collect::<BTreeSet<_>>();
+        self.keys.retain(|k| !untrack_set.contains(k));
     }
 
     /// Untrack prefixes of deleted keys
     // TODO(Ting Sun): decide whether and how to implement untrack_prefixes
-    fn untrack_prefixes(&mut self, mut _other: Vec<Bytes>) {}
+    #[allow(dead_code)]
+    fn untrack_prefixes(&mut self, mut _other: &[Bytes]) {}
 }
