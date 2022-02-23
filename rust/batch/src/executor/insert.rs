@@ -216,10 +216,8 @@ mod tests {
         // Create reader
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.source.as_table_v2();
-        let mut reader = source.stream_reader(
-            TableV2ReaderContext,
-            vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)],
-        )?;
+        let mut reader =
+            source.stream_reader(TableV2ReaderContext, vec![0.into(), 1.into(), 2.into()])?;
 
         let mut insert_executor =
             InsertExecutor::new(table_id, source_manager.clone(), Box::new(mock_executor), 0);

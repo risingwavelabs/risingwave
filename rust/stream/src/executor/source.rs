@@ -394,7 +394,7 @@ mod tests {
             ],
         };
 
-        let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
+        let column_ids = vec![0.into(), 1.into(), 2.into()];
         let pk_indices = vec![0];
 
         let (barrier_sender, barrier_receiver) = unbounded_channel();
