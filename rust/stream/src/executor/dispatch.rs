@@ -101,14 +101,14 @@ impl Output for RemoteOutput {
 /// `DispatchExecutor` consumes messages and send them into downstream actors. Usually,
 /// data chunks will be dispatched with some specified policy, while control message
 /// such as barriers will be distributed to all receivers.
-pub struct DispatchExecutor<Inner: DataDispatcher> {
+pub struct DispatchExecutor<Inner: Dispatcher> {
     input: Box<dyn Executor>,
     inner: Inner,
     actor_id: u32,
     context: Arc<SharedContext>,
 }
 
-impl<Inner: DataDispatcher> std::fmt::Debug for DispatchExecutor<Inner> {
+impl<Inner: Dispatcher> std::fmt::Debug for DispatchExecutor<Inner> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DispatchExecutor")
             .field("input", &self.input)
@@ -118,7 +118,7 @@ impl<Inner: DataDispatcher> std::fmt::Debug for DispatchExecutor<Inner> {
     }
 }
 
-impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
+impl<Inner: Dispatcher + Send> DispatchExecutor<Inner> {
     pub fn new(
         input: Box<dyn Executor>,
         inner: Inner,
@@ -221,7 +221,7 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
 }
 
 #[async_trait]
-impl<Inner: DataDispatcher + Send + Sync + 'static> StreamConsumer for DispatchExecutor<Inner> {
+impl<Inner: Dispatcher + Send + Sync + 'static> StreamConsumer for DispatchExecutor<Inner> {
     async fn next(&mut self) -> Result<Option<Barrier>> {
         let msg = self.input.next().await?;
         let barrier = if let Message::Barrier(ref barrier) = msg {
@@ -236,7 +236,7 @@ impl<Inner: DataDispatcher + Send + Sync + 'static> StreamConsumer for DispatchE
 }
 
 #[async_trait]
-pub trait DataDispatcher: Debug + 'static {
+pub trait Dispatcher: Debug + 'static {
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> Result<()>;
     async fn dispatch_barrier(&mut self, barrier: Barrier) -> Result<()>;
 
@@ -265,7 +265,7 @@ impl RoundRobinDataDispatcher {
 }
 
 #[async_trait]
-impl DataDispatcher for RoundRobinDataDispatcher {
+impl Dispatcher for RoundRobinDataDispatcher {
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> Result<()> {
         self.outputs[self.cur].send(Message::Chunk(chunk)).await?;
         self.cur += 1;
@@ -323,7 +323,7 @@ impl HashDataDispatcher {
 }
 
 #[async_trait]
-impl DataDispatcher for HashDataDispatcher {
+impl Dispatcher for HashDataDispatcher {
     fn set_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
         self.outputs = outputs.into_iter().collect()
     }
@@ -477,7 +477,7 @@ impl BroadcastDispatcher {
 }
 
 #[async_trait]
-impl DataDispatcher for BroadcastDispatcher {
+impl Dispatcher for BroadcastDispatcher {
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> Result<()> {
         for output in self.outputs.values_mut() {
             output.send(Message::Chunk(chunk.clone())).await?;
@@ -527,7 +527,7 @@ impl SimpleDispatcher {
 }
 
 #[async_trait]
-impl DataDispatcher for SimpleDispatcher {
+impl Dispatcher for SimpleDispatcher {
     fn set_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
         self.output = outputs.into_iter().next().unwrap();
     }
