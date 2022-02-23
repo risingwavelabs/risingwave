@@ -95,7 +95,7 @@ macro_rules! gen_expr_normal {
         for<'a> &'a OA: std::convert::From<&'a ArrayImpl>,
       {
         fn return_type(&self) -> DataType {
-          self.return_type
+          self.return_type.clone()
         }
 
         gen_eval! { eval_normal, $ty_name, OA, $($arg, )* }
@@ -170,7 +170,7 @@ macro_rules! gen_expr_bytes {
         $(for<'a> &'a $arg: std::convert::From<&'a ArrayImpl>,)*
       {
         fn return_type(&self) -> DataType {
-          self.return_type
+          self.return_type.clone()
         }
 
         gen_eval! { eval_bytes, $ty_name, Utf8Array, $($arg, )* }
@@ -244,7 +244,7 @@ macro_rules! gen_expr_nullable {
         for<'a> &'a OA: std::convert::From<&'a ArrayImpl>,
       {
         fn return_type(&self) -> DataType {
-          self.return_type
+          self.return_type.clone()
         }
 
         gen_eval! { eval_nullable, $ty_name, OA, $($arg, )* }

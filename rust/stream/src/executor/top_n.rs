@@ -81,7 +81,7 @@ impl<S: StateStore> TopNExecutor<S> {
             .schema()
             .fields
             .iter()
-            .map(|field| field.data_type)
+            .map(|field| field.data_type.clone())
             .collect::<Vec<_>>();
         let ordered_row_deserializer =
             OrderedRowDeserializer::new(pk_data_types, pk_order_types.clone());
@@ -513,7 +513,7 @@ mod tests {
                 Op::Insert,
             ];
             assert_eq!(
-                res.column(0).array_ref().as_int64().iter().collect_vec(),
+                res.column_at(0).array_ref().as_int64().iter().collect_vec(),
                 expected_values
             );
             assert_eq!(res.ops(), expected_ops);

@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -13,26 +14,36 @@ use tracing::event;
 use super::{Barrier, Executor, Message, Mutation, Result, StreamChunk, StreamConsumer};
 use crate::task::SharedContext;
 
+type ActorId = u32;
+
 /// `Output` provides an interface for `Dispatcher` to send data into downstream actors.
 #[async_trait]
 pub trait Output: Debug + Send + Sync + 'static {
     async fn send(&mut self, message: Message) -> Result<()>;
+
+    fn actor_id(&self) -> ActorId;
 }
+
+type BoxedOutput = Box<dyn Output>;
 
 /// `LocalOutput` sends data to a local `mpsc::Channel`
 pub struct LocalOutput {
+    actor_id: ActorId,
+
     ch: Sender<Message>,
 }
 
 impl Debug for LocalOutput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LocalOutput").finish()
+        f.debug_struct("LocalOutput")
+            .field("actor_id", &self.actor_id)
+            .finish()
     }
 }
 
 impl LocalOutput {
-    pub fn new(ch: Sender<Message>) -> Self {
-        Self { ch }
+    pub fn new(actor_id: ActorId, ch: Sender<Message>) -> Self {
+        Self { actor_id, ch }
     }
 }
 
@@ -43,22 +54,30 @@ impl Output for LocalOutput {
         self.ch.send(message).await.unwrap();
         Ok(())
     }
+
+    fn actor_id(&self) -> ActorId {
+        self.actor_id
+    }
 }
 
 /// `RemoteOutput` forwards data to`ExchangeServiceImpl`
 pub struct RemoteOutput {
+    actor_id: ActorId,
+
     ch: Sender<Message>,
 }
 
 impl Debug for RemoteOutput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RemoteOutput").finish()
+        f.debug_struct("RemoteOutput")
+            .field("actor_id", &self.actor_id)
+            .finish()
     }
 }
 
 impl RemoteOutput {
-    pub fn new(ch: Sender<Message>) -> Self {
-        Self { ch }
+    pub fn new(actor_id: ActorId, ch: Sender<Message>) -> Self {
+        Self { actor_id, ch }
     }
 }
 
@@ -72,6 +91,10 @@ impl Output for RemoteOutput {
         // local channel should never fail
         self.ch.send(message).await.unwrap();
         Ok(())
+    }
+
+    fn actor_id(&self) -> ActorId {
+        self.actor_id
     }
 }
 
@@ -141,13 +164,14 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
                         let downstream_addr = actor_info.get_host()?.to_socket_addr()?;
                         if is_local_address(&downstream_addr, &self.context.addr) {
                             let tx = self.context.take_sender(&up_down_ids)?;
-                            new_outputs.push(Box::new(LocalOutput::new(tx)) as Box<dyn Output>)
+                            new_outputs.push(Box::new(LocalOutput::new(down_id, tx)) as BoxedOutput)
                         } else {
                             let tx = self.context.take_sender(&up_down_ids)?;
-                            new_outputs.push(Box::new(RemoteOutput::new(tx)) as Box<dyn Output>)
+                            new_outputs
+                                .push(Box::new(RemoteOutput::new(down_id, tx)) as BoxedOutput)
                         }
                     }
-                    self.inner.update_outputs(new_outputs)
+                    self.inner.set_outputs(new_outputs)
                 }
                 Ok(())
             }
@@ -160,10 +184,12 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
                         let downstream_addr = downstream_actor_info.get_host()?.to_socket_addr()?;
                         if is_local_address(&downstream_addr, &self.context.addr) {
                             let tx = self.context.take_sender(&up_down_ids)?;
-                            outputs_to_add.push(Box::new(LocalOutput::new(tx)) as Box<dyn Output>)
+                            outputs_to_add
+                                .push(Box::new(LocalOutput::new(down_id, tx)) as BoxedOutput)
                         } else {
                             let tx = self.context.take_sender(&up_down_ids)?;
-                            outputs_to_add.push(Box::new(RemoteOutput::new(tx)) as Box<dyn Output>)
+                            outputs_to_add
+                                .push(Box::new(RemoteOutput::new(down_id, tx)) as BoxedOutput)
                         }
                     }
                     self.inner.add_outputs(outputs_to_add);
@@ -193,22 +219,17 @@ impl<Inner: DataDispatcher + Send + Sync + 'static> StreamConsumer for DispatchE
 #[async_trait]
 pub trait DataDispatcher: Debug + 'static {
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> Result<()>;
-    async fn dispatch_barrier(&mut self, barrier: Barrier) -> Result<()> {
-        // always broadcast barrier by default
-        let outputs = self.get_outputs();
-        for output in outputs {
-            output.send(Message::Barrier(barrier.clone())).await?;
-        }
-        Ok(())
-    }
+    async fn dispatch_barrier(&mut self, barrier: Barrier) -> Result<()>;
 
-    fn get_outputs(&mut self) -> &mut [Box<dyn Output>];
-    fn update_outputs(&mut self, outputs: Vec<Box<dyn Output>>);
-    fn add_outputs(&mut self, outputs: Vec<Box<dyn Output>>);
+    fn set_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>);
+    fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>);
+    fn remove_outputs(&mut self, _actor_ids: &HashSet<ActorId>) {
+        unimplemented!("{:?} does not support removing outputs", self)
+    }
 }
 
 pub struct RoundRobinDataDispatcher {
-    outputs: Vec<Box<dyn Output>>,
+    outputs: Vec<BoxedOutput>,
     cur: usize,
 }
 
@@ -221,36 +242,41 @@ impl Debug for RoundRobinDataDispatcher {
 }
 
 impl RoundRobinDataDispatcher {
-    pub fn new(outputs: Vec<Box<dyn Output>>) -> Self {
+    pub fn new(outputs: Vec<BoxedOutput>) -> Self {
         Self { outputs, cur: 0 }
     }
 }
 
 #[async_trait]
 impl DataDispatcher for RoundRobinDataDispatcher {
-    fn update_outputs(&mut self, outputs: Vec<Box<dyn Output>>) {
-        self.outputs = outputs
-    }
-
-    fn add_outputs(&mut self, outputs: Vec<Box<dyn Output>>) {
-        self.outputs.extend(outputs.into_iter());
-    }
-
-    fn get_outputs(&mut self) -> &mut [Box<dyn Output>] {
-        &mut self.outputs
-    }
-
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> Result<()> {
         self.outputs[self.cur].send(Message::Chunk(chunk)).await?;
         self.cur += 1;
         self.cur %= self.outputs.len();
         Ok(())
     }
+
+    async fn dispatch_barrier(&mut self, barrier: Barrier) -> Result<()> {
+        // always broadcast barrier
+        for output in &mut self.outputs {
+            output.send(Message::Barrier(barrier.clone())).await?;
+        }
+        Ok(())
+    }
+
+    fn set_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
+        self.outputs = outputs.into_iter().collect();
+        self.cur = self.cur.min(self.outputs.len() - 1);
+    }
+
+    fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
+        self.outputs.extend(outputs.into_iter());
+    }
 }
 
 pub struct HashDataDispatcher {
     fragment_ids: Vec<u32>,
-    outputs: Vec<Box<dyn Output>>,
+    outputs: Vec<BoxedOutput>,
     keys: Vec<usize>,
 }
 
@@ -264,7 +290,7 @@ impl Debug for HashDataDispatcher {
 }
 
 impl HashDataDispatcher {
-    pub fn new(fragment_ids: Vec<u32>, outputs: Vec<Box<dyn Output>>, keys: Vec<usize>) -> Self {
+    pub fn new(fragment_ids: Vec<u32>, outputs: Vec<BoxedOutput>, keys: Vec<usize>) -> Self {
         Self {
             fragment_ids,
             outputs,
@@ -275,16 +301,20 @@ impl HashDataDispatcher {
 
 #[async_trait]
 impl DataDispatcher for HashDataDispatcher {
-    fn update_outputs(&mut self, outputs: Vec<Box<dyn Output>>) {
-        self.outputs = outputs
+    fn set_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
+        self.outputs = outputs.into_iter().collect()
     }
 
-    fn add_outputs(&mut self, outputs: Vec<Box<dyn Output>>) {
+    fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
         self.outputs.extend(outputs.into_iter());
     }
 
-    fn get_outputs(&mut self) -> &mut [Box<dyn Output>] {
-        &mut self.outputs
+    async fn dispatch_barrier(&mut self, barrier: Barrier) -> Result<()> {
+        // always broadcast barrier
+        for output in &mut self.outputs {
+            output.send(Message::Barrier(barrier.clone())).await?;
+        }
+        Ok(())
     }
 
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> Result<()> {
@@ -390,7 +420,7 @@ impl DataDispatcher for HashDataDispatcher {
 
 /// `BroadcastDispatcher` dispatches message to all outputs.
 pub struct BroadcastDispatcher {
-    outputs: Vec<Box<dyn Output>>,
+    outputs: HashMap<ActorId, BoxedOutput>,
 }
 
 impl Debug for BroadcastDispatcher {
@@ -402,36 +432,55 @@ impl Debug for BroadcastDispatcher {
 }
 
 impl BroadcastDispatcher {
-    pub fn new(outputs: Vec<Box<dyn Output>>) -> Self {
-        Self { outputs }
+    pub fn new(outputs: impl IntoIterator<Item = BoxedOutput>) -> Self {
+        Self {
+            outputs: Self::into_pairs(outputs).collect(),
+        }
+    }
+
+    fn into_pairs(
+        outputs: impl IntoIterator<Item = BoxedOutput>,
+    ) -> impl Iterator<Item = (ActorId, BoxedOutput)> {
+        outputs
+            .into_iter()
+            .map(|output| (output.actor_id(), output))
     }
 }
 
 #[async_trait]
 impl DataDispatcher for BroadcastDispatcher {
-    fn update_outputs(&mut self, outputs: Vec<Box<dyn Output>>) {
-        self.outputs = outputs
-    }
-
-    fn add_outputs(&mut self, outputs: Vec<Box<dyn Output>>) {
-        self.outputs.extend(outputs.into_iter());
-    }
-
-    fn get_outputs(&mut self) -> &mut [Box<dyn Output>] {
-        &mut self.outputs
-    }
-
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> Result<()> {
-        for output in &mut self.outputs {
+        for output in self.outputs.values_mut() {
             output.send(Message::Chunk(chunk.clone())).await?;
         }
         Ok(())
+    }
+
+    async fn dispatch_barrier(&mut self, barrier: Barrier) -> Result<()> {
+        for output in self.outputs.values_mut() {
+            output.send(Message::Barrier(barrier.clone())).await?;
+        }
+        Ok(())
+    }
+
+    fn set_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
+        self.outputs = Self::into_pairs(outputs).collect()
+    }
+
+    fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
+        self.outputs.extend(Self::into_pairs(outputs));
+    }
+
+    fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>) {
+        self.outputs
+            .drain_filter(|actor_id, _| actor_ids.contains(actor_id))
+            .count();
     }
 }
 
 /// `SimpleDispatcher` dispatches message to a single output.
 pub struct SimpleDispatcher {
-    output: Box<dyn Output>,
+    output: BoxedOutput,
 }
 
 impl Debug for SimpleDispatcher {
@@ -443,23 +492,24 @@ impl Debug for SimpleDispatcher {
 }
 
 impl SimpleDispatcher {
-    pub fn new(output: Box<dyn Output>) -> Self {
+    pub fn new(output: BoxedOutput) -> Self {
         Self { output }
     }
 }
 
 #[async_trait]
 impl DataDispatcher for SimpleDispatcher {
-    fn update_outputs(&mut self, outputs: Vec<Box<dyn Output>>) {
+    fn set_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
         self.output = outputs.into_iter().next().unwrap();
     }
 
-    fn add_outputs(&mut self, outputs: Vec<Box<dyn Output>>) {
+    fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
         self.output = outputs.into_iter().next().unwrap();
     }
 
-    fn get_outputs(&mut self) -> &mut [Box<dyn Output>] {
-        std::slice::from_mut(&mut self.output)
+    async fn dispatch_barrier(&mut self, barrier: Barrier) -> Result<()> {
+        self.output.send(Message::Barrier(barrier.clone())).await?;
+        Ok(())
     }
 
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> Result<()> {
@@ -475,11 +525,11 @@ mod sender_consumer {
     #[derive(Debug)]
     pub struct SenderConsumer {
         input: Box<dyn Executor>,
-        channel: Box<dyn Output>,
+        channel: BoxedOutput,
     }
 
     impl SenderConsumer {
-        pub fn new(input: Box<dyn Executor>, channel: Box<dyn Output>) -> Self {
+        pub fn new(input: Box<dyn Executor>, channel: BoxedOutput) -> Self {
             Self { input, channel }
         }
     }
@@ -538,6 +588,10 @@ mod tests {
             self.data.lock().unwrap().push(message);
             Ok(())
         }
+
+        fn actor_id(&self) -> ActorId {
+            0
+        }
     }
 
     #[tokio::test]
@@ -553,7 +607,7 @@ mod tests {
             .collect::<Vec<_>>();
         let outputs = output_data_vecs
             .iter()
-            .map(|data| Box::new(MockOutput::new(data.clone())) as Box<dyn Output>)
+            .map(|data| Box::new(MockOutput::new(data.clone())) as BoxedOutput)
             .collect::<Vec<_>>();
         let mut hash_dispatcher = HashDataDispatcher::new(
             (0..outputs.len() as u32).collect(),
@@ -750,7 +804,7 @@ mod tests {
             .collect::<Vec<_>>();
         let outputs = output_data_vecs
             .iter()
-            .map(|data| Box::new(MockOutput::new(data.clone())) as Box<dyn Output>)
+            .map(|data| Box::new(MockOutput::new(data.clone())) as BoxedOutput)
             .collect::<Vec<_>>();
         let mut hash_dispatcher = HashDataDispatcher::new(
             (0..outputs.len() as u32).collect(),

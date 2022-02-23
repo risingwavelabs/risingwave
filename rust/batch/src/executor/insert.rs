@@ -195,7 +195,7 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(i, f)| TableColumnDesc {
-                data_type: f.data_type,
+                data_type: f.data_type.clone(),
                 column_id: i as i32, // use column index as column id
                 name: f.name.clone(),
             })
@@ -231,7 +231,7 @@ mod tests {
         insert_executor.close().await.unwrap();
         assert_eq!(
             result
-                .column_at(0)?
+                .column_at(0)
                 .array()
                 .as_int64()
                 .iter()

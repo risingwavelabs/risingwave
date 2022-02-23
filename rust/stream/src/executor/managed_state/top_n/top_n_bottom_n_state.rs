@@ -188,12 +188,10 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         let mut insert_process =
             |cache: &mut BTreeMap<OrderedRow, Row>, part_kv_pairs: Drain<(OrderedRow, Row)>| {
                 for (key_from_storage, row_from_storage) in part_kv_pairs {
-                    while let Some((key_from_buffer, _)) = flush_buffer_iter.peek() {
-                        if **key_from_buffer >= key_from_storage {
-                            break;
-                        } else {
-                            flush_buffer_iter.next();
-                        }
+                    while let Some((key_from_buffer, _)) = flush_buffer_iter.peek()
+                        && **key_from_buffer < key_from_storage
+                    {
+                        flush_buffer_iter.next();
                     }
                     if flush_buffer_iter.peek().is_none() {
                         cache.insert(key_from_storage, row_from_storage);

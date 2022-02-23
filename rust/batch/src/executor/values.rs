@@ -169,7 +169,7 @@ mod tests {
         values_executor.close().await.unwrap();
         assert_eq!(
             result
-                .column_at(0)?
+                .column_at(0)
                 .array()
                 .as_int16()
                 .iter()
@@ -178,7 +178,7 @@ mod tests {
         );
         assert_eq!(
             result
-                .column_at(1)?
+                .column_at(1)
                 .array()
                 .as_int32()
                 .iter()
@@ -187,7 +187,7 @@ mod tests {
         );
         assert_eq!(
             result
-                .column_at(2)?
+                .column_at(2)
                 .array()
                 .as_int64()
                 .iter()

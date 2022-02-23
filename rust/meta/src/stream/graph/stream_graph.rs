@@ -238,9 +238,7 @@ where
                                         .get(next_idx_new)
                                         .cloned()
                                         .unwrap(),
-                                    input_column_descs: exchange_node
-                                        .get_input_column_descs()
-                                        .clone(),
+                                    fields: exchange_node.get_fields().clone(),
                                 })),
                                 operator_id: input.operator_id,
                                 identity: "MergeExecutor".to_string(),
@@ -328,7 +326,7 @@ where
                         .collect_vec(),
                     node: Some(Node::MergeNode(MergeNode {
                         upstream_actor_id: Vec::from_iter(upstream_actor_ids.into_iter()),
-                        input_column_descs: chain_node.upstream_column_descs.clone(),
+                        fields: chain_node.upstream_fields.clone(),
                     })),
                     operator_id: input.get(0).as_ref().unwrap().operator_id,
                     identity: "MergeExecutor".to_string(),

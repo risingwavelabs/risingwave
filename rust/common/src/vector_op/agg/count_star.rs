@@ -20,7 +20,7 @@ impl CountStar {
 
 impl Aggregator for CountStar {
     fn return_type(&self) -> DataType {
-        self.return_type
+        self.return_type.clone()
     }
     fn update(&mut self, input: &DataChunk) -> Result<()> {
         self.result += input.cardinality();

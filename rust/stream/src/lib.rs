@@ -12,6 +12,8 @@
 #![feature(binary_heap_drain_sorted)]
 #![feature(test)]
 #![feature(map_first_last)]
+#![feature(let_chains)]
+#![feature(hash_drain_filter)]
 
 #[macro_use]
 extern crate log;

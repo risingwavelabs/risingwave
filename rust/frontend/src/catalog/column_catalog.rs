@@ -15,7 +15,7 @@ impl ColumnDesc {
     }
 
     pub fn data_type(&self) -> DataType {
-        self.data_type
+        self.data_type.clone()
     }
 }
 
@@ -49,7 +49,7 @@ impl ColumnCatalog {
     }
 
     pub fn data_type(&self) -> DataType {
-        self.desc.data_type
+        self.desc.data_type.clone()
     }
 
     pub fn col_desc_ref(&self) -> &ColumnDesc {

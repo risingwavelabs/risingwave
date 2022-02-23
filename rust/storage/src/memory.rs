@@ -88,10 +88,8 @@ impl MemoryStateStore {
         let inner = self.inner.lock().await;
         for (key, value) in inner.range(to_bytes_range(key_range)) {
             data.push((key.clone(), value.clone()));
-            if let Some(limit) = limit {
-                if data.len() >= limit {
-                    break;
-                }
+            if let Some(limit) = limit && data.len() >= limit {
+                break;
             }
         }
         Ok(data)
@@ -113,10 +111,8 @@ impl MemoryStateStore {
         let inner = self.inner.lock().await;
         for (key, value) in inner.range(to_bytes_range(key_range)).rev() {
             data.push((key.clone(), value.clone()));
-            if let Some(limit) = limit {
-                if data.len() >= limit {
-                    break;
-                }
+            if let Some(limit) = limit && data.len() >= limit {
+                break;
             }
         }
         Ok(data)
