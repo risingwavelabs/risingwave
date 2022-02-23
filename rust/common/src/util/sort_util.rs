@@ -1,15 +1,13 @@
 use std::cmp::{Ord, Ordering};
 use std::sync::Arc;
 
-use prost::DecodeError;
 use risingwave_pb::expr::InputRefExpr;
 use risingwave_pb::plan::{ColumnOrder, OrderType as ProstOrderType};
 
 use crate::array::{Array, ArrayImpl, DataChunk, DataChunkRef};
 use crate::error::ErrorCode::InternalError;
-use crate::error::{ErrorCode, Result, RwError};
-use crate::expr::InputRefExpression;
-use crate::types::{DataType, ScalarPartialOrd, ScalarRef};
+use crate::error::{Result, RwError};
+use crate::types::{ScalarPartialOrd, ScalarRef};
 
 pub const K_PROCESSING_WINDOW_SIZE: usize = 1024;
 
@@ -19,23 +17,20 @@ pub enum OrderType {
     Descending,
 }
 
-pub fn build_from_prost(order_type: &i32) -> Result<OrderType> {
-    let res = match ProstOrderType::from_i32(*order_type) {
-        Some(ProstOrderType::Ascending) => OrderType::Ascending,
-        Some(ProstOrderType::Descending) => OrderType::Descending,
-        _ => {
-            return Err(RwError::from(ErrorCode::ProstError(DecodeError::new(
-                "No such order type",
-            ))))
+impl OrderType {
+    pub fn from_prost(order_type: &ProstOrderType) -> OrderType {
+        match order_type {
+            ProstOrderType::Ascending => OrderType::Ascending,
+            ProstOrderType::Descending => OrderType::Descending,
+            ProstOrderType::Invalid => panic!("invalid order type"),
         }
-    };
-    Ok(res)
+    }
 }
 
 #[derive(Debug)]
 pub struct OrderPair {
     pub order_type: OrderType,
-    pub order: Box<InputRefExpression>,
+    pub column_idx: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -123,14 +118,14 @@ where
 
 pub fn compare_two_row(
     order_pairs: &[OrderPair],
-    lhs_datachunk: &DataChunk,
+    lhs_data_chunk: &DataChunk,
     lhs_idx: usize,
-    rhs_datachunk: &DataChunk,
+    rhs_data_chunk: &DataChunk,
     rhs_idx: usize,
 ) -> Result<Ordering> {
     for order_pair in order_pairs.iter() {
-        let lhs_array = order_pair.order.eval_immut(lhs_datachunk)?;
-        let rhs_array = order_pair.order.eval_immut(rhs_datachunk)?;
+        let lhs_array = lhs_data_chunk.column_at(order_pair.column_idx).array();
+        let rhs_array = rhs_data_chunk.column_at(order_pair.column_idx).array();
         macro_rules! gen_match {
         ($lhs: ident, $rhs: ident, [$( $tt: ident), *]) => {
             match ($lhs, $rhs) {
@@ -169,9 +164,7 @@ pub fn fetch_orders(column_orders: &[ColumnOrder]) -> Result<Vec<OrderPair>> {
     let mut order_pairs = Vec::<OrderPair>::new();
     for column_order in column_orders {
         let order_type: ProstOrderType = column_order.get_order_type()?;
-        let return_type = DataType::from(column_order.get_return_type()?);
         let input_ref: &InputRefExpr = column_order.get_input_ref()?;
-        let input_ref_expr = InputRefExpression::new(return_type, input_ref.column_idx as usize);
         order_pairs.push(OrderPair {
             order_type: match order_type {
                 ProstOrderType::Ascending => Ok(OrderType::Ascending),
@@ -180,7 +173,7 @@ pub fn fetch_orders(column_orders: &[ColumnOrder]) -> Result<Vec<OrderPair>> {
                     "Invalid OrderType",
                 )))),
             }?,
-            order: Box::new(input_ref_expr),
+            column_idx: input_ref.column_idx as usize,
         });
     }
     Ok(order_pairs)

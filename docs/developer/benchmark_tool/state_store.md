@@ -84,9 +84,10 @@
 Comma-separated list of operations to run in the specified order. Following operations are supported:
 
 - `writebatch`: write N key/values in sequential key order in async mode.
-- `getrandom`: read N times in random order.
-- `getseq`: read N times sequentially.
-- `prefixscanrandom`: prefix scan N times in random order.
+- `deleterandom`: delete N keys in random order. May delete a key/value many times even it has been deleted before during this operation. If the state store is already empty before this operation, randomly-generated keys would be deleted.
+- `getrandom`: read N keys in random order. May read a key/value many times even it has been read before during this operation. If the state store is already empty before this operation, randomly-generated keys would be read instead.
+- `getseq`: read N times sequentially. Panic if keys in the state store are less than number to get.
+- `prefixscanrandom`: prefix scan N times in random order. May scan a prefix many times even it has been scanned before during this operation. If the state store is already empty before this operation, randomly-generated prefixes would be scanned in this empty state store.
 
 Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
 
@@ -138,6 +139,11 @@ Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
   
   - Size (bytes) of each value.
   - Default: 100
+
+- `--seed`
+  
+  - Seed base for random number generators.
+  - Default: 0
 
 # Flag
 

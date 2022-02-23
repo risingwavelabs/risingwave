@@ -6,6 +6,7 @@ use risingwave_pb::meta::catalog_service_server::CatalogServiceServer;
 use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
 use risingwave_pb::meta::epoch_service_server::EpochServiceServer;
 use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
+use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::UnboundedSender;
@@ -13,11 +14,12 @@ use tokio::task::JoinHandle;
 
 use super::intercept::MetricsMiddlewareLayer;
 use super::metrics::MetaMetrics;
+use super::service::notification_service::NotificationServiceImpl;
 use crate::barrier::BarrierManager;
 use crate::cluster::StoredClusterManager;
 use crate::dashboard::DashboardService;
 use crate::hummock;
-use crate::manager::{MemEpochGenerator, MetaSrvEnv, StoredCatalogManager};
+use crate::manager::{MemEpochGenerator, MetaSrvEnv, NotificationManager, StoredCatalogManager};
 use crate::rpc::service::catalog_service::CatalogServiceImpl;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
 use crate::rpc::service::epoch_service::EpochServiceImpl;
@@ -47,10 +49,15 @@ pub async fn rpc_serve(
 
     let fragment_manager = Arc::new(FragmentManager::new(meta_store_ref.clone()).await.unwrap());
     let hummock_manager = Arc::new(hummock::HummockManager::new(env.clone()).await.unwrap());
+    let notification_manager = Arc::new(NotificationManager::new());
     let cluster_manager = Arc::new(
-        StoredClusterManager::new(env.clone(), Some(hummock_manager.clone()))
-            .await
-            .unwrap(),
+        StoredClusterManager::new(
+            env.clone(),
+            Some(hummock_manager.clone()),
+            notification_manager.clone(),
+        )
+        .await
+        .unwrap(),
     );
 
     if let Some(dashboard_addr) = dashboard_addr {
@@ -105,6 +112,7 @@ pub async fn rpc_serve(
         env,
     );
     let hummock_srv = HummockServiceImpl::new(hummock_manager);
+    let notification_srv = NotificationServiceImpl::new(notification_manager);
     let meta_metrics = Arc::new(MetaMetrics::new());
 
     if let Some(prometheus_addr) = prometheus_addr {
@@ -121,6 +129,7 @@ pub async fn rpc_serve(
             .add_service(ClusterServiceServer::new(cluster_srv))
             .add_service(StreamManagerServiceServer::new(stream_srv))
             .add_service(HummockManagerServiceServer::new(hummock_srv))
+            .add_service(NotificationServiceServer::new(notification_srv))
             .serve_with_incoming_shutdown(
                 tokio_stream::wrappers::TcpListenerStream::new(listener),
                 async move {

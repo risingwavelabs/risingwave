@@ -116,7 +116,7 @@ impl<S: StateStore> SimpleExecutor for MaterializeExecutor<S> {
             let pk_row = Row(self
                 .pk_columns
                 .iter()
-                .map(|c_id| chunk.column(*c_id).array_ref().datum_at(idx))
+                .map(|c_id| chunk.column_at(*c_id).array_ref().datum_at(idx))
                 .collect_vec());
 
             // assemble row
@@ -177,8 +177,8 @@ mod tests {
                 }),
                 encoding: ColumnEncodingType::Raw as i32,
                 name: "v1".to_string(),
-                is_primary: false,
                 column_id: 0,
+                ..Default::default()
             },
             ColumnDesc {
                 column_type: Some(DataType {
@@ -187,8 +187,8 @@ mod tests {
                 }),
                 encoding: ColumnEncodingType::Raw as i32,
                 name: "v2".to_string(),
-                is_primary: false,
                 column_id: 1,
+                ..Default::default()
             },
         ];
         let pks = vec![0_usize];

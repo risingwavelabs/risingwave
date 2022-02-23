@@ -38,7 +38,7 @@ pub struct LiteralExpression {
 
 impl Expression for LiteralExpression {
     fn return_type(&self) -> DataType {
-        self.return_type
+        self.return_type.clone()
     }
 
     fn eval(&mut self, input: &DataChunk) -> Result<ArrayRef> {
@@ -65,7 +65,7 @@ where
     Ok(())
 }
 
-fn literal_type_match(return_type: DataType, literal: Option<&ScalarImpl>) -> bool {
+fn literal_type_match(return_type: &DataType, literal: Option<&ScalarImpl>) -> bool {
     match literal {
         Some(datum) => {
             matches!(
@@ -110,7 +110,7 @@ fn make_interval(bytes: &[u8], ty: IntervalType) -> Result<IntervalUnit> {
 
 impl LiteralExpression {
     pub fn new(return_type: DataType, literal: Datum) -> Self {
-        assert!(literal_type_match(return_type, literal.as_ref()));
+        assert!(literal_type_match(&return_type, literal.as_ref()));
         LiteralExpression {
             return_type,
             literal,

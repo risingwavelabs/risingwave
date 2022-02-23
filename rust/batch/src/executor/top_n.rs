@@ -151,7 +151,6 @@ mod tests {
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{Array, DataChunk, PrimitiveArray};
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::expr::InputRefExpression;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
 
@@ -176,15 +175,13 @@ mod tests {
         };
         let mut mock_executor = MockExecutor::new(schema);
         mock_executor.add(data_chunk);
-        let input_ref_0 = InputRefExpression::new(DataType::Int32, 0);
-        let input_ref_1 = InputRefExpression::new(DataType::Int32, 1);
         let order_pairs = vec![
             OrderPair {
-                order: Box::new(input_ref_1),
+                column_idx: 1,
                 order_type: OrderType::Ascending,
             },
             OrderPair {
-                order: Box::new(input_ref_0),
+                column_idx: 0,
                 order_type: OrderType::Ascending,
             },
         ];
@@ -202,7 +199,7 @@ mod tests {
         assert!(matches!(res, Some(_)));
         if let Some(res) = res {
             assert_eq!(res.cardinality(), 2);
-            let col0 = res.column_at(0).unwrap();
+            let col0 = res.column_at(0);
             assert_eq!(col0.array().as_int32().value_at(0), Some(3));
             assert_eq!(col0.array().as_int32().value_at(1), Some(2));
         }

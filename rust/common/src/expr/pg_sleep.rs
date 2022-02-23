@@ -30,7 +30,7 @@ impl PgSleepExpression {
 
 impl Expression for PgSleepExpression {
     fn return_type(&self) -> DataType {
-        self.return_type
+        self.return_type.clone()
     }
 
     fn eval(&mut self, input: &DataChunk) -> Result<ArrayRef> {

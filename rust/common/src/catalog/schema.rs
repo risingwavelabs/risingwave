@@ -44,13 +44,17 @@ impl Schema {
     }
 
     pub fn data_types(&self) -> Vec<DataType> {
-        self.fields.iter().map(|field| field.data_type).collect()
+        self.fields
+            .iter()
+            .map(|field| field.data_type.clone())
+            .collect()
     }
 
     pub fn fields(&self) -> &[Field] {
         &self.fields
     }
 
+    // TODO(eric): Remove this
     pub fn try_from<'a, I: IntoIterator<Item = &'a ColumnDesc>>(cols: I) -> Result<Self> {
         Ok(Self {
             fields: cols
@@ -94,7 +98,7 @@ impl Field {
     }
 
     pub fn data_type(&self) -> DataType {
-        self.data_type
+        self.data_type.clone()
     }
 }
 

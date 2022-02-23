@@ -22,12 +22,12 @@ impl InputRef {
 
     /// Get a reference to the input ref's data type.
     pub fn data_type(&self) -> DataType {
-        self.data_type
+        self.data_type.clone()
     }
 }
 impl Expr for InputRef {
     fn return_type(&self) -> DataType {
-        self.data_type
+        self.data_type.clone()
     }
     fn to_expr_impl(self) -> ExprImpl {
         ExprImpl::InputRef(Box::new(self))

@@ -172,7 +172,7 @@ mod tests {
         let res = filter_executor.next().await.unwrap();
         assert_matches!(res, Some(_));
         if let Some(res) = res {
-            let col1 = res.column_at(0).unwrap();
+            let col1 = res.column_at(0);
             let array = col1.array();
             let col1 = array.as_int32();
             assert_eq!(col1.len(), 1);
@@ -181,7 +181,7 @@ mod tests {
         let res = filter_executor.next().await.unwrap();
         assert_matches!(res, Some(_));
         if let Some(res) = res {
-            let col1 = res.column_at(0).unwrap();
+            let col1 = res.column_at(0);
             let array = col1.array();
             let col1 = array.as_int32();
             assert_eq!(col1.len(), 1);

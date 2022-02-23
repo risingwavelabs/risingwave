@@ -270,7 +270,7 @@ mod tests {
     use super::*;
     use crate::barrier::BarrierManager;
     use crate::hummock::HummockManager;
-    use crate::manager::MetaSrvEnv;
+    use crate::manager::{MetaSrvEnv, NotificationManager};
     use crate::model::ActorId;
     use crate::storage::MemStore;
     use crate::stream::FragmentManager;
@@ -386,7 +386,9 @@ mod tests {
             sleep(Duration::from_secs(1));
 
             let env = MetaSrvEnv::for_test().await;
-            let cluster_manager = Arc::new(StoredClusterManager::new(env.clone(), None).await?);
+            let notification_manager = Arc::new(NotificationManager::new());
+            let cluster_manager =
+                Arc::new(StoredClusterManager::new(env.clone(), None, notification_manager).await?);
             cluster_manager
                 .add_worker_node(
                     HostAddress {

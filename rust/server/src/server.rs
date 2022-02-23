@@ -9,6 +9,7 @@ use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::ComputeNodeConfig;
 use risingwave_common::worker_id::WorkerIdRef;
+use risingwave_pb::common::WorkerType;
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
@@ -101,7 +102,10 @@ pub async fn compute_node_serve(
     }
 
     // All set, let the meta service know we're ready.
-    let worker_id = meta_client.register(addr).await.unwrap();
+    let worker_id = meta_client
+        .register(addr, WorkerType::ComputeNode)
+        .await
+        .unwrap();
     worker_id_ref.set(worker_id);
 
     (join_handle, shutdown_send)

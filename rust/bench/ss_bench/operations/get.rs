@@ -3,21 +3,72 @@ use std::time::Instant;
 use bytes::Bytes;
 use itertools::Itertools;
 use rand::distributions::Uniform;
-use rand::prelude::{Distribution, StdRng};
-use rand::SeedableRng;
+use rand::prelude::Distribution;
 use risingwave_storage::StateStore;
 
-use super::Operations;
+use super::{Operations, PerfMetrics};
 use crate::utils::latency_stat::LatencyStat;
 use crate::utils::workload::Workload;
 use crate::Opts;
 
 impl Operations {
+    pub(crate) async fn get_random(&mut self, store: &impl StateStore, opts: &Opts) {
+        // generate queried point get key
+        let get_keys = match self.keys.is_empty() {
+            true => Workload::new_random_keys(opts, opts.reads as u64, &mut self.rng).1,
+            false => {
+                let dist = Uniform::from(0..self.keys.len());
+                (0..opts.reads)
+                    .into_iter()
+                    .map(|_| self.keys[dist.sample(&mut self.rng)].clone())
+                    .collect_vec()
+            }
+        };
+
+        let perf = Operations::run_get(store, opts, get_keys).await;
+
+        println!(
+            "
+    getrandom
+      {}
+      QPS: {}  {} bytes/sec",
+            perf.stat, perf.qps, perf.bytes_pre_sec
+        );
+    }
+
+    pub(crate) async fn get_seq(&self, store: &impl StateStore, opts: &Opts) {
+        // generate queried point get key
+        let get_keys = match self.keys.is_empty() {
+            true => Workload::new_sequential_keys(opts, opts.reads as u64).1,
+            false => {
+                assert!(
+                    opts.reads as usize <= self.keys.len(),
+                    "getseq cannot read more data than KV pairs in the state store"
+                );
+
+                (0..opts.reads as usize)
+                    .into_iter()
+                    .map(|i| self.keys[i].clone())
+                    .collect_vec()
+            }
+        };
+
+        let perf = Operations::run_get(store, opts, get_keys).await;
+
+        println!(
+            "
+    getseq
+      {}
+      QPS: {}  {} bytes/sec",
+            perf.stat, perf.qps, perf.bytes_pre_sec
+        );
+    }
+
     async fn run_get(
         store: &impl StateStore,
         opts: &Opts,
         mut get_keys: Vec<Bytes>,
-    ) -> (LatencyStat, u128, u128) {
+    ) -> PerfMetrics {
         // partitioned these keys for each concurrency
         let mut grouped_keys: Vec<Vec<Bytes>> = vec![vec![]; opts.concurrency_num as usize];
         for (i, key) in get_keys.drain(..).enumerate() {
@@ -70,59 +121,10 @@ impl Operations {
         let qps = opts.reads as u128 * 1_000_000_000 / total_time_nano as u128;
         let bytes_pre_sec = total_size as u128 * 1_000_000_000 / total_time_nano as u128;
 
-        (stat, qps, bytes_pre_sec)
-    }
-
-    pub(crate) async fn get_random(&self, store: &impl StateStore, opts: &Opts) {
-        // generate queried point get key
-        let get_keys = match self.keys.is_empty() {
-            true => Workload::new_random_keys(opts, 233, opts.reads as u64).1,
-            false => {
-                let mut rng = StdRng::seed_from_u64(233);
-                let dist = Uniform::from(0..self.keys.len());
-                (0..opts.reads)
-                    .into_iter()
-                    .map(|_| self.keys[dist.sample(&mut rng)].clone())
-                    .collect_vec()
-            }
-        };
-
-        let (stat, qps, bytes_pre_sec) = Operations::run_get(store, opts, get_keys).await;
-
-        println!(
-            "
-    getrandom
-      {}
-      QPS: {}  {} bytes/sec",
-            stat, qps, bytes_pre_sec
-        );
-    }
-
-    pub(crate) async fn get_seq(&self, store: &impl StateStore, opts: &Opts) {
-        // generate queried point get key
-        let get_keys = match self.keys.is_empty() {
-            true => Workload::new_sequential_keys(opts, opts.reads as u64).1,
-            false => {
-                assert!(
-                    opts.reads as usize <= self.keys.len(),
-                    "getseq cannot read more data than KV pairs in the state store"
-                );
-
-                (0..opts.reads as usize)
-                    .into_iter()
-                    .map(|i| self.keys[i].clone())
-                    .collect_vec()
-            }
-        };
-
-        let (stat, qps, bytes_pre_sec) = Operations::run_get(store, opts, get_keys).await;
-
-        println!(
-            "
-    getseq
-      {}
-      QPS: {}  {} bytes/sec",
-            stat, qps, bytes_pre_sec
-        );
+        PerfMetrics {
+            stat,
+            qps,
+            bytes_pre_sec,
+        }
     }
 }
