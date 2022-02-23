@@ -225,7 +225,7 @@ pub struct HashJoinExecutor<S: StateStore, const T: JoinTypePrimitive> {
     op_info: String,
 
     /// Epoch
-    epoch: u64,
+    epoch: Option<u64>,
 }
 
 impl<S: StateStore, const T: JoinTypePrimitive> std::fmt::Debug for HashJoinExecutor<S, T> {
@@ -376,12 +376,15 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
             debug_r,
             identity: format!("HashJoinExecutor {:X}", executor_id),
             op_info,
-            epoch: 0,
+            epoch: None,
         }
     }
 
     async fn flush_data(&mut self) -> Result<()> {
-        let epoch = self.current_epoch();
+        let epoch = match self.current_epoch() {
+            Some(e) => e,
+            None => return Ok(()),
+        };
         for side in [&mut self.side_l, &mut self.side_r] {
             let mut write_batch = side.keyspace.state_store().start_write_batch();
             for state in side.ht.values_mut() {
@@ -466,7 +469,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
         &mut self,
         chunk: StreamChunk,
     ) -> Result<Message> {
-        let epoch = self.current_epoch();
+        let epoch = self.current_epoch().unwrap();
         let chunk = chunk.compact()?;
         let (ops, columns, visibility) = chunk.into_inner();
 
@@ -629,13 +632,13 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
 
     /// Get back the current epoch used for storage reads and writes.
     /// This epoch is the one carried by most recent barrier flowing through the executor.
-    fn current_epoch(&self) -> u64 {
+    fn current_epoch(&self) -> Option<u64> {
         self.epoch
     }
 
     /// Update the current epoch to `new_epoch`, which is carried by a barrier.
     fn update_epoch(&mut self, new_epoch: u64) {
-        self.epoch = new_epoch;
+        self.epoch = Some(new_epoch);
     }
 }
 

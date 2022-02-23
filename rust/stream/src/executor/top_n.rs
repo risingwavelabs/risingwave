@@ -45,7 +45,7 @@ pub struct TopNExecutor<S: StateStore> {
     /// Logical Operator Info
     op_info: String,
     /// Epoch
-    epoch: u64,
+    epoch: Option<u64>,
 }
 
 impl<S: StateStore> std::fmt::Debug for TopNExecutor<S> {
@@ -121,12 +121,15 @@ impl<S: StateStore> TopNExecutor<S> {
             first_execution: true,
             identity: format!("TopNExecutor {:X}", executor_id),
             op_info,
-            epoch: 0,
+            epoch: None,
         }
     }
 
     async fn flush_inner(&mut self) -> Result<()> {
-        let epoch = self.current_epoch();
+        let epoch = match self.current_epoch() {
+            Some(e) => e,
+            None => return Ok(()),
+        };
         self.managed_highest_state.flush(epoch).await?;
         self.managed_middle_state.flush(epoch).await?;
         self.managed_lowest_state.flush(epoch).await
@@ -168,7 +171,7 @@ impl<S: StateStore> Executor for TopNExecutor<S> {
 #[async_trait]
 impl<S: StateStore> TopNExecutorBase for TopNExecutor<S> {
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> Result<StreamChunk> {
-        let epoch = self.current_epoch();
+        let epoch = self.current_epoch().unwrap();
         if self.first_execution {
             self.managed_lowest_state.fill_in_cache(epoch).await?;
             self.managed_middle_state.fill_in_cache(epoch).await?;
@@ -367,12 +370,12 @@ impl<S: StateStore> TopNExecutorBase for TopNExecutor<S> {
         &mut *self.input
     }
 
-    fn current_epoch(&self) -> u64 {
+    fn current_epoch(&self) -> Option<u64> {
         self.epoch
     }
 
     fn update_epoch(&mut self, new_epoch: u64) {
-        self.epoch = new_epoch;
+        self.epoch = Some(new_epoch);
     }
 }
 

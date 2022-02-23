@@ -160,10 +160,15 @@ impl LocalBarrierManager {
             BarrierState::Local => {}
 
             BarrierState::Managed(managed_state) => {
-                let current_epoch = managed_state.as_ref().map(|s| s.epoch);
-                if current_epoch != Some(barrier.epoch) {
+                let current_epoch = match managed_state {
+                    Some(state) => state.epoch,
+                    None => return Ok(()),
+                };
+
+                if current_epoch != barrier.epoch {
                     panic!(
-                        "bad barrier with epoch {} from actor {}, while current epoch is {:?}, last epoch is {:?}",
+                        "bad barrier with epoch {} from actor {}, while current epoch is {:?},
+                    last epoch is {:?}",
                         barrier.epoch, actor_id, current_epoch, self.last_epoch
                     );
                 }

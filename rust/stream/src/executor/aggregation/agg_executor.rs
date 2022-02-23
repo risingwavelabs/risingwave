@@ -206,7 +206,7 @@ pub trait AggExecutor: Executor {
 
     /// Get back the current epoch used for storage reads and writes.
     /// This epoch is the one carried by most recent barrier flowing through the executor.
-    fn current_epoch(&self) -> u64;
+    fn current_epoch(&self) -> Option<u64>;
 
     /// Update the current epoch to `new_epoch`, which is carried by a barrier.
     fn update_epoch(&mut self, new_epoch: u64);

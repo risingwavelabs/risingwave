@@ -57,7 +57,7 @@ pub struct SimpleAggExecutor<S: StateStore> {
     /// Logical Operator Info
     op_info: String,
     /// Epoch
-    epoch: u64,
+    epoch: Option<u64>,
 }
 
 impl<S: StateStore> std::fmt::Debug for SimpleAggExecutor<S> {
@@ -93,7 +93,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             agg_calls,
             identity: format!("GlobalSimpleAggExecutor {:X}", executor_id),
             op_info,
-            epoch: 0,
+            epoch: None,
         }
     }
 
@@ -104,12 +104,12 @@ impl<S: StateStore> SimpleAggExecutor<S> {
 
 #[async_trait]
 impl<S: StateStore> AggExecutor for SimpleAggExecutor<S> {
-    fn current_epoch(&self) -> u64 {
+    fn current_epoch(&self) -> Option<u64> {
         self.epoch
     }
 
     fn update_epoch(&mut self, new_epoch: u64) {
-        self.epoch = new_epoch;
+        self.epoch = Some(new_epoch);
     }
 
     fn cached_barrier_message_mut(&mut self) -> &mut Option<Barrier> {
@@ -117,7 +117,7 @@ impl<S: StateStore> AggExecutor for SimpleAggExecutor<S> {
     }
 
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> Result<()> {
-        let epoch = self.current_epoch();
+        let epoch = self.current_epoch().unwrap();
         let (ops, columns, visibility) = chunk.into_inner();
 
         // --- Retrieve all aggregation inputs in advance ---
@@ -167,7 +167,11 @@ impl<S: StateStore> AggExecutor for SimpleAggExecutor<S> {
         // Some state will have the correct output only after their internal states have been fully
         // flushed.
 
-        let epoch = self.current_epoch();
+        let epoch = match self.current_epoch() {
+            Some(e) => e,
+            None => return Ok(None),
+        };
+
         let states = match self.states.as_mut() {
             Some(states) if states.is_dirty() => states,
             _ => return Ok(None), // Nothing to flush.

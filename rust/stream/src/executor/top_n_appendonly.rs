@@ -30,7 +30,7 @@ pub trait TopNExecutorBase: Executor {
 
     /// Get back the current epoch used for storage reads and writes.
     /// This epoch is the one carried by most recent barrier flowing through the executor.
-    fn current_epoch(&self) -> u64;
+    fn current_epoch(&self) -> Option<u64>;
 
     /// Update the current epoch to `new_epoch`, which is carried by a barrier.
     fn update_epoch(&mut self, new_epoch: u64);
@@ -86,7 +86,7 @@ pub struct AppendOnlyTopNExecutor<S: StateStore> {
     /// Logical Operator Info
     op_info: String,
     /// Epoch
-    epoch: u64,
+    epoch: Option<u64>,
 }
 
 impl<S: StateStore> std::fmt::Debug for AppendOnlyTopNExecutor<S> {
@@ -151,12 +151,15 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
             first_execution: true,
             identity: format!("TopNAppendonlyExecutor {:X}", executor_id),
             op_info,
-            epoch: 0,
+            epoch: None,
         }
     }
 
     async fn flush_inner(&mut self) -> Result<()> {
-        let epoch = self.current_epoch();
+        let epoch = match self.current_epoch() {
+            Some(e) => e,
+            None => return Ok(()),
+        };
         self.managed_higher_state.flush(epoch).await?;
         self.managed_lower_state.flush(epoch).await
     }
@@ -196,7 +199,7 @@ impl<S: StateStore> Executor for AppendOnlyTopNExecutor<S> {
 #[async_trait]
 impl<S: StateStore> TopNExecutorBase for AppendOnlyTopNExecutor<S> {
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> Result<StreamChunk> {
-        let epoch = self.current_epoch();
+        let epoch = self.current_epoch().unwrap();
         if self.first_execution {
             self.managed_lower_state.fill_in_cache(epoch).await?;
             self.managed_higher_state.fill_in_cache(epoch).await?;
@@ -302,12 +305,12 @@ impl<S: StateStore> TopNExecutorBase for AppendOnlyTopNExecutor<S> {
         &mut *self.input
     }
 
-    fn current_epoch(&self) -> u64 {
+    fn current_epoch(&self) -> Option<u64> {
         self.epoch
     }
 
     fn update_epoch(&mut self, new_epoch: u64) {
-        self.epoch = new_epoch;
+        self.epoch = Some(new_epoch);
     }
 }
 
