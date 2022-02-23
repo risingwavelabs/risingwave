@@ -240,8 +240,7 @@ impl LocalVersionManager {
                 if let Ok(version) = hummock_meta_client.pin_version().await {
                     local_version_manager.try_set_version(version);
                 }
-            }
-            else {
+            } else {
                 return;
             }
         }
