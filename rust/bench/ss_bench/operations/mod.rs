@@ -1,5 +1,5 @@
 use std::collections::BTreeSet;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use bytes::Bytes;
 use risingwave_storage::StateStore;
@@ -74,6 +74,6 @@ impl Operations {
     fn untrack_prefixes(&mut self, mut _other: Vec<Bytes>) {}
 
     fn auto_inc_seed(&mut self) -> u64 {
-        self.seed.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        self.seed.fetch_add(1, Ordering::SeqCst)
     }
 }

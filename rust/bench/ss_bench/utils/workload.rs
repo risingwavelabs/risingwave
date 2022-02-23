@@ -1,4 +1,4 @@
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use bytes::{Bytes, BytesMut};
 use itertools::Itertools;
@@ -152,5 +152,5 @@ impl Workload {
 /// generate epoch for the whole crate
 pub(crate) fn get_epoch() -> u64 {
     static EPOCH: AtomicU64 = AtomicU64::new(0);
-    EPOCH.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+    EPOCH.fetch_add(1, Ordering::SeqCst)
 }
