@@ -51,6 +51,7 @@ impl Schema {
         &self.fields
     }
 
+    // TODO(eric): Remove this
     pub fn try_from<'a, I: IntoIterator<Item = &'a ColumnDesc>>(cols: I) -> Result<Self> {
         Ok(Self {
             fields: cols
