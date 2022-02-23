@@ -205,7 +205,9 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
     async fn post_mutate_outputs(&mut self, mutation: &Option<Arc<Mutation>>) -> Result<()> {
         match mutation.as_deref() {
             Some(Mutation::Stop(stops)) => {
-                self.inner.remove_outputs(stops);
+                if !stops.contains(&self.actor_id) {
+                    self.inner.remove_outputs(stops);
+                }
             }
             _ => {}
         }
@@ -237,7 +239,7 @@ pub trait DataDispatcher: Debug + 'static {
     fn set_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>);
     fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>);
     fn remove_outputs(&mut self, _actor_ids: &HashSet<ActorId>) {
-        unimplemented!("{:?} does not support removing outputs", self)
+        trace!("{:?} does not support removing outputs, ignored", self)
     }
 }
 
