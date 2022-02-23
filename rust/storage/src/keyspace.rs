@@ -95,7 +95,7 @@ impl<S: StateStore> Keyspace<S> {
             prefix: Vec::with_capacity(5),
         };
         root.push(Segment::root(b't'));
-        root.push(Segment::u32(id.table_id() as u32));
+        root.push(Segment::u32(id.table_id));
         root
     }
 

@@ -11,7 +11,6 @@ pub use stream::*;
 
 use crate::storage::{self, MetaStore, Operation, Transaction};
 
-pub type TableRawId = i32;
 pub type ActorId = u32;
 pub type FragmentId = u32;
 
