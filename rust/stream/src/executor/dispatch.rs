@@ -449,12 +449,11 @@ impl BroadcastDispatcher {
 
 #[async_trait]
 impl DataDispatcher for BroadcastDispatcher {
-    fn set_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
-        self.outputs = Self::into_pairs(outputs).collect()
-    }
-
-    fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
-        self.outputs.extend(Self::into_pairs(outputs));
+    async fn dispatch_data(&mut self, chunk: StreamChunk) -> Result<()> {
+        for output in self.outputs.values_mut() {
+            output.send(Message::Chunk(chunk.clone())).await?;
+        }
+        Ok(())
     }
 
     async fn dispatch_barrier(&mut self, barrier: Barrier) -> Result<()> {
@@ -464,11 +463,18 @@ impl DataDispatcher for BroadcastDispatcher {
         Ok(())
     }
 
-    async fn dispatch_data(&mut self, chunk: StreamChunk) -> Result<()> {
-        for output in self.outputs.values_mut() {
-            output.send(Message::Chunk(chunk.clone())).await?;
-        }
-        Ok(())
+    fn set_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
+        self.outputs = Self::into_pairs(outputs).collect()
+    }
+
+    fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
+        self.outputs.extend(Self::into_pairs(outputs));
+    }
+
+    fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>) {
+        self.outputs
+            .drain_filter(|actor_id, _| actor_ids.contains(actor_id))
+            .count();
     }
 }
 
