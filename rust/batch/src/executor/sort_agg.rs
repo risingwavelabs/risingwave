@@ -240,7 +240,7 @@ mod tests {
         }
         executor.close().await?;
 
-        let actual = o.column_at(0)?.array();
+        let actual = o.column_at(0).array();
         let actual: &I64Array = actual.as_ref().into();
         let v = actual.iter().collect::<Vec<Option<i64>>>();
         assert_eq!(v, vec![Some(6)]);
@@ -342,25 +342,17 @@ mod tests {
         }
         executor.close().await?;
 
-        let actual = o.column_at(2)?.array();
+        let actual = o.column_at(2).array();
         let actual: &I64Array = actual.as_ref().into();
         let v = actual.iter().collect::<Vec<Option<i64>>>();
         assert_eq!(v, vec![Some(1), Some(2), Some(4), Some(5)]);
 
         assert_eq!(
-            o.column_at(0)?
-                .array()
-                .as_int32()
-                .iter()
-                .collect::<Vec<_>>(),
+            o.column_at(0).array().as_int32().iter().collect::<Vec<_>>(),
             vec![Some(1), Some(1), Some(3), Some(4)]
         );
         assert_eq!(
-            o.column_at(1)?
-                .array()
-                .as_int32()
-                .iter()
-                .collect::<Vec<_>>(),
+            o.column_at(1).array().as_int32().iter().collect::<Vec<_>>(),
             vec![Some(7), Some(8), Some(8), Some(8)]
         );
 

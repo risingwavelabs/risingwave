@@ -21,7 +21,7 @@ impl Expression for InputRefExpression {
     }
 
     fn eval(&mut self, input: &DataChunk) -> Result<ArrayRef> {
-        Ok(input.column_at(self.idx)?.array())
+        Ok(input.column_at(self.idx).array())
     }
 }
 
@@ -31,7 +31,7 @@ impl InputRefExpression {
     }
 
     pub fn eval_immut(&self, input: &DataChunk) -> Result<ArrayRef> {
-        Ok(input.column_at(self.idx)?.array())
+        Ok(input.column_at(self.idx).array())
     }
 }
 

@@ -166,7 +166,7 @@ impl Executor for OrderByExecutor {
         while !self.min_heap.is_empty() && chunk_size < K_PROCESSING_WINDOW_SIZE {
             let top = self.min_heap.pop().unwrap();
             for (idx, builder) in builders.iter_mut().enumerate() {
-                let chunk_arr = self.chunks[top.chunk_idx].column_at(idx)?.array();
+                let chunk_arr = self.chunks[top.chunk_idx].column_at(idx).array();
                 let chunk_arr = chunk_arr.as_ref();
                 macro_rules! gen_match {
                     ($b: ident, $a: ident, [$( $tt: ident), *]) => {
@@ -317,7 +317,7 @@ mod tests {
         let res = order_by_executor.next().await.unwrap();
         assert!(matches!(res, Some(_)));
         if let Some(res) = res {
-            let col0 = res.column_at(0).unwrap();
+            let col0 = res.column_at(0);
             assert_eq!(col0.array().as_int32().value_at(0), Some(3));
             assert_eq!(col0.array().as_int32().value_at(1), Some(2));
             assert_eq!(col0.array().as_int32().value_at(2), Some(1));
@@ -369,7 +369,7 @@ mod tests {
         let res = order_by_executor.next().await.unwrap();
         assert!(matches!(res, Some(_)));
         if let Some(res) = res {
-            let col0 = res.column_at(0).unwrap();
+            let col0 = res.column_at(0);
             assert_eq!(col0.array().as_float32().value_at(0), Some(3.3.into()));
             assert_eq!(col0.array().as_float32().value_at(1), Some(2.2.into()));
             assert_eq!(col0.array().as_float32().value_at(2), Some(1.1.into()));
@@ -430,7 +430,7 @@ mod tests {
         let res = order_by_executor.next().await.unwrap();
         assert!(matches!(res, Some(_)));
         if let Some(res) = res {
-            let col0 = res.column_at(0).unwrap();
+            let col0 = res.column_at(0);
             assert_eq!(col0.array().as_utf8().value_at(0), Some("3.3"));
             assert_eq!(col0.array().as_utf8().value_at(1), Some("2.2"));
             assert_eq!(col0.array().as_utf8().value_at(2), Some("1.1"));
