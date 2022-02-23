@@ -23,7 +23,7 @@ use tokio::task::JoinHandle;
 
 use crate::executor::*;
 use crate::task::{
-    ConsumableChannelPair, SharedContext, StreamEnvironment, UpDownActorIds,
+    ChannelManager, ConsumableChannelPair, SharedContext, StreamEnvironment, UpDownActorIds,
     LOCAL_OUTPUT_CHANNEL_SIZE,
 };
 
@@ -253,13 +253,7 @@ impl StreamManagerCore {
             .map(|down_id| {
                 let host_addr = self.get_actor_info(down_id)?.get_host()?;
                 let downstream_addr = host_addr.to_socket_addr()?;
-                let tx = self.context.take_sender(&(actor_id, *down_id))?;
-                if is_local_address(&downstream_addr, &self.context.addr) {
-                    // if this is a local downstream actor
-                    Ok(Box::new(LocalOutput::new(*down_id, tx)) as Box<dyn Output>)
-                } else {
-                    Ok(Box::new(RemoteOutput::new(*down_id, tx)) as Box<dyn Output>)
-                }
+                new_output(&self.context, downstream_addr, actor_id, down_id)
             })
             .collect::<Result<Vec<_>>>()?;
 
@@ -858,11 +852,9 @@ impl StreamManagerCore {
                     ))
                     .into());
                 }
-                let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-                let up_down_ids = (*upstream_actor_id, actor_id);
-                self.context
-                    .add_channel_pairs(up_down_ids, (Some(tx), Some(rx)));
             }
+            ChannelManager::new(actor_id, self.context.clone())
+                .update_upstreams(&merge.upstream_actor_id);
         }
         for child in &stream_node.input {
             self.build_channel_for_chain_node(actor_id, child)?;
@@ -897,24 +889,19 @@ impl StreamManagerCore {
         for (current_id, actor) in &self.actors {
             self.build_channel_for_chain_node(*current_id, actor.nodes.as_ref().unwrap())?;
 
-            for downstream_id in actor.get_downstream_actor_id() {
-                // At this time, the graph might not be complete, so we do not check if downstream
-                // has `current_id` as upstream.
-                let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-                let up_down_ids = (*current_id, *downstream_id);
-                self.context
-                    .add_channel_pairs(up_down_ids, (Some(tx), Some(rx)));
-            }
+            // At this time, the graph might not be complete, so we do not check if downstream
+            // has `current_id` as upstream.
+            ChannelManager::new(*current_id, self.context.clone())
+                .update_upstreams(actor.get_downstream_actor_id());
 
             // Add remote input channels.
+            let mut up_id = vec![];
             for upstream_id in actor.get_upstream_actor_id() {
                 if !local_actor_ids.contains(upstream_id) {
-                    let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-                    let up_down_ids = (*upstream_id, *current_id);
-                    self.context
-                        .add_channel_pairs(up_down_ids, (Some(tx), Some(rx)));
+                    up_id.push(*upstream_id);
                 }
             }
+            ChannelManager::new(*current_id, self.context.clone()).update_upstreams(&up_id);
         }
 
         for hanging_channel in hanging_channels {
