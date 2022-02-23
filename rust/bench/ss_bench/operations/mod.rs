@@ -17,7 +17,7 @@ pub(crate) struct Operations {
     pub(crate) keys: Vec<Bytes>,
     pub(crate) prefixes: Vec<Bytes>,
 
-    // seed: AtomicU64,
+    // TODO(Sun Ting): exploit specified (no need to support encryption) rng to speed up
     rng: StdRng,
 }
 

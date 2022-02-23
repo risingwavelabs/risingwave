@@ -50,7 +50,6 @@ impl Workload {
         (0..value_num)
             .into_iter()
             .map(|_| {
-                // set seed offset to make values different
                 let value = rng
                     .sample_iter(&str_dist)
                     .take(opts.value_size as usize)
@@ -77,7 +76,6 @@ impl Workload {
         let prefixes = (0..prefix_num)
             .into_iter()
             .map(|_| {
-                // set seed offset to make values different
                 let prefix = rng
                     .sample_iter(&str_dist)
                     .take(opts.key_prefix_size as usize)
@@ -92,7 +90,6 @@ impl Workload {
         let keys = (0..key_num as u64)
             .into_iter()
             .map(|i| {
-                // set seed offset to make values different
                 let user_key = rng
                     .sample_iter(&str_dist)
                     .take(opts.key_size as usize)
