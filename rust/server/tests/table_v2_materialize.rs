@@ -120,7 +120,7 @@ async fn test_table_v2_materialize() -> Result<()> {
     };
 
     // Register associated materialized view
-    let mview_id = TableId::new(SchemaId::default(), 1);
+    let mview_id = TableId::new(1);
     table_manager.register_associated_materialized_view(&source_table_id, &mview_id)?;
     source_manager.register_associated_materialized_view(&source_table_id, &mview_id)?;
 
@@ -129,7 +129,7 @@ async fn test_table_v2_materialize() -> Result<()> {
     let all_schema = get_schema(&all_column_ids);
     let (barrier_tx, barrier_rx) = unbounded_channel();
     let stream_source = SourceExecutor::new(
-        source_table_id.clone(),
+        source_table_id,
         source_desc.clone(),
         all_column_ids.clone(),
         all_schema.clone(),
@@ -158,12 +158,8 @@ async fn test_table_v2_materialize() -> Result<()> {
     ))];
     let chunk = DataChunk::builder().columns(columns.clone()).build();
     let insert_inner = SingleChunkExecutor::new(chunk, all_schema);
-    let mut insert = InsertExecutor::new(
-        mview_id.clone(),
-        source_manager.clone(),
-        Box::new(insert_inner),
-        0,
-    );
+    let mut insert =
+        InsertExecutor::new(mview_id, source_manager.clone(), Box::new(insert_inner), 0);
 
     insert.open().await?;
     insert.next().await?;

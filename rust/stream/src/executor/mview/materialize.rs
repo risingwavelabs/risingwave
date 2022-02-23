@@ -167,7 +167,7 @@ mod tests {
         let store_mgr = Arc::new(SimpleTableManager::new(StateStoreImpl::MemoryStateStore(
             store.clone(),
         )));
-        let table_id = TableId::new(SchemaId::default(), 1);
+        let table_id = TableId::new(1);
         // Two columns of int32 type, the first column is PK.
         let columns = vec![
             ColumnDesc {

@@ -186,22 +186,10 @@ mod tests {
     #[test]
     fn test_table_id_from_pb() {
         let table_id: TableId = TableId {
-            schema_ref_id: SchemaId {
-                database_ref_id: DatabaseId {
-                    database_id: generate_database_id_pb().database_id,
-                },
-                schema_id: generate_schema_id_pb().schema_id,
-            },
-            table_id: generate_table_id_pb().table_id,
+            table_id: generate_table_id_pb().table_id as u32,
         };
 
-        let expected_table_id = TableId {
-            schema_ref_id: SchemaId {
-                database_ref_id: DatabaseId { database_id: 32 },
-                schema_id: 48,
-            },
-            table_id: 67,
-        };
+        let expected_table_id = TableId { table_id: 67 };
 
         assert_eq!(expected_table_id, table_id);
     }

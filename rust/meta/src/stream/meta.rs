@@ -87,7 +87,7 @@ where
     }
 
     pub async fn drop_table_fragments(&self, table_id: &TableId) -> Result<()> {
-        match self.table_fragments.entry(table_id.clone()) {
+        match self.table_fragments.entry(*table_id) {
             Entry::Occupied(entry) => {
                 TableFragments::delete(&*self.meta_store_ref, &TableRefId::from(table_id)).await?;
                 entry.remove();
