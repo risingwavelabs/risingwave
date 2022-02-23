@@ -30,7 +30,10 @@ pub(crate) struct PerfMetrics {
 impl Operations {
     /// Run operations in the `--benchmarks` option
     pub(crate) async fn run(store: impl StateStore, opts: &Opts) {
-        let mut runner = Operations{seed: AtomicU64::new(opts.seed), ..Default::default()};
+        let mut runner = Operations {
+            seed: AtomicU64::new(opts.seed),
+            ..Default::default()
+        };
 
         for operation in opts.benchmarks.split(',') {
             match operation {
@@ -69,7 +72,7 @@ impl Operations {
     // TODO(Ting Sun): decide whether and how to implement untrack_prefixes
     fn untrack_prefixes(&mut self, mut _other: Vec<Bytes>) {}
 
-    fn auto_inc_seed(&mut self, ) -> u64{
+    fn auto_inc_seed(&mut self) -> u64 {
         self.seed.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
     }
 }
