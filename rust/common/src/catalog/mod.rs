@@ -1,5 +1,7 @@
 pub mod schema;
 
+use core::fmt;
+
 pub use schema::*;
 
 pub enum CatalogId {
@@ -45,6 +47,11 @@ impl TableId {
 
     pub fn table_id(&self) -> u32 {
         self.table_id
+    }
+}
+impl fmt::Display for TableId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.table_id,)
     }
 }
 
