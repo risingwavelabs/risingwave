@@ -100,20 +100,22 @@ where
         }
     }
 
-    pub fn load_all_actors(&self) -> Result<ActorInfos> {
+    pub fn load_all_actors(&self, creating_table_id: Option<TableId>) -> Result<ActorInfos> {
         let mut actor_maps = HashMap::new();
         let mut source_actor_ids = HashMap::new();
         self.table_fragments.iter().for_each(|entry| {
             // TODO: when swallow barrier available while blocking creating MV or MV on MV, refactor
             //  the filter logic.
-            if entry.value().is_created() {
-                let node_actors = entry.value().node_actor_ids();
+            let fragments = entry.value();
+
+            if fragments.is_created() || creating_table_id == Some(fragments.table_id()) {
+                let node_actors = fragments.node_actor_ids();
                 node_actors.iter().for_each(|(node_id, actor_ids)| {
                     let node_actor_ids = actor_maps.entry(*node_id).or_insert_with(Vec::new);
                     node_actor_ids.extend_from_slice(actor_ids);
                 });
 
-                let source_actors = entry.value().node_source_actors();
+                let source_actors = fragments.node_source_actors();
                 source_actors.iter().for_each(|(node_id, actor_ids)| {
                     let node_actor_ids = source_actor_ids.entry(*node_id).or_insert_with(Vec::new);
                     node_actor_ids.extend_from_slice(actor_ids);
