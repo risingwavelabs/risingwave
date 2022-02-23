@@ -217,10 +217,7 @@ impl CatalogConnector {
         );
         let table_id = self.meta_client.create_table(table.clone()).await?;
         // Create table locally.
-        table.table_ref_id = Some(TableRefId {
-            schema_ref_id,
-            table_id,
-        });
+        table.table_ref_id = Some(TableRefId::from(&table_id));
         self.catalog_cache
             .lock()
             .create_table(db_name, schema_name, &table)
