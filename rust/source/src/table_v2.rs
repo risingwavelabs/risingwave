@@ -4,6 +4,7 @@ use std::sync::RwLock;
 use async_trait::async_trait;
 use rand::prelude::SliceRandom;
 use risingwave_common::array::StreamChunk;
+use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
 use risingwave_storage::table::ScannableTableRef;
 use risingwave_storage::TableColumnDesc;
@@ -148,7 +149,7 @@ impl Source for TableSourceV2 {
     fn batch_reader(
         &self,
         _context: Self::ReaderContext,
-        _column_ids: Vec<i32>,
+        _column_ids: Vec<ColumnId>,
     ) -> Result<Self::BatchReader> {
         unreachable!("should use table_scan instead of stream_scan to read the table source")
     }
@@ -156,7 +157,7 @@ impl Source for TableSourceV2 {
     fn stream_reader(
         &self,
         _context: Self::ReaderContext,
-        column_ids: Vec<i32>,
+        column_ids: Vec<ColumnId>,
     ) -> Result<Self::StreamReader> {
         let column_indices = column_ids
             .into_iter()
@@ -196,7 +197,10 @@ mod tests {
         let keyspace = Keyspace::table_root(store, &Default::default());
         let table = Arc::new(MViewTable::new_batch(
             keyspace,
-            vec![TableColumnDesc::new_without_name(0, DataType::Int64)],
+            vec![TableColumnDesc::new_without_name(
+                ColumnId::from(0),
+                DataType::Int64,
+            )],
         ));
 
         TableSourceV2::new(table)
@@ -205,7 +209,7 @@ mod tests {
     #[tokio::test]
     async fn test_table_source_v2() -> Result<()> {
         let source = new_source();
-        let mut reader = source.stream_reader(TableV2ReaderContext, vec![0])?;
+        let mut reader = source.stream_reader(TableV2ReaderContext, vec![ColumnId::from(0)])?;
 
         macro_rules! write_chunk {
             ($i:expr) => {{

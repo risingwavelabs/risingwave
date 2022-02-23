@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{DataChunk, DataChunkRef, Row};
+use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::OrderType;
@@ -120,19 +120,6 @@ pub trait ScannableTable: Sync + Send + Any + core::fmt::Debug {
     fn schema(&self) -> Cow<Schema>;
 
     fn column_descs(&self) -> Cow<[TableColumnDesc]>;
-
-    /// Get column indices for given `column_ids`.
-    fn column_indices(&self, column_ids: &[i32]) -> Vec<usize> {
-        column_ids
-            .iter()
-            .map(|id| {
-                self.column_descs()
-                    .iter()
-                    .position(|c| c.column_id == *id)
-                    .expect("column id not exists")
-            })
-            .collect()
-    }
 
     /// Indicates whether this table is backed with a shared storage. The behavior of distributed
     /// scanning differs according to this property.

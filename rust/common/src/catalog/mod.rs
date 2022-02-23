@@ -1,5 +1,7 @@
-pub mod schema;
+mod column;
+mod schema;
 
+pub use column::*;
 pub use schema::*;
 
 pub enum CatalogId {

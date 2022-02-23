@@ -6,7 +6,7 @@ use risingwave_batch::executor::{
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{Array, DataChunk, F64Array};
 use risingwave_common::array_nonnull;
-use risingwave_common::catalog::{Field, Schema, SchemaId, TableId};
+use risingwave_common::catalog::{ColumnId, Field, Schema, SchemaId, TableId};
 use risingwave_common::error::Result;
 use risingwave_common::types::IntoOrdered;
 use risingwave_common::util::sort_util::OrderType;
@@ -106,7 +106,7 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     // Ensure the source exists
     let source_desc = source_manager.get_source(&source_table_id)?;
-    let get_schema = |column_ids: &[i32]| {
+    let get_schema = |column_ids: &[ColumnId]| {
         let mut fields = Vec::with_capacity(column_ids.len());
         for &column_id in column_ids {
             let column_desc = source_desc
@@ -125,7 +125,7 @@ async fn test_table_v2_materialize() -> Result<()> {
     source_manager.register_associated_materialized_view(&source_table_id, &mview_id)?;
 
     // Create a `SourceExecutor` to read the changes
-    let all_column_ids = vec![0, 1];
+    let all_column_ids = vec![ColumnId::from(0), ColumnId::from(1)];
     let all_schema = get_schema(&all_column_ids);
     let (barrier_tx, barrier_rx) = unbounded_channel();
     let stream_source = SourceExecutor::new(

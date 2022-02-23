@@ -18,6 +18,7 @@ use risingwave_pb::plan::{
 };
 use risingwave_pb::task_service::GetDataResponse;
 use risingwave_storage::table::test::TestTable;
+use risingwave_storage::table::ScannableTable;
 
 use super::*;
 use crate::rpc::service::exchange::ExchangeWriter;
@@ -352,7 +353,11 @@ impl<'a> SelectBuilder<'a> {
             .unwrap();
 
         if let Ok(column_table_ref) = downcast_arc::<TestTable>(table_ref.into_any()) {
-            let column_ids = column_table_ref.column_ids();
+            let column_ids = column_table_ref
+                .column_descs()
+                .iter()
+                .map(|c| c.column_id.into())
+                .collect();
             let scan = RowSeqScanNode {
                 table_ref_id: None,
                 column_ids,

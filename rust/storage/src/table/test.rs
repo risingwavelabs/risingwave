@@ -7,7 +7,7 @@ use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::Result;
 use tokio::sync::RwLock;
 
-use super::{DataChunks, ScannableTable, TableIterRef};
+use super::{ScannableTable, TableIterRef};
 use crate::TableColumnDesc;
 
 #[derive(Debug)]
@@ -64,9 +64,5 @@ impl TestTable {
     pub async fn append(&self, data: DataChunk) -> Result<()> {
         self.chunks.write().await.push(data.into());
         Ok(())
-    }
-
-    pub fn column_ids(&self) -> Vec<i32> {
-        self.column_descs.iter().map(|c| c.column_id).collect()
     }
 }

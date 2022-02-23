@@ -1,7 +1,7 @@
 use std::fmt::{Debug, Formatter};
 
 use risingwave_common::array::DataChunk;
-use risingwave_common::catalog::{Field, Schema, TableId};
+use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::plan::plan_node::NodeBody;
@@ -35,7 +35,11 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
             .source_manager()
             .get_source(&table_id)?;
 
-        let column_ids = stream_scan_node.get_column_ids();
+        let column_ids: Vec<_> = stream_scan_node
+            .get_column_ids()
+            .iter()
+            .map(|i| ColumnId::from(*i))
+            .collect();
 
         let fields = column_ids
             .iter()
