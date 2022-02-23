@@ -15,13 +15,13 @@ use crate::utils::workload::Workload;
 use crate::Opts;
 
 impl Operations {
-    pub(crate) async fn prefix_scan_random(&self, store: &impl StateStore, opts: &Opts) {
+    pub(crate) async fn prefix_scan_random(&mut self, store: &impl StateStore, opts: &Opts) {
         // generate queried prefixes
         let mut scan_prefixes = match self.prefixes.is_empty() {
             // if prefixes is empty, use default prefix: ["a"*key_prefix_size]
-            true => Workload::new_random_keys(opts, opts.reads as u64).0,
+            true => Workload::new_random_keys(opts, opts.reads as u64, 2).0,
             false => {
-                let mut rng = StdRng::seed_from_u64(opts.seed);
+                let mut rng = StdRng::seed_from_u64(self.auto_inc_seed());
                 let dist = Uniform::from(0..self.prefixes.len());
                 (0..opts.reads as usize)
                     .into_iter()

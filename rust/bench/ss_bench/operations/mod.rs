@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::sync::atomic::AtomicU64;
 
 use bytes::Bytes;
 use risingwave_storage::StateStore;
@@ -10,10 +11,12 @@ pub(crate) mod get;
 pub(crate) mod prefix_scan_random;
 pub(crate) mod write_batch;
 
-#[derive(Clone, Default)]
+#[derive(Default)]
 pub(crate) struct Operations {
     pub(crate) keys: Vec<Bytes>,
     pub(crate) prefixes: Vec<Bytes>,
+
+    seed: AtomicU64,
 }
 
 type Batch = Vec<(Bytes, Option<Bytes>)>;
@@ -27,7 +30,7 @@ pub(crate) struct PerfMetrics {
 impl Operations {
     /// Run operations in the `--benchmarks` option
     pub(crate) async fn run(store: impl StateStore, opts: &Opts) {
-        let mut runner = Operations::default();
+        let mut runner = Operations{seed: AtomicU64::new(opts.seed), ..Default::default()};
 
         for operation in opts.benchmarks.split(',') {
             match operation {
@@ -65,4 +68,8 @@ impl Operations {
     /// Untrack prefixes of deleted keys
     // TODO(Ting Sun): decide whether and how to implement untrack_prefixes
     fn untrack_prefixes(&mut self, mut _other: Vec<Bytes>) {}
+
+    fn auto_inc_seed(&mut self, ) -> u64{
+        self.seed.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+    }
 }

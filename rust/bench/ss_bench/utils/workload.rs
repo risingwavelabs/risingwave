@@ -45,13 +45,13 @@ impl Workload {
     }
 
     /// Generate the values of given number
-    pub(crate) fn new_values(opts: &Opts, value_num: u64) -> Vec<Option<Bytes>> {
+    pub(crate) fn new_values(opts: &Opts, value_num: u64, base_seed: u64) -> Vec<Option<Bytes>> {
         let str_dist = Uniform::new_inclusive(0, 255);
         (0..value_num)
             .into_iter()
             .map(|i| {
                 // set seed offset to make values different
-                let value = StdRng::seed_from_u64(opts.seed + i)
+                let value = StdRng::seed_from_u64(base_seed + i)
                     .sample_iter(&str_dist)
                     .take(opts.value_size as usize)
                     .map(u8::from)
@@ -69,7 +69,7 @@ impl Workload {
     }
 
     /// Generate the random keys of given number
-    pub(crate) fn new_random_keys(opts: &Opts, key_num: u64) -> (Prefixes, Keys) {
+    pub(crate) fn new_random_keys(opts: &Opts, key_num: u64, base_seed: u64) -> (Prefixes, Keys) {
         // --- get prefixes ---
         let str_dist = Uniform::new_inclusive(0, 255);
 
@@ -78,7 +78,7 @@ impl Workload {
             .into_iter()
             .map(|i| {
                 // set seed offset to make values different
-                let prefix = StdRng::seed_from_u64(opts.seed + i)
+                let prefix = StdRng::seed_from_u64(base_seed + i)
                     .sample_iter(&str_dist)
                     .take(opts.key_prefix_size as usize)
                     .map(u8::from)
@@ -93,7 +93,7 @@ impl Workload {
             .into_iter()
             .map(|i| {
                 // set seed offset to make values different
-                let user_key = StdRng::seed_from_u64(opts.seed + i + 1)
+                let user_key = StdRng::seed_from_u64(base_seed + i + 1)
                     .sample_iter(&str_dist)
                     .take(opts.key_size as usize)
                     .map(u8::from)
