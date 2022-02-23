@@ -256,9 +256,9 @@ impl StreamManagerCore {
                 let tx = self.context.take_sender(&(actor_id, *down_id))?;
                 if is_local_address(&downstream_addr, &self.context.addr) {
                     // if this is a local downstream actor
-                    Ok(Box::new(LocalOutput::new(tx)) as Box<dyn Output>)
+                    Ok(Box::new(LocalOutput::new(*down_id, tx)) as Box<dyn Output>)
                 } else {
-                    Ok(Box::new(RemoteOutput::new(tx)) as Box<dyn Output>)
+                    Ok(Box::new(RemoteOutput::new(*down_id, tx)) as Box<dyn Output>)
                 }
             })
             .collect::<Result<Vec<_>>>()?;
