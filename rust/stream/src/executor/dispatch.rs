@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -108,6 +109,21 @@ pub struct DispatchExecutor<Inner: Dispatcher> {
     context: Arc<SharedContext>,
 }
 
+pub fn new_output(
+    context: &Arc<SharedContext>,
+    addr: SocketAddr,
+    actor_id: u32,
+    down_id: &u32,
+) -> Result<Box<dyn Output>> {
+    let tx = context.take_sender(&(actor_id, *down_id))?;
+    if is_local_address(&addr, &context.addr) {
+        // if this is a local downstream actor
+        Ok(Box::new(LocalOutput::new(*down_id, tx)) as Box<dyn Output>)
+    } else {
+        Ok(Box::new(RemoteOutput::new(*down_id, tx)) as Box<dyn Output>)
+    }
+}
+
 impl<Inner: Dispatcher> std::fmt::Debug for DispatchExecutor<Inner> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DispatchExecutor")
@@ -163,16 +179,13 @@ impl<Inner: Dispatcher + Send> DispatchExecutor<Inner> {
 
                     for actor_info in actor_infos.iter() {
                         let down_id = actor_info.get_actor_id();
-                        let up_down_ids = (actor_id, down_id);
                         let downstream_addr = actor_info.get_host()?.to_socket_addr()?;
-                        if is_local_address(&downstream_addr, &self.context.addr) {
-                            let tx = self.context.take_sender(&up_down_ids)?;
-                            new_outputs.push(Box::new(LocalOutput::new(down_id, tx)) as BoxedOutput)
-                        } else {
-                            let tx = self.context.take_sender(&up_down_ids)?;
-                            new_outputs
-                                .push(Box::new(RemoteOutput::new(down_id, tx)) as BoxedOutput)
-                        }
+                        new_outputs.push(new_output(
+                            &self.context,
+                            downstream_addr,
+                            actor_id,
+                            &down_id,
+                        )?);
                     }
                     self.inner.set_outputs(new_outputs)
                 }
@@ -182,17 +195,13 @@ impl<Inner: Dispatcher + Send> DispatchExecutor<Inner> {
                     let mut outputs_to_add = Vec::with_capacity(downstream_actor_infos.len());
                     for downstream_actor_info in downstream_actor_infos {
                         let down_id = downstream_actor_info.get_actor_id();
-                        let up_down_ids = (self.actor_id, down_id);
                         let downstream_addr = downstream_actor_info.get_host()?.to_socket_addr()?;
-                        if is_local_address(&downstream_addr, &self.context.addr) {
-                            let tx = self.context.take_sender(&up_down_ids)?;
-                            outputs_to_add
-                                .push(Box::new(LocalOutput::new(down_id, tx)) as BoxedOutput)
-                        } else {
-                            let tx = self.context.take_sender(&up_down_ids)?;
-                            outputs_to_add
-                                .push(Box::new(RemoteOutput::new(down_id, tx)) as BoxedOutput)
-                        }
+                        outputs_to_add.push(new_output(
+                            &self.context,
+                            downstream_addr,
+                            self.actor_id,
+                            &down_id,
+                        )?);
                     }
                     self.inner.add_outputs(outputs_to_add);
                 }

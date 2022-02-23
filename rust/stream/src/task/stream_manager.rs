@@ -254,13 +254,7 @@ impl StreamManagerCore {
                     })?
                     .get_host()?;
                 let downstream_addr = host_addr.to_socket_addr()?;
-                let tx = self.context.take_sender(&(actor_id, *down_id))?;
-                if is_local_address(&downstream_addr, &self.context.addr) {
-                    // if this is a local downstream actor
-                    Ok(Box::new(LocalOutput::new(*down_id, tx)) as Box<dyn Output>)
-                } else {
-                    Ok(Box::new(RemoteOutput::new(*down_id, tx)) as Box<dyn Output>)
-                }
+                new_output(&self.context, downstream_addr, actor_id, down_id)
             })
             .collect::<Result<Vec<_>>>()?;
 
