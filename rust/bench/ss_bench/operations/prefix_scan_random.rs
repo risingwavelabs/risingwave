@@ -19,9 +19,9 @@ impl Operations {
         // generate queried prefixes
         let mut scan_prefixes = match self.prefixes.is_empty() {
             // if prefixes is empty, use default prefix: ["a"*key_prefix_size]
-            true => Workload::new_random_keys(opts, 233, opts.reads as u64).0,
+            true => Workload::new_random_keys(opts, opts.reads as u64).0,
             false => {
-                let mut rng = StdRng::seed_from_u64(233);
+                let mut rng = StdRng::seed_from_u64(opts.seed);
                 let dist = Uniform::from(0..self.prefixes.len());
                 (0..opts.reads as usize)
                     .into_iter()

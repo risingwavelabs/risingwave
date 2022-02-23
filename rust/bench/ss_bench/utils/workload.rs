@@ -45,13 +45,13 @@ impl Workload {
     }
 
     /// Generate the values of given number
-    pub(crate) fn new_values(opts: &Opts, base_seed: u64, value_num: u64) -> Vec<Option<Bytes>> {
+    pub(crate) fn new_values(opts: &Opts, value_num: u64) -> Vec<Option<Bytes>> {
         let str_dist = Uniform::new_inclusive(0, 255);
         (0..value_num)
             .into_iter()
             .map(|i| {
-                // set random seed to make bench reproducable
-                let value = StdRng::seed_from_u64(base_seed + i)
+                // set seed offset to make values different
+                let value = StdRng::seed_from_u64(opts.seed + i)
                     .sample_iter(&str_dist)
                     .take(opts.value_size as usize)
                     .map(u8::from)
@@ -69,7 +69,7 @@ impl Workload {
     }
 
     /// Generate the random keys of given number
-    pub(crate) fn new_random_keys(opts: &Opts, base_seed: u64, key_num: u64) -> (Prefixes, Keys) {
+    pub(crate) fn new_random_keys(opts: &Opts, key_num: u64) -> (Prefixes, Keys) {
         // --- get prefixes ---
         let str_dist = Uniform::new_inclusive(0, 255);
 
@@ -77,8 +77,8 @@ impl Workload {
         let prefixes = (0..prefix_num)
             .into_iter()
             .map(|i| {
-                // set random seed to make bench reproducable
-                let prefix = StdRng::seed_from_u64(base_seed + i)
+                // set seed offset to make values different
+                let prefix = StdRng::seed_from_u64(opts.seed + i)
                     .sample_iter(&str_dist)
                     .take(opts.key_prefix_size as usize)
                     .map(u8::from)
@@ -92,8 +92,8 @@ impl Workload {
         let keys = (0..key_num as u64)
             .into_iter()
             .map(|i| {
-                // set random seed to make bench reproducable
-                let user_key = StdRng::seed_from_u64(base_seed + i + 1)
+                // set seed offset to make values different
+                let user_key = StdRng::seed_from_u64(opts.seed + i + 1)
                     .sample_iter(&str_dist)
                     .take(opts.key_size as usize)
                     .map(u8::from)

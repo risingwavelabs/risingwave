@@ -74,6 +74,9 @@ pub(crate) struct Opts {
     #[clap(long, default_value_t = 100)]
     value_size: u32,
 
+    #[clap(long, default_value_t = 0)]
+    seed: u64,
+
     // ----- flag -----
     #[clap(long)]
     statistics: bool,

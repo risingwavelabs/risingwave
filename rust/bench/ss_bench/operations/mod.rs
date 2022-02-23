@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use bytes::Bytes;
 use risingwave_storage::StateStore;
 
@@ -54,11 +56,9 @@ impl Operations {
     }
 
     /// Untrack deleted keys
-    fn untrack_keys(&mut self, mut other: Vec<Bytes>) {
-        // TODO(Ting Sun): consider use Set as the data structure for keys and prefixes
-        for keys in other.drain(..) {
-            self.keys.retain(|k| k != &keys);
-        }
+    fn untrack_keys(&mut self, other: Vec<Bytes>) {
+        let untrack_set = other.into_iter().collect::<BTreeSet<_>>();
+        self.keys.retain(|k| !untrack_set.contains(k));
     }
 
     /// Untrack prefixes of deleted keys

@@ -16,9 +16,9 @@ impl Operations {
     pub(crate) async fn get_random(&self, store: &impl StateStore, opts: &Opts) {
         // generate queried point get key
         let get_keys = match self.keys.is_empty() {
-            true => Workload::new_random_keys(opts, 233, opts.reads as u64).1,
+            true => Workload::new_random_keys(opts, opts.reads as u64).1,
             false => {
-                let mut rng = StdRng::seed_from_u64(233);
+                let mut rng = StdRng::seed_from_u64(opts.seed);
                 let dist = Uniform::from(0..self.keys.len());
                 (0..opts.reads)
                     .into_iter()

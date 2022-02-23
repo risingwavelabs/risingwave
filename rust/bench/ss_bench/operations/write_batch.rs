@@ -11,8 +11,8 @@ use crate::Opts;
 
 impl Operations {
     pub(crate) async fn write_batch(&mut self, store: &impl StateStore, opts: &Opts) {
-        let (prefixes, keys) = Workload::new_random_keys(opts, 233, opts.writes as u64);
-        let values = Workload::new_values(opts, 234, opts.writes as u64);
+        let (prefixes, keys) = Workload::new_random_keys(opts, opts.writes as u64);
+        let values = Workload::new_values(opts,  opts.writes as u64);
 
         // add new prefixes and keys to global prefixes and keys
         self.track_prefixes(prefixes);
@@ -32,7 +32,7 @@ impl Operations {
     }
 
     pub(crate) async fn delete_random(&mut self, store: &impl StateStore, opts: &Opts) {
-        let (prefixes, keys) = Workload::new_random_keys(opts, 233, opts.deletes as u64);
+        let (prefixes, keys) = Workload::new_random_keys(opts, opts.deletes as u64);
         let values = vec![None; opts.deletes as usize];
 
         self.untrack_keys(keys.clone());

@@ -140,6 +140,11 @@ Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
   - Size (bytes) of each value.
   - Default: 100
 
+- `--seed`
+  
+  - Seed base for random number generators.
+  - Default: 0
+
 # Flag
 
 - `--statistics`
