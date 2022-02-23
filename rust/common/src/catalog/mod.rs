@@ -1,9 +1,9 @@
 mod column;
 mod schema;
 
-pub use column::*;
 use core::fmt;
 
+pub use column::*;
 pub use schema::*;
 
 pub enum CatalogId {
