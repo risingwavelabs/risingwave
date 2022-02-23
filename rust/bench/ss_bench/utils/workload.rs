@@ -88,12 +88,11 @@ impl Workload {
     /// Generate the random keys of given number
     pub(crate) fn new_random_keys(opts: &Opts, key_num: u64, rng: &mut StdRng) -> (Prefixes, Keys) {
         // --- get prefixes ---
-        let str_dist = Uniform::new_inclusive(0, 255);
-
         let prefix_num = Self::prefix_num(opts, key_num);
         let prefixes = Workload::new_random_prefixes(opts, prefix_num, rng);
 
         // --- get keys ---
+        let str_dist = Uniform::new_inclusive(0, 255);
         let keys = (0..key_num as u64)
             .into_iter()
             .map(|i| {
