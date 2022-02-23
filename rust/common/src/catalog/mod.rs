@@ -34,7 +34,7 @@ impl SchemaId {
     }
 }
 
-#[derive(Clone, Debug, Default, Hash, PartialOrd, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, Hash, PartialOrd, PartialEq, Eq)]
 pub struct TableId {
     pub table_id: u32,
 }
