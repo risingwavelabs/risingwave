@@ -17,7 +17,7 @@ class Api {
       return data;
     } catch (e) {
       console.error(e);
-      throw Error(e);
+      throw Error("Failed to fetch " + url);
     }
   }
 }
