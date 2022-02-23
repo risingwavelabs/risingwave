@@ -6,6 +6,7 @@
 ~/code/risingwave/rust: cargo run --bin ss-bench -- \
  --benchmarks "writebatch,getseq,getrandom,prefixscanrandom" \
  --batch-size 1000 \
+ --writes 10000 \
  --reads 500 \
  --concurrency-num 4 \
  --statistics
@@ -83,9 +84,10 @@
 Comma-separated list of operations to run in the specified order. Following operations are supported:
 
 - `writebatch`: write N key/values in sequential key order in async mode.
-- `getrandom`: read N times in random order.
-- `getseq`: read N times sequentially.
-- `prefixscanrandom`: prefix scan N times in random order.
+- `deleterandom`: delete N keys in random order. May delete a key/value many times even it has been deleted before during this operation. If the state store is already empty before this operation, randomly-generated keys would be deleted.
+- `getrandom`: read N keys in random order. May read a key/value many times even it has been read before during this operation. If the state store is already empty before this operation, randomly-generated keys would be read instead.
+- `getseq`: read N times sequentially. Panic if keys in the state store are less than number to get.
+- `prefixscanrandom`: prefix scan N times in random order. May scan a prefix many times even it has been scanned before during this operation. If the state store is already empty before this operation, randomly-generated prefixes would be scanned in this empty state store.
 
 Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
 
@@ -106,17 +108,17 @@ Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
   - Number of read keys. If negative, do `--num` reads.
   - Default: -1
 
-- `--write_batches`
+- `--writes`
 
-  - Number of **written batches**.
-  - Default: 100
-
-## Single Batch
+  - Number of written key/values. If negative, do `--num` reads.
+  - Default: -1
 
 - `--batch-size`
 
-  - Number of key/values in a batch.
+  - **Max** number of key/values in a batch. When the key/values are not evenly divided by the `--batch-size`, the last batch will be the remainder.
   - Default: 100
+
+## Key/values Sizes
 
 - `--key-size`
   
@@ -137,6 +139,11 @@ Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
   
   - Size (bytes) of each value.
   - Default: 100
+
+- `--seed`
+  
+  - Seed base for random number generators.
+  - Default: 0
 
 # Flag
 

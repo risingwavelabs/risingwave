@@ -38,6 +38,11 @@ pub struct LocalSimpleAggExecutor {
 
     /// Identity string
     identity: String,
+
+    /// Logical Operator Info
+    op_info: String,
+    /// Epoch
+    epoch: u64,
 }
 
 impl LocalSimpleAggExecutor {
@@ -46,7 +51,7 @@ impl LocalSimpleAggExecutor {
         agg_calls: Vec<AggCall>,
         pk_indices: PkIndices,
         executor_id: u64,
-        identity: String,
+        op_info: String,
     ) -> Result<Self> {
         // simple agg does not have group key
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
@@ -69,7 +74,9 @@ impl LocalSimpleAggExecutor {
             is_dirty: false,
             input,
             agg_calls,
-            identity: format!("{} {:X}", identity, executor_id),
+            identity: format!("LocalSimpleAggExecutor {:X}", executor_id),
+            op_info,
+            epoch: 0,
         })
     }
 }
@@ -91,10 +98,22 @@ impl Executor for LocalSimpleAggExecutor {
     fn identity(&self) -> &str {
         self.identity.as_str()
     }
+
+    fn logical_operator_info(&self) -> &str {
+        &self.op_info
+    }
 }
 
 #[async_trait]
 impl AggExecutor for LocalSimpleAggExecutor {
+    fn current_epoch(&self) -> u64 {
+        self.epoch
+    }
+
+    fn update_epoch(&mut self, new_epoch: u64) {
+        self.epoch = new_epoch;
+    }
+
     fn cached_barrier_message_mut(&mut self) -> &mut Option<Barrier> {
         &mut self.cached_barrier_message
     }
@@ -117,7 +136,7 @@ impl AggExecutor for LocalSimpleAggExecutor {
         Ok(())
     }
 
-    async fn flush_data(&mut self, _epoch: u64) -> Result<Option<StreamChunk>> {
+    async fn flush_data(&mut self) -> Result<Option<StreamChunk>> {
         if !self.is_dirty {
             return Ok(None);
         }

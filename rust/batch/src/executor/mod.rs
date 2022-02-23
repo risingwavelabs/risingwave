@@ -14,7 +14,6 @@ use risingwave_common::error::Result;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::PlanNode;
 pub use row_seq_scan::*;
-pub use seq_scan::*;
 use sort_agg::*;
 use top_n::*;
 
@@ -28,7 +27,7 @@ use crate::executor::join::HashJoinExecutorBuilder;
 pub use crate::executor::stream_scan::StreamScanExecutor;
 use crate::executor::trace::TraceExecutor;
 use crate::executor::values::ValuesExecutor;
-use crate::task::{BatchTaskEnv, TaskId};
+use crate::task::{BatchEnvironment, TaskId};
 
 mod create_source;
 mod create_table;
@@ -45,7 +44,6 @@ mod merge_sort_exchange;
 mod order_by;
 mod projection;
 mod row_seq_scan;
-mod seq_scan;
 mod sort_agg;
 mod stream_scan;
 #[cfg(test)]
@@ -86,7 +84,7 @@ pub trait BoxedExecutorBuilder {
 pub struct ExecutorBuilder<'a> {
     plan_node: &'a PlanNode,
     task_id: &'a TaskId,
-    env: BatchTaskEnv,
+    env: BatchEnvironment,
 }
 
 macro_rules! build_executor {
@@ -102,7 +100,7 @@ macro_rules! build_executor {
 }
 
 impl<'a> ExecutorBuilder<'a> {
-    pub fn new(plan_node: &'a PlanNode, task_id: &'a TaskId, env: BatchTaskEnv) -> Self {
+    pub fn new(plan_node: &'a PlanNode, task_id: &'a TaskId, env: BatchEnvironment) -> Self {
         Self {
             plan_node,
             task_id,
@@ -129,7 +127,6 @@ impl<'a> ExecutorBuilder<'a> {
     fn try_build(&self) -> Result<BoxedExecutor> {
         let real_executor = build_executor! { self,
           NodeBody::CreateTable => CreateTableExecutor,
-          NodeBody::SeqScan => SeqScanExecutor,
           NodeBody::RowSeqScan => RowSeqScanExecutor,
           NodeBody::Insert => InsertExecutor,
           NodeBody::DropTable => DropTableExecutor,
@@ -159,7 +156,7 @@ impl<'a> ExecutorBuilder<'a> {
         self.plan_node
     }
 
-    pub fn global_task_env(&self) -> &BatchTaskEnv {
+    pub fn global_batch_env(&self) -> &BatchEnvironment {
         &self.env
     }
 }
@@ -169,7 +166,7 @@ mod tests {
     use risingwave_pb::plan::PlanNode;
 
     use crate::executor::ExecutorBuilder;
-    use crate::task::{BatchTaskEnv, TaskId};
+    use crate::task::{BatchEnvironment, TaskId};
 
     #[test]
     fn test_clone_for_plan() {
@@ -181,7 +178,7 @@ mod tests {
             stage_id: 1,
             query_id: "test_query_id".to_string(),
         };
-        let builder = ExecutorBuilder::new(&plan_node, task_id, BatchTaskEnv::for_test());
+        let builder = ExecutorBuilder::new(&plan_node, task_id, BatchEnvironment::for_test());
         let child_plan = &PlanNode {
             ..Default::default()
         };

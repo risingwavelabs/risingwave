@@ -99,6 +99,8 @@ pub struct ReceiverExecutor {
     schema: Schema,
     pk_indices: PkIndices,
     receiver: Receiver<Message>,
+    /// Logical Operator Info
+    op_info: String,
 }
 
 impl std::fmt::Debug for ReceiverExecutor {
@@ -111,11 +113,17 @@ impl std::fmt::Debug for ReceiverExecutor {
 }
 
 impl ReceiverExecutor {
-    pub fn new(schema: Schema, pk_indices: PkIndices, receiver: Receiver<Message>) -> Self {
+    pub fn new(
+        schema: Schema,
+        pk_indices: PkIndices,
+        receiver: Receiver<Message>,
+        op_info: String,
+    ) -> Self {
         Self {
             schema,
             pk_indices,
             receiver,
+            op_info,
         }
     }
 }
@@ -142,6 +150,10 @@ impl Executor for ReceiverExecutor {
 
     fn identity(&self) -> &str {
         "ReceiverExecutor"
+    }
+
+    fn logical_operator_info(&self) -> &str {
+        &self.op_info
     }
 }
 
@@ -172,6 +184,9 @@ pub struct MergeExecutor {
 
     /// Belonged actor id.
     actor_id: u32,
+
+    /// Logical Operator Info
+    op_info: String,
 }
 
 impl std::fmt::Debug for MergeExecutor {
@@ -190,6 +205,7 @@ impl MergeExecutor {
         pk_indices: PkIndices,
         actor_id: u32,
         inputs: Vec<Receiver<Message>>,
+        op_info: String,
     ) -> Self {
         Self {
             schema,
@@ -200,6 +216,7 @@ impl MergeExecutor {
             terminated: 0,
             next_barrier: None,
             actor_id,
+            op_info,
         }
     }
 }
@@ -268,6 +285,10 @@ impl Executor for MergeExecutor {
     fn identity(&self) -> &'static str {
         "MergeExecutor"
     }
+
+    fn logical_operator_info(&self) -> &str {
+        &self.op_info
+    }
 }
 
 #[cfg(test)]
@@ -309,7 +330,13 @@ mod tests {
             txs.push(tx);
             rxs.push(rx);
         }
-        let mut merger = MergeExecutor::new(Schema::default(), vec![], 0, rxs);
+        let mut merger = MergeExecutor::new(
+            Schema::default(),
+            vec![],
+            0,
+            rxs,
+            "MergerExecutor".to_string(),
+        );
 
         let mut handles = Vec::with_capacity(CHANNEL_NUMBER);
 

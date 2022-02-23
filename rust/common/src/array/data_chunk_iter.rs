@@ -198,8 +198,8 @@ impl RowDeserializer {
         let mut values = vec![];
         values.reserve(self.data_types.len());
         let mut deserializer = memcomparable::Deserializer::new(data);
-        for &ty in &self.data_types {
-            values.push(deserialize_datum_from(&ty, &mut deserializer)?);
+        for ty in &self.data_types {
+            values.push(deserialize_datum_from(ty, &mut deserializer)?);
         }
         Ok(Row(values))
     }
@@ -209,8 +209,11 @@ impl RowDeserializer {
         let mut values = vec![];
         values.reserve(self.data_types.len());
         let mut deserializer = memcomparable::Deserializer::new(data);
-        for &ty in &self.data_types {
-            values.push(deserialize_datum_not_null_from(ty, &mut deserializer)?);
+        for ty in &self.data_types {
+            values.push(deserialize_datum_not_null_from(
+                ty.clone(),
+                &mut deserializer,
+            )?);
         }
         Ok(Row(values))
     }
@@ -250,7 +253,7 @@ mod tests {
             Some(ScalarImpl::Interval(IntervalUnit::new(7, 8, 9))),
         ]);
         let bytes = row.serialize_not_null().unwrap();
-        assert_eq!(bytes.len(), 10 + 1 + 2 + 4 + 8 + 4 + 8 + 17 + 16);
+        assert_eq!(bytes.len(), 10 + 1 + 2 + 4 + 8 + 4 + 8 + 5 + 16);
 
         let de = RowDeserializer::new(vec![
             Ty::Varchar,
@@ -281,7 +284,7 @@ mod tests {
             Some(ScalarImpl::Interval(IntervalUnit::new(7, 8, 9))),
         ]);
         let bytes = row.serialize().unwrap();
-        assert_eq!(bytes.len(), 10 + 1 + 2 + 4 + 8 + 4 + 8 + 17 + 16 + 9);
+        assert_eq!(bytes.len(), 10 + 1 + 2 + 4 + 8 + 4 + 8 + 5 + 16 + 9);
 
         let de = RowDeserializer::new(vec![
             Ty::Varchar,

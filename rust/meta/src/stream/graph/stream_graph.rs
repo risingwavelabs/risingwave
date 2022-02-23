@@ -1,5 +1,5 @@
 use std::collections::hash_map::{Entry, HashMap};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::ops::Deref;
 use std::sync::Arc;
 
@@ -10,8 +10,10 @@ use risingwave_pb::stream_plan::dispatcher::DispatcherType;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{Dispatcher, MergeNode, StreamActor, StreamNode};
 
-use crate::model::{ActorId, FragmentId, TableRawId};
-use crate::stream::FragmentManagerRef;
+use crate::cluster::NodeId;
+use crate::model::{ActorId, FragmentId};
+use crate::storage::MetaStore;
+use crate::stream::{CreateMaterializedViewContext, FragmentManagerRef};
 
 /// [`StreamActorBuilder`] build a stream actor in a stream DAG.
 pub struct StreamActorBuilder {
@@ -100,14 +102,17 @@ impl StreamActorBuilder {
 
 /// [`StreamGraphBuilder`] build a stream graph. It injects some information to achieve
 /// dependencies. See `build_inner` for more details.
-pub struct StreamGraphBuilder {
+pub struct StreamGraphBuilder<S> {
     actor_builders: BTreeMap<ActorId, StreamActorBuilder>,
     /// (ctx) fragment manager.
-    fragment_manager_ref: FragmentManagerRef,
+    fragment_manager_ref: FragmentManagerRef<S>,
 }
 
-impl StreamGraphBuilder {
-    pub fn new(fragment_manager_ref: FragmentManagerRef) -> Self {
+impl<S> StreamGraphBuilder<S>
+where
+    S: MetaStore,
+{
+    pub fn new(fragment_manager_ref: FragmentManagerRef<S>) -> Self {
         Self {
             actor_builders: BTreeMap::new(),
             fragment_manager_ref,
@@ -138,24 +143,53 @@ impl StreamGraphBuilder {
     }
 
     /// Build final stream DAG with dependencies with current actor builders.
-    pub fn build(&self) -> Result<HashMap<FragmentId, Vec<StreamActor>>> {
+    pub fn build(
+        &self,
+        ctx: &mut CreateMaterializedViewContext,
+    ) -> Result<HashMap<FragmentId, Vec<StreamActor>>> {
         let mut graph = HashMap::new();
         let mut table_sink_map = HashMap::new();
+        let mut dispatches: HashMap<ActorId, Vec<ActorId>> = HashMap::new();
+        let mut upstream_node_actors = HashMap::new();
+
         for builder in self.actor_builders.values() {
             let mut actor = builder.build();
+            let actor_id = actor.actor_id;
 
             let upstream_actors = builder.get_upstream_actors();
+            let mut dispatch_upstreams = vec![];
+
             actor.nodes = Some(self.build_inner(
                 &mut table_sink_map,
+                &mut dispatch_upstreams,
+                &mut upstream_node_actors,
                 actor.get_nodes()?,
                 &upstream_actors,
                 0,
             )?);
+
             graph
                 .entry(builder.get_fragment_id())
                 .or_insert(vec![])
                 .push(actor);
+
+            for up_id in dispatch_upstreams {
+                match dispatches.entry(up_id) {
+                    Entry::Occupied(mut o) => {
+                        o.get_mut().push(actor_id);
+                    }
+                    Entry::Vacant(v) => {
+                        v.insert(vec![actor_id]);
+                    }
+                }
+            }
         }
+        for actor_ids in upstream_node_actors.values_mut() {
+            actor_ids.sort_unstable();
+            actor_ids.dedup();
+        }
+        ctx.dispatches = dispatches;
+        ctx.upstream_node_actors = upstream_node_actors;
         Ok(graph)
     }
 
@@ -167,7 +201,9 @@ impl StreamGraphBuilder {
     /// ids if it is a [`ChainNode`].
     pub fn build_inner(
         &self,
-        table_sink_map: &mut HashMap<TableRawId, Vec<ActorId>>,
+        table_sink_map: &mut HashMap<TableId, Vec<ActorId>>,
+        dispatch_upstreams: &mut Vec<ActorId>,
+        upstream_node_actors: &mut HashMap<NodeId, Vec<ActorId>>,
         stream_node: &StreamNode,
         upstream_actor_id: &[Vec<ActorId>],
         next_idx: usize,
@@ -175,11 +211,18 @@ impl StreamGraphBuilder {
         match stream_node.get_node()? {
             Node::ExchangeNode(_) => self.build_inner(
                 table_sink_map,
+                dispatch_upstreams,
+                upstream_node_actors,
                 stream_node.input.get(0).unwrap(),
                 upstream_actor_id,
                 next_idx,
             ),
-            Node::ChainNode(_) => self.resolve_chain_node(table_sink_map, stream_node),
+            Node::ChainNode(_) => self.resolve_chain_node(
+                table_sink_map,
+                dispatch_upstreams,
+                upstream_node_actors,
+                stream_node,
+            ),
             _ => {
                 let mut new_stream_node = stream_node.clone();
                 let mut next_idx_new = next_idx;
@@ -195,9 +238,7 @@ impl StreamGraphBuilder {
                                         .get(next_idx_new)
                                         .cloned()
                                         .unwrap(),
-                                    input_column_descs: exchange_node
-                                        .get_input_column_descs()
-                                        .clone(),
+                                    fields: exchange_node.get_fields().clone(),
                                 })),
                                 operator_id: input.operator_id,
                                 identity: "MergeExecutor".to_string(),
@@ -205,12 +246,18 @@ impl StreamGraphBuilder {
                             next_idx_new += 1;
                         }
                         Node::ChainNode(_) => {
-                            new_stream_node.input[idx] =
-                                self.resolve_chain_node(table_sink_map, input)?;
+                            new_stream_node.input[idx] = self.resolve_chain_node(
+                                table_sink_map,
+                                dispatch_upstreams,
+                                upstream_node_actors,
+                                input,
+                            )?;
                         }
                         _ => {
                             new_stream_node.input[idx] = self.build_inner(
                                 table_sink_map,
+                                dispatch_upstreams,
+                                upstream_node_actors,
                                 input,
                                 upstream_actor_id,
                                 next_idx_new,
@@ -225,24 +272,48 @@ impl StreamGraphBuilder {
 
     fn resolve_chain_node(
         &self,
-        table_sink_map: &mut HashMap<TableRawId, Vec<ActorId>>,
+        table_sink_map: &mut HashMap<TableId, Vec<ActorId>>,
+        dispatch_upstreams: &mut Vec<ActorId>,
+        upstream_node_actors: &mut HashMap<NodeId, Vec<ActorId>>,
         stream_node: &StreamNode,
     ) -> Result<StreamNode> {
         if let Node::ChainNode(chain_node) = stream_node.get_node().unwrap() {
             let input = stream_node.get_input();
             assert_eq!(input.len(), 2);
             let table_id = TableId::from(&chain_node.table_ref_id);
-            let table_raw_id = chain_node.table_ref_id.as_ref().unwrap().table_id;
-            let upstream_actor_ids = match table_sink_map.entry(table_raw_id) {
-                Entry::Vacant(v) => {
-                    let actor_ids = self
-                        .fragment_manager_ref
-                        .get_table_sink_actor_ids(&table_id)?;
-                    v.insert(actor_ids)
+            let upstream_actor_ids = HashSet::<ActorId>::from_iter(
+                match table_sink_map.entry(table_id) {
+                    Entry::Vacant(v) => {
+                        let actor_ids = self
+                            .fragment_manager_ref
+                            .get_table_sink_actor_ids(&table_id)?;
+                        v.insert(actor_ids).clone()
+                    }
+                    Entry::Occupied(o) => o.get().clone(),
                 }
-                Entry::Occupied(o) => o.into_mut(),
+                .into_iter(),
+            );
+
+            dispatch_upstreams.extend(upstream_actor_ids.iter());
+            let chain_upstream_table_node_actors =
+                self.fragment_manager_ref.get_table_node_actors(&table_id)?;
+            let chain_upstream_node_actors = chain_upstream_table_node_actors
+                .iter()
+                .flat_map(|(node_id, actor_ids)| {
+                    actor_ids.iter().map(|actor_id| (*node_id, *actor_id))
+                })
+                .filter(|(_, actor_id)| upstream_actor_ids.contains(actor_id))
+                .into_group_map();
+            for (node_id, actor_ids) in chain_upstream_node_actors {
+                match upstream_node_actors.entry(node_id) {
+                    Entry::Occupied(mut o) => {
+                        o.get_mut().extend(actor_ids.iter());
+                    }
+                    Entry::Vacant(v) => {
+                        v.insert(actor_ids);
+                    }
+                }
             }
-            .to_owned();
 
             let chain_input = vec![
                 StreamNode {
@@ -253,8 +324,8 @@ impl StreamGraphBuilder {
                         .map(|x| *x as u32)
                         .collect_vec(),
                     node: Some(Node::MergeNode(MergeNode {
-                        upstream_actor_id: upstream_actor_ids,
-                        input_column_descs: chain_node.upstream_column_descs.clone(),
+                        upstream_actor_id: Vec::from_iter(upstream_actor_ids.into_iter()),
+                        fields: chain_node.upstream_fields.clone(),
                     })),
                     operator_id: input.get(0).as_ref().unwrap().operator_id,
                     identity: "MergeExecutor".to_string(),

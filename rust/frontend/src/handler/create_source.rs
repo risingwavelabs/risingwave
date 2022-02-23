@@ -82,7 +82,7 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn handle_create_source() {
-        let meta = LocalMeta::start_in_tempdir().await;
+        let meta = LocalMeta::start().await;
 
         let proto_file = create_proto_file();
         let sql = format!(

@@ -6,7 +6,7 @@ use risingwave_batch::executor::{
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{Array, DataChunk, F64Array};
 use risingwave_common::array_nonnull;
-use risingwave_common::catalog::{Field, Schema, SchemaId, TableId};
+use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::Result;
 use risingwave_common::types::IntoOrdered;
 use risingwave_common::util::sort_util::OrderType;
@@ -18,8 +18,7 @@ use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::{SimpleTableManager, TableManager};
 use risingwave_storage::{Keyspace, StateStoreImpl};
 use risingwave_stream::executor::{
-    Barrier, Executor as StreamExecutor, MaterializeExecutor, Message, PkIndices,
-    StreamSourceExecutor,
+    Barrier, Executor as StreamExecutor, MaterializeExecutor, Message, PkIndices, SourceExecutor,
 };
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -93,12 +92,12 @@ async fn test_table_v2_materialize() -> Result<()> {
     ];
 
     // Create table v2 using `CreateTableExecutor`
-    let mut create_table = CreateTableExecutor::new_v2(
-        source_table_id.clone(),
+    let mut create_table = CreateTableExecutor::new(
+        source_table_id,
         table_manager.clone(),
         source_manager.clone(),
         table_columns,
-        "CreateTableExecutorV2".to_string(),
+        "CreateTableExecutor".to_string(),
     );
     // Execute
     create_table.open().await?;
@@ -115,22 +114,22 @@ async fn test_table_v2_materialize() -> Result<()> {
                 .iter()
                 .find(|c| c.column_id == column_id)
                 .unwrap();
-            fields.push(Field::unnamed(column_desc.data_type));
+            fields.push(Field::unnamed(column_desc.data_type.clone()));
         }
         Schema::new(fields)
     };
 
     // Register associated materialized view
-    let mview_id = TableId::new(SchemaId::default(), 1);
+    let mview_id = TableId::new(1);
     table_manager.register_associated_materialized_view(&source_table_id, &mview_id)?;
     source_manager.register_associated_materialized_view(&source_table_id, &mview_id)?;
 
-    // Create a `StreamSourceExecutor` to read the changes
+    // Create a `SourceExecutor` to read the changes
     let all_column_ids = vec![0, 1];
     let all_schema = get_schema(&all_column_ids);
     let (barrier_tx, barrier_rx) = unbounded_channel();
-    let stream_source = StreamSourceExecutor::new(
-        source_table_id.clone(),
+    let stream_source = SourceExecutor::new(
+        source_table_id,
         source_desc.clone(),
         all_column_ids.clone(),
         all_schema.clone(),
@@ -138,7 +137,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         barrier_rx,
         1,
         1,
-        "StreamSourceExecutor".to_string(),
+        "SourceExecutor".to_string(),
     )?;
 
     // Create a `Materialize` to write the changes to storage
@@ -159,12 +158,8 @@ async fn test_table_v2_materialize() -> Result<()> {
     ))];
     let chunk = DataChunk::builder().columns(columns.clone()).build();
     let insert_inner = SingleChunkExecutor::new(chunk, all_schema);
-    let mut insert = InsertExecutor::new(
-        mview_id.clone(),
-        source_manager.clone(),
-        Box::new(insert_inner),
-        0,
-    );
+    let mut insert =
+        InsertExecutor::new(mview_id, source_manager.clone(), Box::new(insert_inner), 0);
 
     insert.open().await?;
     insert.next().await?;

@@ -2,7 +2,7 @@ use std::fmt;
 
 use risingwave_common::catalog::Schema;
 
-use super::{IntoPlanRef, LogicalJoin, PlanRef, PlanTreeNodeBinary};
+use super::{IntoPlanRef, LogicalJoin, PlanRef, PlanTreeNodeBinary, ToStreamProst};
 use crate::optimizer::property::{Distribution, WithDistribution, WithOrder, WithSchema};
 
 #[derive(Debug, Clone)]
@@ -45,3 +45,4 @@ impl WithSchema for StreamHashJoin {
 }
 impl WithDistribution for StreamHashJoin {}
 impl WithOrder for StreamHashJoin {}
+impl ToStreamProst for StreamHashJoin {}

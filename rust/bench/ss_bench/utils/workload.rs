@@ -1,58 +1,56 @@
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use bytes::{Bytes, BytesMut};
 use itertools::Itertools;
 use rand::distributions::Uniform;
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::Rng;
 use risingwave_storage::hummock::key::next_key;
 
-use crate::WorkloadType::*;
-use crate::{Opts, WorkloadType};
+use crate::Opts;
 
-type Keys = Vec<Bytes>;
 type Prefixes = Vec<Bytes>;
+type Keys = Vec<Bytes>;
 
-pub struct Workload {
-    pub batch: Vec<(Bytes, Option<Bytes>)>,
-    pub prefixes: Vec<Bytes>,
-}
+pub struct Workload;
+
+type Batch = Vec<(Bytes, Option<Bytes>)>;
 
 impl Workload {
-    pub(crate) fn new(opts: &Opts, workload_type: WorkloadType, seed: Option<u64>) -> Workload {
-        let base_seed = seed.unwrap_or(233);
+    pub(crate) fn make_batches(
+        opts: &Opts,
+        keys: Vec<Bytes>,
+        values: Vec<Option<Bytes>>,
+    ) -> Vec<Batch> {
+        let mut batches = vec![];
+        let mut batch = vec![];
 
-        // get ceil result
-        let prefix_num =
-            (opts.batch_size + opts.keys_per_prefix - 1) as u64 / opts.keys_per_prefix as u64;
-        let (prefixes, keys) = match workload_type {
-            WriteBatch | GetRandom | PrefixScanRandom | DeleteRandom => {
-                Self::new_random_keys(opts, base_seed, prefix_num)
+        let pairs = keys.into_iter().zip_eq(values.into_iter()).collect_vec();
+        for (k, v) in pairs {
+            batch.push((k, v));
+            if batch.len() == opts.batch_size as usize {
+                batch.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+                // As duplication rate is low, ignore filling data after deduplicating.
+                batch.dedup_by(|(k1, _), (k2, _)| k1 == k2);
+
+                batches.push(batch);
+                batch = vec![];
             }
-            GetSeq | DeleteSeq => Self::new_sequential_keys(opts, prefix_num),
-        };
+        }
+        if !batch.is_empty() {
+            batches.push(batch);
+        }
 
-        let values = match workload_type {
-            DeleteRandom | DeleteSeq => vec![None; keys.len()],
-            _ => Self::new_values(opts, base_seed),
-        };
-
-        let mut batch = keys.into_iter().zip_eq(values.into_iter()).collect_vec();
-        batch.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-        // As duplication rate is low, ignore filling data after deduplicating.
-        batch.dedup_by(|(k1, _), (k2, _)| k1 == k2);
-
-        Workload { batch, prefixes }
+        batches
     }
 
-    fn new_values(opts: &Opts, base_seed: u64) -> Vec<Option<Bytes>> {
+    /// Generate the values of given number
+    pub(crate) fn new_values(opts: &Opts, value_num: u64, rng: &mut StdRng) -> Vec<Option<Bytes>> {
         let str_dist = Uniform::new_inclusive(0, 255);
-        let value_num = opts.batch_size as u64;
         (0..value_num)
             .into_iter()
-            .map(|i| {
-                // set random seed to make bench reproducable
-                let value = StdRng::seed_from_u64(base_seed + i)
+            .map(|_| {
+                let value = rng
                     .sample_iter(&str_dist)
                     .take(opts.value_size as usize)
                     .map(u8::from)
@@ -63,15 +61,22 @@ impl Workload {
             .collect()
     }
 
-    fn new_random_keys(opts: &Opts, base_seed: u64, prefix_num: u64) -> (Prefixes, Keys) {
+    /// Determine the prefix number of given keys
+    fn prefix_num(opts: &Opts, keys_num: u64) -> u64 {
+        // get ceil result
+        (keys_num + opts.keys_per_prefix as u64 - 1) / opts.keys_per_prefix as u64
+    }
+
+    /// Generate the random keys of given number
+    pub(crate) fn new_random_keys(opts: &Opts, key_num: u64, rng: &mut StdRng) -> (Prefixes, Keys) {
         // --- get prefixes ---
         let str_dist = Uniform::new_inclusive(0, 255);
 
+        let prefix_num = Self::prefix_num(opts, key_num);
         let prefixes = (0..prefix_num)
             .into_iter()
-            .map(|i| {
-                // set random seed to make bench reproducable
-                let prefix = StdRng::seed_from_u64(base_seed + i)
+            .map(|_| {
+                let prefix = rng
                     .sample_iter(&str_dist)
                     .take(opts.key_prefix_size as usize)
                     .map(u8::from)
@@ -82,11 +87,10 @@ impl Workload {
             .collect_vec();
 
         // --- get keys ---
-        let keys = (0..opts.batch_size as u64)
+        let keys = (0..key_num as u64)
             .into_iter()
             .map(|i| {
-                // set random seed to make bench reproducable
-                let user_key = StdRng::seed_from_u64(base_seed + i + 1)
+                let user_key = rng
                     .sample_iter(&str_dist)
                     .take(opts.key_size as usize)
                     .map(u8::from)
@@ -104,27 +108,29 @@ impl Workload {
         (prefixes, keys)
     }
 
-    fn new_sequential_keys(opts: &Opts, prefix_num: u64) -> (Prefixes, Keys) {
+    /// Generate the sequential keys of given number
+    pub(crate) fn new_sequential_keys(opts: &Opts, key_num: u64) -> (Prefixes, Keys) {
         // --- get prefixes ---
+        let prefix_num = Self::prefix_num(opts, key_num);
         let mut prefixes = Vec::with_capacity(prefix_num as usize);
         let mut prefix = vec![b'\0'; opts.key_prefix_size as usize];
         for _ in 0..prefix_num as u64 {
             prefix = next_key(&prefix);
             // ensure next prefix exist
-            assert_ne!(prefix.len(), 0);
+            assert!(!prefix.is_empty());
             prefixes.push(Bytes::from(prefix.clone()));
         }
 
         // --- get keys ---
-        let mut keys = Vec::with_capacity(opts.batch_size as usize);
+        let mut keys = Vec::with_capacity(key_num as usize);
         let mut user_key = vec![b'\0'; opts.key_size as usize];
 
         for _ in 0..opts.keys_per_prefix as u64 {
             user_key = next_key(&user_key);
             // ensure next key exist
-            assert_ne!(user_key.len(), 0);
+            assert!(!user_key.is_empty());
 
-            // keys in a keyspace should be sequential
+            // keys in a key range should be sequential
             for prefix in &prefixes {
                 let mut key =
                     BytesMut::with_capacity((opts.key_prefix_size + opts.key_size) as usize);
@@ -140,7 +146,8 @@ impl Workload {
     }
 }
 
+/// generate epoch for the whole crate
 pub(crate) fn get_epoch() -> u64 {
     static EPOCH: AtomicU64 = AtomicU64::new(0);
-    EPOCH.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+    EPOCH.fetch_add(1, Ordering::SeqCst)
 }

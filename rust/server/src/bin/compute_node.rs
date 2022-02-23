@@ -2,10 +2,14 @@ use clap::StructOpt;
 use log::info;
 use risingwave::server::compute_node_serve;
 use risingwave::ComputeNodeOpts;
+use tikv_jemallocator::Jemalloc;
 use tracing::Level;
 use tracing_subscriber::filter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::prelude::*;
+
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
 
 /// Configure log targets for all `RisingWave` crates. When new crates are added and TRACE level
 /// logs are needed, add them here.
@@ -38,8 +42,7 @@ async fn main() {
             .with_target("hyper", Level::WARN)
             .with_target("h2", Level::WARN)
             .with_target("tower", Level::WARN)
-            .with_target("isahc", Level::WARN)
-            .with_target("sled", Level::WARN);
+            .with_target("isahc", Level::WARN);
 
         // Configure RisingWave's own crates to log at TRACE level, uncomment the following line if
         // needed.

@@ -4,23 +4,20 @@
     "input": [{
       "pkIndices": [2],
       "mergeNode": {
-        "inputColumnDescs": [{
-          "columnType": {
+        "fields": [{
+          "dataType": {
             "typeName": "INT32"
           },
-          "encoding": "RAW",
           "name": "v1"
         }, {
-          "columnType": {
+          "dataType": {
             "typeName": "INT32"
           },
-          "encoding": "RAW",
           "name": "v2"
         }, {
-          "columnType": {
+          "dataType": {
             "typeName": "INT64"
           },
-          "encoding": "RAW",
           "name": "_row_id"
         }]
       },
@@ -28,23 +25,20 @@
     }, {
       "pkIndices": [2],
       "mergeNode": {
-        "inputColumnDescs": [{
-          "columnType": {
+        "fields": [{
+          "dataType": {
             "typeName": "INT32"
           },
-          "encoding": "RAW",
           "name": "v1"
         }, {
-          "columnType": {
+          "dataType": {
             "typeName": "INT32"
           },
-          "encoding": "RAW",
           "name": "v2"
         }, {
-          "columnType": {
+          "dataType": {
             "typeName": "INT64"
           },
-          "encoding": "RAW",
           "name": "_row_id"
         }]
       },
@@ -53,7 +47,8 @@
     "hashJoinNode": {
       "leftKey": [0],
       "rightKey": [0]
-    }
+    },
+    "identity": "RwStreamHashJoin(condition\u003d[\u003d($0, $3)], joinType\u003d[inner])"
   }],
   "mviewNode": {
     "tableRefId": {
@@ -61,7 +56,7 @@
         "databaseRefId": {
         }
       },
-      "tableId": 5
+      "tableId": 7
     },
     "columnDescs": [{
       "columnType": {

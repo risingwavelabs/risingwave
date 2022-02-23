@@ -57,7 +57,7 @@ async fn test_merger_sum_aggr() {
         let schema = Schema {
             fields: vec![Field::unnamed(DataType::Int64)],
         };
-        let input = ReceiverExecutor::new(schema, vec![], input_rx);
+        let input = ReceiverExecutor::new(schema, vec![], input_rx, "ReceiverExecutor".to_string());
         // for the local aggregator, we need two states: row count and sum
         let aggregator = LocalSimpleAggExecutor::new(
             Box::new(input),
@@ -79,7 +79,8 @@ async fn test_merger_sum_aggr() {
         )
         .unwrap();
         let (tx, rx) = channel(16);
-        let consumer = SenderConsumer::new(Box::new(aggregator), Box::new(LocalOutput::new(tx)));
+        let consumer =
+            SenderConsumer::new(Box::new(aggregator), Box::new(LocalOutput::new(233, tx)));
         let context = SharedContext::for_test().into();
         let actor = Actor::new(Box::new(consumer), 0, context);
         (actor, rx)
@@ -100,7 +101,7 @@ async fn test_merger_sum_aggr() {
         let (actor, channel) = make_actor(rx);
         outputs.push(channel);
         handles.push(tokio::spawn(actor.run()));
-        inputs.push(Box::new(LocalOutput::new(tx)) as Box<dyn Output>);
+        inputs.push(Box::new(LocalOutput::new(233, tx)) as Box<dyn Output>);
     }
 
     // create a round robin dispatcher, which dispatches messages to the actors
@@ -108,7 +109,8 @@ async fn test_merger_sum_aggr() {
     let schema = Schema {
         fields: vec![Field::unnamed(DataType::Int64)],
     };
-    let receiver_op = ReceiverExecutor::new(schema.clone(), vec![], rx);
+    let receiver_op =
+        ReceiverExecutor::new(schema.clone(), vec![], rx, "ReceiverExecutor".to_string());
     let dispatcher = DispatchExecutor::new(
         Box::new(receiver_op),
         RoundRobinDataDispatcher::new(inputs),
@@ -120,7 +122,7 @@ async fn test_merger_sum_aggr() {
     handles.push(tokio::spawn(actor.run()));
 
     // use a merge operator to collect data from dispatchers before sending them to aggregator
-    let merger = MergeExecutor::new(schema, vec![], 0, outputs);
+    let merger = MergeExecutor::new(schema, vec![], 0, outputs, "MergerExecutor".to_string());
 
     // for global aggregator, we need to sum data and sum row count
     let aggregator = SimpleAggExecutor::new(
@@ -188,7 +190,7 @@ async fn test_merger_sum_aggr() {
     }
 
     let data = items.lock().unwrap();
-    let array = data.last().unwrap().column(0).array_ref().as_int64();
+    let array = data.last().unwrap().column_at(0).array_ref().as_int64();
     assert_eq!(array.value_at(array.len() - 1), Some((0..10).sum()));
 }
 
@@ -212,11 +214,11 @@ fn make_tpchq6_expr() -> (BoxedExpression, BoxedExpression) {
         LiteralExpression::new(DataType::Float64, Some(ScalarImpl::Float64(0.07.into())));
     let const_24 = LiteralExpression::new(DataType::Int32, Some(ScalarImpl::Int32(24)));
     let t_shipdate = DataType::Timestamp;
-    let l_shipdate = InputRefExpression::new(t_shipdate, 0);
+    let l_shipdate = InputRefExpression::new(t_shipdate.clone(), 0);
     let l_shipdate_2 = InputRefExpression::new(t_shipdate, 0);
     let t_discount = DataType::Float64;
-    let l_discount = InputRefExpression::new(t_discount, 1);
-    let l_discount_2 = InputRefExpression::new(t_discount, 1);
+    let l_discount = InputRefExpression::new(t_discount.clone(), 1);
+    let l_discount_2 = InputRefExpression::new(t_discount.clone(), 1);
     let l_discount_3 = InputRefExpression::new(t_discount, 1);
     let t_quantity = DataType::Float64;
     let l_quantity = InputRefExpression::new(t_quantity, 2);
@@ -311,7 +313,12 @@ async fn test_tpch_q6() {
     // make an actor after dispatcher, which includes filter, projection, and local aggregator.
     let make_actor = |input_rx| {
         let (and, multiply) = make_tpchq6_expr();
-        let input = ReceiverExecutor::new(schema.clone(), vec![], input_rx);
+        let input = ReceiverExecutor::new(
+            schema.clone(),
+            vec![],
+            input_rx,
+            "ReceiverExecutor".to_string(),
+        );
 
         let filter = FilterExecutor::new(Box::new(input), and, 1, "FilterExecutor".to_string());
         let projection = ProjectExecutor::new(
@@ -343,7 +350,8 @@ async fn test_tpch_q6() {
         )
         .unwrap();
         let (tx, rx) = channel(16);
-        let consumer = SenderConsumer::new(Box::new(aggregator), Box::new(LocalOutput::new(tx)));
+        let consumer =
+            SenderConsumer::new(Box::new(aggregator), Box::new(LocalOutput::new(233, tx)));
         let context = SharedContext::for_test().into();
         let actor = Actor::new(Box::new(consumer), 0, context);
         (actor, rx)
@@ -363,12 +371,13 @@ async fn test_tpch_q6() {
         let (actor, channel) = make_actor(rx);
         outputs.push(channel);
         handles.push(tokio::spawn(actor.run()));
-        inputs.push(Box::new(LocalOutput::new(tx)) as Box<dyn Output>);
+        inputs.push(Box::new(LocalOutput::new(233, tx)) as Box<dyn Output>);
     }
 
     // create a round robin dispatcher, which dispatches messages to the actors
     let (mut input, rx) = channel(16);
-    let receiver_op = ReceiverExecutor::new(schema.clone(), vec![], rx);
+    let receiver_op =
+        ReceiverExecutor::new(schema.clone(), vec![], rx, "ReceiverExecutor".to_string());
     let dispatcher = DispatchExecutor::new(
         Box::new(receiver_op),
         RoundRobinDataDispatcher::new(inputs),
@@ -380,7 +389,13 @@ async fn test_tpch_q6() {
     handles.push(tokio::spawn(actor.run()));
 
     // use a merge operator to collect data from dispatchers before sending them to aggregator
-    let merger = MergeExecutor::new(schema.clone(), vec![], 0, outputs);
+    let merger = MergeExecutor::new(
+        schema.clone(),
+        vec![],
+        0,
+        outputs,
+        "MergerExecutor".to_string(),
+    );
 
     // create a global aggregator to sum data and sum row count
     let aggregator = SimpleAggExecutor::new(
@@ -527,7 +542,7 @@ async fn test_tpch_q6() {
         assert_eq!(chunk.ops(), vec![Insert]);
         assert_eq!(chunk.columns().len(), 1);
         assert_eq!(
-            chunk.column(0).array_ref().as_float64().value_at(0),
+            chunk.column_at(0).array_ref().as_float64().value_at(0),
             Some(1.1.into())
         );
 
@@ -536,7 +551,7 @@ async fn test_tpch_q6() {
         assert_eq!(chunk.columns().len(), 1);
         assert_relative_eq!(
             chunk
-                .column(0)
+                .column_at(0)
                 .array_ref()
                 .as_float64()
                 .value_at(1)

@@ -78,7 +78,7 @@ mod tests {
         for i in 0..values.len() {
             let value = Value::Number(String::from(values[i]), false);
             let res = binder.bind_value(value).unwrap();
-            let ans = Literal::new(data[i].clone(), data_type[i]);
+            let ans = Literal::new(data[i].clone(), data_type[i].clone());
             assert_eq!(res, ans);
         }
     }

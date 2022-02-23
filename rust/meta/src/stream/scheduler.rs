@@ -9,6 +9,7 @@ use risingwave_pb::common::{ActorInfo, WorkerType};
 
 use crate::cluster::{NodeId, NodeLocations, StoredClusterManager};
 use crate::model::{ActorId, ActorLocations};
+use crate::storage::MetaStore;
 
 /// [`ScheduleCategory`] defines all supported categories.
 pub enum ScheduleCategory {
@@ -23,8 +24,11 @@ pub enum ScheduleCategory {
 }
 
 /// [`Scheduler`] defines schedule logic for mv actors.
-pub struct Scheduler {
-    cluster_manager: Arc<StoredClusterManager>,
+pub struct Scheduler<S>
+where
+    S: MetaStore,
+{
+    cluster_manager: Arc<StoredClusterManager<S>>,
     category: ScheduleCategory,
 }
 
@@ -78,8 +82,11 @@ impl ScheduledLocations {
     }
 }
 
-impl Scheduler {
-    pub fn new(category: ScheduleCategory, cluster_manager: Arc<StoredClusterManager>) -> Self {
+impl<S> Scheduler<S>
+where
+    S: MetaStore,
+{
+    pub fn new(category: ScheduleCategory, cluster_manager: Arc<StoredClusterManager<S>>) -> Self {
         Self {
             cluster_manager,
             category,
@@ -152,12 +159,14 @@ mod test {
     use risingwave_pb::common::HostAddress;
 
     use super::*;
-    use crate::manager::MetaSrvEnv;
+    use crate::manager::{MetaSrvEnv, NotificationManager};
 
     #[tokio::test]
     async fn test_schedule() -> Result<()> {
         let env = MetaSrvEnv::for_test().await;
-        let cluster_manager = Arc::new(StoredClusterManager::new(env.clone(), None).await?);
+        let notification_manager = Arc::new(NotificationManager::new());
+        let cluster_manager =
+            Arc::new(StoredClusterManager::new(env.clone(), None, notification_manager).await?);
         let actors = (0..15).collect::<Vec<u32>>();
         let source_actors = (20..30).collect::<Vec<u32>>();
         for i in 0..10 {

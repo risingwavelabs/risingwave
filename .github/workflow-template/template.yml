@@ -5,8 +5,8 @@ name:
 on:
 
 env:
-  RUST_TOOLCHAIN: nightly-2022-01-13
-  CACHE_KEY_SUFFIX: v20220216
+  RUST_TOOLCHAIN: nightly-2022-02-21
+  CACHE_KEY_SUFFIX: v20220222
   CARGO_TERM_COLOR: always
 
 jobs:
@@ -57,13 +57,29 @@ jobs:
     needs:
       - compute-node-build
       - frontend-check
-    runs-on: ubuntu-latest
+      - start-runner-a
+    runs-on: ${{ needs.start-runner-a.outputs.label }} # run the job on the newly created runner
+    container:
+      image: public.ecr.aws/x5u3w5h6/risingwave-build-env:latest
+      options: --security-opt seccomp=unconfined
     timeout-minutes: 20 # NOTE: Increase this number when we have more tests.
     steps:
       - name: Checkout
         uses: actions/checkout@v2
         with:
           fetch-depth: 0
+
+      - name: Install rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: rustfmt, clippy
+
+      - name: Set up JDK 11
+        uses: actions/setup-java@v2
+        with:
+          java-version: "11"
+          distribution: "adopt"
 
       - uses: actions/download-artifact@v2
         name: Download compute-node binary
@@ -75,6 +91,12 @@ jobs:
         name: Download meta-node binary
         with:
           name: meta-node
+          path: ./.risingwave/bin
+
+      - uses: actions/download-artifact@v2
+        name: Download rust frontend binary
+        with:
+          name: frontend-v2
           path: ./.risingwave/bin
 
       - uses: actions/download-artifact@v2
@@ -93,12 +115,13 @@ jobs:
         run: |
           chmod +x ./.risingwave/bin/meta-node
           chmod +x ./.risingwave/bin/compute-node
+          chmod +x ./.risingwave/bin/frontend-v2
           chmod +x ./rust/target/debug/risedev-playground
 
       - name: Install required components
         run: |
-          sudo apt-get update -yy
-          sudo apt-get install --upgrade -yy tmux postgresql
+          apt-get update -yy
+          apt-get install --upgrade -yy tmux postgresql
 
       - name: Generate RiseDev CI config
         run: |
@@ -106,8 +129,12 @@ jobs:
 
       - name: Download sqllogictest
         run: |
-          curl -fL -o ~/.cargo/bin/sqllogictest https://github.com/singularity-data/sqllogictest-rs/releases/download/v0.2.0/sqllogictest-linux-amd64
-          chmod +x ~/.cargo/bin/sqllogictest
+          wget ${URL} -O - | tar xz && mv ${BINARY} ${DIR}/${BINARY}
+          chmod +x ${DIR}/${BINARY}
+        env:
+          URL: https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.3.0-pre-2/sqllogictest-linux-amd64.tar.gz
+          DIR: /usr/local/bin
+          BINARY: sqllogictest
 
       - name: Download cargo-make
         run: |
@@ -124,35 +151,11 @@ jobs:
       # please double check whether there is performance degradation. Only increase the timeout
       # if the degradation is reasonable or to be fixed soon.
 
-      - name: e2e test w/ Hummock # Note: RiseDev cluster cannot be used to run e2e coverage unless we rebuild frontend in this workflow
-        run: |
-          ~/cargo-make/makers clean-data
-          ~/cargo-make/makers ci-1node
-          timeout 3m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
-
-      - name: Kill cluster
-        run: |
-          ~/cargo-make/makers k
-          ~/cargo-make/makers logs
-          ~/cargo-make/makers check-logs
-
-      - name: e2e test w/ Hummock w/o cache
-        run: |
-          ~/cargo-make/makers clean-data
-          RW_NO_CACHE=1 ~/cargo-make/makers ci-1node
-          timeout 3m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
-
-      - name: Kill cluster
-        run: |
-          ~/cargo-make/makers k
-          ~/cargo-make/makers logs
-          ~/cargo-make/makers check-logs
-
-      - name: e2e test batch 3-node (table_v2)
+      - name: e2e test streaming 3-node # Note: RiseDev cluster cannot be used to run e2e coverage unless we rebuild frontend in this workflow
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-3node
-          timeout 5m sqllogictest -p 4567 -d dev './e2e_test/batch/**/*.slt'
+          timeout 3m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
 
       - name: Kill cluster
         run: |
@@ -160,11 +163,35 @@ jobs:
           ~/cargo-make/makers logs
           ~/cargo-make/makers check-logs
 
-      - name: e2e test batch 3-node (table_v1)
+      - name: e2e test rust frontend
         run: |
           ~/cargo-make/makers clean-data
-          RW_FORCE_TABLE_V1=1 ~/cargo-make/makers ci-3node
-          timeout 70s sqllogictest -p 4567 -d dev './e2e_test/batch/**/*.slt'
+          ~/cargo-make/makers ci-v2
+          timeout 1m sqllogictest -p 4566 -d dev './e2e_test/v2/*.slt'
+
+      - name: Kill cluster
+        run: |
+          ~/cargo-make/makers k
+          ~/cargo-make/makers logs
+          ~/cargo-make/makers check-logs
+
+      - name: e2e test streaming 3-node w/o cache
+        run: |
+          ~/cargo-make/makers clean-data
+          RW_NO_CACHE=1 ~/cargo-make/makers ci-3node
+          timeout 3m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
+
+      - name: Kill cluster
+        run: |
+          ~/cargo-make/makers k
+          ~/cargo-make/makers logs
+          ~/cargo-make/makers check-logs
+
+      - name: e2e test batch 3-node
+        run: |
+          ~/cargo-make/makers clean-data
+          RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-3node
+          timeout 3m sqllogictest -p 4567 -d dev './e2e_test/batch/**/*.slt'
 
       - name: Kill cluster
         run: |
@@ -228,8 +255,12 @@ jobs:
 
       - name: Download sqllogictest
         run: |
-          curl -fL -o ~/.cargo/bin/sqllogictest https://github.com/singularity-data/sqllogictest-rs/releases/download/v0.2.0/sqllogictest-linux-amd64
-          chmod +x ~/.cargo/bin/sqllogictest
+          wget ${URL} -O - | tar xz && mv ${BINARY} ${DIR}/${BINARY}
+          chmod +x ${DIR}/${BINARY}
+        env:
+          URL: https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.3.0-pre-2/sqllogictest-linux-amd64.tar.gz
+          DIR: /usr/local/bin
+          BINARY: sqllogictest
 
       - name: Download cargo-make
         run: |
@@ -291,10 +322,11 @@ jobs:
       # please double check whether there is performance degradation. Only increase the timeout
       # if the degradation is reasonable or to be fixed soon.
 
-      - name: Run 3-node regress tests (batch)
+      # When running regress tests, do `FLUSH` implicitly after every insertion.
+      - name: regress test batch 3-node
         run: |
           ~/cargo-make/makers clean-data
-          ~/cargo-make/makers ci-3node
+          RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-3node
           psql --version
           RUST_LOG=info cd rust && timeout 40s target/debug/risingwave_regress_test -h 127.0.0.1 \
             -p ${{ env.RW_PORT }} \
@@ -308,7 +340,7 @@ jobs:
           ~/cargo-make/makers logs
           # ~/cargo-make/makers check-logs # regression test is bound to produce errors, so we don't check logs
 
-      - name: e2e test w/ source and Hummock
+      - name: e2e test source
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-1node
@@ -320,7 +352,7 @@ jobs:
           ~/cargo-make/makers logs
           ~/cargo-make/makers check-logs
 
-      - name: e2e test w/ source 3-node
+      - name: e2e test source 3-node
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-3node
@@ -461,6 +493,13 @@ jobs:
 
       - uses: actions/upload-artifact@v2
         with:
+          name: frontend-v2
+          if-no-files-found: error
+          path: |
+            rust/target/debug/frontend-v2
+
+      - uses: actions/upload-artifact@v2
+        with:
           name: risingwave_regress_test
           if-no-files-found: error
           path: |
@@ -561,16 +600,12 @@ jobs:
           buf lint
         working-directory: proto
 
-  stop-runner:
-    name: ec2-stop
+  stop-runner-a:
+    name: ec2-stop-a
     needs:
       - start-runner-a
-      - start-runner-b
       - compute-node-build
-      - compute-node-test
-      # The following workflows are not running on EC2, so we don't need to wait for it.
-      # - frontend-check
-      # - end-to-end
+      - end-to-end-risedev
     runs-on: ubuntu-latest
     if: ${{ always() }} # required to stop the runner even if the error happened in the previous jobs
     steps:
@@ -588,6 +623,24 @@ jobs:
           label: ${{ needs.start-runner-a.outputs.label }}
           ec2-instance-id: ${{ needs.start-runner-a.outputs.ec2-instance-id }}
         if: ${{ always() }}
+
+  stop-runner-b:
+    name: ec2-stop-b
+    needs:
+      - start-runner-b
+      - compute-node-test
+      # The following workflows are not running on EC2, so we don't need to wait for it.
+      # - frontend-check
+      # - end-to-end
+    runs-on: ubuntu-latest
+    if: ${{ always() }} # required to stop the runner even if the error happened in the previous jobs
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-2
       - name: Stop EC2 runner B
         uses: machulav/ec2-github-runner@v2
         with:

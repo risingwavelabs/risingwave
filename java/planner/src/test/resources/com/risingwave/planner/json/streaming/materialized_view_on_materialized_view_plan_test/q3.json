@@ -14,12 +14,12 @@
                 "databaseRefId": {
                 }
               },
-              "tableId": 2
+              "tableId": 4
             },
             "pkIndices": [2],
             "columnIds": [0, 1, 2]
           },
-          "identity": "RwStreamBatchPlan(table\u003d[[test_schema, m1]], tableId\u003d[0.0.2], primaryKeyIndices\u003d[[2]], columnIds\u003d[[0.0.2.0, 0.0.2.1, 0.0.2.2]])"
+          "identity": "RwStreamBatchPlan(table\u003d[[test_schema, m1]], tableId\u003d[0.0.4], primaryKeyIndices\u003d[[2]], columnIds\u003d[[0.0.4.0, 0.0.4.1, 0.0.4.2]])"
         }],
         "chainNode": {
           "tableRefId": {
@@ -27,25 +27,28 @@
               "databaseRefId": {
               }
             },
-            "tableId": 2
+            "tableId": 4
           },
-          "upstreamColumnDescs": [{
-            "columnType": {
+          "upstreamFields": [{
+            "dataType": {
               "typeName": "INT32"
-            }
+            },
+            "name": "v1"
           }, {
-            "columnType": {
+            "dataType": {
               "typeName": "INT32"
-            }
+            },
+            "name": "v2"
           }, {
-            "columnType": {
+            "dataType": {
               "typeName": "INT64"
-            }
+            },
+            "name": "_row_id"
           }],
           "pkIndices": [2],
           "columnIds": [0, 1, 2]
         },
-        "identity": "RwStreamChain(all\u003d[true], tableId\u003d[0.0.2], primaryKeyIndices\u003d[[2]], columnIds\u003d[[0.0.2.0, 0.0.2.1, 0.0.2.2]], upstreamColumnDescs\u003d[[ColumnDesc{dataType\u003dINTEGER, primary\u003dfalse}, ColumnDesc{dataType\u003dINTEGER, primary\u003dfalse}, ColumnDesc{dataType\u003dBIGINT, primary\u003dfalse}]])"
+        "identity": "RwStreamChain(all\u003d[true], tableId\u003d[0.0.4], primaryKeyIndices\u003d[[2]], columnIds\u003d[[0.0.4.0, 0.0.4.1, 0.0.4.2]])"
       }],
       "globalSimpleAggNode": {
         "aggCalls": [{
@@ -161,7 +164,7 @@
         "databaseRefId": {
         }
       },
-      "tableId": 4
+      "tableId": 6
     },
     "columnDescs": [{
       "columnType": {

@@ -220,16 +220,19 @@ impl BatchPlanFragmenter {
 #[cfg(test)]
 mod tests {
 
+    use std::sync::Arc;
+
     use risingwave_pb::common::{WorkerNode, WorkerType};
     use risingwave_pb::plan::JoinType;
 
     use crate::optimizer::plan_node::{
-        BatchExchange, BatchHashJoin, BatchSeqScan, IntoPlanRef, JoinPredicate, LogicalJoin,
+        BatchExchange, BatchHashJoin, BatchSeqScan, EqJoinPredicate, IntoPlanRef, LogicalJoin,
         PlanNodeType,
     };
     use crate::optimizer::property::{Distribution, Order};
     use crate::scheduler::plan_fragmenter::BatchPlanFragmenter;
-    use crate::scheduler::schedule::BatchScheduler;
+    use crate::scheduler::schedule::{BatchScheduler, WorkerNodeManager};
+    use crate::utils::Condition;
 
     #[test]
     fn test_fragmenter() {
@@ -253,12 +256,15 @@ mod tests {
             Distribution::AnyShard,
         )
         .into_plan_ref();
-        let hash_join_node = BatchHashJoin::new(LogicalJoin::new(
-            batch_exchange_node1.clone(),
-            batch_exchange_node2.clone(),
-            JoinType::Inner,
-            JoinPredicate::new_empty(),
-        ))
+        let hash_join_node = BatchHashJoin::new(
+            LogicalJoin::new(
+                batch_exchange_node1.clone(),
+                batch_exchange_node2.clone(),
+                JoinType::Inner,
+                Condition::true_cond(),
+            ),
+            EqJoinPredicate::create(0, 0, Condition::true_cond()),
+        )
         .into_plan_ref();
         let batch_exchange_node3 = BatchExchange::new(
             hash_join_node.clone(),
@@ -313,7 +319,8 @@ mod tests {
             host: None,
         };
         let workers = vec![worker1.clone(), worker2.clone(), worker3.clone()];
-        let mut scheduler = BatchScheduler::mock(workers);
+        let worker_node_manager = Arc::new(WorkerNodeManager::mock(workers));
+        let mut scheduler = BatchScheduler::mock(worker_node_manager);
         let _query_result_loc = scheduler.schedule(&query);
 
         let root = scheduler.get_scheduled_stage_unchecked(&0);

@@ -11,7 +11,7 @@ use risingwave_pb::expr::expr_node::Type::{Add, GreaterThan, InputRef};
 use risingwave_pb::expr::{AggCall, ExprNode, FunctionCall, InputRefExpr};
 use risingwave_pb::plan::column_desc::ColumnEncodingType;
 use risingwave_pb::plan::{
-    ColumnDesc, ColumnOrder, DatabaseRefId, OrderType, SchemaRefId, TableRefId,
+    ColumnDesc, ColumnOrder, DatabaseRefId, Field, OrderType, SchemaRefId, TableRefId,
 };
 use risingwave_pb::stream_plan::dispatcher::DispatcherType;
 use risingwave_pb::stream_plan::source_node::SourceType;
@@ -24,7 +24,7 @@ use risingwave_pb::stream_plan::{
 use crate::manager::MetaSrvEnv;
 use crate::model::TableFragments;
 use crate::stream::fragmenter::StreamFragmenter;
-use crate::stream::FragmentManager;
+use crate::stream::{CreateMaterializedViewContext, FragmentManager};
 
 fn make_table_ref_id(id: i32) -> TableRefId {
     TableRefId {
@@ -73,6 +73,16 @@ fn make_column_desc(id: i32, type_name: TypeName) -> ColumnDesc {
         }),
         column_id: id,
         encoding: ColumnEncodingType::Raw as i32,
+        ..Default::default()
+    }
+}
+
+fn make_field(type_name: TypeName) -> Field {
+    Field {
+        data_type: Some(DataType {
+            type_name: type_name as i32,
+            ..Default::default()
+        }),
         ..Default::default()
     }
 }
@@ -126,10 +136,10 @@ fn make_stream_node() -> StreamNode {
                 r#type: DispatcherType::Hash as i32,
                 column_indices: vec![0],
             }),
-            input_column_descs: vec![
-                make_column_desc(1, TypeName::Int32),
-                make_column_desc(2, TypeName::Int32),
-                make_column_desc(0, TypeName::Int64),
+            fields: vec![
+                make_field(TypeName::Int32),
+                make_field(TypeName::Int32),
+                make_field(TypeName::Int64),
             ],
         })),
         input: vec![source_node],
@@ -177,10 +187,7 @@ fn make_stream_node() -> StreamNode {
                 r#type: DispatcherType::Simple as i32,
                 ..Default::default()
             }),
-            input_column_descs: vec![
-                make_column_desc(0, TypeName::Int64),
-                make_column_desc(0, TypeName::Int64),
-            ],
+            fields: vec![make_field(TypeName::Int64), make_field(TypeName::Int64)],
         })),
         input: vec![simple_agg_node],
         pk_indices: vec![0, 1],
@@ -248,10 +255,11 @@ fn make_stream_node() -> StreamNode {
 async fn test_fragmenter() -> Result<()> {
     let env = MetaSrvEnv::for_test().await;
     let stream_node = make_stream_node();
-    let fragment_manager_ref = Arc::new(FragmentManager::new(env.clone()).await?);
+    let fragment_manager_ref = Arc::new(FragmentManager::new(env.meta_store_ref()).await?);
     let mut fragmenter = StreamFragmenter::new(env.id_gen_manager_ref(), fragment_manager_ref, 1);
 
-    let graph = fragmenter.generate_graph(&stream_node).await?;
+    let mut ctx = CreateMaterializedViewContext::default();
+    let graph = fragmenter.generate_graph(&stream_node, &mut ctx).await?;
     let table_fragments = TableFragments::new(TableId::default(), graph);
     let actors = table_fragments.actors();
     let source_actor_ids = table_fragments.source_actor_ids();
@@ -321,10 +329,11 @@ async fn test_fragmenter() -> Result<()> {
 async fn test_fragmenter_multi_nodes() -> Result<()> {
     let env = MetaSrvEnv::for_test().await;
     let stream_node = make_stream_node();
-    let fragment_manager_ref = Arc::new(FragmentManager::new(env.clone()).await?);
+    let fragment_manager_ref = Arc::new(FragmentManager::new(env.meta_store_ref()).await?);
     let mut fragmenter = StreamFragmenter::new(env.id_gen_manager_ref(), fragment_manager_ref, 3);
 
-    let graph = fragmenter.generate_graph(&stream_node).await?;
+    let mut ctx = CreateMaterializedViewContext::default();
+    let graph = fragmenter.generate_graph(&stream_node, &mut ctx).await?;
     let table_fragments = TableFragments::new(TableId::default(), graph);
     let actors = table_fragments.actors();
     let source_actor_ids = table_fragments.source_actor_ids();

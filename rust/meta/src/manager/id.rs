@@ -1,11 +1,10 @@
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::Result;
 use tokio::sync::RwLock;
 
-use crate::manager::SINGLE_VERSION_EPOCH;
-use crate::storage::MetaStoreRef;
+use crate::storage::{self, MetaStore, DEFAULT_COLUMN_FAMILY};
 
 pub const ID_PREALLOCATE_INTERVAL: i32 = 1000;
 
@@ -24,39 +23,38 @@ pub trait IdGenerator: Sync + Send + 'static {
 }
 
 /// [`StoredIdGenerator`] implements id generator using metastore.
-pub struct StoredIdGenerator {
-    meta_store_ref: MetaStoreRef,
+pub struct StoredIdGenerator<S> {
+    meta_store_ref: Arc<S>,
     category_gen_key: String,
     current_id: AtomicI32,
     next_allocate_id: RwLock<Id>,
 }
 
-impl StoredIdGenerator {
-    pub async fn new(meta_store_ref: MetaStoreRef, category: &str, start: Option<Id>) -> Self {
+impl<S> StoredIdGenerator<S>
+where
+    S: MetaStore,
+{
+    pub async fn new(meta_store_ref: Arc<S>, category: &str, start: Option<Id>) -> Self {
         let category_gen_key = format!("{}_id_next_generator", category);
         let res = meta_store_ref
-            .get(category_gen_key.as_bytes(), SINGLE_VERSION_EPOCH)
+            .get_cf(DEFAULT_COLUMN_FAMILY, category_gen_key.as_bytes())
             .await;
         let current_id = match res {
             Ok(value) => i32::from_be_bytes(value.as_slice().try_into().unwrap()),
-            Err(err) => {
-                if !matches!(err.inner(), ErrorCode::ItemNotFound(_)) {
-                    panic!("{}", err)
-                }
-                start.unwrap_or(0)
-            }
+            Err(storage::Error::ItemNotFound(_)) => start.unwrap_or(0),
+            Err(e) => panic!("{:?}", e),
         };
 
         let next_allocate_id = current_id + ID_PREALLOCATE_INTERVAL;
         if let Err(err) = meta_store_ref
-            .put(
-                category_gen_key.as_bytes(),
-                &next_allocate_id.to_be_bytes(),
-                SINGLE_VERSION_EPOCH,
+            .put_cf(
+                DEFAULT_COLUMN_FAMILY,
+                category_gen_key.clone().into_bytes(),
+                next_allocate_id.to_be_bytes().to_vec(),
             )
             .await
         {
-            panic!("{}", err)
+            panic!("{:?}", err)
         }
 
         StoredIdGenerator {
@@ -69,7 +67,10 @@ impl StoredIdGenerator {
 }
 
 #[async_trait::async_trait]
-impl IdGenerator for StoredIdGenerator {
+impl<S> IdGenerator for StoredIdGenerator<S>
+where
+    S: MetaStore,
+{
     async fn generate_interval(&self, interval: i32) -> Result<Id> {
         let id = self.current_id.fetch_add(interval, Ordering::Relaxed);
         let next_allocate_id = { *self.next_allocate_id.read().await };
@@ -82,10 +83,10 @@ impl IdGenerator for StoredIdGenerator {
                 );
                 let next_allocate_id = *next + ID_PREALLOCATE_INTERVAL * weight;
                 self.meta_store_ref
-                    .put(
-                        self.category_gen_key.as_bytes(),
-                        &next_allocate_id.to_be_bytes(),
-                        SINGLE_VERSION_EPOCH,
+                    .put_cf(
+                        DEFAULT_COLUMN_FAMILY,
+                        self.category_gen_key.clone().into_bytes(),
+                        next_allocate_id.to_be_bytes().to_vec(),
                     )
                     .await?;
                 *next = next_allocate_id;
@@ -115,25 +116,28 @@ pub mod IdCategory {
     pub const HummockSSTableId: IdCategoryType = 8;
 }
 
-pub type IdGeneratorManagerRef = Arc<IdGeneratorManager>;
+pub type IdGeneratorManagerRef<S> = Arc<IdGeneratorManager<S>>;
 
 /// [`IdGeneratorManager`] manages id generators in all categories,
 /// which defined as [`IdCategory`] in [`meta.proto`].
-pub struct IdGeneratorManager {
+pub struct IdGeneratorManager<S> {
     #[cfg(test)]
-    test: Arc<StoredIdGenerator>,
-    database: Arc<StoredIdGenerator>,
-    schema: Arc<StoredIdGenerator>,
-    table: Arc<StoredIdGenerator>,
-    worker: Arc<StoredIdGenerator>,
-    fragment: Arc<StoredIdGenerator>,
-    actor: Arc<StoredIdGenerator>,
-    hummock_snapshot: Arc<StoredIdGenerator>,
-    hummock_ss_table_id: Arc<StoredIdGenerator>,
+    test: Arc<StoredIdGenerator<S>>,
+    database: Arc<StoredIdGenerator<S>>,
+    schema: Arc<StoredIdGenerator<S>>,
+    table: Arc<StoredIdGenerator<S>>,
+    worker: Arc<StoredIdGenerator<S>>,
+    fragment: Arc<StoredIdGenerator<S>>,
+    actor: Arc<StoredIdGenerator<S>>,
+    hummock_snapshot: Arc<StoredIdGenerator<S>>,
+    hummock_ss_table_id: Arc<StoredIdGenerator<S>>,
 }
 
-impl IdGeneratorManager {
-    pub async fn new(meta_store_ref: MetaStoreRef) -> Self {
+impl<S> IdGeneratorManager<S>
+where
+    S: MetaStore,
+{
+    pub async fn new(meta_store_ref: Arc<S>) -> Self {
         Self {
             #[cfg(test)]
             test: Arc::new(StoredIdGenerator::new(meta_store_ref.clone(), "test", None).await),
@@ -157,7 +161,7 @@ impl IdGeneratorManager {
         }
     }
 
-    const fn get<const C: IdCategoryType>(&self) -> &Arc<StoredIdGenerator> {
+    const fn get<const C: IdCategoryType>(&self) -> &Arc<StoredIdGenerator<S>> {
         match C {
             #[cfg(test)]
             IdCategory::Test => &self.test,
@@ -196,7 +200,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_id_generator() -> Result<()> {
-        let meta_store_ref = Arc::new(MemStore::new());
+        let meta_store_ref = Arc::new(MemStore::default());
         let id_generator = StoredIdGenerator::new(meta_store_ref.clone(), "default", None).await;
         let ids = future::join_all((0..10000).map(|_i| {
             let id_generator = &id_generator;
@@ -259,7 +263,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_id_generator_manager() -> Result<()> {
-        let meta_store_ref = Arc::new(MemStore::new());
+        let meta_store_ref = Arc::new(MemStore::default());
         let manager = IdGeneratorManager::new(meta_store_ref.clone()).await;
         let ids = future::join_all((0..10000).map(|_i| {
             let manager = &manager;

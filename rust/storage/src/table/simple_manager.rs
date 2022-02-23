@@ -10,7 +10,6 @@ use risingwave_common::{ensure, gen_error};
 use risingwave_pb::plan::ColumnDesc;
 
 use super::{ScannableTableRef, TableManager};
-use crate::bummock::BummockTable;
 use crate::table::mview::MViewTable;
 use crate::{dispatch_state_store, Keyspace, StateStoreImpl, TableColumnDesc};
 
@@ -33,30 +32,6 @@ impl AsRef<dyn Any> for SimpleTableManager {
 
 #[async_trait::async_trait]
 impl TableManager for SimpleTableManager {
-    async fn create_table(
-        &self,
-        table_id: &TableId,
-        table_columns: Vec<TableColumnDesc>,
-    ) -> Result<ScannableTableRef> {
-        let mut tables = self.lock_tables();
-
-        ensure!(
-            !tables.contains_key(table_id),
-            "Table id already exists: {:?}",
-            table_id
-        );
-
-        let column_count = table_columns.len();
-        ensure!(
-            column_count > 0,
-            "column count must be positive: {}",
-            column_count
-        );
-        let table = Arc::new(BummockTable::new(table_id, table_columns));
-        tables.insert(table_id.clone(), table.clone());
-        Ok(table as ScannableTableRef)
-    }
-
     async fn create_table_v2(
         &self,
         table_id: &TableId,
@@ -74,7 +49,7 @@ impl TableManager for SimpleTableManager {
             let keyspace = Keyspace::table_root(store, table_id);
             Arc::new(MViewTable::new_batch(keyspace, table_columns)) as ScannableTableRef
         });
-        tables.insert(table_id.clone(), table.clone());
+        tables.insert(*table_id, table.clone());
 
         Ok(table)
     }
@@ -127,7 +102,7 @@ impl TableManager for SimpleTableManager {
             ))
         });
 
-        tables.insert(table_id.clone(), table);
+        tables.insert(*table_id, table);
         Ok(())
     }
 
@@ -159,7 +134,7 @@ impl TableManager for SimpleTableManager {
             .clone();
 
         // Simply associate the mview id to the table
-        tables.insert(mview_id.clone(), table.clone());
+        tables.insert(*mview_id, table.clone());
         Ok(table)
     }
 

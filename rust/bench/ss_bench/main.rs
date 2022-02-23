@@ -16,19 +16,8 @@ use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::object::{ConnectionInfo, S3ObjectStore};
 use risingwave_storage::rocksdb_local::RocksDBStateStore;
 use risingwave_storage::tikv::TikvStateStore;
-use risingwave_storage::StateStore;
 
 use crate::utils::store_statistics::print_statistics;
-
-#[allow(dead_code)]
-enum WorkloadType {
-    WriteBatch = 0,
-    GetRandom = 1,
-    GetSeq = 2,
-    PrefixScanRandom = 3,
-    DeleteRandom = 4,
-    DeleteSeq = 5,
-}
 
 #[derive(Parser, Debug)]
 pub(crate) struct Opts {
@@ -66,8 +55,8 @@ pub(crate) struct Opts {
     #[clap(long, default_value_t = -1)]
     reads: i64,
 
-    #[clap(long, default_value_t = 100)]
-    write_batches: u64,
+    #[clap(long, default_value_t = -1)]
+    writes: i64,
 
     // ----- single batch -----
     #[clap(long, default_value_t = 100)]
@@ -84,6 +73,9 @@ pub(crate) struct Opts {
 
     #[clap(long, default_value_t = 100)]
     value_size: u32,
+
+    #[clap(long, default_value_t = 0)]
+    seed: u64,
 
     // ----- flag -----
     #[clap(long)]
@@ -183,18 +175,6 @@ async fn get_state_store_impl(opts: &Opts) -> Result<StateStoreImpl> {
     Ok(instance)
 }
 
-async fn run_operations(store: impl StateStore, opts: &Opts) {
-    for operation in opts.benchmarks.split(',') {
-        match operation {
-            "writebatch" => write_batch::run(&store, opts).await,
-            "getrandom" => get_random::run(&store, opts).await,
-            "getseq" => get_seq::run(&store, opts).await,
-            "prefixscanrandom" => prefix_scan_random::run(&store, opts).await,
-            other => unimplemented!("operation \"{}\" is not supported.", other),
-        }
-    }
-}
-
 fn preprocess_options(opts: &mut Opts) {
     if opts.reads < 0 {
         opts.reads = opts.num;
@@ -202,17 +182,8 @@ fn preprocess_options(opts: &mut Opts) {
     if opts.deletes < 0 {
         opts.deletes = opts.num;
     }
-
-    // check illegal configurations
-    for operation in opts.benchmarks.split(',') {
-        if operation == "getseq" {
-            // TODO(sun ting): eliminate this limitation
-            if opts.batch_size < opts.reads as u32 {
-                panic!(
-                    "In sequential mode, `batch_size` should be greater than or equal to `reads`"
-                );
-            }
-        }
+    if opts.writes < 0 {
+        opts.writes = opts.num;
     }
 }
 
@@ -235,10 +206,10 @@ async fn main() {
     };
 
     match state_store {
-        StateStoreImpl::Hummock(store) => run_operations(store, &opts).await,
-        StateStoreImpl::Memory(store) => run_operations(store, &opts).await,
-        StateStoreImpl::RocksDB(store) => run_operations(store, &opts).await,
-        StateStoreImpl::Tikv(store) => run_operations(store, &opts).await,
+        StateStoreImpl::Hummock(store) => Operations::run(store, &opts).await,
+        StateStoreImpl::Memory(store) => Operations::run(store, &opts).await,
+        StateStoreImpl::RocksDB(store) => Operations::run(store, &opts).await,
+        StateStoreImpl::Tikv(store) => Operations::run(store, &opts).await,
     };
 
     if opts.statistics {

@@ -1114,19 +1114,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "crossbeam-epoch"
-version = "0.9.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c00d6d2ea26e8b151d99093005cb442fb9a37aeaca582a03ec70946f49ab5ed9"
-dependencies = [
- "cfg-if 1.0.0",
- "crossbeam-utils 0.8.7",
- "lazy_static",
- "memoffset 0.6.5",
- "scopeguard",
-]
-
-[[package]]
 name = "crossbeam-utils"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1559,14 +1546,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "fs2"
-version = "0.4.3"
+name = "fs_extra"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9564fc758e15025b46aa6643b1b77d047d1a56a1aea6e01002ac0c7026876213"
-dependencies = [
- "libc",
- "winapi",
-]
+checksum = "2022715d62ab30faffd124d40b76f4134a550a87792276512b18d63272333394"
 
 [[package]]
 name = "futures"
@@ -1695,15 +1678,6 @@ dependencies = [
  "pin-project-lite",
  "pin-utils",
  "slab",
-]
-
-[[package]]
-name = "fxhash"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c31b6d751ae2c7f11320402d34e41349dd1016f8d5d45e48c4312bc8625af50c"
-dependencies = [
- "byteorder",
 ]
 
 [[package]]
@@ -2478,7 +2452,7 @@ dependencies = [
  "async-io",
  "async-lock",
  "crossbeam-channel",
- "crossbeam-epoch 0.8.2",
+ "crossbeam-epoch",
  "crossbeam-utils 0.8.7",
  "futures-util",
  "num_cpus",
@@ -3693,6 +3667,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "thrift",
+ "tikv-jemallocator",
  "tokio",
  "tokio-stream",
  "tonic",
@@ -3894,6 +3869,7 @@ dependencies = [
  "dashmap 5.1.0",
  "either",
  "futures 0.3.21",
+ "hex",
  "hyper",
  "itertools 0.10.3",
  "lazy_static",
@@ -3902,7 +3878,9 @@ dependencies = [
  "moka",
  "num-integer",
  "num-traits",
+ "parking_lot 0.12.0",
  "paste",
+ "prometheus 0.13.0",
  "prost 0.9.0",
  "rand 0.8.5",
  "risingwave-pb",
@@ -3912,7 +3890,6 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "sled",
  "smallvec",
  "tempfile",
  "thiserror",
@@ -3997,12 +3974,14 @@ dependencies = [
 name = "risingwave_sqlparser"
 version = "0.1.2"
 dependencies = [
+ "anyhow",
  "itertools 0.10.3",
  "log",
  "matches",
  "risingwave_common",
  "serde",
  "serde_json",
+ "walkdir",
 ]
 
 [[package]]
@@ -4559,22 +4538,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9def91fd1e018fe007022791f865d0ccc9b3a0d5001e01aabb8b40e46000afb5"
 
 [[package]]
-name = "sled"
-version = "0.34.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f96b4737c2ce5987354855aed3797279def4ebf734436c6aa4552cf8e169935"
-dependencies = [
- "crc32fast",
- "crossbeam-epoch 0.9.7",
- "crossbeam-utils 0.8.7",
- "fs2",
- "fxhash",
- "libc",
- "log",
- "parking_lot 0.11.2",
-]
-
-[[package]]
 name = "sluice"
 version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4892,6 +4855,27 @@ dependencies = [
  "log",
  "tikv-client-common",
  "tikv-client-proto",
+]
+
+[[package]]
+name = "tikv-jemalloc-sys"
+version = "0.4.3+5.2.1-patched.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1792ccb507d955b46af42c123ea8863668fae24d03721e40cad6a41773dbb49"
+dependencies = [
+ "cc",
+ "fs_extra",
+ "libc",
+]
+
+[[package]]
+name = "tikv-jemallocator"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a5b7bcecfafe4998587d636f9ae9d55eb9d0499877b88757767c346875067098"
+dependencies = [
+ "libc",
+ "tikv-jemalloc-sys",
 ]
 
 [[package]]

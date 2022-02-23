@@ -20,4 +20,7 @@ select id from debezium_json_mysql_mv
 109
 
 statement ok
+drop materialized view debezium_json_mysql_mv
+
+statement ok
 drop source debezium_json_mysql_source

@@ -31,6 +31,7 @@ message Table {
   repeated plan.ColumnOrder column_orders = 12;
   bool is_associated = 13;
   uint64 version = 14;
+  repeated plan.TableRefId dependent_tables = 15;
 }
 
 message Database {
@@ -117,9 +118,6 @@ message HeartbeatRequest {
 
 message HeartbeatResponse {
   common.Status status = 1;
-  oneof body {
-    Catalog catalog = 2;
-  }
 }
 
 service HeartbeatService {
@@ -131,8 +129,6 @@ message TableFragments {
   enum State {
     CREATING = 0;
     CREATED = 1;
-    DROPPING = 2;
-    DROPPED = 3;
   }
   message Fragment {
     enum FragmentType {
@@ -221,4 +217,31 @@ service ClusterService {
   rpc AddWorkerNode(AddWorkerNodeRequest) returns (AddWorkerNodeResponse);
   rpc DeleteWorkerNode(DeleteWorkerNodeRequest) returns (DeleteWorkerNodeResponse);
   rpc ListAllNodes(ListAllNodesRequest) returns (ListAllNodesResponse);
+}
+
+// Below for notification service.
+message SubscribeRequest {
+  common.WorkerType worker_type = 1;
+  common.HostAddress host = 2;
+}
+
+message SubscribeResponse {
+  enum Operation {
+    INVALID = 0;
+    ADD = 1;
+    DELETE = 2;
+    UPDATE = 3;
+  }
+  common.Status status = 1;
+  Operation operation = 2;
+  oneof info {
+    common.WorkerNode node = 3;
+    Database database = 4;
+    Schema schema = 5;
+    Table table = 6;
+  }
+}
+
+service NotificationService {
+  rpc Subscribe(SubscribeRequest) returns (stream SubscribeResponse);
 }

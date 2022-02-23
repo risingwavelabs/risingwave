@@ -217,10 +217,7 @@ impl CatalogConnector {
         );
         let table_id = self.meta_client.create_table(table.clone()).await?;
         // Create table locally.
-        table.table_ref_id = Some(TableRefId {
-            schema_ref_id,
-            table_id,
-        });
+        table.table_ref_id = Some(TableRefId::from(&table_id));
         self.catalog_cache
             .lock()
             .create_table(db_name, schema_name, &table)
@@ -232,34 +229,14 @@ impl CatalogConnector {
         schema_name: &str,
         table_name: &str,
     ) -> Result<()> {
-        let database_id = self
-            .catalog_cache
-            .lock()
-            .get_database(db_name)
-            .ok_or_else(|| RwError::from(CatalogError::NotFound("database", db_name.to_string())))?
-            .id() as i32;
-        let schema_id = self
-            .catalog_cache
-            .lock()
-            .get_schema(db_name, schema_name)
-            .ok_or_else(|| {
-                RwError::from(CatalogError::NotFound("schema", schema_name.to_string()))
-            })?
-            .id() as i32;
         let table_id = self
             .catalog_cache
             .lock()
             .get_table(db_name, schema_name, table_name)
             .ok_or_else(|| RwError::from(CatalogError::NotFound("table", table_name.to_string())))?
-            .id() as i32;
+            .id();
 
-        let table_ref_id = TableRefId {
-            schema_ref_id: Some(SchemaRefId {
-                database_ref_id: Some(DatabaseRefId { database_id }),
-                schema_id,
-            }),
-            table_id,
-        };
+        let table_ref_id = TableRefId::from(&table_id);
         self.meta_client.drop_table(table_ref_id).await?;
         // Drop table locally.
         self.catalog_cache
@@ -380,7 +357,7 @@ mod tests {
     #[serial_test::serial]
     async fn test_create_and_drop_table() {
         // Init meta and catalog.
-        let meta = LocalMeta::start_in_tempdir().await;
+        let meta = LocalMeta::start().await;
         let mut meta_client = LocalMeta::create_client().await;
         let catalog_mgr = CatalogConnector::new(meta_client.clone());
 

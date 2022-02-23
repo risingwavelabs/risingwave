@@ -35,9 +35,9 @@ impl AggCall {
 }
 impl Expr for AggCall {
     fn return_type(&self) -> DataType {
-        self.return_type
+        self.return_type.clone()
     }
-    fn bound_expr(self) -> ExprImpl {
+    fn to_expr_impl(self) -> ExprImpl {
         ExprImpl::AggCall(Box::new(self))
     }
 }

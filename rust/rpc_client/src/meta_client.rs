@@ -1,25 +1,28 @@
 use std::net::SocketAddr;
 use std::time::Duration;
 
+use risingwave_common::catalog::TableId;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::try_match_expand;
-use risingwave_pb::common::{HostAddress, WorkerType};
+use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::meta::catalog_service_client::CatalogServiceClient;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::create_request::CatalogBody;
 use risingwave_pb::meta::drop_request::CatalogId;
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
+use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
 use risingwave_pb::meta::{
-    AddWorkerNodeRequest, CreateRequest, Database, DropRequest, HeartbeatRequest, Schema, Table,
+    AddWorkerNodeRequest, CreateRequest, Database, DropRequest, HeartbeatRequest,
+    ListAllNodesRequest, Schema, SubscribeRequest, SubscribeResponse, Table,
 };
 use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
 use tonic::transport::{Channel, Endpoint};
+use tonic::Streaming;
 
 type DatabaseId = i32;
 type SchemaId = i32;
-type TableId = i32;
 
 /// Client to meta server. Cloning the instance is lightweight.
 #[derive(Clone)]
@@ -28,6 +31,7 @@ pub struct MetaClient {
     pub heartbeat_client: HeartbeatServiceClient<Channel>,
     pub catalog_client: CatalogServiceClient<Channel>,
     pub hummock_client: HummockManagerServiceClient<Channel>,
+    pub notification_client: NotificationServiceClient<Channel>,
 }
 
 impl MetaClient {
@@ -42,23 +46,49 @@ impl MetaClient {
         let cluster_client = ClusterServiceClient::new(channel.clone());
         let heartbeat_client = HeartbeatServiceClient::new(channel.clone());
         let catalog_client = CatalogServiceClient::new(channel.clone());
-        let hummock_client = HummockManagerServiceClient::new(channel);
+        let hummock_client = HummockManagerServiceClient::new(channel.clone());
+        let notification_client = NotificationServiceClient::new(channel);
         Ok(Self {
             cluster_client,
             heartbeat_client,
             catalog_client,
             hummock_client,
+            notification_client,
         })
     }
 
+    /// Subscribe to notification from meta.
+    pub async fn subscribe(
+        &self,
+        addr: SocketAddr,
+        worker_type: WorkerType,
+    ) -> Result<Streaming<SubscribeResponse>> {
+        let host = Some(HostAddress {
+            host: addr.ip().to_string(),
+            port: addr.port() as i32,
+        });
+        let request = SubscribeRequest {
+            worker_type: worker_type as i32,
+            host,
+        };
+        let rx = self
+            .notification_client
+            .to_owned()
+            .subscribe(request)
+            .await
+            .to_rw_result()?
+            .into_inner();
+        Ok(rx)
+    }
+
     /// Register the current node to the cluster and return the corresponding worker id.
-    pub async fn register(&self, addr: SocketAddr) -> Result<u32> {
+    pub async fn register(&self, addr: SocketAddr, worker_type: WorkerType) -> Result<u32> {
         let host_address = HostAddress {
             host: addr.ip().to_string(),
             port: addr.port() as i32,
         };
         let request = AddWorkerNodeRequest {
-            worker_type: WorkerType::ComputeNode as i32,
+            worker_type: worker_type as i32,
             host: Some(host_address),
         };
         let resp = self
@@ -89,7 +119,9 @@ impl MetaClient {
     }
 
     pub async fn create_table(&self, table: Table) -> Result<TableId> {
-        self.create_catalog_body(CatalogBody::Table(table)).await
+        Ok(TableId {
+            table_id: self.create_catalog_body(CatalogBody::Table(table)).await? as u32,
+        })
     }
 
     pub async fn create_database(&self, db: Database) -> Result<DatabaseId> {
@@ -142,5 +174,20 @@ impl MetaClient {
             .to_rw_result()?
             .into_inner();
         Ok(())
+    }
+
+    /// Get live nodes with the specified type.
+    pub async fn list_all_nodes(&self, worker_type: WorkerType) -> Result<Vec<WorkerNode>> {
+        let request = ListAllNodesRequest {
+            worker_type: worker_type as i32,
+        };
+        let resp = self
+            .cluster_client
+            .to_owned()
+            .list_all_nodes(request)
+            .await
+            .to_rw_result()?
+            .into_inner();
+        Ok(resp.nodes)
     }
 }

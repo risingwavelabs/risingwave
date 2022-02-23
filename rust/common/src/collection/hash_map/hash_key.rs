@@ -70,7 +70,7 @@ pub trait HashKey: Hash + Eq + Sized + Send + Sync + 'static {
 
         for column_idx in column_idxes {
             data_chunk
-                .column_at(*column_idx)?
+                .column_at(*column_idx)
                 .array_ref()
                 .serialize_to_hash_key(&mut serializers[..])?;
         }
@@ -661,10 +661,7 @@ mod tests {
             for row_idx in 0..data.capacity() {
                 let row = column_indexes
                     .iter()
-                    .map(|col_idx| {
-                        data.column_at(*col_idx)
-                            .unwrap_or_else(|_| panic!("Column not found: {}", *col_idx))
-                    })
+                    .map(|col_idx| data.column_at(*col_idx))
                     .map(|col| col.array_ref().datum_at(row_idx))
                     .collect::<Vec<Datum>>();
 

@@ -20,6 +20,8 @@ use std::rc::Rc;
 use downcast_rs::{impl_downcast, Downcast};
 use dyn_clone::{self, DynClone};
 use paste::paste;
+use risingwave_pb::plan::PlanNode as BatchPlanProst;
+use risingwave_pb::stream_plan::StreamNode as StreamPlanProst;
 
 use super::property::{WithConvention, WithDistribution, WithOrder, WithSchema};
 /// The common trait over all plan nodes. Used by optimizer framework which will treate all node as
@@ -41,6 +43,7 @@ pub trait PlanNode:
     + ToBatch
     + ToStream
     + ToDistributedBatch
+    + ToProst
 {
     fn node_type(&self) -> PlanNodeType;
 }
@@ -57,6 +60,38 @@ impl dyn PlanNode {
         }
         Ok(())
     }
+    pub fn to_batch_prost(&self) -> BatchPlanProst {
+        let node_body = Some(self.to_batch_prost_body());
+        let children = self
+            .inputs()
+            .into_iter()
+            .map(|plan| plan.to_batch_prost())
+            .collect();
+        let identity = format!("{:?}", self);
+        BatchPlanProst {
+            children,
+            identity,
+            node_body,
+        }
+    }
+
+    #[allow(unreachable_code)]
+    pub fn to_stream_prost(&self) -> StreamPlanProst {
+        let node = Some(self.to_stream_prost_body());
+        let input = self
+            .inputs()
+            .into_iter()
+            .map(|plan| plan.to_stream_prost())
+            .collect();
+        let identity = format!("{:?}", self);
+        StreamPlanProst {
+            input,
+            identity,
+            node,
+            operator_id: todo!(),
+            pk_indices: todo!(),
+        }
+    }
 }
 
 #[macro_use]
@@ -66,8 +101,10 @@ mod col_pruning;
 pub use col_pruning::*;
 mod convert;
 pub use convert::*;
-mod join_predicate;
-pub use join_predicate::*;
+mod eq_join_predicate;
+pub use eq_join_predicate::*;
+mod to_prost;
+pub use to_prost::*;
 
 // SOME Intellisense DONT UNDERSTAND THIS.
 //

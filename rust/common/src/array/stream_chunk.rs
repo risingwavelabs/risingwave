@@ -97,7 +97,7 @@ impl StreamChunk {
         &self.columns
     }
 
-    pub fn column(&self, index: usize) -> &Column {
+    pub fn column_at(&self, index: usize) -> &Column {
         &self.columns[index]
     }
 
@@ -140,6 +140,11 @@ impl StreamChunk {
             builder.build()
         };
         (data_chunk, ops)
+    }
+
+    pub fn from_parts(ops: Vec<Op>, data_chunk: DataChunk) -> Self {
+        let (columns, visibility) = data_chunk.into_parts();
+        Self::new(ops, columns, visibility)
     }
 
     pub fn into_inner(self) -> (Vec<Op>, Vec<Column>, Option<Bitmap>) {

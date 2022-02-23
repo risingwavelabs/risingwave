@@ -67,10 +67,8 @@ impl<B: Buf> MaybeFlip<B> {
     def_method!(get_u16, u16);
     def_method!(get_u32, u32);
     def_method!(get_u64, u64);
-    def_method!(get_i8, i8);
     def_method!(get_i32, i32);
     def_method!(get_i64, i64);
-    def_method!(get_i128, i128);
 
     fn copy_to_slice(&mut self, dst: &mut [u8]) {
         self.input.copy_to_slice(dst);
@@ -104,6 +102,22 @@ impl<B: Buf> Deserializer<B> {
                 v => return Err(Error::InvalidBytesEncoding(v)),
             }
         }
+    }
+
+    fn read_decimal(&mut self) -> Result<Vec<u8>> {
+        let flag = self.input.get_u8();
+        if !(0x8..=0x22).contains(&flag) {
+            return Err(Error::InvalidBytesEncoding(flag));
+        }
+        let mut byte_array = vec![flag];
+        loop {
+            let byte = self.input.get_u8();
+            if byte == 0 {
+                break;
+            }
+            byte_array.push(byte);
+        }
+        Ok(byte_array)
     }
 }
 
@@ -460,10 +474,85 @@ impl<'de, 'a, B: Buf + 'de> VariantAccess<'de> for &'a mut Deserializer<B> {
 
 impl<B: Buf> Deserializer<B> {
     /// Deserialize a decimal value. Returns `(mantissa, scale)`.
-    pub fn deserialize_decimal(&mut self) -> Result<(i128, i8)> {
-        let scale = self.input.get_i8();
-        let mantissa = self.input.get_i128() ^ (1 << 127);
-        Ok((mantissa, scale))
+    pub fn deserialize_decimal(&mut self) -> Result<(i128, u8)> {
+        let mut byte_array = self.read_decimal()?;
+
+        // indicate the beginning position of mantissa in `byte_array`.
+        let mut begin: usize = 2;
+        // whether the decimal is negative or not.
+        let mut neg: bool = false;
+        let exponent = match byte_array[0] {
+            0x06 => {
+                // NaN
+                return Ok((0, 31));
+            }
+            0x07 => {
+                // Negative INF
+                return Ok((0, 29));
+            }
+            0x08 => {
+                neg = true;
+                !byte_array[1] as i8
+            }
+            0x09..=0x13 => {
+                begin -= 1;
+                neg = true;
+                (0x13 - byte_array[0]) as i8
+            }
+            0x14 => {
+                neg = true;
+                -(byte_array[1] as i8)
+            }
+            0x15 => {
+                return Ok((0, 0));
+            }
+            0x16 => -!(byte_array[1] as i8),
+            0x17..=0x21 => {
+                begin -= 1;
+                (byte_array[0] - 0x17) as i8
+            }
+            0x22 => byte_array[1] as i8,
+            0x23 => {
+                // Positive INF
+                return Ok((0, 30));
+            }
+            invalid_byte => {
+                return Err(Error::InvalidBytesEncoding(invalid_byte));
+            }
+        };
+        if neg {
+            byte_array = byte_array.into_iter().map(|item| !item).collect();
+        }
+
+        // decode mantissa.
+        let mut mantissa: i128 = 0;
+        let bytes_len = byte_array.len() - begin;
+        let mut exp = bytes_len;
+        for item in byte_array.iter().skip(begin) {
+            exp -= 1;
+            mantissa += ((item - 1) / 2) as i128 * 100i128.pow(exp as u32);
+        }
+        mantissa += 1;
+
+        // get scale
+        let mut scale = (bytes_len as i8 - exponent) * 2;
+        if scale <= 0 {
+            // e.g. 1(mantissa) + 2(exponent) (which is 100).
+            for _i in 0..-scale {
+                mantissa *= 10;
+            }
+            scale = 0;
+        } else if mantissa % 10 == 0 {
+            // Remove uncessary zeros.
+            // e.g. 0.01_11_10 should be 0.01_11_1
+            mantissa /= 10;
+            scale -= 1;
+        }
+
+        if neg {
+            mantissa = -mantissa;
+        }
+        Ok((mantissa, scale as u8))
     }
 
     /// Deserialize a NaiveDateWrapper value. Returns `days`.
@@ -489,6 +578,7 @@ impl<B: Buf> Deserializer<B> {
 
 #[cfg(test)]
 mod tests {
+    use std::iter::zip;
     use std::str::FromStr;
 
     use rust_decimal::Decimal;
@@ -635,26 +725,46 @@ mod tests {
 
     #[test]
     fn test_decimal() {
-        let (mantissa, scale) = (-12_3456_7890_1234, 4);
-        let (mantissa0, scale0) = deserialize_decimal(&serialize_decimal(mantissa, scale));
-        assert_eq!((mantissa, scale), (mantissa0, scale0));
+        // Notice: decimals like 100.00 will be decoding as 100.
+
+        // Test: -1234_5678_9012_3456_7890_1234, -12_3456_7890.1234, -0.001, 0.001, 100, 0.01111,
+        // 12345, 1234_5678_9012_3456_7890_1234, -233.3, 50
+        let mantissas: Vec<i128> = vec![
+            -1234_5678_9012_3456_7890_1234,
+            -12_3456_7890_1234,
+            -1,
+            1,
+            100,
+            1111,
+            12345,
+            1234_5678_9012_3456_7890_1234,
+            -2333,
+            50,
+        ];
+        let scales: Vec<u8> = vec![0, 4, 3, 3, 0, 5, 0, 0, 1, 0];
+        for (mantissa, scale) in zip(mantissas, scales) {
+            assert_eq!(
+                (mantissa, scale),
+                deserialize_decimal(&serialize_decimal(mantissa, scale))
+            );
+        }
     }
 
     #[test]
     fn test_decimal_2() {
         let d = Decimal::from_str("41721.900909090909090909090909").unwrap();
-        let (mantissa, scale) = (d.mantissa(), d.scale() as i8);
+        let (mantissa, scale) = (d.mantissa(), d.scale() as u8);
         let (mantissa0, scale0) = deserialize_decimal(&serialize_decimal(mantissa, scale));
         assert_eq!((mantissa, scale), (mantissa0, scale0));
     }
 
-    fn serialize_decimal(mantissa: i128, scale: i8) -> Vec<u8> {
+    fn serialize_decimal(mantissa: i128, scale: u8) -> Vec<u8> {
         let mut serializer = crate::Serializer::new(vec![]);
         serializer.serialize_decimal(mantissa, scale).unwrap();
         serializer.into_inner()
     }
 
-    fn deserialize_decimal(bytes: &[u8]) -> (i128, i8) {
+    fn deserialize_decimal(bytes: &[u8]) -> (i128, u8) {
         let mut deserializer = Deserializer::new(bytes);
         deserializer.deserialize_decimal().unwrap()
     }

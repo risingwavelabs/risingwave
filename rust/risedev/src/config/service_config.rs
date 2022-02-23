@@ -22,6 +22,8 @@ pub struct MetaNodeConfig {
     pub port: u16,
     pub dashboard_address: String,
     pub dashboard_port: u16,
+    pub exporter_address: String,
+    pub exporter_port: u16,
     pub user_managed: bool,
 }
 
@@ -58,6 +60,7 @@ pub struct PrometheusConfig {
     pub address: String,
     pub port: u16,
     pub provide_compute_node: Option<Vec<ComputeNodeConfig>>,
+    pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
     pub provide_minio: Option<Vec<MinioConfig>>,
 }
 
@@ -84,6 +87,7 @@ pub enum ServiceConfig {
     ComputeNode(ComputeNodeConfig),
     MetaNode(MetaNodeConfig),
     Frontend(FrontendConfig),
+    FrontendV2(FrontendConfig),
     Minio(MinioConfig),
     Prometheus(PrometheusConfig),
     Grafana(GrafanaConfig),
@@ -96,6 +100,7 @@ impl ServiceConfig {
             Self::ComputeNode(c) => &c.id,
             Self::MetaNode(c) => &c.id,
             Self::Frontend(c) => &c.id,
+            Self::FrontendV2(c) => &c.id,
             Self::Minio(c) => &c.id,
             Self::Prometheus(c) => &c.id,
             Self::Grafana(c) => &c.id,

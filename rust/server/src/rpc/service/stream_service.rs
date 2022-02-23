@@ -9,17 +9,17 @@ use risingwave_pb::stream_service::{
     InjectBarrierResponse, UpdateActorsRequest, UpdateActorsResponse,
 };
 use risingwave_stream::executor::Barrier;
-use risingwave_stream::task::{StreamManager, StreamTaskEnv};
+use risingwave_stream::task::{StreamEnvironment, StreamManager};
 use tonic::{Request, Response, Status};
 
 #[derive(Clone)]
 pub struct StreamServiceImpl {
     mgr: Arc<StreamManager>,
-    env: StreamTaskEnv,
+    env: StreamEnvironment,
 }
 
 impl StreamServiceImpl {
-    pub fn new(mgr: Arc<StreamManager>, env: StreamTaskEnv) -> Self {
+    pub fn new(mgr: Arc<StreamManager>, env: StreamEnvironment) -> Self {
         StreamServiceImpl { mgr, env }
     }
 }
@@ -32,7 +32,7 @@ impl StreamService for StreamServiceImpl {
         request: Request<UpdateActorsRequest>,
     ) -> std::result::Result<Response<UpdateActorsResponse>, Status> {
         let req = request.into_inner();
-        let res = self.mgr.update_actors(&req.actors);
+        let res = self.mgr.update_actors(&req.actors, &req.hanging_channels);
         match res {
             Err(e) => {
                 error!("failed to update stream actor {}", e);

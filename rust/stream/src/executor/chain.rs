@@ -23,6 +23,8 @@ pub struct ChainExecutor {
     state: ChainState,
     schema: Schema,
     column_idxs: Vec<usize>,
+    /// Logical Operator Info
+    op_info: String,
 }
 
 impl ChainExecutor {
@@ -31,6 +33,7 @@ impl ChainExecutor {
         mview: Box<dyn Executor>,
         schema: Schema,
         column_idxs: Vec<usize>,
+        op_info: String,
     ) -> Self {
         Self {
             snapshot,
@@ -38,6 +41,7 @@ impl ChainExecutor {
             state: ChainState::Init,
             schema,
             column_idxs,
+            op_info,
         }
     }
 
@@ -71,7 +75,7 @@ impl ChainExecutor {
         match msg {
             Err(e) => {
                 // TODO: Refactor this once we find a better way to know the upstream is done.
-                if let ErrorCode::EOF = e.inner() {
+                if let ErrorCode::Eof = e.inner() {
                     self.state = ChainState::ReadingMView;
                     return self.read_mview().await;
                 }
@@ -123,6 +127,10 @@ impl Executor for ChainExecutor {
     fn identity(&self) -> &str {
         "Chain"
     }
+
+    fn logical_operator_info(&self) -> &str {
+        &self.op_info
+    }
 }
 
 #[cfg(test)]
@@ -160,7 +168,7 @@ mod test {
                     if let Message::Barrier(_) = m {
                         // warning: translate all of the barrier types to the EOF here. May be an
                         // error in some circumstances.
-                        Err(RwError::from(ErrorCode::EOF))
+                        Err(RwError::from(ErrorCode::Eof))
                     } else {
                         Ok(m)
                     }
@@ -188,6 +196,10 @@ mod test {
             "MockSnapshot"
         }
 
+        fn logical_operator_info(&self) -> &str {
+            self.identity()
+        }
+
         fn init(&mut self, _: u64) -> Result<()> {
             Ok(())
         }
@@ -202,8 +214,7 @@ mod test {
             }),
             encoding: ColumnEncodingType::Raw as i32,
             name: "v1".to_string(),
-            is_primary: false,
-            column_id: 0,
+            ..Default::default()
         }];
         let schema = Schema::try_from(&columns).unwrap();
         let first = Box::new(MockSnapshot::with_chunks(
@@ -241,13 +252,14 @@ mod test {
             ],
         ));
 
-        let mut chain = ChainExecutor::new(first, second, schema, vec![0]);
+        let mut chain =
+            ChainExecutor::new(first, second, schema, vec![0], "ChainExecutor".to_string());
         let mut count = 0;
         loop {
             let k = &chain.next().await.unwrap();
             count += 1;
             if let Message::Chunk(ck) = k {
-                let target = ck.column(0).array_ref().as_int32().value_at(0).unwrap();
+                let target = ck.column_at(0).array_ref().as_int32().value_at(0).unwrap();
                 assert_eq!(target, count);
             } else {
                 assert!(matches!(k, Message::Barrier(_)));

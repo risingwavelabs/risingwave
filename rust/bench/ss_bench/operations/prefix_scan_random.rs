@@ -1,82 +1,97 @@
+use std::mem::size_of_val;
 use std::time::Instant;
 
-use bytes::{Buf, Bytes};
-use futures::future;
+use bytes::Buf;
 use itertools::Itertools;
 use rand::distributions::Uniform;
-use rand::prelude::{Distribution, StdRng};
-use rand::SeedableRng;
+use rand::prelude::Distribution;
 use risingwave_storage::hummock::key::next_key;
 use risingwave_storage::StateStore;
 
+use super::Operations;
 use crate::utils::latency_stat::LatencyStat;
-use crate::utils::workload::{get_epoch, Workload};
-use crate::{Opts, WorkloadType};
+use crate::utils::workload::Workload;
+use crate::Opts;
 
-pub(crate) async fn run(store: &impl StateStore, opts: &Opts) {
-    let workload = Workload::new(opts, WorkloadType::PrefixScanRandom, None);
-    store
-        .ingest_batch(workload.batch.clone(), get_epoch())
-        .await
-        .unwrap();
+impl Operations {
+    pub(crate) async fn prefix_scan_random(&mut self, store: &impl StateStore, opts: &Opts) {
+        // generate queried prefixes
+        let mut scan_prefixes = match self.prefixes.is_empty() {
+            // if prefixes is empty, use default prefix: ["a"*key_prefix_size]
+            true => Workload::new_random_keys(opts, opts.reads as u64, &mut self.rng).0,
+            false => {
+                let dist = Uniform::from(0..self.prefixes.len());
+                (0..opts.reads as usize)
+                    .into_iter()
+                    .map(|_| self.prefixes[dist.sample(&mut self.rng)].clone())
+                    .collect_vec()
+            }
+        };
 
-    // generate queried prefixes
-    let mut rng = StdRng::seed_from_u64(233);
-    let dist = Uniform::from(0..workload.prefixes.len());
-    let mut scan_prefixes = (0..opts.reads)
-        .into_iter()
-        .map(|_| workload.prefixes[dist.sample(&mut rng)].clone())
-        .collect_vec();
-    let scan_prefixes_len = scan_prefixes.len();
-
-    // partitioned these prefixes for each concurrency
-    let mut grouped_prefixes = vec![vec![]; opts.concurrency_num as usize];
-    for (i, prefix) in scan_prefixes.drain(..).enumerate() {
-        grouped_prefixes[i % opts.concurrency_num as usize].push(prefix);
-    }
-
-    // actual prefix scan process
-    let epoch = u64::MAX;
-    let prefix_scan = |prefixes: Vec<Bytes>| async {
-        let mut latencies = vec![];
-        for prefix in prefixes {
-            let start = Instant::now();
-            store
-                .scan(
-                    prefix.chunk().to_vec()..next_key(prefix.chunk()),
-                    None,
-                    epoch,
-                )
-                .await
-                .unwrap();
-            let time_nano = start.elapsed().as_nanos();
-            latencies.push(time_nano);
+        // partitioned these prefixes for each concurrency
+        let mut grouped_prefixes = vec![vec![]; opts.concurrency_num as usize];
+        for (i, prefix) in scan_prefixes.drain(..).enumerate() {
+            grouped_prefixes[i % opts.concurrency_num as usize].push(prefix);
         }
-        latencies
-    };
-    let total_start = Instant::now();
-    let futures = grouped_prefixes
-        .drain(..)
-        .map(|prefixes| prefix_scan(prefixes))
-        .collect_vec();
-    let latencies_list: Vec<Vec<u128>> = future::join_all(futures).await;
-    let total_time_nano = total_start.elapsed().as_nanos();
 
-    // calculate metrics
-    let mut latencies = vec![];
-    for list in latencies_list {
-        for latency in list {
-            latencies.push(latency);
-        }
-    }
-    let stat = LatencyStat::new(latencies);
-    let qps = scan_prefixes_len as u128 * 1_000_000_000 / total_time_nano as u128;
+        let mut args = grouped_prefixes
+            .into_iter()
+            .map(|prefixes| (prefixes, store.clone()))
+            .collect_vec();
 
-    println!(
-        "
+        let futures = args
+            .drain(..)
+            .map(|(prefixes, store)| async move {
+                let mut latencies = vec![];
+                let mut sizes = vec![];
+                // actual prefix scan process
+                for prefix in prefixes {
+                    let start = Instant::now();
+                    let kv_pairs = store
+                        .scan(
+                            prefix.chunk().to_vec()..next_key(prefix.chunk()),
+                            None,
+                            u64::MAX,
+                        )
+                        .await
+                        .unwrap();
+                    let size = size_of_val(&kv_pairs);
+                    let time_nano = start.elapsed().as_nanos();
+                    latencies.push(time_nano);
+                    sizes.push(size);
+                }
+                (latencies, sizes)
+            })
+            .collect_vec();
+
+        let total_start = Instant::now();
+
+        let handles = futures.into_iter().map(tokio::spawn).collect_vec();
+        let results = futures::future::join_all(handles).await;
+
+        let total_time_nano = total_start.elapsed().as_nanos();
+
+        // calculate metrics
+        let mut total_latencies = vec![];
+        let mut total_sizes: usize = 0;
+        let _ = results
+            .into_iter()
+            .map(|res| {
+                let (latencies, sizes) = res.unwrap();
+                total_latencies.extend(latencies);
+                total_sizes += sizes.iter().sum::<usize>();
+            })
+            .collect_vec();
+        let stat = LatencyStat::new(total_latencies);
+        let qps = opts.reads as u128 * 1_000_000_000 / total_time_nano as u128;
+        let bytes_pre_sec = total_sizes as u128 * 1_000_000_000 / total_time_nano as u128;
+
+        println!(
+            "
     prefixscanrandom
       {}
-      QPS: {}",
-        stat, qps
-    );
+      QPS: {}  {} bytes/sec",
+            stat, qps, bytes_pre_sec
+        );
+    }
 }

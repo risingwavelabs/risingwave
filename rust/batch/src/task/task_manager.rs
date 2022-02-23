@@ -5,29 +5,31 @@ use risingwave_common::error::ErrorCode::TaskNotFound;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::plan::{PlanFragment, TaskId as ProstTaskId, TaskSinkId as ProstSinkId};
 
-use crate::task::env::BatchTaskEnv;
-use crate::task::task::{TaskExecution, TaskId};
+use crate::task::env::BatchEnvironment;
+use crate::task::task::{BatchTaskExecution, TaskId};
 use crate::task::TaskSink;
 
+/// `BatchManager` is responsible for managing all batch tasks.
 #[derive(Clone)]
-pub struct TaskManager {
-    tasks: Arc<Mutex<HashMap<TaskId, Box<TaskExecution>>>>,
+pub struct BatchManager {
+    /// Every task id has a corresponding task execution.
+    tasks: Arc<Mutex<HashMap<TaskId, Box<BatchTaskExecution>>>>,
 }
 
-impl TaskManager {
+impl BatchManager {
     pub fn new() -> Self {
-        TaskManager {
+        BatchManager {
             tasks: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
     pub fn fire_task(
         &self,
-        env: BatchTaskEnv,
+        env: BatchEnvironment,
         tid: &ProstTaskId,
         plan: PlanFragment,
     ) -> Result<()> {
-        let task = TaskExecution::new(tid, plan, env)?;
+        let task = BatchTaskExecution::new(tid, plan, env)?;
 
         task.async_execute()?;
         self.tasks
@@ -49,7 +51,7 @@ impl TaskManager {
     }
 
     #[cfg(test)]
-    pub fn remove_task(&self, sid: &ProstTaskId) -> Result<Option<Box<TaskExecution>>> {
+    pub fn remove_task(&self, sid: &ProstTaskId) -> Result<Option<Box<BatchTaskExecution>>> {
         let task_id = TaskId::try_from(sid)?;
         match self.tasks.lock().unwrap().remove(&task_id) {
             Some(t) => Ok(Some(t)),
@@ -75,9 +77,9 @@ impl TaskManager {
     }
 }
 
-impl Default for TaskManager {
+impl Default for BatchManager {
     fn default() -> Self {
-        TaskManager::new()
+        BatchManager::new()
     }
 }
 
@@ -86,39 +88,11 @@ mod tests {
     use risingwave_pb::plan::{QueryId, StageId, TaskSinkId as ProstTaskSinkId};
     use tonic::Code;
 
-    use crate::task::test_utils::{ResultChecker, TestRunner};
-    use crate::task::{TaskId, TaskManager};
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_select_all() {
-        let mut runner = TestRunner::new();
-        runner
-            .prepare_table()
-            .create_table_int32s(3)
-            .insert_i32s(&[1, 4, 2])
-            .insert_i32s(&[2, 3, 3])
-            .insert_i32s(&[3, 4, 4])
-            .insert_i32s(&[4, 3, 5])
-            .run()
-            .await;
-
-        let res = runner
-            .prepare_scan()
-            .scan_all()
-            .await
-            .run_and_collect_single_output()
-            .await;
-        ResultChecker::new()
-            .add_i64_column(false, &[0, 1, 2, 3])
-            .add_i32_column(false, &[1, 2, 3, 4])
-            .add_i32_column(false, &[4, 3, 4, 3])
-            .add_i32_column(false, &[2, 3, 4, 5])
-            .check_result(&res);
-    }
+    use crate::task::{BatchManager, TaskId};
 
     #[test]
     fn test_task_not_found() {
-        let manager = TaskManager::new();
+        let manager = BatchManager::new();
         let task_id = TaskId {
             task_id: 0,
             stage_id: 0,

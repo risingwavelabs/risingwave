@@ -10,20 +10,11 @@ pub struct LocalMeta {
 }
 
 impl LocalMeta {
-    pub async fn start_in_tempdir() -> Self {
-        let sled_root = tempfile::tempdir().unwrap();
-        Self::start(sled_root).await
-    }
-
     /// Start a local meta node in the background.
-    pub async fn start(sled_root: impl AsRef<std::path::Path>) -> Self {
+    pub async fn start() -> Self {
         let addr = Self::meta_addr().parse().unwrap();
-        let (join_handle, shutdown_sender) = crate::rpc::server::rpc_serve(
-            addr,
-            None,
-            MetaStoreBackend::Sled(sled_root.as_ref().to_path_buf()),
-        )
-        .await;
+        let (join_handle, shutdown_sender) =
+            crate::rpc::server::rpc_serve(addr, None, None, MetaStoreBackend::Mem).await;
         Self {
             join_handle,
             shutdown_sender,

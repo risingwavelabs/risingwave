@@ -1,9 +1,11 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::channel;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use rand::distributions::{Distribution as RandDistribution, Uniform};
-use risingwave_pb::common::WorkerNode;
+use risingwave_common::error::Result;
+use risingwave_pb::common::{WorkerNode, WorkerType};
+use risingwave_rpc_client::MetaClient;
 
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::optimizer::property::Distribution;
@@ -15,7 +17,7 @@ type ScheduledStageReceiver = std::sync::mpsc::Receiver<ScheduledStage>;
 pub(crate) type TaskId = u64;
 
 pub(crate) struct BatchScheduler {
-    worker_manager: WorkerNodeManager,
+    worker_manager: WorkerNodeManagerRef,
     scheduled_stage_sender: ScheduledStageSender,
     scheduled_stage_receiver: ScheduledStageReceiver,
     scheduled_stages_map: HashMap<StageId, ScheduledStageRef>,
@@ -71,12 +73,10 @@ pub(crate) type AugmentedStageRef = Arc<AugmentedStage>;
 
 impl BatchScheduler {
     /// Used in tests.
-    pub fn mock(workers: Vec<WorkerNode>) -> Self {
+    pub fn mock(worker_manager: WorkerNodeManagerRef) -> Self {
         let (sender, receiver) = channel();
         Self {
-            worker_manager: WorkerNodeManager {
-                worker_nodes: workers,
-            },
+            worker_manager,
             scheduled_stage_sender: sender,
             scheduled_stage_receiver: receiver,
             scheduled_stages_map: HashMap::new(),
@@ -88,20 +88,47 @@ impl BatchScheduler {
     }
 }
 
+/// `WorkerNodeManager` manages live worker nodes.
 pub(crate) struct WorkerNodeManager {
-    worker_nodes: Vec<WorkerNode>,
+    worker_nodes: RwLock<Vec<WorkerNode>>,
 }
 
+pub(crate) type WorkerNodeManagerRef = Arc<WorkerNodeManager>;
+
 impl WorkerNodeManager {
-    pub fn all_nodes(&self) -> &[WorkerNode] {
-        &self.worker_nodes
+    pub async fn new(client: MetaClient) -> Result<Self> {
+        let worker_nodes = RwLock::new(client.list_all_nodes(WorkerType::ComputeNode).await?);
+        Ok(Self { worker_nodes })
+    }
+
+    /// Used in tests.
+    pub fn mock(worker_nodes: Vec<WorkerNode>) -> Self {
+        let worker_nodes = RwLock::new(worker_nodes);
+        Self { worker_nodes }
+    }
+
+    pub fn list_worker_nodes(&self) -> Vec<WorkerNode> {
+        self.worker_nodes.read().unwrap().clone()
+    }
+
+    pub fn add_worker_node(&self, node: WorkerNode) {
+        self.worker_nodes.write().unwrap().push(node);
+    }
+
+    pub fn remove_worker_node(&self, node: WorkerNode) {
+        self.worker_nodes.write().unwrap().retain(|x| *x == node);
     }
 
     /// Get a random worker node.
-    pub fn next_random(&self) -> &WorkerNode {
+    pub fn next_random(&self) -> WorkerNode {
         let mut rng = rand::thread_rng();
-        let die = Uniform::from(0..self.worker_nodes.len());
-        self.worker_nodes.get(die.sample(&mut rng)).unwrap()
+        let die = Uniform::from(0..self.worker_nodes.read().unwrap().len());
+        self.worker_nodes
+            .read()
+            .unwrap()
+            .get(die.sample(&mut rng))
+            .unwrap()
+            .clone()
     }
 }
 
@@ -172,13 +199,13 @@ impl BatchScheduler {
         query_stage_ref: QueryStageRef,
         child_scheduled_stage: &HashSet<StageId>,
     ) {
+        let all_nodes = self.worker_manager.list_worker_nodes();
         let distribution_schema = query_stage_ref.distribution.clone();
         let mut next_stage_parallelism = 1;
         if distribution_schema != Distribution::Single {
-            next_stage_parallelism = self.worker_manager.all_nodes().len();
+            next_stage_parallelism = all_nodes.len();
         }
 
-        let all_nodes = self.worker_manager.all_nodes();
         let scheduled_children = self.get_scheduled_stages(child_scheduled_stage);
 
         // Determine how many worker nodes for current stage.
@@ -186,10 +213,10 @@ impl BatchScheduler {
         if scheduled_children.is_empty() {
             // If current plan has scan node, use all workers (the data may be in any of them).
             if Self::include_table_scan(query_stage_ref.root.clone()) {
-                cur_stage_worker_nodes = all_nodes.to_vec();
+                cur_stage_worker_nodes = all_nodes;
             } else {
                 // Otherwise just choose a random worker.
-                cur_stage_worker_nodes.push(self.worker_manager.next_random().clone());
+                cur_stage_worker_nodes.push(self.worker_manager.next_random());
             }
         } else {
             let mut use_num_nodes = all_nodes.len();
@@ -202,9 +229,9 @@ impl BatchScheduler {
             }
 
             if use_num_nodes == all_nodes.len() {
-                cur_stage_worker_nodes = all_nodes.to_vec();
+                cur_stage_worker_nodes = all_nodes;
             } else {
-                cur_stage_worker_nodes.push(self.worker_manager.next_random().clone());
+                cur_stage_worker_nodes.push(self.worker_manager.next_random());
             }
         }
 

@@ -68,7 +68,7 @@ impl AggStateFactory {
                     distinct,
                 })
             }
-            [] => match (&agg_kind, return_type) {
+            [] => match (&agg_kind, return_type.clone()) {
                 (AggKind::Count, DataType::Int64) => Ok(Self {
                     input_type: None,
                     input_col_idx: 0,
@@ -89,21 +89,21 @@ impl AggStateFactory {
     }
 
     pub fn create_agg_state(&self) -> Result<Box<dyn Aggregator>> {
-        if let Some(input_type) = self.input_type {
+        if let Some(input_type) = self.input_type.clone() {
             create_agg_state_unary(
                 input_type,
                 self.input_col_idx,
                 &self.agg_kind,
-                self.return_type,
+                self.return_type.clone(),
                 self.distinct,
             )
         } else {
-            Ok(Box::new(CountStar::new(self.return_type, 0)))
+            Ok(Box::new(CountStar::new(self.return_type.clone(), 0)))
         }
     }
 
     pub fn get_return_type(&self) -> DataType {
-        self.return_type
+        self.return_type.clone()
     }
 }
 
@@ -121,7 +121,7 @@ pub fn create_agg_state_unary(
       match (
         input_type,
         agg_type,
-        return_type,
+        return_type.clone(),
         distinct,
       ) {
         $(

@@ -1,14 +1,15 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::RwLock;
 
 use async_trait::async_trait;
+use rand::prelude::SliceRandom;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::error::Result;
 use risingwave_storage::table::ScannableTableRef;
 use risingwave_storage::TableColumnDesc;
 use tokio::sync::mpsc;
 
-use crate::{BatchSourceReader, Source, SourceWriter, StreamSourceReader};
+use crate::{BatchSourceReader, Source, StreamSourceReader};
 
 #[derive(Debug)]
 struct TableSourceV2Core {
@@ -29,7 +30,7 @@ struct TableSourceV2Core {
 /// effects.
 #[derive(Debug)]
 pub struct TableSourceV2 {
-    core: Arc<RwLock<TableSourceV2Core>>,
+    core: RwLock<TableSourceV2Core>,
 
     /// All columns in this table.
     column_descs: Vec<TableColumnDesc>,
@@ -48,17 +49,32 @@ impl TableSourceV2 {
         };
 
         Self {
-            core: Arc::new(RwLock::new(core)),
+            core: RwLock::new(core),
             column_descs,
             next_row_id: 0.into(),
         }
     }
 
+    /// Generate a global-unique row id with given `worker_id`.
     pub fn next_row_id(&self, worker_id: u32) -> i64 {
         let local_row_id = self.next_row_id.fetch_add(1, Ordering::SeqCst) as u32;
 
-        // Concatenate worker_id and local_row_id to produce a global unique row_id
+        // Concatenate worker_id and local_row_id to produce a global-unique row_id
         (((worker_id as u64) << 32) + (local_row_id as u64)) as i64
+    }
+
+    /// Write stream chunk into table. Changes writen here will be simply passed to the associated
+    /// streaming task via channel, and then be materialized to storage there.
+    pub async fn write_chunk(&self, chunk: StreamChunk) -> Result<()> {
+        let core = self.core.read().unwrap();
+
+        let tx = core
+            .changes_txs
+            .choose(&mut rand::thread_rng())
+            .expect("no table reader exists");
+        tx.send(chunk).expect("write chunk to table reader failed");
+
+        Ok(())
     }
 }
 
@@ -73,15 +89,15 @@ pub struct TableV2BatchReader;
 #[async_trait]
 impl BatchSourceReader for TableV2BatchReader {
     async fn open(&mut self) -> Result<()> {
-        todo!()
+        unimplemented!()
     }
 
     async fn next(&mut self) -> Result<Option<risingwave_common::array::DataChunk>> {
-        todo!()
+        unimplemented!()
     }
 
     async fn close(&mut self) -> Result<()> {
-        todo!()
+        unimplemented!()
     }
 }
 
@@ -123,44 +139,18 @@ impl StreamSourceReader for TableV2StreamReader {
     }
 }
 
-/// [`TableV2Writer`] is for writing data into table. Changes writen here will be simply passed to
-/// the associated streaming task via channel, and then be materialized to storage there.
-#[derive(Debug)]
-pub struct TableV2Writer {
-    core: Arc<RwLock<TableSourceV2Core>>,
-}
-
-#[async_trait]
-impl SourceWriter for TableV2Writer {
-    async fn write(&mut self, chunk: StreamChunk) -> Result<()> {
-        use rand::Rng;
-        let core = self.core.read().unwrap();
-        assert!(!core.changes_txs.is_empty(), "table reader not exists");
-        // randomly pick a channel
-        let idx = rand::thread_rng().gen_range(0..core.changes_txs.len());
-        let tx = &core.changes_txs[idx];
-        tx.send(chunk).expect("write to table v2 failed");
-        Ok(())
-    }
-
-    async fn flush(&mut self) -> Result<()> {
-        Ok(())
-    }
-}
-
 #[async_trait]
 impl Source for TableSourceV2 {
     type ReaderContext = TableV2ReaderContext;
     type BatchReader = TableV2BatchReader;
     type StreamReader = TableV2StreamReader;
-    type Writer = TableV2Writer;
 
     fn batch_reader(
         &self,
         _context: Self::ReaderContext,
         _column_ids: Vec<i32>,
     ) -> Result<Self::BatchReader> {
-        unimplemented!("currently no one use this")
+        unreachable!("should use table_scan instead of stream_scan to read the table source")
     }
 
     fn stream_reader(
@@ -184,16 +174,12 @@ impl Source for TableSourceV2 {
 
         Ok(TableV2StreamReader { rx, column_indices })
     }
-
-    fn create_writer(&self) -> Result<Self::Writer> {
-        Ok(TableV2Writer {
-            core: self.core.clone(),
-        })
-    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use assert_matches::assert_matches;
     use itertools::Itertools;
     use risingwave_common::array::{Array, I64Array, Op};
@@ -220,7 +206,6 @@ mod tests {
     async fn test_table_source_v2() -> Result<()> {
         let source = new_source();
         let mut reader = source.stream_reader(TableV2ReaderContext, vec![0])?;
-        let mut writer = source.create_writer()?;
 
         macro_rules! write_chunk {
             ($i:expr) => {{
@@ -229,7 +214,7 @@ mod tests {
                     vec![column_nonnull!(I64Array, [$i])],
                     None,
                 );
-                writer.write(chunk).await?;
+                source.write_chunk(chunk).await?;
             }};
         }
 

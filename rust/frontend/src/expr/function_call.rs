@@ -34,6 +34,20 @@ impl FunctionCall {
     pub fn decompose(self) -> (ExprType, Vec<ExprImpl>) {
         (self.func_type, self.inputs)
     }
+    pub fn decompose_as_binary(self) -> (ExprType, ExprImpl, ExprImpl) {
+        assert_eq!(self.inputs.len(), 2);
+        let mut iter = self.inputs.into_iter();
+        let left = iter.next().unwrap();
+        let right = iter.next().unwrap();
+        (self.func_type, left, right)
+    }
+    pub fn decompose_as_unary(self) -> (ExprType, ExprImpl) {
+        assert_eq!(self.inputs.len(), 1);
+        let mut iter = self.inputs.into_iter();
+        let input = iter.next().unwrap();
+        (self.func_type, input)
+    }
+
     pub fn get_expr_type(&self) -> ExprType {
         self.func_type
     }
@@ -45,9 +59,9 @@ impl FunctionCall {
 }
 impl Expr for FunctionCall {
     fn return_type(&self) -> DataType {
-        self.return_type
+        self.return_type.clone()
     }
-    fn bound_expr(self) -> ExprImpl {
+    fn to_expr_impl(self) -> ExprImpl {
         ExprImpl::FunctionCall(Box::new(self))
     }
 }

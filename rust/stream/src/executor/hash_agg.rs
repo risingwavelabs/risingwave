@@ -59,6 +59,12 @@ pub struct HashAggExecutor<S: StateStore> {
 
     /// Identity string
     identity: String,
+
+    /// Logical Operator Info
+    op_info: String,
+
+    /// Epoch
+    epoch: u64,
 }
 
 impl<S: StateStore> HashAggExecutor<S> {
@@ -69,7 +75,7 @@ impl<S: StateStore> HashAggExecutor<S> {
         keyspace: Keyspace<S>,
         pk_indices: PkIndices,
         executor_id: u64,
-        identity: String,
+        op_info: String,
     ) -> Self {
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&key_indices));
 
@@ -82,7 +88,9 @@ impl<S: StateStore> HashAggExecutor<S> {
             key_indices,
             state_map: EvictableHashMap::new(1 << 16), // TODO: decide the target cap
             pk_indices,
-            identity: format!("{} {:X}", identity, executor_id),
+            identity: format!("HashAggExecutor {:X}", executor_id),
+            op_info,
+            epoch: 0,
         }
     }
 
@@ -115,10 +123,8 @@ impl<S: StateStore> HashAggExecutor<S> {
         for (row_idx, key) in keys.iter().enumerate() {
             // if the visibility map has already shadowed this row,
             // then we pass
-            if let Some(vis_map) = visibility {
-                if !vis_map.is_set(row_idx)? {
-                    continue;
-                }
+            if let Some(vis_map) = visibility && !vis_map.is_set(row_idx)? {
+                continue;
             }
             let vis_map = key_to_vis_maps.entry(key).or_insert_with(|| {
                 unique_keys.push(key);
@@ -147,11 +153,20 @@ impl<S: StateStore> HashAggExecutor<S> {
 
 #[async_trait]
 impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
+    fn current_epoch(&self) -> u64 {
+        self.epoch
+    }
+
+    fn update_epoch(&mut self, new_epoch: u64) {
+        self.epoch = new_epoch;
+    }
+
     fn cached_barrier_message_mut(&mut self) -> &mut Option<Barrier> {
         &mut self.cached_barrier_message
     }
 
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> Result<()> {
+        let epoch = self.current_epoch();
         let (ops, columns, visibility) = chunk.into_inner();
 
         // --- Retrieve grouped keys into Row format ---
@@ -200,6 +215,7 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
                         &self.agg_calls,
                         &self.keyspace,
                         input_pk_data_types.clone(),
+                        epoch,
                     )
                     .await?;
                     self.state_map.put(key.to_owned(), state);
@@ -208,21 +224,24 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
             };
 
             // 2. Mark the state as dirty by filling prev states
-            states.may_mark_as_dirty().await?;
+            states.may_mark_as_dirty(epoch).await?;
 
             // 3. Apply batch to each of the state (per agg_call)
             for (agg_state, data) in states.managed_states.iter_mut().zip_eq(all_agg_data.iter()) {
-                agg_state.apply_batch(&ops, Some(&vis_map), data).await?;
+                agg_state
+                    .apply_batch(&ops, Some(&vis_map), data, epoch)
+                    .await?;
             }
         }
 
         Ok(())
     }
 
-    async fn flush_data(&mut self, epoch: u64) -> Result<Option<StreamChunk>> {
+    async fn flush_data(&mut self) -> Result<Option<StreamChunk>> {
         // --- Flush states to the state store ---
         // Some state will have the correct output only after their internal states have been fully
         // flushed.
+        let epoch = self.current_epoch();
         let (write_batch, dirty_cnt) = {
             let mut write_batch = self.keyspace.state_store().start_write_batch();
             let mut dirty_cnt = 0;
@@ -257,7 +276,7 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
         // --- Retrieve modified states and put the changes into the builders ---
         for (key, states) in self.state_map.iter_mut() {
             let _is_empty = states
-                .build_changes(&mut builders, &mut new_ops, Some(key))
+                .build_changes(&mut builders, &mut new_ops, Some(key), epoch)
                 .await?;
         }
 
@@ -320,6 +339,10 @@ impl<S: StateStore> Executor for HashAggExecutor<S> {
         );
         self.state_map.clear();
         Ok(())
+    }
+
+    fn logical_operator_info(&self) -> &str {
+        &self.op_info
     }
 }
 
