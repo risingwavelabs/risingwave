@@ -126,7 +126,7 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
             null_bitmap: Some(null_bitmap),
             values: vec![buffer],
             array_type: T::array_type() as i32,
-            children_array: vec![],
+            struct_array_data: None,
         })
     }
 

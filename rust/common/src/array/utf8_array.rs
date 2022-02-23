@@ -81,7 +81,7 @@ impl Array for Utf8Array {
             null_bitmap: Some(null_bitmap),
             values,
             array_type: ArrayType::Utf8 as i32,
-            children_array: vec![],
+            struct_array_data: None,
         })
     }
 

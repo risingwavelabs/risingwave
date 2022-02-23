@@ -69,7 +69,7 @@ macro_rules! get_chrono_array {
                         null_bitmap: Some(null_bitmap),
                         values: vec![buffer],
                         array_type: Self::get_array_type() as i32,
-                        children_array: vec![],
+                        struct_array_data: None,
                     })
                 }
 

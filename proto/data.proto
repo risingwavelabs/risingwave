@@ -64,6 +64,11 @@ message DataType {
   IntervalType interval_type = 5;
 }
 
+message StructArrayData {
+  repeated Array children_array = 1;
+  repeated DataType children_type = 2;
+}
+
 enum ArrayType {
   INT16 = 0;
   INT32 = 1;
@@ -83,8 +88,7 @@ message Array {
   ArrayType array_type = 1;
   Buffer null_bitmap = 2;
   repeated Buffer values = 3;
-  // For struct. Empty for atomic types.
-  repeated Array children_array = 4;
+  StructArrayData struct_array_data = 4;
 }
 
 // New column proto def to replace fixed width column. This def

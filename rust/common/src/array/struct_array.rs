@@ -2,17 +2,19 @@ use core::fmt;
 use std::cmp::Ordering;
 use std::fmt::{Debug, Display};
 use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType};
+use risingwave_pb::data::{
+    Array as ProstArray, ArrayType as ProstArrayType, DataType as ProstDataType, StructArrayData,
+};
 
 use super::{
-    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, ArrayType,
-    NULL_VAL_FOR_HASH,
+    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, NULL_VAL_FOR_HASH,
 };
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::error::Result;
-use crate::types::{Datum, DatumRef, Scalar, ScalarRefImpl};
+use crate::types::{DataType, Datum, DatumRef, Scalar, ScalarRefImpl};
 
 /// This is a naive implementation of struct array.
 /// We will eventually move to a more efficient flatten implementation.
@@ -20,7 +22,7 @@ use crate::types::{Datum, DatumRef, Scalar, ScalarRefImpl};
 pub struct StructArrayBuilder {
     bitmap: BitmapBuilder,
     children_array: Vec<ArrayBuilderImpl>,
-    children_types: Vec<ArrayType>,
+    children_type: Arc<[DataType]>,
     len: usize,
 }
 
@@ -34,7 +36,12 @@ impl ArrayBuilder for StructArrayBuilder {
 
     #[cfg(test)]
     fn new(capacity: usize) -> Result<Self> {
-        Self::new_with_meta(capacity, ArrayMeta::Struct { children: vec![] })
+        Self::new_with_meta(
+            capacity,
+            ArrayMeta::Struct {
+                children: Arc::new([]),
+            },
+        )
     }
 
     fn new_with_meta(capacity: usize, meta: ArrayMeta) -> Result<Self> {
@@ -46,7 +53,7 @@ impl ArrayBuilder for StructArrayBuilder {
             Ok(Self {
                 bitmap: BitmapBuilder::with_capacity(capacity),
                 children_array,
-                children_types: children,
+                children_type: children,
                 len: 0,
             })
         } else {
@@ -94,7 +101,7 @@ impl ArrayBuilder for StructArrayBuilder {
         Ok(StructArray {
             bitmap: self.bitmap.finish(),
             children,
-            children_types: self.children_types,
+            children_type: self.children_type,
             len: self.len,
         })
     }
@@ -104,7 +111,7 @@ impl ArrayBuilder for StructArrayBuilder {
 pub struct StructArray {
     bitmap: Bitmap,
     children: Vec<ArrayImpl>,
-    children_types: Vec<ArrayType>,
+    children_type: Arc<[DataType]>,
     len: usize,
 }
 
@@ -139,9 +146,17 @@ impl Array for StructArray {
             .iter()
             .map(|a| a.to_protobuf())
             .collect::<Result<Vec<ProstArray>>>()?;
+        let children_type = self
+            .children_type
+            .iter()
+            .map(|t| t.to_protobuf())
+            .collect::<Result<Vec<ProstDataType>>>()?;
         Ok(ProstArray {
             array_type: ProstArrayType::Struct as i32,
-            children_array,
+            struct_array_data: Some(StructArrayData {
+                children_array,
+                children_type,
+            }),
             null_bitmap: Some(self.bitmap.to_protobuf()?),
             values: vec![],
         })
@@ -163,7 +178,7 @@ impl Array for StructArray {
         let array_builder = StructArrayBuilder::new_with_meta(
             capacity,
             ArrayMeta::Struct {
-                children: self.children_types.clone(),
+                children: self.children_type.clone(),
             },
         )?;
         Ok(ArrayBuilderImpl::Struct(array_builder))
@@ -171,7 +186,7 @@ impl Array for StructArray {
 
     fn array_meta(&self) -> ArrayMeta {
         ArrayMeta::Struct {
-            children: self.children_types.clone(),
+            children: self.children_type.clone(),
         }
     }
 }
@@ -184,43 +199,42 @@ impl StructArray {
         );
         let bitmap: Bitmap = array.get_null_bitmap()?.try_into()?;
         let cardinality = bitmap.len();
-        let children = array
+        let array_data = array.get_struct_array_data()?;
+        let children = array_data
             .children_array
             .iter()
             .map(|child| ArrayImpl::from_protobuf(child, cardinality))
             .collect::<Result<Vec<ArrayImpl>>>()?;
-        let children_types = array
-            .children_array
+        let children_type: Arc<[DataType]> = array_data
+            .children_type
             .iter()
-            .map(ArrayType::from_protobuf)
-            .collect::<Result<Vec<ArrayType>>>()?;
+            .map(DataType::from)
+            .collect::<Vec<DataType>>()
+            .into();
         let arr = StructArray {
             bitmap,
             children,
-            children_types,
+            children_type,
             len: cardinality,
         };
         Ok(arr.into())
     }
 
-    pub fn children_array_types(&self) -> &[ArrayType] {
-        &self.children_types
+    pub fn children_array_types(&self) -> &[DataType] {
+        &self.children_type
     }
 
     #[cfg(test)]
-    pub fn from_slices(null_bitmap: &[bool], children: Vec<ArrayImpl>) -> Result<StructArray> {
+    pub fn from_slices(
+        null_bitmap: &[bool],
+        children: Vec<ArrayImpl>,
+        children_type: Vec<DataType>,
+    ) -> Result<StructArray> {
         let cardinality = null_bitmap.len();
         let bitmap = Bitmap::try_from(null_bitmap.to_vec())?;
-        let children_types = children
-            .iter()
-            .map(|a| {
-                assert_eq!(a.len(), cardinality);
-                ArrayType::from_array_impl(a)
-            })
-            .collect::<Result<Vec<ArrayType>>>()?;
         Ok(StructArray {
             bitmap,
-            children_types,
+            children_type: children_type.into(),
             len: cardinality,
             children,
         })
@@ -371,7 +385,7 @@ mod tests {
     // `CREATE TYPE foo_empty as ();`, e.g.
     #[test]
     fn test_struct_new_empty() {
-        let arr = StructArray::from_slices(&[true, false, true, false], vec![]).unwrap();
+        let arr = StructArray::from_slices(&[true, false, true, false], vec![], vec![]).unwrap();
         let actual = StructArray::from_protobuf(&arr.to_protobuf().unwrap()).unwrap();
         assert_eq!(ArrayImpl::Struct(arr), actual);
     }
@@ -385,6 +399,7 @@ mod tests {
                 array! { I32Array, [None, Some(1), None, Some(2)] }.into(),
                 array! { F32Array, [None, Some(3.0), None, Some(4.0)] }.into(),
             ],
+            vec![DataType::Int32, DataType::Float32],
         )
         .unwrap();
         let actual = StructArray::from_protobuf(&arr.to_protobuf().unwrap()).unwrap();
@@ -411,7 +426,7 @@ mod tests {
         let mut builder = StructArrayBuilder::new_with_meta(
             4,
             ArrayMeta::Struct {
-                children: vec![ArrayType::Int32, ArrayType::Float32],
+                children: Arc::new([DataType::Int32, DataType::Float32]),
             },
         )
         .unwrap();
@@ -434,6 +449,7 @@ mod tests {
                 array! { I32Array, [Some(1)] }.into(),
                 array! { F32Array, [Some(2.0)] }.into(),
             ],
+            vec![DataType::Int32, DataType::Float32],
         )
         .unwrap();
         let builder = arr.create_builder(4).unwrap();

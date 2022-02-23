@@ -79,7 +79,7 @@ impl Array for DecimalArray {
             null_bitmap: Some(null_bitmap),
             values,
             array_type: ArrayType::Decimal as i32,
-            children_array: vec![],
+            struct_array_data: None,
         })
     }
 

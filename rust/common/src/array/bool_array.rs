@@ -64,7 +64,7 @@ impl Array for BoolArray {
             null_bitmap: Some(null_bitmap),
             values: vec![values],
             array_type: ArrayType::Bool as i32,
-            children_array: vec![],
+            struct_array_data: None,
         })
     }
 

@@ -1,6 +1,5 @@
 //! `Array` defines all in-memory representations of vectorized execution framework.
 
-mod array_type;
 mod bool_array;
 mod chrono_array;
 pub mod column;
@@ -22,7 +21,6 @@ use std::convert::From;
 use std::hash::Hasher;
 use std::sync::Arc;
 
-pub use array_type::*;
 pub use bool_array::{BoolArray, BoolArrayBuilder};
 pub use chrono_array::{
     NaiveDateArray, NaiveDateArrayBuilder, NaiveDateTimeArray, NaiveDateTimeArrayBuilder,
@@ -177,6 +175,12 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
     fn array_meta(&self) -> ArrayMeta {
         ArrayMeta::Simple
     }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ArrayMeta {
+    Simple, // Simple array without given any extra metadata.
+    Struct { children: Arc<[DataType]> },
 }
 
 /// Implement `compact` on array, which removes element according to `visibility`.
