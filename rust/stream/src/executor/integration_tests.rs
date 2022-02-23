@@ -79,7 +79,8 @@ async fn test_merger_sum_aggr() {
         )
         .unwrap();
         let (tx, rx) = channel(16);
-        let consumer = SenderConsumer::new(Box::new(aggregator), Box::new(LocalOutput::new(tx)));
+        let consumer =
+            SenderConsumer::new(Box::new(aggregator), Box::new(LocalOutput::new(233, tx)));
         let context = SharedContext::for_test().into();
         let actor = Actor::new(Box::new(consumer), 0, context);
         (actor, rx)
@@ -100,7 +101,7 @@ async fn test_merger_sum_aggr() {
         let (actor, channel) = make_actor(rx);
         outputs.push(channel);
         handles.push(tokio::spawn(actor.run()));
-        inputs.push(Box::new(LocalOutput::new(tx)) as Box<dyn Output>);
+        inputs.push(Box::new(LocalOutput::new(233, tx)) as Box<dyn Output>);
     }
 
     // create a round robin dispatcher, which dispatches messages to the actors
@@ -349,7 +350,8 @@ async fn test_tpch_q6() {
         )
         .unwrap();
         let (tx, rx) = channel(16);
-        let consumer = SenderConsumer::new(Box::new(aggregator), Box::new(LocalOutput::new(tx)));
+        let consumer =
+            SenderConsumer::new(Box::new(aggregator), Box::new(LocalOutput::new(233, tx)));
         let context = SharedContext::for_test().into();
         let actor = Actor::new(Box::new(consumer), 0, context);
         (actor, rx)
@@ -369,7 +371,7 @@ async fn test_tpch_q6() {
         let (actor, channel) = make_actor(rx);
         outputs.push(channel);
         handles.push(tokio::spawn(actor.run()));
-        inputs.push(Box::new(LocalOutput::new(tx)) as Box<dyn Output>);
+        inputs.push(Box::new(LocalOutput::new(233, tx)) as Box<dyn Output>);
     }
 
     // create a round robin dispatcher, which dispatches messages to the actors

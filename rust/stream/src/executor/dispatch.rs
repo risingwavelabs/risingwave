@@ -13,26 +13,34 @@ use tracing::event;
 use super::{Barrier, Executor, Message, Mutation, Result, StreamChunk, StreamConsumer};
 use crate::task::SharedContext;
 
+type ActorId = u32;
+
 /// `Output` provides an interface for `Dispatcher` to send data into downstream actors.
 #[async_trait]
 pub trait Output: Debug + Send + Sync + 'static {
     async fn send(&mut self, message: Message) -> Result<()>;
+
+    fn actor_id(&self) -> ActorId;
 }
 
 /// `LocalOutput` sends data to a local `mpsc::Channel`
 pub struct LocalOutput {
+    actor_id: ActorId,
+
     ch: Sender<Message>,
 }
 
 impl Debug for LocalOutput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LocalOutput").finish()
+        f.debug_struct("LocalOutput")
+            .field("actor_id", &self.actor_id)
+            .finish()
     }
 }
 
 impl LocalOutput {
-    pub fn new(ch: Sender<Message>) -> Self {
-        Self { ch }
+    pub fn new(actor_id: ActorId, ch: Sender<Message>) -> Self {
+        Self { actor_id, ch }
     }
 }
 
@@ -43,22 +51,30 @@ impl Output for LocalOutput {
         self.ch.send(message).await.unwrap();
         Ok(())
     }
+
+    fn actor_id(&self) -> ActorId {
+        self.actor_id
+    }
 }
 
 /// `RemoteOutput` forwards data to`ExchangeServiceImpl`
 pub struct RemoteOutput {
+    actor_id: ActorId,
+
     ch: Sender<Message>,
 }
 
 impl Debug for RemoteOutput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RemoteOutput").finish()
+        f.debug_struct("RemoteOutput")
+            .field("actor_id", &self.actor_id)
+            .finish()
     }
 }
 
 impl RemoteOutput {
-    pub fn new(ch: Sender<Message>) -> Self {
-        Self { ch }
+    pub fn new(actor_id: ActorId, ch: Sender<Message>) -> Self {
+        Self { actor_id, ch }
     }
 }
 
@@ -72,6 +88,10 @@ impl Output for RemoteOutput {
         // local channel should never fail
         self.ch.send(message).await.unwrap();
         Ok(())
+    }
+
+    fn actor_id(&self) -> ActorId {
+        self.actor_id
     }
 }
 
@@ -141,10 +161,12 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
                         let downstream_addr = actor_info.get_host()?.to_socket_addr()?;
                         if is_local_address(&downstream_addr, &self.context.addr) {
                             let tx = self.context.take_sender(&up_down_ids)?;
-                            new_outputs.push(Box::new(LocalOutput::new(tx)) as Box<dyn Output>)
+                            new_outputs
+                                .push(Box::new(LocalOutput::new(down_id, tx)) as Box<dyn Output>)
                         } else {
                             let tx = self.context.take_sender(&up_down_ids)?;
-                            new_outputs.push(Box::new(RemoteOutput::new(tx)) as Box<dyn Output>)
+                            new_outputs
+                                .push(Box::new(RemoteOutput::new(down_id, tx)) as Box<dyn Output>)
                         }
                     }
                     self.inner.update_outputs(new_outputs)
@@ -160,10 +182,12 @@ impl<Inner: DataDispatcher + Send> DispatchExecutor<Inner> {
                         let downstream_addr = downstream_actor_info.get_host()?.to_socket_addr()?;
                         if is_local_address(&downstream_addr, &self.context.addr) {
                             let tx = self.context.take_sender(&up_down_ids)?;
-                            outputs_to_add.push(Box::new(LocalOutput::new(tx)) as Box<dyn Output>)
+                            outputs_to_add
+                                .push(Box::new(LocalOutput::new(down_id, tx)) as Box<dyn Output>)
                         } else {
                             let tx = self.context.take_sender(&up_down_ids)?;
-                            outputs_to_add.push(Box::new(RemoteOutput::new(tx)) as Box<dyn Output>)
+                            outputs_to_add
+                                .push(Box::new(RemoteOutput::new(down_id, tx)) as Box<dyn Output>)
                         }
                     }
                     self.inner.add_outputs(outputs_to_add);
@@ -537,6 +561,10 @@ mod tests {
         async fn send(&mut self, message: Message) -> Result<()> {
             self.data.lock().unwrap().push(message);
             Ok(())
+        }
+
+        fn actor_id(&self) -> ActorId {
+            0
         }
     }
 
