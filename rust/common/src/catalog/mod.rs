@@ -36,19 +36,14 @@ impl SchemaId {
 
 #[derive(Clone, Debug, Default, Hash, PartialOrd, PartialEq, Eq)]
 pub struct TableId {
-    schema_ref_id: SchemaId,
-    table_id: i32,
+    pub table_id: u32,
 }
-
 impl TableId {
-    pub fn new(schema_ref_id: SchemaId, table_id: i32) -> Self {
-        TableId {
-            schema_ref_id,
-            table_id,
-        }
+    pub fn new(table_id: u32) -> Self {
+        TableId { table_id }
     }
 
-    pub fn table_id(&self) -> i32 {
+    pub fn table_id(&self) -> u32 {
         self.table_id
     }
 }
@@ -91,14 +86,12 @@ impl From<&Option<risingwave_pb::plan::TableRefId>> for TableId {
     fn from(option: &Option<risingwave_pb::plan::TableRefId>) -> Self {
         match option {
             Some(pb) => TableId {
-                schema_ref_id: SchemaId::from(&pb.schema_ref_id),
-                table_id: pb.table_id,
+                table_id: pb.table_id as u32,
             },
             None => {
                 let pb = risingwave_pb::plan::TableRefId::default();
                 TableId {
-                    schema_ref_id: SchemaId::from(&pb.schema_ref_id),
-                    table_id: pb.table_id,
+                    table_id: pb.table_id as u32,
                 }
             }
         }
@@ -130,10 +123,8 @@ impl From<&SchemaId> for risingwave_pb::plan::SchemaRefId {
 impl From<&TableId> for risingwave_pb::plan::TableRefId {
     fn from(table_id: &TableId) -> Self {
         risingwave_pb::plan::TableRefId {
-            schema_ref_id: Some(risingwave_pb::plan::SchemaRefId::from(
-                &table_id.schema_ref_id,
-            )),
-            table_id: 0,
+            schema_ref_id: None,
+            table_id: table_id.table_id as i32,
         }
     }
 }
