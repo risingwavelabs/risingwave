@@ -141,7 +141,7 @@ impl Executor for OrderByExecutor {
             self.encodable = self
                 .order_pairs
                 .iter()
-                .map(|pair| schema.fields[pair.column_idx].data_type)
+                .map(|pair| schema.fields[pair.column_idx].data_type.clone())
                 .all(is_type_encodable)
         }
 
