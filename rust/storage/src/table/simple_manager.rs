@@ -49,7 +49,7 @@ impl TableManager for SimpleTableManager {
             let keyspace = Keyspace::table_root(store, table_id);
             Arc::new(MViewTable::new_batch(keyspace, table_columns)) as ScannableTableRef
         });
-        tables.insert(table_id.clone(), table.clone());
+        tables.insert(*table_id, table.clone());
 
         Ok(table)
     }
@@ -102,7 +102,7 @@ impl TableManager for SimpleTableManager {
             ))
         });
 
-        tables.insert(table_id.clone(), table);
+        tables.insert(*table_id, table);
         Ok(())
     }
 
@@ -134,7 +134,7 @@ impl TableManager for SimpleTableManager {
             .clone();
 
         // Simply associate the mview id to the table
-        tables.insert(mview_id.clone(), table.clone());
+        tables.insert(*mview_id, table.clone());
         Ok(table)
     }
 
