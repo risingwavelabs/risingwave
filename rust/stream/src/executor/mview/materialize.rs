@@ -145,7 +145,7 @@ mod tests {
     use std::sync::Arc;
 
     use risingwave_common::array::{I32Array, Op, Row};
-    use risingwave_common::catalog::{Schema, SchemaId, TableId};
+    use risingwave_common::catalog::{Schema, TableId};
     use risingwave_common::column_nonnull;
     use risingwave_common::util::downcast_arc;
     use risingwave_common::util::sort_util::OrderType;

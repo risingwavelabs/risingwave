@@ -6,7 +6,7 @@ use risingwave_batch::executor::{
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{Array, DataChunk, F64Array};
 use risingwave_common::array_nonnull;
-use risingwave_common::catalog::{Field, Schema, SchemaId, TableId};
+use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::Result;
 use risingwave_common::types::IntoOrdered;
 use risingwave_common::util::sort_util::OrderType;
@@ -93,7 +93,7 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     // Create table v2 using `CreateTableExecutor`
     let mut create_table = CreateTableExecutor::new(
-        source_table_id.clone(),
+        source_table_id,
         table_manager.clone(),
         source_manager.clone(),
         table_columns,
