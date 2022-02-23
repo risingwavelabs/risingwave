@@ -1,6 +1,7 @@
 use bytes::Bytes;
 use risingwave_storage::StateStore;
 
+use crate::utils::latency_stat::LatencyStat;
 use crate::Opts;
 
 pub(crate) mod get;
@@ -14,6 +15,12 @@ pub(crate) struct Operations {
 }
 
 type Batch = Vec<(Bytes, Option<Bytes>)>;
+
+pub(crate) struct PerfMetrics {
+    stat: LatencyStat,
+    qps: u128,
+    bytes_pre_sec: u128,
+}
 
 impl Operations {
     /// Run operations in the `--benchmarks` option

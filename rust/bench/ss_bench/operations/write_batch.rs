@@ -4,7 +4,7 @@ use std::time::Instant;
 use itertools::Itertools;
 use risingwave_storage::StateStore;
 
-use super::{Batch, Operations};
+use super::{Batch, Operations, PerfMetrics};
 use crate::utils::latency_stat::LatencyStat;
 use crate::utils::workload::{get_epoch, Workload};
 use crate::Opts;
@@ -20,14 +20,14 @@ impl Operations {
 
         let batches = Workload::make_batches(opts, keys, values);
 
-        let (stat, ops, throughput) = self.run_batches(store, opts, batches).await;
+        let perf = self.run_batches(store, opts, batches).await;
 
         println!(
             "
     writebatch
       {}
       KV ingestion OPS: {}  {} bytes/sec",
-            stat, ops, throughput
+            perf.stat, perf.qps, perf.bytes_pre_sec
         );
     }
 
@@ -40,14 +40,14 @@ impl Operations {
 
         let batches = Workload::make_batches(opts, keys, values);
 
-        let (stat, ops, throughput) = self.run_batches(store, opts, batches).await;
+        let perf = self.run_batches(store, opts, batches).await;
 
         println!(
             "
     deleterandom
       {}
       KV ingestion OPS: {}  {} bytes/sec",
-            stat, ops, throughput
+            perf.stat, perf.qps, perf.bytes_pre_sec
         );
     }
 
@@ -56,7 +56,7 @@ impl Operations {
         store: &impl StateStore,
         opts: &Opts,
         mut batches: Vec<Batch>,
-    ) -> (LatencyStat, u128, u128) {
+    ) -> PerfMetrics {
         let batches_len = batches.len();
         let size = size_of_val(&batches);
 
@@ -100,8 +100,12 @@ impl Operations {
         let stat = LatencyStat::new(latencies);
         // calculate operation per second
         let ops = opts.batch_size as u128 * 1_000_000_000 * batches_len as u128 / total_time_nano;
-        let throughput = size as u128 * 1_000_000_000 / total_time_nano;
+        let bytes_pre_sec = size as u128 * 1_000_000_000 / total_time_nano;
 
-        (stat, ops, throughput)
+        PerfMetrics {
+            stat,
+            qps: ops,
+            bytes_pre_sec,
+        }
     }
 }

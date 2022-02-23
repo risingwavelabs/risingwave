@@ -7,7 +7,7 @@ use rand::prelude::{Distribution, StdRng};
 use rand::SeedableRng;
 use risingwave_storage::StateStore;
 
-use super::Operations;
+use super::{Operations, PerfMetrics};
 use crate::utils::latency_stat::LatencyStat;
 use crate::utils::workload::Workload;
 use crate::Opts;
@@ -27,14 +27,14 @@ impl Operations {
             }
         };
 
-        let (stat, qps, bytes_pre_sec) = Operations::run_get(store, opts, get_keys).await;
+        let perf = Operations::run_get(store, opts, get_keys).await;
 
         println!(
             "
     getrandom
       {}
       QPS: {}  {} bytes/sec",
-            stat, qps, bytes_pre_sec
+            perf.stat, perf.qps, perf.bytes_pre_sec
         );
     }
 
@@ -55,14 +55,14 @@ impl Operations {
             }
         };
 
-        let (stat, qps, bytes_pre_sec) = Operations::run_get(store, opts, get_keys).await;
+        let perf = Operations::run_get(store, opts, get_keys).await;
 
         println!(
             "
     getseq
       {}
       QPS: {}  {} bytes/sec",
-            stat, qps, bytes_pre_sec
+            perf.stat, perf.qps, perf.bytes_pre_sec
         );
     }
 
@@ -70,7 +70,7 @@ impl Operations {
         store: &impl StateStore,
         opts: &Opts,
         mut get_keys: Vec<Bytes>,
-    ) -> (LatencyStat, u128, u128) {
+    ) -> PerfMetrics {
         // partitioned these keys for each concurrency
         let mut grouped_keys: Vec<Vec<Bytes>> = vec![vec![]; opts.concurrency_num as usize];
         for (i, key) in get_keys.drain(..).enumerate() {
@@ -123,6 +123,10 @@ impl Operations {
         let qps = opts.reads as u128 * 1_000_000_000 / total_time_nano as u128;
         let bytes_pre_sec = total_size as u128 * 1_000_000_000 / total_time_nano as u128;
 
-        (stat, qps, bytes_pre_sec)
+        PerfMetrics {
+            stat,
+            qps,
+            bytes_pre_sec,
+        }
     }
 }
