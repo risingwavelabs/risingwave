@@ -90,6 +90,7 @@ description = "Build RisingWave compute-node and meta-node"
 condition = { env_set = [ "ENABLE_BUILD_RUST" ] }
 script = '''
 #!@shell
+git worktree add "${pwd}/rust/meta/src/dashboard/build dashboard-artifact"
 set -e
 cd rust && cargo build --profile ${RISINGWAVE_BUILD_PROFILE}
 '''
