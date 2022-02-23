@@ -197,10 +197,7 @@ mod tests {
         let keyspace = Keyspace::table_root(store, &Default::default());
         let table = Arc::new(MViewTable::new_batch(
             keyspace,
-            vec![TableColumnDesc::new_without_name(
-                ColumnId::from(0),
-                DataType::Int64,
-            )],
+            vec![TableColumnDesc::unnamed(ColumnId::from(0), DataType::Int64)],
         ));
 
         TableSourceV2::new(table)

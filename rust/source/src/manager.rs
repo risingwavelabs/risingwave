@@ -235,10 +235,7 @@ mod tests {
 
         let table = Arc::new(TestTable::new(
             &TableId::default(),
-            vec![TableColumnDesc::new_without_name(
-                ColumnId::from(0),
-                DataType::Int64,
-            )],
+            vec![TableColumnDesc::unnamed(ColumnId::from(0), DataType::Int64)],
         ));
 
         let chunk0 = DataChunk::builder()

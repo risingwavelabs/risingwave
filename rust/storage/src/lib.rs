@@ -53,7 +53,7 @@ pub struct TableColumnDesc {
 }
 
 impl TableColumnDesc {
-    pub fn new_without_name(column_id: ColumnId, data_type: DataType) -> TableColumnDesc {
+    pub fn unnamed(column_id: ColumnId, data_type: DataType) -> TableColumnDesc {
         TableColumnDesc {
             data_type,
             column_id,
