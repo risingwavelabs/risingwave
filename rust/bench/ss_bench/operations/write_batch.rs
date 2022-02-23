@@ -39,7 +39,6 @@ impl Operations {
         let delete_keys = match self.keys.is_empty() {
             true => Workload::new_random_keys(opts, opts.deletes as u64, &mut self.rng).1,
             false => {
-                // let mut rng = StdRng::seed_from_u64(self.auto_inc_seed());
                 let dist = Uniform::from(0..self.keys.len());
                 (0..opts.deletes)
                     .into_iter()

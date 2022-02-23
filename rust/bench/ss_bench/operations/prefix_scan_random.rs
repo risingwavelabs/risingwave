@@ -21,7 +21,6 @@ impl Operations {
             // if prefixes is empty, use default prefix: ["a"*key_prefix_size]
             true => Workload::new_random_keys(opts, opts.reads as u64, &mut self.rng).0,
             false => {
-                // let mut rng = StdRng::seed_from_u64(self.auto_inc_seed());
                 let dist = Uniform::from(0..self.prefixes.len());
                 (0..opts.reads as usize)
                     .into_iter()
