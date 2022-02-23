@@ -37,7 +37,7 @@ public class HummockSnapshotManagerImpl implements HummockSnapshotManager {
     pinWorker.scheduleWithFixedDelay(
         () -> {
           try {
-            this.force_update();
+            this.forceUpdate();
           } catch (Exception e) {
             LOGGER.warn("Likely meta service is unreachable, retry after a while.");
             try {
@@ -88,7 +88,7 @@ public class HummockSnapshotManagerImpl implements HummockSnapshotManager {
   }
 
   @Override
-  public void force_update() {
+  public void forceUpdate() {
     // The fetched epoch is guaranteed to be GE than the cached ones.
     long epoch =
         this.metaClient

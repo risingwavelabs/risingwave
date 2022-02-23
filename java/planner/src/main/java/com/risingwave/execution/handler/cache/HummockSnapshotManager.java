@@ -6,7 +6,7 @@ public interface HummockSnapshotManager {
 
   void unpinSnapshot(long epoch);
 
-  void force_update();
+  void forceUpdate();
 
   default ScopedSnapshot getScopedSnapshot() {
     return new ScopedSnapshot(this);
