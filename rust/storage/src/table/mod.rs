@@ -17,13 +17,10 @@ pub use simple_manager::*;
 
 use crate::TableColumnDesc;
 
-// TODO: should not be ref.
-pub type DataChunks = Vec<DataChunkRef>;
-
-#[async_trait::async_trait]
 /// `TableManager` is an abstraction of managing a collection of tables.
 /// The interface between executors and storage should be table-oriented.
 /// `Database` is a logical concept and stored as metadata information.
+#[async_trait::async_trait]
 pub trait TableManager: Sync + Send + AsRef<dyn Any> {
     /// Create a specific table.
     async fn create_table_v2(

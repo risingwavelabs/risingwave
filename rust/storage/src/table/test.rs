@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use risingwave_common::array::DataChunk;
+use risingwave_common::array::{DataChunk, DataChunkRef};
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::Result;
 use tokio::sync::RwLock;
@@ -12,7 +12,7 @@ use crate::TableColumnDesc;
 
 #[derive(Debug)]
 pub struct TestTable {
-    chunks: Arc<RwLock<DataChunks>>,
+    chunks: Arc<RwLock<Vec<DataChunkRef>>>,
 
     column_descs: Vec<TableColumnDesc>,
 
