@@ -19,6 +19,7 @@ pub mod rtrim;
 pub mod substr;
 pub mod translate;
 pub mod trim;
+pub mod tumble;
 pub mod upper;
 
 #[cfg(test)]

@@ -3,7 +3,8 @@ use std::marker::PhantomData;
 use risingwave_pb::expr::expr_node::Type;
 
 use crate::array::{
-    Array, BoolArray, DecimalArray, I32Array, NaiveDateArray, NaiveDateTimeArray, Utf8Array,
+    Array, BoolArray, DecimalArray, I32Array, IntervalArray, NaiveDateArray, NaiveDateTimeArray,
+    Utf8Array,
 };
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
@@ -16,6 +17,7 @@ use crate::vector_op::extract::{extract_from_date, extract_from_timestamp};
 use crate::vector_op::like::like_default;
 use crate::vector_op::position::position;
 use crate::vector_op::round::round_digits;
+use crate::vector_op::tumble::tumble_start;
 
 /// A placeholder function that return bool in [`gen_binary_expr_atm`]
 pub fn cmp_placeholder<T1, T2, T3>(_l: T1, _r: T2) -> Result<bool> {
@@ -319,6 +321,17 @@ pub fn new_binary_expr(
                 _phantom: PhantomData,
             },
         ),
+        Type::TumbleStart => {
+            Box::new(
+                BinaryExpression::<NaiveDateTimeArray, IntervalArray, NaiveDateTimeArray, _> {
+                    expr_ia1: l,
+                    expr_ia2: r,
+                    return_type: ret,
+                    func: tumble_start,
+                    _phantom: PhantomData,
+                },
+            )
+        }
         tp => {
             unimplemented!(
                 "The expression {:?} using vectorized expression framework is not supported yet!",

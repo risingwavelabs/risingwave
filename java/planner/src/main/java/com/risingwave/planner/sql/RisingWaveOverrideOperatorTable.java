@@ -1,5 +1,7 @@
 package com.risingwave.planner.sql;
 
+import static org.apache.calcite.sql.type.OperandTypes.family;
+
 import com.risingwave.common.datatype.RwReturnTypes;
 import com.risingwave.planner.sql.fun.RwSqlExtractFunction;
 import org.apache.calcite.sql.SqlAggFunction;
@@ -130,6 +132,16 @@ public class RisingWaveOverrideOperatorTable extends ReflectiveSqlOperatorTable 
           ReturnTypes.VARCHAR_2000,
           InferTypes.RETURN_TYPE,
           OperandTypes.STRING_STRING_STRING,
+          SqlFunctionCategory.SYSTEM);
+
+  /** tumble_start function */
+  public static final SqlFunction TUMBLE_START =
+      new SqlFunction(
+          "TUMBLE_START",
+          SqlKind.OTHER_FUNCTION,
+          ReturnTypes.TIMESTAMP,
+          InferTypes.RETURN_TYPE,
+          OperandTypes.family(SqlTypeFamily.TIMESTAMP, SqlTypeFamily.DATETIME_INTERVAL),
           SqlFunctionCategory.SYSTEM);
 
   /** Pg's extract function */

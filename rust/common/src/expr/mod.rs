@@ -55,7 +55,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
             build_binary_expr_prost(prost)
         }
         Add | Subtract | Multiply | Divide | Modulus => build_binary_expr_prost(prost),
-        Extract | RoundDigit => build_binary_expr_prost(prost),
+        Extract | RoundDigit | TumbleStart => build_binary_expr_prost(prost),
         StreamNullByRowCount | And | Or => build_nullable_binary_expr_prost(prost),
         Substr => build_substr_expr(prost),
         Length => build_length_expr(prost),
