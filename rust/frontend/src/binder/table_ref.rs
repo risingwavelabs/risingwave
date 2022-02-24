@@ -54,11 +54,7 @@ impl Binder {
             .ok_or_else(|| ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name)))?;
         Ok(BaseTableRef {
             table_id: table_catalog.id(),
-            columns: table_catalog
-                .columns()
-                .iter()
-                .map(|(_, c)| c.clone())
-                .collect(),
+            columns: table_catalog.columns().into(),
         })
     }
 }

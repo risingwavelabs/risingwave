@@ -85,7 +85,7 @@ mod tests {
         let columns = table
             .columns()
             .iter()
-            .map(|(col_name, col)| (col_name.clone(), col.data_type()))
+            .map(|col| (col.name().into(), col.data_type()))
             .collect::<HashMap<String, DataType>>();
         let mut expected_map = HashMap::new();
         expected_map.insert(ROWID_NAME.to_string(), DataType::Int64);
