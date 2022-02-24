@@ -13,9 +13,9 @@ use crate::executor::ManagedMViewState;
 async fn test_mview_table() {
     let state_store = MemoryStateStore::new();
     let schema = schemas::iii();
+    let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
     let pk_columns = vec![0, 1];
     let orderings = vec![OrderType::Ascending, OrderType::Descending];
-    let column_ids = vec![ColumnId::from(0), ColumnId::from(1)];
     let keys = vec![
         OrderPair::new(0, OrderType::Ascending),
         OrderPair::new(1, OrderType::Descending),

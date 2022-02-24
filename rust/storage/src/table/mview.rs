@@ -124,7 +124,7 @@ impl<S: StateStore> MViewTable<S> {
             .get(
                 &[
                     &serialize_pk(&pk, &self.sort_key_serializer)?[..],
-                    &serialize_cell_idx(cell_idx as u32)?[..],
+                    &serialize_cell_idx(cell_idx as i32)?[..],
                 ]
                 .concat(),
                 epoch,

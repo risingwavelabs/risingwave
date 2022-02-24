@@ -139,7 +139,7 @@ mod tests {
     use std::sync::Arc;
 
     use risingwave_common::array::{I32Array, Op, Row};
-    use risingwave_common::catalog::{Schema, TableId};
+    use risingwave_common::catalog::{ColumnId, Schema, TableId};
     use risingwave_common::column_nonnull;
     use risingwave_common::util::downcast_arc;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
@@ -155,7 +155,7 @@ mod tests {
     use crate::executor::*;
 
     #[tokio::test]
-    async fn test_sink() {
+    async fn test_materialize_executor() {
         // Prepare storage and memtable.
         let store = MemoryStateStore::new();
         let store_mgr = Arc::new(SimpleTableManager::new(StateStoreImpl::MemoryStateStore(
@@ -185,6 +185,10 @@ mod tests {
                 ..Default::default()
             },
         ];
+        let column_ids = columns
+            .iter()
+            .map(|c| ColumnId::from(c.column_id))
+            .collect();
         let pks = vec![0_usize];
         let orderings = vec![OrderType::Ascending];
 
@@ -226,7 +230,7 @@ mod tests {
             Box::new(source),
             Keyspace::table_root(store, &table_id),
             vec![OrderPair::new(0, OrderType::Ascending)],
-            vec![0.into()],
+            column_ids,
             1,
             "MaterializeExecutor".to_string(),
         ));
@@ -246,9 +250,7 @@ mod tests {
                     .await
                     .unwrap()
                     .unwrap();
-                // Dirty trick to assert_eq between (&int32 and integer).
-                let d_value = datum.unwrap().as_int32() + 1;
-                assert_eq!(d_value, 7);
+                assert_eq!(*datum.unwrap().as_int32(), 6_i32);
             }
             _ => unreachable!(),
         }

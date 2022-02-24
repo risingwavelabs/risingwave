@@ -114,9 +114,9 @@ pub fn serialize_pk(pk: &Row, serializer: &OrderedRowsSerializer) -> Result<Vec<
 }
 
 // TODO(eric): deprecated. Remove when possible
-pub fn serialize_cell_idx(cell_idx: u32) -> Result<Vec<u8>> {
+pub fn serialize_cell_idx(cell_idx: i32) -> Result<Vec<u8>> {
     let mut buf = Vec::with_capacity(4);
-    buf.put_u32_le(cell_idx);
+    buf.put_i32(cell_idx);
     debug_assert_eq!(buf.len(), 4);
     Ok(buf)
 }
