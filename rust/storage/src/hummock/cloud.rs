@@ -1,10 +1,9 @@
 use std::sync::Arc;
 
 use bytes::{Bytes, BytesMut};
-use moka::future::Cache;
-use risingwave_pb::hummock::SstableMeta;
+use risingwave_pb::hummock::{SstableInfo, SstableMeta};
 
-use super::Block;
+use super::BlockCacheRef;
 use crate::hummock::sstable::SSTable;
 use crate::hummock::{HummockError, HummockResult, HummockSSTableId};
 use crate::object::ObjectStore;
@@ -19,6 +18,35 @@ pub async fn get_sst_meta(
     )
 }
 
+/// Upload table to remote object store.
+pub async fn upload(
+    client: &Arc<dyn ObjectStore>,
+    sst_id: u64,
+    meta: &SstableMeta,
+    data: Bytes,
+    path: &str,
+) -> HummockResult<()> {
+    let mut buf = BytesMut::with_capacity(DEFAULT_META_BYTES_SIZE);
+    SSTable::encode_meta(meta, &mut buf);
+    let buf_meta = buf.freeze();
+
+    let data_path = get_sst_data_path(path, sst_id);
+    client
+        .upload(&data_path, data)
+        .await
+        .map_err(HummockError::object_io_error)?;
+
+    let meta_path = get_sst_meta_path(path, sst_id);
+    if let Err(e) = client.upload(&meta_path, buf_meta).await {
+        client
+            .delete(&data_path)
+            .await
+            .map_err(HummockError::object_io_error)?;
+        return Err(HummockError::object_io_error(e));
+    }
+    Ok(())
+}
+
 /// Upload table to remote object storage and return the URL
 /// TODO: this function should not take `block_cache` as parameter -- why should we have a block
 /// cache when uploading?
@@ -28,7 +56,6 @@ pub async fn gen_remote_sstable(
     data: Bytes,
     meta: SstableMeta,
     remote_dir: &str,
-    block_cache: Option<Arc<Cache<Vec<u8>, Arc<Block>>>>,
 ) -> HummockResult<SSTable> {
     // encode sstable metadata
     let mut buf = BytesMut::new();
@@ -51,25 +78,7 @@ pub async fn gen_remote_sstable(
         .map_err(HummockError::object_io_error)?;
 
     // load sstable
-    SSTable::load(
-        sstable_id,
-        obj_client,
-        data_path,
-        meta,
-        if let Some(block_cache) = block_cache {
-            block_cache
-        } else {
-            #[cfg(test)]
-            {
-                Arc::new(Cache::new(2333))
-            }
-            #[cfg(not(test))]
-            {
-                panic!("must enable block cache in production mode")
-            }
-        },
-    )
-    .await
+    SSTable::new(sstable_id, obj_client, data_path, meta, block_cache).await
 }
 
 pub fn get_sst_meta_path(remote_dir: &str, sstable_id: HummockSSTableId) -> String {

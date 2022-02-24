@@ -3,13 +3,12 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use moka::future::Cache;
 use risingwave_common::error::{Result, RwError};
 use risingwave_rpc_client::MetaClient;
 
 use crate::hummock::hummock_meta_client::RPCHummockMetaClient;
 use crate::hummock::local_version_manager::LocalVersionManager;
-use crate::hummock::HummockStateStore;
+use crate::hummock::{BlockCache, HummockStateStore};
 use crate::memory::MemoryStateStore;
 use crate::rocksdb_local::RocksDBStateStore;
 use crate::tikv::TikvStateStore;
@@ -165,6 +164,7 @@ impl StateStoreImpl {
                     minio.strip_prefix("hummock+").unwrap(),
                 ));
                 let remote_dir = "hummock_001";
+                let block_cache = Arc::new(BlockCache::new(65536));
                 StateStoreImpl::HummockStateStore(HummockStateStore::new(
                     HummockStorage::new(
                         object_client.clone(),
@@ -174,16 +174,16 @@ impl StateStoreImpl {
                             bloom_false_positive: 0.1,
                             remote_dir: remote_dir.to_string(),
                             checksum_algo: ChecksumAlg::Crc32c,
-                            block_cache_capacity: 100,
                         },
                         Arc::new(LocalVersionManager::new(
                             object_client,
                             remote_dir,
                             // TODO: configurable block cache in config
                             // 1GB block cache (65536 blocks * 64KB block)
-                            Some(Arc::new(Cache::new(65536))),
+                            block_cache.clone(),
                         )),
                         Arc::new(RPCHummockMetaClient::new(meta_client)),
+                        block_cache,
                     )
                     .await
                     .map_err(RwError::from)?,
@@ -200,6 +200,7 @@ impl StateStoreImpl {
                     s3.strip_prefix("hummock+s3://").unwrap().to_string(),
                 ));
                 let remote_dir = "hummock_001";
+                let block_cache = Arc::new(BlockCache::new(65536));
                 StateStoreImpl::HummockStateStore(HummockStateStore::new(
                     HummockStorage::new(
                         s3_store.clone(),
@@ -209,14 +210,14 @@ impl StateStoreImpl {
                             bloom_false_positive: 0.1,
                             remote_dir: remote_dir.to_string(),
                             checksum_algo: ChecksumAlg::Crc32c,
-                            block_cache_capacity: 100,
                         },
                         Arc::new(LocalVersionManager::new(
                             s3_store,
                             remote_dir,
-                            Some(Arc::new(Cache::new(65536))),
+                            block_cache.clone(),
                         )),
                         Arc::new(RPCHummockMetaClient::new(meta_client)),
+                        block_cache,
                     )
                     .await
                     .map_err(RwError::from)?,

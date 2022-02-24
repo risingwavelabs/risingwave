@@ -10,10 +10,10 @@ use super::key_range::KeyRange;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::version_cmp::VersionedComparator;
 use super::{
-    HummockError, HummockMetaClient, HummockOptions, HummockResult, HummockStorage, HummockValue,
-    LocalVersionManager, SSTable, SSTableIterator,
+    BlockCacheRef, HummockError, HummockMetaClient, HummockOptions, HummockResult, HummockStorage,
+    HummockValue, LocalVersionManager, SSTable, SSTableIterator,
 };
-use crate::hummock::cloud::gen_remote_sstable;
+use crate::hummock::cloud;
 use crate::object::ObjectStore;
 
 pub struct SubCompactContext {
@@ -22,6 +22,7 @@ pub struct SubCompactContext {
     pub local_version_manager: Arc<LocalVersionManager>,
     pub obj_client: Arc<dyn ObjectStore>,
     pub hummock_meta_client: Arc<dyn HummockMetaClient>,
+    pub block_cache: BlockCacheRef,
 }
 
 pub struct Compactor;
@@ -213,6 +214,21 @@ impl Compactor {
         local_sorted_output_ssts.reserve(builder.len());
         // TODO: decide upload concurrency
         for (table_id, blocks, meta) in builder.finish() {
+            cloud::upload(
+                &context.obj_client,
+                table_id,
+                &meta,
+                blocks,
+                context.options.remote_dir.as_str(),
+            )
+            .await?;
+            let table = SSTable {
+                id: todo!(),
+                meta,
+                obj_client: todo!(),
+                data_path: todo!(),
+                block_cache: todo!(),
+            };
             let table = gen_remote_sstable(
                 context.obj_client.clone(),
                 table_id,

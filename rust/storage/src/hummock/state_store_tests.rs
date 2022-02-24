@@ -17,7 +17,6 @@ fn default_hummock_options() -> HummockOptions {
         bloom_false_positive: 0.1,
         remote_dir: "hummock_001".to_string(),
         checksum_algo: risingwave_pb::hummock::checksum::Algorithm::XxHash64,
-        block_cache_capacity: 100,
     }
 }
 

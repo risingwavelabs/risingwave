@@ -76,8 +76,6 @@ pub struct HummockOptions {
     pub remote_dir: String,
     /// checksum algorithm
     pub checksum_algo: ChecksumAlg,
-    /// block cache capacity
-    pub block_cache_capacity: usize,
 }
 
 /// Hummock is the state store backend.
@@ -114,6 +112,7 @@ impl HummockStorage {
         options: HummockOptions,
         local_version_manager: Arc<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
+        block_cache: BlockCacheRef,
     ) -> HummockResult<HummockStorage> {
         let (trigger_compact_tx, trigger_compact_rx) = mpsc::unbounded_channel();
         let (stop_compact_tx, stop_compact_rx) = mpsc::unbounded_channel();
@@ -158,7 +157,7 @@ impl HummockStorage {
             })))),
             stats,
             hummock_meta_client,
-            block_cache: Arc::new(BlockCache::new(options.block_cache_capacity)),
+            block_cache,
         };
         Ok(instance)
     }
@@ -389,7 +388,7 @@ impl HummockStorage {
                     blocks,
                     meta,
                     self.options.remote_dir.as_str(),
-                    Some(self.local_version_manager.block_cache.clone()),
+                    self.local_version_manager.block_cache.clone(),
                 )
                 .await?;
                 tables.push(table);
