@@ -28,12 +28,11 @@ pub struct AwsCredentials {
 
 impl AwsConfigInfo {
     pub async fn load(&self) -> Result<aws_config::Config> {
-        let region = match &self.region {
-            Some(region) => Some(Region::new(region.clone())),
-            None => {
-                return Err(anyhow::Error::msg("region should be provided"));
-            }
-        };
+        let region = self
+            .region
+            .as_ref()
+            .ok_or_else(|| anyhow::Error::msg("region should be provided"))?;
+        let region = Region::new(region.clone());
 
         let mut credentials_provider = match &self.credentials {
             Some(AwsCredentials {
@@ -68,62 +67,5 @@ impl AwsConfigInfo {
             .region(region)
             .credentials_provider(credentials_provider);
         Ok(config_loader.load().await)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const STREAM_NAME: &str = "kinesis_test_stream";
-    const KINESIS_ROLE_ARN: &str = "";
-
-    #[tokio::test]
-    #[ignore]
-    async fn test_config_default() {
-        let demo_config = AwsConfigInfo {
-            stream_name: STREAM_NAME.into(),
-            region: Some("cn-north-1".to_string()),
-            credentials: None,
-            assume_role: None,
-        };
-        demo_config.load().await.unwrap();
-    }
-
-    #[tokio::test]
-    #[ignore]
-    async fn test_config_without_region() {
-        let demo_config = AwsConfigInfo {
-            stream_name: STREAM_NAME.to_string(),
-            region: None,
-            credentials: None,
-            assume_role: None,
-        };
-
-        demo_config.load().await.unwrap();
-    }
-
-    #[tokio::test]
-    #[ignore]
-    async fn test() {
-        let demo_config = AwsConfigInfo {
-            stream_name: STREAM_NAME.into(),
-            region: Some("cn-north-1".to_string()),
-            credentials: None,
-            assume_role: Some(AwsAssumeRole {
-                arn: KINESIS_ROLE_ARN.into(),
-                external_id: None,
-            }),
-        };
-        let config = demo_config.load().await.unwrap();
-        println!("config {:#?}", config);
-        let client = aws_sdk_kinesis::Client::new(&config);
-
-        let resp = client
-            .describe_stream()
-            .stream_name(&demo_config.stream_name)
-            .send()
-            .await;
-        println!("{:#?}", resp);
     }
 }
