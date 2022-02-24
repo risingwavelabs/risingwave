@@ -35,6 +35,7 @@ message ColumnDesc {
   data.DataType column_type = 1;
   string name = 2;
   int32 column_id = 3;
+  bool is_hidden = 4;
 }
 
 message RowSeqScanNode {
