@@ -7,13 +7,12 @@ use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::array::RwError;
 use risingwave_common::error::{Result, ToRwResult};
+use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::data::Barrier;
 use risingwave_pb::stream_service::InjectBarrierRequest;
 use smallvec::SmallVec;
-use tokio::sync::mpsc::error::TryRecvError;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-use tokio::sync::{oneshot, watch, Mutex};
+use tokio::sync::{oneshot, watch, RwLock};
 use uuid::Uuid;
 
 pub use self::command::Command;
@@ -53,25 +52,27 @@ impl Notifier {
     }
 }
 
-type Scheduled = (Command, Notifier);
-type NewScheduled = (Command, SmallVec<[Notifier; 1]>);
+type Scheduled = (Command, SmallVec<[Notifier; 1]>);
 
+/// A buffer or queue for scheduling barriers.
 struct ScheduledBarriers {
-    buffer: Mutex<VecDeque<NewScheduled>>,
+    buffer: RwLock<VecDeque<Scheduled>>,
 
+    /// When `buffer` is not empty anymore, all subscribers of this watcher will be notified.
     changed_tx: watch::Sender<()>,
 }
 
 impl ScheduledBarriers {
     fn new() -> Self {
         Self {
-            buffer: Mutex::new(VecDeque::new()),
+            buffer: RwLock::new(VecDeque::new()),
             changed_tx: watch::channel(()).0,
         }
     }
 
-    async fn pop_or_default(&self) -> NewScheduled {
-        let mut buffer = self.buffer.lock().await;
+    /// Pop a schduled barrier from the buffer, or a default checkpoint barrier if not exists.
+    async fn pop_or_default(&self) -> Scheduled {
+        let mut buffer = self.buffer.write().await;
 
         // If no command scheduled, create periodic checkpoint barrier by default.
         buffer
@@ -79,8 +80,9 @@ impl ScheduledBarriers {
             .unwrap_or_else(|| (Command::checkpoint(), Default::default()))
     }
 
-    async fn wait_for_one(&self) {
-        let buffer = self.buffer.lock().await;
+    /// Wait for at least one scheduled barrier in the buffer.
+    async fn wait_one(&self) {
+        let buffer = self.buffer.read().await;
         if buffer.len() > 0 {
             return;
         }
@@ -90,16 +92,19 @@ impl ScheduledBarriers {
         rx.changed().await.unwrap();
     }
 
-    async fn push(&self, scheduled: NewScheduled) {
-        let mut buffer = self.buffer.lock().await;
+    /// Push a scheduled barrier into the buffer.
+    async fn push(&self, scheduled: Scheduled) {
+        let mut buffer = self.buffer.write().await;
         buffer.push_back(scheduled);
         if buffer.len() == 1 {
             self.changed_tx.send(()).ok();
         }
     }
 
+    /// Attach `new_notifiers` to the very first schduled barrier. If there's no one scheduled, a
+    /// default checkpoint barrier will be created.
     async fn attach_notifiers(&self, new_notifiers: impl IntoIterator<Item = Notifier>) {
-        let mut buffer = self.buffer.lock().await;
+        let mut buffer = self.buffer.write().await;
         match buffer.front_mut() {
             Some((_, notifiers)) => notifiers.extend(new_notifiers),
             None => {
@@ -137,16 +142,6 @@ where
     clients: StreamClientsRef,
 
     scheduled_barriers: ScheduledBarriers,
-
-    /// Send barriers to this channel to schedule them.
-    scheduled_barriers_tx: UnboundedSender<Scheduled>,
-
-    /// Used for the long-running loop to take scheduled barrier tasks.
-    scheduled_barriers_rx: Mutex<Option<UnboundedReceiver<Scheduled>>>,
-
-    /// Extra notifiers will be taken in the start of next barrier loop, and got merged with the
-    /// notifier associated with the scheduled barrier.
-    extra_notifiers: Mutex<Vec<Notifier>>,
 }
 
 impl<S> BarrierManager<S>
@@ -161,17 +156,12 @@ where
         epoch_generator: EpochGeneratorRef,
         hummock_manager: Arc<HummockManager<S>>,
     ) -> Self {
-        let (tx, rx) = unbounded_channel();
-
         Self {
             cluster_manager,
             fragment_manager,
             epoch_generator,
             clients: env.stream_clients_ref(),
             scheduled_barriers: ScheduledBarriers::new(),
-            scheduled_barriers_tx: tx,
-            scheduled_barriers_rx: Mutex::new(Some(rx)),
-            extra_notifiers: Mutex::new(Default::default()),
             hummock_manager,
         }
     }
@@ -183,20 +173,23 @@ where
 
         loop {
             tokio::select! {
+                // Wait for the minimal interval,
                 _ = min_interval.tick() => {},
-                _ = self.scheduled_barriers.wait_for_one() => {}
+                // ... or there's barrier scheduled.
+                _ = self.scheduled_barriers.wait_one() => {}
             }
+            // Get a barrier to send.
             let (command, notifiers) = self.scheduled_barriers.pop_or_default().await;
 
-            let all_nodes = self.cluster_manager.list_worker_node(
-                WorkerType::ComputeNode,
-                Some(risingwave_pb::common::worker_node::State::Running),
-            );
-            let all_actor_infos = self
-                .fragment_manager
-                .load_all_actors(command.creating_table_id())?;
-
-            let info = BarrierActorInfo::resolve(&all_nodes, all_actor_infos);
+            let info = {
+                let all_nodes = self
+                    .cluster_manager
+                    .list_worker_node(WorkerType::ComputeNode, Some(Running));
+                let all_actor_infos = self
+                    .fragment_manager
+                    .load_all_actors(command.creating_table_id())?;
+                BarrierActorInfo::resolve(all_nodes, all_actor_infos)
+            };
 
             let command_context = CommandContext::new(
                 self.fragment_manager.clone(),
@@ -239,6 +232,8 @@ where
                             target: "events::meta::barrier::inject_barrier",
                             "inject barrier request: {:#?}", request
                         );
+
+                        // This RPC returns only if this worker node has collected this barrier.
                         client.inject_barrier(request).await.to_rw_result()?;
 
                         Ok::<_, RwError>(())
