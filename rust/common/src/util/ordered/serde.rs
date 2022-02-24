@@ -128,13 +128,6 @@ pub fn serialize_column_id(column_id: &ColumnId) -> Result<Vec<u8>> {
     Ok(buf)
 }
 
-pub fn serialize_column_id(column_id: ColumnId) -> Result<Vec<u8>> {
-    let mut buf = Vec::with_capacity(4);
-    buf.put_i32(column_id.get_id());
-    debug_assert_eq!(buf.len(), 4);
-    Ok(buf)
-}
-
 pub fn serialize_cell(cell: &Datum) -> Result<Vec<u8>> {
     let mut serializer = memcomparable::Serializer::new(vec![]);
     if let Some(ScalarImpl::Decimal(decimal)) = cell {

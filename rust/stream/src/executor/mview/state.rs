@@ -33,14 +33,14 @@ impl<S: StateStore> ManagedMViewState<S> {
         let keys_for_serializer = keys
             .iter()
             .enumerate()
-            .map(|(idx, ord)| OrderPair::new(idx, ord))
+            .map(|(idx, ord)| OrderPair::new(idx, ord.order_type))
             .collect::<Vec<_>>();
 
         Self {
             keyspace,
             column_ids,
             cache: HashMap::new(),
-            keys: keys,
+            keys,
             key_serializer: OrderedRowsSerializer::new(keys_for_serializer),
         }
     }
