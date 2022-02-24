@@ -85,9 +85,7 @@ mod tests {
         let row = response.iter().next().unwrap();
         let s = row[0].as_ref().unwrap();
         assert!(s.contains("v1"));
-        assert!(s.contains("Int64"));
         assert!(s.contains("v2"));
-        assert!(s.contains("Float64"));
 
         meta.stop().await;
     }

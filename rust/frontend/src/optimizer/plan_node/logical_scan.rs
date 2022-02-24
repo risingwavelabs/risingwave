@@ -43,7 +43,16 @@ impl WithDistribution for LogicalScan {}
 
 impl fmt::Display for LogicalScan {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", self)
+        let columns = self
+            .schema
+            .fields()
+            .iter()
+            .map(|f| f.name.clone())
+            .collect::<Vec<_>>();
+        f.debug_struct("LogicalScan")
+            .field("table", &"TODO".to_string())
+            .field("columns", &columns)
+            .finish()
     }
 }
 impl ColPrunable for LogicalScan {}
