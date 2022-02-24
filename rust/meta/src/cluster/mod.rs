@@ -7,7 +7,8 @@ use dashmap::DashMap;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
-use risingwave_pb::common::{HostAddress, worker_node::State, WorkerNode, WorkerType};
+use risingwave_pb::common::worker_node::State;
+use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
 use crate::hummock::HummockManager;
@@ -107,7 +108,7 @@ where
             Entry::Occupied(mut entry) => {
                 let mut worker_node = entry.get().to_protobuf();
                 if worker_node.state == State::Created as i32 {
-                    return Ok(())
+                    return Ok(());
                 }
                 worker_node.state = State::Created as i32;
                 let worker = Worker::from_protobuf(worker_node.clone());
@@ -127,11 +128,9 @@ where
 
                 Ok(())
             }
-            Entry::Vacant(_) => {
-                Err(RwError::from(InternalError(
-                    "Worker node does not exist!".to_string(),
-                )))
-            }
+            Entry::Vacant(_) => Err(RwError::from(InternalError(
+                "Worker node does not exist!".to_string(),
+            ))),
         }
     }
 
@@ -170,16 +169,20 @@ where
 
     /// Get live nodes with the specified type and state.
     /// # Arguments
-    /// * `worker_type` WorkerType of the nodes
+    /// * `worker_type` `WorkerType` of the nodes
     /// * `worker_state` Filter by this state if it is not None.
-    pub fn list_worker_node(&self, worker_type: WorkerType, worker_state: Option<State>) -> Vec<WorkerNode> {
+    pub fn list_worker_node(
+        &self,
+        worker_type: WorkerType,
+        worker_state: Option<State>,
+    ) -> Vec<WorkerNode> {
         self.workers
             .iter()
             .map(|entry| entry.value().to_protobuf())
             .filter(|w| w.r#type == worker_type as i32)
             .filter(|w| match worker_state {
-                None => { true }
-                Some(state) => { state as i32 == w.state }
+                None => true,
+                Some(state) => state as i32 == w.state,
             })
             .collect::<Vec<_>>()
     }

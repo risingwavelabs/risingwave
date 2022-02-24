@@ -13,7 +13,10 @@ use risingwave_pb::meta::create_request::CatalogBody;
 use risingwave_pb::meta::drop_request::CatalogId;
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
-use risingwave_pb::meta::{ActivateWorkerNodeRequest, AddWorkerNodeRequest, CreateRequest, Database, DropRequest, HeartbeatRequest, ListAllNodesRequest, Schema, SubscribeRequest, SubscribeResponse, Table};
+use risingwave_pb::meta::{
+    ActivateWorkerNodeRequest, AddWorkerNodeRequest, CreateRequest, Database, DropRequest,
+    HeartbeatRequest, ListAllNodesRequest, Schema, SubscribeRequest, SubscribeResponse, Table,
+};
 use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
 use tonic::transport::{Channel, Endpoint};
 use tonic::Streaming;
@@ -107,10 +110,9 @@ impl MetaClient {
             port: addr.port() as i32,
         };
         let request = ActivateWorkerNodeRequest {
-            host: Some(host_address)
+            host: Some(host_address),
         };
-        self
-            .cluster_client
+        self.cluster_client
             .to_owned()
             .activate_worker_node(request)
             .await
@@ -193,12 +195,16 @@ impl MetaClient {
 
     /// Get live nodes with the specified type.
     /// # Arguments
-    /// * `worker_type` WorkerType of the nodes
+    /// * `worker_type` `WorkerType` of the nodes
     /// * `include_creating` Whether to include nodes still being created
-    pub async fn list_all_nodes(&self, worker_type: WorkerType, include_creating: bool) -> Result<Vec<WorkerNode>> {
+    pub async fn list_all_nodes(
+        &self,
+        worker_type: WorkerType,
+        include_creating: bool,
+    ) -> Result<Vec<WorkerNode>> {
         let request = ListAllNodesRequest {
             worker_type: worker_type as i32,
-            include_creating
+            include_creating,
         };
         let resp = self
             .cluster_client

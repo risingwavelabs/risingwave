@@ -109,10 +109,7 @@ pub async fn compute_node_serve(
     }
 
     // All set, let the meta service know we're ready.
-    meta_client
-        .activate(addr)
-        .await
-        .unwrap();
+    meta_client.activate(addr).await.unwrap();
 
     (join_handle, shutdown_send)
 }

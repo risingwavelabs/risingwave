@@ -388,15 +388,14 @@ mod tests {
             let notification_manager = Arc::new(NotificationManager::new());
             let cluster_manager =
                 Arc::new(StoredClusterManager::new(env.clone(), None, notification_manager).await?);
+            let host = HostAddress {
+                host: host.to_string(),
+                port: port as i32,
+            };
             cluster_manager
-                .add_worker_node(
-                    HostAddress {
-                        host: host.to_string(),
-                        port: port as i32,
-                    },
-                    WorkerType::ComputeNode,
-                )
+                .add_worker_node(host.clone(), WorkerType::ComputeNode)
                 .await?;
+            cluster_manager.activate_worker_node(host).await?;
 
             let fragment_manager = Arc::new(FragmentManager::new(env.meta_store_ref()).await?);
 

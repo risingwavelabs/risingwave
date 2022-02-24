@@ -73,7 +73,8 @@ mod handlers {
         let result = srv.cluster_manager.list_worker_node(
             WorkerType::from_i32(ty)
                 .ok_or_else(|| anyhow!("invalid worker type"))
-                .map_err(err)?, None
+                .map_err(err)?,
+            None,
         );
         Ok(result.into())
     }
@@ -174,15 +175,14 @@ where
         use risingwave_pb::common::{HostAddress, WorkerType};
 
         // TODO: remove adding frontend register when frontend implement register.
+        let host = HostAddress {
+            host: "127.0.0.1".to_string(),
+            port: 4567,
+        };
         self.cluster_manager
-            .add_worker_node(
-                HostAddress {
-                    host: "127.0.0.1".to_string(),
-                    port: 4567,
-                },
-                WorkerType::Frontend,
-            )
+            .add_worker_node(host.clone(), WorkerType::Frontend)
             .await?;
+        self.cluster_manager.activate_worker_node(host).await?;
 
         Ok(())
     }
