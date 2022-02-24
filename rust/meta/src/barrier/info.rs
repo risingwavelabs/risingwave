@@ -20,11 +20,14 @@ pub struct BarrierActorInfo {
 
 impl BarrierActorInfo {
     // TODO: we may resolve this info as graph updating, instead of doing it every time we want to
-    //  send a barrier
-    pub fn resolve(all_nodes: &[WorkerNode], actor_infos: ActorInfos) -> Self {
+    // send a barrier
+    pub fn resolve(
+        all_nodes: impl IntoIterator<Item = WorkerNode>,
+        actor_infos: ActorInfos,
+    ) -> Self {
         let node_map = all_nodes
-            .iter()
-            .map(|node| (node.id, node.clone()))
+            .into_iter()
+            .map(|node| (node.id, node))
             .collect::<HashMap<_, _>>();
 
         Self {
