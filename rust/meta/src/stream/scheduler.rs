@@ -107,9 +107,10 @@ where
         actors: &[ActorId],
         enforce_round_actors: &[ActorId],
     ) -> Result<ScheduledLocations> {
-        let nodes = self
-            .cluster_manager
-            .list_worker_node(WorkerType::ComputeNode);
+        let nodes = self.cluster_manager.list_worker_node(
+            WorkerType::ComputeNode,
+            Some(risingwave_pb::common::worker_node::State::Running),
+        );
         if nodes.is_empty() {
             return Err(InternalError("no available node exist".to_string()).into());
         }
@@ -170,17 +171,19 @@ mod test {
         let actors = (0..15).collect::<Vec<u32>>();
         let source_actors = (20..30).collect::<Vec<u32>>();
         for i in 0..10 {
+            let host = HostAddress {
+                host: "127.0.0.1".to_string(),
+                port: i as i32,
+            };
             cluster_manager
-                .add_worker_node(
-                    HostAddress {
-                        host: "127.0.0.1".to_string(),
-                        port: i as i32,
-                    },
-                    WorkerType::ComputeNode,
-                )
+                .add_worker_node(host.clone(), WorkerType::ComputeNode)
                 .await?;
+            cluster_manager.activate_worker_node(host).await?;
         }
-        let workers = cluster_manager.list_worker_node(WorkerType::ComputeNode);
+        let workers = cluster_manager.list_worker_node(
+            WorkerType::ComputeNode,
+            Some(risingwave_pb::common::worker_node::State::Running),
+        );
 
         let simple_schedule = Scheduler::new(ScheduleCategory::Simple, cluster_manager.clone());
         let nodes = simple_schedule.schedule(&actors, &[])?;

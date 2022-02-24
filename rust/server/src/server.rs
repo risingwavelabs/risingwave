@@ -43,6 +43,13 @@ pub async fn compute_node_serve(
     let config = load_config(&opts);
     let meta_client = MetaClient::new(&opts.meta_address).await.unwrap();
 
+    // Register to the cluster. We're not ready to serve until activate is called.
+    let worker_id = meta_client
+        .register(addr, WorkerType::ComputeNode)
+        .await
+        .unwrap();
+    worker_id_ref.set(worker_id);
+
     // Initialize state store.
     let state_store = StateStoreImpl::from_str(&opts.state_store, meta_client.clone())
         .await
@@ -102,11 +109,7 @@ pub async fn compute_node_serve(
     }
 
     // All set, let the meta service know we're ready.
-    let worker_id = meta_client
-        .register(addr, WorkerType::ComputeNode)
-        .await
-        .unwrap();
-    worker_id_ref.set(worker_id);
+    meta_client.activate(addr).await.unwrap();
 
     (join_handle, shutdown_send)
 }

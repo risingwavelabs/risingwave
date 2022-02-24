@@ -195,9 +195,16 @@ message AddWorkerNodeResponse {
   common.WorkerNode node = 2;
 }
 
+message ActivateWorkerNodeRequest {
+  common.HostAddress host = 1;
+}
+
+message ActivateWorkerNodeResponse {
+  common.Status status = 1;
+}
+
 message DeleteWorkerNodeRequest {
-  common.WorkerType worker_type = 1;
-  common.WorkerNode node = 2;
+  common.HostAddress host = 1;
 }
 
 message DeleteWorkerNodeResponse {
@@ -206,6 +213,8 @@ message DeleteWorkerNodeResponse {
 
 message ListAllNodesRequest {
   common.WorkerType worker_type = 1;
+  // Whether to include nodes still starting
+  bool include_starting_nodes = 2;
 }
 
 message ListAllNodesResponse {
@@ -215,6 +224,7 @@ message ListAllNodesResponse {
 
 service ClusterService {
   rpc AddWorkerNode(AddWorkerNodeRequest) returns (AddWorkerNodeResponse);
+  rpc ActivateWorkerNode(ActivateWorkerNodeRequest) returns (ActivateWorkerNodeResponse);
   rpc DeleteWorkerNode(DeleteWorkerNodeRequest) returns (DeleteWorkerNodeResponse);
   rpc ListAllNodes(ListAllNodesRequest) returns (ListAllNodesResponse);
 }

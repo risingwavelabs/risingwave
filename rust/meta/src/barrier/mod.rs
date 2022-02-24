@@ -142,9 +142,10 @@ where
             let (command, notifier) =
                 scheduled.unwrap_or_else(|| (Command::checkpoint(), Notifier::default()));
 
-            let all_nodes = self
-                .cluster_manager
-                .list_worker_node(WorkerType::ComputeNode);
+            let all_nodes = self.cluster_manager.list_worker_node(
+                WorkerType::ComputeNode,
+                Some(risingwave_pb::common::worker_node::State::Running),
+            );
             let all_actor_infos = self
                 .fragment_manager
                 .load_all_actors(command.creating_table_id())?;
