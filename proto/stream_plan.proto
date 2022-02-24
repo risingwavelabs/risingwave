@@ -33,9 +33,10 @@ message FilterNode {
 message MViewNode {
   plan.TableRefId table_ref_id = 1;
   plan.TableRefId associated_table_ref_id = 5;
-  repeated plan.ColumnDesc column_descs = 2;
-  repeated int32 pk_indices = 3;
+//  repeated plan.ColumnDesc column_descs = 2;
+//  repeated int32 pk_indices = 3;
   repeated plan.ColumnOrder column_orders = 4;
+  repeated int32 column_ids = 6;
 }
 
 // Remark by Yanghao: for both local and global we use the same node in the protobuf.

@@ -40,6 +40,15 @@ impl OrderPair {
             order_type,
         }
     }
+
+    pub fn from_prost(column_order: &ColumnOrder) -> Self {
+        let order_type: ProstOrderType = ProstOrderType::from_i32(column_order.order_type).unwrap();
+        let input_ref: &InputRefExpr = column_order.get_input_ref().unwrap();
+        OrderPair {
+            order_type: OrderType::from_prost(&order_type),
+            column_idx: input_ref.column_idx as usize,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -167,23 +176,4 @@ pub fn compare_two_row(
         }
     }
     Ok(Ordering::Equal)
-}
-
-pub fn fetch_orders(column_orders: &[ColumnOrder]) -> Result<Vec<OrderPair>> {
-    let mut order_pairs = Vec::<OrderPair>::new();
-    for column_order in column_orders {
-        let order_type: ProstOrderType = column_order.get_order_type()?;
-        let input_ref: &InputRefExpr = column_order.get_input_ref()?;
-        order_pairs.push(OrderPair {
-            order_type: match order_type {
-                ProstOrderType::Ascending => Ok(OrderType::Ascending),
-                ProstOrderType::Descending => Ok(OrderType::Descending),
-                ProstOrderType::Invalid => Err(RwError::from(InternalError(String::from(
-                    "Invalid OrderType",
-                )))),
-            }?,
-            column_idx: input_ref.column_idx as usize,
-        });
-    }
-    Ok(order_pairs)
 }

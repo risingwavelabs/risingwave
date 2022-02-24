@@ -11,7 +11,7 @@ use risingwave_common::expr::{build_from_prost as build_expr_from_prost, AggKind
 use risingwave_common::try_match_expand;
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::is_local_address;
-use risingwave_common::util::sort_util::{fetch_orders, OrderType};
+use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::plan::{JoinType as JoinTypeProto, OrderType as ProstOrderType};
 use risingwave_pb::stream_plan::stream_node::Node;
@@ -578,8 +578,11 @@ impl StreamManagerCore {
             }
             Node::MviewNode(materialized_view_node) => {
                 let table_id = TableId::from(&materialized_view_node.table_ref_id);
-                let column_orders = materialized_view_node.get_column_orders();
-                let keys = fetch_orders(column_orders).unwrap();
+                let keys = materialized_view_node
+                    .column_orders
+                    .iter()
+                    .map(|c| OrderPair::from_prost(c))
+                    .collect();
                 let column_ids = materialized_view_node
                     .column_ids
                     .iter()

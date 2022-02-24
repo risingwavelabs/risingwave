@@ -2,7 +2,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::fetch_orders;
+use risingwave_common::util::sort_util::OrderPair;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::{ColumnDesc, ColumnOrder};
 use risingwave_source::SourceManagerRef;
@@ -117,7 +117,12 @@ impl Executor for CreateTableExecutor {
                 )?;
             } else {
                 // Create normal MV.
-                let order_pairs = fetch_orders(&self.column_orders).unwrap();
+                let order_pairs: Vec<_> = self
+                    .column_orders
+                    .iter()
+                    .map(|c| OrderPair::from_prost(c))
+                    .collect();
+
                 let orderings = order_pairs
                     .iter()
                     .map(|order| order.order_type)
