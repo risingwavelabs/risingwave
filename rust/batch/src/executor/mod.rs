@@ -85,6 +85,7 @@ pub struct ExecutorBuilder<'a> {
     plan_node: &'a PlanNode,
     task_id: &'a TaskId,
     env: BatchEnvironment,
+    epoch: u64,
 }
 
 macro_rules! build_executor {
@@ -100,11 +101,17 @@ macro_rules! build_executor {
 }
 
 impl<'a> ExecutorBuilder<'a> {
-    pub fn new(plan_node: &'a PlanNode, task_id: &'a TaskId, env: BatchEnvironment) -> Self {
+    pub fn new(
+        plan_node: &'a PlanNode,
+        task_id: &'a TaskId,
+        env: BatchEnvironment,
+        epoch: u64,
+    ) -> Self {
         Self {
             plan_node,
             task_id,
             env,
+            epoch,
         }
     }
 
@@ -121,7 +128,7 @@ impl<'a> ExecutorBuilder<'a> {
 
     #[must_use]
     pub fn clone_for_plan(&self, plan_node: &'a PlanNode) -> Self {
-        ExecutorBuilder::new(plan_node, self.task_id, self.env.clone())
+        ExecutorBuilder::new(plan_node, self.task_id, self.env.clone(), self.epoch)
     }
 
     fn try_build(&self) -> Result<BoxedExecutor> {
@@ -178,7 +185,8 @@ mod tests {
             stage_id: 1,
             query_id: "test_query_id".to_string(),
         };
-        let builder = ExecutorBuilder::new(&plan_node, task_id, BatchEnvironment::for_test());
+        let builder =
+            ExecutorBuilder::new(&plan_node, task_id, BatchEnvironment::for_test(), u64::MAX);
         let child_plan = &PlanNode {
             ..Default::default()
         };

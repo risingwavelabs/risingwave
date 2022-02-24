@@ -39,7 +39,7 @@ async fn gen_and_upload_table(
     let table = gen_remote_sstable(obj_client, table_id, data, meta, remote_dir, None)
         .await
         .unwrap();
-    let _version = hummock_meta_client
+    let version = hummock_meta_client
         .add_tables(
             epoch,
             vec![SstableInfo {
@@ -53,8 +53,8 @@ async fn gen_and_upload_table(
         )
         .await
         .unwrap();
-    // TODO #2336 we need to maintain local version.
-    vm.update_local_version(hummock_meta_client).await.unwrap();
+    vm.try_set_version(version);
+    hummock_meta_client.commit_epoch(epoch).await.ok();
 }
 
 macro_rules! assert_count_range_scan {

@@ -18,6 +18,7 @@ pub use self::command::Command;
 use self::command::CommandContext;
 use self::info::BarrierActorInfo;
 use crate::cluster::{StoredClusterManager, StoredClusterManagerRef};
+use crate::hummock::HummockManager;
 use crate::manager::{EpochGeneratorRef, MetaSrvEnv, StreamClientsRef};
 use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
@@ -71,6 +72,8 @@ where
 
     epoch_generator: EpochGeneratorRef,
 
+    hummock_manager: Arc<HummockManager<S>>,
+
     clients: StreamClientsRef,
 
     /// Send barriers to this channel to schedule them.
@@ -94,6 +97,7 @@ where
         cluster_manager: Arc<StoredClusterManager<S>>,
         fragment_manager: FragmentManagerRef<S>,
         epoch_generator: EpochGeneratorRef,
+        hummock_manager: Arc<HummockManager<S>>,
     ) -> Self {
         let (tx, rx) = unbounded_channel();
 
@@ -105,6 +109,7 @@ where
             scheduled_barriers_tx: tx,
             scheduled_barriers_rx: Mutex::new(Some(rx)),
             extra_notifiers: Mutex::new(Default::default()),
+            hummock_manager,
         }
     }
 
@@ -203,7 +208,19 @@ where
             });
 
             notifiers.iter_mut().for_each(Notifier::notify_to_send);
-            try_join_all(collect_futures).await?; // wait all barriers collected
+            // wait all barriers collected
+            let collect_result = try_join_all(collect_futures).await;
+            // TODO #96: This is a temporary implementation of commit epoch. Refactor after hummock
+            // shared buffer is deployed.
+            match collect_result {
+                Ok(_) => {
+                    self.hummock_manager.commit_epoch(epoch).await?;
+                }
+                Err(err) => {
+                    self.hummock_manager.abort_epoch(epoch).await?;
+                    return Err(err);
+                }
+            };
             command_context.post_collect().await?; // do some post stuffs
             notifiers.iter_mut().for_each(Notifier::notify_collected);
         }

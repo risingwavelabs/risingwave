@@ -175,6 +175,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         1024,
         true,
         "RowSeqExecutor".to_string(),
+        u64::MAX,
     );
     scan.open().await?;
     assert!(scan.next().await?.is_none());
@@ -211,6 +212,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         1024,
         true,
         "RowSeqScanExecutor".to_string(),
+        u64::MAX,
     );
     scan.open().await?;
     let c = scan.next().await?.unwrap();

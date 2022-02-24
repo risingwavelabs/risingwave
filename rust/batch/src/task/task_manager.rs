@@ -28,8 +28,9 @@ impl BatchManager {
         env: BatchEnvironment,
         tid: &ProstTaskId,
         plan: PlanFragment,
+        epoch: u64,
     ) -> Result<()> {
-        let task = BatchTaskExecution::new(tid, plan, env)?;
+        let task = BatchTaskExecution::new(tid, plan, env, epoch)?;
 
         task.async_execute()?;
         self.tasks

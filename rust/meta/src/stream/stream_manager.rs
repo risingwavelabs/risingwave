@@ -269,6 +269,7 @@ mod tests {
 
     use super::*;
     use crate::barrier::BarrierManager;
+    use crate::hummock::HummockManager;
     use crate::manager::{MetaSrvEnv, NotificationManager};
     use crate::model::ActorId;
     use crate::storage::MemStore;
@@ -399,12 +400,13 @@ mod tests {
                 .await?;
 
             let fragment_manager = Arc::new(FragmentManager::new(env.meta_store_ref()).await?);
-
+            let hummock_manager = Arc::new(HummockManager::new(env.clone()).await?);
             let barrier_manager_ref = Arc::new(BarrierManager::new(
                 env.clone(),
                 cluster_manager.clone(),
                 fragment_manager.clone(),
                 env.epoch_generator_ref(),
+                hummock_manager,
             ));
 
             let stream_manager = StreamManager::new(
