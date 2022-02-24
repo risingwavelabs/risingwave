@@ -401,14 +401,18 @@ mod tests {
             schema,
             PkIndices::new(),
             vec![
-                Message::Chunk(std::mem::take(&mut chunks[0])),
                 Message::Barrier(Barrier {
                     epoch: 0,
                     ..Barrier::default()
                 }),
-                Message::Chunk(std::mem::take(&mut chunks[1])),
+                Message::Chunk(std::mem::take(&mut chunks[0])),
                 Message::Barrier(Barrier {
                     epoch: 1,
+                    ..Barrier::default()
+                }),
+                Message::Chunk(std::mem::take(&mut chunks[1])),
+                Message::Barrier(Barrier {
+                    epoch: 2,
                     ..Barrier::default()
                 }),
                 Message::Chunk(std::mem::take(&mut chunks[2])),
@@ -433,6 +437,9 @@ mod tests {
             1,
             "AppendOnlyTopNExecutor".to_string(),
         );
+
+        // consume the init epoch
+        top_n_executor.next().await.unwrap();
         let res = top_n_executor.next().await.unwrap();
         assert_matches!(res, Message::Chunk(_));
         if let Message::Chunk(res) = res {
@@ -506,6 +513,9 @@ mod tests {
             1,
             "AppendOnlyTopNExecutor".to_string(),
         );
+
+        // consume the init epoch
+        top_n_executor.next().await.unwrap();
         let res = top_n_executor.next().await.unwrap();
         assert_matches!(res, Message::Chunk(_));
         if let Message::Chunk(res) = res {
@@ -602,6 +612,9 @@ mod tests {
             1,
             "AppendOnlyTopNExecutor".to_string(),
         );
+
+        // consume the init epoch
+        top_n_executor.next().await.unwrap();
         let res = top_n_executor.next().await.unwrap();
         assert_matches!(res, Message::Chunk(_));
         if let Message::Chunk(res) = res {

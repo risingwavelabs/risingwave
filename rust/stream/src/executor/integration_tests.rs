@@ -161,6 +161,12 @@ async fn test_merger_sum_aggr() {
     let actor = Actor::new(Box::new(consumer), 0, context);
     handles.push(tokio::spawn(actor.run()));
 
+    let mut epoch = 0;
+    input
+        .send(Message::Barrier(Barrier::new(epoch)))
+        .await
+        .unwrap();
+    epoch += 1;
     for j in 0..11 {
         let op = if j % 2 == 0 { Op::Insert } else { Op::Delete };
         for i in 0..10 {
@@ -175,11 +181,15 @@ async fn test_merger_sum_aggr() {
             );
             input.send(Message::Chunk(chunk)).await.unwrap();
         }
-        input.send(Message::Barrier(Barrier::new(j))).await.unwrap();
+        input
+            .send(Message::Barrier(Barrier::new(epoch)))
+            .await
+            .unwrap();
+        epoch += 1;
     }
     input
         .send(Message::Barrier(
-            Barrier::new(0).with_mutation(Mutation::Stop(HashSet::from([0]))),
+            Barrier::new(epoch).with_mutation(Mutation::Stop(HashSet::from([0]))),
         ))
         .await
         .unwrap();
@@ -495,6 +505,7 @@ async fn test_tpch_q6() {
         )
     };
 
+    input.send(Message::Barrier(Barrier::new(0))).await.unwrap();
     for i in 0..100 {
         input
             .send(Message::Chunk(make_chunk(Insert)))
@@ -504,7 +515,7 @@ async fn test_tpch_q6() {
         if i % 10 == 0 {
             input
                 .send(Message::Barrier(Barrier {
-                    epoch: i / 10,
+                    epoch: (i / 10) + 1,
                     ..Barrier::default()
                 }))
                 .await

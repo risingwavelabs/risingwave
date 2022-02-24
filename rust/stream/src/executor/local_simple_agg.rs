@@ -231,7 +231,8 @@ mod tests {
         );
         let schema = schemas::iii();
 
-        let mut source = MockSource::new(schema, vec![2]); // pk
+        let mut source = MockSource::new(schema, vec![2]); // pk\
+        source.push_barrier(0, false);
         source.push_chunks([chunk1].into_iter());
         source.push_barrier(1, false);
         source.push_chunks([chunk2].into_iter());
@@ -264,6 +265,9 @@ mod tests {
             "LocalSimpleAggExecutor".to_string(),
         )?;
 
+        // Consume the init barrier
+        simple_agg.next().await.unwrap();
+        // Consume stream chunk
         let msg = simple_agg.next().await?;
         if let Message::Chunk(chunk) = msg {
             let (data_chunk, ops) = chunk.into_parts();

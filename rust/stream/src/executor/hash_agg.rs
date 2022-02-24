@@ -398,6 +398,7 @@ mod tests {
             fields: vec![Field::unnamed(DataType::Int64)],
         };
         let mut source = MockSource::new(schema, PkIndices::new());
+        source.push_barrier(0, false);
         source.push_chunks([chunk1].into_iter());
         source.push_barrier(1, false);
         source.push_chunks([chunk2].into_iter());
@@ -433,6 +434,9 @@ mod tests {
             "HashAggExecutor".to_string(),
         );
 
+        // Consume the init barrier
+        hash_agg.next().await.unwrap();
+        // Consume stream chunk
         let msg = hash_agg.next().await.unwrap();
         if let Message::Chunk(chunk) = msg {
             let (data_chunk, ops) = chunk.into_parts();
@@ -506,6 +510,7 @@ mod tests {
         };
 
         let mut source = MockSource::new(schema, PkIndices::new());
+        source.push_barrier(0, false);
         source.push_chunks([chunk1].into_iter());
         source.push_barrier(1, false);
         source.push_chunks([chunk2].into_iter());
@@ -542,6 +547,9 @@ mod tests {
             "HashAggExecutor".to_string(),
         );
 
+        // Consume the init barrier
+        hash_agg.next().await.unwrap();
+        // Consume stream chunk
         if let Message::Chunk(chunk) = hash_agg.next().await.unwrap() {
             let (data_chunk, ops) = chunk.into_parts();
             let rows = ops
@@ -623,6 +631,7 @@ mod tests {
             ],
         };
         let mut source = MockSource::new(schema, vec![2]); // pk
+        source.push_barrier(0, false);
         source.push_chunks([chunk1].into_iter());
         source.push_barrier(1, false);
         source.push_chunks([chunk2].into_iter());
@@ -653,6 +662,9 @@ mod tests {
             "HashAggExecutor".to_string(),
         );
 
+        // Consume the init barrier
+        hash_agg.next().await.unwrap();
+        // Consume stream chunk
         let msg = hash_agg.next().await.unwrap();
         if let Message::Chunk(chunk) = msg {
             let (data_chunk, ops) = chunk.into_parts();

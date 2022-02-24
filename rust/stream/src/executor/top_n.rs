@@ -452,19 +452,19 @@ mod tests {
     fn create_source() -> Box<MockSource> {
         let mut chunks = create_stream_chunks();
         let schema = create_schema();
-        let default_barrier = Barrier::new(0);
         Box::new(MockSource::with_messages(
             schema,
             PkIndices::new(),
             vec![
+                Message::Barrier(Barrier::new(0)),
                 Message::Chunk(std::mem::take(&mut chunks[0])),
-                Message::Barrier(default_barrier.clone()),
+                Message::Barrier(Barrier::new(1)),
                 Message::Chunk(std::mem::take(&mut chunks[1])),
-                Message::Barrier(default_barrier.clone()),
+                Message::Barrier(Barrier::new(2)),
                 Message::Chunk(std::mem::take(&mut chunks[2])),
-                Message::Barrier(default_barrier.clone()),
+                Message::Barrier(Barrier::new(3)),
                 Message::Chunk(std::mem::take(&mut chunks[3])),
-                Message::Barrier(default_barrier),
+                Message::Barrier(Barrier::new(4)),
             ],
         ))
     }
@@ -485,6 +485,9 @@ mod tests {
             1,
             "TopNExecutor".to_string(),
         );
+
+        // consume the init barrier
+        top_n_executor.next().await.unwrap();
         let res = top_n_executor.next().await.unwrap();
         assert_matches!(res, Message::Chunk(_));
         if let Message::Chunk(res) = res {
@@ -580,6 +583,9 @@ mod tests {
             1,
             "TopNExecutor".to_string(),
         );
+
+        // consume the init barrier
+        top_n_executor.next().await.unwrap();
         let res = top_n_executor.next().await.unwrap();
         assert_matches!(res, Message::Chunk(_));
         if let Message::Chunk(res) = res {
@@ -713,6 +719,9 @@ mod tests {
             1,
             "TopNExecutor".to_string(),
         );
+
+        // consume the init barrier
+        top_n_executor.next().await.unwrap();
         let res = top_n_executor.next().await.unwrap();
         assert_matches!(res, Message::Chunk(_));
         if let Message::Chunk(res) = res {

@@ -738,6 +738,10 @@ mod tests {
             "HashJoinExecutor".to_string(),
         );
 
+        // push the init barrier for left and right
+        MockAsyncSource::push_barrier(&mut tx_l, 0, false);
+        MockAsyncSource::push_barrier(&mut tx_r, 0, false);
+        hash_join.next().await.unwrap();
         // push the 1st left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
@@ -758,6 +762,10 @@ mod tests {
             unreachable!();
         }
 
+        // push the init barrier for left and right
+        MockAsyncSource::push_barrier(&mut tx_l, 0, false);
+        MockAsyncSource::push_barrier(&mut tx_r, 0, false);
+        hash_join.next().await.unwrap();
         // push the 2nd left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l2]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
@@ -933,6 +941,10 @@ mod tests {
             "HashJoinExecutor".to_string(),
         );
 
+        // push the init barrier for left and right
+        MockAsyncSource::push_barrier(&mut tx_l, 0, false);
+        MockAsyncSource::push_barrier(&mut tx_r, 0, false);
+        hash_join.next().await.unwrap();
         // push the 1st left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
@@ -954,13 +966,15 @@ mod tests {
         }
 
         // push a barrier to left side
-        MockAsyncSource::push_barrier(&mut tx_l, 0, false);
+        MockAsyncSource::push_barrier(&mut tx_l, 1, false);
 
         // push the 2nd left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l2]);
 
         // join the first right chunk
         MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r1]);
+
+        // Consume stream chunk
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
             assert_eq!(chunk.ops(), vec![Op::Insert]);
             assert_eq!(chunk.columns().len(), 4);
@@ -1005,13 +1019,13 @@ mod tests {
         }
 
         // push a barrier to right side
-        MockAsyncSource::push_barrier(&mut tx_r, 0, false);
+        MockAsyncSource::push_barrier(&mut tx_r, 1, false);
 
         // get the aligned barrier here
         assert!(matches!(
             hash_join.next().await.unwrap(),
             Message::Barrier(Barrier {
-                epoch: 0,
+                epoch: 1,
                 mutation: None,
                 ..
             })
@@ -1171,6 +1185,10 @@ mod tests {
             "HashJoinExecutor".to_string(),
         );
 
+        // push the init barrier for left and right
+        MockAsyncSource::push_barrier(&mut tx_l, 0, false);
+        MockAsyncSource::push_barrier(&mut tx_r, 0, false);
+        hash_join.next().await.unwrap();
         // push the 1st left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
@@ -1416,6 +1434,10 @@ mod tests {
             "HashJoinExecutor".to_string(),
         );
 
+        // push the init barrier for left and right
+        MockAsyncSource::push_barrier(&mut tx_l, 0, false);
+        MockAsyncSource::push_barrier(&mut tx_r, 0, false);
+        hash_join.next().await.unwrap();
         // push the 1st left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
@@ -1611,6 +1633,10 @@ mod tests {
             "HashJoinExecutor".to_string(),
         );
 
+        // push the init barrier for left and right
+        MockAsyncSource::push_barrier(&mut tx_l, 0, false);
+        MockAsyncSource::push_barrier(&mut tx_r, 0, false);
+        hash_join.next().await.unwrap();
         // push the 1st left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
@@ -1861,6 +1887,10 @@ mod tests {
             "HashJoinExecutor".to_string(),
         );
 
+        // push the init barrier for left and right
+        MockAsyncSource::push_barrier(&mut tx_l, 0, false);
+        MockAsyncSource::push_barrier(&mut tx_r, 0, false);
+        hash_join.next().await.unwrap();
         // push the 1st left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
@@ -2111,6 +2141,10 @@ mod tests {
             "HashJoinExecutor".to_string(),
         );
 
+        // push the init barrier for left and right
+        MockAsyncSource::push_barrier(&mut tx_l, 0, false);
+        MockAsyncSource::push_barrier(&mut tx_r, 0, false);
+        hash_join.next().await.unwrap();
         // push the 1st left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
