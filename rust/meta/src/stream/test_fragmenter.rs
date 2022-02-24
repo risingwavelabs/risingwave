@@ -9,10 +9,7 @@ use risingwave_pb::expr::agg_call::{Arg, Type};
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type::{Add, GreaterThan, InputRef};
 use risingwave_pb::expr::{AggCall, ExprNode, FunctionCall, InputRefExpr};
-use risingwave_pb::plan::column_desc::ColumnEncodingType;
-use risingwave_pb::plan::{
-    ColumnDesc, ColumnOrder, DatabaseRefId, Field, OrderType, SchemaRefId, TableRefId,
-};
+use risingwave_pb::plan::{ColumnOrder, DatabaseRefId, Field, OrderType, SchemaRefId, TableRefId};
 use risingwave_pb::stream_plan::dispatcher::DispatcherType;
 use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_pb::stream_plan::stream_node::Node;

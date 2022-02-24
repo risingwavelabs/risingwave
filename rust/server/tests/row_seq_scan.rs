@@ -5,7 +5,7 @@ extern crate risingwave_batch;
 
 use risingwave_batch::executor::{Executor, RowSeqScanExecutor};
 use risingwave_common::array::{Array, Row};
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::{ColumnId, Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
@@ -24,11 +24,12 @@ async fn test_row_seq_scan() -> Result<()> {
         Field::unnamed(DataType::Int32),
         Field::unnamed(DataType::Int64),
     ]);
+    let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
     let pk_columns = vec![0];
     let orderings = vec![OrderType::Ascending];
     let mut state = ManagedMViewState::new(
         keyspace.clone(),
-        vec![0.into()],
+        column_ids,
         vec![OrderPair::new(0, OrderType::Ascending)],
     );
 

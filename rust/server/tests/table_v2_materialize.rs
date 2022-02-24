@@ -3,10 +3,9 @@ use std::sync::Arc;
 use risingwave_batch::executor::{
     CreateTableExecutor, Executor as BatchExecutor, InsertExecutor, RowSeqScanExecutor,
 };
-use risingwave_common::array::column::Column;
 use risingwave_common::array::{Array, DataChunk, F64Array};
-use risingwave_common::array_nonnull;
 use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
+use risingwave_common::column_nonnull;
 use risingwave_common::error::Result;
 use risingwave_common::types::IntoOrdered;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
@@ -152,9 +151,7 @@ async fn test_table_v2_materialize() -> Result<()> {
     );
 
     // Add some data using `InsertExecutor`, assuming we are inserting into the "mv"
-    let columns = vec![Column::new(Arc::new(
-        array_nonnull! { F64Array, [1.14, 5.14] }.into(),
-    ))];
+    let columns = vec![column_nonnull! { F64Array, [1.14, 5.14] }];
     let chunk = DataChunk::builder().columns(columns.clone()).build();
     let insert_inner = SingleChunkExecutor::new(chunk, all_schema);
     let mut insert =
@@ -166,7 +163,7 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     // Since we have not polled `Materialize`, we cannot scan anything from this table
     let table = table_manager.get_table(&mview_id)?;
-    let data_column_ids = vec![0];
+    let data_column_ids = vec![0, 1];
 
     let mut scan = RowSeqScanExecutor::new(
         table.clone(),

@@ -9,13 +9,16 @@ use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::managed_state::flush_status::HashMapFlushStatus as FlushStatus;
 
-/// `ManagedMviewState` buffers recent mutations. Data will be written
+/// `ManagedMViewState` buffers recent mutations. Data will be written
 /// to backend storage on calling `flush`.
 pub struct ManagedMViewState<S: StateStore> {
     keyspace: Keyspace<S>,
 
     /// Column IDs of each column in the input schema
     column_ids: Vec<ColumnId>,
+
+    /// Column and ordering of primary key (for assertion)
+    keys: Vec<OrderPair>,
 
     /// Serializer to serialize keys from input rows
     key_serializer: OrderedRowsSerializer,
@@ -26,20 +29,32 @@ pub struct ManagedMViewState<S: StateStore> {
 
 impl<S: StateStore> ManagedMViewState<S> {
     pub fn new(keyspace: Keyspace<S>, column_ids: Vec<ColumnId>, keys: Vec<OrderPair>) -> Self {
+        // TODO(eric): refactor this later...
+        let keys_for_serializer = keys
+            .iter()
+            .enumerate()
+            .map(|(i, p)| OrderPair::new(i, p.order_type))
+            .collect();
+
         Self {
             keyspace,
             column_ids,
             cache: HashMap::new(),
-            key_serializer: OrderedRowsSerializer::new(keys),
+            keys: keys,
+            key_serializer: OrderedRowsSerializer::new(keys_for_serializer),
         }
     }
 
     pub fn put(&mut self, pk: Row, value: Row) {
+        assert_eq!(self.keys.len(), pk.size());
         assert_eq!(self.column_ids.len(), value.size());
+
         FlushStatus::do_insert(self.cache.entry(pk), value);
     }
 
     pub fn delete(&mut self, pk: Row) {
+        assert_eq!(self.keys.len(), pk.size());
+
         FlushStatus::do_delete(self.cache.entry(pk));
     }
 
@@ -52,7 +67,6 @@ impl<S: StateStore> ManagedMViewState<S> {
 
         for (pk, cells) in self.cache.drain() {
             let row = cells.into_option();
-            debug_assert_eq!(self.column_ids.len(), pk.0.len());
             let pk_buf = serialize_pk(&pk, &self.key_serializer)?;
             for (index, column_id) in self.column_ids.iter().enumerate() {
                 // TODO(MrCroxx): More efficient encoding is needed.
