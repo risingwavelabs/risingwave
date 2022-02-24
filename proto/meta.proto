@@ -204,8 +204,7 @@ message ActivateWorkerNodeResponse {
 }
 
 message DeleteWorkerNodeRequest {
-  common.WorkerType worker_type = 1;
-  common.WorkerNode node = 2;
+  common.HostAddress host = 1;
 }
 
 message DeleteWorkerNodeResponse {

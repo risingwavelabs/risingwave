@@ -73,16 +73,9 @@ where
         request: Request<DeleteWorkerNodeRequest>,
     ) -> Result<Response<DeleteWorkerNodeResponse>, Status> {
         let req = request.into_inner();
-        let node = try_match_expand!(req.node, Some, "DeleteWorkerNodeRequest::node is empty")
+        let host = try_match_expand!(req.host, Some, "ActivateWorkerNodeRequest::host is empty")
             .map_err(|e| e.to_grpc_status())?;
-        let host = try_match_expand!(
-            node.host,
-            Some,
-            "DeleteWorkerNodeRequest::node::host is empty"
-        )
-        .map_err(|e| e.to_grpc_status())?;
-        let _ = self
-            .scm
+        self.scm
             .delete_worker_node(host)
             .await
             .map_err(|e| e.to_grpc_status())?;
