@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::iter::once;
 use std::sync::Arc;
 use std::time::Duration;
@@ -9,9 +10,10 @@ use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::data::Barrier;
 use risingwave_pb::stream_service::InjectBarrierRequest;
+use smallvec::SmallVec;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{oneshot, watch, Mutex};
 use uuid::Uuid;
 
 pub use self::command::Command;
@@ -52,6 +54,64 @@ impl Notifier {
 }
 
 type Scheduled = (Command, Notifier);
+type NewScheduled = (Command, SmallVec<[Notifier; 1]>);
+
+struct ScheduledBarriers {
+    buffer: Mutex<VecDeque<NewScheduled>>,
+
+    changed_tx: watch::Sender<()>,
+}
+
+impl ScheduledBarriers {
+    fn new() -> Self {
+        Self {
+            buffer: Mutex::new(VecDeque::new()),
+            changed_tx: watch::channel(()).0,
+        }
+    }
+
+    async fn pop_or_default(&self) -> NewScheduled {
+        let mut buffer = self.buffer.lock().await;
+
+        // If no command scheduled, create periodic checkpoint barrier by default.
+        buffer
+            .pop_front()
+            .unwrap_or_else(|| (Command::checkpoint(), Default::default()))
+    }
+
+    async fn wait_for_one(&self) {
+        let buffer = self.buffer.lock().await;
+        if buffer.len() > 0 {
+            return;
+        }
+        let mut rx = self.changed_tx.subscribe();
+        drop(buffer);
+
+        rx.changed().await.unwrap();
+    }
+
+    async fn push(&self, scheduled: NewScheduled) {
+        let mut buffer = self.buffer.lock().await;
+        buffer.push_back(scheduled);
+        if buffer.len() == 1 {
+            self.changed_tx.send(()).ok();
+        }
+    }
+
+    async fn attach_notifiers(&self, new_notifiers: impl IntoIterator<Item = Notifier>) {
+        let mut buffer = self.buffer.lock().await;
+        match buffer.front_mut() {
+            Some((_, notifiers)) => notifiers.extend(new_notifiers),
+            None => {
+                // If no command scheduled, create periodic checkpoint barrier by default.
+                buffer.push_back((Command::checkpoint(), new_notifiers.into_iter().collect()));
+                if buffer.len() == 1 {
+                    self.changed_tx.send(()).ok();
+                }
+            }
+        }
+    }
+}
 
 /// [`BarrierManager`] sends barriers to all registered compute nodes and collect them, with
 /// monotonic increasing epoch numbers. On compute nodes, [`LocalBarrierManager`] will serve these
@@ -75,6 +135,8 @@ where
     hummock_manager: Arc<HummockManager<S>>,
 
     clients: StreamClientsRef,
+
+    scheduled_barriers: ScheduledBarriers,
 
     /// Send barriers to this channel to schedule them.
     scheduled_barriers_tx: UnboundedSender<Scheduled>,
@@ -106,6 +168,7 @@ where
             fragment_manager,
             epoch_generator,
             clients: env.stream_clients_ref(),
+            scheduled_barriers: ScheduledBarriers::new(),
             scheduled_barriers_tx: tx,
             scheduled_barriers_rx: Mutex::new(Some(rx)),
             extra_notifiers: Mutex::new(Default::default()),
@@ -115,32 +178,15 @@ where
 
     /// Start an infinite loop to take scheduled barriers and send them.
     pub async fn run(&self) -> Result<()> {
-        let mut rx = self
-            .scheduled_barriers_rx
-            .lock()
-            .await
-            .take()
-            .expect("barrier manager can only run once");
-
-        let mut min_interval = tokio::time::interval(Duration::from_millis(100));
+        let mut min_interval = tokio::time::interval(Duration::from_millis(5000));
+        min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
         loop {
-            let scheduled = match rx.try_recv() {
-                Ok(scheduled) => Ok(Some(scheduled)),
-                Err(TryRecvError::Empty) => Ok(None),
-                Err(e) => Err(e),
+            tokio::select! {
+                _ = min_interval.tick() => {},
+                _ = self.scheduled_barriers.wait_for_one() => {}
             }
-            .unwrap();
-
-            // Only wait for minimal interval if no command is scheduled, and no extra notifiers is
-            // pending.
-            if scheduled.is_none() && self.extra_notifiers.lock().await.is_empty() {
-                min_interval.tick().await;
-            }
-
-            // If no command scheduled, create periodic checkpoint barrier by default.
-            let (command, notifier) =
-                scheduled.unwrap_or_else(|| (Command::checkpoint(), Notifier::default()));
+            let (command, notifiers) = self.scheduled_barriers.pop_or_default().await;
 
             let all_nodes = self.cluster_manager.list_worker_node(
                 WorkerType::ComputeNode,
@@ -152,19 +198,12 @@ where
 
             let info = BarrierActorInfo::resolve(&all_nodes, all_actor_infos);
 
-            let (command_context, mut notifiers) = {
-                let extra_notifiers = std::mem::take(&mut *self.extra_notifiers.lock().await);
-                let notifiers = once(notifier)
-                    .chain(extra_notifiers.into_iter())
-                    .collect_vec();
-                let context = CommandContext::new(
-                    self.fragment_manager.clone(),
-                    self.clients.clone(),
-                    &info,
-                    command,
-                );
-                (context, notifiers)
-            };
+            let command_context = CommandContext::new(
+                self.fragment_manager.clone(),
+                self.clients.clone(),
+                &info,
+                command,
+            );
 
             let mutation = command_context.to_mutation()?;
 
@@ -208,6 +247,7 @@ where
                 }
             });
 
+            let mut notifiers = notifiers;
             notifiers.iter_mut().for_each(Notifier::notify_to_send);
             // wait all barriers collected
             let collect_result = try_join_all(collect_futures).await;
@@ -232,17 +272,17 @@ impl<S> BarrierManager<S>
 where
     S: MetaStore,
 {
-    fn do_schedule(&self, command: Command, notifier: Notifier) -> Result<()> {
-        self.scheduled_barriers_tx
-            .send((command, notifier))
-            .unwrap();
+    async fn do_schedule(&self, command: Command, notifier: Notifier) -> Result<()> {
+        self.scheduled_barriers
+            .push((command, once(notifier).collect()))
+            .await;
         Ok(())
     }
 
     /// Schedule a command and return immediately.
     #[allow(dead_code)]
     pub async fn schedule_command(&self, command: Command) -> Result<()> {
-        self.do_schedule(command, Default::default())
+        self.do_schedule(command, Default::default()).await
     }
 
     /// Schedule a command and return when its coresponding barrier is about to sent.
@@ -255,7 +295,8 @@ where
                 to_send: Some(tx),
                 ..Default::default()
             },
-        )?;
+        )
+        .await?;
         rx.await.unwrap();
         Ok(())
     }
@@ -269,7 +310,8 @@ where
                 collected: Some(tx),
                 ..Default::default()
             },
-        )?;
+        )
+        .await?;
         rx.await.unwrap();
         Ok(())
     }
@@ -278,10 +320,13 @@ where
     /// ignored, if exists.
     pub async fn wait_for_next_barrier(&self) -> Result<()> {
         let (tx, rx) = oneshot::channel();
-        self.extra_notifiers.lock().await.push(Notifier {
+        let notifier = Notifier {
             collected: Some(tx),
             ..Default::default()
-        });
+        };
+        self.scheduled_barriers
+            .attach_notifiers(once(notifier))
+            .await;
         rx.await.unwrap();
         Ok(())
     }
