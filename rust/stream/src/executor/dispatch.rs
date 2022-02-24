@@ -110,7 +110,7 @@ pub struct DispatchExecutor<Inner: Dispatcher> {
 }
 
 pub fn new_output(
-    context: &Arc<SharedContext>,
+    context: &SharedContext,
     addr: SocketAddr,
     actor_id: u32,
     down_id: &u32,

@@ -23,7 +23,7 @@ use tokio::task::JoinHandle;
 
 use crate::executor::*;
 use crate::task::{
-    update_upstreams, ConsumableChannelPair, SharedContext, StreamEnvironment, UpDownActorIds,
+    ConsumableChannelPair, SharedContext, StreamEnvironment, UpDownActorIds,
     LOCAL_OUTPUT_CHANNEL_SIZE,
 };
 
@@ -203,6 +203,15 @@ fn build_agg_call_from_prost(agg_call_proto: &expr::AggCall) -> Result<AggCall> 
         args,
         return_type: DataType::from(agg_call_proto.get_return_type()?),
     })
+}
+
+fn update_upstreams(context: &SharedContext, ids: &[UpDownActorIds]) {
+    ids.iter()
+        .map(|id| {
+            let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
+            context.add_channel_pairs(*id, (Some(tx), Some(rx)));
+        })
+        .count();
 }
 
 impl StreamManagerCore {
@@ -902,7 +911,7 @@ impl StreamManagerCore {
                 .iter()
                 .map(|id| (*current_id, *id))
                 .collect_vec();
-            update_upstreams(self.context.clone(), &down_id);
+            update_upstreams(&self.context, &down_id);
 
             // Add remote input channels.
             let mut up_id = vec![];
@@ -911,7 +920,7 @@ impl StreamManagerCore {
                     up_id.push((*upstream_id, *current_id));
                 }
             }
-            update_upstreams(self.context.clone(), &up_id);
+            update_upstreams(&self.context, &up_id);
         }
 
         for hanging_channel in hanging_channels {
