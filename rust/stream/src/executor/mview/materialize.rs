@@ -151,7 +151,6 @@ mod tests {
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType;
-    use risingwave_pb::plan::column_desc::ColumnEncodingType;
     use risingwave_pb::plan::ColumnDesc;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::{SimpleTableManager, TableManager};
@@ -175,20 +174,16 @@ mod tests {
                     type_name: TypeName::Int32 as i32,
                     ..Default::default()
                 }),
-                encoding: ColumnEncodingType::Raw as i32,
                 name: "v1".to_string(),
                 column_id: 0,
-                ..Default::default()
             },
             ColumnDesc {
                 column_type: Some(DataType {
                     type_name: TypeName::Int32 as i32,
                     ..Default::default()
                 }),
-                encoding: ColumnEncodingType::Raw as i32,
                 name: "v2".to_string(),
                 column_id: 1,
-                ..Default::default()
             },
         ];
         let pks = vec![0_usize];

@@ -112,13 +112,11 @@
       "columnType": {
         "typeName": "FLOAT"
       },
-      "encoding": "RAW",
       "name": "sum_v1"
     }, {
       "columnType": {
         "typeName": "INT32"
       },
-      "encoding": "RAW",
       "name": "v2"
     }],
     "pkIndices": [1],
