@@ -32,7 +32,7 @@ impl AwsConfigInfo {
             .region
             .as_ref()
             .ok_or_else(|| anyhow::Error::msg("region should be provided"))?;
-        let region = Region::new(region.clone());
+        let region = Some(Region::new(region.clone()));
 
         let mut credentials_provider = match &self.credentials {
             Some(AwsCredentials {
