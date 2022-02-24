@@ -67,13 +67,11 @@ impl Workload {
         (keys_num + opts.keys_per_prefix as u64 - 1) / opts.keys_per_prefix as u64
     }
 
-    /// Generate the random keys of given number
-    pub(crate) fn new_random_keys(opts: &Opts, key_num: u64, rng: &mut StdRng) -> (Prefixes, Keys) {
-        // --- get prefixes ---
+    /// Generate the random prefixes of given number
+    pub(crate) fn new_random_prefixes(opts: &Opts, prefix_num: u64, rng: &mut StdRng) -> Prefixes {
         let str_dist = Uniform::new_inclusive(0, 255);
 
-        let prefix_num = Self::prefix_num(opts, key_num);
-        let prefixes = (0..prefix_num)
+        (0..prefix_num)
             .into_iter()
             .map(|_| {
                 let prefix = rng
@@ -84,9 +82,17 @@ impl Workload {
 
                 Bytes::from(prefix)
             })
-            .collect_vec();
+            .collect_vec()
+    }
+
+    /// Generate the random keys of given number
+    pub(crate) fn new_random_keys(opts: &Opts, key_num: u64, rng: &mut StdRng) -> (Prefixes, Keys) {
+        // --- get prefixes ---
+        let prefix_num = Self::prefix_num(opts, key_num);
+        let prefixes = Workload::new_random_prefixes(opts, prefix_num, rng);
 
         // --- get keys ---
+        let str_dist = Uniform::new_inclusive(0, 255);
         let keys = (0..key_num as u64)
             .into_iter()
             .map(|i| {
