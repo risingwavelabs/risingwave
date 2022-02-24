@@ -54,6 +54,15 @@ impl Command {
     pub fn checkpoint() -> Self {
         Self::Plain(Mutation::Nothing(NothingMutation {}))
     }
+
+    pub fn creating_table_id(&self) -> Option<TableId> {
+        match self {
+            Command::CreateMaterializedView {
+                table_fragments, ..
+            } => Some(table_fragments.table_id()),
+            _ => None,
+        }
+    }
 }
 
 /// [`CommandContext`] is used for generating barrier and doing post stuffs according to the given

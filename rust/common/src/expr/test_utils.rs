@@ -13,10 +13,7 @@ pub fn make_expression(kind: Type, rets: &[TypeName], indices: &[i32]) -> ExprNo
     let function_call = FunctionCall { children: exprs };
     let return_type = DataType {
         type_name: TypeName::Timestamp as i32,
-        precision: 0,
-        scale: 0,
-        is_nullable: false,
-        interval_type: 0,
+        ..Default::default()
     };
     ExprNode {
         expr_type: kind as i32,

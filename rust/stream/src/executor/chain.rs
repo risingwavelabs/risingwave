@@ -96,7 +96,7 @@ impl ChainExecutor {
             Message::Barrier(barrier) => {
                 self.snapshot.init(barrier.epoch)?;
                 self.state = ChainState::ReadingSnapshot;
-                return self.read_snapshot().await;
+                Ok(Message::Barrier(barrier))
             }
         }
     }

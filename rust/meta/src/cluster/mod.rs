@@ -20,16 +20,15 @@ pub type NodeId = u32;
 pub type NodeLocations = HashMap<NodeId, WorkerNode>;
 
 /// [`StoredClusterManager`] manager cluster/worker meta data in [`MetaStore`].
-pub struct StoredClusterManager<S>
-where
-    S: MetaStore,
-{
+pub struct StoredClusterManager<S> {
     meta_store_ref: Arc<S>,
     id_gen_manager_ref: IdGeneratorManagerRef<S>,
     hummock_manager_ref: Option<Arc<HummockManager<S>>>,
     workers: DashMap<WorkerKey, Worker>,
     nm: NotificationManagerRef,
 }
+
+pub type StoredClusterManagerRef<S> = Arc<StoredClusterManager<S>>;
 
 pub struct WorkerKey(pub HostAddress);
 
