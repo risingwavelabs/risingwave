@@ -398,11 +398,11 @@ mod tests {
             fields: vec![Field::unnamed(DataType::Int64)],
         };
         let mut source = MockSource::new(schema, PkIndices::new());
-        source.push_barrier(0, false);
-        source.push_chunks([chunk1].into_iter());
         source.push_barrier(1, false);
-        source.push_chunks([chunk2].into_iter());
+        source.push_chunks([chunk1].into_iter());
         source.push_barrier(2, false);
+        source.push_chunks([chunk2].into_iter());
+        source.push_barrier(3, false);
 
         // This is local hash aggregation, so we add another row count state
         let keys = vec![0];
@@ -510,11 +510,11 @@ mod tests {
         };
 
         let mut source = MockSource::new(schema, PkIndices::new());
-        source.push_barrier(0, false);
-        source.push_chunks([chunk1].into_iter());
         source.push_barrier(1, false);
-        source.push_chunks([chunk2].into_iter());
+        source.push_chunks([chunk1].into_iter());
         source.push_barrier(2, false);
+        source.push_chunks([chunk2].into_iter());
+        source.push_barrier(3, false);
 
         // This is local hash aggregation, so we add another sum state
         let key_indices = vec![0];
@@ -631,11 +631,11 @@ mod tests {
             ],
         };
         let mut source = MockSource::new(schema, vec![2]); // pk
-        source.push_barrier(0, false);
-        source.push_chunks([chunk1].into_iter());
         source.push_barrier(1, false);
-        source.push_chunks([chunk2].into_iter());
+        source.push_chunks([chunk1].into_iter());
         source.push_barrier(2, false);
+        source.push_chunks([chunk2].into_iter());
+        source.push_barrier(3, false);
 
         // This is local hash aggregation, so we add another row count state
         let keys = vec![0];

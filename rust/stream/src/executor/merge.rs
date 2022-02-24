@@ -357,13 +357,14 @@ mod tests {
                     tx.send(Message::Chunk(build_test_chunk(epoch)))
                         .await
                         .unwrap();
-                    tx.send(Message::Barrier(Barrier::new(epoch)))
+                    tx.send(Message::Barrier(Barrier::new_test_barrier(epoch)))
                         .await
                         .unwrap();
                     tokio::time::sleep(Duration::from_millis(1)).await;
                 }
                 tx.send(Message::Barrier(
-                    Barrier::new(1000).with_mutation(Mutation::Stop(HashSet::default())),
+                    Barrier::new_test_barrier(1000)
+                        .with_mutation(Mutation::Stop(HashSet::default())),
                 ))
                 .await
                 .unwrap();
@@ -380,7 +381,7 @@ mod tests {
             }
             // expect a barrier
             assert_matches!(merger.next().await.unwrap(), Message::Barrier(Barrier{epoch:barrier_epoch,mutation:_,..}) => {
-              assert_eq!(barrier_epoch, epoch);
+              assert_eq!(barrier_epoch.curr, epoch);
             });
         }
         assert_matches!(
@@ -432,10 +433,7 @@ mod tests {
             .await
             .unwrap();
             // send barrier
-            let barrier = Barrier {
-                epoch: 12345,
-                ..Barrier::default()
-            };
+            let barrier = Barrier::new_test_barrier(12345);
             tx.send(Ok(GetStreamResponse {
                 message: Some(StreamMessage {
                     stream_message: Some(
@@ -488,7 +486,7 @@ mod tests {
           assert_eq!(visibility, None);
         });
         assert_matches!(rx.next().await.unwrap(), Message::Barrier(Barrier { epoch: barrier_epoch, mutation: _, .. }) => {
-          assert_eq!(barrier_epoch, 12345);
+          assert_eq!(barrier_epoch.curr, 12345);
         });
         assert!(rpc_called.load(Ordering::SeqCst));
         input_handle.await.unwrap();

@@ -243,7 +243,7 @@ pub async fn agg_executor_next<E: AggExecutor>(executor: &mut E) -> Result<Messa
                 return Ok(Message::Barrier(barrier));
             }
             Message::Barrier(barrier) => {
-                let epoch = barrier.epoch;
+                let epoch = barrier.epoch.curr;
                 if let Some(chunk) = executor.flush_data().await? {
                     // Cache the barrier_msg and send it later.
                     *executor.cached_barrier_message_mut() = Some(barrier);

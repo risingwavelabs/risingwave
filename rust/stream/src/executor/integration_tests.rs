@@ -161,9 +161,9 @@ async fn test_merger_sum_aggr() {
     let actor = Actor::new(Box::new(consumer), 0, context);
     handles.push(tokio::spawn(actor.run()));
 
-    let mut epoch = 0;
+    let mut epoch = 1;
     input
-        .send(Message::Barrier(Barrier::new(epoch)))
+        .send(Message::Barrier(Barrier::new_test_barrier(epoch)))
         .await
         .unwrap();
     epoch += 1;
@@ -182,14 +182,14 @@ async fn test_merger_sum_aggr() {
             input.send(Message::Chunk(chunk)).await.unwrap();
         }
         input
-            .send(Message::Barrier(Barrier::new(epoch)))
+            .send(Message::Barrier(Barrier::new_test_barrier(epoch)))
             .await
             .unwrap();
         epoch += 1;
     }
     input
         .send(Message::Barrier(
-            Barrier::new(epoch).with_mutation(Mutation::Stop(HashSet::from([0]))),
+            Barrier::new_test_barrier(epoch).with_mutation(Mutation::Stop(HashSet::from([0]))),
         ))
         .await
         .unwrap();
@@ -505,7 +505,10 @@ async fn test_tpch_q6() {
         )
     };
 
-    input.send(Message::Barrier(Barrier::new(0))).await.unwrap();
+    input
+        .send(Message::Barrier(Barrier::new_test_barrier(1)))
+        .await
+        .unwrap();
     for i in 0..100 {
         input
             .send(Message::Chunk(make_chunk(Insert)))
@@ -514,10 +517,7 @@ async fn test_tpch_q6() {
 
         if i % 10 == 0 {
             input
-                .send(Message::Barrier(Barrier {
-                    epoch: (i / 10) + 1,
-                    ..Barrier::default()
-                }))
+                .send(Message::Barrier(Barrier::new_test_barrier((i / 10) + 2)))
                 .await
                 .unwrap();
         }
@@ -529,12 +529,12 @@ async fn test_tpch_q6() {
         .unwrap();
 
     input
-        .send(Message::Barrier(Barrier::new(100)))
+        .send(Message::Barrier(Barrier::new_test_barrier(100)))
         .await
         .unwrap();
     input
         .send(Message::Barrier(
-            Barrier::new(200).with_mutation(Mutation::Stop(HashSet::from([0]))),
+            Barrier::new_test_barrier(200).with_mutation(Mutation::Stop(HashSet::from([0]))),
         ))
         .await
         .unwrap();

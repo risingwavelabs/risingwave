@@ -290,11 +290,11 @@ mod tests {
         };
 
         let mut source = MockSource::new(schema, vec![2]); // pk
-        source.push_barrier(0, false);
-        source.push_chunks([chunk1].into_iter());
         source.push_barrier(1, false);
-        source.push_chunks([chunk2].into_iter());
+        source.push_chunks([chunk1].into_iter());
         source.push_barrier(2, false);
+        source.push_chunks([chunk2].into_iter());
+        source.push_barrier(3, false);
 
         // This is local simple aggregation, so we add another row count state
         let agg_calls = vec![

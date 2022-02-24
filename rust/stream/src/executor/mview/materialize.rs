@@ -46,7 +46,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
     }
 
     async fn flush(&mut self, barrier: Barrier) -> Result<Message> {
-        self.local_state.flush(barrier.epoch).await?;
+        self.local_state.flush(barrier.epoch.prev).await?;
         Ok(Message::Barrier(barrier))
     }
 }

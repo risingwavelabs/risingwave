@@ -46,7 +46,7 @@ pub(super) async fn top_n_executor_next(executor: &mut dyn TopNExecutorBase) -> 
         Message::Barrier(barrier) if barrier.is_stop_mutation() => Ok(Message::Barrier(barrier)),
         Message::Barrier(barrier) => {
             executor.flush_data().await?;
-            executor.update_epoch(barrier.epoch);
+            executor.update_epoch(barrier.epoch.curr);
             Ok(Message::Barrier(barrier))
         }
     };
@@ -351,7 +351,7 @@ mod tests {
 
     use crate::executor::test_utils::{create_in_memory_keyspace, MockSource};
     use crate::executor::top_n_appendonly::AppendOnlyTopNExecutor;
-    use crate::executor::{Barrier, Executor, Message, PkIndices, StreamChunk};
+    use crate::executor::{Barrier, Epoch, Executor, Message, PkIndices, StreamChunk};
 
     fn create_stream_chunks() -> Vec<StreamChunk> {
         let chunk1 = StreamChunk::new(
@@ -402,17 +402,17 @@ mod tests {
             PkIndices::new(),
             vec![
                 Message::Barrier(Barrier {
-                    epoch: 0,
+                    epoch: Epoch::new_test_epoch(1),
                     ..Barrier::default()
                 }),
                 Message::Chunk(std::mem::take(&mut chunks[0])),
                 Message::Barrier(Barrier {
-                    epoch: 1,
+                    epoch: Epoch::new_test_epoch(2),
                     ..Barrier::default()
                 }),
                 Message::Chunk(std::mem::take(&mut chunks[1])),
                 Message::Barrier(Barrier {
-                    epoch: 2,
+                    epoch: Epoch::new_test_epoch(3),
                     ..Barrier::default()
                 }),
                 Message::Chunk(std::mem::take(&mut chunks[2])),

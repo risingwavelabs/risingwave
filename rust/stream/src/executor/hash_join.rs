@@ -257,7 +257,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<S,
             },
             AlignedMessage::Barrier(barrier) => {
                 self.flush_data().await?;
-                let epoch = barrier.epoch;
+                let epoch = barrier.epoch.curr;
                 self.side_l.ht.update_epoch(epoch);
                 self.side_r.ht.update_epoch(epoch);
                 self.update_epoch(epoch);
@@ -656,7 +656,7 @@ mod tests {
 
     use super::{HashJoinExecutor, JoinParams, JoinType, *};
     use crate::executor::test_utils::MockAsyncSource;
-    use crate::executor::{Barrier, Executor, Message};
+    use crate::executor::{Barrier, Epoch, Executor, Message};
 
     fn create_in_memory_keyspace() -> Keyspace<MemoryStateStore> {
         Keyspace::executor_root(MemoryStateStore::new(), 0x2333)
@@ -739,8 +739,8 @@ mod tests {
         );
 
         // push the init barrier for left and right
-        MockAsyncSource::push_barrier(&mut tx_l, 0, false);
-        MockAsyncSource::push_barrier(&mut tx_r, 0, false);
+        MockAsyncSource::push_barrier(&mut tx_l, 1, false);
+        MockAsyncSource::push_barrier(&mut tx_r, 1, false);
         hash_join.next().await.unwrap();
         // push the 1st left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
@@ -763,8 +763,8 @@ mod tests {
         }
 
         // push the init barrier for left and right
-        MockAsyncSource::push_barrier(&mut tx_l, 0, false);
-        MockAsyncSource::push_barrier(&mut tx_r, 0, false);
+        MockAsyncSource::push_barrier(&mut tx_l, 1, false);
+        MockAsyncSource::push_barrier(&mut tx_r, 1, false);
         hash_join.next().await.unwrap();
         // push the 2nd left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l2]);
@@ -942,8 +942,8 @@ mod tests {
         );
 
         // push the init barrier for left and right
-        MockAsyncSource::push_barrier(&mut tx_l, 0, false);
-        MockAsyncSource::push_barrier(&mut tx_r, 0, false);
+        MockAsyncSource::push_barrier(&mut tx_l, 1, false);
+        MockAsyncSource::push_barrier(&mut tx_r, 1, false);
         hash_join.next().await.unwrap();
         // push the 1st left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
@@ -966,7 +966,7 @@ mod tests {
         }
 
         // push a barrier to left side
-        MockAsyncSource::push_barrier(&mut tx_l, 1, false);
+        MockAsyncSource::push_barrier(&mut tx_l, 2, false);
 
         // push the 2nd left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l2]);
@@ -1019,16 +1019,17 @@ mod tests {
         }
 
         // push a barrier to right side
-        MockAsyncSource::push_barrier(&mut tx_r, 1, false);
+        MockAsyncSource::push_barrier(&mut tx_r, 2, false);
 
         // get the aligned barrier here
+        let expected_epoch = Epoch::new_test_epoch(2);
         assert!(matches!(
             hash_join.next().await.unwrap(),
             Message::Barrier(Barrier {
-                epoch: 1,
+                epoch,
                 mutation: None,
                 ..
-            })
+            }) if epoch == expected_epoch
         ));
 
         // join the 2nd left chunk
@@ -1186,8 +1187,8 @@ mod tests {
         );
 
         // push the init barrier for left and right
-        MockAsyncSource::push_barrier(&mut tx_l, 0, false);
-        MockAsyncSource::push_barrier(&mut tx_r, 0, false);
+        MockAsyncSource::push_barrier(&mut tx_l, 1, false);
+        MockAsyncSource::push_barrier(&mut tx_r, 1, false);
         hash_join.next().await.unwrap();
         // push the 1st left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
@@ -1435,8 +1436,8 @@ mod tests {
         );
 
         // push the init barrier for left and right
-        MockAsyncSource::push_barrier(&mut tx_l, 0, false);
-        MockAsyncSource::push_barrier(&mut tx_r, 0, false);
+        MockAsyncSource::push_barrier(&mut tx_l, 1, false);
+        MockAsyncSource::push_barrier(&mut tx_r, 1, false);
         hash_join.next().await.unwrap();
         // push the 1st left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
@@ -1634,8 +1635,8 @@ mod tests {
         );
 
         // push the init barrier for left and right
-        MockAsyncSource::push_barrier(&mut tx_l, 0, false);
-        MockAsyncSource::push_barrier(&mut tx_r, 0, false);
+        MockAsyncSource::push_barrier(&mut tx_l, 1, false);
+        MockAsyncSource::push_barrier(&mut tx_r, 1, false);
         hash_join.next().await.unwrap();
         // push the 1st left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
@@ -1888,8 +1889,8 @@ mod tests {
         );
 
         // push the init barrier for left and right
-        MockAsyncSource::push_barrier(&mut tx_l, 0, false);
-        MockAsyncSource::push_barrier(&mut tx_r, 0, false);
+        MockAsyncSource::push_barrier(&mut tx_l, 1, false);
+        MockAsyncSource::push_barrier(&mut tx_r, 1, false);
         hash_join.next().await.unwrap();
         // push the 1st left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
@@ -2142,8 +2143,8 @@ mod tests {
         );
 
         // push the init barrier for left and right
-        MockAsyncSource::push_barrier(&mut tx_l, 0, false);
-        MockAsyncSource::push_barrier(&mut tx_r, 0, false);
+        MockAsyncSource::push_barrier(&mut tx_l, 1, false);
+        MockAsyncSource::push_barrier(&mut tx_r, 1, false);
         hash_join.next().await.unwrap();
         // push the 1st left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);

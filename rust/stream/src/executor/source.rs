@@ -201,7 +201,7 @@ mod tests {
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::*;
-    use crate::executor::{Barrier, Mutation, SourceExecutor};
+    use crate::executor::{Barrier, Epoch, Mutation, SourceExecutor};
 
     #[tokio::test]
     async fn test_table_source() -> Result<()> {
@@ -290,7 +290,7 @@ mod tests {
 
         barrier_sender
             .send(Message::Barrier(Barrier {
-                epoch: 1,
+                epoch: Epoch::new_test_epoch(1),
                 ..Barrier::default()
             }))
             .unwrap();
@@ -313,7 +313,7 @@ mod tests {
                     assert_eq!(vec![Op::Insert; 3], chunk.ops());
                 }
                 Message::Barrier(barrier) => {
-                    assert_eq!(barrier.epoch, 1)
+                    assert_eq!(barrier.epoch, Epoch::new_test_epoch(1))
                 }
             }
         }
@@ -415,7 +415,7 @@ mod tests {
 
         barrier_sender
             .send(Message::Barrier(
-                Barrier::new(1).with_mutation(Mutation::Stop(HashSet::default())),
+                Barrier::new_test_barrier(1).with_mutation(Mutation::Stop(HashSet::default())),
             ))
             .unwrap();
 
