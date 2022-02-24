@@ -9,7 +9,7 @@ use risingwave_common::array_nonnull;
 use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::error::Result;
 use risingwave_common::types::IntoOrdered;
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::plan::ColumnDesc;
@@ -145,9 +145,8 @@ async fn test_table_v2_materialize() -> Result<()> {
     let mut materialize = MaterializeExecutor::new(
         Box::new(stream_source),
         keyspace.clone(),
-        all_schema.clone(),
-        vec![1],
-        vec![OrderType::Ascending],
+        vec![OrderPair::new(1, OrderType::Ascending)],
+        all_column_ids,
         2,
         "MaterializeExecutor".to_string(),
     );

@@ -142,7 +142,7 @@ mod tests {
     use risingwave_common::catalog::{Schema, TableId};
     use risingwave_common::column_nonnull;
     use risingwave_common::util::downcast_arc;
-    use risingwave_common::util::sort_util::OrderType;
+    use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType;
     use risingwave_pb::plan::column_desc::ColumnEncodingType;
@@ -222,12 +222,11 @@ mod tests {
             ],
         );
 
-        let mut sink_executor = Box::new(MaterializeExecutor::new(
+        let mut materialize_executor = Box::new(MaterializeExecutor::new(
             Box::new(source),
             Keyspace::table_root(store, &table_id),
-            schema,
-            pks,
-            vec![OrderType::Ascending],
+            vec![OrderPair::new(0, OrderType::Ascending)],
+            vec![0.into()],
             1,
             "MaterializeExecutor".to_string(),
         ));
@@ -237,10 +236,10 @@ mod tests {
         )
         .unwrap();
 
-        sink_executor.next().await.unwrap();
+        materialize_executor.next().await.unwrap();
         let epoch = u64::MAX;
         // First stream chunk. We check the existence of (3) -> (3,6)
-        match sink_executor.next().await.unwrap() {
+        match materialize_executor.next().await.unwrap() {
             Message::Barrier(_) => {
                 let datum = table
                     .get(Row(vec![Some(3_i32.into())]), 1, epoch)
@@ -254,9 +253,9 @@ mod tests {
             _ => unreachable!(),
         }
 
-        sink_executor.next().await.unwrap();
+        materialize_executor.next().await.unwrap();
         // Second stream chunk. We check the existence of (7) -> (7,8)
-        match sink_executor.next().await.unwrap() {
+        match materialize_executor.next().await.unwrap() {
             Message::Barrier(_) => {
                 let datum = table
                     .get(Row(vec![Some(7_i32.into())]), 1, epoch)

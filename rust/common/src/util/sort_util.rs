@@ -11,7 +11,7 @@ use crate::types::{ScalarPartialOrd, ScalarRef};
 
 pub const K_PROCESSING_WINDOW_SIZE: usize = 1024;
 
-#[derive(PartialEq, Copy, Clone, Debug)]
+#[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub enum OrderType {
     Ascending,
     Descending,
@@ -27,7 +27,7 @@ impl OrderType {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OrderPair {
     pub column_idx: usize,
     pub order_type: OrderType,

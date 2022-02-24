@@ -13,8 +13,14 @@ use crate::executor::managed_state::flush_status::HashMapFlushStatus as FlushSta
 /// to backend storage on calling `flush`.
 pub struct ManagedMViewState<S: StateStore> {
     keyspace: Keyspace<S>,
+
+    /// Column IDs of each column in the input schema
     column_ids: Vec<ColumnId>,
+
+    /// Serializer to serialize keys from input rows
     key_serializer: OrderedRowsSerializer,
+
+    /// Cached key/values
     cache: HashMap<Row, FlushStatus<Row>>,
 }
 
@@ -29,6 +35,7 @@ impl<S: StateStore> ManagedMViewState<S> {
     }
 
     pub fn put(&mut self, pk: Row, value: Row) {
+        assert_eq!(self.column_ids.len(), value.size());
         FlushStatus::do_insert(self.cache.entry(pk), value);
     }
 
@@ -85,11 +92,13 @@ mod tests {
         // and the ammount of rows is expected.
         let state_store = MemoryStateStore::new();
         let schema = schemas::ii();
-        let pk_columns = vec![0];
-        let orderings = vec![OrderType::Ascending];
         let keyspace = Keyspace::executor_root(state_store.clone(), 0x42);
 
-        let mut state = ManagedMViewState::new(keyspace.clone(), schema, pk_columns, orderings);
+        let mut state = ManagedMViewState::new(
+            keyspace.clone(),
+            vec![0.into(), 1.into()],
+            vec![OrderPair::new(0, OrderType::Ascending)],
+        );
         let mut epoch: u64 = 0;
         state.put(
             Row(vec![Some(1_i32.into())]),

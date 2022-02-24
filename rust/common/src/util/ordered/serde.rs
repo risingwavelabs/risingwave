@@ -58,6 +58,7 @@ impl OrderedRowsSerializer {
     }
 
     pub fn serialize(&self, data: &[&Row], append_to: &mut Vec<Vec<u8>>) {
+        assert_eq!(self.order_pairs.len(), data.len());
         for row in data {
             let mut row_bytes = vec![];
             for OrderPair {

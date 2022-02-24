@@ -238,16 +238,11 @@ fn make_stream_node() -> StreamNode {
         node: Some(Node::MviewNode(MViewNode {
             table_ref_id: Some(make_table_ref_id(1)),
             associated_table_ref_id: None,
-            // ignore STREAM_NULL_BY_ROW_COUNT here. It's not important.
-            column_descs: vec![
-                make_column_desc(0, TypeName::Int64),
-                make_column_desc(0, TypeName::Int64),
-            ],
-            pk_indices: vec![1, 2],
+            column_ids: vec![0_i32, 1_i32],
             column_orders: vec![make_column_order(1), make_column_order(2)],
         })),
         operator_id: 7,
-        identity: "MviewExecutor".to_string(),
+        identity: "MaterializeExecutor".to_string(),
     }
 }
 
