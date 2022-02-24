@@ -2,20 +2,21 @@ use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::Op::*;
 use risingwave_common::array::Row;
-use risingwave_common::catalog::Schema;
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::catalog::{ColumnId, Schema};
+use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::state::ManagedMViewState;
 use crate::executor::{
     Barrier, Executor, Message, PkIndicesRef, Result, SimpleExecutor, StreamChunk,
 };
-/// `MaterializeExecutor` writes data to a row-based memtable, so that data could
-/// be queried by the AP engine.
+/// `MaterializeExecutor` materializes changes in stream into a materialized view on storage.
 pub struct MaterializeExecutor<S: StateStore> {
     input: Box<dyn Executor>,
-    schema: Schema,
+
     local_state: ManagedMViewState<S>,
+
+    /// Columns of primary keys
     pk_columns: Vec<usize>,
 
     /// Identity string
@@ -29,21 +30,15 @@ impl<S: StateStore> MaterializeExecutor<S> {
     pub fn new(
         input: Box<dyn Executor>,
         keyspace: Keyspace<S>,
-        schema: Schema,
-        pk_columns: Vec<usize>,
-        orderings: Vec<OrderType>,
+        keys: Vec<OrderPair>,
+        column_ids: Vec<ColumnId>,
         executor_id: u64,
         op_info: String,
     ) -> Self {
+        let pk_columns = keys.iter().map(|k| k.column_idx).collect();
         Self {
             input,
-            local_state: ManagedMViewState::new(
-                keyspace,
-                schema.clone(),
-                pk_columns.clone(),
-                orderings,
-            ),
-            schema,
+            local_state: ManagedMViewState::new(keyspace, column_ids, keys),
             pk_columns,
             identity: format!("MaterializeExecutor {:X}", executor_id),
             op_info,
@@ -69,7 +64,7 @@ impl<S: StateStore> Executor for MaterializeExecutor<S> {
     }
 
     fn schema(&self) -> &Schema {
-        &self.schema
+        self.input.schema()
     }
 
     fn pk_indices(&self) -> PkIndicesRef {
@@ -89,7 +84,6 @@ impl<S: StateStore> std::fmt::Debug for MaterializeExecutor<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MaterializeExecutor")
             .field("input", &self.input)
-            .field("schema", &self.schema)
             .field("pk_columns", &self.pk_columns)
             .finish()
     }
@@ -116,7 +110,7 @@ impl<S: StateStore> SimpleExecutor for MaterializeExecutor<S> {
             let pk_row = Row(self
                 .pk_columns
                 .iter()
-                .map(|c_id| chunk.column_at(*c_id).array_ref().datum_at(idx))
+                .map(|col_idx| chunk.column_at(*col_idx).array_ref().datum_at(idx))
                 .collect_vec());
 
             // assemble row

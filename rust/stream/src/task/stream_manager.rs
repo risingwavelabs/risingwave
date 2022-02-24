@@ -578,20 +578,13 @@ impl StreamManagerCore {
             }
             Node::MviewNode(materialized_view_node) => {
                 let table_id = TableId::from(&materialized_view_node.table_ref_id);
-                let columns = materialized_view_node.get_column_descs();
-                let pks = materialized_view_node
-                    .pk_indices
-                    .iter()
-                    .map(|key| *key as usize)
-                    .collect::<Vec<_>>();
-
                 let column_orders = materialized_view_node.get_column_orders();
-                let order_pairs = fetch_orders(column_orders).unwrap();
-                let orderings = order_pairs
+                let keys = fetch_orders(column_orders).unwrap();
+                let column_ids = materialized_view_node
+                    .column_ids
                     .iter()
-                    .map(|order| order.order_type)
-                    .collect::<Vec<_>>();
-
+                    .map(|id| ColumnId::from(*id))
+                    .collect();
                 let keyspace = if materialized_view_node.associated_table_ref_id.is_some() {
                     // share the keyspace between mview and table v2
                     let associated_table_id =
@@ -604,9 +597,8 @@ impl StreamManagerCore {
                 let executor = Box::new(MaterializeExecutor::new(
                     input.remove(0),
                     keyspace,
-                    Schema::try_from(columns)?,
-                    pks,
-                    orderings,
+                    keys,
+                    column_ids,
                     executor_id,
                     op_info,
                 ));
