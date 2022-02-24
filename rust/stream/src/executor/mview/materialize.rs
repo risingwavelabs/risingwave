@@ -176,7 +176,6 @@ mod tests {
                 }),
                 name: "v1".to_string(),
                 column_id: 0,
-                ..Default::default()
             },
             ColumnDesc {
                 column_type: Some(DataType {
@@ -185,7 +184,6 @@ mod tests {
                 }),
                 name: "v2".to_string(),
                 column_id: 1,
-                ..Default::default()
             },
         ];
         let pks = vec![0_usize];
