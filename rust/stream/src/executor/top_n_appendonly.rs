@@ -9,7 +9,8 @@ use risingwave_common::error::Result;
 use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
-use risingwave_common::util::sort_util::{build_from_prost, OrderType};
+use risingwave_common::util::sort_util::OrderType;
+use risingwave_pb::plan::OrderType as ProstOrderType;
 use risingwave_pb::stream_plan;
 use risingwave_storage::keyspace::Segment;
 use risingwave_storage::{Keyspace, StateStore};
@@ -109,11 +110,12 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
         node: &stream_plan::TopNNode,
         store: S,
     ) -> Result<Self> {
-        let order_types = node
+        let order_types: Vec<_> = node
             .get_order_types()
             .iter()
-            .map(build_from_prost)
-            .collect::<Result<Vec<_>>>()?;
+            .map(|v| ProstOrderType::from_i32(*v).unwrap())
+            .map(|v| OrderType::from_prost(&v))
+            .collect();
         assert_eq!(order_types.len(), params.pk_indices.len());
         let limit = if node.limit == 0 {
             None
