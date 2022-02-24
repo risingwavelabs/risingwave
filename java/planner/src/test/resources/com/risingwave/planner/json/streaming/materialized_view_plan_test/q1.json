@@ -161,19 +161,16 @@
       "columnType": {
         "typeName": "INT64"
       },
-      "encoding": "RAW",
       "name": "v"
     }, {
       "columnType": {
         "typeName": "INT64"
       },
-      "encoding": "RAW",
       "name": "$f0"
     }, {
       "columnType": {
         "typeName": "INT64"
       },
-      "encoding": "RAW",
       "name": "v_copy"
     }],
     "pkIndices": [1, 2],
