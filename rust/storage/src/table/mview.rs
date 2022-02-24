@@ -114,6 +114,7 @@ impl<S: StateStore> MViewTable<S> {
 
     // TODO(MrCroxx): More interfaces are needed besides cell get.
     // The returned Datum is from a snapshot corresponding to the given `epoch`
+    // TODO(eric): remove this...
     pub async fn get(&self, pk: Row, cell_idx: usize, epoch: u64) -> Result<Option<Datum>> {
         debug_assert!(cell_idx < self.schema.len());
         // TODO(MrCroxx): More efficient encoding is needed.
@@ -123,7 +124,7 @@ impl<S: StateStore> MViewTable<S> {
             .get(
                 &[
                     &serialize_pk(&pk, &self.sort_key_serializer)?[..],
-                    &serialize_cell_idx(cell_idx as u32)?[..],
+                    &serialize_cell_idx(cell_idx as i32)?[..],
                 ]
                 .concat(),
                 epoch,

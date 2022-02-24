@@ -57,7 +57,7 @@ impl OrderedRowsSerializer {
         Self { order_pairs }
     }
 
-    pub fn order_based_scehmaed_serialize(&self, data: &[&Row], append_to: &mut Vec<Vec<u8>>) {
+    pub fn serialize(&self, data: &[&Row], append_to: &mut Vec<Vec<u8>>) {
         for row in data {
             let mut row_bytes = vec![];
             for OrderPair {
@@ -109,14 +109,21 @@ impl OrderedRowDeserializer {
 
 pub fn serialize_pk(pk: &Row, serializer: &OrderedRowsSerializer) -> Result<Vec<u8>> {
     let mut result = vec![];
-    serializer.order_based_scehmaed_serialize(&[pk], &mut result);
+    serializer.serialize(&[pk], &mut result);
     Ok(std::mem::take(&mut result[0]))
 }
 
 // TODO(eric): deprecated. Remove when possible
-pub fn serialize_cell_idx(cell_idx: u32) -> Result<Vec<u8>> {
+pub fn serialize_cell_idx(cell_idx: i32) -> Result<Vec<u8>> {
     let mut buf = Vec::with_capacity(4);
-    buf.put_u32_le(cell_idx);
+    buf.put_i32(cell_idx);
+    debug_assert_eq!(buf.len(), 4);
+    Ok(buf)
+}
+
+pub fn serialize_column_id(column_id: &ColumnId) -> Result<Vec<u8>> {
+    let mut buf = Vec::with_capacity(4);
+    buf.put_i32(column_id.get_id());
     debug_assert_eq!(buf.len(), 4);
     Ok(buf)
 }
@@ -219,7 +226,7 @@ mod tests {
         let row2 = Row(vec![Some(Int16(5)), Some(Utf8("abd".to_string()))]);
         let row3 = Row(vec![Some(Int16(6)), Some(Utf8("abc".to_string()))]);
         let mut array = vec![];
-        serializer.order_based_scehmaed_serialize(&[&row1, &row2, &row3], &mut array);
+        serializer.serialize(&[&row1, &row2, &row3], &mut array);
         array.sort();
         // option 1 byte || number 2 bytes
         assert_eq!(array[0][2], !6i16.to_be_bytes()[1]);
@@ -299,7 +306,7 @@ mod tests {
         let row3 = Row(vec![Some(Utf8("abc".to_string())), Some(Int16(6))]);
         let deserializer = OrderedRowDeserializer::new(schema, order_types.clone());
         let mut array = vec![];
-        serializer.order_based_scehmaed_serialize(&[&row1, &row2, &row3], &mut array);
+        serializer.serialize(&[&row1, &row2, &row3], &mut array);
         assert_eq!(
             deserializer.deserialize(&array[0]).unwrap(),
             OrderedRow::new(row1, &order_types)

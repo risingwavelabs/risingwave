@@ -1,5 +1,5 @@
 use risingwave_common::array::Row;
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::Keyspace;
 
@@ -14,9 +14,11 @@ pub async fn gen_basic_table(row_count: usize) -> MViewTable<MemoryStateStore> {
     let keyspace = Keyspace::executor_root(state_store, 0x42);
     let mut state = ManagedMViewState::new(
         keyspace.clone(),
-        schema.clone(),
-        pk_columns.clone(),
-        orderings.clone(),
+        vec![0.into(), 1.into(), 2.into()],
+        vec![
+            OrderPair::new(0, OrderType::Ascending),
+            OrderPair::new(1, OrderType::Descending),
+        ],
     );
     let table = MViewTable::new(keyspace.clone(), schema, pk_columns.clone(), orderings);
     let epoch: u64 = 0;
