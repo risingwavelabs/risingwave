@@ -364,11 +364,15 @@ impl StreamManagerCore {
         let executor: Result<Box<dyn Executor>> =
             match node.get_node()? {
                 Node::SourceNode(node) => {
-                    let (sender, _barrier_receiver) = unbounded_channel();
+                    let (sender, barrier_receiver) = unbounded_channel();
                     self.context
                         .lock_barrier_manager()
                         .register_sender(actor_id, sender);
-                    Ok(Box::new(SourceExecutor::create(executor_params, node)?))
+                    Ok(Box::new(SourceExecutor::create(
+                        executor_params,
+                        node,
+                        barrier_receiver,
+                    )?))
                 }
                 Node::ProjectNode(project_node) => Ok(Box::new(ProjectExecutor::create(
                     executor_params,

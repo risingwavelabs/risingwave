@@ -13,7 +13,7 @@ use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::error::Result;
 use risingwave_pb::stream_plan;
 use risingwave_source::*;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::executor::monitor::DEFAULT_COMPUTE_STATS;
 use crate::executor::{Executor, Message, PkIndices, PkIndicesRef};
@@ -46,11 +46,13 @@ pub struct SourceExecutor {
 }
 
 impl SourceExecutor {
-    pub fn create(params: ExecutorParams, node: &stream_plan::SourceNode) -> Result<Self> {
+    pub fn create(
+        params: ExecutorParams,
+        node: &stream_plan::SourceNode,
+        barrier_receiver: UnboundedReceiver<Message>,
+    ) -> Result<Self> {
         let source_id = TableId::from(&node.table_ref_id);
         let source_desc = params.env.source_manager().get_source(&source_id)?;
-
-        let (_sender, barrier_receiver) = unbounded_channel();
 
         let column_ids: Vec<_> = node
             .get_column_ids()
