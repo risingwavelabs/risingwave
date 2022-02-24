@@ -10,6 +10,17 @@ use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
 use crate::object::InMemObjectStore;
 
+fn default_hummock_options() -> HummockOptions {
+    HummockOptions {
+        sstable_size: 256 * (1 << 20),
+        block_size: 64 * (1 << 10),
+        bloom_false_positive: 0.1,
+        remote_dir: "hummock_001".to_string(),
+        checksum_algo: risingwave_pb::hummock::checksum::Algorithm::XxHash64,
+        block_cache_capacity: 100,
+    }
+}
+
 async fn prometheus_service(
     _req: Request<Body>,
     registry: &Registry,
@@ -29,7 +40,7 @@ async fn prometheus_service(
 #[tokio::test]
 async fn test_prometheus_endpoint_hummock() {
     // Create a hummock instance so as to fill the registry.
-    let hummock_options = HummockOptions::default_for_test();
+    let hummock_options = default_hummock_options();
     let object_client = Arc::new(InMemObjectStore::new());
     let local_version_manager = Arc::new(LocalVersionManager::new(
         object_client.clone(),
@@ -70,7 +81,7 @@ async fn test_prometheus_endpoint_hummock() {
 #[ignore]
 async fn test_basic() {
     let object_client = Arc::new(InMemObjectStore::new());
-    let hummock_options = HummockOptions::default_for_test();
+    let hummock_options = default_hummock_options();
     let local_version_manager = Arc::new(LocalVersionManager::new(
         object_client.clone(),
         &hummock_options.remote_dir,
@@ -229,7 +240,7 @@ async fn count_iter(iter: &mut UserIterator<'_>) -> usize {
 #[ignore]
 async fn test_reload_storage() {
     let mem_objstore = Arc::new(InMemObjectStore::new());
-    let hummock_options = HummockOptions::default_for_test();
+    let hummock_options = default_hummock_options();
     let local_version_manager = Arc::new(LocalVersionManager::new(
         mem_objstore.clone(),
         &hummock_options.remote_dir,
@@ -285,7 +296,7 @@ async fn test_reload_storage() {
     drop(hummock_storage);
     let hummock_storage = HummockStorage::new(
         mem_objstore,
-        HummockOptions::default_for_test(),
+        default_hummock_options(),
         local_version_manager,
         hummock_meta_client,
     )

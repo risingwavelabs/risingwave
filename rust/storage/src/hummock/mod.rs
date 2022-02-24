@@ -8,6 +8,8 @@ use itertools::Itertools;
 
 mod sstable;
 pub use sstable::*;
+mod block_cache;
+pub use block_cache::*;
 mod cloud;
 pub mod compactor;
 mod error;
@@ -74,30 +76,8 @@ pub struct HummockOptions {
     pub remote_dir: String,
     /// checksum algorithm
     pub checksum_algo: ChecksumAlg,
-}
-
-impl HummockOptions {
-    #[cfg(test)]
-    pub fn default_for_test() -> Self {
-        Self {
-            sstable_size: 256 * (1 << 20),
-            block_size: 64 * (1 << 10),
-            bloom_false_positive: 0.1,
-            remote_dir: "hummock_001".to_string(),
-            checksum_algo: ChecksumAlg::XxHash64,
-        }
-    }
-
-    #[cfg(test)]
-    pub fn small_for_test() -> Self {
-        Self {
-            sstable_size: 4 * (1 << 10),
-            block_size: 1 << 10,
-            bloom_false_positive: 0.1,
-            remote_dir: "hummock_001_small".to_string(),
-            checksum_algo: ChecksumAlg::XxHash64,
-        }
-    }
+    /// block cache capacity
+    pub block_cache_capacity: usize,
 }
 
 /// Hummock is the state store backend.
@@ -124,6 +104,8 @@ pub struct HummockStorage {
     stats: Arc<StateStoreStats>,
 
     hummock_meta_client: Arc<dyn HummockMetaClient>,
+
+    block_cache: BlockCacheRef,
 }
 
 impl HummockStorage {
@@ -138,8 +120,8 @@ impl HummockStorage {
 
         let stats = DEFAULT_STATE_STORE_STATS.clone();
 
-        let arc_options = Arc::new(options);
-        let options_for_compact = arc_options.clone();
+        let options = Arc::new(options);
+        let options_for_compact = options.clone();
         let local_version_manager_for_compact = local_version_manager.clone();
         let hummock_meta_client_for_compact = hummock_meta_client.clone();
         let obj_client_for_compact = obj_client.clone();
@@ -155,7 +137,7 @@ impl HummockStorage {
         local_version_manager.wait_epoch(HummockEpoch::MIN).await;
 
         let instance = Self {
-            options: arc_options,
+            options: options.clone(),
             local_version_manager,
             obj_client,
             tx: trigger_compact_tx,
@@ -176,6 +158,7 @@ impl HummockStorage {
             })))),
             stats,
             hummock_meta_client,
+            block_cache: Arc::new(BlockCache::new(options.block_cache_capacity)),
         };
         Ok(instance)
     }

@@ -174,6 +174,7 @@ impl StateStoreImpl {
                             bloom_false_positive: 0.1,
                             remote_dir: remote_dir.to_string(),
                             checksum_algo: ChecksumAlg::Crc32c,
+                            block_cache_capacity: 100,
                         },
                         Arc::new(LocalVersionManager::new(
                             object_client,
@@ -208,6 +209,7 @@ impl StateStoreImpl {
                             bloom_false_positive: 0.1,
                             remote_dir: remote_dir.to_string(),
                             checksum_algo: ChecksumAlg::Crc32c,
+                            block_cache_capacity: 100,
                         },
                         Arc::new(LocalVersionManager::new(
                             s3_store,

@@ -14,6 +14,17 @@ use crate::object::{InMemObjectStore, ObjectStore};
 
 const TEST_KEY_TABLE_ID: u64 = 233;
 
+fn default_hummock_options() -> HummockOptions {
+    HummockOptions {
+        sstable_size: 256 * (1 << 20),
+        block_size: 64 * (1 << 10),
+        bloom_false_positive: 0.1,
+        remote_dir: "hummock_001".to_string(),
+        checksum_algo: ChecksumAlg::XxHash64,
+        block_cache_capacity: 100,
+    }
+}
+
 async fn gen_and_upload_table(
     obj_client: Arc<dyn ObjectStore>,
     remote_dir: &str,
@@ -103,7 +114,7 @@ async fn test_snapshot() {
         mock_hummock_meta_service.clone(),
     ));
 
-    let hummock_options = HummockOptions::default_for_test();
+    let hummock_options = default_hummock_options();
     let hummock_storage = HummockStorage::new(
         obj_client.clone(),
         hummock_options,
@@ -177,7 +188,7 @@ async fn test_snapshot_range_scan() {
     let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
         mock_hummock_meta_service.clone(),
     ));
-    let hummock_options = HummockOptions::default_for_test();
+    let hummock_options = default_hummock_options();
     let hummock_storage = HummockStorage::new(
         obj_client.clone(),
         hummock_options,
@@ -231,7 +242,7 @@ async fn test_snapshot_reverse_range_scan() {
     let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
         mock_hummock_meta_service.clone(),
     ));
-    let hummock_options = HummockOptions::default_for_test();
+    let hummock_options = default_hummock_options();
     let hummock_storage = HummockStorage::new(
         obj_client.clone(),
         hummock_options,

@@ -45,6 +45,7 @@ async fn get_hummock_storage() -> HummockStorage {
         bloom_false_positive: 0.1,
         remote_dir: "hummock_001_test".to_string(),
         checksum_algo: ChecksumAlg::XxHash64,
+        block_cache_capacity: 100,
     };
     let hummock_meta_client = Arc::new(get_hummock_meta_client().await);
     let obj_client = Arc::new(InMemObjectStore::new());

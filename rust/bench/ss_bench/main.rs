@@ -127,6 +127,7 @@ async fn get_state_store_impl(opts: &Opts) -> Result<StateStoreImpl> {
                         bloom_false_positive: opts.bloom_false_positive,
                         remote_dir: remote_dir.to_string(),
                         checksum_algo: get_checksum_algo(opts.checksum_algo.as_ref()),
+                        block_cache_capacity: 100,
                     },
                     Arc::new(LocalVersionManager::new(
                         object_client,
@@ -158,6 +159,7 @@ async fn get_state_store_impl(opts: &Opts) -> Result<StateStoreImpl> {
                         bloom_false_positive: opts.bloom_false_positive,
                         remote_dir: remote_dir.to_string(),
                         checksum_algo: get_checksum_algo(opts.checksum_algo.as_ref()),
+                        block_cache_capacity: 100,
                     },
                     Arc::new(LocalVersionManager::new(
                         s3_store,
