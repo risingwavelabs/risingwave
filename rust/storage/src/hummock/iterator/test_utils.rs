@@ -315,7 +315,7 @@ pub async fn upload_and_load_sst(
     Ok(SSTable {
         id: sst_id,
         meta,
-        obj_client: obj_client,
+        obj_client,
         data_path: cloud::get_sst_data_path(path, sst_id),
         block_cache: Arc::new(moka::future::Cache::new(65536)),
     })
