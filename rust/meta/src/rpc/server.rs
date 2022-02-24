@@ -48,8 +48,10 @@ use crate::rpc::service::epoch_service::EpochServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
 use crate::rpc::service::hummock_service::HummockServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
+
 use crate::storage::{EtcdMetaStore, MemStore, MetaStore};
-use crate::stream::{FragmentManager, StreamManager};
+use crate::stream::{FragmentManager, SourceManager, StreamManager};
+
 
 #[derive(Debug)]
 pub enum MetaStoreBackend {
@@ -184,10 +186,17 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         .unwrap(),
     );
 
+
     let vacuum_trigger_ref = Arc::new(hummock::VacuumTrigger::new(
         hummock_manager.clone(),
         compactor_manager.clone(),
     ));
+
+    let source_manager_ref = Arc::new(
+        SourceManager::new(catalog_manager_ref.clone())
+            .await
+            .unwrap(),
+    );
 
     let epoch_srv = EpochServiceImpl::new(epoch_generator_ref.clone());
     let heartbeat_srv = HeartbeatServiceImpl::new(cluster_manager.clone());
@@ -203,7 +212,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let stream_srv = StreamServiceImpl::<S>::new(
         stream_manager_ref,
         fragment_manager.clone(),
-        cluster_manager.clone(),
+        cluster_manager,
+        source_manager_ref,
         env,
     );
     let hummock_srv = HummockServiceImpl::new(

@@ -26,12 +26,14 @@
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
 
-mod base;
+pub mod base;
 mod filesystem;
 mod kafka;
 mod kinesis;
 mod pulsar;
 mod state;
+
+pub use base::*;
 
 #[cfg(test)]
 mod tests {

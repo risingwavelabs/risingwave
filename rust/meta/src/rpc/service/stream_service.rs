@@ -19,17 +19,18 @@ use risingwave_pb::meta::*;
 use tonic::{Request, Response, Status};
 
 use crate::cluster::StoredClusterManagerRef;
+use crate::cluster::StoredClusterManager;
 use crate::manager::{EpochGeneratorRef, IdGeneratorManagerRef, MetaSrvEnv};
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
-use crate::stream::{FragmentManagerRef, StreamFragmenter, StreamManagerRef};
+use crate::stream::{CreateSourceContext, DropSourceContext, FragmentManagerRef, SourceManagerRef, StreamFragmenter, StreamManagerRef};
 
 pub type TonicResponse<T> = Result<Response<T>, Status>;
 
 #[derive(Clone)]
 pub struct StreamServiceImpl<S>
-where
-    S: MetaStore,
+    where
+        S: MetaStore,
 {
     sm: StreamManagerRef<S>,
 
@@ -37,18 +38,21 @@ where
     fragment_manager_ref: FragmentManagerRef<S>,
     cluster_manager: StoredClusterManagerRef<S>,
 
+    source_manager_ref: SourceManagerRef<S>,
+
     #[allow(dead_code)]
     epoch_generator: EpochGeneratorRef,
 }
 
 impl<S> StreamServiceImpl<S>
-where
-    S: MetaStore,
+    where
+        S: MetaStore,
 {
     pub fn new(
         sm: StreamManagerRef<S>,
         fragment_manager_ref: FragmentManagerRef<S>,
         cluster_manager: StoredClusterManagerRef<S>,
+        source_manager_ref: SourceManagerRef<S>,
         env: MetaSrvEnv<S>,
     ) -> Self {
         StreamServiceImpl {
@@ -56,6 +60,7 @@ where
             fragment_manager_ref,
             id_gen_manager_ref: env.id_gen_manager_ref(),
             cluster_manager,
+            source_manager_ref,
             epoch_generator: env.epoch_generator_ref(),
         }
     }
@@ -63,8 +68,8 @@ where
 
 #[async_trait::async_trait]
 impl<S> StreamManagerService for StreamServiceImpl<S>
-where
-    S: MetaStore,
+    where
+        S: MetaStore,
 {
     #[cfg_attr(coverage, no_coverage)]
     async fn create_materialized_view(
@@ -123,16 +128,31 @@ where
     #[cfg_attr(coverage, no_coverage)]
     async fn create_source(
         &self,
-        request: Request<CreateSourceRequest>,
-    ) -> Result<Response<CreateSourceResponse>, Status> {
-        todo!()
+        _request: Request<CreateSourceRequest>,
+    ) -> TonicResponse<CreateSourceResponse> {
+        let _req = _request.into_inner();
+
+        match self.source_manager_ref.create_source(CreateSourceContext {
+            table_id: Default::default(),
+            discovery_new_split: false,
+            properties: Default::default(),
+        }).await {
+            Ok(()) => Ok(Response::new(CreateSourceResponse { status: None })),
+            Err(e) => Err(e.to_grpc_status()),
+        }
     }
 
     async fn drop_source(
         &self,
-        request: Request<DropSourceRequest>,
-    ) -> Result<Response<DropSourceResponse>, Status> {
-        todo!()
+        _request: Request<DropSourceRequest>,
+    ) -> TonicResponse<DropSourceResponse> {
+        let req = _request.into_inner();
+        let table_id = req.get_table_ref_id().map_err(tonic_err)?;
+
+        match self.source_manager_ref.drop_source(DropSourceContext { table_id: table_id.clone() }).await {
+            Ok(()) => Ok(Response::new(DropSourceResponse { status: None })),
+            Err(e) => Err(e.to_grpc_status()),
+        }
     }
 
     #[cfg(not(tarpaulin_include))]

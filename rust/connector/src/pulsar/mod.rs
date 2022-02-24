@@ -13,7 +13,10 @@
 // limitations under the License.
 //
 mod admin;
-mod enumerator;
+pub(crate) mod enumerator;
 mod source;
 mod split;
 mod topic;
+
+
+pub use enumerator::*;
