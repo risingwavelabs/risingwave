@@ -11,14 +11,14 @@ use crate::storage::{ColumnFamilyUtils, MetaStore, Operation, Transaction};
 const HUMMOCK_VERSION_ID_LEY: &str = "version_id";
 
 pub struct CurrentHummockVersionId {
-    cf_ident: String,
+    cf_name: String,
     id: HummockVersionId,
 }
 
 impl CurrentHummockVersionId {
-    pub fn new(cf_ident: &str) -> CurrentHummockVersionId {
+    pub fn new(cf_name: &str) -> CurrentHummockVersionId {
         CurrentHummockVersionId {
-            cf_ident: String::from(cf_ident),
+            cf_name: String::from(cf_name),
             id: FIRST_VERSION_ID,
         }
     }
@@ -33,16 +33,16 @@ impl CurrentHummockVersionId {
 
     pub async fn get<S: MetaStore>(
         meta_store_ref: &S,
-        cf_ident: &str,
+        cf_name: &str,
     ) -> Result<CurrentHummockVersionId> {
         let byte_vec = meta_store_ref
             .get_cf(
-                &ColumnFamilyUtils::get_composed_cf(CurrentHummockVersionId::cf_name(), cf_ident),
+                &ColumnFamilyUtils::get_composed_cf(CurrentHummockVersionId::cf_name(), cf_name),
                 CurrentHummockVersionId::key().as_bytes(),
             )
             .await?;
         let instant = CurrentHummockVersionId {
-            cf_ident: String::from(cf_ident),
+            cf_name: String::from(cf_name),
             id: HummockVersionRefId::decode(byte_vec.as_slice())?.id,
         };
         Ok(instant)
@@ -59,7 +59,7 @@ impl CurrentHummockVersionId {
         trx.add_operations(vec![Operation::Put {
             cf: ColumnFamilyUtils::get_composed_cf(
                 CurrentHummockVersionId::cf_name(),
-                &self.cf_ident,
+                &self.cf_name,
             ),
             key: CurrentHummockVersionId::key().as_bytes().to_vec(),
             value: HummockVersionRefId { id: self.id }.encode_to_vec(),

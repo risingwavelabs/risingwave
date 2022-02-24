@@ -99,14 +99,14 @@ pub trait MetadataModel: Sized {
 #[async_trait]
 pub trait MetadataUserCfModel: MetadataModel {
     /// `list_with_cf_suffix` returns all records in this model which satisfies extending cf.
-    async fn list_with_cf_suffix<S>(store: &S, cf_ident: &str) -> Result<Vec<Self>>
+    async fn list_with_cf_suffix<S>(store: &S, cf_name: &str) -> Result<Vec<Self>>
     where
         S: MetaStore,
     {
         let bytes_vec = store
             .list_cf(&ColumnFamilyUtils::get_composed_cf(
                 &Self::cf_name(),
-                cf_ident,
+                cf_name,
             ))
             .await?;
         Ok(bytes_vec
@@ -118,7 +118,7 @@ pub trait MetadataUserCfModel: MetadataModel {
     /// `select_with_cf_suffix` query a record with associated key and version.
     async fn select_with_cf_suffix<S>(
         store: &S,
-        cf_ident: &str,
+        cf_name: &str,
         key: &Self::KeyType,
     ) -> Result<Option<Self>>
     where
@@ -126,7 +126,7 @@ pub trait MetadataUserCfModel: MetadataModel {
     {
         let byte_vec = match store
             .get_cf(
-                &ColumnFamilyUtils::get_composed_cf(&Self::cf_name(), cf_ident),
+                &ColumnFamilyUtils::get_composed_cf(&Self::cf_name(), cf_name),
                 &key.encode_to_vec(),
             )
             .await
@@ -190,23 +190,23 @@ pub trait Transactional: MetadataModel {
 pub trait TransactionalUserCf: Transactional + MetadataUserCfModel {
     fn upsert_in_transaction_with_cf(
         &self,
-        cf_ident: &str,
+        cf_name: &str,
         trx: &mut Transaction,
     ) -> risingwave_common::error::Result<()> {
         Self::upsert_in_transaction_by_cf(
             self,
-            ColumnFamilyUtils::get_composed_cf(&Self::cf_name(), cf_ident),
+            ColumnFamilyUtils::get_composed_cf(&Self::cf_name(), cf_name),
             trx,
         )
     }
     fn delete_in_transaction_with_cf(
         &self,
-        cf_ident: &str,
+        cf_name: &str,
         trx: &mut Transaction,
     ) -> risingwave_common::error::Result<()> {
         Self::delete_in_transaction_by_cf(
             self,
-            ColumnFamilyUtils::get_composed_cf(&Self::cf_name(), cf_ident),
+            ColumnFamilyUtils::get_composed_cf(&Self::cf_name(), cf_name),
             trx,
         )
     }

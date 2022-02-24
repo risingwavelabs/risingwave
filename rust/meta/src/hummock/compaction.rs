@@ -18,19 +18,19 @@ pub(crate) const HUMMOCK_COMPACT_STATUS_KEY: &str = "compact_status";
 // TODO define CompactStatus in prost instead
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
 pub struct CompactStatus {
-    pub(crate) cf_ident: String,
+    pub(crate) cf_name: String,
     pub(crate) level_handlers: Vec<LevelHandler>,
     pub(crate) next_compact_task_id: u64,
 }
 
 impl CompactStatus {
-    pub fn new(cf_ident: &str) -> CompactStatus {
+    pub fn new(cf_name: &str) -> CompactStatus {
         let vec_handler_having_l0 = vec![
             LevelHandler::Overlapping(vec![], vec![]),
             LevelHandler::Nonoverlapping(vec![], vec![]),
         ];
         CompactStatus {
-            cf_ident: String::from(cf_ident),
+            cf_name: String::from(cf_name),
             level_handlers: vec_handler_having_l0,
             next_compact_task_id: 1,
         }
@@ -44,10 +44,10 @@ impl CompactStatus {
         HUMMOCK_COMPACT_STATUS_KEY
     }
 
-    pub async fn get<S: MetaStore>(meta_store_ref: &S, cf_ident: &str) -> Result<CompactStatus> {
+    pub async fn get<S: MetaStore>(meta_store_ref: &S, cf_name: &str) -> Result<CompactStatus> {
         meta_store_ref
             .get_cf(
-                &ColumnFamilyUtils::get_composed_cf(CompactStatus::cf_name(), cf_ident),
+                &ColumnFamilyUtils::get_composed_cf(CompactStatus::cf_name(), cf_name),
                 CompactStatus::key().as_bytes(),
             )
             .await
@@ -58,7 +58,7 @@ impl CompactStatus {
 
     pub fn update_in_transaction(&self, trx: &mut Transaction) {
         trx.add_operations(vec![Operation::Put {
-            cf: ColumnFamilyUtils::get_composed_cf(CompactStatus::cf_name(), &self.cf_ident),
+            cf: ColumnFamilyUtils::get_composed_cf(CompactStatus::cf_name(), &self.cf_name),
             key: CompactStatus::key().as_bytes().to_vec(),
             // TODO replace unwrap
             value: bincode::serialize(&self).unwrap(),
@@ -347,7 +347,7 @@ mod tests {
     #[tokio::test]
     async fn test_serde() -> Result<()> {
         let origin = CompactStatus {
-            cf_ident: String::from("global"),
+            cf_name: String::from("global"),
             level_handlers: vec![],
             next_compact_task_id: 3,
         };

@@ -69,10 +69,10 @@ where
         request: Request<AddTablesRequest>,
     ) -> Result<Response<AddTablesResponse>, Status> {
         let req = request.into_inner();
-        let cf_ident = String::from(req.get_column_family());
+        let cf_name = String::from(req.get_column_family());
         let result = self
             .hummock_manager
-            .add_tables(req.context_id, &cf_ident, req.sstable_info, req.epoch)
+            .add_tables(req.context_id, &cf_name, req.sstable_info, req.epoch)
             .await;
         match result {
             Ok(version) => Ok(Response::new(AddTablesResponse {
@@ -106,7 +106,7 @@ where
         request: Request<ReportCompactionTasksRequest>,
     ) -> Result<Response<ReportCompactionTasksResponse>, Status> {
         let req = request.into_inner();
-        let cf_ident = String::from(req.get_column_family());
+        let cf_name = String::from(req.get_column_family());
         match req.compact_task {
             None => Ok(Response::new(ReportCompactionTasksResponse {
                 status: None,
@@ -114,7 +114,7 @@ where
             Some(compact_task) => {
                 let result = self
                     .hummock_manager
-                    .report_compact_task(req.context_id, &cf_ident, compact_task, req.task_result)
+                    .report_compact_task(req.context_id, &cf_name, compact_task, req.task_result)
                     .await;
                 match result {
                     Ok(_) => Ok(Response::new(ReportCompactionTasksResponse {
