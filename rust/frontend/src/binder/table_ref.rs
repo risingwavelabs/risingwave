@@ -12,6 +12,7 @@ pub enum TableRef {
 }
 #[derive(Debug)]
 pub struct BaseTableRef {
+    pub name: String, // explain-only
     pub table_id: TableId,
     pub columns: Vec<ColumnCatalog>,
 }
@@ -53,6 +54,7 @@ impl Binder {
             .and_then(|c| c.get_table(&table_name))
             .ok_or_else(|| ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name)))?;
         Ok(BaseTableRef {
+            name: table_name,
             table_id: table_catalog.id(),
             columns: table_catalog.columns().into(),
         })
