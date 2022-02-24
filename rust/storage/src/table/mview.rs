@@ -8,7 +8,7 @@ use risingwave_common::catalog::{ColumnId, Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::Datum;
 use risingwave_common::util::ordered::*;
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::sort_util::{OrderPair, OrderType};
 
 use super::TableIterRef;
 use crate::table::{ScannableTable, TableIter};
@@ -48,6 +48,7 @@ impl<S: StateStore> MViewTable<S> {
         let order_pairs = orderings
             .into_iter()
             .zip_eq(pk_columns.clone().into_iter())
+            .map(|(order, index)| OrderPair::new(index, order))
             .collect::<Vec<_>>();
 
         let column_descs = schema
@@ -83,7 +84,7 @@ impl<S: StateStore> MViewTable<S> {
         // row id will be inserted at first column in `InsertExecutor`
         // FIXME: should we check `is_primary` in pb `ColumnDesc` after we support pk?
         let pk_columns = vec![0];
-        let order_pairs = vec![(OrderType::Ascending, 0)];
+        let order_pairs = vec![OrderPair::new(0, OrderType::Ascending)];
 
         Self {
             keyspace,

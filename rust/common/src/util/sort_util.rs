@@ -29,8 +29,17 @@ impl OrderType {
 
 #[derive(Debug)]
 pub struct OrderPair {
-    pub order_type: OrderType,
     pub column_idx: usize,
+    pub order_type: OrderType,
+}
+
+impl OrderPair {
+    pub fn new(column_idx: usize, order_type: OrderType) -> Self {
+        Self {
+            column_idx,
+            order_type,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

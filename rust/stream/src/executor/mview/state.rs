@@ -4,7 +4,7 @@ use risingwave_common::array::Row;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_common::util::ordered::*;
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::managed_state::flush_status::HashMapFlushStatus as FlushStatus;
@@ -31,7 +31,7 @@ impl<S: StateStore> ManagedMViewState<S> {
         let order_pairs = orderings
             .into_iter()
             .enumerate()
-            .map(|(a, b)| (b, a))
+            .map(|(idx, ord)| OrderPair::new(idx, ord))
             .collect::<Vec<_>>();
 
         Self {
