@@ -91,7 +91,7 @@ impl RandValue for bool {
 
 impl RandValue for StructValue {
     fn rand_value<R: rand::Rng>(_rand: &mut R) -> Self {
-        StructValue {}
+        StructValue::new(vec![])
     }
 }
 

@@ -1,5 +1,5 @@
 use risingwave_common::array::DataChunk;
-use risingwave_common::catalog::{Schema, TableId};
+use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::fetch_orders;
@@ -98,7 +98,7 @@ impl Executor for CreateTableExecutor {
             .map(|col| {
                 Ok(TableColumnDesc {
                     data_type: DataType::from(col.get_column_type()?),
-                    column_id: col.get_column_id(),
+                    column_id: ColumnId::from(col.get_column_id()),
                     name: col.get_name().to_string(),
                 })
             })
