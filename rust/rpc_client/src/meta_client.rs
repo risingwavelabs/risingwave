@@ -27,6 +27,7 @@ type SchemaId = i32;
 /// Client to meta server. Cloning the instance is lightweight.
 #[derive(Clone)]
 pub struct MetaClient {
+    worker_id_ref: Option<u32>,
     pub cluster_client: ClusterServiceClient<Channel>,
     pub heartbeat_client: HeartbeatServiceClient<Channel>,
     pub catalog_client: CatalogServiceClient<Channel>,
@@ -49,12 +50,21 @@ impl MetaClient {
         let hummock_client = HummockManagerServiceClient::new(channel.clone());
         let notification_client = NotificationServiceClient::new(channel);
         Ok(Self {
+            worker_id_ref: None,
             cluster_client,
             heartbeat_client,
             catalog_client,
             hummock_client,
             notification_client,
         })
+    }
+
+    pub fn set_worker_id(&mut self, worker_id: u32) {
+        self.worker_id_ref = Some(worker_id);
+    }
+
+    pub fn worker_id(&self) -> Option<u32> {
+        self.worker_id_ref
     }
 
     /// Subscribe to notification from meta.
