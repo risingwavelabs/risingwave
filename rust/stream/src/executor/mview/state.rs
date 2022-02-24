@@ -1,78 +1,87 @@
 use std::collections::HashMap;
 
 use risingwave_common::array::Row;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
 use risingwave_common::util::ordered::*;
-use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::managed_state::flush_status::HashMapFlushStatus as FlushStatus;
 
-/// `ManagedMviewState` buffers recent mutations. Data will be written
+/// `ManagedMViewState` buffers recent mutations. Data will be written
 /// to backend storage on calling `flush`.
 pub struct ManagedMViewState<S: StateStore> {
     keyspace: Keyspace<S>,
-    schema: Schema,
-    pk_columns: Vec<usize>,
-    sort_key_serializer: OrderedRowsSerializer,
-    memtable: HashMap<Row, FlushStatus<Row>>,
+
+    /// Column IDs of each column in the input schema
+    column_ids: Vec<ColumnId>,
+
+    /// Column and ordering of primary key (for assertion)
+    keys: Vec<OrderPair>,
+
+    /// Serializer to serialize keys from input rows
+    key_serializer: OrderedRowsSerializer,
+
+    /// Cached key/values
+    cache: HashMap<Row, FlushStatus<Row>>,
 }
 
 impl<S: StateStore> ManagedMViewState<S> {
-    pub fn new(
-        keyspace: Keyspace<S>,
-        schema: Schema,
-        pk_columns: Vec<usize>,
-        orderings: Vec<OrderType>,
-    ) -> Self {
-        // We use `0..` because `mview_sink` would assemble pk for us.
-        // Therefore, we don't need the original pk indices any more.
-        let order_pairs = orderings
-            .into_iter()
+    pub fn new(keyspace: Keyspace<S>, column_ids: Vec<ColumnId>, keys: Vec<OrderPair>) -> Self {
+        // TODO(eric): refactor this later...
+        let keys_for_serializer = keys
+            .iter()
             .enumerate()
-            .map(|(idx, ord)| OrderPair::new(idx, ord))
+            .map(|(idx, ord)| OrderPair::new(idx, ord.order_type))
             .collect::<Vec<_>>();
 
         Self {
             keyspace,
-            schema,
-            pk_columns,
-            memtable: HashMap::new(),
-            sort_key_serializer: OrderedRowsSerializer::new(order_pairs),
+            column_ids,
+            cache: HashMap::new(),
+            keys,
+            key_serializer: OrderedRowsSerializer::new(keys_for_serializer),
         }
     }
 
     pub fn put(&mut self, pk: Row, value: Row) {
-        FlushStatus::do_insert(self.memtable.entry(pk), value);
+        assert_eq!(self.keys.len(), pk.size());
+        assert_eq!(self.column_ids.len(), value.size());
+
+        FlushStatus::do_insert(self.cache.entry(pk), value);
     }
 
     pub fn delete(&mut self, pk: Row) {
-        FlushStatus::do_delete(self.memtable.entry(pk));
+        assert_eq!(self.keys.len(), pk.size());
+
+        FlushStatus::do_delete(self.cache.entry(pk));
     }
 
-    // TODO(MrCroxx): flush can be performed in another coruntine by taking the snapshot of
-    // memtable.
+    // TODO(MrCroxx): flush can be performed in another coroutine by taking the snapshot of
+    // cache.
     pub async fn flush(&mut self, epoch: u64) -> Result<()> {
         let mut batch = self.keyspace.state_store().start_write_batch();
-        batch.reserve(self.memtable.len() * self.schema.len());
+        batch.reserve(self.cache.len() * self.column_ids.len());
         let mut local = batch.prefixify(&self.keyspace);
 
-        for (pk, cells) in self.memtable.drain() {
-            let cells = cells.into_option();
-            debug_assert_eq!(self.pk_columns.len(), pk.0.len());
-            let pk_buf = serialize_pk(&pk, &self.sort_key_serializer)?;
-            for cell_idx in 0..self.schema.len() {
+        for (pk, cells) in self.cache.drain() {
+            let row = cells.into_option();
+            let pk_buf = serialize_pk(&pk, &self.key_serializer)?;
+            for (index, column_id) in self.column_ids.iter().enumerate() {
                 // TODO(MrCroxx): More efficient encoding is needed.
                 // format: [ pk_buf | cell_idx (4B)]
                 let key = [
                     pk_buf.as_slice(),
-                    serialize_cell_idx(cell_idx as u32)?.as_slice(),
+                    serialize_column_id(column_id)?.as_slice(),
                 ]
                 .concat();
 
-                match &cells {
-                    Some(cells) => local.put(key, serialize_cell(&cells[cell_idx])?),
+                match &row {
+                    Some(values) => {
+                        let value = serialize_cell(&values[index])?;
+                        local.put(key, value)
+                    }
                     None => local.delete(key),
                 };
             }
@@ -96,12 +105,14 @@ mod tests {
         // Only assert pk and columns can be successfully put/delete/flush,
         // and the ammount of rows is expected.
         let state_store = MemoryStateStore::new();
-        let schema = schemas::ii();
-        let pk_columns = vec![0];
-        let orderings = vec![OrderType::Ascending];
+        let _schema = schemas::ii();
         let keyspace = Keyspace::executor_root(state_store.clone(), 0x42);
 
-        let mut state = ManagedMViewState::new(keyspace.clone(), schema, pk_columns, orderings);
+        let mut state = ManagedMViewState::new(
+            keyspace.clone(),
+            vec![0.into(), 1.into()],
+            vec![OrderPair::new(0, OrderType::Ascending)],
+        );
         let mut epoch: u64 = 0;
         state.put(
             Row(vec![Some(1_i32.into())]),

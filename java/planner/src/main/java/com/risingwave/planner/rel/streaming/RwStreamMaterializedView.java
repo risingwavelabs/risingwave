@@ -108,17 +108,11 @@ public class RwStreamMaterializedView extends SingleRel implements RisingWaveStr
   @Override
   public StreamNode serialize() {
     MViewNode.Builder materializedViewNodeBuilder = MViewNode.newBuilder();
-    // Add columns.
-    for (Pair<String, ColumnDesc> pair : this.getColumns()) {
-      com.risingwave.proto.plan.ColumnDesc.Builder columnDescBuilder =
-          com.risingwave.proto.plan.ColumnDesc.newBuilder();
-      columnDescBuilder
-          .setName(pair.getKey())
-          .setColumnType(pair.getValue().getDataType().getProtobufType());
-      materializedViewNodeBuilder.addColumnDescs(columnDescBuilder);
+    // Add column IDs (mocked)
+    // FIXME: Column ID should be in the catalog
+    for (int i = 0; i < this.getColumns().size(); i++) {
+      materializedViewNodeBuilder.addColumnIds(i);
     }
-    // Set primary key columns.
-    materializedViewNodeBuilder.addAllPkIndices(this.getPrimaryKeyIndices());
     // Set table ref id.
     materializedViewNodeBuilder.setTableRefId(Messages.getTableRefId(tableId));
     if (associatedTableId != null) {
