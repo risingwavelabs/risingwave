@@ -1,3 +1,4 @@
+use std::env;
 use std::net::SocketAddr;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -154,16 +155,16 @@ where
                     .allow_methods(vec![Method::GET, Method::POST, Method::PUT, Method::DELETE]),
             );
 
+        let ui_path = env::var("PREFIX_UI")?;
+
         let static_file_router = Router::new().nest(
             "/",
-            get_service(ServeDir::new("./build")).handle_error(
-                |error: std::io::Error| async move {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Unhandled internal error: {}", error),
-                    )
-                },
-            ),
+            get_service(ServeDir::new(ui_path)).handle_error(|error: std::io::Error| async move {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Unhandled internal error: {}", error),
+                )
+            }),
         );
 
         let app = Router::new()
