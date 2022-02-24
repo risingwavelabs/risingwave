@@ -97,7 +97,7 @@ pub(crate) type WorkerNodeManagerRef = Arc<WorkerNodeManager>;
 
 impl WorkerNodeManager {
     pub async fn new(client: MetaClient) -> Result<Self> {
-        let worker_nodes = RwLock::new(client.list_all_nodes(WorkerType::ComputeNode).await?);
+        let worker_nodes = RwLock::new(client.list_all_nodes(WorkerType::ComputeNode, false).await?);
         Ok(Self { worker_nodes })
     }
 

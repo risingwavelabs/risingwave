@@ -13,10 +13,7 @@ use risingwave_pb::meta::create_request::CatalogBody;
 use risingwave_pb::meta::drop_request::CatalogId;
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
-use risingwave_pb::meta::{
-    AddWorkerNodeRequest, CreateRequest, Database, DropRequest, HeartbeatRequest,
-    ListAllNodesRequest, Schema, SubscribeRequest, SubscribeResponse, Table,
-};
+use risingwave_pb::meta::{ActivateWorkerNodeRequest, AddWorkerNodeRequest, CreateRequest, Database, DropRequest, HeartbeatRequest, ListAllNodesRequest, Schema, SubscribeRequest, SubscribeResponse, Table};
 use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
 use tonic::transport::{Channel, Endpoint};
 use tonic::Streaming;
@@ -103,6 +100,24 @@ impl MetaClient {
         Ok(worker_node.id)
     }
 
+    /// Activate the current node in cluster to confirm it's ready to serve.
+    pub async fn activate(&self, addr: SocketAddr) -> Result<()> {
+        let host_address = HostAddress {
+            host: addr.ip().to_string(),
+            port: addr.port() as i32,
+        };
+        let request = ActivateWorkerNodeRequest {
+            host: Some(host_address)
+        };
+        self
+            .cluster_client
+            .to_owned()
+            .activate_worker_node(request)
+            .await
+            .to_rw_result()?;
+        Ok(())
+    }
+
     /// Send heartbeat signal to meta service.
     pub async fn send_heartbeat(&self, node_id: u32) -> Result<()> {
         let request = HeartbeatRequest {
@@ -177,9 +192,13 @@ impl MetaClient {
     }
 
     /// Get live nodes with the specified type.
-    pub async fn list_all_nodes(&self, worker_type: WorkerType) -> Result<Vec<WorkerNode>> {
+    /// # Arguments
+    /// * `worker_type` WorkerType of the nodes
+    /// * `include_creating` Whether to include nodes still being created
+    pub async fn list_all_nodes(&self, worker_type: WorkerType, include_creating: bool) -> Result<Vec<WorkerNode>> {
         let request = ListAllNodesRequest {
             worker_type: worker_type as i32,
+            include_creating
         };
         let resp = self
             .cluster_client

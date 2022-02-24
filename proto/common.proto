@@ -32,9 +32,14 @@ enum WorkerType {
 }
 
 message WorkerNode {
+  enum State {
+    CREATING = 0;
+    CREATED = 1;
+  }
   uint32 id = 1;
   WorkerType type = 2;
   HostAddress host = 3;
+  State state = 4;
 }
 
 // A cluster can be either a set of OLAP compute nodes, or a set of streaming compute nodes.

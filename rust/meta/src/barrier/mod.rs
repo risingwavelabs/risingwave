@@ -135,7 +135,7 @@ where
 
             let all_nodes = self
                 .cluster_manager
-                .list_worker_node(WorkerType::ComputeNode);
+                .list_worker_node(WorkerType::ComputeNode, Some(risingwave_pb::common::worker_node::State::Created));
             let all_actor_infos = self.fragment_manager.load_all_actors()?;
 
             let info = BarrierActorInfo::resolve(&all_nodes, all_actor_infos);

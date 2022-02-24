@@ -73,7 +73,7 @@ mod handlers {
         let result = srv.cluster_manager.list_worker_node(
             WorkerType::from_i32(ty)
                 .ok_or_else(|| anyhow!("invalid worker type"))
-                .map_err(err)?,
+                .map_err(err)?, None
         );
         Ok(result.into())
     }
@@ -101,7 +101,7 @@ mod handlers {
         let node_actors = srv.fragment_manager.load_all_node_actors().map_err(err)?;
         let nodes = srv
             .cluster_manager
-            .list_worker_node(WorkerType::ComputeNode);
+            .list_worker_node(WorkerType::ComputeNode, None);
         let actors = nodes
             .iter()
             .map(|node| ActorLocation {
