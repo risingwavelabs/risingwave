@@ -4,7 +4,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::array::Row;
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::{ColumnId, Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::Datum;
 use risingwave_common::util::ordered::*;
@@ -56,7 +56,8 @@ impl<S: StateStore> MViewTable<S> {
             .enumerate()
             .map(|(column_index, f)| {
                 // For mview, column id is exactly the index, so we perform conversion here.
-                TableColumnDesc::new_without_name(column_index as i32, f.data_type.clone())
+                let column_id = ColumnId::from(column_index as i32);
+                TableColumnDesc::unnamed(column_id, f.data_type.clone())
             })
             .collect_vec();
 

@@ -60,10 +60,10 @@ pub enum ErrorCode {
     #[error("Error while interact with meta service: {0}")]
     MetaError(String),
 
-    /// EOF represents an upstream node will not generate new data. This error is rare in our
+    /// `Eof` represents an upstream node will not generate new data. This error is rare in our
     /// system, currently only used in the [`BatchQueryExecutor`] as an ephemeral solution.
     #[error("End of the stream")]
-    EOF,
+    Eof,
 
     #[error("Unknown error: {0}")]
     UnknownError(String),
@@ -202,7 +202,7 @@ impl ErrorCode {
             ErrorCode::MemComparableError(_) => 15,
             ErrorCode::MetaError(_) => 18,
             ErrorCode::CatalogError(..) => 21,
-            ErrorCode::EOF => 22,
+            ErrorCode::Eof => 22,
             ErrorCode::UnknownError(_) => 101,
         }
     }

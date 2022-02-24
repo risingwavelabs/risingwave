@@ -24,10 +24,7 @@ use crate::manager::{IdCategory, IdGeneratorManagerRef, MetaSrvEnv};
 use crate::model::{MetadataModel, Transactional};
 use crate::storage::{MetaStore, Transaction};
 
-pub struct HummockManager<S>
-where
-    S: MetaStore,
-{
+pub struct HummockManager<S> {
     id_gen_manager_ref: IdGeneratorManagerRef<S>,
     // 1. When trying to locks compaction and versioning at the same time, compaction lock should
     // be requested before versioning lock.
@@ -41,17 +38,11 @@ where
     versioning: RwLock<Versioning<S>>,
 }
 
-struct Compaction<S>
-where
-    S: MetaStore,
-{
+struct Compaction<S> {
     meta_store_ref: Arc<S>,
 }
 
-struct Versioning<S>
-where
-    S: MetaStore,
-{
+struct Versioning<S> {
     meta_store_ref: Arc<S>,
 }
 

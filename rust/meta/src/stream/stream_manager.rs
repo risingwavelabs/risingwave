@@ -472,7 +472,7 @@ mod tests {
                 actors: actors.clone(),
             },
         );
-        let table_fragments = TableFragments::new(table_id.clone(), fragments);
+        let table_fragments = TableFragments::new(table_id, fragments);
 
         let ctx = CreateMaterializedViewContext::default();
 

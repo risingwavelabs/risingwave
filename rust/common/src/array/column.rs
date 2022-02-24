@@ -1,16 +1,9 @@
-use risingwave_pb::data::{ArrayType, Column as ProstColumn};
+use std::sync::Arc;
 
-use crate::array::column_proto_readers::{
-    read_bool_array, read_naivedate_array, read_naivedatetime_array, read_naivetime_array,
-    read_numeric_array, read_string_array,
-};
-use crate::array::value_reader::{
-    DecimalValueReader, F32ValueReader, F64ValueReader, I16ValueReader, I32ValueReader,
-    I64ValueReader, Utf8ValueReader,
-};
-use crate::array::{ArrayImpl, ArrayRef, DecimalArrayBuilder, Utf8ArrayBuilder};
+use risingwave_pb::data::Column as ProstColumn;
+
+use crate::array::{ArrayImpl, ArrayRef};
 use crate::error::Result;
-use crate::types::{OrderedF32, OrderedF64};
 
 /// Column is owned by `DataChunk`. It consists of logic data type and physical array
 /// implementation.
@@ -31,29 +24,9 @@ impl Column {
     }
 
     pub fn from_protobuf(col: &ProstColumn, cardinality: usize) -> Result<Self> {
-        let array = col.get_array()?;
-        let array = match array.array_type() {
-            ArrayType::Int16 => read_numeric_array::<i16, I16ValueReader>(array, cardinality)?,
-            ArrayType::Int32 => read_numeric_array::<i32, I32ValueReader>(array, cardinality)?,
-            ArrayType::Int64 => read_numeric_array::<i64, I64ValueReader>(array, cardinality)?,
-            ArrayType::Float32 => {
-                read_numeric_array::<OrderedF32, F32ValueReader>(array, cardinality)?
-            }
-            ArrayType::Float64 => {
-                read_numeric_array::<OrderedF64, F64ValueReader>(array, cardinality)?
-            }
-            ArrayType::Bool => read_bool_array(array, cardinality)?,
-            ArrayType::Utf8 => {
-                read_string_array::<Utf8ArrayBuilder, Utf8ValueReader>(array, cardinality)?
-            }
-            ArrayType::Decimal => {
-                read_string_array::<DecimalArrayBuilder, DecimalValueReader>(array, cardinality)?
-            }
-            ArrayType::Date => read_naivedate_array(array, cardinality)?,
-            ArrayType::Time => read_naivetime_array(array, cardinality)?,
-            ArrayType::Timestamp => read_naivedatetime_array(array, cardinality)?,
-        };
-        Ok(Self { array })
+        Ok(Column {
+            array: Arc::new(ArrayImpl::from_protobuf(col.get_array()?, cardinality)?),
+        })
     }
 
     pub fn array(&self) -> ArrayRef {
@@ -73,9 +46,10 @@ mod tests {
 
     use super::*;
     use crate::array::{
-        Array, ArrayBuilder, BoolArray, BoolArrayBuilder, DecimalArray, I32Array, I32ArrayBuilder,
-        NaiveDateArray, NaiveDateArrayBuilder, NaiveDateTimeArray, NaiveDateTimeArrayBuilder,
-        NaiveTimeArray, NaiveTimeArrayBuilder, Utf8Array,
+        Array, ArrayBuilder, BoolArray, BoolArrayBuilder, DecimalArray, DecimalArrayBuilder,
+        I32Array, I32ArrayBuilder, NaiveDateArray, NaiveDateArrayBuilder, NaiveDateTimeArray,
+        NaiveDateTimeArrayBuilder, NaiveTimeArray, NaiveTimeArrayBuilder, Utf8Array,
+        Utf8ArrayBuilder,
     };
     use crate::error::Result;
     use crate::types::{Decimal, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper};
