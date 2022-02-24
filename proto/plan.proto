@@ -41,7 +41,7 @@ message RowSeqScanNode {
   TableRefId table_ref_id = 1;
   repeated int32 column_ids = 2;
   repeated plan.Field fields = 3;
-} 
+}
 
 message SourceScanNode {
   TableRefId table_ref_id = 1;
