@@ -33,6 +33,15 @@ pub struct OrderPair {
     pub column_idx: usize,
 }
 
+impl OrderPair {
+    pub fn new(column_idx: usize, order_type: OrderType) -> Self {
+        Self {
+            column_idx,
+            order_type,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct HeapElem {
     pub order_pairs: Arc<Vec<OrderPair>>,
