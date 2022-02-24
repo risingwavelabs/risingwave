@@ -9,7 +9,6 @@ use risingwave_pb::expr::agg_call::{Arg, Type};
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type::{Add, GreaterThan, InputRef};
 use risingwave_pb::expr::{AggCall, ExprNode, FunctionCall, InputRefExpr};
-use risingwave_pb::plan::column_desc::ColumnEncodingType;
 use risingwave_pb::plan::{
     ColumnDesc, ColumnOrder, DatabaseRefId, Field, OrderType, SchemaRefId, TableRefId,
 };
@@ -72,7 +71,6 @@ fn make_column_desc(id: i32, type_name: TypeName) -> ColumnDesc {
             ..Default::default()
         }),
         column_id: id,
-        encoding: ColumnEncodingType::Raw as i32,
         ..Default::default()
     }
 }

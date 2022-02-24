@@ -235,37 +235,31 @@
       "columnType": {
         "typeName": "DOUBLE"
       },
-      "encoding": "RAW",
       "name": "avg_v1"
     }, {
       "columnType": {
         "typeName": "INT64"
       },
-      "encoding": "RAW",
       "name": "sum_v2"
     }, {
       "columnType": {
         "typeName": "INT64"
       },
-      "encoding": "RAW",
       "name": "count_v3"
     }, {
       "columnType": {
         "typeName": "FLOAT"
       },
-      "encoding": "RAW",
       "name": "$f1"
     }, {
       "columnType": {
         "typeName": "INT64"
       },
-      "encoding": "RAW",
       "name": "$f2"
     }, {
       "columnType": {
         "typeName": "INT64"
       },
-      "encoding": "RAW",
       "name": "sum_v2_copy"
     }],
     "pkIndices": [2, 3, 4, 5],

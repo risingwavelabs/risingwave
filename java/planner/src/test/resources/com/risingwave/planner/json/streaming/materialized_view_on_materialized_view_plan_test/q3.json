@@ -170,31 +170,26 @@
       "columnType": {
         "typeName": "INT64"
       },
-      "encoding": "RAW",
       "name": "sum_m1_v1"
     }, {
       "columnType": {
         "typeName": "INT64"
       },
-      "encoding": "RAW",
       "name": "sum_m1_v2"
     }, {
       "columnType": {
         "typeName": "INT64"
       },
-      "encoding": "RAW",
       "name": "$f0"
     }, {
       "columnType": {
         "typeName": "INT64"
       },
-      "encoding": "RAW",
       "name": "sum_m1_v1_copy"
     }, {
       "columnType": {
         "typeName": "INT64"
       },
-      "encoding": "RAW",
       "name": "sum_m1_v2_copy"
     }],
     "pkIndices": [2, 3, 4],

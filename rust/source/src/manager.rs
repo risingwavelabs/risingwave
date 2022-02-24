@@ -42,7 +42,6 @@ pub struct SourceColumnDesc {
     pub data_type: DataType,
     pub column_id: ColumnId,
     pub skip_parse: bool,
-    pub is_primary: bool,
 }
 
 impl From<&TableColumnDesc> for SourceColumnDesc {
@@ -52,7 +51,6 @@ impl From<&TableColumnDesc> for SourceColumnDesc {
             data_type: c.data_type.clone(),
             column_id: c.column_id,
             skip_parse: false,
-            is_primary: false,
         }
     }
 }
@@ -251,7 +249,6 @@ mod tests {
                 data_type: c.data_type.clone(),
                 column_id: c.column_id,
                 skip_parse: false,
-                is_primary: false,
             })
             .collect();
 

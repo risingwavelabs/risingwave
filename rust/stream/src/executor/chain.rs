@@ -143,7 +143,6 @@ mod test {
     use risingwave_common::error::{ErrorCode, Result};
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType;
-    use risingwave_pb::plan::column_desc::ColumnEncodingType;
     use risingwave_pb::plan::ColumnDesc;
 
     use super::ChainExecutor;
@@ -212,7 +211,6 @@ mod test {
                 type_name: TypeName::Int32 as i32,
                 ..Default::default()
             }),
-            encoding: ColumnEncodingType::Raw as i32,
             name: "v1".to_string(),
             ..Default::default()
         }];

@@ -121,7 +121,6 @@ impl ProtobufParser {
                     protobuf_type_mapping(&field_type, f.is_repeated())?.to_protobuf()?;
                 Ok(ColumnDesc {
                     column_type: Some(column_type),
-                    is_primary: false,
                     name: f.name().to_string(),
                     ..Default::default()
                 })
@@ -349,42 +348,36 @@ mod tests {
                 data_type: DataType::Int32,
                 column_id: ColumnId::from(0),
                 skip_parse: false,
-                is_primary: false,
             },
             SourceColumnDesc {
                 name: "address".to_string(),
                 data_type: DataType::Char,
                 column_id: ColumnId::from(1),
                 skip_parse: false,
-                is_primary: false,
             },
             SourceColumnDesc {
                 name: "city".to_string(),
                 data_type: DataType::Char,
                 column_id: ColumnId::from(2),
                 skip_parse: false,
-                is_primary: false,
             },
             SourceColumnDesc {
                 name: "zipcode".to_string(),
                 data_type: DataType::Int64,
                 column_id: ColumnId::from(3),
                 skip_parse: false,
-                is_primary: false,
             },
             SourceColumnDesc {
                 name: "rate".to_string(),
                 data_type: DataType::Float32,
                 column_id: ColumnId::from(4),
                 skip_parse: false,
-                is_primary: false,
             },
             SourceColumnDesc {
                 name: "date".to_string(),
                 data_type: DataType::Date,
                 column_id: ColumnId::from(5),
                 skip_parse: false,
-                is_primary: false,
             },
         ];
 
@@ -414,37 +407,31 @@ mod tests {
             vec![
                 ColumnDesc {
                     column_type: Some(DataType::Int32.to_protobuf().unwrap()),
-                    is_primary: false,
                     name: "id".to_string(),
                     ..Default::default()
                 },
                 ColumnDesc {
                     column_type: Some(DataType::Varchar.to_protobuf().unwrap()),
-                    is_primary: false,
                     name: "address".to_string(),
                     ..Default::default()
                 },
                 ColumnDesc {
                     column_type: Some(DataType::Varchar.to_protobuf().unwrap()),
-                    is_primary: false,
                     name: "city".to_string(),
                     ..Default::default()
                 },
                 ColumnDesc {
                     column_type: Some(DataType::Int64.to_protobuf().unwrap()),
-                    is_primary: false,
                     name: "zipcode".to_string(),
                     ..Default::default()
                 },
                 ColumnDesc {
                     column_type: Some(DataType::Float32.to_protobuf().unwrap()),
-                    is_primary: false,
                     name: "rate".to_string(),
                     ..Default::default()
                 },
                 ColumnDesc {
                     column_type: Some(DataType::Varchar.to_protobuf().unwrap()),
-                    is_primary: false,
                     name: "date".to_string(),
                     ..Default::default()
                 },
