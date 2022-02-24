@@ -29,8 +29,8 @@ impl OrderType {
 
 #[derive(Debug)]
 pub struct OrderPair {
-    pub order_type: OrderType,
     pub column_idx: usize,
+    pub order_type: OrderType,
 }
 
 impl OrderPair {
