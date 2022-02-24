@@ -109,7 +109,7 @@ where
     ) -> Result<ScheduledLocations> {
         let nodes = self.cluster_manager.list_worker_node(
             WorkerType::ComputeNode,
-            Some(risingwave_pb::common::worker_node::State::Created),
+            Some(risingwave_pb::common::worker_node::State::Running),
         );
         if nodes.is_empty() {
             return Err(InternalError("no available node exist".to_string()).into());
@@ -182,7 +182,7 @@ mod test {
         }
         let workers = cluster_manager.list_worker_node(
             WorkerType::ComputeNode,
-            Some(risingwave_pb::common::worker_node::State::Created),
+            Some(risingwave_pb::common::worker_node::State::Running),
         );
 
         let simple_schedule = Scheduler::new(ScheduleCategory::Simple, cluster_manager.clone());

@@ -139,7 +139,7 @@ where
 
             let all_nodes = self.cluster_manager.list_worker_node(
                 WorkerType::ComputeNode,
-                Some(risingwave_pb::common::worker_node::State::Created),
+                Some(risingwave_pb::common::worker_node::State::Running),
             );
             let all_actor_infos = self
                 .fragment_manager

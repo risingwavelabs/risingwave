@@ -33,8 +33,8 @@ enum WorkerType {
 
 message WorkerNode {
   enum State {
-    CREATING = 0;
-    CREATED = 1;
+    STARTING = 0;
+    RUNNING = 1;
   }
   uint32 id = 1;
   WorkerType type = 2;

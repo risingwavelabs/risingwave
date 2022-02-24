@@ -214,8 +214,8 @@ message DeleteWorkerNodeResponse {
 
 message ListAllNodesRequest {
   common.WorkerType worker_type = 1;
-  // Whether to include nodes still being created
-  bool include_creating = 2;
+  // Whether to include nodes still starting
+  bool include_starting_nodes = 2;
 }
 
 message ListAllNodesResponse {

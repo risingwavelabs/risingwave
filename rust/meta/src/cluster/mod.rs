@@ -92,7 +92,7 @@ where
                     id: id as u32,
                     r#type: r#type as i32,
                     host: Some(host_address.clone()),
-                    state: State::Creating as i32,
+                    state: State::Starting as i32,
                 };
                 let worker = Worker::from_protobuf(worker_node.clone());
                 worker.insert(&*self.meta_store_ref).await?;
@@ -106,10 +106,10 @@ where
         match self.workers.entry(WorkerKey(host_address.clone())) {
             Entry::Occupied(mut entry) => {
                 let mut worker_node = entry.get().to_protobuf();
-                if worker_node.state == State::Created as i32 {
+                if worker_node.state == State::Running as i32 {
                     return Ok(());
                 }
-                worker_node.state = State::Created as i32;
+                worker_node.state = State::Running as i32;
                 let worker = Worker::from_protobuf(worker_node.clone());
                 worker.insert(self.meta_store_ref.as_ref()).await?;
                 entry.insert(worker);

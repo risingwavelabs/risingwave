@@ -95,10 +95,10 @@ where
     ) -> Result<Response<ListAllNodesResponse>, Status> {
         let req = request.into_inner();
         let worker_type = req.get_worker_type().map_err(tonic_err)?;
-        let worker_state = if req.include_creating {
+        let worker_state = if req.include_starting_nodes {
             None
         } else {
-            Some(risingwave_pb::common::worker_node::State::Created)
+            Some(risingwave_pb::common::worker_node::State::Running)
         };
         let node_list = self.scm.list_worker_node(worker_type, worker_state);
         Ok(Response::new(ListAllNodesResponse {

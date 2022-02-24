@@ -307,19 +307,19 @@ mod tests {
             id: 0,
             r#type: WorkerType::ComputeNode as i32,
             host: None,
-            state: risingwave_pb::common::worker_node::State::Created as i32,
+            state: risingwave_pb::common::worker_node::State::Running as i32,
         };
         let worker2 = WorkerNode {
             id: 1,
             r#type: WorkerType::ComputeNode as i32,
             host: None,
-            state: risingwave_pb::common::worker_node::State::Created as i32,
+            state: risingwave_pb::common::worker_node::State::Running as i32,
         };
         let worker3 = WorkerNode {
             id: 2,
             r#type: WorkerType::ComputeNode as i32,
             host: None,
-            state: risingwave_pb::common::worker_node::State::Created as i32,
+            state: risingwave_pb::common::worker_node::State::Running as i32,
         };
         let workers = vec![worker1.clone(), worker2.clone(), worker3.clone()];
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(workers));

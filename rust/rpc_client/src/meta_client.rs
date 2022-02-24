@@ -196,15 +196,15 @@ impl MetaClient {
     /// Get live nodes with the specified type.
     /// # Arguments
     /// * `worker_type` `WorkerType` of the nodes
-    /// * `include_creating` Whether to include nodes still being created
+    /// * `include_starting_nodes` Whether to include nodes still being created
     pub async fn list_all_nodes(
         &self,
         worker_type: WorkerType,
-        include_creating: bool,
+        include_starting_nodes: bool,
     ) -> Result<Vec<WorkerNode>> {
         let request = ListAllNodesRequest {
             worker_type: worker_type as i32,
-            include_creating,
+            include_starting_nodes,
         };
         let resp = self
             .cluster_client
