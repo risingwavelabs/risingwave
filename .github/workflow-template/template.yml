@@ -155,7 +155,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-3node
-          timeout 3m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
+          timeout 100s sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
 
       - name: Kill cluster
         run: |
@@ -179,7 +179,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           RW_NO_CACHE=1 ~/cargo-make/makers ci-3node
-          timeout 3m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
+          timeout 100s sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
 
       - name: Kill cluster
         run: |
@@ -191,7 +191,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-3node
-          timeout 3m sqllogictest -p 4567 -d dev './e2e_test/batch/**/*.slt'
+          timeout 80s sqllogictest -p 4567 -d dev './e2e_test/batch/**/*.slt'
 
       - name: Kill cluster
         run: |
@@ -344,7 +344,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-1node
-          timeout 70s sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source/**/*.slt'
+          timeout 100s sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source/**/*.slt'
 
       - name: Kill cluster
         run: |
@@ -356,7 +356,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-3node
-          timeout 30s sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source_distributed/**/*.slt'
+          timeout 60s sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source_distributed/**/*.slt'
 
       - name: Kill cluster
         run: |
