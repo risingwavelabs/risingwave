@@ -106,7 +106,10 @@ impl HummockMetaClient for MockHummockMetaClient {
 
     async fn commit_epoch(&self, epoch: HummockEpoch) -> HummockResult<()> {
         self.mock_hummock_meta_service
-            .commit_epoch(CommitEpochRequest { epoch });
+            .commit_epoch(CommitEpochRequest {
+                column_family: String::from(GLOBAL_COLUMN_FAMILY_ID),
+                epoch,
+            });
         Ok(())
     }
 

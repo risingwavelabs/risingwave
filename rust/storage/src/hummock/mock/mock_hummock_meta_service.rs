@@ -131,9 +131,13 @@ impl MockHummockMetaService {
             .get(&guard.current_version_id)
             .cloned()
             .unwrap();
-        new_version.levels[0]
-            .table_ids
-            .extend(request.tables.iter().map(|table| table.id).collect_vec());
+        new_version.levels[0].table_ids.extend(
+            request
+                .sstable_info
+                .iter()
+                .map(|table| table.id)
+                .collect_vec(),
+        );
         guard.current_version_id += 1;
         new_version.id = guard.current_version_id;
         guard.versions.insert(new_version.id, new_version.clone());
