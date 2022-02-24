@@ -65,18 +65,6 @@ fn make_sum_aggcall(idx: i32) -> AggCall {
     }
 }
 
-fn make_column_desc(id: i32, type_name: TypeName) -> ColumnDesc {
-    ColumnDesc {
-        column_type: Some(DataType {
-            type_name: type_name as i32,
-            ..Default::default()
-        }),
-        column_id: id,
-        encoding: ColumnEncodingType::Raw as i32,
-        ..Default::default()
-    }
-}
-
 fn make_field(type_name: TypeName) -> Field {
     Field {
         data_type: Some(DataType {

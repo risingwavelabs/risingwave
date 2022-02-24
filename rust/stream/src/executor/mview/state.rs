@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
 use risingwave_common::array::Row;
-use risingwave_common::catalog::{ColumnId, Schema};
+use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
 use risingwave_common::util::ordered::*;
-use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::managed_state::flush_status::HashMapFlushStatus as FlushStatus;
@@ -91,7 +91,7 @@ mod tests {
         // Only assert pk and columns can be successfully put/delete/flush,
         // and the ammount of rows is expected.
         let state_store = MemoryStateStore::new();
-        let schema = schemas::ii();
+        let _schema = schemas::ii();
         let keyspace = Keyspace::executor_root(state_store.clone(), 0x42);
 
         let mut state = ManagedMViewState::new(

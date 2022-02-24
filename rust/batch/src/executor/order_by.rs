@@ -46,7 +46,7 @@ impl BoxedExecutorBuilder for OrderByExecutor {
         let order_pairs = order_by_node
             .column_orders
             .iter()
-            .map(|c| OrderPair::from_prost(c))
+            .map(OrderPair::from_prost)
             .collect();
         if let Some(child_plan) = source.plan_node.get_children().get(0) {
             let child = source.clone_for_plan(child_plan).build()?;

@@ -120,7 +120,7 @@ impl Executor for CreateTableExecutor {
                 let order_pairs: Vec<_> = self
                     .column_orders
                     .iter()
-                    .map(|c| OrderPair::from_prost(c))
+                    .map(OrderPair::from_prost)
                     .collect();
 
                 let orderings = order_pairs

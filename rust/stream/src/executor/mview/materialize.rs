@@ -3,7 +3,7 @@ use itertools::Itertools;
 use risingwave_common::array::Op::*;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnId, Schema};
-use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::state::ManagedMViewState;

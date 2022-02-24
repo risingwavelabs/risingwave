@@ -581,7 +581,7 @@ impl StreamManagerCore {
                 let keys = materialized_view_node
                     .column_orders
                     .iter()
-                    .map(|c| OrderPair::from_prost(c))
+                    .map(OrderPair::from_prost)
                     .collect();
                 let column_ids = materialized_view_node
                     .column_ids

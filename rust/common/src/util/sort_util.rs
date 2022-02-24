@@ -6,7 +6,7 @@ use risingwave_pb::plan::{ColumnOrder, OrderType as ProstOrderType};
 
 use crate::array::{Array, ArrayImpl, DataChunk, DataChunkRef};
 use crate::error::ErrorCode::InternalError;
-use crate::error::{Result, RwError};
+use crate::error::Result;
 use crate::types::{ScalarPartialOrd, ScalarRef};
 
 pub const K_PROCESSING_WINDOW_SIZE: usize = 1024;
