@@ -112,13 +112,11 @@
       "columnType": {
         "typeName": "INT32"
       },
-      "encoding": "RAW",
       "name": "v2"
     }, {
       "columnType": {
         "typeName": "INT64"
       },
-      "encoding": "RAW",
       "name": "v"
     }],
     "pkIndices": [0],

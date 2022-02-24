@@ -25,25 +25,21 @@
       "columnType": {
         "typeName": "FLOAT"
       },
-      "encoding": "RAW",
       "name": "v1"
     }, {
       "columnType": {
         "typeName": "INT32"
       },
-      "encoding": "RAW",
       "name": "v2"
     }, {
       "columnType": {
         "typeName": "FLOAT"
       },
-      "encoding": "RAW",
       "name": "v3"
     }, {
       "columnType": {
         "typeName": "INT64"
       },
-      "encoding": "RAW",
       "name": "_row_id"
     }],
     "pkIndices": [3],

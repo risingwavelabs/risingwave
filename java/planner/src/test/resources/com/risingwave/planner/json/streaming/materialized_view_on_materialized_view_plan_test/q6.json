@@ -169,19 +169,16 @@
       "columnType": {
         "typeName": "FLOAT"
       },
-      "encoding": "RAW",
       "name": "sum_v1"
     }, {
       "columnType": {
         "typeName": "DOUBLE"
       },
-      "encoding": "RAW",
       "name": "avg_v3"
     }, {
       "columnType": {
         "typeName": "FLOAT"
       },
-      "encoding": "RAW",
       "name": "v1"
     }],
     "pkIndices": [2],

@@ -51,9 +51,7 @@ public class TableNodeSerializer {
             com.risingwave.proto.plan.ColumnDesc.newBuilder();
         columnDescBuilder
             .setName(pair.getKey())
-            .setEncoding(com.risingwave.proto.plan.ColumnDesc.ColumnEncodingType.RAW)
-            .setColumnType(pair.getValue().getDataType().getProtobufType())
-            .setIsPrimary(false);
+            .setColumnType(pair.getValue().getDataType().getProtobufType());
         builder.addColumnDescs(columnDescBuilder);
       }
 
@@ -134,9 +132,7 @@ public class TableNodeSerializer {
             com.risingwave.proto.plan.ColumnDesc.newBuilder();
         columnDescBuilder
             .setName(column.getName())
-            .setEncoding(com.risingwave.proto.plan.ColumnDesc.ColumnEncodingType.RAW)
             .setColumnType(column.getDesc().getDataType().getProtobufType())
-            .setIsPrimary(catalog.getPrimaryKeyColumnIds().contains(column.getId().getValue()))
             .setColumnId(column.getId().getValue());
         builder.addColumnDescs(columnDescBuilder);
       }
