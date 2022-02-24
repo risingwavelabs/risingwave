@@ -32,28 +32,16 @@ message TableRefId {
 
 // ColumnDesc defines a column in a table
 message ColumnDesc {
-  enum ColumnEncodingType {
-    INVALID = 0;
-    RAW = 1;
-    LZO = 2;
-    LZ4 = 3;
-    ZSTD = 4;
-    RUN_LENGTH = 5;
-    BYTE_DICT = 6;
-    DELTA = 7;
-  }
   data.DataType column_type = 1;
-  ColumnEncodingType encoding = 2;
-  bool is_primary = 3;
-  string name = 4;
-  int32 column_id = 5;
+  string name = 2;
+  int32 column_id = 3;
 }
 
 message RowSeqScanNode {
   TableRefId table_ref_id = 1;
   repeated int32 column_ids = 2;
   repeated plan.Field fields = 3;
-}
+} 
 
 message SourceScanNode {
   TableRefId table_ref_id = 1;
