@@ -15,7 +15,7 @@ pub fn tumble_start(
             "unimplemented: tumble_start only support days or miliseconds".to_string(),
         )));
     }
-    let window = window.get_days() as i64 * 24 * 60 + window.get_ms() / 1000;
+    let window = window.get_days() as i64 * 24 * 60 * 60 + window.get_ms() / 1000;
     let offset = diff / window;
     let window_start = window * offset;
 
