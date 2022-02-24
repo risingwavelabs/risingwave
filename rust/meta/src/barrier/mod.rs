@@ -148,6 +148,9 @@ impl<S> BarrierManager<S>
 where
     S: MetaStore,
 {
+    const INTERVAL: Duration =
+        Duration::from_millis(if cfg!(debug_assertions) { 5000 } else { 100 });
+
     /// Create a new [`BarrierManager`].
     pub fn new(
         env: MetaSrvEnv<S>,
@@ -168,7 +171,7 @@ where
 
     /// Start an infinite loop to take scheduled barriers and send them.
     pub async fn run(&self) -> Result<()> {
-        let mut min_interval = tokio::time::interval(Duration::from_millis(5000));
+        let mut min_interval = tokio::time::interval(Self::INTERVAL);
         min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
         loop {
