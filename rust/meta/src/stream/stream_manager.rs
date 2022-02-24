@@ -435,7 +435,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_create_materialized_view() -> Result<()> {
-        let services = MockServices::start("127.0.0.1", 12345).await?;
+        let services = MockServices::start("127.0.0.1", 12333).await?;
 
         let table_ref_id = TableRefId {
             schema_ref_id: None,
@@ -508,7 +508,7 @@ mod tests {
                     .unwrap(),
                 HostAddress {
                     host: "127.0.0.1".to_string(),
-                    port: 12345,
+                    port: 12333,
                 }
             );
         }
