@@ -176,9 +176,7 @@ impl HummockMetaClient for RPCHummockMetaClient {
             .meta_client
             .to_owned()
             .hummock_client
-            .get_compaction_tasks(GetCompactionTasksRequest {
-                context_id: self.meta_client.worker_id(),
-            })
+            .get_compaction_tasks(GetCompactionTasksRequest {})
             .await
             .map_err(HummockError::meta_error)?
             .into_inner();
@@ -197,7 +195,6 @@ impl HummockMetaClient for RPCHummockMetaClient {
             .to_owned()
             .hummock_client
             .report_compaction_tasks(ReportCompactionTasksRequest {
-                context_id: self.meta_client.worker_id(),
                 compact_task: Some(compact_task),
                 task_result,
             })
