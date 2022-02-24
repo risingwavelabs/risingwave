@@ -17,7 +17,7 @@ use uuid::Uuid;
 pub use self::command::Command;
 use self::command::CommandContext;
 use self::info::BarrierActorInfo;
-use crate::cluster::StoredClusterManager;
+use crate::cluster::{StoredClusterManager, StoredClusterManagerRef};
 use crate::manager::{EpochGeneratorRef, MetaSrvEnv, StreamClientsRef};
 use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
@@ -65,7 +65,7 @@ pub struct BarrierManager<S>
 where
     S: MetaStore,
 {
-    cluster_manager: Arc<StoredClusterManager<S>>,
+    cluster_manager: StoredClusterManagerRef<S>,
 
     fragment_manager: FragmentManagerRef<S>,
 
@@ -133,18 +133,20 @@ where
                 min_interval.tick().await;
             }
 
+            // If no command scheduled, create periodic checkpoint barrier by default.
+            let (command, notifier) =
+                scheduled.unwrap_or_else(|| (Command::checkpoint(), Notifier::default()));
+
             let all_nodes = self
                 .cluster_manager
                 .list_worker_node(WorkerType::ComputeNode);
-            let all_actor_infos = self.fragment_manager.load_all_actors()?;
+            let all_actor_infos = self
+                .fragment_manager
+                .load_all_actors(command.creating_table_id())?;
 
             let info = BarrierActorInfo::resolve(&all_nodes, all_actor_infos);
 
             let (command_context, mut notifiers) = {
-                let (command, notifier) = scheduled.unwrap_or_else(
-                    || (Command::checkpoint(), Default::default()), /* default periodic
-                                                                     * checkpoint barrier */
-                );
                 let extra_notifiers = std::mem::take(&mut *self.extra_notifiers.lock().await);
                 let notifiers = once(notifier)
                     .chain(extra_notifiers.into_iter())
