@@ -12,6 +12,14 @@ use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
 use crate::scheduler::plan_fragmenter::{Query, QueryStageRef, StageId};
 
+type ScheduledStageSender = std::sync::mpsc::Sender<ScheduledStage>;
+type ScheduledStageReceiver = std::sync::mpsc::Receiver<ScheduledStage>;
+use risingwave_pb::plan;
+use risingwave_pb::plan::plan_node::NodeBody;
+use risingwave_pb::plan::{
+    plan_node as pb_batch_node, ExchangeNode, ExchangeSource, PlanFragment, QueryId,
+};
+
 pub(crate) type TaskId = u64;
 
 /// `BatchScheduler` dispatches query fragments to compute nodes.
@@ -67,6 +75,106 @@ impl AugmentedStage {
             parallelism,
             workers,
         }
+    }
+
+    /// Serialize augmented stage into plan node. Used by task manager to construct task.
+    pub fn to_prost(&self, task_id: TaskId, query: &Query) -> PlanFragment {
+        let prost_root = self.rewrite_exchange(self.query_stage.root.clone(), task_id, query);
+        PlanFragment {
+            root: Some(prost_root),
+            exchange_info: Some(self.query_stage.distribution.to_prost(self.parallelism)),
+        }
+    }
+
+    fn rewrite_exchange(
+        &self,
+        plan_node: PlanRef,
+        task_id: TaskId,
+        query: &Query,
+    ) -> plan::PlanNode {
+        let mut current_node = plan_node.to_batch_prost();
+        // Clear children first.
+        current_node.children.clear();
+
+        // If current plan node is exchange node, it must be root.
+        let cur_plan_node_type = plan_node.node_type();
+        if cur_plan_node_type == PlanNodeType::BatchExchange {
+            let source_stage_id = query
+                .stage_graph
+                .exchange_id_to_stage
+                .get(&plan_node.id().0)
+                .unwrap();
+            let scheduled_stage = self.exchange_source.get(source_stage_id).unwrap();
+            let exchange_node =
+                Self::create_exchange_node(scheduled_stage, plan_node, task_id, query);
+            current_node.node_body = Some(exchange_node);
+        } else {
+            for child in plan_node.inputs() {
+                current_node
+                    .children
+                    .push(self.rewrite_exchange(child, task_id, query))
+            }
+        }
+
+        current_node
+    }
+
+    fn create_exchange_node(
+        stage: &ScheduledStageRef,
+        plan_node: PlanRef,
+        task_id: TaskId,
+        query: &Query,
+    ) -> pb_batch_node::NodeBody {
+        let mut exchange_node = ExchangeNode {
+            ..Default::default()
+        };
+        let pb_stage_id = risingwave_pb::plan::StageId {
+            stage_id: stage.augmented_stage.query_stage.id as u32,
+            query_id: Some(QueryId {
+                trace_id: query.query_id.to_string(),
+            }),
+        };
+        exchange_node.source_stage_id = Some(pb_stage_id);
+        for (child_task_id, worker_node) in &stage.assignments {
+            let host = &worker_node.host;
+            let sink_id = Some(risingwave_pb::plan::TaskSinkId {
+                sink_id: task_id as u32,
+                task_id: Self::construct_prost_task_id(
+                    *child_task_id,
+                    stage.id(),
+                    query.query_id.to_string(),
+                ),
+            });
+            // Construct exchange source into exchange node.
+            let exchange_source = ExchangeSource {
+                host: host.clone(),
+                sink_id,
+            };
+            exchange_node.sources.push(exchange_source);
+        }
+        // Construct input schema in exchange node.
+        let input = plan_node.inputs()[0].clone();
+        let schema = input.schema();
+        for field in &schema.fields {
+            exchange_node.input_schema.push(field.to_prost());
+        }
+        NodeBody::Exchange(exchange_node)
+    }
+
+    // Construct TaskId in prost.
+    fn construct_prost_task_id(
+        task_id: TaskId,
+        stage_id: StageId,
+        trace_id: String,
+    ) -> Option<risingwave_pb::plan::TaskId> {
+        let stage_id = Some(risingwave_pb::plan::StageId {
+            stage_id: stage_id as u32,
+            query_id: Some(QueryId { trace_id }),
+        });
+        Some(risingwave_pb::plan::TaskId {
+            task_id: task_id as u32,
+            stage_id,
+        })
     }
 }
 
@@ -275,11 +383,10 @@ impl BatchScheduler {
     }
 
     /// Wrap scheduled stages into task and send to compute node for execution.
-    /// TODO(Bowen): Introduce Compute Client to do task distribution.
     fn do_stage_execution(&mut self, augmented_stage: AugmentedStageRef) {
         let mut scheduled_tasks = HashMap::new();
-
         for task_id in 0..augmented_stage.parallelism {
+            // TODO(Bowen): Introduce Compute Client to do task distribution.
             scheduled_tasks.insert(
                 task_id as TaskId,
                 augmented_stage.workers[task_id as usize].clone(),

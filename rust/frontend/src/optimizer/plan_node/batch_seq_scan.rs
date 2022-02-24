@@ -1,6 +1,8 @@
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
+use risingwave_pb::plan::plan_node::NodeBody;
+use risingwave_pb::plan::{CellBasedTableDesc, RowSeqScanNode};
 
 use super::{BatchBase, PlanRef, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::plan_node::LogicalScan;
@@ -49,4 +51,15 @@ impl ToDistributedBatch for BatchSeqScan {
     }
 }
 
-impl ToBatchProst for BatchSeqScan {}
+impl ToBatchProst for BatchSeqScan {
+    fn to_batch_prost_body(&self) -> NodeBody {
+        // TODO(Bowen): Fix this serialization.
+        NodeBody::RowSeqScan(RowSeqScanNode {
+            table_desc: Some(CellBasedTableDesc {
+                table_id: self.logical.table_id.table_id,
+                pk: vec![],
+            }),
+            ..Default::default()
+        })
+    }
+}

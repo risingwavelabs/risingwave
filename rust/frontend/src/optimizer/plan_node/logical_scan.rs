@@ -16,7 +16,7 @@ use crate::session::QueryContextRef;
 pub struct LogicalScan {
     pub base: LogicalBase,
     table_name: String,
-    table_id: TableId,
+    pub table_id: TableId,
     columns: Vec<ColumnId>,
 }
 
