@@ -244,10 +244,9 @@ mod tests {
     use rand::{thread_rng, Rng};
 
     use super::*;
-    use crate::hummock::cloud::gen_remote_sstable;
     use crate::hummock::iterator::test_utils::{
         default_builder_opt_for_test, iterator_test_key_of, iterator_test_key_of_epoch, test_key,
-        test_value_of, TestIteratorBuilder, TEST_KEYS_COUNT,
+        test_value_of, upload_and_load_sst, TestIteratorBuilder, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::variants::BACKWARD;
     use crate::hummock::iterator::BoxedHummockIterator;
@@ -843,7 +842,7 @@ mod tests {
         let (data, meta) = b.finish();
         // get remote table
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
-        let table = gen_remote_sstable(obj_client, 0, data, meta, REMOTE_DIR, None)
+        let table = upload_and_load_sst(obj_client, 0, meta, data, REMOTE_DIR)
             .await
             .unwrap();
 
@@ -910,7 +909,8 @@ mod tests {
         let (data, meta) = b.finish();
         // get remote table
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
-        gen_remote_sstable(obj_client, 0, data, meta, REMOTE_DIR, None)
+
+        upload_and_load_sst(obj_client, 0, meta, data, REMOTE_DIR)
             .await
             .unwrap()
     }

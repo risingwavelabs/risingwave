@@ -3,9 +3,10 @@
 use std::sync::Arc;
 
 use super::variants::*;
-use crate::hummock::cloud::gen_remote_sstable;
 use crate::hummock::key::{key_with_epoch, user_key, Epoch};
-use crate::hummock::{HummockResult, HummockValue, SSTable, SSTableBuilder, SSTableBuilderOptions};
+use crate::hummock::{
+    cloud, HummockResult, HummockValue, SSTable, SSTableBuilder, SSTableBuilderOptions,
+};
 use crate::object::{InMemObjectStore, ObjectStore};
 
 pub trait IndexMapper: Fn(u64, usize) -> Vec<u8> + Send + Sync + 'static {}
@@ -159,6 +160,7 @@ macro_rules! test_key {
     };
 }
 
+use risingwave_pb::hummock::SstableMeta;
 pub(crate) use test_key;
 
 pub type TestIterator = TestIteratorInner<FORWARD>;
@@ -297,9 +299,26 @@ pub async fn gen_test_sstable_base(
     // get remote table
     let (data, meta) = b.finish();
     let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
-    gen_remote_sstable(obj_client, 0, data, meta, REMOTE_DIR, None)
+    upload_and_load_sst(obj_client, 0, meta, data, REMOTE_DIR)
         .await
         .unwrap()
+}
+
+pub async fn upload_and_load_sst(
+    obj_client: Arc<dyn ObjectStore>,
+    sst_id: u64,
+    meta: SstableMeta,
+    data: Bytes,
+    path: &str,
+) -> HummockResult<SSTable> {
+    cloud::upload(&obj_client, sst_id, &meta, data, path).await?;
+    Ok(SSTable {
+        id: sst_id,
+        meta,
+        obj_client: obj_client,
+        data_path: cloud::get_sst_data_path(path, sst_id),
+        block_cache: Arc::new(moka::future::Cache::new(65536)),
+    })
 }
 
 #[cfg(test)]

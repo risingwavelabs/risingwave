@@ -11,9 +11,9 @@ use super::multi_builder::CapacitySplitTableBuilder;
 use super::version_cmp::VersionedComparator;
 use super::{
     HummockError, HummockMetaClient, HummockOptions, HummockResult, HummockStorage, HummockValue,
-    LocalVersionManager, SSTable, SSTableIterator,
+    LocalVersionManager, SSTableIterator,
 };
-use crate::hummock::cloud::gen_remote_sstable;
+use crate::hummock::cloud;
 use crate::object::ObjectStore;
 
 pub struct SubCompactContext {
@@ -108,30 +108,17 @@ impl Compactor {
         let mut buffered = stream_of_futures.buffer_unordered(num_sub);
 
         let mut sub_compact_outputsets = Vec::with_capacity(num_sub);
-        let mut sub_compact_results = Vec::with_capacity(num_sub);
+        // let mut sub_compact_results = Vec::with_capacity(num_sub);
 
         while let Some(tokio_result) = buffered.next().await {
             let (sub_result, sub_kr_idx, sub_output) = tokio_result.unwrap();
             sub_compact_outputsets.push((sub_kr_idx, sub_output));
-            sub_compact_results.push(sub_result);
+            sub_result?
         }
 
         sub_compact_outputsets.sort_by_key(|(sub_kr_idx, _)| *sub_kr_idx);
         for (_, sub_output) in sub_compact_outputsets {
-            for sstable in sub_output {
-                compact_task.sorted_output_ssts.push(SstableInfo {
-                    id: sstable.id,
-                    key_range: Some(risingwave_pb::hummock::KeyRange {
-                        left: sstable.meta.get_smallest_key().to_vec(),
-                        right: sstable.meta.get_largest_key().to_vec(),
-                        inf: false,
-                    }),
-                });
-            }
-        }
-
-        for sub_compact_result in sub_compact_results {
-            sub_compact_result?;
+            compact_task.sorted_output_ssts.extend(sub_output);
         }
 
         Ok(())
@@ -141,7 +128,7 @@ impl Compactor {
         context: SubCompactContext,
         kr: KeyRange,
         mut iter: MergeIterator<'_>,
-        local_sorted_output_ssts: &mut Vec<SSTable>,
+        output_sst_infos: &mut Vec<SstableInfo>,
         is_target_ultimate_and_leveling: bool,
         watermark: Epoch,
     ) -> HummockResult<()> {
@@ -210,19 +197,26 @@ impl Compactor {
         // Seal table for each split
         builder.seal_current();
 
-        local_sorted_output_ssts.reserve(builder.len());
+        output_sst_infos.reserve(builder.len());
         // TODO: decide upload concurrency
         for (table_id, blocks, meta) in builder.finish() {
-            let table = gen_remote_sstable(
-                context.obj_client.clone(),
+            cloud::upload(
+                &context.obj_client,
                 table_id,
+                &meta,
                 blocks,
-                meta,
                 context.options.remote_dir.as_str(),
-                Some(context.local_version_manager.block_cache.clone()),
             )
             .await?;
-            local_sorted_output_ssts.push(table);
+            let info = SstableInfo {
+                id: table_id,
+                key_range: Some(risingwave_pb::hummock::KeyRange {
+                    left: meta.get_smallest_key().to_vec(),
+                    right: meta.get_largest_key().to_vec(),
+                    inf: false,
+                }),
+            };
+            output_sst_infos.push(info);
         }
 
         Ok(())
