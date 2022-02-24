@@ -159,12 +159,14 @@ mod test {
     use risingwave_pb::common::HostAddress;
 
     use super::*;
-    use crate::manager::MetaSrvEnv;
+    use crate::manager::{MetaSrvEnv, NotificationManager};
 
     #[tokio::test]
     async fn test_schedule() -> Result<()> {
         let env = MetaSrvEnv::for_test().await;
-        let cluster_manager = Arc::new(StoredClusterManager::new(env.clone(), None).await?);
+        let notification_manager = Arc::new(NotificationManager::new());
+        let cluster_manager =
+            Arc::new(StoredClusterManager::new(env.clone(), None, notification_manager).await?);
         let actors = (0..15).collect::<Vec<u32>>();
         let source_actors = (20..30).collect::<Vec<u32>>();
         for i in 0..10 {

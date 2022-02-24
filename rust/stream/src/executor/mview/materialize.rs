@@ -145,7 +145,7 @@ mod tests {
     use std::sync::Arc;
 
     use risingwave_common::array::{I32Array, Op, Row};
-    use risingwave_common::catalog::{Schema, SchemaId, TableId};
+    use risingwave_common::catalog::{Schema, TableId};
     use risingwave_common::column_nonnull;
     use risingwave_common::util::downcast_arc;
     use risingwave_common::util::sort_util::OrderType;
@@ -167,7 +167,7 @@ mod tests {
         let store_mgr = Arc::new(SimpleTableManager::new(StateStoreImpl::MemoryStateStore(
             store.clone(),
         )));
-        let table_id = TableId::new(SchemaId::default(), 1);
+        let table_id = TableId::new(1);
         // Two columns of int32 type, the first column is PK.
         let columns = vec![
             ColumnDesc {
@@ -177,8 +177,8 @@ mod tests {
                 }),
                 encoding: ColumnEncodingType::Raw as i32,
                 name: "v1".to_string(),
-                is_primary: false,
                 column_id: 0,
+                ..Default::default()
             },
             ColumnDesc {
                 column_type: Some(DataType {
@@ -187,8 +187,8 @@ mod tests {
                 }),
                 encoding: ColumnEncodingType::Raw as i32,
                 name: "v2".to_string(),
-                is_primary: false,
                 column_id: 1,
+                ..Default::default()
             },
         ];
         let pks = vec![0_usize];

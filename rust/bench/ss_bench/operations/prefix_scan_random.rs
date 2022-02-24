@@ -4,8 +4,7 @@ use std::time::Instant;
 use bytes::Buf;
 use itertools::Itertools;
 use rand::distributions::Uniform;
-use rand::prelude::{Distribution, StdRng};
-use rand::SeedableRng;
+use rand::prelude::Distribution;
 use risingwave_storage::hummock::key::next_key;
 use risingwave_storage::StateStore;
 
@@ -15,17 +14,15 @@ use crate::utils::workload::Workload;
 use crate::Opts;
 
 impl Operations {
-    pub(crate) async fn prefix_scan_random(&self, store: &impl StateStore, opts: &Opts) {
+    pub(crate) async fn prefix_scan_random(&mut self, store: &impl StateStore, opts: &Opts) {
         // generate queried prefixes
         let mut scan_prefixes = match self.prefixes.is_empty() {
-            // if prefixes is empty, use default prefix: ["a"*key_prefix_size]
-            true => Workload::new_random_keys(opts, 233, opts.reads as u64).0,
+            true => Workload::new_random_prefixes(opts, opts.scans as u64, &mut self.rng),
             false => {
-                let mut rng = StdRng::seed_from_u64(233);
                 let dist = Uniform::from(0..self.prefixes.len());
-                (0..opts.reads as usize)
+                (0..opts.scans as usize)
                     .into_iter()
-                    .map(|_| self.prefixes[dist.sample(&mut rng)].clone())
+                    .map(|_| self.prefixes[dist.sample(&mut self.rng)].clone())
                     .collect_vec()
             }
         };

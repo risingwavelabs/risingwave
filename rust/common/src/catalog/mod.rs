@@ -1,5 +1,9 @@
-pub mod schema;
+mod column;
+mod schema;
 
+use core::fmt;
+
+pub use column::*;
 pub use schema::*;
 
 pub enum CatalogId {
@@ -34,22 +38,22 @@ impl SchemaId {
     }
 }
 
-#[derive(Clone, Debug, Default, Hash, PartialOrd, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, Hash, PartialOrd, PartialEq, Eq)]
 pub struct TableId {
-    schema_ref_id: SchemaId,
-    table_id: i32,
+    pub table_id: u32,
 }
-
 impl TableId {
-    pub fn new(schema_ref_id: SchemaId, table_id: i32) -> Self {
-        TableId {
-            schema_ref_id,
-            table_id,
-        }
+    pub fn new(table_id: u32) -> Self {
+        TableId { table_id }
     }
 
-    pub fn table_id(&self) -> i32 {
+    pub fn table_id(&self) -> u32 {
         self.table_id
+    }
+}
+impl fmt::Display for TableId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.table_id,)
     }
 }
 
@@ -91,14 +95,12 @@ impl From<&Option<risingwave_pb::plan::TableRefId>> for TableId {
     fn from(option: &Option<risingwave_pb::plan::TableRefId>) -> Self {
         match option {
             Some(pb) => TableId {
-                schema_ref_id: SchemaId::from(&pb.schema_ref_id),
-                table_id: pb.table_id,
+                table_id: pb.table_id as u32,
             },
             None => {
                 let pb = risingwave_pb::plan::TableRefId::default();
                 TableId {
-                    schema_ref_id: SchemaId::from(&pb.schema_ref_id),
-                    table_id: pb.table_id,
+                    table_id: pb.table_id as u32,
                 }
             }
         }
@@ -130,10 +132,8 @@ impl From<&SchemaId> for risingwave_pb::plan::SchemaRefId {
 impl From<&TableId> for risingwave_pb::plan::TableRefId {
     fn from(table_id: &TableId) -> Self {
         risingwave_pb::plan::TableRefId {
-            schema_ref_id: Some(risingwave_pb::plan::SchemaRefId::from(
-                &table_id.schema_ref_id,
-            )),
-            table_id: 0,
+            schema_ref_id: None,
+            table_id: table_id.table_id as i32,
         }
     }
 }
@@ -188,22 +188,10 @@ mod tests {
     #[test]
     fn test_table_id_from_pb() {
         let table_id: TableId = TableId {
-            schema_ref_id: SchemaId {
-                database_ref_id: DatabaseId {
-                    database_id: generate_database_id_pb().database_id,
-                },
-                schema_id: generate_schema_id_pb().schema_id,
-            },
-            table_id: generate_table_id_pb().table_id,
+            table_id: generate_table_id_pb().table_id as u32,
         };
 
-        let expected_table_id = TableId {
-            schema_ref_id: SchemaId {
-                database_ref_id: DatabaseId { database_id: 32 },
-                schema_id: 48,
-            },
-            table_id: 67,
-        };
+        let expected_table_id = TableId { table_id: 67 };
 
         assert_eq!(expected_table_id, table_id);
     }

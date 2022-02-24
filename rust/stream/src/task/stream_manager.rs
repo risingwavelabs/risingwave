@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use futures::channel::mpsc::{channel, Receiver};
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, Schema, TableId};
+use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::expr::{build_from_prost as build_expr_from_prost, AggKind, RowExpression};
 use risingwave_common::try_match_expand;
@@ -109,6 +109,7 @@ impl StreamManager {
         for id in actors {
             core.drop_actor(*id);
         }
+        debug!("drop actors: {:?}", actors);
         Ok(())
     }
 
@@ -256,9 +257,9 @@ impl StreamManagerCore {
                 let tx = self.context.take_sender(&(actor_id, *down_id))?;
                 if is_local_address(&downstream_addr, &self.context.addr) {
                     // if this is a local downstream actor
-                    Ok(Box::new(LocalOutput::new(tx)) as Box<dyn Output>)
+                    Ok(Box::new(LocalOutput::new(*down_id, tx)) as Box<dyn Output>)
                 } else {
-                    Ok(Box::new(RemoteOutput::new(tx)) as Box<dyn Output>)
+                    Ok(Box::new(RemoteOutput::new(*down_id, tx)) as Box<dyn Output>)
                 }
             })
             .collect::<Result<Vec<_>>>()?;
@@ -355,7 +356,11 @@ impl StreamManagerCore {
                     .lock_barrier_manager()
                     .register_sender(actor_id, sender);
 
-                let column_ids = node.get_column_ids().to_vec();
+                let column_ids: Vec<_> = node
+                    .get_column_ids()
+                    .iter()
+                    .map(|i| ColumnId::from(*i))
+                    .collect();
                 let mut fields = Vec::with_capacity(column_ids.len());
                 for &column_id in &column_ids {
                     let column_desc = source_desc
@@ -364,7 +369,7 @@ impl StreamManagerCore {
                         .find(|c| c.column_id == column_id)
                         .unwrap();
                     fields.push(Field::with_name(
-                        column_desc.data_type,
+                        column_desc.data_type.clone(),
                         column_desc.name.clone(),
                     ));
                 }

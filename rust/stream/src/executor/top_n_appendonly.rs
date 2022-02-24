@@ -122,7 +122,7 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
             .schema()
             .fields
             .iter()
-            .map(|field| field.data_type)
+            .map(|field| field.data_type.clone())
             .collect::<Vec<_>>();
         let lower_sub_keyspace = keyspace.with_segment(Segment::FixedLength(b"l/".to_vec()));
         let higher_sub_keyspace = keyspace.with_segment(Segment::FixedLength(b"h/".to_vec()));

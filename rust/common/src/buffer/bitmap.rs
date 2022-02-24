@@ -60,6 +60,13 @@ impl BitmapBuilder {
         self
     }
 
+    pub fn append_bitmap(&mut self, other: &Bitmap) -> &mut Self {
+        for bit in other.iter() {
+            self.append(bit);
+        }
+        self
+    }
+
     pub fn finish(&mut self) -> Bitmap {
         if self.len % 8 != 0 {
             self.data.push(self.head);

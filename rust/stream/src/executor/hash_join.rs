@@ -317,18 +317,21 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
 
         assert_eq!(schema_fields.len(), new_column_n);
 
-        let output_data_types = schema_fields.iter().map(|field| field.data_type).collect();
+        let output_data_types = schema_fields
+            .iter()
+            .map(|field| field.data_type.clone())
+            .collect();
         let col_l_datatypes = input_l
             .schema()
             .fields
             .iter()
-            .map(|field| field.data_type)
+            .map(|field| field.data_type.clone())
             .collect_vec();
         let col_r_datatypes = input_r
             .schema()
             .fields
             .iter()
-            .map(|field| field.data_type)
+            .map(|field| field.data_type.clone())
             .collect_vec();
         let pk_indices_l = input_l.pk_indices().to_vec();
         let pk_indices_r = input_r.pk_indices().to_vec();
