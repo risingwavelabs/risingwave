@@ -6,7 +6,7 @@ use risingwave_pb::data::buffer::CompressionType;
 use risingwave_pb::data::{Array as ProstArray, ArrayType, Buffer};
 
 use super::{Array, ArrayBuilder, ArrayIterator, NULL_VAL_FOR_HASH};
-use crate::array::{ArrayBuilderImpl, ArrayImpl};
+use crate::array::{ArrayBuilderImpl, ArrayImpl, ArrayMeta};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::error::Result;
 use crate::for_all_native_types;
@@ -126,6 +126,7 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
             null_bitmap: Some(null_bitmap),
             values: vec![buffer],
             array_type: T::array_type() as i32,
+            struct_array_data: None,
         })
     }
 
@@ -157,7 +158,7 @@ pub struct PrimitiveArrayBuilder<T: PrimitiveArrayItemType> {
 impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
     type ArrayType = PrimitiveArray<T>;
 
-    fn new(capacity: usize) -> Result<Self> {
+    fn new_with_meta(capacity: usize, _meta: ArrayMeta) -> Result<Self> {
         Ok(Self {
             bitmap: BitmapBuilder::with_capacity(capacity),
             data: Vec::with_capacity(capacity),
