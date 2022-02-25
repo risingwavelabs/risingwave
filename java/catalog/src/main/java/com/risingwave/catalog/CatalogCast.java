@@ -4,11 +4,8 @@ import com.risingwave.proto.expr.InputRefExpr;
 import com.risingwave.proto.metanode.Database;
 import com.risingwave.proto.metanode.Schema;
 import com.risingwave.proto.metanode.Table;
-import com.risingwave.proto.plan.ColumnOrder;
-import com.risingwave.proto.plan.DatabaseRefId;
-import com.risingwave.proto.plan.OrderType;
-import com.risingwave.proto.plan.SchemaRefId;
-import com.risingwave.proto.plan.TableRefId;
+import com.risingwave.proto.plan.*;
+
 import java.util.ArrayList;
 import java.util.List;
 import org.apache.calcite.rel.RelCollations;
@@ -65,47 +62,52 @@ public class CatalogCast {
     builder.setTableName(createTableInfo.getName());
     builder.setTableRefId(
         TableRefId.newBuilder().setSchemaRefId(buildSchemaRefId(databaseCatalog, schemaCatalog)));
-    builder.setIsMaterializedView(createTableInfo.isMv());
-    builder.setIsSource(createTableInfo.isSource());
-    builder.setDistType(Table.DistributionType.ALL);
-    builder.setRowFormat(createTableInfo.getRowFormat());
-    builder.putAllProperties(createTableInfo.getProperties());
-    builder.addAllPkColumns(createTableInfo.getPrimaryKeyIndices());
-    builder.setRowSchemaLocation(createTableInfo.getRowSchemaLocation());
+
+    // ColumnDesc
     for (var columns : createTableInfo.getColumns()) {
       com.risingwave.proto.plan.ColumnDesc.Builder colBuilder =
-          com.risingwave.proto.plan.ColumnDesc.newBuilder();
+              com.risingwave.proto.plan.ColumnDesc.newBuilder();
       colBuilder.setName(columns.left);
       colBuilder.setColumnType(columns.right.getDataType().getProtobufType());
       builder.addColumnDescs(colBuilder.build());
     }
-    for (var tableId : createTableInfo.getDependentTables()) {
-      SchemaCatalog.SchemaId schemaId = tableId.getParent();
-      DatabaseCatalog.DatabaseId databaseId = schemaId.getParent();
 
-      DatabaseRefId.Builder databaseRefIdBuilder = DatabaseRefId.newBuilder();
-      databaseRefIdBuilder.setDatabaseId(databaseId.getValue());
+    // Info
+    if (createTableInfo.isSource()) {
+      var sourceInfoBuilder = StreamSourceInfo.newBuilder();
+      sourceInfoBuilder.setRowFormat(createTableInfo.getRowFormat());
+      sourceInfoBuilder.putAllProperties(createTableInfo.getProperties());
+      sourceInfoBuilder.setRowSchemaLocation(createTableInfo.getRowSchemaLocation());
 
-      SchemaRefId.Builder schemaRefIdBuilder = SchemaRefId.newBuilder();
-      schemaRefIdBuilder.setSchemaId(schemaId.getValue());
-      schemaRefIdBuilder.setDatabaseRefId(databaseRefIdBuilder);
+    } else if (createTableInfo.isMv()) {
+      var mvInfoBuilder = MaterializedViewInfo.newBuilder();
+      mvInfoBuilder.addAllPkIndices(createTableInfo.getPrimaryKeyIndices());
 
-      TableRefId.Builder tableRefIdBuilder = TableRefId.newBuilder();
-      tableRefIdBuilder.setTableId(tableId.getValue());
-      tableRefIdBuilder.setSchemaRefId(schemaRefIdBuilder);
+      // Dependent tables
+      for (var tableId : createTableInfo.getDependentTables()) {
+        SchemaCatalog.SchemaId schemaId = tableId.getParent();
+        DatabaseCatalog.DatabaseId databaseId = schemaId.getParent();
 
-      builder.addDependentTables(tableRefIdBuilder);
-    }
+        DatabaseRefId.Builder databaseRefIdBuilder = DatabaseRefId.newBuilder();
+        databaseRefIdBuilder.setDatabaseId(databaseId.getValue());
 
-    if (createTableInfo.isMv()) {
-      CreateMaterializedViewInfo createMaterializedViewInfo =
-          (CreateMaterializedViewInfo) createTableInfo;
+        SchemaRefId.Builder schemaRefIdBuilder = SchemaRefId.newBuilder();
+        schemaRefIdBuilder.setSchemaId(schemaId.getValue());
+        schemaRefIdBuilder.setDatabaseRefId(databaseRefIdBuilder);
+
+        TableRefId.Builder tableRefIdBuilder = TableRefId.newBuilder();
+        tableRefIdBuilder.setTableId(tableId.getValue());
+        tableRefIdBuilder.setSchemaRefId(schemaRefIdBuilder);
+
+        mvInfoBuilder.addDependentTables(tableRefIdBuilder);
+      }
+
+      var createMaterializedViewInfo = (CreateMaterializedViewInfo) createTableInfo;
+      // Column orders
       if (createMaterializedViewInfo.getCollation() != null) {
-        List<RelFieldCollation> rfc =
-            createMaterializedViewInfo.getCollation().getFieldCollations();
+        var rfc = createMaterializedViewInfo.getCollation().getFieldCollations();
         for (RelFieldCollation relFieldCollation : rfc) {
-          InputRefExpr inputRefExpr =
-              InputRefExpr.newBuilder().setColumnIdx(relFieldCollation.getFieldIndex()).build();
+          var inputRefExpr = InputRefExpr.newBuilder().setColumnIdx(relFieldCollation.getFieldIndex()).build();
           RelFieldCollation.Direction dir = relFieldCollation.getDirection();
           OrderType orderType;
           if (dir == RelFieldCollation.Direction.ASCENDING) {
@@ -116,11 +118,18 @@ public class CatalogCast {
             throw new SerializationException(String.format("%s direction not supported", dir));
           }
           ColumnOrder columnOrder =
-              ColumnOrder.newBuilder().setOrderType(orderType).setInputRef(inputRefExpr).build();
-          builder.addColumnOrders(columnOrder);
+                  ColumnOrder.newBuilder().setOrderType(orderType).setInputRef(inputRefExpr).build();
+          mvInfoBuilder.addColumnOrders(columnOrder);
         }
       }
-      builder.setIsAssociated(createMaterializedViewInfo.isAssociated());
+
+      // Associated table id
+      mvInfoBuilder.setIsAssociated(createMaterializedViewInfo.isAssociated());
+
+    } else {
+      var tableInfoBuilder = TableSourceInfo.newBuilder();
+
+      builder.setTableSource(tableInfoBuilder);
     }
 
     return builder.build();

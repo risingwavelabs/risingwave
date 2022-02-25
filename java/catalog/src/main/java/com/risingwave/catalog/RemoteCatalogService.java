@@ -99,15 +99,16 @@ public class RemoteCatalogService implements CatalogService {
         throw RisingWaveException.from(MetaServiceError.SCHEMA_NOT_EXISTS, schemaId);
       }
       CreateTableInfo createTableInfo = CatalogCast.tableFromProto(table);
-      if (!table.getIsMaterializedView()) {
+      var isMaterializedView = table.getInfoCase() == Table.InfoCase.MATERIALIZED_VIEW;
+      if (isMaterializedView) {
         schemaCatalog
-            .createTableWithId(createTableInfo, table.getTableRefId().getTableId())
-            .setVersion(table.getVersion());
+                .createMaterializedViewWithId(
+                        (CreateMaterializedViewInfo) createTableInfo, table.getTableRefId().getTableId())
+                .setVersion(table.getVersion());
       } else {
         schemaCatalog
-            .createMaterializedViewWithId(
-                (CreateMaterializedViewInfo) createTableInfo, table.getTableRefId().getTableId())
-            .setVersion(table.getVersion());
+                .createTableWithId(createTableInfo, table.getTableRefId().getTableId())
+                .setVersion(table.getVersion());
       }
     }
   }
