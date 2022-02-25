@@ -23,11 +23,11 @@ impl ObjectStore for InMemObjectStore {
         Ok(())
     }
 
-    async fn read(&self, path: &str, block: Option<BlockLocation>) -> Result<Vec<u8>> {
+    async fn read(&self, path: &str, block: Option<BlockLocation>) -> Result<Bytes> {
         if let Some(loc) = block {
             self.get_object(path, |obj| find_block(obj, loc)).await?
         } else {
-            self.get_object(path, |obj| Ok(obj.to_vec())).await?
+            self.get_object(path, |obj| Ok(obj.clone())).await?
         }
     }
 
@@ -62,11 +62,9 @@ impl InMemObjectStore {
     }
 }
 
-fn find_block(obj: &Bytes, block: BlockLocation) -> Result<Vec<u8>> {
+fn find_block(obj: &Bytes, block: BlockLocation) -> Result<Bytes> {
     ensure!(block.offset + block.size <= obj.len());
-    Ok(obj
-        .slice(block.offset..(block.offset + block.size))
-        .to_vec())
+    Ok(obj.slice(block.offset..(block.offset + block.size)))
 }
 
 #[cfg(test)]

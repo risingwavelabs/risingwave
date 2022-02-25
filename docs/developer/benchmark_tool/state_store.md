@@ -33,9 +33,9 @@
   - Format: `hummock+s3://bucket`
   - Example: `hummock+s3://s3-ut`
   - Notice: some environment variables are required to be set
-    - `S3_TEST_REGION`
-    - `S3_TEST_ACCESS_KEY`
-    - `S3_TEST_SECRET_KEY`
+    - `AWS_REGION`
+    - `AWS_ACCESS_KEY_ID`
+    - `AWS_SECRET_ACCESS_KEY`
 
 - `TiKV`
   
