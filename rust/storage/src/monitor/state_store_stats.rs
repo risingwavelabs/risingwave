@@ -255,7 +255,7 @@ impl StateStoreStats {
         let buckets = DEFAULT_BUCKETS.map(|x| x * ITER_NEXT_SIZE_SCALE).to_vec();
         let opts = histogram_opts!(
             "state_store_iter_next_size",
-            "Total value bytes of KV pair that have been requested from remote storage",
+            "Total bytes gotten from state store iterator next(), for calculating read throughput",
             buckets
         );
         let iter_next_size = register_histogram_with_registry!(opts, registry).unwrap();
