@@ -1,6 +1,7 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
-use risingwave_pb::meta::Table;
+use risingwave_pb::meta::table::Info;
+use risingwave_pb::meta::{StreamSourceInfo, Table};
 use risingwave_source::ProtobufParser;
 use risingwave_sqlparser::ast::{CreateSourceStatement, ProtobufSchema, SourceSchema};
 
@@ -10,10 +11,16 @@ use crate::session::RwSession;
 fn create_protobuf_table_schema(schema: &ProtobufSchema) -> Result<Table> {
     let parser = ProtobufParser::new(&schema.row_schema_location.0, &schema.message_name.0)?;
     let column_descs = parser.map_to_columns()?;
-    Ok(Table {
-        column_descs,
+    let info = StreamSourceInfo {
+        append_only: true,
         row_format: schema.row_schema_location.0.clone(),
         row_schema_location: schema.row_schema_location.0.clone(),
+        ..Default::default()
+    };
+
+    Ok(Table {
+        column_descs,
+        info: Some(Info::StreamSource(info)),
         ..Default::default()
     })
 }
@@ -26,10 +33,13 @@ pub(super) async fn handle_create_source(
         SourceSchema::Protobuf(protobuf_schema) => create_protobuf_table_schema(protobuf_schema)?,
         SourceSchema::Json => todo!(),
     };
+    match table.info.as_mut().unwrap() {
+        Info::StreamSource(info) => {
+            info.properties = stmt.with_properties.into();
+        }
+        _ => unreachable!(),
+    }
     table.table_name = stmt.source_name.value.clone();
-    table.is_source = true;
-    table.properties = stmt.with_properties.into();
-    table.append_only = true;
 
     let catalog_mgr = session.env().catalog_mgr();
     catalog_mgr
