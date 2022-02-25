@@ -8,6 +8,8 @@ use itertools::Itertools;
 
 mod sstable;
 pub use sstable::*;
+mod block_cache;
+pub use block_cache::*;
 mod cloud;
 pub mod compactor;
 mod error;
@@ -73,30 +75,6 @@ pub struct HummockOptions {
     pub remote_dir: String,
     /// checksum algorithm
     pub checksum_algo: ChecksumAlg,
-}
-
-impl HummockOptions {
-    #[cfg(test)]
-    pub fn default_for_test() -> Self {
-        Self {
-            sstable_size: 256 * (1 << 20),
-            block_size: 64 * (1 << 10),
-            bloom_false_positive: 0.1,
-            remote_dir: "hummock_001".to_string(),
-            checksum_algo: ChecksumAlg::XxHash64,
-        }
-    }
-
-    #[cfg(test)]
-    pub fn small_for_test() -> Self {
-        Self {
-            sstable_size: 4 * (1 << 10),
-            block_size: 1 << 10,
-            bloom_false_positive: 0.1,
-            remote_dir: "hummock_001_small".to_string(),
-            checksum_algo: ChecksumAlg::XxHash64,
-        }
-    }
 }
 
 /// Hummock is the state store backend.
