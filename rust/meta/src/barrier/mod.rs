@@ -21,6 +21,7 @@ use self::info::BarrierActorInfo;
 use crate::cluster::{StoredClusterManager, StoredClusterManagerRef};
 use crate::hummock::HummockManager;
 use crate::manager::{EpochGeneratorRef, MetaSrvEnv, StreamClientsRef};
+use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
 
@@ -142,6 +143,8 @@ where
     clients: StreamClientsRef,
 
     scheduled_barriers: ScheduledBarriers,
+
+    metrics: Arc<MetaMetrics>,
 }
 
 impl<S> BarrierManager<S>
@@ -158,6 +161,7 @@ where
         fragment_manager: FragmentManagerRef<S>,
         epoch_generator: EpochGeneratorRef,
         hummock_manager: Arc<HummockManager<S>>,
+        metrics: Arc<MetaMetrics>,
     ) -> Self {
         Self {
             cluster_manager,
@@ -166,6 +170,7 @@ where
             clients: env.stream_clients_ref(),
             scheduled_barriers: ScheduledBarriers::new(),
             hummock_manager,
+            metrics,
         }
     }
 
@@ -247,8 +252,10 @@ where
 
             let mut notifiers = notifiers;
             notifiers.iter_mut().for_each(Notifier::notify_to_send);
+            let timer = self.metrics.barrier_latency.start_timer();
             // wait all barriers collected
             let collect_result = try_join_all(collect_futures).await;
+            timer.observe_duration();
             // TODO #96: This is a temporary implementation of commit epoch. Refactor after hummock
             // shared buffer is deployed.
             match collect_result {
