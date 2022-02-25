@@ -120,8 +120,8 @@ jobs:
 
       - name: Install required components
         run: |
-          apt-get update -yy
-          apt-get install --upgrade -yy tmux postgresql
+          apt-get update -yy -o Acquire::Retries=3
+          apt-get install --upgrade -yy tmux postgresql -o Acquire::Retries=3
 
       - name: Generate RiseDev CI config
         run: |
@@ -246,8 +246,8 @@ jobs:
 
       - name: Install required components
         run: |
-          sudo apt-get update -yy
-          sudo apt-get install --upgrade -yy tmux postgresql
+          sudo apt-get update -yy -o Acquire::Retries=3
+          sudo apt-get install --upgrade -yy tmux postgresql -o Acquire::Retries=3
 
       # For source testing.
       - name: Setup kafka cluster
@@ -569,7 +569,7 @@ jobs:
       - name: Install required tools
         run: |
           wget https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/${BINARY}.tar.gz -O - | tar xz && sudo mv ${BINARY} /usr/bin/yq
-          sudo apt install -y protobuf-compiler
+          sudo apt install -y protobuf-compiler -o Acquire::Retries=3
           curl -sSL \
             https://github.com/uber/prototool/releases/download/v1.8.0/prototool-$(uname -s)-$(uname -m).tar.gz | \
             sudo tar -C /usr/local --strip-components 1 -xz
