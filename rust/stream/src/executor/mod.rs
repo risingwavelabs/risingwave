@@ -281,7 +281,7 @@ pub trait Executor: Send + Debug + 'static {
         let schema = self.schema();
         self.pk_indices()
             .iter()
-            .map(|idx| schema.fields[*idx].data_type)
+            .map(|idx| schema.fields[*idx].data_type.clone())
             .collect()
     }
 

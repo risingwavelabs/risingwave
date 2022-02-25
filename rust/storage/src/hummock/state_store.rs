@@ -75,9 +75,8 @@ impl StateStore for HummockStateStore {
         )))
     }
 
-    async fn update_local_version(&self) -> Result<()> {
-        self.storage.update_local_version().await?;
-        Ok(())
+    async fn wait_epoch(&self, epoch: u64) {
+        self.storage.wait_epoch(epoch).await;
     }
 }
 

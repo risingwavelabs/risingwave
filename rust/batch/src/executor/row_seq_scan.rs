@@ -22,6 +22,8 @@ pub struct RowSeqScanExecutor {
     chunk_size: usize,
     schema: Schema,
     identity: String,
+
+    epoch: u64,
 }
 
 impl RowSeqScanExecutor {
@@ -34,6 +36,7 @@ impl RowSeqScanExecutor {
         chunk_size: usize,
         primary: bool,
         identity: String,
+        epoch: u64,
     ) -> Self {
         // Currently row_id for table_v2 is totally a mess, we override this function to match the
         // behavior of column ids of mviews.
@@ -57,6 +60,7 @@ impl RowSeqScanExecutor {
             chunk_size,
             schema,
             identity,
+            epoch,
         }
     }
 
@@ -94,6 +98,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutor {
             Self::DEFAULT_CHUNK_SIZE,
             source.task_id.task_id == 0,
             source.plan_node().get_identity().clone(),
+            source.epoch,
         )))
     }
 }
@@ -106,7 +111,7 @@ impl Executor for RowSeqScanExecutor {
             return Ok(());
         }
 
-        self.iter = Some(self.table.iter(u64::MAX).await?);
+        self.iter = Some(self.table.iter(self.epoch).await?);
         Ok(())
     }
 

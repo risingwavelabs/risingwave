@@ -40,6 +40,8 @@ public class QueryHandler implements SqlHandler {
     BatchPlan plan = planner.plan(ast, context);
 
     BatchDataChunkResult result;
+    // TODO: Temporarily force a snapshot update. Should be made into a option for user.
+    context.getHummockSnapshotManager().forceUpdate();
     try (ScopedSnapshot scopedSnapshot = context.getHummockSnapshotManager().getScopedSnapshot()) {
       QueryResultLocation resultLocation;
       try {

@@ -11,7 +11,7 @@ use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{Dispatcher, MergeNode, StreamActor, StreamNode};
 
 use crate::cluster::NodeId;
-use crate::model::{ActorId, FragmentId, TableRawId};
+use crate::model::{ActorId, FragmentId};
 use crate::storage::MetaStore;
 use crate::stream::{CreateMaterializedViewContext, FragmentManagerRef};
 
@@ -201,7 +201,7 @@ where
     /// ids if it is a [`ChainNode`].
     pub fn build_inner(
         &self,
-        table_sink_map: &mut HashMap<TableRawId, Vec<ActorId>>,
+        table_sink_map: &mut HashMap<TableId, Vec<ActorId>>,
         dispatch_upstreams: &mut Vec<ActorId>,
         upstream_node_actors: &mut HashMap<NodeId, Vec<ActorId>>,
         stream_node: &StreamNode,
@@ -238,9 +238,7 @@ where
                                         .get(next_idx_new)
                                         .cloned()
                                         .unwrap(),
-                                    input_column_descs: exchange_node
-                                        .get_input_column_descs()
-                                        .clone(),
+                                    fields: exchange_node.get_fields().clone(),
                                 })),
                                 operator_id: input.operator_id,
                                 identity: "MergeExecutor".to_string(),
@@ -274,7 +272,7 @@ where
 
     fn resolve_chain_node(
         &self,
-        table_sink_map: &mut HashMap<TableRawId, Vec<ActorId>>,
+        table_sink_map: &mut HashMap<TableId, Vec<ActorId>>,
         dispatch_upstreams: &mut Vec<ActorId>,
         upstream_node_actors: &mut HashMap<NodeId, Vec<ActorId>>,
         stream_node: &StreamNode,
@@ -283,9 +281,8 @@ where
             let input = stream_node.get_input();
             assert_eq!(input.len(), 2);
             let table_id = TableId::from(&chain_node.table_ref_id);
-            let table_raw_id = chain_node.table_ref_id.as_ref().unwrap().table_id;
             let upstream_actor_ids = HashSet::<ActorId>::from_iter(
-                match table_sink_map.entry(table_raw_id) {
+                match table_sink_map.entry(table_id) {
                     Entry::Vacant(v) => {
                         let actor_ids = self
                             .fragment_manager_ref
@@ -328,7 +325,7 @@ where
                         .collect_vec(),
                     node: Some(Node::MergeNode(MergeNode {
                         upstream_actor_id: Vec::from_iter(upstream_actor_ids.into_iter()),
-                        input_column_descs: chain_node.upstream_column_descs.clone(),
+                        fields: chain_node.upstream_fields.clone(),
                     })),
                     operator_id: input.get(0).as_ref().unwrap().operator_id,
                     identity: "MergeExecutor".to_string(),

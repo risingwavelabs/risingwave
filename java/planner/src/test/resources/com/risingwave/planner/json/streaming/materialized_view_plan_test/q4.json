@@ -29,27 +29,31 @@
             },
             "tableId": 1
           },
-          "upstreamColumnDescs": [{
-            "columnType": {
+          "upstreamFields": [{
+            "dataType": {
               "typeName": "INT32"
-            }
+            },
+            "name": "v1"
           }, {
-            "columnType": {
+            "dataType": {
               "typeName": "INT32"
-            }
+            },
+            "name": "v2"
           }, {
-            "columnType": {
+            "dataType": {
               "typeName": "FLOAT"
-            }
+            },
+            "name": "v3"
           }, {
-            "columnType": {
+            "dataType": {
               "typeName": "INT64"
-            }
+            },
+            "name": "_row_id"
           }],
           "pkIndices": [2],
           "columnIds": [0, 1, 3]
         },
-        "identity": "RwStreamChain(all\u003d[true], tableId\u003d[0.0.1], primaryKeyIndices\u003d[[2]], columnIds\u003d[[0.0.1.0, 0.0.1.1, 0.0.1.3]], upstreamColumnDescs\u003d[[ColumnDesc{dataType\u003dINTEGER, primary\u003dfalse}, ColumnDesc{dataType\u003dINTEGER, primary\u003dfalse}, ColumnDesc{dataType\u003dFLOAT, primary\u003dfalse}, ColumnDesc{dataType\u003dBIGINT, primary\u003dfalse}]])"
+        "identity": "RwStreamChain(all\u003d[true], tableId\u003d[0.0.1], primaryKeyIndices\u003d[[2]], columnIds\u003d[[0.0.1.0, 0.0.1.1, 0.0.1.3]])"
       }],
       "globalSimpleAggNode": {
         "aggCalls": [{
@@ -175,32 +179,6 @@
       },
       "tableId": 5
     },
-    "columnDescs": [{
-      "columnType": {
-        "typeName": "INT64"
-      },
-      "encoding": "RAW",
-      "name": "v"
-    }, {
-      "columnType": {
-        "typeName": "INT64"
-      },
-      "encoding": "RAW",
-      "name": "$f0"
-    }, {
-      "columnType": {
-        "typeName": "INT64"
-      },
-      "encoding": "RAW",
-      "name": "$f1"
-    }, {
-      "columnType": {
-        "typeName": "INT64"
-      },
-      "encoding": "RAW",
-      "name": "$f2"
-    }],
-    "pkIndices": [1, 2, 3],
     "columnOrders": [{
       "orderType": "ASCENDING",
       "inputRef": {
@@ -225,7 +203,8 @@
       "returnType": {
         "typeName": "INT64"
       }
-    }]
+    }],
+    "columnIds": [0, 1, 2, 3]
   },
   "identity": "RwStreamMaterializedView(name\u003d[t4])"
 }

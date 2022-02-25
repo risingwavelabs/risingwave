@@ -132,6 +132,16 @@ public class RisingWaveOverrideOperatorTable extends ReflectiveSqlOperatorTable 
           OperandTypes.STRING_STRING_STRING,
           SqlFunctionCategory.SYSTEM);
 
+  /** tumble_start function */
+  public static final SqlFunction TUMBLE_START =
+      new SqlFunction(
+          "TUMBLE_START",
+          SqlKind.OTHER_FUNCTION,
+          ReturnTypes.TIMESTAMP,
+          InferTypes.RETURN_TYPE,
+          OperandTypes.family(SqlTypeFamily.TIMESTAMP, SqlTypeFamily.DATETIME_INTERVAL),
+          SqlFunctionCategory.SYSTEM);
+
   /** Pg's extract function */
   public static final SqlFunction EXTRACT = new RwSqlExtractFunction();
 }

@@ -9,6 +9,7 @@ use rdkafka::consumer::{CommitMode, Consumer, DefaultConsumerContext, StreamCons
 use rdkafka::metadata::Metadata;
 use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
 use risingwave_common::array::{DataChunk, StreamChunk};
+use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
@@ -201,7 +202,7 @@ impl HighLevelKafkaSource {
             .map_err(|e| RwError::from(InternalError(format!("consumer creation failed {}", e))))
     }
 
-    fn get_target_columns(&self, column_ids: Vec<i32>) -> Result<Vec<SourceColumnDesc>> {
+    fn get_target_columns(&self, column_ids: Vec<ColumnId>) -> Result<Vec<SourceColumnDesc>> {
         column_ids
             .iter()
             .map(|id| {
@@ -229,7 +230,7 @@ impl Source for HighLevelKafkaSource {
     fn batch_reader(
         &self,
         context: HighLevelKafkaSourceReaderContext,
-        column_ids: Vec<i32>,
+        column_ids: Vec<ColumnId>,
     ) -> Result<Self::BatchReader> {
         let consumer = self.create_consumer(&context)?;
 
@@ -268,7 +269,7 @@ impl Source for HighLevelKafkaSource {
     fn stream_reader(
         &self,
         context: HighLevelKafkaSourceReaderContext,
-        column_ids: Vec<i32>,
+        column_ids: Vec<ColumnId>,
     ) -> Result<Self::StreamReader> {
         let consumer = self.create_consumer(&context)?;
 

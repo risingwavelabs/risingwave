@@ -82,16 +82,16 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn handle_create_source() {
-        let meta = LocalMeta::start().await;
+        let meta = LocalMeta::start(12001).await;
 
         let proto_file = create_proto_file();
         let sql = format!(
             r#"CREATE SOURCE t
-    WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001') 
+    WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001')
     ROW FORMAT PROTOBUF MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://{}'"#,
             proto_file.path().to_str().unwrap()
         );
-        let frontend = LocalFrontend::new().await;
+        let frontend = LocalFrontend::new(&meta).await;
         frontend.run_sql(sql).await.unwrap();
 
         let catalog_manager = frontend.session().env().catalog_mgr();
@@ -99,7 +99,7 @@ mod tests {
         let columns = table
             .columns()
             .iter()
-            .map(|(col_name, col)| (col_name.clone(), col.data_type()))
+            .map(|col| (col.name().into(), col.data_type()))
             .collect::<HashMap<String, DataType>>();
         let mut expected_map = HashMap::new();
         expected_map.insert(ROWID_NAME.to_string(), DataType::Int64);

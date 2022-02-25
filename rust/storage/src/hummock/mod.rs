@@ -27,7 +27,6 @@ mod utils;
 pub mod value;
 mod version_cmp;
 
-use cloud::gen_remote_sstable;
 use compactor::{Compactor, SubCompactContext};
 pub use error::*;
 use parking_lot::Mutex as PLMutex;
@@ -36,8 +35,6 @@ use risingwave_pb::hummock::{KeyRange, LevelType, SstableInfo};
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-use tokio_retry::strategy::{jitter, ExponentialBackoff};
-use tokio_retry::RetryIf;
 use value::*;
 
 use self::iterator::{
@@ -49,7 +46,7 @@ use self::multi_builder::CapacitySplitTableBuilder;
 pub use self::state_store::*;
 use self::utils::bloom_filter_sstables;
 use super::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
-use crate::hummock::hummock_meta_client::{HummockMetaClient, RetryableError};
+use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::iterator::ReverseUserIterator;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::object::ObjectStore;
@@ -61,7 +58,8 @@ pub type HummockVersionId = u64;
 pub type HummockContextId = u32;
 pub type HummockEpoch = u64;
 pub const INVALID_EPOCH: HummockEpoch = 0;
-pub const FIRST_VERSION_ID: HummockVersionId = 0;
+pub const INVALID_VERSION_ID: HummockVersionId = 0;
+pub const FIRST_VERSION_ID: HummockVersionId = 1;
 
 #[derive(Default, Debug, Clone)]
 pub struct HummockOptions {
@@ -147,17 +145,13 @@ impl HummockStorage {
         let rx = Arc::new(PLMutex::new(Some(trigger_compact_rx)));
         let rx_for_compact = rx.clone();
 
-        RetryIf::spawn(
-            ExponentialBackoff::from_millis(10).map(jitter).take(4),
-            || async {
-                // Initialize the local version
-                local_version_manager
-                    .update_local_version(hummock_meta_client.as_ref())
-                    .await
-            },
-            RetryableError::default(),
+        LocalVersionManager::start_workers(
+            local_version_manager.clone(),
+            hummock_meta_client.clone(),
         )
-        .await?;
+        .await;
+        // Ensure at least one available version in cache.
+        local_version_manager.wait_epoch(HummockEpoch::MIN).await;
 
         let instance = Self {
             options: arc_options,
@@ -202,7 +196,7 @@ impl HummockStorage {
 
         let mut table_iters: Vec<BoxedHummockIterator> = Vec::new();
 
-        let version = self.local_version_manager.get_scoped_local_version();
+        let version = self.local_version_manager.get_version()?;
 
         for level in &version.levels() {
             match level.level_type() {
@@ -269,7 +263,7 @@ impl HummockStorage {
     {
         self.stats.range_scan_counts.inc();
 
-        let version = self.local_version_manager.get_scoped_local_version();
+        let version = self.local_version_manager.get_version()?;
 
         // Filter out tables that overlap with given `key_range`
         let overlapped_tables = self
@@ -327,7 +321,7 @@ impl HummockStorage {
     {
         self.stats.range_scan_counts.inc();
 
-        let version = self.local_version_manager.get_scoped_local_version();
+        let version = self.local_version_manager.get_version()?;
 
         // Filter out tables that overlap with given `key_range`
         let overlapped_tables = self
@@ -405,16 +399,22 @@ impl HummockStorage {
 
             // TODO: decide upload concurrency
             for (table_id, blocks, meta) in builder.finish() {
-                let table = gen_remote_sstable(
-                    self.obj_client.clone(),
+                cloud::upload(
+                    &self.obj_client,
                     table_id,
+                    &meta,
                     blocks,
-                    meta,
                     self.options.remote_dir.as_str(),
-                    Some(self.local_version_manager.block_cache.clone()),
                 )
                 .await?;
-                tables.push(table);
+
+                tables.push(SSTable {
+                    id: table_id,
+                    meta,
+                    obj_client: self.obj_client.clone(),
+                    data_path: cloud::get_sst_data_path(self.options.remote_dir.as_str(), table_id),
+                    block_cache: self.local_version_manager.block_cache.clone(),
+                });
             }
 
             tables
@@ -426,7 +426,8 @@ impl HummockStorage {
 
         // Add all tables at once.
         let timer = self.stats.batch_write_add_l0_latency.start_timer();
-        self.hummock_meta_client()
+        let version = self
+            .hummock_meta_client()
             .add_tables(
                 epoch,
                 tables
@@ -444,20 +445,13 @@ impl HummockStorage {
             .await?;
         timer.observe_duration();
 
+        // TODO #93: enable compactor
         // Notify the compactor
         self.tx.send(()).ok();
 
-        // TODO: #2336 The transaction flow is not ready yet. Before that we update_local_version
-        // after each write_batch to make uncommitted write visible.
-        self.update_local_version().await?;
+        // Ensure the added data is available locally
+        self.local_version_manager.try_set_version(version);
 
-        Ok(())
-    }
-
-    pub async fn update_local_version(&self) -> HummockResult<()> {
-        self.local_version_manager
-            .update_local_version(self.hummock_meta_client().as_ref())
-            .await?;
         Ok(())
     }
 
@@ -508,5 +502,9 @@ impl HummockStorage {
     }
     pub fn obj_client(&self) -> &Arc<dyn ObjectStore> {
         &self.obj_client
+    }
+
+    pub async fn wait_epoch(&self, epoch: HummockEpoch) {
+        self.local_version_manager.wait_epoch(epoch).await;
     }
 }

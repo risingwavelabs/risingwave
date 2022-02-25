@@ -1,7 +1,7 @@
 use std::fmt::{Debug, Formatter};
 
 use risingwave_common::array::DataChunk;
-use risingwave_common::catalog::{Field, Schema, TableId};
+use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::plan::plan_node::NodeBody;
@@ -35,7 +35,11 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
             .source_manager()
             .get_source(&table_id)?;
 
-        let column_ids = stream_scan_node.get_column_ids();
+        let column_ids: Vec<_> = stream_scan_node
+            .get_column_ids()
+            .iter()
+            .map(|i| ColumnId::from(*i))
+            .collect();
 
         let fields = column_ids
             .iter()
@@ -45,7 +49,7 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
                     .iter()
                     .find(|c| c.column_id == *id)
                     .map(|col| Field {
-                        data_type: col.data_type,
+                        data_type: col.data_type.clone(),
                         name: col.name.clone(),
                     })
                     .ok_or_else(|| {
@@ -63,7 +67,7 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
                     query_id: Some(source.task_id.clone().query_id),
                     bound_timestamp_ms: Some(stream_scan_node.timestamp_ms),
                 },
-                column_ids.clone(),
+                column_ids,
             )?),
             SourceImpl::TableV2(_) => {
                 panic!("use table_scan to scan a table")
@@ -161,13 +165,7 @@ mod tests {
         let chunk1 = chunk1.unwrap();
         assert_eq!(1, chunk1.dimension());
         assert_eq!(
-            chunk1
-                .column_at(0)
-                .unwrap()
-                .array()
-                .as_int32()
-                .iter()
-                .collect_vec(),
+            chunk1.column_at(0).array().as_int32().iter().collect_vec(),
             vec![Some(1), Some(2), Some(3)]
         );
 
@@ -176,13 +174,7 @@ mod tests {
         let chunk2 = chunk2.unwrap();
         assert_eq!(1, chunk2.dimension());
         assert_eq!(
-            chunk2
-                .column_at(0)
-                .unwrap()
-                .array()
-                .as_int32()
-                .iter()
-                .collect_vec(),
+            chunk2.column_at(0).array().as_int32().iter().collect_vec(),
             vec![Some(1), Some(2), Some(3)]
         );
 

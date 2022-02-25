@@ -1,6 +1,7 @@
 //! This type inference is just to infer the return type of function calls, and make sure the
 //! functionCall expressions have same input type requirement and return type definition as backend.
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::vec;
 
 use itertools::iproduct;
@@ -45,7 +46,7 @@ fn name_of(ty: &DataType) -> DataTypeName {
         DataType::Timestampz => DataTypeName::Timestampz,
         DataType::Decimal => DataTypeName::Decimal,
         DataType::Interval => DataTypeName::Interval,
-        DataType::Struct => DataTypeName::Struct,
+        DataType::Struct { .. } => DataTypeName::Struct,
     }
 }
 
@@ -70,7 +71,9 @@ pub fn infer_type(func_type: ExprType, inputs_type: Vec<DataType>) -> Option<Dat
         DataTypeName::Timestampz => DataType::Timestampz,
         DataTypeName::Decimal => DataType::Decimal,
         DataTypeName::Interval => DataType::Interval,
-        DataTypeName::Struct => DataType::Struct,
+        DataTypeName::Struct => DataType::Struct {
+            fields: Arc::new([]),
+        },
     })
 }
 
@@ -253,44 +256,43 @@ mod tests {
             ExprType::Divide,
             ExprType::Modulus,
         ];
-        let decimal_type = DataType::Decimal;
         let num_promote_table = vec![
             (Int16, Int16, Int16),
             (Int16, Int32, Int32),
             (Int16, Int64, Int64),
             (Int16, Float32, Float32),
             (Int16, Float64, Float64),
-            (Int16, decimal_type, decimal_type),
+            (Int16, Decimal, Decimal),
             (Int32, Int16, Int32),
             (Int32, Int32, Int32),
             (Int32, Int64, Int64),
             (Int32, Float32, Float32),
             (Int32, Float64, Float64),
-            (Int32, decimal_type, decimal_type),
+            (Int32, Decimal, Decimal),
             (Int64, Int16, Int64),
             (Int64, Int32, Int64),
             (Int64, Int64, Int64),
             (Int64, Float32, Float32),
             (Int64, Float64, Float64),
-            (Int64, decimal_type, decimal_type),
+            (Int64, Decimal, Decimal),
             (Float32, Int16, Float32),
             (Float32, Int32, Float32),
             (Float32, Int64, Float32),
             (Float32, Float32, Float32),
             (Float32, Float64, Float64),
-            (Float32, decimal_type, decimal_type),
+            (Float32, Decimal, Decimal),
             (Float64, Int16, Float64),
             (Float64, Int32, Float64),
             (Float64, Int64, Float64),
             (Float64, Float32, Float64),
             (Float64, Float64, Float64),
-            (Float64, decimal_type, decimal_type),
-            (decimal_type, Int16, decimal_type),
-            (decimal_type, Int32, decimal_type),
-            (decimal_type, Int64, decimal_type),
-            (decimal_type, Float32, decimal_type),
-            (decimal_type, Float64, decimal_type),
-            (decimal_type, decimal_type, decimal_type),
+            (Float64, Decimal, Decimal),
+            (Decimal, Int16, Decimal),
+            (Decimal, Int32, Decimal),
+            (Decimal, Int64, Decimal),
+            (Decimal, Float32, Decimal),
+            (Decimal, Float64, Decimal),
+            (Decimal, Decimal, Decimal),
         ];
         for (expr, (t1, t2, tr)) in iproduct!(atm_exprs, num_promote_table) {
             test_simple_infer_type(expr, vec![t1, t2], tr);

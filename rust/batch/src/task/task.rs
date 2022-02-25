@@ -166,10 +166,17 @@ pub struct BatchTaskExecution {
 
     /// The execution failure.
     failure: Arc<Mutex<Option<RwError>>>,
+
+    epoch: u64,
 }
 
 impl BatchTaskExecution {
-    pub fn new(prost_tid: &ProstTaskId, plan: PlanFragment, env: BatchEnvironment) -> Result<Self> {
+    pub fn new(
+        prost_tid: &ProstTaskId,
+        plan: PlanFragment,
+        env: BatchEnvironment,
+        epoch: u64,
+    ) -> Result<Self> {
         Ok(BatchTaskExecution {
             task_id: TaskId::try_from(prost_tid)?,
             plan,
@@ -177,6 +184,7 @@ impl BatchTaskExecution {
             receivers: Mutex::new(Vec::new()),
             env,
             failure: Arc::new(Mutex::new(None)),
+            epoch,
         })
     }
 
@@ -196,6 +204,7 @@ impl BatchTaskExecution {
             self.plan.root.as_ref().unwrap(),
             &self.task_id.clone(),
             self.env.clone(),
+            self.epoch,
         )
         .build()?;
 

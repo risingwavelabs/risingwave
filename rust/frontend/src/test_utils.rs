@@ -14,12 +14,13 @@ pub struct LocalFrontend {
 }
 
 impl LocalFrontend {
-    pub async fn new() -> Self {
+    pub async fn new(meta: &LocalMeta) -> Self {
         let args: [OsString; 0] = []; // No argument.
         let mut opts: FrontendOpts = FrontendOpts::parse_from(args);
         opts.host = "127.0.0.1:45666".to_string();
-        opts.meta_addr = format!("http://{}", LocalMeta::meta_addr());
-        let env = FrontendEnv::init(&opts).await.unwrap();
+        let env = FrontendEnv::with_meta_client(meta.create_client().await, &opts)
+            .await
+            .unwrap();
         let session = RwSession::new(env, "dev".to_string());
         Self { opts, session }
     }

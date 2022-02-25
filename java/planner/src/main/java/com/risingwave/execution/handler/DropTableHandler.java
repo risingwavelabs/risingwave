@@ -78,6 +78,7 @@ public class DropTableHandler implements SqlHandler {
     } else {
       builder.add(table);
 
+      // Only allow dropping table_v2.
       if (table.isAssociatedMaterializedView()) {
         var sourceName = TableCatalog.getTableSourceName(name);
         var sourceTableName =
@@ -85,6 +86,10 @@ public class DropTableHandler implements SqlHandler {
         var sourceTable = context.getCatalogService().getTable(sourceTableName);
         checkNotNull(sourceTable, "source table for associated materialized view must exist");
         builder.add(sourceTable);
+      } else if (table.isMaterializedView()) {
+        throw new PgException(
+            PgErrorCode.INVALID_TABLE_DEFINITION,
+            "Use `DROP MATERIALIZED VIEW` to drop a materialized view.");
       }
     }
 

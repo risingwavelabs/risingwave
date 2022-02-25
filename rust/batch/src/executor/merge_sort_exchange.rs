@@ -8,9 +8,7 @@ use risingwave_common::array::{ArrayBuilderImpl, DataChunk, DataChunkRef};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::ToOwnedDatum;
-use risingwave_common::util::sort_util::{
-    fetch_orders, HeapElem, OrderPair, K_PROCESSING_WINDOW_SIZE,
-};
+use risingwave_common::util::sort_util::{HeapElem, OrderPair, K_PROCESSING_WINDOW_SIZE};
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::ExchangeSource as ProstExchangeSource;
 
@@ -138,7 +136,7 @@ impl<CS: 'static + CreateSource> Executor for MergeSortExchangeExecutorImpl<CS> 
             let cur_chunk = top_elem.chunk;
             let row_idx = top_elem.elem_idx;
             for (idx, builder) in builders.iter_mut().enumerate() {
-                let chunk_arr = cur_chunk.column_at(idx)?.array();
+                let chunk_arr = cur_chunk.column_at(idx).array();
                 let chunk_arr = chunk_arr.as_ref();
                 let datum = chunk_arr.value_at(row_idx).to_owned_datum();
                 builder.append_datum(&datum)?;
@@ -189,7 +187,13 @@ impl<CS: 'static + CreateSource> BoxedExecutorBuilder for MergeSortExchangeExecu
         )?;
 
         let server_addr = *source.env.server_address();
-        let order_pairs = Arc::new(fetch_orders(sort_merge_node.get_column_orders()).unwrap());
+
+        let order_pairs = sort_merge_node
+            .column_orders
+            .iter()
+            .map(OrderPair::from_prost)
+            .collect();
+        let order_pairs = Arc::new(order_pairs);
 
         let exchange_node = sort_merge_node.get_exchange_node()?;
         let proto_sources: Vec<ProstExchangeSource> = exchange_node.get_sources().to_vec();
@@ -226,7 +230,6 @@ mod tests {
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{Array, DataChunk, I32Array};
     use risingwave_common::array_nonnull;
-    use risingwave_common::expr::InputRefExpression;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
 
@@ -269,9 +272,8 @@ mod tests {
         for _ in 0..num_sources {
             proto_sources.push(ProstExchangeSource::default());
         }
-        let input_ref_1 = InputRefExpression::new(DataType::Int32, 0);
         let order_pairs = Arc::new(vec![OrderPair {
-            order: Box::new(input_ref_1),
+            column_idx: 0,
             order_type: OrderType::Ascending,
         }]);
 
@@ -296,7 +298,7 @@ mod tests {
         assert!(matches!(res, Some(_)));
         if let Some(res) = res {
             assert_eq!(res.capacity(), 3 * num_sources);
-            let col0 = res.column_at(0).unwrap();
+            let col0 = res.column_at(0);
             assert_eq!(col0.array().as_int32().value_at(0), Some(1));
             assert_eq!(col0.array().as_int32().value_at(1), Some(1));
             assert_eq!(col0.array().as_int32().value_at(2), Some(2));

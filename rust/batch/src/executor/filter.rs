@@ -172,7 +172,7 @@ mod tests {
         let res = filter_executor.next().await.unwrap();
         assert_matches!(res, Some(_));
         if let Some(res) = res {
-            let col1 = res.column_at(0).unwrap();
+            let col1 = res.column_at(0);
             let array = col1.array();
             let col1 = array.as_int32();
             assert_eq!(col1.len(), 1);
@@ -181,7 +181,7 @@ mod tests {
         let res = filter_executor.next().await.unwrap();
         assert_matches!(res, Some(_));
         if let Some(res) = res {
-            let col1 = res.column_at(0).unwrap();
+            let col1 = res.column_at(0);
             let array = col1.array();
             let col1 = array.as_int32();
             assert_eq!(col1.len(), 1);
@@ -200,10 +200,7 @@ mod tests {
         };
         let return_type = risingwave_pb::data::DataType {
             type_name: risingwave_pb::data::data_type::TypeName::Boolean as i32,
-            precision: 0,
-            scale: 0,
-            is_nullable: false,
-            interval_type: 0,
+            ..Default::default()
         };
         ExprNode {
             expr_type: kind as i32,

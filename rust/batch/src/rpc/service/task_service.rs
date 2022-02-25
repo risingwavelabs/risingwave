@@ -34,6 +34,7 @@ impl TaskService for BatchServiceImpl {
             self.env.clone(),
             req.get_task_id().expect("no task id found"),
             req.get_plan().expect("no plan found").clone(),
+            req.epoch,
         );
         match res {
             Ok(_) => Ok(Response::new(CreateTaskResponse { status: None })),

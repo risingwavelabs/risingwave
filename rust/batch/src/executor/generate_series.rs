@@ -116,7 +116,7 @@ mod tests {
         let mut remained_values = ((stop - start) / step + 1) as usize;
         while remained_values > 0 {
             let chunk = executor.next().await.unwrap().unwrap();
-            let col = chunk.column_at(0).unwrap();
+            let col = chunk.column_at(0);
             let arr = try_match_expand!(col.array_ref(), ArrayImpl::Int32).unwrap();
 
             if remained_values > DEFAULT_CHUNK_BUFFER_SIZE {

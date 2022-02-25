@@ -34,6 +34,7 @@ message ExprNode {
     // date functions
     EXTRACT = 101;
     PG_SLEEP = 102;
+    TUMBLE_START = 103;
     // other functions
     CAST = 201;
     SUBSTR = 202;

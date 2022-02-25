@@ -3,11 +3,10 @@ use std::sync::Arc;
 
 use futures::{SinkExt, StreamExt};
 use risingwave_common::config::StreamingConfig;
-use risingwave_common::worker_id::WorkerIdRef;
 use risingwave_pb::common::{ActorInfo, HostAddress};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
-use risingwave_pb::plan::ColumnDesc;
+use risingwave_pb::plan::Field;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::*;
 use risingwave_pb::stream_service::*;
@@ -65,8 +64,8 @@ async fn test_stream_proto() {
                         input: vec![StreamNode {
                             node: Some(Node::MergeNode(MergeNode {
                                 upstream_actor_id: vec![0],
-                                input_column_descs: vec![ColumnDesc {
-                                    column_type: Some(DataType {
+                                fields: vec![Field {
+                                    data_type: Some(DataType {
                                         type_name: TypeName::Int32 as i32,
                                         ..Default::default()
                                     }),
@@ -98,8 +97,8 @@ async fn test_stream_proto() {
                         input: vec![StreamNode {
                             node: Some(Node::MergeNode(MergeNode {
                                 upstream_actor_id: vec![1],
-                                input_column_descs: vec![ColumnDesc {
-                                    column_type: Some(DataType {
+                                fields: vec![Field {
+                                    data_type: Some(DataType {
                                         type_name: TypeName::Int32 as i32,
                                         ..Default::default()
                                     }),
@@ -131,8 +130,8 @@ async fn test_stream_proto() {
                         input: vec![StreamNode {
                             node: Some(Node::MergeNode(MergeNode {
                                 upstream_actor_id: vec![3],
-                                input_column_descs: vec![ColumnDesc {
-                                    column_type: Some(DataType {
+                                fields: vec![Field {
+                                    data_type: Some(DataType {
                                         type_name: TypeName::Int32 as i32,
                                         ..Default::default()
                                     }),
@@ -164,8 +163,8 @@ async fn test_stream_proto() {
                         input: vec![StreamNode {
                             node: Some(Node::MergeNode(MergeNode {
                                 upstream_actor_id: vec![3],
-                                input_column_descs: vec![ColumnDesc {
-                                    column_type: Some(DataType {
+                                fields: vec![Field {
+                                    data_type: Some(DataType {
                                         type_name: TypeName::Int32 as i32,
                                         ..Default::default()
                                     }),
@@ -197,8 +196,8 @@ async fn test_stream_proto() {
                         input: vec![StreamNode {
                             node: Some(Node::MergeNode(MergeNode {
                                 upstream_actor_id: vec![7, 11],
-                                input_column_descs: vec![ColumnDesc {
-                                    column_type: Some(DataType {
+                                fields: vec![Field {
+                                    data_type: Some(DataType {
                                         type_name: TypeName::Int32 as i32,
                                         ..Default::default()
                                     }),
@@ -231,7 +230,7 @@ async fn test_stream_proto() {
         Arc::new(MemSourceManager::new()),
         std::net::SocketAddr::V4("127.0.0.1:5688".parse().unwrap()),
         Arc::new(StreamingConfig::default()),
-        WorkerIdRef::for_test(),
+        WorkerNodeId::default(),
     );
     stream_manager
         .build_actors(&[1, 3, 7, 11, 13], env)

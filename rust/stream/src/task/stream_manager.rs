@@ -5,17 +5,15 @@ use std::sync::{Arc, Mutex};
 
 use futures::channel::mpsc::{channel, Receiver};
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, Schema, TableId};
+use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::expr::{build_from_prost as build_expr_from_prost, AggKind, RowExpression};
 use risingwave_common::try_match_expand;
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::is_local_address;
-use risingwave_common::util::sort_util::{
-    build_from_prost as build_order_type_from_prost, fetch_orders,
-};
+use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_pb::common::ActorInfo;
-use risingwave_pb::plan::JoinType as JoinTypeProto;
+use risingwave_pb::plan::{JoinType as JoinTypeProto, OrderType as ProstOrderType};
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::{expr, stream_plan, stream_service};
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
@@ -111,6 +109,7 @@ impl StreamManager {
         for id in actors {
             core.drop_actor(*id);
         }
+        debug!("drop actors: {:?}", actors);
         Ok(())
     }
 
@@ -258,9 +257,9 @@ impl StreamManagerCore {
                 let tx = self.context.take_sender(&(actor_id, *down_id))?;
                 if is_local_address(&downstream_addr, &self.context.addr) {
                     // if this is a local downstream actor
-                    Ok(Box::new(LocalOutput::new(tx)) as Box<dyn Output>)
+                    Ok(Box::new(LocalOutput::new(*down_id, tx)) as Box<dyn Output>)
                 } else {
-                    Ok(Box::new(RemoteOutput::new(tx)) as Box<dyn Output>)
+                    Ok(Box::new(RemoteOutput::new(*down_id, tx)) as Box<dyn Output>)
                 }
             })
             .collect::<Result<Vec<_>>>()?;
@@ -357,7 +356,11 @@ impl StreamManagerCore {
                     .lock_barrier_manager()
                     .register_sender(actor_id, sender);
 
-                let column_ids = node.get_column_ids().to_vec();
+                let column_ids: Vec<_> = node
+                    .get_column_ids()
+                    .iter()
+                    .map(|i| ColumnId::from(*i))
+                    .collect();
                 let mut fields = Vec::with_capacity(column_ids.len());
                 for &column_id in &column_ids {
                     let column_desc = source_desc
@@ -366,7 +369,7 @@ impl StreamManagerCore {
                         .find(|c| c.column_id == column_id)
                         .unwrap();
                     fields.push(Field::with_name(
-                        column_desc.data_type,
+                        column_desc.data_type.clone(),
                         column_desc.name.clone(),
                     ));
                 }
@@ -461,11 +464,12 @@ impl StreamManagerCore {
                 )))
             }
             Node::AppendOnlyTopNNode(top_n_node) => {
-                let order_types = top_n_node
+                let order_types: Vec<_> = top_n_node
                     .get_order_types()
                     .iter()
-                    .map(build_order_type_from_prost)
-                    .collect::<Result<Vec<_>>>()?;
+                    .map(|v| ProstOrderType::from_i32(*v).unwrap())
+                    .map(|v| OrderType::from_prost(&v))
+                    .collect();
                 assert_eq!(order_types.len(), pk_indices.len());
                 let limit = if top_n_node.limit == 0 {
                     None
@@ -487,11 +491,12 @@ impl StreamManagerCore {
                 )))
             }
             Node::TopNNode(top_n_node) => {
-                let order_types = top_n_node
+                let order_types: Vec<_> = top_n_node
                     .get_order_types()
                     .iter()
-                    .map(build_order_type_from_prost)
-                    .collect::<Result<Vec<_>>>()?;
+                    .map(|v| ProstOrderType::from_i32(*v).unwrap())
+                    .map(|v| OrderType::from_prost(&v))
+                    .collect();
                 assert_eq!(order_types.len(), pk_indices.len());
                 let limit = if top_n_node.limit == 0 {
                     None
@@ -573,20 +578,16 @@ impl StreamManagerCore {
             }
             Node::MviewNode(materialized_view_node) => {
                 let table_id = TableId::from(&materialized_view_node.table_ref_id);
-                let columns = materialized_view_node.get_column_descs();
-                let pks = materialized_view_node
-                    .pk_indices
+                let keys = materialized_view_node
+                    .column_orders
                     .iter()
-                    .map(|key| *key as usize)
-                    .collect::<Vec<_>>();
-
-                let column_orders = materialized_view_node.get_column_orders();
-                let order_pairs = fetch_orders(column_orders).unwrap();
-                let orderings = order_pairs
+                    .map(OrderPair::from_prost)
+                    .collect();
+                let column_ids = materialized_view_node
+                    .column_ids
                     .iter()
-                    .map(|order| order.order_type)
-                    .collect::<Vec<_>>();
-
+                    .map(|id| ColumnId::from(*id))
+                    .collect();
                 let keyspace = if materialized_view_node.associated_table_ref_id.is_some() {
                     // share the keyspace between mview and table v2
                     let associated_table_id =
@@ -599,16 +600,16 @@ impl StreamManagerCore {
                 let executor = Box::new(MaterializeExecutor::new(
                     input.remove(0),
                     keyspace,
-                    Schema::try_from(columns)?,
-                    pks,
-                    orderings,
+                    keys,
+                    column_ids,
                     executor_id,
                     op_info,
                 ));
                 Ok(executor)
             }
             Node::MergeNode(merge_node) => {
-                let schema = Schema::try_from(merge_node.get_input_column_descs())?;
+                let fields = merge_node.fields.iter().map(Field::from).collect();
+                let schema = Schema::new(fields);
                 let upstreams = merge_node.get_upstream_actor_id();
                 self.create_merge_node(actor_id, schema, upstreams, pk_indices, op_info)
             }

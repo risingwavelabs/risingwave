@@ -1,11 +1,11 @@
-import Layout from "../components/Layout";
-
 import React from 'react';
-export default function About() {
 
+export default function About() {
   return (
     <>
-      <Layout currentPage="about"/>
+      <div>
+        About
+      </div>
     </>
   );
 }

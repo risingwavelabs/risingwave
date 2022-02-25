@@ -35,7 +35,7 @@ impl LogicalAgg {
             &group_keys,
             agg_calls
                 .iter()
-                .map(|agg_call| agg_call.return_type)
+                .map(|agg_call| agg_call.return_type.clone())
                 .collect(),
             &agg_call_alias,
         );

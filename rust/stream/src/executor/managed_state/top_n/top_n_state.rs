@@ -346,7 +346,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
             }?;
             for cell_idx in 0..self.data_types.len() {
                 // format: [pk_buf | cell_idx (4B)]
-                let key_encoded = [&pk_buf[..], &serialize_cell_idx(cell_idx as u32)?[..]].concat();
+                let key_encoded = [&pk_buf[..], &serialize_cell_idx(cell_idx as i32)?[..]].concat();
 
                 match &row_option {
                     Some(row) => {

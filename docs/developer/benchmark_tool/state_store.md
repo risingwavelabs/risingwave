@@ -33,9 +33,9 @@
   - Format: `hummock+s3://bucket`
   - Example: `hummock+s3://s3-ut`
   - Notice: some environment variables are required to be set
-    - `S3_TEST_REGION`
-    - `S3_TEST_ACCESS_KEY`
-    - `S3_TEST_SECRET_KEY`
+    - `AWS_REGION`
+    - `AWS_ACCESS_KEY_ID`
+    - `AWS_SECRET_ACCESS_KEY`
 
 - `TiKV`
   
@@ -84,9 +84,10 @@
 Comma-separated list of operations to run in the specified order. Following operations are supported:
 
 - `writebatch`: write N key/values in sequential key order in async mode.
-- `getrandom`: read N times in random order.
-- `getseq`: read N times sequentially.
-- `prefixscanrandom`: prefix scan N times in random order.
+- `deleterandom`: delete N keys in random order. May delete a key/value many times even it has been deleted before during this operation. If the state store is already completely empty before this operation, randomly-generated keys would be deleted.
+- `getrandom`: read N keys in random order. May read a key/value many times even it has been read before during this operation. If the state store is already completely empty before this operation, randomly-generated keys would be read instead.
+- `getseq`: read N times sequentially. Panic if keys in the state store are less than number to get. But if the state store is completely empty, sequentially-generated keys would be read.
+- `prefixscanrandom`: prefix scan N times in random order. May scan a prefix many times even it has been scanned before during this operation. If the state store is already completely empty before this operation, randomly-generated prefixes would be scanned in this empty state store.
 
 Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
 
@@ -105,6 +106,11 @@ Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
 - `--reads`
 
   - Number of read keys. If negative, do `--num` reads.
+  - Default: -1
+
+- `--scans`
+
+  - Number of scanned prefixes. If negative, do `--num` scans.
   - Default: -1
 
 - `--writes`
@@ -138,6 +144,11 @@ Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
   
   - Size (bytes) of each value.
   - Default: 100
+
+- `--seed`
+  
+  - Seed base for random number generators.
+  - Default: 0
 
 # Flag
 

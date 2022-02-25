@@ -75,7 +75,7 @@ impl ChainExecutor {
         match msg {
             Err(e) => {
                 // TODO: Refactor this once we find a better way to know the upstream is done.
-                if let ErrorCode::EOF = e.inner() {
+                if let ErrorCode::Eof = e.inner() {
                     self.state = ChainState::ReadingMView;
                     return self.read_mview().await;
                 }
@@ -96,7 +96,7 @@ impl ChainExecutor {
             Message::Barrier(barrier) => {
                 self.snapshot.init(barrier.epoch)?;
                 self.state = ChainState::ReadingSnapshot;
-                return self.read_snapshot().await;
+                Ok(Message::Barrier(barrier))
             }
         }
     }
@@ -143,7 +143,6 @@ mod test {
     use risingwave_common::error::{ErrorCode, Result};
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType;
-    use risingwave_pb::plan::column_desc::ColumnEncodingType;
     use risingwave_pb::plan::ColumnDesc;
 
     use super::ChainExecutor;
@@ -168,7 +167,7 @@ mod test {
                     if let Message::Barrier(_) = m {
                         // warning: translate all of the barrier types to the EOF here. May be an
                         // error in some circumstances.
-                        Err(RwError::from(ErrorCode::EOF))
+                        Err(RwError::from(ErrorCode::Eof))
                     } else {
                         Ok(m)
                     }
@@ -212,10 +211,8 @@ mod test {
                 type_name: TypeName::Int32 as i32,
                 ..Default::default()
             }),
-            encoding: ColumnEncodingType::Raw as i32,
             name: "v1".to_string(),
-            is_primary: false,
-            column_id: 0,
+            ..Default::default()
         }];
         let schema = Schema::try_from(&columns).unwrap();
         let first = Box::new(MockSnapshot::with_chunks(
@@ -260,7 +257,7 @@ mod test {
             let k = &chain.next().await.unwrap();
             count += 1;
             if let Message::Chunk(ck) = k {
-                let target = ck.column(0).array_ref().as_int32().value_at(0).unwrap();
+                let target = ck.column_at(0).array_ref().as_int32().value_at(0).unwrap();
                 assert_eq!(target, count);
             } else {
                 assert!(matches!(k, Message::Barrier(_)));

@@ -8,7 +8,7 @@ use prometheus::{Encoder, TextEncoder};
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::ComputeNodeConfig;
-use risingwave_common::worker_id::WorkerIdRef;
+use risingwave_pb::common::WorkerType;
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
@@ -38,9 +38,14 @@ pub async fn compute_node_serve(
     opts: ComputeNodeOpts,
 ) -> (JoinHandle<()>, UnboundedSender<()>) {
     // Load the configuration.
-    let worker_id_ref = WorkerIdRef::new();
     let config = load_config(&opts);
-    let meta_client = MetaClient::new(&opts.meta_address).await.unwrap();
+    let mut meta_client = MetaClient::new(&opts.meta_address).await.unwrap();
+
+    // Register to the cluster. We're not ready to serve until activate is called.
+    let worker_id = meta_client
+        .register(addr, WorkerType::ComputeNode)
+        .await
+        .unwrap();
 
     // Initialize state store.
     let state_store = StateStoreImpl::from_str(&opts.state_store, meta_client.clone())
@@ -61,18 +66,12 @@ pub async fn compute_node_serve(
         batch_mgr.clone(),
         addr,
         batch_config,
-        worker_id_ref.clone(),
+        worker_id,
     );
 
     // Initialize the streaming environment.
     let stream_config = Arc::new(config.streaming.clone());
-    let stream_env = StreamEnvironment::new(
-        table_mgr,
-        source_mgr,
-        addr,
-        stream_config,
-        worker_id_ref.clone(),
-    );
+    let stream_env = StreamEnvironment::new(table_mgr, source_mgr, addr, stream_config, worker_id);
 
     // Boot the runtime gRPC services.
     let batch_srv = BatchServiceImpl::new(batch_mgr.clone(), batch_env);
@@ -101,8 +100,7 @@ pub async fn compute_node_serve(
     }
 
     // All set, let the meta service know we're ready.
-    let worker_id = meta_client.register(addr).await.unwrap();
-    worker_id_ref.set(worker_id);
+    meta_client.activate(addr).await.unwrap();
 
     (join_handle, shutdown_send)
 }
@@ -155,10 +153,10 @@ mod tests {
     use crate::server::compute_node_serve;
     use crate::ComputeNodeOpts;
 
-    async fn start_compute_node() -> (JoinHandle<()>, UnboundedSender<()>) {
+    async fn start_compute_node(meta: &LocalMeta) -> (JoinHandle<()>, UnboundedSender<()>) {
         let args: [OsString; 0] = []; // No argument.
         let mut opts = ComputeNodeOpts::parse_from(args);
-        opts.meta_address = format!("http://{}", LocalMeta::meta_addr());
+        opts.meta_address = format!("http://{}", meta.meta_addr());
         let addr = opts.host.parse().unwrap();
         compute_node_serve(addr, opts).await
     }
@@ -166,8 +164,8 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn test_server_shutdown() {
-        let meta = LocalMeta::start().await;
-        let (join, shutdown) = start_compute_node().await;
+        let meta = LocalMeta::start(12313).await;
+        let (join, shutdown) = start_compute_node(&meta).await;
         shutdown.send(()).unwrap();
         join.await.unwrap();
         meta.stop().await;

@@ -6,7 +6,7 @@ on:
 
 env:
   RUST_TOOLCHAIN: nightly-2022-02-21
-  CACHE_KEY_SUFFIX: v20220222
+  CACHE_KEY_SUFFIX: v20220225
   CARGO_TERM_COLOR: always
 
 jobs:
@@ -120,8 +120,8 @@ jobs:
 
       - name: Install required components
         run: |
-          apt-get update -yy
-          apt-get install --upgrade -yy tmux postgresql
+          apt-get update -yy -o Acquire::Retries=3
+          apt-get install --upgrade -yy tmux postgresql -o Acquire::Retries=3
 
       - name: Generate RiseDev CI config
         run: |
@@ -155,7 +155,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-3node
-          timeout 3m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
+          timeout 100s sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
 
       - name: Kill cluster
         run: |
@@ -179,7 +179,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           RW_NO_CACHE=1 ~/cargo-make/makers ci-3node
-          timeout 3m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
+          timeout 100s sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
 
       - name: Kill cluster
         run: |
@@ -191,7 +191,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-3node
-          timeout 3m sqllogictest -p 4567 -d dev './e2e_test/batch/**/*.slt'
+          timeout 80s sqllogictest -p 4567 -d dev './e2e_test/batch/**/*.slt'
 
       - name: Kill cluster
         run: |
@@ -246,8 +246,8 @@ jobs:
 
       - name: Install required components
         run: |
-          sudo apt-get update -yy
-          sudo apt-get install --upgrade -yy tmux postgresql
+          sudo apt-get update -yy -o Acquire::Retries=3
+          sudo apt-get install --upgrade -yy tmux postgresql -o Acquire::Retries=3
 
       # For source testing.
       - name: Setup kafka cluster
@@ -344,7 +344,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-1node
-          timeout 70s sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source/**/*.slt'
+          timeout 5m sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source/**/*.slt'
 
       - name: Kill cluster
         run: |
@@ -356,7 +356,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-3node
-          timeout 30s sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source_distributed/**/*.slt'
+          timeout 5m sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source_distributed/**/*.slt'
 
       - name: Kill cluster
         run: |
@@ -569,7 +569,7 @@ jobs:
       - name: Install required tools
         run: |
           wget https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/${BINARY}.tar.gz -O - | tar xz && sudo mv ${BINARY} /usr/bin/yq
-          sudo apt install -y protobuf-compiler
+          sudo apt install -y protobuf-compiler -o Acquire::Retries=3
           curl -sSL \
             https://github.com/uber/prototool/releases/download/v1.8.0/prototool-$(uname -s)-$(uname -m).tar.gz | \
             sudo tar -C /usr/local --strip-components 1 -xz
