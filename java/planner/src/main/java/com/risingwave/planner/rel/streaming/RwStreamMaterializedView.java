@@ -9,7 +9,7 @@ import com.risingwave.proto.data.DataType;
 import com.risingwave.proto.expr.InputRefExpr;
 import com.risingwave.proto.plan.ColumnOrder;
 import com.risingwave.proto.plan.OrderType;
-import com.risingwave.proto.streaming.plan.MViewNode;
+import com.risingwave.proto.streaming.plan.MaterializeNode;
 import com.risingwave.proto.streaming.plan.StreamNode;
 import com.risingwave.rpc.Messages;
 import java.util.ArrayList;
@@ -30,9 +30,9 @@ import org.apache.calcite.util.Pair;
 import org.apache.commons.lang3.SerializationException;
 
 /**
- * We need to explicitly specify a materialized view node in a streaming plan.
- *
- * <p>A sequential streaming plan (no parallel degree) roots with a materialized view node.
+ * Materialize operator accepts a stream of changes and materialize it into a materialized view or table
+ * <p>
+ * A sequential streaming plan (no parallel degree) roots with a materialized view node.
  */
 public class RwStreamMaterializedView extends SingleRel implements RisingWaveStreamingRel {
   // TODO: define more attributes corresponding to TableCatalog.
@@ -107,7 +107,7 @@ public class RwStreamMaterializedView extends SingleRel implements RisingWaveStr
    */
   @Override
   public StreamNode serialize() {
-    MViewNode.Builder materializedViewNodeBuilder = MViewNode.newBuilder();
+    MaterializeNode.Builder materializedViewNodeBuilder = MaterializeNode.newBuilder();
     // Add column IDs (mocked)
     // FIXME: Column ID should be in the catalog
     for (int i = 0; i < this.getColumns().size(); i++) {
@@ -172,9 +172,9 @@ public class RwStreamMaterializedView extends SingleRel implements RisingWaveStr
     materializedViewNodeBuilder.addAllColumnOrders(columnOrders);
     // Sort key serialization ends
     // Build and return.
-    MViewNode materializedViewNode = materializedViewNodeBuilder.build();
+    MaterializeNode materializedViewNode = materializedViewNodeBuilder.build();
     return StreamNode.newBuilder()
-        .setMviewNode(materializedViewNode)
+        .setMaterializeNode(materializedViewNode)
         .setIdentity(StreamingPlan.getCurrentNodeIdentity(this))
         .build();
   }
