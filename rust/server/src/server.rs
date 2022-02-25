@@ -8,7 +8,6 @@ use prometheus::{Encoder, TextEncoder};
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::ComputeNodeConfig;
-use risingwave_common::worker_id::WorkerIdRef;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
@@ -39,16 +38,14 @@ pub async fn compute_node_serve(
     opts: ComputeNodeOpts,
 ) -> (JoinHandle<()>, UnboundedSender<()>) {
     // Load the configuration.
-    let worker_id_ref = WorkerIdRef::new();
     let config = load_config(&opts);
-    let meta_client = MetaClient::new(&opts.meta_address).await.unwrap();
+    let mut meta_client = MetaClient::new(&opts.meta_address).await.unwrap();
 
     // Register to the cluster. We're not ready to serve until activate is called.
     let worker_id = meta_client
         .register(addr, WorkerType::ComputeNode)
         .await
         .unwrap();
-    worker_id_ref.set(worker_id);
 
     // Initialize state store.
     let state_store = StateStoreImpl::from_str(&opts.state_store, meta_client.clone())
@@ -69,18 +66,12 @@ pub async fn compute_node_serve(
         batch_mgr.clone(),
         addr,
         batch_config,
-        worker_id_ref.clone(),
+        worker_id,
     );
 
     // Initialize the streaming environment.
     let stream_config = Arc::new(config.streaming.clone());
-    let stream_env = StreamEnvironment::new(
-        table_mgr,
-        source_mgr,
-        addr,
-        stream_config,
-        worker_id_ref.clone(),
-    );
+    let stream_env = StreamEnvironment::new(table_mgr, source_mgr, addr, stream_config, worker_id);
 
     // Boot the runtime gRPC services.
     let batch_srv = BatchServiceImpl::new(batch_mgr.clone(), batch_env);
