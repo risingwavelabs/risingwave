@@ -79,7 +79,12 @@ create materialized view source_mv1 as select * from s;
 statement ok
 create materialized view source_mv2 as select sum(v1) as sum_v1, count(v2) as count_v2 from s where v1 > 3;
 
+# Wait for source
 sleep 30s
+
+# Flush into storage
+statement ok
+flush;
 
 # Note(xx): Disabled because this case fails randomly
 # TODO: uncomment this after migrated to low-level kafka source

@@ -21,10 +21,7 @@ public class ColumnDesc {
   }
 
   public ColumnDesc(com.risingwave.proto.plan.ColumnDesc desc) {
-    this(
-        RisingWaveTypeFactory.INSTANCE.createDataType(desc.getColumnType()),
-        desc.getIsPrimary(),
-        ColumnEncoding.valueOf(desc.getEncoding().name()));
+    this(RisingWaveTypeFactory.INSTANCE.createDataType(desc.getColumnType()));
   }
 
   public RisingWaveDataType getDataType() {
@@ -43,7 +40,6 @@ public class ColumnDesc {
   public String toString() {
     return MoreObjects.toStringHelper(this)
         .add("dataType", dataType.getSqlTypeName().name())
-        .add("primary", primary)
         .toString();
   }
 }

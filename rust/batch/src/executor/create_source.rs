@@ -83,7 +83,6 @@ impl BoxedExecutorBuilder for CreateSourceExecutor {
                     data_type: DataType::from(c.get_column_type()?),
                     column_id: ColumnId::from(c.column_id),
                     skip_parse: idx as i32 == row_id_index,
-                    is_primary: c.is_primary,
                 })
             })
             .collect::<Result<Vec<SourceColumnDesc>>>()?;

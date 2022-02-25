@@ -76,10 +76,6 @@ public class CatalogCast {
       com.risingwave.proto.plan.ColumnDesc.Builder colBuilder =
           com.risingwave.proto.plan.ColumnDesc.newBuilder();
       colBuilder.setName(columns.left);
-      colBuilder.setEncoding(
-          com.risingwave.proto.plan.ColumnDesc.ColumnEncodingType.valueOf(
-              columns.right.getEncoding().name()));
-      colBuilder.setIsPrimary(columns.right.isPrimary());
       colBuilder.setColumnType(columns.right.getDataType().getProtobufType());
       builder.addColumnDescs(colBuilder.build());
     }

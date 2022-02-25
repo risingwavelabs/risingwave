@@ -97,20 +97,6 @@
       },
       "tableId": 3
     },
-    "columnDescs": [{
-      "columnType": {
-        "typeName": "INT32"
-      },
-      "encoding": "RAW",
-      "name": "v"
-    }, {
-      "columnType": {
-        "typeName": "INT64"
-      },
-      "encoding": "RAW",
-      "name": "_row_id"
-    }],
-    "pkIndices": [1],
     "columnOrders": [{
       "orderType": "ASCENDING",
       "inputRef": {
@@ -119,7 +105,8 @@
       "returnType": {
         "typeName": "INT64"
       }
-    }]
+    }],
+    "columnIds": [0, 1]
   },
   "identity": "RwStreamMaterializedView(name\u003d[t2])"
 }

@@ -304,7 +304,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
                 let ordered_row_bytes = ordered_row.serialize()?;
                 let key_encoded = [
                     &ordered_row_bytes[..],
-                    &serialize_cell_idx(cell_idx as u32)?[..],
+                    &serialize_cell_idx(cell_idx as i32)?[..],
                 ]
                 .concat();
 

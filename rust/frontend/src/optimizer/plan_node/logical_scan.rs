@@ -11,6 +11,7 @@ use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 #[derive(Debug, Clone, Default)]
 #[allow(dead_code)]
 pub struct LogicalScan {
+    table_name: String,
     table_id: TableId,
     columns: Vec<ColumnId>,
     schema: Schema,
@@ -18,8 +19,14 @@ pub struct LogicalScan {
 
 impl LogicalScan {
     /// Create a LogicalScan node. Used internally by optimizer.
-    pub fn new(table_id: TableId, columns: Vec<ColumnId>, schema: Schema) -> Self {
+    pub fn new(
+        table_name: String,
+        table_id: TableId,
+        columns: Vec<ColumnId>,
+        schema: Schema,
+    ) -> Self {
         Self {
+            table_name,
             table_id,
             columns,
             schema,
@@ -27,8 +34,13 @@ impl LogicalScan {
     }
 
     /// Create a LogicalScan node. Used by planner.
-    pub fn create(table_id: TableId, columns: Vec<ColumnId>, schema: Schema) -> Result<Self> {
-        Ok(Self::new(table_id, columns, schema))
+    pub fn create(
+        table_name: String,
+        table_id: TableId,
+        columns: Vec<ColumnId>,
+        schema: Schema,
+    ) -> Result<Self> {
+        Ok(Self::new(table_name, table_id, columns, schema))
     }
 }
 
@@ -43,7 +55,16 @@ impl WithDistribution for LogicalScan {}
 
 impl fmt::Display for LogicalScan {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", self)
+        let columns = self
+            .schema
+            .fields()
+            .iter()
+            .map(|f| f.name.clone())
+            .collect::<Vec<_>>();
+        f.debug_struct("LogicalScan")
+            .field("table", &self.table_name)
+            .field("columns", &columns)
+            .finish()
     }
 }
 impl ColPrunable for LogicalScan {}

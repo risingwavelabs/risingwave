@@ -165,26 +165,6 @@
       },
       "tableId": 9
     },
-    "columnDescs": [{
-      "columnType": {
-        "typeName": "FLOAT"
-      },
-      "encoding": "RAW",
-      "name": "sum_v1"
-    }, {
-      "columnType": {
-        "typeName": "DOUBLE"
-      },
-      "encoding": "RAW",
-      "name": "avg_v3"
-    }, {
-      "columnType": {
-        "typeName": "FLOAT"
-      },
-      "encoding": "RAW",
-      "name": "v1"
-    }],
-    "pkIndices": [2],
     "columnOrders": [{
       "orderType": "ASCENDING",
       "inputRef": {
@@ -193,7 +173,8 @@
       "returnType": {
         "typeName": "FLOAT"
       }
-    }]
+    }],
+    "columnIds": [0, 1, 2]
   },
   "identity": "RwStreamMaterializedView(name\u003d[m6])"
 }
