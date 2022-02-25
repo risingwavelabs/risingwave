@@ -263,7 +263,7 @@ pub(super) mod tests {
     use itertools::Itertools;
 
     use super::*;
-    use crate::hummock::cloud::gen_remote_sstable;
+    use crate::hummock::iterator::test_utils::upload_and_load_sst;
     use crate::hummock::key::key_with_epoch;
     use crate::hummock::sstable::SSTable;
     use crate::object::{InMemObjectStore, ObjectStore};
@@ -350,7 +350,7 @@ pub(super) mod tests {
         // get remote table
         let (data, meta) = b.finish();
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
-        gen_remote_sstable(obj_client, 0, data, meta, REMOTE_DIR, None)
+        upload_and_load_sst(obj_client, 0, meta, data, REMOTE_DIR)
             .await
             .unwrap()
     }

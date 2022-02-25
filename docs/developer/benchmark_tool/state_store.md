@@ -1,14 +1,17 @@
-`ss_bench` is used to benchmark the performance of the state store. In this doc, we first show a usage example and then describe each provided parameter.
+`ss_bench` is used to directly benchmark the state store of the system.
 
 # Usage Example
 
 ```shell
 ~/code/risingwave/rust: cargo run --bin ss-bench -- \
- --benchmarks "writebatch,getseq,getrandom,prefixscanrandom" \
+ --benchmarks "writebatch,getseq,getrandom,prefixscanrandom,deleterandom" \
  --batch-size 1000 \
  --writes 10000 \
  --reads 500 \
+ --scans 200 \
+ --deletes 2000
  --concurrency-num 4 \
+ --seed 233
  --statistics
 ```
 
@@ -26,21 +29,21 @@
 - `Hummock+MinIO`
   
   - Format: `hummock+minio://key:secret@address:port/bucket`
-  - Example: `--store hummock+minio://INTEGRATION_TEST_ACCESS_KEY:INTEGRATION_TEST_SECRET_KEY@127.0.0.1:9000/myminio`
+  - Example: `hummock+minio://INTEGRATION_TEST_ACCESS_KEY:INTEGRATION_TEST_SECRET_KEY@127.0.0.1:9000/myminio`
 
 - `Hummock+S3`
   
   - Format: `hummock+s3://bucket`
   - Example: `hummock+s3://s3-ut`
   - Notice: some environment variables are required to be set
-    - `S3_TEST_REGION`
-    - `S3_TEST_ACCESS_KEY`
-    - `S3_TEST_SECRET_KEY`
+    - `AWS_REGION`
+    - `AWS_ACCESS_KEY_ID`
+    - `AWS_SECRET_ACCESS_KEY`
 
 - `TiKV`
   
   - Foramt: `tikv://pd_address:port`
-  - Example: `--store tikv://127.0.0.1:2379`
+  - Example: `tikv://127.0.0.1:2379`
 
 - `RocksDB`
   
@@ -84,10 +87,10 @@
 Comma-separated list of operations to run in the specified order. Following operations are supported:
 
 - `writebatch`: write N key/values in sequential key order in async mode.
-- `deleterandom`: delete N keys in random order. May delete a key/value many times even it has been deleted before during this operation. If the state store is already empty before this operation, randomly-generated keys would be deleted.
-- `getrandom`: read N keys in random order. May read a key/value many times even it has been read before during this operation. If the state store is already empty before this operation, randomly-generated keys would be read instead.
-- `getseq`: read N times sequentially. Panic if keys in the state store are less than number to get.
-- `prefixscanrandom`: prefix scan N times in random order. May scan a prefix many times even it has been scanned before during this operation. If the state store is already empty before this operation, randomly-generated prefixes would be scanned in this empty state store.
+- `deleterandom`: delete N keys in random order. May delete a key/value many times even it has been deleted before during this operation. If the state store is already completely empty before this operation, randomly-generated keys would be deleted.
+- `getrandom`: read N keys in random order. May read a key/value many times even it has been read before during this operation. If the state store is already completely empty before this operation, randomly-generated keys would be read instead.
+- `getseq`: read N times sequentially. Panic if keys in the state store are less than number to get. But if the state store is completely empty, sequentially-generated keys would be read.
+- `prefixscanrandom`: prefix scan N times in random order. May scan a prefix many times even it has been scanned before during this operation. If the state store is already completely empty before this operation, randomly-generated prefixes would be scanned in this empty state store.
 
 Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
 
@@ -108,9 +111,14 @@ Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
   - Number of read keys. If negative, do `--num` reads.
   - Default: -1
 
+- `--scans`
+
+  - Number of scanned prefixes. If negative, do `--num` scans.
+  - Default: -1
+
 - `--writes`
 
-  - Number of written key/values. If negative, do `--num` reads.
+  - Number of written key/values. If negative, do `--num` writes.
   - Default: -1
 
 - `--batch-size`
@@ -153,4 +161,4 @@ Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
 # Metrics
 
 - Letancy (`min/mean/P50/P95/P99/max/std_dev`)
-- Throughput (`QPS/OPS`)
+- Throughput (`QPS/OPS/bytes_pre_second`)

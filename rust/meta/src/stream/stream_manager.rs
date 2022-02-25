@@ -269,8 +269,10 @@ mod tests {
 
     use super::*;
     use crate::barrier::BarrierManager;
+    use crate::hummock::HummockManager;
     use crate::manager::{MetaSrvEnv, NotificationManager};
     use crate::model::ActorId;
+    use crate::rpc::metrics::MetaMetrics;
     use crate::storage::MemStore;
     use crate::stream::FragmentManager;
 
@@ -388,23 +390,25 @@ mod tests {
             let notification_manager = Arc::new(NotificationManager::new());
             let cluster_manager =
                 Arc::new(StoredClusterManager::new(env.clone(), None, notification_manager).await?);
+            let host = HostAddress {
+                host: host.to_string(),
+                port: port as i32,
+            };
             cluster_manager
-                .add_worker_node(
-                    HostAddress {
-                        host: host.to_string(),
-                        port: port as i32,
-                    },
-                    WorkerType::ComputeNode,
-                )
+                .add_worker_node(host.clone(), WorkerType::ComputeNode)
                 .await?;
+            cluster_manager.activate_worker_node(host).await?;
 
             let fragment_manager = Arc::new(FragmentManager::new(env.meta_store_ref()).await?);
-
+            let hummock_manager = Arc::new(HummockManager::new(env.clone()).await?);
+            let meta_metrics = Arc::new(MetaMetrics::new());
             let barrier_manager_ref = Arc::new(BarrierManager::new(
                 env.clone(),
                 cluster_manager.clone(),
                 fragment_manager.clone(),
                 env.epoch_generator_ref(),
+                hummock_manager,
+                meta_metrics.clone(),
             ));
 
             let stream_manager = StreamManager::new(
@@ -435,7 +439,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_create_materialized_view() -> Result<()> {
-        let services = MockServices::start("127.0.0.1", 12345).await?;
+        let services = MockServices::start("127.0.0.1", 12333).await?;
 
         let table_ref_id = TableRefId {
             schema_ref_id: None,
@@ -508,7 +512,7 @@ mod tests {
                     .unwrap(),
                 HostAddress {
                     host: "127.0.0.1".to_string(),
-                    port: 12345,
+                    port: 12333,
                 }
             );
         }

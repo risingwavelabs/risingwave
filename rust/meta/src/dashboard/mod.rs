@@ -74,6 +74,7 @@ mod handlers {
             WorkerType::from_i32(ty)
                 .ok_or_else(|| anyhow!("invalid worker type"))
                 .map_err(err)?,
+            None,
         );
         Ok(result.into())
     }
@@ -101,7 +102,7 @@ mod handlers {
         let node_actors = srv.fragment_manager.load_all_node_actors().map_err(err)?;
         let nodes = srv
             .cluster_manager
-            .list_worker_node(WorkerType::ComputeNode);
+            .list_worker_node(WorkerType::ComputeNode, None);
         let actors = nodes
             .iter()
             .map(|node| ActorLocation {
@@ -151,9 +152,12 @@ where
             )
             .layer(
                 // TODO: allow wildcard CORS is dangerous! Should remove this in production.
-                CorsLayer::new()
-                    .allow_origin(cors::any())
-                    .allow_methods(vec![Method::GET, Method::POST, Method::PUT, Method::DELETE]),
+                CorsLayer::new().allow_origin(cors::Any).allow_methods(vec![
+                    Method::GET,
+                    Method::POST,
+                    Method::PUT,
+                    Method::DELETE,
+                ]),
             );
 
         axum::Server::bind(&srv.dashboard_addr)
@@ -174,15 +178,14 @@ where
         use risingwave_pb::common::{HostAddress, WorkerType};
 
         // TODO: remove adding frontend register when frontend implement register.
+        let host = HostAddress {
+            host: "127.0.0.1".to_string(),
+            port: 4567,
+        };
         self.cluster_manager
-            .add_worker_node(
-                HostAddress {
-                    host: "127.0.0.1".to_string(),
-                    port: 4567,
-                },
-                WorkerType::Frontend,
-            )
+            .add_worker_node(host.clone(), WorkerType::Frontend)
             .await?;
+        self.cluster_manager.activate_worker_node(host).await?;
 
         Ok(())
     }

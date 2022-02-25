@@ -2,11 +2,12 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use risingwave_common::config::BatchConfig;
-use risingwave_common::worker_id::WorkerIdRef;
 use risingwave_source::{SourceManager, SourceManagerRef};
 use risingwave_storage::table::{TableManager, TableManagerRef};
 
 use crate::task::BatchManager;
+
+pub(crate) type WorkerNodeId = u32;
 
 /// The global environment for task execution.
 /// The instance will be shared by every task.
@@ -27,8 +28,8 @@ pub struct BatchEnvironment {
     /// Batch related configurations.
     config: Arc<BatchConfig>,
 
-    /// Reference to the worker node id.
-    worker_id_ref: WorkerIdRef,
+    /// Current worker node id.
+    worker_id: WorkerNodeId,
 }
 
 impl BatchEnvironment {
@@ -38,7 +39,7 @@ impl BatchEnvironment {
         task_manager: Arc<BatchManager>,
         server_addr: SocketAddr,
         config: Arc<BatchConfig>,
-        worker_id_ref: WorkerIdRef,
+        worker_id: WorkerNodeId,
     ) -> Self {
         BatchEnvironment {
             table_manager,
@@ -46,7 +47,7 @@ impl BatchEnvironment {
             task_manager,
             source_manager,
             config,
-            worker_id_ref,
+            worker_id,
         }
     }
 
@@ -62,7 +63,7 @@ impl BatchEnvironment {
             server_addr: SocketAddr::V4("127.0.0.1:5688".parse().unwrap()),
             source_manager: std::sync::Arc::new(MemSourceManager::new()),
             config: Arc::new(BatchConfig::default()),
-            worker_id_ref: WorkerIdRef::for_test(),
+            worker_id: WorkerNodeId::default(),
         }
     }
 
@@ -94,7 +95,7 @@ impl BatchEnvironment {
         self.config.as_ref()
     }
 
-    pub fn worker_id(&self) -> u32 {
-        self.worker_id_ref.get()
+    pub fn worker_id(&self) -> WorkerNodeId {
+        self.worker_id
     }
 }

@@ -13,7 +13,7 @@ use risingwave_storage::hummock::hummock_meta_client::RPCHummockMetaClient;
 use risingwave_storage::hummock::local_version_manager::LocalVersionManager;
 use risingwave_storage::hummock::{HummockOptions, HummockStateStore, HummockStorage};
 use risingwave_storage::memory::MemoryStateStore;
-use risingwave_storage::object::{ConnectionInfo, S3ObjectStore};
+use risingwave_storage::object::S3ObjectStore;
 use risingwave_storage::rocksdb_local::RocksDBStateStore;
 use risingwave_storage::tikv::TikvStateStore;
 
@@ -54,6 +54,9 @@ pub(crate) struct Opts {
 
     #[clap(long, default_value_t = -1)]
     reads: i64,
+
+    #[clap(long, default_value_t = -1)]
+    scans: i64,
 
     #[clap(long, default_value_t = -1)]
     writes: i64,
@@ -108,9 +111,9 @@ async fn get_state_store_impl(opts: &Opts) -> Result<StateStoreImpl> {
             .unwrap()
             .to_string()])),
         minio if minio.starts_with("hummock+minio://") => {
-            let object_client = Arc::new(S3ObjectStore::new_with_minio(
-                minio.strip_prefix("hummock+").unwrap(),
-            ));
+            let object_client = Arc::new(
+                S3ObjectStore::new_with_minio(minio.strip_prefix("hummock+").unwrap()).await,
+            );
             let remote_dir = "hummock_001";
             let hummock_meta_client = Arc::new(RPCHummockMetaClient::new(
                 MetaClient::new(meta_address).await?,
@@ -137,11 +140,9 @@ async fn get_state_store_impl(opts: &Opts) -> Result<StateStoreImpl> {
             ))
         }
         s3 if s3.starts_with("hummock+s3://") => {
-            let s3_test_conn_info = ConnectionInfo::new();
-            let s3_store = Arc::new(S3ObjectStore::new(
-                s3_test_conn_info,
-                s3.strip_prefix("hummock+s3://").unwrap().to_string(),
-            ));
+            let s3_store = Arc::new(
+                S3ObjectStore::new(s3.strip_prefix("hummock+s3://").unwrap().to_string()).await,
+            );
             let remote_dir = "hummock_001";
             let hummock_meta_client = Arc::new(RPCHummockMetaClient::new(
                 MetaClient::new(meta_address).await?,
@@ -178,6 +179,9 @@ async fn get_state_store_impl(opts: &Opts) -> Result<StateStoreImpl> {
 fn preprocess_options(opts: &mut Opts) {
     if opts.reads < 0 {
         opts.reads = opts.num;
+    }
+    if opts.scans < 0 {
+        opts.scans = opts.num;
     }
     if opts.deletes < 0 {
         opts.deletes = opts.num;

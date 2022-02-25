@@ -2,9 +2,9 @@ use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::Op::*;
 use risingwave_common::array::Row;
-use risingwave_common::catalog::{Schema, TableId};
+use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::try_match_expand;
-use risingwave_common::util::sort_util::{fetch_orders, OrderType};
+use risingwave_common::util::sort_util::OrderPair;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::{Keyspace, StateStore};
@@ -15,12 +15,13 @@ use crate::executor::{
 };
 use crate::task::{ExecutorParams, StreamManagerCore};
 
-/// `MaterializeExecutor` writes data to a row-based memtable, so that data could
-/// be queried by the AP engine.
+/// `MaterializeExecutor` materializes changes in stream into a materialized view on storage.
 pub struct MaterializeExecutor<S: StateStore> {
     input: Box<dyn Executor>,
-    schema: Schema,
+
     local_state: ManagedMViewState<S>,
+
+    /// Columns of primary keys
     pk_columns: Vec<usize>,
 
     /// Identity string
@@ -52,19 +53,16 @@ impl<S: StateStore> MaterializeExecutor<S> {
         store: S,
     ) -> Result<Box<dyn Executor>> {
         let table_id = TableId::from(&node.table_ref_id);
-        let columns = node.get_column_descs();
-        let pks = node
-            .pk_indices
+        let keys = node
+            .column_orders
             .iter()
-            .map(|key| *key as usize)
-            .collect::<Vec<_>>();
-
-        let column_orders = node.get_column_orders();
-        let order_pairs = fetch_orders(column_orders).unwrap();
-        let orderings = order_pairs
+            .map(OrderPair::from_prost)
+            .collect();
+        let column_ids = node
+            .column_ids
             .iter()
-            .map(|order| order.order_type)
-            .collect::<Vec<_>>();
+            .map(|id| ColumnId::from(*id))
+            .collect();
 
         let keyspace = if node.associated_table_ref_id.is_some() {
             // share the keyspace between mview and table v2
@@ -77,9 +75,8 @@ impl<S: StateStore> MaterializeExecutor<S> {
         Ok(Box::new(MaterializeExecutor::new(
             params.input.remove(0),
             keyspace,
-            Schema::try_from(columns)?,
-            pks,
-            orderings,
+            keys,
+            column_ids,
             params.executor_id,
             params.op_info,
         )))
@@ -88,21 +85,15 @@ impl<S: StateStore> MaterializeExecutor<S> {
     pub fn new(
         input: Box<dyn Executor>,
         keyspace: Keyspace<S>,
-        schema: Schema,
-        pk_columns: Vec<usize>,
-        orderings: Vec<OrderType>,
+        keys: Vec<OrderPair>,
+        column_ids: Vec<ColumnId>,
         executor_id: u64,
         op_info: String,
     ) -> Self {
+        let pk_columns = keys.iter().map(|k| k.column_idx).collect();
         Self {
             input,
-            local_state: ManagedMViewState::new(
-                keyspace,
-                schema.clone(),
-                pk_columns.clone(),
-                orderings,
-            ),
-            schema,
+            local_state: ManagedMViewState::new(keyspace, column_ids, keys),
             pk_columns,
             identity: format!("MaterializeExecutor {:X}", executor_id),
             op_info,
@@ -128,7 +119,7 @@ impl<S: StateStore> Executor for MaterializeExecutor<S> {
     }
 
     fn schema(&self) -> &Schema {
-        &self.schema
+        self.input.schema()
     }
 
     fn pk_indices(&self) -> PkIndicesRef {
@@ -148,7 +139,6 @@ impl<S: StateStore> std::fmt::Debug for MaterializeExecutor<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MaterializeExecutor")
             .field("input", &self.input)
-            .field("schema", &self.schema)
             .field("pk_columns", &self.pk_columns)
             .finish()
     }
@@ -175,7 +165,7 @@ impl<S: StateStore> SimpleExecutor for MaterializeExecutor<S> {
             let pk_row = Row(self
                 .pk_columns
                 .iter()
-                .map(|c_id| chunk.column_at(*c_id).array_ref().datum_at(idx))
+                .map(|col_idx| chunk.column_at(*col_idx).array_ref().datum_at(idx))
                 .collect_vec());
 
             // assemble row
@@ -204,13 +194,12 @@ mod tests {
     use std::sync::Arc;
 
     use risingwave_common::array::{I32Array, Op, Row};
-    use risingwave_common::catalog::{Schema, TableId};
+    use risingwave_common::catalog::{ColumnId, Schema, TableId};
     use risingwave_common::column_nonnull;
     use risingwave_common::util::downcast_arc;
-    use risingwave_common::util::sort_util::OrderType;
+    use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType;
-    use risingwave_pb::plan::column_desc::ColumnEncodingType;
     use risingwave_pb::plan::ColumnDesc;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::{SimpleTableManager, TableManager};
@@ -220,7 +209,7 @@ mod tests {
     use crate::executor::*;
 
     #[tokio::test]
-    async fn test_sink() {
+    async fn test_materialize_executor() {
         // Prepare storage and memtable.
         let store = MemoryStateStore::new();
         let store_mgr = Arc::new(SimpleTableManager::new(StateStoreImpl::MemoryStateStore(
@@ -234,7 +223,6 @@ mod tests {
                     type_name: TypeName::Int32 as i32,
                     ..Default::default()
                 }),
-                encoding: ColumnEncodingType::Raw as i32,
                 name: "v1".to_string(),
                 column_id: 0,
                 ..Default::default()
@@ -244,12 +232,15 @@ mod tests {
                     type_name: TypeName::Int32 as i32,
                     ..Default::default()
                 }),
-                encoding: ColumnEncodingType::Raw as i32,
                 name: "v2".to_string(),
                 column_id: 1,
                 ..Default::default()
             },
         ];
+        let column_ids = columns
+            .iter()
+            .map(|c| ColumnId::from(c.column_id))
+            .collect();
         let pks = vec![0_usize];
         let orderings = vec![OrderType::Ascending];
 
@@ -287,12 +278,11 @@ mod tests {
             ],
         );
 
-        let mut sink_executor = Box::new(MaterializeExecutor::new(
+        let mut materialize_executor = Box::new(MaterializeExecutor::new(
             Box::new(source),
             Keyspace::table_root(store, &table_id),
-            schema,
-            pks,
-            vec![OrderType::Ascending],
+            vec![OrderPair::new(0, OrderType::Ascending)],
+            column_ids,
             1,
             "MaterializeExecutor".to_string(),
         ));
@@ -302,26 +292,24 @@ mod tests {
         )
         .unwrap();
 
-        sink_executor.next().await.unwrap();
+        materialize_executor.next().await.unwrap();
         let epoch = u64::MAX;
         // First stream chunk. We check the existence of (3) -> (3,6)
-        match sink_executor.next().await.unwrap() {
+        match materialize_executor.next().await.unwrap() {
             Message::Barrier(_) => {
                 let datum = table
                     .get(Row(vec![Some(3_i32.into())]), 1, epoch)
                     .await
                     .unwrap()
                     .unwrap();
-                // Dirty trick to assert_eq between (&int32 and integer).
-                let d_value = datum.unwrap().as_int32() + 1;
-                assert_eq!(d_value, 7);
+                assert_eq!(*datum.unwrap().as_int32(), 6_i32);
             }
             _ => unreachable!(),
         }
 
-        sink_executor.next().await.unwrap();
+        materialize_executor.next().await.unwrap();
         // Second stream chunk. We check the existence of (7) -> (7,8)
-        match sink_executor.next().await.unwrap() {
+        match materialize_executor.next().await.unwrap() {
             Message::Barrier(_) => {
                 let datum = table
                     .get(Row(vec![Some(7_i32.into())]), 1, epoch)

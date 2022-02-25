@@ -14,7 +14,7 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_common::util::encoding_for_comparison::{encode_chunk, is_type_encodable};
 use risingwave_common::util::sort_util::{
-    compare_two_row, fetch_orders, HeapElem, OrderPair, K_PROCESSING_WINDOW_SIZE,
+    compare_two_row, HeapElem, OrderPair, K_PROCESSING_WINDOW_SIZE,
 };
 use risingwave_pb::plan::plan_node::NodeBody;
 
@@ -43,7 +43,11 @@ impl BoxedExecutorBuilder for OrderByExecutor {
             NodeBody::OrderBy
         )?;
 
-        let order_pairs = fetch_orders(order_by_node.get_column_orders()).unwrap();
+        let order_pairs = order_by_node
+            .column_orders
+            .iter()
+            .map(OrderPair::from_prost)
+            .collect();
         if let Some(child_plan) = source.plan_node.get_children().get(0) {
             let child = source.clone_for_plan(child_plan).build()?;
             return Ok(Box::new(Self {

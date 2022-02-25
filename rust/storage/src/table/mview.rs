@@ -8,7 +8,7 @@ use risingwave_common::catalog::{ColumnId, Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::Datum;
 use risingwave_common::util::ordered::*;
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::sort_util::{OrderPair, OrderType};
 
 use super::TableIterRef;
 use crate::table::{ScannableTable, TableIter};
@@ -25,7 +25,7 @@ pub struct MViewTable<S: StateStore> {
 
     pk_columns: Vec<usize>,
 
-    sort_key_serializer: OrderedRowsSerializer,
+    sort_key_serializer: OrderedRowSerializer,
 }
 
 impl<S: StateStore> std::fmt::Debug for MViewTable<S> {
@@ -48,6 +48,7 @@ impl<S: StateStore> MViewTable<S> {
         let order_pairs = orderings
             .into_iter()
             .zip_eq(pk_columns.clone().into_iter())
+            .map(|(order, index)| OrderPair::new(index, order))
             .collect::<Vec<_>>();
 
         let column_descs = schema
@@ -66,7 +67,7 @@ impl<S: StateStore> MViewTable<S> {
             schema,
             column_descs,
             pk_columns,
-            sort_key_serializer: OrderedRowsSerializer::new(order_pairs),
+            sort_key_serializer: OrderedRowSerializer::new(order_pairs),
         }
     }
 
@@ -83,14 +84,14 @@ impl<S: StateStore> MViewTable<S> {
         // row id will be inserted at first column in `InsertExecutor`
         // FIXME: should we check `is_primary` in pb `ColumnDesc` after we support pk?
         let pk_columns = vec![0];
-        let order_pairs = vec![(OrderType::Ascending, 0)];
+        let order_pairs = vec![OrderPair::new(0, OrderType::Ascending)];
 
         Self {
             keyspace,
             schema,
             column_descs,
             pk_columns,
-            sort_key_serializer: OrderedRowsSerializer::new(order_pairs),
+            sort_key_serializer: OrderedRowSerializer::new(order_pairs),
         }
     }
 
@@ -113,6 +114,7 @@ impl<S: StateStore> MViewTable<S> {
 
     // TODO(MrCroxx): More interfaces are needed besides cell get.
     // The returned Datum is from a snapshot corresponding to the given `epoch`
+    // TODO(eric): remove this...
     pub async fn get(&self, pk: Row, cell_idx: usize, epoch: u64) -> Result<Option<Datum>> {
         debug_assert!(cell_idx < self.schema.len());
         // TODO(MrCroxx): More efficient encoding is needed.
@@ -122,7 +124,7 @@ impl<S: StateStore> MViewTable<S> {
             .get(
                 &[
                     &serialize_pk(&pk, &self.sort_key_serializer)?[..],
-                    &serialize_cell_idx(cell_idx as u32)?[..],
+                    &serialize_cell_idx(cell_idx as i32)?[..],
                 ]
                 .concat(),
                 epoch,
@@ -169,10 +171,7 @@ impl<'a, S: StateStore> MViewTableIter<S> {
         pk_columns: Vec<usize>,
         epoch: u64,
     ) -> Result<Self> {
-        // The table might be updated from other compute nodes, and we are not aware of the latest
-        // version in Hummock's local version manager.
-        // TODO: remove this after we implement periodical version updating.
-        keyspace.state_store().update_local_version().await?;
+        keyspace.state_store().wait_epoch(epoch).await;
 
         let iter = Self {
             keyspace,

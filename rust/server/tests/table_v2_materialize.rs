@@ -3,13 +3,12 @@ use std::sync::Arc;
 use risingwave_batch::executor::{
     CreateTableExecutor, Executor as BatchExecutor, InsertExecutor, RowSeqScanExecutor,
 };
-use risingwave_common::array::column::Column;
 use risingwave_common::array::{Array, DataChunk, F64Array};
-use risingwave_common::array_nonnull;
 use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
+use risingwave_common::column_nonnull;
 use risingwave_common::error::Result;
 use risingwave_common::types::IntoOrdered;
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::plan::ColumnDesc;
@@ -145,17 +144,14 @@ async fn test_table_v2_materialize() -> Result<()> {
     let mut materialize = MaterializeExecutor::new(
         Box::new(stream_source),
         keyspace.clone(),
-        all_schema.clone(),
-        vec![1],
-        vec![OrderType::Ascending],
+        vec![OrderPair::new(1, OrderType::Ascending)],
+        all_column_ids,
         2,
         "MaterializeExecutor".to_string(),
     );
 
     // Add some data using `InsertExecutor`, assuming we are inserting into the "mv"
-    let columns = vec![Column::new(Arc::new(
-        array_nonnull! { F64Array, [1.14, 5.14] }.into(),
-    ))];
+    let columns = vec![column_nonnull! { F64Array, [1.14, 5.14] }];
     let chunk = DataChunk::builder().columns(columns.clone()).build();
     let insert_inner = SingleChunkExecutor::new(chunk, all_schema);
     let mut insert =
@@ -167,7 +163,7 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     // Since we have not polled `Materialize`, we cannot scan anything from this table
     let table = table_manager.get_table(&mview_id)?;
-    let data_column_ids = vec![0];
+    let data_column_ids = vec![0, 1];
 
     let mut scan = RowSeqScanExecutor::new(
         table.clone(),
@@ -175,6 +171,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         1024,
         true,
         "RowSeqExecutor".to_string(),
+        u64::MAX,
     );
     scan.open().await?;
     assert!(scan.next().await?.is_none());
@@ -211,6 +208,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         1024,
         true,
         "RowSeqScanExecutor".to_string(),
+        u64::MAX,
     );
     scan.open().await?;
     let c = scan.next().await?.unwrap();

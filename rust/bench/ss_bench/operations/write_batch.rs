@@ -68,7 +68,12 @@ impl Operations {
         mut batches: Vec<Batch>,
     ) -> PerfMetrics {
         let batches_len = batches.len();
-        let size = size_of_val(&batches);
+        // TODO(Ting Sun): use sizes from metrics directly
+        let size = batches
+            .iter()
+            .flat_map(|batch| batch.iter())
+            .map(|(key, value)| size_of_val(key) + size_of_val(value))
+            .sum::<usize>();
 
         // partitioned these batches for each concurrency
         let mut grouped_batches = vec![vec![]; opts.concurrency_num as usize];

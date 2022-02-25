@@ -32,12 +32,11 @@ mod tests {
     use crate::test_utils::LocalFrontend;
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_drop_table_handler() {
-        let meta = LocalMeta::start().await;
+        let meta = LocalMeta::start(12003).await;
         let sql_create_table = "create table t (v1 smallint);";
         let sql_drop_table = "drop table t;";
-        let frontend = LocalFrontend::new().await;
+        let frontend = LocalFrontend::new(&meta).await;
         frontend.run_sql(sql_create_table).await.unwrap();
         frontend.run_sql(sql_drop_table).await.unwrap();
 

@@ -6,12 +6,12 @@ use risingwave_pb::plan::{ColumnOrder, OrderType as ProstOrderType};
 
 use crate::array::{Array, ArrayImpl, DataChunk, DataChunkRef};
 use crate::error::ErrorCode::InternalError;
-use crate::error::{Result, RwError};
+use crate::error::Result;
 use crate::types::{ScalarPartialOrd, ScalarRef};
 
 pub const K_PROCESSING_WINDOW_SIZE: usize = 1024;
 
-#[derive(PartialEq, Copy, Clone, Debug)]
+#[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub enum OrderType {
     Ascending,
     Descending,
@@ -27,10 +27,28 @@ impl OrderType {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OrderPair {
-    pub order_type: OrderType,
     pub column_idx: usize,
+    pub order_type: OrderType,
+}
+
+impl OrderPair {
+    pub fn new(column_idx: usize, order_type: OrderType) -> Self {
+        Self {
+            column_idx,
+            order_type,
+        }
+    }
+
+    pub fn from_prost(column_order: &ColumnOrder) -> Self {
+        let order_type: ProstOrderType = ProstOrderType::from_i32(column_order.order_type).unwrap();
+        let input_ref: &InputRefExpr = column_order.get_input_ref().unwrap();
+        OrderPair {
+            order_type: OrderType::from_prost(&order_type),
+            column_idx: input_ref.column_idx as usize,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -158,23 +176,4 @@ pub fn compare_two_row(
         }
     }
     Ok(Ordering::Equal)
-}
-
-pub fn fetch_orders(column_orders: &[ColumnOrder]) -> Result<Vec<OrderPair>> {
-    let mut order_pairs = Vec::<OrderPair>::new();
-    for column_order in column_orders {
-        let order_type: ProstOrderType = column_order.get_order_type()?;
-        let input_ref: &InputRefExpr = column_order.get_input_ref()?;
-        order_pairs.push(OrderPair {
-            order_type: match order_type {
-                ProstOrderType::Ascending => Ok(OrderType::Ascending),
-                ProstOrderType::Descending => Ok(OrderType::Descending),
-                ProstOrderType::Invalid => Err(RwError::from(InternalError(String::from(
-                    "Invalid OrderType",
-                )))),
-            }?,
-            column_idx: input_ref.column_idx as usize,
-        });
-    }
-    Ok(order_pairs)
 }

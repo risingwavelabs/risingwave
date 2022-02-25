@@ -14,8 +14,8 @@ use risingwave_pb::meta::drop_request::CatalogId;
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
 use risingwave_pb::meta::{
-    AddWorkerNodeRequest, CreateRequest, Database, DropRequest, HeartbeatRequest,
-    ListAllNodesRequest, Schema, SubscribeRequest, SubscribeResponse, Table,
+    ActivateWorkerNodeRequest, AddWorkerNodeRequest, CreateRequest, Database, DropRequest,
+    HeartbeatRequest, ListAllNodesRequest, Schema, SubscribeRequest, SubscribeResponse, Table,
 };
 use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
 use tonic::transport::{Channel, Endpoint};
@@ -27,6 +27,7 @@ type SchemaId = i32;
 /// Client to meta server. Cloning the instance is lightweight.
 #[derive(Clone)]
 pub struct MetaClient {
+    worker_id_ref: Option<u32>,
     pub cluster_client: ClusterServiceClient<Channel>,
     pub heartbeat_client: HeartbeatServiceClient<Channel>,
     pub catalog_client: CatalogServiceClient<Channel>,
@@ -49,12 +50,21 @@ impl MetaClient {
         let hummock_client = HummockManagerServiceClient::new(channel.clone());
         let notification_client = NotificationServiceClient::new(channel);
         Ok(Self {
+            worker_id_ref: None,
             cluster_client,
             heartbeat_client,
             catalog_client,
             hummock_client,
             notification_client,
         })
+    }
+
+    pub fn set_worker_id(&mut self, worker_id: u32) {
+        self.worker_id_ref = Some(worker_id);
+    }
+
+    pub fn worker_id(&self) -> u32 {
+        self.worker_id_ref.expect("worker node id is not set.")
     }
 
     /// Subscribe to notification from meta.
@@ -81,8 +91,8 @@ impl MetaClient {
         Ok(rx)
     }
 
-    /// Register the current node to the cluster and return the corresponding worker id.
-    pub async fn register(&self, addr: SocketAddr, worker_type: WorkerType) -> Result<u32> {
+    /// Register the current node to the cluster and set the corresponding worker id.
+    pub async fn register(&mut self, addr: SocketAddr, worker_type: WorkerType) -> Result<u32> {
         let host_address = HostAddress {
             host: addr.ip().to_string(),
             port: addr.port() as i32,
@@ -100,7 +110,25 @@ impl MetaClient {
             .into_inner();
         let worker_node =
             try_match_expand!(resp.node, Some, "AddWorkerNodeResponse::node is empty")?;
+        self.set_worker_id(worker_node.id);
         Ok(worker_node.id)
+    }
+
+    /// Activate the current node in cluster to confirm it's ready to serve.
+    pub async fn activate(&self, addr: SocketAddr) -> Result<()> {
+        let host_address = HostAddress {
+            host: addr.ip().to_string(),
+            port: addr.port() as i32,
+        };
+        let request = ActivateWorkerNodeRequest {
+            host: Some(host_address),
+        };
+        self.cluster_client
+            .to_owned()
+            .activate_worker_node(request)
+            .await
+            .to_rw_result()?;
+        Ok(())
     }
 
     /// Send heartbeat signal to meta service.
@@ -177,9 +205,17 @@ impl MetaClient {
     }
 
     /// Get live nodes with the specified type.
-    pub async fn list_all_nodes(&self, worker_type: WorkerType) -> Result<Vec<WorkerNode>> {
+    /// # Arguments
+    /// * `worker_type` `WorkerType` of the nodes
+    /// * `include_starting_nodes` Whether to include nodes still being created
+    pub async fn list_all_nodes(
+        &self,
+        worker_type: WorkerType,
+        include_starting_nodes: bool,
+    ) -> Result<Vec<WorkerNode>> {
         let request = ListAllNodesRequest {
             worker_type: worker_type as i32,
+            include_starting_nodes,
         };
         let resp = self
             .cluster_client

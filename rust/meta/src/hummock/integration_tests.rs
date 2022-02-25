@@ -28,7 +28,11 @@ async fn get_hummock_meta_client() -> MockHummockMetaClient {
         port: 80,
     };
     let (worker_node, _) = cluster_manager
-        .add_worker_node(fake_host_address, WorkerType::ComputeNode)
+        .add_worker_node(fake_host_address.clone(), WorkerType::ComputeNode)
+        .await
+        .unwrap();
+    cluster_manager
+        .activate_worker_node(fake_host_address)
         .await
         .unwrap();
     MockHummockMetaClient::new(hummock_manager, worker_node.id)
