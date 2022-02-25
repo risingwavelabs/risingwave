@@ -31,6 +31,7 @@
 - `Hummock+S3`
   
   - Format: `hummock+s3://bucket`
+  - Example: `hummock+s3://s3-ut`
   - Notice: some environment variables are required to be set
     - `AWS_REGION`
     - `AWS_ACCESS_KEY_ID`
