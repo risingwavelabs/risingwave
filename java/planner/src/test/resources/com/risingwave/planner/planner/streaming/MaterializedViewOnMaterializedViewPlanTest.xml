@@ -13,8 +13,6 @@ RwStreamMaterializedView(name=[m1])
       RwStreamBatchPlan(table=[[test_schema, t1]], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.2]])
 ]]>
         </Resource>
-        <Resource name="json" path="streaming/materialized_view_on_materialized_view_plan_test/q1">
-        </Resource>>
         <Resource name="primaryKey">
             <![CDATA[
 [2]
@@ -36,8 +34,6 @@ RwStreamMaterializedView(name=[m2])
       RwStreamBatchPlan(table=[[test_schema, t1]], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.2]])
 ]]>
         </Resource>
-        <Resource name="json" path="streaming/materialized_view_on_materialized_view_plan_test/q2">
-        </Resource>>
         <Resource name="primaryKey">
             <![CDATA[
 [2]
@@ -59,8 +55,6 @@ RwStreamMaterializedView(name=[m3])
       RwStreamChain(all=[true], tableId=[0.0.4], primaryKeyIndices=[[2]], columnIds=[[0.0.4.0, 0.0.4.1, 0.0.4.2]])
         RwStreamBatchPlan(table=[[test_schema, m1]], tableId=[0.0.4], primaryKeyIndices=[[2]], columnIds=[[0.0.4.0, 0.0.4.1, 0.0.4.2]])]]>
         </Resource>
-        <Resource name="json" path="streaming/materialized_view_on_materialized_view_plan_test/q3">
-        </Resource>>
         <Resource name="primaryKey">
             <![CDATA[
 [2, 3, 4]
@@ -85,8 +79,6 @@ RwStreamMaterializedView(name=[m4])
       RwStreamChain(all=[true], tableId=[0.0.5], primaryKeyIndices=[[2]], columnIds=[[0.0.5.0, 0.0.5.1, 0.0.5.2]])
         RwStreamBatchPlan(table=[[test_schema, m2]], tableId=[0.0.5], primaryKeyIndices=[[2]], columnIds=[[0.0.5.0, 0.0.5.1, 0.0.5.2]])]]>
         </Resource>
-        <Resource name="json" path="streaming/materialized_view_on_materialized_view_plan_test/q4">
-        </Resource>>
         <Resource name="primaryKey">
             <![CDATA[
 [2, 5]
@@ -105,8 +97,6 @@ RwStreamMaterializedView(name=[m5])
   RwStreamTableSource(table=[[test_schema, t2]], columns=[v2,v3,v1,_row_id])
 ]]>
         </Resource>
-        <Resource name="json" path="streaming/materialized_view_on_materialized_view_plan_test/q5">
-        </Resource>>
         <Resource name="primaryKey">
             <![CDATA[
 [3]
@@ -127,8 +117,6 @@ RwStreamMaterializedView(name=[m6])
       RwStreamChain(all=[true], tableId=[0.0.8], primaryKeyIndices=[[2]], columnIds=[[0.0.8.2, 0.0.8.1, 0.0.8.3]])
         RwStreamBatchPlan(table=[[test_schema, m5]], tableId=[0.0.8], primaryKeyIndices=[[2]], columnIds=[[0.0.8.2, 0.0.8.1, 0.0.8.3]])]]>
         </Resource>
-        <Resource name="json" path="streaming/materialized_view_on_materialized_view_plan_test/q6">
-        </Resource>>
         <Resource name="primaryKey">
             <![CDATA[
 [2]
@@ -149,8 +137,6 @@ RwStreamMaterializedView(name=[m7])
       RwStreamChain(all=[true], tableId=[0.0.8], primaryKeyIndices=[[2]], columnIds=[[0.0.8.0, 0.0.8.2, 0.0.8.3]])
         RwStreamBatchPlan(table=[[test_schema, m5]], tableId=[0.0.8], primaryKeyIndices=[[2]], columnIds=[[0.0.8.0, 0.0.8.2, 0.0.8.3]])]]>
         </Resource>
-        <Resource name="json" path="streaming/materialized_view_on_materialized_view_plan_test/q7">
-        </Resource>>
         <Resource name="primaryKey">
             <![CDATA[
 [1]
@@ -169,8 +155,6 @@ RwStreamMaterializedView(name=[m8])
   RwStreamTableSource(table=[[test_schema, t2]], columns=[v1,v2,v3,_row_id])
 ]]>
         </Resource>
-        <Resource name="json" path="streaming/materialized_view_on_materialized_view_plan_test/q8">
-        </Resource>>
         <Resource name="primaryKey">
             <![CDATA[
 [3]
@@ -191,8 +175,6 @@ RwStreamMaterializedView(name=[m9])
       RwStreamChain(all=[true], tableId=[0.0.11], primaryKeyIndices=[[2]], columnIds=[[0.0.11.0, 0.0.11.1, 0.0.11.3]])
         RwStreamBatchPlan(table=[[test_schema, m8]], tableId=[0.0.11], primaryKeyIndices=[[2]], columnIds=[[0.0.11.0, 0.0.11.1, 0.0.11.3]])]]>
         </Resource>
-        <Resource name="json" path="streaming/materialized_view_on_materialized_view_plan_test/q9">
-        </Resource>>
         <Resource name="primaryKey">
             <![CDATA[
 [2, 3, 4, 5]
