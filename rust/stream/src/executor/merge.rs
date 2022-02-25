@@ -455,7 +455,7 @@ mod tests {
     async fn test_stream_exchange_client() {
         let rpc_called = Arc::new(AtomicBool::new(false));
         let server_run = Arc::new(AtomicBool::new(false));
-        let addr = "127.0.0.1:12346".parse().unwrap();
+        let addr = "127.0.0.1:12348".parse().unwrap();
 
         // Start a server.
         let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();

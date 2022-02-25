@@ -42,6 +42,26 @@ impl FrontendEnv {
         })
     }
 
+    pub async fn with_meta_client(meta_client: MetaClient, opts: &FrontendOpts) -> Result<Self> {
+        meta_client
+            .register(opts.host.parse().unwrap(), WorkerType::Frontend)
+            .await
+            .unwrap();
+
+        // Create default database when env init.
+        let catalog_manager = CatalogConnector::new(meta_client.clone());
+        catalog_manager
+            .create_database(DEFAULT_DATABASE_NAME)
+            .await?;
+        catalog_manager
+            .create_schema(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME)
+            .await?;
+        Ok(Self {
+            meta_client,
+            catalog_manager,
+        })
+    }
+
     pub fn meta_client(&self) -> &MetaClient {
         &self.meta_client
     }
@@ -121,10 +141,10 @@ mod tests {
 
         use super::*;
 
-        let meta = LocalMeta::start().await;
+        let meta = LocalMeta::start(12008).await;
         let args: [OsString; 0] = []; // No argument.
         let mut opts = FrontendOpts::parse_from(args);
-        opts.meta_addr = format!("http://{}", LocalMeta::meta_addr());
+        opts.meta_addr = format!("http://{}", meta.meta_addr());
         let mgr = RwSessionManager::new(&opts).await.unwrap();
         // Check default database is created.
         assert!(mgr

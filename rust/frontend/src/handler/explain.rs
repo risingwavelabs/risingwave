@@ -47,10 +47,9 @@ mod tests {
     use risingwave_sqlparser::parser::Parser;
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_handle_explain() {
-        let meta = risingwave_meta::test_utils::LocalMeta::start().await;
-        let frontend = crate::test_utils::LocalFrontend::new().await;
+        let meta = risingwave_meta::test_utils::LocalMeta::start(12004).await;
+        let frontend = crate::test_utils::LocalFrontend::new(&meta).await;
 
         let sql = "values (11, 22), (33+(1+2), 44);";
         let stmt = Parser::parse_sql(sql).unwrap().into_iter().next().unwrap();
@@ -66,10 +65,9 @@ mod tests {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_handle_explain_scan() {
-        let meta = risingwave_meta::test_utils::LocalMeta::start().await;
-        let frontend = crate::test_utils::LocalFrontend::new().await;
+        let meta = risingwave_meta::test_utils::LocalMeta::start(12005).await;
+        let frontend = crate::test_utils::LocalFrontend::new(&meta).await;
 
         let sql_scan = "explain select * from t";
 
@@ -91,10 +89,9 @@ mod tests {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_handle_explain_insert() {
-        let meta = risingwave_meta::test_utils::LocalMeta::start().await;
-        let frontend = crate::test_utils::LocalFrontend::new().await;
+        let meta = risingwave_meta::test_utils::LocalMeta::start(12006).await;
+        let frontend = crate::test_utils::LocalFrontend::new(&meta).await;
 
         frontend
             .run_sql("create table t (v1 int, v2 int)")
