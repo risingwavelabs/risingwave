@@ -21,7 +21,7 @@ pub struct ManagedMViewState<S: StateStore> {
     keys: Vec<OrderPair>,
 
     /// Serializer to serialize keys from input rows
-    key_serializer: OrderedRowsSerializer,
+    key_serializer: OrderedRowSerializer,
 
     /// Cached key/values
     cache: HashMap<Row, FlushStatus<Row>>,
@@ -41,7 +41,7 @@ impl<S: StateStore> ManagedMViewState<S> {
             column_ids,
             cache: HashMap::new(),
             keys,
-            key_serializer: OrderedRowsSerializer::new(keys_for_serializer),
+            key_serializer: OrderedRowSerializer::new(keys_for_serializer),
         }
     }
 
