@@ -43,14 +43,16 @@ message StreamSourceInfo {
   map<string, string> properties = 2;
   RowFormatType row_format = 3;
   string row_schema_location = 4;
+  int32 row_id_index = 5;
 }
 
 message TableSourceInfo {}
 
 message MaterializedViewInfo {
-  bool is_associated = 1;
+  TableRefId associated_table_ref_id = 1;
   repeated ColumnOrder column_orders = 2;
-  repeated TableRefId dependent_tables = 3;
+  repeated int32 pk_indices = 3;
+  repeated TableRefId dependent_tables = 4;
 }
 
 message RowSeqScanNode {
@@ -99,10 +101,10 @@ message CreateTableNode {
   // primarykey_col_ids, dist_type, distkey_col_id, append_only
 
   // We re-use the CreateTableNode for creating materialized views.
-  bool is_materialized_view = 4;
-  TableRefId associated_table_ref_id = 5;
-  repeated int32 pk_indices = 6;
-  repeated ColumnOrder column_orders = 7;
+  oneof info {
+    TableSourceInfo table_source = 3;
+    MaterializedViewInfo materialized_view = 4;
+  }
 }
 
 enum OrderType {
@@ -142,10 +144,8 @@ enum RowFormatType {
 message CreateSourceNode {
   TableRefId table_ref_id = 1;
   repeated ColumnDesc column_descs = 2;
-  RowFormatType format = 3;
-  map<string, string> properties = 4;
-  string schema_location = 5;
-  int32 row_id_index = 6;
+
+  StreamSourceInfo info = 3;
 }
 
 message DropSourceNode {
