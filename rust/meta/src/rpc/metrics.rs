@@ -4,18 +4,28 @@ use std::sync::Arc;
 use hyper::{Body, Request, Response};
 use itertools::Itertools;
 use prometheus::{
-    histogram_opts, register_histogram_vec_with_registry, Encoder, HistogramVec, Registry,
-    TextEncoder, DEFAULT_BUCKETS,
+    histogram_opts, register_histogram_vec_with_registry, register_histogram_with_registry,
+    Encoder, Histogram, HistogramVec, Registry, TextEncoder, DEFAULT_BUCKETS,
 };
 use tower::make::Shared;
 use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
 
+pub const BARRIER_BUCKETS: &[f64; 36] = &[
+    0.000005, 0.00001, 0.000025, 0.00005, 0.0001, 0.00025, 0.0005, 0.001, 0.0025, 0.005, 0.01,
+    0.025, 0.05, 0.1, 0.25, 0.5, 0.75, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6,
+    2.7, 2.8, 2.9, 3.0, 3.5, 4.0, 5.0,
+];
 pub struct MetaMetrics {
     registry: Registry,
 
     /// gRPC latency of meta services
     pub grpc_latency: HistogramVec,
+    pub barrier_latency: Histogram,
+}
+lazy_static::lazy_static! {
+  pub static ref
+  DEFAULT_META_STATS: Arc<MetaMetrics> = Arc::new(MetaMetrics::new());
 }
 
 impl MetaMetrics {
@@ -25,13 +35,23 @@ impl MetaMetrics {
         let opts = histogram_opts!(
             "meta_grpc_duration_seconds",
             "gRPC latency of meta services",
-            buckets.iter().map(|x| *x * 0.1).collect_vec()
+            buckets.iter().map(|x| *x * 1.0).collect_vec()
         );
         let grpc_latency =
             register_histogram_vec_with_registry!(opts, &["path"], registry).unwrap();
+
+        let buckets = BARRIER_BUCKETS;
+        let opts = histogram_opts!(
+            "meta_barrier_duration_seconds",
+            "barrier latency ",
+            buckets.iter().map(|x| *x * 0.1).collect_vec()
+        );
+        let barrier_latency = register_histogram_with_registry!(opts, registry).unwrap();
+
         Self {
             registry,
             grpc_latency,
+            barrier_latency,
         }
     }
 

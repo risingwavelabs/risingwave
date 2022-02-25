@@ -13,7 +13,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 
 use super::intercept::MetricsMiddlewareLayer;
-use super::metrics::MetaMetrics;
+use super::metrics::DEFAULT_META_STATS;
 use super::service::notification_service::NotificationServiceImpl;
 use crate::barrier::BarrierManager;
 use crate::cluster::StoredClusterManager;
@@ -113,7 +113,7 @@ pub async fn rpc_serve(
     );
     let hummock_srv = HummockServiceImpl::new(hummock_manager);
     let notification_srv = NotificationServiceImpl::new(notification_manager);
-    let meta_metrics = Arc::new(MetaMetrics::new());
+    let meta_metrics = DEFAULT_META_STATS.clone();
 
     if let Some(prometheus_addr) = prometheus_addr {
         meta_metrics.boot_metrics_service(prometheus_addr);

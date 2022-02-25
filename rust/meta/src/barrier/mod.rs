@@ -21,6 +21,7 @@ use self::info::BarrierActorInfo;
 use crate::cluster::{StoredClusterManager, StoredClusterManagerRef};
 use crate::hummock::HummockManager;
 use crate::manager::{EpochGeneratorRef, MetaSrvEnv, StreamClientsRef};
+use crate::rpc::metrics::{MetaMetrics, DEFAULT_META_STATS};
 use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
 
@@ -60,6 +61,7 @@ struct ScheduledBarriers {
 
     /// When `buffer` is not empty anymore, all subscribers of this watcher will be notified.
     changed_tx: watch::Sender<()>,
+    metrics: Arc<MetaMetrics>,
 }
 
 impl ScheduledBarriers {
@@ -67,6 +69,7 @@ impl ScheduledBarriers {
         Self {
             buffer: RwLock::new(VecDeque::new()),
             changed_tx: watch::channel(()).0,
+            metrics: DEFAULT_META_STATS.clone(),
         }
     }
 
@@ -247,8 +250,14 @@ where
 
             let mut notifiers = notifiers;
             notifiers.iter_mut().for_each(Notifier::notify_to_send);
+            let timer = self
+                .scheduled_barriers
+                .metrics
+                .barrier_latency
+                .start_timer();
             // wait all barriers collected
             let collect_result = try_join_all(collect_futures).await;
+            timer.observe_duration();
             // TODO #96: This is a temporary implementation of commit epoch. Refactor after hummock
             // shared buffer is deployed.
             match collect_result {
