@@ -11,6 +11,7 @@ use crate::hummock::hummock_meta_client::RPCHummockMetaClient;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::HummockStateStore;
 use crate::memory::MemoryStateStore;
+use crate::object::S3ObjectStore;
 use crate::rocksdb_local::RocksDBStateStore;
 use crate::tikv::TikvStateStore;
 use crate::write_batch::WriteBatch;
@@ -158,12 +159,11 @@ impl StateStoreImpl {
                 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 
                 use crate::hummock::{HummockOptions, HummockStorage};
-                use crate::object::S3ObjectStore;
                 // TODO: initialize those settings in a yaml file or command line instead of
                 // hard-coding (#2165).
-                let object_client = Arc::new(S3ObjectStore::new_with_minio(
-                    minio.strip_prefix("hummock+").unwrap(),
-                ));
+                let object_client = Arc::new(
+                    S3ObjectStore::new_with_minio(minio.strip_prefix("hummock+").unwrap()).await,
+                );
                 let remote_dir = "hummock_001";
                 StateStoreImpl::HummockStateStore(HummockStateStore::new(
                     HummockStorage::new(
@@ -192,12 +192,10 @@ impl StateStoreImpl {
                 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 
                 use crate::hummock::{HummockOptions, HummockStorage};
-                use crate::object::{ConnectionInfo, S3ObjectStore};
-                let s3_test_conn_info = ConnectionInfo::new();
-                let s3_store = Arc::new(S3ObjectStore::new(
-                    s3_test_conn_info,
-                    s3.strip_prefix("hummock+s3://").unwrap().to_string(),
-                ));
+                let s3_store = Arc::new(
+                    S3ObjectStore::new(s3.strip_prefix("hummock+s3://").unwrap().to_string()).await,
+                );
+
                 let remote_dir = "hummock_001";
                 StateStoreImpl::HummockStateStore(HummockStateStore::new(
                     HummockStorage::new(

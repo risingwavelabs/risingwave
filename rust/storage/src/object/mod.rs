@@ -38,7 +38,7 @@ pub trait ObjectStore: Send + Sync {
     /// If objects are PUT using a multipart upload, it’s a good practice to GET them in the same
     /// part sizes (or at least aligned to part boundaries) for best performance.
     /// https://d1.awsstatic.com/whitepapers/AmazonS3BestPractices.pdf?stod_obj2
-    async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> Result<Vec<u8>>;
+    async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> Result<Bytes>;
 
     /// Obtain the object metadata.
     async fn metadata(&self, path: &str) -> Result<ObjectMetadata>;

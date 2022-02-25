@@ -61,7 +61,7 @@ pub fn get_sst_data_path(path: &str, sst_id: HummockSSTableId) -> String {
 async fn get_object_store_file(
     obj_client: Arc<dyn ObjectStore>,
     file_path: &str,
-) -> HummockResult<Vec<u8>> {
+) -> HummockResult<Bytes> {
     obj_client
         .read(file_path, None)
         .await
