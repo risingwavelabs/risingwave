@@ -15,8 +15,6 @@ RwStreamMaterializedView(name=[t1])
           RwStreamBatchPlan(table=[[test_schema, t]], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.3]])
 ]]>
         </Resource>
-        <Resource name="json" path="streaming/materialized_view_plan_test/q1">
-        </Resource>>
     </TestCase>
 
 
@@ -39,8 +37,6 @@ RwStreamMaterializedView(name=[t2])
 [1]
 ]]>
         </Resource>
-        <Resource name="json" path="streaming/materialized_view_plan_test/q2">
-        </Resource>
     </TestCase>
 
 
@@ -59,8 +55,6 @@ RwStreamMaterializedView(name=[t3])
         RwStreamBatchPlan(table=[[test_schema, t]], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.1, 0.0.1.0, 0.0.1.3]])
 ]]>
         </Resource>
-        <Resource name="json" path="streaming/materialized_view_plan_test/q3">
-        </Resource>
     </TestCase>
 
     <TestCase name="query 4">
@@ -77,8 +71,6 @@ RwStreamMaterializedView(name=[t4])
       RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.3]])
         RwStreamBatchPlan(table=[[test_schema, t]], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.3]])
 ]]>
-        </Resource>
-        <Resource name="json" path="streaming/materialized_view_plan_test/q4">
         </Resource>
     </TestCase>
 
@@ -97,8 +89,6 @@ RwStreamMaterializedView(name=[t5])
         RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.3]])
           RwStreamBatchPlan(table=[[test_schema, t]], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.3]])
 ]]>
-        </Resource>
-        <Resource name="json" path="streaming/materialized_view_plan_test/q5">
         </Resource>
     </TestCase>
 
@@ -122,8 +112,6 @@ RwStreamMaterializedView(name=[t6])
 [1]
             ]]>
         </Resource>
-        <Resource name="json" path="streaming/materialized_view_plan_test/q6">
-        </Resource>
     </TestCase>
 
     <TestCase name="query 7">
@@ -146,8 +134,6 @@ RwStreamMaterializedView(name=[t7])
 [1]
             ]]>
         </Resource>
-        <Resource name="json" path="streaming/materialized_view_plan_test/q7">
-        </Resource>
     </TestCase>
     <TestCase name="query 8">
         <Resource name="sql">
@@ -164,8 +150,6 @@ RwStreamMaterializedView(name=[t8])
         RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.3]])
           RwStreamBatchPlan(table=[[test_schema, t]], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.3]])
             ]]>
-        </Resource>
-        <Resource name="json" path="streaming/materialized_view_plan_test/q8">
         </Resource>
     </TestCase>>
 
