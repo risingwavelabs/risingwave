@@ -1,4 +1,5 @@
 use std::ops::RangeBounds;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -6,6 +7,7 @@ use risingwave_common::error::Result;
 
 use super::HummockStorage;
 use crate::hummock::iterator::DirectedUserIterator;
+use crate::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
 use crate::{StateStore, StateStoreIter};
 
 /// A wrapper over [`HummockStorage`] as a state store.
@@ -58,7 +60,7 @@ impl StateStore for HummockStateStore {
         let mut res = DirectedUserIterator::Forward(inner);
         res.rewind().await?;
         timer.observe_duration();
-        Ok(HummockStateStoreIter(res))
+        Ok(HummockStateStoreIter::new(res))
     }
 
     async fn reverse_iter<R, B>(&self, key_range: R, epoch: u64) -> Result<Self::Iter<'_>>
@@ -68,7 +70,9 @@ impl StateStore for HummockStateStore {
     {
         let mut res = self.storage.reverse_range_scan(key_range, epoch).await?;
         res.rewind().await?;
-        Ok(HummockStateStoreIter(DirectedUserIterator::Backward(res)))
+        Ok(HummockStateStoreIter::new(DirectedUserIterator::Backward(
+            res,
+        )))
     }
 
     async fn update_local_version(&self) -> Result<()> {
@@ -77,7 +81,19 @@ impl StateStore for HummockStateStore {
     }
 }
 
-pub struct HummockStateStoreIter<'a>(DirectedUserIterator<'a>);
+pub struct HummockStateStoreIter<'a> {
+    inner: DirectedUserIterator<'a>,
+    stats: Arc<StateStoreStats>,
+}
+
+impl<'a> HummockStateStoreIter<'a> {
+    fn new(inner: DirectedUserIterator<'a>) -> Self {
+        Self {
+            inner,
+            stats: DEFAULT_STATE_STORE_STATS.clone(),
+        }
+    }
+}
 
 #[async_trait]
 impl<'a> StateStoreIter for HummockStateStoreIter<'a> {
@@ -85,7 +101,8 @@ impl<'a> StateStoreIter for HummockStateStoreIter<'a> {
     type Item = (Bytes, Bytes);
 
     async fn next(&mut self) -> Result<Option<Self::Item>> {
-        let iter = &mut self.0;
+        let timer = self.stats.iter_next_latency.start_timer();
+        let iter = &mut self.inner;
 
         if iter.is_valid() {
             let kv = (
@@ -93,6 +110,10 @@ impl<'a> StateStoreIter for HummockStateStoreIter<'a> {
                 Bytes::copy_from_slice(iter.value()),
             );
             iter.next().await?;
+            timer.observe_duration();
+            self.stats
+                .iter_next_size
+                .observe((kv.0.len() + kv.1.len()) as f64);
             Ok(Some(kv))
         } else {
             Ok(None)

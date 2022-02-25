@@ -251,7 +251,7 @@ impl HummockStorage {
         timer.observe_duration();
         self.stats
             .get_value_size
-            .observe((value.as_ref().map(|x| x.len()).unwrap_or(0) + 1) as f64);
+            .observe(value.as_ref().map(|x| x.len()).unwrap_or(0) as f64);
 
         Ok(value)
     }

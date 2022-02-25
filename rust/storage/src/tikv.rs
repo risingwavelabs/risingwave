@@ -1,10 +1,10 @@
 use std::ops::Bound::Excluded;
 use std::ops::{Bound, RangeBounds};
 use std::sync::Arc;
-use std::mem::size_of_val;
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use risingwave_common::array::{InternalError, RwError};
 use risingwave_common::error::{Result, ToRwResult};
 use tikv_client::{BoundRange, KvPair, TransactionClient};
 use tokio::sync::OnceCell;
@@ -53,18 +53,17 @@ impl StateStore for TikvStateStore {
         let res = txn
             .get(key.to_owned())
             .await
-            .map(|x| x.map(Bytes::from))
-            .map_err(anyhow::Error::new);
+            .map_or(Err(RwError::from(InternalError("".into()))), Ok)?;
         timer.observe_duration();
         txn.commit().await.unwrap();
 
         self.stats.get_key_size.observe(key.len() as f64);
-        if res.is_ok() && res.unwrap().is_some() {
+        if res.is_some() {
             self.stats
                 .get_value_size
-                .observe( size_of_val(res.as_ref().unwrap()) as f64);
+                .observe(res.as_ref().unwrap().len() as f64);
         }
-        res.to_rw_result()
+        Ok(res.map(Bytes::from))
     }
 
     async fn scan<R, B>(
@@ -104,6 +103,9 @@ impl StateStore for TikvStateStore {
             let key = Bytes::copy_from_slice(key.as_ref().into());
             let value = Bytes::from(value);
             data.push((key.clone(), value.clone()));
+            self.stats
+                .iter_next_size
+                .observe((key.len() + value.len()) as f64);
             if let Some(limit) = limit {
                 if data.len() >= limit {
                     break;
@@ -115,20 +117,14 @@ impl StateStore for TikvStateStore {
     }
 
     async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>, _epoch: u64) -> Result<()> {
-        self.stats.batched_write_counts.inc();
-        let mut write_batch_size = 0_usize;
-
-        let timer = self.stats.batch_write_latency.start_timer();
         let mut txn = self.client().await.begin_optimistic().await.unwrap();
         for (key, value) in kv_pairs {
-            write_batch_size += size_of_val(key.as_ref());
             match value {
                 Some(value) => {
                     txn.put(tikv_client::Key::from(key.to_vec()), value.to_vec())
                         .await
                         .map_err(anyhow::Error::new)
                         .to_rw_result()?;
-                    write_batch_size += size_of_val(value.as_ref().unwrap());
                 }
                 None => {
                     txn.delete(tikv_client::Key::from(key.to_vec()))
@@ -139,9 +135,6 @@ impl StateStore for TikvStateStore {
             }
         }
         txn.commit().await.unwrap();
-        timer.observe_duration();
-
-        self.stats.batch_write_size.observe(batch_write_size as f64);
         Ok(())
     }
 
@@ -163,6 +156,7 @@ pub struct TikvStateStoreIter {
     key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
     index: usize,
     kv_pair_buffer: Vec<tikv_client::KvPair>,
+    stats: Arc<StateStoreStats>,
 }
 
 impl TikvStateStoreIter {
@@ -172,6 +166,7 @@ impl TikvStateStoreIter {
             key_range,
             index: 0,
             kv_pair_buffer: Vec::with_capacity(SCAN_LIMIT),
+            stats: DEFAULT_STATE_STORE_STATS.clone(),
         }
     }
 }
@@ -182,6 +177,7 @@ impl StateStoreIter for TikvStateStoreIter {
 
     async fn next(&mut self) -> Result<Option<Self::Item>> {
         // self.store.get_client().await;
+        let timer = self.stats.iter_next_latency.start_timer();
 
         let mut txn = self.store.client().await.begin_optimistic().await.unwrap();
         if self.index == self.kv_pair_buffer.len() {
@@ -212,6 +208,10 @@ impl StateStoreIter for TikvStateStoreIter {
         txn.commit().await.unwrap();
         self.index += 1;
 
+        timer.observe_duration();
+        self.stats
+            .iter_next_size
+            .observe((key.len() + value.len()) as f64);
         return Ok(Some((key.clone(), value.clone())));
     }
 }
