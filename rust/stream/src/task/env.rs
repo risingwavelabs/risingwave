@@ -2,9 +2,10 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use risingwave_common::config::StreamingConfig;
-use risingwave_common::worker_id::WorkerIdRef;
 use risingwave_source::{SourceManager, SourceManagerRef};
 use risingwave_storage::table::{TableManager, TableManagerRef};
+
+pub(crate) type WorkerNodeId = u32;
 
 /// The global environment for task execution.
 /// The instance will be shared by every task.
@@ -22,8 +23,8 @@ pub struct StreamEnvironment {
     /// Streaming related configurations.
     config: Arc<StreamingConfig>,
 
-    /// Reference to the current worker node id.
-    worker_id_ref: WorkerIdRef,
+    /// Current worker node id.
+    worker_id: WorkerNodeId,
 }
 
 impl StreamEnvironment {
@@ -32,14 +33,14 @@ impl StreamEnvironment {
         source_manager: SourceManagerRef,
         server_addr: SocketAddr,
         config: Arc<StreamingConfig>,
-        worker_id_ref: WorkerIdRef,
+        worker_id: WorkerNodeId,
     ) -> Self {
         StreamEnvironment {
             table_manager,
             server_addr,
             source_manager,
             config,
-            worker_id_ref,
+            worker_id,
         }
     }
 
@@ -54,7 +55,7 @@ impl StreamEnvironment {
             server_addr: SocketAddr::V4("127.0.0.1:5688".parse().unwrap()),
             source_manager: Arc::new(MemSourceManager::new()),
             config: Arc::new(StreamingConfig::default()),
-            worker_id_ref: WorkerIdRef::for_test(),
+            worker_id: WorkerNodeId::default(),
         }
     }
 
@@ -82,7 +83,7 @@ impl StreamEnvironment {
         self.config.as_ref()
     }
 
-    pub fn worker_id(&self) -> u32 {
-        self.worker_id_ref.get()
+    pub fn worker_id(&self) -> WorkerNodeId {
+        self.worker_id
     }
 }

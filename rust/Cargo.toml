@@ -19,6 +19,3 @@ members = [
   "utils/memcomparable",
   "utils/pgwire",
 ]
-
-[profile.release]
-panic = 'abort'
