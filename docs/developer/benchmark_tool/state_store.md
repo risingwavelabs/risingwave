@@ -1,15 +1,17 @@
-`ss_bench` is used to directly benchmark the state store.
+`ss_bench` is used to directly benchmark the state store of the system.
 
 # Usage Example
 
 ```shell
 ~/code/risingwave/rust: cargo run --bin ss-bench -- \
- --benchmarks "writebatch,getseq,getrandom,prefixscanrandom" \
+ --benchmarks "writebatch,getseq,getrandom,prefixscanrandom,deleterandom" \
  --batch-size 1000 \
  --writes 10000 \
  --reads 500 \
  --scans 200 \
+ --deletes 2000
  --concurrency-num 4 \
+ --seed 233
  --statistics
 ```
 
