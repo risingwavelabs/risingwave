@@ -13,13 +13,13 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 
 use super::intercept::MetricsMiddlewareLayer;
-use super::metrics::DEFAULT_META_STATS;
 use super::service::notification_service::NotificationServiceImpl;
 use crate::barrier::BarrierManager;
 use crate::cluster::StoredClusterManager;
 use crate::dashboard::DashboardService;
 use crate::hummock;
 use crate::manager::{MemEpochGenerator, MetaSrvEnv, NotificationManager, StoredCatalogManager};
+use crate::rpc::metrics::MetaMetrics;
 use crate::rpc::service::catalog_service::CatalogServiceImpl;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
 use crate::rpc::service::epoch_service::EpochServiceImpl;
@@ -71,13 +71,14 @@ pub async fn rpc_serve(
         tokio::spawn(dashboard_service.serve()); // TODO: join dashboard service back to local
                                                  // thread
     }
-
+    let meta_metrics = Arc::new(MetaMetrics::new());
     let barrier_manager_ref = Arc::new(BarrierManager::new(
         env.clone(),
         cluster_manager.clone(),
         fragment_manager.clone(),
         epoch_generator_ref.clone(),
         hummock_manager.clone(),
+        meta_metrics.clone(),
     ));
     {
         let barrier_manager_ref = barrier_manager_ref.clone();
@@ -113,7 +114,6 @@ pub async fn rpc_serve(
     );
     let hummock_srv = HummockServiceImpl::new(hummock_manager);
     let notification_srv = NotificationServiceImpl::new(notification_manager);
-    let meta_metrics = DEFAULT_META_STATS.clone();
 
     if let Some(prometheus_addr) = prometheus_addr {
         meta_metrics.boot_metrics_service(prometheus_addr);
