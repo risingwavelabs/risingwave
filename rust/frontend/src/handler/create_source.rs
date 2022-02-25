@@ -1,7 +1,8 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
 use risingwave_pb::meta::table::Info;
-use risingwave_pb::meta::{StreamSourceInfo, Table};
+use risingwave_pb::meta::Table;
+use risingwave_pb::plan::{RowFormatType, StreamSourceInfo};
 use risingwave_source::ProtobufParser;
 use risingwave_sqlparser::ast::{CreateSourceStatement, ProtobufSchema, SourceSchema};
 
@@ -13,7 +14,7 @@ fn create_protobuf_table_schema(schema: &ProtobufSchema) -> Result<Table> {
     let column_descs = parser.map_to_columns()?;
     let info = StreamSourceInfo {
         append_only: true,
-        row_format: schema.row_schema_location.0.clone(),
+        row_format: RowFormatType::Protobuf as i32,
         row_schema_location: schema.row_schema_location.0.clone(),
         ..Default::default()
     };

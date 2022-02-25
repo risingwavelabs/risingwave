@@ -10,21 +10,6 @@ import "common.proto";
 import "plan.proto";
 import "stream_plan.proto";
 
-message StreamSourceInfo {
-  bool append_only = 1;
-  map<string, string> properties = 2;
-  string row_format = 3;
-  string row_schema_location = 4;
-}
-
-message TableSourceInfo {}
-
-message MaterializedViewInfo {
-  bool is_associated = 1;
-  repeated plan.ColumnOrder column_orders = 2;
-  repeated plan.TableRefId dependent_tables = 3;
-}
-
 message Table {
   plan.TableRefId table_ref_id = 1;
   string table_name = 2;
@@ -32,9 +17,9 @@ message Table {
   uint64 version = 4;
 
   oneof info {
-    StreamSourceInfo stream_source = 5;
-    TableSourceInfo table_source = 6;
-    MaterializedViewInfo materialized_view = 7;
+    plan.StreamSourceInfo stream_source = 5;
+    plan.TableSourceInfo table_source = 6;
+    plan.MaterializedViewInfo materialized_view = 7;
   }
 }
 

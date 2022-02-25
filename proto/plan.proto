@@ -38,10 +38,25 @@ message ColumnDesc {
   bool is_hidden = 4;
 }
 
+message StreamSourceInfo {
+  bool append_only = 1;
+  map<string, string> properties = 2;
+  RowFormatType row_format = 3;
+  string row_schema_location = 4;
+}
+
+message TableSourceInfo {}
+
+message MaterializedViewInfo {
+  bool is_associated = 1;
+  repeated ColumnOrder column_orders = 2;
+  repeated TableRefId dependent_tables = 3;
+}
+
 message RowSeqScanNode {
   TableRefId table_ref_id = 1;
   repeated int32 column_ids = 2;
-  repeated plan.Field fields = 3;
+  repeated Field fields = 3;
 }
 
 message SourceScanNode {
@@ -74,7 +89,7 @@ message ValuesNode {
     repeated expr.ExprNode cells = 1;
   }
   repeated ExprTuple tuples = 1;
-  repeated plan.Field fields = 2;
+  repeated Field fields = 2;
 }
 
 message CreateTableNode {
@@ -87,7 +102,7 @@ message CreateTableNode {
   bool is_materialized_view = 4;
   TableRefId associated_table_ref_id = 5;
   repeated int32 pk_indices = 6;
-  repeated plan.ColumnOrder column_orders = 7;
+  repeated ColumnOrder column_orders = 7;
 }
 
 enum OrderType {
@@ -117,13 +132,14 @@ message LimitNode {
   uint32 offset = 2;
 }
 
+enum RowFormatType {
+  JSON = 0;
+  PROTOBUF = 1;
+  DEBEZIUM_JSON = 2;
+  AVRO = 3;
+}
+
 message CreateSourceNode {
-  enum RowFormatType {
-    JSON = 0;
-    PROTOBUF = 1;
-    DEBEZIUM_JSON = 2;
-    AVRO = 3;
-  }
   TableRefId table_ref_id = 1;
   repeated ColumnDesc column_descs = 2;
   RowFormatType format = 3;

@@ -6,7 +6,7 @@ use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
-use risingwave_pb::plan::create_source_node::RowFormatType;
+use risingwave_pb::plan::RowFormatType;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_source::parser::JSONParser;
 use risingwave_source::{
