@@ -101,6 +101,8 @@ pub struct HummockStorage {
     stats: Arc<StateStoreStats>,
 
     hummock_meta_client: Arc<dyn HummockMetaClient>,
+
+    block_cache: BlockCacheRef,
 }
 
 impl HummockStorage {
@@ -109,6 +111,7 @@ impl HummockStorage {
         options: HummockOptions,
         local_version_manager: Arc<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
+        block_cache: BlockCacheRef,
     ) -> HummockResult<HummockStorage> {
         let (trigger_compact_tx, trigger_compact_rx) = mpsc::unbounded_channel();
         let (stop_compact_tx, stop_compact_rx) = mpsc::unbounded_channel();
@@ -153,6 +156,8 @@ impl HummockStorage {
             })))),
             stats,
             hummock_meta_client,
+            // TODO(MrCroxx): Set capacity based on options.
+            block_cache,
         };
         Ok(instance)
     }

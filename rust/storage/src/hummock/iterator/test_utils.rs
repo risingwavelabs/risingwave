@@ -5,7 +5,8 @@ use std::sync::Arc;
 use super::variants::*;
 use crate::hummock::key::{key_with_epoch, user_key, Epoch};
 use crate::hummock::{
-    cloud, HummockResult, HummockValue, SSTable, SSTableBuilder, SSTableBuilderOptions,
+    cloud, BlockCache, BlockCacheRef, HummockResult, HummockValue, SSTable, SSTableBuilder,
+    SSTableBuilderOptions,
 };
 use crate::object::{InMemObjectStore, ObjectStore};
 
@@ -299,7 +300,7 @@ pub async fn gen_test_sstable_base(
     // get remote table
     let (data, meta) = b.finish();
     let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
-    upload_and_load_sst(obj_client, 0, meta, data, REMOTE_DIR)
+    upload_and_load_sst(obj_client, 0, meta, data, REMOTE_DIR, None)
         .await
         .unwrap()
 }
@@ -310,6 +311,7 @@ pub async fn upload_and_load_sst(
     meta: SstableMeta,
     data: Bytes,
     path: &str,
+    block_cache: Option<BlockCacheRef>,
 ) -> HummockResult<SSTable> {
     cloud::upload(&obj_client, sst_id, &meta, data, path).await?;
     Ok(SSTable {
@@ -317,7 +319,11 @@ pub async fn upload_and_load_sst(
         meta,
         obj_client,
         data_path: cloud::get_sst_data_path(path, sst_id),
-        block_cache: Arc::new(moka::future::Cache::new(65536)),
+        block_cache: match block_cache {
+            Some(cache) => cache,
+            // a dummy block cache
+            None => Arc::new(BlockCache::new(0)),
+        },
     })
 }
 

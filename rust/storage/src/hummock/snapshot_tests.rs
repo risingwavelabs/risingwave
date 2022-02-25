@@ -103,10 +103,11 @@ macro_rules! assert_count_reverse_range_scan {
 async fn test_snapshot() {
     let remote_dir = "/test";
     let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
+    let block_cache = Arc::new(BlockCache::new(65536));
     let vm = Arc::new(LocalVersionManager::new(
         obj_client.clone(),
         remote_dir,
-        None,
+        block_cache.clone(),
     ));
     let mock_hummock_meta_service = Arc::new(MockHummockMetaService::new());
     let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
@@ -119,6 +120,7 @@ async fn test_snapshot() {
         hummock_options,
         vm.clone(),
         mock_hummock_meta_client.clone(),
+        block_cache,
     )
     .await
     .unwrap();
@@ -177,11 +179,12 @@ async fn test_snapshot() {
 #[tokio::test]
 async fn test_snapshot_range_scan() {
     let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
+    let block_cache = Arc::new(BlockCache::new(65536));
     let remote_dir = "/test";
     let vm = Arc::new(LocalVersionManager::new(
         obj_client.clone(),
         remote_dir,
-        None,
+        block_cache.clone(),
     ));
     let mock_hummock_meta_service = Arc::new(MockHummockMetaService::new());
     let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
@@ -193,6 +196,7 @@ async fn test_snapshot_range_scan() {
         hummock_options,
         vm.clone(),
         mock_hummock_meta_client.clone(),
+        block_cache,
     )
     .await
     .unwrap();
@@ -231,11 +235,12 @@ async fn test_snapshot_range_scan() {
 #[tokio::test]
 async fn test_snapshot_reverse_range_scan() {
     let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
+    let block_cache = Arc::new(BlockCache::new(65536));
     let remote_dir = "/test";
     let vm = Arc::new(LocalVersionManager::new(
         obj_client.clone(),
         remote_dir,
-        None,
+        block_cache.clone(),
     ));
     let mock_hummock_meta_service = Arc::new(MockHummockMetaService::new());
     let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
@@ -247,6 +252,7 @@ async fn test_snapshot_reverse_range_scan() {
         hummock_options,
         vm.clone(),
         mock_hummock_meta_client.clone(),
+        block_cache,
     )
     .await
     .unwrap();

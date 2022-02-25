@@ -3,13 +3,12 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use moka::future::Cache;
 use risingwave_common::error::{Result, RwError};
 use risingwave_rpc_client::MetaClient;
 
 use crate::hummock::hummock_meta_client::RPCHummockMetaClient;
 use crate::hummock::local_version_manager::LocalVersionManager;
-use crate::hummock::HummockStateStore;
+use crate::hummock::{BlockCache, HummockStateStore};
 use crate::memory::MemoryStateStore;
 use crate::rocksdb_local::RocksDBStateStore;
 use crate::tikv::TikvStateStore;
@@ -146,6 +145,8 @@ macro_rules! dispatch_state_store {
 
 impl StateStoreImpl {
     pub async fn from_str(s: &str, meta_client: MetaClient) -> Result<Self> {
+        // TODO(MrCroxx): Move me to another place and make capacity based on options.
+        let block_cache = Arc::new(BlockCache::new(65536));
         let store = match s {
             "in_memory" | "in-memory" => StateStoreImpl::shared_in_memory_store(),
             tikv if tikv.starts_with("tikv") => {
@@ -180,9 +181,10 @@ impl StateStoreImpl {
                             remote_dir,
                             // TODO: configurable block cache in config
                             // 1GB block cache (65536 blocks * 64KB block)
-                            Some(Arc::new(Cache::new(65536))),
+                            block_cache.clone(),
                         )),
                         Arc::new(RPCHummockMetaClient::new(meta_client)),
+                        block_cache,
                     )
                     .await
                     .map_err(RwError::from)?,
@@ -212,9 +214,10 @@ impl StateStoreImpl {
                         Arc::new(LocalVersionManager::new(
                             s3_store,
                             remote_dir,
-                            Some(Arc::new(Cache::new(65536))),
+                            block_cache.clone(),
                         )),
                         Arc::new(RPCHummockMetaClient::new(meta_client)),
+                        block_cache,
                     )
                     .await
                     .map_err(RwError::from)?,

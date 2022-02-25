@@ -13,7 +13,6 @@ pub mod multi_builder;
 pub use block_iterator::*;
 pub use builder::*;
 mod sstable_iterator;
-use moka::future::Cache;
 pub use sstable_iterator::*;
 mod reverse_sstable_iterator;
 pub use reverse_sstable_iterator::*;
@@ -27,6 +26,7 @@ use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 use risingwave_pb::hummock::{Checksum, SstableMeta};
 use utils::verify_checksum;
 
+use super::block_cache::{block_cache_key, BlockCacheRef};
 use super::{HummockError, HummockResult};
 use crate::hummock::sstable::utils::checksum;
 use crate::object::{BlockLocation, ObjectStore};
@@ -128,24 +128,17 @@ pub struct SSTable {
     // Data path for the data object
     pub data_path: String,
 
-    pub block_cache: Arc<Cache<Vec<u8>, Arc<Block>>>,
-}
-
-fn block_cache_key_of(sst_id: u64, block_id: u64) -> Vec<u8> {
-    let mut key = Vec::with_capacity(16);
-    key.put_u64_le(sst_id);
-    key.put_u64_le(block_id);
-    key
+    pub block_cache: BlockCacheRef,
 }
 
 impl SSTable {
-    /// Open an existing SST from a pre-loaded [`Bytes`].
-    pub async fn load(
+    // TODO(MrCroxx): REFINE ME! SSTable should be based on a loaded buffer, not a object client and path.
+    pub async fn new(
         id: u64,
         obj_client: Arc<dyn ObjectStore>,
         data_path: String,
         meta: SstableMeta,
-        block_cache: Arc<Cache<Vec<u8>, Arc<Block>>>,
+        block_cache: BlockCacheRef,
     ) -> HummockResult<Self> {
         Ok(SSTable {
             id,
@@ -210,7 +203,7 @@ impl SSTable {
         let size = block_meta.len as usize;
         let block_loc = BlockLocation { offset, size };
 
-        let key = block_cache_key_of(self.id, idx as u64);
+        let key = block_cache_key(self.id, idx as u64);
 
         if let Some(block) = self.block_cache.get(&key) {
             Ok(block)

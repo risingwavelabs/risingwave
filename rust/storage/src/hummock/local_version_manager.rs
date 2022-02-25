@@ -3,12 +3,11 @@ use std::ops::DerefMut;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
-use moka::future::Cache;
 use parking_lot::{Mutex, RwLock};
 use risingwave_pb::hummock::{HummockVersion, Level, LevelType};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
-use super::Block;
+use super::BlockCacheRef;
 use crate::hummock::cloud::{get_sst_data_path, get_sst_meta};
 use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::{
@@ -72,7 +71,8 @@ pub struct LocalVersionManager {
 
     obj_client: Arc<dyn ObjectStore>,
     remote_dir: Arc<String>,
-    pub block_cache: Arc<Cache<Vec<u8>, Arc<Block>>>,
+    // TODO(MrCroxx): REFINE ME! Make `block_cache` field private.
+    pub block_cache: BlockCacheRef,
     update_notifier_tx: tokio::sync::watch::Sender<HummockVersionId>,
     unpin_worker_tx: UnboundedSender<HummockVersionId>,
     unpin_worker_rx: Mutex<Option<UnboundedReceiver<HummockVersionId>>>,
@@ -82,7 +82,7 @@ impl LocalVersionManager {
     pub fn new(
         obj_client: Arc<dyn ObjectStore>,
         remote_dir: &str,
-        block_cache: Option<Arc<Cache<Vec<u8>, Arc<Block>>>>,
+        block_cache: BlockCacheRef,
     ) -> LocalVersionManager {
         let (update_notifier_tx, _) = tokio::sync::watch::channel(INVALID_VERSION_ID);
         let (unpin_worker_tx, unpin_worker_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -92,18 +92,7 @@ impl LocalVersionManager {
             sstables: RwLock::new(BTreeMap::new()),
             obj_client,
             remote_dir: Arc::new(remote_dir.to_string()),
-            block_cache: if let Some(block_cache) = block_cache {
-                block_cache
-            } else {
-                #[cfg(test)]
-                {
-                    Arc::new(Cache::new(2333))
-                }
-                #[cfg(not(test))]
-                {
-                    panic!("must enable block cache in production mode")
-                }
-            },
+            block_cache,
             update_notifier_tx,
             unpin_worker_tx,
             unpin_worker_rx: Mutex::new(Some(unpin_worker_rx)),

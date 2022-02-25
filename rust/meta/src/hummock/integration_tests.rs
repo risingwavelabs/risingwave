@@ -1,13 +1,12 @@
 use std::iter::once;
 use std::sync::Arc;
 
-use moka::future::Cache;
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 use risingwave_storage::hummock::compactor::{Compactor, SubCompactContext};
 use risingwave_storage::hummock::local_version_manager::LocalVersionManager;
 use risingwave_storage::hummock::value::HummockValue;
-use risingwave_storage::hummock::{HummockOptions, HummockStorage};
+use risingwave_storage::hummock::{BlockCache, HummockOptions, HummockStorage};
 use risingwave_storage::object::InMemObjectStore;
 
 use crate::cluster::StoredClusterManager;
@@ -48,16 +47,18 @@ async fn get_hummock_storage() -> HummockStorage {
     };
     let hummock_meta_client = Arc::new(get_hummock_meta_client().await);
     let obj_client = Arc::new(InMemObjectStore::new());
+    let block_cache = Arc::new(BlockCache::new(65536));
     let local_version_manager = Arc::new(LocalVersionManager::new(
         obj_client.clone(),
         &options.remote_dir,
-        Some(Arc::new(Cache::new(65536))),
+        block_cache.clone(),
     ));
     HummockStorage::new(
         obj_client.clone(),
         options.clone(),
         local_version_manager.clone(),
         hummock_meta_client.clone(),
+        block_cache,
     )
     .await
     .unwrap()

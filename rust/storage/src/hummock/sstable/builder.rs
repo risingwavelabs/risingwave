@@ -350,7 +350,7 @@ pub(super) mod tests {
         // get remote table
         let (data, meta) = b.finish();
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
-        upload_and_load_sst(obj_client, 0, meta, data, REMOTE_DIR)
+        upload_and_load_sst(obj_client, 0, meta, data, REMOTE_DIR, None)
             .await
             .unwrap()
     }

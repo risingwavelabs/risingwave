@@ -236,7 +236,7 @@ mod tests {
         let (blocks, meta) = b.finish();
 
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
-        let table = upload_and_load_sst(obj_client, 0, meta, blocks, REMOTE_DIR)
+        let table = upload_and_load_sst(obj_client, 0, meta, blocks, REMOTE_DIR, None)
             .await
             .unwrap();
 

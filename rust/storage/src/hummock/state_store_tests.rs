@@ -9,6 +9,7 @@ use super::iterator::UserIterator;
 use super::{HummockOptions, HummockStorage};
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
+use crate::hummock::BlockCache;
 use crate::object::InMemObjectStore;
 
 fn default_hummock_options() -> HummockOptions {
@@ -42,10 +43,11 @@ async fn test_prometheus_endpoint_hummock() {
     // Create a hummock instance so as to fill the registry.
     let hummock_options = default_hummock_options();
     let object_client = Arc::new(InMemObjectStore::new());
+    let block_cache = Arc::new(BlockCache::new(65536));
     let local_version_manager = Arc::new(LocalVersionManager::new(
         object_client.clone(),
         &hummock_options.remote_dir,
-        None,
+        block_cache.clone(),
     ));
     let _hummock_storage = HummockStorage::new(
         object_client,
@@ -54,6 +56,7 @@ async fn test_prometheus_endpoint_hummock() {
         Arc::new(MockHummockMetaClient::new(Arc::new(
             MockHummockMetaService::new(),
         ))),
+        block_cache,
     )
     .await
     .unwrap();
@@ -81,11 +84,12 @@ async fn test_prometheus_endpoint_hummock() {
 #[ignore]
 async fn test_basic() {
     let object_client = Arc::new(InMemObjectStore::new());
+    let block_cache = Arc::new(BlockCache::new(65536));
     let hummock_options = default_hummock_options();
     let local_version_manager = Arc::new(LocalVersionManager::new(
         object_client.clone(),
         &hummock_options.remote_dir,
-        None,
+        block_cache.clone(),
     ));
     let hummock_storage = HummockStorage::new(
         object_client,
@@ -94,6 +98,7 @@ async fn test_basic() {
         Arc::new(MockHummockMetaClient::new(Arc::new(
             MockHummockMetaService::new(),
         ))),
+        block_cache,
     )
     .await
     .unwrap();
@@ -241,10 +246,11 @@ async fn count_iter(iter: &mut UserIterator<'_>) -> usize {
 async fn test_reload_storage() {
     let mem_objstore = Arc::new(InMemObjectStore::new());
     let hummock_options = default_hummock_options();
+    let block_cache = Arc::new(BlockCache::new(65536));
     let local_version_manager = Arc::new(LocalVersionManager::new(
         mem_objstore.clone(),
         &hummock_options.remote_dir,
-        None,
+        block_cache.clone(),
     ));
     let hummock_meta_client = Arc::new(MockHummockMetaClient::new(Arc::new(
         MockHummockMetaService::new(),
@@ -255,6 +261,7 @@ async fn test_reload_storage() {
         hummock_options,
         local_version_manager.clone(),
         hummock_meta_client.clone(),
+        block_cache.clone(),
     )
     .await
     .unwrap();
@@ -299,6 +306,8 @@ async fn test_reload_storage() {
         default_hummock_options(),
         local_version_manager,
         hummock_meta_client,
+        // REVIEW ME: should also reload block cache?
+        block_cache,
     )
     .await
     .unwrap();
