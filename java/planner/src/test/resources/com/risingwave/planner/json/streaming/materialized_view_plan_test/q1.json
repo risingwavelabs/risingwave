@@ -157,23 +157,6 @@
       },
       "tableId": 2
     },
-    "columnDescs": [{
-      "columnType": {
-        "typeName": "INT64"
-      },
-      "name": "v"
-    }, {
-      "columnType": {
-        "typeName": "INT64"
-      },
-      "name": "$f0"
-    }, {
-      "columnType": {
-        "typeName": "INT64"
-      },
-      "name": "v_copy"
-    }],
-    "pkIndices": [1, 2],
     "columnOrders": [{
       "orderType": "ASCENDING",
       "inputRef": {
@@ -190,7 +173,8 @@
       "returnType": {
         "typeName": "INT64"
       }
-    }]
+    }],
+    "columnIds": [0, 1, 2]
   },
   "identity": "RwStreamMaterializedView(name\u003d[t1])"
 }

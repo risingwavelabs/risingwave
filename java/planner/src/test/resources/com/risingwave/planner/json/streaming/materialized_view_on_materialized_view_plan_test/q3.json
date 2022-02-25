@@ -166,33 +166,6 @@
       },
       "tableId": 6
     },
-    "columnDescs": [{
-      "columnType": {
-        "typeName": "INT64"
-      },
-      "name": "sum_m1_v1"
-    }, {
-      "columnType": {
-        "typeName": "INT64"
-      },
-      "name": "sum_m1_v2"
-    }, {
-      "columnType": {
-        "typeName": "INT64"
-      },
-      "name": "$f0"
-    }, {
-      "columnType": {
-        "typeName": "INT64"
-      },
-      "name": "sum_m1_v1_copy"
-    }, {
-      "columnType": {
-        "typeName": "INT64"
-      },
-      "name": "sum_m1_v2_copy"
-    }],
-    "pkIndices": [2, 3, 4],
     "columnOrders": [{
       "orderType": "ASCENDING",
       "inputRef": {
@@ -217,7 +190,8 @@
       "returnType": {
         "typeName": "INT64"
       }
-    }]
+    }],
+    "columnIds": [0, 1, 2, 3, 4]
   },
   "identity": "RwStreamMaterializedView(name\u003d[m3])"
 }

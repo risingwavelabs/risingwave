@@ -108,18 +108,6 @@
       },
       "tableId": 4
     },
-    "columnDescs": [{
-      "columnType": {
-        "typeName": "INT32"
-      },
-      "name": "v2"
-    }, {
-      "columnType": {
-        "typeName": "INT64"
-      },
-      "name": "v"
-    }],
-    "pkIndices": [0],
     "columnOrders": [{
       "orderType": "ASCENDING",
       "inputRef": {
@@ -127,7 +115,8 @@
       "returnType": {
         "typeName": "INT32"
       }
-    }]
+    }],
+    "columnIds": [0, 1]
   },
   "identity": "RwStreamMaterializedView(name\u003d[t3])"
 }

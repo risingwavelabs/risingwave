@@ -122,6 +122,9 @@ pub struct SSTable {
     /// Client of object store
     pub obj_client: Arc<dyn ObjectStore>,
 
+    // TODO(MrCroxx): Replace this field with base path.
+    // It's so confused that there is only data path but no meta path here.
+    //
     // Data path for the data object
     pub data_path: String,
 
