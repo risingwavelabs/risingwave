@@ -29,6 +29,15 @@ fn configure_risingwave_targets(targets: filter::Targets) -> filter::Targets {
 #[cfg(not(tarpaulin_include))]
 #[tokio::main]
 async fn main() {
+    use std::panic;
+
+    let default_hook = panic::take_hook();
+
+    panic::set_hook(Box::new(move |info| {
+        default_hook(info);
+        std::process::abort();
+    }));
+
     use isahc::config::Configurable;
 
     let opts = ComputeNodeOpts::parse();
