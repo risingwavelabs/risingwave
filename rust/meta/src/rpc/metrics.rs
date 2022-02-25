@@ -23,10 +23,6 @@ pub struct MetaMetrics {
     pub grpc_latency: HistogramVec,
     pub barrier_latency: Histogram,
 }
-lazy_static::lazy_static! {
-  pub static ref
-  DEFAULT_META_STATS: Arc<MetaMetrics> = Arc::new(MetaMetrics::new());
-}
 
 impl MetaMetrics {
     pub fn new() -> Self {
@@ -87,5 +83,10 @@ impl MetaMetrics {
             .unwrap();
 
         Ok(response)
+    }
+}
+impl Default for MetaMetrics {
+    fn default() -> Self {
+        Self::new()
     }
 }
