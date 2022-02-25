@@ -59,12 +59,6 @@ impl RPCHummockMetaClient {
             stats: DEFAULT_STATE_STORE_STATS.clone(),
         }
     }
-
-    fn worker_id(&self) -> u32 {
-        self.meta_client
-            .worker_id()
-            .expect("worker node id is not set")
-    }
 }
 
 // TODO #93 idempotent retry
@@ -78,7 +72,7 @@ impl HummockMetaClient for RPCHummockMetaClient {
             .to_owned()
             .hummock_client
             .pin_version(PinVersionRequest {
-                context_id: self.worker_id(),
+                context_id: self.meta_client.worker_id(),
             })
             .await
             .map_err(HummockError::meta_error)?
@@ -94,7 +88,7 @@ impl HummockMetaClient for RPCHummockMetaClient {
             .to_owned()
             .hummock_client
             .unpin_version(UnpinVersionRequest {
-                context_id: self.worker_id(),
+                context_id: self.meta_client.worker_id(),
                 pinned_version_id,
             })
             .await
@@ -111,7 +105,7 @@ impl HummockMetaClient for RPCHummockMetaClient {
             .to_owned()
             .hummock_client
             .pin_snapshot(PinSnapshotRequest {
-                context_id: self.worker_id(),
+                context_id: self.meta_client.worker_id(),
             })
             .await
             .map_err(HummockError::meta_error)?
@@ -127,7 +121,7 @@ impl HummockMetaClient for RPCHummockMetaClient {
             .to_owned()
             .hummock_client
             .unpin_snapshot(UnpinSnapshotRequest {
-                context_id: self.worker_id(),
+                context_id: self.meta_client.worker_id(),
                 snapshot: Some(HummockSnapshot {
                     epoch: pinned_epoch,
                 }),
@@ -165,7 +159,7 @@ impl HummockMetaClient for RPCHummockMetaClient {
             .to_owned()
             .hummock_client
             .add_tables(AddTablesRequest {
-                context_id: self.worker_id(),
+                context_id: self.meta_client.worker_id(),
                 tables: sstables,
                 epoch,
             })
@@ -183,7 +177,7 @@ impl HummockMetaClient for RPCHummockMetaClient {
             .to_owned()
             .hummock_client
             .get_compaction_tasks(GetCompactionTasksRequest {
-                context_id: self.worker_id(),
+                context_id: self.meta_client.worker_id(),
             })
             .await
             .map_err(HummockError::meta_error)?
@@ -203,7 +197,7 @@ impl HummockMetaClient for RPCHummockMetaClient {
             .to_owned()
             .hummock_client
             .report_compaction_tasks(ReportCompactionTasksRequest {
-                context_id: self.worker_id(),
+                context_id: self.meta_client.worker_id(),
                 compact_task: Some(compact_task),
                 task_result,
             })

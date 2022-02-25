@@ -46,7 +46,6 @@ pub async fn compute_node_serve(
         .register(addr, WorkerType::ComputeNode)
         .await
         .unwrap();
-    meta_client.set_worker_id(worker_id);
 
     // Initialize state store.
     let state_store = StateStoreImpl::from_str(&opts.state_store, meta_client.clone())
