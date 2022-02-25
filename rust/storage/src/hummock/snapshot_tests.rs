@@ -2,7 +2,6 @@
 use std::sync::Arc;
 
 use super::*;
-use crate::hummock::cloud::gen_remote_sstable;
 use crate::hummock::iterator::test_utils::{
     default_builder_opt_for_test, iterator_test_key_of, iterator_test_key_of_epoch,
 };
@@ -36,17 +35,18 @@ async fn gen_and_upload_table(
     }
     let (data, meta) = b.finish();
     // get remote table
-    let table = gen_remote_sstable(obj_client, table_id, data, meta, remote_dir, None)
+    cloud::upload(&obj_client, table_id, &meta, data, remote_dir)
         .await
         .unwrap();
+
     let version = hummock_meta_client
         .add_tables(
             epoch,
             vec![SstableInfo {
-                id: table.id,
+                id: table_id,
                 key_range: Some(risingwave_pb::hummock::KeyRange {
-                    left: table.meta.smallest_key,
-                    right: table.meta.largest_key,
+                    left: meta.smallest_key,
+                    right: meta.largest_key,
                     inf: false,
                 }),
             }],

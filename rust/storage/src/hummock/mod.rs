@@ -27,7 +27,6 @@ mod utils;
 pub mod value;
 mod version_cmp;
 
-use cloud::gen_remote_sstable;
 use compactor::{Compactor, SubCompactContext};
 pub use error::*;
 use parking_lot::Mutex as PLMutex;
@@ -400,16 +399,22 @@ impl HummockStorage {
 
             // TODO: decide upload concurrency
             for (table_id, blocks, meta) in builder.finish() {
-                let table = gen_remote_sstable(
-                    self.obj_client.clone(),
+                cloud::upload(
+                    &self.obj_client,
                     table_id,
+                    &meta,
                     blocks,
-                    meta,
                     self.options.remote_dir.as_str(),
-                    Some(self.local_version_manager.block_cache.clone()),
                 )
                 .await?;
-                tables.push(table);
+
+                tables.push(SSTable {
+                    id: table_id,
+                    meta,
+                    obj_client: self.obj_client.clone(),
+                    data_path: cloud::get_sst_data_path(self.options.remote_dir.as_str(), table_id),
+                    block_cache: self.local_version_manager.block_cache.clone(),
+                });
             }
 
             tables
