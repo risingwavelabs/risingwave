@@ -40,7 +40,7 @@ public class RwStreamSort extends Sort implements RisingWaveStreamingRel {
   public StreamNode serialize() {
     // Here we serialize RwStreamSort to topN executor in backend, but records will
     // not be sorted here. The sort operation will be achieved through keeping
-    // collation in `RwStreamMaterializedView`.
+    // collation in `RwStreamMaterialize`.
     var primaryKeyIndices =
         ((RisingWaveRelMetadataQuery) getCluster().getMetadataQuery()).getPrimaryKeyIndices(this);
 

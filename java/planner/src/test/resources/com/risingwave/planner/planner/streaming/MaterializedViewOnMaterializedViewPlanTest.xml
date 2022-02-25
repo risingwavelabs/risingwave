@@ -7,7 +7,7 @@ create materialized view m1 as select v1, v2 from t1 where v1 = 1;
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView(name=[m1])
+RwStreamMaterialize(name=[m1])
   RwStreamFilter(condition=[=($0, 1)])
     RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.2]])
       RwStreamBatchPlan(table=[[test_schema, t1]], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.2]])
@@ -28,7 +28,7 @@ create materialized view m2 as select v1, v2 from t1 where v2 = 1;
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView(name=[m2])
+RwStreamMaterialize(name=[m2])
   RwStreamFilter(condition=[=($1, 1)])
     RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.2]])
       RwStreamBatchPlan(table=[[test_schema, t1]], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.2]])
@@ -49,7 +49,7 @@ create materialized view m3 as select sum(M1.v1) as sum_m1_v1, sum(m1.v2) as sum
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView(name=[m3])
+RwStreamMaterialize(name=[m3])
   RwStreamProject(sum_m1_v1=[$STREAM_NULL_BY_ROW_COUNT($0, $1)], sum_m1_v2=[$STREAM_NULL_BY_ROW_COUNT($0, $2)], $f0=[$0], sum_m1_v1_copy=[$1], sum_m1_v2_copy=[$2])
     RwStreamAgg(group=[{}], agg#0=[COUNT()], sum_m1_v1=[SUM($0)], sum_m1_v2=[SUM($1)])
       RwStreamChain(all=[true], tableId=[0.0.4], primaryKeyIndices=[[2]], columnIds=[[0.0.4.0, 0.0.4.1, 0.0.4.2]])
@@ -70,7 +70,7 @@ create materialized view m4 as select m1.v1, m1.v2, m2.v1, m2.v2 from m1 join m2
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView(name=[m4])
+RwStreamMaterialize(name=[m4])
   RwStreamHashJoin(condition=[=($0, $3)], joinType=[inner])
     RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
       RwStreamChain(all=[true], tableId=[0.0.4], primaryKeyIndices=[[2]], columnIds=[[0.0.4.0, 0.0.4.1, 0.0.4.2]])
@@ -93,7 +93,7 @@ create materialized view m5 as select v2, v3, v1 from t2;
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView(name=[m5])
+RwStreamMaterialize(name=[m5])
   RwStreamTableSource(table=[[test_schema, t2]], columns=[v2,v3,v1,_row_id])
 ]]>
         </Resource>
@@ -111,7 +111,7 @@ create materialized view m6 as select sum(v1) as sum_v1, avg(v3) as avg_v3 from 
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView(name=[m6])
+RwStreamMaterialize(name=[m6])
   RwStreamProject(sum_v1=[$2], avg_v3=[/(CAST($3):DOUBLE NOT NULL, $4)], v1=[$0])
     RwStreamAgg(group=[{0}], agg#0=[COUNT()], sum_v1=[SUM($0)], agg#2=[SUM($1)], agg#3=[COUNT($1)])
       RwStreamChain(all=[true], tableId=[0.0.8], primaryKeyIndices=[[2]], columnIds=[[0.0.8.2, 0.0.8.1, 0.0.8.3]])
@@ -131,7 +131,7 @@ create materialized view m7 as select sum(v1) as sum_v1 from m5 group by v2;
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView(name=[m7])
+RwStreamMaterialize(name=[m7])
   RwStreamProject(sum_v1=[$2], v2=[$0])
     RwStreamAgg(group=[{0}], agg#0=[COUNT()], sum_v1=[SUM($1)])
       RwStreamChain(all=[true], tableId=[0.0.8], primaryKeyIndices=[[2]], columnIds=[[0.0.8.0, 0.0.8.2, 0.0.8.3]])
@@ -151,7 +151,7 @@ create materialized view m8 as select v1, v2, v3 from t2;
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView(name=[m8])
+RwStreamMaterialize(name=[m8])
   RwStreamTableSource(table=[[test_schema, t2]], columns=[v1,v2,v3,_row_id])
 ]]>
         </Resource>
@@ -169,7 +169,7 @@ create materialized view m9 as select round(avg(v1), 1) as avg_v1, sum(v2) as su
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView(name=[m9])
+RwStreamMaterialize(name=[m9])
   RwStreamProject(avg_v1=[ROUND($STREAM_NULL_BY_ROW_COUNT($0, /(CAST($1):DOUBLE, $2)), 1)], sum_v2=[$STREAM_NULL_BY_ROW_COUNT($0, $3)], count_v3=[$0], $f1=[$1], $f2=[$2], sum_v2_copy=[$3])
     RwStreamAgg(group=[{}], agg#0=[COUNT()], agg#1=[SUM($0)], agg#2=[COUNT($0)], sum_v2=[SUM($1)])
       RwStreamChain(all=[true], tableId=[0.0.11], primaryKeyIndices=[[2]], columnIds=[[0.0.11.0, 0.0.11.1, 0.0.11.3]])
