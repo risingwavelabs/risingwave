@@ -344,6 +344,11 @@ impl<S: StateStore> Executor for HashAggExecutor<S> {
     fn logical_operator_info(&self) -> &str {
         &self.op_info
     }
+
+    fn reset(&mut self, epoch: u64) {
+        self.state_map.clear();
+        self.epoch = epoch;
+    }
 }
 
 #[cfg(test)]

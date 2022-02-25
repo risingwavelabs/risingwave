@@ -78,6 +78,10 @@ impl<S: StateStore> Executor for MaterializeExecutor<S> {
     fn logical_operator_info(&self) -> &str {
         &self.op_info
     }
+
+    fn reset(&mut self, _epoch: u64) {
+        self.local_state.clear_cache();
+    }
 }
 
 impl<S: StateStore> std::fmt::Debug for MaterializeExecutor<S> {

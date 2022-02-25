@@ -58,6 +58,10 @@ impl<S: StateStore> ManagedMViewState<S> {
         FlushStatus::do_delete(self.cache.entry(pk));
     }
 
+    pub fn clear_cache(&mut self) {
+        self.cache.clear();
+    }
+
     // TODO(MrCroxx): flush can be performed in another coroutine by taking the snapshot of
     // cache.
     pub async fn flush(&mut self, epoch: u64) -> Result<()> {

@@ -163,6 +163,14 @@ impl<S: StateStore> Executor for TopNExecutor<S> {
 
         Ok(())
     }
+
+    fn reset(&mut self, epoch: u64) {
+        self.managed_lowest_state.clear_cache();
+        self.managed_middle_state.clear_cache();
+        self.managed_highest_state.clear_cache();
+        self.first_execution = true;
+        self.epoch = epoch;
+    }
 }
 
 #[async_trait]

@@ -191,6 +191,13 @@ impl<S: StateStore> Executor for AppendOnlyTopNExecutor<S> {
 
         Ok(())
     }
+
+    fn reset(&mut self, epoch: u64) {
+        self.managed_lower_state.clear_cache();
+        self.managed_higher_state.clear_cache();
+        self.first_execution = true;
+        self.epoch = epoch;
+    }
 }
 
 #[async_trait]

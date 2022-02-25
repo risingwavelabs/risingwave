@@ -102,6 +102,12 @@ impl Executor for LocalSimpleAggExecutor {
     fn logical_operator_info(&self) -> &str {
         &self.op_info
     }
+
+    fn reset(&mut self, epoch: u64) {
+        self.states.iter_mut().for_each(|state| state.reset());
+        self.is_dirty = false;
+        self.epoch = epoch;
+    }
 }
 
 #[async_trait]
