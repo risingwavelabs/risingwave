@@ -30,9 +30,10 @@ import org.apache.calcite.util.Pair;
 import org.apache.commons.lang3.SerializationException;
 
 /**
- * Materialize operator accepts a stream of changes and materialize it into a materialized view or table
- * <p>
- * A sequential streaming plan (no parallel degree) roots with a materialized view node.
+ * Materialize operator accepts a stream of changes and materialize it into a materialized view or
+ * table
+ *
+ * <p>A sequential streaming plan (no parallel degree) roots with a materialized view node.
  */
 public class RwStreamMaterialize extends SingleRel implements RisingWaveStreamingRel {
   // TODO: define more attributes corresponding to TableCatalog.
