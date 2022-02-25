@@ -42,7 +42,10 @@ impl FrontendEnv {
         })
     }
 
-    pub async fn with_meta_client(meta_client: MetaClient, opts: &FrontendOpts) -> Result<Self> {
+    pub async fn with_meta_client(
+        mut meta_client: MetaClient,
+        opts: &FrontendOpts,
+    ) -> Result<Self> {
         meta_client
             .register(opts.host.parse().unwrap(), WorkerType::Frontend)
             .await
