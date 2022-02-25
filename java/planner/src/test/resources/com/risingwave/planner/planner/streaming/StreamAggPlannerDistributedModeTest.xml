@@ -7,7 +7,7 @@ create materialized view T_no_group_no_count as select sum(v1) as V from t
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView(name=[t_no_group_no_count])
+RwStreamMaterialize(name=[t_no_group_no_count])
   RwStreamProject(v=[$STREAM_NULL_BY_ROW_COUNT($0, $1)], $f0=[$0], v_copy=[$1])
     RwStreamAgg(group=[{}], agg#0=[$SUM0($0)], v=[SUM($1)])
       RwStreamExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
@@ -26,7 +26,7 @@ create materialized view T_no_group_has_count as select Count(*), Sum(v1) as V f
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView(name=[t_no_group_has_count])
+RwStreamMaterialize(name=[t_no_group_has_count])
   RwStreamProject(EXPR$0=[$0], v=[$STREAM_NULL_BY_ROW_COUNT($0, $1)], v_copy=[$1])
     RwStreamAgg(group=[{}], agg#0=[$SUM0($0)], v=[SUM($1)])
       RwStreamExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
@@ -45,7 +45,7 @@ create materialized view T_has_group_has_count as select v2, Count(*), Sum(v1) a
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView(name=[t_has_group_has_count])
+RwStreamMaterialize(name=[t_has_group_has_count])
   RwStreamAgg(group=[{0}], agg#0=[$SUM0($1)], v=[SUM($2)])
     RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
       RwStreamAgg(group=[{0}], agg#0=[COUNT()], v=[SUM($1)])
@@ -63,7 +63,7 @@ create materialized view T_has_group_no_count as select v2, Sum(v1) as V from t 
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView(name=[t_has_group_no_count])
+RwStreamMaterialize(name=[t_has_group_no_count])
   RwStreamProject(v2=[$0], v=[$2])
     RwStreamAgg(group=[{0}], agg#0=[$SUM0($1)], v=[SUM($2)])
       RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
@@ -82,7 +82,7 @@ create materialized view T_has_three_group as select v1, v2, v3, Sum(v1), AVG(v2
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView(name=[t_has_three_group])
+RwStreamMaterialize(name=[t_has_three_group])
   RwStreamProject(v1=[$0], v2=[$1], v3=[$2], EXPR$3=[$4], EXPR$4=[/(CAST($5):DECIMAL(28,10) NOT NULL, $6)], v=[$3])
     RwStreamAgg(group=[{0, 1, 2}], agg#0=[COUNT()], EXPR$3=[SUM($0)], agg#2=[SUM($1)], agg#3=[COUNT($1)])
       RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1, 2]}], collation=[[]])
@@ -100,7 +100,7 @@ select v1, avg(v3) from t group by v1;
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView(name=[t_one_group_avg])
+RwStreamMaterialize(name=[t_one_group_avg])
   RwStreamProject(v1=[$0], EXPR$1=[/(CAST($2):DOUBLE NOT NULL, $3)])
     RwStreamAgg(group=[{0}], agg#0=[$SUM0($1)], agg#1=[SUM($2)], agg#2=[$SUM0($3)])
       RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
@@ -120,7 +120,7 @@ select count(*) from t;
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView(name=[t_one_count_star])
+RwStreamMaterialize(name=[t_one_count_star])
   RwStreamAgg(group=[{}], agg#0=[$SUM0($0)])
     RwStreamExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
       RwStreamAgg(group=[{}], agg#0=[COUNT()])
