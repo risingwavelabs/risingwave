@@ -4,6 +4,7 @@ use crate::binder::BoundStatement;
 use crate::optimizer::plan_node::PlanRef;
 
 mod insert;
+mod projection;
 mod query;
 mod select;
 mod set_expr;

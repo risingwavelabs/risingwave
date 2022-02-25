@@ -6,10 +6,11 @@ use crate::planner::Planner;
 
 impl Planner {
     pub(super) fn plan_select(&mut self, select: BoundSelect) -> Result<PlanRef> {
-        let root = match select.from {
+        let mut root = match select.from {
             None => self.create_dummy_values()?,
             Some(t) => self.plan_table_ref(t)?,
         };
+        root = self.plan_projection(root, select.projection)?;
         // mut root with LogicalFilter and LogicalProject here
         Ok(root)
     }
