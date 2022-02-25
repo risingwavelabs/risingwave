@@ -32,7 +32,7 @@ impl MetaMetrics {
         let opts = histogram_opts!(
             "meta_grpc_duration_seconds",
             "gRPC latency of meta services",
-            buckets.iter().map(|x| *x * 1.0).collect_vec()
+            buckets.iter().map(|x| *x * 0.1).collect_vec()
         );
         let grpc_latency =
             register_histogram_vec_with_registry!(opts, &["path"], registry).unwrap();
