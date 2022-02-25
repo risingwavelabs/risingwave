@@ -8,6 +8,7 @@
  --batch-size 1000 \
  --writes 10000 \
  --reads 500 \
+ --scans 200 \
  --concurrency-num 4 \
  --statistics
 ```
@@ -26,7 +27,7 @@
 - `Hummock+MinIO`
   
   - Format: `hummock+minio://key:secret@address:port/bucket`
-  - Example: `--store hummock+minio://INTEGRATION_TEST_ACCESS_KEY:INTEGRATION_TEST_SECRET_KEY@127.0.0.1:9000/myminio`
+  - Example: `hummock+minio://INTEGRATION_TEST_ACCESS_KEY:INTEGRATION_TEST_SECRET_KEY@127.0.0.1:9000/myminio`
 
 - `Hummock+S3`
   
@@ -40,7 +41,7 @@
 - `TiKV`
   
   - Foramt: `tikv://pd_address:port`
-  - Example: `--store tikv://127.0.0.1:2379`
+  - Example: `tikv://127.0.0.1:2379`
 
 - `RocksDB`
   
@@ -115,7 +116,7 @@ Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
 
 - `--writes`
 
-  - Number of written key/values. If negative, do `--num` reads.
+  - Number of written key/values. If negative, do `--num` writes.
   - Default: -1
 
 - `--batch-size`
@@ -123,7 +124,7 @@ Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
   - **Max** number of key/values in a batch. When the key/values are not evenly divided by the `--batch-size`, the last batch will be the remainder.
   - Default: 100
 
-## Key/values Sizes
+## Key/value Sizes
 
 - `--key-size`
   
@@ -158,4 +159,4 @@ Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
 # Metrics
 
 - Letancy (`min/mean/P50/P95/P99/max/std_dev`)
-- Throughput (`QPS/OPS`)
+- Throughput (`QPS/OPS/bytes_pre_second`)
