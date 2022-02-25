@@ -5,7 +5,9 @@ use async_trait::async_trait;
 use aws_sdk_kinesis::error::GetRecordsError;
 use aws_sdk_kinesis::model::ShardIteratorType;
 use aws_sdk_kinesis::output::GetRecordsOutput;
-use aws_sdk_kinesis::{Client as kinesis_client, DateTime, SdkError};
+use aws_sdk_kinesis::Client as kinesis_client;
+use aws_sdk_kinesis::types::SdkError;
+use aws_smithy_types::DateTime;
 use http::uri::Uri;
 
 use crate::base::SourceReader;
