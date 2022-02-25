@@ -1,4 +1,4 @@
-`ss_bench` is used to benchmark the performance of the state store. In this doc, we first show a usage example and then describe each provided parameter.
+`ss_bench` is used to directly benchmark the state store.
 
 # Usage Example
 
@@ -124,7 +124,7 @@ Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
   - **Max** number of key/values in a batch. When the key/values are not evenly divided by the `--batch-size`, the last batch will be the remainder.
   - Default: 100
 
-## Key/value Sizes
+## Key/values Sizes
 
 - `--key-size`
   
