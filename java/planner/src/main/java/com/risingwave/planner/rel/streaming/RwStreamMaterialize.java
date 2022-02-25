@@ -34,7 +34,7 @@ import org.apache.commons.lang3.SerializationException;
  * <p>
  * A sequential streaming plan (no parallel degree) roots with a materialized view node.
  */
-public class RwStreamMaterializedView extends SingleRel implements RisingWaveStreamingRel {
+public class RwStreamMaterialize extends SingleRel implements RisingWaveStreamingRel {
   // TODO: define more attributes corresponding to TableCatalog.
   private TableCatalog.TableId tableId;
 
@@ -46,7 +46,7 @@ public class RwStreamMaterializedView extends SingleRel implements RisingWaveStr
 
   private final RelCollation collation;
 
-  public RwStreamMaterializedView(
+  public RwStreamMaterialize(
       RelOptCluster cluster,
       RelTraitSet traits,
       RelNode input,
@@ -55,7 +55,7 @@ public class RwStreamMaterializedView extends SingleRel implements RisingWaveStr
     this(cluster, traits, input, name, primaryKeyIndices, null);
   }
 
-  public RwStreamMaterializedView(
+  public RwStreamMaterialize(
       RelOptCluster cluster,
       RelTraitSet traits,
       RelNode input,
