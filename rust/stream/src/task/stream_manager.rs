@@ -576,22 +576,22 @@ impl StreamManagerCore {
                 let executor = create_hash_join_executor(join_type_proto);
                 Ok(executor)
             }
-            Node::MviewNode(materialized_view_node) => {
-                let table_id = TableId::from(&materialized_view_node.table_ref_id);
-                let keys = materialized_view_node
+            Node::MaterializeNode(materialized_node) => {
+                let table_id = TableId::from(&materialized_node.table_ref_id);
+                let keys = materialized_node
                     .column_orders
                     .iter()
                     .map(OrderPair::from_prost)
                     .collect();
-                let column_ids = materialized_view_node
+                let column_ids = materialized_node
                     .column_ids
                     .iter()
                     .map(|id| ColumnId::from(*id))
                     .collect();
-                let keyspace = if materialized_view_node.associated_table_ref_id.is_some() {
+                let keyspace = if materialized_node.associated_table_ref_id.is_some() {
                     // share the keyspace between mview and table v2
                     let associated_table_id =
-                        TableId::from(&materialized_view_node.associated_table_ref_id);
+                        TableId::from(&materialized_node.associated_table_ref_id);
                     Keyspace::table_root(store, &associated_table_id)
                 } else {
                     Keyspace::table_root(store, &table_id)
