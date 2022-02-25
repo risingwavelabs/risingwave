@@ -21,6 +21,7 @@ pub struct MetaMetrics {
 
     /// gRPC latency of meta services
     pub grpc_latency: HistogramVec,
+    /// latency of each barrier
     pub barrier_latency: Histogram,
 }
 
@@ -40,7 +41,7 @@ impl MetaMetrics {
         let opts = histogram_opts!(
             "meta_barrier_duration_seconds",
             "barrier latency ",
-            buckets.iter().map(|x| *x * 0.1).collect_vec()
+            buckets.to_vec()
         );
         let barrier_latency = register_histogram_with_registry!(opts, registry).unwrap();
 
