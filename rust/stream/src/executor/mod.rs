@@ -262,6 +262,17 @@ pub enum Message {
     Barrier(Barrier),
 }
 
+impl<'a> TryFrom<&'a Message> for &'a Barrier {
+    type Error = ();
+
+    fn try_from(m: &'a Message) -> std::result::Result<Self, Self::Error> {
+        match m {
+            Message::Chunk(_) => Err(()),
+            Message::Barrier(b) => Ok(b),
+        }
+    }
+}
+
 impl Message {
     /// Return true if the message is a stop barrier, meaning the stream
     /// will not continue, false otherwise.
@@ -336,6 +347,51 @@ pub trait Executor: Send + Debug + 'static {
 
     fn init(&mut self, _epoch: u64) -> Result<()> {
         unreachable!()
+    }
+}
+
+#[derive(Debug)]
+pub enum ExecutorState {
+    /// Waiting for the first barrier
+    INIT,
+    /// Can read from and write to storage
+    ACTIVE(u64),
+}
+
+impl ExecutorState {
+    pub fn epoch(&self) -> u64 {
+        match self {
+            ExecutorState::INIT => panic!("Executor is not active when getting the epoch"),
+            ExecutorState::ACTIVE(epoch) => *epoch,
+        }
+    }
+}
+
+pub trait StatefuleExecutor: Executor {
+    fn executor_state(&self) -> &ExecutorState;
+
+    fn update_executor_state(&mut self, new_state: ExecutorState);
+
+    /// Try initializing the executor if not done.
+    /// Return:
+    /// - Some(Epoch) if the executor is successfully initialized
+    /// - None if the executor has been intialized
+    fn try_init_executor<'a>(
+        &'a mut self,
+        msg: impl TryInto<&'a Barrier, Error = ()>,
+    ) -> Option<Barrier> {
+        match self.executor_state() {
+            ExecutorState::INIT => {
+                if let Ok(barrier) = msg.try_into() {
+                    // Move to ACTIVE state
+                    self.update_executor_state(ExecutorState::ACTIVE(barrier.epoch.curr));
+                    Some(barrier.clone())
+                } else {
+                    panic!("The first message the executor receives is not a barrier");
+                }
+            }
+            ExecutorState::ACTIVE(_) => None,
+        }
     }
 }
 

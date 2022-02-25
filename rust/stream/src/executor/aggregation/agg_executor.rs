@@ -11,7 +11,7 @@ use static_assertions::const_assert_eq;
 
 use super::AggCall;
 use crate::executor::managed_state::aggregation::ManagedStateImpl;
-use crate::executor::{Barrier, Executor, Message, PkDataTypes};
+use crate::executor::{Barrier, Executor, ExecutorState, Message, PkDataTypes, StatefuleExecutor};
 
 /// Hash key for [`HashAggExecutor`].
 pub type HashKey = Row;
@@ -191,7 +191,7 @@ impl<S: StateStore> AggState<S> {
 /// Trait for [`SimpleAggExecutor`] and [`HashAggExecutor`], providing an implementaion of
 /// [`Executor::next`] by [`agg_executor_next`].
 #[async_trait]
-pub trait AggExecutor: Executor {
+pub trait AggExecutor: StatefuleExecutor {
     /// If exists, we should send a Barrier while next called.
     fn cached_barrier_message_mut(&mut self) -> &mut Option<Barrier>;
 
@@ -203,13 +203,6 @@ pub trait AggExecutor: Executor {
     async fn flush_data(&mut self) -> Result<Option<StreamChunk>>;
 
     fn input(&mut self) -> &mut dyn Executor;
-
-    /// Get back the current epoch used for storage reads and writes.
-    /// This epoch is the one carried by most recent barrier flowing through the executor.
-    fn current_epoch(&self) -> Option<u64>;
-
-    /// Update the current epoch to `new_epoch`, which is carried by a barrier.
-    fn update_epoch(&mut self, new_epoch: u64);
 }
 
 /// Get aggregation inputs by `agg_calls` and `columns`.
@@ -237,6 +230,10 @@ pub async fn agg_executor_next<E: AggExecutor>(executor: &mut E) -> Result<Messa
 
     loop {
         let msg = executor.input().next().await?;
+        if executor.try_init_executor(&msg).is_some() {
+            // Pass through the first msg directly after initializing the executor
+            return Ok(msg);
+        }
         match msg {
             Message::Chunk(chunk) => executor.apply_chunk(chunk).await?,
             Message::Barrier(barrier) if barrier.is_stop_mutation() => {
@@ -247,11 +244,11 @@ pub async fn agg_executor_next<E: AggExecutor>(executor: &mut E) -> Result<Messa
                 if let Some(chunk) = executor.flush_data().await? {
                     // Cache the barrier_msg and send it later.
                     *executor.cached_barrier_message_mut() = Some(barrier);
-                    executor.update_epoch(epoch);
+                    executor.update_executor_state(ExecutorState::ACTIVE(epoch));
                     return Ok(Message::Chunk(chunk));
                 } else {
                     // No fresh data need to flush, just forward the barrier.
-                    executor.update_epoch(epoch);
+                    executor.update_executor_state(ExecutorState::ACTIVE(epoch));
                     return Ok(Message::Barrier(barrier));
                 }
             }

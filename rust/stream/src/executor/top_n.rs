@@ -7,6 +7,7 @@ use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::{Keyspace, Segment, StateStore};
 
+use super::{ExecutorState, StatefuleExecutor};
 use crate::executor::managed_state::top_n::variants::*;
 use crate::executor::managed_state::top_n::{ManagedTopNBottomNState, ManagedTopNState};
 use crate::executor::{
@@ -44,8 +45,9 @@ pub struct TopNExecutor<S: StateStore> {
 
     /// Logical Operator Info
     op_info: String,
-    /// Epoch
-    epoch: Option<u64>,
+
+    /// Executor state
+    executor_state: ExecutorState,
 }
 
 impl<S: StateStore> std::fmt::Debug for TopNExecutor<S> {
@@ -121,15 +123,12 @@ impl<S: StateStore> TopNExecutor<S> {
             first_execution: true,
             identity: format!("TopNExecutor {:X}", executor_id),
             op_info,
-            epoch: None,
+            executor_state: ExecutorState::INIT,
         }
     }
 
     async fn flush_inner(&mut self) -> Result<()> {
-        let epoch = match self.current_epoch() {
-            Some(e) => e,
-            None => return Ok(()),
-        };
+        let epoch = self.executor_state().epoch();
         self.managed_highest_state.flush(epoch).await?;
         self.managed_middle_state.flush(epoch).await?;
         self.managed_lowest_state.flush(epoch).await
@@ -171,7 +170,7 @@ impl<S: StateStore> Executor for TopNExecutor<S> {
 #[async_trait]
 impl<S: StateStore> TopNExecutorBase for TopNExecutor<S> {
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> Result<StreamChunk> {
-        let epoch = self.current_epoch().unwrap();
+        let epoch = self.executor_state().epoch();
         if self.first_execution {
             self.managed_lowest_state.fill_in_cache(epoch).await?;
             self.managed_middle_state.fill_in_cache(epoch).await?;
@@ -369,13 +368,15 @@ impl<S: StateStore> TopNExecutorBase for TopNExecutor<S> {
     fn input(&mut self) -> &mut dyn Executor {
         &mut *self.input
     }
+}
 
-    fn current_epoch(&self) -> Option<u64> {
-        self.epoch
+impl<S: StateStore> StatefuleExecutor for TopNExecutor<S> {
+    fn executor_state(&self) -> &ExecutorState {
+        &self.executor_state
     }
 
-    fn update_epoch(&mut self, new_epoch: u64) {
-        self.epoch = Some(new_epoch);
+    fn update_executor_state(&mut self, new_state: ExecutorState) {
+        self.executor_state = new_state;
     }
 }
 

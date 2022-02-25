@@ -16,7 +16,8 @@ use risingwave_storage::{Keyspace, StateStore};
 use super::aggregation::{AggState, HashKey};
 use super::{
     agg_executor_next, agg_input_arrays, generate_agg_schema, generate_agg_state, pk_input_arrays,
-    AggCall, AggExecutor, Barrier, Executor, Message, PkIndicesRef,
+    AggCall, AggExecutor, Barrier, Executor, ExecutorState, Message, PkIndicesRef,
+    StatefuleExecutor,
 };
 use crate::executor::PkIndices;
 
@@ -63,8 +64,8 @@ pub struct HashAggExecutor<S: StateStore> {
     /// Logical Operator Info
     op_info: String,
 
-    /// Epoch
-    epoch: Option<u64>,
+    /// Executor state
+    executor_state: ExecutorState,
 }
 
 impl<S: StateStore> HashAggExecutor<S> {
@@ -90,7 +91,7 @@ impl<S: StateStore> HashAggExecutor<S> {
             pk_indices,
             identity: format!("HashAggExecutor {:X}", executor_id),
             op_info,
-            epoch: None,
+            executor_state: ExecutorState::INIT,
         }
     }
 
@@ -153,20 +154,12 @@ impl<S: StateStore> HashAggExecutor<S> {
 
 #[async_trait]
 impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
-    fn current_epoch(&self) -> Option<u64> {
-        self.epoch
-    }
-
-    fn update_epoch(&mut self, new_epoch: u64) {
-        self.epoch = Some(new_epoch);
-    }
-
     fn cached_barrier_message_mut(&mut self) -> &mut Option<Barrier> {
         &mut self.cached_barrier_message
     }
 
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> Result<()> {
-        let epoch = self.current_epoch().unwrap();
+        let epoch = self.executor_state().epoch();
         let (ops, columns, visibility) = chunk.into_inner();
 
         // --- Retrieve grouped keys into Row format ---
@@ -241,11 +234,7 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
         // --- Flush states to the state store ---
         // Some state will have the correct output only after their internal states have been fully
         // flushed.
-        let epoch = match self.current_epoch() {
-            Some(e) => e,
-            None => return Ok(None),
-        };
-
+        let epoch = self.executor_state().epoch();
         let (write_batch, dirty_cnt) = {
             let mut write_batch = self.keyspace.state_store().start_write_batch();
             let mut dirty_cnt = 0;
@@ -347,6 +336,16 @@ impl<S: StateStore> Executor for HashAggExecutor<S> {
 
     fn logical_operator_info(&self) -> &str {
         &self.op_info
+    }
+}
+
+impl<S: StateStore> StatefuleExecutor for HashAggExecutor<S> {
+    fn executor_state(&self) -> &ExecutorState {
+        &self.executor_state
+    }
+
+    fn update_executor_state(&mut self, new_state: ExecutorState) {
+        self.executor_state = new_state;
     }
 }
 

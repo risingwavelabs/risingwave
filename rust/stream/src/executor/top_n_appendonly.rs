@@ -13,13 +13,13 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::keyspace::Segment;
 use risingwave_storage::{Keyspace, StateStore};
 
-use super::PkIndicesRef;
+use super::{ExecutorState, PkIndicesRef, StatefuleExecutor};
 use crate::executor::managed_state::top_n::variants::*;
 use crate::executor::managed_state::top_n::ManagedTopNState;
 use crate::executor::{Executor, Message, PkIndices, StreamChunk};
 
 #[async_trait]
-pub trait TopNExecutorBase: Executor {
+pub trait TopNExecutorBase: StatefuleExecutor {
     /// Apply the chunk to the dirty state and get the diffs.
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> Result<StreamChunk>;
 
@@ -27,26 +27,22 @@ pub trait TopNExecutorBase: Executor {
     async fn flush_data(&mut self) -> Result<()>;
 
     fn input(&mut self) -> &mut dyn Executor;
-
-    /// Get back the current epoch used for storage reads and writes.
-    /// This epoch is the one carried by most recent barrier flowing through the executor.
-    fn current_epoch(&self) -> Option<u64>;
-
-    /// Update the current epoch to `new_epoch`, which is carried by a barrier.
-    fn update_epoch(&mut self, new_epoch: u64);
 }
 
 /// We remark that topN executor diffs from aggregate executor as it must output diffs
 /// whenever it applies a batch of input data. Therefore, topN executor flushes data only instead of
 /// computing diffs and flushing when receiving a barrier.
-pub(super) async fn top_n_executor_next(executor: &mut dyn TopNExecutorBase) -> Result<Message> {
+pub(super) async fn top_n_executor_next<E: TopNExecutorBase>(executor: &mut E) -> Result<Message> {
     let msg = executor.input().next().await?;
+    if executor.try_init_executor(&msg).is_some() {        // Pass through the first msg directly after initializing the executor
+        return Ok(msg);
+    }
     let res = match msg {
         Message::Chunk(chunk) => Ok(Message::Chunk(executor.apply_chunk(chunk).await?)),
         Message::Barrier(barrier) if barrier.is_stop_mutation() => Ok(Message::Barrier(barrier)),
         Message::Barrier(barrier) => {
             executor.flush_data().await?;
-            executor.update_epoch(barrier.epoch.curr);
+            executor.update_executor_state(ExecutorState::ACTIVE(barrier.epoch.curr));
             Ok(Message::Barrier(barrier))
         }
     };
@@ -85,8 +81,9 @@ pub struct AppendOnlyTopNExecutor<S: StateStore> {
 
     /// Logical Operator Info
     op_info: String,
-    /// Epoch
-    epoch: Option<u64>,
+
+    /// Executor state
+    executor_state: ExecutorState,
 }
 
 impl<S: StateStore> std::fmt::Debug for AppendOnlyTopNExecutor<S> {
@@ -151,15 +148,12 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
             first_execution: true,
             identity: format!("TopNAppendonlyExecutor {:X}", executor_id),
             op_info,
-            epoch: None,
+            executor_state: ExecutorState::INIT,
         }
     }
 
     async fn flush_inner(&mut self) -> Result<()> {
-        let epoch = match self.current_epoch() {
-            Some(e) => e,
-            None => return Ok(()),
-        };
+        let epoch = self.executor_state().epoch();
         self.managed_higher_state.flush(epoch).await?;
         self.managed_lower_state.flush(epoch).await
     }
@@ -199,7 +193,7 @@ impl<S: StateStore> Executor for AppendOnlyTopNExecutor<S> {
 #[async_trait]
 impl<S: StateStore> TopNExecutorBase for AppendOnlyTopNExecutor<S> {
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> Result<StreamChunk> {
-        let epoch = self.current_epoch().unwrap();
+        let epoch = self.executor_state().epoch();
         if self.first_execution {
             self.managed_lower_state.fill_in_cache(epoch).await?;
             self.managed_higher_state.fill_in_cache(epoch).await?;
@@ -304,13 +298,15 @@ impl<S: StateStore> TopNExecutorBase for AppendOnlyTopNExecutor<S> {
     fn input(&mut self) -> &mut dyn Executor {
         &mut *self.input
     }
+}
 
-    fn current_epoch(&self) -> Option<u64> {
-        self.epoch
+impl<S: StateStore> StatefuleExecutor for AppendOnlyTopNExecutor<S> {
+    fn executor_state(&self) -> &ExecutorState {
+        &self.executor_state
     }
 
-    fn update_epoch(&mut self, new_epoch: u64) {
-        self.epoch = Some(new_epoch);
+    fn update_executor_state(&mut self, new_state: ExecutorState) {
+        self.executor_state = new_state;
     }
 }
 
