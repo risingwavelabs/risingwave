@@ -6,20 +6,22 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Op, Row};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
+use risingwave_common::try_match_expand;
 use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan::OrderType as ProstOrderType;
 use risingwave_pb::stream_plan;
+use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::keyspace::Segment;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::PkIndicesRef;
 use crate::executor::managed_state::top_n::variants::*;
 use crate::executor::managed_state::top_n::ManagedTopNState;
-use crate::executor::{Executor, Message, PkIndices, StreamChunk};
-use crate::task::ExecutorParams;
+use crate::executor::{Executor, ExecutorBuilder, Message, PkIndices, StreamChunk};
+use crate::task::{ExecutorParams, StreamManagerCore};
 
 #[async_trait]
 pub trait TopNExecutorBase: Executor {
@@ -104,12 +106,26 @@ impl<S: StateStore> std::fmt::Debug for AppendOnlyTopNExecutor<S> {
     }
 }
 
+pub struct AppendOnlyTopNExecutorCreater {}
+
+impl ExecutorBuilder for AppendOnlyTopNExecutorCreater {
+    fn create_executor(
+        params: ExecutorParams,
+        node: &stream_plan::StreamNode,
+        store: impl StateStore,
+        _stream: &mut StreamManagerCore,
+    ) -> Result<Box<dyn Executor>> {
+        let node = try_match_expand!(node.get_node().unwrap(), Node::AppendOnlyTopNNode)?;
+        AppendOnlyTopNExecutor::create(params, node, store)
+    }
+}
+
 impl<S: StateStore> AppendOnlyTopNExecutor<S> {
     pub fn create(
         mut params: ExecutorParams,
         node: &stream_plan::TopNNode,
         store: S,
-    ) -> Result<Self> {
+    ) -> Result<Box<dyn Executor>> {
         let order_types: Vec<_> = node
             .get_order_types()
             .iter()
@@ -125,7 +141,7 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
         let cache_size = Some(1024);
         let total_count = (0, 0);
         let keyspace = Keyspace::executor_root(store, params.executor_id);
-        Ok(Self::new(
+        Ok(Box::new(Self::new(
             params.input.remove(0),
             order_types,
             (node.offset as usize, limit),
@@ -135,7 +151,7 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
             total_count,
             params.executor_id,
             params.op_info,
-        ))
+        )))
     }
 
     #[allow(clippy::too_many_arguments)]

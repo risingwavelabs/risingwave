@@ -9,13 +9,18 @@ use risingwave_common::array::{
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_common::expr::RowExpression;
+use risingwave_common::try_match_expand;
 use risingwave_common::types::{DataType, ToOwnedDatum};
+use risingwave_pb::stream_plan;
+use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::keyspace::Segment;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::barrier_align::{AlignedMessage, BarrierAligner};
 use super::managed_state::join::*;
 use super::{Executor, Message, PkIndices, PkIndicesRef};
+use crate::executor::ExecutorBuilder;
+use crate::task::{ExecutorParams, StreamManagerCore};
 
 /// The `JoinType` and `SideType` are to mimic a enum, because currently
 /// enum is not supported in const generic.
@@ -194,6 +199,20 @@ impl<S: StateStore> JoinSide<S> {
             "cannot clear cache while states of hash join are dirty"
         );
         self.ht.clear();
+    }
+}
+
+pub struct HashJoinExecutorCreater {}
+
+impl ExecutorBuilder for HashJoinExecutorCreater {
+    fn create_executor(
+        params: ExecutorParams,
+        node: &stream_plan::StreamNode,
+        store: impl StateStore,
+        stream: &mut StreamManagerCore,
+    ) -> Result<Box<dyn Executor>> {
+        let node = try_match_expand!(node.get_node().unwrap(), Node::HashJoinNode)?;
+        stream.create_hash_join_node(params, node, store)
     }
 }
 

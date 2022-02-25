@@ -16,7 +16,6 @@ use risingwave_pb::plan::JoinType as JoinTypeProto;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::{expr, stream_plan, stream_service};
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
-use tokio::sync::mpsc::unbounded_channel;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
@@ -37,7 +36,7 @@ pub struct StreamManagerCore {
     /// termination.
     handles: HashMap<u32, JoinHandle<Result<()>>>,
 
-    context: Arc<SharedContext>,
+    pub(crate) context: Arc<SharedContext>,
 
     /// Stores all actor information.
     actor_infos: HashMap<u32, ActorInfo>,
@@ -361,70 +360,7 @@ impl StreamManagerCore {
             input,
             actor_id,
         };
-        let executor: Result<Box<dyn Executor>> =
-            match node.get_node()? {
-                Node::SourceNode(node) => {
-                    let (sender, barrier_receiver) = unbounded_channel();
-                    self.context
-                        .lock_barrier_manager()
-                        .register_sender(actor_id, sender);
-                    Ok(Box::new(SourceExecutor::create(
-                        executor_params,
-                        node,
-                        barrier_receiver,
-                    )?))
-                }
-                Node::ProjectNode(project_node) => Ok(Box::new(ProjectExecutor::create(
-                    executor_params,
-                    project_node,
-                )?)),
-                Node::FilterNode(filter_node) => Ok(Box::new(FilterExecutor::create(
-                    executor_params,
-                    filter_node,
-                )?)),
-                Node::LocalSimpleAggNode(aggr_node) => Ok(Box::new(
-                    LocalSimpleAggExecutor::create(executor_params, aggr_node)?,
-                )),
-                Node::GlobalSimpleAggNode(aggr_node) => Ok(Box::new(SimpleAggExecutor::create(
-                    executor_params,
-                    aggr_node,
-                    store,
-                )?)),
-                Node::HashAggNode(aggr_node) => Ok(Box::new(HashAggExecutor::create(
-                    executor_params,
-                    aggr_node,
-                    store,
-                )?)),
-                Node::AppendOnlyTopNNode(top_n_node) => Ok(Box::new(
-                    AppendOnlyTopNExecutor::create(executor_params, top_n_node, store)?,
-                )),
-                Node::TopNNode(top_n_node) => Ok(Box::new(TopNExecutor::create(
-                    executor_params,
-                    top_n_node,
-                    store,
-                )?)),
-                Node::HashJoinNode(hash_join_node) => {
-                    Ok(self.create_hash_join_node(executor_params, hash_join_node, store)?)
-                }
-                Node::MviewNode(materialized_view_node) => Ok(Box::new(
-                    MaterializeExecutor::create(executor_params, materialized_view_node, store)?,
-                )),
-                Node::MergeNode(merge_node) => {
-                    Ok(self.create_merge_node(executor_params, merge_node)?)
-                }
-                Node::ChainNode(chain_node) => Ok(Box::new(ChainExecutor::create(
-                    executor_params,
-                    chain_node,
-                )?)),
-                Node::BatchPlanNode(batch_plan_node) => Ok(Box::new(BatchQueryExecutor::create(
-                    executor_params,
-                    batch_plan_node,
-                )?)),
-                _ => Err(RwError::from(ErrorCode::InternalError(format!(
-                    "unsupported node:{:?}",
-                    node
-                )))),
-            };
+        let executor = create_executor(executor_params, self, node, store);
         let executor = Self::wrap_executor_for_debug(executor?, actor_id, input_pos)?;
         Ok(executor)
     }

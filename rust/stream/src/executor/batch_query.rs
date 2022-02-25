@@ -3,11 +3,14 @@ use itertools::Itertools;
 use risingwave_common::array::{Op, RwError, StreamChunk};
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan;
+use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::table::{ScannableTableRef, TableIterRef};
+use risingwave_storage::StateStore;
 
-use crate::executor::{Executor, Message, PkIndices, PkIndicesRef};
-use crate::task::ExecutorParams;
+use crate::executor::{Executor, ExecutorBuilder, Message, PkIndices, PkIndicesRef};
+use crate::task::{ExecutorParams, StreamManagerCore};
 
 const DEFAULT_BATCH_SIZE: usize = 100;
 
@@ -40,13 +43,34 @@ impl std::fmt::Debug for BatchQueryExecutor {
     }
 }
 
+pub struct BatchQueryExecutorCreater {}
+
+impl ExecutorBuilder for BatchQueryExecutorCreater {
+    fn create_executor(
+        params: ExecutorParams,
+        node: &stream_plan::StreamNode,
+        _store: impl StateStore,
+        _stream: &mut StreamManagerCore,
+    ) -> Result<Box<dyn Executor>> {
+        let node = try_match_expand!(node.get_node().unwrap(), Node::BatchPlanNode)?;
+        BatchQueryExecutor::create(params, node)
+    }
+}
+
 impl BatchQueryExecutor {
-    pub fn create(params: ExecutorParams, node: &stream_plan::BatchPlanNode) -> Result<Self> {
+    pub fn create(
+        params: ExecutorParams,
+        node: &stream_plan::BatchPlanNode,
+    ) -> Result<Box<dyn Executor>> {
         let table_id = TableId::from(&node.table_ref_id);
         let table_manager = params.env.table_manager();
         let table = table_manager.get_table(&table_id)?;
 
-        Ok(Self::new(table.clone(), params.pk_indices, params.op_info))
+        Ok(Box::new(Self::new(
+            table.clone(),
+            params.pk_indices,
+            params.op_info,
+        )))
     }
 
     pub fn new(table: ScannableTableRef, pk_indices: PkIndices, op_info: String) -> Self {

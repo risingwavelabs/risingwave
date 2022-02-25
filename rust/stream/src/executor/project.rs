@@ -5,11 +5,14 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::expr::{build_from_prost, BoxedExpression};
+use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan;
+use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_storage::StateStore;
 
 use super::{Executor, Message, PkIndicesRef, SimpleExecutor, StreamChunk};
-use crate::executor::PkIndices;
-use crate::task::ExecutorParams;
+use crate::executor::{ExecutorBuilder, PkIndices};
+use crate::task::{ExecutorParams, StreamManagerCore};
 
 /// `ProjectExecutor` project data with the `expr`. The `expr` takes a chunk of data,
 /// and returns a new data chunk. And then, `ProjectExecutor` will insert, delete
@@ -41,20 +44,37 @@ impl std::fmt::Debug for ProjectExecutor {
     }
 }
 
+pub struct ProjectExecutorCreater {}
+
+impl ExecutorBuilder for ProjectExecutorCreater {
+    fn create_executor(
+        params: ExecutorParams,
+        node: &stream_plan::StreamNode,
+        _store: impl StateStore,
+        _stream: &mut StreamManagerCore,
+    ) -> Result<Box<dyn Executor>> {
+        let node = try_match_expand!(node.get_node().unwrap(), Node::ProjectNode)?;
+        ProjectExecutor::create(params, node)
+    }
+}
+
 impl ProjectExecutor {
-    pub fn create(mut params: ExecutorParams, node: &stream_plan::ProjectNode) -> Result<Self> {
+    pub fn create(
+        mut params: ExecutorParams,
+        node: &stream_plan::ProjectNode,
+    ) -> Result<Box<dyn Executor>> {
         let project_exprs = node
             .get_select_list()
             .iter()
             .map(build_from_prost)
             .collect::<Result<Vec<_>>>()?;
-        Ok(Self::new(
+        Ok(Box::new(Self::new(
             params.input.remove(0),
             params.pk_indices,
             project_exprs,
             params.executor_id,
             params.op_info,
-        ))
+        )))
     }
 
     pub fn new(

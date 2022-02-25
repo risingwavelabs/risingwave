@@ -6,10 +6,14 @@ use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_common::expr::{build_from_prost, BoxedExpression};
+use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan;
+use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_storage::StateStore;
 
 use super::{Executor, Message, PkIndicesRef, SimpleExecutor, StreamChunk};
-use crate::task::ExecutorParams;
+use crate::executor::ExecutorBuilder;
+use crate::task::{ExecutorParams, StreamManagerCore};
 
 /// `FilterExecutor` filters data with the `expr`. The `expr` takes a chunk of data,
 /// and returns a boolean array on whether each item should be retained. And then,
@@ -29,15 +33,32 @@ pub struct FilterExecutor {
     op_info: String,
 }
 
+pub struct FilterExecutorCreater {}
+
+impl ExecutorBuilder for FilterExecutorCreater {
+    fn create_executor(
+        params: ExecutorParams,
+        node: &stream_plan::StreamNode,
+        _store: impl StateStore,
+        _stream: &mut StreamManagerCore,
+    ) -> Result<Box<dyn Executor>> {
+        let node = try_match_expand!(node.get_node().unwrap(), Node::FilterNode)?;
+        FilterExecutor::create(params, node)
+    }
+}
+
 impl FilterExecutor {
-    pub fn create(mut params: ExecutorParams, node: &stream_plan::FilterNode) -> Result<Self> {
+    pub fn create(
+        mut params: ExecutorParams,
+        node: &stream_plan::FilterNode,
+    ) -> Result<Box<dyn Executor>> {
         let search_condition = build_from_prost(node.get_search_condition()?)?;
-        Ok(FilterExecutor::new(
+        Ok(Box::new(FilterExecutor::new(
             params.input.remove(0),
             search_condition,
             params.executor_id,
             params.op_info,
-        ))
+        )))
     }
 
     pub fn new(

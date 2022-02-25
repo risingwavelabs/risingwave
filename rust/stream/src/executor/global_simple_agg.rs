@@ -8,12 +8,15 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::*;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
+use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan;
+use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::aggregation::*;
 use super::{pk_input_arrays, Barrier, Executor, Message, PkIndices, PkIndicesRef};
-use crate::task::{build_agg_call_from_prost, ExecutorParams};
+use crate::executor::ExecutorBuilder;
+use crate::task::{build_agg_call_from_prost, ExecutorParams, StreamManagerCore};
 
 /// `SimpleAggExecutor` is the aggregation operator for streaming system.
 /// To create an aggregation operator, states and expressions should be passed along the
@@ -73,26 +76,40 @@ impl<S: StateStore> std::fmt::Debug for SimpleAggExecutor<S> {
     }
 }
 
+pub struct SimpleAggExecutorCreater {}
+
+impl ExecutorBuilder for SimpleAggExecutorCreater {
+    fn create_executor(
+        params: ExecutorParams,
+        node: &stream_plan::StreamNode,
+        store: impl StateStore,
+        _stream: &mut StreamManagerCore,
+    ) -> Result<Box<dyn Executor>> {
+        let node = try_match_expand!(node.get_node().unwrap(), Node::GlobalSimpleAggNode)?;
+        SimpleAggExecutor::create(params, node, store)
+    }
+}
+
 impl<S: StateStore> SimpleAggExecutor<S> {
     pub fn create(
         mut params: ExecutorParams,
         node: &stream_plan::SimpleAggNode,
         store: S,
-    ) -> Result<Self> {
+    ) -> Result<Box<dyn Executor>> {
         let agg_calls: Vec<AggCall> = node
             .get_agg_calls()
             .iter()
             .map(build_agg_call_from_prost)
             .try_collect()?;
         let keyspace = Keyspace::executor_root(store, params.executor_id);
-        Ok(Self::new(
+        Ok(Box::new(Self::new(
             params.input.remove(0),
             agg_calls,
             keyspace,
             params.pk_indices,
             params.executor_id,
             params.op_info,
-        ))
+        )))
     }
 
     pub fn new(

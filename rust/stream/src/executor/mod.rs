@@ -31,13 +31,16 @@ use risingwave_pb::data::{
     Actors as MutationActors, AddMutation, Barrier as ProstBarrier, NothingMutation, StopMutation,
     StreamMessage as ProstStreamMessage, UpdateMutation,
 };
+use risingwave_pb::stream_plan;
+use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_storage::StateStore;
 use smallvec::SmallVec;
 pub use source::*;
 pub use top_n::*;
 pub use top_n_appendonly::*;
 use tracing::trace_span;
 
-use crate::task::ENABLE_BARRIER_AGGREGATION;
+use crate::task::{ExecutorParams, StreamManagerCore, ENABLE_BARRIER_AGGREGATION};
 
 mod actor;
 mod aggregation;
@@ -311,6 +314,52 @@ pub fn pk_input_arrays<'a>(pk_indices: PkIndicesRef, columns: &'a [Column]) -> V
         .iter()
         .map(|pk_idx| columns[*pk_idx].array_ref())
         .collect()
+}
+
+pub trait ExecutorBuilder {
+    fn create_executor(
+        executor_params: ExecutorParams,
+        node: &stream_plan::StreamNode,
+        store: impl StateStore,
+        steam: &mut StreamManagerCore,
+    ) -> Result<Box<dyn Executor>>;
+}
+
+macro_rules! build_executor {
+    ($source: expr,$a: expr,$b: expr,$c: expr, $($proto_type_name:path => $data_type:ty),*) => {
+        match $a.get_node().unwrap() {
+            $(
+                $proto_type_name(..) => {
+                    <$data_type>::create_executor($source,$a,$b,$c)
+                },
+            )*
+        }
+    }
+}
+
+pub fn create_executor(
+    executor_params: ExecutorParams,
+    steam: &mut StreamManagerCore,
+    node: &stream_plan::StreamNode,
+    store: impl StateStore,
+) -> Result<Box<dyn Executor>> {
+    let real_executor = build_executor! { executor_params,node,store,steam,
+      Node::SourceNode => SourceExecutorCreater,
+      Node::ProjectNode => ProjectExecutorCreater,
+      Node::TopNNode => TopNExecutorCreater,
+      Node::AppendOnlyTopNNode => AppendOnlyTopNExecutorCreater,
+      Node::LocalSimpleAggNode => LocalSimpleAggExecutorCreater,
+      Node::GlobalSimpleAggNode => SimpleAggExecutorCreater,
+      Node::HashAggNode => HashAggExecutorCreater,
+      Node::HashJoinNode => HashJoinExecutorCreater,
+      Node::ChainNode => ChainExecutorCreater,
+      Node::BatchPlanNode => BatchQueryExecutorCreater,
+      Node::ExchangeNode => MaterializeExecutorCreater,
+      Node::MergeNode => MergeExecutorCreater,
+      Node::MviewNode => MaterializeExecutorCreater,
+      Node::FilterNode => FilterExecutorCreater
+    }?;
+    Ok(real_executor)
 }
 
 /// `SimpleExecutor` accepts a single chunk as input.

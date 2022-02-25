@@ -11,13 +11,16 @@ use risingwave_common::array::{
 };
 use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::error::Result;
+use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan;
+use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_source::*;
-use tokio::sync::mpsc::UnboundedReceiver;
+use risingwave_storage::StateStore;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
 use crate::executor::monitor::DEFAULT_COMPUTE_STATS;
-use crate::executor::{Executor, Message, PkIndices, PkIndicesRef};
-use crate::task::ExecutorParams;
+use crate::executor::{Executor, ExecutorBuilder, Message, PkIndices, PkIndicesRef};
+use crate::task::{ExecutorParams, StreamManagerCore};
 
 /// [`SourceExecutor`] is a streaming source, from risingwave's batch table, or external systems
 /// such as Kafka.
@@ -45,12 +48,32 @@ pub struct SourceExecutor {
     source_output_row_count: Counter<u64>,
 }
 
+pub struct SourceExecutorCreater {}
+
+impl ExecutorBuilder for SourceExecutorCreater {
+    fn create_executor(
+        params: ExecutorParams,
+        node: &stream_plan::StreamNode,
+        _store: impl StateStore,
+        stream: &mut StreamManagerCore,
+    ) -> Result<Box<dyn Executor>> {
+        let node = try_match_expand!(node.get_node().unwrap(), Node::SourceNode)?;
+        let (sender, barrier_receiver) = unbounded_channel();
+        stream
+            .context
+            .lock_barrier_manager()
+            .register_sender(params.actor_id, sender);
+
+        SourceExecutor::create(params, node, barrier_receiver)
+    }
+}
+
 impl SourceExecutor {
     pub fn create(
         params: ExecutorParams,
         node: &stream_plan::SourceNode,
         barrier_receiver: UnboundedReceiver<Message>,
-    ) -> Result<Self> {
+    ) -> Result<Box<dyn Executor>> {
         let source_id = TableId::from(&node.table_ref_id);
         let source_desc = params.env.source_manager().get_source(&source_id)?;
 
@@ -73,7 +96,7 @@ impl SourceExecutor {
         }
         let schema = Schema::new(fields);
 
-        Self::new(
+        Ok(Box::new(Self::new(
             source_id,
             source_desc,
             column_ids,
@@ -83,7 +106,7 @@ impl SourceExecutor {
             params.executor_id,
             params.operator_id,
             params.op_info,
-        )
+        )?))
     }
 
     #[allow(clippy::too_many_arguments)]

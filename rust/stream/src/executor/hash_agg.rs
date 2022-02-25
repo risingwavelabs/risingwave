@@ -11,7 +11,9 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::error::Result;
+use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan;
+use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::aggregation::{AggState, HashKey};
@@ -19,8 +21,8 @@ use super::{
     agg_executor_next, agg_input_arrays, generate_agg_schema, generate_agg_state, pk_input_arrays,
     AggCall, AggExecutor, Barrier, Executor, Message, PkIndicesRef,
 };
-use crate::executor::PkIndices;
-use crate::task::{build_agg_call_from_prost, ExecutorParams};
+use crate::executor::{ExecutorBuilder, PkIndices};
+use crate::task::{build_agg_call_from_prost, ExecutorParams, StreamManagerCore};
 
 /// [`HashAggExecutor`] could process large amounts of data using a state backend. It works as
 /// follows:
@@ -69,12 +71,26 @@ pub struct HashAggExecutor<S: StateStore> {
     epoch: u64,
 }
 
+pub struct HashAggExecutorCreater {}
+
+impl ExecutorBuilder for HashAggExecutorCreater {
+    fn create_executor(
+        params: ExecutorParams,
+        node: &stream_plan::StreamNode,
+        store: impl StateStore,
+        _stream: &mut StreamManagerCore,
+    ) -> Result<Box<dyn Executor>> {
+        let node = try_match_expand!(node.get_node().unwrap(), Node::HashAggNode)?;
+        HashAggExecutor::create(params, node, store)
+    }
+}
+
 impl<S: StateStore> HashAggExecutor<S> {
     pub fn create(
         mut params: ExecutorParams,
         node: &stream_plan::HashAggNode,
         store: S,
-    ) -> Result<Self> {
+    ) -> Result<Box<dyn Executor>> {
         let keys = node
             .get_group_keys()
             .iter()
@@ -86,7 +102,7 @@ impl<S: StateStore> HashAggExecutor<S> {
             .map(build_agg_call_from_prost)
             .try_collect()?;
         let keyspace = Keyspace::shared_executor_root(store, params.executor_id);
-        Ok(Self::new(
+        Ok(Box::new(Self::new(
             params.input.remove(0),
             agg_calls,
             keys,
@@ -94,7 +110,7 @@ impl<S: StateStore> HashAggExecutor<S> {
             params.pk_indices,
             params.executor_id,
             params.op_info,
-        ))
+        )))
     }
 
     pub fn new(

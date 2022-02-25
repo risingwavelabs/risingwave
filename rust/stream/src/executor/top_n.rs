@@ -2,20 +2,22 @@ use async_trait::async_trait;
 use risingwave_common::array::{DataChunk, Op, Row, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
+use risingwave_common::try_match_expand;
 use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan::OrderType as ProstOrderType;
 use risingwave_pb::stream_plan;
+use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::{Keyspace, Segment, StateStore};
 
 use crate::executor::managed_state::top_n::variants::*;
 use crate::executor::managed_state::top_n::{ManagedTopNBottomNState, ManagedTopNState};
 use crate::executor::{
-    generate_output, top_n_executor_next, Executor, Message, PkIndices, PkIndicesRef,
-    TopNExecutorBase,
+    generate_output, top_n_executor_next, Executor, ExecutorBuilder, Message, PkIndices,
+    PkIndicesRef, TopNExecutorBase,
 };
-use crate::task::ExecutorParams;
+use crate::task::{ExecutorParams, StreamManagerCore};
 
 /// `TopNExecutor` works with input with modification, it keeps all the data
 /// records/rows that have been seen, and returns topN records overall.
@@ -63,12 +65,26 @@ impl<S: StateStore> std::fmt::Debug for TopNExecutor<S> {
     }
 }
 
+pub struct TopNExecutorCreater {}
+
+impl ExecutorBuilder for TopNExecutorCreater {
+    fn create_executor(
+        params: ExecutorParams,
+        node: &stream_plan::StreamNode,
+        store: impl StateStore,
+        _stream: &mut StreamManagerCore,
+    ) -> Result<Box<dyn Executor>> {
+        let node = try_match_expand!(node.get_node().unwrap(), Node::TopNNode)?;
+        TopNExecutor::create(params, node, store)
+    }
+}
+
 impl<S: StateStore> TopNExecutor<S> {
     pub fn create(
         mut params: ExecutorParams,
         node: &stream_plan::TopNNode,
         store: S,
-    ) -> Result<Self> {
+    ) -> Result<Box<dyn Executor>> {
         let order_types: Vec<_> = node
             .get_order_types()
             .iter()
@@ -84,7 +100,7 @@ impl<S: StateStore> TopNExecutor<S> {
         let cache_size = Some(1024);
         let total_count = (0, 0, 0);
         let keyspace = Keyspace::executor_root(store, params.executor_id);
-        Ok(Self::new(
+        Ok(Box::new(Self::new(
             params.input.remove(0),
             order_types,
             (node.offset as usize, limit),
@@ -94,7 +110,7 @@ impl<S: StateStore> TopNExecutor<S> {
             total_count,
             params.executor_id,
             params.op_info,
-        ))
+        )))
     }
 
     #[allow(clippy::too_many_arguments)]

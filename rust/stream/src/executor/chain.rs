@@ -3,10 +3,14 @@ use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan;
+use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_storage::StateStore;
 
 use super::{Executor, Message, PkIndicesRef};
-use crate::task::ExecutorParams;
+use crate::executor::ExecutorBuilder;
+use crate::task::{ExecutorParams, StreamManagerCore};
 
 #[derive(Debug)]
 enum ChainState {
@@ -30,8 +34,25 @@ pub struct ChainExecutor {
     op_info: String,
 }
 
+pub struct ChainExecutorCreater {}
+
+impl ExecutorBuilder for ChainExecutorCreater {
+    fn create_executor(
+        params: ExecutorParams,
+        node: &stream_plan::StreamNode,
+        _store: impl StateStore,
+        _stream: &mut StreamManagerCore,
+    ) -> Result<Box<dyn Executor>> {
+        let node = try_match_expand!(node.get_node().unwrap(), Node::ChainNode)?;
+        ChainExecutor::create(params, node)
+    }
+}
+
 impl ChainExecutor {
-    pub fn create(mut params: ExecutorParams, node: &stream_plan::ChainNode) -> Result<Self> {
+    pub fn create(
+        mut params: ExecutorParams,
+        node: &stream_plan::ChainNode,
+    ) -> Result<Box<dyn Executor>> {
         let snapshot = params.input.remove(1);
         let mview = params.input.remove(0);
 
@@ -45,13 +66,13 @@ impl ChainExecutor {
                 .map(|i| upstream_schema.fields()[*i].clone())
                 .collect_vec(),
         );
-        Ok(Self::new(
+        Ok(Box::new(Self::new(
             snapshot,
             mview,
             schema,
             column_idxs,
             params.op_info,
-        ))
+        )))
     }
 
     pub fn new(
