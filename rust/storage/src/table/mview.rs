@@ -25,7 +25,7 @@ pub struct MViewTable<S: StateStore> {
 
     pk_columns: Vec<usize>,
 
-    sort_key_serializer: OrderedRowsSerializer,
+    sort_key_serializer: OrderedRowSerializer,
 }
 
 impl<S: StateStore> std::fmt::Debug for MViewTable<S> {
@@ -67,7 +67,7 @@ impl<S: StateStore> MViewTable<S> {
             schema,
             column_descs,
             pk_columns,
-            sort_key_serializer: OrderedRowsSerializer::new(order_pairs),
+            sort_key_serializer: OrderedRowSerializer::new(order_pairs),
         }
     }
 
@@ -91,7 +91,7 @@ impl<S: StateStore> MViewTable<S> {
             schema,
             column_descs,
             pk_columns,
-            sort_key_serializer: OrderedRowsSerializer::new(order_pairs),
+            sort_key_serializer: OrderedRowSerializer::new(order_pairs),
         }
     }
 

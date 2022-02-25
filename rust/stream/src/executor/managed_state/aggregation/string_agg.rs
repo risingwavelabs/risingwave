@@ -163,8 +163,7 @@ impl<S: StateStore> ManagedExtremeState<S> for ManagedStringAggState<S> {
         }
 
         let mut row_keys = vec![];
-        self.sorted_arrays_serializer
-            .order_based_scehmaed_serialize(data, &mut row_keys);
+        self.sorted_arrays_serializer.serialize(data, &mut row_keys);
 
         for (row_idx, (op, key_bytes)) in ops.iter().zip_eq(row_keys.into_iter()).enumerate() {
             let visible = visibility
