@@ -108,7 +108,6 @@ impl Compactor {
         let mut buffered = stream_of_futures.buffer_unordered(num_sub);
 
         let mut sub_compact_outputsets = Vec::with_capacity(num_sub);
-        // let mut sub_compact_results = Vec::with_capacity(num_sub);
 
         while let Some(tokio_result) = buffered.next().await {
             let (sub_result, sub_kr_idx, sub_output) = tokio_result.unwrap();
