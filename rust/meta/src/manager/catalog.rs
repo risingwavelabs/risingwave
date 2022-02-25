@@ -6,10 +6,12 @@ use anyhow::anyhow;
 use risingwave_common::catalog::{CatalogId, DatabaseId, SchemaId, TableId};
 use risingwave_common::error::ErrorCode::CatalogError;
 use risingwave_common::error::Result;
+use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{Catalog, Database, Schema, Table};
 use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
 use tokio::sync::Mutex;
 
+use super::{NotificationManagerRef, NotificationTarget};
 use crate::model::MetadataModel;
 use crate::storage::MetaStore;
 
@@ -18,6 +20,7 @@ use crate::storage::MetaStore;
 pub struct StoredCatalogManager<S> {
     core: Mutex<CatalogManagerCore>,
     meta_store_ref: Arc<S>,
+    nm: NotificationManagerRef,
 }
 
 pub type StoredCatalogManagerRef<S> = Arc<StoredCatalogManager<S>>;
@@ -26,7 +29,7 @@ impl<S> StoredCatalogManager<S>
 where
     S: MetaStore,
 {
-    pub async fn new(meta_store_ref: Arc<S>) -> Result<Self> {
+    pub async fn new(meta_store_ref: Arc<S>, nm: NotificationManagerRef) -> Result<Self> {
         let databases = Database::list(&*meta_store_ref).await?;
         let schemas = Schema::list(&*meta_store_ref).await?;
         let tables = Table::list(&*meta_store_ref).await?;
@@ -35,6 +38,7 @@ where
         Ok(Self {
             core,
             meta_store_ref,
+            nm,
         })
     }
 
@@ -48,7 +52,17 @@ where
         let database_id = DatabaseId::from(&database.database_ref_id);
         if !core.has_database(&database_id) {
             database.insert(&*self.meta_store_ref).await?;
-            core.add_database(database);
+            core.add_database(database.clone());
+
+            // Notify frontends to create database.
+            self.nm
+                .notify(
+                    Operation::Add,
+                    &Info::Database(database),
+                    NotificationTarget::Frontend,
+                )
+                .await?;
+
             Ok(Some(CatalogId::DatabaseId(database_id)))
         } else {
             Ok(None)
@@ -63,7 +77,17 @@ where
         let database_id = DatabaseId::from(&Some(database_ref_id.clone()));
         if core.has_database(&database_id) {
             Database::delete(&*self.meta_store_ref, database_ref_id).await?;
-            core.delete_database(&database_id);
+            let database = core.delete_database(&database_id).unwrap();
+
+            // Notify frontends to delete database.
+            self.nm
+                .notify(
+                    Operation::Delete,
+                    &Info::Database(database),
+                    NotificationTarget::Frontend,
+                )
+                .await?;
+
             Ok(Some(CatalogId::DatabaseId(database_id)))
         } else {
             Ok(None)
@@ -75,7 +99,17 @@ where
         let schema_id = SchemaId::from(&schema.schema_ref_id);
         if !core.has_schema(&schema_id) {
             schema.insert(&*self.meta_store_ref).await?;
-            core.add_schema(schema);
+            core.add_schema(schema.clone());
+
+            // Notify frontends to create schema.
+            self.nm
+                .notify(
+                    Operation::Add,
+                    &Info::Schema(schema),
+                    NotificationTarget::Frontend,
+                )
+                .await?;
+
             Ok(Some(CatalogId::SchemaId(schema_id)))
         } else {
             Ok(None)
@@ -87,7 +121,17 @@ where
         let schema_id = SchemaId::from(&Some(schema_ref_id.clone()));
         if core.has_schema(&schema_id) {
             Schema::delete(&*self.meta_store_ref, schema_ref_id).await?;
-            core.delete_schema(&schema_id);
+            let schema = core.delete_schema(&schema_id).unwrap();
+
+            // Notify frontends to delete schema.
+            self.nm
+                .notify(
+                    Operation::Delete,
+                    &Info::Schema(schema),
+                    NotificationTarget::Frontend,
+                )
+                .await?;
+
             Ok(Some(CatalogId::SchemaId(schema_id)))
         } else {
             Ok(None)
@@ -100,10 +144,20 @@ where
         if !core.has_table(&table_id) {
             table.insert(&*self.meta_store_ref).await?;
             core.add_table(table.clone());
-            for table_ref_id in table.dependent_tables {
+            for table_ref_id in &table.dependent_tables {
                 let dependent_table_id = TableId::from(&Some(table_ref_id.clone()));
                 core.increase_ref_count(dependent_table_id);
             }
+
+            // Notify frontends to create table.
+            self.nm
+                .notify(
+                    Operation::Add,
+                    &Info::Table(table),
+                    NotificationTarget::Frontend,
+                )
+                .await?;
+
             Ok(Some(CatalogId::TableId(table_id)))
         } else {
             Ok(None)
@@ -126,10 +180,25 @@ where
                 .into()),
                 None => {
                     Table::delete(&*self.meta_store_ref, table_ref_id).await?;
-                    let dependent_tables = core.delete_table(&table_id);
+                    let table = core.delete_table(&table_id).unwrap();
+                    let dependent_tables: Vec<TableId> = table
+                        .dependent_tables
+                        .iter()
+                        .map(|table_ref_id| TableId::from(&Some(table_ref_id.clone())))
+                        .collect();
                     for dependent_table_id in dependent_tables {
                         core.decrease_ref_count(dependent_table_id);
                     }
+
+                    // Notify frontends to delete table.
+                    self.nm
+                        .notify(
+                            Operation::Delete,
+                            &Info::Table(table),
+                            NotificationTarget::Frontend,
+                        )
+                        .await?;
+
                     Ok(Some(CatalogId::TableId(table_id)))
                 }
             }
@@ -194,8 +263,8 @@ impl CatalogManagerCore {
         self.databases.insert(database_id, database);
     }
 
-    fn delete_database(&mut self, database_id: &DatabaseId) {
-        self.databases.remove(database_id);
+    fn delete_database(&mut self, database_id: &DatabaseId) -> Option<Database> {
+        self.databases.remove(database_id)
     }
 
     fn has_schema(&self, schema_id: &SchemaId) -> bool {
@@ -207,8 +276,8 @@ impl CatalogManagerCore {
         self.schemas.insert(schema_id, schema);
     }
 
-    fn delete_schema(&mut self, schema_id: &SchemaId) {
-        self.schemas.remove(schema_id);
+    fn delete_schema(&mut self, schema_id: &SchemaId) -> Option<Schema> {
+        self.schemas.remove(schema_id)
     }
 
     fn has_table(&self, table_id: &TableId) -> bool {
@@ -220,15 +289,8 @@ impl CatalogManagerCore {
         self.tables.insert(table_id, table);
     }
 
-    fn delete_table(&mut self, table_id: &TableId) -> Vec<TableId> {
-        match self.tables.remove(table_id) {
-            Some(table) => table
-                .dependent_tables
-                .into_iter()
-                .map(|table_ref_id| TableId::from(&Some(table_ref_id)))
-                .collect(),
-            None => unreachable!(),
-        }
+    fn delete_table(&mut self, table_id: &TableId) -> Option<Table> {
+        self.tables.remove(table_id)
     }
 
     fn get_ref_count(&self, table_id: &TableId) -> Option<usize> {

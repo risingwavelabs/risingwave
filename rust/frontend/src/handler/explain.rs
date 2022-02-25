@@ -61,6 +61,9 @@ mod tests {
         assert!(s.contains("33"));
         assert!(s.contains("44"));
 
+        // Client should be shut down before meta stops. Otherwise it will get stuck in
+        // `join_handle.await` in `meta.stop()` because of graceful shutdown.
+        frontend.observer_join_handle.abort();
         meta.stop().await;
     }
 
@@ -85,6 +88,9 @@ mod tests {
         assert!(s.contains("v1"));
         assert!(s.contains("v2"));
 
+        // Client should be shut down before meta stops. Otherwise it will get stuck in
+        // `join_handle.await` in `meta.stop()` because of graceful shutdown.
+        frontend.observer_join_handle.abort();
         meta.stop().await;
     }
 
@@ -111,6 +117,9 @@ mod tests {
         assert!(lines[1].contains("44"));
         assert!(lines[1].contains("55"));
 
+        // Client should be shut down before meta stops. Otherwise it will get stuck in
+        // `join_handle.await` in `meta.stop()` because of graceful shutdown.
+        frontend.observer_join_handle.abort();
         meta.stop().await;
     }
 }

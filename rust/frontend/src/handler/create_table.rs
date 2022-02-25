@@ -95,6 +95,10 @@ mod tests {
         expected_map.insert("v4".to_string(), DataType::Float32);
         expected_map.insert("v5".to_string(), DataType::Float64);
         assert_eq!(columns, expected_map);
+
+        // Client should be shut down before meta stops. Otherwise it will get stuck in
+        // `join_handle.await` in `meta.stop()` because of graceful shutdown.
+        frontend.observer_join_handle.abort();
         meta.stop().await;
     }
 }

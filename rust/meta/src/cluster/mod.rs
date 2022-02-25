@@ -114,7 +114,7 @@ where
                 worker.insert(self.meta_store_ref.as_ref()).await?;
                 entry.insert(worker);
 
-                // Notify frontends of new compute node
+                // Notify frontends of new compute node.
                 if worker_node.r#type == WorkerType::ComputeNode as i32 {
                     self.nm
                         .notify(
@@ -142,6 +142,7 @@ where
                 let worker_node = entry.1.to_protobuf();
                 Worker::delete(&*self.meta_store_ref, &host_address).await?;
 
+                // Notify frontends to delete compute node.
                 if worker_node.r#type == WorkerType::ComputeNode as i32 {
                     self.nm
                         .notify(

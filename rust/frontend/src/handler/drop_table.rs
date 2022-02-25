@@ -46,6 +46,9 @@ mod tests {
             .get_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "t")
             .is_none());
 
+        // Client should be shut down before meta stops. Otherwise it will get stuck in
+        // `join_handle.await` in `meta.stop()` because of graceful shutdown.
+        frontend.observer_join_handle.abort();
         meta.stop().await;
     }
 }

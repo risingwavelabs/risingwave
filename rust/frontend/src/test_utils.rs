@@ -4,6 +4,7 @@ use clap::StructOpt;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::Session;
 use risingwave_meta::test_utils::LocalMeta;
+use tokio::task::JoinHandle;
 
 use crate::session::{FrontendEnv, RwSession};
 use crate::FrontendOpts;
@@ -11,6 +12,7 @@ use crate::FrontendOpts;
 pub struct LocalFrontend {
     pub opts: FrontendOpts,
     pub session: RwSession,
+    pub observer_join_handle: JoinHandle<()>,
 }
 
 impl LocalFrontend {
@@ -18,11 +20,16 @@ impl LocalFrontend {
         let args: [OsString; 0] = []; // No argument.
         let mut opts: FrontendOpts = FrontendOpts::parse_from(args);
         opts.host = "127.0.0.1:45666".to_string();
-        let env = FrontendEnv::with_meta_client(meta.create_client().await, &opts)
-            .await
-            .unwrap();
+        let (env, observer_join_handle) =
+            FrontendEnv::with_meta_client(meta.create_client().await, &opts)
+                .await
+                .unwrap();
         let session = RwSession::new(env, "dev".to_string());
-        Self { opts, session }
+        Self {
+            opts,
+            session,
+            observer_join_handle,
+        }
     }
 
     pub async fn run_sql(
