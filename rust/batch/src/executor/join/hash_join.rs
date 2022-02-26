@@ -280,7 +280,7 @@ struct HashJoinExecutorBuilderDispatcher<K> {
 }
 
 /// A dispatcher to help create specialized hash join executor.
-impl<K: HashKey> HashKeyDispatcher<K> for HashJoinExecutorBuilderDispatcher<K> {
+impl<K: HashKey> HashKeyDispatcher for HashJoinExecutorBuilderDispatcher<K> {
     type Input = HashJoinExecutorBuilder;
     type Output = BoxedExecutor;
 

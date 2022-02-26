@@ -1,4 +1,3 @@
-use crate::collection::hash_map::hash_key::HashKey;
 use crate::collection::hash_map::HashKeyKind::{Key128, Key16, Key256, Key32, Key64};
 use crate::collection::hash_map::MAX_FIXED_SIZE_KEY_ELEMENTS;
 use crate::types::{DataSize, DataType};
@@ -26,7 +25,7 @@ impl HashKeyKind {
     }
 }
 
-pub trait HashKeyDispatcher<K: HashKey> {
+pub trait HashKeyDispatcher {
     type Input;
     type Output;
     fn dispatch(input: Self::Input) -> Self::Output;
