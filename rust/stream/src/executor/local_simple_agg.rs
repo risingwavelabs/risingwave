@@ -13,7 +13,8 @@ use risingwave_storage::StateStore;
 
 use super::{
     agg_executor_next, create_streaming_agg_state, generate_agg_schema, AggCall, AggExecutor,
-    Barrier, Executor, Message, PkIndices, PkIndicesRef, StreamingAggStateImpl,
+    Barrier, Executor, ExecutorState, Message, PkIndices, PkIndicesRef, StatefuleExecutor,
+    StreamingAggStateImpl,
 };
 use crate::executor::ExecutorBuilder;
 use crate::task::{build_agg_call_from_prost, ExecutorParams, StreamManagerCore};
@@ -46,8 +47,9 @@ pub struct LocalSimpleAggExecutor {
 
     /// Logical Operator Info
     op_info: String,
-    /// Epoch
-    epoch: u64,
+
+    /// Executor state
+    executor_state: ExecutorState,
 }
 
 pub struct LocalSimpleAggExecutorCreater {}
@@ -113,7 +115,7 @@ impl LocalSimpleAggExecutor {
             agg_calls,
             identity: format!("LocalSimpleAggExecutor {:X}", executor_id),
             op_info,
-            epoch: 0,
+            executor_state: ExecutorState::INIT,
         })
     }
 }
@@ -143,14 +145,6 @@ impl Executor for LocalSimpleAggExecutor {
 
 #[async_trait]
 impl AggExecutor for LocalSimpleAggExecutor {
-    fn current_epoch(&self) -> u64 {
-        self.epoch
-    }
-
-    fn update_epoch(&mut self, new_epoch: u64) {
-        self.epoch = new_epoch;
-    }
-
     fn cached_barrier_message_mut(&mut self) -> &mut Option<Barrier> {
         &mut self.cached_barrier_message
     }
@@ -197,6 +191,16 @@ impl AggExecutor for LocalSimpleAggExecutor {
 
     fn input(&mut self) -> &mut dyn Executor {
         self.input.as_mut()
+    }
+}
+
+impl StatefuleExecutor for LocalSimpleAggExecutor {
+    fn executor_state(&self) -> &ExecutorState {
+        &self.executor_state
+    }
+
+    fn update_executor_state(&mut self, new_state: ExecutorState) {
+        self.executor_state = new_state;
     }
 }
 
@@ -268,11 +272,12 @@ mod tests {
         );
         let schema = schemas::iii();
 
-        let mut source = MockSource::new(schema, vec![2]); // pk
-        source.push_chunks([chunk1].into_iter());
+        let mut source = MockSource::new(schema, vec![2]); // pk\
         source.push_barrier(1, false);
-        source.push_chunks([chunk2].into_iter());
+        source.push_chunks([chunk1].into_iter());
         source.push_barrier(2, false);
+        source.push_chunks([chunk2].into_iter());
+        source.push_barrier(3, false);
 
         // This is local simple aggregation, so we add another row count state
         let agg_calls = vec![
@@ -301,6 +306,9 @@ mod tests {
             "LocalSimpleAggExecutor".to_string(),
         )?;
 
+        // Consume the init barrier
+        simple_agg.next().await.unwrap();
+        // Consume stream chunk
         let msg = simple_agg.next().await?;
         if let Message::Chunk(chunk) = msg {
             let (data_chunk, ops) = chunk.into_parts();

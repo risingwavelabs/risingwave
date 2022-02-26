@@ -787,7 +787,7 @@ mod tests {
         add_local_channels(ctx.clone(), vec![(233, 234), (233, 235)]);
         add_remote_channels(ctx.clone(), 233, vec![238]);
 
-        let b1 = Barrier::new(0).with_mutation(Mutation::UpdateOutputs(updates1));
+        let b1 = Barrier::new_test_barrier(1).with_mutation(Mutation::UpdateOutputs(updates1));
         tx.send(Message::Barrier(b1)).await.unwrap();
         executor.next().await.unwrap();
         let tctx = ctx.clone();
@@ -798,7 +798,7 @@ mod tests {
         let mut updates2: HashMap<u32, Vec<ActorInfo>> = HashMap::new();
         updates2.insert(actor_id, vec![helper_make_local_actor(235)]);
         add_local_channels(ctx.clone(), vec![(233, 235)]);
-        let b2 = Barrier::new(0).with_mutation(Mutation::UpdateOutputs(updates2));
+        let b2 = Barrier::new_test_barrier(1).with_mutation(Mutation::UpdateOutputs(updates2));
 
         tx.send(Message::Barrier(b2)).await.unwrap();
         executor.next().await.unwrap();
@@ -809,16 +809,16 @@ mod tests {
 
         add_local_channels(ctx.clone(), vec![(233, 245)]);
         add_remote_channels(ctx.clone(), 233, vec![246]);
-        tx.send(Message::Barrier(Barrier::new(0).with_mutation(
-            Mutation::AddOutput({
+        tx.send(Message::Barrier(
+            Barrier::new_test_barrier(1).with_mutation(Mutation::AddOutput({
                 let mut actors = HashMap::default();
                 actors.insert(
                     233,
                     vec![helper_make_local_actor(245), helper_make_remote_actor(246)],
                 );
                 actors
-            }),
-        )))
+            })),
+        ))
         .await
         .unwrap();
         executor.next().await.unwrap();

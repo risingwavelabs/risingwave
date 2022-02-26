@@ -142,8 +142,13 @@ message AddMutation {
   map<uint32, Actors> actors = 1;
 }
 
+message Epoch {
+  uint64 curr = 1;
+  uint64 prev = 2;
+}
+
 message Barrier {
-  uint64 epoch = 1;
+  Epoch epoch = 1;
   oneof mutation {
     NothingMutation nothing = 2;
     StopMutation stop = 3;

@@ -141,7 +141,7 @@ impl ChainExecutor {
             )
             .into()),
             Message::Barrier(barrier) => {
-                self.snapshot.init(barrier.epoch)?;
+                self.snapshot.init(barrier.epoch.prev)?;
                 self.state = ChainState::ReadingSnapshot;
                 Ok(Message::Barrier(barrier))
             }
@@ -283,7 +283,7 @@ mod test {
             schema.clone(),
             PkIndices::new(),
             vec![
-                Message::Barrier(Barrier::new(0)),
+                Message::Barrier(Barrier::new_test_barrier(1)),
                 Message::Chunk(StreamChunk::new(
                     vec![Op::Insert],
                     vec![column_nonnull! { I32Array, [3] }],

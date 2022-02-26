@@ -62,7 +62,7 @@ impl Actor {
                             // For the upstream trace pipe, its output is our input.
                             actor_id = self.id,
                             next = "Outbound",
-                            epoch = barrier.epoch,
+                            epoch = barrier.epoch.curr,
                         );
                     } else {
                         span = tracing::trace_span!(
@@ -71,7 +71,7 @@ impl Actor {
                             // For the upstream trace pipe, its output is our input.
                             actor_id = self.id,
                             next = "Outbound",
-                            epoch = barrier.epoch,
+                            epoch = barrier.epoch.curr,
                         );
                     }
                 }

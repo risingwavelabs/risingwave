@@ -40,7 +40,7 @@ impl ExecutorBuilder for MaterializeExecutorCreater {
         store: impl StateStore,
         _stream: &mut StreamManagerCore,
     ) -> Result<Box<dyn Executor>> {
-        let node = try_match_expand!(node.get_node().unwrap(), Node::MviewNode)?;
+        let node = try_match_expand!(node.get_node().unwrap(), Node::MaterializeNode)?;
 
         MaterializeExecutor::create(params, node, store)
     }
@@ -49,7 +49,7 @@ impl ExecutorBuilder for MaterializeExecutorCreater {
 impl<S: StateStore> MaterializeExecutor<S> {
     pub fn create(
         mut params: ExecutorParams,
-        node: &stream_plan::MViewNode,
+        node: &stream_plan::MaterializeNode,
         store: S,
     ) -> Result<Box<dyn Executor>> {
         let table_id = TableId::from(&node.table_ref_id);
@@ -101,7 +101,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
     }
 
     async fn flush(&mut self, barrier: Barrier) -> Result<Message> {
-        self.local_state.flush(barrier.epoch).await?;
+        self.local_state.flush(barrier.epoch.prev).await?;
         Ok(Message::Barrier(barrier))
     }
 }
