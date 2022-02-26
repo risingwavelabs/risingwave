@@ -3,3 +3,34 @@ create table t (v1 int not null);
 
 statement ok
 drop table t;
+
+statement ok
+create table t (v1 int, v2 int)
+
+query T
+explain insert into t values (22, 33), (44, 55);
+----
+LogicalInsert { table_name: t, columns: [] }
+LogicalValues { rows: [[Literal(Literal { data: Some(Int32(22)), data_type: Int32 }), Literal(Literal { data: Some(Int32(33)), data_type: Int32 })], [Literal(Literal { data: Some(Int32(44)), data_type: Int32 }), Literal(Literal { data: Some(Int32(55)), data_type: Int32 })]], schema: Schema { fields: [Field { name = , data_type = Int32 }, Field { name = , data_type = Int32 }] } }
+
+statement ok
+drop table t;
+
+statement error
+explain select * from t
+
+statement ok
+create table t (v1 bigint, v2 double precision)
+
+query T
+explain select * from t
+----
+LogicalScan { table: "t", columns: ["_row_id", "v1", "v2"] }
+
+statement ok
+drop table t;
+
+query T
+explain values (11, 22), (33+(1+2), 44);
+----
+LogicalValues { rows: [[Literal(Literal { data: Some(Int32(11)), data_type: Int32 }), Literal(Literal { data: Some(Int32(22)), data_type: Int32 })], [FunctionCall(FunctionCall { func_type: Add, return_type: Int32, inputs: [Literal(Literal { data: Some(Int32(33)), data_type: Int32 }), FunctionCall(FunctionCall { func_type: Add, return_type: Int32, inputs: [Literal(Literal { data: Some(Int32(1)), data_type: Int32 }), Literal(Literal { data: Some(Int32(2)), data_type: Int32 })] })] }), Literal(Literal { data: Some(Int32(44)), data_type: Int32 })]], schema: Schema { fields: [Field { name = , data_type = Int32 }, Field { name = , data_type = Int32 }] } }

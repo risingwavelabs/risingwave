@@ -10,7 +10,8 @@ use crate::catalog::TableId;
 pub enum TableRef {
     BaseTable(Box<BaseTableRef>),
 }
-#[derive(Debug)]
+
+#[derive(Debug, Clone)]
 pub struct BaseTableRef {
     pub name: String, // explain-only
     pub table_id: TableId,
