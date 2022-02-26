@@ -34,7 +34,8 @@ pub trait TopNExecutorBase: StatefuleExecutor {
 /// computing diffs and flushing when receiving a barrier.
 pub(super) async fn top_n_executor_next<E: TopNExecutorBase>(executor: &mut E) -> Result<Message> {
     let msg = executor.input().next().await?;
-    if executor.try_init_executor(&msg).is_some() {        // Pass through the first msg directly after initializing the executor
+    if executor.try_init_executor(&msg).is_some() {
+        // Pass through the first msg directly after initializing the executor
         return Ok(msg);
     }
     let res = match msg {
