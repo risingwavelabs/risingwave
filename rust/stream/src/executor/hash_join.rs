@@ -202,10 +202,10 @@ impl<S: StateStore> JoinSide<S> {
     }
 }
 
-pub struct HashJoinExecutorCreater {}
+pub struct HashJoinExecutorBuilder {}
 
-impl ExecutorBuilder for HashJoinExecutorCreater {
-    fn create_executor(
+impl ExecutorBuilder for HashJoinExecutorBuilder {
+    fn build(
         params: ExecutorParams,
         node: &stream_plan::StreamNode,
         store: impl StateStore,

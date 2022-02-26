@@ -48,10 +48,10 @@ pub struct SourceExecutor {
     source_output_row_count: Counter<u64>,
 }
 
-pub struct SourceExecutorCreater {}
+pub struct SourceExecutorBuilder {}
 
-impl ExecutorBuilder for SourceExecutorCreater {
-    fn create_executor(
+impl ExecutorBuilder for SourceExecutorBuilder {
+    fn build(
         params: ExecutorParams,
         node: &stream_plan::StreamNode,
         _store: impl StateStore,
@@ -64,16 +64,6 @@ impl ExecutorBuilder for SourceExecutorCreater {
             .lock_barrier_manager()
             .register_sender(params.actor_id, sender);
 
-        SourceExecutor::create(params, node, barrier_receiver)
-    }
-}
-
-impl SourceExecutor {
-    pub fn create(
-        params: ExecutorParams,
-        node: &stream_plan::SourceNode,
-        barrier_receiver: UnboundedReceiver<Message>,
-    ) -> Result<Box<dyn Executor>> {
         let source_id = TableId::from(&node.table_ref_id);
         let source_desc = params.env.source_manager().get_source(&source_id)?;
 
@@ -96,7 +86,7 @@ impl SourceExecutor {
         }
         let schema = Schema::new(fields);
 
-        Ok(Box::new(Self::new(
+        Ok(Box::new(SourceExecutor::new(
             source_id,
             source_desc,
             column_ids,
@@ -108,7 +98,9 @@ impl SourceExecutor {
             params.op_info,
         )?))
     }
+}
 
+impl SourceExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         source_id: TableId,

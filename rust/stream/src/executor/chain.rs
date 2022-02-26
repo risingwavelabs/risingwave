@@ -34,25 +34,16 @@ pub struct ChainExecutor {
     op_info: String,
 }
 
-pub struct ChainExecutorCreater {}
+pub struct ChainExecutorBuilder {}
 
-impl ExecutorBuilder for ChainExecutorCreater {
-    fn create_executor(
-        params: ExecutorParams,
+impl ExecutorBuilder for ChainExecutorBuilder {
+    fn build(
+        mut params: ExecutorParams,
         node: &stream_plan::StreamNode,
         _store: impl StateStore,
         _stream: &mut StreamManagerCore,
     ) -> Result<Box<dyn Executor>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::ChainNode)?;
-        ChainExecutor::create(params, node)
-    }
-}
-
-impl ChainExecutor {
-    pub fn create(
-        mut params: ExecutorParams,
-        node: &stream_plan::ChainNode,
-    ) -> Result<Box<dyn Executor>> {
         let snapshot = params.input.remove(1);
         let mview = params.input.remove(0);
 
@@ -66,7 +57,7 @@ impl ChainExecutor {
                 .map(|i| upstream_schema.fields()[*i].clone())
                 .collect_vec(),
         );
-        Ok(Box::new(Self::new(
+        Ok(Box::new(ChainExecutor::new(
             snapshot,
             mview,
             schema,
@@ -74,7 +65,9 @@ impl ChainExecutor {
             params.op_info,
         )))
     }
+}
 
+impl ChainExecutor {
     pub fn new(
         snapshot: Box<dyn Executor>,
         mview: Box<dyn Executor>,

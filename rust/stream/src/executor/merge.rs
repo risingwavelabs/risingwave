@@ -124,10 +124,10 @@ impl std::fmt::Debug for ReceiverExecutor {
     }
 }
 
-pub struct MergeExecutorCreater {}
+pub struct MergeExecutorBuilder {}
 
-impl ExecutorBuilder for MergeExecutorCreater {
-    fn create_executor(
+impl ExecutorBuilder for MergeExecutorBuilder {
+    fn build(
         params: ExecutorParams,
         node: &stream_plan::StreamNode,
         _store: impl StateStore,

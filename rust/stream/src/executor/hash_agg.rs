@@ -72,26 +72,16 @@ pub struct HashAggExecutor<S: StateStore> {
     executor_state: ExecutorState,
 }
 
-pub struct HashAggExecutorCreater {}
+pub struct HashAggExecutorBuilder {}
 
-impl ExecutorBuilder for HashAggExecutorCreater {
-    fn create_executor(
-        params: ExecutorParams,
+impl ExecutorBuilder for HashAggExecutorBuilder {
+    fn build(
+        mut params: ExecutorParams,
         node: &stream_plan::StreamNode,
         store: impl StateStore,
         _stream: &mut StreamManagerCore,
     ) -> Result<Box<dyn Executor>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::HashAggNode)?;
-        HashAggExecutor::create(params, node, store)
-    }
-}
-
-impl<S: StateStore> HashAggExecutor<S> {
-    pub fn create(
-        mut params: ExecutorParams,
-        node: &stream_plan::HashAggNode,
-        store: S,
-    ) -> Result<Box<dyn Executor>> {
         let keys = node
             .get_group_keys()
             .iter()
@@ -103,7 +93,7 @@ impl<S: StateStore> HashAggExecutor<S> {
             .map(build_agg_call_from_prost)
             .try_collect()?;
         let keyspace = Keyspace::shared_executor_root(store, params.executor_id);
-        Ok(Box::new(Self::new(
+        Ok(Box::new(HashAggExecutor::new(
             params.input.remove(0),
             agg_calls,
             keys,
@@ -113,7 +103,9 @@ impl<S: StateStore> HashAggExecutor<S> {
             params.op_info,
         )))
     }
+}
 
+impl<S: StateStore> HashAggExecutor<S> {
     pub fn new(
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,

@@ -52,31 +52,22 @@ pub struct LocalSimpleAggExecutor {
     executor_state: ExecutorState,
 }
 
-pub struct LocalSimpleAggExecutorCreater {}
+pub struct LocalSimpleAggExecutorBuilder {}
 
-impl ExecutorBuilder for LocalSimpleAggExecutorCreater {
-    fn create_executor(
-        params: ExecutorParams,
+impl ExecutorBuilder for LocalSimpleAggExecutorBuilder {
+    fn build(
+        mut params: ExecutorParams,
         node: &stream_plan::StreamNode,
         _store: impl StateStore,
         _stream: &mut StreamManagerCore,
     ) -> Result<Box<dyn Executor>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::LocalSimpleAggNode)?;
-        LocalSimpleAggExecutor::create(params, node)
-    }
-}
-
-impl LocalSimpleAggExecutor {
-    pub fn create(
-        mut params: ExecutorParams,
-        node: &stream_plan::SimpleAggNode,
-    ) -> Result<Box<dyn Executor>> {
         let agg_calls: Vec<AggCall> = node
             .get_agg_calls()
             .iter()
             .map(build_agg_call_from_prost)
             .try_collect()?;
-        Ok(Box::new(Self::new(
+        Ok(Box::new(LocalSimpleAggExecutor::new(
             params.input.remove(0),
             agg_calls,
             params.pk_indices,
@@ -84,7 +75,9 @@ impl LocalSimpleAggExecutor {
             params.op_info,
         )?))
     }
+}
 
+impl LocalSimpleAggExecutor {
     pub fn new(
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,

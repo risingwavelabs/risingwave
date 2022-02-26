@@ -43,36 +43,29 @@ impl std::fmt::Debug for BatchQueryExecutor {
     }
 }
 
-pub struct BatchQueryExecutorCreater {}
+pub struct BatchQueryExecutorBuilder {}
 
-impl ExecutorBuilder for BatchQueryExecutorCreater {
-    fn create_executor(
+impl ExecutorBuilder for BatchQueryExecutorBuilder {
+    fn build(
         params: ExecutorParams,
         node: &stream_plan::StreamNode,
         _store: impl StateStore,
         _stream: &mut StreamManagerCore,
     ) -> Result<Box<dyn Executor>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::BatchPlanNode)?;
-        BatchQueryExecutor::create(params, node)
-    }
-}
-
-impl BatchQueryExecutor {
-    pub fn create(
-        params: ExecutorParams,
-        node: &stream_plan::BatchPlanNode,
-    ) -> Result<Box<dyn Executor>> {
         let table_id = TableId::from(&node.table_ref_id);
         let table_manager = params.env.table_manager();
         let table = table_manager.get_table(&table_id)?;
 
-        Ok(Box::new(Self::new(
+        Ok(Box::new(BatchQueryExecutor::new(
             table.clone(),
             params.pk_indices,
             params.op_info,
         )))
     }
+}
 
+impl BatchQueryExecutor {
     pub fn new(table: ScannableTableRef, pk_indices: PkIndices, op_info: String) -> Self {
         Self::new_with_batch_size(table, pk_indices, DEFAULT_BATCH_SIZE, op_info)
     }

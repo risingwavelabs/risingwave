@@ -44,31 +44,22 @@ impl std::fmt::Debug for ProjectExecutor {
     }
 }
 
-pub struct ProjectExecutorCreater {}
+pub struct ProjectExecutorBuilder {}
 
-impl ExecutorBuilder for ProjectExecutorCreater {
-    fn create_executor(
-        params: ExecutorParams,
+impl ExecutorBuilder for ProjectExecutorBuilder {
+    fn build(
+        mut params: ExecutorParams,
         node: &stream_plan::StreamNode,
         _store: impl StateStore,
         _stream: &mut StreamManagerCore,
     ) -> Result<Box<dyn Executor>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::ProjectNode)?;
-        ProjectExecutor::create(params, node)
-    }
-}
-
-impl ProjectExecutor {
-    pub fn create(
-        mut params: ExecutorParams,
-        node: &stream_plan::ProjectNode,
-    ) -> Result<Box<dyn Executor>> {
         let project_exprs = node
             .get_select_list()
             .iter()
             .map(build_from_prost)
             .collect::<Result<Vec<_>>>()?;
-        Ok(Box::new(Self::new(
+        Ok(Box::new(ProjectExecutor::new(
             params.input.remove(0),
             params.pk_indices,
             project_exprs,
@@ -76,7 +67,9 @@ impl ProjectExecutor {
             params.op_info,
         )))
     }
+}
 
+impl ProjectExecutor {
     pub fn new(
         input: Box<dyn Executor>,
         pk_indices: PkIndices,

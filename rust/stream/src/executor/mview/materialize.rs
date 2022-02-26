@@ -31,27 +31,17 @@ pub struct MaterializeExecutor<S: StateStore> {
     op_info: String,
 }
 
-pub struct MaterializeExecutorCreater {}
+pub struct MaterializeExecutorBuilder {}
 
-impl ExecutorBuilder for MaterializeExecutorCreater {
-    fn create_executor(
-        params: ExecutorParams,
+impl ExecutorBuilder for MaterializeExecutorBuilder {
+    fn build(
+        mut params: ExecutorParams,
         node: &stream_plan::StreamNode,
         store: impl StateStore,
         _stream: &mut StreamManagerCore,
     ) -> Result<Box<dyn Executor>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::MaterializeNode)?;
 
-        MaterializeExecutor::create(params, node, store)
-    }
-}
-
-impl<S: StateStore> MaterializeExecutor<S> {
-    pub fn create(
-        mut params: ExecutorParams,
-        node: &stream_plan::MaterializeNode,
-        store: S,
-    ) -> Result<Box<dyn Executor>> {
         let table_id = TableId::from(&node.table_ref_id);
         let keys = node
             .column_orders
@@ -81,7 +71,9 @@ impl<S: StateStore> MaterializeExecutor<S> {
             params.op_info,
         )))
     }
+}
 
+impl<S: StateStore> MaterializeExecutor<S> {
     pub fn new(
         input: Box<dyn Executor>,
         keyspace: Keyspace<S>,

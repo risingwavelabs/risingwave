@@ -104,26 +104,16 @@ impl<S: StateStore> std::fmt::Debug for AppendOnlyTopNExecutor<S> {
     }
 }
 
-pub struct AppendOnlyTopNExecutorCreater {}
+pub struct AppendOnlyTopNExecutorBuilder {}
 
-impl ExecutorBuilder for AppendOnlyTopNExecutorCreater {
-    fn create_executor(
-        params: ExecutorParams,
+impl ExecutorBuilder for AppendOnlyTopNExecutorBuilder {
+    fn build(
+        mut params: ExecutorParams,
         node: &stream_plan::StreamNode,
         store: impl StateStore,
         _stream: &mut StreamManagerCore,
     ) -> Result<Box<dyn Executor>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::AppendOnlyTopNNode)?;
-        AppendOnlyTopNExecutor::create(params, node, store)
-    }
-}
-
-impl<S: StateStore> AppendOnlyTopNExecutor<S> {
-    pub fn create(
-        mut params: ExecutorParams,
-        node: &stream_plan::TopNNode,
-        store: S,
-    ) -> Result<Box<dyn Executor>> {
         let order_types: Vec<_> = node
             .get_order_types()
             .iter()
@@ -139,7 +129,7 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
         let cache_size = Some(1024);
         let total_count = (0, 0);
         let keyspace = Keyspace::executor_root(store, params.executor_id);
-        Ok(Box::new(Self::new(
+        Ok(Box::new(AppendOnlyTopNExecutor::new(
             params.input.remove(0),
             order_types,
             (node.offset as usize, limit),
@@ -151,7 +141,9 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
             params.op_info,
         )))
     }
+}
 
+impl<S: StateStore> AppendOnlyTopNExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         input: Box<dyn Executor>,

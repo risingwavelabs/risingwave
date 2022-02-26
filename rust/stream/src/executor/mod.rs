@@ -411,7 +411,7 @@ pub fn pk_input_arrays<'a>(pk_indices: PkIndicesRef, columns: &'a [Column]) -> V
 }
 
 pub trait ExecutorBuilder {
-    fn create_executor(
+    fn build(
         executor_params: ExecutorParams,
         node: &stream_plan::StreamNode,
         store: impl StateStore,
@@ -424,7 +424,7 @@ macro_rules! build_executor {
         match $a.get_node().unwrap() {
             $(
                 $proto_type_name(..) => {
-                    <$data_type>::create_executor($source,$a,$b,$c)
+                    <$data_type>::build($source,$a,$b,$c)
                 },
             )*
             _ => Err(RwError::from(
@@ -444,19 +444,19 @@ pub fn create_executor(
     store: impl StateStore,
 ) -> Result<Box<dyn Executor>> {
     let real_executor = build_executor! { executor_params,node,store,steam,
-      Node::SourceNode => SourceExecutorCreater,
-      Node::ProjectNode => ProjectExecutorCreater,
-      Node::TopNNode => TopNExecutorCreater,
-      Node::AppendOnlyTopNNode => AppendOnlyTopNExecutorCreater,
-      Node::LocalSimpleAggNode => LocalSimpleAggExecutorCreater,
-      Node::GlobalSimpleAggNode => SimpleAggExecutorCreater,
-      Node::HashAggNode => HashAggExecutorCreater,
-      Node::HashJoinNode => HashJoinExecutorCreater,
-      Node::ChainNode => ChainExecutorCreater,
-      Node::BatchPlanNode => BatchQueryExecutorCreater,
-      Node::MergeNode => MergeExecutorCreater,
-      Node::MaterializeNode => MaterializeExecutorCreater,
-      Node::FilterNode => FilterExecutorCreater
+      Node::SourceNode => SourceExecutorBuilder,
+      Node::ProjectNode => ProjectExecutorBuilder,
+      Node::TopNNode => TopNExecutorBuilder,
+      Node::AppendOnlyTopNNode => AppendOnlyTopNExecutorBuilder,
+      Node::LocalSimpleAggNode => LocalSimpleAggExecutorBuilder,
+      Node::GlobalSimpleAggNode => SimpleAggExecutorBuilder,
+      Node::HashAggNode => HashAggExecutorBuilder,
+      Node::HashJoinNode => HashJoinExecutorBuilder,
+      Node::ChainNode => ChainExecutorBuilder,
+      Node::BatchPlanNode => BatchQueryExecutorBuilder,
+      Node::MergeNode => MergeExecutorBuilder,
+      Node::MaterializeNode => MaterializeExecutorBuilder,
+      Node::FilterNode => FilterExecutorBuilder
     }?;
     Ok(real_executor)
 }

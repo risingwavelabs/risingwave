@@ -33,25 +33,16 @@ pub struct FilterExecutor {
     op_info: String,
 }
 
-pub struct FilterExecutorCreater {}
+pub struct FilterExecutorBuilder {}
 
-impl ExecutorBuilder for FilterExecutorCreater {
-    fn create_executor(
-        params: ExecutorParams,
+impl ExecutorBuilder for FilterExecutorBuilder {
+    fn build(
+        mut params: ExecutorParams,
         node: &stream_plan::StreamNode,
         _store: impl StateStore,
         _stream: &mut StreamManagerCore,
     ) -> Result<Box<dyn Executor>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::FilterNode)?;
-        FilterExecutor::create(params, node)
-    }
-}
-
-impl FilterExecutor {
-    pub fn create(
-        mut params: ExecutorParams,
-        node: &stream_plan::FilterNode,
-    ) -> Result<Box<dyn Executor>> {
         let search_condition = build_from_prost(node.get_search_condition()?)?;
         Ok(Box::new(FilterExecutor::new(
             params.input.remove(0),
@@ -60,7 +51,9 @@ impl FilterExecutor {
             params.op_info,
         )))
     }
+}
 
+impl FilterExecutor {
     pub fn new(
         input: Box<dyn Executor>,
         expr: BoxedExpression,
