@@ -22,7 +22,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayImpl, DataChunk, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::data::barrier::Mutation as ProstMutation;
@@ -324,7 +324,7 @@ pub trait ExecutorBuilder {
         steam: &mut StreamManagerCore,
     ) -> Result<Box<dyn Executor>>;
 }
-
+#[macro_export]
 macro_rules! build_executor {
     ($source: expr,$a: expr,$b: expr,$c: expr, $($proto_type_name:path => $data_type:ty),*) => {
         match $a.get_node().unwrap() {
@@ -333,6 +333,12 @@ macro_rules! build_executor {
                     <$data_type>::create_executor($source,$a,$b,$c)
                 },
             )*
+            _ => Err(RwError::from(
+              ErrorCode::InternalError(format!(
+                "unsupported node:{:?}",
+                $a.get_node().unwrap()
+              )),
+            )),
         }
     }
 }
@@ -354,7 +360,6 @@ pub fn create_executor(
       Node::HashJoinNode => HashJoinExecutorCreater,
       Node::ChainNode => ChainExecutorCreater,
       Node::BatchPlanNode => BatchQueryExecutorCreater,
-      Node::ExchangeNode => MaterializeExecutorCreater,
       Node::MergeNode => MergeExecutorCreater,
       Node::MviewNode => MaterializeExecutorCreater,
       Node::FilterNode => FilterExecutorCreater
