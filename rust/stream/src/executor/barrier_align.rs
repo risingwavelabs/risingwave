@@ -20,6 +20,17 @@ pub enum AlignedMessage {
     Barrier(Barrier),
 }
 
+impl<'a> TryFrom<&'a AlignedMessage> for &'a Barrier {
+    type Error = ();
+
+    fn try_from(m: &'a AlignedMessage) -> std::result::Result<Self, Self::Error> {
+        match m {
+            AlignedMessage::Barrier(b) => Ok(b),
+            _ => Err(()),
+        }
+    }
+}
+
 pub struct BarrierAligner {
     /// The input from the left executor
     input_l: Pin<Box<dyn Stream<Item = Result<Message>> + Send>>,
