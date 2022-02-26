@@ -240,7 +240,8 @@ where
 
         // check whether the epoch is valid
         // TODO: return error instead of panic
-        // TODO: the validation is temporarily disabled until transaction is integrated
+        // TODO: the validation is temporarily disabled until 
+        // the new barrier manager design is integrated
         // if epoch <= hummock_version.max_committed_epoch {
         //   panic!(
         //     "Epoch {} <= max_committed_epoch {}",
