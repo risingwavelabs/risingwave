@@ -1,5 +1,5 @@
-use super::HashKey;
-use crate::collection::hash_map::{self, MAX_FIXED_SIZE_KEY_ELEMENTS};
+use super::{HashKey, MAX_FIXED_SIZE_KEY_ELEMENTS};
+use crate::collection::hash_map as hash;
 use crate::types::{DataSize, DataType};
 
 /// An enum to help to dynamically dispatch [`HashKey`] template.
@@ -34,12 +34,12 @@ pub trait HashKeyDispatcher {
 
     fn dispatch_by_kind(kind: HashKeyKind, input: Self::Input) -> Self::Output {
         match kind {
-            HashKeyKind::Key16 => Self::dispatch::<hash_map::Key16>(input),
-            HashKeyKind::Key32 => Self::dispatch::<hash_map::Key32>(input),
-            HashKeyKind::Key64 => Self::dispatch::<hash_map::Key64>(input),
-            HashKeyKind::Key128 => Self::dispatch::<hash_map::Key128>(input),
-            HashKeyKind::Key256 => Self::dispatch::<hash_map::Key256>(input),
-            HashKeyKind::KeySerialized => Self::dispatch::<hash_map::KeySerialized>(input),
+            HashKeyKind::Key16 => Self::dispatch::<hash::Key16>(input),
+            HashKeyKind::Key32 => Self::dispatch::<hash::Key32>(input),
+            HashKeyKind::Key64 => Self::dispatch::<hash::Key64>(input),
+            HashKeyKind::Key128 => Self::dispatch::<hash::Key128>(input),
+            HashKeyKind::Key256 => Self::dispatch::<hash::Key256>(input),
+            HashKeyKind::KeySerialized => Self::dispatch::<hash::KeySerialized>(input),
         }
     }
 }
