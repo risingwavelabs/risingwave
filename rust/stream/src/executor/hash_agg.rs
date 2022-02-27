@@ -44,7 +44,7 @@ pub struct HashAggExecutor<S: StateStore> {
     cached_barrier_message: Option<Barrier>,
 
     /// The executor operates on this keyspace.
-    keyspace: Keyspace<S>,
+    keyspace: Arc<Keyspace<S>>,
 
     /// The cached states. `HashKey -> (prev_value, value)`.
     state_map: EvictableHashMap<HashKey, Box<AggState<S>>>,
@@ -53,7 +53,7 @@ pub struct HashAggExecutor<S: StateStore> {
     input: Box<dyn Executor>,
 
     /// A [`HashAggExecutor`] may have multiple [`AggCall`]s.
-    agg_calls: Vec<AggCall>,
+    agg_calls: Arc<Vec<AggCall>>,
 
     /// Indices of the columns
     /// all of the aggregation functions in this executor should depend on same group of keys
@@ -83,9 +83,9 @@ impl<S: StateStore> HashAggExecutor<S> {
 
         Self {
             cached_barrier_message: None,
-            keyspace,
+            keyspace: Arc::new(keyspace),
             input,
-            agg_calls,
+            agg_calls: Arc::new(agg_calls),
             schema,
             key_indices,
             state_map: EvictableHashMap::new(1 << 16), // TODO: decide the target cap
@@ -204,32 +204,37 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
 
         let mut futures = vec![];
         for (key, vis_map) in unique_keys {
-            // 1. Retrieve previous state from the KeyedState. If they didn't exist, the
-            // ManagedState will automatically create new ones for them.
-            let mut states = {
-                if !self.state_map.contains(key) {
-                    // TODO: parallelize this
-                    let state = generate_agg_state(
-                        Some(key),
-                        &self.agg_calls,
-                        &self.keyspace,
-                        input_pk_data_types.clone(),
-                        epoch,
-                    )
-                    .await?;
-                    Box::new(state)
-                } else {
-                    self.state_map.pop(key).unwrap()
-                }
-            };
+            // Retrieve previous state from the KeyedState.
+            let states = self.state_map.pop(key);
 
             let key = key.to_owned();
             let ops = ops.clone();
             let all_agg_data = all_agg_data.clone();
+            let input_pk_data_types = input_pk_data_types.clone();
+            let agg_calls = self.agg_calls.clone();
+            let keyspace = self.keyspace.clone();
 
             // To leverage more parallelism in IO operations, fetching and updating states for every
             // unique keys is created as futures and run in parallel.
             futures.push(async move {
+                // 1. If previous state didn't exist, the ManagedState will automatically create new
+                // ones for them.
+                let mut states = {
+                    match states {
+                        Some(s) => s,
+                        None => Box::new(
+                            generate_agg_state(
+                                Some(&key),
+                                &*agg_calls,
+                                &*keyspace,
+                                input_pk_data_types,
+                                epoch,
+                            )
+                            .await?,
+                        ),
+                    }
+                };
+
                 // 2. Mark the state as dirty by filling prev states
                 states.may_mark_as_dirty(epoch).await?;
 
