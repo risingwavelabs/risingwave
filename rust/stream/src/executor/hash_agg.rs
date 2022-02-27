@@ -43,7 +43,7 @@ pub struct HashAggExecutor<S: StateStore> {
     cached_barrier_message: Option<Barrier>,
 
     /// The executor operates on this keyspace.
-    keyspace: Arc<Keyspace<S>>,
+    keyspace: Keyspace<S>,
 
     /// The cached states. `HashKey -> (prev_value, value)`.
     state_map: EvictableHashMap<HashKey, Box<AggState<S>>>,
@@ -52,7 +52,7 @@ pub struct HashAggExecutor<S: StateStore> {
     input: Box<dyn Executor>,
 
     /// A [`HashAggExecutor`] may have multiple [`AggCall`]s.
-    agg_calls: Arc<Vec<AggCall>>,
+    agg_calls: Vec<AggCall>,
 
     /// Indices of the columns
     /// all of the aggregation functions in this executor should depend on same group of keys
@@ -82,9 +82,9 @@ impl<S: StateStore> HashAggExecutor<S> {
 
         Self {
             cached_barrier_message: None,
-            keyspace: Arc::new(keyspace),
+            keyspace,
             input,
-            agg_calls: Arc::new(agg_calls),
+            agg_calls,
             schema,
             key_indices,
             state_map: EvictableHashMap::new(1 << 16), // TODO: decide the target cap
@@ -161,7 +161,6 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> Result<()> {
         let epoch = self.executor_state().epoch();
         let (ops, columns, visibility) = chunk.into_inner();
-        let ops = Arc::new(ops);
 
         // --- Retrieve grouped keys into Row format ---
         let keys = {
@@ -191,31 +190,25 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
         let input_pk_data_types = self.input.pk_data_types();
 
         // When applying batch, we will send columns of primary keys to the last N columns.
-        let all_agg_data = Arc::new(
-            all_agg_input_arrays
-                .into_iter()
-                .map(|mut input_arrays| {
-                    input_arrays.extend(pk_input_arrays.iter().cloned());
-                    input_arrays
-                })
-                .collect_vec(),
-        );
+        let all_agg_data = all_agg_input_arrays
+            .into_iter()
+            .map(|mut input_arrays| {
+                input_arrays.extend(pk_input_arrays.iter().cloned());
+                input_arrays
+            })
+            .collect_vec();
 
         let mut futures = vec![];
         for (key, vis_map) in unique_keys {
             // Retrieve previous state from the KeyedState.
             let states = self.state_map.pop(key);
 
-            let key = key.to_owned();
-            let ops = ops.clone();
-            let all_agg_data = all_agg_data.clone();
-            let input_pk_data_types = input_pk_data_types.clone();
-            let agg_calls = self.agg_calls.clone();
-            let keyspace = self.keyspace.clone();
-
             // To leverage more parallelism in IO operations, fetching and updating states for every
             // unique keys is created as futures and run in parallel.
-            futures.push(async move {
+            futures.push(async {
+                let key = key.clone();
+                let vis_map = vis_map;
+
                 // 1. If previous state didn't exist, the ManagedState will automatically create new
                 // ones for them.
                 let mut states = {
@@ -224,9 +217,9 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
                         None => Box::new(
                             generate_agg_state(
                                 Some(&key),
-                                &*agg_calls,
-                                &*keyspace,
-                                input_pk_data_types,
+                                &self.agg_calls,
+                                &self.keyspace,
+                                input_pk_data_types.clone(),
                                 epoch,
                             )
                             .await?,
