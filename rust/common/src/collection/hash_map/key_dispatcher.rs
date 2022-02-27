@@ -1,3 +1,4 @@
+use super::HashKey;
 use crate::collection::hash_map::{self, MAX_FIXED_SIZE_KEY_ELEMENTS};
 use crate::types::{DataSize, DataType};
 
@@ -77,8 +78,6 @@ pub fn calc_hash_key_kind(data_types: &[DataType]) -> HashKeyKind {
 
     HashKeyKind::KeySerialized
 }
-
-use super::HashKey;
 
 #[cfg(test)]
 mod tests {
