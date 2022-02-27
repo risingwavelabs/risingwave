@@ -12,9 +12,9 @@ use risingwave_storage::{Keyspace, StateStore};
 
 use super::aggregation::*;
 use super::{
-    pk_input_arrays, Barrier, Executor, ExecutorState, Message, PkIndices, PkIndicesRef,
-    StatefuleExecutor,
+    Barrier, Executor, ExecutorState, Message, PkIndices, PkIndicesRef, StatefuleExecutor,
 };
+use crate::executor::pk_input_array_refs;
 
 /// `SimpleAggExecutor` is the aggregation operator for streaming system.
 /// To create an aggregation operator, states and expressions should be passed along the

@@ -16,9 +16,8 @@ use risingwave_storage::{Keyspace, StateStore};
 
 use super::aggregation::{AggState, HashKey};
 use super::{
-    agg_executor_next, agg_input_arrays, generate_agg_schema, generate_agg_state, pk_input_arrays,
-    AggCall, AggExecutor, Barrier, Executor, ExecutorState, Message, PkIndicesRef,
-    StatefuleExecutor,
+    agg_executor_next, generate_agg_schema, generate_agg_state, AggCall, AggExecutor, Barrier,
+    Executor, ExecutorState, Message, PkIndicesRef, StatefuleExecutor,
 };
 use crate::executor::{agg_input_arrays, pk_input_arrays, PkIndices};
 
