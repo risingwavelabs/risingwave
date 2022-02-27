@@ -28,7 +28,7 @@ struct HashAggExecutorBuilderDispatcher<K> {
 }
 
 /// A dispatcher to help create specialized hash agg executor.
-impl<K: HashKey> HashKeyDispatcher<K> for HashAggExecutorBuilderDispatcher<K> {
+impl<K: HashKey> HashKeyDispatcher for HashAggExecutorBuilderDispatcher<K> {
     type Input = HashAggExecutorBuilder;
     type Output = BoxedExecutor;
 
