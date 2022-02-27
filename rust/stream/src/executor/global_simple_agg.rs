@@ -12,9 +12,9 @@ use risingwave_storage::{Keyspace, StateStore};
 
 use super::aggregation::*;
 use super::{
-    pk_input_arrays, Barrier, Executor, ExecutorState, Message, PkIndices, PkIndicesRef,
-    StatefuleExecutor,
+    Barrier, Executor, ExecutorState, Message, PkIndices, PkIndicesRef, StatefuleExecutor,
 };
+use crate::executor::pk_input_array_refs;
 
 /// `SimpleAggExecutor` is the aggregation operator for streaming system.
 /// To create an aggregation operator, states and expressions should be passed along the
@@ -117,8 +117,8 @@ impl<S: StateStore> AggExecutor for SimpleAggExecutor<S> {
         let (ops, columns, visibility) = chunk.into_inner();
 
         // --- Retrieve all aggregation inputs in advance ---
-        let all_agg_input_arrays = agg_input_arrays(&self.agg_calls, &columns);
-        let pk_input_arrays = pk_input_arrays(self.input.pk_indices(), &columns);
+        let all_agg_input_arrays = agg_input_array_refs(&self.agg_calls, &columns);
+        let pk_input_arrays = pk_input_array_refs(self.input.pk_indices(), &columns);
         let input_pk_data_types = self.input.pk_data_types();
 
         // When applying batch, we will send columns of primary keys to the last N columns.
