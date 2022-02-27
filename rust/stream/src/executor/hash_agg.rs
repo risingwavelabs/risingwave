@@ -150,9 +150,12 @@ impl<S: StateStore> HashAggExecutor<S> {
     }
 
     fn is_dirty(&self) -> bool {
-        self.state_map
-            .values()
-            .any(|state| state.try_lock().unwrap().is_dirty())
+        self.state_map.values().any(|state| {
+            state
+                .try_lock()
+                .expect("Lock should not be held by others when is_dirty is called")
+                .is_dirty()
+        })
     }
 }
 
