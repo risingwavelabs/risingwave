@@ -234,7 +234,7 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
 
             // To leverage more parallelism in IO operations, fetching and updating states for every
             // unique keys is created as futures and run in parallel.
-            futures.push(tokio::spawn(async move {
+            futures.push(async move {
                 // 2. Mark the state as dirty by filling prev states
                 states.lock().await.may_mark_as_dirty(epoch).await?;
 
@@ -253,12 +253,12 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
                 }
 
                 Ok::<(), RwError>(())
-            }));
+            });
         }
         join_all(futures)
             .await
             .into_iter()
-            .collect::<std::result::Result<Result<()>, _>>()??;
+            .collect::<Result<()>>()?;
 
         Ok(())
     }
