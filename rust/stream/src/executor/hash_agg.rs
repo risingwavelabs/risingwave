@@ -46,7 +46,7 @@ pub struct HashAggExecutor<S: StateStore> {
     keyspace: Keyspace<S>,
 
     /// The cached states. `HashKey -> (prev_value, value)`.
-    state_map: EvictableHashMap<HashKey, Box<AggState<S>>>,
+    state_map: EvictableHashMap<HashKey, Option<Box<AggState<S>>>>,
 
     /// The input of the current executor
     input: Box<dyn Executor>,
@@ -148,7 +148,9 @@ impl<S: StateStore> HashAggExecutor<S> {
     }
 
     fn is_dirty(&self) -> bool {
-        self.state_map.values().any(|state| state.is_dirty())
+        self.state_map
+            .values()
+            .any(|state| state.as_ref().unwrap().is_dirty())
     }
 }
 
@@ -201,7 +203,7 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
         let mut futures = vec![];
         for (key, vis_map) in unique_keys {
             // Retrieve previous state from the KeyedState.
-            let states = self.state_map.pop(key);
+            let states = self.state_map.put(key.to_owned(), None);
 
             // To leverage more parallelism in IO operations, fetching and updating states for every
             // unique keys is created as futures and run in parallel.
@@ -213,7 +215,7 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
                 // ones for them.
                 let mut states = {
                     match states {
-                        Some(s) => s,
+                        Some(s) => s.unwrap(),
                         None => Box::new(
                             generate_agg_state(
                                 Some(&key),
@@ -247,7 +249,7 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
         let mut buffered = stream::iter(futures).buffer_unordered(10);
         while let Some(result) = buffered.next().await {
             let (key, state) = result?;
-            self.state_map.put(key, state);
+            self.state_map.put(key, Some(state));
         }
 
         Ok(())
@@ -263,9 +265,9 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
             let mut dirty_cnt = 0;
 
             for states in self.state_map.values_mut() {
-                if states.is_dirty() {
+                if states.as_ref().unwrap().is_dirty() {
                     dirty_cnt += 1;
-                    for state in &mut states.managed_states {
+                    for state in &mut states.as_mut().unwrap().managed_states {
                         state.flush(&mut write_batch)?;
                     }
                 }
@@ -292,6 +294,8 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
         // --- Retrieve modified states and put the changes into the builders ---
         for (key, states) in self.state_map.iter_mut() {
             let _is_empty = states
+                .as_mut()
+                .unwrap()
                 .build_changes(&mut builders, &mut new_ops, Some(key), epoch)
                 .await?;
         }
