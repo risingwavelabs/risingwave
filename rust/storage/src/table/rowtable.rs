@@ -10,7 +10,7 @@ use super::TableIter;
 use crate::{IndexDesc, Keyspace, StateStore, TableColumnDesc};
 
 /// `RowTable` is the interface accessing relational data in KV(`StateStore`) with encoding format:
-/// [pk | `column_id` (4B)] -> value.
+/// [keyspace | pk | `column_id` (4B)] -> value.
 /// if the key of the column id does not exist, it will be Null in the relation
 pub struct RowTable<S: StateStore> {
     keyspace: Keyspace<S>,
