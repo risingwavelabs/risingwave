@@ -4,14 +4,16 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures::future::join_all;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{Row, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::collection::evictable::EvictableHashMap;
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 use risingwave_storage::{Keyspace, StateStore};
+use tokio::sync::Mutex;
 
 use super::aggregation::{AggState, HashKey};
 use super::{
@@ -19,7 +21,7 @@ use super::{
     AggCall, AggExecutor, Barrier, Executor, ExecutorState, Message, PkIndicesRef,
     StatefuleExecutor,
 };
-use crate::executor::PkIndices;
+use crate::executor::{agg_input_arrays, pk_input_arrays, PkIndices};
 
 /// [`HashAggExecutor`] could process large amounts of data using a state backend. It works as
 /// follows:
@@ -46,7 +48,7 @@ pub struct HashAggExecutor<S: StateStore> {
     keyspace: Keyspace<S>,
 
     /// The cached states. `HashKey -> (prev_value, value)`.
-    state_map: EvictableHashMap<HashKey, AggState<S>>,
+    state_map: EvictableHashMap<HashKey, Arc<Mutex<AggState<S>>>>,
 
     /// The input of the current executor
     input: Box<dyn Executor>,
@@ -148,7 +150,9 @@ impl<S: StateStore> HashAggExecutor<S> {
     }
 
     fn is_dirty(&self) -> bool {
-        self.state_map.values().any(|state| state.is_dirty())
+        self.state_map
+            .values()
+            .any(|state| state.try_lock().unwrap().is_dirty())
     }
 }
 
@@ -161,6 +165,7 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> Result<()> {
         let epoch = self.executor_state().epoch();
         let (ops, columns, visibility) = chunk.into_inner();
+        let ops = Arc::new(ops);
 
         // --- Retrieve grouped keys into Row format ---
         let keys = {
@@ -190,14 +195,17 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
         let input_pk_data_types = self.input.pk_data_types();
 
         // When applying batch, we will send columns of primary keys to the last N columns.
-        let all_agg_data = all_agg_input_arrays
-            .into_iter()
-            .map(|mut input_arrays| {
-                input_arrays.extend(pk_input_arrays.iter());
-                input_arrays
-            })
-            .collect_vec();
+        let all_agg_data = Arc::new(
+            all_agg_input_arrays
+                .into_iter()
+                .map(|mut input_arrays| {
+                    input_arrays.extend(pk_input_arrays.iter().cloned());
+                    input_arrays
+                })
+                .collect_vec(),
+        );
 
+        let mut futures = vec![];
         for (key, vis_map) in unique_keys {
             // 1. Retrieve previous state from the KeyedState. If they didn't exist, the
             // ManagedState will automatically create new ones for them.
@@ -211,21 +219,43 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
                         epoch,
                     )
                     .await?;
-                    self.state_map.put(key.to_owned(), state);
+                    self.state_map
+                        .put(key.to_owned(), Arc::new(Mutex::new(state)));
                 }
                 self.state_map.get_mut(key).unwrap()
-            };
-
-            // 2. Mark the state as dirty by filling prev states
-            states.may_mark_as_dirty(epoch).await?;
-
-            // 3. Apply batch to each of the state (per agg_call)
-            for (agg_state, data) in states.managed_states.iter_mut().zip_eq(all_agg_data.iter()) {
-                agg_state
-                    .apply_batch(&ops, Some(&vis_map), data, epoch)
-                    .await?;
             }
+            .clone();
+
+            let ops = ops.clone();
+            let all_agg_data = all_agg_data.clone();
+
+            // To leverage more parallelism in IO operations, fetching and updating states for every
+            // unique keys is created as futures and run in parallel.
+            futures.push(tokio::spawn(async move {
+                // 2. Mark the state as dirty by filling prev states
+                states.lock().await.may_mark_as_dirty(epoch).await?;
+
+                // 3. Apply batch to each of the state (per agg_call)
+                for (agg_state, data) in states
+                    .lock()
+                    .await
+                    .managed_states
+                    .iter_mut()
+                    .zip_eq(all_agg_data.iter())
+                {
+                    let data = data.iter().map(|d| &**d).collect_vec();
+                    agg_state
+                        .apply_batch(&ops, Some(&vis_map), &data, epoch)
+                        .await?;
+                }
+
+                Ok::<(), RwError>(())
+            }));
         }
+        join_all(futures)
+            .await
+            .into_iter()
+            .collect::<std::result::Result<Result<()>, _>>()??;
 
         Ok(())
     }
@@ -240,9 +270,9 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
             let mut dirty_cnt = 0;
 
             for states in self.state_map.values_mut() {
-                if states.is_dirty() {
+                if states.lock().await.is_dirty() {
                     dirty_cnt += 1;
-                    for state in &mut states.managed_states {
+                    for state in &mut states.lock().await.managed_states {
                         state.flush(&mut write_batch)?;
                     }
                 }
@@ -269,6 +299,8 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
         // --- Retrieve modified states and put the changes into the builders ---
         for (key, states) in self.state_map.iter_mut() {
             let _is_empty = states
+                .lock()
+                .await
                 .build_changes(&mut builders, &mut new_ops, Some(key), epoch)
                 .await?;
         }
