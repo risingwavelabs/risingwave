@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::future::join_all;
+use futures::{stream, StreamExt};
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{Row, StreamChunk};
@@ -251,12 +251,12 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
                 Ok::<(HashKey, Box<AggState<S>>), RwError>((key, states))
             });
         }
-        // TODO: use BufferUnordered
-        join_all(futures).await.into_iter().try_for_each(|result| {
+
+        let mut buffered = stream::iter(futures).buffer_unordered(10);
+        while let Some(result) = buffered.next().await {
             let (key, state) = result?;
             self.state_map.put(key, state);
-            Ok::<(), RwError>(())
-        })?;
+        }
 
         Ok(())
     }
