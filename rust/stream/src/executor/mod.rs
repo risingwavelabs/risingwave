@@ -358,21 +358,21 @@ pub trait Executor: Send + Debug + 'static {
 #[derive(Debug)]
 pub enum ExecutorState {
     /// Waiting for the first barrier
-    INIT,
+    Init,
     /// Can read from and write to storage
-    ACTIVE(u64),
+    Active(u64),
 }
 
 impl ExecutorState {
     pub fn epoch(&self) -> u64 {
         match self {
-            ExecutorState::INIT => panic!("Executor is not active when getting the epoch"),
-            ExecutorState::ACTIVE(epoch) => *epoch,
+            ExecutorState::Init => panic!("Executor is not active when getting the epoch"),
+            ExecutorState::Active(epoch) => *epoch,
         }
     }
 }
 
-pub trait StatefuleExecutor: Executor {
+pub trait StatefulExecutor: Executor {
     fn executor_state(&self) -> &ExecutorState;
 
     fn update_executor_state(&mut self, new_state: ExecutorState);
@@ -386,16 +386,16 @@ pub trait StatefuleExecutor: Executor {
         msg: impl TryInto<&'a Barrier, Error = ()>,
     ) -> Option<Barrier> {
         match self.executor_state() {
-            ExecutorState::INIT => {
+            ExecutorState::Init => {
                 if let Ok(barrier) = msg.try_into() {
                     // Move to ACTIVE state
-                    self.update_executor_state(ExecutorState::ACTIVE(barrier.epoch.curr));
+                    self.update_executor_state(ExecutorState::Active(barrier.epoch.curr));
                     Some(barrier.clone())
                 } else {
                     panic!("The first message the executor receives is not a barrier");
                 }
             }
-            ExecutorState::ACTIVE(_) => None,
+            ExecutorState::Active(_) => None,
         }
     }
 }

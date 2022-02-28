@@ -13,13 +13,13 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::keyspace::Segment;
 use risingwave_storage::{Keyspace, StateStore};
 
-use super::{ExecutorState, PkIndicesRef, StatefuleExecutor};
+use super::{ExecutorState, PkIndicesRef, StatefulExecutor};
 use crate::executor::managed_state::top_n::variants::*;
 use crate::executor::managed_state::top_n::ManagedTopNState;
 use crate::executor::{Executor, Message, PkIndices, StreamChunk};
 
 #[async_trait]
-pub trait TopNExecutorBase: StatefuleExecutor {
+pub trait TopNExecutorBase: StatefulExecutor {
     /// Apply the chunk to the dirty state and get the diffs.
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> Result<StreamChunk>;
 
@@ -43,7 +43,7 @@ pub(super) async fn top_n_executor_next<E: TopNExecutorBase>(executor: &mut E) -
         Message::Barrier(barrier) if barrier.is_stop_mutation() => Ok(Message::Barrier(barrier)),
         Message::Barrier(barrier) => {
             executor.flush_data().await?;
-            executor.update_executor_state(ExecutorState::ACTIVE(barrier.epoch.curr));
+            executor.update_executor_state(ExecutorState::Active(barrier.epoch.curr));
             Ok(Message::Barrier(barrier))
         }
     };
@@ -149,7 +149,7 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
             first_execution: true,
             identity: format!("TopNAppendonlyExecutor {:X}", executor_id),
             op_info,
-            executor_state: ExecutorState::INIT,
+            executor_state: ExecutorState::Init,
         }
     }
 
@@ -308,7 +308,7 @@ impl<S: StateStore> TopNExecutorBase for AppendOnlyTopNExecutor<S> {
     }
 }
 
-impl<S: StateStore> StatefuleExecutor for AppendOnlyTopNExecutor<S> {
+impl<S: StateStore> StatefulExecutor for AppendOnlyTopNExecutor<S> {
     fn executor_state(&self) -> &ExecutorState {
         &self.executor_state
     }

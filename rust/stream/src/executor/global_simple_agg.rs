@@ -11,9 +11,7 @@ use risingwave_common::error::Result;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::aggregation::*;
-use super::{
-    Barrier, Executor, ExecutorState, Message, PkIndices, PkIndicesRef, StatefuleExecutor,
-};
+use super::{Barrier, Executor, ExecutorState, Message, PkIndices, PkIndicesRef, StatefulExecutor};
 use crate::executor::pk_input_array_refs;
 
 /// `SimpleAggExecutor` is the aggregation operator for streaming system.
@@ -97,7 +95,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             agg_calls,
             identity: format!("GlobalSimpleAggExecutor {:X}", executor_id),
             op_info,
-            executor_state: ExecutorState::INIT,
+            executor_state: ExecutorState::Init,
         }
     }
 
@@ -201,7 +199,7 @@ impl<S: StateStore> AggExecutor for SimpleAggExecutor<S> {
     }
 }
 
-impl<S: StateStore> StatefuleExecutor for SimpleAggExecutor<S> {
+impl<S: StateStore> StatefulExecutor for SimpleAggExecutor<S> {
     fn executor_state(&self) -> &ExecutorState {
         &self.executor_state
     }

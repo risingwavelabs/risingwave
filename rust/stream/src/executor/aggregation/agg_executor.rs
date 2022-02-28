@@ -11,7 +11,7 @@ use static_assertions::const_assert_eq;
 
 use super::AggCall;
 use crate::executor::managed_state::aggregation::ManagedStateImpl;
-use crate::executor::{Barrier, Executor, ExecutorState, Message, PkDataTypes, StatefuleExecutor};
+use crate::executor::{Barrier, Executor, ExecutorState, Message, PkDataTypes, StatefulExecutor};
 
 /// Hash key for [`HashAggExecutor`].
 pub type HashKey = Row;
@@ -191,7 +191,7 @@ impl<S: StateStore> AggState<S> {
 /// Trait for [`SimpleAggExecutor`] and [`HashAggExecutor`], providing an implementaion of
 /// [`Executor::next`] by [`agg_executor_next`].
 #[async_trait]
-pub trait AggExecutor: StatefuleExecutor {
+pub trait AggExecutor: StatefulExecutor {
     /// If exists, we should send a Barrier while next called.
     fn cached_barrier_message_mut(&mut self) -> &mut Option<Barrier>;
 
