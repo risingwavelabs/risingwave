@@ -98,6 +98,14 @@ pub trait MetadataModel: Sized {
 
 #[async_trait]
 pub trait MetadataUserCfModel: MetadataModel {
+    /// use `list_with_cf_suffix` instead in `MetadataUserCfModel`
+    async fn list<S>(_: &S) -> Result<Vec<Self>>
+    where
+        S: MetaStore,
+    {
+        unimplemented!();
+    }
+
     /// `list_with_cf_suffix` returns all records in this model which satisfies extending cf.
     async fn list_with_cf_suffix<S>(store: &S, cf_name: &str) -> Result<Vec<Self>>
     where
@@ -113,6 +121,14 @@ pub trait MetadataUserCfModel: MetadataModel {
             .iter()
             .map(|bytes| Self::from_protobuf(Self::ProstType::decode(bytes.as_slice()).unwrap()))
             .collect::<Vec<_>>())
+    }
+
+    /// use `select_with_cf_suffix` instead in `MetadataUserCfModel`
+    async fn select<S>(_: &S, _: &Self::KeyType) -> Result<Option<Self>>
+    where
+        S: MetaStore,
+    {
+        unimplemented!();
     }
 
     /// `select_with_cf_suffix` query a record with associated key and version.
@@ -147,18 +163,6 @@ pub trait MetadataUserCfModel: MetadataModel {
 /// `Transactional` defines operations supported in a transaction.
 /// Read operations can be supported if necessary.
 pub trait Transactional: MetadataModel {
-    fn upsert_in_transaction_by_cf(
-        &self,
-        eventual_cf: String,
-        trx: &mut Transaction,
-    ) -> risingwave_common::error::Result<()> {
-        trx.add_operations(vec![Operation::Put {
-            cf: eventual_cf,
-            key: self.key()?.encode_to_vec(),
-            value: self.to_protobuf_encoded_vec(),
-        }]);
-        Ok(())
-    }
     fn upsert_in_transaction(&self, trx: &mut Transaction) -> risingwave_common::error::Result<()> {
         trx.add_operations(vec![Operation::Put {
             cf: Self::cf_name(),
@@ -167,17 +171,7 @@ pub trait Transactional: MetadataModel {
         }]);
         Ok(())
     }
-    fn delete_in_transaction_by_cf(
-        &self,
-        eventual_cf: String,
-        trx: &mut Transaction,
-    ) -> risingwave_common::error::Result<()> {
-        trx.add_operations(vec![Operation::Delete {
-            cf: eventual_cf,
-            key: self.key()?.encode_to_vec(),
-        }]);
-        Ok(())
-    }
+
     fn delete_in_transaction(&self, trx: &mut Transaction) -> risingwave_common::error::Result<()> {
         trx.add_operations(vec![Operation::Delete {
             cf: Self::cf_name(),
@@ -188,26 +182,38 @@ pub trait Transactional: MetadataModel {
 }
 
 pub trait TransactionalUserCf: Transactional + MetadataUserCfModel {
+    /// use `upsert_in_transaction_with_cf` instead in `TransactionalUserCf`
+    fn upsert_in_transaction(&self, _: &mut Transaction) -> risingwave_common::error::Result<()> {
+        unimplemented!();
+    }
+
     fn upsert_in_transaction_with_cf(
         &self,
         cf_name: &str,
         trx: &mut Transaction,
     ) -> risingwave_common::error::Result<()> {
-        Self::upsert_in_transaction_by_cf(
-            self,
-            ColumnFamilyUtils::get_composed_cf(&Self::cf_name(), cf_name),
-            trx,
-        )
+        trx.add_operations(vec![Operation::Put {
+            cf: ColumnFamilyUtils::get_composed_cf(&Self::cf_name(), cf_name),
+            key: self.key()?.encode_to_vec(),
+            value: self.to_protobuf_encoded_vec(),
+        }]);
+        Ok(())
     }
+
+    /// use `delete_in_transaction_with_cf` instead in `TransactionalUserCf`
+    fn delete_in_transaction(&self, _: &mut Transaction) -> risingwave_common::error::Result<()> {
+        unimplemented!();
+    }
+
     fn delete_in_transaction_with_cf(
         &self,
         cf_name: &str,
         trx: &mut Transaction,
     ) -> risingwave_common::error::Result<()> {
-        Self::delete_in_transaction_by_cf(
-            self,
-            ColumnFamilyUtils::get_composed_cf(&Self::cf_name(), cf_name),
-            trx,
-        )
+        trx.add_operations(vec![Operation::Delete {
+            cf: ColumnFamilyUtils::get_composed_cf(&Self::cf_name(), cf_name),
+            key: self.key()?.encode_to_vec(),
+        }]);
+        Ok(())
     }
 }

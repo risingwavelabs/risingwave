@@ -22,7 +22,7 @@ use crate::hummock::model::{
     CurrentHummockVersionId, HummockContextPinnedSnapshotExt, HummockContextPinnedVersionExt,
 };
 use crate::manager::{IdCategory, IdGeneratorManagerRef, MetaSrvEnv};
-use crate::model::{MetadataModel, MetadataUserCfModel, TransactionalUserCf};
+use crate::model::{MetadataUserCfModel, TransactionalUserCf};
 use crate::storage::{MetaStore, Transaction, DEFAULT_COLUMN_FAMILY_ID};
 
 pub struct HummockManager<S: MetaStore> {
@@ -284,7 +284,8 @@ where
         .await?
         .unwrap();
 
-        let current_tables = SstableInfo::list(&*versioning_guard.meta_store_ref).await?;
+        let current_tables =
+            SstableInfo::list_with_cf_suffix(&*versioning_guard.meta_store_ref, cf_name).await?;
         if tables
             .iter()
             .any(|t| current_tables.iter().any(|ct| ct.id == t.id))
