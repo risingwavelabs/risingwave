@@ -70,25 +70,16 @@ impl<S: StateStore> ManagedMViewState<S> {
         for (pk, cells) in self.cache.drain() {
             let row = cells.into_option();
             let pk_buf = serialize_pk(&pk, &self.key_serializer)?;
-            for (index, column_id) in self.column_ids.iter().enumerate() {
-                // TODO(MrCroxx): More efficient encoding is needed.
-                // format: [ pk_buf | cell_idx (4B)]
-                let key = [
-                    pk_buf.as_slice(),
-                    serialize_column_id(column_id)?.as_slice(),
-                ]
-                .concat();
-
-                match &row {
-                    Some(values) => {
-                        let value = serialize_cell(&values[index])?;
-                        local.put(key, value)
+            let bytes = serialize_pk_and_row(&pk_buf, &row, &self.column_ids)?;
+            for (key, value) in bytes {
+                match value {
+                    Some(val) => {
+                        local.put(key, val);
                     }
                     None => local.delete(key),
-                };
+                }
             }
         }
-
         batch.ingest(epoch).await.unwrap();
         Ok(())
     }

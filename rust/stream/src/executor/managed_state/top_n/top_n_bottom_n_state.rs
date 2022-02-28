@@ -5,12 +5,16 @@ use std::collections::BTreeMap;
 use std::vec::Drain;
 
 use risingwave_common::array::Row;
+use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
-use risingwave_common::types::{DataType, Datum};
+use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::*;
+use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::managed_state::flush_status::BtreeMapFlushStatus as FlushStatus;
+use crate::executor::managed_state::top_n::deserialize_bytes_to_pk_and_row;
+use crate::executor::managed_state::top_n::variants::TOP_N_MIN;
 
 /// This state is used for `[offset, offset+limit)` part in the `TopNExecutor`.
 ///
@@ -37,6 +41,8 @@ pub struct ManagedTopNBottomNState<S: StateStore> {
     data_types: Vec<DataType>,
     /// For deserializing `OrderedRow`.
     ordered_row_deserializer: OrderedRowDeserializer,
+    /// For deserializing `Row`.
+    cell_based_row_deserializer: CellBasedRowDeserializer,
 }
 
 impl<S: StateStore> ManagedTopNBottomNState<S> {
@@ -46,6 +52,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         keyspace: Keyspace<S>,
         data_types: Vec<DataType>,
         ordered_row_deserializer: OrderedRowDeserializer,
+        cell_based_row_deserializer: CellBasedRowDeserializer,
     ) -> Self {
         Self {
             top_n: BTreeMap::new(),
@@ -57,6 +64,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
             keyspace,
             data_types,
             ordered_row_deserializer,
+            cell_based_row_deserializer,
         }
     }
 
@@ -242,32 +250,11 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
                 epoch,
             )
             .await?;
-        let data_type_num = self.data_types.len();
-        // We must have enough cells to restore a complete row.
-        debug_assert_eq!(pk_row_bytes.len() % data_type_num, 0);
-        // cell-based storage format, so `self.schema.len()`
-        let mut cell_restored = 0;
-        let mut res = vec![];
-        let mut datum_vec: Vec<Datum> = vec![];
-        for (i, (pk, cell_bytes)) in pk_row_bytes.into_iter().enumerate() {
-            let datum = deserialize_cell(&cell_bytes[..], &self.data_types[i % data_type_num])?;
-            datum_vec.push(datum);
-
-            cell_restored += 1;
-            if cell_restored == data_type_num {
-                cell_restored = 0;
-
-                let row = Row::new(std::mem::take(&mut datum_vec));
-                // format: [pk_buf | cell_idx (4B)]
-                // Take `pk_buf` out.
-                let pk_without_cell_idx = pk.slice(0..pk.len() - 4);
-                let ordered_row = self
-                    .ordered_row_deserializer
-                    .deserialize(&pk_without_cell_idx)?;
-                res.push((ordered_row, row));
-            }
-        }
-        Ok(res)
+        deserialize_bytes_to_pk_and_row::<TOP_N_MIN>(
+            pk_row_bytes,
+            &mut self.ordered_row_deserializer,
+            &mut self.cell_based_row_deserializer,
+        )
     }
 
     /// We can fill in the cache from storage only when state is not dirty, i.e. right after
@@ -297,29 +284,23 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         let mut write_batch = self.keyspace.state_store().start_write_batch();
         let mut local = write_batch.prefixify(&self.keyspace);
 
-        for (ordered_row, cells) in std::mem::take(&mut self.flush_buffer) {
-            let row_option = cells.into_option();
-            for cell_idx in 0..self.data_types.len() {
-                // format: [pk_buf | cell_idx (4B)]
-                let ordered_row_bytes = ordered_row.serialize()?;
-                let key_encoded = [
-                    &ordered_row_bytes[..],
-                    &serialize_cell_idx(cell_idx as i32)?[..],
-                ]
-                .concat();
-
-                match &row_option {
-                    Some(row) => {
-                        let cell_encoded = serialize_cell(&row[cell_idx])?;
-                        local.put(key_encoded, cell_encoded);
+        for (pk, cells) in std::mem::take(&mut self.flush_buffer) {
+            let row = cells.into_option();
+            let pk_buf = pk.serialize()?;
+            // TODO: use real column ids later.
+            let column_ids = (0..self.data_types.len() as i32)
+                .map(ColumnId::from)
+                .collect::<Vec<_>>();
+            let bytes = serialize_pk_and_row(&pk_buf, &row, &column_ids)?;
+            for (key, value) in bytes {
+                match value {
+                    Some(val) => {
+                        local.put(key, val);
                     }
-                    None => {
-                        local.delete(key_encoded);
-                    }
-                };
+                    None => local.delete(key),
+                }
             }
         }
-
         write_batch.ingest(epoch).await.unwrap();
 
         // We don't retain `n` elements as we have a all-or-nothing policy for now.
@@ -352,7 +333,7 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::{Keyspace, StateStore};
+    use risingwave_storage::{Keyspace, StateStore, TableColumnDesc};
 
     use super::*;
     use crate::executor::managed_state::top_n::top_n_bottom_n_state::ManagedTopNBottomNState;
@@ -365,6 +346,14 @@ mod tests {
         order_types: Vec<OrderType>,
     ) -> ManagedTopNBottomNState<S> {
         let ordered_row_deserializer = OrderedRowDeserializer::new(data_types.clone(), order_types);
+        let table_column_descs = data_types
+            .iter()
+            .enumerate()
+            .map(|(id, data_type)| {
+                TableColumnDesc::unnamed(ColumnId::from(id as i32), data_type.clone())
+            })
+            .collect::<Vec<_>>();
+        let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_column_descs);
 
         ManagedTopNBottomNState::new(
             Some(1),
@@ -372,6 +361,7 @@ mod tests {
             Keyspace::executor_root(store.clone(), 0x2333),
             data_types,
             ordered_row_deserializer,
+            cell_based_row_deserializer,
         )
     }
 
