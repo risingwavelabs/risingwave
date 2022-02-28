@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
 use risingwave_pb::hummock::*;
-use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
 use crate::hummock::{CompactorManager, HummockManager};
+use crate::rpc::service::RwReceiverStream;
 use crate::storage::MetaStore;
 
 pub struct HummockServiceImpl<S>
@@ -13,7 +13,7 @@ where
     S: MetaStore,
 {
     hummock_manager: Arc<HummockManager<S>>,
-    compaction_manager: Arc<CompactorManager<tonic::Status>>,
+    compactor_manager: Arc<CompactorManager>,
 }
 
 impl<S> HummockServiceImpl<S>
@@ -22,11 +22,11 @@ where
 {
     pub fn new(
         hummock_manager: Arc<HummockManager<S>>,
-        compaction_manager: Arc<CompactorManager<tonic::Status>>,
+        compactor_manager: Arc<CompactorManager>,
     ) -> Self {
         HummockServiceImpl {
             hummock_manager,
-            compaction_manager,
+            compactor_manager,
         }
     }
 }
@@ -190,13 +190,13 @@ where
         }
     }
 
-    type CompactTasksStream = ReceiverStream<Result<CompactTasksResponse, Status>>;
+    type CompactTasksStream = RwReceiverStream<CompactTasksResponse>;
 
     async fn compact_tasks(
         &self,
         _request: Request<CompactTasksRequest>,
     ) -> Result<Response<Self::CompactTasksStream>, Status> {
-        let rx = self.compaction_manager.add_compactor().await;
-        Ok(Response::new(ReceiverStream::new(rx)))
+        let rx = self.compactor_manager.add_compactor().await;
+        Ok(Response::new(RwReceiverStream::new(rx)))
     }
 }

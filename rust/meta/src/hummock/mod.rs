@@ -23,9 +23,9 @@ use crate::storage::MetaStore;
 
 const COMPACT_TRIGGER_INTERVAL: Duration = Duration::from_secs(10);
 /// Starts a worker to conditionally trigger compaction.
-pub async fn start_compaction_loop<S, E>(
+pub async fn start_compaction_loop<S>(
     hummock_manager_ref: Arc<HummockManager<S>>,
-    compactor_manager_ref: Arc<CompactorManager<E>>,
+    compactor_manager_ref: Arc<CompactorManager>,
 ) where
     S: MetaStore,
 {
@@ -59,27 +59,17 @@ pub async fn start_compaction_loop<S, E>(
                 continue;
             }
         };
-        match compactor_manager_ref
+        if !compactor_manager_ref
             .try_assign_compact_task(compact_task.clone())
             .await
         {
-            Ok(b) => {
-                if !b {
-                    // TODO #546: Cancel a task only requires task_id. compact_task.clone() can be
-                    // avoided.
-                    match hummock_manager_ref
-                        .report_compact_task(compact_task, false)
-                        .await
-                    {
-                        Ok(_) => {}
-                        Err(e) => {
-                            error!("failed to report_compact_task {}", e);
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                error!("failed to try_assign_compact_task {}", e);
+            // TODO #546: Cancel a task only requires task_id. compact_task.clone() can be
+            // avoided.
+            if let Err(e) = hummock_manager_ref
+                .report_compact_task(compact_task, false)
+                .await
+            {
+                error!("failed to report_compact_task {}", e);
             }
         }
     }
