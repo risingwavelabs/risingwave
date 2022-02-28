@@ -108,7 +108,7 @@ impl Executor for LocalSimpleAggExecutor {
     fn reset(&mut self, epoch: u64) {
         self.states.iter_mut().for_each(|state| state.reset());
         self.is_dirty = false;
-        self.epoch = epoch;
+        self.update_executor_state(ExecutorState::ACTIVE(epoch));
     }
 }
 

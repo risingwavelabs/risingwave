@@ -244,7 +244,7 @@ impl<S: StateStore> Executor for SimpleAggExecutor<S> {
 
     fn reset(&mut self, epoch: u64) {
         self.states.take();
-        self.epoch = epoch;
+        self.update_executor_state(ExecutorState::ACTIVE(epoch));
     }
 }
 
