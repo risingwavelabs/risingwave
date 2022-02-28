@@ -39,8 +39,8 @@ impl LogicalScan {
         table_id: TableId,
         columns: Vec<ColumnId>,
         schema: Schema,
-    ) -> Result<Self> {
-        Ok(Self::new(table_name, table_id, columns, schema))
+    ) -> Result<PlanRef> {
+        Ok(Self::new(table_name, table_id, columns, schema).into_plan_ref())
     }
 }
 
