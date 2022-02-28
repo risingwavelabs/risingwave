@@ -77,6 +77,7 @@ public class CatalogCast {
       sourceInfoBuilder.putAllProperties(createTableInfo.getProperties());
       sourceInfoBuilder.setRowSchemaLocation(createTableInfo.getRowSchemaLocation());
 
+      builder.setStreamSource(sourceInfoBuilder);
     } else if (createTableInfo.isMv()) {
       var mvInfoBuilder = MaterializedViewInfo.newBuilder();
       mvInfoBuilder.addAllPkIndices(createTableInfo.getPrimaryKeyIndices());
@@ -128,6 +129,7 @@ public class CatalogCast {
               .setTableId(createMaterializedViewInfo.getAssociatedTableId().getValue());
       mvInfoBuilder.setAssociatedTableRefId(associatedTableRefId);
 
+      builder.setMaterializedView(mvInfoBuilder);
     } else {
       var tableInfoBuilder = TableSourceInfo.newBuilder();
 
