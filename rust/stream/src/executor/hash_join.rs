@@ -296,8 +296,8 @@ impl<S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<S,
     }
 
     fn reset(&mut self, epoch: u64) {
-        self.side_l.clear_cache();
-        self.side_r.clear_cache();
+        self.side_l.ht.clear();
+        self.side_r.ht.clear();
         self.update_executor_state(ExecutorState::Active(epoch));
     }
 }

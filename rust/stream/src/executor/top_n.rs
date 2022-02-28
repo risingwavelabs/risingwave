@@ -158,18 +158,18 @@ impl<S: StateStore> Executor for TopNExecutor<S> {
     }
 
     fn clear_cache(&mut self) -> Result<()> {
-        self.managed_lowest_state.clear_cache();
-        self.managed_middle_state.clear_cache();
-        self.managed_highest_state.clear_cache();
+        self.managed_lowest_state.clear_cache(false);
+        self.managed_middle_state.clear_cache(false);
+        self.managed_highest_state.clear_cache(false);
         self.first_execution = true;
 
         Ok(())
     }
 
     fn reset(&mut self, epoch: u64) {
-        self.managed_lowest_state.clear_cache();
-        self.managed_middle_state.clear_cache();
-        self.managed_highest_state.clear_cache();
+        self.managed_lowest_state.clear_cache(true);
+        self.managed_middle_state.clear_cache(true);
+        self.managed_highest_state.clear_cache(true);
         self.first_execution = true;
         self.update_executor_state(ExecutorState::Active(epoch));
     }
