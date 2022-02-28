@@ -209,60 +209,9 @@ public class CatalogCast {
         throw new SerializationException("table info not set or not supported");
     }
 
-    //    if (table.getInfoCase() == Table.InfoCase.MATERIALIZED_VIEW) {
-    //      builder = CreateMaterializedViewInfo.builder(table.getTableName());
-    //      var info = table.getMaterializedView();
-    //      info.getPkIndicesList().forEach(builder::addPrimaryKey);
-    //    } else {
-    //      builder = CreateTableInfo.builder(table.getTableName());
-    //    }
-
-    //    builder.setMv(false);
-    //    builder.setProperties(table.getPropertiesMap());
-    //    table.getPkColumnsList().forEach(builder::addPrimaryKey);
-    //    builder.setSource(table.getIsSource());
-    //    builder.setAppendOnly(table.getAppendOnly());
-    //    builder.setRowFormat(table.getRowFormat());
-    //    builder.setRowSchemaLocation(table.getRowSchemaLocation());
     for (com.risingwave.proto.plan.ColumnDesc desc : table.getColumnDescsList()) {
       builder.addColumn(desc.getName(), new com.risingwave.catalog.ColumnDesc(desc));
     }
-    //    List<TableCatalog.TableId> dependentTables = new ArrayList<>();
-    //    for (var tableRefId : table.getDependentTablesList()) {
-    //      SchemaRefId schemaRefId = tableRefId.getSchemaRefId();
-    //      DatabaseRefId databaseRefId = schemaRefId.getDatabaseRefId();
-    //      DatabaseCatalog.DatabaseId databaseId =
-    //          new DatabaseCatalog.DatabaseId(databaseRefId.getDatabaseId());
-    //      SchemaCatalog.SchemaId schemaId =
-    //          new SchemaCatalog.SchemaId(schemaRefId.getSchemaId(), databaseId);
-    //      TableCatalog.TableId tableId = new TableCatalog.TableId(tableRefId.getTableId(),
-    // schemaId);
-    //      dependentTables.add(tableId);
-    //    }
-    //    builder.setDependentTables(dependentTables);
-    //    if (!table.getIsMaterializedView()) {
-    //      return builder.build();
-    //    }
-    //    var fieldCollations = new ArrayList<RelFieldCollation>();
-    //    for (var columnOrder : table.getColumnOrdersList()) {
-    //      var orderType = columnOrder.getOrderType();
-    //      var columnIdx = columnOrder.getInputRef().getColumnIdx();
-    //      RelFieldCollation.Direction dir;
-    //      if (orderType == OrderType.ASCENDING) {
-    //        dir = RelFieldCollation.Direction.ASCENDING;
-    //      } else if (orderType == OrderType.DESCENDING) {
-    //        dir = RelFieldCollation.Direction.DESCENDING;
-    //      } else {
-    //        throw new SerializationException(String.format("%s direction not supported",
-    // orderType));
-    //      }
-    //      fieldCollations.add(new RelFieldCollation(columnIdx, dir));
-    //    }
-    //    if (!fieldCollations.isEmpty()) {
-    //      ((CreateMaterializedViewInfo.Builder) builder)
-    //          .setCollation(RelCollations.of(fieldCollations));
-    //    }
-    //    ((CreateMaterializedViewInfo.Builder) builder).setAssociated(table.getIsAssociated());
     return builder.build();
   }
 }
