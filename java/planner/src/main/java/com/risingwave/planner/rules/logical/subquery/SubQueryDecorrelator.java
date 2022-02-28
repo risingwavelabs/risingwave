@@ -1,20 +1,20 @@
 package com.risingwave.planner.rules.logical.subquery; /*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+                                                        * Licensed to the Apache Software Foundation (ASF) under one
+                                                        * or more contributor license agreements.  See the NOTICE file
+                                                        * distributed with this work for additional information
+                                                        * regarding copyright ownership.  The ASF licenses this file
+                                                        * to you under the Apache License, Version 2.0 (the
+                                                        * "License"); you may not use this file except in compliance
+                                                        * with the License.  You may obtain a copy of the License at
+                                                        *
+                                                        *     http://www.apache.org/licenses/LICENSE-2.0
+                                                        *
+                                                        * Unless required by applicable law or agreed to in writing, software
+                                                        * distributed under the License is distributed on an "AS IS" BASIS,
+                                                        * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+                                                        * See the License for the specific language governing permissions and
+                                                        * limitations under the License.
+                                                        */
 
 import static com.google.common.base.Preconditions.checkNotNull;
 
@@ -169,7 +169,7 @@ public class SubQueryDecorrelator extends RelShuttleImpl {
           newRel = addProjectionForIn(subQuery.rel);
         }
         final Frame frame = decorrelator.getInvoke(newRel);
-        if (frame != null && frame.c != null) {
+        if (frame != null && frame.condition != null) {
 
           Frame target = frame;
           if (subQuery.getKind() == SqlKind.EXISTS) {
@@ -178,10 +178,10 @@ public class SubQueryDecorrelator extends RelShuttleImpl {
 
           final DecorrelateRexShuttle shuttle =
               new DecorrelateRexShuttle(
-                  rel.getRowType(), target.r.getRowType(), rel.getVariablesSet());
+                  rel.getRowType(), target.relNode.getRowType(), rel.getVariablesSet());
 
-          final RexNode newCondition = target.c.accept(shuttle);
-          Pair<RelNode, RexNode> newNodeAndCondition = new Pair<>(target.r, newCondition);
+          final RexNode newCondition = target.condition.accept(shuttle);
+          Pair<RelNode, RexNode> newNodeAndCondition = new Pair<>(target.relNode, newCondition);
           subQueryMap.put(subQuery, newNodeAndCondition);
         }
         return null;
@@ -215,12 +215,10 @@ public class SubQueryDecorrelator extends RelShuttleImpl {
     return relBuilder.build();
   }
 
-  /**
-   * Adds Projection to choose the fields used by join condition.
-   */
+  /** Adds Projection to choose the fields used by join condition. */
   private Frame addProjectionForExists(Frame frame) {
     final List<Integer> corIndices = new ArrayList<>(frame.getCorInputRefIndices());
-    final RelNode rel = frame.r;
+    final RelNode rel = frame.relNode;
     final RelDataType rowType = rel.getRowType();
     if (corIndices.size() == rowType.getFieldCount()) {
       // no need projection
@@ -238,11 +236,11 @@ public class SubQueryDecorrelator extends RelShuttleImpl {
     }
 
     relBuilder.clear();
-    relBuilder.push(frame.r);
+    relBuilder.push(frame.relNode);
     relBuilder.project(projects);
     final RelNode newProject = relBuilder.build();
     final RexNode newCondition =
-        adjustInputRefs(frame.c, mapInputToOutput, newProject.getRowType());
+        adjustInputRefs(frame.condition, mapInputToOutput, newProject.getRowType());
 
     // There is no old RelNode corresponding to newProject, so oldToNewOutputs is empty.
     return new Frame(rel, newProject, newCondition, new HashMap<>());
@@ -316,7 +314,7 @@ public class SubQueryDecorrelator extends RelShuttleImpl {
               return false;
             } else if (result.contains(true)) {
               // TODO supports correlation variable with OR
-              //	return call.op.getKind() != SqlKind.OR || !result.contains(null);
+              // return call.op.getKind() != SqlKind.OR || !result.contains(null);
               return call.op.getKind() != SqlKind.OR;
             } else {
               return null;
@@ -339,10 +337,10 @@ public class SubQueryDecorrelator extends RelShuttleImpl {
   /**
    * Adjust the condition's field indices according to mapOldToNewIndex.
    *
-   * @param c                The condition to be adjusted.
+   * @param c The condition to be adjusted.
    * @param mapOldToNewIndex A map containing the mapping the old field indices to new field
-   *                         indices.
-   * @param rowType          The row type of the new output.
+   *     indices.
+   * @param rowType The row type of the new output.
    * @return Return new condition with new field indices.
    */
   private static RexNode adjustInputRefs(
@@ -441,7 +439,7 @@ public class SubQueryDecorrelator extends RelShuttleImpl {
 
       final List<RexNode> oldProjects = rel.getProjects();
       final List<RelDataTypeField> relOutput = rel.getRowType().getFieldList();
-      final RelNode newInput = frame.r;
+      final RelNode newInput = frame.relNode;
 
       // Project projects the original expressions,
       // plus any correlated variables the input wants to pass along.
@@ -466,9 +464,9 @@ public class SubQueryDecorrelator extends RelShuttleImpl {
         }
       }
 
-      if (frame.c != null) {
+      if (frame.condition != null) {
         // Project any correlated variables the input wants to pass along.
-        final ImmutableBitSet corInputIndices = RelOptUtil.InputFinder.bits(frame.c);
+        final ImmutableBitSet corInputIndices = RelOptUtil.InputFinder.bits(frame.condition);
         final RelDataType inputRowType = newInput.getRowType();
         for (int inputIndex : corInputIndices.toList()) {
           if (!mapInputToOutput.containsKey(inputIndex)) {
@@ -490,8 +488,9 @@ public class SubQueryDecorrelator extends RelShuttleImpl {
               false);
 
       final RexNode newCorCondition;
-      if (frame.c != null) {
-        newCorCondition = adjustInputRefs(frame.c, mapInputToOutput, newProject.getRowType());
+      if (frame.condition != null) {
+        newCorCondition =
+            adjustInputRefs(frame.condition, mapInputToOutput, newProject.getRowType());
       } else {
         newCorCondition = null;
       }
@@ -541,13 +540,13 @@ public class SubQueryDecorrelator extends RelShuttleImpl {
       // because RelBuilder.filter method does not have VariablesSet arg.
       final LogicalFilter newFilter =
           LogicalFilter.create(
-              frame.r,
+              frame.relNode,
               remainingCondition,
               com.google.common.collect.ImmutableSet.copyOf(rel.getVariablesSet()));
 
       // Adds input's correlation condition
-      if (frame.c != null) {
-        corConditions.add(frame.c);
+      if (frame.condition != null) {
+        corConditions.add(frame.condition);
       }
 
       final RexNode corCondition = RexUtil.composeConjunction(rexBuilder, corConditions, true);
@@ -576,7 +575,7 @@ public class SubQueryDecorrelator extends RelShuttleImpl {
         return null;
       }
 
-      final RelNode newInput = frame.r;
+      final RelNode newInput = frame.relNode;
       // map from newInput
       final Map<Integer, Integer> mapNewInputToProjOutputs = new HashMap<>();
       final int oldGroupKeyCount = rel.getGroupSet().cardinality();
@@ -604,7 +603,7 @@ public class SubQueryDecorrelator extends RelShuttleImpl {
         newPos++;
       }
 
-      if (frame.c != null) {
+      if (frame.condition != null) {
         // If input produces correlated variables, move them to the front,
         // right after any existing GROUP BY fields.
 
@@ -640,8 +639,9 @@ public class SubQueryDecorrelator extends RelShuttleImpl {
               false);
 
       final RexNode newCondition;
-      if (frame.c != null) {
-        newCondition = adjustInputRefs(frame.c, mapNewInputToProjOutputs, newProject.getRowType());
+      if (frame.condition != null) {
+        newCondition =
+            adjustInputRefs(frame.condition, mapNewInputToProjOutputs, newProject.getRowType());
       } else {
         newCondition = null;
       }
@@ -737,20 +737,20 @@ public class SubQueryDecorrelator extends RelShuttleImpl {
 
       switch (rel.getJoinType()) {
         case LEFT:
-          assert rightFrame.c == null;
+          assert rightFrame.condition == null;
           break;
         case RIGHT:
-          assert leftFrame.c == null;
+          assert leftFrame.condition == null;
           break;
         case FULL:
-          assert leftFrame.c == null && rightFrame.c == null;
+          assert leftFrame.condition == null && rightFrame.condition == null;
           break;
         default:
           break;
       }
 
       final int oldLeftFieldCount = oldLeft.getRowType().getFieldCount();
-      final int newLeftFieldCount = leftFrame.r.getRowType().getFieldCount();
+      final int newLeftFieldCount = leftFrame.relNode.getRowType().getFieldCount();
       final int oldRightFieldCount = oldRight.getRowType().getFieldCount();
       assert rel.getRowType().getFieldCount() == oldLeftFieldCount + oldRightFieldCount;
 
@@ -764,8 +764,8 @@ public class SubQueryDecorrelator extends RelShuttleImpl {
 
       final RelNode newJoin =
           LogicalJoin.create(
-              leftFrame.r,
-              rightFrame.r,
+              leftFrame.relNode,
+              rightFrame.relNode,
               rel.getHints(),
               newJoinCondition,
               rel.getVariablesSet(),
@@ -783,22 +783,101 @@ public class SubQueryDecorrelator extends RelShuttleImpl {
       }
 
       final List<RexNode> corConditions = new ArrayList<>();
-      if (leftFrame.c != null) {
-        corConditions.add(leftFrame.c);
+      if (leftFrame.condition != null) {
+        corConditions.add(leftFrame.condition);
       }
-      if (rightFrame.c != null) {
+      if (rightFrame.condition != null) {
         // Right input positions are shifted by newLeftFieldCount.
         final Map<Integer, Integer> rightMapOldToNewOutputs = new HashMap<>();
         for (int index : rightFrame.getCorInputRefIndices()) {
           rightMapOldToNewOutputs.put(index, index + newLeftFieldCount);
         }
         final RexNode newRightCondition =
-            adjustInputRefs(rightFrame.c, rightMapOldToNewOutputs, newJoin.getRowType());
+            adjustInputRefs(rightFrame.condition, rightMapOldToNewOutputs, newJoin.getRowType());
         corConditions.add(newRightCondition);
       }
 
       final RexNode newCondition = RexUtil.composeConjunction(rexBuilder, corConditions, true);
       return new Frame(rel, newJoin, newCondition, mapOldToNewOutputs);
+    }
+
+    /**
+     * Rewrite Sort.
+     *
+     * <p>Rewrite logic: change the collations field to reference the new input.
+     *
+     * @param rel Sort to be rewritten
+     */
+    public Frame decorrelateRel(Sort rel) {
+      // Sort itself should not reference corVars.
+      assert !cm.mapRefRelToCorRef.containsKey(rel);
+
+      // Sort only references field positions in collations field.
+      // The collations field in the newRel now need to refer to the
+      // new output positions in its input.
+      // Its output does not change the input ordering, so there's no
+      // need to call propagateExpr.
+      final RelNode oldInput = rel.getInput();
+      final Frame frame = getInvoke(oldInput);
+      if (frame == null) {
+        // If input has not been rewritten, do not rewrite this rel.
+        return null;
+      }
+      final RelNode newInput = frame.relNode;
+
+      Mappings.TargetMapping mapping =
+          Mappings.target(
+              frame.oldToNewOutputs,
+              oldInput.getRowType().getFieldCount(),
+              newInput.getRowType().getFieldCount());
+
+      RelCollation oldCollation = rel.getCollation();
+      RelCollation newCollation = RexUtil.apply(mapping, oldCollation);
+
+      final Sort newSort = LogicalSort.create(newInput, newCollation, rel.offset, rel.fetch);
+
+      // Sort does not change input ordering
+      return new Frame(rel, newSort, frame.condition, frame.oldToNewOutputs);
+    }
+
+    /**
+     * Rewrites a {@link Values}.
+     *
+     * @param rel Values to be rewritten
+     */
+    public Frame decorrelateRel(Values rel) {
+      // There are no inputs, so rel does not need to be changed.
+      return null;
+    }
+
+    public Frame decorrelateRel(LogicalCorrelate rel) {
+      // does not allow correlation condition in its inputs now, so choose default behavior
+      return decorrelateRel((RelNode) rel);
+    }
+
+    /** Fallback if none of the other {@code decorrelateRel} methods match. */
+    public Frame decorrelateRel(RelNode rel) {
+      RelNode newRel = rel.copy(rel.getTraitSet(), rel.getInputs());
+      if (rel.getInputs().size() > 0) {
+        List<RelNode> oldInputs = rel.getInputs();
+        List<RelNode> newInputs = new ArrayList<>();
+        for (int i = 0; i < oldInputs.size(); ++i) {
+          final Frame frame = getInvoke(oldInputs.get(i));
+          if (frame == null || frame.condition != null) {
+            // if input is not rewritten, or if it produces correlated variables,
+            // terminate rewrite
+            return null;
+          }
+          newInputs.add(frame.relNode);
+          newRel.replaceInput(i, frame.relNode);
+        }
+
+        if (!Util.equalShallow(oldInputs, newInputs)) {
+          newRel = rel.copy(rel.getTraitSet(), newInputs);
+        }
+      }
+      // the output position should not change since there are no corVars coming from below.
+      return new Frame(rel, newRel, null, identityMap(rel.getRowType().getFieldCount()));
     }
 
     private RexNode adjustJoinCondition(
@@ -828,87 +907,6 @@ public class SubQueryDecorrelator extends RelShuttleImpl {
           });
     }
 
-    /**
-     * Rewrite Sort.
-     *
-     * <p>Rewrite logic: change the collations field to reference the new input.
-     *
-     * @param rel Sort to be rewritten
-     */
-    public Frame decorrelateRel(Sort rel) {
-      // Sort itself should not reference corVars.
-      assert !cm.mapRefRelToCorRef.containsKey(rel);
-
-      // Sort only references field positions in collations field.
-      // The collations field in the newRel now need to refer to the
-      // new output positions in its input.
-      // Its output does not change the input ordering, so there's no
-      // need to call propagateExpr.
-      final RelNode oldInput = rel.getInput();
-      final Frame frame = getInvoke(oldInput);
-      if (frame == null) {
-        // If input has not been rewritten, do not rewrite this rel.
-        return null;
-      }
-      final RelNode newInput = frame.r;
-
-      Mappings.TargetMapping mapping =
-          Mappings.target(
-              frame.oldToNewOutputs,
-              oldInput.getRowType().getFieldCount(),
-              newInput.getRowType().getFieldCount());
-
-      RelCollation oldCollation = rel.getCollation();
-      RelCollation newCollation = RexUtil.apply(mapping, oldCollation);
-
-      final Sort newSort = LogicalSort.create(newInput, newCollation, rel.offset, rel.fetch);
-
-      // Sort does not change input ordering
-      return new Frame(rel, newSort, frame.c, frame.oldToNewOutputs);
-    }
-
-    /**
-     * Rewrites a {@link Values}.
-     *
-     * @param rel Values to be rewritten
-     */
-    public Frame decorrelateRel(Values rel) {
-      // There are no inputs, so rel does not need to be changed.
-      return null;
-    }
-
-    public Frame decorrelateRel(LogicalCorrelate rel) {
-      // does not allow correlation condition in its inputs now, so choose default behavior
-      return decorrelateRel((RelNode) rel);
-    }
-
-    /**
-     * Fallback if none of the other {@code decorrelateRel} methods match.
-     */
-    public Frame decorrelateRel(RelNode rel) {
-      RelNode newRel = rel.copy(rel.getTraitSet(), rel.getInputs());
-      if (rel.getInputs().size() > 0) {
-        List<RelNode> oldInputs = rel.getInputs();
-        List<RelNode> newInputs = new ArrayList<>();
-        for (int i = 0; i < oldInputs.size(); ++i) {
-          final Frame frame = getInvoke(oldInputs.get(i));
-          if (frame == null || frame.c != null) {
-            // if input is not rewritten, or if it produces correlated variables,
-            // terminate rewrite
-            return null;
-          }
-          newInputs.add(frame.r);
-          newRel.replaceInput(i, frame.r);
-        }
-
-        if (!Util.equalShallow(oldInputs, newInputs)) {
-          newRel = rel.copy(rel.getTraitSet(), newInputs);
-        }
-      }
-      // the output position should not change since there are no corVars coming from below.
-      return new Frame(rel, newRel, null, identityMap(rel.getRowType().getFieldCount()));
-    }
-
     /* Returns an immutable map with the identity [0: 0, .., count-1: count-1]. */
     private static Map<Integer, Integer> identityMap(int count) {
       com.google.common.collect.ImmutableMap.Builder<Integer, Integer> builder =
@@ -919,9 +917,7 @@ public class SubQueryDecorrelator extends RelShuttleImpl {
       return builder.build();
     }
 
-    /**
-     * Returns a literal output field, or null if it is not literal.
-     */
+    /** Returns a literal output field, or null if it is not literal. */
     private static RexLiteral projectedLiteral(RelNode rel, int i) {
       if (rel instanceof Project) {
         final Project project = (Project) rel;
@@ -934,9 +930,7 @@ public class SubQueryDecorrelator extends RelShuttleImpl {
     }
   }
 
-  /**
-   * Builds a {@link CorelMap}.
-   */
+  /** Builds a {@link CorelMap}. */
   private static class CorelMapBuilder extends RelShuttleImpl {
     private final int maxCnfNodeCount;
     // nested correlation variables in SubQuery, such as:
@@ -977,9 +971,7 @@ public class SubQueryDecorrelator extends RelShuttleImpl {
     int corrIdGenerator = 0;
     final Deque<RelNode> corNodeStack = new ArrayDeque<>();
 
-    /**
-     * Creates a CorelMap by iterating over a {@link RelNode} tree.
-     */
+    /** Creates a CorelMap by iterating over a {@link RelNode} tree. */
     CorelMap build(RelNode... rels) {
       for (RelNode rel : rels) {
         stripHep(rel).accept(this);
@@ -1323,9 +1315,9 @@ public class SubQueryDecorrelator extends RelShuttleImpl {
     public boolean equals(Object o) {
       return this == o
           || o instanceof CorRef
-          && uniqueKey == ((CorRef) o).uniqueKey
-          && corr == ((CorRef) o).corr
-          && field == ((CorRef) o).field;
+              && uniqueKey == ((CorRef) o).uniqueKey
+              && corr == ((CorRef) o).corr
+              && field == ((CorRef) o).field;
     }
 
     public int compareTo(@Nonnull CorRef o) {
@@ -1388,9 +1380,9 @@ public class SubQueryDecorrelator extends RelShuttleImpl {
     public boolean equals(Object obj) {
       return obj == this
           || obj instanceof CorelMap
-          && mapRefRelToCorRef.equals(((CorelMap) obj).mapRefRelToCorRef)
-          && mapCorToCorRel.equals(((CorelMap) obj).mapCorToCorRel)
-          && mapSubQueryNodeToCorSet.equals(((CorelMap) obj).mapSubQueryNodeToCorSet);
+              && mapRefRelToCorRef.equals(((CorelMap) obj).mapRefRelToCorRef)
+              && mapCorToCorRel.equals(((CorelMap) obj).mapCorToCorRel)
+              && mapSubQueryNodeToCorSet.equals(((CorelMap) obj).mapSubQueryNodeToCorSet);
     }
 
     @Override
@@ -1398,9 +1390,7 @@ public class SubQueryDecorrelator extends RelShuttleImpl {
       return Objects.hash(mapRefRelToCorRef, mapCorToCorRel, mapSubQueryNodeToCorSet);
     }
 
-    /**
-     * Creates a CorelMap with given contents.
-     */
+    /** Creates a CorelMap with given contents. */
     public static CorelMap of(
         com.google.common.collect.SortedSetMultimap<RelNode, CorRef> mapRefRelToCorVar,
         SortedMap<CorrelationId, RelNode> mapCorToCorRel,
@@ -1424,9 +1414,9 @@ public class SubQueryDecorrelator extends RelShuttleImpl {
    */
   private static class Frame {
     // the new rel
-    final RelNode r;
+    final RelNode relNode;
     // the condition contains correlation variables
-    final RexNode c;
+    final RexNode condition;
     // map the oldRel's field indices to newRel's field indices
     final com.google.common.collect.ImmutableSortedMap<Integer, Integer> oldToNewOutputs;
 
@@ -1435,19 +1425,19 @@ public class SubQueryDecorrelator extends RelShuttleImpl {
         RelNode newRel,
         RexNode corCondition,
         Map<Integer, Integer> oldToNewOutputs) {
-      this.r = checkNotNull(newRel);
-      this.c = corCondition;
+      this.relNode = checkNotNull(newRel);
+      this.condition = corCondition;
       this.oldToNewOutputs = com.google.common.collect.ImmutableSortedMap.copyOf(oldToNewOutputs);
       assert allLessThan(
           this.oldToNewOutputs.keySet(), oldRel.getRowType().getFieldCount(), Litmus.THROW);
       assert allLessThan(
-          this.oldToNewOutputs.values(), r.getRowType().getFieldCount(), Litmus.THROW);
+          this.oldToNewOutputs.values(), relNode.getRowType().getFieldCount(), Litmus.THROW);
     }
 
     List<Integer> getCorInputRefIndices() {
       final List<Integer> inputRefIndices;
-      if (c != null) {
-        inputRefIndices = RelOptUtil.InputFinder.bits(c).toList();
+      if (condition != null) {
+        inputRefIndices = RelOptUtil.InputFinder.bits(condition).toList();
       } else {
         inputRefIndices = new ArrayList<>();
       }
