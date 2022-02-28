@@ -4,8 +4,8 @@ use std::mem::take;
 use either::Either;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::collection::hash_map::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
 use risingwave_common::error::Result;
+use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_pb::plan::plan_node::NodeBody;
@@ -381,8 +381,8 @@ mod tests {
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{ArrayBuilderImpl, DataChunk, F32Array, F64Array, I32Array};
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::collection::hash_map::Key32;
     use risingwave_common::error::Result;
+    use risingwave_common::hash::Key32;
     use risingwave_common::types::DataType;
 
     use crate::executor::join::hash_join::{EquiJoinParams, HashJoinExecutor};
