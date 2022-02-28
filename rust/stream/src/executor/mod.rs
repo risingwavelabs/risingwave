@@ -348,6 +348,9 @@ pub trait Executor: Send + Debug + 'static {
     fn init(&mut self, _epoch: u64) -> Result<()> {
         unreachable!()
     }
+
+    /// Clear the executor's in-memory cache and reset to specific epoch.
+    fn reset(&mut self, _epoch: u64);
 }
 
 #[derive(Debug)]
@@ -383,7 +386,7 @@ pub trait StatefulExecutor: Executor {
         match self.executor_state() {
             ExecutorState::Init => {
                 if let Ok(barrier) = msg.try_into() {
-                    // Move to ACTIVE state
+                    // Move to Active state
                     self.update_executor_state(ExecutorState::Active(barrier.epoch.curr));
                     Some(barrier.clone())
                 } else {

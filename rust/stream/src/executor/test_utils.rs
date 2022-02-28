@@ -105,6 +105,10 @@ impl Executor for MockSource {
     fn logical_operator_info(&self) -> &str {
         self.identity()
     }
+
+    fn reset(&mut self, _epoch: u64) {
+        // nothing to do
+    }
 }
 
 /// This source takes message from users asynchronously
@@ -193,6 +197,10 @@ impl Executor for MockAsyncSource {
 
     fn logical_operator_info(&self) -> &str {
         self.identity()
+    }
+
+    fn reset(&mut self, _epoch: u64) {
+        // nothing to do
     }
 }
 

@@ -255,16 +255,17 @@ pub async fn agg_executor_next<E: AggExecutor>(executor: &mut E) -> Result<Messa
             }
             Message::Barrier(barrier) => {
                 let epoch = barrier.epoch.curr;
-                if let Some(chunk) = executor.flush_data().await? {
+                // TODO: handle epoch rollback, and set cached_barrier_message.
+                return if let Some(chunk) = executor.flush_data().await? {
                     // Cache the barrier_msg and send it later.
                     *executor.cached_barrier_message_mut() = Some(barrier);
                     executor.update_executor_state(ExecutorState::Active(epoch));
-                    return Ok(Message::Chunk(chunk));
+                    Ok(Message::Chunk(chunk))
                 } else {
                     // No fresh data need to flush, just forward the barrier.
                     executor.update_executor_state(ExecutorState::Active(epoch));
-                    return Ok(Message::Barrier(barrier));
-                }
+                    Ok(Message::Barrier(barrier))
+                };
             }
         }
     }
