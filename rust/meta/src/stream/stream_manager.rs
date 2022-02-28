@@ -452,12 +452,14 @@ mod tests {
                 actor_id: i,
                 // A dummy node to avoid panic.
                 nodes: Some(risingwave_pb::stream_plan::StreamNode {
-                    node: Some(risingwave_pb::stream_plan::stream_node::Node::MviewNode(
-                        risingwave_pb::stream_plan::MViewNode {
-                            table_ref_id: Some(table_ref_id.clone()),
-                            ..Default::default()
-                        },
-                    )),
+                    node: Some(
+                        risingwave_pb::stream_plan::stream_node::Node::MaterializeNode(
+                            risingwave_pb::stream_plan::MaterializeNode {
+                                table_ref_id: Some(table_ref_id.clone()),
+                                ..Default::default()
+                            },
+                        ),
+                    ),
                     operator_id: 1,
                     ..Default::default()
                 }),

@@ -152,9 +152,12 @@ where
             )
             .layer(
                 // TODO: allow wildcard CORS is dangerous! Should remove this in production.
-                CorsLayer::new()
-                    .allow_origin(cors::any())
-                    .allow_methods(vec![Method::GET, Method::POST, Method::PUT, Method::DELETE]),
+                CorsLayer::new().allow_origin(cors::Any).allow_methods(vec![
+                    Method::GET,
+                    Method::POST,
+                    Method::PUT,
+                    Method::DELETE,
+                ]),
             );
 
         axum::Server::bind(&srv.dashboard_addr)

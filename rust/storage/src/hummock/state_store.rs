@@ -21,6 +21,10 @@ impl HummockStateStore {
     pub fn new(storage: HummockStorage) -> Self {
         Self { storage }
     }
+
+    pub fn storage(&self) -> HummockStorage {
+        self.storage.clone()
+    }
 }
 
 // Note(eric): How about removing HummockStateStore and just impl StateStore for HummockStorage?

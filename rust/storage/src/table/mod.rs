@@ -1,4 +1,5 @@
 pub mod mview;
+pub mod row_table;
 mod simple_manager;
 pub mod test;
 
@@ -125,7 +126,6 @@ pub trait ScannableTable: Sync + Send + Any + core::fmt::Debug {
     /// scanning differs according to this property.
     fn is_shared_storage(&self) -> bool;
 }
-
 /// Reference of a `TableManager`.
 pub type TableManagerRef = Arc<dyn TableManager>;
 pub type ScannableTableRef = Arc<dyn ScannableTable>;

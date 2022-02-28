@@ -6,6 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use risingwave_common::error::Result;
 
 pub const EPOCH_PHYSICAL_SHIFT_BITS: u8 = 16;
+pub const INVALID_EPOCH: u64 = 0;
 
 #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd, Hash, Debug)]
 pub struct Epoch(u64);
