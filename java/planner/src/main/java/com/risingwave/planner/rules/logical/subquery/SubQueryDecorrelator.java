@@ -1,20 +1,20 @@
 package com.risingwave.planner.rules.logical.subquery; /*
-                                                        * Licensed to the Apache Software Foundation (ASF) under one
-                                                        * or more contributor license agreements.  See the NOTICE file
-                                                        * distributed with this work for additional information
-                                                        * regarding copyright ownership.  The ASF licenses this file
-                                                        * to you under the Apache License, Version 2.0 (the
-                                                        * "License"); you may not use this file except in compliance
-                                                        * with the License.  You may obtain a copy of the License at
-                                                        *
-                                                        *     http://www.apache.org/licenses/LICENSE-2.0
-                                                        *
-                                                        * Unless required by applicable law or agreed to in writing, software
-                                                        * distributed under the License is distributed on an "AS IS" BASIS,
-                                                        * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-                                                        * See the License for the specific language governing permissions and
-                                                        * limitations under the License.
-                                                        */
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 import static com.google.common.base.Preconditions.checkNotNull;
 
@@ -215,7 +215,9 @@ public class SubQueryDecorrelator extends RelShuttleImpl {
     return relBuilder.build();
   }
 
-  /** Adds Projection to choose the fields used by join condition. */
+  /**
+   * Adds Projection to choose the fields used by join condition.
+   */
   private Frame addProjectionForExists(Frame frame) {
     final List<Integer> corIndices = new ArrayList<>(frame.getCorInputRefIndices());
     final RelNode rel = frame.r;
@@ -337,10 +339,10 @@ public class SubQueryDecorrelator extends RelShuttleImpl {
   /**
    * Adjust the condition's field indices according to mapOldToNewIndex.
    *
-   * @param c The condition to be adjusted.
+   * @param c                The condition to be adjusted.
    * @param mapOldToNewIndex A map containing the mapping the old field indices to new field
-   *     indices.
-   * @param rowType The row type of the new output.
+   *                         indices.
+   * @param rowType          The row type of the new output.
    * @return Return new condition with new field indices.
    */
   private static RexNode adjustInputRefs(
@@ -880,7 +882,9 @@ public class SubQueryDecorrelator extends RelShuttleImpl {
       return decorrelateRel((RelNode) rel);
     }
 
-    /** Fallback if none of the other {@code decorrelateRel} methods match. */
+    /**
+     * Fallback if none of the other {@code decorrelateRel} methods match.
+     */
     public Frame decorrelateRel(RelNode rel) {
       RelNode newRel = rel.copy(rel.getTraitSet(), rel.getInputs());
       if (rel.getInputs().size() > 0) {
@@ -915,7 +919,9 @@ public class SubQueryDecorrelator extends RelShuttleImpl {
       return builder.build();
     }
 
-    /** Returns a literal output field, or null if it is not literal. */
+    /**
+     * Returns a literal output field, or null if it is not literal.
+     */
     private static RexLiteral projectedLiteral(RelNode rel, int i) {
       if (rel instanceof Project) {
         final Project project = (Project) rel;
@@ -928,7 +934,9 @@ public class SubQueryDecorrelator extends RelShuttleImpl {
     }
   }
 
-  /** Builds a {@link CorelMap}. */
+  /**
+   * Builds a {@link CorelMap}.
+   */
   private static class CorelMapBuilder extends RelShuttleImpl {
     private final int maxCnfNodeCount;
     // nested correlation variables in SubQuery, such as:
@@ -969,7 +977,9 @@ public class SubQueryDecorrelator extends RelShuttleImpl {
     int corrIdGenerator = 0;
     final Deque<RelNode> corNodeStack = new ArrayDeque<>();
 
-    /** Creates a CorelMap by iterating over a {@link RelNode} tree. */
+    /**
+     * Creates a CorelMap by iterating over a {@link RelNode} tree.
+     */
     CorelMap build(RelNode... rels) {
       for (RelNode rel : rels) {
         stripHep(rel).accept(this);
@@ -1313,9 +1323,9 @@ public class SubQueryDecorrelator extends RelShuttleImpl {
     public boolean equals(Object o) {
       return this == o
           || o instanceof CorRef
-              && uniqueKey == ((CorRef) o).uniqueKey
-              && corr == ((CorRef) o).corr
-              && field == ((CorRef) o).field;
+          && uniqueKey == ((CorRef) o).uniqueKey
+          && corr == ((CorRef) o).corr
+          && field == ((CorRef) o).field;
     }
 
     public int compareTo(@Nonnull CorRef o) {
@@ -1378,9 +1388,9 @@ public class SubQueryDecorrelator extends RelShuttleImpl {
     public boolean equals(Object obj) {
       return obj == this
           || obj instanceof CorelMap
-              && mapRefRelToCorRef.equals(((CorelMap) obj).mapRefRelToCorRef)
-              && mapCorToCorRel.equals(((CorelMap) obj).mapCorToCorRel)
-              && mapSubQueryNodeToCorSet.equals(((CorelMap) obj).mapSubQueryNodeToCorSet);
+          && mapRefRelToCorRef.equals(((CorelMap) obj).mapRefRelToCorRef)
+          && mapCorToCorRel.equals(((CorelMap) obj).mapCorToCorRel)
+          && mapSubQueryNodeToCorSet.equals(((CorelMap) obj).mapSubQueryNodeToCorSet);
     }
 
     @Override
@@ -1388,7 +1398,9 @@ public class SubQueryDecorrelator extends RelShuttleImpl {
       return Objects.hash(mapRefRelToCorRef, mapCorToCorRel, mapSubQueryNodeToCorSet);
     }
 
-    /** Creates a CorelMap with given contents. */
+    /**
+     * Creates a CorelMap with given contents.
+     */
     public static CorelMap of(
         com.google.common.collect.SortedSetMultimap<RelNode, CorRef> mapRefRelToCorVar,
         SortedMap<CorrelationId, RelNode> mapCorToCorRel,
