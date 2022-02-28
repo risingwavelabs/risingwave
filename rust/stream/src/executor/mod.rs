@@ -19,7 +19,7 @@ pub use monitor::*;
 pub use mview::*;
 pub use project::*;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayImpl, DataChunk, StreamChunk};
+use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
@@ -402,8 +402,19 @@ pub type PkIndices = Vec<usize>;
 pub type PkIndicesRef<'a> = &'a [usize];
 pub type PkDataTypes = SmallVec<[DataType; 1]>;
 
-/// Get inputs by given `pk_indices` from `columns`.
-pub fn pk_input_arrays<'a>(pk_indices: PkIndicesRef, columns: &'a [Column]) -> Vec<&'a ArrayImpl> {
+/// Get clones of inputs by given `pk_indices` from `columns`.
+pub fn pk_input_arrays(pk_indices: PkIndicesRef, columns: &[Column]) -> Vec<ArrayRef> {
+    pk_indices
+        .iter()
+        .map(|pk_idx| columns[*pk_idx].array())
+        .collect()
+}
+
+/// Get references to inputs by given `pk_indices` from `columns`.
+pub fn pk_input_array_refs<'a>(
+    pk_indices: PkIndicesRef,
+    columns: &'a [Column],
+) -> Vec<&'a ArrayImpl> {
     pk_indices
         .iter()
         .map(|pk_idx| columns[*pk_idx].array_ref())
@@ -411,7 +422,7 @@ pub fn pk_input_arrays<'a>(pk_indices: PkIndicesRef, columns: &'a [Column]) -> V
 }
 
 pub trait ExecutorBuilder {
-    fn build(
+    fn new_boxed_executor(
         executor_params: ExecutorParams,
         node: &stream_plan::StreamNode,
         store: impl StateStore,
@@ -424,7 +435,7 @@ macro_rules! build_executor {
         match $a.get_node().unwrap() {
             $(
                 $proto_type_name(..) => {
-                    <$data_type>::build($source,$a,$b,$c)
+                    <$data_type>::new_boxed_executor($source,$a,$b,$c)
                 },
             )*
             _ => Err(RwError::from(

@@ -15,10 +15,9 @@ use risingwave_storage::{Keyspace, StateStore};
 
 use super::aggregation::*;
 use super::{
-    pk_input_arrays, Barrier, Executor, ExecutorState, Message, PkIndices, PkIndicesRef,
-    StatefuleExecutor,
+    Barrier, Executor, ExecutorState, Message, PkIndices, PkIndicesRef, StatefuleExecutor,
 };
-use crate::executor::ExecutorBuilder;
+use crate::executor::{pk_input_array_refs, ExecutorBuilder};
 use crate::task::{build_agg_call_from_prost, ExecutorParams, StreamManagerCore};
 
 /// `SimpleAggExecutor` is the aggregation operator for streaming system.
@@ -83,7 +82,7 @@ impl<S: StateStore> std::fmt::Debug for SimpleAggExecutor<S> {
 pub struct SimpleAggExecutorBuilder {}
 
 impl ExecutorBuilder for SimpleAggExecutorBuilder {
-    fn build(
+    fn new_boxed_executor(
         mut params: ExecutorParams,
         node: &stream_plan::StreamNode,
         store: impl StateStore,
@@ -149,8 +148,8 @@ impl<S: StateStore> AggExecutor for SimpleAggExecutor<S> {
         let (ops, columns, visibility) = chunk.into_inner();
 
         // --- Retrieve all aggregation inputs in advance ---
-        let all_agg_input_arrays = agg_input_arrays(&self.agg_calls, &columns);
-        let pk_input_arrays = pk_input_arrays(self.input.pk_indices(), &columns);
+        let all_agg_input_arrays = agg_input_array_refs(&self.agg_calls, &columns);
+        let pk_input_arrays = pk_input_array_refs(self.input.pk_indices(), &columns);
         let input_pk_data_types = self.input.pk_data_types();
 
         // When applying batch, we will send columns of primary keys to the last N columns.

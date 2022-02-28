@@ -36,7 +36,7 @@ pub struct FilterExecutor {
 pub struct FilterExecutorBuilder {}
 
 impl ExecutorBuilder for FilterExecutorBuilder {
-    fn build(
+    fn new_boxed_executor(
         mut params: ExecutorParams,
         node: &stream_plan::StreamNode,
         _store: impl StateStore,

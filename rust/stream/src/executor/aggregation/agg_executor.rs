@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayBuilderImpl, ArrayImpl, Op, Row, StreamChunk};
+use risingwave_common::array::{ArrayBuilderImpl, ArrayImpl, ArrayRef, Op, Row, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::Datum;
@@ -205,8 +205,22 @@ pub trait AggExecutor: StatefuleExecutor {
     fn input(&mut self) -> &mut dyn Executor;
 }
 
-/// Get aggregation inputs by `agg_calls` and `columns`.
-pub fn agg_input_arrays<'a>(
+/// Get clones of aggregation inputs by `agg_calls` and `columns`.
+pub fn agg_input_arrays(agg_calls: &[AggCall], columns: &[Column]) -> Vec<Vec<ArrayRef>> {
+    agg_calls
+        .iter()
+        .map(|agg| {
+            agg.args
+                .val_indices()
+                .iter()
+                .map(|val_idx| columns[*val_idx].array())
+                .collect()
+        })
+        .collect()
+}
+
+/// Get references to aggregation inputs by `agg_calls` and `columns`.
+pub fn agg_input_array_refs<'a>(
     agg_calls: &[AggCall],
     columns: &'a [Column],
 ) -> Vec<Vec<&'a ArrayImpl>> {

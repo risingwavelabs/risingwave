@@ -47,7 +47,7 @@ impl std::fmt::Debug for ProjectExecutor {
 pub struct ProjectExecutorBuilder {}
 
 impl ExecutorBuilder for ProjectExecutorBuilder {
-    fn build(
+    fn new_boxed_executor(
         mut params: ExecutorParams,
         node: &stream_plan::StreamNode,
         _store: impl StateStore,

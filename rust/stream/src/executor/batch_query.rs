@@ -46,7 +46,7 @@ impl std::fmt::Debug for BatchQueryExecutor {
 pub struct BatchQueryExecutorBuilder {}
 
 impl ExecutorBuilder for BatchQueryExecutorBuilder {
-    fn build(
+    fn new_boxed_executor(
         params: ExecutorParams,
         node: &stream_plan::StreamNode,
         _store: impl StateStore,

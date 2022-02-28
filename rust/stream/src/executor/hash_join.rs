@@ -205,7 +205,7 @@ impl<S: StateStore> JoinSide<S> {
 pub struct HashJoinExecutorBuilder {}
 
 impl ExecutorBuilder for HashJoinExecutorBuilder {
-    fn build(
+    fn new_boxed_executor(
         params: ExecutorParams,
         node: &stream_plan::StreamNode,
         store: impl StateStore,

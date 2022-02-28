@@ -37,7 +37,7 @@ pub struct ChainExecutor {
 pub struct ChainExecutorBuilder {}
 
 impl ExecutorBuilder for ChainExecutorBuilder {
-    fn build(
+    fn new_boxed_executor(
         mut params: ExecutorParams,
         node: &stream_plan::StreamNode,
         _store: impl StateStore,

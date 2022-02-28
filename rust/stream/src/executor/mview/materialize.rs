@@ -34,7 +34,7 @@ pub struct MaterializeExecutor<S: StateStore> {
 pub struct MaterializeExecutorBuilder {}
 
 impl ExecutorBuilder for MaterializeExecutorBuilder {
-    fn build(
+    fn new_boxed_executor(
         mut params: ExecutorParams,
         node: &stream_plan::StreamNode,
         store: impl StateStore,

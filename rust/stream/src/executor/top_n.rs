@@ -70,7 +70,7 @@ impl<S: StateStore> std::fmt::Debug for TopNExecutor<S> {
 pub struct TopNExecutorBuilder {}
 
 impl ExecutorBuilder for TopNExecutorBuilder {
-    fn build(
+    fn new_boxed_executor(
         mut params: ExecutorParams,
         node: &stream_plan::StreamNode,
         store: impl StateStore,

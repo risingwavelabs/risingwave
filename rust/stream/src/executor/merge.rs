@@ -127,7 +127,7 @@ impl std::fmt::Debug for ReceiverExecutor {
 pub struct MergeExecutorBuilder {}
 
 impl ExecutorBuilder for MergeExecutorBuilder {
-    fn build(
+    fn new_boxed_executor(
         params: ExecutorParams,
         node: &stream_plan::StreamNode,
         _store: impl StateStore,
