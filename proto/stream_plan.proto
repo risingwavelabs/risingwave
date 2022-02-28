@@ -30,7 +30,7 @@ message FilterNode {
 // A materialized view is regarded as a table,
 // hence we copy the CreateTableNode definition in OLAP PlanNode.
 // In addition, we also specify primary key to MV for efficient point lookup during update and deletion.
-message MViewNode {
+message MaterializeNode {
   plan.TableRefId table_ref_id = 1;
   plan.TableRefId associated_table_ref_id = 2;
   // Column indexes and orders of primary key
@@ -104,7 +104,7 @@ message StreamNode {
     SourceNode source_node = 4;
     ProjectNode project_node = 5;
     FilterNode filter_node = 6;
-    MViewNode mview_node = 7;
+    MaterializeNode materialize_node = 7;
     SimpleAggNode local_simple_agg_node = 16;
     SimpleAggNode global_simple_agg_node = 8;
     HashAggNode hash_agg_node = 9;

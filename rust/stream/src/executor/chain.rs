@@ -94,7 +94,7 @@ impl ChainExecutor {
             )
             .into()),
             Message::Barrier(barrier) => {
-                self.snapshot.init(barrier.epoch)?;
+                self.snapshot.init(barrier.epoch.prev)?;
                 self.state = ChainState::ReadingSnapshot;
                 Ok(Message::Barrier(barrier))
             }
@@ -130,6 +130,10 @@ impl Executor for ChainExecutor {
 
     fn logical_operator_info(&self) -> &str {
         &self.op_info
+    }
+
+    fn reset(&mut self, _epoch: u64) {
+        // nothing to do
     }
 }
 
@@ -202,6 +206,10 @@ mod test {
         fn init(&mut self, _: u64) -> Result<()> {
             Ok(())
         }
+
+        fn reset(&mut self, _epoch: u64) {
+            // nothing to do
+        }
     }
 
     #[tokio::test]
@@ -236,7 +244,7 @@ mod test {
             schema.clone(),
             PkIndices::new(),
             vec![
-                Message::Barrier(Barrier::new(0)),
+                Message::Barrier(Barrier::new_test_barrier(1)),
                 Message::Chunk(StreamChunk::new(
                     vec![Op::Insert],
                     vec![column_nonnull! { I32Array, [3] }],

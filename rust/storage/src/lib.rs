@@ -17,7 +17,9 @@
 #![feature(let_chains)]
 
 use risingwave_common::types::DataType;
+use risingwave_common::util::sort_util::OrderType;
 
+pub mod bummock;
 pub mod hummock;
 pub mod keyspace;
 pub mod memory;
@@ -50,6 +52,13 @@ pub struct TableColumnDesc {
     pub data_type: DataType,
     pub column_id: ColumnId,
     pub name: String, // for debugging
+}
+
+#[derive(Clone, Debug)]
+pub struct IndexDesc {
+    pub column_id: ColumnId,
+    pub data_type: DataType,
+    pub order: OrderType,
 }
 
 impl TableColumnDesc {
