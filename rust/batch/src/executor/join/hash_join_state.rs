@@ -5,9 +5,9 @@ use std::ops::{Deref, DerefMut};
 
 use either::Either;
 use risingwave_common::array::{ArrayImpl, DataChunk};
-use risingwave_common::collection::hash_map::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 
 use crate::executor::join::chunked_data::{ChunkedData, RowId};
