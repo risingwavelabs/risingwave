@@ -144,7 +144,6 @@ enum RowFormatType {
 message CreateSourceNode {
   TableRefId table_ref_id = 1;
   repeated ColumnDesc column_descs = 2;
-
   StreamSourceInfo info = 3;
 }
 

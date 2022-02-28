@@ -15,7 +15,6 @@ message Table {
   string table_name = 2;
   repeated plan.ColumnDesc column_descs = 3;
   uint64 version = 4;
-
   oneof info {
     plan.StreamSourceInfo stream_source = 5;
     plan.TableSourceInfo table_source = 6;
