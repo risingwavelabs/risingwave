@@ -18,6 +18,7 @@
 
 use risingwave_common::types::DataType;
 
+pub mod bummock;
 pub mod hummock;
 pub mod keyspace;
 pub mod memory;
