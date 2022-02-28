@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayBuilderImpl, ArrayImpl, Op, Row, StreamChunk};
+use risingwave_common::array::{ArrayBuilderImpl, ArrayImpl, ArrayRef, Op, Row, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::Datum;
@@ -11,7 +11,7 @@ use static_assertions::const_assert_eq;
 
 use super::AggCall;
 use crate::executor::managed_state::aggregation::ManagedStateImpl;
-use crate::executor::{Barrier, Executor, ExecutorState, Message, PkDataTypes, StatefuleExecutor};
+use crate::executor::{Barrier, Executor, ExecutorState, Message, PkDataTypes, StatefulExecutor};
 
 /// Hash key for [`HashAggExecutor`].
 pub type HashKey = Row;
@@ -191,7 +191,7 @@ impl<S: StateStore> AggState<S> {
 /// Trait for [`SimpleAggExecutor`] and [`HashAggExecutor`], providing an implementaion of
 /// [`Executor::next`] by [`agg_executor_next`].
 #[async_trait]
-pub trait AggExecutor: StatefuleExecutor {
+pub trait AggExecutor: StatefulExecutor {
     /// If exists, we should send a Barrier while next called.
     fn cached_barrier_message_mut(&mut self) -> &mut Option<Barrier>;
 
@@ -205,8 +205,22 @@ pub trait AggExecutor: StatefuleExecutor {
     fn input(&mut self) -> &mut dyn Executor;
 }
 
-/// Get aggregation inputs by `agg_calls` and `columns`.
-pub fn agg_input_arrays<'a>(
+/// Get clones of aggregation inputs by `agg_calls` and `columns`.
+pub fn agg_input_arrays(agg_calls: &[AggCall], columns: &[Column]) -> Vec<Vec<ArrayRef>> {
+    agg_calls
+        .iter()
+        .map(|agg| {
+            agg.args
+                .val_indices()
+                .iter()
+                .map(|val_idx| columns[*val_idx].array())
+                .collect()
+        })
+        .collect()
+}
+
+/// Get references to aggregation inputs by `agg_calls` and `columns`.
+pub fn agg_input_array_refs<'a>(
     agg_calls: &[AggCall],
     columns: &'a [Column],
 ) -> Vec<Vec<&'a ArrayImpl>> {
@@ -241,16 +255,17 @@ pub async fn agg_executor_next<E: AggExecutor>(executor: &mut E) -> Result<Messa
             }
             Message::Barrier(barrier) => {
                 let epoch = barrier.epoch.curr;
-                if let Some(chunk) = executor.flush_data().await? {
+                // TODO: handle epoch rollback, and set cached_barrier_message.
+                return if let Some(chunk) = executor.flush_data().await? {
                     // Cache the barrier_msg and send it later.
                     *executor.cached_barrier_message_mut() = Some(barrier);
-                    executor.update_executor_state(ExecutorState::ACTIVE(epoch));
-                    return Ok(Message::Chunk(chunk));
+                    executor.update_executor_state(ExecutorState::Active(epoch));
+                    Ok(Message::Chunk(chunk))
                 } else {
                     // No fresh data need to flush, just forward the barrier.
-                    executor.update_executor_state(ExecutorState::ACTIVE(epoch));
-                    return Ok(Message::Barrier(barrier));
-                }
+                    executor.update_executor_state(ExecutorState::Active(epoch));
+                    Ok(Message::Barrier(barrier))
+                };
             }
         }
     }

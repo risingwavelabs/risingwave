@@ -22,6 +22,7 @@ pub const BATCH_WRITE_ADD_L0_LATENCT_SCALE: f64 = 0.00001;
 
 pub const ITER_NEXT_LATENCY_SCALE: f64 = 0.0001;
 pub const ITER_SEEK_LATENCY_SCALE: f64 = 0.0001;
+pub const ITER_NEXT_SIZE_SCALE: f64 = 400.0;
 
 pub const PIN_VERSION_LATENCY_SCALE: f64 = 0.1;
 pub const UNPIN_VERSION_LATENCY_SCALE: f64 = 0.1;
@@ -57,6 +58,7 @@ macro_rules! for_all_metrics {
             iter_next_counts: GenericCounter<AtomicU64>,
             iter_seek_latency: Histogram,
             iter_next_latency: Histogram,
+            iter_next_size: Histogram,
 
             pin_version_counts: GenericCounter<AtomicU64>,
             unpin_version_counts: GenericCounter<AtomicU64>,
@@ -250,6 +252,14 @@ impl StateStoreStats {
         );
         let iter_next_latency = register_histogram_with_registry!(opts, registry).unwrap();
 
+        let buckets = DEFAULT_BUCKETS.map(|x| x * ITER_NEXT_SIZE_SCALE).to_vec();
+        let opts = histogram_opts!(
+            "state_store_iter_next_size",
+            "Total bytes gotten from state store iterator next(), for calculating read throughput",
+            buckets
+        );
+        let iter_next_size = register_histogram_with_registry!(opts, registry).unwrap();
+
         // ----- gRPC -----
         // gRPC count
         let pin_version_counts = register_int_counter_with_registry!(
@@ -419,6 +429,7 @@ impl StateStoreStats {
             iter_next_counts,
             iter_seek_latency,
             iter_next_latency,
+            iter_next_size,
 
             pin_version_counts,
             unpin_version_counts,

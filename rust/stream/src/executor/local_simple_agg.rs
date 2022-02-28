@@ -9,7 +9,7 @@ use risingwave_common::error::Result;
 
 use super::{
     agg_executor_next, create_streaming_agg_state, generate_agg_schema, AggCall, AggExecutor,
-    Barrier, Executor, ExecutorState, Message, PkIndices, PkIndicesRef, StatefuleExecutor,
+    Barrier, Executor, ExecutorState, Message, PkIndices, PkIndicesRef, StatefulExecutor,
     StreamingAggStateImpl,
 };
 
@@ -78,7 +78,7 @@ impl LocalSimpleAggExecutor {
             agg_calls,
             identity: format!("LocalSimpleAggExecutor {:X}", executor_id),
             op_info,
-            executor_state: ExecutorState::INIT,
+            executor_state: ExecutorState::Init,
         })
     }
 }
@@ -103,6 +103,12 @@ impl Executor for LocalSimpleAggExecutor {
 
     fn logical_operator_info(&self) -> &str {
         &self.op_info
+    }
+
+    fn reset(&mut self, epoch: u64) {
+        self.states.iter_mut().for_each(|state| state.reset());
+        self.is_dirty = false;
+        self.update_executor_state(ExecutorState::Active(epoch));
     }
 }
 
@@ -157,7 +163,7 @@ impl AggExecutor for LocalSimpleAggExecutor {
     }
 }
 
-impl StatefuleExecutor for LocalSimpleAggExecutor {
+impl StatefulExecutor for LocalSimpleAggExecutor {
     fn executor_state(&self) -> &ExecutorState {
         &self.executor_state
     }

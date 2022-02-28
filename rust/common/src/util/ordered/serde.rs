@@ -44,24 +44,23 @@ impl OrderedArraysSerializer {
     }
 }
 
+/// `OrderedRowSerializer` expects that the input row contains exactly the values needed to be
+/// serialized, not more and not less. This is because `Row` always needs to be constructed from
+/// chunk manually.
 pub struct OrderedRowSerializer {
-    order_pairs: Vec<OrderPair>,
+    order_types: Vec<OrderType>,
 }
 
 impl OrderedRowSerializer {
-    pub fn new(order_pairs: Vec<OrderPair>) -> Self {
-        Self { order_pairs }
+    pub fn new(order_types: Vec<OrderType>) -> Self {
+        Self { order_types }
     }
 
     pub fn serialize(&self, row: &Row, append_to: &mut Vec<u8>) {
-        for OrderPair {
-            order_type,
-            column_idx,
-        } in &self.order_pairs
-        {
+        for (datum, order_type) in row.0.iter().zip_eq(self.order_types.iter()) {
             let mut serializer = memcomparable::Serializer::new(vec![]);
             serializer.set_reverse(*order_type == OrderType::Descending);
-            serialize_datum_into(&row.0[*column_idx], &mut serializer).unwrap();
+            serialize_datum_into(datum, &mut serializer).unwrap();
             append_to.extend(serializer.into_inner());
         }
     }
@@ -193,8 +192,6 @@ fn deserialize_decimal(bytes: &[u8]) -> Result<Datum> {
 
 #[cfg(test)]
 mod tests {
-    use itertools::Itertools;
-
     use super::*;
     use crate::array::{I16Array, Utf8Array};
     use crate::array_nonnull;
@@ -202,10 +199,7 @@ mod tests {
 
     #[test]
     fn test_ordered_row_serializer() {
-        let orders = vec![
-            OrderPair::new(0, OrderType::Descending),
-            OrderPair::new(1, OrderType::Ascending),
-        ];
+        let orders = vec![OrderType::Descending, OrderType::Ascending];
         let serializer = OrderedRowSerializer::new(orders);
         let row1 = Row(vec![Some(Int16(5)), Some(Utf8("abc".to_string()))]);
         let row2 = Row(vec![Some(Int16(5)), Some(Utf8("abd".to_string()))]);
@@ -284,12 +278,8 @@ mod tests {
 
     #[test]
     fn test_ordered_row_deserializer() {
-        let order_pairs = vec![
-            OrderPair::new(0, OrderType::Descending),
-            OrderPair::new(1, OrderType::Ascending),
-        ];
-        let order_types = order_pairs.iter().map(|o| o.order_type).collect_vec();
-        let serializer = OrderedRowSerializer::new(order_pairs);
+        let order_types = vec![OrderType::Descending, OrderType::Ascending];
+        let serializer = OrderedRowSerializer::new(order_types.clone());
         let schema = vec![DataType::Varchar, DataType::Int16];
         let row1 = Row(vec![Some(Utf8("abc".to_string())), Some(Int16(5))]);
         let row2 = Row(vec![Some(Utf8("abd".to_string())), Some(Int16(5))]);

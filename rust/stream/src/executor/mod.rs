@@ -19,7 +19,7 @@ pub use monitor::*;
 pub use mview::*;
 pub use project::*;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayImpl, DataChunk, StreamChunk};
+use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
@@ -348,26 +348,29 @@ pub trait Executor: Send + Debug + 'static {
     fn init(&mut self, _epoch: u64) -> Result<()> {
         unreachable!()
     }
+
+    /// Clear the executor's in-memory cache and reset to specific epoch.
+    fn reset(&mut self, _epoch: u64);
 }
 
 #[derive(Debug)]
 pub enum ExecutorState {
     /// Waiting for the first barrier
-    INIT,
+    Init,
     /// Can read from and write to storage
-    ACTIVE(u64),
+    Active(u64),
 }
 
 impl ExecutorState {
     pub fn epoch(&self) -> u64 {
         match self {
-            ExecutorState::INIT => panic!("Executor is not active when getting the epoch"),
-            ExecutorState::ACTIVE(epoch) => *epoch,
+            ExecutorState::Init => panic!("Executor is not active when getting the epoch"),
+            ExecutorState::Active(epoch) => *epoch,
         }
     }
 }
 
-pub trait StatefuleExecutor: Executor {
+pub trait StatefulExecutor: Executor {
     fn executor_state(&self) -> &ExecutorState;
 
     fn update_executor_state(&mut self, new_state: ExecutorState);
@@ -381,16 +384,16 @@ pub trait StatefuleExecutor: Executor {
         msg: impl TryInto<&'a Barrier, Error = ()>,
     ) -> Option<Barrier> {
         match self.executor_state() {
-            ExecutorState::INIT => {
+            ExecutorState::Init => {
                 if let Ok(barrier) = msg.try_into() {
-                    // Move to ACTIVE state
-                    self.update_executor_state(ExecutorState::ACTIVE(barrier.epoch.curr));
+                    // Move to Active state
+                    self.update_executor_state(ExecutorState::Active(barrier.epoch.curr));
                     Some(barrier.clone())
                 } else {
                     panic!("The first message the executor receives is not a barrier");
                 }
             }
-            ExecutorState::ACTIVE(_) => None,
+            ExecutorState::Active(_) => None,
         }
     }
 }
@@ -399,8 +402,19 @@ pub type PkIndices = Vec<usize>;
 pub type PkIndicesRef<'a> = &'a [usize];
 pub type PkDataTypes = SmallVec<[DataType; 1]>;
 
-/// Get inputs by given `pk_indices` from `columns`.
-pub fn pk_input_arrays<'a>(pk_indices: PkIndicesRef, columns: &'a [Column]) -> Vec<&'a ArrayImpl> {
+/// Get clones of inputs by given `pk_indices` from `columns`.
+pub fn pk_input_arrays(pk_indices: PkIndicesRef, columns: &[Column]) -> Vec<ArrayRef> {
+    pk_indices
+        .iter()
+        .map(|pk_idx| columns[*pk_idx].array())
+        .collect()
+}
+
+/// Get references to inputs by given `pk_indices` from `columns`.
+pub fn pk_input_array_refs<'a>(
+    pk_indices: PkIndicesRef,
+    columns: &'a [Column],
+) -> Vec<&'a ArrayImpl> {
     pk_indices
         .iter()
         .map(|pk_idx| columns[*pk_idx].array_ref())

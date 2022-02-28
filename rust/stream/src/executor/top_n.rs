@@ -7,7 +7,7 @@ use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::{Keyspace, Segment, StateStore};
 
-use super::{ExecutorState, StatefuleExecutor};
+use super::{ExecutorState, StatefulExecutor};
 use crate::executor::managed_state::top_n::variants::*;
 use crate::executor::managed_state::top_n::{ManagedTopNBottomNState, ManagedTopNState};
 use crate::executor::{
@@ -123,7 +123,7 @@ impl<S: StateStore> TopNExecutor<S> {
             first_execution: true,
             identity: format!("TopNExecutor {:X}", executor_id),
             op_info,
-            executor_state: ExecutorState::INIT,
+            executor_state: ExecutorState::Init,
         }
     }
 
@@ -158,12 +158,20 @@ impl<S: StateStore> Executor for TopNExecutor<S> {
     }
 
     fn clear_cache(&mut self) -> Result<()> {
-        self.managed_lowest_state.clear_cache();
-        self.managed_middle_state.clear_cache();
-        self.managed_highest_state.clear_cache();
+        self.managed_lowest_state.clear_cache(false);
+        self.managed_middle_state.clear_cache(false);
+        self.managed_highest_state.clear_cache(false);
         self.first_execution = true;
 
         Ok(())
+    }
+
+    fn reset(&mut self, epoch: u64) {
+        self.managed_lowest_state.clear_cache(true);
+        self.managed_middle_state.clear_cache(true);
+        self.managed_highest_state.clear_cache(true);
+        self.first_execution = true;
+        self.update_executor_state(ExecutorState::Active(epoch));
     }
 }
 
@@ -370,7 +378,7 @@ impl<S: StateStore> TopNExecutorBase for TopNExecutor<S> {
     }
 }
 
-impl<S: StateStore> StatefuleExecutor for TopNExecutor<S> {
+impl<S: StateStore> StatefulExecutor for TopNExecutor<S> {
     fn executor_state(&self) -> &ExecutorState {
         &self.executor_state
     }

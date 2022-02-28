@@ -110,6 +110,10 @@ impl Executor for BatchQueryExecutor {
         }
         Ok(())
     }
+
+    fn reset(&mut self, _epoch: u64) {
+        // nothing to do
+    }
 }
 
 #[cfg(test)]
