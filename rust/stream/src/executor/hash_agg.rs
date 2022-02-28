@@ -367,7 +367,7 @@ impl<S: StateStore> Executor for HashAggExecutor<S> {
 
     fn reset(&mut self, epoch: u64) {
         self.state_map.clear();
-        self.update_executor_state(ExecutorState::ACTIVE(epoch));
+        self.update_executor_state(ExecutorState::Active(epoch));
     }
 }
 

@@ -194,7 +194,7 @@ impl<S: StateStore> Executor for AppendOnlyTopNExecutor<S> {
         self.managed_lower_state.clear_cache();
         self.managed_higher_state.clear_cache();
         self.first_execution = true;
-        self.update_executor_state(ExecutorState::ACTIVE(epoch));
+        self.update_executor_state(ExecutorState::Active(epoch));
     }
 }
 

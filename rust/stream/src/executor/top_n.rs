@@ -171,7 +171,7 @@ impl<S: StateStore> Executor for TopNExecutor<S> {
         self.managed_middle_state.clear_cache();
         self.managed_highest_state.clear_cache();
         self.first_execution = true;
-        self.update_executor_state(ExecutorState::ACTIVE(epoch));
+        self.update_executor_state(ExecutorState::Active(epoch));
     }
 }
 
