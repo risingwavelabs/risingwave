@@ -5,9 +5,7 @@ import com.risingwave.proto.metanode.Database;
 import com.risingwave.proto.metanode.Schema;
 import com.risingwave.proto.metanode.Table;
 import com.risingwave.proto.plan.*;
-
 import java.util.ArrayList;
-import java.util.List;
 import org.apache.calcite.rel.RelCollations;
 import org.apache.calcite.rel.RelFieldCollation;
 import org.apache.commons.lang3.SerializationException;
@@ -66,7 +64,7 @@ public class CatalogCast {
     // ColumnDesc
     for (var columns : createTableInfo.getColumns()) {
       com.risingwave.proto.plan.ColumnDesc.Builder colBuilder =
-              com.risingwave.proto.plan.ColumnDesc.newBuilder();
+          com.risingwave.proto.plan.ColumnDesc.newBuilder();
       colBuilder.setName(columns.left);
       colBuilder.setColumnType(columns.right.getDataType().getProtobufType());
       builder.addColumnDescs(colBuilder.build());
@@ -107,7 +105,8 @@ public class CatalogCast {
       if (createMaterializedViewInfo.getCollation() != null) {
         var rfc = createMaterializedViewInfo.getCollation().getFieldCollations();
         for (RelFieldCollation relFieldCollation : rfc) {
-          var inputRefExpr = InputRefExpr.newBuilder().setColumnIdx(relFieldCollation.getFieldIndex()).build();
+          var inputRefExpr =
+              InputRefExpr.newBuilder().setColumnIdx(relFieldCollation.getFieldIndex()).build();
           RelFieldCollation.Direction dir = relFieldCollation.getDirection();
           OrderType orderType;
           if (dir == RelFieldCollation.Direction.ASCENDING) {
@@ -118,13 +117,16 @@ public class CatalogCast {
             throw new SerializationException(String.format("%s direction not supported", dir));
           }
           ColumnOrder columnOrder =
-                  ColumnOrder.newBuilder().setOrderType(orderType).setInputRef(inputRefExpr).build();
+              ColumnOrder.newBuilder().setOrderType(orderType).setInputRef(inputRefExpr).build();
           mvInfoBuilder.addColumnOrders(columnOrder);
         }
       }
 
       // Associated table id
-      mvInfoBuilder.setIsAssociated(createMaterializedViewInfo.isAssociated());
+      var associatedTableRefId =
+          TableRefId.newBuilder()
+              .setTableId(createMaterializedViewInfo.getAssociatedTableId().getValue());
+      mvInfoBuilder.setAssociatedTableRefId(associatedTableRefId);
 
     } else {
       var tableInfoBuilder = TableSourceInfo.newBuilder();
@@ -136,56 +138,131 @@ public class CatalogCast {
   }
 
   public static CreateTableInfo tableFromProto(Table table) {
-    CreateTableInfo.Builder builder;
-    if (!table.getIsMaterializedView()) {
-      builder = CreateTableInfo.builder(table.getTableName());
-    } else {
-      builder = CreateMaterializedViewInfo.builder(table.getTableName());
+    CreateTableInfo.Builder builder = null;
+
+    switch (table.getInfoCase()) {
+      case STREAM_SOURCE:
+        {
+          builder = CreateTableInfo.builder(table.getTableName());
+          builder.setSource(true);
+          var info = table.getStreamSource();
+          builder.setProperties(info.getPropertiesMap());
+          builder.setAppendOnly(info.getAppendOnly());
+          builder.setRowFormat(info.getRowFormat());
+          builder.setRowSchemaLocation(info.getRowSchemaLocation());
+
+          break;
+        }
+      case TABLE_SOURCE:
+        {
+          builder = CreateTableInfo.builder(table.getTableName());
+
+          break;
+        }
+      case MATERIALIZED_VIEW:
+        {
+          builder = CreateMaterializedViewInfo.builder(table.getTableName());
+          builder.setMv(true);
+          var info = table.getMaterializedView();
+          info.getPkIndicesList().forEach(builder::addPrimaryKey);
+
+          for (var tableRefId : info.getDependentTablesList()) {
+            SchemaRefId schemaRefId = tableRefId.getSchemaRefId();
+            DatabaseRefId databaseRefId = schemaRefId.getDatabaseRefId();
+            DatabaseCatalog.DatabaseId databaseId =
+                new DatabaseCatalog.DatabaseId(databaseRefId.getDatabaseId());
+            SchemaCatalog.SchemaId schemaId =
+                new SchemaCatalog.SchemaId(schemaRefId.getSchemaId(), databaseId);
+            TableCatalog.TableId tableId =
+                new TableCatalog.TableId(tableRefId.getTableId(), schemaId);
+            builder.addDependentTable(tableId);
+          }
+
+          var fieldCollations = new ArrayList<RelFieldCollation>();
+          for (var columnOrder : info.getColumnOrdersList()) {
+            var orderType = columnOrder.getOrderType();
+            var columnIdx = columnOrder.getInputRef().getColumnIdx();
+            RelFieldCollation.Direction dir;
+            if (orderType == OrderType.ASCENDING) {
+              dir = RelFieldCollation.Direction.ASCENDING;
+            } else if (orderType == OrderType.DESCENDING) {
+              dir = RelFieldCollation.Direction.DESCENDING;
+            } else {
+              throw new SerializationException(
+                  String.format("%s direction not supported", orderType));
+            }
+            fieldCollations.add(new RelFieldCollation(columnIdx, dir));
+          }
+          if (!fieldCollations.isEmpty()) {
+            ((CreateMaterializedViewInfo.Builder) builder)
+                .setCollation(RelCollations.of(fieldCollations));
+          }
+
+          var associatedTableId =
+              new TableCatalog.TableId(info.getAssociatedTableRefId().getTableId(), null);
+          ((CreateMaterializedViewInfo.Builder) builder).setAssociated(associatedTableId);
+
+          break;
+        }
+
+      default:
+        throw new SerializationException("table info not set or not supported");
     }
-    builder.setMv(false);
-    builder.setProperties(table.getPropertiesMap());
-    table.getPkColumnsList().forEach(builder::addPrimaryKey);
-    builder.setSource(table.getIsSource());
-    builder.setAppendOnly(table.getAppendOnly());
-    builder.setRowFormat(table.getRowFormat());
-    builder.setRowSchemaLocation(table.getRowSchemaLocation());
+
+    //    if (table.getInfoCase() == Table.InfoCase.MATERIALIZED_VIEW) {
+    //      builder = CreateMaterializedViewInfo.builder(table.getTableName());
+    //      var info = table.getMaterializedView();
+    //      info.getPkIndicesList().forEach(builder::addPrimaryKey);
+    //    } else {
+    //      builder = CreateTableInfo.builder(table.getTableName());
+    //    }
+
+    //    builder.setMv(false);
+    //    builder.setProperties(table.getPropertiesMap());
+    //    table.getPkColumnsList().forEach(builder::addPrimaryKey);
+    //    builder.setSource(table.getIsSource());
+    //    builder.setAppendOnly(table.getAppendOnly());
+    //    builder.setRowFormat(table.getRowFormat());
+    //    builder.setRowSchemaLocation(table.getRowSchemaLocation());
     for (com.risingwave.proto.plan.ColumnDesc desc : table.getColumnDescsList()) {
       builder.addColumn(desc.getName(), new com.risingwave.catalog.ColumnDesc(desc));
     }
-    List<TableCatalog.TableId> dependentTables = new ArrayList<>();
-    for (var tableRefId : table.getDependentTablesList()) {
-      SchemaRefId schemaRefId = tableRefId.getSchemaRefId();
-      DatabaseRefId databaseRefId = schemaRefId.getDatabaseRefId();
-      DatabaseCatalog.DatabaseId databaseId =
-          new DatabaseCatalog.DatabaseId(databaseRefId.getDatabaseId());
-      SchemaCatalog.SchemaId schemaId =
-          new SchemaCatalog.SchemaId(schemaRefId.getSchemaId(), databaseId);
-      TableCatalog.TableId tableId = new TableCatalog.TableId(tableRefId.getTableId(), schemaId);
-      dependentTables.add(tableId);
-    }
-    builder.setDependentTables(dependentTables);
-    if (!table.getIsMaterializedView()) {
-      return builder.build();
-    }
-    var fieldCollations = new ArrayList<RelFieldCollation>();
-    for (var columnOrder : table.getColumnOrdersList()) {
-      var orderType = columnOrder.getOrderType();
-      var columnIdx = columnOrder.getInputRef().getColumnIdx();
-      RelFieldCollation.Direction dir;
-      if (orderType == OrderType.ASCENDING) {
-        dir = RelFieldCollation.Direction.ASCENDING;
-      } else if (orderType == OrderType.DESCENDING) {
-        dir = RelFieldCollation.Direction.DESCENDING;
-      } else {
-        throw new SerializationException(String.format("%s direction not supported", orderType));
-      }
-      fieldCollations.add(new RelFieldCollation(columnIdx, dir));
-    }
-    if (!fieldCollations.isEmpty()) {
-      ((CreateMaterializedViewInfo.Builder) builder)
-          .setCollation(RelCollations.of(fieldCollations));
-    }
-    ((CreateMaterializedViewInfo.Builder) builder).setAssociated(table.getIsAssociated());
+    //    List<TableCatalog.TableId> dependentTables = new ArrayList<>();
+    //    for (var tableRefId : table.getDependentTablesList()) {
+    //      SchemaRefId schemaRefId = tableRefId.getSchemaRefId();
+    //      DatabaseRefId databaseRefId = schemaRefId.getDatabaseRefId();
+    //      DatabaseCatalog.DatabaseId databaseId =
+    //          new DatabaseCatalog.DatabaseId(databaseRefId.getDatabaseId());
+    //      SchemaCatalog.SchemaId schemaId =
+    //          new SchemaCatalog.SchemaId(schemaRefId.getSchemaId(), databaseId);
+    //      TableCatalog.TableId tableId = new TableCatalog.TableId(tableRefId.getTableId(),
+    // schemaId);
+    //      dependentTables.add(tableId);
+    //    }
+    //    builder.setDependentTables(dependentTables);
+    //    if (!table.getIsMaterializedView()) {
+    //      return builder.build();
+    //    }
+    //    var fieldCollations = new ArrayList<RelFieldCollation>();
+    //    for (var columnOrder : table.getColumnOrdersList()) {
+    //      var orderType = columnOrder.getOrderType();
+    //      var columnIdx = columnOrder.getInputRef().getColumnIdx();
+    //      RelFieldCollation.Direction dir;
+    //      if (orderType == OrderType.ASCENDING) {
+    //        dir = RelFieldCollation.Direction.ASCENDING;
+    //      } else if (orderType == OrderType.DESCENDING) {
+    //        dir = RelFieldCollation.Direction.DESCENDING;
+    //      } else {
+    //        throw new SerializationException(String.format("%s direction not supported",
+    // orderType));
+    //      }
+    //      fieldCollations.add(new RelFieldCollation(columnIdx, dir));
+    //    }
+    //    if (!fieldCollations.isEmpty()) {
+    //      ((CreateMaterializedViewInfo.Builder) builder)
+    //          .setCollation(RelCollations.of(fieldCollations));
+    //    }
+    //    ((CreateMaterializedViewInfo.Builder) builder).setAssociated(table.getIsAssociated());
     return builder.build();
   }
 }

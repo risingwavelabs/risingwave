@@ -102,13 +102,13 @@ public class RemoteCatalogService implements CatalogService {
       var isMaterializedView = table.getInfoCase() == Table.InfoCase.MATERIALIZED_VIEW;
       if (isMaterializedView) {
         schemaCatalog
-                .createMaterializedViewWithId(
-                        (CreateMaterializedViewInfo) createTableInfo, table.getTableRefId().getTableId())
-                .setVersion(table.getVersion());
+            .createMaterializedViewWithId(
+                (CreateMaterializedViewInfo) createTableInfo, table.getTableRefId().getTableId())
+            .setVersion(table.getVersion());
       } else {
         schemaCatalog
-                .createTableWithId(createTableInfo, table.getTableRefId().getTableId())
-                .setVersion(table.getVersion());
+            .createTableWithId(createTableInfo, table.getTableRefId().getTableId())
+            .setVersion(table.getVersion());
       }
     }
   }
