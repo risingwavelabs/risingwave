@@ -32,7 +32,7 @@ public class StreamingShuffleAggRule extends RelRule<StreamingShuffleAggRule.Con
   public void onMatch(RelOptRuleCall call) {
     RwLogicalAggregate logicalAgg = call.rel(0);
     var groupCount = logicalAgg.getGroupCount();
-//    assert isDistributedMode(contextOf(call)) && groupCount >= MIN_GROUP_COUNT;
+    //    assert isDistributedMode(contextOf(call)) && groupCount >= MIN_GROUP_COUNT;
     var distTrait = RwDistributions.hash(logicalAgg.getGroupSet().toArray());
     var requiredInputTraitSet = logicalAgg.getInput().getTraitSet().plus(STREAMING).plus(distTrait);
     var aggTraits = logicalAgg.getTraitSet().plus(STREAMING);
