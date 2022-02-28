@@ -12,7 +12,7 @@ pub use reverse_user::*;
 mod merge;
 pub use merge::*;
 mod merge_inner;
-mod user;
+pub mod user;
 pub use user::*;
 
 #[cfg(test)]

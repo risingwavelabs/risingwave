@@ -59,10 +59,8 @@ public class CreateSourceHandler implements SqlHandler {
 
       columnDescBuilder
           .setName(columnCatalog.getName())
-          .setEncoding(com.risingwave.proto.plan.ColumnDesc.ColumnEncodingType.RAW)
           .setColumnType(columnCatalog.getDesc().getDataType().getProtobufType())
-          .setColumnId(columnCatalog.getId().getValue())
-          .setIsPrimary(columnCatalog.getDesc().isPrimary());
+          .setColumnId(columnCatalog.getId().getValue());
 
       createSourceNodeBuilder.addColumnDescs(columnDescBuilder);
     }

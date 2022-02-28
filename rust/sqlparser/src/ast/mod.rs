@@ -282,6 +282,8 @@ pub enum Expr {
     Cube(Vec<Vec<Expr>>),
     /// The `ROLLUP` expr.
     Rollup(Vec<Vec<Expr>>),
+    /// The `ROW` expr. The `ROW` keyword can be omitted,
+    Row(Vec<Expr>),
 }
 
 impl fmt::Display for Expr {
@@ -442,6 +444,16 @@ impl fmt::Display for Expr {
 
                 write!(f, ")")
             }
+            Expr::Row(exprs) => write!(
+                f,
+                "ROW({})",
+                exprs
+                    .iter()
+                    .map(|v| v.to_string())
+                    .collect::<Vec<String>>()
+                    .as_slice()
+                    .join(", ")
+            ),
         }
     }
 }

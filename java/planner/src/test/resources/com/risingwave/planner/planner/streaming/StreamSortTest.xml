@@ -7,9 +7,9 @@ create materialized view T_select_all_order_v1 as select * from t order by v1;
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView(name=[t_select_all_order_v1], collation=[[0]])
+RwStreamMaterialize(name=[t_select_all_order_v1], collation=[[0]])
   RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
-    RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[3]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.2, 0.0.1.3]], upstreamColumnDescs=[[ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=FLOAT, primary=false}, ColumnDesc{dataType=BIGINT, primary=false}]])
+    RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[3]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.2, 0.0.1.3]])
       RwStreamBatchPlan(table=[[test_schema, t]], tableId=[0.0.1], primaryKeyIndices=[[3]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.2, 0.0.1.3]])
 ]]>
         </Resource>
@@ -27,9 +27,9 @@ create materialized view T_select_all_order_v2_v1 as select * from t order by v2
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView(name=[t_select_all_order_v2_v1], collation=[[1, 0 DESC]])
+RwStreamMaterialize(name=[t_select_all_order_v2_v1], collation=[[1, 0 DESC]])
   RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
-    RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[3]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.2, 0.0.1.3]], upstreamColumnDescs=[[ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=FLOAT, primary=false}, ColumnDesc{dataType=BIGINT, primary=false}]])
+    RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[3]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.2, 0.0.1.3]])
       RwStreamBatchPlan(table=[[test_schema, t]], tableId=[0.0.1], primaryKeyIndices=[[3]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.2, 0.0.1.3]])
 ]]>
         </Resource>
@@ -47,9 +47,9 @@ create materialized view T_select_v1_order_v2 as select v1 from t order by v2 DE
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView(name=[t_select_v1_order_v2], collation=[[1 DESC]])
+RwStreamMaterialize(name=[t_select_v1_order_v2], collation=[[1 DESC]])
   RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
-    RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.3]], upstreamColumnDescs=[[ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=FLOAT, primary=false}, ColumnDesc{dataType=BIGINT, primary=false}]])
+    RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.3]])
       RwStreamBatchPlan(table=[[test_schema, t]], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.3]])
 ]]>
         </Resource>
@@ -68,11 +68,11 @@ select v1, C from (select v1, v2, avg(v3) as C from t group by v1, v2) order by 
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView(name=[t_order_after_aggregation], collation=[[1 DESC]])
+RwStreamMaterialize(name=[t_order_after_aggregation], collation=[[1 DESC]])
   RwStreamProject(v1=[$0], c=[/(CAST($3):DOUBLE NOT NULL, $4)], v2=[$1])
     RwStreamAgg(group=[{0, 1}], agg#0=[COUNT()], agg#1=[SUM($2)], agg#2=[COUNT($2)])
       RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0, 1]}], collation=[[]])
-        RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[3]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.2, 0.0.1.3]], upstreamColumnDescs=[[ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=FLOAT, primary=false}, ColumnDesc{dataType=BIGINT, primary=false}]])
+        RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[3]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.2, 0.0.1.3]])
           RwStreamBatchPlan(table=[[test_schema, t]], tableId=[0.0.1], primaryKeyIndices=[[3]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.2, 0.0.1.3]])
 ]]>
         </Resource>
@@ -91,10 +91,10 @@ select * from t order by v1 limit 100 offset 10;
         </Resource>
         <Resource name="plan">
             <![CDATA[
-RwStreamMaterializedView(name=[t_order_limit], collation=[[0]])
+RwStreamMaterialize(name=[t_order_limit], collation=[[0]])
   RwStreamSort(sort0=[$0], dir0=[ASC], offset=[10], fetch=[100])
     RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
-      RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[3]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.2, 0.0.1.3]], upstreamColumnDescs=[[ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=FLOAT, primary=false}, ColumnDesc{dataType=BIGINT, primary=false}]])
+      RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[3]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.2, 0.0.1.3]])
         RwStreamBatchPlan(table=[[test_schema, t]], tableId=[0.0.1], primaryKeyIndices=[[3]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.2, 0.0.1.3]])
 ]]>
         </Resource>

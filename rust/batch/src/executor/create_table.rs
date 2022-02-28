@@ -1,8 +1,8 @@
 use risingwave_common::array::DataChunk;
-use risingwave_common::catalog::{Schema, TableId};
+use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::fetch_orders;
+use risingwave_common::util::sort_util::OrderPair;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::{ColumnDesc, ColumnOrder};
 use risingwave_source::SourceManagerRef;
@@ -69,8 +69,8 @@ impl BoxedExecutorBuilder for CreateTableExecutor {
 
         Ok(Box::new(Self {
             table_id,
-            table_manager: source.global_task_env().table_manager_ref(),
-            source_manager: source.global_task_env().source_manager_ref(),
+            table_manager: source.global_batch_env().table_manager_ref(),
+            source_manager: source.global_batch_env().source_manager_ref(),
             table_columns: node.column_descs.clone(),
             identity: "CreateTableExecutor".to_string(),
             is_materialized_view: node.is_materialized_view,
@@ -98,7 +98,7 @@ impl Executor for CreateTableExecutor {
             .map(|col| {
                 Ok(TableColumnDesc {
                     data_type: DataType::from(col.get_column_type()?),
-                    column_id: col.get_column_id(),
+                    column_id: ColumnId::from(col.get_column_id()),
                     name: col.get_name().to_string(),
                 })
             })
@@ -117,7 +117,12 @@ impl Executor for CreateTableExecutor {
                 )?;
             } else {
                 // Create normal MV.
-                let order_pairs = fetch_orders(&self.column_orders).unwrap();
+                let order_pairs: Vec<_> = self
+                    .column_orders
+                    .iter()
+                    .map(OrderPair::from_prost)
+                    .collect();
+
                 let orderings = order_pairs
                     .iter()
                     .map(|order| order.order_type)

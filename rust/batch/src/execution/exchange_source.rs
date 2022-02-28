@@ -1,16 +1,15 @@
 use std::net::SocketAddr;
-use std::time::Duration;
 
 use futures::StreamExt;
 use risingwave_common::array::DataChunk;
-use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::{GetDataRequest, GetDataResponse};
-use tonic::transport::{Channel, Endpoint};
+use risingwave_rpc_client::ComputeClient;
+use tonic::transport::Channel;
 use tonic::Streaming;
 
-use crate::task::{BatchTaskEnv, TaskId, TaskSink, TaskSinkId};
+use crate::task::{BatchEnvironment, TaskId, TaskSink, TaskSinkId};
 
 /// Each ExchangeSource maps to one task, it takes the execution result from task chunk by chunk.
 #[async_trait::async_trait]
@@ -33,14 +32,7 @@ pub struct GrpcExchangeSource {
 
 impl GrpcExchangeSource {
     pub async fn create(addr: SocketAddr, task_id: TaskId, sink_id: TaskSinkId) -> Result<Self> {
-        let mut client = ExchangeServiceClient::new(
-            Endpoint::from_shared(format!("http://{}", addr))
-                .map_err(|e| InternalError(format!("{}", e)))?
-                .connect_timeout(Duration::from_secs(5))
-                .connect()
-                .await
-                .to_rw_result_with(format!("failed to connect to {}", addr))?,
-        );
+        let mut client = ComputeClient::new(&addr).await?.get_channel();
         let stream = client
             .get_data(GetDataRequest {
                 sink_id: Some(sink_id.to_prost()),
@@ -92,7 +84,7 @@ pub struct LocalExchangeSource {
 }
 
 impl LocalExchangeSource {
-    pub fn create(sink_id: TaskSinkId, env: BatchTaskEnv, task_id: TaskId) -> Result<Self> {
+    pub fn create(sink_id: TaskSinkId, env: BatchEnvironment, task_id: TaskId) -> Result<Self> {
         let task_sink = env.task_manager().take_sink(&sink_id.to_prost())?;
         Ok(Self { task_sink, task_id })
     }

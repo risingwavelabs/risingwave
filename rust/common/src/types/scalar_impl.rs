@@ -1,5 +1,5 @@
 use super::*;
-use crate::array::struct_array::StructValue;
+use crate::array::struct_array::{StructRef, StructValue};
 use crate::{for_all_native_types, for_all_scalar_variants};
 
 /// `ScalarPartialOrd` allows comparison between `Scalar` and `ScalarRef`.
@@ -55,10 +55,10 @@ impl Scalar for String {
 
 /// Implement `Scalar` for `StructValue`.
 impl Scalar for StructValue {
-    type ScalarRefType<'a> = StructValue;
+    type ScalarRefType<'a> = StructRef<'a>;
 
-    fn as_scalar_ref(&self) -> StructValue {
-        *self
+    fn as_scalar_ref(&self) -> StructRef<'_> {
+        StructRef::ValueRef { val: self }
     }
 
     fn to_scalar_value(self) -> ScalarImpl {
@@ -258,11 +258,16 @@ impl<'a> ScalarRef<'a> for NaiveTimeWrapper {
 }
 
 /// Implement `Scalar` for `StructValue`.
-impl<'a> ScalarRef<'a> for StructValue {
+impl<'a> ScalarRef<'a> for StructRef<'a> {
     type ScalarType = StructValue;
 
     fn to_owned_scalar(&self) -> StructValue {
-        *self
+        let fields = self
+            .fields_ref()
+            .iter()
+            .map(|f| f.map(|s| s.into_scalar_impl()))
+            .collect();
+        StructValue::new(fields)
     }
 }
 

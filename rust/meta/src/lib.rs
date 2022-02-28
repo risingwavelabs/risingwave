@@ -10,6 +10,7 @@
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(const_fn_trait_bound)]
+#![feature(option_result_contains)]
 
 mod barrier;
 mod cluster;

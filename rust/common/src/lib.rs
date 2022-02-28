@@ -26,8 +26,8 @@ pub mod catalog;
 pub mod collection;
 pub mod config;
 pub mod expr;
+pub mod hash;
 #[cfg(test)]
 pub mod test_utils;
 pub mod types;
 pub mod vector_op;
-pub mod worker_id;

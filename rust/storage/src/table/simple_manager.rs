@@ -13,9 +13,7 @@ use super::{ScannableTableRef, TableManager};
 use crate::table::mview::MViewTable;
 use crate::{dispatch_state_store, Keyspace, StateStoreImpl, TableColumnDesc};
 
-/// A simple implementation of in memory table for local tests.
-/// It will be replaced in near future when replaced by locally
-/// on-disk files.
+/// Manages all tables in the storage backend.
 pub struct SimpleTableManager {
     // TODO: should not use `std::sync::Mutex` in async context.
     tables: Mutex<HashMap<TableId, ScannableTableRef>>,
@@ -49,10 +47,34 @@ impl TableManager for SimpleTableManager {
             let keyspace = Keyspace::table_root(store, table_id);
             Arc::new(MViewTable::new_batch(keyspace, table_columns)) as ScannableTableRef
         });
-        tables.insert(table_id.clone(), table.clone());
+        tables.insert(*table_id, table.clone());
 
         Ok(table)
     }
+
+    // async fn create_table_on_collection(
+    //     &self,
+    //     table_id: &CollectionId,
+    //     table_columns: Vec<TableColumnDesc>,
+    // ) -> Result<Option<ScannableTableRef>> {
+    //     let mut tables = self.lock_tables();
+
+    //     ensure!(
+    //         !tables.contains_key(table_id),
+    //         "Table id already exists: {:?}",
+    //         table_id
+    //     );
+
+    //     if let StateStoreImpl::HummockStateStore(hummock_state_store) = &self.state_store {
+    //         let storage = hummock_state_store.storage();
+    //         let collection = Collection::new_relation(storage, table_id, table_columns);
+    //         let table = Arc::new(collection);
+    //         tables.insert(table_id.clone(), table.clone());
+    //         Ok(Some(table))
+    //     } else {
+    //         Ok(None)
+    //     }
+    // }
 
     fn get_table(&self, table_id: &TableId) -> Result<ScannableTableRef> {
         let tables = self.lock_tables();
@@ -102,7 +124,7 @@ impl TableManager for SimpleTableManager {
             ))
         });
 
-        tables.insert(table_id.clone(), table);
+        tables.insert(*table_id, table);
         Ok(())
     }
 
@@ -134,7 +156,7 @@ impl TableManager for SimpleTableManager {
             .clone();
 
         // Simply associate the mview id to the table
-        tables.insert(mview_id.clone(), table.clone());
+        tables.insert(*mview_id, table.clone());
         Ok(table)
     }
 

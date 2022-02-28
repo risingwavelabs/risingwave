@@ -1,47 +1,50 @@
-use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::collections::btree_map::BTreeMap;
+use std::ops::DerefMut;
+use std::sync::{Arc, Weak};
+use std::time::Duration;
 
-use itertools::Itertools;
 use moka::future::Cache;
 use parking_lot::{Mutex, RwLock};
 use risingwave_pb::hummock::{HummockVersion, Level, LevelType};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use super::Block;
 use crate::hummock::cloud::{get_sst_data_path, get_sst_meta};
+use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::{
-    HummockMetaClient, HummockRefCount, HummockResult, HummockSSTableId, HummockVersionId, SSTable,
-    FIRST_VERSION_ID, INVALID_EPOCH,
+    HummockEpoch, HummockError, HummockResult, HummockSSTableId, HummockVersionId, SSTable,
+    INVALID_VERSION_ID,
 };
 use crate::object::ObjectStore;
 
 pub struct ScopedLocalVersion {
-    version_id: HummockVersionId,
     version: Arc<HummockVersion>,
-    local_version_manager: Arc<LocalVersionManager>,
+    unpin_worker_tx: UnboundedSender<HummockVersionId>,
 }
 
 impl Drop for ScopedLocalVersion {
     fn drop(&mut self) {
-        self.local_version_manager
-            .unpin_local_version(self.version_id);
+        self.unpin_worker_tx.send(self.version.id).ok();
     }
 }
 
 impl ScopedLocalVersion {
-    pub fn new(local_version_manager: Arc<LocalVersionManager>) -> ScopedLocalVersion {
-        let (version_id, version) = local_version_manager.pin_greatest_local_version();
+    fn new(
+        version: Arc<HummockVersion>,
+        unpin_worker: UnboundedSender<HummockVersionId>,
+    ) -> ScopedLocalVersion {
         ScopedLocalVersion {
-            version_id,
             version,
-            local_version_manager,
+            unpin_worker_tx: unpin_worker,
         }
     }
 
-    pub fn version_id(&self) -> HummockVersionId {
-        self.version_id
+    pub fn id(&self) -> HummockVersionId {
+        self.version.id
     }
 
-    pub fn merged_version(&self) -> Vec<Level> {
+    // TODO: may return only committed levels in some cases.
+    pub fn levels(&self) -> Vec<Level> {
         let uncommitted_level = self
             .version
             .uncommitted_epochs
@@ -59,32 +62,20 @@ impl ScopedLocalVersion {
     }
 }
 
-struct LocalVersionManagerInner {
-    version_ref_counts: BTreeMap<HummockVersionId, HummockRefCount>,
-    /// greatest version comes last
-    pinned_versions: BTreeMap<HummockVersionId, Arc<HummockVersion>>,
-}
-
-impl LocalVersionManagerInner {
-    fn new() -> LocalVersionManagerInner {
-        LocalVersionManagerInner {
-            version_ref_counts: BTreeMap::new(),
-            pinned_versions: BTreeMap::new(),
-        }
-    }
-}
-
 /// The `LocalVersionManager` maintain a local copy of storage service's hummock version data.
 /// By acquiring a `ScopedLocalVersion`, the `SSTables` of this version is guaranteed to be valid
 /// during the lifetime of `ScopedLocalVersion`. Internally `LocalVersionManager` will pin/unpin the
 /// versions in storage service.
 pub struct LocalVersionManager {
-    inner: Mutex<LocalVersionManagerInner>,
+    current_version: RwLock<Option<Arc<ScopedLocalVersion>>>,
     sstables: RwLock<BTreeMap<HummockSSTableId, Arc<SSTable>>>,
 
     obj_client: Arc<dyn ObjectStore>,
     remote_dir: Arc<String>,
     pub block_cache: Arc<Cache<Vec<u8>, Arc<Block>>>,
+    update_notifier_tx: tokio::sync::watch::Sender<HummockVersionId>,
+    unpin_worker_tx: UnboundedSender<HummockVersionId>,
+    unpin_worker_rx: Mutex<Option<UnboundedReceiver<HummockVersionId>>>,
 }
 
 impl LocalVersionManager {
@@ -93,8 +84,11 @@ impl LocalVersionManager {
         remote_dir: &str,
         block_cache: Option<Arc<Cache<Vec<u8>, Arc<Block>>>>,
     ) -> LocalVersionManager {
-        let instance = Self {
-            inner: Mutex::new(LocalVersionManagerInner::new()),
+        let (update_notifier_tx, _) = tokio::sync::watch::channel(INVALID_VERSION_ID);
+        let (unpin_worker_tx, unpin_worker_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        LocalVersionManager {
+            current_version: RwLock::new(None),
             sstables: RwLock::new(BTreeMap::new()),
             obj_client,
             remote_dir: Arc::new(remote_dir.to_string()),
@@ -110,87 +104,78 @@ impl LocalVersionManager {
                     panic!("must enable block cache in production mode")
                 }
             },
-        };
-        // Insert an artificial empty version.
-        instance.inner.lock().pinned_versions.insert(
-            FIRST_VERSION_ID,
-            Arc::new(HummockVersion {
-                id: FIRST_VERSION_ID,
-                levels: vec![],
-                uncommitted_epochs: vec![],
-                max_committed_epoch: INVALID_EPOCH,
-            }),
-        );
-        instance
-    }
-
-    /// Get the greatest version from storage service and add it to local state.
-    /// Currently it's invoked in two places:
-    /// - At the end of `HummockStorage` creation.
-    /// - At the end of `write_batch`.
-    pub async fn update_local_version(
-        &self,
-        hummock_meta_client: &dyn HummockMetaClient,
-    ) -> HummockResult<()> {
-        let (new_pinned_version_id, new_pinned_version) = hummock_meta_client.pin_version().await?;
-        let versions_to_unpin = {
-            // Add to local state
-            let mut guard = self.inner.lock();
-            guard
-                .pinned_versions
-                .insert(new_pinned_version_id, Arc::new(new_pinned_version));
-
-            // Unpin versions with ref_count = 0 except for the greatest version in local state.
-            // TODO Should be called periodically.
-            let versions_to_unpin = guard
-                .version_ref_counts
-                .iter()
-                .rev()
-                .skip(1)
-                .filter(|(_version_id, ref_count)| **ref_count == 0)
-                .map(|(version_id, _ref_count)| version_id)
-                .cloned()
-                .collect_vec();
-            for version_id in &versions_to_unpin {
-                guard.version_ref_counts.remove(version_id).unwrap();
-                guard.pinned_versions.remove(version_id).unwrap();
-            }
-            versions_to_unpin
-        };
-
-        // Unpin versions with ref_count = 0 except for the greatest version in storage service.
-        for version_id in versions_to_unpin {
-            if version_id == FIRST_VERSION_ID {
-                // Edge case. This is an artificial version.
-                continue;
-            }
-            hummock_meta_client.unpin_version(version_id).await?;
+            update_notifier_tx,
+            unpin_worker_tx,
+            unpin_worker_rx: Mutex::new(Some(unpin_worker_rx)),
         }
-
-        Ok(())
     }
 
-    /// Get and pin the greatest local version
-    fn pin_greatest_local_version(&self) -> (HummockVersionId, Arc<HummockVersion>) {
-        let mut guard = self.inner.lock();
-        let (version_id, version) = guard
-            .pinned_versions
-            .last_key_value()
-            .map(|(version_id, version)| (*version_id, version.clone()))
-            .unwrap();
-        let entry = guard.version_ref_counts.entry(version_id);
-        *entry.or_insert(0) += 1;
-        (version_id, version)
+    pub async fn start_workers(
+        local_version_manager: Arc<LocalVersionManager>,
+        hummock_meta_client: Arc<dyn HummockMetaClient>,
+    ) {
+        let unpin_worker_rx = local_version_manager.unpin_worker_rx.lock().take();
+        if let Some(unpin_worker_rx) = unpin_worker_rx {
+            // Pin and get latest version.
+            tokio::spawn(LocalVersionManager::start_pin_worker(
+                Arc::downgrade(&local_version_manager),
+                hummock_meta_client.clone(),
+            ));
+            // Unpin unused version.
+            tokio::spawn(LocalVersionManager::start_unpin_worker(
+                unpin_worker_rx,
+                hummock_meta_client,
+            ));
+        }
     }
 
-    fn unpin_local_version(&self, version_id: HummockVersionId) {
-        let mut guard = self.inner.lock();
-        let entry = guard.version_ref_counts.entry(version_id);
-        *entry.or_insert(1) -= 1;
+    /// Update cached version if the new version is of greater id
+    pub fn try_set_version(&self, hummock_version: HummockVersion) -> bool {
+        let new_version_id = hummock_version.id;
+        let mut guard = self.current_version.write();
+        match guard.as_ref() {
+            Some(cached_version) if cached_version.id() >= new_version_id => {
+                return false;
+            }
+            _ => {}
+        }
+        // Update cached version
+        *guard.deref_mut() = Some(Arc::new(ScopedLocalVersion::new(
+            Arc::new(hummock_version),
+            self.unpin_worker_tx.clone(),
+        )));
+        self.update_notifier_tx.send(new_version_id).ok();
+        true
     }
 
-    pub fn get_scoped_local_version(self: &Arc<LocalVersionManager>) -> ScopedLocalVersion {
-        ScopedLocalVersion::new(self.clone())
+    /// Wait until the local hummock version contains the given committed epoch
+    pub async fn wait_epoch(&self, epoch: HummockEpoch) {
+        // TODO: review usage of all HummockEpoch::MAX
+        if epoch == HummockEpoch::MAX {
+            return;
+        }
+        let mut receiver = self.update_notifier_tx.subscribe();
+        loop {
+            {
+                let current_version = self.current_version.read();
+                if let Some(version) = current_version.as_ref() {
+                    if version.version.max_committed_epoch >= epoch {
+                        return;
+                    }
+                }
+            }
+            if receiver.changed().await.is_err() {
+                // The tx is dropped.
+                return;
+            }
+        }
+    }
+
+    pub fn get_version(self: &Arc<LocalVersionManager>) -> HummockResult<Arc<ScopedLocalVersion>> {
+        match self.current_version.read().as_ref() {
+            None => Err(HummockError::meta_error("No version found.")),
+            Some(current_version) => Ok(current_version.clone()),
+        }
     }
 
     fn try_get_sstable_from_cache(&self, table_id: HummockSSTableId) -> Option<Arc<SSTable>> {
@@ -245,5 +230,38 @@ impl LocalVersionManager {
         }
 
         Ok(out)
+    }
+
+    async fn start_pin_worker(
+        local_version_manager: Weak<LocalVersionManager>,
+        hummock_meta_client: Arc<dyn HummockMetaClient>,
+    ) {
+        let mut min_interval = tokio::time::interval(Duration::from_millis(100));
+        loop {
+            min_interval.tick().await;
+            if let Some(local_version_manager) = local_version_manager.upgrade() {
+                if let Ok(version) = hummock_meta_client.pin_version().await {
+                    local_version_manager.try_set_version(version);
+                }
+            } else {
+                return;
+            }
+        }
+    }
+
+    async fn start_unpin_worker(
+        mut rx: UnboundedReceiver<HummockVersionId>,
+        hummock_meta_client: Arc<dyn HummockMetaClient>,
+    ) {
+        loop {
+            match rx.recv().await {
+                None => {
+                    return;
+                }
+                Some(version_id) => {
+                    hummock_meta_client.unpin_version(version_id).await.ok();
+                }
+            }
+        }
     }
 }

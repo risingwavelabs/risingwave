@@ -1,7 +1,7 @@
 [package]
 edition = "2021"
 name = "risingwave_batch"
-version = "0.1.2"
+version = "0.1.3"
 
 [dependencies]
 anyhow = "1"
@@ -24,6 +24,7 @@ prost = "0.9"
 rdkafka = { version = "0.28", features = ["cmake-build"] }
 risingwave-pb = { path = "../prost" }
 risingwave_common = { path = "../common" }
+risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_source = { path = "../source" }
 risingwave_storage = { path = "../storage" }
 serde = { version = "1", features = ["derive"] }

@@ -37,7 +37,7 @@ impl IsNotNullExpression {
 
 impl Expression for IsNullExpression {
     fn return_type(&self) -> DataType {
-        self.return_type
+        self.return_type.clone()
     }
 
     fn eval(&mut self, input: &DataChunk) -> Result<ArrayRef> {
@@ -54,7 +54,7 @@ impl Expression for IsNullExpression {
 
 impl Expression for IsNotNullExpression {
     fn return_type(&self) -> DataType {
-        self.return_type
+        self.return_type.clone()
     }
 
     fn eval(&mut self, input: &DataChunk) -> Result<ArrayRef> {

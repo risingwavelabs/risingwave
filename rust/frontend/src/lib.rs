@@ -5,6 +5,7 @@ pub mod catalog;
 pub mod binder;
 pub mod expr;
 pub mod handler;
+pub mod observer;
 pub mod optimizer;
 pub mod planner;
 mod scheduler;

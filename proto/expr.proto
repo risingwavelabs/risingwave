@@ -30,9 +30,11 @@ message ExprNode {
     AND = 21;
     OR = 22;
     NOT = 23;
+    IN = 24;
     // date functions
     EXTRACT = 101;
     PG_SLEEP = 102;
+    TUMBLE_START = 103;
     // other functions
     CAST = 201;
     SUBSTR = 202;

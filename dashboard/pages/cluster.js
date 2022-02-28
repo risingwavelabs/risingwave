@@ -1,7 +1,7 @@
-import React from 'react';
-import { useState } from 'react';
+import React, { useEffect } from 'react';
+import { useState, useRef } from 'react';
 
-import Layout from '../components/Layout';
+import Message from '../components/Message';
 import NoData from '../components/NoData';
 import { getClusterInfoFrontend, getClusterInfoComputeNode } from "./api/cluster";
 
@@ -49,30 +49,32 @@ const NodeTable = (props) => {
   )
 }
 
-export async function getStaticProps(context) {
-  let frontendList = await getClusterInfoFrontend();
-  let computeNodeList = await getClusterInfoComputeNode();
-  return {
-    props: {
-      frontendList,
-      computeNodeList
-    }
-  }
-}
-
 export default function Cluster(props) {
 
-  const [frontendList, setFrontendList] = useState(props.frontendList || []);
-  const [computeNodeList, setComputeNodeList] = useState(props.computeNodeList || [])
+  const [frontendList, setFrontendList] = useState([]);
+  const [computeNodeList, setComputeNodeList] = useState([]);
+
+  const message = useRef(null);
+
+  useEffect(async () => {
+    try {
+      setFrontendList(await getClusterInfoFrontend());
+      setComputeNodeList(await getClusterInfoComputeNode());
+    } catch (e) {
+      message.current.error(e.toString());
+      console.error(e);
+    }
+  }, []);
 
   return (
     <>
-      <Layout currentPage="cluster">
+      <div>
         <p>Frontend</p>
         <NodeTable data={frontendList} />
         <p>Compute Node</p>
         <NodeTable data={computeNodeList} />
-      </Layout>
+      </div>
+      <Message ref={message} vertical="top" horizontal="center" />
     </>
   )
 }

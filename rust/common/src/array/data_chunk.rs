@@ -10,7 +10,6 @@ use crate::array::column::Column;
 use crate::array::data_chunk_iter::{DataChunkRefIter, Row, RowRef};
 use crate::array::{ArrayBuilderImpl, ArrayImpl};
 use crate::buffer::Bitmap;
-use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 use crate::types::DataType;
 use crate::util::hash_util::finalize_hashers;
@@ -174,15 +173,8 @@ impl DataChunk {
         self.visibility = Some(visibility);
     }
 
-    pub fn column_at(&self, idx: usize) -> Result<Column> {
-        self.columns.get(idx).cloned().ok_or_else(|| {
-            InternalError(format!(
-                "Invalid array index: {}, chunk array count: {}",
-                self.columns.len(),
-                idx
-            ))
-            .into()
-        })
+    pub fn column_at(&self, idx: usize) -> &Column {
+        &self.columns[idx]
     }
 
     pub fn columns(&self) -> &[Column] {
@@ -335,7 +327,7 @@ impl DataChunk {
         let mut states = Vec::with_capacity(self.cardinality());
         states.resize_with(self.cardinality(), || hasher_builder.build_hasher());
         for column_idx in column_idxes {
-            let array = self.column_at(*column_idx)?.array();
+            let array = self.column_at(*column_idx).array();
             array.hash_vec(&mut states[..]);
         }
         Ok(finalize_hashers(&mut states[..]))
@@ -474,7 +466,6 @@ mod tests {
                 assert_eq!(
                     new_chunks[chunk_idx]
                         .column_at(0)
-                        .unwrap()
                         .array()
                         .as_int32()
                         .value_at(cur_idx)

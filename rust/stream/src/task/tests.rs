@@ -2,11 +2,11 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use futures::{SinkExt, StreamExt};
-use risingwave_common::worker_id::WorkerIdRef;
+use risingwave_common::config::StreamingConfig;
 use risingwave_pb::common::{ActorInfo, HostAddress};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
-use risingwave_pb::plan::ColumnDesc;
+use risingwave_pb::plan::Field;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::*;
 use risingwave_pb::stream_service::*;
@@ -14,8 +14,8 @@ use risingwave_source::MemSourceManager;
 use risingwave_storage::table::SimpleTableManager;
 
 use super::*;
-use crate::executor::{Barrier, Message, Mutation};
-use crate::task::env::StreamTaskEnv;
+use crate::executor::{Barrier, Epoch, Message, Mutation};
+use crate::task::env::StreamEnvironment;
 
 fn helper_make_local_actor(actor_id: u32) -> ActorInfo {
     ActorInfo {
@@ -64,8 +64,8 @@ async fn test_stream_proto() {
                         input: vec![StreamNode {
                             node: Some(Node::MergeNode(MergeNode {
                                 upstream_actor_id: vec![0],
-                                input_column_descs: vec![ColumnDesc {
-                                    column_type: Some(DataType {
+                                fields: vec![Field {
+                                    data_type: Some(DataType {
                                         type_name: TypeName::Int32 as i32,
                                         ..Default::default()
                                     }),
@@ -97,8 +97,8 @@ async fn test_stream_proto() {
                         input: vec![StreamNode {
                             node: Some(Node::MergeNode(MergeNode {
                                 upstream_actor_id: vec![1],
-                                input_column_descs: vec![ColumnDesc {
-                                    column_type: Some(DataType {
+                                fields: vec![Field {
+                                    data_type: Some(DataType {
                                         type_name: TypeName::Int32 as i32,
                                         ..Default::default()
                                     }),
@@ -130,8 +130,8 @@ async fn test_stream_proto() {
                         input: vec![StreamNode {
                             node: Some(Node::MergeNode(MergeNode {
                                 upstream_actor_id: vec![3],
-                                input_column_descs: vec![ColumnDesc {
-                                    column_type: Some(DataType {
+                                fields: vec![Field {
+                                    data_type: Some(DataType {
                                         type_name: TypeName::Int32 as i32,
                                         ..Default::default()
                                     }),
@@ -163,8 +163,8 @@ async fn test_stream_proto() {
                         input: vec![StreamNode {
                             node: Some(Node::MergeNode(MergeNode {
                                 upstream_actor_id: vec![3],
-                                input_column_descs: vec![ColumnDesc {
-                                    column_type: Some(DataType {
+                                fields: vec![Field {
+                                    data_type: Some(DataType {
                                         type_name: TypeName::Int32 as i32,
                                         ..Default::default()
                                     }),
@@ -196,8 +196,8 @@ async fn test_stream_proto() {
                         input: vec![StreamNode {
                             node: Some(Node::MergeNode(MergeNode {
                                 upstream_actor_id: vec![7, 11],
-                                input_column_descs: vec![ColumnDesc {
-                                    column_type: Some(DataType {
+                                fields: vec![Field {
+                                    data_type: Some(DataType {
                                         type_name: TypeName::Int32 as i32,
                                         ..Default::default()
                                     }),
@@ -225,11 +225,12 @@ async fn test_stream_proto() {
         )
         .unwrap();
 
-    let env = StreamTaskEnv::new(
+    let env = StreamEnvironment::new(
         Arc::new(SimpleTableManager::with_in_memory_store()),
         Arc::new(MemSourceManager::new()),
         std::net::SocketAddr::V4("127.0.0.1:5688".parse().unwrap()),
-        WorkerIdRef::for_test(),
+        Arc::new(StreamingConfig::default()),
+        WorkerNodeId::default(),
     );
     stream_manager
         .build_actors(&[1, 3, 7, 11, 13], env)
@@ -245,13 +246,14 @@ async fn test_stream_proto() {
                 Message::Barrier(Barrier { mutation: None, .. })
             ));
         }
+        let barrier_epoch = Epoch::new_test_epoch(114514);
         assert!(matches!(
           sink.next().await.unwrap(),
           Message::Barrier(Barrier {
-            epoch: 114514,
+            epoch,
             mutation,
             ..
-          }) if mutation.as_deref().unwrap().is_stop()
+          }) if mutation.as_deref().unwrap().is_stop() && epoch == barrier_epoch
         ));
     });
 
@@ -260,10 +262,7 @@ async fn test_stream_proto() {
     for epoch in 0..100 {
         tokio::time::timeout(
             timeout,
-            source.send(Message::Barrier(Barrier {
-                epoch,
-                ..Barrier::default()
-            })),
+            source.send(Message::Barrier(Barrier::new_test_barrier(epoch + 1))),
         )
         .await
         .expect("timeout while sending barrier message")
@@ -272,9 +271,10 @@ async fn test_stream_proto() {
 
     tokio::time::timeout(
         timeout,
-        source.send(Message::Barrier(Barrier::new(114514).with_mutation(
-            Mutation::Stop(HashSet::from([1, 3, 7, 11, 13, 233])),
-        ))),
+        source.send(Message::Barrier(
+            Barrier::new_test_barrier(114514)
+                .with_mutation(Mutation::Stop(HashSet::from([1, 3, 7, 11, 13, 233]))),
+        )),
     )
     .await
     .expect("timeout while sending terminate message")

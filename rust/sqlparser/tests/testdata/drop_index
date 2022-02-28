@@ -1,0 +1,5 @@
+DROP INDEX idx_a
+---
+DROP INDEX idx_a
+=>
+Drop(DropStatement { object_type: Index, if_exists: false, name: Ident { value: "idx_a", quote_style: None }, drop_mode: None })

@@ -29,12 +29,19 @@ public class QueryHandler implements SqlHandler {
 
   private static final Logger log = LoggerFactory.getLogger(QueryHandler.class);
 
+  // When this env var is set, for inserting into TABLE_V2, we call `FLUSH` implicitly to ensure the
+  // data is inserted.
+  // Used for regression tests.
+  private static final String IMPLICIT_FLUSH_ENV_VAR_KEY = "RW_IMPLICIT_FLUSH";
+
   @Override
   public PgResult handle(SqlNode ast, ExecutionContext context) {
     BatchPlanner planner = new BatchPlanner();
     BatchPlan plan = planner.plan(ast, context);
 
     BatchDataChunkResult result;
+    // TODO: Temporarily force a snapshot update. Should be made into a option for user.
+    context.getHummockSnapshotManager().forceUpdate();
     try (ScopedSnapshot scopedSnapshot = context.getHummockSnapshotManager().getScopedSnapshot()) {
       QueryResultLocation resultLocation;
       try {
@@ -66,14 +73,16 @@ public class QueryHandler implements SqlHandler {
       throw new RuntimeException(e);
     }
 
-    // For inserting into TABLE_V2, we call `FLUSH` implicitly to ensure the data is inserted.
-    var isInsert = plan.getRoot() instanceof RwBatchInsert;
-    if (isInsert) {
-      var insert = (RwBatchInsert) plan.getRoot();
-      var table = insert.getTable().unwrapOrThrow(TableCatalog.class);
-      if (table.isAssociatedMaterializedView()) {
-        log.debug("flush after inserting into table_v2 / associated materialized view");
-        new FlushHandler().handle(null, context);
+    var implicitFlush = System.getenv(IMPLICIT_FLUSH_ENV_VAR_KEY) != null;
+    if (implicitFlush) {
+      var isInsert = plan.getRoot() instanceof RwBatchInsert;
+      if (isInsert) {
+        var insert = (RwBatchInsert) plan.getRoot();
+        var table = insert.getTable().unwrapOrThrow(TableCatalog.class);
+        if (table.isAssociatedMaterializedView()) {
+          log.debug("flush after inserting into table_v2 / associated materialized view");
+          new FlushHandler().handle(null, context);
+        }
       }
     }
 

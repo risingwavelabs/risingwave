@@ -7,22 +7,22 @@ use risingwave_pb::task_service::{
 };
 use tonic::{Request, Response, Status};
 
-use crate::task::{BatchTaskEnv, TaskManager};
+use crate::task::{BatchEnvironment, BatchManager};
 
 #[derive(Clone)]
-pub struct TaskServiceImpl {
-    mgr: Arc<TaskManager>,
-    env: BatchTaskEnv,
+pub struct BatchServiceImpl {
+    mgr: Arc<BatchManager>,
+    env: BatchEnvironment,
 }
 
-impl TaskServiceImpl {
-    pub fn new(mgr: Arc<TaskManager>, env: BatchTaskEnv) -> Self {
-        TaskServiceImpl { mgr, env }
+impl BatchServiceImpl {
+    pub fn new(mgr: Arc<BatchManager>, env: BatchEnvironment) -> Self {
+        BatchServiceImpl { mgr, env }
     }
 }
 
 #[async_trait::async_trait]
-impl TaskService for TaskServiceImpl {
+impl TaskService for BatchServiceImpl {
     #[cfg(not(tarpaulin_include))]
     async fn create_task(
         &self,
@@ -34,6 +34,7 @@ impl TaskService for TaskServiceImpl {
             self.env.clone(),
             req.get_task_id().expect("no task id found"),
             req.get_plan().expect("no plan found").clone(),
+            req.epoch,
         );
         match res {
             Ok(_) => Ok(Response::new(CreateTaskResponse { status: None })),

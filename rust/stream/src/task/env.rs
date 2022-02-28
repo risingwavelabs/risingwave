@@ -1,47 +1,61 @@
 use std::net::SocketAddr;
+use std::sync::Arc;
 
-use risingwave_common::worker_id::WorkerIdRef;
+use risingwave_common::config::StreamingConfig;
 use risingwave_source::{SourceManager, SourceManagerRef};
 use risingwave_storage::table::{TableManager, TableManagerRef};
+
+pub(crate) type WorkerNodeId = u32;
 
 /// The global environment for task execution.
 /// The instance will be shared by every task.
 #[derive(Clone)]
-pub struct StreamTaskEnv {
+pub struct StreamEnvironment {
+    /// The table manager.
     table_manager: TableManagerRef,
+
+    /// Endpoint the stream manager listens on.
     server_addr: SocketAddr,
+
+    /// Reference to the source manager.
     source_manager: SourceManagerRef,
-    worker_id_ref: WorkerIdRef,
+
+    /// Streaming related configurations.
+    config: Arc<StreamingConfig>,
+
+    /// Current worker node id.
+    worker_id: WorkerNodeId,
 }
 
-impl StreamTaskEnv {
+impl StreamEnvironment {
     pub fn new(
         table_manager: TableManagerRef,
         source_manager: SourceManagerRef,
         server_addr: SocketAddr,
-        worker_id_ref: WorkerIdRef,
+        config: Arc<StreamingConfig>,
+        worker_id: WorkerNodeId,
     ) -> Self {
-        StreamTaskEnv {
+        StreamEnvironment {
             table_manager,
             server_addr,
             source_manager,
-            worker_id_ref,
+            config,
+            worker_id,
         }
     }
 
     // Create an instance for testing purpose.
     #[cfg(test)]
     pub fn for_test() -> Self {
-        use std::sync::Arc;
-
         use risingwave_source::MemSourceManager;
         use risingwave_storage::table::SimpleTableManager;
 
-        StreamTaskEnv {
+        StreamEnvironment {
             table_manager: Arc::new(SimpleTableManager::with_in_memory_store()),
             server_addr: SocketAddr::V4("127.0.0.1:5688".parse().unwrap()),
             source_manager: Arc::new(MemSourceManager::new()),
-            worker_id_ref: WorkerIdRef::for_test(),
+            config: Arc::new(StreamingConfig::default()),
+            worker_id: WorkerNodeId::default(),
         }
     }
 
@@ -65,7 +79,11 @@ impl StreamTaskEnv {
         self.source_manager.clone()
     }
 
-    pub fn worker_id(&self) -> u32 {
-        self.worker_id_ref.get()
+    pub fn config(&self) -> &StreamingConfig {
+        self.config.as_ref()
+    }
+
+    pub fn worker_id(&self) -> WorkerNodeId {
+        self.worker_id
     }
 }

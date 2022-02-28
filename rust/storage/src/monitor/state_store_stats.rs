@@ -12,13 +12,14 @@ pub const DEFAULT_BUCKETS: &[f64; 11] = &[
 
 pub const GET_KEY_SIZE_SCALE: f64 = 200.0;
 pub const GET_VALUE_SIZE_SCALE: f64 = 200.0;
-pub const BATCH_WRITE_SIZE_SCALE: f64 = 20000.0;
-
 pub const GET_LATENCY_SCALE: f64 = 0.01;
 pub const GET_SNAPSHOT_LATENCY_SCALE: f64 = 0.0001;
-pub const WRITE_BATCH_LATENCY_SCALE: f64 = 0.0001;
-pub const BUILD_TABLE_LATENCY_SCALE: f64 = 0.0001;
-pub const ADD_L0_LATENCT_SCALE: f64 = 0.00001;
+
+pub const BATCH_WRITE_SIZE_SCALE: f64 = 20000.0;
+pub const BATCH_WRITE_LATENCY_SCALE: f64 = 0.1;
+pub const BATCH_WRITE_BUILD_TABLE_LATENCY_SCALE: f64 = 0.0001;
+pub const BATCH_WRITE_ADD_L0_LATENCT_SCALE: f64 = 0.00001;
+
 pub const ITER_NEXT_LATENCY_SCALE: f64 = 0.0001;
 pub const ITER_SEEK_LATENCY_SCALE: f64 = 0.0001;
 
@@ -30,6 +31,7 @@ pub const ADD_TABLE_LATENCT_SCALE: f64 = 0.1;
 pub const GET_NEW_TABLE_ID_LATENCY_SCALE: f64 = 0.1;
 pub const GET_COMPATION_TASK_LATENCY_SCALE: f64 = 0.1;
 pub const REPORT_COMPATION_TASK_LATENCY_SCALE: f64 = 0.1;
+
 /// Define all metrics.
 #[macro_export]
 macro_rules! for_all_metrics {
@@ -175,7 +177,7 @@ impl StateStoreStats {
         .unwrap();
 
         let buckets = DEFAULT_BUCKETS
-            .map(|x| x * WRITE_BATCH_LATENCY_SCALE)
+            .map(|x| x * BATCH_WRITE_LATENCY_SCALE)
             .to_vec();
         let opts = histogram_opts!(
             "state_store_batched_write_latency",
@@ -193,7 +195,7 @@ impl StateStoreStats {
         let batch_write_size = register_histogram_with_registry!(opts, registry).unwrap();
 
         let buckets = DEFAULT_BUCKETS
-            .map(|x| x * BUILD_TABLE_LATENCY_SCALE)
+            .map(|x| x * BATCH_WRITE_BUILD_TABLE_LATENCY_SCALE)
             .to_vec();
         let opts = histogram_opts!(
             "state_store_batch_write_build_table_latency",
@@ -203,7 +205,9 @@ impl StateStoreStats {
         let batch_write_build_table_latency =
             register_histogram_with_registry!(opts, registry).unwrap();
 
-        let buckets = DEFAULT_BUCKETS.map(|x| x * ADD_L0_LATENCT_SCALE).to_vec();
+        let buckets = DEFAULT_BUCKETS
+            .map(|x| x * BATCH_WRITE_ADD_L0_LATENCT_SCALE)
+            .to_vec();
         let opts = histogram_opts!(
             "state_store_batch_write_add_l0_ssts_latency",
             "Total time of add_l0_ssts that have been issued to state store",

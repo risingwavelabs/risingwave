@@ -12,10 +12,9 @@ use risingwave_common::array::{
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
-use risingwave_common::expr::Expression;
 use risingwave_common::util::encoding_for_comparison::{encode_chunk, is_type_encodable};
 use risingwave_common::util::sort_util::{
-    compare_two_row, fetch_orders, HeapElem, OrderPair, K_PROCESSING_WINDOW_SIZE,
+    compare_two_row, HeapElem, OrderPair, K_PROCESSING_WINDOW_SIZE,
 };
 use risingwave_pb::plan::plan_node::NodeBody;
 
@@ -44,7 +43,11 @@ impl BoxedExecutorBuilder for OrderByExecutor {
             NodeBody::OrderBy
         )?;
 
-        let order_pairs = fetch_orders(order_by_node.get_column_orders()).unwrap();
+        let order_pairs = order_by_node
+            .column_orders
+            .iter()
+            .map(OrderPair::from_prost)
+            .collect();
         if let Some(child_plan) = source.plan_node.get_children().get(0) {
             let child = source.clone_for_plan(child_plan).build()?;
             return Ok(Box::new(Self {
@@ -138,10 +141,12 @@ impl Executor for OrderByExecutor {
         self.child.open().await?;
 
         if !self.disable_encoding {
+            let schema = self.schema();
             self.encodable = self
                 .order_pairs
                 .iter()
-                .all(|pair| is_type_encodable(pair.order.return_type()))
+                .map(|pair| schema.fields[pair.column_idx].data_type.clone())
+                .all(is_type_encodable)
         }
 
         self.collect_child_data().await?;
@@ -155,7 +160,7 @@ impl Executor for OrderByExecutor {
             .schema()
             .fields()
             .iter()
-            .map(|f| f.data_type)
+            .map(|f| f.data_type.clone())
             .collect_vec();
         let mut builders = data_types
             .iter()
@@ -165,7 +170,7 @@ impl Executor for OrderByExecutor {
         while !self.min_heap.is_empty() && chunk_size < K_PROCESSING_WINDOW_SIZE {
             let top = self.min_heap.pop().unwrap();
             for (idx, builder) in builders.iter_mut().enumerate() {
-                let chunk_arr = self.chunks[top.chunk_idx].column_at(idx)?.array();
+                let chunk_arr = self.chunks[top.chunk_idx].column_at(idx).array();
                 let chunk_arr = chunk_arr.as_ref();
                 macro_rules! gen_match {
                     ($b: ident, $a: ident, [$( $tt: ident), *]) => {
@@ -231,7 +236,6 @@ mod tests {
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{BoolArray, DataChunk, PrimitiveArray, Utf8Array};
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::expr::InputRefExpression;
     use risingwave_common::types::{DataType, OrderedF32, OrderedF64};
     use risingwave_common::util::sort_util::OrderType;
     use test::Bencher;
@@ -288,15 +292,13 @@ mod tests {
         };
         let mut mock_executor = MockExecutor::new(schema);
         mock_executor.add(data_chunk);
-        let input_ref_1 = InputRefExpression::new(DataType::Int32, 0);
-        let input_ref_2 = InputRefExpression::new(DataType::Int32, 1);
         let order_pairs = vec![
             OrderPair {
-                order: Box::new(input_ref_2),
+                column_idx: 1,
                 order_type: OrderType::Ascending,
             },
             OrderPair {
-                order: Box::new(input_ref_1),
+                column_idx: 0,
                 order_type: OrderType::Ascending,
             },
         ];
@@ -319,7 +321,7 @@ mod tests {
         let res = order_by_executor.next().await.unwrap();
         assert!(matches!(res, Some(_)));
         if let Some(res) = res {
-            let col0 = res.column_at(0).unwrap();
+            let col0 = res.column_at(0);
             assert_eq!(col0.array().as_int32().value_at(0), Some(3));
             assert_eq!(col0.array().as_int32().value_at(1), Some(2));
             assert_eq!(col0.array().as_int32().value_at(2), Some(1));
@@ -342,15 +344,13 @@ mod tests {
         };
         let mut mock_executor = MockExecutor::new(schema);
         mock_executor.add(data_chunk);
-        let input_ref_1 = InputRefExpression::new(DataType::Float32, 0);
-        let input_ref_2 = InputRefExpression::new(DataType::Float64, 1);
         let order_pairs = vec![
             OrderPair {
-                order: Box::new(input_ref_2),
+                column_idx: 1,
                 order_type: OrderType::Ascending,
             },
             OrderPair {
-                order: Box::new(input_ref_1),
+                column_idx: 0,
                 order_type: OrderType::Ascending,
             },
         ];
@@ -373,7 +373,7 @@ mod tests {
         let res = order_by_executor.next().await.unwrap();
         assert!(matches!(res, Some(_)));
         if let Some(res) = res {
-            let col0 = res.column_at(0).unwrap();
+            let col0 = res.column_at(0);
             assert_eq!(col0.array().as_float32().value_at(0), Some(3.3.into()));
             assert_eq!(col0.array().as_float32().value_at(1), Some(2.2.into()));
             assert_eq!(col0.array().as_float32().value_at(2), Some(1.1.into()));
@@ -405,15 +405,13 @@ mod tests {
         };
         let mut mock_executor = MockExecutor::new(schema);
         mock_executor.add(data_chunk);
-        let input_ref_1 = InputRefExpression::new(DataType::Varchar, 0);
-        let input_ref_2 = InputRefExpression::new(DataType::Varchar, 1);
         let order_pairs = vec![
             OrderPair {
-                order: Box::new(input_ref_2),
+                column_idx: 1,
                 order_type: OrderType::Ascending,
             },
             OrderPair {
-                order: Box::new(input_ref_1),
+                column_idx: 0,
                 order_type: OrderType::Ascending,
             },
         ];
@@ -436,7 +434,7 @@ mod tests {
         let res = order_by_executor.next().await.unwrap();
         assert!(matches!(res, Some(_)));
         if let Some(res) = res {
-            let col0 = res.column_at(0).unwrap();
+            let col0 = res.column_at(0);
             assert_eq!(col0.array().as_utf8().value_at(0), Some("3.3"));
             assert_eq!(col0.array().as_utf8().value_at(1), Some("2.2"));
             assert_eq!(col0.array().as_utf8().value_at(2), Some("1.1"));
@@ -490,25 +488,21 @@ mod tests {
             };
             let mut mock_executor = MockExecutor::new(schema);
             mock_executor.add(data_chunk);
-            let input_ref_0 = InputRefExpression::new(DataType::Int16, 0);
-            let input_ref_1 = InputRefExpression::new(DataType::Boolean, 1);
-            let input_ref_2 = InputRefExpression::new(DataType::Float32, 2);
-            let input_ref_3 = InputRefExpression::new(DataType::Varchar, 3);
             let order_pairs = vec![
                 OrderPair {
-                    order: Box::new(input_ref_1),
+                    column_idx: 1,
                     order_type: OrderType::Ascending,
                 },
                 OrderPair {
-                    order: Box::new(input_ref_0),
+                    column_idx: 0,
                     order_type: OrderType::Descending,
                 },
                 OrderPair {
-                    order: Box::new(input_ref_3),
+                    column_idx: 3,
                     order_type: OrderType::Descending,
                 },
                 OrderPair {
-                    order: Box::new(input_ref_2),
+                    column_idx: 2,
                     order_type: OrderType::Ascending,
                 },
             ];
