@@ -5,7 +5,7 @@ import com.risingwave.catalog.ColumnDesc;
 import com.risingwave.catalog.MaterializedViewCatalog;
 import com.risingwave.catalog.TableCatalog;
 import com.risingwave.common.datatype.RisingWaveDataType;
-import com.risingwave.planner.rel.streaming.RwStreamMaterializedView;
+import com.risingwave.planner.rel.streaming.RwStreamMaterialize;
 import com.risingwave.proto.data.DataType;
 import com.risingwave.proto.expr.InputRefExpr;
 import com.risingwave.proto.plan.*;
@@ -30,7 +30,7 @@ public class TableNodeSerializer {
    * @return The `PlanFragment` proto of the table catalog.
    */
   public static PlanFragment createProtoFromCatalog(
-      TableCatalog catalog, boolean isTableV2, RwStreamMaterializedView root) {
+      TableCatalog catalog, boolean isTableV2, RwStreamMaterialize root) {
     TableCatalog.TableId tableId = catalog.getId();
     CreateTableNode.Builder builder = CreateTableNode.newBuilder();
 

@@ -81,7 +81,7 @@ public class CreateMaterializedViewHandler implements SqlHandler {
     SchemaCatalog.SchemaName schemaName = context.getCurrentSchema();
 
     CreateMaterializedViewInfo.Builder builder = CreateMaterializedViewInfo.builder(tableName);
-    RwStreamMaterializedView rootNode = plan.getStreamingPlan();
+    RwStreamMaterialize rootNode = plan.getStreamingPlan();
     var columns = rootNode.getColumns();
     for (var column : columns) {
       builder.addColumn(column.getKey(), column.getValue());
@@ -101,7 +101,7 @@ public class CreateMaterializedViewHandler implements SqlHandler {
   }
 
   @VisibleForTesting
-  public static boolean isAllAliased(RwStreamMaterializedView root) {
+  public static boolean isAllAliased(RwStreamMaterialize root) {
     // Trick for checking whether is there any un-aliased aggregations: check the name pattern of
     // columns. Un-aliased column is named as EXPR$1 etc.
     var columns = root.getColumns();

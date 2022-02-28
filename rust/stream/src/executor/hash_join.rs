@@ -15,7 +15,7 @@ use risingwave_storage::{Keyspace, StateStore};
 
 use super::barrier_align::{AlignedMessage, BarrierAligner};
 use super::managed_state::join::*;
-use super::{Executor, Message, PkIndices, PkIndicesRef};
+use super::{Executor, ExecutorState, Message, PkIndices, PkIndicesRef, StatefulExecutor};
 
 /// The `JoinType` and `SideType` are to mimic a enum, because currently
 /// enum is not supported in const generic.
@@ -224,8 +224,8 @@ pub struct HashJoinExecutor<S: StateStore, const T: JoinTypePrimitive> {
     /// Logical Operator Info
     op_info: String,
 
-    /// Epoch
-    epoch: u64,
+    /// Executor state
+    executor_state: ExecutorState,
 }
 
 impl<S: StateStore, const T: JoinTypePrimitive> std::fmt::Debug for HashJoinExecutor<S, T> {
@@ -246,7 +246,13 @@ impl<S: StateStore, const T: JoinTypePrimitive> std::fmt::Debug for HashJoinExec
 #[async_trait]
 impl<S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<S, T> {
     async fn next(&mut self) -> Result<Message> {
-        match self.aligner.next().await {
+        let msg = self.aligner.next().await;
+        if let Some(barrier) = self.try_init_executor(&msg) {
+            self.side_l.ht.update_epoch(barrier.epoch.curr);
+            self.side_r.ht.update_epoch(barrier.epoch.curr);
+            return Ok(Message::Barrier(barrier));
+        }
+        match msg {
             AlignedMessage::Left(message) => match message {
                 Ok(chunk) => self.consume_chunk_left(chunk).await,
                 Err(e) => Err(e),
@@ -257,10 +263,10 @@ impl<S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<S,
             },
             AlignedMessage::Barrier(barrier) => {
                 self.flush_data().await?;
-                let epoch = barrier.epoch;
+                let epoch = barrier.epoch.curr;
                 self.side_l.ht.update_epoch(epoch);
                 self.side_r.ht.update_epoch(epoch);
-                self.update_epoch(epoch);
+                self.update_executor_state(ExecutorState::Active(barrier.epoch.curr));
                 Ok(Message::Barrier(barrier))
             }
         }
@@ -287,6 +293,12 @@ impl<S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<S,
         self.side_r.clear_cache();
 
         Ok(())
+    }
+
+    fn reset(&mut self, epoch: u64) {
+        self.side_l.ht.clear();
+        self.side_r.ht.clear();
+        self.update_executor_state(ExecutorState::Active(epoch));
     }
 }
 
@@ -376,12 +388,12 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
             debug_r,
             identity: format!("HashJoinExecutor {:X}", executor_id),
             op_info,
-            epoch: 0,
+            executor_state: ExecutorState::Init,
         }
     }
 
     async fn flush_data(&mut self) -> Result<()> {
-        let epoch = self.current_epoch();
+        let epoch = self.executor_state().epoch();
         for side in [&mut self.side_l, &mut self.side_r] {
             let mut write_batch = side.keyspace.state_store().start_write_batch();
             for state in side.ht.values_mut() {
@@ -466,7 +478,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
         &mut self,
         chunk: StreamChunk,
     ) -> Result<Message> {
-        let epoch = self.current_epoch();
+        let epoch = self.executor_state().epoch();
         let chunk = chunk.compact()?;
         let (ops, columns, visibility) = chunk.into_inner();
 
@@ -626,16 +638,15 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
 
         Ok(Message::Chunk(new_chunk))
     }
+}
 
-    /// Get back the current epoch used for storage reads and writes.
-    /// This epoch is the one carried by most recent barrier flowing through the executor.
-    fn current_epoch(&self) -> u64 {
-        self.epoch
+impl<S: StateStore, const T: JoinTypePrimitive> StatefulExecutor for HashJoinExecutor<S, T> {
+    fn executor_state(&self) -> &ExecutorState {
+        &self.executor_state
     }
 
-    /// Update the current epoch to `new_epoch`, which is carried by a barrier.
-    fn update_epoch(&mut self, new_epoch: u64) {
-        self.epoch = new_epoch;
+    fn update_executor_state(&mut self, new_state: ExecutorState) {
+        self.executor_state = new_state;
     }
 }
 
@@ -653,7 +664,7 @@ mod tests {
 
     use super::{HashJoinExecutor, JoinParams, JoinType, *};
     use crate::executor::test_utils::MockAsyncSource;
-    use crate::executor::{Barrier, Executor, Message};
+    use crate::executor::{Barrier, Epoch, Executor, Message};
 
     fn create_in_memory_keyspace() -> Keyspace<MemoryStateStore> {
         Keyspace::executor_root(MemoryStateStore::new(), 0x2333)
@@ -735,6 +746,10 @@ mod tests {
             "HashJoinExecutor".to_string(),
         );
 
+        // push the init barrier for left and right
+        MockAsyncSource::push_barrier(&mut tx_l, 1, false);
+        MockAsyncSource::push_barrier(&mut tx_r, 1, false);
+        hash_join.next().await.unwrap();
         // push the 1st left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
@@ -755,6 +770,10 @@ mod tests {
             unreachable!();
         }
 
+        // push the init barrier for left and right
+        MockAsyncSource::push_barrier(&mut tx_l, 1, false);
+        MockAsyncSource::push_barrier(&mut tx_r, 1, false);
+        hash_join.next().await.unwrap();
         // push the 2nd left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l2]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
@@ -930,6 +949,10 @@ mod tests {
             "HashJoinExecutor".to_string(),
         );
 
+        // push the init barrier for left and right
+        MockAsyncSource::push_barrier(&mut tx_l, 1, false);
+        MockAsyncSource::push_barrier(&mut tx_r, 1, false);
+        hash_join.next().await.unwrap();
         // push the 1st left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
@@ -951,13 +974,15 @@ mod tests {
         }
 
         // push a barrier to left side
-        MockAsyncSource::push_barrier(&mut tx_l, 0, false);
+        MockAsyncSource::push_barrier(&mut tx_l, 2, false);
 
         // push the 2nd left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l2]);
 
         // join the first right chunk
         MockAsyncSource::push_chunks(&mut tx_r, vec![chunk_r1]);
+
+        // Consume stream chunk
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
             assert_eq!(chunk.ops(), vec![Op::Insert]);
             assert_eq!(chunk.columns().len(), 4);
@@ -1002,16 +1027,17 @@ mod tests {
         }
 
         // push a barrier to right side
-        MockAsyncSource::push_barrier(&mut tx_r, 0, false);
+        MockAsyncSource::push_barrier(&mut tx_r, 2, false);
 
         // get the aligned barrier here
+        let expected_epoch = Epoch::new_test_epoch(2);
         assert!(matches!(
             hash_join.next().await.unwrap(),
             Message::Barrier(Barrier {
-                epoch: 0,
+                epoch,
                 mutation: None,
                 ..
-            })
+            }) if epoch == expected_epoch
         ));
 
         // join the 2nd left chunk
@@ -1168,6 +1194,10 @@ mod tests {
             "HashJoinExecutor".to_string(),
         );
 
+        // push the init barrier for left and right
+        MockAsyncSource::push_barrier(&mut tx_l, 1, false);
+        MockAsyncSource::push_barrier(&mut tx_r, 1, false);
+        hash_join.next().await.unwrap();
         // push the 1st left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
@@ -1413,6 +1443,10 @@ mod tests {
             "HashJoinExecutor".to_string(),
         );
 
+        // push the init barrier for left and right
+        MockAsyncSource::push_barrier(&mut tx_l, 1, false);
+        MockAsyncSource::push_barrier(&mut tx_r, 1, false);
+        hash_join.next().await.unwrap();
         // push the 1st left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
@@ -1608,6 +1642,10 @@ mod tests {
             "HashJoinExecutor".to_string(),
         );
 
+        // push the init barrier for left and right
+        MockAsyncSource::push_barrier(&mut tx_l, 1, false);
+        MockAsyncSource::push_barrier(&mut tx_r, 1, false);
+        hash_join.next().await.unwrap();
         // push the 1st left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
@@ -1858,6 +1896,10 @@ mod tests {
             "HashJoinExecutor".to_string(),
         );
 
+        // push the init barrier for left and right
+        MockAsyncSource::push_barrier(&mut tx_l, 1, false);
+        MockAsyncSource::push_barrier(&mut tx_r, 1, false);
+        hash_join.next().await.unwrap();
         // push the 1st left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {
@@ -2108,6 +2150,10 @@ mod tests {
             "HashJoinExecutor".to_string(),
         );
 
+        // push the init barrier for left and right
+        MockAsyncSource::push_barrier(&mut tx_l, 1, false);
+        MockAsyncSource::push_barrier(&mut tx_r, 1, false);
+        hash_join.next().await.unwrap();
         // push the 1st left chunk
         MockAsyncSource::push_chunks(&mut tx_l, vec![chunk_l1]);
         if let Message::Chunk(chunk) = hash_join.next().await.unwrap() {

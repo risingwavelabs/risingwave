@@ -14,7 +14,7 @@ use risingwave_pb::stream_plan::dispatcher::DispatcherType;
 use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{
-    Dispatcher, ExchangeNode, FilterNode, MViewNode, ProjectNode, SimpleAggNode, SourceNode,
+    Dispatcher, ExchangeNode, FilterNode, MaterializeNode, ProjectNode, SimpleAggNode, SourceNode,
     StreamNode,
 };
 
@@ -220,7 +220,7 @@ fn make_stream_node() -> StreamNode {
     StreamNode {
         input: vec![project_node],
         pk_indices: vec![],
-        node: Some(Node::MviewNode(MViewNode {
+        node: Some(Node::MaterializeNode(MaterializeNode {
             table_ref_id: Some(make_table_ref_id(1)),
             associated_table_ref_id: None,
             column_ids: vec![0_i32, 1_i32],

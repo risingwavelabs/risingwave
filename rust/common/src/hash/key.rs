@@ -595,7 +595,7 @@ mod tests {
         ArrayRef, BoolArray, DataChunk, DecimalArray, F32Array, F64Array, I16Array, I32Array,
         I32ArrayBuilder, I64Array, NaiveDateArray, NaiveDateTimeArray, NaiveTimeArray, Utf8Array,
     };
-    use crate::collection::hash_map::{
+    use crate::hash::{
         HashKey, Key128, Key16, Key256, Key32, Key64, KeySerialized, PrecomputedBuildHasher,
     };
     use crate::test_utils::rand_array::seed_rand_array_ref;

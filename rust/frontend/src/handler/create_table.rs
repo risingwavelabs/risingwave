@@ -74,11 +74,10 @@ mod tests {
     use crate::test_utils::LocalFrontend;
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_create_table_handler() {
-        let meta = LocalMeta::start().await;
+        let meta = LocalMeta::start(12002).await;
         let sql = "create table t (v1 smallint, v2 int, v3 bigint, v4 float, v5 double);";
-        let frontend = LocalFrontend::new().await;
+        let frontend = LocalFrontend::new(&meta).await;
         frontend.run_sql(sql).await.unwrap();
 
         let catalog_manager = frontend.session().env().catalog_mgr();

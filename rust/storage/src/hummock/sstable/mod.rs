@@ -229,8 +229,6 @@ impl SSTable {
                 block_loc
             );
 
-            let block_data = Bytes::from(block_data);
-
             let block = Block::decode(block_data, offset)?;
 
             self.block_cache.insert(key, block.clone()).await;

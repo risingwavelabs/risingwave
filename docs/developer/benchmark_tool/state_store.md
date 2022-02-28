@@ -1,14 +1,17 @@
-`ss_bench` is used to benchmark the performance of the state store. In this doc, we first show a usage example and then describe each provided parameter.
+`ss_bench` is used to directly benchmark the state store of the system.
 
 # Usage Example
 
 ```shell
 ~/code/risingwave/rust: cargo run --bin ss-bench -- \
- --benchmarks "writebatch,getseq,getrandom,prefixscanrandom" \
+ --benchmarks "writebatch,getseq,getrandom,prefixscanrandom,deleterandom" \
  --batch-size 1000 \
  --writes 10000 \
  --reads 500 \
+ --scans 200 \
+ --deletes 2000
  --concurrency-num 4 \
+ --seed 233
  --statistics
 ```
 
@@ -26,21 +29,21 @@
 - `Hummock+MinIO`
   
   - Format: `hummock+minio://key:secret@address:port/bucket`
-  - Example: `--store hummock+minio://INTEGRATION_TEST_ACCESS_KEY:INTEGRATION_TEST_SECRET_KEY@127.0.0.1:9000/myminio`
+  - Example: `hummock+minio://INTEGRATION_TEST_ACCESS_KEY:INTEGRATION_TEST_SECRET_KEY@127.0.0.1:9000/myminio`
 
 - `Hummock+S3`
   
   - Format: `hummock+s3://bucket`
   - Example: `hummock+s3://s3-ut`
   - Notice: some environment variables are required to be set
-    - `S3_TEST_REGION`
-    - `S3_TEST_ACCESS_KEY`
-    - `S3_TEST_SECRET_KEY`
+    - `AWS_REGION`
+    - `AWS_ACCESS_KEY_ID`
+    - `AWS_SECRET_ACCESS_KEY`
 
 - `TiKV`
   
   - Foramt: `tikv://pd_address:port`
-  - Example: `--store tikv://127.0.0.1:2379`
+  - Example: `tikv://127.0.0.1:2379`
 
 - `RocksDB`
   
@@ -115,7 +118,7 @@ Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
 
 - `--writes`
 
-  - Number of written key/values. If negative, do `--num` reads.
+  - Number of written key/values. If negative, do `--num` writes.
   - Default: -1
 
 - `--batch-size`
@@ -158,4 +161,4 @@ Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
 # Metrics
 
 - Letancy (`min/mean/P50/P95/P99/max/std_dev`)
-- Throughput (`QPS/OPS`)
+- Throughput (`QPS/OPS/bytes_pre_second`)

@@ -272,6 +272,7 @@ mod tests {
     use crate::hummock::HummockManager;
     use crate::manager::{MetaSrvEnv, NotificationManager};
     use crate::model::ActorId;
+    use crate::rpc::metrics::MetaMetrics;
     use crate::storage::MemStore;
     use crate::stream::FragmentManager;
 
@@ -400,12 +401,14 @@ mod tests {
 
             let fragment_manager = Arc::new(FragmentManager::new(env.meta_store_ref()).await?);
             let hummock_manager = Arc::new(HummockManager::new(env.clone()).await?);
+            let meta_metrics = Arc::new(MetaMetrics::new());
             let barrier_manager_ref = Arc::new(BarrierManager::new(
                 env.clone(),
                 cluster_manager.clone(),
                 fragment_manager.clone(),
                 env.epoch_generator_ref(),
                 hummock_manager,
+                meta_metrics.clone(),
             ));
 
             let stream_manager = StreamManager::new(
@@ -436,7 +439,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_create_materialized_view() -> Result<()> {
-        let services = MockServices::start("127.0.0.1", 12345).await?;
+        let services = MockServices::start("127.0.0.1", 12333).await?;
 
         let table_ref_id = TableRefId {
             schema_ref_id: None,
@@ -449,12 +452,14 @@ mod tests {
                 actor_id: i,
                 // A dummy node to avoid panic.
                 nodes: Some(risingwave_pb::stream_plan::StreamNode {
-                    node: Some(risingwave_pb::stream_plan::stream_node::Node::MviewNode(
-                        risingwave_pb::stream_plan::MViewNode {
-                            table_ref_id: Some(table_ref_id.clone()),
-                            ..Default::default()
-                        },
-                    )),
+                    node: Some(
+                        risingwave_pb::stream_plan::stream_node::Node::MaterializeNode(
+                            risingwave_pb::stream_plan::MaterializeNode {
+                                table_ref_id: Some(table_ref_id.clone()),
+                                ..Default::default()
+                            },
+                        ),
+                    ),
                     operator_id: 1,
                     ..Default::default()
                 }),
@@ -509,7 +514,7 @@ mod tests {
                     .unwrap(),
                 HostAddress {
                     host: "127.0.0.1".to_string(),
-                    port: 12345,
+                    port: 12333,
                 }
             );
         }
