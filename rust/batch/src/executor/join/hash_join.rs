@@ -10,6 +10,7 @@ use risingwave_common::collection::hash_map::{
     Key256, Key32, Key64, KeySerialized,
 };
 use risingwave_common::error::Result;
+use risingwave_common::expr::BoxedExpression;
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_pb::plan::plan_node::NodeBody;
@@ -89,6 +90,7 @@ pub(super) struct HashJoinExecutor<K> {
     state: HashJoinState<K>,
     schema: Schema,
     identity: String,
+    cond: Option<BoxedExpression>,
 }
 
 impl EquiJoinParams {
@@ -218,13 +220,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                     }
                     None => {
                         return if probe_table.join_type().need_join_remaining() {
-                            if let Some(ret_data_chunk) = probe_table.join_remaining()? {
-                                self.state = ProbeRemaining(probe_table);
-                                Ok(Some(ret_data_chunk))
-                            } else {
-                                self.state = Done;
-                                probe_table.consume_left()
-                            }
+                            self.state = ProbeRemaining(probe_table);
+                            Ok(None)
                         } else {
                             self.state = Done;
                             probe_table.consume_left()
@@ -263,6 +260,7 @@ impl<K> HashJoinExecutor<K> {
             state: HashJoinState::Build(BuildTable::with_params(params)),
             schema,
             identity,
+            cond: None,
         }
     }
 }

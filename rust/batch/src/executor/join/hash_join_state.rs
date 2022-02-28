@@ -1,7 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::convert::TryFrom;
-use std::ops::{Deref, DerefMut};
 
 use either::Either;
 use risingwave_common::array::{ArrayImpl, DataChunk};
@@ -107,7 +106,7 @@ pub(super) struct ProbeTable<K> {
     /// Used only when join remaining is required after probing.
     ///
     /// See [`JoinType::need_join_remaining`]
-    build_matched: RefCell<Option<ChunkedData<bool>>>,
+    build_matched: Option<ChunkedData<bool>>,
 
     /// Fields for generating one chunk during probe
     cur_probe_data: Option<ProbeData<K>>,
@@ -135,12 +134,12 @@ impl<K: HashKey> TryFrom<BuildTable> for ProbeTable<K> {
     fn try_from(build_table: BuildTable) -> Result<Self> {
         let (build_index, hash_map) = build_table.build_hash_map()?;
 
-        let mut build_matched = RefCell::new(None);
+        let mut build_matched = None;
         let mut remaining_build_row_id = None;
         if build_table.params.join_type().need_build_flag() {
-            build_matched = RefCell::new(Some(ChunkedData::<bool>::with_chunk_sizes(
+            build_matched = Some(ChunkedData::<bool>::with_chunk_sizes(
                 build_table.build_data.iter().map(|c| c.cardinality()),
-            )?));
+            )?);
             remaining_build_row_id = Some(RowId::default());
         }
 
@@ -421,8 +420,8 @@ impl<K: HashKey> ProbeTable<K> {
         Ok(None)
     }
 
-    fn set_build_matched(&self, build_row_id: RowId) -> Result<()> {
-        match self.build_matched.borrow_mut().deref_mut() {
+    fn set_build_matched(&mut self, build_row_id: RowId) -> Result<()> {
+        match self.build_matched.as_mut() {
             Some(flags) => {
                 flags[build_row_id] = true;
                 Ok(())
@@ -434,7 +433,7 @@ impl<K: HashKey> ProbeTable<K> {
     }
 
     fn is_build_matched(&self, build_row_id: RowId) -> Result<bool> {
-        match self.build_matched.borrow().deref() {
+        match self.build_matched.as_ref() {
             Some(flags) => Ok(flags[build_row_id]),
             None => Err(RwError::from(InternalError(
                 "Build match flags not found!".to_string(),
