@@ -5,12 +5,12 @@ use risingwave_common::error::Result;
 use risingwave_pb::meta::Table;
 
 use crate::catalog::column_catalog::{ColumnCatalog, ColumnDesc};
-use crate::catalog::{CatalogError, TableId};
+use crate::catalog::{CatalogError, ColumnId, TableId};
 
 #[derive(Clone)]
 pub struct TableCatalog {
     table_id: TableId,
-    next_column_id: u64,
+    next_column_id: i32,
     columns: Vec<ColumnCatalog>,
 }
 
@@ -26,7 +26,7 @@ impl TableCatalog {
     }
 
     pub fn add_column(&mut self, col_name: &str, col_desc: ColumnDesc) -> Result<()> {
-        let col_catalog = ColumnCatalog::new(self.next_column_id, col_name.to_string(), col_desc);
+        let col_catalog = ColumnCatalog::new(ColumnId::from(self.next_column_id), col_name.to_string(), col_desc);
         self.next_column_id += 1;
         self.columns.push(col_catalog);
         Ok(())
