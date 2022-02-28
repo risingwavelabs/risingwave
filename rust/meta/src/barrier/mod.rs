@@ -265,10 +265,14 @@ where
             if prev_epoch != INVALID_EPOCH {
                 match collect_result {
                     Ok(_) => {
-                        self.hummock_manager.commit_epoch(DEFAULT_COLUMN_FAMILY_ID, prev_epoch).await?;
+                        self.hummock_manager
+                            .commit_epoch(DEFAULT_COLUMN_FAMILY_ID, prev_epoch)
+                            .await?;
                     }
                     Err(err) => {
-                        self.hummock_manager.abort_epoch(DEFAULT_COLUMN_FAMILY_ID, prev_epoch).await?;
+                        self.hummock_manager
+                            .abort_epoch(DEFAULT_COLUMN_FAMILY_ID, prev_epoch)
+                            .await?;
                         return Err(err);
                     }
                 };
