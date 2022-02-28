@@ -124,10 +124,12 @@ public class CatalogCast {
       }
 
       // Associated table id
-      var associatedTableRefId =
-          TableRefId.newBuilder()
-              .setTableId(createMaterializedViewInfo.getAssociatedTableId().getValue());
-      mvInfoBuilder.setAssociatedTableRefId(associatedTableRefId);
+      if (createMaterializedViewInfo.getAssociatedTableId() != null) {
+        var associatedTableRefId =
+            TableRefId.newBuilder()
+                .setTableId(createMaterializedViewInfo.getAssociatedTableId().getValue());
+        mvInfoBuilder.setAssociatedTableRefId(associatedTableRefId);
+      }
 
       builder.setMaterializedView(mvInfoBuilder);
     } else {
