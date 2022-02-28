@@ -1,5 +1,5 @@
 pub mod mview;
-pub mod rowtable;
+pub mod row_table;
 mod simple_manager;
 pub mod test;
 
