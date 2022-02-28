@@ -24,6 +24,7 @@ use risingwave_pb::plan::PlanNode as BatchPlanProst;
 use risingwave_pb::stream_plan::StreamNode as StreamPlanProst;
 
 use super::property::{WithConvention, WithDistribution, WithOrder, WithSchema};
+
 /// The common trait over all plan nodes. Used by optimizer framework which will treate all node as
 /// `dyn PlanNode`
 ///
@@ -96,14 +97,23 @@ impl dyn PlanNode {
 
 #[macro_use]
 mod plan_tree_node;
+
 pub use plan_tree_node::*;
+
 mod col_pruning;
+
 pub use col_pruning::*;
+
 mod convert;
+
 pub use convert::*;
+
 mod eq_join_predicate;
+
 pub use eq_join_predicate::*;
+
 mod to_prost;
+
 pub use to_prost::*;
 
 // SOME Intellisense DONT UNDERSTAND THIS.
@@ -139,6 +149,7 @@ mod stream_exchange;
 mod stream_hash_join;
 mod stream_project;
 mod stream_table_source;
+
 pub use batch_exchange::BatchExchange;
 pub use batch_hash_join::BatchHashJoin;
 pub use batch_limit::BatchLimit;
@@ -177,27 +188,27 @@ macro_rules! for_all_plan_nodes {
     ($macro:tt $(, $x:tt)*) => {
       $macro! {
           [$($x),*]
-          ,{ Logical, Agg}
-          ,{ Logical, Filter}
-          ,{ Logical, Project}
-          ,{ Logical, Scan}
-          ,{ Logical, Insert}
-          ,{ Logical, Join}
-          ,{ Logical, Values}
-          ,{ Logical, Limit}
-          ,{ Logical, TopN}
-          // ,{ Logical, Sort} we don't need a LogicalSort, just require the Order
-          ,{ Batch, Project}
-          ,{ Batch, SeqScan}
-          ,{ Batch, HashJoin}
-          ,{ Batch, SortMergeJoin}
-          ,{ Batch, Sort}
-          ,{ Batch, Exchange}
-          ,{ Batch, Limit}
-          ,{ Stream, Project}
-          ,{ Stream, TableSource}
-          ,{ Stream, HashJoin}
-          ,{ Stream, Exchange}
+          ,{ Logical, Agg }
+          ,{ Logical, Filter }
+          ,{ Logical, Project }
+          ,{ Logical, Scan }
+          ,{ Logical, Insert }
+          ,{ Logical, Join }
+          ,{ Logical, Values }
+          ,{ Logical, Limit }
+          ,{ Logical, TopN }
+          // ,{ Logical, Sort } we don't need a LogicalSort, just require the Order
+          ,{ Batch, Project }
+          ,{ Batch, SeqScan }
+          ,{ Batch, HashJoin }
+          ,{ Batch, SortMergeJoin }
+          ,{ Batch, Sort }
+          ,{ Batch, Exchange }
+          ,{ Batch, Limit }
+          ,{ Stream, Project }
+          ,{ Stream, TableSource }
+          ,{ Stream, HashJoin }
+          ,{ Stream, Exchange }
       }
   };
 }
@@ -207,15 +218,15 @@ macro_rules! for_logical_plan_nodes {
     ($macro:tt $(, $x:tt)*) => {
         $macro! {
             [$($x),*]
-            ,{ Logical, Agg}
-            ,{ Logical, Filter}
-            ,{ Logical, Project}
-            ,{ Logical, Scan}
-            ,{ Logical, Insert}
-            ,{ Logical, Join}
-            ,{ Logical, Values}
-            ,{ Logical, Limit}
-            ,{ Logical, TopN}
+            ,{ Logical, Agg }
+            ,{ Logical, Filter }
+            ,{ Logical, Project }
+            ,{ Logical, Scan }
+            ,{ Logical, Insert }
+            ,{ Logical, Join }
+            ,{ Logical, Values }
+            ,{ Logical, Limit }
+            ,{ Logical, TopN }
             // ,{ Logical, Sort} not sure if we will support Order by clause in subquery/view/MV
             // if we dont support thatk, we don't need LogicalSort, just require the Order at the top of query
         }
@@ -228,13 +239,13 @@ macro_rules! for_batch_plan_nodes {
     ($macro:tt $(, $x:tt)*) => {
         $macro! {
             [$($x),*]
-            ,{ Batch, Project}
-            ,{ Batch, SeqScan}
-            ,{ Batch, HashJoin}
-            ,{ Batch, Limit}
-            ,{ Batch, SortMergeJoin}
-            ,{ Batch, Sort}
-            ,{ Batch, Exchange}
+            ,{ Batch, Project }
+            ,{ Batch, SeqScan }
+            ,{ Batch, HashJoin }
+            ,{ Batch, Limit }
+            ,{ Batch, SortMergeJoin }
+            ,{ Batch, Sort }
+            ,{ Batch, Exchange }
         }
     };
 }
@@ -245,10 +256,10 @@ macro_rules! for_stream_plan_nodes {
     ($macro:tt $(, $x:tt)*) => {
         $macro! {
             [$($x),*]
-            ,{ Stream, Project}
-            ,{ Stream, TableSource}
-            ,{ Stream, HashJoin}
-            ,{ Stream, Exchange}
+            ,{ Stream, Project }
+            ,{ Stream, TableSource }
+            ,{ Stream, HashJoin }
+            ,{ Stream, Exchange }
         }
     };
 }
@@ -272,12 +283,13 @@ macro_rules! enum_plan_node_type {
     }
   }
 }
-for_all_plan_nodes! {enum_plan_node_type }
+for_all_plan_nodes! { enum_plan_node_type }
 
 pub trait IntoPlanRef {
     fn into_plan_ref(self) -> PlanRef;
     fn clone_as_plan_ref(&self) -> PlanRef;
 }
+
 /// impl fn plan_ref for each node.
 macro_rules! impl_plan_ref {
     ([], $( { $convention:ident, $name:ident }),*) => {
@@ -286,14 +298,15 @@ macro_rules! impl_plan_ref {
                 fn into_plan_ref(self) -> PlanRef {
                     std::rc::Rc::new(self)
                 }
-                fn clone_as_plan_ref(&self) -> PlanRef{
+                fn clone_as_plan_ref(&self) -> PlanRef {
                     self.clone().into_plan_ref()
                 }
             })*
         }
     }
 }
-for_all_plan_nodes! {impl_plan_ref }
+
+for_all_plan_nodes! { impl_plan_ref }
 
 /// impl plan node downcast fn for each node.
 macro_rules! impl_down_cast_fn {
@@ -308,4 +321,4 @@ macro_rules! impl_down_cast_fn {
         }
     }
 }
-for_all_plan_nodes! {impl_down_cast_fn }
+for_all_plan_nodes! { impl_down_cast_fn }

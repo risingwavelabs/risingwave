@@ -18,6 +18,7 @@ pub struct LogicalProject {
     input: PlanRef,
     schema: Schema,
 }
+
 impl LogicalProject {
     fn new(input: PlanRef, exprs: Vec<ExprImpl>, expr_alias: Vec<Option<String>>) -> Self {
         let schema = Self::derive_schema(&exprs, &expr_alias);
@@ -31,6 +32,7 @@ impl LogicalProject {
             expr_alias,
         }
     }
+
     pub fn create(
         input: PlanRef,
         exprs: Vec<ExprImpl>,
@@ -80,6 +82,7 @@ impl LogicalProject {
         self.expr_alias.as_ref()
     }
 }
+
 impl PlanTreeNodeUnary for LogicalProject {
     fn input(&self) -> PlanRef {
         self.input.clone()
@@ -88,20 +91,27 @@ impl PlanTreeNodeUnary for LogicalProject {
         Self::new(input, self.exprs.clone(), self.expr_alias().to_vec())
     }
 }
+
 impl_plan_tree_node_for_unary! {LogicalProject}
+
 impl fmt::Display for LogicalProject {
     fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
         todo!()
     }
 }
+
 impl WithOrder for LogicalProject {}
+
 impl WithDistribution for LogicalProject {}
+
 impl WithSchema for LogicalProject {
     fn schema(&self) -> &Schema {
         &self.schema
     }
 }
+
 impl ColPrunable for LogicalProject {}
+
 impl ToBatch for LogicalProject {
     fn to_batch(&self) -> PlanRef {
         let new_input = self.input().to_batch();
@@ -109,6 +119,7 @@ impl ToBatch for LogicalProject {
         BatchProject::new(new_logical).into_plan_ref()
     }
 }
+
 impl ToStream for LogicalProject {
     fn to_stream_with_dist_required(&self, required_dist: &Distribution) -> PlanRef {
         let new_input = self.input().to_stream_with_dist_required(required_dist);

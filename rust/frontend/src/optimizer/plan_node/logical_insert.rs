@@ -50,7 +50,9 @@ impl WithSchema for LogicalInsert {
         &self.schema
     }
 }
+
 impl WithOrder for LogicalInsert {}
+
 impl WithDistribution for LogicalInsert {}
 
 impl fmt::Display for LogicalInsert {
@@ -62,12 +64,15 @@ impl fmt::Display for LogicalInsert {
         )
     }
 }
+
 impl ColPrunable for LogicalInsert {}
+
 impl ToBatch for LogicalInsert {
     fn to_batch(&self) -> PlanRef {
         todo!()
     }
 }
+
 impl ToStream for LogicalInsert {
     fn to_stream(&self) -> PlanRef {
         todo!()

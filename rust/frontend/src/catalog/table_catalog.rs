@@ -26,7 +26,11 @@ impl TableCatalog {
     }
 
     pub fn add_column(&mut self, col_name: &str, col_desc: ColumnDesc) -> Result<()> {
-        let col_catalog = ColumnCatalog::new(ColumnId::from(self.next_column_id), col_name.to_string(), col_desc);
+        let col_catalog = ColumnCatalog::new(
+            ColumnId::from(self.next_column_id),
+            col_name.to_string(),
+            col_desc,
+        );
         self.next_column_id += 1;
         self.columns.push(col_catalog);
         Ok(())

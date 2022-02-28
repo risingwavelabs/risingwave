@@ -7,6 +7,7 @@ use super::{ColPrunable, PlanRef, ToBatch, ToStream};
 use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::plan_node::IntoPlanRef;
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
+
 #[derive(Debug, Clone)]
 pub struct LogicalValues {
     rows: Vec<Vec<ExprImpl>>,
@@ -35,6 +36,7 @@ impl LogicalValues {
         self.rows.as_ref()
     }
 }
+
 impl WithSchema for LogicalValues {
     fn schema(&self) -> &Schema {
         &self.schema
@@ -42,6 +44,7 @@ impl WithSchema for LogicalValues {
 }
 impl_plan_tree_node_for_leaf! {LogicalValues}
 impl WithOrder for LogicalValues {}
+
 impl WithDistribution for LogicalValues {}
 
 impl fmt::Display for LogicalValues {
@@ -49,12 +52,15 @@ impl fmt::Display for LogicalValues {
         write!(f, "{:?}", self)
     }
 }
+
 impl ColPrunable for LogicalValues {}
+
 impl ToBatch for LogicalValues {
     fn to_batch(&self) -> PlanRef {
         todo!()
     }
 }
+
 impl ToStream for LogicalValues {
     fn to_stream(&self) -> PlanRef {
         unimplemented!("Stream values executor is unimplemented!")
