@@ -275,21 +275,16 @@ RwStreamMaterialize(name=[t_wrong_case_two_phase_agg])
     RwStreamHashJoin(condition=[=($0, $1)], joinType=[inner])
       RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
         RwStreamProject(v1=[$0])
-          RwStreamAgg(group=[{0}], agg#0=[$SUM0($1)], EXPR$1=[SUM($2)])
+          RwStreamAgg(group=[{0}], agg#0=[COUNT()], EXPR$1=[SUM($1)])
             RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
-              RwStreamAgg(group=[{0}], agg#0=[COUNT()], EXPR$1=[SUM($1)])
-                RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
-                  RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.2, 0.0.1.3]])
-                    RwStreamBatchPlan(table=[[test_schema, t]], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.2, 0.0.1.3]])
+              RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.2, 0.0.1.3]])
+                RwStreamBatchPlan(table=[[test_schema, t]], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.2, 0.0.1.3]])
       RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
         RwStreamProject(v1=[$0])
-          RwStreamAgg(group=[{0}], agg#0=[$SUM0($1)], agg#1=[SUM($2)], agg#2=[$SUM0($3)])
+          RwStreamAgg(group=[{0}], agg#0=[COUNT()], agg#1=[SUM($1)], agg#2=[COUNT($1)])
             RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
-              RwStreamAgg(group=[{0}], agg#0=[COUNT()], agg#1=[SUM($1)], agg#2=[COUNT($1)])
-                RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
-                  RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.2, 0.0.1.3]])
-                    RwStreamBatchPlan(table=[[test_schema, t]], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.2, 0.0.1.3]])
-]]>
+              RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.2, 0.0.1.3]])
+                RwStreamBatchPlan(table=[[test_schema, t]], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.2, 0.0.1.3]])]]>
         </Resource>
         <Resource name="primaryKey">
             <![CDATA[

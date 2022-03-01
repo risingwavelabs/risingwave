@@ -2,14 +2,19 @@ use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::Op::*;
 use risingwave_common::array::Row;
-use risingwave_common::catalog::{ColumnId, Schema};
+use risingwave_common::catalog::{ColumnId, Schema, TableId};
+use risingwave_common::try_match_expand;
 use risingwave_common::util::sort_util::OrderPair;
+use risingwave_pb::stream_plan;
+use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::state::ManagedMViewState;
 use crate::executor::{
-    Barrier, Executor, Message, PkIndicesRef, Result, SimpleExecutor, StreamChunk,
+    Barrier, Executor, ExecutorBuilder, Message, PkIndicesRef, Result, SimpleExecutor, StreamChunk,
 };
+use crate::task::{ExecutorParams, StreamManagerCore};
+
 /// `MaterializeExecutor` materializes changes in stream into a materialized view on storage.
 pub struct MaterializeExecutor<S: StateStore> {
     input: Box<dyn Executor>,
@@ -26,6 +31,48 @@ pub struct MaterializeExecutor<S: StateStore> {
     op_info: String,
 }
 
+pub struct MaterializeExecutorBuilder {}
+
+impl ExecutorBuilder for MaterializeExecutorBuilder {
+    fn new_boxed_executor(
+        mut params: ExecutorParams,
+        node: &stream_plan::StreamNode,
+        store: impl StateStore,
+        _stream: &mut StreamManagerCore,
+    ) -> Result<Box<dyn Executor>> {
+        let node = try_match_expand!(node.get_node().unwrap(), Node::MaterializeNode)?;
+
+        let table_id = TableId::from(&node.table_ref_id);
+        let keys = node
+            .column_orders
+            .iter()
+            .map(OrderPair::from_prost)
+            .collect();
+        let column_ids = node
+            .column_ids
+            .iter()
+            .map(|id| ColumnId::from(*id))
+            .collect();
+
+        let keyspace = if node.associated_table_ref_id.is_some() {
+            // share the keyspace between mview and table v2
+            let associated_table_id = TableId::from(&node.associated_table_ref_id);
+            Keyspace::table_root(store, &associated_table_id)
+        } else {
+            Keyspace::table_root(store, &table_id)
+        };
+
+        Ok(Box::new(MaterializeExecutor::new(
+            params.input.remove(0),
+            keyspace,
+            keys,
+            column_ids,
+            params.executor_id,
+            params.op_info,
+        )))
+    }
+}
+
 impl<S: StateStore> MaterializeExecutor<S> {
     pub fn new(
         input: Box<dyn Executor>,
@@ -36,9 +83,10 @@ impl<S: StateStore> MaterializeExecutor<S> {
         op_info: String,
     ) -> Self {
         let pk_columns = keys.iter().map(|k| k.column_idx).collect();
+        let pk_order_types = keys.iter().map(|k| k.order_type).collect();
         Self {
             input,
-            local_state: ManagedMViewState::new(keyspace, column_ids, keys),
+            local_state: ManagedMViewState::new(keyspace, column_ids, pk_order_types),
             pk_columns,
             identity: format!("MaterializeExecutor {:X}", executor_id),
             op_info,
@@ -77,6 +125,10 @@ impl<S: StateStore> Executor for MaterializeExecutor<S> {
 
     fn logical_operator_info(&self) -> &str {
         &self.op_info
+    }
+
+    fn reset(&mut self, _epoch: u64) {
+        self.local_state.clear_cache();
     }
 }
 

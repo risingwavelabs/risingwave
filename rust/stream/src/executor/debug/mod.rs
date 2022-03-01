@@ -57,4 +57,8 @@ where
     fn init(&mut self, epoch: u64) -> Result<()> {
         self.input_mut().init(epoch)
     }
+
+    fn reset(&mut self, epoch: u64) {
+        self.input_mut().reset(epoch)
+    }
 }
