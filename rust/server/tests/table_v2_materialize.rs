@@ -11,6 +11,7 @@ use risingwave_common::types::IntoOrdered;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
+use risingwave_pb::plan::create_table_node::Info;
 use risingwave_pb::plan::ColumnDesc;
 use risingwave_source::{MemSourceManager, SourceManager};
 use risingwave_storage::memory::MemoryStateStore;
@@ -98,6 +99,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         source_manager.clone(),
         table_columns,
         "CreateTableExecutor".to_string(),
+        Info::TableSource(Default::default()),
     );
     // Execute
     create_table.open().await?;

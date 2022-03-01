@@ -214,13 +214,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                     }
                     None => {
                         return if probe_table.join_type().need_join_remaining() {
-                            if let Some(ret_data_chunk) = probe_table.join_remaining()? {
-                                self.state = ProbeRemaining(probe_table);
-                                Ok(Some(ret_data_chunk))
-                            } else {
-                                self.state = Done;
-                                probe_table.consume_left()
-                            }
+                            self.state = ProbeRemaining(probe_table);
+                            Ok(None)
                         } else {
                             self.state = Done;
                             probe_table.consume_left()

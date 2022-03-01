@@ -3,8 +3,9 @@ use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderPair;
+use risingwave_pb::plan::create_table_node::Info;
 use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_pb::plan::{ColumnDesc, ColumnOrder};
+use risingwave_pb::plan::ColumnDesc;
 use risingwave_source::SourceManagerRef;
 use risingwave_storage::table::TableManagerRef;
 use risingwave_storage::TableColumnDesc;
@@ -18,11 +19,9 @@ pub struct CreateTableExecutor {
     source_manager: SourceManagerRef,
     table_columns: Vec<ColumnDesc>,
     identity: String,
-    /// Below for materialized views.
-    is_materialized_view: bool,
-    associated_table_id: Option<TableId>,
-    pk_indices: Vec<usize>,
-    column_orders: Vec<ColumnOrder>,
+
+    /// Other info for creating table.
+    info: Info,
 }
 
 impl CreateTableExecutor {
@@ -32,6 +31,7 @@ impl CreateTableExecutor {
         source_manager: SourceManagerRef,
         table_columns: Vec<ColumnDesc>,
         identity: String,
+        info: Info,
     ) -> Self {
         Self {
             table_id,
@@ -39,10 +39,7 @@ impl CreateTableExecutor {
             source_manager,
             table_columns,
             identity,
-            is_materialized_view: false,
-            associated_table_id: None,
-            pk_indices: vec![],
-            column_orders: vec![],
+            info,
         }
     }
 }
@@ -56,27 +53,13 @@ impl BoxedExecutorBuilder for CreateTableExecutor {
 
         let table_id = TableId::from(&node.table_ref_id);
 
-        let associated_table_id = node
-            .associated_table_ref_id
-            .as_ref()
-            .map(|_| TableId::from(&node.associated_table_ref_id));
-
-        let pks = node
-            .pk_indices
-            .iter()
-            .map(|key| *key as usize)
-            .collect::<Vec<_>>();
-
         Ok(Box::new(Self {
             table_id,
             table_manager: source.global_batch_env().table_manager_ref(),
             source_manager: source.global_batch_env().source_manager_ref(),
             table_columns: node.column_descs.clone(),
             identity: "CreateTableExecutor".to_string(),
-            is_materialized_view: node.is_materialized_view,
-            associated_table_id,
-            pk_indices: pks,
-            column_orders: node.column_orders.clone(),
+            info: node.info.clone().unwrap(),
         }))
     }
 }
@@ -84,13 +67,6 @@ impl BoxedExecutorBuilder for CreateTableExecutor {
 #[async_trait::async_trait]
 impl Executor for CreateTableExecutor {
     async fn open(&mut self) -> Result<()> {
-        tracing::info!(
-            "create table: table_id={:?}, associated_table_id={:?}, is_materialized_view={}",
-            self.table_id,
-            self.associated_table_id,
-            self.is_materialized_view
-        );
-
         let table_columns = self
             .table_columns
             .to_owned()
@@ -104,48 +80,62 @@ impl Executor for CreateTableExecutor {
             })
             .collect::<Result<Vec<_>>>()?;
 
-        if self.is_materialized_view {
-            if self.associated_table_id.is_some() {
-                // Create associated materialized view for table_v2.
-                self.table_manager.register_associated_materialized_view(
-                    self.associated_table_id.as_ref().unwrap(),
-                    &self.table_id,
-                )?;
-                self.source_manager.register_associated_materialized_view(
-                    self.associated_table_id.as_ref().unwrap(),
-                    &self.table_id,
-                )?;
-            } else {
-                // Create normal MV.
-                let order_pairs: Vec<_> = self
-                    .column_orders
-                    .iter()
-                    .map(OrderPair::from_prost)
-                    .collect();
+        match &self.info {
+            Info::TableSource(_) => {
+                // Create table_v2.
+                info!("Create table id:{}", &self.table_id.table_id());
 
-                let orderings = order_pairs
-                    .iter()
-                    .map(|order| order.order_type)
-                    .collect::<Vec<_>>();
-
-                self.table_manager.create_materialized_view(
-                    &self.table_id,
-                    &self.table_columns,
-                    self.pk_indices.clone(),
-                    orderings,
-                )?;
+                let table = self
+                    .table_manager
+                    .create_table_v2(&self.table_id, table_columns)
+                    .await?;
+                self.source_manager
+                    .create_table_source_v2(&self.table_id, table)?;
             }
-        } else {
-            // Create table_v2.
-            info!("Create table id:{}", &self.table_id.table_id());
+            Info::MaterializedView(info) => {
+                if info.associated_table_ref_id.is_some() {
+                    // Create associated materialized view for table_v2.
+                    let associated_table_id = TableId::from(&info.associated_table_ref_id);
+                    info!(
+                        "create associated materialized view: id={:?}, associated={:?}",
+                        self.table_id, associated_table_id
+                    );
 
-            let table = self
-                .table_manager
-                .create_table_v2(&self.table_id, table_columns)
-                .await?;
-            self.source_manager
-                .create_table_source_v2(&self.table_id, table)?;
+                    self.table_manager.register_associated_materialized_view(
+                        &associated_table_id,
+                        &self.table_id,
+                    )?;
+                    self.source_manager.register_associated_materialized_view(
+                        &associated_table_id,
+                        &self.table_id,
+                    )?;
+                } else {
+                    // Create normal MV.
+                    info!("create materialized view: id={:?}", self.table_id);
+
+                    let order_pairs: Vec<_> = info
+                        .column_orders
+                        .iter()
+                        .map(OrderPair::from_prost)
+                        .collect();
+
+                    let orderings = order_pairs
+                        .iter()
+                        .map(|order| order.order_type)
+                        .collect::<Vec<_>>();
+
+                    let pk_indices = info.pk_indices.iter().map(|key| *key as usize).collect();
+
+                    self.table_manager.create_materialized_view(
+                        &self.table_id,
+                        &self.table_columns,
+                        pk_indices,
+                        orderings,
+                    )?;
+                }
+            }
         }
+
         Ok(())
     }
 

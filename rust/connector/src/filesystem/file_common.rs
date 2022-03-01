@@ -1,17 +1,15 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use tokio::sync as tokio_sync;
-use tokio::sync::mpsc::error::SendError;
 
 /// ``EntryStat`` Describes a directory or file. A file is a generic concept,
 /// and can be a local file, a distributed file system, or a bucket in S3.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct EntryStat {
-    path: String,
-    atime: i64,
-    mtime: i64,
-    size: i64,
-    // is_dir: bool,
+    pub(crate) path: String,
+    pub(crate) atime: i64,
+    pub(crate) mtime: i64,
+    pub(crate) size: i64,
 }
 
 /// The operations supported on Entry/file.
@@ -37,15 +35,14 @@ impl Default for EntryStat {
             atime: 0,
             mtime: 0,
             size: 0,
-            // is_dir: false,
         }
     }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct EntryOptEvent {
-    entry_operation: EntryOpt,
-    entry: EntryStat,
+    pub(crate) entry_operation: EntryOpt,
+    pub(crate) entry: EntryStat,
 }
 
 impl Default for EntryOptEvent {
@@ -55,6 +52,11 @@ impl Default for EntryOptEvent {
             entry: Default::default(),
         }
     }
+}
+
+pub enum DirectoryChangeWatch {
+    Running,
+    Stopped,
 }
 
 /// Unlike the concept in the OS, the abstraction of a location is represented in the current
@@ -69,27 +71,27 @@ pub trait Directory: Send + Sync {
     async fn push_entries_change(
         &self,
         sender: tokio_sync::mpsc::Sender<EntryOptEvent>,
-    ) -> Result<(), SendError<EntryOptEvent>>;
+        task_status: tokio_sync::watch::Receiver<DirectoryChangeWatch>,
+    ) -> Result<()>;
     async fn list_entries(&self) -> Result<Vec<EntryStat>>;
-    async fn last_modification(&self) -> i64;
+    // async fn last_modification(&self) -> i64;
     fn entry_discover(&self) -> EntryDiscover;
 }
 
 #[cfg(test)]
 mod test {
     use std::collections::HashMap;
-    use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+    use std::sync::atomic::{AtomicI64, Ordering};
     use std::sync::Arc;
 
     use anyhow::Result;
     use async_trait::async_trait;
     use chrono::Local;
     use itertools::Itertools;
-    use tokio::sync::mpsc::error::SendError;
     use tokio::{sync, time};
 
     use crate::filesystem::file_common::{
-        Directory, EntryDiscover, EntryOpt, EntryOptEvent, EntryStat,
+        Directory, DirectoryChangeWatch, EntryDiscover, EntryOpt, EntryOptEvent, EntryStat,
     };
 
     // path, init_count, total_count, file_size
@@ -220,7 +222,6 @@ mod test {
         file_system: MockFileSystem,
         last_modification: Arc<AtomicI64>,
         auto_discover: EntryDiscover,
-        push_change_status: Arc<AtomicBool>,
     }
 
     impl DummyDirectory {
@@ -229,26 +230,7 @@ mod test {
                 file_system,
                 last_modification: Arc::new(AtomicI64::new(i64::MIN)),
                 auto_discover: EntryDiscover::Auto,
-                push_change_status: Arc::new(AtomicBool::new(false)),
             }
-        }
-
-        fn push_status_start(&self) {
-            let _ignore = self.push_change_status.compare_exchange(
-                false,
-                true,
-                Ordering::SeqCst,
-                Ordering::SeqCst,
-            );
-        }
-
-        fn push_status_stop(&self) {
-            let _ignore = self.push_change_status.compare_exchange(
-                true,
-                false,
-                Ordering::SeqCst,
-                Ordering::SeqCst,
-            );
         }
     }
 
@@ -257,17 +239,26 @@ mod test {
         async fn push_entries_change(
             &self,
             sender: tokio::sync::mpsc::Sender<EntryOptEvent>,
-        ) -> Result<(), SendError<EntryOptEvent>> {
+            mut task_status: tokio::sync::watch::Receiver<DirectoryChangeWatch>,
+        ) -> anyhow::Result<()> {
             let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(2));
             let file_system_clone = Arc::new(&self.file_system);
             println!(
-                "entry_change_listener running. {:?} change_status_value = {:?}",
+                "entry_change_listener running. {:?}",
                 self.last_modification.load(Ordering::SeqCst),
-                self.push_change_status.load(Ordering::SeqCst)
             );
             let rs = loop {
-                if !self.push_change_status.load(Ordering::SeqCst) {
-                    break Ok(());
+                tokio::select! {
+                    _= interval.tick() => {
+                        // println!("next around.");
+                    },
+                    status = task_status.changed() => {
+                        if status.is_ok() {
+                            if let DirectoryChangeWatch::Stopped = *task_status.borrow() {
+                                break Ok(());
+                            }
+                        }
+                    }
                 }
                 let file_values = file_system_clone.list_files().await;
                 let curr_modification = self.last_modification.load(Ordering::SeqCst);
@@ -303,7 +294,8 @@ mod test {
                 }
                 match send_opt_event_err {
                     Some(tx_send_err) => {
-                        break Err(tx_send_err);
+                        break Err(anyhow::Error::from(tx_send_err));
+                        // break Error::from(tx_send_err.to_string());
                     }
                     None => {
                         continue;
@@ -329,9 +321,9 @@ mod test {
             Ok(entries)
         }
 
-        async fn last_modification(&self) -> i64 {
-            self.last_modification.load(Ordering::SeqCst)
-        }
+        // async fn last_modification(&self) -> i64 {
+        //     self.last_modification.load(Ordering::SeqCst)
+        // }
 
         fn entry_discover(&self) -> EntryDiscover {
             self.auto_discover
@@ -368,12 +360,13 @@ mod test {
         let file_system = MockFileSystem::new(default_filesystem_conf());
         let directory = DummyDirectory::new(file_system.clone());
         let (tx, mut rx) = tokio::sync::mpsc::channel(10);
+        let (s_tx, s_rx) = tokio::sync::watch::channel(DirectoryChangeWatch::Running);
+        let _ = s_tx.send(DirectoryChangeWatch::Running);
         let directory_for_clone = Arc::new(directory.clone());
         file_system.state_change(1).await;
         file_system.wait_state_change_complete().await;
-        directory.push_status_start();
         let send_join = tokio::task::spawn(async move {
-            let rs = directory_for_clone.push_entries_change(tx).await;
+            let rs = directory_for_clone.push_entries_change(tx, s_rx).await;
             match rs {
                 Ok(()) => {
                     println!("send success");
@@ -389,7 +382,8 @@ mod test {
                 let receive_event = rx.recv().await;
                 println!("receive event change = {:?}", receive_event);
             }
-            directory.clone().push_status_stop();
+            let send_rs = s_tx.send(DirectoryChangeWatch::Stopped);
+            assert!(send_rs.is_ok());
             println!("receive task complete");
         });
         send_join.await.unwrap();

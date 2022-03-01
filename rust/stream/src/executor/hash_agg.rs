@@ -14,6 +14,9 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
+use risingwave_common::try_match_expand;
+use risingwave_pb::stream_plan;
+use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::aggregation::AggState;
@@ -21,7 +24,8 @@ use super::{
     agg_executor_next, generate_agg_schema, generate_agg_state, AggCall, AggExecutor, Barrier,
     Executor, ExecutorState, Message, PkIndicesRef, StatefulExecutor,
 };
-use crate::executor::{agg_input_arrays, pk_input_arrays, PkIndices};
+use crate::executor::{agg_input_arrays, pk_input_arrays, ExecutorBuilder, PkIndices};
+use crate::task::{build_agg_call_from_prost, ExecutorParams, StreamManagerCore};
 
 /// [`HashAggExecutor`] could process large amounts of data using a state backend. It works as
 /// follows:
@@ -70,9 +74,9 @@ pub struct HashAggExecutor<K: HashKey, S: StateStore> {
     executor_state: ExecutorState,
 }
 
-struct HashAggExecutorBuilder<S: StateStore>(PhantomData<S>);
+struct HashAggExecutorDispatcher<S: StateStore>(PhantomData<S>);
 
-struct HashAggExecutorBuilderInput<S: StateStore> {
+struct HashAggExecutorDispatcherArgs<S: StateStore> {
     input: Box<dyn Executor>,
     agg_calls: Vec<AggCall>,
     key_indices: Vec<usize>,
@@ -82,8 +86,8 @@ struct HashAggExecutorBuilderInput<S: StateStore> {
     op_info: String,
 }
 
-impl<S: StateStore> HashKeyDispatcher for HashAggExecutorBuilder<S> {
-    type Input = HashAggExecutorBuilderInput<S>;
+impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
+    type Input = HashAggExecutorDispatcherArgs<S>;
     type Output = Box<dyn Executor>;
 
     fn dispatch<K: HashKey>(input: Self::Input) -> Self::Output {
@@ -99,30 +103,44 @@ impl<S: StateStore> HashKeyDispatcher for HashAggExecutorBuilder<S> {
     }
 }
 
-pub fn new_boxed_hash_agg_executor<S: StateStore>(
-    input: Box<dyn Executor>,
-    agg_calls: Vec<AggCall>,
-    key_indices: Vec<usize>,
-    keyspace: Keyspace<S>,
-    pk_indices: PkIndices,
-    executor_id: u64,
-    op_info: String,
-) -> Box<dyn Executor> {
-    let keys = key_indices
-        .iter()
-        .map(|idx| input.schema().fields[*idx].data_type())
-        .collect_vec();
-    let input = HashAggExecutorBuilderInput {
-        input,
-        agg_calls,
-        key_indices,
-        keyspace,
-        pk_indices,
-        executor_id,
-        op_info,
-    };
-    let kind = calc_hash_key_kind(&keys);
-    HashAggExecutorBuilder::<S>::dispatch_by_kind(kind, input)
+pub struct HashAggExecutorBuilder;
+
+impl ExecutorBuilder for HashAggExecutorBuilder {
+    fn new_boxed_executor(
+        mut params: ExecutorParams,
+        node: &stream_plan::StreamNode,
+        store: impl StateStore,
+        _stream: &mut StreamManagerCore,
+    ) -> Result<Box<dyn Executor>> {
+        let node = try_match_expand!(node.get_node().unwrap(), Node::HashAggNode)?;
+        let key_indices = node
+            .get_group_keys()
+            .iter()
+            .map(|key| key.column_idx as usize)
+            .collect::<Vec<_>>();
+        let agg_calls: Vec<AggCall> = node
+            .get_agg_calls()
+            .iter()
+            .map(build_agg_call_from_prost)
+            .try_collect()?;
+        let keyspace = Keyspace::shared_executor_root(store, params.executor_id);
+        let input = params.input.remove(0);
+        let keys = key_indices
+            .iter()
+            .map(|idx| input.schema().fields[*idx].data_type())
+            .collect_vec();
+        let kind = calc_hash_key_kind(&keys);
+        let args = HashAggExecutorDispatcherArgs {
+            input: params.input.remove(0),
+            agg_calls,
+            key_indices,
+            keyspace,
+            pk_indices: params.pk_indices,
+            executor_id: params.executor_id,
+            op_info: params.op_info,
+        };
+        Ok(HashAggExecutorDispatcher::dispatch_by_kind(kind, args))
+    }
 }
 
 impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
@@ -441,6 +459,32 @@ mod tests {
     use crate::executor::test_utils::*;
     use crate::executor::*;
     use crate::*;
+
+    fn new_boxed_hash_agg_executor(
+        input: Box<dyn Executor>,
+        agg_calls: Vec<AggCall>,
+        key_indices: Vec<usize>,
+        keyspace: Keyspace<impl StateStore>,
+        pk_indices: PkIndices,
+        executor_id: u64,
+        op_info: String,
+    ) -> Box<dyn Executor> {
+        let keys = key_indices
+            .iter()
+            .map(|idx| input.schema().fields[*idx].data_type())
+            .collect_vec();
+        let args = HashAggExecutorDispatcherArgs {
+            input,
+            agg_calls,
+            key_indices,
+            keyspace,
+            pk_indices,
+            executor_id,
+            op_info,
+        };
+        let kind = calc_hash_key_kind(&keys);
+        HashAggExecutorDispatcher::dispatch_by_kind(kind, args)
+    }
 
     // --- Test HashAgg with in-memory KeyedState ---
 
