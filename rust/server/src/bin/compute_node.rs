@@ -2,10 +2,14 @@ use clap::StructOpt;
 use log::info;
 use risingwave::server::compute_node_serve;
 use risingwave::ComputeNodeOpts;
+use tikv_jemallocator::Jemalloc;
 use tracing::Level;
 use tracing_subscriber::filter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::prelude::*;
+
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
 
 /// Configure log targets for all `RisingWave` crates. When new crates are added and TRACE level
 /// logs are needed, add them here.
@@ -25,6 +29,15 @@ fn configure_risingwave_targets(targets: filter::Targets) -> filter::Targets {
 #[cfg(not(tarpaulin_include))]
 #[tokio::main]
 async fn main() {
+    use std::panic;
+
+    let default_hook = panic::take_hook();
+
+    panic::set_hook(Box::new(move |info| {
+        default_hook(info);
+        std::process::abort();
+    }));
+
     use isahc::config::Configurable;
 
     let opts = ComputeNodeOpts::parse();
@@ -34,7 +47,7 @@ async fn main() {
         let fmt_layer = tracing_subscriber::fmt::layer().compact().with_ansi(false);
         let filter = filter::Targets::new()
             // Only enable WARN and ERROR for 3rd-party crates
-            .with_target("rusoto_core", Level::WARN)
+            .with_target("aws_endpoint", Level::WARN)
             .with_target("hyper", Level::WARN)
             .with_target("h2", Level::WARN)
             .with_target("tower", Level::WARN)

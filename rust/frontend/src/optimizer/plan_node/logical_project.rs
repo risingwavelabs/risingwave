@@ -7,8 +7,9 @@ use super::{
     BatchProject, ColPrunable, IntoPlanRef, PlanRef, PlanTreeNodeUnary, StreamProject, ToBatch,
     ToStream,
 };
-use crate::expr::{assert_input_ref, Expr, ExprImpl};
+use crate::expr::{assert_input_ref, Expr, ExprImpl, InputRef};
 use crate::optimizer::property::{Distribution, WithDistribution, WithOrder, WithSchema};
+use crate::utils::ColIndexMapping;
 
 #[derive(Debug, Clone)]
 pub struct LogicalProject {
@@ -36,6 +37,23 @@ impl LogicalProject {
         expr_alias: Vec<Option<String>>,
     ) -> PlanRef {
         Self::new(input, exprs, expr_alias).into_plan_ref()
+    }
+
+    pub fn with_mapping(input: PlanRef, mapping: ColIndexMapping) -> Self {
+        let mut input_refs = vec![None; mapping.target_upper()];
+        for (src, tar) in mapping.mapping_pairs() {
+            assert_eq!(input_refs[tar], None);
+            input_refs[tar] = Some(src);
+        }
+        let input_schema = input.schema();
+        let exprs: Vec<ExprImpl> = input_refs
+            .into_iter()
+            .map(|i| i.unwrap())
+            .map(|i| InputRef::new(i, input_schema.fields()[i].data_type()).to_expr_impl())
+            .collect();
+
+        let alias = vec![None; exprs.len()];
+        LogicalProject::new(input, exprs, alias)
     }
 
     fn derive_schema(exprs: &[ExprImpl], expr_alias: &[Option<String>]) -> Schema {

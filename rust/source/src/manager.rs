@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
@@ -40,19 +40,17 @@ pub trait SourceManager: Sync + Send {
 pub struct SourceColumnDesc {
     pub name: String,
     pub data_type: DataType,
-    pub column_id: i32,
+    pub column_id: ColumnId,
     pub skip_parse: bool,
-    pub is_primary: bool,
 }
 
 impl From<&TableColumnDesc> for SourceColumnDesc {
     fn from(c: &TableColumnDesc) -> Self {
         Self {
             name: c.name.clone(),
-            data_type: c.data_type,
+            data_type: c.data_type.clone(),
             column_id: c.column_id,
             skip_parse: false,
-            is_primary: false,
         }
     }
 }
@@ -105,7 +103,7 @@ impl SourceManager for MemSourceManager {
             row_id_index,
         };
 
-        tables.insert(source_id.clone(), desc);
+        tables.insert(*source_id, desc);
 
         Ok(())
     }
@@ -135,7 +133,7 @@ impl SourceManager for MemSourceManager {
             row_id_index: Some(0), // always use the first column as row_id
         };
 
-        sources.insert(table_id.clone(), desc);
+        sources.insert(*table_id, desc);
         Ok(())
     }
 
@@ -158,7 +156,7 @@ impl SourceManager for MemSourceManager {
             .clone();
 
         // Simply associate the mview id to the table source
-        sources.insert(mview_id.clone(), source);
+        sources.insert(*mview_id, source);
         Ok(())
     }
 
@@ -202,7 +200,7 @@ mod tests {
     use std::sync::Arc;
 
     use risingwave_common::array::*;
-    use risingwave_common::catalog::{Field, Schema, TableId};
+    use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
     use risingwave_common::column_nonnull;
     use risingwave_common::error::Result;
     use risingwave_common::types::DataType;
@@ -235,7 +233,7 @@ mod tests {
 
         let table = Arc::new(TestTable::new(
             &TableId::default(),
-            vec![TableColumnDesc::new_without_name(0, DataType::Int64)],
+            vec![TableColumnDesc::unnamed(ColumnId::from(0), DataType::Int64)],
         ));
 
         let chunk0 = DataChunk::builder()
@@ -248,10 +246,9 @@ mod tests {
             .iter()
             .map(|c| SourceColumnDesc {
                 name: "123".to_string(),
-                data_type: c.data_type,
+                data_type: c.data_type.clone(),
                 column_id: c.column_id,
                 skip_parse: false,
-                is_primary: false,
             })
             .collect();
 
@@ -297,8 +294,8 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(i, f)| TableColumnDesc {
-                data_type: f.data_type,
-                column_id: i as i32, // use column index as column id
+                data_type: f.data_type.clone(),
+                column_id: ColumnId::from(i as i32), // use column index as column id
                 name: f.name.clone(),
             })
             .collect();

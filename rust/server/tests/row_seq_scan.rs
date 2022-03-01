@@ -5,10 +5,10 @@ extern crate risingwave_batch;
 
 use risingwave_batch::executor::{Executor, RowSeqScanExecutor};
 use risingwave_common::array::{Array, Row};
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::{ColumnId, Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::Keyspace;
 use risingwave_stream::executor::{MViewTable, ManagedMViewState};
@@ -24,13 +24,13 @@ async fn test_row_seq_scan() -> Result<()> {
         Field::unnamed(DataType::Int32),
         Field::unnamed(DataType::Int64),
     ]);
+    let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
     let pk_columns = vec![0];
     let orderings = vec![OrderType::Ascending];
     let mut state = ManagedMViewState::new(
         keyspace.clone(),
-        schema.clone(),
-        pk_columns.clone(),
-        orderings.clone(),
+        column_ids,
+        vec![OrderPair::new(0, OrderType::Ascending)],
     );
 
     let table = Arc::new(MViewTable::new(
@@ -40,8 +40,14 @@ async fn test_row_seq_scan() -> Result<()> {
         orderings,
     ));
 
-    let mut executor =
-        RowSeqScanExecutor::new(table, vec![0, 1], 1, true, "RowSeqScanExecutor".to_string());
+    let mut executor = RowSeqScanExecutor::new(
+        table,
+        vec![0, 1],
+        1,
+        true,
+        "RowSeqScanExecutor".to_string(),
+        u64::MAX,
+    );
 
     let epoch: u64 = 0;
     state.put(
@@ -69,7 +75,7 @@ async fn test_row_seq_scan() -> Result<()> {
     assert_eq!(res_chunk.dimension(), 2);
     assert_eq!(
         res_chunk
-            .column_at(0)?
+            .column_at(0)
             .array()
             .as_int32()
             .iter()
@@ -78,7 +84,7 @@ async fn test_row_seq_scan() -> Result<()> {
     );
     assert_eq!(
         res_chunk
-            .column_at(1)?
+            .column_at(1)
             .array()
             .as_int32()
             .iter()
@@ -90,7 +96,7 @@ async fn test_row_seq_scan() -> Result<()> {
     assert_eq!(res_chunk2.dimension(), 2);
     assert_eq!(
         res_chunk2
-            .column_at(0)?
+            .column_at(0)
             .array()
             .as_int32()
             .iter()
@@ -99,7 +105,7 @@ async fn test_row_seq_scan() -> Result<()> {
     );
     assert_eq!(
         res_chunk2
-            .column_at(1)?
+            .column_at(1)
             .array()
             .as_int32()
             .iter()

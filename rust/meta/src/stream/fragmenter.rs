@@ -71,7 +71,7 @@ where
 
         let stream_graph = self.stream_graph.build(ctx)?;
 
-        Ok(stream_graph
+        stream_graph
             .iter()
             .map(|(&fragment_id, actors)| {
                 Ok::<_, RwError>((
@@ -84,7 +84,7 @@ where
                     },
                 ))
             })
-            .collect::<Result<BTreeMap<_, _>>>()?)
+            .collect::<Result<BTreeMap<_, _>>>()
     }
 
     /// Generate fragment DAG from input streaming plan by their dependency.
@@ -117,7 +117,7 @@ where
         // Update current fragment based on the node we're visiting.
         match stream_node.get_node()? {
             Node::SourceNode(_) => current_fragment.set_fragment_type(FragmentType::Source),
-            Node::MviewNode(_) => current_fragment.set_fragment_type(FragmentType::Sink),
+            Node::MaterializeNode(_) => current_fragment.set_fragment_type(FragmentType::Sink),
 
             // TODO: Force singleton for TopN as a workaround. We should implement two phase TopN.
             Node::TopNNode(_) => current_fragment.set_singleton(true),

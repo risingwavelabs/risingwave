@@ -26,7 +26,7 @@ impl Binder {
             .collect::<Vec<DataType>>();
         for vec in &bound {
             for (i, expr) in vec.iter().enumerate() {
-                types[i] = Self::find_compat(types[i], expr.return_type())?
+                types[i] = Self::find_compat(types[i].clone(), expr.return_type())?
             }
         }
         let rows = bound
@@ -34,7 +34,7 @@ impl Binder {
             .map(|vec| {
                 vec.into_iter()
                     .enumerate()
-                    .map(|(i, expr)| Self::ensure_type(expr, types[i]))
+                    .map(|(i, expr)| Self::ensure_type(expr, types[i].clone()))
                     .collect::<Vec<ExprImpl>>()
             })
             .collect::<Vec<Vec<ExprImpl>>>();
@@ -48,7 +48,7 @@ impl Binder {
             || (left.is_string() && right.is_string()
                 || (left.is_date_or_timestamp() && right.is_date_or_timestamp()))
         {
-            if left as i32 > right as i32 {
+            if left.type_index() > right.type_index() {
                 Ok(left)
             } else {
                 Ok(right)

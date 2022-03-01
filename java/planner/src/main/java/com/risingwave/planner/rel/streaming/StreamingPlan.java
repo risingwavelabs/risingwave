@@ -12,13 +12,13 @@ import org.apache.calcite.rel.RelNode;
  * procedure.
  */
 public class StreamingPlan {
-  private final RwStreamMaterializedView streamingPlan;
+  private final RwStreamMaterialize streamingPlan;
 
-  public StreamingPlan(RwStreamMaterializedView streamingPlan) {
+  public StreamingPlan(RwStreamMaterialize streamingPlan) {
     this.streamingPlan = streamingPlan;
   }
 
-  public RwStreamMaterializedView getStreamingPlan() {
+  public RwStreamMaterialize getStreamingPlan() {
     return streamingPlan;
   }
 

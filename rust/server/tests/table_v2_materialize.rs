@@ -3,13 +3,12 @@ use std::sync::Arc;
 use risingwave_batch::executor::{
     CreateTableExecutor, Executor as BatchExecutor, InsertExecutor, RowSeqScanExecutor,
 };
-use risingwave_common::array::column::Column;
 use risingwave_common::array::{Array, DataChunk, F64Array};
-use risingwave_common::array_nonnull;
-use risingwave_common::catalog::{Field, Schema, SchemaId, TableId};
+use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
+use risingwave_common::column_nonnull;
 use risingwave_common::error::Result;
 use risingwave_common::types::IntoOrdered;
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::plan::ColumnDesc;
@@ -18,7 +17,8 @@ use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::{SimpleTableManager, TableManager};
 use risingwave_storage::{Keyspace, StateStoreImpl};
 use risingwave_stream::executor::{
-    Barrier, Executor as StreamExecutor, MaterializeExecutor, Message, PkIndices, SourceExecutor,
+    Barrier, Epoch, Executor as StreamExecutor, MaterializeExecutor, Message, PkIndices,
+    SourceExecutor,
 };
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -61,8 +61,8 @@ impl BatchExecutor for SingleChunkExecutor {
     }
 }
 
-/// This test checks whether batch task and streaming task work together for `TableV2` creation and
-/// materialization.
+/// This test checks whether batch task and streaming task work together for `TableV2` creation
+/// and materialization.
 #[tokio::test]
 async fn test_table_v2_materialize() -> Result<()> {
     let memory_state_store = MemoryStateStore::new();
@@ -93,7 +93,7 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     // Create table v2 using `CreateTableExecutor`
     let mut create_table = CreateTableExecutor::new(
-        source_table_id.clone(),
+        source_table_id,
         table_manager.clone(),
         source_manager.clone(),
         table_columns,
@@ -106,7 +106,7 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     // Ensure the source exists
     let source_desc = source_manager.get_source(&source_table_id)?;
-    let get_schema = |column_ids: &[i32]| {
+    let get_schema = |column_ids: &[ColumnId]| {
         let mut fields = Vec::with_capacity(column_ids.len());
         for &column_id in column_ids {
             let column_desc = source_desc
@@ -114,22 +114,22 @@ async fn test_table_v2_materialize() -> Result<()> {
                 .iter()
                 .find(|c| c.column_id == column_id)
                 .unwrap();
-            fields.push(Field::unnamed(column_desc.data_type));
+            fields.push(Field::unnamed(column_desc.data_type.clone()));
         }
         Schema::new(fields)
     };
 
     // Register associated materialized view
-    let mview_id = TableId::new(SchemaId::default(), 1);
+    let mview_id = TableId::new(1);
     table_manager.register_associated_materialized_view(&source_table_id, &mview_id)?;
     source_manager.register_associated_materialized_view(&source_table_id, &mview_id)?;
 
     // Create a `SourceExecutor` to read the changes
-    let all_column_ids = vec![0, 1];
+    let all_column_ids = vec![ColumnId::from(0), ColumnId::from(1)];
     let all_schema = get_schema(&all_column_ids);
     let (barrier_tx, barrier_rx) = unbounded_channel();
     let stream_source = SourceExecutor::new(
-        source_table_id.clone(),
+        source_table_id,
         source_desc.clone(),
         all_column_ids.clone(),
         all_schema.clone(),
@@ -145,25 +145,18 @@ async fn test_table_v2_materialize() -> Result<()> {
     let mut materialize = MaterializeExecutor::new(
         Box::new(stream_source),
         keyspace.clone(),
-        all_schema.clone(),
-        vec![1],
-        vec![OrderType::Ascending],
+        vec![OrderPair::new(1, OrderType::Ascending)],
+        all_column_ids,
         2,
         "MaterializeExecutor".to_string(),
     );
 
     // Add some data using `InsertExecutor`, assuming we are inserting into the "mv"
-    let columns = vec![Column::new(Arc::new(
-        array_nonnull! { F64Array, [1.14, 5.14] }.into(),
-    ))];
+    let columns = vec![column_nonnull! { F64Array, [1.14, 5.14] }];
     let chunk = DataChunk::builder().columns(columns.clone()).build();
     let insert_inner = SingleChunkExecutor::new(chunk, all_schema);
-    let mut insert = InsertExecutor::new(
-        mview_id.clone(),
-        source_manager.clone(),
-        Box::new(insert_inner),
-        0,
-    );
+    let mut insert =
+        InsertExecutor::new(mview_id, source_manager.clone(), Box::new(insert_inner), 0);
 
     insert.open().await?;
     insert.next().await?;
@@ -171,7 +164,7 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     // Since we have not polled `Materialize`, we cannot scan anything from this table
     let table = table_manager.get_table(&mview_id)?;
-    let data_column_ids = vec![0];
+    let data_column_ids = vec![0, 1];
 
     let mut scan = RowSeqScanExecutor::new(
         table.clone(),
@@ -179,6 +172,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         1024,
         true,
         "RowSeqExecutor".to_string(),
+        u64::MAX,
     );
     scan.open().await?;
     assert!(scan.next().await?.is_none());
@@ -200,12 +194,16 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     // Send a barrier and poll again, should write changes to storage
     barrier_tx
-        .send(Message::Barrier(Barrier::new(1919)))
+        .send(Message::Barrier(Barrier::new_test_barrier(1919)))
         .unwrap();
 
     assert!(matches!(
         materialize.next().await?,
-        Message::Barrier(Barrier { epoch: 1919, .. })
+        Message::Barrier(Barrier {
+            epoch,
+            mutation: None,
+            ..
+        }) if epoch == Epoch::new_test_epoch(1919)
     ));
 
     // Scan the table again, we are able to get the data now!
@@ -215,6 +213,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         1024,
         true,
         "RowSeqScanExecutor".to_string(),
+        u64::MAX,
     );
     scan.open().await?;
     let c = scan.next().await?.unwrap();

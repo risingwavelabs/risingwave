@@ -1,0 +1,19 @@
+name: CI
+on:
+  pull_request:
+    branches: [main]
+    paths: [dashboard/**]
+jobs:
+  dashboard-ui-build:
+    runs-on: ubuntu-latest
+    steps: 
+      - uses: actions/checkout@v2
+      - uses: actions/setup-node@v2
+        with:
+          node-version: '14'
+      - name: build
+        working-directory: ./dashboard
+        run: |
+          npm install
+          npm run build
+          npm run build-static

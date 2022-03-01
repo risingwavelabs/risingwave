@@ -1,7 +1,7 @@
 {
 	"__inputs": [
 		{
-			"name": "DS_RISEDEV-PROMETHEUS",
+			"name": "${DS_RISEDEV-PROMETHEUS}",
 			"label": "risedev-prometheus",
 			"description": "",
 			"type": "datasource",
@@ -58,7 +58,8 @@
 	"editable": true,
 	"fiscalYearStartMonth": 0,
 	"graphTooltip": 0,
-	"id": null,
+	"id": 267,
+	"iteration": 1645770296715,
 	"links": [],
 	"liveNow": false,
 	"panels": [
@@ -70,9 +71,9 @@
 				"x": 0,
 				"y": 0
 			},
-			"id": 62,
+			"id": 123,
 			"panels": [],
-			"title": "gRPC",
+			"title": "meta Barrier",
 			"type": "row"
 		},
 		{
@@ -89,7 +90,7 @@
 				"y": 1
 			},
 			"hiddenSeries": false,
-			"id": 60,
+			"id": 124,
 			"legend": {
 				"avg": false,
 				"current": false,
@@ -121,9 +122,9 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "sum(rate(state_store_pin_version_counts[1m]))",
+					"expr": "histogram_quantile(0.5, sum(irate(meta_barrier_duration_seconds_bucket[1m])) by (le))",
 					"interval": "",
-					"legendFormat": "pin_version_counts",
+					"legendFormat": "barrier_latency_p50",
 					"refId": "A"
 				},
 				{
@@ -132,112 +133,10 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "sum(rate(state_store_unpin_version_counts[1m]))",
+					"expr": "histogram_quantile(0.9, sum(irate(meta_barrier_duration_seconds_bucket[1m])) by (le))",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "unpin_version_counts",
-					"refId": "B"
-				}
-			],
-			"thresholds": [],
-			"timeRegions": [],
-			"title": "version_count",
-			"tooltip": {
-				"shared": true,
-				"sort": 0,
-				"value_type": "individual"
-			},
-			"type": "graph",
-			"xaxis": {
-				"mode": "time",
-				"show": true,
-				"values": []
-			},
-			"yaxes": [
-				{
-					"$$hashKey": "object:64",
-					"format": "ops",
-					"logBase": 1,
-					"show": true
-				},
-				{
-					"$$hashKey": "object:65",
-					"format": "short",
-					"logBase": 1,
-					"show": true
-				}
-			],
-			"yaxis": {
-				"align": false
-			}
-		},
-		{
-			"aliasColors": {},
-			"bars": false,
-			"dashLength": 10,
-			"dashes": false,
-			"fieldConfig": {
-				"defaults": {
-					"unit": "s"
-				},
-				"overrides": []
-			},
-			"fill": 1,
-			"fillGradient": 0,
-			"gridPos": {
-				"h": 8,
-				"w": 12,
-				"x": 12,
-				"y": 1
-			},
-			"hiddenSeries": false,
-			"id": 71,
-			"legend": {
-				"avg": false,
-				"current": false,
-				"max": false,
-				"min": false,
-				"show": true,
-				"total": false,
-				"values": false
-			},
-			"lines": true,
-			"linewidth": 1,
-			"nullPointMode": "null",
-			"options": {
-				"alertThreshold": true
-			},
-			"percentage": false,
-			"pluginVersion": "8.3.3",
-			"pointradius": 2,
-			"points": false,
-			"renderer": "flot",
-			"seriesOverrides": [],
-			"spaceLength": 10,
-			"stack": false,
-			"steppedLine": false,
-			"targets": [
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.5, sum(rate(state_store_pin_version_latency_bucket[5m])) by (le))",
-					"interval": "",
-					"legendFormat": "pin_version_latency_p50",
-					"refId": "A"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.99, sum(rate(state_store_pin_version_latency_bucket[5m])) by (le))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "pin_version_latency_p99",
+					"legendFormat": "barrier_latency_p90",
 					"refId": "B"
 				},
 				{
@@ -246,10 +145,10 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "histogram_quantile(0.9, sum(rate(state_store_pin_version_latency_bucket[5m])) by (le))",
+					"expr": "histogram_quantile(0.99, sum(irate(meta_barrier_duration_seconds_bucket[1m])) by (le))",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "pin_version_latencyp90",
+					"legendFormat": "barrier_latency_p99",
 					"refId": "C"
 				},
 				{
@@ -258,64 +157,28 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "sum(rate(state_store_pin_version_latency_sum[5m])) / sum(rate(state_store_pin_version_latency_count[5m]))",
+					"expr": "sum(irate(meta_barrier_duration_seconds_sum[1m])) / sum(irate(meta_barrier_duration_seconds_count[1m]))",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "pin_version_latency_avg",
+					"legendFormat": "barrier_latency_avg",
 					"refId": "D"
 				},
 				{
 					"datasource": {
 						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
+						"uid": "PEDE6B306CC9C0CD0"
 					},
 					"exemplar": true,
-					"expr": "histogram_quantile(0.5, sum(rate(state_store_unpin_version_latency_bucket[5m])) by (le))",
+					"expr": "histogram_quantile(0.999, sum(irate(meta_barrier_duration_seconds_bucket[1m])) by (le))",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "unpin_version_latency_p50",
+					"legendFormat": "barrier_latency_p999",
 					"refId": "E"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.99, sum(rate(state_store_unpin_version_latency_bucket[5m])) by (le))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "unpin_version_latency_p99",
-					"refId": "F"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "sum(rate(state_store_unpin_version_latency_sum[5m])) / sum(rate(state_store_unpin_version_latency_count[5m]))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "unpin_version_latency_avg",
-					"refId": "G"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.90, sum(rate(state_store_unpin_version_latency_bucket[5m])) by (le))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "unpin_version_latency_p90",
-					"refId": "H"
 				}
 			],
 			"thresholds": [],
 			"timeRegions": [],
-			"title": "version_latency",
+			"title": "barrier latency",
 			"tooltip": {
 				"shared": true,
 				"sort": 0,
@@ -329,13 +192,13 @@
 			},
 			"yaxes": [
 				{
-					"$$hashKey": "object:123",
+					"$$hashKey": "object:437",
 					"format": "s",
 					"logBase": 1,
 					"show": true
 				},
 				{
-					"$$hashKey": "object:124",
+					"$$hashKey": "object:438",
 					"format": "short",
 					"logBase": 1,
 					"show": true
@@ -346,392 +209,2431 @@
 			}
 		},
 		{
-			"aliasColors": {},
-			"bars": false,
-			"dashLength": 10,
-			"dashes": false,
-			"fill": 1,
-			"fillGradient": 0,
+			"collapsed": true,
 			"gridPos": {
-				"h": 8,
-				"w": 12,
+				"h": 1,
+				"w": 24,
 				"x": 0,
 				"y": 9
 			},
-			"hiddenSeries": false,
-			"id": 64,
-			"legend": {
-				"avg": false,
-				"current": false,
-				"max": false,
-				"min": false,
-				"show": true,
-				"total": false,
-				"values": false
-			},
-			"lines": true,
-			"linewidth": 1,
-			"nullPointMode": "null",
-			"options": {
-				"alertThreshold": true
-			},
-			"percentage": false,
-			"pluginVersion": "8.3.3",
-			"pointradius": 2,
-			"points": false,
-			"renderer": "flot",
-			"seriesOverrides": [],
-			"spaceLength": 10,
-			"stack": false,
-			"steppedLine": false,
-			"targets": [
+			"id": 115,
+			"panels": [
 				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 8,
+						"x": 0,
+						"y": 2
 					},
-					"exemplar": true,
-					"expr": "sum(rate(state_store_pin_snapshot_counts[1m]))",
-					"interval": "",
-					"legendFormat": "pin_snapshot_counts",
-					"refId": "A"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
+					"hiddenSeries": false,
+					"id": 116,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
 					},
-					"exemplar": true,
-					"expr": "sum(rate(state_store_unpin_snapshot_counts[1m]))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "unpin_snapshot_counts",
-					"refId": "B"
-				}
-			],
-			"thresholds": [],
-			"timeRegions": [],
-			"title": "snapshot_count",
-			"tooltip": {
-				"shared": true,
-				"sort": 0,
-				"value_type": "individual"
-			},
-			"type": "graph",
-			"xaxis": {
-				"mode": "time",
-				"show": true,
-				"values": []
-			},
-			"yaxes": [
-				{
-					"$$hashKey": "object:97",
-					"format": "ops",
-					"logBase": 1,
-					"show": true
-				},
-				{
-					"$$hashKey": "object:98",
-					"format": "short",
-					"logBase": 1,
-					"show": true
-				}
-			],
-			"yaxis": {
-				"align": false
-			}
-		},
-		{
-			"aliasColors": {},
-			"bars": false,
-			"dashLength": 10,
-			"dashes": false,
-			"fieldConfig": {
-				"defaults": {
-					"unit": "s"
-				},
-				"overrides": []
-			},
-			"fill": 1,
-			"fillGradient": 0,
-			"gridPos": {
-				"h": 8,
-				"w": 12,
-				"x": 12,
-				"y": 9
-			},
-			"hiddenSeries": false,
-			"id": 72,
-			"legend": {
-				"avg": false,
-				"current": false,
-				"max": false,
-				"min": false,
-				"show": true,
-				"total": false,
-				"values": false
-			},
-			"lines": true,
-			"linewidth": 1,
-			"nullPointMode": "null",
-			"options": {
-				"alertThreshold": true
-			},
-			"percentage": false,
-			"pluginVersion": "8.3.3",
-			"pointradius": 2,
-			"points": false,
-			"renderer": "flot",
-			"seriesOverrides": [],
-			"spaceLength": 10,
-			"stack": false,
-			"steppedLine": false,
-			"targets": [
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
 					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.5, sum(rate(state_store_pin_snapshot_latency_bucket[5m])) by (le))",
-					"interval": "",
-					"legendFormat": "pin_snapshot_latency_p50",
-					"refId": "A"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.99, sum(rate(state_store_pin_snapshot_latency_bucket[5m])) by (le))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "pin_snapshot_latency_p99",
-					"refId": "B"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.9, sum(rate(state_store_pin_snapshot_latency_bucket[5m])) by (le))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "pin_snapshot_latencyp90",
-					"refId": "C"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "sum(rate(state_store_pin_snapshot_latency_sum[5m])) / sum(rate(state_store_pin_snapshot_latency_count[5m]))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "pin_snapshot_latency_avg",
-					"refId": "D"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.5, sum(rate(state_store_unpin_version_snapshot_bucket[5m])) by (le))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "unpin_snapshot_latency_p50",
-					"refId": "E"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.99, sum(rate(state_store_unpin_version_snapshot_bucket[5m])) by (le))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "unpin_snapshot_latency_p99",
-					"refId": "F"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "sum(rate(state_store_unpin_snapshot_latency_sum[5m])) / sum(rate(state_store_unpin_snapshot_latency_count[5m]))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "unpin_snapshot_latency_avg",
-					"refId": "G"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.90, sum(rate(state_store_unpin_snapshot_latency_bucket[5m])) by (le))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "unpin_snapshot_latency_p90",
-					"refId": "H"
-				}
-			],
-			"thresholds": [],
-			"timeRegions": [],
-			"title": "snapshot_latency",
-			"tooltip": {
-				"shared": true,
-				"sort": 0,
-				"value_type": "individual"
-			},
-			"type": "graph",
-			"xaxis": {
-				"mode": "time",
-				"show": true,
-				"values": []
-			},
-			"yaxes": [
-				{
-					"$$hashKey": "object:123",
-					"format": "s",
-					"logBase": 1,
-					"show": true
-				},
-				{
-					"$$hashKey": "object:124",
-					"format": "short",
-					"logBase": 1,
-					"show": true
-				}
-			],
-			"yaxis": {
-				"align": false
-			}
-		},
-		{
-			"fieldConfig": {
-				"defaults": {
-					"color": {
-						"mode": "palette-classic"
-					},
-					"custom": {
-						"axisLabel": "",
-						"axisPlacement": "auto",
-						"barAlignment": 0,
-						"drawStyle": "line",
-						"fillOpacity": 0,
-						"gradientMode": "none",
-						"hideFrom": {
-							"legend": false,
-							"tooltip": false,
-							"viz": false
-						},
-						"lineInterpolation": "linear",
-						"lineWidth": 1,
-						"pointSize": 5,
-						"scaleDistribution": {
-							"type": "linear"
-						},
-						"showPoints": "auto",
-						"spanNulls": false,
-						"stacking": {
-							"group": "A",
-							"mode": "none"
-						},
-						"thresholdsStyle": {
-							"mode": "off"
-						}
-					},
-					"mappings": [],
-					"thresholds": {
-						"mode": "absolute",
-						"steps": [
-							{
-								"color": "green",
-								"value": null
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
-							{
-								"color": "red",
-								"value": 80
-							}
-						]
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/GetNewTableId\"}[1m])) by (le))",
+							"interval": "",
+							"legendFormat": "hummock_manager_ GetNewTableId_p50",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_get_new_table_id_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance)) ",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "hummock_client_ GetNewTableId_p50 compute_node = {{instance}} ",
+							"refId": "B"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "get new TableID latency p50",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:437",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:438",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
 					}
 				},
-				"overrides": []
-			},
-			"gridPos": {
-				"h": 8,
-				"w": 12,
-				"x": 0,
-				"y": 17
-			},
-			"id": 66,
-			"options": {
-				"legend": {
-					"calcs": [],
-					"displayMode": "list",
-					"placement": "bottom"
-				},
-				"tooltip": {
-					"mode": "single"
-				}
-			},
-			"targets": [
 				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 8,
+						"x": 8,
+						"y": 2
 					},
-					"exemplar": true,
-					"expr": "sum(rate(state_store_add_tables_counts[1m]))",
-					"interval": "",
-					"legendFormat": "add_tables_counts",
-					"refId": "A"
+					"hiddenSeries": false,
+					"id": 117,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.9, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/GetNewTableId\"}[1m])) by (le))",
+							"interval": "",
+							"legendFormat": "hummock_manager_ GetNewTableId_p90",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.9, sum(irate(state_store_get_new_table_id_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "hummock_client_ GetNewTableId_p90 compute_node = {{instance}} ",
+							"refId": "B"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "get new TableID latency p90",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:437",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:438",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
 				},
 				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 8,
+						"x": 16,
+						"y": 2
 					},
-					"exemplar": true,
-					"expr": "sum(rate(state_store_get_new_table_id_counts[1m]))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "get_new_table_id_counts",
-					"refId": "B"
+					"hiddenSeries": false,
+					"id": 118,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/GetNewTableId\"}[1m])) by (le))",
+							"interval": "",
+							"legendFormat": "hummock_manager_ GetNewTableId_p99",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_get_new_table_id_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "hummock_client_GetNewTableId_p99 compute_node = {{instance}} ",
+							"refId": "B"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "get new TableID latency p99",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:437",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:438",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				},
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 8,
+						"x": 0,
+						"y": 10
+					},
+					"hiddenSeries": false,
+					"id": 119,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/AddTables\"}[1m])) by (le))",
+							"interval": "",
+							"legendFormat": "hummock_manager_ AddTables_p50",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_add_tables_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "hummock_client_ AddTables_p50 compute_node = {{instance}} ",
+							"refId": "B"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "add tables latency p50",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:437",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:438",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				},
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 8,
+						"x": 8,
+						"y": 10
+					},
+					"hiddenSeries": false,
+					"id": 120,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.9, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/AddTables\"}[1m])) by (le))",
+							"interval": "",
+							"legendFormat": "hummock_manager_ AddTables_p90",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.9, sum(irate(state_store_add_tables_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "hummock_client_ AddTables_p90 compute_node = {{instance}} ",
+							"refId": "B"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "add tables latency p90",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:437",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:438",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				},
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 8,
+						"x": 16,
+						"y": 10
+					},
+					"hiddenSeries": false,
+					"id": 121,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/AddTables\"}[1m])) by (le))",
+							"interval": "",
+							"legendFormat": "hummock_manager_ AddTables_p99",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_add_tables_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "hummock_client_ AddTables_p99 compute_node = {{instance}} ",
+							"refId": "B"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "add tables latency p99",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:437",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:438",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
 				}
 			],
-			"title": "table_count",
-			"type": "timeseries"
+			"title": "gRPC Hommock Table Comparision",
+			"type": "row"
+		},
+		{
+			"collapsed": true,
+			"gridPos": {
+				"h": 1,
+				"w": 24,
+				"x": 0,
+				"y": 10
+			},
+			"id": 113,
+			"panels": [
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 8,
+						"x": 0,
+						"y": 2
+					},
+					"hiddenSeries": false,
+					"id": 104,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/GetCompactionTasks\"}[1m])) by (le))",
+							"interval": "",
+							"legendFormat": "hummock_manager_ GetCompactionTasks_p50",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_get_compaction_task_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "hummock_client_ GetCompactionTasks_p50 compute_node = {{instance}} ",
+							"refId": "B"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "get compation latency p50",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:437",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:438",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				},
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 8,
+						"x": 8,
+						"y": 2
+					},
+					"hiddenSeries": false,
+					"id": 105,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.9, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/GetCompactionTasks\"}[1m])) by (le))",
+							"interval": "",
+							"legendFormat": "hummock_manager_ GetCompactionTasks_p90",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.9, sum(irate(state_store_get_compaction_task_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "hummock_client_ GetCompactionTasks_p90 compute_node = {{instance}} ",
+							"refId": "B"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "get compation latency p90",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:437",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:438",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				},
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 8,
+						"x": 16,
+						"y": 2
+					},
+					"hiddenSeries": false,
+					"id": 110,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/GetCompactionTasks\"}[1m])) by (le))",
+							"interval": "",
+							"legendFormat": "hummock_manager_ GetCompactionTasks_p99",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_get_compaction_task_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "hummock_client_ GetCompactionTasks_p99 compute_node = {{instance}} ",
+							"refId": "B"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "get compation latency p99",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:437",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:438",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				},
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 8,
+						"x": 0,
+						"y": 10
+					},
+					"hiddenSeries": false,
+					"id": 106,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/ReportCompactionTasks\"}[1m])) by (le))",
+							"interval": "",
+							"legendFormat": "hummock_manager_ ReportCompactionTasks_p50",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_report_compaction_task_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "hummock_client_ ReportCompactionTasks_p50 compute_node = {{instance}} ",
+							"refId": "B"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "report compation latency p50",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:437",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:438",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				},
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 8,
+						"x": 8,
+						"y": 10
+					},
+					"hiddenSeries": false,
+					"id": 107,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.9, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/ReportCompactionTasks\"}[1m])) by (le))",
+							"interval": "",
+							"legendFormat": "hummock_manager_ ReportCompactionTasks_p90",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.9, sum(irate(state_store_report_compaction_task_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "hummock_client_ ReportCompactionTasks_p90 compute_node = {{instance}} ",
+							"refId": "B"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "report compation latency p90",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:437",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:438",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				},
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 8,
+						"x": 16,
+						"y": 10
+					},
+					"hiddenSeries": false,
+					"id": 111,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/ReportCompactionTasks\"}[1m])) by (le))",
+							"interval": "",
+							"legendFormat": "hummock_manager_ ReportCompactionTasks_p99",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_report_compaction_task_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "hummock_client_ ReportCompactionTasks_p99 compute_node = {{instance}} ",
+							"refId": "B"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "report compation latency p99",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:437",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:438",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				}
+			],
+			"title": "gRPC Hummock Compation Comparision",
+			"type": "row"
+		},
+		{
+			"collapsed": true,
+			"gridPos": {
+				"h": 1,
+				"w": 24,
+				"x": 0,
+				"y": 11
+			},
+			"id": 97,
+			"panels": [
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 8,
+						"x": 0,
+						"y": 3
+					},
+					"hiddenSeries": false,
+					"id": 98,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/PinVersion\"}[1m])) by (le, instance))",
+							"interval": "",
+							"legendFormat": "hummock_manager_pinVersion_p50 compute_node = {{instance}} ",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_pin_version_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "hummock_client_pinVersion_p50 compute_node = {{instance}} ",
+							"refId": "B"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "pin version latency p50",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:437",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:438",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				},
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 8,
+						"x": 8,
+						"y": 3
+					},
+					"hiddenSeries": false,
+					"id": 100,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.9, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/PinVersion\"}[1m])) by (le, instance))",
+							"interval": "",
+							"legendFormat": "hummock_manager_pinVersion_p90 compute_node = {{instance}} ",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.9, sum(irate(state_store_pin_version_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "hummock_client_pinVersion_p90 compute_node = {{instance}} ",
+							"refId": "B"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "pin version latency p90",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:437",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:438",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				},
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 8,
+						"x": 16,
+						"y": 3
+					},
+					"hiddenSeries": false,
+					"id": 108,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/PinVersion\"}[1m])) by (le, instance))",
+							"interval": "",
+							"legendFormat": "hummock_manager_pinVersion_p99 compute_node = {{instance}} ",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_pin_version_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "hummock_client_pinVersion_p99 compute_node = {{instance}} ",
+							"refId": "B"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "pin version latency p90",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:437",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:438",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				},
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 8,
+						"x": 0,
+						"y": 11
+					},
+					"hiddenSeries": false,
+					"id": 102,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/UnpinVersion\"}[1m])) by (le, instance))",
+							"interval": "",
+							"legendFormat": "hummock_manager_unpinVersion_p50 compute_node = {{instance}} ",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_unpin_version_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "hummock_client_unpinVersion_p50 compute_node = {{instance}} ",
+							"refId": "B"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "unpin version latency p50",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:437",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:438",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				},
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 8,
+						"x": 8,
+						"y": 11
+					},
+					"hiddenSeries": false,
+					"id": 103,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.9, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/UnpinVersion\"}[1m])) by (le, instance))",
+							"interval": "",
+							"legendFormat": "hummock_manager_unpinVersion_p90 compute_node = {{instance}} ",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.9, sum(irate(state_store_unpin_version_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "hummock_client_unpinVersion_p90 compute_node = {{instance}} ",
+							"refId": "B"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "unpin version latency p90",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:437",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:438",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				},
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 8,
+						"x": 16,
+						"y": 11
+					},
+					"hiddenSeries": false,
+					"id": 109,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/UnpinVersion\"}[1m])) by (le, instance))",
+							"interval": "",
+							"legendFormat": "hummock_manager_unpinVersion_p99 compute_node = {{instance}} ",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_unpin_version_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "hummock_client_unpinVersion_p99 compute_node = {{instance}} ",
+							"refId": "B"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "unpin version latency p99",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:437",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:438",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				}
+			],
+			"title": "gRPC Hommock Version Comparison",
+			"type": "row"
+		},
+		{
+			"collapsed": true,
+			"gridPos": {
+				"h": 1,
+				"w": 24,
+				"x": 0,
+				"y": 12
+			},
+			"id": 88,
+			"panels": [
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 0,
+						"y": 4
+					},
+					"hiddenSeries": false,
+					"id": 91,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.CatalogService/Create\"}[1m])) by (le))",
+							"interval": "",
+							"legendFormat": "Create_p50",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.9, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.CatalogService/Create\"}[1m])) by (le))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "Create_p90",
+							"refId": "B"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.CatalogService/Create\"}[1m])) by (le))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "Create_p99",
+							"refId": "C"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.CatalogService/Create\"}[1m])) / sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.CatalogService/Create\"}[1m]))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "Create_avg",
+							"refId": "D"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "create latency",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:437",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:438",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				},
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 12,
+						"y": 4
+					},
+					"hiddenSeries": false,
+					"id": 92,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.CatalogService/Drop\"}[1m])) by (le))",
+							"interval": "",
+							"legendFormat": "Drop_p50",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.9, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.CatalogService/Drop\"}[1m])) by (le))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "Drop_p90",
+							"refId": "B"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.CatalogService/Drop\"}[1m])) by (le))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "Drop_p99",
+							"refId": "C"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.CatalogService/Drop\"}[1m])) / sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.CatalogService/Drop\"}[1m]))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "Drop_avg",
+							"refId": "D"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "drop latency",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:437",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:438",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				},
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 0,
+						"y": 12
+					},
+					"hiddenSeries": false,
+					"id": 93,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.CatalogService/GetCatalog\"}[1m])) by (le))",
+							"interval": "",
+							"legendFormat": "GetCatalog_p50",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.9, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.CatalogService/GetCatalog\"}[1m])) by (le))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "GetCatalog_p90",
+							"refId": "B"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.CatalogService/GetCatalog\"}[1m])) by (le))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "GetCatalog_p99",
+							"refId": "C"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.CatalogService/GetCatalog\"}[1m])) / sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.CatalogService/GetCatalog\"}[1m]))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "GetCatalog_avg",
+							"refId": "D"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "get catalog latency",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:437",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:438",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				}
+			],
+			"title": "gRPC meta: Catalog Service",
+			"type": "row"
+		},
+		{
+			"collapsed": true,
+			"gridPos": {
+				"h": 1,
+				"w": 24,
+				"x": 0,
+				"y": 13
+			},
+			"id": 84,
+			"panels": [
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 0,
+						"y": 5
+					},
+					"hiddenSeries": false,
+					"id": 89,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.ClusterService/AddWorkerNode\"}[1m])) by (le))",
+							"interval": "",
+							"legendFormat": "AddWorkerNode_p50",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.9, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.ClusterService/AddWorkerNode\"}[1m])) by (le))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "AddWorkerNode_p90",
+							"refId": "B"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.ClusterService/AddWorkerNode\"}[1m])) by (le))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "AddWorkerNode_p99",
+							"refId": "C"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.ClusterService/AddWorkerNode\"}[1m])) / sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.ClusterService/AddWorkerNode\"}[1m]))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "AddWorkerNode_avg",
+							"refId": "D"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "add worker node latency",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:437",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:438",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				},
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 12,
+						"y": 5
+					},
+					"hiddenSeries": false,
+					"id": 90,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.ClusterService/ListAllNodes\"}[1m])) by (le))",
+							"interval": "",
+							"legendFormat": "ListAllNodes_p50",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.9, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.ClusterService/ListAllNodes\"}[1m])) by (le))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "ListAllNodes_p90",
+							"refId": "B"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.ClusterService/ListAllNodes\"}[1m])) by (le))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "ListAllNodes_p99",
+							"refId": "C"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.ClusterService/ListAllNodes\"}[1m])) / sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.ClusterService/ListAllNodes\"}[1m]))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "ListAllNodes_avg",
+							"refId": "D"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "list all node latency",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:437",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:438",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				}
+			],
+			"title": "gRPC meta: Cluster Service",
+			"type": "row"
+		},
+		{
+			"collapsed": false,
+			"gridPos": {
+				"h": 1,
+				"w": 24,
+				"x": 0,
+				"y": 14
+			},
+			"id": 82,
+			"panels": [],
+			"title": "gRPC meta: Stream Manager",
+			"type": "row"
 		},
 		{
 			"aliasColors": {},
 			"bars": false,
 			"dashLength": 10,
 			"dashes": false,
-			"fieldConfig": {
-				"defaults": {
-					"unit": "s"
-				},
-				"overrides": []
-			},
 			"fill": 1,
 			"fillGradient": 0,
 			"gridPos": {
 				"h": 8,
 				"w": 12,
-				"x": 12,
-				"y": 17
+				"x": 0,
+				"y": 15
 			},
 			"hiddenSeries": false,
-			"id": 73,
+			"id": 76,
 			"legend": {
 				"avg": false,
 				"current": false,
@@ -763,9 +2665,9 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "histogram_quantile(0.5, sum(rate(state_store_add_tables_latency_bucket[5m])) by (le))",
+					"expr": "histogram_quantile(0.5, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.StreamManagerService/CreateMaterializedView\"}[1m])) by (le))",
 					"interval": "",
-					"legendFormat": "pin_snapshot_latency_p50",
+					"legendFormat": "CreateMaterializedView_p50",
 					"refId": "A"
 				},
 				{
@@ -774,10 +2676,10 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "histogram_quantile(0.99, sum(rate(state_store_add_tables_latency_bucket[5m])) by (le))",
+					"expr": "histogram_quantile(0.9, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.StreamManagerService/CreateMaterializedView\"}[1m])) by (le))",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "add_table_latency_p99",
+					"legendFormat": "CreateMaterializedView_p90",
 					"refId": "B"
 				},
 				{
@@ -786,10 +2688,10 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "histogram_quantile(0.9, sum(rate(state_store_add_tables_latency_bucket[5m])) by (le))",
+					"expr": "histogram_quantile(0.99, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.StreamManagerService/CreateMaterializedView\"}[1m])) by (le))",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "add_table_latencyp90",
+					"legendFormat": "CreateMaterializedView_p99",
 					"refId": "C"
 				},
 				{
@@ -798,64 +2700,16 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "sum(rate(state_store_add_tables_latency_sum[5m])) / sum(rate(state_store_add_tables_latency_count[5m]))",
+					"expr": "sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.StreamManagerService/CreateMaterializedView\"}[1m])) / sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.StreamManagerService/CreateMaterializedView\"}[1m]))",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "add_table_latency_avg",
+					"legendFormat": "CreateMaterializedView_avg",
 					"refId": "D"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.5, sum(rate(state_store_get_new_table_id_latency_bucket[5m])) by (le))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "get_new_table_id_latency_p50",
-					"refId": "E"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.99, sum(rate(state_store_get_new_table_id_latency_bucket[5m])) by (le))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "get_new_table_id_latency_p99",
-					"refId": "F"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "sum(rate(state_store_get_new_table_id_latency_sum[5m])) / sum(rate(state_store_get_new_table_id_latency_count[5m]))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "get_new_table_id_latency_avg",
-					"refId": "G"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.90, sum(rate(state_store_get_new_table_id_latency_bucket[5m])) by (le))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "get_new_table_id_latency_p90",
-					"refId": "H"
 				}
 			],
 			"thresholds": [],
 			"timeRegions": [],
-			"title": "table_latency",
+			"title": "create materialized view latency",
 			"tooltip": {
 				"shared": true,
 				"sort": 0,
@@ -869,13 +2723,133 @@
 			},
 			"yaxes": [
 				{
-					"$$hashKey": "object:123",
+					"$$hashKey": "object:437",
 					"format": "s",
 					"logBase": 1,
 					"show": true
 				},
 				{
-					"$$hashKey": "object:124",
+					"$$hashKey": "object:438",
+					"format": "short",
+					"logBase": 1,
+					"show": true
+				}
+			],
+			"yaxis": {
+				"align": false
+			}
+		},
+		{
+			"aliasColors": {},
+			"bars": false,
+			"dashLength": 10,
+			"dashes": false,
+			"fill": 1,
+			"fillGradient": 0,
+			"gridPos": {
+				"h": 8,
+				"w": 12,
+				"x": 12,
+				"y": 15
+			},
+			"hiddenSeries": false,
+			"id": 85,
+			"legend": {
+				"avg": false,
+				"current": false,
+				"max": false,
+				"min": false,
+				"show": true,
+				"total": false,
+				"values": false
+			},
+			"lines": true,
+			"linewidth": 1,
+			"nullPointMode": "null",
+			"options": {
+				"alertThreshold": true
+			},
+			"percentage": false,
+			"pluginVersion": "8.3.3",
+			"pointradius": 2,
+			"points": false,
+			"renderer": "flot",
+			"seriesOverrides": [],
+			"spaceLength": 10,
+			"stack": false,
+			"steppedLine": false,
+			"targets": [
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "${DS_RISEDEV-PROMETHEUS}"
+					},
+					"exemplar": true,
+					"expr": "histogram_quantile(0.5, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.StreamManagerService/DropMaterializedView\"}[1m])) by (le))",
+					"interval": "",
+					"legendFormat": "DropMaterializedView_p50",
+					"refId": "A"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "${DS_RISEDEV-PROMETHEUS}"
+					},
+					"exemplar": true,
+					"expr": "histogram_quantile(0.9, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.StreamManagerService/DropMaterializedView\"}[1m])) by (le))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "DropMaterializedView_p90",
+					"refId": "B"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "${DS_RISEDEV-PROMETHEUS}"
+					},
+					"exemplar": true,
+					"expr": "histogram_quantile(0.99, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.StreamManagerService/DropMaterializedView\"}[1m])) by (le))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "DropMaterializedView_p99",
+					"refId": "C"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "${DS_RISEDEV-PROMETHEUS}"
+					},
+					"exemplar": true,
+					"expr": "sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.StreamManagerService/DropMaterializedView\"}[1m])) / sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.StreamManagerService/DropMaterializedView\"}[1m]))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "DropMaterializedView_avg",
+					"refId": "D"
+				}
+			],
+			"thresholds": [],
+			"timeRegions": [],
+			"title": "drop materialized view latency",
+			"tooltip": {
+				"shared": true,
+				"sort": 0,
+				"value_type": "individual"
+			},
+			"type": "graph",
+			"xaxis": {
+				"mode": "time",
+				"show": true,
+				"values": []
+			},
+			"yaxes": [
+				{
+					"$$hashKey": "object:437",
+					"format": "s",
+					"logBase": 1,
+					"show": true
+				},
+				{
+					"$$hashKey": "object:438",
 					"format": "short",
 					"logBase": 1,
 					"show": true
@@ -896,10 +2870,10 @@
 				"h": 8,
 				"w": 12,
 				"x": 0,
-				"y": 25
+				"y": 23
 			},
 			"hiddenSeries": false,
-			"id": 68,
+			"id": 86,
 			"legend": {
 				"avg": false,
 				"current": false,
@@ -931,9 +2905,9 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "sum(rate(state_store_get_compaction_task_counts[1m]))",
+					"expr": "histogram_quantile(0.5, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.StreamManagerService/Flush\"}[1m])) by (le))",
 					"interval": "",
-					"legendFormat": "get_compaction_task_counts",
+					"legendFormat": "Flush_p50",
 					"refId": "A"
 				},
 				{
@@ -942,16 +2916,40 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "sum(rate(state_store_report_compaction_task_counts[1m]))",
+					"expr": "histogram_quantile(0.9, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.StreamManagerService/Flush\"}[1m])) by (le))",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "report_compaction_task_counts",
+					"legendFormat": "Flush_p90",
 					"refId": "B"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "${DS_RISEDEV-PROMETHEUS}"
+					},
+					"exemplar": true,
+					"expr": "histogram_quantile(0.99, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.StreamManagerService/Flush\"}[1m])) by (le))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "Flush_p99",
+					"refId": "C"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "${DS_RISEDEV-PROMETHEUS}"
+					},
+					"exemplar": true,
+					"expr": "sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.StreamManagerService/Flush\"}[1m])) / sum(irate(meta_grpc_duration_seconds_bucket{path=\"/meta.StreamManagerService/Flush\"}[1m]))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "Flush_avg",
+					"refId": "D"
 				}
 			],
 			"thresholds": [],
 			"timeRegions": [],
-			"title": "compaction_count",
+			"title": "flush latency",
 			"tooltip": {
 				"shared": true,
 				"sort": 0,
@@ -965,13 +2963,13 @@
 			},
 			"yaxes": [
 				{
-					"$$hashKey": "object:238",
-					"format": "ops",
+					"$$hashKey": "object:437",
+					"format": "s",
 					"logBase": 1,
 					"show": true
 				},
 				{
-					"$$hashKey": "object:239",
+					"$$hashKey": "object:438",
 					"format": "short",
 					"logBase": 1,
 					"show": true
@@ -982,178 +2980,1783 @@
 			}
 		},
 		{
-			"aliasColors": {},
-			"bars": false,
-			"dashLength": 10,
-			"dashes": false,
-			"fieldConfig": {
-				"defaults": {
-					"unit": "s"
-				},
-				"overrides": []
-			},
-			"fill": 1,
-			"fillGradient": 0,
+			"collapsed": true,
 			"gridPos": {
-				"h": 8,
-				"w": 12,
-				"x": 12,
-				"y": 25
+				"h": 1,
+				"w": 24,
+				"x": 0,
+				"y": 31
 			},
-			"hiddenSeries": false,
-			"id": 74,
-			"legend": {
-				"avg": false,
-				"current": false,
-				"max": false,
-				"min": false,
-				"show": true,
-				"total": false,
-				"values": false
-			},
-			"lines": true,
-			"linewidth": 1,
-			"nullPointMode": "null",
-			"options": {
-				"alertThreshold": true
-			},
-			"percentage": false,
-			"pluginVersion": "8.3.3",
-			"pointradius": 2,
-			"points": false,
-			"renderer": "flot",
-			"seriesOverrides": [],
-			"spaceLength": 10,
-			"stack": false,
-			"steppedLine": false,
-			"targets": [
+			"id": 78,
+			"panels": [
 				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 0,
+						"y": 8
 					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.5, sum(rate(state_store_get_compaction_task_latency_bucket[5m])) by (le))",
-					"interval": "",
-					"legendFormat": "get_compaction_task_latency_p50",
-					"refId": "A"
+					"hiddenSeries": false,
+					"id": 80,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/UnpinVersion\"}[1m])) by (le))",
+							"interval": "",
+							"legendFormat": "UnpinVersion_p50",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.9, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/UnpinVersion\"}[1m])) by (le))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "UnpinVersion_p90",
+							"refId": "B"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/UnpinVersion\"}[1m])) by (le))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "UnpinVersion_p99",
+							"refId": "C"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/UnpinVersion\"}[1m])) / sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/UnpinVersion\"}[1m]))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "UnpinVersion_avg",
+							"refId": "D"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/PinVersion\"}[1m])) by (le))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "PinVersion_p50",
+							"refId": "E"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.9, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/PinVersion\"}[1m])) by (le))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "PinVersion_p90",
+							"refId": "F"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/PinVersion\"}[1m])) by (le))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "PinVersion_p99",
+							"refId": "G"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/PinVersion\"}[1m])) / sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/PinVersion\"}[1m]))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "PinVersion_avg",
+							"refId": "H"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "version latency",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:437",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:438",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
 				},
 				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 12,
+						"y": 8
 					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.99, sum(rate(state_store_get_compaction_task_latency_bucket[5m])) by (le))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "get_compaction_task_latency_p99",
-					"refId": "B"
+					"hiddenSeries": false,
+					"id": 79,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/UnpinSnapshot\"}[1m])) by (le))",
+							"interval": "",
+							"legendFormat": "UnpinSnapshot_p50",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.9, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/UnpinSnapshot\"}[1m])) by (le))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "UnpinSnapshot_p90",
+							"refId": "B"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/UnpinSnapshot\"}[1m])) by (le))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "UnpinSnapshot_p99",
+							"refId": "C"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/UnpinSnapshot\"}[1m])) / sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/UnpinSnapshot\"}[1m]))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "UnpinSnapshot_avg",
+							"refId": "D"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/PinSnapshot\"}[1m])) by (le))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "PinSnapshot_p50",
+							"refId": "E"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.9, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/PinSnapshot\"}[1m])) by (le))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "PinSnapshot_p90",
+							"refId": "F"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/PinSnapshot\"}[1m])) by (le))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "PinSnapshot_p99",
+							"refId": "G"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/UnpinSnapshot\"}[1m])) / sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/UnpinSnapshot\"}[1m]))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "PinSnapshot_avg",
+							"refId": "H"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "snapshot latency",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:437",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:438",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
 				},
 				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 0,
+						"y": 16
 					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.9, sum(rate(state_store_get_compaction_task_latency_bucket[5m])) by (le))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "get_compaction_task_latency_p90",
-					"refId": "C"
+					"hiddenSeries": false,
+					"id": 94,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/GetCompactionTasks\"}[1m])) by (le))",
+							"interval": "",
+							"legendFormat": "GetCompactionTasks_p50",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.9, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/UnpinVersion\"}[1m])) by (le))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "GetCompactionTasks_p90",
+							"refId": "B"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/UnpinVersion\"}[1m])) by (le))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "GetCompactionTasks_p99",
+							"refId": "C"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/UnpinVersion\"}[1m])) / sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/UnpinVersion\"}[1m]))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "GetCompactionTasks_avg",
+							"refId": "D"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/ReportCompactionTasks\"}[1m])) by (le))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "ReportCompactionTasks_p50",
+							"refId": "E"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.9, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/ReportCompactionTasks\"}[1m])) by (le))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "ReportCompactionTasks_p90",
+							"refId": "F"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/ReportCompactionTasks\"}[1m])) by (le))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "ReportCompactionTasks_p99",
+							"refId": "G"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/ReportCompactionTasks\"}[1m])) / sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/ReportCompactionTasks\"}[1m]))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "ReportCompactionTasks_avg",
+							"refId": "H"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "compation latency",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:437",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:438",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
 				},
 				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 12,
+						"y": 16
 					},
-					"exemplar": true,
-					"expr": "sum(rate(state_store_get_compaction_task_latency_sum[5m])) / sum(rate(state_store_get_compaction_task_latency_count[5m]))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "get_compaction_task_latency_avg",
-					"refId": "D"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
+					"hiddenSeries": false,
+					"id": 95,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
 					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.5, sum(rate(state_store_report_compaction_task_latency_bucket[5m])) by (le))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "report_compaction_task_latency_p50",
-					"refId": "E"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
 					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.99, sum(rate(state_store_report_compaction_task_latency_bucket[5m])) by (le))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "report_compaction_task_latency_p99",
-					"refId": "F"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/AddTables\"}[1m])) by (le))",
+							"interval": "",
+							"legendFormat": "AddTables_p50",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.9, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/AddTables\"}[1m])) by (le))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "AddTables_p90",
+							"refId": "B"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/AddTables\"}[1m])) by (le))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "AddTables_p99",
+							"refId": "C"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/AddTables\"}[1m])) / sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/AddTables\"}[1m]))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "AddTables_avg",
+							"refId": "D"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/GetNewTableId\"}[1m])) by (le))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "GetNewTableId_p50",
+							"refId": "E"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.9, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/GetNewTableId\"}[1m])) by (le))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "GetNewTableId_p90",
+							"refId": "F"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/GetNewTableId\"}[1m])) by (le))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "GetNewTableId_p99",
+							"refId": "G"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/GetNewTableId\"}[1m])) / sum(irate(meta_grpc_duration_seconds_bucket{path=\"/hummock.HummockManagerService/GetNewTableId\"}[1m]))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "GetNewTableId_avg",
+							"refId": "H"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "table latency",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
 					},
-					"exemplar": true,
-					"expr": "sum(rate(state_store_report_compaction_task_latency_sum[5m])) / sum(rate(state_store_report_compaction_task_latency_count[5m]))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "report_compaction_task_latency_avg",
-					"refId": "G"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
 					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.90, sum(rate(state_store_report_compaction_task_latency_bucket[5m])) by (le))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "report_compaction_task_latency_p90",
-					"refId": "H"
+					"yaxes": [
+						{
+							"$$hashKey": "object:437",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:438",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
 				}
 			],
-			"thresholds": [],
-			"timeRegions": [],
-			"title": "compation_latency",
-			"tooltip": {
-				"shared": true,
-				"sort": 0,
-				"value_type": "individual"
+			"title": "gRPC meta: Hummock Manager",
+			"type": "row"
+		},
+		{
+			"collapsed": true,
+			"gridPos": {
+				"h": 1,
+				"w": 24,
+				"x": 0,
+				"y": 32
 			},
-			"type": "graph",
-			"xaxis": {
-				"mode": "time",
-				"show": true,
-				"values": []
-			},
-			"yaxes": [
+			"id": 62,
+			"panels": [
 				{
-					"$$hashKey": "object:123",
-					"format": "s",
-					"logBase": 1,
-					"show": true
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 0,
+						"y": 24
+					},
+					"hiddenSeries": false,
+					"id": 60,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(irate(state_store_pin_version_counts{instance =~\"$compute_node\"}[1m])) by(instance)",
+							"interval": "",
+							"legendFormat": "pin_version_counts compute_node = {{instance}} ",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(irate(state_store_unpin_version_counts{instance =~\"$compute_node\"}[1m])) by(instance)",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "unpin_version_counts compute_node = {{instance}} ",
+							"refId": "B"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "version_count",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:64",
+							"format": "ops",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:65",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
 				},
 				{
-					"$$hashKey": "object:124",
-					"format": "short",
-					"logBase": 1,
-					"show": true
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fieldConfig": {
+						"defaults": {
+							"unit": "s"
+						},
+						"overrides": []
+					},
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 12,
+						"y": 24
+					},
+					"hiddenSeries": false,
+					"id": 71,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_pin_version_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"interval": "",
+							"legendFormat": "pin_version_latency_p50 compute_node = {{instance}} ",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_pin_version_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "pin_version_latency_p99 compute_node = {{instance}} ",
+							"refId": "B"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.9, sum(irate(state_store_pin_version_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "pin_version_latencyp90 compute_node = {{instance}} ",
+							"refId": "C"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(irate(state_store_pin_version_latency_sum{instance =~\"$compute_node\"}[1m])) / sum(irate(state_store_pin_version_latency_count{instance =~\"$compute_node\"}[1m]))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "pin_version_latency_avg",
+							"refId": "D"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_unpin_version_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "unpin_version_latency_p50 compute_node = {{instance}} ",
+							"refId": "E"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_unpin_version_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "unpin_version_latency_p99 compute_node = {{instance}} ",
+							"refId": "F"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(irate(state_store_unpin_version_latency_sum{instance =~\"$compute_node\"}[1m])) / sum(irate(state_store_unpin_version_latency_count{instance =~\"$compute_node\"}[1m]))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "unpin_version_latency_avg",
+							"refId": "G"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.90, sum(irate(state_store_unpin_version_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "unpin_version_latency_p90 compute_node = {{instance}} ",
+							"refId": "H"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "version_latency",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:123",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:124",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				},
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 0,
+						"y": 32
+					},
+					"hiddenSeries": false,
+					"id": 64,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(irate(state_store_pin_snapshot_counts{instance =~\"$compute_node\"}[1m])) by(instance)",
+							"interval": "",
+							"legendFormat": "pin_snapshot_counts compute_node = {{instance}} ",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(irate(state_store_unpin_snapshot_counts{instance =~\"$compute_node\"}[1m])) by(instance)",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "unpin_snapshot_counts compute_node = {{instance}} ",
+							"refId": "B"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "snapshot_count",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:97",
+							"format": "ops",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:98",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				},
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fieldConfig": {
+						"defaults": {
+							"unit": "s"
+						},
+						"overrides": []
+					},
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 12,
+						"y": 32
+					},
+					"hiddenSeries": false,
+					"id": 72,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_pin_snapshot_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"interval": "",
+							"legendFormat": "pin_snapshot_latency_p50 compute_node = {{instance}} ",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_pin_snapshot_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "pin_snapshot_latency_p99 compute_node = {{instance}} ",
+							"refId": "B"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.9, sum(irate(state_store_pin_snapshot_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "pin_snapshot_latencyp90 compute_node = {{instance}} ",
+							"refId": "C"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(irate(state_store_pin_snapshot_latency_sum[1m])) / sum(irate(state_store_pin_snapshot_latency_count[1m]))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "pin_snapshot_latency_avg",
+							"refId": "D"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_unpin_version_snapshot_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "unpin_snapshot_latency_p50 compute_node = {{instance}} ",
+							"refId": "E"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_unpin_version_snapshot_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "unpin_snapshot_latency_p99 compute_node = {{instance}} ",
+							"refId": "F"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(irate(state_store_unpin_snapshot_latency_sum[1m])) / sum(irate(state_store_unpin_snapshot_latency_count[1m]))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "unpin_snapshot_latency_avg",
+							"refId": "G"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.90, sum(irate(state_store_unpin_snapshot_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "unpin_snapshot_latency_p90 compute_node = {{instance}} ",
+							"refId": "H"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "snapshot_latency",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:123",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:124",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				},
+				{
+					"fieldConfig": {
+						"defaults": {
+							"color": {
+								"mode": "palette-classic"
+							},
+							"custom": {
+								"axisLabel": "",
+								"axisPlacement": "auto",
+								"barAlignment": 0,
+								"drawStyle": "line",
+								"fillOpacity": 0,
+								"gradientMode": "none",
+								"hideFrom": {
+									"legend": false,
+									"tooltip": false,
+									"viz": false
+								},
+								"lineInterpolation": "linear",
+								"lineWidth": 1,
+								"pointSize": 5,
+								"scaleDistribution": {
+									"type": "linear"
+								},
+								"showPoints": "auto",
+								"spanNulls": false,
+								"stacking": {
+									"group": "A",
+									"mode": "none"
+								},
+								"thresholdsStyle": {
+									"mode": "off"
+								}
+							},
+							"mappings": [],
+							"thresholds": {
+								"mode": "absolute",
+								"steps": [
+									{
+										"color": "green"
+									},
+									{
+										"color": "red",
+										"value": 80
+									}
+								]
+							}
+						},
+						"overrides": []
+					},
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 0,
+						"y": 40
+					},
+					"id": 66,
+					"options": {
+						"legend": {
+							"calcs": [],
+							"displayMode": "list",
+							"placement": "bottom"
+						},
+						"tooltip": {
+							"mode": "single"
+						}
+					},
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(irate(state_store_add_tables_counts{instance =~\"$compute_node\"}[1m]))by(instance)",
+							"interval": "",
+							"legendFormat": "add_tables_counts compute_node = {{instance}} ",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(irate(state_store_get_new_table_id_counts{instance =~\"$compute_node\"}[1m]))by(instance)",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "get_new_table_id_counts compute_node = {{instance}} ",
+							"refId": "B"
+						}
+					],
+					"title": "table_count",
+					"type": "timeseries"
+				},
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fieldConfig": {
+						"defaults": {
+							"unit": "s"
+						},
+						"overrides": []
+					},
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 12,
+						"y": 40
+					},
+					"hiddenSeries": false,
+					"id": 73,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_add_tables_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le,instance))",
+							"interval": "",
+							"legendFormat": "pin_snapshot_latency_p50 compute_node = {{instance}} ",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_add_tables_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "add_table_latency_p99 compute_node = {{instance}} ",
+							"refId": "B"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.9, sum(irate(state_store_add_tables_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "add_table_latency_p90 compute_node = {{instance}} ",
+							"refId": "C"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(irate(state_store_add_tables_latency_sum[1m])) / sum(irate(state_store_add_tables_latency_count[1m]))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "add_table_latency_avg",
+							"refId": "D"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_get_new_table_id_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "get_new_table_id_latency_p50 compute_node = {{instance}} ",
+							"refId": "E"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_get_new_table_id_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "get_new_table_id_latency_p99 compute_node = {{instance}} ",
+							"refId": "F"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(irate(state_store_get_new_table_id_latency_sum[1m])) / sum(irate(state_store_get_new_table_id_latency_count[1m]))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "get_new_table_id_latency_avg",
+							"refId": "G"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.90, sum(irate(state_store_get_new_table_id_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "get_new_table_id_latency_p90 compute_node = {{instance}} ",
+							"refId": "H"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "table_latency",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:123",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:124",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				},
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 0,
+						"y": 48
+					},
+					"hiddenSeries": false,
+					"id": 68,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(irate(state_store_get_compaction_task_counts{instance =~\"$compute_node\"}[1m])) by(instance)",
+							"interval": "",
+							"legendFormat": "get_compaction_task_counts compute_node = {{instance}} ",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(irate(state_store_report_compaction_task_counts{instance =~\"$compute_node\"}[1m])) by(instance)",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "report_compaction_task_counts compute_node = {{instance}} ",
+							"refId": "B"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "compaction_count",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:238",
+							"format": "ops",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:239",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				},
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fieldConfig": {
+						"defaults": {
+							"unit": "s"
+						},
+						"overrides": []
+					},
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 12,
+						"y": 48
+					},
+					"hiddenSeries": false,
+					"id": 74,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_get_compaction_task_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"interval": "",
+							"legendFormat": "get_compaction_task_latency_p50 compute_node = {{instance}}",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_get_compaction_task_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "get_compaction_task_latency_p99 compute_node = {{instance}}",
+							"refId": "B"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.9, sum(irate(state_store_get_compaction_task_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "get_compaction_task_latency_p90 compute_node = {{instance}}",
+							"refId": "C"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(irate(state_store_get_compaction_task_latency_sum[1m])) / sum(irate(state_store_get_compaction_task_latency_count[1m]))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "get_compaction_task_latency_avg",
+							"refId": "D"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_report_compaction_task_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "report_compaction_task_latency_p50 compute_node = {{instance}}",
+							"refId": "E"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_report_compaction_task_latency_bucket{instance =~\"$compute_node\"}[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "report_compaction_task_latency_p99 compute_node = {{instance}}",
+							"refId": "F"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(irate(state_store_report_compaction_task_latency_sum[1m])) / sum(irate(state_store_report_compaction_task_latency_count[1m]))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "report_compaction_task_latency_avg",
+							"refId": "G"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.90, sum(irate(state_store_report_compaction_task_latency_bucket[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "report_compaction_task_latency_p90 compute_node = {{instance}}",
+							"refId": "H"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "compation_latency",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:123",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:124",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
 				}
 			],
-			"yaxis": {
-				"align": false
-			}
+			"title": "gRPC: hummock meta client",
+			"type": "row"
 		},
 		{
 			"collapsed": true,
@@ -1176,7 +4779,7 @@
 						"h": 8,
 						"w": 12,
 						"x": 0,
-						"y": 2
+						"y": 25
 					},
 					"hiddenSeries": false,
 					"id": 56,
@@ -1211,9 +4814,9 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "sum(rate(state_store_reverse_range_scan_counts[1m])) by (type)",
+							"expr": "sum(irate(state_store_reverse_range_scan_counts{instance =~\"$compute_node\"}[1m])) by(instance)",
 							"interval": "",
-							"legendFormat": "reverse_range_scan_counts",
+							"legendFormat": "reverse_range_scan_count compute_node = {{instance}}",
 							"refId": "A"
 						},
 						{
@@ -1222,10 +4825,10 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "sum(rate(state_store_range_scan_counts[1m])) by (type)",
+							"expr": "sum(irate(state_store_range_scan_counts{instance =~\"$compute_node\"}[1m])) by(instance)",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "range_scan_count",
+							"legendFormat": "range_scan_countcompute_node = {{instance}}",
 							"refId": "B"
 						}
 					],
@@ -1286,7 +4889,7 @@
 						"h": 8,
 						"w": 12,
 						"x": 0,
-						"y": 10
+						"y": 26
 					},
 					"hiddenSeries": false,
 					"id": 14,
@@ -1384,7 +4987,7 @@
 						"h": 8,
 						"w": 12,
 						"x": 0,
-						"y": 4
+						"y": 27
 					},
 					"hiddenSeries": false,
 					"id": 16,
@@ -1419,7 +5022,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "rate(stream_source_output_rows_counts[15s])",
+							"expr": "irate(stream_source_output_rows_counts[15s])",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "source_id = {{source_id}}",
@@ -1489,7 +5092,7 @@
 						"h": 8,
 						"w": 12,
 						"x": 0,
-						"y": 5
+						"y": 12
 					},
 					"hiddenSeries": false,
 					"id": 28,
@@ -1524,9 +5127,9 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.5, sum(rate(state_store_get_latency_bucket[5m])) by (le))",
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_get_latency_bucket[5m])) by (le, instance))",
 							"interval": "",
-							"legendFormat": "p50",
+							"legendFormat": "p50 compute_node = {{instance}} ",
 							"refId": "A"
 						},
 						{
@@ -1535,10 +5138,10 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.99, sum(rate(state_store_get_latency_bucket[5m])) by (le))",
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_get_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "p99",
+							"legendFormat": "p99 compute_node = {{instance}} ",
 							"refId": "B"
 						},
 						{
@@ -1547,10 +5150,10 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.9, sum(rate(state_store_get_latency_bucket[5m])) by (le))",
+							"expr": "histogram_quantile(0.9, sum(irate(state_store_get_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "p90",
+							"legendFormat": "p90 compute_node = {{instance}} ",
 							"refId": "C"
 						},
 						{
@@ -1559,7 +5162,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "sum(rate(state_store_get_latency_sum[5m])) / sum(rate(state_store_get_latency_count[5m]))",
+							"expr": "sum(irate(state_store_get_latency_sum[1m])) / sum(irate(state_store_get_latency_count[1m]))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "avg",
@@ -1609,7 +5212,7 @@
 						"h": 8,
 						"w": 12,
 						"x": 12,
-						"y": 5
+						"y": 12
 					},
 					"hiddenSeries": false,
 					"id": 30,
@@ -1644,10 +5247,10 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "sum(rate(state_store_get_counts[1m])) by (type)",
+							"expr": "sum(irate(state_store_get_counts[1m])) by (instance)",
 							"interval": "",
 							"intervalFactor": 2,
-							"legendFormat": "get_count",
+							"legendFormat": "get_count compute_node = {{instance}} ",
 							"refId": "A"
 						}
 					],
@@ -1694,7 +5297,7 @@
 						"h": 8,
 						"w": 12,
 						"x": 0,
-						"y": 13
+						"y": 20
 					},
 					"hiddenSeries": false,
 					"id": 32,
@@ -1729,9 +5332,9 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "sum(state_store_get_key_size_sum)/sum(state_store_get_key_size_count)",
+							"expr": "sum(state_store_get_key_size_sum)by(instance)/sum(state_store_get_key_size_count) by(instance)",
 							"interval": "",
-							"legendFormat": "get_key_size",
+							"legendFormat": "get_key_size compute_node = {{instance}} ",
 							"refId": "A"
 						},
 						{
@@ -1740,10 +5343,10 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "sum(state_store_get_value_size_sum)/sum(state_store_get_value_size_count)",
+							"expr": "sum(state_store_get_value_size_sum)by(instance)/sum(state_store_get_value_size_count)by(instance)",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "get_value_size",
+							"legendFormat": "get_value_size compute_node = {{instance}} ",
 							"refId": "B"
 						}
 					],
@@ -1790,7 +5393,7 @@
 						"h": 8,
 						"w": 12,
 						"x": 12,
-						"y": 13
+						"y": 20
 					},
 					"hiddenSeries": false,
 					"id": 34,
@@ -1825,9 +5428,9 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.5, sum(rate(state_store_get_snapshot_latency_bucket[5m])) by (le))",
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_get_snapshot_latency_bucket[1m])) by (le, instance))",
 							"interval": "",
-							"legendFormat": "p50",
+							"legendFormat": "p50 compute_node = {{instance}} ",
 							"refId": "A"
 						},
 						{
@@ -1836,10 +5439,10 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.95, sum(rate(state_store_get_snapshot_latency_bucket[5m])) by (le))",
+							"expr": "histogram_quantile(0.95, sum(irate(state_store_get_snapshot_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "p95",
+							"legendFormat": "p95 compute_node = {{instance}} ",
 							"refId": "B"
 						},
 						{
@@ -1848,10 +5451,10 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.99, sum(rate(state_store_get_snapshot_latency_bucket[5m])) by (le))",
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_get_snapshot_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "p99",
+							"legendFormat": "p99 compute_node = {{instance}} ",
 							"refId": "C"
 						},
 						{
@@ -1860,7 +5463,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "sum(rate(state_store_get_snapshot_latency_sum[5m])) / sum(rate(state_store_get_latency_count[5m]))",
+							"expr": "sum(irate(state_store_get_snapshot_latency_sum[1m])) / sum(irate(state_store_get_latency_count[1m]))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "avg",
@@ -1904,7 +5507,7 @@
 			"type": "row"
 		},
 		{
-			"collapsed": false,
+			"collapsed": true,
 			"gridPos": {
 				"h": 1,
 				"w": 24,
@@ -1912,623 +5515,624 @@
 				"y": 37
 			},
 			"id": 24,
-			"panels": [],
+			"panels": [
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 0,
+						"y": 13
+					},
+					"hiddenSeries": false,
+					"id": 43,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(irate(state_store_batched_write_counts[1m])) by (instance)",
+							"interval": "",
+							"intervalFactor": 2,
+							"legendFormat": "get_count compute_node = {{instance}} ",
+							"refId": "A"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "write_batch_count",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:90",
+							"format": "ops",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:91",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				},
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 12,
+						"y": 13
+					},
+					"hiddenSeries": false,
+					"id": 44,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(irate(state_store_batched_write_tuple_counts[1m])) by (instance)",
+							"interval": "",
+							"intervalFactor": 2,
+							"legendFormat": "get_count compute_node = {{instance}} ",
+							"refId": "A"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "write_batch_kv_pair_count",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:90",
+							"format": "ops",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:91",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				},
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 0,
+						"y": 21
+					},
+					"hiddenSeries": false,
+					"id": 40,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_batched_write_latency_bucket[1m])) by (le, instance))",
+							"interval": "",
+							"legendFormat": "p50 compute_node = {{instance}} ",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.9, sum(irate(state_store_batched_write_latency_bucket[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "p90 compute_node = {{instance}} ",
+							"refId": "B"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_batched_write_latency_bucket[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "p99 compute_node = {{instance}} ",
+							"refId": "C"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(irate(state_store_batched_write_latency_sum[1m])) / sum(irate(state_store_batched_write_latency_count[1m]))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "avg",
+							"refId": "D"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "write_batch_latency",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:664",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:665",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				},
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 12,
+						"y": 21
+					},
+					"hiddenSeries": false,
+					"id": 42,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_batch_write_add_l0_ssts_latency_bucket[1m])) by (le, instance))",
+							"interval": "",
+							"legendFormat": "p50 compute_node = {{instance}} ",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.9, sum(irate(state_store_batch_write_add_l0_ssts_latency_bucket[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "p90 compute_node = {{instance}} ",
+							"refId": "B"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_batch_write_add_l0_ssts_latency_bucket[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "p99 compute_node = {{instance}} ",
+							"refId": "C"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(irate(state_store_batch_write_add_l0_ssts_latency_sum[1m])) / sum(irate(state_store_batch_write_add_l0_ssts_latency_count[1m]))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "avg",
+							"refId": "D"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "add_l0_sst_latency",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:664",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:665",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				},
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 0,
+						"y": 29
+					},
+					"hiddenSeries": false,
+					"id": 41,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_batch_write_build_table_latency_bucket[1m])) by (le, instance))",
+							"interval": "",
+							"legendFormat": "p50 compute_node = {{instance}} ",
+							"refId": "A"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.9, sum(irate(state_store_batch_write_build_table_latency_bucket[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "p90 compute_node = {{instance}} ",
+							"refId": "B"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_batch_write_build_table_latency_bucket[1m])) by (le, instance))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "p99 compute_node = {{instance}} ",
+							"refId": "C"
+						},
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(irate(state_store_batch_write_build_table_latency_sum[1m])) / sum(irate(state_store_batch_write_build_table_latency_count[1m]))",
+							"hide": false,
+							"interval": "",
+							"legendFormat": "avg",
+							"refId": "D"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "build_table_latency",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:664",
+							"format": "s",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:665",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				},
+				{
+					"aliasColors": {},
+					"bars": false,
+					"dashLength": 10,
+					"dashes": false,
+					"fill": 1,
+					"fillGradient": 0,
+					"gridPos": {
+						"h": 8,
+						"w": 12,
+						"x": 12,
+						"y": 29
+					},
+					"hiddenSeries": false,
+					"id": 45,
+					"legend": {
+						"avg": false,
+						"current": false,
+						"max": false,
+						"min": false,
+						"show": true,
+						"total": false,
+						"values": false
+					},
+					"lines": true,
+					"linewidth": 1,
+					"nullPointMode": "null",
+					"options": {
+						"alertThreshold": true
+					},
+					"percentage": false,
+					"pluginVersion": "8.3.3",
+					"pointradius": 2,
+					"points": false,
+					"renderer": "flot",
+					"seriesOverrides": [],
+					"spaceLength": 10,
+					"stack": false,
+					"steppedLine": false,
+					"targets": [
+						{
+							"datasource": {
+								"type": "prometheus",
+								"uid": "${DS_RISEDEV-PROMETHEUS}"
+							},
+							"exemplar": true,
+							"expr": "sum(state_store_batched_write_size_sum)by(instance)/sum(state_store_batched_write_size_count)by(instance)",
+							"interval": "",
+							"legendFormat": "get_key_size compute_node = {{instance}} ",
+							"refId": "A"
+						}
+					],
+					"thresholds": [],
+					"timeRegions": [],
+					"title": "write_batch_size",
+					"tooltip": {
+						"shared": true,
+						"sort": 0,
+						"value_type": "individual"
+					},
+					"type": "graph",
+					"xaxis": {
+						"mode": "time",
+						"show": true,
+						"values": []
+					},
+					"yaxes": [
+						{
+							"$$hashKey": "object:160",
+							"format": "decbytes",
+							"logBase": 1,
+							"show": true
+						},
+						{
+							"$$hashKey": "object:161",
+							"format": "short",
+							"logBase": 1,
+							"show": true
+						}
+					],
+					"yaxis": {
+						"align": false
+					}
+				}
+			],
 			"title": "hummock_write_batch",
 			"type": "row"
-		},
-		{
-			"aliasColors": {},
-			"bars": false,
-			"dashLength": 10,
-			"dashes": false,
-			"fill": 1,
-			"fillGradient": 0,
-			"gridPos": {
-				"h": 8,
-				"w": 12,
-				"x": 0,
-				"y": 38
-			},
-			"hiddenSeries": false,
-			"id": 43,
-			"legend": {
-				"avg": false,
-				"current": false,
-				"max": false,
-				"min": false,
-				"show": true,
-				"total": false,
-				"values": false
-			},
-			"lines": true,
-			"linewidth": 1,
-			"nullPointMode": "null",
-			"options": {
-				"alertThreshold": true
-			},
-			"percentage": false,
-			"pluginVersion": "8.3.3",
-			"pointradius": 2,
-			"points": false,
-			"renderer": "flot",
-			"seriesOverrides": [],
-			"spaceLength": 10,
-			"stack": false,
-			"steppedLine": false,
-			"targets": [
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "sum(rate(state_store_batched_write_counts[1m])) by (type)",
-					"interval": "",
-					"intervalFactor": 2,
-					"legendFormat": "get_count",
-					"refId": "A"
-				}
-			],
-			"thresholds": [],
-			"timeRegions": [],
-			"title": "write_batch_count",
-			"tooltip": {
-				"shared": true,
-				"sort": 0,
-				"value_type": "individual"
-			},
-			"type": "graph",
-			"xaxis": {
-				"mode": "time",
-				"show": true,
-				"values": []
-			},
-			"yaxes": [
-				{
-					"$$hashKey": "object:90",
-					"format": "ops",
-					"logBase": 1,
-					"show": true
-				},
-				{
-					"$$hashKey": "object:91",
-					"format": "short",
-					"logBase": 1,
-					"show": true
-				}
-			],
-			"yaxis": {
-				"align": false
-			}
-		},
-		{
-			"aliasColors": {},
-			"bars": false,
-			"dashLength": 10,
-			"dashes": false,
-			"fill": 1,
-			"fillGradient": 0,
-			"gridPos": {
-				"h": 8,
-				"w": 12,
-				"x": 12,
-				"y": 38
-			},
-			"hiddenSeries": false,
-			"id": 44,
-			"legend": {
-				"avg": false,
-				"current": false,
-				"max": false,
-				"min": false,
-				"show": true,
-				"total": false,
-				"values": false
-			},
-			"lines": true,
-			"linewidth": 1,
-			"nullPointMode": "null",
-			"options": {
-				"alertThreshold": true
-			},
-			"percentage": false,
-			"pluginVersion": "8.3.3",
-			"pointradius": 2,
-			"points": false,
-			"renderer": "flot",
-			"seriesOverrides": [],
-			"spaceLength": 10,
-			"stack": false,
-			"steppedLine": false,
-			"targets": [
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "sum(rate(state_store_batched_write_tuple_counts[1m])) by (type)",
-					"interval": "",
-					"intervalFactor": 2,
-					"legendFormat": "get_count",
-					"refId": "A"
-				}
-			],
-			"thresholds": [],
-			"timeRegions": [],
-			"title": "write_batch_kv_pair_count",
-			"tooltip": {
-				"shared": true,
-				"sort": 0,
-				"value_type": "individual"
-			},
-			"type": "graph",
-			"xaxis": {
-				"mode": "time",
-				"show": true,
-				"values": []
-			},
-			"yaxes": [
-				{
-					"$$hashKey": "object:90",
-					"format": "ops",
-					"logBase": 1,
-					"show": true
-				},
-				{
-					"$$hashKey": "object:91",
-					"format": "short",
-					"logBase": 1,
-					"show": true
-				}
-			],
-			"yaxis": {
-				"align": false
-			}
-		},
-		{
-			"aliasColors": {},
-			"bars": false,
-			"dashLength": 10,
-			"dashes": false,
-			"fill": 1,
-			"fillGradient": 0,
-			"gridPos": {
-				"h": 8,
-				"w": 12,
-				"x": 0,
-				"y": 46
-			},
-			"hiddenSeries": false,
-			"id": 40,
-			"legend": {
-				"avg": false,
-				"current": false,
-				"max": false,
-				"min": false,
-				"show": true,
-				"total": false,
-				"values": false
-			},
-			"lines": true,
-			"linewidth": 1,
-			"nullPointMode": "null",
-			"options": {
-				"alertThreshold": true
-			},
-			"percentage": false,
-			"pluginVersion": "8.3.3",
-			"pointradius": 2,
-			"points": false,
-			"renderer": "flot",
-			"seriesOverrides": [],
-			"spaceLength": 10,
-			"stack": false,
-			"steppedLine": false,
-			"targets": [
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.5, sum(rate(state_store_batched_write_latency_bucket[5m])) by (le))",
-					"interval": "",
-					"legendFormat": "p50",
-					"refId": "A"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.9, sum(rate(state_store_batched_write_latency_bucket[5m])) by (le))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "p90",
-					"refId": "B"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.99, sum(rate(state_store_batched_write_latency_bucket[5m])) by (le))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "p99",
-					"refId": "C"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "sum(rate(state_store_batched_write_latency_sum[5m])) / sum(rate(state_store_batched_write_latency_count[5m]))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "avg",
-					"refId": "D"
-				}
-			],
-			"thresholds": [],
-			"timeRegions": [],
-			"title": "write_batch_latency",
-			"tooltip": {
-				"shared": true,
-				"sort": 0,
-				"value_type": "individual"
-			},
-			"type": "graph",
-			"xaxis": {
-				"mode": "time",
-				"show": true,
-				"values": []
-			},
-			"yaxes": [
-				{
-					"$$hashKey": "object:664",
-					"format": "s",
-					"logBase": 1,
-					"show": true
-				},
-				{
-					"$$hashKey": "object:665",
-					"format": "short",
-					"logBase": 1,
-					"show": true
-				}
-			],
-			"yaxis": {
-				"align": false
-			}
-		},
-		{
-			"aliasColors": {},
-			"bars": false,
-			"dashLength": 10,
-			"dashes": false,
-			"fill": 1,
-			"fillGradient": 0,
-			"gridPos": {
-				"h": 8,
-				"w": 12,
-				"x": 12,
-				"y": 46
-			},
-			"hiddenSeries": false,
-			"id": 42,
-			"legend": {
-				"avg": false,
-				"current": false,
-				"max": false,
-				"min": false,
-				"show": true,
-				"total": false,
-				"values": false
-			},
-			"lines": true,
-			"linewidth": 1,
-			"nullPointMode": "null",
-			"options": {
-				"alertThreshold": true
-			},
-			"percentage": false,
-			"pluginVersion": "8.3.3",
-			"pointradius": 2,
-			"points": false,
-			"renderer": "flot",
-			"seriesOverrides": [],
-			"spaceLength": 10,
-			"stack": false,
-			"steppedLine": false,
-			"targets": [
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.5, sum(rate(state_store_batch_write_add_l0_ssts_latency_bucket[5m])) by (le))",
-					"interval": "",
-					"legendFormat": "p50",
-					"refId": "A"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.9, sum(rate(state_store_batch_write_add_l0_ssts_latency_bucket[5m])) by (le))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "p90",
-					"refId": "B"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.99, sum(rate(state_store_batch_write_add_l0_ssts_latency_bucket[5m])) by (le))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "p99",
-					"refId": "C"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "sum(rate(state_store_batch_write_add_l0_ssts_latency_sum[5m])) / sum(rate(state_store_batch_write_add_l0_ssts_latency_count[5m]))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "avg",
-					"refId": "D"
-				}
-			],
-			"thresholds": [],
-			"timeRegions": [],
-			"title": "add_l0_sst_latency",
-			"tooltip": {
-				"shared": true,
-				"sort": 0,
-				"value_type": "individual"
-			},
-			"type": "graph",
-			"xaxis": {
-				"mode": "time",
-				"show": true,
-				"values": []
-			},
-			"yaxes": [
-				{
-					"$$hashKey": "object:664",
-					"format": "s",
-					"logBase": 1,
-					"show": true
-				},
-				{
-					"$$hashKey": "object:665",
-					"format": "short",
-					"logBase": 1,
-					"show": true
-				}
-			],
-			"yaxis": {
-				"align": false
-			}
-		},
-		{
-			"aliasColors": {},
-			"bars": false,
-			"dashLength": 10,
-			"dashes": false,
-			"fill": 1,
-			"fillGradient": 0,
-			"gridPos": {
-				"h": 8,
-				"w": 12,
-				"x": 0,
-				"y": 54
-			},
-			"hiddenSeries": false,
-			"id": 41,
-			"legend": {
-				"avg": false,
-				"current": false,
-				"max": false,
-				"min": false,
-				"show": true,
-				"total": false,
-				"values": false
-			},
-			"lines": true,
-			"linewidth": 1,
-			"nullPointMode": "null",
-			"options": {
-				"alertThreshold": true
-			},
-			"percentage": false,
-			"pluginVersion": "8.3.3",
-			"pointradius": 2,
-			"points": false,
-			"renderer": "flot",
-			"seriesOverrides": [],
-			"spaceLength": 10,
-			"stack": false,
-			"steppedLine": false,
-			"targets": [
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.5, sum(rate(state_store_batch_write_build_table_latency_bucket[5m])) by (le))",
-					"interval": "",
-					"legendFormat": "p50",
-					"refId": "A"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.9, sum(rate(state_store_batch_write_build_table_latency_bucket[5m])) by (le))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "p90",
-					"refId": "B"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.99, sum(rate(state_store_batch_write_build_table_latency_bucket[5m])) by (le))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "p99",
-					"refId": "C"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "sum(rate(state_store_batch_write_build_table_latency_sum[5m])) / sum(rate(state_store_batch_write_build_table_latency_count[5m]))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "avg",
-					"refId": "D"
-				}
-			],
-			"thresholds": [],
-			"timeRegions": [],
-			"title": "build_table_latency",
-			"tooltip": {
-				"shared": true,
-				"sort": 0,
-				"value_type": "individual"
-			},
-			"type": "graph",
-			"xaxis": {
-				"mode": "time",
-				"show": true,
-				"values": []
-			},
-			"yaxes": [
-				{
-					"$$hashKey": "object:664",
-					"format": "s",
-					"logBase": 1,
-					"show": true
-				},
-				{
-					"$$hashKey": "object:665",
-					"format": "short",
-					"logBase": 1,
-					"show": true
-				}
-			],
-			"yaxis": {
-				"align": false
-			}
-		},
-		{
-			"aliasColors": {},
-			"bars": false,
-			"dashLength": 10,
-			"dashes": false,
-			"fill": 1,
-			"fillGradient": 0,
-			"gridPos": {
-				"h": 8,
-				"w": 12,
-				"x": 12,
-				"y": 54
-			},
-			"hiddenSeries": false,
-			"id": 45,
-			"legend": {
-				"avg": false,
-				"current": false,
-				"max": false,
-				"min": false,
-				"show": true,
-				"total": false,
-				"values": false
-			},
-			"lines": true,
-			"linewidth": 1,
-			"nullPointMode": "null",
-			"options": {
-				"alertThreshold": true
-			},
-			"percentage": false,
-			"pluginVersion": "8.3.3",
-			"pointradius": 2,
-			"points": false,
-			"renderer": "flot",
-			"seriesOverrides": [],
-			"spaceLength": 10,
-			"stack": false,
-			"steppedLine": false,
-			"targets": [
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "sum(state_store_batched_write_size_sum)/sum(state_store_batched_write_size_count)",
-					"interval": "",
-					"legendFormat": "get_key_size",
-					"refId": "A"
-				}
-			],
-			"thresholds": [],
-			"timeRegions": [],
-			"title": "write_batch_size",
-			"tooltip": {
-				"shared": true,
-				"sort": 0,
-				"value_type": "individual"
-			},
-			"type": "graph",
-			"xaxis": {
-				"mode": "time",
-				"show": true,
-				"values": []
-			},
-			"yaxes": [
-				{
-					"$$hashKey": "object:160",
-					"format": "decbytes",
-					"logBase": 1,
-					"show": true
-				},
-				{
-					"$$hashKey": "object:161",
-					"format": "short",
-					"logBase": 1,
-					"show": true
-				}
-			],
-			"yaxis": {
-				"align": false
-			}
 		},
 		{
 			"collapsed": true,
@@ -2536,7 +6140,7 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 62
+				"y": 38
 			},
 			"id": 22,
 			"panels": [
@@ -2545,17 +6149,13 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
-					"fieldConfig": {
-						"defaults": {},
-						"overrides": []
-					},
 					"fill": 1,
 					"fillGradient": 0,
 					"gridPos": {
 						"h": 8,
 						"w": 12,
 						"x": 0,
-						"y": 5
+						"y": 14
 					},
 					"hiddenSeries": false,
 					"id": 46,
@@ -2590,10 +6190,10 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "sum(rate(state_store_iter_counts[1m])) ",
+							"expr": "sum(irate(state_store_iter_counts[1m])) by(instance)",
 							"interval": "",
 							"intervalFactor": 2,
-							"legendFormat": "get_count",
+							"legendFormat": "get_count compute_node = {{instance}} ",
 							"refId": "A"
 						}
 					],
@@ -2634,17 +6234,13 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
-					"fieldConfig": {
-						"defaults": {},
-						"overrides": []
-					},
 					"fill": 1,
 					"fillGradient": 0,
 					"gridPos": {
 						"h": 8,
 						"w": 12,
 						"x": 12,
-						"y": 5
+						"y": 14
 					},
 					"hiddenSeries": false,
 					"id": 47,
@@ -2679,10 +6275,10 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "sum(rate(state_store_iter_next_counts[1m])) ",
+							"expr": "sum(irate(state_store_iter_next_counts[1m])) by(instance)",
 							"interval": "",
 							"intervalFactor": 2,
-							"legendFormat": "get_count",
+							"legendFormat": "get_count compute_node = {{instance}} ",
 							"refId": "A"
 						}
 					],
@@ -2729,7 +6325,7 @@
 						"h": 8,
 						"w": 12,
 						"x": 0,
-						"y": 13
+						"y": 22
 					},
 					"hiddenSeries": false,
 					"id": 48,
@@ -2764,9 +6360,9 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.5, sum(rate(state_store_iter_next_latency_bucket[5m])) by (le))",
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_iter_next_latency_bucket[1m])) by (le, instance))",
 							"interval": "",
-							"legendFormat": "p50",
+							"legendFormat": "p50 compute_node = {{instance}} ",
 							"refId": "A"
 						},
 						{
@@ -2775,10 +6371,10 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.9, sum(rate(state_store_iter_next_latency_bucket[5m])) by (le))",
+							"expr": "histogram_quantile(0.9, sum(irate(state_store_iter_next_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "p90",
+							"legendFormat": "p90 compute_node = {{instance}} ",
 							"refId": "B"
 						},
 						{
@@ -2787,10 +6383,10 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.99, sum(rate(state_store_iter_next_latency_bucket[5m])) by (le))",
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_iter_next_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "p99",
+							"legendFormat": "p99 compute_node = {{instance}} ",
 							"refId": "C"
 						},
 						{
@@ -2799,7 +6395,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "sum(rate(state_store_iter_next_latency_sum[5m])) / sum(rate(state_store_iter_next_latency_count[5m]))",
+							"expr": "sum(irate(state_store_iter_next_latency_sum[1m])) / sum(irate(state_store_iter_next_latency_count[1m]))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "avg",
@@ -2849,7 +6445,7 @@
 						"h": 8,
 						"w": 12,
 						"x": 12,
-						"y": 13
+						"y": 22
 					},
 					"hiddenSeries": false,
 					"id": 49,
@@ -2884,9 +6480,9 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.5, sum(rate(state_store_iter_seek_latency_bucket[5m])) by (le))",
+							"expr": "histogram_quantile(0.5, sum(irate(state_store_iter_seek_latency_bucket[1m])) by (le, instance))",
 							"interval": "",
-							"legendFormat": "p50",
+							"legendFormat": "p50 compute_node = {{instance}} ",
 							"refId": "A"
 						},
 						{
@@ -2895,10 +6491,10 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.9, sum(rate(state_store_iter_seek_latency_bucket[5m])) by (le))",
+							"expr": "histogram_quantile(0.9, sum(irate(state_store_iter_seek_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "p90",
+							"legendFormat": "p90 compute_node = {{instance}} ",
 							"refId": "B"
 						},
 						{
@@ -2907,10 +6503,10 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.99, sum(rate(state_store_iter_seek_latency_bucket[5m])) by (le))",
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_iter_seek_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "p99",
+							"legendFormat": "p99 compute_node = {{instance}} ",
 							"refId": "C"
 						},
 						{
@@ -2919,7 +6515,7 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "sum(rate(state_store_iter_seek_latency_sum[5m])) / sum(rate(state_store_iter_seek_latency_count[5m]))",
+							"expr": "sum(irate(state_store_iter_seek_latency_sum[1m])) / sum(irate(state_store_iter_seek_latency_count[1m]))",
 							"hide": false,
 							"interval": "",
 							"legendFormat": "avg",
@@ -2968,7 +6564,7 @@
 				"h": 1,
 				"w": 24,
 				"x": 0,
-				"y": 63
+				"y": 39
 			},
 			"id": 20,
 			"panels": [
@@ -2983,7 +6579,7 @@
 						"h": 8,
 						"w": 12,
 						"x": 0,
-						"y": 22
+						"y": 15
 					},
 					"hiddenSeries": false,
 					"id": 54,
@@ -3018,9 +6614,9 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "sum(state_store_get_key_size_sum)/sum(state_store_get_key_size_count)",
+							"expr": "sum(state_store_get_key_size_sum) by(instance)/sum(state_store_get_key_size_count)by(instance)",
 							"interval": "",
-							"legendFormat": "get_key_size",
+							"legendFormat": "get_key_size compute_node = {{instance}} ",
 							"refId": "A"
 						},
 						{
@@ -3029,10 +6625,10 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "sum(state_store_get_value_size_sum)/sum(state_store_get_value_size_count)",
+							"expr": "sum(state_store_get_value_size_sum) by(instance)/sum(state_store_get_value_size_count) by(instance)",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "get_value_size",
+							"legendFormat": "get_value_size compute_node = {{instance}} ",
 							"refId": "B"
 						},
 						{
@@ -3041,10 +6637,10 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "sum(state_store_batched_write_size_sum)/sum(state_store_batched_write_size_count)",
+							"expr": "sum(state_store_batched_write_size_sum)by(instance)/sum(state_store_batched_write_size_count) by(instance)",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "batch_write_size",
+							"legendFormat": "batch_write_size compute_node = {{instance}} ",
 							"refId": "C"
 						}
 					],
@@ -3085,17 +6681,13 @@
 					"bars": false,
 					"dashLength": 10,
 					"dashes": false,
-					"fieldConfig": {
-						"defaults": {},
-						"overrides": []
-					},
 					"fill": 1,
 					"fillGradient": 0,
 					"gridPos": {
 						"h": 8,
 						"w": 12,
 						"x": 12,
-						"y": 22
+						"y": 15
 					},
 					"hiddenSeries": false,
 					"id": 53,
@@ -3130,10 +6722,10 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "sum(rate(state_store_get_counts[1m])) ",
+							"expr": "sum(irate(state_store_get_counts[1m])) by(instance)",
 							"interval": "",
 							"intervalFactor": 2,
-							"legendFormat": "get_count",
+							"legendFormat": "get_count compute_node = {{instance}} ",
 							"refId": "A"
 						},
 						{
@@ -3142,10 +6734,10 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "sum(rate(state_store_batched_write_counts[1m])) ",
+							"expr": "sum(irate(state_store_batched_write_counts[1m])) by(instance)",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "batched_write_count",
+							"legendFormat": "batched_write_count compute_node = {{instance}} ",
 							"refId": "B"
 						},
 						{
@@ -3154,10 +6746,10 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "sum(rate(state_store_batched_write_tuple_counts[1m])) ",
+							"expr": "sum(irate(state_store_batched_write_tuple_counts[1m])) by(instance)",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "batched_write_kv_pair_count",
+							"legendFormat": "batched_write_kv_pair_count compute_node = {{instance}} ",
 							"refId": "C"
 						},
 						{
@@ -3166,10 +6758,10 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "sum(rate(state_store_iter_next_counts[1m])) ",
+							"expr": "sum(irate(state_store_iter_next_counts[1m])) by(instance)",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "iter_next_count",
+							"legendFormat": "iter_next_count compute_node = {{instance}} ",
 							"refId": "D"
 						},
 						{
@@ -3178,10 +6770,10 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "sum(rate(state_store_iter_counts[1m])) ",
+							"expr": "sum(irate(state_store_iter_counts[1m])) by(instance)",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "iter_count",
+							"legendFormat": "iter_count compute_node = {{instance}} ",
 							"refId": "E"
 						}
 					],
@@ -3228,7 +6820,7 @@
 						"h": 8,
 						"w": 12,
 						"x": 0,
-						"y": 30
+						"y": 23
 					},
 					"hiddenSeries": false,
 					"id": 52,
@@ -3263,10 +6855,10 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.99, sum(rate(state_store_get_latency_bucket[5m])) by (le))",
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_get_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "get_latency",
+							"legendFormat": "get_latency compute_node = {{instance}} ",
 							"refId": "A"
 						},
 						{
@@ -3275,10 +6867,10 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.99, sum(rate(state_store_get_snapshot_latency_bucket[5m])) by (le))",
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_get_snapshot_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "get_snapshot_latency",
+							"legendFormat": "get_snapshot_latency compute_node = {{instance}} ",
 							"refId": "B"
 						},
 						{
@@ -3287,10 +6879,10 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.99, sum(rate(state_store_iter_next_latency_bucket[5m])) by (le))",
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_iter_next_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "iter_next_latency",
+							"legendFormat": "iter_next_latency compute_node = {{instance}} ",
 							"refId": "C"
 						},
 						{
@@ -3299,10 +6891,10 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.99, sum(rate(state_store_iter_seek_latency_bucket[5m])) by (le))",
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_iter_seek_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "iter_seek_latency",
+							"legendFormat": "iter_seek_latency compute_node = {{instance}} ",
 							"refId": "D"
 						},
 						{
@@ -3311,10 +6903,10 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.99, sum(rate(state_store_batched_write_latency_bucket[5m])) by (le))",
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_batched_write_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "batched_write_latency",
+							"legendFormat": "batched_write_latency compute_node = {{instance}} ",
 							"refId": "E"
 						},
 						{
@@ -3323,10 +6915,10 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.99, sum(rate(state_store_batch_write_build_table_latency_bucket[5m])) by (le))",
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_batch_write_build_table_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "batch_write_build_table_latency",
+							"legendFormat": "batch_write_build_table_latency compute_node = {{instance}} ",
 							"refId": "F"
 						},
 						{
@@ -3335,10 +6927,10 @@
 								"uid": "${DS_RISEDEV-PROMETHEUS}"
 							},
 							"exemplar": true,
-							"expr": "histogram_quantile(0.99, sum(rate(state_store_batch_write_add_l0_ssts_latency_bucket[5m])) by (le))",
+							"expr": "histogram_quantile(0.99, sum(irate(state_store_batch_write_add_l0_ssts_latency_bucket[1m])) by (le, instance))",
 							"hide": false,
 							"interval": "",
-							"legendFormat": "batch_write_add_l0_ssts_latency",
+							"legendFormat": "batch_write_add_l0_ssts_latency  compute_node = {{instance}} ",
 							"refId": "G"
 						}
 					],
@@ -3384,7 +6976,35 @@
 	"style": "dark",
 	"tags": [],
 	"templating": {
-		"list": []
+		"list": [
+			{
+				"current": {
+					"selected": true,
+					"text": [
+						"127.0.0.1:1222"
+					],
+					"value": [
+						"127.0.0.1:1222"
+					]
+				},
+				"definition": "label_values(state_store_get_counts, instance)",
+				"hide": 0,
+				"includeAll": true,
+				"label": "compute_node",
+				"multi": true,
+				"name": "compute_node",
+				"options": [],
+				"query": {
+					"query": "label_values(state_store_get_counts, instance)",
+					"refId": "StandardVariableQuery"
+				},
+				"refresh": 2,
+				"regex": "",
+				"skipUrlSync": false,
+				"sort": 0,
+				"type": "query"
+			}
+		]
 	},
 	"time": {
 		"from": "now-15m",
@@ -3394,6 +7014,6 @@
 	"timezone": "",
 	"title": "risingwave_dashboard",
 	"uid": "Ecy3uV1nz",
-	"version": 128,
+	"version": 253,
 	"weekStart": ""
 }

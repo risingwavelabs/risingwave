@@ -11,7 +11,8 @@ use risingwave_common::error::Result;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::aggregation::*;
-use super::{pk_input_arrays, Barrier, Executor, Message, PkIndices, PkIndicesRef};
+use super::{Barrier, Executor, ExecutorState, Message, PkIndices, PkIndicesRef, StatefulExecutor};
+use crate::executor::pk_input_array_refs;
 
 /// `SimpleAggExecutor` is the aggregation operator for streaming system.
 /// To create an aggregation operator, states and expressions should be passed along the
@@ -56,8 +57,9 @@ pub struct SimpleAggExecutor<S: StateStore> {
 
     /// Logical Operator Info
     op_info: String,
-    /// Epoch
-    epoch: u64,
+
+    /// Executor state
+    executor_state: ExecutorState,
 }
 
 impl<S: StateStore> std::fmt::Debug for SimpleAggExecutor<S> {
@@ -93,7 +95,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             agg_calls,
             identity: format!("GlobalSimpleAggExecutor {:X}", executor_id),
             op_info,
-            epoch: 0,
+            executor_state: ExecutorState::Init,
         }
     }
 
@@ -104,25 +106,17 @@ impl<S: StateStore> SimpleAggExecutor<S> {
 
 #[async_trait]
 impl<S: StateStore> AggExecutor for SimpleAggExecutor<S> {
-    fn current_epoch(&self) -> u64 {
-        self.epoch
-    }
-
-    fn update_epoch(&mut self, new_epoch: u64) {
-        self.epoch = new_epoch;
-    }
-
     fn cached_barrier_message_mut(&mut self) -> &mut Option<Barrier> {
         &mut self.cached_barrier_message
     }
 
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> Result<()> {
-        let epoch = self.current_epoch();
+        let epoch = self.executor_state().epoch();
         let (ops, columns, visibility) = chunk.into_inner();
 
         // --- Retrieve all aggregation inputs in advance ---
-        let all_agg_input_arrays = agg_input_arrays(&self.agg_calls, &columns);
-        let pk_input_arrays = pk_input_arrays(self.input.pk_indices(), &columns);
+        let all_agg_input_arrays = agg_input_array_refs(&self.agg_calls, &columns);
+        let pk_input_arrays = pk_input_array_refs(self.input.pk_indices(), &columns);
         let input_pk_data_types = self.input.pk_data_types();
 
         // When applying batch, we will send columns of primary keys to the last N columns.
@@ -167,7 +161,7 @@ impl<S: StateStore> AggExecutor for SimpleAggExecutor<S> {
         // Some state will have the correct output only after their internal states have been fully
         // flushed.
 
-        let epoch = self.current_epoch();
+        let epoch = self.executor_state().epoch();
         let states = match self.states.as_mut() {
             Some(states) if states.is_dirty() => states,
             _ => return Ok(None), // Nothing to flush.
@@ -202,6 +196,16 @@ impl<S: StateStore> AggExecutor for SimpleAggExecutor<S> {
 
     fn input(&mut self) -> &mut dyn Executor {
         self.input.as_mut()
+    }
+}
+
+impl<S: StateStore> StatefulExecutor for SimpleAggExecutor<S> {
+    fn executor_state(&self) -> &ExecutorState {
+        &self.executor_state
+    }
+
+    fn update_executor_state(&mut self, new_state: ExecutorState) {
+        self.executor_state = new_state;
     }
 }
 
@@ -286,10 +290,11 @@ mod tests {
         };
 
         let mut source = MockSource::new(schema, vec![2]); // pk
-        source.push_chunks([chunk1].into_iter());
         source.push_barrier(1, false);
-        source.push_chunks([chunk2].into_iter());
+        source.push_chunks([chunk1].into_iter());
         source.push_barrier(2, false);
+        source.push_chunks([chunk2].into_iter());
+        source.push_barrier(3, false);
 
         // This is local simple aggregation, so we add another row count state
         let agg_calls = vec![
@@ -324,6 +329,9 @@ mod tests {
             "SimpleAggExecutor".to_string(),
         );
 
+        // Consume the init barrier
+        simple_agg.next().await.unwrap();
+        // Consume stream chunk
         let msg = simple_agg.next().await.unwrap();
         if let Message::Chunk(chunk) = msg {
             let (data_chunk, ops) = chunk.into_parts();

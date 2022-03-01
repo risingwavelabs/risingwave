@@ -81,7 +81,7 @@ impl Executor for BatchQueryExecutor {
             .table
             .collect_from_iter(iter, &column_indices, Some(self.batch_size))
             .await?
-            .ok_or_else(|| RwError::from(ErrorCode::EOF))?;
+            .ok_or_else(|| RwError::from(ErrorCode::Eof))?;
 
         let ops = vec![Op::Insert; data_chunk.cardinality()];
         let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
@@ -136,7 +136,7 @@ mod test {
         node.init(u64::MAX).unwrap();
         let mut batch_cnt = 0;
         while let Ok(Message::Chunk(sc)) = node.next().await {
-            let data = *sc.column(0).array_ref().datum_at(0).unwrap().as_int32();
+            let data = *sc.column_at(0).array_ref().datum_at(0).unwrap().as_int32();
             assert_eq!(data, (batch_cnt * test_batch_size) as i32);
             batch_cnt += 1;
         }

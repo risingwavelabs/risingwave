@@ -85,7 +85,7 @@ macro_rules! impl_aggregator {
             }
             fn update_with_row(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
                 if let ArrayImpl::$input_variant(i) =
-                    input.column_at(self.input_col_idx)?.array_ref()
+                    input.column_at(self.input_col_idx).array_ref()
                 {
                     self.update_with_scalar_concrete(i, row_id)
                 } else {
@@ -99,7 +99,7 @@ macro_rules! impl_aggregator {
 
             fn update(&mut self, input: &DataChunk) -> Result<()> {
                 if let ArrayImpl::$input_variant(i) =
-                    input.column_at(self.input_col_idx)?.array_ref()
+                    input.column_at(self.input_col_idx).array_ref()
                 {
                     self.update_concrete(i)
                 } else {
@@ -128,7 +128,7 @@ macro_rules! impl_aggregator {
                 groups: &EqGroups,
             ) -> Result<()> {
                 if let (ArrayImpl::$input_variant(i), ArrayBuilderImpl::$result_variant(b)) =
-                    (input.column_at(self.input_col_idx)?.array_ref(), builder)
+                    (input.column_at(self.input_col_idx).array_ref(), builder)
                 {
                     self.update_and_output_with_sorted_groups_concrete(i, b, groups)
                 } else {

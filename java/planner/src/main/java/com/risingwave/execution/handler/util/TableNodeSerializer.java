@@ -5,7 +5,7 @@ import com.risingwave.catalog.ColumnDesc;
 import com.risingwave.catalog.MaterializedViewCatalog;
 import com.risingwave.catalog.TableCatalog;
 import com.risingwave.common.datatype.RisingWaveDataType;
-import com.risingwave.planner.rel.streaming.RwStreamMaterializedView;
+import com.risingwave.planner.rel.streaming.RwStreamMaterialize;
 import com.risingwave.proto.data.DataType;
 import com.risingwave.proto.expr.InputRefExpr;
 import com.risingwave.proto.plan.ColumnOrder;
@@ -35,7 +35,7 @@ public class TableNodeSerializer {
    * @return The `PlanFragment` proto of the table catalog.
    */
   public static PlanFragment createProtoFromCatalog(
-      TableCatalog catalog, boolean isTableV2, RwStreamMaterializedView root) {
+      TableCatalog catalog, boolean isTableV2, RwStreamMaterialize root) {
     TableCatalog.TableId tableId = catalog.getId();
     CreateTableNode.Builder builder = CreateTableNode.newBuilder();
 
@@ -51,9 +51,7 @@ public class TableNodeSerializer {
             com.risingwave.proto.plan.ColumnDesc.newBuilder();
         columnDescBuilder
             .setName(pair.getKey())
-            .setEncoding(com.risingwave.proto.plan.ColumnDesc.ColumnEncodingType.RAW)
-            .setColumnType(pair.getValue().getDataType().getProtobufType())
-            .setIsPrimary(false);
+            .setColumnType(pair.getValue().getDataType().getProtobufType());
         builder.addColumnDescs(columnDescBuilder);
       }
 
@@ -134,9 +132,7 @@ public class TableNodeSerializer {
             com.risingwave.proto.plan.ColumnDesc.newBuilder();
         columnDescBuilder
             .setName(column.getName())
-            .setEncoding(com.risingwave.proto.plan.ColumnDesc.ColumnEncodingType.RAW)
             .setColumnType(column.getDesc().getDataType().getProtobufType())
-            .setIsPrimary(catalog.getPrimaryKeyColumnIds().contains(column.getId().getValue()))
             .setColumnId(column.getId().getValue());
         builder.addColumnDescs(columnDescBuilder);
       }

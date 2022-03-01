@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_common::array::DataChunk;
-use risingwave_common::catalog::{Schema, TableId};
+use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
@@ -81,9 +81,8 @@ impl BoxedExecutorBuilder for CreateSourceExecutor {
                 Ok(SourceColumnDesc {
                     name: c.name.clone(),
                     data_type: DataType::from(c.get_column_type()?),
-                    column_id: c.column_id,
+                    column_id: ColumnId::from(c.column_id),
                     skip_parse: idx as i32 == row_id_index,
-                    is_primary: c.is_primary,
                 })
             })
             .collect::<Result<Vec<SourceColumnDesc>>>()?;
@@ -99,12 +98,10 @@ impl BoxedExecutorBuilder for CreateSourceExecutor {
 
         let schema_location = node.get_schema_location();
 
-        if let SourceFormat::Protobuf = format {
-            if schema_location.is_empty() {
-                return Err(RwError::from(ProtocolError(
-                    "protobuf file location not provided".to_string(),
-                )));
-            }
+        if format == SourceFormat::Protobuf && schema_location.is_empty() {
+            return Err(RwError::from(ProtocolError(
+                "protobuf file location not provided".to_string(),
+            )));
         }
 
         let config = match get_from_properties!(properties, UPSTREAM_SOURCE_KEY).as_str() {
@@ -125,7 +122,7 @@ impl BoxedExecutorBuilder for CreateSourceExecutor {
             table_id,
             config,
             format,
-            source_manager: source.global_task_env().source_manager_ref(),
+            source_manager: source.global_batch_env().source_manager_ref(),
             columns,
             schema: Schema { fields: vec![] },
             properties: properties.clone(),

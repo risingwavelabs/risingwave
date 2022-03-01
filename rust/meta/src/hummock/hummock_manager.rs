@@ -24,10 +24,7 @@ use crate::manager::{IdCategory, IdGeneratorManagerRef, MetaSrvEnv};
 use crate::model::{MetadataModel, Transactional};
 use crate::storage::{MetaStore, Transaction};
 
-pub struct HummockManager<S>
-where
-    S: MetaStore,
-{
+pub struct HummockManager<S> {
     id_gen_manager_ref: IdGeneratorManagerRef<S>,
     // 1. When trying to locks compaction and versioning at the same time, compaction lock should
     // be requested before versioning lock.
@@ -41,17 +38,11 @@ where
     versioning: RwLock<Versioning<S>>,
 }
 
-struct Compaction<S>
-where
-    S: MetaStore,
-{
+struct Compaction<S> {
     meta_store_ref: Arc<S>,
 }
 
-struct Versioning<S>
-where
-    S: MetaStore,
-{
+struct Versioning<S> {
     meta_store_ref: Arc<S>,
 }
 
@@ -132,10 +123,7 @@ where
         meta_store_ref.txn(trx).await.map_err(Into::into)
     }
 
-    pub async fn pin_version(
-        &self,
-        context_id: HummockContextId,
-    ) -> Result<(HummockVersionId, HummockVersion)> {
+    pub async fn pin_version(&self, context_id: HummockContextId) -> Result<HummockVersion> {
         let versioning_guard = self.versioning.write().await;
         let version_id = CurrentHummockVersionId::get(versioning_guard.meta_store_ref.as_ref())
             .await?
@@ -166,7 +154,7 @@ where
         )
         .await?;
 
-        Ok((version_id, hummock_version))
+        Ok(hummock_version)
     }
 
     pub async fn unpin_version(
@@ -202,7 +190,7 @@ where
         context_id: HummockContextId,
         tables: Vec<SstableInfo>,
         epoch: HummockEpoch,
-    ) -> Result<()> {
+    ) -> Result<HummockVersion> {
         let stats = tables.iter().map(SSTableStat::from).collect_vec();
 
         // Hold the compact status lock so that no one else could add/drop SST or search compaction
@@ -231,19 +219,9 @@ where
         compact_status.update_in_transaction(&mut transaction);
 
         let versioning_guard = self.versioning.write().await;
-        let current_tables = SstableInfo::list(&*versioning_guard.meta_store_ref).await?;
-        if tables
-            .iter()
-            .any(|t| current_tables.iter().any(|ct| ct.id == t.id))
-        {
-            // Retry an add_tables request is OK if the original request has completed successfully.
-            return Ok(());
-        }
         let mut current_version_id =
             CurrentHummockVersionId::get(versioning_guard.meta_store_ref.as_ref()).await?;
-        let old_version_id = current_version_id.increase();
-        let new_version_id = current_version_id.id();
-        current_version_id.update_in_transaction(&mut transaction);
+        let old_version_id = current_version_id.id();
         let mut hummock_version = HummockVersion::select(
             &*versioning_guard.meta_store_ref,
             &HummockVersionRefId { id: old_version_id },
@@ -251,9 +229,19 @@ where
         .await?
         .unwrap();
 
+        let current_tables = SstableInfo::list(&*versioning_guard.meta_store_ref).await?;
+        if tables
+            .iter()
+            .any(|t| current_tables.iter().any(|ct| ct.id == t.id))
+        {
+            // Retry an add_tables request is OK if the original request has completed successfully.
+            return Ok(hummock_version);
+        }
+
         // check whether the epoch is valid
         // TODO: return error instead of panic
-        // TODO: the validation is temporarily disabled until transaction is integrated
+        // TODO: the validation is temporarily disabled until
+        // the new barrier manager design is integrated
         // if epoch <= hummock_version.max_committed_epoch {
         //   panic!(
         //     "Epoch {} <= max_committed_epoch {}",
@@ -282,7 +270,9 @@ where
                 table_ids: tables.iter().map(|t| t.id).collect(),
             }),
         };
-        hummock_version.id = new_version_id;
+        current_version_id.increase();
+        current_version_id.update_in_transaction(&mut transaction);
+        hummock_version.id = current_version_id.id();
         hummock_version.upsert_in_transaction(&mut transaction)?;
 
         // the trx contain update for both tables and compact_status
@@ -293,7 +283,7 @@ where
         )
         .await?;
 
-        Ok(())
+        Ok(hummock_version)
     }
 
     pub async fn pin_snapshot(&self, context_id: HummockContextId) -> Result<HummockSnapshot> {
@@ -310,16 +300,7 @@ where
         )
         .await?
         .unwrap();
-        // TODO #2336 Because e2e checkpoint is not ready yet, we temporarily return the maximum
-        // write_batch epoch to enable uncommitted read.
-        let max_committed_epoch = version
-            .uncommitted_epochs
-            .iter()
-            .map(|u| u.epoch)
-            .max()
-            .unwrap_or(INVALID_EPOCH);
-        // let max_committed_epoch = version.max_committed_epoch;
-
+        let max_committed_epoch = version.max_committed_epoch;
         let mut context_pinned_snapshot = HummockContextPinnedSnapshot::select(
             &*versioning_guard.meta_store_ref,
             &HummockContextRefId { id: context_id },
@@ -508,11 +489,7 @@ where
         Ok(())
     }
 
-    pub async fn commit_epoch(
-        &self,
-        context_id: HummockContextId,
-        epoch: HummockEpoch,
-    ) -> Result<()> {
+    pub async fn commit_epoch(&self, epoch: HummockEpoch) -> Result<()> {
         let versioning_guard = self.versioning.write().await;
         let mut transaction = versioning_guard.meta_store_ref.get_transaction();
         let mut current_version_id =
@@ -526,7 +503,15 @@ where
         )
         .await?
         .unwrap();
+        // TODO: return error instead of panic
+        if epoch <= hummock_version.max_committed_epoch {
+            panic!(
+                "Epoch {} <= max_committed_epoch {}",
+                epoch, hummock_version.max_committed_epoch
+            );
+        }
 
+        // TODO #447: the epoch should fail and rollback if any precedent epoch is uncommitted.
         // get tables in the committing epoch
         if let Some(idx) = hummock_version
             .uncommitted_epochs
@@ -551,30 +536,18 @@ where
 
             // remove the epoch from uncommitted_epochs and update max_committed_epoch
             hummock_version.uncommitted_epochs.swap_remove(idx);
-            if epoch > hummock_version.max_committed_epoch {
-                hummock_version.max_committed_epoch = epoch;
-            }
-
-            // create new_version
-            hummock_version.id = new_version_id;
-            hummock_version.upsert_in_transaction(&mut transaction)?;
-
-            self.commit_trx(
-                versioning_guard.meta_store_ref.as_ref(),
-                transaction,
-                Some(context_id),
-            )
-            .await
-        } else {
-            Ok(())
         }
+        // Create a new_version, possibly merely to bump up the version id and max_committed_epoch.
+        hummock_version.max_committed_epoch = epoch;
+        hummock_version.id = new_version_id;
+        hummock_version.upsert_in_transaction(&mut transaction)?;
+        self.commit_trx(versioning_guard.meta_store_ref.as_ref(), transaction, None)
+            .await?;
+        tracing::trace!("new committed epoch {}", epoch);
+        Ok(())
     }
 
-    pub async fn abort_epoch(
-        &self,
-        context_id: HummockContextId,
-        epoch: HummockEpoch,
-    ) -> Result<()> {
+    pub async fn abort_epoch(&self, epoch: HummockEpoch) -> Result<()> {
         let versioning_guard = self.versioning.write().await;
         let mut transaction = versioning_guard.meta_store_ref.get_transaction();
         let mut current_version_id =
@@ -612,12 +585,8 @@ where
                 hummock_version.id = new_version_id;
                 hummock_version.upsert_in_transaction(&mut transaction)?;
 
-                self.commit_trx(
-                    versioning_guard.meta_store_ref.as_ref(),
-                    transaction,
-                    Some(context_id),
-                )
-                .await
+                self.commit_trx(versioning_guard.meta_store_ref.as_ref(), transaction, None)
+                    .await
             }
             None => Ok(()),
         }

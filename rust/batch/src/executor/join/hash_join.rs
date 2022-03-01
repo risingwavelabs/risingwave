@@ -1,15 +1,11 @@
 use std::convert::TryInto;
-use std::marker::PhantomData;
 use std::mem::take;
 
 use either::Either;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::collection::hash_map::{
-    calc_hash_key_kind, hash_key_dispatch, HashKey, HashKeyDispatcher, HashKeyKind, Key128, Key16,
-    Key256, Key32, Key64, KeySerialized,
-};
 use risingwave_common::error::Result;
+use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_pb::plan::plan_node::NodeBody;
@@ -275,16 +271,14 @@ pub struct HashJoinExecutorBuilder {
     task_id: TaskId,
 }
 
-struct HashJoinExecutorBuilderDispatcher<K> {
-    _marker: PhantomData<K>,
-}
+struct HashJoinExecutorBuilderDispatcher;
 
 /// A dispatcher to help create specialized hash join executor.
-impl<K: HashKey> HashKeyDispatcher<K> for HashJoinExecutorBuilderDispatcher<K> {
+impl HashKeyDispatcher for HashJoinExecutorBuilderDispatcher {
     type Input = HashJoinExecutorBuilder;
     type Output = BoxedExecutor;
 
-    fn dispatch(input: HashJoinExecutorBuilder) -> Self::Output {
+    fn dispatch<K: HashKey>(input: HashJoinExecutorBuilder) -> Self::Output {
         Box::new(HashJoinExecutor::<K>::new(
             input.left_child,
             input.right_child,
@@ -370,10 +364,9 @@ impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
             task_id: context.task_id.clone(),
         };
 
-        Ok(hash_key_dispatch!(
+        Ok(HashJoinExecutorBuilderDispatcher::dispatch_by_kind(
             hash_key_kind,
-            HashJoinExecutorBuilderDispatcher,
-            builder
+            builder,
         ))
     }
 }
@@ -388,8 +381,8 @@ mod tests {
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{ArrayBuilderImpl, DataChunk, F32Array, F64Array, I32Array};
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::collection::hash_map::Key32;
     use risingwave_common::error::Result;
+    use risingwave_common::hash::Key32;
     use risingwave_common::types::DataType;
 
     use crate::executor::join::hash_join::{EquiJoinParams, HashJoinExecutor};
@@ -418,7 +411,7 @@ mod tests {
         fn append(&mut self, data_chunk: &DataChunk) -> Result<()> {
             ensure!(self.array_builders.len() == data_chunk.dimension());
             for idx in 0..self.array_builders.len() {
-                self.array_builders[idx].append_array(data_chunk.column_at(idx)?.array_ref())?;
+                self.array_builders[idx].append_array(data_chunk.column_at(idx).array_ref())?;
             }
 
             Ok(())
@@ -593,8 +586,8 @@ mod tests {
             output_columns
                 .iter()
                 .map(|column| match column {
-                    Either::Left(idx) => self.left_types[*idx],
-                    Either::Right(idx) => self.right_types[*idx],
+                    Either::Left(idx) => self.left_types[*idx].clone(),
+                    Either::Right(idx) => self.right_types[*idx].clone(),
                 })
                 .collect::<Vec<DataType>>()
         }
@@ -612,9 +605,9 @@ mod tests {
             let params = EquiJoinParams {
                 join_type,
                 left_key_columns: vec![0],
-                left_key_types: vec![self.left_types[0]],
+                left_key_types: vec![self.left_types[0].clone()],
                 right_key_columns: vec![0],
-                right_key_types: vec![self.right_types[0]],
+                right_key_types: vec![self.right_types[0].clone()],
                 output_columns,
                 output_data_types,
                 batch_size: 2,

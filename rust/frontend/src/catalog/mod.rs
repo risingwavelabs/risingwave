@@ -11,7 +11,7 @@ pub(crate) mod table_catalog;
 
 pub(crate) type DatabaseId = u64;
 pub(crate) type SchemaId = u64;
-pub(crate) type TableId = u64;
+pub(crate) type TableId = risingwave_common::catalog::TableId;
 pub(crate) type ColumnId = u64;
 
 #[derive(Error, Debug)]

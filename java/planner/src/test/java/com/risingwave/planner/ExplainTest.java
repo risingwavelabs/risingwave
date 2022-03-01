@@ -49,7 +49,7 @@ public class ExplainTest extends SqlTestBase {
     assertTrue(iterator.next());
     var row1 = iterator.getRow();
     assertEquals(1, row1.size());
-    assertTrue(row1.get(0).encodeInText().contains("StreamMaterializedView"));
+    assertTrue(row1.get(0).encodeInText().contains("StreamMaterialize"));
 
     assertTrue(iterator.next());
     var row2 = iterator.getRow();

@@ -138,6 +138,7 @@ impl SourceParser for DebeziumJsonParser {
 #[cfg(test)]
 mod test {
     use risingwave_common::array::Op;
+    use risingwave_common::catalog::ColumnId;
     use risingwave_common::types::{DataType, ScalarImpl};
 
     use crate::parser::debezium::json::DebeziumJsonParser;
@@ -148,30 +149,26 @@ mod test {
             SourceColumnDesc {
                 name: "id".to_string(),
                 data_type: DataType::Int32,
-                column_id: 0,
+                column_id: ColumnId::from(0),
                 skip_parse: false,
-                is_primary: false,
             },
             SourceColumnDesc {
                 name: "name".to_string(),
                 data_type: DataType::Varchar,
-                column_id: 1,
+                column_id: ColumnId::from(1),
                 skip_parse: false,
-                is_primary: false,
             },
             SourceColumnDesc {
                 name: "description".to_string(),
                 data_type: DataType::Varchar,
-                column_id: 2,
+                column_id: ColumnId::from(2),
                 skip_parse: false,
-                is_primary: false,
             },
             SourceColumnDesc {
                 name: "weight".to_string(),
                 data_type: DataType::Float64,
-                column_id: 3,
+                column_id: ColumnId::from(3),
                 skip_parse: false,
-                is_primary: false,
             },
         ];
 

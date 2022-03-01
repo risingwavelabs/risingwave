@@ -163,8 +163,7 @@ impl<S: StateStore> ManagedExtremeState<S> for ManagedStringAggState<S> {
         }
 
         let mut row_keys = vec![];
-        self.sorted_arrays_serializer
-            .order_based_scehmaed_serialize(data, &mut row_keys);
+        self.sorted_arrays_serializer.serialize(data, &mut row_keys);
 
         for (row_idx, (op, key_bytes)) in ops.iter().zip_eq(row_keys.into_iter()).enumerate() {
             let visible = visibility
@@ -259,7 +258,7 @@ impl<S: StateStore> ManagedExtremeState<S> for ManagedStringAggState<S> {
 mod tests {
     use risingwave_common::array::{I64Array, Op, Utf8Array};
     use risingwave_common::types::ScalarImpl;
-    use risingwave_common::util::sort_util::OrderType;
+    use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_storage::{Keyspace, StateStore};
 
     use super::*;
@@ -278,6 +277,7 @@ mod tests {
             .clone()
             .into_iter()
             .zip_eq(sort_key_indices.clone().into_iter())
+            .map(|(ord, idx)| OrderPair::new(idx, ord))
             .collect::<Vec<_>>();
         let sort_key_serializer = OrderedArraysSerializer::new(order_pairs);
         let managed_state = ManagedStringAggState::new(

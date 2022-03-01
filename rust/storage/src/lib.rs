@@ -14,9 +14,12 @@
 #![feature(bound_map)]
 #![feature(backtrace)]
 #![feature(map_first_last)]
+#![feature(let_chains)]
 
 use risingwave_common::types::DataType;
+use risingwave_common::util::sort_util::OrderType;
 
+pub mod bummock;
 pub mod hummock;
 pub mod keyspace;
 pub mod memory;
@@ -41,17 +44,25 @@ pub mod tikv;
 pub mod tikv;
 
 pub use keyspace::{Keyspace, Segment};
+use risingwave_common::catalog::ColumnId;
 pub use store::{StateStore, StateStoreImpl, StateStoreIter};
 
 #[derive(Clone, Debug)]
 pub struct TableColumnDesc {
     pub data_type: DataType,
-    pub column_id: i32,
+    pub column_id: ColumnId,
     pub name: String, // for debugging
 }
 
+#[derive(Clone, Debug)]
+pub struct IndexDesc {
+    pub column_id: ColumnId,
+    pub data_type: DataType,
+    pub order: OrderType,
+}
+
 impl TableColumnDesc {
-    pub fn new_without_name(column_id: i32, data_type: DataType) -> TableColumnDesc {
+    pub fn unnamed(column_id: ColumnId, data_type: DataType) -> TableColumnDesc {
         TableColumnDesc {
             data_type,
             column_id,

@@ -18,6 +18,7 @@ use risingwave_pb::plan::{
 };
 use risingwave_pb::task_service::GetDataResponse;
 use risingwave_storage::table::test::TestTable;
+use risingwave_storage::table::ScannableTable;
 
 use super::*;
 use crate::rpc::service::exchange::ExchangeWriter;
@@ -54,7 +55,7 @@ impl ExchangeWriter for FakeExchangeWriter {
 
 pub struct TestRunner {
     tid: ProstTaskId,
-    env: BatchTaskEnv,
+    env: BatchEnvironment,
 }
 
 impl TestRunner {
@@ -70,7 +71,7 @@ impl TestRunner {
         };
         Self {
             tid,
-            env: BatchTaskEnv::for_test(),
+            env: BatchEnvironment::for_test(),
         }
     }
 
@@ -89,7 +90,7 @@ impl TestRunner {
 
     pub fn run_task(&mut self, plan: &PlanFragment) -> Result<()> {
         let task_manager = self.env.task_manager();
-        task_manager.fire_task(self.env.clone(), &self.tid, plan.clone())
+        task_manager.fire_task(self.env.clone(), &self.tid, plan.clone(), u64::MAX)
     }
 
     pub async fn collect_task_output(
@@ -115,7 +116,7 @@ impl TestRunner {
         Ok(res)
     }
 
-    fn get_global_env(&self) -> BatchTaskEnv {
+    fn get_global_env(&self) -> BatchEnvironment {
         self.env.clone()
     }
 
@@ -352,7 +353,11 @@ impl<'a> SelectBuilder<'a> {
             .unwrap();
 
         if let Ok(column_table_ref) = downcast_arc::<TestTable>(table_ref.into_any()) {
-            let column_ids = column_table_ref.column_ids();
+            let column_ids = column_table_ref
+                .column_descs()
+                .iter()
+                .map(|c| c.column_id.get_id())
+                .collect();
             let scan = RowSeqScanNode {
                 table_ref_id: None,
                 column_ids,

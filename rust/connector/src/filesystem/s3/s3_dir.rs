@@ -6,7 +6,7 @@ use aws_sdk_s3::{client as s3_client, config as s3_config};
 use aws_sdk_sqs::client as sqs_client;
 use aws_types::credentials::SharedCredentialsProvider;
 use aws_types::region::Region;
-use log::{error, info};
+use log::{debug, error, info};
 use sync::watch;
 use thiserror::Error;
 use tokio::sync;
@@ -132,7 +132,7 @@ pub struct S3SourceConfig {
     shared_config: aws_config::Config,
     custom_config: Option<AwsCustomConfig>,
     sqs_config: SqsReceiveMsgConfig,
-    match_pattern: String,
+    match_pattern: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -144,13 +144,17 @@ pub struct S3Directory {
 
 impl S3Directory {
     pub fn is_match(&self, s3_object_key: String) -> anyhow::Result<bool> {
-        let match_string = self.source_config.clone().match_pattern;
-        let glob = globset::Glob::new(match_string.as_str());
-        if let Ok(matcher) = glob {
-            let glob_matcher = matcher.compile_matcher();
-            Ok(glob_matcher.is_match(s3_object_key.as_str()))
+        let match_string_option = self.source_config.clone().match_pattern;
+        if let Some(match_string) = match_string_option {
+            let glob = globset::Glob::new(match_string.as_str());
+            if let Ok(matcher) = glob {
+                let glob_matcher = matcher.compile_matcher();
+                Ok(glob_matcher.is_match(s3_object_key.as_str()))
+            } else {
+                Err(anyhow::Error::from(glob.err().unwrap()))
+            }
         } else {
-            Err(anyhow::Error::from(glob.err().unwrap()))
+            Ok(true)
         }
     }
 
@@ -193,13 +197,14 @@ impl S3Directory {
                 match notification_event {
                     Ok(event) => {
                         for msg in event.records {
-                            println!("current event_type = {:?}", msg.event_type);
+                            println!("Receive SQS Msg={:?}", msg);
                             if matches!(
                                 msg.event_type,
                                 NotifyEventType::ObjectCreatedPut
                                     | NotifyEventType::ObjectCreatedPost
                                     | NotifyEventType::ObjectCreatedCompleteMultipartUpload
                             ) {
+                                debug!("current event_type = {:?} match", msg.event_type);
                                 let s3_object_key = msg.s3.object.key;
                                 let path =
                                     format!("{}/{}", msg.s3.bucket.name, s3_object_key.clone());
@@ -219,6 +224,7 @@ impl S3Directory {
                                             entry: entry_stat,
                                         })
                                         .await;
+                                    println!("sqs_recv_msg_post() send change complete");
                                     if send_rs.is_err() {
                                         return Err(anyhow::Error::from(send_rs.err().unwrap()));
                                     } else {
@@ -233,7 +239,12 @@ impl S3Directory {
                                             )
                                             .send()
                                             .await;
+                                        println!("sqs_recv_msg_post delete msg complete");
                                         if del_msg_rs.is_err() {
+                                            error!(
+                                                "sqs_recv_msg_post del sqs msg error. {:?}",
+                                                del_msg_rs
+                                            );
                                             return Err(anyhow::Error::from(
                                                 del_msg_rs.err().unwrap(),
                                             ));
@@ -307,7 +318,8 @@ impl Directory for S3Directory {
                 status = running_status.changed() => {
                     if status.is_ok() {
                         if let DirectoryChangeWatch::Stopped = *running_status.borrow() {
-                            info!("S3Directory receive Stopped Signal exit");
+                            println!("sqs_recv_msg_post() send change complete");
+                            // info!("");
                             return Ok(());
                         }
                     }
@@ -337,20 +349,6 @@ impl Directory for S3Directory {
                                     return Err(process_msg_rs.err().unwrap());
                                 }
                             }
-                            // while let Some(msg) = msg_iter.next() {
-                            //     let process_msg_rs = self
-                            //         .sqs_recv_msg_post(
-                            //             sqs_queue_url.as_str(),
-                            //             &sender,
-                            //             msg,
-                            //             &self.client_for_sqs,
-                            //         )
-                            //         .await;
-                            //     if process_msg_rs.is_err() {
-                            //         error!("S3Directory process_msg error");
-                            //         return Err(process_msg_rs.err().unwrap());
-                            //     }
-                            // }
                         }
                     } else {
                         info!("not receive sqs message. next around");
@@ -366,43 +364,54 @@ impl Directory for S3Directory {
     }
 
     async fn list_entries(&self) -> anyhow::Result<Vec<EntryStat>> {
-        let match_string = self.source_config.clone().match_pattern;
-        let glob = globset::Glob::new(match_string.as_str());
-
-        if let Ok(matcher) = glob {
-            let prefix_string = find_prefix(matcher.compile_matcher().glob().glob());
-            let obj_keys_rsp = self
-                .client_for_s3
-                .list_objects_v2()
-                .bucket(self.source_config.clone().bucket)
-                .prefix(prefix_string)
-                .send()
-                .await;
-            if let Ok(list_obj_output) = obj_keys_rsp {
-                let key_obj_vec = list_obj_output.contents;
-                match key_obj_vec {
-                    Some(vec) => {
-                        let mut entry_stat_vec = Vec::new();
-                        for v in vec {
-                            let mut entry_stat = EntryStat::default();
-                            let path =
-                                format!("s3://{}/{}", self.source_config.bucket, v.key.unwrap());
-                            entry_stat.path = path;
-                            entry_stat.size = v.size;
-                            if let Some(mtime) = v.last_modified {
-                                entry_stat.mtime = mtime.secs();
-                            }
-                            entry_stat_vec.push(entry_stat);
-                        }
-                        Ok(entry_stat_vec)
-                    }
-                    None => Ok(Vec::default()),
-                }
+        let prefix_string = if let Some(match_string) = self.source_config.clone().match_pattern {
+            let glob = globset::Glob::new(match_string.as_str());
+            if let Ok(glob_obj) = glob {
+                Ok(find_prefix(glob_obj.compile_matcher().glob().glob()))
             } else {
-                Err(anyhow::Error::from(obj_keys_rsp.err().unwrap()))
+                Err(glob.err().unwrap())
             }
         } else {
-            Err(anyhow::Error::from(glob.err().unwrap()))
+            Ok("".to_string())
+        };
+
+        match prefix_string {
+            Ok(prefix) => {
+                let obj_keys_rsp = self
+                    .client_for_s3
+                    .list_objects_v2()
+                    .bucket(self.source_config.clone().bucket)
+                    .prefix(prefix)
+                    .send()
+                    .await;
+                if let Ok(list_obj_output) = obj_keys_rsp {
+                    let key_obj_vec = list_obj_output.contents;
+                    match key_obj_vec {
+                        Some(vec) => {
+                            let mut entry_stat_vec = Vec::new();
+                            for v in vec {
+                                let mut entry_stat = EntryStat::default();
+                                let path = format!(
+                                    "s3://{}/{}",
+                                    self.source_config.bucket,
+                                    v.key.unwrap()
+                                );
+                                entry_stat.path = path;
+                                entry_stat.size = v.size;
+                                if let Some(mtime) = v.last_modified {
+                                    entry_stat.mtime = mtime.secs();
+                                }
+                                entry_stat_vec.push(entry_stat);
+                            }
+                            Ok(entry_stat_vec)
+                        }
+                        None => Ok(Vec::default()),
+                    }
+                } else {
+                    Err(anyhow::Error::from(obj_keys_rsp.err().unwrap()))
+                }
+            }
+            Err(err) => Err(anyhow::Error::from(err)),
         }
     }
 
@@ -455,7 +464,7 @@ mod test {
             .send()
             .await;
         assert!(rs.is_ok());
-        println!("put_object rs = {:?}", rs.unwrap());
+        println!("put_object complete");
     }
 
     fn new_s3_source_config(shared_config: aws_config::Config) -> S3SourceConfig {
@@ -465,7 +474,7 @@ mod test {
             shared_config,
             custom_config: None,
             sqs_config: SqsReceiveMsgConfig::default(),
-            match_pattern: "".to_string(),
+            match_pattern: None,
         }
     }
 
@@ -491,15 +500,21 @@ mod test {
         let (s_tx, s_rx) = tokio::sync::watch::channel(DirectoryChangeWatch::Stopped);
         let s_send_rs = s_tx.send(DirectoryChangeWatch::Running);
         assert!(s_send_rs.is_ok());
-        let (tx, _rx) = tokio::sync::mpsc::channel(20);
+        let (tx, mut rx) = tokio::sync::mpsc::channel(10);
         let change_join = tokio::task::spawn(async move {
             let rs = s3_dir_for_task.push_entries_change(tx, s_rx).await;
             assert!(rs.is_ok());
         });
         let status_control_join = tokio::task::spawn(async move {
             upload_json_file_test().await;
-            std::thread::sleep(std::time::Duration::from_secs(30));
-            let _send_rs = s_tx.send(DirectoryChangeWatch::Stopped);
+            let entry_event = rx.recv().await;
+            println!(
+                "receive S3 DirectoryEntryOptEvent={:?}",
+                entry_event.unwrap()
+            );
+            let send_rs = s_tx.send(DirectoryChangeWatch::Stopped);
+            assert!(send_rs.is_ok());
+            println!("send dir watch stopped complete");
         });
         let rs1 = change_join.await;
         let rs2 = status_control_join.await;

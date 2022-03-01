@@ -18,9 +18,6 @@ risingwave-pb = { path = "../prost" }
 risingwave_common = { path = "../common" }
 risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_storage = { path = "../storage" } 
-rusoto_core = "0.47"
-rusoto_credential = "0.47"
-rusoto_s3 = "0.47"
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["fs", "rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
 toml = "0.5"
@@ -29,6 +26,7 @@ toml = "0.5"
 name = "ss-bench"
 path = "ss_bench/main.rs"
 
-[[bin]]
-name = "s3-bench"
-path = "s3_bench/main.rs"
+# TODO: enable s3-bench when it has migrated to aws-sdk-s3
+# [[bin]]
+# name = "s3-bench"
+# path = "s3_bench/main.rs"

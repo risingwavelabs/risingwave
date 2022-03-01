@@ -50,7 +50,7 @@ impl BoxedExecutorBuilder for DropStreamExecutor {
 
         Ok(Box::new(Self {
             table_id,
-            source_manager: source.global_task_env().source_manager_ref(),
+            source_manager: source.global_batch_env().source_manager_ref(),
             schema: Schema { fields: vec![] },
             identity: "DropStreamExecutor".to_string(),
         }))

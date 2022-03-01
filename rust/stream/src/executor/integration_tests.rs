@@ -79,7 +79,8 @@ async fn test_merger_sum_aggr() {
         )
         .unwrap();
         let (tx, rx) = channel(16);
-        let consumer = SenderConsumer::new(Box::new(aggregator), Box::new(LocalOutput::new(tx)));
+        let consumer =
+            SenderConsumer::new(Box::new(aggregator), Box::new(LocalOutput::new(233, tx)));
         let context = SharedContext::for_test().into();
         let actor = Actor::new(Box::new(consumer), 0, context);
         (actor, rx)
@@ -100,7 +101,7 @@ async fn test_merger_sum_aggr() {
         let (actor, channel) = make_actor(rx);
         outputs.push(channel);
         handles.push(tokio::spawn(actor.run()));
-        inputs.push(Box::new(LocalOutput::new(tx)) as Box<dyn Output>);
+        inputs.push(Box::new(LocalOutput::new(233, tx)) as Box<dyn Output>);
     }
 
     // create a round robin dispatcher, which dispatches messages to the actors
@@ -160,6 +161,12 @@ async fn test_merger_sum_aggr() {
     let actor = Actor::new(Box::new(consumer), 0, context);
     handles.push(tokio::spawn(actor.run()));
 
+    let mut epoch = 1;
+    input
+        .send(Message::Barrier(Barrier::new_test_barrier(epoch)))
+        .await
+        .unwrap();
+    epoch += 1;
     for j in 0..11 {
         let op = if j % 2 == 0 { Op::Insert } else { Op::Delete };
         for i in 0..10 {
@@ -174,11 +181,15 @@ async fn test_merger_sum_aggr() {
             );
             input.send(Message::Chunk(chunk)).await.unwrap();
         }
-        input.send(Message::Barrier(Barrier::new(j))).await.unwrap();
+        input
+            .send(Message::Barrier(Barrier::new_test_barrier(epoch)))
+            .await
+            .unwrap();
+        epoch += 1;
     }
     input
         .send(Message::Barrier(
-            Barrier::new(0).with_mutation(Mutation::Stop(HashSet::from([0]))),
+            Barrier::new_test_barrier(epoch).with_mutation(Mutation::Stop(HashSet::from([0]))),
         ))
         .await
         .unwrap();
@@ -189,7 +200,7 @@ async fn test_merger_sum_aggr() {
     }
 
     let data = items.lock().unwrap();
-    let array = data.last().unwrap().column(0).array_ref().as_int64();
+    let array = data.last().unwrap().column_at(0).array_ref().as_int64();
     assert_eq!(array.value_at(array.len() - 1), Some((0..10).sum()));
 }
 
@@ -213,11 +224,11 @@ fn make_tpchq6_expr() -> (BoxedExpression, BoxedExpression) {
         LiteralExpression::new(DataType::Float64, Some(ScalarImpl::Float64(0.07.into())));
     let const_24 = LiteralExpression::new(DataType::Int32, Some(ScalarImpl::Int32(24)));
     let t_shipdate = DataType::Timestamp;
-    let l_shipdate = InputRefExpression::new(t_shipdate, 0);
+    let l_shipdate = InputRefExpression::new(t_shipdate.clone(), 0);
     let l_shipdate_2 = InputRefExpression::new(t_shipdate, 0);
     let t_discount = DataType::Float64;
-    let l_discount = InputRefExpression::new(t_discount, 1);
-    let l_discount_2 = InputRefExpression::new(t_discount, 1);
+    let l_discount = InputRefExpression::new(t_discount.clone(), 1);
+    let l_discount_2 = InputRefExpression::new(t_discount.clone(), 1);
     let l_discount_3 = InputRefExpression::new(t_discount, 1);
     let t_quantity = DataType::Float64;
     let l_quantity = InputRefExpression::new(t_quantity, 2);
@@ -349,7 +360,8 @@ async fn test_tpch_q6() {
         )
         .unwrap();
         let (tx, rx) = channel(16);
-        let consumer = SenderConsumer::new(Box::new(aggregator), Box::new(LocalOutput::new(tx)));
+        let consumer =
+            SenderConsumer::new(Box::new(aggregator), Box::new(LocalOutput::new(233, tx)));
         let context = SharedContext::for_test().into();
         let actor = Actor::new(Box::new(consumer), 0, context);
         (actor, rx)
@@ -369,7 +381,7 @@ async fn test_tpch_q6() {
         let (actor, channel) = make_actor(rx);
         outputs.push(channel);
         handles.push(tokio::spawn(actor.run()));
-        inputs.push(Box::new(LocalOutput::new(tx)) as Box<dyn Output>);
+        inputs.push(Box::new(LocalOutput::new(233, tx)) as Box<dyn Output>);
     }
 
     // create a round robin dispatcher, which dispatches messages to the actors
@@ -493,6 +505,10 @@ async fn test_tpch_q6() {
         )
     };
 
+    input
+        .send(Message::Barrier(Barrier::new_test_barrier(1)))
+        .await
+        .unwrap();
     for i in 0..100 {
         input
             .send(Message::Chunk(make_chunk(Insert)))
@@ -501,10 +517,7 @@ async fn test_tpch_q6() {
 
         if i % 10 == 0 {
             input
-                .send(Message::Barrier(Barrier {
-                    epoch: i / 10,
-                    ..Barrier::default()
-                }))
+                .send(Message::Barrier(Barrier::new_test_barrier((i / 10) + 2)))
                 .await
                 .unwrap();
         }
@@ -516,12 +529,12 @@ async fn test_tpch_q6() {
         .unwrap();
 
     input
-        .send(Message::Barrier(Barrier::new(100)))
+        .send(Message::Barrier(Barrier::new_test_barrier(100)))
         .await
         .unwrap();
     input
         .send(Message::Barrier(
-            Barrier::new(200).with_mutation(Mutation::Stop(HashSet::from([0]))),
+            Barrier::new_test_barrier(200).with_mutation(Mutation::Stop(HashSet::from([0]))),
         ))
         .await
         .unwrap();
@@ -540,7 +553,7 @@ async fn test_tpch_q6() {
         assert_eq!(chunk.ops(), vec![Insert]);
         assert_eq!(chunk.columns().len(), 1);
         assert_eq!(
-            chunk.column(0).array_ref().as_float64().value_at(0),
+            chunk.column_at(0).array_ref().as_float64().value_at(0),
             Some(1.1.into())
         );
 
@@ -549,7 +562,7 @@ async fn test_tpch_q6() {
         assert_eq!(chunk.columns().len(), 1);
         assert_relative_eq!(
             chunk
-                .column(0)
+                .column_at(0)
                 .array_ref()
                 .as_float64()
                 .value_at(1)

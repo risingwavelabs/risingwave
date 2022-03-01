@@ -60,11 +60,11 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     StreamingPlan plan = streamPlanner.plan(ast, executionContext);
     String resultPlan = ExplainWriter.explainPlan(plan.getStreamingPlan());
     String expectedPlan =
-        "RwStreamMaterializedView(name=[t_test])\n"
+        "RwStreamMaterialize(name=[t_test])\n"
             + "  RwStreamProject(v=[+($STREAM_NULL_BY_ROW_COUNT($0, $1), 1)], $f0=[$0], $f1=[$1])\n"
             + "    RwStreamAgg(group=[{}], agg#0=[COUNT()], agg#1=[SUM($0)])\n"
             + "      RwStreamFilter(condition=[>($0, $1)])\n"
-            + "        RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.3]], upstreamColumnDescs=[[ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=FLOAT, primary=false}, ColumnDesc{dataType=BIGINT, primary=false}]])\n"
+            + "        RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.3]])\n"
             + "          RwStreamBatchPlan(table=[[test_schema, t]], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.3]])";
     Assertions.assertEquals(expectedPlan, resultPlan);
 
@@ -115,14 +115,14 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
 
     String explainExchangePlan = ExplainWriter.explainPlan(plan.getStreamingPlan());
     String expectedPlan =
-        "RwStreamMaterializedView(name=[t_distributed])\n"
+        "RwStreamMaterialize(name=[t_distributed])\n"
             + "  RwStreamProject(v=[+($STREAM_NULL_BY_ROW_COUNT($0, $1), 1)], $f0=[$0], $f1=[$1])\n"
             + "    RwStreamAgg(group=[{}], agg#0=[$SUM0($0)], agg#1=[SUM($1)])\n"
             + "      RwStreamExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])\n"
             + "        RwStreamAgg(group=[{}], agg#0=[COUNT()], agg#1=[SUM($0)])\n"
             + "          RwStreamFilter(condition=[>($0, $1)])\n"
             + "            RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])\n"
-            + "              RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.3]], upstreamColumnDescs=[[ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=FLOAT, primary=false}, ColumnDesc{dataType=BIGINT, primary=false}]])\n"
+            + "              RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.3]])\n"
             + "                RwStreamBatchPlan(table=[[test_schema, t]], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.3]])";
     testLogger.debug("explain the exchange plan:\n" + explainExchangePlan);
     Assertions.assertEquals(expectedPlan, explainExchangePlan);
@@ -148,13 +148,13 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
 
     String explainExchangePlan = ExplainWriter.explainPlan(plan.getStreamingPlan());
     String expectedPlan =
-        "RwStreamMaterializedView(name=[t_agg])\n"
+        "RwStreamMaterialize(name=[t_agg])\n"
             + "  RwStreamProject(v1=[$0], v=[$2])\n"
             + "    RwStreamAgg(group=[{0}], agg#0=[$SUM0($1)], v=[SUM($2)])\n"
             + "      RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])\n"
             + "        RwStreamAgg(group=[{0}], agg#0=[COUNT()], v=[SUM($1)])\n"
             + "          RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])\n"
-            + "            RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.3]], upstreamColumnDescs=[[ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=FLOAT, primary=false}, ColumnDesc{dataType=BIGINT, primary=false}]])\n"
+            + "            RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.3]])\n"
             + "              RwStreamBatchPlan(table=[[test_schema, t]], tableId=[0.0.1], primaryKeyIndices=[[2]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.3]])";
     testLogger.debug("explain the exchange plan:\n" + explainExchangePlan);
     Assertions.assertEquals(expectedPlan, explainExchangePlan);
@@ -169,10 +169,10 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     StreamingPlan plan = streamPlanner.plan(ast, executionContext);
     String resultPlan = ExplainWriter.explainPlan(plan.getStreamingPlan());
     String expectedPlan =
-        "RwStreamMaterializedView(name=[t_test_order_limit], collation=[[0, 1]])\n"
+        "RwStreamMaterialize(name=[t_test_order_limit], collation=[[0, 1]])\n"
             + "  RwStreamSort(sort0=[$0], sort1=[$1], dir0=[ASC], dir1=[ASC], offset=[10], fetch=[100])\n"
             + "    RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])\n"
-            + "      RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[3]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.2, 0.0.1.3]], upstreamColumnDescs=[[ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=FLOAT, primary=false}, ColumnDesc{dataType=BIGINT, primary=false}]])\n"
+            + "      RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[3]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.2, 0.0.1.3]])\n"
             + "        RwStreamBatchPlan(table=[[test_schema, t]], tableId=[0.0.1], primaryKeyIndices=[[3]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.2, 0.0.1.3]])";
     testLogger.debug("result plan:\n" + resultPlan);
     Assertions.assertEquals(expectedPlan, resultPlan);
@@ -239,10 +239,10 @@ public class MaterializedViewPlanTest extends StreamPlanTestBase {
     StreamingPlan plan = streamPlanner.plan(ast, executionContext);
     String resultPlan = ExplainWriter.explainPlan(plan.getStreamingPlan());
     String expectedPlan =
-        "RwStreamMaterializedView(name=[t_test_order_zero_limit], collation=[[0, 1]])\n"
+        "RwStreamMaterialize(name=[t_test_order_zero_limit], collation=[[0, 1]])\n"
             + "  RwStreamSort(sort0=[$0], sort1=[$1], dir0=[ASC], dir1=[ASC], offset=[10])\n"
             + "    RwStreamExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])\n"
-            + "      RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[3]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.2, 0.0.1.3]], upstreamColumnDescs=[[ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=INTEGER, primary=false}, ColumnDesc{dataType=FLOAT, primary=false}, ColumnDesc{dataType=BIGINT, primary=false}]])\n"
+            + "      RwStreamChain(all=[true], tableId=[0.0.1], primaryKeyIndices=[[3]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.2, 0.0.1.3]])\n"
             + "        RwStreamBatchPlan(table=[[test_schema, t]], tableId=[0.0.1], primaryKeyIndices=[[3]], columnIds=[[0.0.1.0, 0.0.1.1, 0.0.1.2, 0.0.1.3]])";
     testLogger.debug("result plan:\n" + resultPlan);
     Assertions.assertEquals(expectedPlan, resultPlan);
