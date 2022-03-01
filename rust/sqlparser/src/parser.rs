@@ -1175,6 +1175,30 @@ impl Parser {
         Ok(values)
     }
 
+    /// Parse a comma-separated list of 1+ items accepted by `F` with uniform value types
+    pub fn parse_comma_separated_uniform<T, F>(&mut self, mut f: F) -> Result<Vec<T>, ParserError>
+    where
+        F: FnMut(&mut Parser) -> Result<T, ParserError>,
+    {
+        let mut values = vec![];
+        loop {
+            let found = f(self)?;
+            let n = values.len();
+            if n > 0 {
+                let expected = std::mem::discriminant(&values[n - 1]);
+                if expected != std::mem::discriminant(&found) {
+                    return parser_err!(format!("Comma separated value types are not uniform"));
+                }
+            }
+
+            values.push(found);
+            if !self.consume_token(&Token::Comma) {
+                break;
+            }
+        }
+        Ok(values)
+    }
+
     /// Run a parser method `f`, reverting back to the current position
     /// if unsuccessful.
     #[must_use]
