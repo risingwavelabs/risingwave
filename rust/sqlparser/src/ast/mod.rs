@@ -284,6 +284,8 @@ pub enum Expr {
     Rollup(Vec<Vec<Expr>>),
     /// The `ROW` expr. The `ROW` keyword can be omitted,
     Row(Vec<Expr>),
+    /// The `ARRAY` expr. The `ARRAY` keyword can be omitted,
+    Array(Vec<Expr>),
 }
 
 impl fmt::Display for Expr {
@@ -447,6 +449,16 @@ impl fmt::Display for Expr {
             Expr::Row(exprs) => write!(
                 f,
                 "ROW({})",
+                exprs
+                    .iter()
+                    .map(|v| v.to_string())
+                    .collect::<Vec<String>>()
+                    .as_slice()
+                    .join(", ")
+            ),
+            Expr::Array(exprs) => write!(
+                f,
+                "ARRAY[{}]",
                 exprs
                     .iter()
                     .map(|v| v.to_string())

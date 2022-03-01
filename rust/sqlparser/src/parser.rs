@@ -204,7 +204,6 @@ impl Parser {
     /// Parse a new expression including wildcard & qualified wildcard
     pub fn parse_wildcard_expr(&mut self) -> Result<WildcardExpr, ParserError> {
         let index = self.index;
-
         match self.next_token() {
             Token::Word(w) if self.peek_token() == Token::Period => {
                 let mut id_parts: Vec<Ident> = vec![w.to_ident()];
@@ -309,6 +308,7 @@ impl Parser {
                     expr: Box::new(self.parse_subexpr(Self::UNARY_NOT_PREC)?),
                 }),
                 Keyword::ROW => Ok(Expr::Row(self.parse_parenthesized_exprs()?)),
+                Keyword::ARRAY => Ok(Expr::Array(self.parse_array_exprs()?)),
                 // Here `w` is a word, check if it's a part of a multi-part
                 // identifier, a function call, or a simple identifier:
                 _ => match self.peek_token() {
@@ -999,7 +999,7 @@ impl Parser {
             Token::Mul | Token::Div | Token::Mod | Token::StringConcat => Ok(40),
             Token::DoubleColon => Ok(50),
             Token::ExclamationMark => Ok(50),
-            Token::LBracket | Token::RBracket => Ok(10),
+            Token::LBracket => Ok(10),
             _ => Ok(0),
         }
     }
@@ -1963,6 +1963,16 @@ impl Parser {
             Ok(exprs)
         } else {
             self.expected("a list of expressions in parentheses", self.peek_token())
+        }
+    }
+
+    pub fn parse_array_exprs(&mut self) -> Result<Vec<Expr>, ParserError> {
+        if self.consume_token(&Token::LBracket) {
+            let exprs = self.parse_comma_separated_uniform(Parser::parse_expr)?;
+            self.expect_token(&Token::RBracket)?;
+            Ok(exprs)
+        } else {
+            self.expected("an array of expressions in brackets", self.peek_token())
         }
     }
 
