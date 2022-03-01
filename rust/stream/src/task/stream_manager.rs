@@ -455,7 +455,7 @@ impl StreamManagerCore {
                     .map(build_agg_call_from_prost)
                     .try_collect()?;
 
-                Ok(Box::new(HashAggExecutor::new(
+                Ok(new_boxed_hash_agg_executor(
                     input.remove(0),
                     agg_calls,
                     keys,
@@ -463,7 +463,7 @@ impl StreamManagerCore {
                     pk_indices,
                     executor_id,
                     op_info,
-                )))
+                ))
             }
             Node::AppendOnlyTopNNode(top_n_node) => {
                 let order_types: Vec<_> = top_n_node

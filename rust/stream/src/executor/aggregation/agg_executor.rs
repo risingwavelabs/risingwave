@@ -13,9 +13,6 @@ use super::AggCall;
 use crate::executor::managed_state::aggregation::ManagedStateImpl;
 use crate::executor::{Barrier, Executor, ExecutorState, Message, PkDataTypes, StatefulExecutor};
 
-/// Hash key for [`HashAggExecutor`].
-pub type HashKey = Row;
-
 /// States for [`SimpleAggExecutor`] and [`HashAggExecutor`].
 pub struct AggState<S: StateStore> {
     /// Current managed states for all [`AggCall`]s.
@@ -70,24 +67,21 @@ impl<S: StateStore> AggState<S> {
     }
 
     /// Build changes into `builders` and `new_ops`, according to previous and current states. Note
-    /// that for [`HashAggExecutor`], a key should be passed in to build group key columns.
-    /// Returns whether this state is empty (and may be deleted).
+    /// that for [`HashAggExecutor`].
+    ///
+    /// Returns how many rows are appended in buidlers.
     pub async fn build_changes(
         &mut self,
         builders: &mut [ArrayBuilderImpl],
         new_ops: &mut Vec<Op>,
-        key: Option<&HashKey>,
         epoch: u64,
-    ) -> Result<bool> {
+    ) -> Result<usize> {
         if !self.is_dirty() {
-            return Ok(false);
+            return Ok(0);
         }
 
         let row_count = self.row_count(epoch).await?;
         let prev_row_count = self.prev_row_count();
-
-        // First several columns are used for group keys in HashAgg.
-        let agg_call_offset = key.map(|k| k.0.len()).unwrap_or_default();
 
         trace!(
             "prev_row_count = {}, row_count = {}",
@@ -95,56 +89,41 @@ impl<S: StateStore> AggState<S> {
             row_count
         );
 
-        match (prev_row_count, row_count) {
+        let appended = match (prev_row_count, row_count) {
             (0, 0) => {
                 // previous state is empty, current state is also empty.
                 // FIXME: for `SimpleAgg`, should we still build some changes when `row_count` is 0
                 // while other aggs may not be `0`?
+
+                0
             }
 
             (0, _) => {
                 // previous state is empty, current state is not empty, insert one `Insert` op.
                 new_ops.push(Op::Insert);
 
-                if let Some(key) = key {
-                    let key_length = key.0.len();
-                    for (builder, datum) in
-                        builders.iter_mut().take(key_length).zip_eq(key.0.iter())
-                    {
-                        builder.append_datum(datum)?;
-                    }
-                }
-
-                for (builder, state) in builders[agg_call_offset..]
-                    .iter_mut()
-                    .zip_eq(self.managed_states.iter_mut())
-                {
+                for (builder, state) in builders.iter_mut().zip_eq(self.managed_states.iter_mut()) {
                     let data = state.get_output(epoch).await?;
                     trace!("append_datum (0 -> N): {:?}", &data);
                     builder.append_datum(&data)?;
                 }
+
+                1
             }
 
             (_, 0) => {
                 // previous state is not empty, current state is empty, insert one `Delete` op.
                 new_ops.push(Op::Delete);
 
-                if let Some(key) = key {
-                    let key_length = key.0.len();
-                    for (builder, datum) in
-                        builders.iter_mut().take(key_length).zip_eq(key.0.iter())
-                    {
-                        builder.append_datum(datum)?;
-                    }
-                }
-
-                for (builder, state) in builders[agg_call_offset..]
+                for (builder, state) in builders
                     .iter_mut()
                     .zip_eq(self.prev_states.as_ref().unwrap().iter())
                 {
                     trace!("append_datum (N -> 0): {:?}", &state);
                     builder.append_datum(state)?;
                 }
+
+                1
             }
 
             _ => {
@@ -152,18 +131,8 @@ impl<S: StateStore> AggState<S> {
                 new_ops.push(Op::UpdateDelete);
                 new_ops.push(Op::UpdateInsert);
 
-                if let Some(key) = key {
-                    let key_length = key.0.len();
-                    for (builder, datum) in
-                        builders.iter_mut().take(key_length).zip_eq(key.0.iter())
-                    {
-                        builder.append_datum(datum)?;
-                        builder.append_datum(datum)?;
-                    }
-                }
-
                 for (builder, prev_state, cur_state) in itertools::multizip((
-                    builders[agg_call_offset..].iter_mut(),
+                    builders.iter_mut(),
                     self.prev_states.as_ref().unwrap().iter(),
                     self.managed_states.iter_mut(),
                 )) {
@@ -177,14 +146,14 @@ impl<S: StateStore> AggState<S> {
                     builder.append_datum(prev_state)?;
                     builder.append_datum(&cur_state)?;
                 }
-            }
-        }
 
-        // unmark dirty
+                2
+            }
+        };
+
         self.prev_states = None;
 
-        let empty = row_count == 0;
-        Ok(empty)
+        Ok(appended)
     }
 }
 
@@ -298,7 +267,7 @@ pub fn generate_agg_schema(
 /// Generate initial [`AggState`] from `agg_calls`. For [`HashAggExecutor`], the group key should be
 /// provided.
 pub async fn generate_agg_state<S: StateStore>(
-    key: Option<&HashKey>,
+    key: Option<&Row>,
     agg_calls: &[AggCall],
     keyspace: &Keyspace<S>,
     pk_data_types: PkDataTypes,

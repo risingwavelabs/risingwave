@@ -1,20 +1,22 @@
 //! Global Streaming Hash Aggregators
 
 use std::collections::HashMap;
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::{stream, StreamExt};
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{Row, StreamChunk};
+use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
 use risingwave_storage::{Keyspace, StateStore};
 
-use super::aggregation::{AggState, HashKey};
+use super::aggregation::AggState;
 use super::{
     agg_executor_next, generate_agg_schema, generate_agg_state, AggCall, AggExecutor, Barrier,
     Executor, ExecutorState, Message, PkIndicesRef, StatefulExecutor,
@@ -31,7 +33,7 @@ use crate::executor::{agg_input_arrays, pk_input_arrays, PkIndices};
 /// * Upon a barrier is received, the executor will call `.flush` on the storage backend, so that
 ///   all modifications will be flushed to the storage backend. Meanwhile, the executor will go
 ///   through `modified_keys`, and produce a stream chunk based on the state changes.
-pub struct HashAggExecutor<S: StateStore> {
+pub struct HashAggExecutor<K: HashKey, S: StateStore> {
     /// Schema of the executor.
     schema: Schema,
 
@@ -46,7 +48,7 @@ pub struct HashAggExecutor<S: StateStore> {
     keyspace: Keyspace<S>,
 
     /// The cached states. `HashKey -> (prev_value, value)`.
-    state_map: EvictableHashMap<HashKey, Option<Box<AggState<S>>>>,
+    state_map: EvictableHashMap<K, Option<Box<AggState<S>>>>,
 
     /// The input of the current executor
     input: Box<dyn Executor>,
@@ -68,7 +70,62 @@ pub struct HashAggExecutor<S: StateStore> {
     executor_state: ExecutorState,
 }
 
-impl<S: StateStore> HashAggExecutor<S> {
+struct HashAggExecutorBuilder<S: StateStore>(PhantomData<S>);
+
+struct HashAggExecutorBuilderInput<S: StateStore> {
+    input: Box<dyn Executor>,
+    agg_calls: Vec<AggCall>,
+    key_indices: Vec<usize>,
+    keyspace: Keyspace<S>,
+    pk_indices: PkIndices,
+    executor_id: u64,
+    op_info: String,
+}
+
+impl<S: StateStore> HashKeyDispatcher for HashAggExecutorBuilder<S> {
+    type Input = HashAggExecutorBuilderInput<S>;
+    type Output = Box<dyn Executor>;
+
+    fn dispatch<K: HashKey>(input: Self::Input) -> Self::Output {
+        Box::new(HashAggExecutor::<K, S>::new(
+            input.input,
+            input.agg_calls,
+            input.key_indices,
+            input.keyspace,
+            input.pk_indices,
+            input.executor_id,
+            input.op_info,
+        ))
+    }
+}
+
+pub fn new_boxed_hash_agg_executor<S: StateStore>(
+    input: Box<dyn Executor>,
+    agg_calls: Vec<AggCall>,
+    key_indices: Vec<usize>,
+    keyspace: Keyspace<S>,
+    pk_indices: PkIndices,
+    executor_id: u64,
+    op_info: String,
+) -> Box<dyn Executor> {
+    let keys = key_indices
+        .iter()
+        .map(|idx| input.schema().fields[*idx].data_type())
+        .collect_vec();
+    let input = HashAggExecutorBuilderInput {
+        input,
+        agg_calls,
+        key_indices,
+        keyspace,
+        pk_indices,
+        executor_id,
+        op_info,
+    };
+    let kind = calc_hash_key_kind(&keys);
+    HashAggExecutorBuilder::<S>::dispatch_by_kind(kind, input)
+}
+
+impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     pub fn new(
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
@@ -102,14 +159,11 @@ impl<S: StateStore> HashAggExecutor<S> {
     /// `keys` are Hash Keys of all the rows
     /// `visibility`, leave invisible ones out of aggregation
     /// `state_entries`, the current state to check whether a key has existed or not
-    fn get_unique_keys<'a, 'b>(
+    fn get_unique_keys(
         &self,
-        keys: &'a [HashKey],
+        keys: Vec<K>,
         visibility: &Option<Bitmap>,
-    ) -> Result<Vec<(&'b HashKey, Bitmap)>>
-    where
-        'a: 'b,
-    {
+    ) -> Result<Vec<(K, Bitmap)>> {
         let total_num_rows = keys.len();
         // Each hash key, e.g. `key1` corresponds to a visibility map that not only shadows
         // all the rows whose keys are not `key1`, but also shadows those rows shadowed in the
@@ -138,7 +192,7 @@ impl<S: StateStore> HashAggExecutor<S> {
             .into_iter()
             .map(|key| {
                 (
-                    key,
+                    key.clone(),
                     key_to_vis_maps.remove(key).unwrap().try_into().unwrap(),
                 )
             })
@@ -155,35 +209,20 @@ impl<S: StateStore> HashAggExecutor<S> {
 }
 
 #[async_trait]
-impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
+impl<K: HashKey, S: StateStore> AggExecutor for HashAggExecutor<K, S> {
     fn cached_barrier_message_mut(&mut self) -> &mut Option<Barrier> {
         &mut self.cached_barrier_message
     }
 
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> Result<()> {
         let epoch = self.executor_state().epoch();
-        let (ops, columns, visibility) = chunk.into_inner();
-
-        // --- Retrieve grouped keys into Row format ---
-        let keys = {
-            let total_num_rows = ops.len();
-            let mut keys = vec![Row(vec![]); total_num_rows];
-
-            // we retrieve the key column-by-column
-            for key_idx in &self.key_indices {
-                let col = &columns[*key_idx];
-                // for each column, we push all items in that column into the `keys` vector.
-                for (row_idx, key) in keys.iter_mut().enumerate() {
-                    key.0.push(col.array().datum_at(row_idx));
-                }
-            }
-
-            keys
-        };
+        let (data_chunk, ops) = chunk.into_parts();
+        let keys = K::build(&self.pk_indices, &data_chunk)?;
+        let (columns, visibility) = data_chunk.into_parts();
 
         // --- Find unique keys in this batch and generate visibility map for each key ---
         // TODO: this might be inefficient if there are not too many duplicated keys in one batch.
-        let unique_keys = self.get_unique_keys(&keys, &visibility)?;
+        let unique_keys = self.get_unique_keys(keys, &visibility)?;
 
         // --- Retrieve all aggregation inputs in advance ---
         // Previously, this is done in `unique_keys` inner loop, which is very inefficient.
@@ -200,15 +239,16 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
             })
             .collect_vec();
 
+        let key_data_types = &self.schema.data_types()[..self.key_indices.len()];
         let mut futures = vec![];
         for (key, vis_map) in unique_keys {
             // Retrieve previous state from the KeyedState.
             let states = self.state_map.put(key.to_owned(), None);
 
+            let key = key.clone();
             // To leverage more parallelism in IO operations, fetching and updating states for every
             // unique keys is created as futures and run in parallel.
             futures.push(async {
-                let key = key.clone();
                 let vis_map = vis_map;
 
                 // 1. If previous state didn't exist, the ManagedState will automatically create new
@@ -218,7 +258,7 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
                         Some(s) => s.unwrap(),
                         None => Box::new(
                             generate_agg_state(
-                                Some(&key),
+                                Some(&key.clone().deserialize(key_data_types.iter())?),
                                 &self.agg_calls,
                                 &self.keyspace,
                                 input_pk_data_types.clone(),
@@ -242,7 +282,7 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
                         .await?;
                 }
 
-                Ok::<(HashKey, Box<AggState<S>>), RwError>((key, states))
+                Ok::<(_, Box<AggState<S>>), RwError>((key, states))
             });
         }
 
@@ -293,11 +333,16 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
 
         // --- Retrieve modified states and put the changes into the builders ---
         for (key, states) in self.state_map.iter_mut() {
-            let _is_empty = states
+            let appended = states
                 .as_mut()
                 .unwrap()
-                .build_changes(&mut builders, &mut new_ops, Some(key), epoch)
+                .build_changes(&mut builders[self.key_indices.len()..], &mut new_ops, epoch)
                 .await?;
+
+            for _ in 0..appended {
+                key.clone()
+                    .deserialize_to_builders(&mut builders[..self.key_indices.len()])?;
+            }
         }
 
         // evict cache to target capacity
@@ -322,7 +367,7 @@ impl<S: StateStore> AggExecutor for HashAggExecutor<S> {
     }
 }
 
-impl<S: StateStore> std::fmt::Debug for HashAggExecutor<S> {
+impl<K: HashKey, S: StateStore> std::fmt::Debug for HashAggExecutor<K, S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AggregateExecutor")
             .field("input", &self.input)
@@ -335,7 +380,7 @@ impl<S: StateStore> std::fmt::Debug for HashAggExecutor<S> {
 }
 
 #[async_trait]
-impl<S: StateStore> Executor for HashAggExecutor<S> {
+impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -371,7 +416,7 @@ impl<S: StateStore> Executor for HashAggExecutor<S> {
     }
 }
 
-impl<S: StateStore> StatefulExecutor for HashAggExecutor<S> {
+impl<K: HashKey, S: StateStore> StatefulExecutor for HashAggExecutor<K, S> {
     fn executor_state(&self) -> &ExecutorState {
         &self.executor_state
     }
@@ -455,7 +500,7 @@ mod tests {
             },
         ];
 
-        let mut hash_agg = HashAggExecutor::new(
+        let mut hash_agg = new_boxed_hash_agg_executor(
             Box::new(source),
             agg_calls,
             keys,
@@ -568,7 +613,7 @@ mod tests {
             },
         ];
 
-        let mut hash_agg = HashAggExecutor::new(
+        let mut hash_agg = new_boxed_hash_agg_executor(
             Box::new(source),
             agg_calls,
             key_indices,
@@ -683,7 +728,7 @@ mod tests {
             },
         ];
 
-        let mut hash_agg = HashAggExecutor::new(
+        let mut hash_agg = new_boxed_hash_agg_executor(
             Box::new(source),
             agg_calls,
             keys,
