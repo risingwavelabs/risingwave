@@ -1,5 +1,5 @@
 use super::{HashKey, MAX_FIXED_SIZE_KEY_ELEMENTS};
-use crate::collection::hash_map as hash;
+use crate::hash;
 use crate::types::{DataSize, DataType};
 
 /// An enum to help to dynamically dispatch [`HashKey`] template.
@@ -82,7 +82,7 @@ pub fn calc_hash_key_kind(data_types: &[DataType]) -> HashKeyKind {
 #[cfg(test)]
 mod tests {
 
-    use crate::collection::hash_map::{calc_hash_key_kind, HashKeyKind};
+    use crate::hash::{calc_hash_key_kind, HashKeyKind};
     use crate::types::DataType;
 
     fn all_data_types() -> Vec<DataType> {

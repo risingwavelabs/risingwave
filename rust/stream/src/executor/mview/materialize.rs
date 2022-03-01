@@ -83,9 +83,10 @@ impl<S: StateStore> MaterializeExecutor<S> {
         op_info: String,
     ) -> Self {
         let pk_columns = keys.iter().map(|k| k.column_idx).collect();
+        let pk_order_types = keys.iter().map(|k| k.order_type).collect();
         Self {
             input,
-            local_state: ManagedMViewState::new(keyspace, column_ids, keys),
+            local_state: ManagedMViewState::new(keyspace, column_ids, pk_order_types),
             pk_columns,
             identity: format!("MaterializeExecutor {:X}", executor_id),
             op_info,
@@ -124,6 +125,10 @@ impl<S: StateStore> Executor for MaterializeExecutor<S> {
 
     fn logical_operator_info(&self) -> &str {
         &self.op_info
+    }
+
+    fn reset(&mut self, _epoch: u64) {
+        self.local_state.clear_cache();
     }
 }
 

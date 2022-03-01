@@ -213,6 +213,15 @@ pub fn build_agg_call_from_prost(agg_call_proto: &expr::AggCall) -> Result<AggCa
     })
 }
 
+fn update_upstreams(context: &SharedContext, ids: &[UpDownActorIds]) {
+    ids.iter()
+        .map(|id| {
+            let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
+            context.add_channel_pairs(*id, (Some(tx), Some(rx)));
+        })
+        .count();
+}
+
 impl StreamManagerCore {
     fn new(addr: SocketAddr, state_store: StateStoreImpl) -> Self {
         Self::with_store_and_context(state_store, SharedContext::new(addr))
@@ -239,6 +248,14 @@ impl StreamManagerCore {
         )
     }
 
+    fn get_actor_info(&self, actor_id: &u32) -> Result<&ActorInfo> {
+        self.actor_infos.get(actor_id).ok_or_else(|| {
+            RwError::from(ErrorCode::InternalError(
+                "actor not found in info table".into(),
+            ))
+        })
+    }
+
     /// Create dispatchers with downstream information registered before
     fn create_dispatcher(
         &mut self,
@@ -251,24 +268,9 @@ impl StreamManagerCore {
         let outputs = downstreams
             .iter()
             .map(|down_id| {
-                let host_addr = self
-                    .actor_infos
-                    .get(down_id)
-                    .ok_or_else(|| {
-                        RwError::from(ErrorCode::InternalError(format!(
-                            "create dispatcher error: channel between {} and {} does not exist",
-                            actor_id, down_id
-                        )))
-                    })?
-                    .get_host()?;
+                let host_addr = self.get_actor_info(down_id)?.get_host()?;
                 let downstream_addr = host_addr.to_socket_addr()?;
-                let tx = self.context.take_sender(&(actor_id, *down_id))?;
-                if is_local_address(&downstream_addr, &self.context.addr) {
-                    // if this is a local downstream actor
-                    Ok(Box::new(LocalOutput::new(*down_id, tx)) as Box<dyn Output>)
-                } else {
-                    Ok(Box::new(RemoteOutput::new(*down_id, tx)) as Box<dyn Output>)
-                }
+                new_output(&self.context, downstream_addr, actor_id, down_id)
             })
             .collect::<Result<Vec<_>>>()?;
 
@@ -505,15 +507,7 @@ impl StreamManagerCore {
                 if *up_id == 0 {
                     Ok(self.mock_source.1.take().unwrap())
                 } else {
-                    let upstream_addr = self
-                        .actor_infos
-                        .get(up_id)
-                        .ok_or_else(|| {
-                            RwError::from(ErrorCode::InternalError(
-                                "upstream actor not found in info table".into(),
-                            ))
-                        })?
-                        .get_host()?;
+                    let upstream_addr = self.get_actor_info(up_id)?.get_host()?;
                     let upstream_socket_addr = upstream_addr.to_socket_addr()?;
                     if !is_local_address(&upstream_socket_addr, &self.context.addr) {
                         // Get the sender for `RemoteInput` to forward received messages to
@@ -686,24 +680,23 @@ impl StreamManagerCore {
         for (current_id, actor) in &self.actors {
             self.build_channel_for_chain_node(*current_id, actor.nodes.as_ref().unwrap())?;
 
-            for downstream_id in actor.get_downstream_actor_id() {
-                // At this time, the graph might not be complete, so we do not check if downstream
-                // has `current_id` as upstream.
-                let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-                let up_down_ids = (*current_id, *downstream_id);
-                self.context
-                    .add_channel_pairs(up_down_ids, (Some(tx), Some(rx)));
-            }
+            // At this time, the graph might not be complete, so we do not check if downstream
+            // has `current_id` as upstream.
+            let down_id = actor
+                .get_downstream_actor_id()
+                .iter()
+                .map(|id| (*current_id, *id))
+                .collect_vec();
+            update_upstreams(&self.context, &down_id);
 
             // Add remote input channels.
+            let mut up_id = vec![];
             for upstream_id in actor.get_upstream_actor_id() {
                 if !local_actor_ids.contains(upstream_id) {
-                    let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
-                    let up_down_ids = (*upstream_id, *current_id);
-                    self.context
-                        .add_channel_pairs(up_down_ids, (Some(tx), Some(rx)));
+                    up_id.push((*upstream_id, *current_id));
                 }
             }
+            update_upstreams(&self.context, &up_id);
         }
 
         for hanging_channel in hanging_channels {

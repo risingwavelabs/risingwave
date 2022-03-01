@@ -2,22 +2,21 @@
 #![allow(dead_code)]
 
 use std::net::SocketAddr;
-use std::time::Duration;
 
 use async_trait::async_trait;
 use futures::channel::mpsc::{Receiver, Sender};
 use futures::future::select_all;
 use futures::{SinkExt, StreamExt};
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::ToRwResult;
 use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::{GetStreamRequest, GetStreamResponse};
+use risingwave_rpc_client::ComputeClient;
 use risingwave_storage::StateStore;
-use tonic::transport::{Channel, Endpoint};
+use tonic::transport::Channel;
 use tonic::{Request, Streaming};
 use tracing_futures::Instrument;
 
@@ -42,14 +41,7 @@ impl RemoteInput {
         up_down_ids: UpDownActorIds,
         sender: Sender<Message>,
     ) -> Result<Self> {
-        let mut client = ExchangeServiceClient::new(
-            Endpoint::from_shared(format!("http://{}", addr))
-                .map_err(|e| InternalError(format!("{}", e)))?
-                .connect_timeout(Duration::from_secs(5))
-                .connect()
-                .await
-                .to_rw_result_with(format!("RemoteInput failed to connect to {}", addr))?,
-        );
+        let mut client = ComputeClient::new(&addr).await?.get_channel();
         let req = GetStreamRequest {
             up_fragment_id: up_down_ids.0,
             down_fragment_id: up_down_ids.1,
@@ -180,6 +172,10 @@ impl Executor for ReceiverExecutor {
 
     fn logical_operator_info(&self) -> &str {
         &self.op_info
+    }
+
+    fn reset(&mut self, _epoch: u64) {
+        // nothing to do
     }
 }
 
@@ -314,6 +310,10 @@ impl Executor for MergeExecutor {
 
     fn logical_operator_info(&self) -> &str {
         &self.op_info
+    }
+
+    fn reset(&mut self, _epoch: u64) {
+        // nothing to do
     }
 }
 

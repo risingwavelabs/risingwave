@@ -14,9 +14,7 @@ use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::aggregation::*;
-use super::{
-    Barrier, Executor, ExecutorState, Message, PkIndices, PkIndicesRef, StatefuleExecutor,
-};
+use super::{Barrier, Executor, ExecutorState, Message, PkIndices, PkIndicesRef, StatefulExecutor};
 use crate::executor::{pk_input_array_refs, ExecutorBuilder};
 use crate::task::{build_agg_call_from_prost, ExecutorParams, StreamManagerCore};
 
@@ -128,7 +126,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             agg_calls,
             identity: format!("GlobalSimpleAggExecutor {:X}", executor_id),
             op_info,
-            executor_state: ExecutorState::INIT,
+            executor_state: ExecutorState::Init,
         }
     }
 
@@ -232,7 +230,7 @@ impl<S: StateStore> AggExecutor for SimpleAggExecutor<S> {
     }
 }
 
-impl<S: StateStore> StatefuleExecutor for SimpleAggExecutor<S> {
+impl<S: StateStore> StatefulExecutor for SimpleAggExecutor<S> {
     fn executor_state(&self) -> &ExecutorState {
         &self.executor_state
     }
@@ -271,6 +269,11 @@ impl<S: StateStore> Executor for SimpleAggExecutor<S> {
         );
         self.states.take();
         Ok(())
+    }
+
+    fn reset(&mut self, epoch: u64) {
+        self.states.take();
+        self.update_executor_state(ExecutorState::Active(epoch));
     }
 }
 

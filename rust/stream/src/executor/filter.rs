@@ -99,6 +99,10 @@ impl Executor for FilterExecutor {
     fn logical_operator_info(&self) -> &str {
         &self.op_info
     }
+
+    fn reset(&mut self, _epoch: u64) {
+        // nothing to do
+    }
 }
 
 impl SimpleExecutor for FilterExecutor {

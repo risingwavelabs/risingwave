@@ -18,7 +18,7 @@ use risingwave_storage::{Keyspace, StateStore};
 
 use super::barrier_align::{AlignedMessage, BarrierAligner};
 use super::managed_state::join::*;
-use super::{Executor, ExecutorState, Message, PkIndices, PkIndicesRef, StatefuleExecutor};
+use super::{Executor, ExecutorState, Message, PkIndices, PkIndicesRef, StatefulExecutor};
 use crate::executor::ExecutorBuilder;
 use crate::task::{ExecutorParams, StreamManagerCore};
 
@@ -285,7 +285,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<S,
                 let epoch = barrier.epoch.curr;
                 self.side_l.ht.update_epoch(epoch);
                 self.side_r.ht.update_epoch(epoch);
-                self.update_executor_state(ExecutorState::ACTIVE(barrier.epoch.curr));
+                self.update_executor_state(ExecutorState::Active(barrier.epoch.curr));
                 Ok(Message::Barrier(barrier))
             }
         }
@@ -312,6 +312,12 @@ impl<S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<S,
         self.side_r.clear_cache();
 
         Ok(())
+    }
+
+    fn reset(&mut self, epoch: u64) {
+        self.side_l.ht.clear();
+        self.side_r.ht.clear();
+        self.update_executor_state(ExecutorState::Active(epoch));
     }
 }
 
@@ -401,7 +407,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
             debug_r,
             identity: format!("HashJoinExecutor {:X}", executor_id),
             op_info,
-            executor_state: ExecutorState::INIT,
+            executor_state: ExecutorState::Init,
         }
     }
 
@@ -653,7 +659,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
     }
 }
 
-impl<S: StateStore, const T: JoinTypePrimitive> StatefuleExecutor for HashJoinExecutor<S, T> {
+impl<S: StateStore, const T: JoinTypePrimitive> StatefulExecutor for HashJoinExecutor<S, T> {
     fn executor_state(&self) -> &ExecutorState {
         &self.executor_state
     }
