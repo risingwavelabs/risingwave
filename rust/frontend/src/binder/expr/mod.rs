@@ -11,7 +11,8 @@ mod value;
 impl Binder {
     pub(super) fn bind_expr(&mut self, expr: Expr) -> Result<ExprImpl> {
         match expr {
-            Expr::Identifier(ident) => self.bind_column(ident),
+            Expr::Identifier(ident) => self.bind_column(&[ident]),
+            Expr::CompoundIdentifier(idents) => self.bind_column(&idents),
             Expr::Value(v) => Ok(ExprImpl::Literal(Box::new(self.bind_value(v)?))),
             Expr::BinaryOp { left, op, right } => Ok(ExprImpl::FunctionCall(Box::new(
                 self.bind_binary_op(*left, op, *right)?,

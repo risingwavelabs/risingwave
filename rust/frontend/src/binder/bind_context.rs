@@ -8,16 +8,15 @@ pub struct ColumnBinding {
 }
 
 pub struct BindContext {
-    // TODO: support multiple tables.
-
-    // Mapping column name to column.
-    pub columns: HashMap<String, ColumnBinding>,
+    // Mapping table name to columns.
+    pub tables: HashMap<String, HashMap<String, ColumnBinding>>,
 }
 
 impl BindContext {
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         BindContext {
-            columns: HashMap::new(),
+            tables: HashMap::new(),
         }
     }
 }

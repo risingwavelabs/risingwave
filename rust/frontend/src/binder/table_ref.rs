@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{ObjectName, TableFactor, TableWithJoins};
 
@@ -54,20 +56,22 @@ impl Binder {
             .get_schema(&schema_name)
             .and_then(|c| c.get_table(&table_name))
             .ok_or_else(|| ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name)))?;
-        let columns: Vec<ColumnCatalog> = table_catalog
-            .columns()
-            .iter()
-            .map(|(_, c)| c.clone())
-            .collect();
-        for column in &columns {
-            self.context.columns.insert(
-                column.name().to_string(),
-                ColumnBinding {
-                    id: column.id() as usize,
-                    data_type: column.data_type(),
-                },
-            );
-        }
+        let columns = table_catalog.columns().to_vec();
+
+        self.context.tables.insert(table_name.clone(), {
+            let mut column_name_map = HashMap::new();
+            for column in &columns {
+                column_name_map.insert(
+                    column.name().to_string(),
+                    ColumnBinding {
+                        id: column.id() as usize,
+                        data_type: column.data_type(),
+                    },
+                );
+            }
+            column_name_map
+        });
+
         Ok(BaseTableRef {
             name: table_name,
             table_id: table_catalog.id(),
