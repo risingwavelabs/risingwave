@@ -61,7 +61,7 @@
 	"id": 267,
 	"iteration": 1645770296715,
 	"links": [],
-	"liveNow": false,
+	"liveNow": true,
 	"panels": [
 		{
 			"collapsed": false,
@@ -6971,7 +6971,7 @@
 			"type": "row"
 		}
 	],
-	"refresh": "",
+	"refresh": "5s",
 	"schemaVersion": 34,
 	"style": "dark",
 	"tags": [],

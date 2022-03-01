@@ -9,12 +9,11 @@ use itertools::Itertools;
 
 mod sstable;
 pub use sstable::*;
-pub mod cf;
 mod cloud;
 pub mod compactor;
 mod error;
 pub mod hummock_meta_client;
-pub(crate) mod iterator;
+mod iterator;
 pub mod key;
 pub mod key_range;
 pub mod local_version_manager;

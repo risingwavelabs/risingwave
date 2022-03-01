@@ -52,30 +52,6 @@ impl TableManager for SimpleTableManager {
         Ok(table)
     }
 
-    // async fn create_table_on_collection(
-    //     &self,
-    //     table_id: &CollectionId,
-    //     table_columns: Vec<TableColumnDesc>,
-    // ) -> Result<Option<ScannableTableRef>> {
-    //     let mut tables = self.lock_tables();
-
-    //     ensure!(
-    //         !tables.contains_key(table_id),
-    //         "Table id already exists: {:?}",
-    //         table_id
-    //     );
-
-    //     if let StateStoreImpl::HummockStateStore(hummock_state_store) = &self.state_store {
-    //         let storage = hummock_state_store.storage();
-    //         let collection = Collection::new_relation(storage, table_id, table_columns);
-    //         let table = Arc::new(collection);
-    //         tables.insert(table_id.clone(), table.clone());
-    //         Ok(Some(table))
-    //     } else {
-    //         Ok(None)
-    //     }
-    // }
-
     fn get_table(&self, table_id: &TableId) -> Result<ScannableTableRef> {
         let tables = self.lock_tables();
         tables
