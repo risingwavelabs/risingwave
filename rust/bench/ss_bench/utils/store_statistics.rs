@@ -3,7 +3,7 @@ use prometheus::Histogram;
 use risingwave_storage::for_all_metrics;
 use risingwave_storage::monitor::DEFAULT_STATE_STORE_STATS;
 
-fn get_percentile(histogram: &Histogram, p: f64) -> f64 {
+pub(crate) fn get_percentile(histogram: &Histogram, p: f64) -> f64 {
     let metric = histogram.metric();
     let histogram = metric.get_histogram();
     let sample_count = histogram.get_sample_count();

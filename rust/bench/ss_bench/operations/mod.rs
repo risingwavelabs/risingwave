@@ -1,13 +1,15 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use bytes::Bytes;
+use prometheus::Registry;
 use rand::prelude::StdRng;
 use rand::SeedableRng;
+use risingwave_storage::monitor::StateStoreStats;
 use risingwave_storage::StateStore;
 
+use crate::utils::diff_statistics::*;
 use crate::utils::latency_stat::LatencyStat;
 use crate::Opts;
-
 pub(crate) mod get;
 pub(crate) mod prefix_scan_random;
 pub(crate) mod write_batch;
@@ -31,6 +33,13 @@ pub(crate) struct PerfMetrics {
 impl Operations {
     /// Run operations in the `--benchmarks` option
     pub(crate) async fn run(store: impl StateStore, opts: &Opts) {
+        let reg = Registry::new();
+        let stat = StateStoreStats::new(&reg);
+        let mut diff_stat = DiffStat {
+            prev_stat: stat.clone(),
+            cur_stat: stat,
+        };
+
         let mut runner = Operations {
             keys: vec![],
             prefixes: vec![],
@@ -38,12 +47,23 @@ impl Operations {
         };
 
         for operation in opts.benchmarks.split(',') {
+            // (Sun Ting) TODO: remove statistics print for each operation
             match operation {
-                "writebatch" => runner.write_batch(&store, opts).await,
+                "writebatch" => {
+                    runner.write_batch(&store, opts).await;
+                }
                 "deleterandom" => runner.delete_random(&store, opts).await,
                 "getrandom" => runner.get_random(&store, opts).await,
                 "getseq" => runner.get_seq(&store, opts).await,
                 "prefixscanrandom" => runner.prefix_scan_random(&store, opts).await,
+                other => unimplemented!("operation \"{}\" is not supported.", other),
+            }
+
+            diff_stat.update_stat();
+
+            match operation {
+                "writebatch" => diff_stat.display_write_batch(),
+                // (Sun Ting) TODO: implement other performance displays
                 other => unimplemented!("operation \"{}\" is not supported.", other),
             }
         }
