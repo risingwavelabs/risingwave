@@ -80,7 +80,7 @@ impl DiffStat {
             upper_bound_list: bucket_bounds,
             count_list: prev_buckets
                 .iter()
-                .zip(cur_buckets.iter())
+                .zip_eq(cur_buckets.iter())
                 .map(|(pb, cb)| cb.get_cumulative_count() - pb.get_cumulative_count())
                 .collect_vec(),
             total_sum: cur.get_sample_sum() - prev.get_sample_sum(),

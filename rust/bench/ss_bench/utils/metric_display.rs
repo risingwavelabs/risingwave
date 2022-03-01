@@ -36,7 +36,7 @@ impl MetricDisplay {
         let threshold = (sample_count as f64 * (p / 100.0_f64)).ceil() as u64;
         let mut last_upper_bound = 0.0;
         let mut last_count = 0;
-        for (&upper_bound, &count) in hist.upper_bound_list.iter().zip(hist.count_list.iter()) {
+        for (&upper_bound, &count) in hist.upper_bound_list.iter().zip_eq(hist.count_list.iter()) {
             if count >= threshold {
                 // assume scale linearly within this bucket,
                 // return a value bwtween last_upper_bound and upper_bound

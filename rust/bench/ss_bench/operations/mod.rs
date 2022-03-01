@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeSet};
 
 use bytes::Bytes;
 use prometheus::Registry;
