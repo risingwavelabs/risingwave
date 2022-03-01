@@ -204,6 +204,7 @@ impl Parser {
     /// Parse a new expression including wildcard & qualified wildcard
     pub fn parse_wildcard_expr(&mut self) -> Result<WildcardExpr, ParserError> {
         let index = self.index;
+
         match self.next_token() {
             Token::Word(w) if self.peek_token() == Token::Period => {
                 let mut id_parts: Vec<Ident> = vec![w.to_ident()];
