@@ -77,9 +77,7 @@ message DropResponse {
   common.Status status = 1;
 }
 
-message GetCatalogRequest {
-  uint32 node_id = 1;
-}
+message GetCatalogRequest {}
 
 message Catalog {
   repeated Database databases = 1;

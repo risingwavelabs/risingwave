@@ -48,8 +48,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_explain() {
-        let meta = risingwave_meta::test_utils::LocalMeta::start(12004).await;
-        let frontend = crate::test_utils::LocalFrontend::new(&meta).await;
+        let frontend = crate::test_utils::LocalFrontend::new().await;
 
         let sql = "values (11, 22), (33+(1+2), 44);";
         let stmt = Parser::parse_sql(sql).unwrap().into_iter().next().unwrap();
@@ -60,14 +59,11 @@ mod tests {
         assert!(s.contains("22"));
         assert!(s.contains("33"));
         assert!(s.contains("44"));
-
-        meta.stop().await;
     }
 
     #[tokio::test]
     async fn test_handle_explain_scan() {
-        let meta = risingwave_meta::test_utils::LocalMeta::start(12005).await;
-        let frontend = crate::test_utils::LocalFrontend::new(&meta).await;
+        let frontend = crate::test_utils::LocalFrontend::new().await;
 
         let sql_scan = "explain select * from t";
 
@@ -84,14 +80,11 @@ mod tests {
         let s = row[0].as_ref().unwrap();
         assert!(s.contains("v1"));
         assert!(s.contains("v2"));
-
-        meta.stop().await;
     }
 
     #[tokio::test]
     async fn test_handle_explain_insert() {
-        let meta = risingwave_meta::test_utils::LocalMeta::start(12006).await;
-        let frontend = crate::test_utils::LocalFrontend::new(&meta).await;
+        let frontend = crate::test_utils::LocalFrontend::new().await;
 
         frontend
             .run_sql("create table t (v1 int, v2 int)")
@@ -110,7 +103,5 @@ mod tests {
         assert!(lines[1].contains("33"));
         assert!(lines[1].contains("44"));
         assert!(lines[1].contains("55"));
-
-        meta.stop().await;
     }
 }

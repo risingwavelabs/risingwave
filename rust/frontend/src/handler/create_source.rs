@@ -61,7 +61,6 @@ mod tests {
     use std::io::Write;
 
     use risingwave_common::types::DataType;
-    use risingwave_meta::test_utils::LocalMeta;
     use tempfile::NamedTempFile;
 
     use crate::catalog::table_catalog::ROWID_NAME;
@@ -93,8 +92,6 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn handle_create_source() {
-        let meta = LocalMeta::start(12001).await;
-
         let proto_file = create_proto_file();
         let sql = format!(
             r#"CREATE SOURCE t
@@ -102,7 +99,7 @@ mod tests {
     ROW FORMAT PROTOBUF MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://{}'"#,
             proto_file.path().to_str().unwrap()
         );
-        let frontend = LocalFrontend::new(&meta).await;
+        let frontend = LocalFrontend::new().await;
         frontend.run_sql(sql).await.unwrap();
 
         let catalog_manager = frontend.session().env().catalog_mgr();
@@ -119,7 +116,5 @@ mod tests {
         expected_map.insert("zipcode".to_string(), DataType::Int64);
         expected_map.insert("rate".to_string(), DataType::Float32);
         assert_eq!(columns, expected_map);
-
-        meta.stop().await;
     }
 }

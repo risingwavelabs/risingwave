@@ -3941,6 +3941,7 @@ dependencies = [
 name = "risingwave_rpc_client"
 version = "0.1.3"
 dependencies = [
+ "async-trait",
  "risingwave-pb",
  "risingwave_common",
  "tonic",
