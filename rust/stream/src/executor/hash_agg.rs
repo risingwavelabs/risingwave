@@ -90,15 +90,15 @@ impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcher<S> {
     type Input = HashAggExecutorDispatcherArgs<S>;
     type Output = Box<dyn Executor>;
 
-    fn dispatch<K: HashKey>(input: Self::Input) -> Self::Output {
+    fn dispatch<K: HashKey>(args: Self::Input) -> Self::Output {
         Box::new(HashAggExecutor::<K, S>::new(
-            input.input,
-            input.agg_calls,
-            input.key_indices,
-            input.keyspace,
-            input.pk_indices,
-            input.executor_id,
-            input.op_info,
+            args.input,
+            args.agg_calls,
+            args.key_indices,
+            args.keyspace,
+            args.pk_indices,
+            args.executor_id,
+            args.op_info,
         ))
     }
 }
