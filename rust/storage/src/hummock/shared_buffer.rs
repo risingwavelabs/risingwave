@@ -6,7 +6,6 @@ use async_trait::async_trait;
 use itertools::Itertools;
 use parking_lot::RwLock as PLRwLock;
 use risingwave_common::error::Result;
-use tokio::sync::mpsc::error::TryRecvError;
 use tokio::task::JoinHandle;
 
 use super::compactor::{Compactor, SubCompactContext};
@@ -441,23 +440,12 @@ impl SharedBufferUploader {
 
     pub async fn run(mut self) -> Result<()> {
         loop {
-            match self.rx.try_recv() {
-                Ok(m) => match self.handle(m).await {
+            match self.rx.recv().await {
+                Some(m) => match self.handle(m).await {
                     Ok(_) => continue,
                     Err(e) => return Err(e),
                 },
-                Err(TryRecvError::Empty) => {
-                    // Wait for the next item
-                    // Is there a better way to do this?
-                    match self.rx.recv().await {
-                        Some(m) => match self.handle(m).await {
-                            Ok(_) => continue,
-                            Err(e) => return Err(e),
-                        },
-                        None => break,
-                    }
-                }
-                Err(TryRecvError::Disconnected) => break,
+                None => break,
             }
         }
         Ok(())

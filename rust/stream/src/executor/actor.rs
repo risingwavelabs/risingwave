@@ -52,7 +52,9 @@ impl Actor {
                         dispatch_state_store!(&self.context.state_store, store, {
                             match store.sync(Some(barrier.epoch.prev)).await {
                                 Ok(_) => (),
-                                Err(e) => tracing::info!(
+                                // TODO: Handle sync failure by propagating it
+                                // back to global barrier manager
+                                Err(e) => panic!(
                                 "Failed to sync state store after receving barrier {:?} due to {}",
                                 barrier,
                                 e
