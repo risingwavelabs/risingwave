@@ -1,6 +1,5 @@
-
 use itertools::Itertools;
-use prometheus::core::{Metric};
+use prometheus::core::Metric;
 use prometheus::proto::Histogram;
 use risingwave_storage::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
 
@@ -32,25 +31,41 @@ impl DiffStat {
     }
 
     pub(crate) fn display_write_batch(&mut self) {
-        // let batched_write_counts =  self.cur_stat.batched_write_counts.get()
-        //  - self.prev_stat.batched_write_counts.get();
         let metric = self.prev_stat.batch_write_latency.metric();
         let prev_histogram = metric.get_histogram();
         let metric = self.cur_stat.batch_write_latency.metric();
         let cur_histogram = metric.get_histogram();
 
-        let latency_hist = DiffStat::histogram_diff(prev_histogram, cur_histogram);
-        let latency = MetricDisplay::new(&latency_hist);
+        let latency = {
+            let latency_hist = DiffStat::histogram_diff(prev_histogram, cur_histogram);
+            MetricDisplay::new(&latency_hist)
+        };
 
-        println!("hello {}", latency);
+        let time_comsume = cur_histogram.get_sample_sum() - prev_histogram.get_sample_sum();
 
-        //     println!(
-        //         "
-        // writebatch
-        //   {}
-        //   KV ingestion OPS: {}  {} bytes/sec",
-        //         latency, perf.qps, perf.bytes_pre_sec
-        //     );
+        let ops = {
+            let written_batch_num =
+                cur_histogram.get_sample_count() - prev_histogram.get_sample_count();
+            written_batch_num as f64 / time_comsume
+        };
+
+        let bytes_pre_sec = {
+            let metric = self.prev_stat.batch_write_size.metric();
+            let prev_histogram = metric.get_histogram();
+            let metric = self.cur_stat.batch_write_size.metric();
+            let cur_histogram = metric.get_histogram();
+
+            let written_bytes = cur_histogram.get_sample_sum() - prev_histogram.get_sample_sum();
+            written_bytes / time_comsume
+        };
+
+        println!(
+            "
+        writebatch
+          {}
+          OPS: {}  {} bytes/sec",
+            latency, ops, bytes_pre_sec
+        );
     }
 
     fn histogram_diff(prev: &Histogram, cur: &Histogram) -> MyHistogram {
