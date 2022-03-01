@@ -4,6 +4,18 @@ SELECT CAST(ARRAY[a, b, c] AS foo)
 =>
 Query(Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(Cast { expr: Array([Identifier(Ident { value: "a", quote_style: None }), Identifier(Ident { value: "b", quote_style: None }), Identifier(Ident { value: "c", quote_style: None })]), data_type: Custom(ObjectName([Ident { value: "foo", quote_style: None }])) })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
 
-SELECT ARRAY[a, b, 1]::foo;
+SELECT ARRAY[a, b, c];
+---
+SELECT ARRAY[a, b, c]
+=>
+Query(Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(Array([Identifier(Ident { value: "a", quote_style: None }), Identifier(Ident { value: "b", quote_style: None }), Identifier(Ident { value: "c", quote_style: None })]))], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
+
+SELECT ARRAY[1, 2, 3.0];
+---
+SELECT ARRAY[1, 2, 3.0]
+=>
+Query(Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(Array([Value(Number("1", false)), Value(Number("2", false)), Value(Number("3.0", false))]))], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
+
+SELECT ARRAY[a, b, 1];
 ---
 sql parser error: Comma separated value types are not uniform
