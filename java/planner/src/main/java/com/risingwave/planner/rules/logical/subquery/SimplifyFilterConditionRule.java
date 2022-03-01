@@ -34,10 +34,10 @@ import org.apache.calcite.rex.RexUtil;
 /**
  * Planner rule that apply various simplifying transformations on filter condition.
  *
- * <p> if `simplifySubQuery` is true, this rule will also simplify the filter condition
- * in [[RexSubQuery]].
+ * <p>if `simplifySubQuery` is true, this rule will also simplify the filter condition in
+ * [[RexSubQuery]].
  *
- * <p> This file is adapted from flink.
+ * <p>This file is adapted from flink.
  */
 class SimplifyFilterConditionRule extends RelOptRule {
 
@@ -51,20 +51,20 @@ class SimplifyFilterConditionRule extends RelOptRule {
     Filter filter = call.rel(0);
     var changed = new boolean[] {false};
     var newFilter = simplify(filter, changed);
-    newFilter.ifPresent(f -> {
-      call.transformTo(f);
-      call.getPlanner().prune(filter);
-    });
+    newFilter.ifPresent(
+        f -> {
+          call.transformTo(f);
+          call.getPlanner().prune(filter);
+        });
   }
 
   private Optional<Filter> simplify(Filter filter, boolean[] changed) {
     var condition = simplifyFilterConditionInSubQuery(filter.getCondition(), changed);
 
     var rexBuilder = filter.getCluster().getRexBuilder();
-    var simplifiedCondition = PlannerUtils.simplify(
-        rexBuilder,
-        condition,
-        filter.getCluster().getPlanner().getExecutor());
+    var simplifiedCondition =
+        PlannerUtils.simplify(
+            rexBuilder, condition, filter.getCluster().getPlanner().getExecutor());
     var newCondition = RexUtil.pullFactors(rexBuilder, simplifiedCondition);
 
     if (!changed[0] && !condition.equals(newCondition)) {
@@ -80,20 +80,23 @@ class SimplifyFilterConditionRule extends RelOptRule {
   }
 
   private RexNode simplifyFilterConditionInSubQuery(RexNode condition, boolean[] changed) {
-    return condition.accept(new RexShuttle() {
-      @Override
-      public RexNode visitSubQuery(RexSubQuery subQuery) {
-        var newRel = subQuery.rel.accept(new RelShuttleImpl() {
-          public RelNode visit(LogicalFilter filter) {
-            return simplify(filter, changed).orElse(filter);
+    return condition.accept(
+        new RexShuttle() {
+          @Override
+          public RexNode visitSubQuery(RexSubQuery subQuery) {
+            var newRel =
+                subQuery.rel.accept(
+                    new RelShuttleImpl() {
+                      public RelNode visit(LogicalFilter filter) {
+                        return simplify(filter, changed).orElse(filter);
+                      }
+                    });
+            if (changed[0]) {
+              return subQuery.clone(newRel);
+            } else {
+              return subQuery;
+            }
           }
         });
-        if (changed[0]) {
-          return subQuery.clone(newRel);
-        } else {
-          return subQuery;
-        }
-      }
-    });
   }
 }
