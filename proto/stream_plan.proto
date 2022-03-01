@@ -24,26 +24,18 @@ message SourceNode {
   SourceType source_type = 3;
 }
 
-message SourceNodeV2 {
-  oneof source {
-    InternalSourceNode internal_source = 1;
-    ConnectorSourceNode connector_source = 2;
-  }
-}
-
-message InternalSourceNode {
-  plan.TableRefId table_ref_id = 1;
-  repeated int32 column_ids = 2;
-}
-
 message ConnectorSplit {
-
+  oneof split {
+    KafkaSplit() {
+          
+  }
+  }
 }
 
 message ConnectorSourceNode {
   map<string, string> properties = 1; // { "kafka.host": "localhost:9092,sdsd"}
   repeated ConnectorSplit splits = 2;
-  repeated int32 column_ids = 3; 
+  repeated plan.ColumnDesc column_descs = 3;
 }
 
 // connector-node -> mv_sink -> xxxxx
@@ -131,8 +123,8 @@ message BatchPlanNode {
 
 message StreamNode {
   oneof node {
-    SourceNodeV2 source_node_v2 = 19;
     SourceNode source_node = 4;
+    ConnectorSourceNode connector_source_node = 20;
     ProjectNode project_node = 5;
     FilterNode filter_node = 6;
     MaterializeNode materialize_node = 7;

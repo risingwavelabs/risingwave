@@ -163,8 +163,17 @@ message Barrier {
     StopMutation stop = 3;
     UpdateMutation update = 4;
     AddMutation add = 5;
+    AssignSplitsMutation assign_splits = 6;
   }
-  bytes span = 6;
+  bytes span = 7;
+}
+
+message AssignSplitMutation {
+  map<uint32, Splits> splits = 1;
+}
+
+message Splits {
+
 }
 
 message Terminate {}
