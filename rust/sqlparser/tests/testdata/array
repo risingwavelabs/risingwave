@@ -1,0 +1,9 @@
+SELECT ARRAY[a, b, c]::foo;
+---
+SELECT CAST(ARRAY[a, b, c] AS foo)
+=>
+Query(Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(Cast { expr: Array([Identifier(Ident { value: "a", quote_style: None }), Identifier(Ident { value: "b", quote_style: None }), Identifier(Ident { value: "c", quote_style: None })]), data_type: Custom(ObjectName([Ident { value: "foo", quote_style: None }])) })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
+
+SELECT ARRAY[a, b, 1]::foo;
+---
+sql parser error: Comma separated value types are not uniform
