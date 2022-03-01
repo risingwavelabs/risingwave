@@ -284,7 +284,8 @@ pub enum Expr {
     Rollup(Vec<Vec<Expr>>),
     /// The `ROW` expr. The `ROW` keyword can be omitted,
     Row(Vec<Expr>),
-    /// The `ARRAY` expr. Alternative syntax for `ARRAY` is by utilizing curly braces, e.g. {1, 2, 3},
+    /// The `ARRAY` expr. Alternative syntax for `ARRAY` is by utilizing curly braces, e.g. {1, 2,
+    /// 3},
     Array(Vec<Expr>),
 }
 
