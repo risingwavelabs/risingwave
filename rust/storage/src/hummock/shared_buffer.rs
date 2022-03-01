@@ -439,13 +439,9 @@ impl SharedBufferUploader {
     }
 
     pub async fn run(mut self) -> Result<()> {
-        loop {
-            match self.rx.recv().await {
-                Some(m) => match self.handle(m).await {
-                    Ok(_) => continue,
-                    Err(e) => return Err(e),
-                },
-                None => break,
+        while let Some(m) = self.rx.recv().await {
+            if let Err(e) = self.handle(m).await {
+                return Err(e);
             }
         }
         Ok(())
