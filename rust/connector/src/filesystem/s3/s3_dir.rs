@@ -183,6 +183,8 @@ impl S3Directory {
         }
     }
 
+    /// Receive SQS messages and serialize. Current only support `ObjectObjectXXX` Event. (append
+    /// only) [use aws sqs long running](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-short-and-long-polling.html)
     pub async fn sqs_recv_msg_post(
         &self,
         queue_url: &str,
@@ -266,6 +268,8 @@ impl S3Directory {
 
 #[async_trait]
 impl Directory for S3Directory {
+    /// Send the added S3 File to the specified channel sender,
+    /// if the ```DirectoryChangeWatch::Stopped``` event method will exit.
     async fn push_entries_change(
         &self,
         sender: Sender<EntryOptEvent>,
