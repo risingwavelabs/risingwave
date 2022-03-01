@@ -452,7 +452,7 @@ impl HummockStorage {
         self.local_version_manager.wait_epoch(epoch).await;
     }
 
-    pub fn shared_buffer_manager(&self) -> &Arc<SharedBufferManager> {
+    pub fn shared_buffer_manager(&self) -> &SharedBufferManager {
         &self.shared_buffer_manager
     }
 }

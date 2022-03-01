@@ -156,7 +156,7 @@ impl LocalVersionManager {
     pub async fn wait_epoch(&self, epoch: HummockEpoch) {
         // TODO: review usage of all HummockEpoch::MAX
         if epoch == HummockEpoch::MAX {
-            return;
+            panic!("epoch should not be u64::MAXX");
         }
         let mut receiver = self.update_notifier_tx.subscribe();
         loop {

@@ -200,7 +200,6 @@ impl Compactor {
         watermark: Epoch,
     ) -> HummockResult<()> {
         // NOTICE: should be user_key overlap, NOT full_key overlap!
-
         let mut builder = CapacitySplitTableBuilder::new(|| async {
             let table_id = context.hummock_meta_client.get_new_table_id().await?;
             let builder = HummockStorage::get_builder(&context.options);

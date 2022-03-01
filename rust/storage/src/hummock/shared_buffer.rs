@@ -26,7 +26,7 @@ type SharedBufferItem = (Vec<u8>, HummockValue<Vec<u8>>);
 /// A write batch stored in the shared buffer.
 #[derive(Clone, Debug)]
 pub struct SharedBufferBatch {
-    inner: Arc<Vec<SharedBufferItem>>,
+    inner: Arc<[SharedBufferItem]>,
     epoch: u64,
 }
 
@@ -34,7 +34,7 @@ pub struct SharedBufferBatch {
 impl SharedBufferBatch {
     pub fn new(sorted_items: Vec<SharedBufferItem>, epoch: u64) -> Self {
         Self {
-            inner: Arc::new(sorted_items),
+            inner: sorted_items.into(),
             epoch,
         }
     }
@@ -76,19 +76,15 @@ impl SharedBufferBatch {
     pub fn epoch(&self) -> u64 {
         self.epoch
     }
-
-    pub fn into_inner(self) -> Arc<Vec<SharedBufferItem>> {
-        self.inner
-    }
 }
 
 pub struct SharedBufferBatchIterator<const DIRECTION: usize> {
-    inner: Arc<Vec<SharedBufferItem>>,
+    inner: Arc<[SharedBufferItem]>,
     current_idx: usize,
 }
 
 impl<const DIRECTION: usize> SharedBufferBatchIterator<DIRECTION> {
-    pub fn new(inner: Arc<Vec<SharedBufferItem>>) -> Self {
+    pub fn new(inner: Arc<[SharedBufferItem]>) -> Self {
         Self {
             inner,
             current_idx: 0,
@@ -119,10 +115,7 @@ impl<const DIRECTION: usize> HummockIterator for SharedBufferBatchIterator<DIREC
     }
 
     fn value(&self) -> HummockValue<&[u8]> {
-        match &self.current_item().1 {
-            HummockValue::Put(v) => HummockValue::Put(v.as_slice()),
-            HummockValue::Delete => HummockValue::Delete,
-        }
+        self.current_item().1.as_slice()
     }
 
     fn is_valid(&self) -> bool {
@@ -137,7 +130,7 @@ impl<const DIRECTION: usize> HummockIterator for SharedBufferBatchIterator<DIREC
     async fn seek(&mut self, key: &[u8]) -> super::HummockResult<()> {
         match self
             .inner
-            .binary_search_by(|probe| probe.0.as_slice().cmp(key))
+            .binary_search_by(|probe| key::user_key(probe.0.as_slice()).cmp(key::user_key(key)))
         {
             Ok(i) => self.current_idx = i,
             Err(i) => self.current_idx = i,
@@ -292,9 +285,8 @@ impl SharedBufferManager {
     /// Delete shared buffers before a given `epoch` inclusively.
     pub fn delete_before(&self, epoch: u64) {
         let mut guard = self.shared_buffer.write();
-        let mut new = guard.split_off(&(epoch + 1));
-        guard.clear();
-        guard.append(&mut new);
+        let new = guard.split_off(&(epoch + 1));
+        *guard = new;
     }
 
     /// This function was called while [`SharedBufferManager`] exited.
