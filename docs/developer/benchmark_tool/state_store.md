@@ -11,7 +11,7 @@
  --scans 200 \
  --deletes 2000
  --concurrency-num 4 \
- --seed 233
+ --seed 233 \
  --statistics
 ```
 
