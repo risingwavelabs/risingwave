@@ -8,7 +8,7 @@ use risingwave_common::array::{Array, Row};
 use risingwave_common::catalog::{ColumnId, Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::Keyspace;
 use risingwave_stream::executor::{MViewTable, ManagedMViewState};
@@ -27,11 +27,8 @@ async fn test_row_seq_scan() -> Result<()> {
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
     let pk_columns = vec![0];
     let orderings = vec![OrderType::Ascending];
-    let mut state = ManagedMViewState::new(
-        keyspace.clone(),
-        column_ids,
-        vec![OrderPair::new(0, OrderType::Ascending)],
-    );
+    let mut state =
+        ManagedMViewState::new(keyspace.clone(), column_ids, vec![OrderType::Ascending]);
 
     let table = Arc::new(MViewTable::new(
         keyspace.clone(),

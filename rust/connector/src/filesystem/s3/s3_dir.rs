@@ -224,7 +224,6 @@ impl S3Directory {
                                             entry: entry_stat,
                                         })
                                         .await;
-                                    println!("sqs_recv_msg_post() send change complete");
                                     if send_rs.is_err() {
                                         return Err(anyhow::Error::from(send_rs.err().unwrap()));
                                     } else {
@@ -239,7 +238,6 @@ impl S3Directory {
                                             )
                                             .send()
                                             .await;
-                                        println!("sqs_recv_msg_post delete msg complete");
                                         if del_msg_rs.is_err() {
                                             error!(
                                                 "sqs_recv_msg_post del sqs msg error. {:?}",
@@ -479,6 +477,7 @@ mod test {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_list_curr_entries() {
         let shared_config = new_share_config(TEST_REGION_NAME.to_string(), AwsCredential::Default)
             .await
@@ -490,6 +489,7 @@ mod test {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    #[ignore]
     async fn test_s3_directory_entries_change() {
         let shared_config = new_share_config(TEST_REGION_NAME.to_string(), AwsCredential::Default)
             .await

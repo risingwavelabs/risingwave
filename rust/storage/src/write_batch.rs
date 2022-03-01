@@ -1,4 +1,3 @@
-use std::mem::size_of_val;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -86,9 +85,9 @@ where
         // self.state_store_stats.batch_write_size.reset();
         let mut write_batch_size = 0_usize;
         for (key, value) in self.batch.clone() {
-            write_batch_size += size_of_val(key.as_ref());
+            write_batch_size += key.len();
             if value.is_some() {
-                write_batch_size += size_of_val(value.as_ref().unwrap());
+                write_batch_size += value.as_ref().unwrap().len();
             }
         }
         self.state_store_stats

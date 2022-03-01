@@ -1,11 +1,16 @@
 use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::{Op, RwError, StreamChunk};
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::try_match_expand;
+use risingwave_pb::stream_plan;
+use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::table::{ScannableTableRef, TableIterRef};
+use risingwave_storage::StateStore;
 
-use crate::executor::{Executor, Message, PkIndices, PkIndicesRef};
+use crate::executor::{Executor, ExecutorBuilder, Message, PkIndices, PkIndicesRef};
+use crate::task::{ExecutorParams, StreamManagerCore};
 
 const DEFAULT_BATCH_SIZE: usize = 100;
 
@@ -35,6 +40,28 @@ impl std::fmt::Debug for BatchQueryExecutor {
             .field("pk_indices", &self.pk_indices)
             .field("batch_size", &self.batch_size)
             .finish()
+    }
+}
+
+pub struct BatchQueryExecutorBuilder {}
+
+impl ExecutorBuilder for BatchQueryExecutorBuilder {
+    fn new_boxed_executor(
+        params: ExecutorParams,
+        node: &stream_plan::StreamNode,
+        _store: impl StateStore,
+        _stream: &mut StreamManagerCore,
+    ) -> Result<Box<dyn Executor>> {
+        let node = try_match_expand!(node.get_node().unwrap(), Node::BatchPlanNode)?;
+        let table_id = TableId::from(&node.table_ref_id);
+        let table_manager = params.env.table_manager();
+        let table = table_manager.get_table(&table_id)?;
+
+        Ok(Box::new(BatchQueryExecutor::new(
+            table.clone(),
+            params.pk_indices,
+            params.op_info,
+        )))
     }
 }
 
@@ -109,6 +136,10 @@ impl Executor for BatchQueryExecutor {
             panic!("epoch cannot be initialized twice");
         }
         Ok(())
+    }
+
+    fn reset(&mut self, _epoch: u64) {
+        // nothing to do
     }
 }
 
