@@ -217,7 +217,7 @@ impl<K: HashKey, S: StateStore> AggExecutor for HashAggExecutor<K, S> {
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> Result<()> {
         let epoch = self.executor_state().epoch();
         let (data_chunk, ops) = chunk.into_parts();
-        let keys = K::build(&self.pk_indices, &data_chunk)?;
+        let keys = K::build(&self.key_indices, &data_chunk)?;
         let (columns, visibility) = data_chunk.into_parts();
 
         // --- Find unique keys in this batch and generate visibility map for each key ---

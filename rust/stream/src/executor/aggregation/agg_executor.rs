@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
@@ -20,6 +22,14 @@ pub struct AggState<S: StateStore> {
 
     /// Previous outputs of managed states. Initializing with `None`.
     pub prev_states: Option<Vec<Datum>>,
+}
+
+impl<S: StateStore> Debug for AggState<S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AggState")
+            .field("prev_states", &self.prev_states)
+            .finish()
+    }
 }
 
 /// We assume the first state of aggregation is always `StreamingRowCountAgg`.
