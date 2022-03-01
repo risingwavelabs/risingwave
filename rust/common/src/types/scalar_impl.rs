@@ -1,5 +1,6 @@
 use super::*;
 use crate::array::struct_array::{StructRef, StructValue};
+use crate::array::list_array::{ListRef, ListValue};
 use crate::{for_all_native_types, for_all_scalar_variants};
 
 /// `ScalarPartialOrd` allows comparison between `Scalar` and `ScalarRef`.
@@ -63,6 +64,19 @@ impl Scalar for StructValue {
 
     fn to_scalar_value(self) -> ScalarImpl {
         ScalarImpl::Struct(self)
+    }
+}
+
+/// Implement `Scalar` for `ListValue`.
+impl Scalar for ListValue {
+    type ScalarRefType<'a> = ListRef<'a>;
+
+    fn as_scalar_ref(&self) -> ListRef<'_> {
+        ListRef::ValueRef { val: self }
+    }
+
+    fn to_scalar_value(self) -> ScalarImpl {
+        ScalarImpl::List(self)
     }
 }
 
@@ -268,6 +282,20 @@ impl<'a> ScalarRef<'a> for StructRef<'a> {
             .map(|f| f.map(|s| s.into_scalar_impl()))
             .collect();
         StructValue::new(fields)
+    }
+}
+
+/// Implement `Scalar` for `ListValue`.
+impl<'a> ScalarRef<'a> for ListRef<'a> {
+    type ScalarType = ListValue;
+
+    fn to_owned_scalar(&self) -> ListValue {
+        let fields = self
+            .fields_ref()
+            .iter()
+            .map(|f| f.map(|s| s.into_scalar_impl()))
+            .collect();
+        ListValue::new(fields)
     }
 }
 

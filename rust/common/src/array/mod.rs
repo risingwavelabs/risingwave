@@ -14,6 +14,7 @@ mod primitive_array;
 pub mod stream_chunk;
 mod stream_chunk_iter;
 pub mod struct_array;
+pub mod list_array;
 mod utf8_array;
 mod value_reader;
 
@@ -36,6 +37,7 @@ pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayI
 use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType};
 pub use stream_chunk::{Op, StreamChunk};
 pub use struct_array::{StructArray, StructArrayBuilder, StructRef, StructValue};
+pub use list_array::{ListArray, ListArrayBuilder, ListRef, ListValue};
 pub use utf8_array::*;
 
 use crate::array::iterator::ArrayImplIterator;
@@ -181,6 +183,7 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
 pub enum ArrayMeta {
     Simple, // Simple array without given any extra metadata.
     Struct { children: Arc<[DataType]> },
+    List { children: Arc<[DataType]> },
 }
 
 /// Implement `compact` on array, which removes element according to `visibility`.
@@ -228,7 +231,8 @@ macro_rules! for_all_variants {
             { NaiveDate, naivedate, NaiveDateArray, NaiveDateArrayBuilder },
             { NaiveDateTime, naivedatetime, NaiveDateTimeArray, NaiveDateTimeArrayBuilder },
             { NaiveTime, naivetime, NaiveTimeArray, NaiveTimeArrayBuilder },
-            { Struct, struct, StructArray, StructArrayBuilder }
+            { Struct, struct, StructArray, StructArrayBuilder },
+            { List, list, ListArray, ListArrayBuilder }
         }
     };
 }
@@ -295,6 +299,12 @@ impl From<NaiveTimeArray> for ArrayImpl {
 impl From<StructArray> for ArrayImpl {
     fn from(arr: StructArray) -> Self {
         Self::Struct(arr)
+    }
+}
+
+impl From<ListArray> for ArrayImpl {
+    fn from(arr: ListArray) -> Self {
+        Self::List(arr)
     }
 }
 
@@ -540,6 +550,7 @@ impl ArrayImpl {
             ProstArrayType::Time => read_naivetime_array(array, cardinality)?,
             ProstArrayType::Timestamp => read_naivedatetime_array(array, cardinality)?,
             ProstArrayType::Struct => StructArray::from_protobuf(array)?,
+            ProstArrayType::List => ListArray::from_protobuf(array)?,
         };
         Ok(array)
     }
