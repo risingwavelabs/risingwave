@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
+use log::info;
 use parking_lot::Mutex;
 use risingwave_common::array::RwError;
 use risingwave_common::error::Result;
@@ -8,6 +10,7 @@ use risingwave_common::types::DataType;
 use risingwave_pb::meta::{Database, Schema, Table};
 use risingwave_pb::plan::{ColumnDesc, DatabaseRefId, SchemaRefId, TableRefId};
 use risingwave_rpc_client::MetaClient;
+use tokio::time;
 
 use crate::catalog::database_catalog::DatabaseCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
@@ -60,11 +63,11 @@ impl CatalogCache {
     }
 
     fn get_database_snapshot(&self, db_name: &str) -> Option<Arc<DatabaseCatalog>> {
-        Some(self.database_by_name.get(db_name)?.clone())
+        self.database_by_name.get(db_name).cloned()
     }
 
     pub fn get_database_name(&self, db_id: DatabaseId) -> Option<String> {
-        Some(self.db_name_by_id.get(&db_id)?.clone())
+        self.db_name_by_id.get(&db_id).cloned()
     }
 
     pub fn create_schema(
@@ -163,6 +166,10 @@ impl CatalogConnector {
                 ..Default::default()
             })
             .await?;
+        while self.catalog_cache.lock().get_database(db_name).is_none() {
+            info!("Wait to create database: {}", db_name);
+            time::sleep(Duration::from_micros(10)).await;
+        }
         Ok(())
     }
 
@@ -185,6 +192,15 @@ impl CatalogConnector {
                 }),
             })
             .await?;
+        while self
+            .catalog_cache
+            .lock()
+            .get_schema(db_name, schema_name)
+            .is_none()
+        {
+            info!("Wait to create schema: {}", schema_name);
+            time::sleep(Duration::from_micros(10)).await;
+        }
         Ok(())
     }
 
@@ -226,6 +242,15 @@ impl CatalogConnector {
             },
         );
         self.meta_client.create_table(table.clone()).await?;
+        while self
+            .catalog_cache
+            .lock()
+            .get_table(db_name, schema_name, &table.table_name)
+            .is_none()
+        {
+            info!("Wait to create table: {}", table.table_name);
+            time::sleep(Duration::from_micros(10)).await;
+        }
         Ok(())
     }
 
@@ -356,12 +381,15 @@ mod tests {
         // Init meta and catalog.
         let meta = LocalMeta::start(12000).await;
         let mut meta_client = meta.create_client().await;
-        let mut observer_manager =
-            ObserverManager::new(meta_client.clone(), "127.0.0.1:12345".parse().unwrap()).await;
         let catalog_cache = Arc::new(Mutex::new(CatalogCache::new()));
         let catalog_mgr = CatalogConnector::new(meta_client.clone(), catalog_cache.clone());
 
-        observer_manager.set_catalog_cache(catalog_cache);
+        let observer_manager = ObserverManager::new(
+            meta_client.clone(),
+            "127.0.0.1:12345".parse().unwrap(),
+            catalog_cache,
+        )
+        .await;
         let observer_join_handle = observer_manager.start();
 
         // Create db and schema.

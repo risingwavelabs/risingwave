@@ -28,15 +28,14 @@ impl FrontendEnv {
     pub async fn init(opts: &FrontendOpts) -> Result<(Self, JoinHandle<()>)> {
         let host = opts.host.parse().unwrap();
         let mut meta_client = MetaClient::new(opts.meta_addr.clone().as_str()).await?;
+
         // Register in meta by calling `AddWorkerNode` RPC.
         meta_client.register(host, WorkerType::Frontend).await?;
-
-        let mut observer_manager = ObserverManager::new(meta_client.clone(), host).await;
 
         let catalog_cache = Arc::new(Mutex::new(CatalogCache::new()));
         let catalog_manager = CatalogConnector::new(meta_client.clone(), catalog_cache.clone());
 
-        observer_manager.set_catalog_cache(catalog_cache);
+        let observer_manager = ObserverManager::new(meta_client.clone(), host, catalog_cache).await;
         let observer_join_handle = observer_manager.start();
 
         meta_client.activate(host).await?;
@@ -63,17 +62,19 @@ impl FrontendEnv {
         opts: &FrontendOpts,
     ) -> Result<(Self, JoinHandle<()>)> {
         let host = opts.host.parse().unwrap();
+
+        // Register in meta by calling `AddWorkerNode` RPC.
         meta_client.register(host, WorkerType::Frontend).await?;
 
-        let mut observer_manager = ObserverManager::new(meta_client.clone(), host).await;
-
-        // Create default database when env init.
         let catalog_cache = Arc::new(Mutex::new(CatalogCache::new()));
         let catalog_manager = CatalogConnector::new(meta_client.clone(), catalog_cache.clone());
 
-        observer_manager.set_catalog_cache(catalog_cache);
+        let observer_manager = ObserverManager::new(meta_client.clone(), host, catalog_cache).await;
         let observer_join_handle = observer_manager.start();
 
+        meta_client.activate(host).await?;
+
+        // Create default database when env init.
         catalog_manager
             .create_database(DEFAULT_DATABASE_NAME)
             .await?;

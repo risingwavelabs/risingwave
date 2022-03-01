@@ -26,11 +26,11 @@ impl DatabaseCatalog {
         self.schema_by_name
             .try_insert(schema_name.to_string(), SchemaCatalog::new(schema_id))
             .map(|_val| ())
-            .map_err(|_| CatalogError::Duplicated("table", schema_name.to_string()))?;
+            .map_err(|_| CatalogError::Duplicated("schema", schema_name.to_string()))?;
         self.schema_name_by_id
             .try_insert(schema_id, schema_name.to_string())
             .map(|_val| ())
-            .map_err(|_| CatalogError::Duplicated("table id", schema_id.to_string()).into())
+            .map_err(|_| CatalogError::Duplicated("schema id", schema_id.to_string()).into())
     }
 
     pub fn drop_schema(&mut self, schema_name: &str) -> Result<()> {
@@ -52,7 +52,7 @@ impl DatabaseCatalog {
     }
 
     pub fn get_schema_name(&self, schema_id: SchemaId) -> Option<String> {
-        Some(self.schema_name_by_id.get(&schema_id)?.clone())
+        self.schema_name_by_id.get(&schema_id).cloned()
     }
 
     pub fn id(&self) -> u64 {
