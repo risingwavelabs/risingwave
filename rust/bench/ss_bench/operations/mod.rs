@@ -48,10 +48,9 @@ impl Operations {
 
         for operation in opts.benchmarks.split(',') {
             // (Sun Ting) TODO: remove statistics print for each operation
+            // after new performance display is ready
             match operation {
-                "writebatch" => {
-                    runner.write_batch(&store, opts).await;
-                }
+                "writebatch" => runner.write_batch(&store, opts).await,
                 "deleterandom" => runner.delete_random(&store, opts).await,
                 "getrandom" => runner.get_random(&store, opts).await,
                 "getseq" => runner.get_seq(&store, opts).await,
@@ -64,6 +63,10 @@ impl Operations {
             match operation {
                 "writebatch" => diff_stat.display_write_batch(),
                 // (Sun Ting) TODO: implement other performance displays
+                "deleterandom" => {}
+                "getrandom" => {}
+                "getseq" => {}
+                "prefixscanrandom" => {}
                 other => unimplemented!("operation \"{}\" is not supported.", other),
             }
         }
