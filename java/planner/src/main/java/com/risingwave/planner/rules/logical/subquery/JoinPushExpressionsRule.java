@@ -28,20 +28,18 @@ import org.apache.calcite.tools.RelBuilder;
 import org.apache.calcite.tools.RelBuilderFactory;
 
 /**
- * This rules is copied from Calcite's {@link org.apache.calcite.rel.rules.JoinPushExpressionsRule}.
- * Modification: - Supports SEMI/ANTI join using {@link
- * org.apache.flink.table.planner.plan.utils.FlinkRelOptUtil#pushDownJoinConditions} - Only push
- * down calls on non-time-indicator field.
- */
-
-/**
  * Planner rule that pushes down expressions in "equal" join condition.
+ *
+ * <p>This rules is copied from Calcite's {@link
+ * org.apache.calcite.rel.rules.JoinPushExpressionsRule}. Modification: - Supports SEMI/ANTI join
+ * using {@link org.apache.flink.table.planner.plan.utils.FlinkRelOptUtil#pushDownJoinConditions} -
+ * Only push down calls on non-time-indicator field.
  *
  * <p>For example, given "emp JOIN dept ON emp.deptno + 1 = dept.deptno", adds a project above "emp"
  * that computes the expression "emp.deptno + 1". The resulting join condition is a simple
  * combination of AND, equals, and input fields, plus the remaining non-equal conditions.
  *
- * This file is adapted from flink.
+ * <p>This file is adapted from flink.
  */
 public class JoinPushExpressionsRule extends RelOptRule {
 
@@ -49,8 +47,7 @@ public class JoinPushExpressionsRule extends RelOptRule {
       new JoinPushExpressionsRule(Join.class, RelFactories.LOGICAL_BUILDER);
 
   /** Creates a JoinPushExpressionsRule. */
-  public JoinPushExpressionsRule(
-      Class<? extends Join> clazz, RelBuilderFactory relBuilderFactory) {
+  public JoinPushExpressionsRule(Class<? extends Join> clazz, RelBuilderFactory relBuilderFactory) {
     super(operand(clazz, any()), relBuilderFactory, null);
   }
 
@@ -78,4 +75,3 @@ public class JoinPushExpressionsRule extends RelOptRule {
     call.transformTo(newJoin);
   }
 }
-
