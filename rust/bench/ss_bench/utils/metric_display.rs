@@ -1,5 +1,7 @@
 use std::fmt::{Display, Formatter};
+
 use itertools::Itertools;
+
 use super::diff_statistics::MyHistogram;
 
 pub(crate) struct MetricDisplay {
