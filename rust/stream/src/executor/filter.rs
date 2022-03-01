@@ -5,9 +5,15 @@ use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
-use risingwave_common::expr::BoxedExpression;
+use risingwave_common::expr::{build_from_prost, BoxedExpression};
+use risingwave_common::try_match_expand;
+use risingwave_pb::stream_plan;
+use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_storage::StateStore;
 
 use super::{Executor, Message, PkIndicesRef, SimpleExecutor, StreamChunk};
+use crate::executor::ExecutorBuilder;
+use crate::task::{ExecutorParams, StreamManagerCore};
 
 /// `FilterExecutor` filters data with the `expr`. The `expr` takes a chunk of data,
 /// and returns a boolean array on whether each item should be retained. And then,
@@ -25,6 +31,26 @@ pub struct FilterExecutor {
 
     /// Logical Operator Info
     op_info: String,
+}
+
+pub struct FilterExecutorBuilder {}
+
+impl ExecutorBuilder for FilterExecutorBuilder {
+    fn new_boxed_executor(
+        mut params: ExecutorParams,
+        node: &stream_plan::StreamNode,
+        _store: impl StateStore,
+        _stream: &mut StreamManagerCore,
+    ) -> Result<Box<dyn Executor>> {
+        let node = try_match_expand!(node.get_node().unwrap(), Node::FilterNode)?;
+        let search_condition = build_from_prost(node.get_search_condition()?)?;
+        Ok(Box::new(FilterExecutor::new(
+            params.input.remove(0),
+            search_condition,
+            params.executor_id,
+            params.op_info,
+        )))
+    }
 }
 
 impl FilterExecutor {
@@ -72,6 +98,10 @@ impl Executor for FilterExecutor {
 
     fn logical_operator_info(&self) -> &str {
         &self.op_info
+    }
+
+    fn reset(&mut self, _epoch: u64) {
+        // nothing to do
     }
 }
 

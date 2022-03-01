@@ -9,13 +9,18 @@ use risingwave_common::array::{
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_common::expr::RowExpression;
+use risingwave_common::try_match_expand;
 use risingwave_common::types::{DataType, ToOwnedDatum};
+use risingwave_pb::stream_plan;
+use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::keyspace::Segment;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::barrier_align::{AlignedMessage, BarrierAligner};
 use super::managed_state::join::*;
 use super::{Executor, ExecutorState, Message, PkIndices, PkIndicesRef, StatefulExecutor};
+use crate::executor::ExecutorBuilder;
+use crate::task::{ExecutorParams, StreamManagerCore};
 
 /// The `JoinType` and `SideType` are to mimic a enum, because currently
 /// enum is not supported in const generic.
@@ -197,6 +202,20 @@ impl<S: StateStore> JoinSide<S> {
     }
 }
 
+pub struct HashJoinExecutorBuilder {}
+
+impl ExecutorBuilder for HashJoinExecutorBuilder {
+    fn new_boxed_executor(
+        params: ExecutorParams,
+        node: &stream_plan::StreamNode,
+        store: impl StateStore,
+        stream: &mut StreamManagerCore,
+    ) -> Result<Box<dyn Executor>> {
+        let node = try_match_expand!(node.get_node().unwrap(), Node::HashJoinNode)?;
+        stream.create_hash_join_node(params, node, store)
+    }
+}
+
 /// `HashJoinExecutor` takes two input streams and runs equal hash join on them.
 /// The output columns are the concatenation of left and right columns.
 pub struct HashJoinExecutor<S: StateStore, const T: JoinTypePrimitive> {
@@ -293,6 +312,12 @@ impl<S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<S,
         self.side_r.clear_cache();
 
         Ok(())
+    }
+
+    fn reset(&mut self, epoch: u64) {
+        self.side_l.ht.clear();
+        self.side_r.ht.clear();
+        self.update_executor_state(ExecutorState::Active(epoch));
     }
 }
 

@@ -9,16 +9,20 @@ use futures::future::select_all;
 use futures::{SinkExt, StreamExt};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ToRwResult;
+use risingwave_common::try_match_expand;
+use risingwave_pb::stream_plan;
+use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::{GetStreamRequest, GetStreamResponse};
 use risingwave_rpc_client::ComputeClient;
+use risingwave_storage::StateStore;
 use tonic::transport::Channel;
 use tonic::{Request, Streaming};
 use tracing_futures::Instrument;
 
 use super::{Barrier, Executor, Message, PkIndicesRef, Result};
-use crate::executor::{Mutation, PkIndices};
-use crate::task::UpDownActorIds;
+use crate::executor::{ExecutorBuilder, Mutation, PkIndices};
+use crate::task::{ExecutorParams, StreamManagerCore, UpDownActorIds};
 
 /// Receive data from `gRPC` and forwards to `MergerExecutor`/`ReceiverExecutor`
 pub struct RemoteInput {
@@ -112,6 +116,20 @@ impl std::fmt::Debug for ReceiverExecutor {
     }
 }
 
+pub struct MergeExecutorBuilder {}
+
+impl ExecutorBuilder for MergeExecutorBuilder {
+    fn new_boxed_executor(
+        params: ExecutorParams,
+        node: &stream_plan::StreamNode,
+        _store: impl StateStore,
+        stream: &mut StreamManagerCore,
+    ) -> Result<Box<dyn Executor>> {
+        let node = try_match_expand!(node.get_node().unwrap(), Node::MergeNode)?;
+        stream.create_merge_node(params, node)
+    }
+}
+
 impl ReceiverExecutor {
     pub fn new(
         schema: Schema,
@@ -154,6 +172,10 @@ impl Executor for ReceiverExecutor {
 
     fn logical_operator_info(&self) -> &str {
         &self.op_info
+    }
+
+    fn reset(&mut self, _epoch: u64) {
+        // nothing to do
     }
 }
 
@@ -288,6 +310,10 @@ impl Executor for MergeExecutor {
 
     fn logical_operator_info(&self) -> &str {
         &self.op_info
+    }
+
+    fn reset(&mut self, _epoch: u64) {
+        // nothing to do
     }
 }
 

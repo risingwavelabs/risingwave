@@ -35,7 +35,8 @@ public class StreamingTwoPhaseAggRule extends RelRule<StreamingTwoPhaseAggRule.C
     RwLogicalAggregate logicalAgg = call.rel(0);
     var groupCount = logicalAgg.getGroupCount();
     boolean distributedMode = isDistributedMode(contextOf(call));
-    return groupCount <= 1
+    // now we dont have stateless local hash agg with group
+    return groupCount == 0
         && distributedMode
         // In stream processing, only stateless aggregators can be parallelized.
         && logicalAgg.streamingCanTwoPhase();

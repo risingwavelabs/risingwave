@@ -12,6 +12,9 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::try_match_expand;
+use risingwave_pb::stream_plan;
+use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::aggregation::{AggState, HashKey};
@@ -19,7 +22,8 @@ use super::{
     agg_executor_next, generate_agg_schema, generate_agg_state, AggCall, AggExecutor, Barrier,
     Executor, ExecutorState, Message, PkIndicesRef, StatefulExecutor,
 };
-use crate::executor::{agg_input_arrays, pk_input_arrays, PkIndices};
+use crate::executor::{agg_input_arrays, pk_input_arrays, ExecutorBuilder, PkIndices};
+use crate::task::{build_agg_call_from_prost, ExecutorParams, StreamManagerCore};
 
 /// [`HashAggExecutor`] could process large amounts of data using a state backend. It works as
 /// follows:
@@ -66,6 +70,39 @@ pub struct HashAggExecutor<S: StateStore> {
 
     /// Executor state
     executor_state: ExecutorState,
+}
+
+pub struct HashAggExecutorBuilder {}
+
+impl ExecutorBuilder for HashAggExecutorBuilder {
+    fn new_boxed_executor(
+        mut params: ExecutorParams,
+        node: &stream_plan::StreamNode,
+        store: impl StateStore,
+        _stream: &mut StreamManagerCore,
+    ) -> Result<Box<dyn Executor>> {
+        let node = try_match_expand!(node.get_node().unwrap(), Node::HashAggNode)?;
+        let keys = node
+            .get_group_keys()
+            .iter()
+            .map(|key| key.column_idx as usize)
+            .collect::<Vec<_>>();
+        let agg_calls: Vec<AggCall> = node
+            .get_agg_calls()
+            .iter()
+            .map(build_agg_call_from_prost)
+            .try_collect()?;
+        let keyspace = Keyspace::shared_executor_root(store, params.executor_id);
+        Ok(Box::new(HashAggExecutor::new(
+            params.input.remove(0),
+            agg_calls,
+            keys,
+            keyspace,
+            params.pk_indices,
+            params.executor_id,
+            params.op_info,
+        )))
+    }
 }
 
 impl<S: StateStore> HashAggExecutor<S> {
@@ -363,6 +400,11 @@ impl<S: StateStore> Executor for HashAggExecutor<S> {
 
     fn logical_operator_info(&self) -> &str {
         &self.op_info
+    }
+
+    fn reset(&mut self, epoch: u64) {
+        self.state_map.clear();
+        self.update_executor_state(ExecutorState::Active(epoch));
     }
 }
 
