@@ -19,7 +19,6 @@
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 
-pub mod bummock;
 pub mod hummock;
 pub mod keyspace;
 pub mod memory;
