@@ -20,7 +20,7 @@ use self::command::CommandContext;
 use self::info::BarrierActorInfo;
 use crate::cluster::{StoredClusterManager, StoredClusterManagerRef};
 use crate::hummock::HummockManager;
-use crate::manager::{EpochGeneratorRef, MetaSrvEnv, StreamClientsRef};
+use crate::manager::{EpochGeneratorRef, MetaSrvEnv, StreamClientsRef, INVALID_EPOCH};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
@@ -147,6 +147,8 @@ where
     metrics: Arc<MetaMetrics>,
 }
 
+// TODO: Persist barrier manager states in meta store including
+// previous epoch number, current epoch number and barrier collection progress
 impl<S> BarrierManager<S>
 where
     S: MetaStore,
@@ -179,6 +181,7 @@ where
         let mut min_interval = tokio::time::interval(Self::INTERVAL);
         min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
+        let mut prev_epoch = INVALID_EPOCH;
         loop {
             tokio::select! {
                 // Wait for the minimal interval,
@@ -208,7 +211,7 @@ where
 
             let mutation = command_context.to_mutation()?;
 
-            let epoch = self.epoch_generator.generate()?.into_inner();
+            let new_epoch = self.epoch_generator.generate()?.into_inner();
 
             let collect_futures = info.node_map.iter().filter_map(|(node_id, node)| {
                 let actor_ids_to_send = info.actor_ids_to_send(node_id).collect_vec();
@@ -221,7 +224,10 @@ where
                     let mutation = mutation.clone();
                     let request_id = Uuid::new_v4().to_string();
                     let barrier = Barrier {
-                        epoch,
+                        epoch: Some(risingwave_pb::data::Epoch {
+                            curr: new_epoch,
+                            prev: prev_epoch,
+                        }),
                         mutation: Some(mutation),
                         // TODO(chi): add distributed tracing
                         span: vec![],
@@ -256,17 +262,18 @@ where
             // wait all barriers collected
             let collect_result = try_join_all(collect_futures).await;
             timer.observe_duration();
-            // TODO #96: This is a temporary implementation of commit epoch. Refactor after hummock
-            // shared buffer is deployed.
-            match collect_result {
-                Ok(_) => {
-                    self.hummock_manager.commit_epoch(epoch).await?;
-                }
-                Err(err) => {
-                    self.hummock_manager.abort_epoch(epoch).await?;
-                    return Err(err);
-                }
-            };
+            if prev_epoch != INVALID_EPOCH {
+                match collect_result {
+                    Ok(_) => {
+                        self.hummock_manager.commit_epoch(prev_epoch).await?;
+                    }
+                    Err(err) => {
+                        self.hummock_manager.abort_epoch(prev_epoch).await?;
+                        return Err(err);
+                    }
+                };
+            }
+            prev_epoch = new_epoch;
             command_context.post_collect().await?; // do some post stuffs
             notifiers.iter_mut().for_each(Notifier::notify_collected);
         }

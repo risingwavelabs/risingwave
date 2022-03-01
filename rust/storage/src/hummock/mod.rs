@@ -1,5 +1,6 @@
 //! Hummock is the state store of the streaming system.
 
+use std::fmt;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 use std::sync::Arc;
@@ -506,5 +507,11 @@ impl HummockStorage {
 
     pub async fn wait_epoch(&self, epoch: HummockEpoch) {
         self.local_version_manager.wait_epoch(epoch).await;
+    }
+}
+
+impl fmt::Debug for HummockStorage {
+    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        todo!()
     }
 }

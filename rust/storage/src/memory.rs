@@ -1,5 +1,4 @@
 use std::collections::{btree_map, BTreeMap};
-use std::mem::size_of_val;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
 use std::sync::Arc;
@@ -87,6 +86,9 @@ impl MemoryStateStore {
         }
         let inner = self.inner.lock().await;
         for (key, value) in inner.range(to_bytes_range(key_range)) {
+            self.stats
+                .iter_next_size
+                .observe((key.len() + value.len()) as f64);
             data.push((key.clone(), value.clone()));
             if let Some(limit) = limit && data.len() >= limit {
                 break;
@@ -131,11 +133,9 @@ impl StateStore for MemoryStateStore {
         timer.observe_duration();
 
         self.stats.get_key_size.observe(key.len() as f64);
-        if res.is_some() {
-            self.stats
-                .get_value_size
-                .observe(size_of_val(res.as_ref().unwrap()) as f64);
-        }
+        self.stats
+            .get_value_size
+            .observe(res.as_ref().map(|x| x.len()).unwrap_or(0) as f64);
 
         Ok(res)
     }
@@ -170,24 +170,7 @@ impl StateStore for MemoryStateStore {
 
     async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>, _epoch: u64) -> Result<()> {
         // TODO: actually use epoch and support rollback
-        self.stats.batched_write_counts.inc();
-        let batch_write_tuple_counts = kv_pairs.len();
-        let timer = self.stats.batch_write_latency.start_timer();
-        // use estimated size in order to be faster
-        let batch_write_size = size_of_val(&kv_pairs);
-
-        let res = self.ingest_batch_inner(kv_pairs).await;
-
-        timer.observe_duration();
-
-        if res.is_ok() {
-            self.stats
-                .batch_write_tuple_counts
-                .inc_by(batch_write_tuple_counts as u64);
-            self.stats.batch_write_size.observe(batch_write_size as f64);
-        }
-
-        res
+        self.ingest_batch_inner(kv_pairs).await
     }
 
     async fn iter<R, B>(&self, key_range: R, _epoch: u64) -> Result<Self::Iter<'_>>
@@ -204,17 +187,37 @@ impl StateStore for MemoryStateStore {
             .map(|(k, v)| (k.to_owned(), v.to_owned()))
             .collect();
 
-        Ok(MemoryStateStoreIter(snapshot.into_iter()))
+        Ok(MemoryStateStoreIter::new(snapshot.into_iter()))
     }
 }
 
-pub struct MemoryStateStoreIter(btree_map::IntoIter<Bytes, Bytes>);
+pub struct MemoryStateStoreIter {
+    inner: btree_map::IntoIter<Bytes, Bytes>,
+    stats: Arc<StateStoreStats>,
+}
+
+impl MemoryStateStoreIter {
+    fn new(iter: btree_map::IntoIter<Bytes, Bytes>) -> Self {
+        Self {
+            inner: iter,
+            stats: DEFAULT_STATE_STORE_STATS.clone(),
+        }
+    }
+}
 
 #[async_trait]
 impl StateStoreIter for MemoryStateStoreIter {
     type Item = (Bytes, Bytes);
 
     async fn next(&mut self) -> Result<Option<Self::Item>> {
-        Ok(self.0.next())
+        let timer = self.stats.iter_next_latency.start_timer();
+        let res = self.inner.next();
+        timer.observe_duration();
+        if res.is_some() {
+            self.stats
+                .iter_next_size
+                .observe((res.as_ref().unwrap().0.len() + res.as_ref().unwrap().1.len()) as f64)
+        }
+        Ok(res)
     }
 }

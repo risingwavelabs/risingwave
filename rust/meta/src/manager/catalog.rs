@@ -7,6 +7,7 @@ use risingwave_common::catalog::{CatalogId, DatabaseId, SchemaId, TableId};
 use risingwave_common::error::ErrorCode::CatalogError;
 use risingwave_common::error::Result;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use risingwave_pb::meta::table::Info as TableInfo;
 use risingwave_pb::meta::{Catalog, Database, Schema, Table};
 use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
 use tokio::sync::Mutex;
@@ -144,9 +145,12 @@ where
         if !core.has_table(&table_id) {
             table.insert(&*self.meta_store_ref).await?;
             core.add_table(table.clone());
-            for table_ref_id in &table.dependent_tables {
-                let dependent_table_id = TableId::from(&Some(table_ref_id.clone()));
-                core.increase_ref_count(dependent_table_id);
+
+            if let TableInfo::MaterializedView(mview_info) = table.get_info().unwrap() {
+                for table_ref_id in &mview_info.dependent_tables {
+                    let dependent_table_id = TableId::from(&Some(table_ref_id.clone()));
+                    core.increase_ref_count(dependent_table_id);
+                }
             }
 
             // Notify frontends to create table.
@@ -181,11 +185,19 @@ where
                 None => {
                     Table::delete(&*self.meta_store_ref, table_ref_id).await?;
                     let table = core.delete_table(&table_id).unwrap();
-                    let dependent_tables: Vec<TableId> = table
-                        .dependent_tables
-                        .iter()
-                        .map(|table_ref_id| TableId::from(&Some(table_ref_id.clone())))
-                        .collect();
+                    let dependent_tables: Vec<TableId> = if let TableInfo::MaterializedView(
+                        mview_info,
+                    ) = table.get_info().unwrap()
+                    {
+                        mview_info
+                            .dependent_tables
+                            .clone()
+                            .into_iter()
+                            .map(|table_ref_id| TableId::from(&Some(table_ref_id)))
+                            .collect()
+                    } else {
+                        Default::default()
+                    };
                     for dependent_table_id in dependent_tables {
                         core.decrease_ref_count(dependent_table_id);
                     }
@@ -231,11 +243,14 @@ impl CatalogManagerCore {
                 .map(|schema| (SchemaId::from(&schema.schema_ref_id), schema)),
         );
         let tables = HashMap::from_iter(tables.into_iter().map(|table| {
-            let dependencies = table.get_dependent_tables();
-            for table_ref_id in dependencies {
-                let table_id = TableId::from(&Some(table_ref_id.clone()));
-                *table_ref_count.entry(table_id).or_insert(0) += 1;
+            if let TableInfo::MaterializedView(mview_info) = table.get_info().unwrap() {
+                let dependencies = mview_info.get_dependent_tables();
+                for table_ref_id in dependencies {
+                    let table_id = TableId::from(&Some(table_ref_id.clone()));
+                    *table_ref_count.entry(table_id).or_insert(0) += 1;
+                }
             }
+
             (TableId::from(&table.table_ref_id), table)
         }));
         Self {

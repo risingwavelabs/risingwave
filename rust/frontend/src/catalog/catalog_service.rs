@@ -349,7 +349,8 @@ mod tests {
     use parking_lot::Mutex;
     use risingwave_common::types::DataType;
     use risingwave_meta::test_utils::LocalMeta;
-    use risingwave_pb::plan::ColumnDesc;
+    use risingwave_pb::meta::table::Info;
+    use risingwave_pb::plan::{ColumnDesc, TableSourceInfo};
 
     use crate::catalog::catalog_service::{
         CatalogCache, CatalogConnector, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
@@ -368,6 +369,7 @@ mod tests {
         Table {
             table_name: test_table_name.to_string(),
             column_descs,
+            info: Info::TableSource(TableSourceInfo::default()).into(),
             ..Default::default()
         }
     }

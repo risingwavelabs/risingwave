@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::marker::PhantomData;
 use std::sync::Arc;
 use std::{mem, vec};
 
@@ -7,11 +6,10 @@ use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::collection::hash_map::{
-    calc_hash_key_kind, hash_key_dispatch, HashKey, HashKeyDispatcher, HashKeyKind, Key128, Key16,
-    Key256, Key32, Key64, KeySerialized, PrecomputedBuildHasher,
-};
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::hash::{
+    calc_hash_key_kind, HashKey, HashKeyDispatcher, PrecomputedBuildHasher,
+};
 use risingwave_common::types::DataType;
 use risingwave_common::vector_op::agg::{AggStateFactory, BoxedAggState};
 use risingwave_pb::plan::plan_node::NodeBody;
@@ -23,16 +21,14 @@ use crate::task::TaskId;
 
 type AggHashMap<K> = HashMap<K, Vec<BoxedAggState>, PrecomputedBuildHasher>;
 
-struct HashAggExecutorBuilderDispatcher<K> {
-    _marker: PhantomData<K>,
-}
+struct HashAggExecutorBuilderDispatcher;
 
 /// A dispatcher to help create specialized hash agg executor.
-impl<K: HashKey> HashKeyDispatcher<K> for HashAggExecutorBuilderDispatcher<K> {
+impl HashKeyDispatcher for HashAggExecutorBuilderDispatcher {
     type Input = HashAggExecutorBuilder;
     type Output = BoxedExecutor;
 
-    fn dispatch(input: HashAggExecutorBuilder) -> Self::Output {
+    fn dispatch<K: HashKey>(input: HashAggExecutorBuilder) -> Self::Output {
         Box::new(HashAggExecutor::<K>::new(input))
     }
 }
@@ -91,10 +87,9 @@ impl HashAggExecutorBuilder {
             identity,
         };
 
-        Ok(hash_key_dispatch!(
+        Ok(HashAggExecutorBuilderDispatcher::dispatch_by_kind(
             hash_key_kind,
-            HashAggExecutorBuilderDispatcher,
-            builder
+            builder,
         ))
     }
 }

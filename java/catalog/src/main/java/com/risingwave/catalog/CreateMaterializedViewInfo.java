@@ -2,6 +2,7 @@ package com.risingwave.catalog;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.risingwave.proto.plan.RowFormatType;
 import javax.annotation.Nullable;
 import org.apache.calcite.rel.RelCollation;
 import org.apache.calcite.util.ImmutableIntList;
@@ -23,7 +24,7 @@ import org.apache.calcite.util.Pair;
 public class CreateMaterializedViewInfo extends CreateTableInfo {
   private final RelCollation collation;
 
-  private final boolean associated;
+  private final TableCatalog.TableId associated;
 
   private CreateMaterializedViewInfo(
       String tableName,
@@ -31,11 +32,11 @@ public class CreateMaterializedViewInfo extends CreateTableInfo {
       ImmutableIntList primaryKeyIndices,
       ImmutableMap<String, String> properties,
       boolean appendOnly,
-      String rowFormat,
+      RowFormatType rowFormat,
       String rowSchemaLocation,
       ImmutableList<TableCatalog.TableId> dependentTables,
       @Nullable RelCollation collation,
-      boolean associated) {
+      TableCatalog.TableId associated) {
     super(
         tableName,
         columns,
@@ -55,6 +56,10 @@ public class CreateMaterializedViewInfo extends CreateTableInfo {
   }
 
   public boolean isAssociated() {
+    return associated != null;
+  }
+
+  public TableCatalog.TableId getAssociatedTableId() {
     return associated;
   }
 
@@ -71,7 +76,7 @@ public class CreateMaterializedViewInfo extends CreateTableInfo {
   public static class Builder extends CreateTableInfo.Builder {
     private RelCollation collation = null;
 
-    private boolean associated = false;
+    private TableCatalog.TableId associated = null;
 
     private Builder(String tableName) {
       super(tableName);
@@ -81,7 +86,7 @@ public class CreateMaterializedViewInfo extends CreateTableInfo {
       this.collation = collation;
     }
 
-    public void setAssociated(boolean associated) {
+    public void setAssociated(TableCatalog.TableId associated) {
       this.associated = associated;
     }
 

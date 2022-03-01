@@ -2,17 +2,23 @@ use async_trait::async_trait;
 use risingwave_common::array::{DataChunk, Op, Row, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
+use risingwave_common::try_match_expand;
 use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_pb::plan::OrderType as ProstOrderType;
+use risingwave_pb::stream_plan;
+use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::{Keyspace, Segment, StateStore};
 
+use super::{ExecutorState, StatefulExecutor};
 use crate::executor::managed_state::top_n::variants::*;
 use crate::executor::managed_state::top_n::{ManagedTopNBottomNState, ManagedTopNState};
 use crate::executor::{
-    generate_output, top_n_executor_next, Executor, Message, PkIndices, PkIndicesRef,
-    TopNExecutorBase,
+    generate_output, top_n_executor_next, Executor, ExecutorBuilder, Message, PkIndices,
+    PkIndicesRef, TopNExecutorBase,
 };
+use crate::task::{ExecutorParams, StreamManagerCore};
 
 /// `TopNExecutor` works with input with modification, it keeps all the data
 /// records/rows that have been seen, and returns topN records overall.
@@ -44,8 +50,9 @@ pub struct TopNExecutor<S: StateStore> {
 
     /// Logical Operator Info
     op_info: String,
-    /// Epoch
-    epoch: u64,
+
+    /// Executor state
+    executor_state: ExecutorState,
 }
 
 impl<S: StateStore> std::fmt::Debug for TopNExecutor<S> {
@@ -57,6 +64,45 @@ impl<S: StateStore> std::fmt::Debug for TopNExecutor<S> {
             .field("offset", &self.offset)
             .field("pk_indices", &self.pk_indices)
             .finish()
+    }
+}
+
+pub struct TopNExecutorBuilder {}
+
+impl ExecutorBuilder for TopNExecutorBuilder {
+    fn new_boxed_executor(
+        mut params: ExecutorParams,
+        node: &stream_plan::StreamNode,
+        store: impl StateStore,
+        _stream: &mut StreamManagerCore,
+    ) -> Result<Box<dyn Executor>> {
+        let node = try_match_expand!(node.get_node().unwrap(), Node::TopNNode)?;
+        let order_types: Vec<_> = node
+            .get_order_types()
+            .iter()
+            .map(|v| ProstOrderType::from_i32(*v).unwrap())
+            .map(|v| OrderType::from_prost(&v))
+            .collect();
+        assert_eq!(order_types.len(), params.pk_indices.len());
+        let limit = if node.limit == 0 {
+            None
+        } else {
+            Some(node.limit as usize)
+        };
+        let cache_size = Some(1024);
+        let total_count = (0, 0, 0);
+        let keyspace = Keyspace::executor_root(store, params.executor_id);
+        Ok(Box::new(TopNExecutor::new(
+            params.input.remove(0),
+            order_types,
+            (node.offset as usize, limit),
+            params.pk_indices,
+            keyspace,
+            cache_size,
+            total_count,
+            params.executor_id,
+            params.op_info,
+        )))
     }
 }
 
@@ -121,12 +167,12 @@ impl<S: StateStore> TopNExecutor<S> {
             first_execution: true,
             identity: format!("TopNExecutor {:X}", executor_id),
             op_info,
-            epoch: 0,
+            executor_state: ExecutorState::Init,
         }
     }
 
     async fn flush_inner(&mut self) -> Result<()> {
-        let epoch = self.current_epoch();
+        let epoch = self.executor_state().epoch();
         self.managed_highest_state.flush(epoch).await?;
         self.managed_middle_state.flush(epoch).await?;
         self.managed_lowest_state.flush(epoch).await
@@ -156,19 +202,27 @@ impl<S: StateStore> Executor for TopNExecutor<S> {
     }
 
     fn clear_cache(&mut self) -> Result<()> {
-        self.managed_lowest_state.clear_cache();
-        self.managed_middle_state.clear_cache();
-        self.managed_highest_state.clear_cache();
+        self.managed_lowest_state.clear_cache(false);
+        self.managed_middle_state.clear_cache(false);
+        self.managed_highest_state.clear_cache(false);
         self.first_execution = true;
 
         Ok(())
+    }
+
+    fn reset(&mut self, epoch: u64) {
+        self.managed_lowest_state.clear_cache(true);
+        self.managed_middle_state.clear_cache(true);
+        self.managed_highest_state.clear_cache(true);
+        self.first_execution = true;
+        self.update_executor_state(ExecutorState::Active(epoch));
     }
 }
 
 #[async_trait]
 impl<S: StateStore> TopNExecutorBase for TopNExecutor<S> {
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> Result<StreamChunk> {
-        let epoch = self.current_epoch();
+        let epoch = self.executor_state().epoch();
         if self.first_execution {
             self.managed_lowest_state.fill_in_cache(epoch).await?;
             self.managed_middle_state.fill_in_cache(epoch).await?;
@@ -366,13 +420,15 @@ impl<S: StateStore> TopNExecutorBase for TopNExecutor<S> {
     fn input(&mut self) -> &mut dyn Executor {
         &mut *self.input
     }
+}
 
-    fn current_epoch(&self) -> u64 {
-        self.epoch
+impl<S: StateStore> StatefulExecutor for TopNExecutor<S> {
+    fn executor_state(&self) -> &ExecutorState {
+        &self.executor_state
     }
 
-    fn update_epoch(&mut self, new_epoch: u64) {
-        self.epoch = new_epoch;
+    fn update_executor_state(&mut self, new_state: ExecutorState) {
+        self.executor_state = new_state;
     }
 }
 
@@ -449,19 +505,19 @@ mod tests {
     fn create_source() -> Box<MockSource> {
         let mut chunks = create_stream_chunks();
         let schema = create_schema();
-        let default_barrier = Barrier::new(0);
         Box::new(MockSource::with_messages(
             schema,
             PkIndices::new(),
             vec![
+                Message::Barrier(Barrier::new_test_barrier(1)),
                 Message::Chunk(std::mem::take(&mut chunks[0])),
-                Message::Barrier(default_barrier.clone()),
+                Message::Barrier(Barrier::new_test_barrier(2)),
                 Message::Chunk(std::mem::take(&mut chunks[1])),
-                Message::Barrier(default_barrier.clone()),
+                Message::Barrier(Barrier::new_test_barrier(3)),
                 Message::Chunk(std::mem::take(&mut chunks[2])),
-                Message::Barrier(default_barrier.clone()),
+                Message::Barrier(Barrier::new_test_barrier(4)),
                 Message::Chunk(std::mem::take(&mut chunks[3])),
-                Message::Barrier(default_barrier),
+                Message::Barrier(Barrier::new_test_barrier(5)),
             ],
         ))
     }
@@ -482,6 +538,9 @@ mod tests {
             1,
             "TopNExecutor".to_string(),
         );
+
+        // consume the init barrier
+        top_n_executor.next().await.unwrap();
         let res = top_n_executor.next().await.unwrap();
         assert_matches!(res, Message::Chunk(_));
         if let Message::Chunk(res) = res {
@@ -577,6 +636,9 @@ mod tests {
             1,
             "TopNExecutor".to_string(),
         );
+
+        // consume the init barrier
+        top_n_executor.next().await.unwrap();
         let res = top_n_executor.next().await.unwrap();
         assert_matches!(res, Message::Chunk(_));
         if let Message::Chunk(res) = res {
@@ -710,6 +772,9 @@ mod tests {
             1,
             "TopNExecutor".to_string(),
         );
+
+        // consume the init barrier
+        top_n_executor.next().await.unwrap();
         let res = top_n_executor.next().await.unwrap();
         assert_matches!(res, Message::Chunk(_));
         if let Message::Chunk(res) = res {

@@ -69,7 +69,7 @@ impl MockSource {
     }
 
     pub fn push_barrier(&mut self, epoch: u64, stop: bool) {
-        let mut barrier = Barrier::new(epoch);
+        let mut barrier = Barrier::new_test_barrier(epoch);
         if stop {
             barrier = barrier.with_mutation(Mutation::Stop(HashSet::default()));
         }
@@ -84,7 +84,8 @@ impl Executor for MockSource {
         match self.msgs.pop_front() {
             Some(msg) => Ok(msg),
             None => Ok(Message::Barrier(
-                Barrier::new(self.epoch).with_mutation(Mutation::Stop(HashSet::default())),
+                Barrier::new_test_barrier(self.epoch)
+                    .with_mutation(Mutation::Stop(HashSet::default())),
             )),
         }
     }
@@ -103,6 +104,10 @@ impl Executor for MockSource {
 
     fn logical_operator_info(&self) -> &str {
         self.identity()
+    }
+
+    fn reset(&mut self, _epoch: u64) {
+        // nothing to do
     }
 }
 
@@ -157,7 +162,7 @@ impl MockAsyncSource {
     }
 
     pub fn push_barrier(tx: &mut UnboundedSender<Message>, epoch: u64, stop: bool) {
-        let mut barrier = Barrier::new(epoch);
+        let mut barrier = Barrier::new_test_barrier(epoch);
         if stop {
             barrier = barrier.with_mutation(Mutation::Stop(HashSet::default()))
         }
@@ -172,7 +177,8 @@ impl Executor for MockAsyncSource {
         match self.rx.recv().await {
             Some(msg) => Ok(msg),
             None => Ok(Message::Barrier(
-                Barrier::new(self.epoch).with_mutation(Mutation::Stop(HashSet::default())),
+                Barrier::new_test_barrier(self.epoch)
+                    .with_mutation(Mutation::Stop(HashSet::default())),
             )),
         }
     }
@@ -191,6 +197,10 @@ impl Executor for MockAsyncSource {
 
     fn logical_operator_info(&self) -> &str {
         self.identity()
+    }
+
+    fn reset(&mut self, _epoch: u64) {
+        // nothing to do
     }
 }
 

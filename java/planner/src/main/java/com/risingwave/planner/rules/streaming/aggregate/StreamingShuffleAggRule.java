@@ -14,8 +14,8 @@ import org.apache.calcite.plan.RelRule;
 /** Rule for converting logical aggregation to shuffle aggregation */
 public class StreamingShuffleAggRule extends RelRule<StreamingShuffleAggRule.Config> {
 
-  /** Threshold of number of group keys to use shuffle aggregation */
-  private static final int MIN_GROUP_COUNT = 2;
+  //  /** Threshold of number of group keys to use shuffle aggregation */
+  //  private static final int MIN_GROUP_COUNT = 2;
 
   public StreamingShuffleAggRule(Config config) {
     super(config);
@@ -25,14 +25,14 @@ public class StreamingShuffleAggRule extends RelRule<StreamingShuffleAggRule.Con
   public boolean matches(RelOptRuleCall call) {
     RwLogicalAggregate logicalAgg = call.rel(0);
     var groupCount = logicalAgg.getGroupCount();
-    return isDistributedMode(contextOf(call)) && groupCount >= MIN_GROUP_COUNT;
+    return isDistributedMode(contextOf(call)) && groupCount > 0;
   }
 
   @Override
   public void onMatch(RelOptRuleCall call) {
     RwLogicalAggregate logicalAgg = call.rel(0);
     var groupCount = logicalAgg.getGroupCount();
-    assert isDistributedMode(contextOf(call)) && groupCount >= MIN_GROUP_COUNT;
+    //    assert isDistributedMode(contextOf(call)) && groupCount >= MIN_GROUP_COUNT;
     var distTrait = RwDistributions.hash(logicalAgg.getGroupSet().toArray());
     var requiredInputTraitSet = logicalAgg.getInput().getTraitSet().plus(STREAMING).plus(distTrait);
     var aggTraits = logicalAgg.getTraitSet().plus(STREAMING);

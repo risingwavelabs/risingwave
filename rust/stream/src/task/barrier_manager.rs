@@ -125,7 +125,7 @@ impl LocalBarrierManager {
 
                 let (tx, rx) = oneshot::channel();
                 *state = Some(ManagedBarrierState {
-                    epoch: barrier.epoch,
+                    epoch: barrier.epoch.curr,
                     collect_notifier: tx,
                     remaining_actors: to_collect,
                 });
@@ -161,10 +161,10 @@ impl LocalBarrierManager {
 
             BarrierState::Managed(managed_state) => {
                 let current_epoch = managed_state.as_ref().map(|s| s.epoch);
-                if current_epoch != Some(barrier.epoch) {
+                if current_epoch != Some(barrier.epoch.curr) {
                     panic!(
                         "bad barrier with epoch {} from actor {}, while current epoch is {:?}, last epoch is {:?}",
-                        barrier.epoch, actor_id, current_epoch, self.last_epoch
+                        barrier.epoch.curr, actor_id, current_epoch, self.last_epoch
                     );
                 }
 
@@ -174,7 +174,7 @@ impl LocalBarrierManager {
                 tracing::trace!(
                     target: "events::stream::barrier::collect_barrier",
                     "collect_barrier: epoch = {}, actor_id = {}, remaining_actors = {:?}",
-                    barrier.epoch,
+                    barrier.epoch.curr,
                     actor_id,
                     state
                         .remaining_actors
@@ -237,7 +237,7 @@ mod tests {
 
         // Send a barrier to all actors
         let epoch = 114514;
-        let barrier = Barrier::new(epoch);
+        let barrier = Barrier::new_test_barrier(epoch);
         let mut collect_rx = manager
             .send_barrier(&barrier, actor_ids.clone(), actor_ids)
             .unwrap()
@@ -250,7 +250,7 @@ mod tests {
                 let msg = rx.try_recv().unwrap();
                 let barrier = match msg {
                     Message::Barrier(b) => {
-                        assert_eq!(b.epoch, epoch);
+                        assert_eq!(b.epoch.curr, epoch);
                         b
                     }
                     _ => unreachable!(),

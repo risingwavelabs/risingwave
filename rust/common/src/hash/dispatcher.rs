@@ -1,6 +1,5 @@
-use crate::collection::hash_map::hash_key::HashKey;
-use crate::collection::hash_map::HashKeyKind::{Key128, Key16, Key256, Key32, Key64};
-use crate::collection::hash_map::MAX_FIXED_SIZE_KEY_ELEMENTS;
+use super::{HashKey, MAX_FIXED_SIZE_KEY_ELEMENTS};
+use crate::hash;
 use crate::types::{DataSize, DataType};
 
 /// An enum to help to dynamically dispatch [`HashKey`] template.
@@ -16,7 +15,8 @@ pub enum HashKeyKind {
 
 impl HashKeyKind {
     fn order_by_key_size() -> impl IntoIterator<Item = (HashKeyKind, usize)> {
-        vec![
+        use HashKeyKind::*;
+        [
             (Key16, 2),
             (Key32, 4),
             (Key64, 8),
@@ -26,10 +26,22 @@ impl HashKeyKind {
     }
 }
 
-pub trait HashKeyDispatcher<K: HashKey> {
+pub trait HashKeyDispatcher {
     type Input;
     type Output;
-    fn dispatch(input: Self::Input) -> Self::Output;
+
+    fn dispatch<K: HashKey>(input: Self::Input) -> Self::Output;
+
+    fn dispatch_by_kind(kind: HashKeyKind, input: Self::Input) -> Self::Output {
+        match kind {
+            HashKeyKind::Key16 => Self::dispatch::<hash::Key16>(input),
+            HashKeyKind::Key32 => Self::dispatch::<hash::Key32>(input),
+            HashKeyKind::Key64 => Self::dispatch::<hash::Key64>(input),
+            HashKeyKind::Key128 => Self::dispatch::<hash::Key128>(input),
+            HashKeyKind::Key256 => Self::dispatch::<hash::Key256>(input),
+            HashKeyKind::KeySerialized => Self::dispatch::<hash::KeySerialized>(input),
+        }
+    }
 }
 
 /// Calculate what kind of hash key should be used given the key data types.
@@ -67,35 +79,10 @@ pub fn calc_hash_key_kind(data_types: &[DataType]) -> HashKeyKind {
     HashKeyKind::KeySerialized
 }
 
-/// This macro helps user to dispatch to [`HashKeyDispatcher`] implementation according to
-/// [`HashKeyKind`].
-///
-/// Please import following types before using this macro:
-///
-/// ```ignore
-/// use crate::executor::hash_map::HashKeyKind;
-/// use crate::executor::hash_map::{Key128, Key16, Key256, Key32, Key64, KeySerialized};
-/// ```
-#[macro_export]
-macro_rules! hash_key_dispatch {
-    ($hash_key_kind:expr, $dispatcher:tt, $arg:expr) => {
-        match $hash_key_kind {
-            HashKeyKind::Key16 => $dispatcher::<Key16>::dispatch($arg),
-            HashKeyKind::Key32 => $dispatcher::<Key32>::dispatch($arg),
-            HashKeyKind::Key64 => $dispatcher::<Key64>::dispatch($arg),
-            HashKeyKind::Key128 => $dispatcher::<Key128>::dispatch($arg),
-            HashKeyKind::Key256 => $dispatcher::<Key256>::dispatch($arg),
-            HashKeyKind::KeySerialized => $dispatcher::<KeySerialized>::dispatch($arg),
-        }
-    };
-}
-
-pub use hash_key_dispatch;
-
 #[cfg(test)]
 mod tests {
 
-    use crate::collection::hash_map::{calc_hash_key_kind, HashKeyKind};
+    use crate::hash::{calc_hash_key_kind, HashKeyKind};
     use crate::types::DataType;
 
     fn all_data_types() -> Vec<DataType> {

@@ -1,8 +1,9 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
+use risingwave_pb::meta::table::Info;
 use risingwave_pb::meta::Table;
-use risingwave_pb::plan::ColumnDesc;
+use risingwave_pb::plan::{ColumnDesc, TableSourceInfo};
 use risingwave_sqlparser::ast::{ColumnDef, DataType as AstDataType, ObjectName};
 
 use crate::catalog::catalog_service::DEFAULT_SCHEMA_NAME;
@@ -40,6 +41,7 @@ pub(super) async fn handle_create_table(
     columns: Vec<ColumnDef>,
 ) -> Result<PgResponse> {
     let mut table = Table {
+        info: Info::TableSource(TableSourceInfo::default()).into(),
         ..Default::default()
     };
 

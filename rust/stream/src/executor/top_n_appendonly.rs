@@ -6,20 +6,25 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Op, Row};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
+use risingwave_common::try_match_expand;
 use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_pb::plan::OrderType as ProstOrderType;
+use risingwave_pb::stream_plan;
+use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::keyspace::Segment;
 use risingwave_storage::{Keyspace, StateStore};
 
-use super::PkIndicesRef;
+use super::{ExecutorState, PkIndicesRef, StatefulExecutor};
 use crate::executor::managed_state::top_n::variants::*;
 use crate::executor::managed_state::top_n::ManagedTopNState;
-use crate::executor::{Executor, Message, PkIndices, StreamChunk};
+use crate::executor::{Executor, ExecutorBuilder, Message, PkIndices, StreamChunk};
+use crate::task::{ExecutorParams, StreamManagerCore};
 
 #[async_trait]
-pub trait TopNExecutorBase: Executor {
+pub trait TopNExecutorBase: StatefulExecutor {
     /// Apply the chunk to the dirty state and get the diffs.
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> Result<StreamChunk>;
 
@@ -27,26 +32,23 @@ pub trait TopNExecutorBase: Executor {
     async fn flush_data(&mut self) -> Result<()>;
 
     fn input(&mut self) -> &mut dyn Executor;
-
-    /// Get back the current epoch used for storage reads and writes.
-    /// This epoch is the one carried by most recent barrier flowing through the executor.
-    fn current_epoch(&self) -> u64;
-
-    /// Update the current epoch to `new_epoch`, which is carried by a barrier.
-    fn update_epoch(&mut self, new_epoch: u64);
 }
 
 /// We remark that topN executor diffs from aggregate executor as it must output diffs
 /// whenever it applies a batch of input data. Therefore, topN executor flushes data only instead of
 /// computing diffs and flushing when receiving a barrier.
-pub(super) async fn top_n_executor_next(executor: &mut dyn TopNExecutorBase) -> Result<Message> {
+pub(super) async fn top_n_executor_next<E: TopNExecutorBase>(executor: &mut E) -> Result<Message> {
     let msg = executor.input().next().await?;
+    if executor.try_init_executor(&msg).is_some() {
+        // Pass through the first msg directly after initializing the executor
+        return Ok(msg);
+    }
     let res = match msg {
         Message::Chunk(chunk) => Ok(Message::Chunk(executor.apply_chunk(chunk).await?)),
         Message::Barrier(barrier) if barrier.is_stop_mutation() => Ok(Message::Barrier(barrier)),
         Message::Barrier(barrier) => {
             executor.flush_data().await?;
-            executor.update_epoch(barrier.epoch);
+            executor.update_executor_state(ExecutorState::Active(barrier.epoch.curr));
             Ok(Message::Barrier(barrier))
         }
     };
@@ -85,8 +87,9 @@ pub struct AppendOnlyTopNExecutor<S: StateStore> {
 
     /// Logical Operator Info
     op_info: String,
-    /// Epoch
-    epoch: u64,
+
+    /// Executor state
+    executor_state: ExecutorState,
 }
 
 impl<S: StateStore> std::fmt::Debug for AppendOnlyTopNExecutor<S> {
@@ -98,6 +101,45 @@ impl<S: StateStore> std::fmt::Debug for AppendOnlyTopNExecutor<S> {
             .field("offset", &self.offset)
             .field("pk_indices", &self.pk_indices)
             .finish()
+    }
+}
+
+pub struct AppendOnlyTopNExecutorBuilder {}
+
+impl ExecutorBuilder for AppendOnlyTopNExecutorBuilder {
+    fn new_boxed_executor(
+        mut params: ExecutorParams,
+        node: &stream_plan::StreamNode,
+        store: impl StateStore,
+        _stream: &mut StreamManagerCore,
+    ) -> Result<Box<dyn Executor>> {
+        let node = try_match_expand!(node.get_node().unwrap(), Node::AppendOnlyTopNNode)?;
+        let order_types: Vec<_> = node
+            .get_order_types()
+            .iter()
+            .map(|v| ProstOrderType::from_i32(*v).unwrap())
+            .map(|v| OrderType::from_prost(&v))
+            .collect();
+        assert_eq!(order_types.len(), params.pk_indices.len());
+        let limit = if node.limit == 0 {
+            None
+        } else {
+            Some(node.limit as usize)
+        };
+        let cache_size = Some(1024);
+        let total_count = (0, 0);
+        let keyspace = Keyspace::executor_root(store, params.executor_id);
+        Ok(Box::new(AppendOnlyTopNExecutor::new(
+            params.input.remove(0),
+            order_types,
+            (node.offset as usize, limit),
+            params.pk_indices,
+            keyspace,
+            cache_size,
+            total_count,
+            params.executor_id,
+            params.op_info,
+        )))
     }
 }
 
@@ -151,12 +193,12 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
             first_execution: true,
             identity: format!("TopNAppendonlyExecutor {:X}", executor_id),
             op_info,
-            epoch: 0,
+            executor_state: ExecutorState::Init,
         }
     }
 
     async fn flush_inner(&mut self) -> Result<()> {
-        let epoch = self.current_epoch();
+        let epoch = self.executor_state().epoch();
         self.managed_higher_state.flush(epoch).await?;
         self.managed_lower_state.flush(epoch).await
     }
@@ -185,18 +227,25 @@ impl<S: StateStore> Executor for AppendOnlyTopNExecutor<S> {
     }
 
     fn clear_cache(&mut self) -> Result<()> {
-        self.managed_lower_state.clear_cache();
-        self.managed_higher_state.clear_cache();
+        self.managed_lower_state.clear_cache(false);
+        self.managed_higher_state.clear_cache(false);
         self.first_execution = true;
 
         Ok(())
+    }
+
+    fn reset(&mut self, epoch: u64) {
+        self.managed_lower_state.clear_cache(true);
+        self.managed_higher_state.clear_cache(true);
+        self.first_execution = true;
+        self.update_executor_state(ExecutorState::Active(epoch));
     }
 }
 
 #[async_trait]
 impl<S: StateStore> TopNExecutorBase for AppendOnlyTopNExecutor<S> {
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> Result<StreamChunk> {
-        let epoch = self.current_epoch();
+        let epoch = self.executor_state().epoch();
         if self.first_execution {
             self.managed_lower_state.fill_in_cache(epoch).await?;
             self.managed_higher_state.fill_in_cache(epoch).await?;
@@ -301,13 +350,15 @@ impl<S: StateStore> TopNExecutorBase for AppendOnlyTopNExecutor<S> {
     fn input(&mut self) -> &mut dyn Executor {
         &mut *self.input
     }
+}
 
-    fn current_epoch(&self) -> u64 {
-        self.epoch
+impl<S: StateStore> StatefulExecutor for AppendOnlyTopNExecutor<S> {
+    fn executor_state(&self) -> &ExecutorState {
+        &self.executor_state
     }
 
-    fn update_epoch(&mut self, new_epoch: u64) {
-        self.epoch = new_epoch;
+    fn update_executor_state(&mut self, new_state: ExecutorState) {
+        self.executor_state = new_state;
     }
 }
 
@@ -348,7 +399,7 @@ mod tests {
 
     use crate::executor::test_utils::{create_in_memory_keyspace, MockSource};
     use crate::executor::top_n_appendonly::AppendOnlyTopNExecutor;
-    use crate::executor::{Barrier, Executor, Message, PkIndices, StreamChunk};
+    use crate::executor::{Barrier, Epoch, Executor, Message, PkIndices, StreamChunk};
 
     fn create_stream_chunks() -> Vec<StreamChunk> {
         let chunk1 = StreamChunk::new(
@@ -398,14 +449,18 @@ mod tests {
             schema,
             PkIndices::new(),
             vec![
+                Message::Barrier(Barrier {
+                    epoch: Epoch::new_test_epoch(1),
+                    ..Barrier::default()
+                }),
                 Message::Chunk(std::mem::take(&mut chunks[0])),
                 Message::Barrier(Barrier {
-                    epoch: 0,
+                    epoch: Epoch::new_test_epoch(2),
                     ..Barrier::default()
                 }),
                 Message::Chunk(std::mem::take(&mut chunks[1])),
                 Message::Barrier(Barrier {
-                    epoch: 1,
+                    epoch: Epoch::new_test_epoch(3),
                     ..Barrier::default()
                 }),
                 Message::Chunk(std::mem::take(&mut chunks[2])),
@@ -430,6 +485,9 @@ mod tests {
             1,
             "AppendOnlyTopNExecutor".to_string(),
         );
+
+        // consume the init epoch
+        top_n_executor.next().await.unwrap();
         let res = top_n_executor.next().await.unwrap();
         assert_matches!(res, Message::Chunk(_));
         if let Message::Chunk(res) = res {
@@ -503,6 +561,9 @@ mod tests {
             1,
             "AppendOnlyTopNExecutor".to_string(),
         );
+
+        // consume the init epoch
+        top_n_executor.next().await.unwrap();
         let res = top_n_executor.next().await.unwrap();
         assert_matches!(res, Message::Chunk(_));
         if let Message::Chunk(res) = res {
@@ -599,6 +660,9 @@ mod tests {
             1,
             "AppendOnlyTopNExecutor".to_string(),
         );
+
+        // consume the init epoch
+        top_n_executor.next().await.unwrap();
         let res = top_n_executor.next().await.unwrap();
         assert_matches!(res, Message::Chunk(_));
         if let Message::Chunk(res) = res {

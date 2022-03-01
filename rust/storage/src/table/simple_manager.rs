@@ -13,9 +13,7 @@ use super::{ScannableTableRef, TableManager};
 use crate::table::mview::MViewTable;
 use crate::{dispatch_state_store, Keyspace, StateStoreImpl, TableColumnDesc};
 
-/// A simple implementation of in memory table for local tests.
-/// It will be replaced in near future when replaced by locally
-/// on-disk files.
+/// Manages all tables in the storage backend.
 pub struct SimpleTableManager {
     // TODO: should not use `std::sync::Mutex` in async context.
     tables: Mutex<HashMap<TableId, ScannableTableRef>>,

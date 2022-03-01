@@ -2,24 +2,27 @@
 #![allow(dead_code)]
 
 use std::net::SocketAddr;
-use std::time::Duration;
 
 use async_trait::async_trait;
 use futures::channel::mpsc::{Receiver, Sender};
 use futures::future::select_all;
 use futures::{SinkExt, StreamExt};
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::ToRwResult;
+use risingwave_common::try_match_expand;
+use risingwave_pb::stream_plan;
+use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::{GetStreamRequest, GetStreamResponse};
-use tonic::transport::{Channel, Endpoint};
+use risingwave_rpc_client::ComputeClient;
+use risingwave_storage::StateStore;
+use tonic::transport::Channel;
 use tonic::{Request, Streaming};
 use tracing_futures::Instrument;
 
 use super::{Barrier, Executor, Message, PkIndicesRef, Result};
-use crate::executor::{Mutation, PkIndices};
-use crate::task::UpDownActorIds;
+use crate::executor::{ExecutorBuilder, Mutation, PkIndices};
+use crate::task::{ExecutorParams, StreamManagerCore, UpDownActorIds};
 
 /// Receive data from `gRPC` and forwards to `MergerExecutor`/`ReceiverExecutor`
 pub struct RemoteInput {
@@ -38,14 +41,7 @@ impl RemoteInput {
         up_down_ids: UpDownActorIds,
         sender: Sender<Message>,
     ) -> Result<Self> {
-        let mut client = ExchangeServiceClient::new(
-            Endpoint::from_shared(format!("http://{}", addr))
-                .map_err(|e| InternalError(format!("{}", e)))?
-                .connect_timeout(Duration::from_secs(5))
-                .connect()
-                .await
-                .to_rw_result_with(format!("RemoteInput failed to connect to {}", addr))?,
-        );
+        let mut client = ComputeClient::new(&addr).await?.get_channel();
         let req = GetStreamRequest {
             up_fragment_id: up_down_ids.0,
             down_fragment_id: up_down_ids.1,
@@ -120,6 +116,20 @@ impl std::fmt::Debug for ReceiverExecutor {
     }
 }
 
+pub struct MergeExecutorBuilder {}
+
+impl ExecutorBuilder for MergeExecutorBuilder {
+    fn new_boxed_executor(
+        params: ExecutorParams,
+        node: &stream_plan::StreamNode,
+        _store: impl StateStore,
+        stream: &mut StreamManagerCore,
+    ) -> Result<Box<dyn Executor>> {
+        let node = try_match_expand!(node.get_node().unwrap(), Node::MergeNode)?;
+        stream.create_merge_node(params, node)
+    }
+}
+
 impl ReceiverExecutor {
     pub fn new(
         schema: Schema,
@@ -162,6 +172,10 @@ impl Executor for ReceiverExecutor {
 
     fn logical_operator_info(&self) -> &str {
         &self.op_info
+    }
+
+    fn reset(&mut self, _epoch: u64) {
+        // nothing to do
     }
 }
 
@@ -297,6 +311,10 @@ impl Executor for MergeExecutor {
     fn logical_operator_info(&self) -> &str {
         &self.op_info
     }
+
+    fn reset(&mut self, _epoch: u64) {
+        // nothing to do
+    }
 }
 
 #[cfg(test)]
@@ -357,13 +375,14 @@ mod tests {
                     tx.send(Message::Chunk(build_test_chunk(epoch)))
                         .await
                         .unwrap();
-                    tx.send(Message::Barrier(Barrier::new(epoch)))
+                    tx.send(Message::Barrier(Barrier::new_test_barrier(epoch)))
                         .await
                         .unwrap();
                     tokio::time::sleep(Duration::from_millis(1)).await;
                 }
                 tx.send(Message::Barrier(
-                    Barrier::new(1000).with_mutation(Mutation::Stop(HashSet::default())),
+                    Barrier::new_test_barrier(1000)
+                        .with_mutation(Mutation::Stop(HashSet::default())),
                 ))
                 .await
                 .unwrap();
@@ -380,7 +399,7 @@ mod tests {
             }
             // expect a barrier
             assert_matches!(merger.next().await.unwrap(), Message::Barrier(Barrier{epoch:barrier_epoch,mutation:_,..}) => {
-              assert_eq!(barrier_epoch, epoch);
+              assert_eq!(barrier_epoch.curr, epoch);
             });
         }
         assert_matches!(
@@ -432,10 +451,7 @@ mod tests {
             .await
             .unwrap();
             // send barrier
-            let barrier = Barrier {
-                epoch: 12345,
-                ..Barrier::default()
-            };
+            let barrier = Barrier::new_test_barrier(12345);
             tx.send(Ok(GetStreamResponse {
                 message: Some(StreamMessage {
                     stream_message: Some(
@@ -488,7 +504,7 @@ mod tests {
           assert_eq!(visibility, None);
         });
         assert_matches!(rx.next().await.unwrap(), Message::Barrier(Barrier { epoch: barrier_epoch, mutation: _, .. }) => {
-          assert_eq!(barrier_epoch, 12345);
+          assert_eq!(barrier_epoch.curr, 12345);
         });
         assert!(rpc_called.load(Ordering::SeqCst));
         input_handle.await.unwrap();
