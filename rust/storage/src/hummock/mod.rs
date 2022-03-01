@@ -9,7 +9,6 @@ use itertools::Itertools;
 
 mod sstable;
 pub use sstable::*;
-pub mod cf;
 mod cloud;
 pub mod compactor;
 mod error;
