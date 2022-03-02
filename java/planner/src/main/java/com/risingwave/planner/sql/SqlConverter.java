@@ -1,5 +1,6 @@
 package com.risingwave.planner.sql;
 
+import static com.risingwave.common.config.BatchPlannerConfigurations.OPTIMIZER_ENABLE_CALCITE_SUBQUERY_EXPAND;
 import static java.util.Objects.requireNonNull;
 
 import com.risingwave.common.datatype.RisingWaveTypeFactory;
@@ -68,11 +69,6 @@ public class SqlConverter {
       return this;
     }
 
-    public Builder withSql2RelConverterConfig(SqlToRelConverter.Config config) {
-      this.config = requireNonNull(config, "config can't be null!");
-      return this;
-    }
-
     public SqlConverter build() {
 
       RisingWaveCalciteCatalogReader catalogReader =
@@ -86,7 +82,12 @@ public class SqlConverter {
       RisingWaveConvertletTable sqlRexConvertletTable = new RisingWaveConvertletTable();
 
       initAll();
-      this.config = this.config.addRelBuilderConfigTransform(c -> c.withSimplify(false));
+      this.config =
+          this.config
+              .addRelBuilderConfigTransform(c -> c.withSimplify(false))
+              .withExpand(
+                  context.getSessionConfiguration().get(OPTIMIZER_ENABLE_CALCITE_SUBQUERY_EXPAND));
+
       SqlToRelConverter sql2RelConverter =
           new RisingWaveSqlToRelConverter(
               catalogReader, validator, catalogReader, cluster, sqlRexConvertletTable, config);
