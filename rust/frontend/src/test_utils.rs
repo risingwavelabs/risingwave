@@ -61,7 +61,7 @@ pub struct FrontendMockMetaClient {
 impl FrontendMockMetaClient {
     pub async fn new() -> Self {
         let meta_store = Arc::new(MemStore::default());
-        let epoch_generator = Arc::new(MemEpochGenerator::new());
+        let epoch_generator = Arc::new(MemEpochGenerator::default());
         let env = MetaSrvEnv::<MemStore>::new(meta_store.clone(), epoch_generator.clone()).await;
 
         let catalog_manager =
