@@ -19,8 +19,11 @@ pub use simple_manager::*;
 
 use crate::TableColumnDesc;
 
-/// `TableManager` is an abstraction of managing a collection of tables.
-/// The interface between executors and storage should be table-oriented.
+// deprecated and to be removed
+// deprecated and to be removed
+/// deprecated and to be removed
+/// `TableManager` is an abstraction of managing a collection of
+/// tables. The interface between executors and storage should be table-oriented.
 /// `Database` is a logical concept and stored as metadata information.
 #[async_trait::async_trait]
 pub trait TableManager: Debug + Sync + Send + AsRef<dyn Any> {
@@ -63,6 +66,9 @@ pub trait TableIter: Send {
 }
 
 #[async_trait::async_trait]
+// deprecated and to be removed
+// deprecated and to be removed
+/// deprecated and to be removed
 pub trait ScannableTable: Sync + Send + Any + core::fmt::Debug {
     /// Open and return an iterator.
     async fn iter(&self, epoch: u64) -> Result<TableIterRef>;

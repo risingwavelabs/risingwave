@@ -9,7 +9,9 @@ use tokio::sync::RwLock;
 
 use super::{ScannableTable, TableIterRef};
 use crate::TableColumnDesc;
-
+// deprecated and to be removed
+// deprecated and to be removed
+/// deprecated and to be removed
 #[derive(Debug)]
 pub struct TestTable {
     chunks: Arc<RwLock<Vec<DataChunkRef>>>,
