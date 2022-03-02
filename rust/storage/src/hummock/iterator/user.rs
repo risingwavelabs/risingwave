@@ -6,7 +6,7 @@ use crate::hummock::iterator::ReverseUserIterator;
 use crate::hummock::key::{get_epoch, key_with_epoch, user_key as to_user_key, Epoch};
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
-use crate::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
+use crate::monitor::StateStoreStats;
 
 pub enum DirectedUserIterator<'a> {
     Forward(UserIterator<'a>),
@@ -85,18 +85,26 @@ pub struct UserIterator<'a> {
 impl<'a> UserIterator<'a> {
     /// Create [`UserIterator`] with maximum epoch.
     #[cfg(test)]
-    pub(crate) fn new(
+    pub(crate) fn for_test(
         iterator: MergeIterator<'a>,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
     ) -> Self {
-        Self::new_with_epoch(iterator, key_range, Epoch::MAX)
+        use crate::monitor::DEFAULT_STATE_STORE_STATS;
+
+        Self::new(
+            iterator,
+            key_range,
+            Epoch::MAX,
+            DEFAULT_STATE_STORE_STATS.clone(),
+        )
     }
 
     /// Create [`UserIterator`] with given `read_epoch`.
-    pub(crate) fn new_with_epoch(
+    pub(crate) fn new(
         iterator: MergeIterator<'a>,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
+        stats: Arc<StateStoreStats>,
     ) -> Self {
         Self {
             iterator,
@@ -105,7 +113,7 @@ impl<'a> UserIterator<'a> {
             last_key: Vec::new(),
             last_val: Vec::new(),
             read_epoch,
-            stats: DEFAULT_STATE_STORE_STATS.clone(),
+            stats,
         }
     }
 
@@ -264,7 +272,7 @@ mod tests {
             .collect_vec();
 
         let mi = MergeIterator::new(iters);
-        let mut ui = UserIterator::new(mi, (Unbounded, Unbounded));
+        let mut ui = UserIterator::for_test(mi, (Unbounded, Unbounded));
         ui.rewind().await.unwrap();
 
         let mut i = 0;
@@ -303,7 +311,7 @@ mod tests {
             .collect_vec();
 
         let mi = MergeIterator::new(iters);
-        let mut ui = UserIterator::new(mi, (Unbounded, Unbounded));
+        let mut ui = UserIterator::for_test(mi, (Unbounded, Unbounded));
         let test_validator = &validators[2];
 
         // right edge case
@@ -360,7 +368,7 @@ mod tests {
             Box::new(SSTableIterator::new(Arc::new(table1))),
         ];
         let mi = MergeIterator::new(iters);
-        let mut ui = UserIterator::new(mi, (Unbounded, Unbounded));
+        let mut ui = UserIterator::for_test(mi, (Unbounded, Unbounded));
         ui.rewind().await.unwrap();
 
         // verify
@@ -402,7 +410,7 @@ mod tests {
         let begin_key = Included(user_key(key_range_test_key(0, 2, 0).as_slice()).to_vec());
         let end_key = Included(user_key(key_range_test_key(0, 7, 0).as_slice()).to_vec());
 
-        let mut ui = UserIterator::new(mi, (begin_key, end_key));
+        let mut ui = UserIterator::for_test(mi, (begin_key, end_key));
 
         // ----- basic iterate -----
         ui.rewind().await.unwrap();
@@ -478,7 +486,7 @@ mod tests {
         let begin_key = Included(user_key(key_range_test_key(0, 2, 0).as_slice()).to_vec());
         let end_key = Excluded(user_key(key_range_test_key(0, 7, 0).as_slice()).to_vec());
 
-        let mut ui = UserIterator::new(mi, (begin_key, end_key));
+        let mut ui = UserIterator::for_test(mi, (begin_key, end_key));
 
         // ----- basic iterate -----
         ui.rewind().await.unwrap();
@@ -553,7 +561,7 @@ mod tests {
         let mi = MergeIterator::new(iters);
         let end_key = Included(user_key(key_range_test_key(0, 7, 0).as_slice()).to_vec());
 
-        let mut ui = UserIterator::new(mi, (Unbounded, end_key));
+        let mut ui = UserIterator::for_test(mi, (Unbounded, end_key));
 
         // ----- basic iterate -----
         ui.rewind().await.unwrap();
@@ -632,7 +640,7 @@ mod tests {
         let mi = MergeIterator::new(iters);
         let begin_key = Included(user_key(key_range_test_key(0, 2, 0).as_slice()).to_vec());
 
-        let mut ui = UserIterator::new(mi, (begin_key, Unbounded));
+        let mut ui = UserIterator::for_test(mi, (begin_key, Unbounded));
 
         // ----- basic iterate -----
         ui.rewind().await.unwrap();

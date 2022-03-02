@@ -46,7 +46,7 @@ use self::key::{key_with_epoch, user_key};
 use self::multi_builder::CapacitySplitTableBuilder;
 pub use self::state_store::*;
 use self::utils::bloom_filter_sstables;
-use super::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
+use super::monitor::StateStoreStats;
 use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::iterator::ReverseUserIterator;
 use crate::hummock::local_version_manager::LocalVersionManager;
@@ -127,16 +127,33 @@ pub struct HummockStorage {
 }
 
 impl HummockStorage {
+    pub async fn with_default_stats(
+        obj_client: Arc<dyn ObjectStore>,
+        options: HummockOptions,
+        local_version_manager: Arc<LocalVersionManager>,
+        hummock_meta_client: Arc<dyn HummockMetaClient>,
+    ) -> HummockResult<Self> {
+        use crate::monitor::DEFAULT_STATE_STORE_STATS;
+
+        Self::new(
+            obj_client,
+            options,
+            local_version_manager,
+            hummock_meta_client,
+            DEFAULT_STATE_STORE_STATS.clone(),
+        )
+        .await
+    }
+
     pub async fn new(
         obj_client: Arc<dyn ObjectStore>,
         options: HummockOptions,
         local_version_manager: Arc<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
-    ) -> HummockResult<HummockStorage> {
+        stats: Arc<StateStoreStats>,
+    ) -> HummockResult<Self> {
         let (trigger_compact_tx, trigger_compact_rx) = mpsc::unbounded_channel();
         let (stop_compact_tx, stop_compact_rx) = mpsc::unbounded_channel();
-
-        let stats = DEFAULT_STATE_STORE_STATS.clone();
 
         let arc_options = Arc::new(options);
         let options_for_compact = arc_options.clone();
@@ -289,13 +306,14 @@ impl HummockStorage {
         let mi = MergeIterator::new(table_iters);
 
         // TODO: avoid this clone
-        Ok(UserIterator::new_with_epoch(
+        Ok(UserIterator::new(
             mi,
             (
                 key_range.start_bound().map(|b| b.as_ref().to_owned()),
                 key_range.end_bound().map(|b| b.as_ref().to_owned()),
             ),
             epoch,
+            self.stats.clone(),
         ))
     }
 

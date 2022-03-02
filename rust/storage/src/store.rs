@@ -7,10 +7,11 @@ use moka::future::Cache;
 use risingwave_common::error::{Result, RwError};
 use risingwave_rpc_client::MetaClient;
 
-use crate::hummock::hummock_meta_client::RPCHummockMetaClient;
+use crate::hummock::hummock_meta_client::RpcHummockMetaClient;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::HummockStateStore;
 use crate::memory::MemoryStateStore;
+use crate::monitor::StateStoreStats;
 use crate::object::S3ObjectStore;
 use crate::rocksdb_local::RocksDBStateStore;
 use crate::tikv::TikvStateStore;
@@ -146,7 +147,11 @@ macro_rules! dispatch_state_store {
 }
 
 impl StateStoreImpl {
-    pub async fn from_str(s: &str, meta_client: MetaClient) -> Result<Self> {
+    pub async fn from_str(
+        s: &str,
+        meta_client: MetaClient,
+        stats: Arc<StateStoreStats>,
+    ) -> Result<Self> {
         let store = match s {
             "in_memory" | "in-memory" => StateStoreImpl::shared_in_memory_store(),
             tikv if tikv.starts_with("tikv") => {
@@ -182,7 +187,8 @@ impl StateStoreImpl {
                             // 1GB block cache (65536 blocks * 64KB block)
                             Some(Arc::new(Cache::new(65536))),
                         )),
-                        Arc::new(RPCHummockMetaClient::new(meta_client)),
+                        Arc::new(RpcHummockMetaClient::new(meta_client, stats.clone())),
+                        stats,
                     )
                     .await
                     .map_err(RwError::from)?,
@@ -212,7 +218,8 @@ impl StateStoreImpl {
                             remote_dir,
                             Some(Arc::new(Cache::new(65536))),
                         )),
-                        Arc::new(RPCHummockMetaClient::new(meta_client)),
+                        Arc::new(RpcHummockMetaClient::new(meta_client, stats.clone())),
+                        stats,
                     )
                     .await
                     .map_err(RwError::from)?,

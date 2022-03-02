@@ -1,7 +1,6 @@
 use prometheus::core::{AtomicU64, Collector, GenericCounter, Metric};
 use prometheus::Histogram;
 use risingwave_storage::for_all_metrics;
-use risingwave_storage::monitor::DEFAULT_STATE_STORE_STATS;
 
 fn get_percentile(histogram: &Histogram, p: f64) -> f64 {
     let metric = histogram.metric();
@@ -63,11 +62,10 @@ impl Print for Histogram {
 
 macro_rules! print_statistics {
     ($( $name:ident: $type:ty ),* ,) => {
-        pub(crate) fn print_statistics() {
+        pub(crate) fn print_statistics(stats: &risingwave_storage::monitor::StateStoreStats) {
             println!("STATISTICS:");
-            let stat = DEFAULT_STATE_STORE_STATS.clone();
             // print for all fields
-            $( stat.$name.print(); )*
+            $( stats.$name.print(); )*
             println!();
         }
     }
