@@ -4,6 +4,7 @@ version = "0.1.3"
 edition = "2021"
 
 [dependencies]
+async-trait = "0.1"
 risingwave-pb = { path = "../prost" }
 risingwave_common = { path = "../common" }
 tonic = "0.6"

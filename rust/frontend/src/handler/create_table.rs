@@ -67,7 +67,6 @@ mod tests {
     use std::collections::HashMap;
 
     use risingwave_common::types::DataType;
-    use risingwave_meta::test_utils::LocalMeta;
 
     use crate::catalog::catalog_service::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
     use crate::catalog::table_catalog::ROWID_NAME;
@@ -75,9 +74,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_table_handler() {
-        let meta = LocalMeta::start(12002).await;
         let sql = "create table t (v1 smallint, v2 int, v3 bigint, v4 float, v5 double);";
-        let frontend = LocalFrontend::new(&meta).await;
+        let frontend = LocalFrontend::new().await;
         frontend.run_sql(sql).await.unwrap();
 
         let catalog_manager = frontend.session().env().catalog_mgr();
@@ -97,6 +95,5 @@ mod tests {
         expected_map.insert("v4".to_string(), DataType::Float32);
         expected_map.insert("v5".to_string(), DataType::Float64);
         assert_eq!(columns, expected_map);
-        meta.stop().await;
     }
 }
