@@ -2,7 +2,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 
 use crate::binder::{BaseTableRef, TableRef};
-use crate::optimizer::plan_node::{IntoPlanRef as _, LogicalScan, PlanRef};
+use crate::optimizer::plan_node::{LogicalScan, PlanRef};
 use crate::planner::Planner;
 
 impl Planner {
