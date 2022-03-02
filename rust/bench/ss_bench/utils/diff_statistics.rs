@@ -37,12 +37,12 @@ impl DiffStat {
             MetricDisplay::new(&latency_hist)
         };
 
-        let time_comsume = cur_latency_hist.get_sample_sum() - prev_latency_hist.get_sample_sum();
+        let time_consume = cur_latency_hist.get_sample_sum() - prev_latency_hist.get_sample_sum();
 
         let ops = {
             let written_batch_num =
                 cur_latency_hist.get_sample_count() - prev_latency_hist.get_sample_count();
-            written_batch_num as f64 / time_comsume
+            written_batch_num as f64 / time_consume
         };
 
         let bytes_pre_sec = {
@@ -52,7 +52,7 @@ impl DiffStat {
             let cur_histogram = metric.get_histogram();
 
             let written_bytes = cur_histogram.get_sample_sum() - prev_histogram.get_sample_sum();
-            written_bytes / time_comsume
+            written_bytes / time_consume
         };
 
         println!(
