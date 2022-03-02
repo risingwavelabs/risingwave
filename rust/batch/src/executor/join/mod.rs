@@ -31,7 +31,7 @@ impl JoinType {
     pub(super) fn need_join_remaining(self) -> bool {
         matches!(
             self,
-            JoinType::RightOuter | JoinType::RightAnti | JoinType::FullOuter
+            JoinType::RightOuter | JoinType::RightAnti | JoinType::FullOuter | JoinType::RightSemi
         )
     }
 
