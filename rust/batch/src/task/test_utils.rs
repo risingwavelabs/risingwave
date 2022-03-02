@@ -17,7 +17,6 @@ use risingwave_pb::plan::{
     TaskSinkId as ProstSinkId, ValuesNode,
 };
 use risingwave_pb::task_service::GetDataResponse;
-use risingwave_storage::table::test::TestTable;
 use risingwave_storage::table::ScannableTable;
 
 use super::*;
