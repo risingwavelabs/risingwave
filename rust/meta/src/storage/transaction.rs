@@ -47,7 +47,7 @@ impl Transaction {
     #[inline(always)]
     #[allow(dead_code)]
     pub fn add_preconditions(&mut self, mut preconditions: impl AsMut<Vec<Precondition>>) {
-        self.preconditions.append(preconditions.as_mut())
+        self.preconditions.append(preconditions.as_mut());
     }
 
     /// Add a batch of operations.
