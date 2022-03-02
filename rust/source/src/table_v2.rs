@@ -140,17 +140,23 @@ impl StreamSourceReader for TableV2StreamReader {
             .recv()
             .await
             .expect("TableSourceV2 dropped before associated streaming task terminated");
-        notifier.send(()).ok();
 
-        let (ops, columns, bitmap) = chunk.into_inner();
+        // Caveats: we should ensure there's no `await` after here.
+        let consume = move || {
+            notifier.send(()).ok();
 
-        let selected_columns = self
-            .column_indices
-            .iter()
-            .map(|i| columns[*i].clone())
-            .collect();
+            let (ops, columns, bitmap) = chunk.into_inner();
 
-        Ok(StreamChunk::new(ops, selected_columns, bitmap))
+            let selected_columns = self
+                .column_indices
+                .iter()
+                .map(|i| columns[*i].clone())
+                .collect();
+
+            Ok(StreamChunk::new(ops, selected_columns, bitmap))
+        };
+
+        consume()
     }
 }
 
