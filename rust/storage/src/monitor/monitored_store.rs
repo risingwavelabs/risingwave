@@ -7,7 +7,6 @@ use futures::Future;
 use risingwave_common::error::Result;
 
 use super::StateStoreStats;
-use crate::write_batch::WriteBatch;
 use crate::{StateStore, StateStoreIter};
 
 /// A state store wrapper for monitoring metrics.
