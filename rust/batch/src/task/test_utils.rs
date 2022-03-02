@@ -1,9 +1,7 @@
 use core::default::Default as CoreDefault;
 
 use itertools::Itertools;
-use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
-use risingwave_common::util::downcast_arc;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::{Column, DataType};
 use risingwave_pb::expr::expr_node::RexNode;
@@ -13,11 +11,10 @@ use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::values_node::ExprTuple;
 use risingwave_pb::plan::{
     exchange_info, ColumnDesc, CreateTableNode, ExchangeInfo, Field as NodeField, InsertNode,
-    PlanFragment, PlanNode, QueryId, RowSeqScanNode, StageId, TaskId as ProstTaskId,
-    TaskSinkId as ProstSinkId, ValuesNode,
+    PlanFragment, PlanNode, QueryId, StageId, TaskId as ProstTaskId, TaskSinkId as ProstSinkId,
+    ValuesNode,
 };
 use risingwave_pb::task_service::GetDataResponse;
-use risingwave_storage::table::ScannableTable;
 
 use super::*;
 use crate::rpc::service::exchange::ExchangeWriter;
