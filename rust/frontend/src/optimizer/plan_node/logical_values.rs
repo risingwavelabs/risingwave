@@ -31,7 +31,7 @@ impl LogicalValues {
         Ok(Self::new(rows, schema))
     }
 
-    /// Get a reference to the logical values's rows.
+    /// Get a reference to the logical values' rows.
     pub fn rows(&self) -> &[Vec<ExprImpl>] {
         self.rows.as_ref()
     }
@@ -42,7 +42,9 @@ impl WithSchema for LogicalValues {
         &self.schema
     }
 }
+
 impl_plan_tree_node_for_leaf! {LogicalValues}
+
 impl WithOrder for LogicalValues {}
 
 impl WithDistribution for LogicalValues {}

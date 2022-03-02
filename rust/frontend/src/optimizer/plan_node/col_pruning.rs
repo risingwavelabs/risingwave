@@ -11,7 +11,7 @@ pub trait ColPrunable: WithSchema + IntoPlanRef {
     /// transform the plan node to only output the required columns ordered by index number.
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
         let mapping = ColIndexMapping::with_remaining_columns(required_cols);
-        LogicalProject::with_mapping(self.clone_as_plan_ref(), mapping).into_plan_ref()
+        LogicalProject::with_mapping(self.into_plan_ref(), mapping)
     }
 }
 

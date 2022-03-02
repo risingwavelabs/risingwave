@@ -61,6 +61,7 @@ impl dyn PlanNode {
         }
         Ok(())
     }
+
     pub fn to_batch_prost(&self) -> BatchPlanProst {
         let node_body = Some(self.to_batch_prost_body());
         let children = self

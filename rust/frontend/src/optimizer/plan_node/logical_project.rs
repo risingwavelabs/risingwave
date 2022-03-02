@@ -41,7 +41,7 @@ impl LogicalProject {
         Self::new(input, exprs, expr_alias).into_plan_ref()
     }
 
-    pub fn with_mapping(input: PlanRef, mapping: ColIndexMapping) -> Self {
+    pub fn with_mapping(input: PlanRef, mapping: ColIndexMapping) -> PlanRef {
         let mut input_refs = vec![None; mapping.target_upper()];
         for (src, tar) in mapping.mapping_pairs() {
             assert_eq!(input_refs[tar], None);
@@ -55,7 +55,7 @@ impl LogicalProject {
             .collect();
 
         let alias = vec![None; exprs.len()];
-        LogicalProject::new(input, exprs, alias)
+        LogicalProject::new(input, exprs, alias).into_plan_ref()
     }
 
     fn derive_schema(exprs: &[ExprImpl], expr_alias: &[Option<String>]) -> Schema {

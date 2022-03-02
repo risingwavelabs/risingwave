@@ -32,7 +32,9 @@ impl PlanTreeNodeUnary for BatchProject {
         Self::new(self.logical.clone_with_input(input))
     }
 }
-impl_plan_tree_node_for_unary! {BatchProject}
+
+impl_plan_tree_node_for_unary! { BatchProject }
+
 impl WithOrder for BatchProject {}
 
 impl WithDistribution for BatchProject {}
