@@ -9,13 +9,12 @@ use risingwave_pb::hummock::{HummockVersion, Level, LevelType};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use super::Block;
-use crate::hummock::cloud::{get_sst_data_path, get_sst_meta};
 use crate::hummock::hummock_meta_client::HummockMetaClient;
+use crate::hummock::sstable_manager::SSTableManagerRef;
 use crate::hummock::{
     HummockEpoch, HummockError, HummockResult, HummockSSTableId, HummockVersionId, SSTable,
     INVALID_VERSION_ID,
 };
-use crate::object::ObjectStore;
 
 pub struct ScopedLocalVersion {
     version: Arc<HummockVersion>,
@@ -69,9 +68,8 @@ impl ScopedLocalVersion {
 pub struct LocalVersionManager {
     current_version: RwLock<Option<Arc<ScopedLocalVersion>>>,
     sstables: RwLock<BTreeMap<HummockSSTableId, Arc<SSTable>>>,
+    sstable_manager: SSTableManagerRef,
 
-    obj_client: Arc<dyn ObjectStore>,
-    remote_dir: Arc<String>,
     pub block_cache: Arc<Cache<Vec<u8>, Arc<Block>>>,
     update_notifier_tx: tokio::sync::watch::Sender<HummockVersionId>,
     unpin_worker_tx: UnboundedSender<HummockVersionId>,
@@ -80,8 +78,7 @@ pub struct LocalVersionManager {
 
 impl LocalVersionManager {
     pub fn new(
-        obj_client: Arc<dyn ObjectStore>,
-        remote_dir: &str,
+        sstable_manager: SSTableManagerRef,
         block_cache: Option<Arc<Cache<Vec<u8>, Arc<Block>>>>,
     ) -> LocalVersionManager {
         let (update_notifier_tx, _) = tokio::sync::watch::channel(INVALID_VERSION_ID);
@@ -89,9 +86,9 @@ impl LocalVersionManager {
 
         LocalVersionManager {
             current_version: RwLock::new(None),
+            sstable_manager,
             sstables: RwLock::new(BTreeMap::new()),
-            obj_client,
-            remote_dir: Arc::new(remote_dir.to_string()),
+
             block_cache: if let Some(block_cache) = block_cache {
                 block_cache
             } else {
@@ -193,11 +190,7 @@ impl LocalVersionManager {
                 None => {
                     let fetched_sstable = Arc::new(SSTable {
                         id: *table_id,
-                        meta: get_sst_meta(self.obj_client.clone(), &self.remote_dir, *table_id)
-                            .await?,
-                        obj_client: self.obj_client.clone(),
-                        data_path: get_sst_data_path(&self.remote_dir, *table_id),
-                        block_cache: self.block_cache.clone(),
+                        meta: self.sstable_manager.meta(*table_id).await?,
                     });
                     self.add_sstable_to_cache(fetched_sstable.clone());
                     fetched_sstable

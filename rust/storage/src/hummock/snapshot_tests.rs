@@ -1,3 +1,5 @@
+// TODO: Refactor this file. SSTableManager shoule be shared whthin the same context.
+
 #[cfg(test)]
 use std::sync::Arc;
 
@@ -14,7 +16,7 @@ use crate::object::{InMemObjectStore, ObjectStore};
 const TEST_KEY_TABLE_ID: u64 = 233;
 
 async fn gen_and_upload_table(
-    obj_client: Arc<dyn ObjectStore>,
+    object_store: Arc<dyn ObjectStore>,
     remote_dir: &str,
     vm: Arc<LocalVersionManager>,
     hummock_meta_client: &dyn HummockMetaClient,
@@ -35,9 +37,8 @@ async fn gen_and_upload_table(
     }
     let (data, meta) = b.finish();
     // get remote table
-    cloud::upload(&obj_client, table_id, &meta, data, remote_dir)
-        .await
-        .unwrap();
+    let sstable_manager = Arc::new(SSTableManager::new(object_store, remote_dir.to_string()));
+    sstable_manager.put(table_id, &meta, data).await.unwrap();
 
     let version = hummock_meta_client
         .add_tables(
@@ -92,12 +93,12 @@ macro_rules! assert_count_reverse_range_scan {
 #[tokio::test]
 async fn test_snapshot() {
     let remote_dir = "/test";
-    let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
-    let vm = Arc::new(LocalVersionManager::new(
-        obj_client.clone(),
-        remote_dir,
-        None,
+    let object_store = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
+    let sstable_manager = Arc::new(SSTableManager::new(
+        object_store.clone(),
+        remote_dir.to_string(),
     ));
+    let vm = Arc::new(LocalVersionManager::new(sstable_manager, None));
     let mock_hummock_meta_service = Arc::new(MockHummockMetaService::new());
     let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
         mock_hummock_meta_service.clone(),
@@ -105,7 +106,7 @@ async fn test_snapshot() {
 
     let hummock_options = HummockOptions::default_for_test();
     let hummock_storage = HummockStorage::new(
-        obj_client.clone(),
+        object_store.clone(),
         hummock_options,
         vm.clone(),
         mock_hummock_meta_client.clone(),
@@ -115,7 +116,7 @@ async fn test_snapshot() {
 
     let epoch1: u64 = 1;
     gen_and_upload_table(
-        obj_client.clone(),
+        object_store.clone(),
         remote_dir,
         vm.clone(),
         mock_hummock_meta_client.as_ref(),
@@ -130,7 +131,7 @@ async fn test_snapshot() {
 
     let epoch2 = epoch1 + 1;
     gen_and_upload_table(
-        obj_client.clone(),
+        object_store.clone(),
         remote_dir,
         vm.clone(),
         mock_hummock_meta_client.as_ref(),
@@ -147,7 +148,7 @@ async fn test_snapshot() {
 
     let epoch3 = epoch2 + 1;
     gen_and_upload_table(
-        obj_client.clone(),
+        object_store.clone(),
         remote_dir,
         vm.clone(),
         mock_hummock_meta_client.as_ref(),
@@ -166,20 +167,20 @@ async fn test_snapshot() {
 
 #[tokio::test]
 async fn test_snapshot_range_scan() {
-    let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
+    let object_store = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
     let remote_dir = "/test";
-    let vm = Arc::new(LocalVersionManager::new(
-        obj_client.clone(),
-        remote_dir,
-        None,
+    let sstable_manager = Arc::new(SSTableManager::new(
+        object_store.clone(),
+        remote_dir.to_string(),
     ));
+    let vm = Arc::new(LocalVersionManager::new(sstable_manager, None));
     let mock_hummock_meta_service = Arc::new(MockHummockMetaService::new());
     let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
         mock_hummock_meta_service.clone(),
     ));
     let hummock_options = HummockOptions::default_for_test();
     let hummock_storage = HummockStorage::new(
-        obj_client.clone(),
+        object_store.clone(),
         hummock_options,
         vm.clone(),
         mock_hummock_meta_client.clone(),
@@ -190,7 +191,7 @@ async fn test_snapshot_range_scan() {
     let epoch: u64 = 1;
 
     gen_and_upload_table(
-        obj_client.clone(),
+        object_store.clone(),
         remote_dir,
         vm.clone(),
         mock_hummock_meta_client.as_ref(),
@@ -220,20 +221,20 @@ async fn test_snapshot_range_scan() {
 
 #[tokio::test]
 async fn test_snapshot_reverse_range_scan() {
-    let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
+    let object_store = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
     let remote_dir = "/test";
-    let vm = Arc::new(LocalVersionManager::new(
-        obj_client.clone(),
-        remote_dir,
-        None,
+    let sstable_manager = Arc::new(SSTableManager::new(
+        object_store.clone(),
+        remote_dir.to_string(),
     ));
+    let vm = Arc::new(LocalVersionManager::new(sstable_manager, None));
     let mock_hummock_meta_service = Arc::new(MockHummockMetaService::new());
     let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
         mock_hummock_meta_service.clone(),
     ));
     let hummock_options = HummockOptions::default_for_test();
     let hummock_storage = HummockStorage::new(
-        obj_client.clone(),
+        object_store.clone(),
         hummock_options,
         vm.clone(),
         mock_hummock_meta_client.clone(),
@@ -244,7 +245,7 @@ async fn test_snapshot_reverse_range_scan() {
     let epoch = 1;
 
     gen_and_upload_table(
-        obj_client.clone(),
+        object_store.clone(),
         remote_dir,
         vm.clone(),
         mock_hummock_meta_client.as_ref(),

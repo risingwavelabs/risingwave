@@ -13,7 +13,6 @@ pub mod multi_builder;
 pub use block_iterator::*;
 pub use builder::*;
 mod sstable_iterator;
-use moka::future::Cache;
 pub use sstable_iterator::*;
 mod reverse_sstable_iterator;
 pub use reverse_sstable_iterator::*;
@@ -21,15 +20,12 @@ mod utils;
 
 use std::sync::Arc;
 
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use bytes::{Buf, Bytes};
 use prost::Message;
-use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 use risingwave_pb::hummock::{Checksum, SstableMeta};
 use utils::verify_checksum;
 
 use super::{HummockError, HummockResult};
-use crate::hummock::sstable::utils::checksum;
-use crate::object::{BlockLocation, ObjectStore};
 
 /// Block contains several entries. It can be obtained from an SST.
 #[derive(Default)]
@@ -67,7 +63,7 @@ impl Block {
     /// +-------------------------------------+--------------------+--------------+------------------+
     /// ```
     /// Decode block from given bytes
-    fn decode(data: Bytes, block_offset: usize) -> HummockResult<Arc<Block>> {
+    pub fn decode(data: Bytes, block_offset: usize) -> HummockResult<Arc<Block>> {
         // read checksum length
         let mut read_pos = data.len() - 4;
         let checksum_len = (&data[read_pos..read_pos + 4]).get_u32() as usize;
@@ -111,143 +107,22 @@ impl Block {
     }
 }
 
-/// [`Table`] represents a loaded SST file with the info we have about it.
+/// [`SSTable`] represents a SST in object store.
+#[derive(Clone)]
 pub struct SSTable {
-    /// SST id
     pub id: u64,
-
-    /// Prost-encoded Metadata of SST
     pub meta: SstableMeta,
-
-    /// Client of object store
-    pub obj_client: Arc<dyn ObjectStore>,
-
-    // TODO(MrCroxx): Replace this field with base path.
-    // It's so confused that there is only data path but no meta path here.
-    //
-    // Data path for the data object
-    pub data_path: String,
-
-    pub block_cache: Arc<Cache<Vec<u8>, Arc<Block>>>,
-}
-
-fn block_cache_key_of(sst_id: u64, block_id: u64) -> Vec<u8> {
-    let mut key = Vec::with_capacity(16);
-    key.put_u64_le(sst_id);
-    key.put_u64_le(block_id);
-    key
 }
 
 impl SSTable {
-    /// Open an existing SST from a pre-loaded [`Bytes`].
-    pub async fn load(
-        id: u64,
-        obj_client: Arc<dyn ObjectStore>,
-        data_path: String,
-        meta: SstableMeta,
-        block_cache: Arc<Cache<Vec<u8>, Arc<Block>>>,
-    ) -> HummockResult<Self> {
-        Ok(SSTable {
-            id,
-            meta,
-            obj_client,
-            data_path,
-            block_cache,
-        })
+    pub fn new(id: u64, meta: SstableMeta) -> Self {
+        Self { id, meta }
     }
 
-    /// Decode bytes to table metadata instance.
-    ///
-    /// Metadata format:
-    /// ```plain
-    /// |       variable      | variable |       4B        |
-    /// |  Prost-encoded Meta | Checksum | Checksum Length |
-    /// ```
-    pub fn decode_meta(content: &[u8]) -> HummockResult<SstableMeta> {
-        let mut read_pos = content.len();
-
-        // read checksum length from last 4 bytes
-        read_pos -= 4;
-        let mut buf = &content[read_pos..read_pos + 4];
-        let checksum_len = buf.get_u32() as usize;
-
-        // read checksum
-        read_pos -= checksum_len;
-        let buf = &content[read_pos..read_pos + checksum_len];
-        let checksum = Checksum::decode(buf)?;
-
-        // read data
-        let data = &content[0..read_pos];
-        verify_checksum(&checksum, data)?;
-
-        Ok(SstableMeta::decode(data)?)
-    }
-
-    pub fn encode_meta(meta: &SstableMeta, buf: &mut BytesMut) {
-        // encode index
-        let mut raw_meta = BytesMut::new();
-        meta.encode(&mut raw_meta).unwrap();
-        assert!(raw_meta.len() < u32::MAX as usize);
-
-        // encode checksum and its length
-        let checksum = checksum(
-            ChecksumAlg::XxHash64, // TODO: may add an option for meta checksum algorithm
-            &raw_meta,
-        );
-        let mut cs_bytes = BytesMut::new();
-        checksum.encode(&mut cs_bytes).unwrap();
-        let cs_len = cs_bytes.len() as u32;
-
-        buf.put(raw_meta);
-        buf.put(cs_bytes);
-        buf.put_u32(cs_len);
-    }
-
-    /// Get the required block.
-    pub async fn block(&self, idx: usize) -> HummockResult<Arc<Block>> {
-        let block_meta = &self.meta.block_metas[idx];
-        let offset = block_meta.offset as usize;
-        let size = block_meta.len as usize;
-        let block_loc = BlockLocation { offset, size };
-
-        let key = block_cache_key_of(self.id, idx as u64);
-
-        if let Some(block) = self.block_cache.get(&key) {
-            Ok(block)
-        } else {
-            let block_data = self
-                .obj_client
-                .read(self.data_path.as_str(), Some(block_loc))
-                .await
-                .map_err(|e| HummockError::ObjectIoError(e.to_string()))?;
-
-            tracing::trace!(
-                target: "events::storage::sstable::block_read",
-                "table read block: table_id = {}, block_id = {}, block_loc = {:?}",
-                self.id,
-                idx,
-                block_loc
-            );
-
-            let block = Block::decode(block_data, offset)?;
-
-            self.block_cache.insert(key, block.clone()).await;
-
-            Ok(block)
-        }
-    }
-
-    /// Return true if the table has a Bloom filter
     pub fn has_bloom_filter(&self) -> bool {
         !self.meta.bloom_filter.is_empty()
     }
 
-    /// Judge whether the given user key is in the table with the given false positive rate.
-    ///
-    /// Note of false positive rate:
-    ///   - if the return value is true, then the table surely does not have the user key;
-    ///   - if the return value is false, then the table may or may not have the user key actually,
-    /// a.k.a. we don't know the answer.
     pub fn surely_not_have_user_key(&self, user_key: &[u8]) -> bool {
         if self.has_bloom_filter() {
             let hash = farmhash::fingerprint32(user_key);
@@ -258,23 +133,7 @@ impl SSTable {
         }
     }
 
-    /// Number of blocks in the current table
     pub fn block_count(&self) -> usize {
         self.meta.block_metas.len()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::builder::tests::*;
-
-    #[tokio::test]
-    async fn test_sstable_load() {
-        // build remote table
-        let table = gen_test_sstable(default_builder_opt_for_test()).await;
-
-        for i in 0..10 {
-            table.block(i).await.unwrap();
-        }
     }
 }

@@ -9,7 +9,7 @@ use risingwave_rpc_client::MetaClient;
 
 use crate::hummock::hummock_meta_client::RPCHummockMetaClient;
 use crate::hummock::local_version_manager::LocalVersionManager;
-use crate::hummock::HummockStateStore;
+use crate::hummock::{HummockStateStore, SSTableManager};
 use crate::memory::MemoryStateStore;
 use crate::object::S3ObjectStore;
 use crate::rocksdb_local::RocksDBStateStore;
@@ -165,6 +165,10 @@ impl StateStoreImpl {
                     S3ObjectStore::new_with_minio(minio.strip_prefix("hummock+").unwrap()).await,
                 );
                 let remote_dir = "hummock_001";
+                let sstable_manager = Arc::new(SSTableManager::new(
+                    object_client.clone(),
+                    remote_dir.to_string(),
+                ));
                 StateStoreImpl::HummockStateStore(HummockStateStore::new(
                     HummockStorage::new(
                         object_client.clone(),
@@ -176,8 +180,7 @@ impl StateStoreImpl {
                             checksum_algo: ChecksumAlg::Crc32c,
                         },
                         Arc::new(LocalVersionManager::new(
-                            object_client,
-                            remote_dir,
+                            sstable_manager,
                             // TODO: configurable block cache in config
                             // 1GB block cache (65536 blocks * 64KB block)
                             Some(Arc::new(Cache::new(65536))),
@@ -197,6 +200,10 @@ impl StateStoreImpl {
                 );
 
                 let remote_dir = "hummock_001";
+                let sstable_manager = Arc::new(SSTableManager::new(
+                    s3_store.clone(),
+                    remote_dir.to_string(),
+                ));
                 StateStoreImpl::HummockStateStore(HummockStateStore::new(
                     HummockStorage::new(
                         s3_store.clone(),
@@ -208,8 +215,7 @@ impl StateStoreImpl {
                             checksum_algo: ChecksumAlg::Crc32c,
                         },
                         Arc::new(LocalVersionManager::new(
-                            s3_store,
-                            remote_dir,
+                            sstable_manager,
                             Some(Arc::new(Cache::new(65536))),
                         )),
                         Arc::new(RPCHummockMetaClient::new(meta_client)),

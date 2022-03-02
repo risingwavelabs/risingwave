@@ -11,7 +11,9 @@ use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::hummock_meta_client::RPCHummockMetaClient;
 use risingwave_storage::hummock::local_version_manager::LocalVersionManager;
-use risingwave_storage::hummock::{HummockOptions, HummockStateStore, HummockStorage};
+use risingwave_storage::hummock::{
+    HummockOptions, HummockStateStore, HummockStorage, SSTableManager,
+};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::object::S3ObjectStore;
 use risingwave_storage::rocksdb_local::RocksDBStateStore;
@@ -118,6 +120,10 @@ async fn get_state_store_impl(opts: &Opts) -> Result<StateStoreImpl> {
             let hummock_meta_client = Arc::new(RPCHummockMetaClient::new(
                 MetaClient::new(meta_address).await?,
             ));
+            let sstable_manager = Arc::new(SSTableManager::new(
+                object_client.clone(),
+                remote_dir.to_string(),
+            ));
             StateStoreImpl::Hummock(HummockStateStore::new(
                 HummockStorage::new(
                     object_client.clone(),
@@ -129,8 +135,7 @@ async fn get_state_store_impl(opts: &Opts) -> Result<StateStoreImpl> {
                         checksum_algo: get_checksum_algo(opts.checksum_algo.as_ref()),
                     },
                     Arc::new(LocalVersionManager::new(
-                        object_client,
-                        remote_dir,
+                        sstable_manager,
                         Some(Arc::new(Cache::new(65536))),
                     )),
                     hummock_meta_client,
@@ -147,6 +152,10 @@ async fn get_state_store_impl(opts: &Opts) -> Result<StateStoreImpl> {
             let hummock_meta_client = Arc::new(RPCHummockMetaClient::new(
                 MetaClient::new(meta_address).await?,
             ));
+            let sstable_manager = Arc::new(SSTableManager::new(
+                s3_store.clone(),
+                remote_dir.to_string(),
+            ));
             StateStoreImpl::Hummock(HummockStateStore::new(
                 HummockStorage::new(
                     s3_store.clone(),
@@ -158,8 +167,7 @@ async fn get_state_store_impl(opts: &Opts) -> Result<StateStoreImpl> {
                         checksum_algo: get_checksum_algo(opts.checksum_algo.as_ref()),
                     },
                     Arc::new(LocalVersionManager::new(
-                        s3_store,
-                        remote_dir,
+                        sstable_manager,
                         Some(Arc::new(Cache::new(65536))),
                     )),
                     hummock_meta_client,

@@ -205,8 +205,7 @@ mod tests {
 
     use super::super::{SSTableBuilder, SSTableBuilderOptions};
     use super::*;
-    use crate::hummock::iterator::test_utils::upload_and_load_sst;
-    use crate::hummock::HummockValue;
+    use crate::hummock::{HummockValue, SSTableManager};
     use crate::object::{InMemObjectStore, ObjectStore};
 
     #[tokio::test]
@@ -233,14 +232,12 @@ mod tests {
                 ),
             );
         }
-        let (blocks, meta) = b.finish();
+        let (data, meta) = b.finish();
 
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
-        let table = upload_and_load_sst(obj_client, 0, meta, blocks, REMOTE_DIR)
-            .await
-            .unwrap();
-
-        let block = table.block(0).await.unwrap();
+        let sstable_manager = SSTableManager::new(obj_client, REMOTE_DIR.to_string());
+        sstable_manager.put(0, &meta, data).await.unwrap();
+        let block = sstable_manager.get(0, &meta, 0).await.unwrap();
 
         let mut blk_iter = BlockIterator::new(block);
         let mut idx = 0;

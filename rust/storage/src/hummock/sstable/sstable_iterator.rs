@@ -8,6 +8,7 @@ use super::{BlockIterator, SSTable, SeekPos};
 use crate::hummock::iterator::variants::FORWARD;
 use crate::hummock::iterator::HummockIterator;
 use crate::hummock::version_cmp::VersionedComparator;
+use crate::hummock::SSTableManagerRef;
 
 pub trait SSTableIteratorBase: HummockIterator {}
 
@@ -15,7 +16,7 @@ pub trait SSTableIteratorType {
     type SSTableIterator: SSTableIteratorBase;
     const DIRECTION: usize;
 
-    fn new(table: Arc<SSTable>) -> Self::SSTableIterator;
+    fn new(table: Arc<SSTable>, sstable_manager: SSTableManagerRef) -> Self::SSTableIterator;
 }
 
 /// Iterates on a table.
@@ -28,14 +29,17 @@ pub struct SSTableIterator {
 
     /// Reference to the table
     pub table: Arc<SSTable>,
+
+    sstable_manager: SSTableManagerRef,
 }
 
 impl SSTableIterator {
-    pub fn new(table: Arc<SSTable>) -> Self {
+    pub fn new(table: Arc<SSTable>, sstable_manager: SSTableManagerRef) -> Self {
         Self {
             block_iter: None,
             cur_idx: 0,
             table,
+            sstable_manager,
         }
     }
 
@@ -50,7 +54,11 @@ impl SSTableIterator {
         if idx >= self.table.block_count() {
             self.block_iter = None;
         } else {
-            let mut block_iter = BlockIterator::new(self.table.block(idx).await?);
+            let block = self
+                .sstable_manager
+                .get(self.table.id, &self.table.meta, idx as u64)
+                .await?;
+            let mut block_iter = BlockIterator::new(block);
             if let Some(key) = seek_key {
                 block_iter.seek(key, SeekPos::Origin);
             } else {
@@ -136,8 +144,8 @@ impl SSTableIteratorType for SSTableIterator {
     type SSTableIterator = SSTableIterator;
     const DIRECTION: usize = FORWARD;
 
-    fn new(table: Arc<SSTable>) -> Self::SSTableIterator {
-        SSTableIterator::new(table)
+    fn new(table: Arc<SSTable>, sstable_manager: SSTableManagerRef) -> Self::SSTableIterator {
+        SSTableIterator::new(table, sstable_manager)
     }
 }
 
@@ -149,18 +157,20 @@ mod tests {
     use super::super::builder::tests::*;
     use super::*;
     use crate::assert_bytes_eq;
+    use crate::hummock::iterator::test_utils::mock_sstable_manager;
     use crate::hummock::key::key_with_epoch;
     use crate::hummock::sstable::builder::tests::gen_test_sstable;
 
     #[tokio::test]
     async fn test_table_iterator() {
         // build remote table
-        let table = gen_test_sstable(default_builder_opt_for_test()).await;
+        let sstable_manager = mock_sstable_manager();
+        let table = gen_test_sstable(default_builder_opt_for_test(), sstable_manager.clone()).await;
         // We should have at least 10 blocks, so that table iterator test could cover more code
         // path.
         assert!(table.meta.block_metas.len() > 10);
 
-        let mut sstable_iter = SSTableIterator::new(Arc::new(table));
+        let mut sstable_iter = SSTableIterator::new(Arc::new(table), sstable_manager);
         let mut cnt = 0;
         sstable_iter.rewind().await.unwrap();
 
@@ -178,12 +188,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_table_seek() {
-        let table = gen_test_sstable(default_builder_opt_for_test()).await;
+        let sstable_manager = mock_sstable_manager();
+        let table = gen_test_sstable(default_builder_opt_for_test(), sstable_manager.clone()).await;
         // We should have at least 10 blocks, so that table iterator test could cover more code
         // path.
         assert!(table.meta.block_metas.len() > 10);
         let table = Arc::new(table);
-        let mut sstable_iter = SSTableIterator::new(table.clone());
+        let mut sstable_iter = SSTableIterator::new(table.clone(), sstable_manager);
         let mut all_key_to_test = (0..TEST_KEYS_COUNT).collect_vec();
         let mut rng = thread_rng();
         all_key_to_test.shuffle(&mut rng);

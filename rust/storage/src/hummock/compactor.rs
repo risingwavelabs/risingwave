@@ -8,20 +8,22 @@ use super::iterator::{ConcatIterator, HummockIterator, MergeIterator};
 use super::key::{get_epoch, Epoch, FullKey};
 use super::key_range::KeyRange;
 use super::multi_builder::CapacitySplitTableBuilder;
+use super::sstable_manager::SSTableManagerRef;
 use super::version_cmp::VersionedComparator;
 use super::{
     HummockError, HummockMetaClient, HummockOptions, HummockResult, HummockStorage, HummockValue,
     LocalVersionManager, SSTableIterator,
 };
-use crate::hummock::cloud;
 use crate::object::ObjectStore;
 
+#[derive(Clone)]
 pub struct SubCompactContext {
     // TODO: remove Arc?
     pub options: Arc<HummockOptions>,
     pub local_version_manager: Arc<LocalVersionManager>,
     pub obj_client: Arc<dyn ObjectStore>,
     pub hummock_meta_client: Arc<dyn HummockMetaClient>,
+    pub sstable_manager: SSTableManagerRef,
 }
 
 pub struct Compactor;
@@ -61,21 +63,22 @@ impl Compactor {
                 overlapping_tables
                     .iter()
                     .map(|table| -> Box<dyn HummockIterator> {
-                        Box::new(SSTableIterator::new(table.clone()))
+                        Box::new(SSTableIterator::new(
+                            table.clone(),
+                            context.sstable_manager.clone(),
+                        ))
                     })
                     .chain(non_overlapping_table_seqs.iter().map(
                         |tableseq| -> Box<dyn HummockIterator> {
-                            Box::new(ConcatIterator::new(tableseq.clone()))
+                            Box::new(ConcatIterator::new(
+                                tableseq.clone(),
+                                context.sstable_manager.clone(),
+                            ))
                         },
                     )),
             );
 
-            let spawn_context = SubCompactContext {
-                options: context.options.clone(),
-                local_version_manager: context.local_version_manager.clone(),
-                obj_client: context.obj_client.clone(),
-                hummock_meta_client: context.hummock_meta_client.clone(),
-            };
+            let context_clone = context.clone();
             let spawn_kr = KeyRange {
                 left: Bytes::copy_from_slice(kr.get_left()),
                 right: Bytes::copy_from_slice(kr.get_right()),
@@ -88,7 +91,7 @@ impl Compactor {
                 tokio::spawn(async move {
                     (
                         Compactor::sub_compact(
-                            spawn_context,
+                            context_clone,
                             spawn_kr,
                             iter,
                             &mut output_needing_vacuum,
@@ -198,15 +201,8 @@ impl Compactor {
 
         output_sst_infos.reserve(builder.len());
         // TODO: decide upload concurrency
-        for (table_id, blocks, meta) in builder.finish() {
-            cloud::upload(
-                &context.obj_client,
-                table_id,
-                &meta,
-                blocks,
-                context.options.remote_dir.as_str(),
-            )
-            .await?;
+        for (table_id, data, meta) in builder.finish() {
+            context.sstable_manager.put(table_id, &meta, data).await?;
             let info = SstableInfo {
                 id: table_id,
                 key_range: Some(risingwave_pb::hummock::KeyRange {

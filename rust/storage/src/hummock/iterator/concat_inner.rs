@@ -7,7 +7,7 @@ use super::variants::*;
 use crate::hummock::iterator::HummockIterator;
 use crate::hummock::value::HummockValue;
 use crate::hummock::version_cmp::VersionedComparator;
-use crate::hummock::{HummockResult, SSTable, SSTableIteratorType};
+use crate::hummock::{HummockResult, SSTable, SSTableIteratorType, SSTableManagerRef};
 
 /// Serves as the concrete implementation of `ConcatIterator` and `ReverseConcatIterator`.
 pub struct ConcatIteratorInner<TI: SSTableIteratorType> {
@@ -19,17 +19,20 @@ pub struct ConcatIteratorInner<TI: SSTableIteratorType> {
 
     /// All non-overlapping tables.
     tables: Vec<Arc<SSTable>>,
+
+    sstable_manager: SSTableManagerRef,
 }
 
 impl<TI: SSTableIteratorType> ConcatIteratorInner<TI> {
     /// Caller should make sure that `tables` are non-overlapping,
     /// arranged in ascending order when it serves as a forward iterator,
     /// and arranged in descending order when it serves as a reverse iterator.
-    pub fn new(tables: Vec<Arc<SSTable>>) -> Self {
+    pub fn new(tables: Vec<Arc<SSTable>>, sstable_manager: SSTableManagerRef) -> Self {
         Self {
             sstable_iter: None,
             cur_idx: 0,
             tables,
+            sstable_manager,
         }
     }
 
@@ -38,7 +41,7 @@ impl<TI: SSTableIteratorType> ConcatIteratorInner<TI> {
         if idx >= self.tables.len() {
             self.sstable_iter = None;
         } else {
-            let mut sstable_iter = TI::new(self.tables[idx].clone());
+            let mut sstable_iter = TI::new(self.tables[idx].clone(), self.sstable_manager.clone());
             if let Some(key) = seek_key {
                 sstable_iter.seek(key).await?;
             } else {

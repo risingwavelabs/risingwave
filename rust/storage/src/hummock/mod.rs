@@ -10,7 +10,6 @@ use itertools::Itertools;
 mod sstable;
 pub use sstable::*;
 pub mod cf;
-mod cloud;
 pub mod compactor;
 mod error;
 pub mod hummock_meta_client;
@@ -22,6 +21,7 @@ pub mod local_version_manager;
 pub(crate) mod mock;
 #[cfg(test)]
 mod snapshot_tests;
+mod sstable_manager;
 mod state_store;
 #[cfg(test)]
 mod state_store_tests;
@@ -45,6 +45,7 @@ use self::iterator::{
 };
 use self::key::{key_with_epoch, user_key};
 use self::multi_builder::CapacitySplitTableBuilder;
+pub use self::sstable_manager::*;
 pub use self::state_store::*;
 use self::utils::bloom_filter_sstables;
 use super::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
@@ -125,6 +126,8 @@ pub struct HummockStorage {
     stats: Arc<StateStoreStats>,
 
     hummock_meta_client: Arc<dyn HummockMetaClient>,
+
+    sstable_manager: SSTableManagerRef,
 }
 
 impl HummockStorage {
@@ -155,6 +158,12 @@ impl HummockStorage {
         // Ensure at least one available version in cache.
         local_version_manager.wait_epoch(HummockEpoch::MIN).await;
 
+        let sstable_manager = Arc::new(SSTableManager::new(
+            obj_client.clone(),
+            arc_options.remote_dir.clone(),
+        ));
+        let sstable_manager_for_compact = sstable_manager.clone();
+
         let instance = Self {
             options: arc_options,
             local_version_manager,
@@ -169,6 +178,7 @@ impl HummockStorage {
                         local_version_manager: local_version_manager_for_compact,
                         obj_client: obj_client_for_compact,
                         hummock_meta_client: hummock_meta_client_for_compact,
+                        sstable_manager: sstable_manager_for_compact,
                     },
                     rx_for_compact,
                     stop_compact_rx,
@@ -177,6 +187,7 @@ impl HummockStorage {
             })))),
             stats,
             hummock_meta_client,
+            sstable_manager,
         };
         Ok(instance)
     }
@@ -209,11 +220,10 @@ impl HummockStorage {
                             .await?,
                         key,
                     )?;
-                    table_iters.extend(
-                        tables.into_iter().map(|table| {
-                            Box::new(SSTableIterator::new(table)) as BoxedHummockIterator
-                        }),
-                    )
+                    table_iters.extend(tables.into_iter().map(|table| {
+                        Box::new(SSTableIterator::new(table, self.sstable_manager.clone()))
+                            as BoxedHummockIterator
+                    }))
                 }
                 LevelType::Nonoverlapping => {
                     let tables = bloom_filter_sstables(
@@ -222,7 +232,10 @@ impl HummockStorage {
                             .await?,
                         key,
                     )?;
-                    table_iters.push(Box::new(ConcatIterator::new(tables)))
+                    table_iters.push(Box::new(ConcatIterator::new(
+                        tables,
+                        self.sstable_manager.clone(),
+                    )))
                 }
             }
         }
@@ -295,8 +308,9 @@ impl HummockStorage {
                 !too_left && !too_right
             });
 
-        let table_iters =
-            overlapped_tables.map(|t| Box::new(SSTableIterator::new(t)) as BoxedHummockIterator);
+        let table_iters = overlapped_tables.map(|t| {
+            Box::new(SSTableIterator::new(t, self.sstable_manager.clone())) as BoxedHummockIterator
+        });
         let mi = MergeIterator::new(table_iters);
 
         // TODO: avoid this clone
@@ -353,8 +367,10 @@ impl HummockStorage {
                 !too_left && !too_right
             });
 
-        let reverse_table_iters = overlapped_tables
-            .map(|t| Box::new(ReverseSSTableIterator::new(t)) as BoxedHummockIterator);
+        let reverse_table_iters = overlapped_tables.map(|t| {
+            Box::new(ReverseSSTableIterator::new(t, self.sstable_manager.clone()))
+                as BoxedHummockIterator
+        });
         let reverse_merge_iterator = ReverseMergeIterator::new(reverse_table_iters);
 
         // TODO: avoid this clone
@@ -400,23 +416,10 @@ impl HummockStorage {
             let mut tables = Vec::with_capacity(builder.len());
 
             // TODO: decide upload concurrency
-            for (table_id, blocks, meta) in builder.finish() {
-                cloud::upload(
-                    &self.obj_client,
-                    table_id,
-                    &meta,
-                    blocks,
-                    self.options.remote_dir.as_str(),
-                )
-                .await?;
+            for (sst_id, data, meta) in builder.finish() {
+                self.sstable_manager.put(sst_id, &meta, data).await?;
 
-                tables.push(SSTable {
-                    id: table_id,
-                    meta,
-                    obj_client: self.obj_client.clone(),
-                    data_path: cloud::get_sst_data_path(self.options.remote_dir.as_str(), table_id),
-                    block_cache: self.local_version_manager.block_cache.clone(),
-                });
+                tables.push(SSTable { id: sst_id, meta });
             }
 
             tables
@@ -490,6 +493,10 @@ impl HummockStorage {
             .unwrap()
             .await
             .unwrap()
+    }
+
+    pub fn sstable_manager(&self) -> SSTableManagerRef {
+        self.sstable_manager.clone()
     }
 
     pub fn hummock_meta_client(&self) -> &Arc<dyn HummockMetaClient> {
