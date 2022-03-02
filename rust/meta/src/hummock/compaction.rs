@@ -325,12 +325,16 @@ impl CompactStatus {
                 (compact_task.sorted_output_ssts, delete_table_ids)
             }
             false => {
-                // TODO: loop only in input levels
-                for level_handler in &mut self.level_handlers {
-                    level_handler.unassign_task(compact_task.task_id);
-                }
+                self.cancel_compact_task(compact_task.task_id);
                 (vec![], vec![])
             }
+        }
+    }
+
+    pub fn cancel_compact_task(&mut self, task_id: u64) {
+        // TODO: loop only in input levels
+        for level_handler in &mut self.level_handlers {
+            level_handler.unassign_task(task_id);
         }
     }
 }

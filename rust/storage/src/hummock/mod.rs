@@ -28,14 +28,9 @@ mod utils;
 pub mod value;
 mod version_cmp;
 
-use compactor::{Compactor, SubCompactContext};
 pub use error::*;
-use parking_lot::Mutex as PLMutex;
 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 use risingwave_pb::hummock::LevelType;
-use tokio::select;
-use tokio::sync::mpsc;
-use tokio::task::JoinHandle;
 use value::*;
 
 use self::iterator::{
@@ -109,14 +104,6 @@ pub struct HummockStorage {
 
     obj_client: Arc<dyn ObjectStore>,
 
-    /// Receiver of the compactor.
-    #[allow(dead_code)]
-    rx: Arc<PLMutex<Option<mpsc::UnboundedReceiver<()>>>>,
-
-    stop_compact_tx: mpsc::UnboundedSender<()>,
-
-    compactor_joinhandle: Arc<PLMutex<Option<JoinHandle<HummockResult<()>>>>>,
-
     /// Statistics.
     stats: Arc<StateStoreStats>,
 
@@ -133,24 +120,13 @@ impl HummockStorage {
         local_version_manager: Arc<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> HummockResult<HummockStorage> {
-        let (trigger_compact_tx, trigger_compact_rx) = mpsc::unbounded_channel();
-        let (stop_compact_tx, stop_compact_rx) = mpsc::unbounded_channel();
-
         let stats = DEFAULT_STATE_STORE_STATS.clone();
-
-        let arc_options = Arc::new(options);
-        let options_for_compact = arc_options.clone();
-        let local_version_manager_for_compact = local_version_manager.clone();
-        let hummock_meta_client_for_compact = hummock_meta_client.clone();
-        let obj_client_for_compact = obj_client.clone();
-        let rx = Arc::new(PLMutex::new(Some(trigger_compact_rx)));
-        let rx_for_compact = rx.clone();
+        let options = Arc::new(options);
 
         let shared_buffer_manager = Arc::new(SharedBufferManager::new(
-            arc_options.clone(),
+            options.clone(),
             local_version_manager.clone(),
             obj_client.clone(),
-            trigger_compact_tx.clone(),
             stats.clone(),
             hummock_meta_client.clone(),
         ));
@@ -164,22 +140,10 @@ impl HummockStorage {
         // Ensure at least one available version in cache.
         local_version_manager.wait_epoch(HummockEpoch::MIN).await;
 
-        let sub_compact_context = SubCompactContext {
-            options: options_for_compact,
-            local_version_manager: local_version_manager_for_compact,
-            obj_client: obj_client_for_compact,
-            hummock_meta_client: hummock_meta_client_for_compact,
-        };
-
         let instance = Self {
-            options: arc_options,
+            options,
             local_version_manager,
             obj_client,
-            rx,
-            stop_compact_tx,
-            compactor_joinhandle: Arc::new(PLMutex::new(Some(tokio::spawn(async move {
-                Self::start_compactor(sub_compact_context, rx_for_compact, stop_compact_rx).await
-            })))),
             stats,
             hummock_meta_client,
             shared_buffer_manager,
@@ -407,31 +371,6 @@ impl HummockStorage {
             bloom_false_positive: options.bloom_false_positive,
             checksum_algo: options.checksum_algo,
         })
-    }
-
-    pub async fn start_compactor(
-        context: SubCompactContext,
-        compact_signal: Arc<PLMutex<Option<mpsc::UnboundedReceiver<()>>>>,
-        mut stop: mpsc::UnboundedReceiver<()>,
-    ) -> HummockResult<()> {
-        let mut compact_notifier = compact_signal.lock().take().unwrap();
-        loop {
-            select! {
-                Some(_) = compact_notifier.recv() => Compactor::compact(&context).await?,
-                Some(_) = stop.recv() => break
-            }
-        }
-        Ok(())
-    }
-
-    pub async fn shutdown_compactor(&mut self) -> HummockResult<()> {
-        self.stop_compact_tx.send(()).ok();
-        self.compactor_joinhandle
-            .lock()
-            .take()
-            .unwrap()
-            .await
-            .unwrap()
     }
 
     pub fn hummock_meta_client(&self) -> &Arc<dyn HummockMetaClient> {

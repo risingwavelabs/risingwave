@@ -152,7 +152,6 @@ impl SharedBufferManager {
         options: Arc<HummockOptions>,
         local_version_manager: Arc<LocalVersionManager>,
         obj_client: Arc<dyn ObjectStore>,
-        compactor_tx: tokio::sync::mpsc::UnboundedSender<()>,
         stats: Arc<StateStoreStats>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> Self {
@@ -161,7 +160,6 @@ impl SharedBufferManager {
             options,
             local_version_manager,
             obj_client,
-            compactor_tx,
             stats,
             hummock_meta_client,
             uploader_rx,
@@ -316,9 +314,6 @@ pub struct SharedBufferUploader {
     options: Arc<HummockOptions>,
     obj_client: Arc<dyn ObjectStore>,
 
-    /// Notify the compactor to compact after every sync().
-    compactor_tx: tokio::sync::mpsc::UnboundedSender<()>,
-
     /// Statistics.
     stats: Arc<StateStoreStats>,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -331,7 +326,6 @@ impl SharedBufferUploader {
         options: Arc<HummockOptions>,
         local_version_manager: Arc<LocalVersionManager>,
         obj_client: Arc<dyn ObjectStore>,
-        compactor_tx: tokio::sync::mpsc::UnboundedSender<()>,
         stats: Arc<StateStoreStats>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         rx: tokio::sync::mpsc::UnboundedReceiver<SharedBufferUploaderItem>,
@@ -341,7 +335,6 @@ impl SharedBufferUploader {
             options,
             local_version_manager,
             obj_client,
-            compactor_tx,
             stats,
             hummock_meta_client,
             rx,
@@ -387,9 +380,6 @@ impl SharedBufferUploader {
         let timer = self.stats.batch_write_add_l0_latency.start_timer();
         let version = self.hummock_meta_client.add_tables(epoch, tables).await?;
         timer.observe_duration();
-
-        // Notify the compactor
-        self.compactor_tx.send(()).ok();
 
         // Ensure the added data is available locally
         self.local_version_manager.try_set_version(version);
@@ -551,12 +541,10 @@ mod tests {
         let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
             mock_hummock_meta_service.clone(),
         ));
-        let (mock_tx, _) = tokio::sync::mpsc::unbounded_channel();
         let shared_buffer_manager = SharedBufferManager::new(
             Arc::new(HummockOptions::default_for_test()),
             vm.clone(),
             obj_client.clone(),
-            mock_tx,
             DEFAULT_STATE_STORE_STATS.clone(),
             mock_hummock_meta_client.clone(),
         );
