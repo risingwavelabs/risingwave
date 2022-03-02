@@ -63,6 +63,7 @@ where
                     NotificationTarget::Frontend,
                 )
                 .await?;
+            // TODO(Zehua) Error handling of `notify` method.
 
             Ok(Some(CatalogId::DatabaseId(database_id)))
         } else {
@@ -88,6 +89,7 @@ where
                     NotificationTarget::Frontend,
                 )
                 .await?;
+            // TODO(Zehua) Error handling of `notify` method.
 
             Ok(Some(CatalogId::DatabaseId(database_id)))
         } else {
@@ -110,6 +112,7 @@ where
                     NotificationTarget::Frontend,
                 )
                 .await?;
+            // TODO(Zehua) Error handling of `notify` method.
 
             Ok(Some(CatalogId::SchemaId(schema_id)))
         } else {
@@ -132,6 +135,7 @@ where
                     NotificationTarget::Frontend,
                 )
                 .await?;
+            // TODO(Zehua) Error handling of `notify` method.
 
             Ok(Some(CatalogId::SchemaId(schema_id)))
         } else {
@@ -161,6 +165,7 @@ where
                     NotificationTarget::Frontend,
                 )
                 .await?;
+            // TODO(Zehua) Error handling of `notify` method.
 
             Ok(Some(CatalogId::TableId(table_id)))
         } else {
@@ -210,6 +215,7 @@ where
                             NotificationTarget::Frontend,
                         )
                         .await?;
+                    // TODO(Zehua) Error handling of `notify` method.
 
                     Ok(Some(CatalogId::TableId(table_id)))
                 }

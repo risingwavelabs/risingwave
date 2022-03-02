@@ -49,6 +49,8 @@ impl FrontendEnv {
         meta_client.activate(host).await?;
 
         // Create default database when env init.
+        // TODO(Zehua) If two frontends start together, maybe both of them call `create_database`.
+        // One of them will fail to start because of duplicate error.
         let db_name = DEFAULT_DATABASE_NAME;
         let schema_name = DEFAULT_SCHEMA_NAME;
         if catalog_manager.get_database(db_name).is_none() {
