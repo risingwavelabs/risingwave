@@ -73,9 +73,7 @@ impl<S: StateStore> ManagedMViewState<S> {
             let bytes = serialize_pk_and_row(&pk_buf, &row, &self.column_ids)?;
             for (key, value) in bytes {
                 match value {
-                    Some(val) => {
-                        local.put(key, val);
-                    }
+                    Some(val) => local.put(key, val),
                     None => local.delete(key),
                 }
             }

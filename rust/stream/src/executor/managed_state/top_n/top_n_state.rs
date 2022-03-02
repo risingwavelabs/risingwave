@@ -332,9 +332,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
             let bytes = serialize_pk_and_row(&pk_buf, &row, &column_ids)?;
             for (key, value) in bytes {
                 match value {
-                    Some(val) => {
-                        local.put(key, val);
-                    }
+                    Some(val) => local.put(key, val),
                     None => local.delete(key),
                 }
             }

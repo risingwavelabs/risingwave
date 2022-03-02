@@ -205,7 +205,6 @@ pub fn deserialize_cell(bytes: &[u8], ty: &DataType) -> Result<Datum> {
 
 pub fn deserialize_column_id(bytes: &[u8]) -> Result<i32> {
     assert_eq!(bytes.len(), 4);
-    // println!("deserialize_column_id:{:?}", bytes);
     let column_id = from_slice::<i32>(bytes)?;
     Ok(column_id)
 }

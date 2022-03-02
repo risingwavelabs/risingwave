@@ -227,7 +227,6 @@ impl<S: StateStore> TableIter for MViewTableIter<S> {
             }
         }
 
-        let mut pk_buf = vec![];
         loop {
             let (key, value) = match self.buf.get(self.next_idx) {
                 Some(kv) => kv,
@@ -237,9 +236,9 @@ impl<S: StateStore> TableIter for MViewTableIter<S> {
                     if let Some(item) = self.buf.first() {
                         item
                     } else {
-                        let row = self.cell_based_row_deserializer.take();
+                        let pk_and_row = self.cell_based_row_deserializer.take();
                         self.done = true;
-                        return Ok(row);
+                        return Ok(pk_and_row.map(|(_pk, row)| row));
                     }
                 }
             };
@@ -255,19 +254,12 @@ impl<S: StateStore> TableIter for MViewTableIter<S> {
                 return Err(ErrorCode::InternalError("corrupted key".to_owned()).into());
             }
 
-            let cur_pk_buf = &key[self.keyspace.key().len()..key.len() - 4];
-
-            if pk_buf.is_empty() {
-                pk_buf = cur_pk_buf.to_vec();
-            } else if pk_buf != cur_pk_buf {
-                // We remark this is when we realize that the current row has been finalized as we
-                // encounter a new pk.
-                // In this case, we do not advance the `self.next_idx` pointer.
-                let row = self.cell_based_row_deserializer.take();
-                return Ok(row);
-            }
-            self.cell_based_row_deserializer.deserialize(key, value)?;
+            let pk_and_row = self.cell_based_row_deserializer.deserialize(key, value)?;
             self.next_idx += 1;
+            match pk_and_row {
+                Some(_) => return Ok(pk_and_row.map(|(_pk, row)| row)),
+                None => {}
+            }
         }
     }
 }

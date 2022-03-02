@@ -15,7 +15,7 @@ pub struct CellBasedRowDeserializer {
     /// `CellBasedRowDeserializer` does not deserialize pk itself. We need to take the key in as
     /// we have to know the cell id of each datum. So `pk_bytes` serves as an additional check
     /// which should also be done on the caller side.
-    pk_bytes: Vec<u8>,
+    pk_bytes: Option<Vec<u8>>,
 }
 
 impl CellBasedRowDeserializer {
@@ -24,24 +24,32 @@ impl CellBasedRowDeserializer {
         Self {
             table_column_descs,
             data: vec![None; num_cells],
-            pk_bytes: vec![],
+            pk_bytes: None,
         }
     }
 
-    pub fn deserialize(&mut self, pk_with_cell_id: &Bytes, cell: &Bytes) -> Result<()> {
+    /// When we encounter a new key, we can be sure that the previous row has been fully
+    /// deserialized. Then we return the key and the value of the previous row.
+    pub fn deserialize(
+        &mut self,
+        pk_with_cell_id: &Bytes,
+        cell: &Bytes,
+    ) -> Result<Option<(Vec<u8>, Row)>> {
         let pk_with_cell_id = pk_with_cell_id.to_vec();
         let pk_vec_len = pk_with_cell_id.len();
-        let pk_bytes = &pk_with_cell_id[0..pk_vec_len - 4];
-        if !self.pk_bytes.is_empty() {
-            assert_eq!(pk_bytes, self.pk_bytes);
-        } else {
-            self.pk_bytes = pk_bytes.to_vec();
+        let cur_pk_bytes = &pk_with_cell_id[0..pk_vec_len - 4];
+        let mut result = None;
+        if let Some(prev_pk_bytes) = &self.pk_bytes && prev_pk_bytes != cur_pk_bytes {
+            result = self.take();
+            self.pk_bytes = Some(cur_pk_bytes.to_vec());
+        } else if self.pk_bytes.is_none() {
+            self.pk_bytes = Some(cur_pk_bytes.to_vec());
         }
 
         let cell_id_bytes = &pk_with_cell_id[pk_vec_len - 4..];
         let cell_id = deserialize_column_id(cell_id_bytes)?;
         if cell_id == NULL_ROW_SPECIAL_CELL_ID {
-            return Ok(());
+            return Ok(None);
         }
         // We remark here that column_id may not be monotonically increasing, so `!=` instead of `<`
         // is needed here.
@@ -49,16 +57,16 @@ impl CellBasedRowDeserializer {
         let datum = deserialize_cell(cell, data_type)?;
         assert!(self.data.get(cell_id as usize).unwrap().is_none());
         *self.data.get_mut(cell_id as usize).unwrap() = datum;
-        Ok(())
+        Ok(result)
     }
 
-    pub fn take(&mut self) -> Option<Row> {
-        if self.pk_bytes.is_empty() {
+    pub fn take(&mut self) -> Option<(Vec<u8>, Row)> {
+        if self.pk_bytes.is_none() {
             return None;
         }
-        self.pk_bytes.clear();
+        let cur_pk_bytes = self.pk_bytes.take().unwrap();
         let ret = self.data.iter_mut().map(std::mem::take).collect::<Vec<_>>();
-        Some(Row(ret))
+        Some((cur_pk_bytes, Row(ret)))
     }
 }
 
