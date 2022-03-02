@@ -1,10 +1,12 @@
 mod catalog;
 mod cluster;
+mod hash_mapping;
 mod stream;
 
 use async_trait::async_trait;
 pub use catalog::*;
 pub use cluster::*;
+pub use hash_mapping::*;
 use prost::Message;
 use risingwave_common::error::Result;
 pub use stream::*;

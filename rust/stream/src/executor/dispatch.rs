@@ -361,7 +361,7 @@ impl Dispatcher for HashDataDispatcher {
             .get_hash_values(&self.keys, hash_builder)
             .unwrap()
             .iter()
-            .map(|hash| *hash as usize % num_outputs)
+            .map(|hash| *hash as usize % 2048) // FIXME: Extract the constant!!
             .collect::<Vec<_>>();
 
         let (ops, columns, visibility) = chunk.into_inner();

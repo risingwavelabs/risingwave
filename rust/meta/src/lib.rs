@@ -11,6 +11,7 @@
 #![feature(binary_heap_drain_sorted)]
 #![feature(const_fn_trait_bound)]
 #![feature(option_result_contains)]
+#![feature(map_first_last)]
 
 mod barrier;
 mod cluster;
