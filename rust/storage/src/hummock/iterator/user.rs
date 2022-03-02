@@ -78,6 +78,8 @@ pub struct UserIterator<'a> {
     /// Only read values if `ts <= self.read_epoch`.
     read_epoch: Epoch,
 
+    #[allow(dead_code)]
+    // TODO: separate state store stats with hummock stats
     stats: Arc<StateStoreStats>,
 }
 
@@ -201,7 +203,6 @@ impl<'a> UserIterator<'a> {
 
     /// Reset the iterating position to the first position where the key >= provided key.
     pub async fn seek(&mut self, user_key: &[u8]) -> HummockResult<()> {
-        let timer = self.stats.iter_seek_latency.start_timer();
         // handle range scan when key < begin_key
         let user_key = match &self.key_range.0 {
             Included(begin_key) => {
@@ -222,7 +223,6 @@ impl<'a> UserIterator<'a> {
         self.last_key.clear();
         // handle range scan when key > end_key
         let res = self.next().await;
-        timer.observe_duration();
         res
     }
 

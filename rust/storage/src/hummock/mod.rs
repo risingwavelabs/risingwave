@@ -127,6 +127,7 @@ pub struct HummockStorage {
 }
 
 impl HummockStorage {
+    /// Create a [`HummockStorage`] with default stats. Should only used by tests.
     pub async fn with_default_stats(
         obj_client: Arc<dyn ObjectStore>,
         options: HummockOptions,
@@ -145,6 +146,7 @@ impl HummockStorage {
         .await
     }
 
+    /// Create a [`HummockStorage`].
     pub async fn new(
         obj_client: Arc<dyn ObjectStore>,
         options: HummockOptions,
