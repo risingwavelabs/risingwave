@@ -117,19 +117,6 @@ mod to_prost;
 
 pub use to_prost::*;
 
-// SOME Intellisense DONT UNDERSTAND THIS.
-//
-// /// Define module for each plan node.
-// macro_rules! def_mod_and_use {
-//   ([], $( { $convention:ident, $name:ident }),*) => {
-//       $(paste! {
-//           mod [<$convention:snake _ $name:snake>];
-//           pub use [<$convention:snake _ $name:snake>]::[<$convention $name>];
-//       })*
-//   }
-// }
-// for_all_plan_nodes! {def_mod_and_use }
-
 mod batch_exchange;
 mod batch_hash_join;
 mod batch_limit;
