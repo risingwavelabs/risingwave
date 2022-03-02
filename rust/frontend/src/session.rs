@@ -1,6 +1,5 @@
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
-use parking_lot::Mutex;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{Session, SessionManager};
 use risingwave_common::error::Result;
@@ -14,6 +13,7 @@ use crate::catalog::catalog_service::{
 };
 use crate::handler::handle;
 use crate::observer::observer_manager::ObserverManager;
+use crate::scheduler::schedule::WorkerNodeManager;
 use crate::FrontendOpts;
 
 /// The global environment for the frontend server.
@@ -32,21 +32,31 @@ impl FrontendEnv {
         // Register in meta by calling `AddWorkerNode` RPC.
         meta_client.register(host, WorkerType::Frontend).await?;
 
-        let catalog_cache = Arc::new(Mutex::new(CatalogCache::new()));
+        let catalog_cache = Arc::new(RwLock::new(CatalogCache::new(meta_client.clone()).await?));
         let catalog_manager = CatalogConnector::new(meta_client.clone(), catalog_cache.clone());
 
-        let observer_manager = ObserverManager::new(meta_client.clone(), host, catalog_cache).await;
+        let worker_node_manager = Arc::new(WorkerNodeManager::new(meta_client.clone()).await?);
+
+        let observer_manager = ObserverManager::new(
+            meta_client.clone(),
+            host,
+            worker_node_manager,
+            catalog_cache,
+        )
+        .await;
         let observer_join_handle = observer_manager.start();
 
         meta_client.activate(host).await?;
 
         // Create default database when env init.
-        catalog_manager
-            .create_database(DEFAULT_DATABASE_NAME)
-            .await?;
-        catalog_manager
-            .create_schema(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME)
-            .await?;
+        let db_name = DEFAULT_DATABASE_NAME;
+        let schema_name = DEFAULT_SCHEMA_NAME;
+        if catalog_manager.get_database(db_name).is_none() {
+            catalog_manager.create_database(db_name).await?;
+        }
+        if catalog_manager.get_schema(db_name, schema_name).is_none() {
+            catalog_manager.create_schema(db_name, schema_name).await?;
+        }
 
         Ok((
             Self {
@@ -66,21 +76,31 @@ impl FrontendEnv {
         // Register in meta by calling `AddWorkerNode` RPC.
         meta_client.register(host, WorkerType::Frontend).await?;
 
-        let catalog_cache = Arc::new(Mutex::new(CatalogCache::new()));
+        let catalog_cache = Arc::new(RwLock::new(CatalogCache::new(meta_client.clone()).await?));
         let catalog_manager = CatalogConnector::new(meta_client.clone(), catalog_cache.clone());
 
-        let observer_manager = ObserverManager::new(meta_client.clone(), host, catalog_cache).await;
+        let worker_node_manager = Arc::new(WorkerNodeManager::new(meta_client.clone()).await?);
+
+        let observer_manager = ObserverManager::new(
+            meta_client.clone(),
+            host,
+            worker_node_manager,
+            catalog_cache,
+        )
+        .await;
         let observer_join_handle = observer_manager.start();
 
         meta_client.activate(host).await?;
 
         // Create default database when env init.
-        catalog_manager
-            .create_database(DEFAULT_DATABASE_NAME)
-            .await?;
-        catalog_manager
-            .create_schema(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME)
-            .await?;
+        let db_name = DEFAULT_DATABASE_NAME;
+        let schema_name = DEFAULT_SCHEMA_NAME;
+        if catalog_manager.get_database(db_name).is_none() {
+            catalog_manager.create_database(db_name).await?;
+        }
+        if catalog_manager.get_schema(db_name, schema_name).is_none() {
+            catalog_manager.create_schema(db_name, schema_name).await?;
+        }
 
         Ok((
             Self {

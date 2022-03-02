@@ -1,8 +1,10 @@
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use log::{error, info};
-use parking_lot::Mutex;
+use risingwave_common::array::RwError;
+use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::Result;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{Database, Schema, SubscribeResponse, Table};
@@ -11,7 +13,7 @@ use tokio::task::JoinHandle;
 use tonic::Streaming;
 
 use crate::catalog::catalog_service::CatalogCache;
-use crate::catalog::{DatabaseId, SchemaId};
+use crate::catalog::{CatalogError, DatabaseId, SchemaId};
 use crate::scheduler::schedule::WorkerNodeManagerRef;
 
 /// `ObserverManager` is used to update data based on notification from meta.
@@ -19,20 +21,21 @@ use crate::scheduler::schedule::WorkerNodeManagerRef;
 /// which receives meta's notification and update frontend's data.
 pub(crate) struct ObserverManager {
     rx: Streaming<SubscribeResponse>,
-    worker_node_manager: Option<WorkerNodeManagerRef>, /* Option<> will be removed when `WorkerNodeManager` is used in code. */
-    catalog_cache: Arc<Mutex<CatalogCache>>,
+    worker_node_manager: WorkerNodeManagerRef,
+    catalog_cache: Arc<RwLock<CatalogCache>>,
 }
 
 impl ObserverManager {
     pub async fn new(
         client: MetaClient,
         addr: SocketAddr,
-        catalog_cache: Arc<Mutex<CatalogCache>>,
+        worker_node_manager: WorkerNodeManagerRef,
+        catalog_cache: Arc<RwLock<CatalogCache>>,
     ) -> Self {
         let rx = client.subscribe(addr, WorkerType::Frontend).await.unwrap();
         Self {
             rx,
-            worker_node_manager: None,
+            worker_node_manager,
             catalog_cache,
         }
     }
@@ -52,16 +55,19 @@ impl ObserverManager {
 
                     match resp.info {
                         Some(Info::Database(database)) => {
-                            self.update_database(operation, database);
+                            self.update_database(operation, database)
+                                .unwrap_or_else(|e| error!("{}", e.to_string()));
                         }
                         Some(Info::Node(node)) => {
                             self.update_worker_node_manager(operation, node);
                         }
                         Some(Info::Schema(schema)) => {
-                            self.update_schema(operation, schema);
+                            self.update_schema(operation, schema)
+                                .unwrap_or_else(|e| error!("{}", e.to_string()));
                         }
                         Some(Info::Table(table)) => {
-                            self.update_table(operation, table);
+                            self.update_table(operation, table)
+                                .unwrap_or_else(|e| error!("{}", e.to_string()));
                         }
                         None => (),
                     }
@@ -77,125 +83,113 @@ impl ObserverManager {
             "Update worker nodes, operation: {:?}, node: {:?}",
             operation, node
         );
-        let manager = self
-            .worker_node_manager
-            .as_ref()
-            .expect("forget to call `set_worker_node_manager` before call start");
 
         match operation {
-            Operation::Add => manager.add_worker_node(node),
-            Operation::Delete => manager.remove_worker_node(node),
+            Operation::Add => self.worker_node_manager.add_worker_node(node),
+            Operation::Delete => self.worker_node_manager.remove_worker_node(node),
             _ => (),
         }
     }
 
     /// `update_database` is called in `start` method.
     /// It calls `create_database` and `drop_database` of `CatalogCache`.
-    fn update_database(&self, operation: Operation, database: Database) {
+    fn update_database(&self, operation: Operation, database: Database) -> Result<()> {
         info!(
             "Update database, operation: {:?}, database: {:?}",
             operation, database
         );
-        let db_name = database.database_name.as_str();
-        let db_id = database.database_ref_id.unwrap().database_id as u64;
+        let db_name = database.get_database_name();
+        let db_id = database.get_database_ref_id()?.database_id as u64;
 
         match operation {
             Operation::Add => self
                 .catalog_cache
-                .lock()
-                .create_database(db_name, db_id)
-                .unwrap_or_else(|e| error!("{}", e.to_string())),
-            Operation::Delete => self
-                .catalog_cache
-                .lock()
-                .drop_database(db_name)
-                .unwrap_or_else(|e| error!("{}", e.to_string())),
-            _ => (),
+                .write()
+                .unwrap()
+                .create_database(db_name, db_id),
+            Operation::Delete => self.catalog_cache.write().unwrap().drop_database(db_name),
+            _ => Err(RwError::from(InternalError(
+                "Unsupported operation.".to_string(),
+            ))),
         }
     }
 
     /// `update_schema` is called in `start` method.
     /// It calls `create_schema` and `drop_schema` of `CatalogCache`.
-    fn update_schema(&self, operation: Operation, schema: Schema) {
+    fn update_schema(&self, operation: Operation, schema: Schema) -> Result<()> {
         info!(
             "Update schema, operation: {:?}, schema: {:?}",
             operation, schema
         );
-        let schema_ref_id = schema.schema_ref_id.unwrap();
-        let db_id = schema_ref_id.database_ref_id.as_ref().unwrap().database_id as DatabaseId;
-        let db_name = self.catalog_cache.lock().get_database_name(db_id);
-        if db_name.is_none() {
-            error!("Not found database id: {:?}", db_id);
-            return;
-        }
-        let db_name = db_name.unwrap();
+        let schema_ref_id = schema.get_schema_ref_id()?;
+        let db_id = schema_ref_id.get_database_ref_id()?.database_id as DatabaseId;
+        let db_name = self
+            .catalog_cache
+            .read()
+            .unwrap()
+            .get_database_name(db_id)
+            .ok_or_else(|| CatalogError::NotFound("database id", db_id.to_string()))?;
+        let schema_name = schema.get_schema_name();
+        let schema_id = schema_ref_id.schema_id as SchemaId;
 
         match operation {
-            Operation::Add => self
-                .catalog_cache
-                .lock()
-                .create_schema(
-                    &db_name,
-                    &schema.schema_name,
-                    schema_ref_id.schema_id as SchemaId,
-                )
-                .unwrap_or_else(|e| error!("{}", e.to_string())),
+            Operation::Add => {
+                self.catalog_cache
+                    .write()
+                    .unwrap()
+                    .create_schema(&db_name, schema_name, schema_id)
+            }
             Operation::Delete => self
                 .catalog_cache
-                .lock()
-                .drop_schema(&db_name, &schema.schema_name)
-                .unwrap_or_else(|e| error!("{}", e.to_string())),
-            _ => (),
+                .write()
+                .unwrap()
+                .drop_schema(&db_name, schema_name),
+            _ => Err(RwError::from(InternalError(
+                "Unsupported operation.".to_string(),
+            ))),
         }
     }
 
     /// `update_table` is called in `start` method.
     /// It calls `create_table` and `drop_table` of `CatalogCache`.
-    fn update_table(&self, operation: Operation, table: Table) {
+    fn update_table(&self, operation: Operation, table: Table) -> Result<()> {
         info!(
             "Update table, operation: {:?}, table: {:?}",
             operation, table
         );
-        let schema_ref_id = table
-            .table_ref_id
-            .as_ref()
+        let schema_ref_id = table.get_table_ref_id()?.get_schema_ref_id()?;
+        let db_id = schema_ref_id.get_database_ref_id()?.database_id as DatabaseId;
+        let db_name = self
+            .catalog_cache
+            .read()
             .unwrap()
-            .schema_ref_id
-            .as_ref()
-            .unwrap();
-        let db_id = schema_ref_id.database_ref_id.as_ref().unwrap().database_id as DatabaseId;
+            .get_database_name(db_id)
+            .ok_or_else(|| CatalogError::NotFound("database id", db_id.to_string()))?;
         let schema_id = schema_ref_id.schema_id as SchemaId;
-        let db_name = self.catalog_cache.lock().get_database_name(db_id);
-        if db_name.is_none() {
-            error!("Not found database id: {:?}", db_id);
-            return;
-        }
-        let db_name = db_name.unwrap();
-
         let schema_name = self
             .catalog_cache
-            .lock()
+            .read()
+            .unwrap()
             .get_database(&db_name)
             .unwrap()
-            .get_schema_name(schema_id);
-        if schema_name.is_none() {
-            error!("Not found schema id: {:?}", schema_id);
-            return;
-        }
-        let schema_name = schema_name.unwrap();
+            .get_schema_name(schema_id)
+            .ok_or_else(|| CatalogError::NotFound("schema id", schema_id.to_string()))?;
 
         match operation {
-            Operation::Add => self
-                .catalog_cache
-                .lock()
-                .create_table(&db_name, &schema_name, &table)
-                .unwrap_or_else(|e| error!("{}", e.to_string())),
-            Operation::Delete => self
-                .catalog_cache
-                .lock()
-                .drop_table(&db_name, &schema_name, &table.table_name)
-                .unwrap_or_else(|e| error!("{}", e.to_string())),
-            _ => (),
+            Operation::Add => {
+                self.catalog_cache
+                    .write()
+                    .unwrap()
+                    .create_table(&db_name, &schema_name, &table)
+            }
+            Operation::Delete => self.catalog_cache.write().unwrap().drop_table(
+                &db_name,
+                &schema_name,
+                &table.table_name,
+            ),
+            _ => Err(RwError::from(InternalError(
+                "Unsupported operation.".to_string(),
+            ))),
         }
     }
 }

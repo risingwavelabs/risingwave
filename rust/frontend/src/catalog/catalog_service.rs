@@ -1,13 +1,12 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use log::info;
-use parking_lot::Mutex;
 use risingwave_common::array::RwError;
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
-use risingwave_pb::meta::{Database, Schema, Table};
+use risingwave_pb::meta::{Catalog, Database, Schema, Table};
 use risingwave_pb::plan::{ColumnDesc, DatabaseRefId, SchemaRefId, TableRefId};
 use risingwave_rpc_client::MetaClient;
 use tokio::time;
@@ -36,11 +35,8 @@ pub struct CatalogCache {
 ///       - table catalog
 ///        - column catalog
 impl CatalogCache {
-    pub fn new() -> Self {
-        Self {
-            database_by_name: HashMap::new(),
-            db_name_by_id: HashMap::new(),
-        }
+    pub async fn new(client: MetaClient) -> Result<Self> {
+        client.get_catalog().await.and_then(TryInto::try_into)
     }
 
     pub fn create_database(&mut self, db_name: &str, db_id: DatabaseId) -> Result<()> {
@@ -137,6 +133,51 @@ impl CatalogCache {
     }
 }
 
+impl TryFrom<Catalog> for CatalogCache {
+    type Error = RwError;
+
+    fn try_from(catalog: Catalog) -> Result<Self> {
+        let mut cache = CatalogCache {
+            database_by_name: HashMap::new(),
+            db_name_by_id: HashMap::new(),
+        };
+
+        for database in catalog.get_databases() {
+            let db_name = database.get_database_name();
+            let db_id = database.get_database_ref_id()?.database_id as DatabaseId;
+            cache.create_database(db_name, db_id)?;
+        }
+
+        for schema in catalog.get_schemas() {
+            let schema_ref_id = schema.get_schema_ref_id()?;
+            let db_id = schema_ref_id.get_database_ref_id()?.database_id as DatabaseId;
+            let db_name = cache
+                .get_database_name(db_id)
+                .ok_or_else(|| CatalogError::NotFound("database id", db_id.to_string()))?;
+            let schema_name = schema.get_schema_name();
+            let schema_id = schema_ref_id.schema_id as SchemaId;
+            cache.create_schema(&db_name, schema_name, schema_id)?;
+        }
+
+        for table in catalog.get_tables() {
+            let schema_ref_id = table.get_table_ref_id()?.get_schema_ref_id()?;
+            let db_id = schema_ref_id.get_database_ref_id()?.database_id as DatabaseId;
+            let db_name = cache
+                .get_database_name(db_id)
+                .ok_or_else(|| CatalogError::NotFound("database id", db_id.to_string()))?;
+            let schema_id = schema_ref_id.schema_id as SchemaId;
+            let schema_name = cache
+                .get_database(&db_name)
+                .unwrap()
+                .get_schema_name(schema_id)
+                .ok_or_else(|| CatalogError::NotFound("schema id", schema_id.to_string()))?;
+            cache.create_table(&db_name, &schema_name, table)?;
+        }
+
+        Ok(cache)
+    }
+}
+
 /// For DDL (create table/schema/database), only send rpc to meta. Create and delete actions will be
 /// done by `ObserverManager`. For get catalog request (get table/schema/database), check the root
 /// catalog cache only. Should be used by DDL handler.
@@ -147,11 +188,11 @@ impl CatalogCache {
 #[derive(Clone)]
 pub struct CatalogConnector {
     meta_client: MetaClient,
-    catalog_cache: Arc<Mutex<CatalogCache>>,
+    catalog_cache: Arc<RwLock<CatalogCache>>,
 }
 
 impl CatalogConnector {
-    pub fn new(meta_client: MetaClient, catalog_cache: Arc<Mutex<CatalogCache>>) -> Self {
+    pub fn new(meta_client: MetaClient, catalog_cache: Arc<RwLock<CatalogCache>>) -> Self {
         Self {
             meta_client,
             catalog_cache,
@@ -166,7 +207,13 @@ impl CatalogConnector {
                 ..Default::default()
             })
             .await?;
-        while self.catalog_cache.lock().get_database(db_name).is_none() {
+        while self
+            .catalog_cache
+            .read()
+            .unwrap()
+            .get_database(db_name)
+            .is_none()
+        {
             info!("Wait to create database: {}", db_name);
             time::sleep(Duration::from_micros(10)).await;
         }
@@ -176,7 +223,8 @@ impl CatalogConnector {
     pub async fn create_schema(&self, db_name: &str, schema_name: &str) -> Result<()> {
         let database_id = self
             .catalog_cache
-            .lock()
+            .read()
+            .unwrap()
             .get_database(db_name)
             .ok_or_else(|| RwError::from(CatalogError::NotFound("database", db_name.to_string())))?
             .id();
@@ -194,7 +242,8 @@ impl CatalogConnector {
             .await?;
         while self
             .catalog_cache
-            .lock()
+            .read()
+            .unwrap()
             .get_schema(db_name, schema_name)
             .is_none()
         {
@@ -212,13 +261,15 @@ impl CatalogConnector {
     ) -> Result<()> {
         let database_id = self
             .catalog_cache
-            .lock()
+            .read()
+            .unwrap()
             .get_database(db_name)
             .ok_or_else(|| RwError::from(CatalogError::NotFound("database", db_name.to_string())))?
             .id() as i32;
         let schema_id = self
             .catalog_cache
-            .lock()
+            .read()
+            .unwrap()
             .get_schema(db_name, schema_name)
             .ok_or_else(|| {
                 RwError::from(CatalogError::NotFound("schema", schema_name.to_string()))
@@ -244,7 +295,8 @@ impl CatalogConnector {
         self.meta_client.create_table(table.clone()).await?;
         while self
             .catalog_cache
-            .lock()
+            .read()
+            .unwrap()
             .get_table(db_name, schema_name, &table.table_name)
             .is_none()
         {
@@ -262,7 +314,8 @@ impl CatalogConnector {
     ) -> Result<()> {
         let table_id = self
             .catalog_cache
-            .lock()
+            .read()
+            .unwrap()
             .get_table(db_name, schema_name, table_name)
             .ok_or_else(|| RwError::from(CatalogError::NotFound("table", table_name.to_string())))?
             .id();
@@ -275,13 +328,15 @@ impl CatalogConnector {
     pub async fn drop_schema(&self, db_name: &str, schema_name: &str) -> Result<()> {
         let database_id = self
             .catalog_cache
-            .lock()
+            .read()
+            .unwrap()
             .get_database(db_name)
             .ok_or_else(|| RwError::from(CatalogError::NotFound("database", db_name.to_string())))?
             .id() as i32;
         let schema_id = self
             .catalog_cache
-            .lock()
+            .read()
+            .unwrap()
             .get_schema(db_name, schema_name)
             .ok_or_else(|| {
                 RwError::from(CatalogError::NotFound("schema", schema_name.to_string()))
@@ -299,7 +354,8 @@ impl CatalogConnector {
     pub async fn drop_database(&self, db_name: &str) -> Result<()> {
         let database_id = self
             .catalog_cache
-            .lock()
+            .read()
+            .unwrap()
             .get_database(db_name)
             .ok_or_else(|| RwError::from(CatalogError::NotFound("database", db_name.to_string())))?
             .id() as i32;
@@ -309,7 +365,10 @@ impl CatalogConnector {
     }
 
     pub fn get_database_snapshot(&self, db_name: &str) -> Option<Arc<DatabaseCatalog>> {
-        self.catalog_cache.lock().get_database_snapshot(db_name)
+        self.catalog_cache
+            .read()
+            .unwrap()
+            .get_database_snapshot(db_name)
     }
 
     /// Get catalog will not query meta service. The sync of schema is done by periodically push of
@@ -322,20 +381,24 @@ impl CatalogConnector {
         table_name: &str,
     ) -> Option<TableCatalog> {
         self.catalog_cache
-            .lock()
+            .read()
+            .unwrap()
             .get_table(db_name, schema_name, table_name)
             .cloned()
     }
 
-    #[cfg(test)]
     pub fn get_database(&self, db_name: &str) -> Option<DatabaseCatalog> {
-        self.catalog_cache.lock().get_database(db_name).cloned()
+        self.catalog_cache
+            .read()
+            .unwrap()
+            .get_database(db_name)
+            .cloned()
     }
 
-    #[cfg(test)]
     pub fn get_schema(&self, db_name: &str, schema_name: &str) -> Option<SchemaCatalog> {
         self.catalog_cache
-            .lock()
+            .read()
+            .unwrap()
             .get_schema(db_name, schema_name)
             .cloned()
     }
@@ -344,9 +407,8 @@ impl CatalogConnector {
 #[cfg(test)]
 mod tests {
 
-    use std::sync::Arc;
+    use std::sync::{Arc, RwLock};
 
-    use parking_lot::Mutex;
     use risingwave_common::types::DataType;
     use risingwave_meta::test_utils::LocalMeta;
     use risingwave_pb::meta::table::Info;
@@ -356,6 +418,7 @@ mod tests {
         CatalogCache, CatalogConnector, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
     };
     use crate::observer::observer_manager::ObserverManager;
+    use crate::scheduler::schedule::WorkerNodeManager;
 
     fn create_test_table(test_table_name: &str, columns: Vec<(String, DataType)>) -> Table {
         let column_descs = columns
@@ -383,12 +446,18 @@ mod tests {
         // Init meta and catalog.
         let meta = LocalMeta::start(12000).await;
         let mut meta_client = meta.create_client().await;
-        let catalog_cache = Arc::new(Mutex::new(CatalogCache::new()));
+        let catalog_cache = Arc::new(RwLock::new(
+            CatalogCache::new(meta_client.clone()).await.unwrap(),
+        ));
         let catalog_mgr = CatalogConnector::new(meta_client.clone(), catalog_cache.clone());
+
+        let worker_node_manager =
+            Arc::new(WorkerNodeManager::new(meta_client.clone()).await.unwrap());
 
         let observer_manager = ObserverManager::new(
             meta_client.clone(),
             "127.0.0.1:12345".parse().unwrap(),
+            worker_node_manager,
             catalog_cache,
         )
         .await;

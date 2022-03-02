@@ -120,7 +120,7 @@ impl WorkerNodeManager {
     }
 
     pub fn remove_worker_node(&self, node: WorkerNode) {
-        self.worker_nodes.write().unwrap().retain(|x| *x == node);
+        self.worker_nodes.write().unwrap().retain(|x| *x != node);
     }
 
     /// Get a random worker node.
@@ -288,5 +288,70 @@ impl BatchScheduler {
         let scheduled_stage =
             ScheduledStage::from_augmented_stage(augmented_stage, scheduled_tasks);
         self.scheduled_stage_sender.send(scheduled_stage).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, RwLock};
+    use std::time::Duration;
+
+    use risingwave_meta::test_utils::LocalMeta;
+    use risingwave_pb::common::{HostAddress, WorkerType};
+
+    use super::WorkerNodeManager;
+    use crate::catalog::catalog_service::CatalogCache;
+    use crate::observer::observer_manager::ObserverManager;
+
+    #[tokio::test]
+    async fn test_add_and_delete_worker_node() {
+        let meta = LocalMeta::start(12009).await;
+        let mut meta_client = meta.create_client().await;
+
+        let catalog_cache = Arc::new(RwLock::new(
+            CatalogCache::new(meta_client.clone()).await.unwrap(),
+        ));
+        let worker_node_manager =
+            Arc::new(WorkerNodeManager::new(meta_client.clone()).await.unwrap());
+
+        let observer_manager = ObserverManager::new(
+            meta_client.clone(),
+            "127.0.0.1:12345".parse().unwrap(),
+            worker_node_manager.clone(),
+            catalog_cache,
+        )
+        .await;
+        let observer_join_handle = observer_manager.start();
+
+        // Add worker node
+        let socket_addr = "127.0.0.1:6789".parse().unwrap();
+        meta_client
+            .register(socket_addr, WorkerType::ComputeNode)
+            .await
+            .unwrap();
+        meta_client.activate(socket_addr).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let mut worker_nodes = worker_node_manager.list_worker_nodes();
+        assert_eq!(1, worker_nodes.len());
+        let worker_node_0 = worker_nodes.pop().unwrap();
+        assert_eq!(WorkerType::ComputeNode, worker_node_0.r#type());
+        assert_eq!(
+            &HostAddress {
+                host: "127.0.0.1".to_string(),
+                port: 6789
+            },
+            worker_node_0.get_host().unwrap()
+        );
+
+        // Delete worker node
+        meta_client.unregister(socket_addr).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let worker_nodes = worker_node_manager.list_worker_nodes();
+        assert_eq!(0, worker_nodes.len());
+
+        // Client should be shut down before meta stops. Otherwise it will get stuck in
+        // `join_handle.await` in `meta.stop()` because of graceful shutdown.
+        observer_join_handle.abort();
+        meta.stop().await;
     }
 }

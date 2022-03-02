@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 use std::time::Duration;
 
+use risingwave_common::array::RwError;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
@@ -14,8 +15,9 @@ use risingwave_pb::meta::drop_request::CatalogId;
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
 use risingwave_pb::meta::{
-    ActivateWorkerNodeRequest, AddWorkerNodeRequest, CreateRequest, Database, DropRequest,
-    HeartbeatRequest, ListAllNodesRequest, Schema, SubscribeRequest, SubscribeResponse, Table,
+    ActivateWorkerNodeRequest, AddWorkerNodeRequest, Catalog, CreateRequest, Database,
+    DeleteWorkerNodeRequest, DropRequest, GetCatalogRequest, HeartbeatRequest, ListAllNodesRequest,
+    Schema, SubscribeRequest, SubscribeResponse, Table,
 };
 use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
 use tonic::transport::{Channel, Endpoint};
@@ -73,13 +75,13 @@ impl MetaClient {
         addr: SocketAddr,
         worker_type: WorkerType,
     ) -> Result<Streaming<SubscribeResponse>> {
-        let host = Some(HostAddress {
+        let host_address = HostAddress {
             host: addr.ip().to_string(),
             port: addr.port() as i32,
-        });
+        };
         let request = SubscribeRequest {
             worker_type: worker_type as i32,
-            host,
+            host: Some(host_address),
         };
         let rx = self
             .notification_client
@@ -198,6 +200,40 @@ impl MetaClient {
             .catalog_client
             .to_owned()
             .drop(request)
+            .await
+            .to_rw_result()?
+            .into_inner();
+        Ok(())
+    }
+
+    /// Get Catalog from meta.
+    pub async fn get_catalog(&self) -> Result<Catalog> {
+        let request = GetCatalogRequest::default();
+        let resp = self
+            .catalog_client
+            .to_owned()
+            .get_catalog(request)
+            .await
+            .to_rw_result()?
+            .into_inner();
+        resp.catalog.ok_or_else(|| {
+            RwError::from(InternalError("Get None in GetCatalogResponse".to_string()))
+        })
+    }
+
+    /// Unregister the current node to the cluster.
+    pub async fn unregister(&self, addr: SocketAddr) -> Result<()> {
+        let host_address = HostAddress {
+            host: addr.ip().to_string(),
+            port: addr.port() as i32,
+        };
+        let request = DeleteWorkerNodeRequest {
+            host: Some(host_address),
+        };
+        let _resp = self
+            .cluster_client
+            .to_owned()
+            .delete_worker_node(request)
             .await
             .to_rw_result()?
             .into_inner();
