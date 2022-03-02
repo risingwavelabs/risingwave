@@ -11,7 +11,7 @@ use crate::executor::*;
 /// Note that this option will significantly increase the overhead of tracing.
 pub const ENABLE_BARRIER_AGGREGATION: bool = false;
 
-struct ManagedBarrierState {
+pub struct ManagedBarrierState {
     epoch: u64,
 
     /// Notify that the collection is finished.
@@ -19,6 +19,18 @@ struct ManagedBarrierState {
 
     /// Actor ids remaining to be collected.
     remaining_actors: HashSet<u32>,
+}
+
+impl ManagedBarrierState {
+    pub fn notify(self) {
+        // Notify about barrier finishing.
+        if self.collect_notifier.send(()).is_err() {
+            warn!(
+                "failed to notify barrier collection with epoch {}: rx is dropped",
+                self.epoch
+            )
+        }
+    }
 }
 
 enum BarrierState {
@@ -155,9 +167,15 @@ impl LocalBarrierManager {
 
     /// When a [`StreamConsumer`] (typically [`DispatchExecutor`]) get a barrier, it should report
     /// and collect this barrier with its own `actor_id` using this function.
-    pub fn collect(&mut self, actor_id: u32, barrier: &Barrier) -> Result<()> {
+    /// Return the owned `ManagedBarrierState` when finishing collecting barriers from all
+    /// actors
+    pub fn collect(
+        &mut self,
+        actor_id: u32,
+        barrier: &Barrier,
+    ) -> Result<Option<ManagedBarrierState>> {
         match &mut self.state {
-            BarrierState::Local => {}
+            BarrierState::Local => Ok(None),
 
             BarrierState::Managed(managed_state) => {
                 let current_epoch = managed_state.as_ref().map(|s| s.epoch);
@@ -187,19 +205,11 @@ impl LocalBarrierManager {
                 if state.remaining_actors.is_empty() {
                     let state = managed_state.take().unwrap();
                     self.last_epoch = Some(state.epoch);
-                    // Notify about barrier finishing.
-                    let tx = state.collect_notifier;
-                    if tx.send(()).is_err() {
-                        warn!(
-                            "failed to notify barrier collection with epoch {}: rx is dropped",
-                            state.epoch
-                        )
-                    }
+                    return Ok(Some(state));
                 }
+                Ok(None)
             }
         }
-
-        Ok(())
     }
 
     /// Returns whether [`BarrierState`] is `Local`.
@@ -261,7 +271,9 @@ mod tests {
 
         // Report to local barrier manager
         for (i, (actor_id, barrier)) in collected_barriers.into_iter().enumerate() {
-            manager.collect(actor_id, &barrier).unwrap();
+            if let Some(barrier_state) = manager.collect(actor_id, &barrier).unwrap() {
+                barrier_state.notify();
+            }
             let notified = collect_rx.try_recv().is_ok();
             assert_eq!(notified, i == count - 1);
         }
