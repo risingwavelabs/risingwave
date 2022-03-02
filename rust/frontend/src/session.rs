@@ -122,7 +122,6 @@ impl Session for RwSession {
 mod tests {
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_run_statement() {
         use std::ffi::OsString;
 
