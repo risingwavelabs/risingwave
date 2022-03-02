@@ -14,6 +14,8 @@ const VIRTUAL_KEY_COUNT: usize = 2048;
 
 pub type HashDispatchManagerRef<S> = Arc<HashDispatchManager<S>>;
 
+/// `HashDispatchManager` maintains a load-balanced hash mapping based on consistent hash. 
+/// The mapping changes when one or more nodes enter or leave the cluster. 
 pub struct HashDispatchManager<S> {
     core: Mutex<HashDispatchManagerCore<S>>,
 }
@@ -48,6 +50,8 @@ where
     }
 }
 
+/// [`HashDispatchManagerCore`] contains the core logic for mapping change when one or more nodes 
+/// enter or leave the cluster.
 struct HashDispatchManagerCore<S> {
     /// Total number of parallel units in cluster.
     total_parallels: usize,

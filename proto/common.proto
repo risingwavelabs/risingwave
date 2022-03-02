@@ -44,6 +44,7 @@ message WorkerNode {
   WorkerType type = 2;
   HostAddress host = 3;
   State state = 4;
+  // a mapping from logical key to parallel unit, with logical key as the index of array
   repeated ParallelUnit parallel_units = 5;
 }
 
