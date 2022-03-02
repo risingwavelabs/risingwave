@@ -5,6 +5,7 @@ pub mod test;
 
 use std::any::Any;
 use std::borrow::Cow;
+use std::fmt::Debug;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -18,11 +19,14 @@ pub use simple_manager::*;
 
 use crate::TableColumnDesc;
 
-/// `TableManager` is an abstraction of managing a collection of tables.
-/// The interface between executors and storage should be table-oriented.
+// deprecated and to be removed
+// deprecated and to be removed
+/// deprecated and to be removed
+/// `TableManager` is an abstraction of managing a collection of
+/// tables. The interface between executors and storage should be table-oriented.
 /// `Database` is a logical concept and stored as metadata information.
 #[async_trait::async_trait]
-pub trait TableManager: Sync + Send + AsRef<dyn Any> {
+pub trait TableManager: Debug + Sync + Send + AsRef<dyn Any> {
     /// Create a specific table.
     async fn create_table_v2(
         &self,
@@ -62,6 +66,9 @@ pub trait TableIter: Send {
 }
 
 #[async_trait::async_trait]
+// deprecated and to be removed
+// deprecated and to be removed
+/// deprecated and to be removed
 pub trait ScannableTable: Sync + Send + Any + core::fmt::Debug {
     /// Open and return an iterator.
     async fn iter(&self, epoch: u64) -> Result<TableIterRef>;

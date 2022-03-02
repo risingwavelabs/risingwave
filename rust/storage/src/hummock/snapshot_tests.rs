@@ -1,6 +1,8 @@
 #[cfg(test)]
 use std::sync::Arc;
 
+use risingwave_pb::hummock::SstableInfo;
+
 use super::*;
 use crate::hummock::iterator::test_utils::{
     default_builder_opt_for_test, iterator_test_key_of, iterator_test_key_of_epoch,
@@ -104,7 +106,7 @@ async fn test_snapshot() {
     ));
 
     let hummock_options = HummockOptions::default_for_test();
-    let hummock_storage = HummockStorage::new(
+    let hummock_storage = HummockStorage::with_default_stats(
         obj_client.clone(),
         hummock_options,
         vm.clone(),
@@ -178,7 +180,7 @@ async fn test_snapshot_range_scan() {
         mock_hummock_meta_service.clone(),
     ));
     let hummock_options = HummockOptions::default_for_test();
-    let hummock_storage = HummockStorage::new(
+    let hummock_storage = HummockStorage::with_default_stats(
         obj_client.clone(),
         hummock_options,
         vm.clone(),
@@ -232,7 +234,7 @@ async fn test_snapshot_reverse_range_scan() {
         mock_hummock_meta_service.clone(),
     ));
     let hummock_options = HummockOptions::default_for_test();
-    let hummock_storage = HummockStorage::new(
+    let hummock_storage = HummockStorage::with_default_stats(
         obj_client.clone(),
         hummock_options,
         vm.clone(),

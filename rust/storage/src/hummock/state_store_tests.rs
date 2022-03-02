@@ -36,7 +36,7 @@ async fn test_prometheus_endpoint_hummock() {
         &hummock_options.remote_dir,
         None,
     ));
-    let _hummock_storage = HummockStorage::new(
+    let _hummock_storage = HummockStorage::with_default_stats(
         object_client,
         hummock_options,
         local_version_manager,
@@ -76,7 +76,7 @@ async fn test_basic() {
         &hummock_options.remote_dir,
         None,
     ));
-    let hummock_storage = HummockStorage::new(
+    let hummock_storage = HummockStorage::with_default_stats(
         object_client,
         hummock_options,
         local_version_manager,
@@ -239,7 +239,7 @@ async fn test_reload_storage() {
         MockHummockMetaService::new(),
     )));
 
-    let hummock_storage = HummockStorage::new(
+    let hummock_storage = HummockStorage::with_default_stats(
         mem_objstore.clone(),
         hummock_options,
         local_version_manager.clone(),
@@ -283,7 +283,7 @@ async fn test_reload_storage() {
 
     // Mock somthing happened to storage internal, and storage is reloaded.
     drop(hummock_storage);
-    let hummock_storage = HummockStorage::new(
+    let hummock_storage = HummockStorage::with_default_stats(
         mem_objstore,
         HummockOptions::default_for_test(),
         local_version_manager,

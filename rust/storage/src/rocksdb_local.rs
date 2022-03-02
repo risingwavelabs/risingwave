@@ -10,13 +10,11 @@ use tokio::sync::OnceCell;
 use tokio::task;
 
 use super::{StateStore, StateStoreIter};
-use crate::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
 
 #[derive(Clone)]
 pub struct RocksDBStateStore {
     storage: Arc<OnceCell<RocksDBStorage>>,
     db_path: String,
-    stats: Arc<StateStoreStats>,
 }
 
 impl RocksDBStateStore {
@@ -24,7 +22,6 @@ impl RocksDBStateStore {
         Self {
             storage: Arc::new(OnceCell::new()),
             db_path: db_path.to_string(),
-            stats: DEFAULT_STATE_STORE_STATS.clone(),
         }
     }
 
@@ -40,23 +37,11 @@ impl StateStore for RocksDBStateStore {
     type Iter<'a> = RocksDBStateStoreIter;
 
     async fn get(&self, key: &[u8], _epoch: u64) -> Result<Option<Bytes>> {
-        self.stats.get_counts.inc();
-        let timer = self.stats.get_latency.start_timer();
-        let res = self.storage().await.get(key).await?;
-        timer.observe_duration();
-
-        self.stats.get_key_size.observe(key.len() as f64);
-        if res.is_some() {
-            self.stats
-                .get_value_size
-                .observe(res.as_ref().unwrap().len() as f64);
-        }
-        Ok(res)
+        self.storage().await.get(key).await
     }
 
     async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>, _epoch: u64) -> Result<()> {
-        self.storage().await.write_batch(kv_pairs).await?;
-        Ok(())
+        self.storage().await.write_batch(kv_pairs).await
     }
 
     async fn iter<R, B>(&self, key_range: R, _epoch: u64) -> Result<Self::Iter<'_>>
@@ -84,7 +69,6 @@ pub fn next_prefix(prefix: &[u8]) -> Vec<u8> {
 pub struct RocksDBStateStoreIter {
     iter: Option<Box<DBIterator<Arc<DB>>>>,
     key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-    stats: Arc<StateStoreStats>,
 }
 
 impl RocksDBStateStoreIter {
@@ -118,7 +102,6 @@ impl RocksDBStateStoreIter {
             Ok(Self {
                 iter: Some(Box::new(iter)),
                 key_range: range,
-                stats: DEFAULT_STATE_STORE_STATS.clone(),
             })
         })
         .await?
@@ -130,8 +113,6 @@ impl StateStoreIter for RocksDBStateStoreIter {
     type Item = (Bytes, Bytes);
 
     async fn next(&mut self) -> Result<Option<Self::Item>> {
-        let timer = self.stats.iter_next_latency.start_timer();
-
         let mut end_key = Bytes::new();
         let mut is_end_exclude = false;
         let mut is_end_unbounded = false;
@@ -175,15 +156,7 @@ impl StateStoreIter for RocksDBStateStoreIter {
         .unwrap();
 
         self.iter = Some(iter);
-        let kv = kv?;
-
-        timer.observe_duration();
-        if kv.is_some() {
-            self.stats
-                .iter_next_size
-                .observe((kv.as_ref().unwrap().0.len() + kv.as_ref().unwrap().1.len()) as f64)
-        }
-        Ok(kv)
+        kv
     }
 }
 

@@ -14,6 +14,7 @@ use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::MetaClient;
 use risingwave_source::MemSourceManager;
+use risingwave_storage::monitor::DEFAULT_STATE_STORE_STATS;
 use risingwave_storage::table::SimpleTableManager;
 use risingwave_storage::StateStoreImpl;
 use risingwave_stream::task::{StreamEnvironment, StreamManager};
@@ -48,7 +49,8 @@ pub async fn compute_node_serve(
         .unwrap();
 
     // Initialize state store.
-    let state_store = StateStoreImpl::from_str(&opts.state_store, meta_client.clone())
+    let stats = DEFAULT_STATE_STORE_STATS.clone();
+    let state_store = StateStoreImpl::from_str(&opts.state_store, meta_client.clone(), stats)
         .await
         .unwrap();
 
@@ -138,36 +140,5 @@ impl MetricsManager {
             .unwrap();
 
         Ok(response)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::ffi::OsString;
-
-    use clap::StructOpt;
-    use risingwave_meta::test_utils::LocalMeta;
-    use tokio::sync::mpsc::UnboundedSender;
-    use tokio::task::JoinHandle;
-
-    use crate::server::compute_node_serve;
-    use crate::ComputeNodeOpts;
-
-    async fn start_compute_node(meta: &LocalMeta) -> (JoinHandle<()>, UnboundedSender<()>) {
-        let args: [OsString; 0] = []; // No argument.
-        let mut opts = ComputeNodeOpts::parse_from(args);
-        opts.meta_address = format!("http://{}", meta.meta_addr());
-        let addr = opts.host.parse().unwrap();
-        compute_node_serve(addr, opts).await
-    }
-
-    #[tokio::test]
-    #[serial_test::serial]
-    async fn test_server_shutdown() {
-        let meta = LocalMeta::start(12313).await;
-        let (join, shutdown) = start_compute_node(&meta).await;
-        shutdown.send(()).unwrap();
-        join.await.unwrap();
-        meta.stop().await;
     }
 }

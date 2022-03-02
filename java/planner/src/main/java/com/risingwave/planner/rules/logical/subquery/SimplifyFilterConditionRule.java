@@ -39,9 +39,8 @@ import org.apache.calcite.rex.RexUtil;
  *
  * <p>This file is adapted from flink.
  */
-class SimplifyFilterConditionRule extends RelOptRule {
-
-  private final boolean simplifySubQuery = true;
+public class SimplifyFilterConditionRule extends RelOptRule {
+  public static final SimplifyFilterConditionRule INSTANCE = new SimplifyFilterConditionRule();
 
   public SimplifyFilterConditionRule() {
     super(operand(Filter.class, any()), "SimplifyFilterConditionRule:simplifySubQuery");

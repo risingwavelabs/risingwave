@@ -12,8 +12,7 @@ mod scheduler;
 pub mod session;
 pub mod utils;
 extern crate log;
-#[cfg(test)]
-mod test_utils;
+pub mod test_utils;
 
 use clap::Parser;
 #[derive(Parser, Clone)]

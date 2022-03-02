@@ -5,13 +5,14 @@ use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
 use super::{ColPrunable, IntoPlanRef, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
-use crate::catalog::{ColumnId, TableId};
+use crate::binder::BaseTableRef;
+use crate::catalog::ColumnId;
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct LogicalInsert {
-    table_id: TableId,
+    table: BaseTableRef,
     columns: Vec<ColumnId>,
     input: PlanRef,
     schema: Schema,
@@ -19,10 +20,10 @@ pub struct LogicalInsert {
 
 impl LogicalInsert {
     /// Create a LogicalInsert node. Used internally by optimizer.
-    pub fn new(input: PlanRef, table_id: TableId, columns: Vec<ColumnId>) -> Self {
+    pub fn new(input: PlanRef, table: BaseTableRef, columns: Vec<ColumnId>) -> Self {
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
         Self {
-            table_id,
+            table,
             columns,
             input,
             schema,
@@ -30,8 +31,8 @@ impl LogicalInsert {
     }
 
     /// Create a LogicalInsert node. Used by planner.
-    pub fn create(input: PlanRef, table_id: TableId, columns: Vec<ColumnId>) -> Result<Self> {
-        Ok(Self::new(input, table_id, columns))
+    pub fn create(input: PlanRef, table: BaseTableRef, columns: Vec<ColumnId>) -> Result<Self> {
+        Ok(Self::new(input, table, columns))
     }
 }
 
@@ -40,7 +41,7 @@ impl PlanTreeNodeUnary for LogicalInsert {
         self.input.clone()
     }
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.table_id, self.columns.clone())
+        Self::new(input, self.table.clone(), self.columns.clone())
     }
 }
 impl_plan_tree_node_for_unary! {LogicalInsert}
@@ -57,8 +58,8 @@ impl fmt::Display for LogicalInsert {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "LogicalInsert {{ table_id: {}, columns: {:?} }}",
-            self.table_id, self.columns,
+            "LogicalInsert {{ table_name: {}, columns: {:?} }}",
+            self.table.name, self.columns,
         )
     }
 }

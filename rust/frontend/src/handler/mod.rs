@@ -5,8 +5,8 @@ use risingwave_sqlparser::ast::{ObjectName, Statement};
 use crate::session::RwSession;
 
 mod create_source;
-mod create_table;
-mod drop_table;
+pub mod create_table;
+pub mod drop_table;
 mod explain;
 
 pub(super) async fn handle(session: &RwSession, stmt: Statement) -> Result<PgResponse> {
