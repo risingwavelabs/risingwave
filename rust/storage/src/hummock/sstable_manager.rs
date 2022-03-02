@@ -64,7 +64,10 @@ impl SSTableManager {
         match self.block_cache.get(&(sst_id, block_index)) {
             Some(block) => Ok(block),
             None => {
-                let block_meta = meta.block_metas.get(block_index as usize).unwrap();
+                let block_meta = meta
+                    .block_metas
+                    .get(block_index as usize)
+                    .ok_or_else(HummockError::invalid_block)?;
                 let block_loc = BlockLocation {
                     offset: block_meta.offset as usize,
                     size: block_meta.len as usize,

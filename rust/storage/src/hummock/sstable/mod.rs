@@ -108,7 +108,6 @@ impl Block {
 }
 
 /// [`SSTable`] represents a SST in object store.
-#[derive(Clone)]
 pub struct SSTable {
     pub id: u64,
     pub meta: SstableMeta,

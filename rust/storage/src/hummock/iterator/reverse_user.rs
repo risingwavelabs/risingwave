@@ -756,7 +756,7 @@ mod tests {
             _ => unimplemented!(),
         };
         let iters: Vec<BoxedHummockIterator> = vec![Box::new(ReverseSSTableIterator::new(
-            Arc::new(table.clone()),
+            Arc::new(clone_sst(&table)),
             sstable_manager,
         ))];
         let rsi = ReverseMergeIterator::new(iters);
@@ -861,37 +861,37 @@ mod tests {
                 "begin_key:{:?},end_key:{:?}",
                 begin_key_bytes, end_key_bytes
             );
-            chaos_test_case(table.clone(), Unbounded, Unbounded, &truth).await;
+            chaos_test_case(clone_sst(&table), Unbounded, Unbounded, &truth).await;
             chaos_test_case(
-                table.clone(),
+                clone_sst(&table),
                 Unbounded,
                 Included(end_key_bytes.clone()),
                 &truth,
             )
             .await;
             chaos_test_case(
-                table.clone(),
+                clone_sst(&table),
                 Included(begin_key_bytes.clone()),
                 Unbounded,
                 &truth,
             )
             .await;
             chaos_test_case(
-                table.clone(),
+                clone_sst(&table),
                 Excluded(begin_key_bytes.clone()),
                 Unbounded,
                 &truth,
             )
             .await;
             chaos_test_case(
-                table.clone(),
+                clone_sst(&table),
                 Included(begin_key_bytes.clone()),
                 Included(end_key_bytes.clone()),
                 &truth,
             )
             .await;
             chaos_test_case(
-                table.clone(),
+                clone_sst(&table),
                 Excluded(begin_key_bytes),
                 Included(end_key_bytes),
                 &truth,
@@ -919,5 +919,12 @@ mod tests {
 
     fn key_range_test_key(table: u64, idx: usize, epoch: u64) -> Vec<u8> {
         iterator_test_key_of_epoch(table, idx, epoch)
+    }
+
+    fn clone_sst(sst: &SSTable) -> SSTable {
+        SSTable {
+            id: sst.id,
+            meta: sst.meta.clone(),
+        }
     }
 }
