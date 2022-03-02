@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use risingwave_common::array::{InternalError, RwError};
 use risingwave_common::error::{Result, ToRwResult};
 use tikv_client::{BoundRange, KvPair, TransactionClient};
 use tokio::sync::OnceCell;
@@ -46,15 +47,23 @@ impl StateStore for TikvStateStore {
 
     async fn get(&self, key: &[u8], _epoch: u64) -> Result<Option<Bytes>> {
         self.stats.get_counts.inc();
+
+        let timer = self.stats.get_latency.start_timer();
         let mut txn = self.client().await.begin_optimistic().await.unwrap();
         let res = txn
             .get(key.to_owned())
             .await
-            .map(|x| x.map(Bytes::from))
-            .map_err(anyhow::Error::new)
-            .to_rw_result();
+            .map_or(Err(RwError::from(InternalError("".into()))), Ok)?;
+        timer.observe_duration();
         txn.commit().await.unwrap();
-        res
+
+        self.stats.get_key_size.observe(key.len() as f64);
+        if res.is_some() {
+            self.stats
+                .get_value_size
+                .observe(res.as_ref().unwrap().len() as f64);
+        }
+        Ok(res.map(Bytes::from))
     }
 
     async fn scan<R, B>(
@@ -94,6 +103,9 @@ impl StateStore for TikvStateStore {
             let key = Bytes::copy_from_slice(key.as_ref().into());
             let value = Bytes::from(value);
             data.push((key.clone(), value.clone()));
+            self.stats
+                .iter_next_size
+                .observe((key.len() + value.len()) as f64);
             if let Some(limit) = limit {
                 if data.len() >= limit {
                     break;
@@ -144,6 +156,7 @@ pub struct TikvStateStoreIter {
     key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
     index: usize,
     kv_pair_buffer: Vec<tikv_client::KvPair>,
+    stats: Arc<StateStoreStats>,
 }
 
 impl TikvStateStoreIter {
@@ -153,6 +166,7 @@ impl TikvStateStoreIter {
             key_range,
             index: 0,
             kv_pair_buffer: Vec::with_capacity(SCAN_LIMIT),
+            stats: DEFAULT_STATE_STORE_STATS.clone(),
         }
     }
 }
@@ -163,6 +177,7 @@ impl StateStoreIter for TikvStateStoreIter {
 
     async fn next(&mut self) -> Result<Option<Self::Item>> {
         // self.store.get_client().await;
+        let timer = self.stats.iter_next_latency.start_timer();
 
         let mut txn = self.store.client().await.begin_optimistic().await.unwrap();
         if self.index == self.kv_pair_buffer.len() {
@@ -193,6 +208,10 @@ impl StateStoreIter for TikvStateStoreIter {
         txn.commit().await.unwrap();
         self.index += 1;
 
+        timer.observe_duration();
+        self.stats
+            .iter_next_size
+            .observe((key.len() + value.len()) as f64);
         return Ok(Some((key.clone(), value.clone())));
     }
 }
