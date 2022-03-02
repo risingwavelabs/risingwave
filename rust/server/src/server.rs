@@ -140,34 +140,3 @@ impl MetricsManager {
         Ok(response)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use std::ffi::OsString;
-
-    use clap::StructOpt;
-    use risingwave_meta::test_utils::LocalMeta;
-    use tokio::sync::mpsc::UnboundedSender;
-    use tokio::task::JoinHandle;
-
-    use crate::server::compute_node_serve;
-    use crate::ComputeNodeOpts;
-
-    async fn start_compute_node(meta: &LocalMeta) -> (JoinHandle<()>, UnboundedSender<()>) {
-        let args: [OsString; 0] = []; // No argument.
-        let mut opts = ComputeNodeOpts::parse_from(args);
-        opts.meta_address = format!("http://{}", meta.meta_addr());
-        let addr = opts.host.parse().unwrap();
-        compute_node_serve(addr, opts).await
-    }
-
-    #[tokio::test]
-    #[serial_test::serial]
-    async fn test_server_shutdown() {
-        let meta = LocalMeta::start(12313).await;
-        let (join, shutdown) = start_compute_node(&meta).await;
-        shutdown.send(()).unwrap();
-        join.await.unwrap();
-        meta.stop().await;
-    }
-}

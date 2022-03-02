@@ -151,16 +151,3 @@ pub async fn rpc_serve(
 
     (join_handle, shutdown_send)
 }
-
-#[cfg(test)]
-mod tests {
-    use crate::rpc::server::{rpc_serve, MetaStoreBackend};
-
-    #[tokio::test]
-    async fn test_server_shutdown() {
-        let addr = "127.0.0.1:9527".parse().unwrap();
-        let (join_handle, shutdown_send) = rpc_serve(addr, None, None, MetaStoreBackend::Mem).await;
-        shutdown_send.send(()).unwrap();
-        join_handle.await.unwrap();
-    }
-}

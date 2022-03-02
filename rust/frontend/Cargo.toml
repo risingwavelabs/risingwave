@@ -45,7 +45,6 @@ uuid = "0.8"
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.8"
-serial_test = "*"
 tempfile = "3"
 walkdir = "2"
 

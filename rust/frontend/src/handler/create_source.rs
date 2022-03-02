@@ -90,7 +90,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn handle_create_source() {
         let proto_file = create_proto_file();
         let sql = format!(

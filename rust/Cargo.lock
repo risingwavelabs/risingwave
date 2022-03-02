@@ -1571,7 +1571,6 @@ dependencies = [
  "risingwave_sqlparser",
  "serde",
  "serde_yaml",
- "serial_test",
  "smallvec",
  "tempfile",
  "thiserror",
@@ -3686,7 +3685,6 @@ dependencies = [
  "serde",
  "serde-value",
  "serde_json",
- "serial_test",
  "smallvec",
  "static_assertions",
  "tempfile",
@@ -4361,30 +4359,6 @@ dependencies = [
  "ryu",
  "serde",
  "yaml-rust",
-]
-
-[[package]]
-name = "serial_test"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5bcc41d18f7a1d50525d080fd3e953be87c4f9f1a974f3c21798ca00d54ec15"
-dependencies = [
- "lazy_static",
- "parking_lot 0.11.2",
- "serial_test_derive",
-]
-
-[[package]]
-name = "serial_test_derive"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2881bccd7d60fb32dfa3d7b3136385312f8ad75e2674aab2852867a09790cae8"
-dependencies = [
- "proc-macro-error",
- "proc-macro2",
- "quote",
- "rustversion",
- "syn",
 ]
 
 [[package]]
