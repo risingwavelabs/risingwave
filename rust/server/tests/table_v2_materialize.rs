@@ -3,7 +3,7 @@ use std::sync::Arc;
 use risingwave_batch::executor::{
     CreateTableExecutor, Executor as BatchExecutor, InsertExecutor, RowSeqScanExecutor,
 };
-use risingwave_common::array::{Array, DataChunk, F64Array};
+use risingwave_common::array::{Array, DataChunk, F64Array, RwError};
 use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::column_nonnull;
 use risingwave_common::error::Result;
@@ -165,9 +165,12 @@ async fn test_table_v2_materialize() -> Result<()> {
     let mut insert =
         InsertExecutor::new(mview_id, source_manager.clone(), Box::new(insert_inner), 0);
 
-    insert.open().await?;
-    insert.next().await?;
-    insert.close().await?;
+    tokio::spawn(async move {
+        insert.open().await?;
+        insert.next().await?;
+        insert.close().await?;
+        Ok::<_, RwError>(())
+    });
 
     // Since we have not polled `Materialize`, we cannot scan anything from this table
     let table = table_manager.get_table(&mview_id)?;

@@ -219,23 +219,27 @@ mod tests {
         let mut reader =
             source.stream_reader(TableV2ReaderContext, vec![0.into(), 1.into(), 2.into()])?;
 
+        // Insert
         let mut insert_executor =
             InsertExecutor::new(table_id, source_manager.clone(), Box::new(mock_executor), 0);
-        insert_executor.open().await.unwrap();
-        let fields = &insert_executor.schema().fields;
-        assert_eq!(fields[0].data_type, DataType::Int64);
-        let result = insert_executor.next().await?.unwrap();
-        insert_executor.close().await.unwrap();
-        assert_eq!(
-            result
-                .column_at(0)
-                .array()
-                .as_int64()
-                .iter()
-                .collect::<Vec<_>>(),
-            vec![Some(5)] // inserted rows
-        );
+        tokio::spawn(async move {
+            insert_executor.open().await.unwrap();
+            let fields = &insert_executor.schema().fields;
+            assert_eq!(fields[0].data_type, DataType::Int64);
+            let result = insert_executor.next().await.unwrap().unwrap();
+            insert_executor.close().await.unwrap();
+            assert_eq!(
+                result
+                    .column_at(0)
+                    .array()
+                    .as_int64()
+                    .iter()
+                    .collect::<Vec<_>>(),
+                vec![Some(5)] // inserted rows
+            );
+        });
 
+        // Read
         reader.open().await?;
         let chunk = reader.next().await?;
 
