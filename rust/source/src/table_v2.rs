@@ -67,6 +67,8 @@ impl TableSourceV2 {
 
     /// Write stream chunk into table. Changes writen here will be simply passed to the associated
     /// streaming task via channel, and then be materialized to storage there.
+    ///
+    /// Note: this function will block until a reader consumes the chunk.
     pub async fn write_chunk(&self, chunk: StreamChunk) -> Result<()> {
         let notifier_rx = {
             let core = self.core.read().unwrap();
@@ -222,17 +224,20 @@ mod tests {
 
     #[tokio::test]
     async fn test_table_source_v2() -> Result<()> {
-        let source = new_source();
+        let source = Arc::new(new_source());
         let mut reader = source.stream_reader(TableV2ReaderContext, vec![ColumnId::from(0)])?;
 
         macro_rules! write_chunk {
             ($i:expr) => {{
+                let source = source.clone();
                 let chunk = StreamChunk::new(
                     vec![Op::Insert],
                     vec![column_nonnull!(I64Array, [$i])],
                     None,
                 );
-                source.write_chunk(chunk).await?;
+                tokio::spawn(async move {
+                    source.write_chunk(chunk).await.unwrap();
+                })
             }};
         }
 
