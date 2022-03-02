@@ -459,19 +459,19 @@ pub fn create_executor(
     store: impl StateStore,
 ) -> Result<Box<dyn Executor>> {
     let real_executor = build_executor! { executor_params,node,store,stream,
-      Node::SourceNode => SourceExecutorBuilder,
-      Node::ProjectNode => ProjectExecutorBuilder,
-      Node::TopNNode => TopNExecutorBuilder,
-      Node::AppendOnlyTopNNode => AppendOnlyTopNExecutorBuilder,
-      Node::LocalSimpleAggNode => LocalSimpleAggExecutorBuilder,
-      Node::GlobalSimpleAggNode => SimpleAggExecutorBuilder,
-      Node::HashAggNode => HashAggExecutorBuilder,
-      Node::HashJoinNode => HashJoinExecutorBuilder,
-      Node::ChainNode => ChainExecutorBuilder,
-      Node::BatchPlanNode => BatchQueryExecutorBuilder,
-      Node::MergeNode => MergeExecutorBuilder,
-      Node::MaterializeNode => MaterializeExecutorBuilder,
-      Node::FilterNode => FilterExecutorBuilder
+        Node::SourceNode => SourceExecutorBuilder,
+        Node::ProjectNode => ProjectExecutorBuilder,
+        Node::TopNNode => TopNExecutorBuilder,
+        Node::AppendOnlyTopNNode => AppendOnlyTopNExecutorBuilder,
+        Node::LocalSimpleAggNode => LocalSimpleAggExecutorBuilder,
+        Node::GlobalSimpleAggNode => SimpleAggExecutorBuilder,
+        Node::HashAggNode => HashAggExecutorBuilder,
+        Node::HashJoinNode => HashJoinExecutorBuilder,
+        Node::ChainNode => ChainExecutorBuilder,
+        Node::BatchPlanNode => BatchQueryExecutorBuilder,
+        Node::MergeNode => MergeExecutorBuilder,
+        Node::MaterializeNode => MaterializeExecutorBuilder,
+        Node::FilterNode => FilterExecutorBuilder
     }?;
     Ok(real_executor)
 }
