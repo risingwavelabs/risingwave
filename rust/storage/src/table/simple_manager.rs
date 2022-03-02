@@ -14,6 +14,7 @@ use crate::table::mview::MViewTable;
 use crate::{dispatch_state_store, Keyspace, StateStoreImpl, TableColumnDesc};
 
 /// Manages all tables in the storage backend.
+#[derive(Debug)]
 pub struct SimpleTableManager {
     // TODO: should not use `std::sync::Mutex` in async context.
     tables: Mutex<HashMap<TableId, ScannableTableRef>>,

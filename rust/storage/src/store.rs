@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
@@ -132,6 +133,17 @@ pub enum StateStoreImpl {
     MemoryStateStore(MemoryStateStore),
     RocksDBStateStore(RocksDBStateStore),
     TikvStateStore(TikvStateStore),
+}
+
+impl Debug for StateStoreImpl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StateStoreImpl::HummockStateStore(_hummock) => write!(f, "HummockStateStore(_)"),
+            StateStoreImpl::MemoryStateStore(_memory) => write!(f, "MemoryStateStore(_)"),
+            StateStoreImpl::RocksDBStateStore(_rocksdb) => write!(f, "RocksDBStateStore(_)"),
+            StateStoreImpl::TikvStateStore(_tikv) => write!(f, "TikvStateStore(_)"),
+        }
+    }
 }
 
 impl StateStoreImpl {

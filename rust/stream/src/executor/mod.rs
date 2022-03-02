@@ -432,6 +432,7 @@ pub trait ExecutorBuilder {
         stream: &mut StreamManagerCore,
     ) -> Result<Box<dyn Executor>>;
 }
+
 #[macro_export]
 macro_rules! build_executor {
     ($source: expr,$node: expr,$store: expr,$stream: expr, $($proto_type_name:path => $data_type:ty),*) => {
