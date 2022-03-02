@@ -141,22 +141,19 @@ impl StreamSourceReader for TableV2StreamReader {
             .await
             .expect("TableSourceV2 dropped before associated streaming task terminated");
 
-        // Caveats: we should ensure there's no `await` after here.
-        let consume = move || {
-            notifier.send(()).ok();
+        let (ops, columns, bitmap) = chunk.into_inner();
 
-            let (ops, columns, bitmap) = chunk.into_inner();
+        let selected_columns = self
+            .column_indices
+            .iter()
+            .map(|i| columns[*i].clone())
+            .collect();
+        let chunk = StreamChunk::new(ops, selected_columns, bitmap);
 
-            let selected_columns = self
-                .column_indices
-                .iter()
-                .map(|i| columns[*i].clone())
-                .collect();
-
-            Ok(StreamChunk::new(ops, selected_columns, bitmap))
-        };
-
-        consume()
+        // Caveats: this function is an arm of `tokio::select`. We should ensure there's no `await`
+        // after here.
+        notifier.send(()).ok();
+        Ok(chunk)
     }
 }
 

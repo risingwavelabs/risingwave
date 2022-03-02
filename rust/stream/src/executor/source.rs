@@ -193,23 +193,26 @@ impl Executor for SourceExecutor {
 
         // FIXME: may lose message
         tokio::select! {
-          chunk = self.reader.next() => {
-            let mut chunk = chunk?;
+            biased; // Prefer barrier than stream chunk.
 
-            // Refill row id only if not a table source.
-            // Note(eric): Currently, rows from external sources are filled with row_ids here,
-            // but rows from tables (by insert statements) are filled in InsertExecutor.
-            //
-            // TODO: in the future, we may add row_id column here for TableV2 as well
-            if !matches!(self.source_desc.source.as_ref(), SourceImpl::TableV2(_)) {
-              chunk = self.refill_row_id_column(chunk);
+            message = self.barrier_receiver.recv() => {
+                message.ok_or_else(|| RwError::from(InternalError("stream closed unexpectedly".to_string())))
             }
-            self.source_output_row_count.add(chunk.cardinality() as u64, &self.attributes);
-            Ok(Message::Chunk(chunk))
-          }
-          message = self.barrier_receiver.recv() => {
-            message.ok_or_else(|| RwError::from(InternalError("stream closed unexpectedly".to_string())))
-          }
+
+            chunk = self.reader.next() => {
+                let mut chunk = chunk?;
+
+                // Refill row id only if not a table source.
+                // Note(eric): Currently, rows from external sources are filled with row_ids here,
+                // but rows from tables (by insert statements) are filled in InsertExecutor.
+                //
+                // TODO: in the future, we may add row_id column here for TableV2 as well
+                if !matches!(self.source_desc.source.as_ref(), SourceImpl::TableV2(_)) {
+                    chunk = self.refill_row_id_column(chunk);
+                }
+                self.source_output_row_count.add(chunk.cardinality() as u64, &self.attributes);
+                Ok(Message::Chunk(chunk))
+            }
         }
     }
 
