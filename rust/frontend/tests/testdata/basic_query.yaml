@@ -12,8 +12,14 @@
     LogicalScan { table: "t", columns: ["_row_id", "v1", "v2"] }
 
 - sql: |
+    create table t (v1 bigint, v2 double precision);
+    select * from t where v1>3;
+
+
+- sql: |
     create table t (v1 int, v2 int);
     insert into t values (22, 33), (44, 55);
   plan: |
     LogicalInsert { table_name: t, columns: [] }
       LogicalValues { rows: [[Literal(Literal { data: Some(Int32(22)), data_type: Int32 }), Literal(Literal { data: Some(Int32(33)), data_type: Int32 })], [Literal(Literal { data: Some(Int32(44)), data_type: Int32 }), Literal(Literal { data: Some(Int32(55)), data_type: Int32 })]], schema: Schema { fields: [Field { name = , data_type = Int32 }, Field { name = , data_type = Int32 }] } }
+
