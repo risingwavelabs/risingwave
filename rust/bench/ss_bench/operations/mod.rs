@@ -60,6 +60,7 @@ impl Operations {
 
             diff_stat.update_stat();
 
+            // display metrics
             match operation {
                 "writebatch" => diff_stat.display_write_batch(),
                 // (Sun Ting) TODO: implement other performance displays

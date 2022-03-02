@@ -5,10 +5,7 @@ use risingwave_storage::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
 
 use crate::utils::metric_display::MetricDisplay;
 
-// #[derive(Default)]
 pub(crate) struct DiffStat {
-    // pub(crate) prev_histogram: BTreeMap<String, Histogram>,
-    // pub(crate) prev_counter: BTreeMap<String, GenericCounter<AtomicU64>>,
     pub(crate) prev_stat: StateStoreStats,
     pub(crate) cur_stat: StateStoreStats,
 }
@@ -31,20 +28,20 @@ impl DiffStat {
 
     pub(crate) fn display_write_batch(&mut self) {
         let metric = self.prev_stat.batch_write_latency.metric();
-        let prev_histogram = metric.get_histogram();
+        let prev_latency_hist = metric.get_histogram();
         let metric = self.cur_stat.batch_write_latency.metric();
-        let cur_histogram = metric.get_histogram();
+        let cur_latency_hist = metric.get_histogram();
 
         let latency = {
-            let latency_hist = DiffStat::histogram_diff(prev_histogram, cur_histogram);
+            let latency_hist = DiffStat::histogram_diff(prev_latency_hist, cur_latency_hist);
             MetricDisplay::new(&latency_hist)
         };
 
-        let time_comsume = cur_histogram.get_sample_sum() - prev_histogram.get_sample_sum();
+        let time_comsume = cur_latency_hist.get_sample_sum() - prev_latency_hist.get_sample_sum();
 
         let ops = {
             let written_batch_num =
-                cur_histogram.get_sample_count() - prev_histogram.get_sample_count();
+                cur_latency_hist.get_sample_count() - prev_latency_hist.get_sample_count();
             written_batch_num as f64 / time_comsume
         };
 
