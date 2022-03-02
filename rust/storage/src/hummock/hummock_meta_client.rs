@@ -4,9 +4,11 @@ use async_trait::async_trait;
 use risingwave_pb::hummock::{
     AddTablesRequest, CompactTask, GetCompactionTasksRequest, GetNewTableIdRequest,
     HummockSnapshot, HummockVersion, PinSnapshotRequest, PinVersionRequest,
-    ReportCompactionTasksRequest, SstableInfo, UnpinSnapshotRequest, UnpinVersionRequest,
+    ReportCompactionTasksRequest, SstableInfo, SubscribeCompactTasksRequest,
+    SubscribeCompactTasksResponse, UnpinSnapshotRequest, UnpinVersionRequest,
 };
 use risingwave_rpc_client::MetaClient;
+use tonic::Streaming;
 
 use crate::hummock::{
     HummockEpoch, HummockError, HummockResult, HummockSSTableId, HummockVersionId,
@@ -43,8 +45,17 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         compact_task: CompactTask,
         task_result: bool,
     ) -> HummockResult<()>;
-    async fn commit_epoch(&self, epoch: HummockEpoch) -> HummockResult<()>;
-    async fn abort_epoch(&self, epoch: HummockEpoch) -> HummockResult<()>;
+    async fn commit_epoch(&self, _epoch: HummockEpoch) -> HummockResult<()> {
+        unimplemented!()
+    }
+    async fn abort_epoch(&self, _epoch: HummockEpoch) -> HummockResult<()> {
+        unimplemented!()
+    }
+    async fn subscribe_compact_tasks(
+        &self,
+    ) -> HummockResult<Streaming<SubscribeCompactTasksResponse>> {
+        unimplemented!()
+    }
 }
 
 pub struct RpcHummockMetaClient {
@@ -189,11 +200,16 @@ impl HummockMetaClient for RpcHummockMetaClient {
         Ok(())
     }
 
-    async fn commit_epoch(&self, _epoch: HummockEpoch) -> HummockResult<()> {
-        unimplemented!()
-    }
-
-    async fn abort_epoch(&self, _epoch: HummockEpoch) -> HummockResult<()> {
-        unimplemented!()
+    async fn subscribe_compact_tasks(
+        &self,
+    ) -> HummockResult<Streaming<SubscribeCompactTasksResponse>> {
+        let stream = self
+            .meta_client
+            .to_owned()
+            .inner
+            .subscribe_compact_tasks(SubscribeCompactTasksRequest {})
+            .await
+            .map_err(HummockError::meta_error)?;
+        Ok(stream)
     }
 }

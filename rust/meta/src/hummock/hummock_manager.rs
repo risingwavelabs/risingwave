@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -406,6 +404,15 @@ where
         let mut transaction = Transaction::default();
         let mut compact_status =
             CompactStatus::get(compaction_guard.meta_store_ref.as_ref()).await?;
+
+        let compact_task_id = compact_task.task_id;
+        let input_sst_count: usize = compact_task
+            .input_ssts
+            .iter()
+            .map(|v| v.level.as_ref().unwrap().table_ids.len())
+            .sum();
+        let output_sst_count = compact_task.sorted_output_ssts.len();
+
         let (sorted_output_ssts, delete_table_ids) = compact_status.report_compact_task(
             output_table_compact_entries,
             compact_task,
@@ -475,6 +482,14 @@ where
         }
         self.commit_trx(compaction_guard.meta_store_ref.as_ref(), transaction, None)
             .await?;
+        if task_result {
+            tracing::debug!(
+                "Finish hummock compaction task id {}, compact {} SSTs to {} SSTs",
+                compact_task_id,
+                input_sst_count,
+                output_sst_count
+            );
+        }
         Ok(())
     }
 

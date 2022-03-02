@@ -1,9 +1,15 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use bytes::{Bytes, BytesMut};
 use futures::stream::{self, StreamExt};
 use futures::Future;
-use risingwave_pb::hummock::{CompactTask, LevelEntry, LevelType, SstableInfo};
+use risingwave_common::error::RwError;
+use risingwave_pb::hummock::{
+    CompactTask, LevelEntry, LevelType, SstableInfo, SubscribeCompactTasksResponse,
+};
+use tokio::sync::mpsc::UnboundedSender;
+use tokio::task::JoinHandle;
 
 use super::iterator::{ConcatIterator, HummockIterator, MergeIterator};
 use super::key::{get_epoch, Epoch, FullKey};
@@ -18,7 +24,6 @@ use crate::hummock::cloud;
 use crate::object::ObjectStore;
 
 pub struct SubCompactContext {
-    // TODO: remove Arc?
     pub options: Arc<HummockOptions>,
     pub local_version_manager: Arc<LocalVersionManager>,
     pub obj_client: Arc<dyn ObjectStore>,
@@ -238,12 +243,10 @@ impl Compactor {
         Ok(())
     }
 
-    pub async fn compact(context: &SubCompactContext) -> HummockResult<()> {
-        let mut compact_task = match context.hummock_meta_client.get_compaction_task().await? {
-            Some(task) => task,
-            None => return Ok(()),
-        };
-
+    pub async fn compact(
+        context: &SubCompactContext,
+        mut compact_task: CompactTask,
+    ) -> HummockResult<()> {
         let result = Compactor::run_compact(context, &mut compact_task).await;
         if result.is_err() {
             for _sst_to_delete in &compact_task.sorted_output_ssts {
@@ -270,5 +273,84 @@ impl Compactor {
             // FIXME: error message in `result` should not be ignored
             Err(HummockError::object_io_error("compaction failed."))
         }
+    }
+
+    pub fn start_compactor(
+        options: Arc<HummockOptions>,
+        local_version_manager: Arc<LocalVersionManager>,
+        obj_client: Arc<dyn ObjectStore>,
+        hummock_meta_client: Arc<dyn HummockMetaClient>,
+    ) -> (JoinHandle<()>, UnboundedSender<()>) {
+        let sub_compact_context = SubCompactContext {
+            options,
+            local_version_manager,
+            obj_client,
+            hummock_meta_client,
+        };
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
+        let stream_retry_interval = Duration::from_secs(60);
+        let join_handle = tokio::spawn(async move {
+            let mut min_interval = tokio::time::interval(stream_retry_interval);
+            // This outer loop is to recreate stream
+            'start_stream: loop {
+                tokio::select! {
+                    // Wait for interval
+                    _ = min_interval.tick() => {},
+                    // Shutdown compactor
+                    _ = shutdown_rx.recv() => {
+                        tracing::info!("compactor is shutting down");
+                        return;
+                    }
+                }
+
+                let mut stream = match sub_compact_context
+                    .hummock_meta_client
+                    .subscribe_compact_tasks()
+                    .await
+                {
+                    Ok(stream) => stream,
+                    Err(e) => {
+                        tracing::warn!("failed to subscribe_compact_tasks. {}", RwError::from(e));
+                        continue 'start_stream;
+                    }
+                };
+
+                // This inner loop is to consume stream
+                loop {
+                    let message = tokio::select! {
+                        message = stream.message() => {
+                            message
+                        },
+                        // Shutdown compactor
+                        _ = shutdown_rx.recv() => {
+                            tracing::info!("compactor is shutting down");
+                            return
+                        }
+                    };
+                    match message {
+                        // The inner Some is the side effect of generated code.
+                        Ok(Some(SubscribeCompactTasksResponse {
+                            compact_task: Some(compact_task),
+                        })) => {
+                            if let Err(e) =
+                                Compactor::compact(&sub_compact_context, compact_task).await
+                            {
+                                tracing::warn!("failed to compact. {}", RwError::from(e));
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!("failed to consume stream. {}", e.message());
+                            continue 'start_stream;
+                        }
+                        _ => {
+                            // The stream is exhausted
+                            continue 'start_stream;
+                        }
+                    }
+                }
+            }
+        });
+
+        (join_handle, shutdown_tx)
     }
 }

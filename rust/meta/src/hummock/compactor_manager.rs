@@ -2,16 +2,17 @@ use std::ops::Add;
 use std::time::{Duration, Instant};
 
 use risingwave_common::error::Result;
-use risingwave_pb::hummock::{CompactTask, CompactTasksResponse};
+use risingwave_pb::hummock::{CompactTask, SubscribeCompactTasksResponse};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::RwLock;
+use tracing::warn;
 
 const STREAM_BUFFER_SIZE: usize = 4;
 const COMPACT_TASK_TIMEOUT: Duration = Duration::from_secs(60);
 
 struct CompactorManagerInner {
     /// Senders of stream to available compactors
-    compactors: Vec<Sender<Result<CompactTasksResponse>>>,
+    compactors: Vec<Sender<Result<SubscribeCompactTasksResponse>>>,
 
     // Although we can find all ongoing compact tasks in CompactStatus, this field can help in
     // tracking compact tasks. We don't persist this field because all assigned tasks would be
@@ -65,13 +66,13 @@ impl CompactorManager {
             }
             let compactor_index = guard.next_compactor % guard.compactors.len();
             let compactor = &guard.compactors[compactor_index];
-            if compactor
-                .send(Ok(CompactTasksResponse {
+            if let Err(err) = compactor
+                .send(Ok(SubscribeCompactTasksResponse {
                     compact_task: Some(compact_task.clone()),
                 }))
                 .await
-                .is_err()
             {
+                warn!("failed to send compaction task. {}", err);
                 guard.compactors.remove(compactor_index);
                 continue;
             }
@@ -87,7 +88,7 @@ impl CompactorManager {
     }
 
     /// A new compactor is registered.
-    pub async fn add_compactor(&self) -> Receiver<Result<CompactTasksResponse>> {
+    pub async fn add_compactor(&self) -> Receiver<Result<SubscribeCompactTasksResponse>> {
         let (tx, rx) = tokio::sync::mpsc::channel(STREAM_BUFFER_SIZE);
         self.inner.write().await.compactors.push(tx);
         rx
@@ -97,7 +98,7 @@ impl CompactorManager {
 #[cfg(test)]
 mod tests {
     use risingwave_common::error::Result;
-    use risingwave_pb::hummock::{CompactTask, CompactTasksResponse};
+    use risingwave_pb::hummock::{CompactTask, SubscribeCompactTasksResponse};
     use tokio::sync::mpsc::error::TryRecvError;
 
     use crate::hummock::CompactorManager;
@@ -137,7 +138,7 @@ mod tests {
             .compactors
             .first()
             .unwrap()
-            .send(Ok(CompactTasksResponse {
+            .send(Ok(SubscribeCompactTasksResponse {
                 compact_task: Some(task.clone()),
             }))
             .await

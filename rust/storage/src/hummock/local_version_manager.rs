@@ -106,7 +106,7 @@ impl LocalVersionManager {
         }
     }
 
-    pub async fn start_workers(
+    pub fn start_workers(
         local_version_manager: Arc<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         shared_buffer_manager: Arc<SharedBufferManager>,

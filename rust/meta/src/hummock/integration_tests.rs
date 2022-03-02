@@ -145,7 +145,7 @@ async fn test_compaction_same_key_not_split() {
         .cloned()
         .unwrap();
     // assert that output table reaches the target size
-    let target_table_size = storage.get_options().sstable_size;
+    let target_table_size = storage.options().sstable_size;
     assert!(table.meta.estimated_size > target_table_size);
 
     // 5. get compact task
