@@ -5,7 +5,7 @@ use risingwave_pb::common::{HashMapping, ParallelUnit};
 use super::MetadataModel;
 use crate::cluster::ParallelUnitId;
 
-/// `VirtualKey` is the logical key for consistent hash. One `VirtualKey` corresponds to exactly one 
+/// `VirtualKey` is the logical key for consistent hash. One `VirtualKey` corresponds to exactly one
 /// `ParallelUnit`, while a `ParallelUnit` can correspond to a number of `VirtualKey`s.
 pub type VirtualKey = usize;
 
@@ -14,9 +14,9 @@ const HASH_MAPPING_CF_NAME: &str = "cf/hash_mapping";
 /// Hardcoded key for mapping storage.
 const HASH_MAPPING_KEY: &str = "consistent_hash_mapping";
 
-/// `ConsistentHashMapping` stores the hash mapping from `VirtualKey` to `ParallelUnit` based on 
-/// consistent hash, which serves for load balance of the cluster. Specifically, `Dispatcher` 
-/// dispatches compute tasks to downstream actors in a load balanced way according to the mapping. 
+/// `ConsistentHashMapping` stores the hash mapping from `VirtualKey` to `ParallelUnit` based on
+/// consistent hash, which serves for load balance of the cluster. Specifically, `Dispatcher`
+/// dispatches compute tasks to downstream actors in a load balanced way according to the mapping.
 /// When the mapping changes, every compute node in the cluster should be informed.
 #[derive(Debug, Clone)]
 pub struct ConsistentHashMapping(HashMapping);
@@ -78,8 +78,7 @@ impl ConsistentHashMapping {
     }
 
     pub fn get_mapping(&self) -> Vec<ParallelUnitId> {
-        self
-            .0
+        self.0
             .parallel_units
             .iter()
             .map(|parallel_unit| parallel_unit.id)

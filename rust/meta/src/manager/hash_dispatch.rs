@@ -14,8 +14,8 @@ const VIRTUAL_KEY_COUNT: usize = 2048;
 
 pub type HashDispatchManagerRef<S> = Arc<HashDispatchManager<S>>;
 
-/// `HashDispatchManager` maintains a load-balanced hash mapping based on consistent hash. 
-/// The mapping changes when one or more nodes enter or leave the cluster. 
+/// `HashDispatchManager` maintains a load-balanced hash mapping based on consistent hash.
+/// The mapping changes when one or more nodes enter or leave the cluster.
 pub struct HashDispatchManager<S> {
     core: Mutex<HashDispatchManagerCore<S>>,
 }
@@ -24,9 +24,13 @@ impl<S> HashDispatchManager<S>
 where
     S: MetaStore,
 {
-    pub async fn new(meta_store_ref: Arc<S>) -> Result<Self> {
+    pub async fn new(compute_nodes: Vec<&WorkerNode>, meta_store_ref: Arc<S>) -> Result<Self> {
+        let mut core = HashDispatchManagerCore::new(meta_store_ref);
+        if !compute_nodes.is_empty() {
+            core.add_worker_mapping_from_empty(compute_nodes).await?;
+        }
         Ok(Self {
-            core: Mutex::new(HashDispatchManagerCore::new(meta_store_ref).await?),
+            core: Mutex::new(core),
         })
     }
 
@@ -50,7 +54,7 @@ where
     }
 }
 
-/// [`HashDispatchManagerCore`] contains the core logic for mapping change when one or more nodes 
+/// [`HashDispatchManagerCore`] contains the core logic for mapping change when one or more nodes
 /// enter or leave the cluster.
 struct HashDispatchManagerCore<S> {
     /// Total number of parallel units in cluster.
@@ -78,18 +82,18 @@ impl<S> HashDispatchManagerCore<S>
 where
     S: MetaStore,
 {
-    async fn new(meta_store_ref: Arc<S>) -> Result<Self> {
-        let key_mapping = ConsistentHashMapping::from(&Vec::with_capacity(VIRTUAL_KEY_COUNT));
+    fn new(meta_store_ref: Arc<S>) -> Self {
+        let key_mapping = ConsistentHashMapping::from(&Vec::new());
         let owner_mapping: HashMap<ParallelUnitId, Vec<VirtualKey>> = HashMap::new();
         let load_balancer: BTreeMap<usize, Vec<ParallelUnitId>> = BTreeMap::new();
 
-        Ok(Self {
+        Self {
             total_parallels: 0,
             key_mapping,
             owner_mapping,
             load_balancer,
             meta_store_ref,
-        })
+        }
     }
 
     async fn add_worker_mapping_from_empty(
@@ -334,102 +338,151 @@ mod tests {
                 }
             })
             .collect_vec();
-        let hash_dispatch_manager = HashDispatchManager::new(meta_store_ref).await?;
+
+        let hash_dispatch_manager = HashDispatchManager::new(vec![], meta_store_ref).await?;
 
         for node in &worker_nodes {
             hash_dispatch_manager.add_worker_mapping(node).await?;
-            let core = hash_dispatch_manager.core.lock().await;
-            assert_eq!(
-                core.owner_mapping
-                    .iter()
-                    .map(|(_, keys)| { keys.len() })
-                    .sum::<usize>(),
-                VIRTUAL_KEY_COUNT
-            );
-            assert_eq!(
-                core.load_balancer
-                    .iter()
-                    .map(|(load_count, parallel_units)| { load_count * parallel_units.len() })
-                    .sum::<usize>(),
-                VIRTUAL_KEY_COUNT
-            );
-            let key_mapping = core.key_mapping.get_mapping();
-            let load_balancer = &core.load_balancer;
-            let owner_mapping = &core.owner_mapping;
-            for (&load_count, parallel_units) in load_balancer {
-                for parallel_unit_id in parallel_units {
-                    assert_eq!(
-                        key_mapping
-                            .iter()
-                            .filter(|&id| *id == *parallel_unit_id)
-                            .count(),
-                        load_count
-                    );
-                    assert_eq!(
-                        owner_mapping.get(parallel_unit_id).unwrap().len(),
-                        load_count
-                    );
-                }
-            }
+            assert_core(&hash_dispatch_manager).await;
         }
-
-        {
-            let core = hash_dispatch_manager.core.lock().await;
-            assert_eq!(
-                core.owner_mapping.keys().len() as u32,
-                worker_count * parallel_unit_per_node
-            );
-        }
+        assert_parallel_unit_count(
+            &hash_dispatch_manager,
+            worker_count * parallel_unit_per_node,
+        )
+        .await;
 
         let mut deleted_count = 0u32;
         for node in &worker_nodes {
             if node.get_id() % 2 == 0 {
                 hash_dispatch_manager.delete_worker_mapping(node).await?;
-                let core = hash_dispatch_manager.core.lock().await;
-                assert_eq!(
-                    core.owner_mapping
-                        .iter()
-                        .map(|(_, keys)| { keys.len() })
-                        .sum::<usize>(),
-                    VIRTUAL_KEY_COUNT
-                );
-                assert_eq!(
-                    core.load_balancer
-                        .iter()
-                        .map(|(load_count, parallel_units)| { load_count * parallel_units.len() })
-                        .sum::<usize>(),
-                    VIRTUAL_KEY_COUNT
-                );
-                let key_mapping = core.key_mapping.get_mapping();
-                let load_balancer = &core.load_balancer;
-                let owner_mapping = &core.owner_mapping;
-                for (&load_count, parallel_units) in load_balancer {
-                    for parallel_unit_id in parallel_units {
-                        assert_eq!(
-                            key_mapping
-                                .iter()
-                                .filter(|&id| *id == *parallel_unit_id)
-                                .count(),
-                            load_count
-                        );
-                        assert_eq!(
-                            owner_mapping.get(parallel_unit_id).unwrap().len(),
-                            load_count
-                        );
-                    }
-                }
+                assert_core(&hash_dispatch_manager).await;
                 deleted_count += 1;
             }
         }
-
-        {
-            let core = hash_dispatch_manager.core.lock().await;
-            assert_eq!(
-                core.owner_mapping.keys().len() as u32,
-                (worker_count - deleted_count) * parallel_unit_per_node
-            );
-        }
+        assert_parallel_unit_count(
+            &hash_dispatch_manager,
+            (worker_count - deleted_count) * parallel_unit_per_node,
+        )
+        .await;
 
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_hash_dispatch_manager_reboot() -> Result<()> {
+        let meta_store_ref = Arc::new(MemStore::default());
+        let mut current_id = 0u32;
+        let init_worker_count = 3u32;
+        let init_parallel_unit_per_node = 4u32;
+        let host_address = HostAddress {
+            host: "127.0.0.1".to_string(),
+            port: 80,
+        };
+        let init_worker_nodes = (0..init_worker_count)
+            .map(|node_id| {
+                let parallel_units = (0..init_parallel_unit_per_node)
+                    .map(|_| {
+                        let parallel_unit = ParallelUnit { id: current_id };
+                        current_id += 1;
+                        parallel_unit
+                    })
+                    .collect_vec();
+                WorkerNode {
+                    id: node_id,
+                    r#type: WorkerType::ComputeNode as i32,
+                    host: Some(host_address.clone()),
+                    state: State::Starting as i32,
+                    parallel_units,
+                }
+            })
+            .collect_vec();
+
+        let hash_dispatch_manager =
+            HashDispatchManager::new(init_worker_nodes.iter().collect_vec(), meta_store_ref)
+                .await?;
+        assert_core(&hash_dispatch_manager).await;
+        assert_parallel_unit_count(
+            &hash_dispatch_manager,
+            init_worker_count * init_parallel_unit_per_node,
+        )
+        .await;
+
+        let worker_count = 10u32;
+        let parallel_unit_per_node = 5u32;
+        let worker_nodes = (init_worker_count..worker_count)
+            .map(|node_id| {
+                let parallel_units = (0..parallel_unit_per_node)
+                    .map(|_| {
+                        let parallel_unit = ParallelUnit { id: current_id };
+                        current_id += 1;
+                        parallel_unit
+                    })
+                    .collect_vec();
+                WorkerNode {
+                    id: node_id,
+                    r#type: WorkerType::ComputeNode as i32,
+                    host: Some(host_address.clone()),
+                    state: State::Starting as i32,
+                    parallel_units,
+                }
+            })
+            .collect_vec();
+
+        for node in &worker_nodes {
+            hash_dispatch_manager.add_worker_mapping(node).await?;
+            assert_core(&hash_dispatch_manager).await;
+        }
+        assert_parallel_unit_count(
+            &hash_dispatch_manager,
+            init_worker_count * init_parallel_unit_per_node
+                + (worker_count - init_worker_count) * parallel_unit_per_node,
+        )
+        .await;
+
+        Ok(())
+    }
+
+    async fn assert_core(hash_dispatch_manager: &HashDispatchManager<MemStore>) {
+        let core = hash_dispatch_manager.core.lock().await;
+        assert_eq!(
+            core.owner_mapping
+                .iter()
+                .map(|(_, keys)| { keys.len() })
+                .sum::<usize>(),
+            VIRTUAL_KEY_COUNT
+        );
+        assert_eq!(
+            core.load_balancer
+                .iter()
+                .map(|(load_count, parallel_units)| { load_count * parallel_units.len() })
+                .sum::<usize>(),
+            VIRTUAL_KEY_COUNT
+        );
+        let key_mapping = core.key_mapping.get_mapping();
+        let load_balancer = &core.load_balancer;
+        let owner_mapping = &core.owner_mapping;
+        for (&load_count, parallel_units) in load_balancer {
+            for parallel_unit_id in parallel_units {
+                assert_eq!(
+                    key_mapping
+                        .iter()
+                        .filter(|&id| *id == *parallel_unit_id)
+                        .count(),
+                    load_count
+                );
+                assert_eq!(
+                    owner_mapping.get(parallel_unit_id).unwrap().len(),
+                    load_count
+                );
+            }
+        }
+    }
+
+    async fn assert_parallel_unit_count(
+        hash_dispatch_manager: &HashDispatchManager<MemStore>,
+        parallel_unit_count: u32,
+    ) {
+        let core = hash_dispatch_manager.core.lock().await;
+        assert_eq!(core.owner_mapping.keys().len() as u32, parallel_unit_count);
     }
 }

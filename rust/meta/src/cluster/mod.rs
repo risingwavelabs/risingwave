@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
+use itertools::Itertools;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
@@ -68,13 +69,19 @@ where
             "Worker::list fail"
         )?;
         let worker_map = DashMap::new();
+        let mut compute_nodes = Vec::new();
 
         workers.iter().for_each(|w| {
             worker_map.insert(WorkerKey(w.key().unwrap()), w.clone());
+            if w.worker_type() == WorkerType::ComputeNode {
+                compute_nodes.push(w.worker_node());
+            }
         });
 
-        let dispatch_manager_ref =
-            Arc::new(HashDispatchManager::new(meta_store_ref.clone()).await?);
+        let dispatch_manager_ref = Arc::new(
+            HashDispatchManager::new(compute_nodes.iter().collect_vec(), meta_store_ref.clone())
+                .await?,
+        );
 
         Ok(Self {
             meta_store_ref,
@@ -94,24 +101,26 @@ where
         match self.workers.entry(WorkerKey(host_address.clone())) {
             Entry::Occupied(o) => Ok((o.get().to_protobuf(), false)),
             Entry::Vacant(v) => {
-                let id = self
+                let worker_id = self
                     .id_gen_manager_ref
                     .generate::<{ IdCategory::Worker }>()
                     .await?;
 
                 let mut parallel_units = Vec::with_capacity(DEFAULT_WORKNODE_PARALLEL_DEGREE);
-                for _ in 0..DEFAULT_WORKNODE_PARALLEL_DEGREE {
-                    let parallel_unit_id = self
-                        .id_gen_manager_ref
-                        .generate::<{ IdCategory::ParallelUnit }>()
-                        .await?;
+                let start_id = self
+                    .id_gen_manager_ref
+                    .generate_interval::<{ IdCategory::ParallelUnit }>(
+                        DEFAULT_WORKNODE_PARALLEL_DEGREE as i32,
+                    )
+                    .await? as usize;
+                for parallel_unit_id in start_id..start_id + DEFAULT_WORKNODE_PARALLEL_DEGREE {
                     parallel_units.push(ParallelUnit {
                         id: parallel_unit_id as u32,
                     });
                 }
 
                 let worker_node = WorkerNode {
-                    id: id as u32,
+                    id: worker_id as u32,
                     r#type: r#type as i32,
                     host: Some(host_address.clone()),
                     state: State::Starting as i32,
