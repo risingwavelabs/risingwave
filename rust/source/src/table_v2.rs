@@ -2,13 +2,14 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::RwLock;
 
 use async_trait::async_trait;
+use log::warn;
 use rand::prelude::SliceRandom;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
 use risingwave_storage::table::ScannableTableRef;
 use risingwave_storage::TableColumnDesc;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 use crate::{BatchSourceReader, Source, StreamSourceReader};
 
@@ -20,7 +21,7 @@ struct TableSourceV2Core {
     ///
     /// When a `StreamReader` is created, a channel will be created and the sender will be
     /// saved here. The insert statement will take one channel randomly.
-    changes_txs: Vec<mpsc::UnboundedSender<StreamChunk>>,
+    changes_txs: Vec<mpsc::UnboundedSender<(StreamChunk, oneshot::Sender<()>)>>,
 }
 
 /// [`TableSourceV2`] is a special internal source to handle table updates from user,
@@ -67,13 +68,24 @@ impl TableSourceV2 {
     /// Write stream chunk into table. Changes writen here will be simply passed to the associated
     /// streaming task via channel, and then be materialized to storage there.
     pub async fn write_chunk(&self, chunk: StreamChunk) -> Result<()> {
-        let core = self.core.read().unwrap();
+        let notifier_rx = {
+            let core = self.core.read().unwrap();
 
-        let tx = core
-            .changes_txs
-            .choose(&mut rand::thread_rng())
-            .expect("no table reader exists");
-        tx.send(chunk).expect("write chunk to table reader failed");
+            let tx = core
+                .changes_txs
+                .choose(&mut rand::thread_rng())
+                .expect("no table reader exists");
+
+            let (notifier_tx, notifier_rx) = oneshot::channel();
+            tx.send((chunk, notifier_tx))
+                .expect("write chunk to table reader failed");
+
+            notifier_rx
+        };
+
+        if notifier_rx.await.is_err() {
+            warn!("failed to wait for reader consuming the data chunk");
+        }
 
         Ok(())
     }
@@ -110,7 +122,7 @@ impl BatchSourceReader for TableV2BatchReader {
 pub struct TableV2StreamReader {
     /// The receiver of the changes channel. This field is `Some` only if the reader has been
     /// `open`ed.
-    rx: mpsc::UnboundedReceiver<StreamChunk>,
+    rx: mpsc::UnboundedReceiver<(StreamChunk, oneshot::Sender<()>)>,
 
     /// Mappings from the source column to the column to be read.
     column_indices: Vec<usize>,
@@ -123,10 +135,12 @@ impl StreamSourceReader for TableV2StreamReader {
     }
 
     async fn next(&mut self) -> Result<StreamChunk> {
-        let chunk = match self.rx.recv().await {
-            Some(chunk) => chunk,
-            None => panic!("TableSourceV2 dropped before associated streaming task terminated"),
-        };
+        let (chunk, notifier) = self
+            .rx
+            .recv()
+            .await
+            .expect("TableSourceV2 dropped before associated streaming task terminated");
+        notifier.send(()).ok();
 
         let (ops, columns, bitmap) = chunk.into_inner();
 
