@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_pb::common::{HashMapping, ParallelUnit};

@@ -135,7 +135,6 @@ message Dispatcher {
   }
   DispatcherType type = 1;
   repeated uint32 column_indices = 2;
-  // repeated uint32 mapping = 3;
 }
 
 // A StreamActor is a running fragment of the overall stream graph,
