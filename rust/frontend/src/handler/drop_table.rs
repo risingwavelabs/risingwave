@@ -5,7 +5,7 @@ use risingwave_sqlparser::ast::ObjectName;
 use crate::catalog::catalog_service::DEFAULT_SCHEMA_NAME;
 use crate::session::RwSession;
 
-pub(super) async fn handle_drop_table(
+pub async fn handle_drop_table(
     session: &RwSession,
     table_name: ObjectName,
 ) -> Result<PgResponse> {

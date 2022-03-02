@@ -1548,6 +1548,7 @@ dependencies = [
 name = "frontend"
 version = "0.1.3"
 dependencies = [
+ "anyhow",
  "async-trait",
  "byteorder",
  "bytes",
@@ -1568,6 +1569,8 @@ dependencies = [
  "risingwave_rpc_client",
  "risingwave_source",
  "risingwave_sqlparser",
+ "serde",
+ "serde_yaml",
  "serial_test",
  "smallvec",
  "tempfile",
@@ -1577,6 +1580,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "walkdir",
 ]
 
 [[package]]
