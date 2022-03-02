@@ -5,7 +5,10 @@ use risingwave_sqlparser::ast::ObjectName;
 use crate::catalog::catalog_service::DEFAULT_SCHEMA_NAME;
 use crate::session::SessionImpl;
 
-pub async fn handle_drop_table(session: &SessionImpl, table_name: ObjectName) -> Result<PgResponse> {
+pub async fn handle_drop_table(
+    session: &SessionImpl,
+    table_name: ObjectName,
+) -> Result<PgResponse> {
     let str_table_name = table_name.to_string();
 
     let catalog_mgr = session.env().catalog_mgr();

@@ -19,7 +19,8 @@ impl Default for ApplyOrder {
 }
 
 // TODO: we should have a builder of HeuristicOptimizer here
-/// a rule based heuristic optimizer, which traverse every nodes and try to apply each rules on them.
+/// A rule-based heuristic optimizer, which traverses every plan nodes and tries to
+/// apply each rule on them.
 pub struct HeuristicOptimizer {
     apply_order: ApplyOrder,
     rules: Vec<BoxedRule>,

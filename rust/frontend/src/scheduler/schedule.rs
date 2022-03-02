@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, mpsc, RwLock};
+use std::sync::{mpsc, Arc, RwLock};
 
 use rand::distributions::{Distribution as RandDistribution, Uniform};
 use risingwave_common::error::Result;
