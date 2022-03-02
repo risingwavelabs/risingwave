@@ -9,6 +9,7 @@ use risingwave_common::error::Result;
 use super::StateStoreStats;
 use crate::{StateStore, StateStoreIter};
 
+/// A state store wrapper for monitoring metrics.
 #[derive(Clone)]
 pub struct MonitoredStateStore<S> {
     inner: S,
@@ -141,6 +142,7 @@ where
     }
 }
 
+/// A state store iterator wrapper for monitoring metrics.
 pub struct MonitoredStateStoreIter<I> {
     inner: I,
 

@@ -87,9 +87,6 @@ impl StateStore for TikvStateStore {
             let key = Bytes::copy_from_slice(key.as_ref().into());
             let value = Bytes::from(value);
             data.push((key.clone(), value.clone()));
-            // self.stats
-            //     .iter_next_size
-            //     .observe((key.len() + value.len()) as f64);
             if let Some(limit) = limit {
                 if data.len() >= limit {
                     break;
