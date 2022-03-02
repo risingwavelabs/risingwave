@@ -37,7 +37,9 @@ import org.apache.calcite.sql.SqlOperator;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.util.Util;
 
-/** Utilities functions for Planner */
+/**
+ * Utilities functions for Planner
+ */
 public class PlannerUtils {
   public static boolean isSingleMode(ExecutionContext context) {
     return context.getConf().get(CLUSTER_MODE) == LeaderServerConfigurations.ClusterMode.Single;
@@ -73,7 +75,9 @@ public class PlannerUtils {
     return new CnfHelper(rexBuilder, maxCnfNodeCnt).toCnf(rex);
   }
 
-  /** Get the number of RexCall in the given node. */
+  /**
+   * Get the number of RexCall in the given node.
+   */
   private static int getNumberOfRexCall(RexNode rex) {
     final int[] numberOfNodes = new int[] {0};
     rex.accept(
@@ -87,7 +91,9 @@ public class PlannerUtils {
     return numberOfNodes[0];
   }
 
-  /** Helps [[toCnf]] */
+  /**
+   * Helps [[toCnf]]
+   */
   private static class CnfHelper {
     private final RexBuilder rexBuilder;
     private final int maxNodeCount;
@@ -111,69 +117,64 @@ public class PlannerUtils {
 
     private RexNode toCnf2(RexNode rex) {
       switch (rex.getKind()) {
-        case AND:
-          {
-            List<RexNode> cnfOperands = Lists.newArrayList();
-            var operands = RexUtil.flattenAnd(((RexCall) rex).getOperands());
-            for (RexNode node : operands) {
-              var cnf = toCnf2(node);
-              if (cnf.getKind() == SqlKind.AND) {
-                cnfOperands.addAll(((RexCall) cnf).getOperands());
-              } else {
-                cnfOperands.add(cnf);
-              }
-            }
-            var node = and(cnfOperands);
-            checkCnfRexCallCount(node);
-            return node;
-          }
-        case OR:
-          {
-            var operands = RexUtil.flattenOr(((RexCall) rex).getOperands());
-            var head = operands.get(0);
-            var headCnf = toCnf2(head);
-            var headCnfs = RelOptUtil.conjunctions(headCnf);
-            var tail = or(Util.skip(operands));
-            var tailCnf = toCnf2(tail);
-            var tailCnfs = RelOptUtil.conjunctions(tailCnf);
-            List<RexNode> list = Lists.newArrayList();
-            for (var h : headCnfs) {
-              for (var t : tailCnfs) {
-                list.add(or(ImmutableList.of(h, t)));
-              }
-            }
-            var node = and(list);
-            checkCnfRexCallCount(node);
-            return node;
-          }
-        case NOT:
-          {
-            var arg = ((RexCall) rex).getOperands().get(0);
-            switch (arg.getKind()) {
-              case NOT:
-                return toCnf2(((RexCall) arg).getOperands().get(0));
-              case OR:
-                {
-                  var operands = ((RexCall) arg).getOperands();
-                  return toCnf2(
-                      and(
-                          RexUtil.flattenOr(operands).stream()
-                              .map(this::addNot)
-                              .collect(Collectors.toList())));
-                }
-              case AND:
-                {
-                  var operands = ((RexCall) arg).getOperands();
-                  return toCnf2(
-                      or(
-                          RexUtil.flattenAnd(operands).stream()
-                              .map(this::addNot)
-                              .collect(Collectors.toList())));
-                }
-              default:
-                return rex;
+        case AND: {
+          List<RexNode> cnfOperands = Lists.newArrayList();
+          var operands = RexUtil.flattenAnd(((RexCall) rex).getOperands());
+          for (RexNode node : operands) {
+            var cnf = toCnf2(node);
+            if (cnf.getKind() == SqlKind.AND) {
+              cnfOperands.addAll(((RexCall) cnf).getOperands());
+            } else {
+              cnfOperands.add(cnf);
             }
           }
+          var node = and(cnfOperands);
+          checkCnfRexCallCount(node);
+          return node;
+        }
+        case OR: {
+          var operands = RexUtil.flattenOr(((RexCall) rex).getOperands());
+          var head = operands.get(0);
+          var headCnf = toCnf2(head);
+          var headCnfs = RelOptUtil.conjunctions(headCnf);
+          var tail = or(Util.skip(operands));
+          var tailCnf = toCnf2(tail);
+          var tailCnfs = RelOptUtil.conjunctions(tailCnf);
+          List<RexNode> list = Lists.newArrayList();
+          for (var h : headCnfs) {
+            for (var t : tailCnfs) {
+              list.add(or(ImmutableList.of(h, t)));
+            }
+          }
+          var node = and(list);
+          checkCnfRexCallCount(node);
+          return node;
+        }
+        case NOT: {
+          var arg = ((RexCall) rex).getOperands().get(0);
+          switch (arg.getKind()) {
+            case NOT:
+              return toCnf2(((RexCall) arg).getOperands().get(0));
+            case OR: {
+              var operands = ((RexCall) arg).getOperands();
+              return toCnf2(
+                  and(
+                      RexUtil.flattenOr(operands).stream()
+                          .map(this::addNot)
+                          .collect(Collectors.toList())));
+            }
+            case AND: {
+              var operands = ((RexCall) arg).getOperands();
+              return toCnf2(
+                  or(
+                      RexUtil.flattenAnd(operands).stream()
+                          .map(this::addNot)
+                          .collect(Collectors.toList())));
+            }
+            default:
+              return rex;
+          }
+        }
         default:
           return rex;
       }
@@ -333,33 +334,31 @@ public class PlannerUtils {
       var newConjunctions =
           RelOptUtil.conjunctions(newExpr1).stream()
               .map(ex -> mergeSameExpr(ex, rexBuilder.makeLiteral(true)))
-              .collect(Collectors.toList());
+              .toArray(RexNode[]::new);
 
       RexNode newExpr2;
-      if (newConjunctions.size() == 0) {
+      if (newConjunctions.length == 0) {
         newExpr2 = newExpr1;
-      } else if (newConjunctions.size() == 1) {
-        newExpr2 = newConjunctions.get(0);
+      } else if (newConjunctions.length == 1) {
+        newExpr2 = newConjunctions[0];
       } else {
-        newExpr2 = rexBuilder.makeCall(AND, newConjunctions.toArray(new RexNode[0]));
+        newExpr2 = rexBuilder.makeCall(AND, newConjunctions);
       }
 
       // merges same expressions in disjunctions
       // e.g. (a > b OR c < 10) OR a > b -> a > b OR c < 10 OR false
       sameExprMap.clear();
+      var newDisjunctions = RelOptUtil.disjunctions(newExpr2).stream()
+          .map(ex -> mergeSameExpr(ex, rexBuilder.makeLiteral(false)))
+          .toArray(RexNode[]::new);
 
       RexNode newExpr3;
-      if (newConjunctions.size() == 0) {
+      if (newDisjunctions.length == 0) {
         newExpr3 = newExpr2;
-      } else if (newConjunctions.size() == 1) {
-        newExpr3 = newConjunctions.get(0);
+      } else if (newDisjunctions.length == 1) {
+        newExpr3 = newDisjunctions[0];
       } else {
-        newExpr3 =
-            rexBuilder.makeCall(
-                OR,
-                RelOptUtil.disjunctions(newExpr2).stream()
-                    .map(ex -> mergeSameExpr(ex, rexBuilder.makeLiteral(false)))
-                    .toArray(RexNode[]::new));
+        newExpr3 = rexBuilder.makeCall(OR, newDisjunctions);
       }
 
       return newExpr3;

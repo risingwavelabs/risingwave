@@ -55,7 +55,7 @@ public class Configuration {
     if (configEntry == null) {
       throw new PgException(
           PgErrorCode.CONFIG_FILE_ERROR,
-          "Config %s is missing and has no default value!",
+          "Config entry '%s' not found!",
           stringKey);
     } else {
       return configEntry;

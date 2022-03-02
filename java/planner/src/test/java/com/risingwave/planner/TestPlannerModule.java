@@ -9,6 +9,7 @@ import com.google.inject.Singleton;
 import com.risingwave.catalog.CatalogService;
 import com.risingwave.catalog.SimpleCatalogService;
 import com.risingwave.common.config.Configuration;
+import com.risingwave.common.config.FrontendServerConfigurations;
 import com.risingwave.common.config.LeaderServerConfigurations;
 import com.risingwave.execution.handler.DefaultSqlHandlerFactory;
 import com.risingwave.execution.handler.SqlHandlerFactory;
@@ -56,9 +57,9 @@ public class TestPlannerModule extends AbstractModule {
   @Singleton
   @Provides
   static Configuration getConfiguration() {
-    var cfg = new Configuration();
-    cfg.set(LeaderServerConfigurations.COMPUTE_NODES, Lists.newArrayList("127.0.0.1:1234"));
-    return cfg;
+    var testConfig = TestPlannerModule.class.getClassLoader()
+        .getResourceAsStream("config.properties");
+    return Configuration.load(testConfig, FrontendServerConfigurations.class, LeaderServerConfigurations.class);
   }
 
   @Singleton

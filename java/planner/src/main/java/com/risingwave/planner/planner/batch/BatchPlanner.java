@@ -30,6 +30,8 @@ import com.risingwave.planner.rel.physical.RwBatchProject;
 import com.risingwave.planner.rel.serialization.ExplainWriter;
 import com.risingwave.planner.rules.physical.BatchRuleSets;
 import com.risingwave.planner.sql.SqlConverter;
+import java.util.function.BiFunction;
+import java.util.function.Function;
 import org.apache.calcite.rel.RelCollation;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.RelRoot;
@@ -49,10 +51,10 @@ public class BatchPlanner implements Planner<BatchPlan> {
     return planDistributed(ast, context);
   }
 
-  private RelNode plan(SqlNode ast, ExecutionContext context, OptimizerPhase optimizeLevel) {
+  public RelNode plan(SqlNode ast, ExecutionContext context, Function<RelCollation, OptimizerProgram> optimizerProgramProvider) {
     SqlConverter sqlConverter = SqlConverter.builder(context).build();
     RelRoot rawRoot = sqlConverter.toRel(ast);
-    OptimizerProgram optimizerProgram = buildOptimizerProgram(optimizeLevel, rawRoot.collation);
+    OptimizerProgram optimizerProgram = optimizerProgramProvider.apply(rawRoot.collation);
     RelNode optimized = optimizerProgram.optimize(rawRoot.rel, context);
     if (!rawRoot.isRefTrivial()) {
       LogicalProject proj = (LogicalProject) rawRoot.withRel(optimized).project(true);
@@ -69,20 +71,20 @@ public class BatchPlanner implements Planner<BatchPlan> {
   }
 
   public RelNode planLogical(SqlNode ast, ExecutionContext context) {
-    RelNode result = plan(ast, context, LOGICAL_CBO);
+    RelNode result = plan(ast, context, relCollation -> buildOptimizerProgram(LOGICAL_CBO, relCollation));
     log.info("Create logical plan:\n {}", ExplainWriter.explainPlan(result));
     return result;
   }
 
   public BatchPlan planPhysical(SqlNode ast, ExecutionContext context) {
-    RelNode result = plan(ast, context, PHYSICAL);
+    RelNode result = plan(ast, context, relCollation -> buildOptimizerProgram(PHYSICAL, relCollation));
     RisingWaveBatchPhyRel root = (RisingWaveBatchPhyRel) result;
     log.debug("Create physical plan:\n {}", ExplainWriter.explainPlan(root));
     return new BatchPlan(root);
   }
 
   public BatchPlan planDistributed(SqlNode ast, ExecutionContext context) {
-    RelNode result = plan(ast, context, DISTRIBUTED);
+    RelNode result = plan(ast, context, relCollation -> buildOptimizerProgram(DISTRIBUTED, relCollation));
     RisingWaveBatchPhyRel root = (RisingWaveBatchPhyRel) result;
     log.debug("Create distributed plan:\n {}", ExplainWriter.explainPlan(root));
     return new BatchPlan(root);

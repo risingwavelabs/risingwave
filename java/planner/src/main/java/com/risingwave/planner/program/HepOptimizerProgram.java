@@ -55,6 +55,11 @@ public class HepOptimizerProgram implements OptimizerProgram {
       return this;
     }
 
+    public Builder addRule(RelOptRule rule) {
+      rules.add(rule);
+      return this;
+    }
+
     public Builder withUseRuleInstance(boolean useRuleInstance) {
       this.useRuleInstance = useRuleInstance;
       return this;
