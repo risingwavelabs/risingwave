@@ -106,6 +106,8 @@ where
         };
         init_version.upsert_in_transaction(&mut transaction)?;
 
+        // TODO #93: Cancel all compact_tasks
+
         self.commit_trx(compaction_guard.meta_store_ref.as_ref(), transaction, None)
             .await
     }
@@ -353,10 +355,7 @@ where
         .await
     }
 
-    pub async fn get_compact_task(
-        &self,
-        context_id: HummockContextId,
-    ) -> Result<Option<CompactTask>> {
+    pub async fn get_compact_task(&self) -> Result<Option<CompactTask>> {
         let watermark = {
             let versioning_guard = self.versioning.read().await;
             let current_version_id =
@@ -386,12 +385,8 @@ where
             Some(mut compact_task) => {
                 let mut transaction = compaction_guard.meta_store_ref.get_transaction();
                 compact_status.update_in_transaction(&mut transaction);
-                self.commit_trx(
-                    compaction_guard.meta_store_ref.as_ref(),
-                    transaction,
-                    Some(context_id),
-                )
-                .await?;
+                self.commit_trx(compaction_guard.meta_store_ref.as_ref(), transaction, None)
+                    .await?;
                 compact_task.watermark = watermark;
                 Ok(Some(compact_task))
             }
@@ -400,7 +395,6 @@ where
 
     pub async fn report_compact_task(
         &self,
-        context_id: HummockContextId,
         compact_task: CompactTask,
         task_result: bool,
     ) -> Result<()> {
@@ -480,12 +474,8 @@ where
                 tables_to_delete.upsert_in_transaction(&mut transaction)?;
             }
         }
-        self.commit_trx(
-            compaction_guard.meta_store_ref.as_ref(),
-            transaction,
-            Some(context_id),
-        )
-        .await?;
+        self.commit_trx(compaction_guard.meta_store_ref.as_ref(), transaction, None)
+            .await?;
         Ok(())
     }
 

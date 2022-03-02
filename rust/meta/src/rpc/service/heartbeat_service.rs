@@ -2,7 +2,7 @@ use risingwave_pb::meta::heartbeat_service_server::HeartbeatService;
 use risingwave_pb::meta::{HeartbeatRequest, HeartbeatResponse};
 use tonic::{Request, Response, Status};
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct HeartbeatServiceImpl {}
 
 impl HeartbeatServiceImpl {

@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
+use std::fmt::Debug;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
@@ -65,6 +66,20 @@ pub struct ExecutorParams {
     pub op_info: String,
     pub input: Vec<Box<dyn Executor>>,
     pub actor_id: u32,
+}
+
+impl Debug for ExecutorParams {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ExecutorParams")
+            .field("env", &"...")
+            .field("pk_indices", &self.pk_indices)
+            .field("executor_id", &self.executor_id)
+            .field("operator_id", &self.operator_id)
+            .field("op_info", &self.op_info)
+            .field("input", &self.input)
+            .field("actor_id", &self.actor_id)
+            .finish()
+    }
 }
 
 impl StreamManager {
@@ -224,7 +239,8 @@ fn update_upstreams(context: &SharedContext, ids: &[UpDownActorIds]) {
 
 impl StreamManagerCore {
     fn new(addr: SocketAddr, state_store: StateStoreImpl) -> Self {
-        Self::with_store_and_context(state_store, SharedContext::new(addr))
+        let context = SharedContext::new(addr, state_store.clone());
+        Self::with_store_and_context(state_store, context)
     }
 
     fn with_store_and_context(state_store: StateStoreImpl, context: SharedContext) -> Self {

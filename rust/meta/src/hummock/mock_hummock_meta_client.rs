@@ -83,7 +83,7 @@ impl HummockMetaClient for MockHummockMetaClient {
 
     async fn get_compaction_task(&self) -> HummockResult<Option<CompactTask>> {
         self.hummock_manager
-            .get_compact_task(self.context_id)
+            .get_compact_task()
             .await
             .map_err(HummockError::meta_error)
     }
@@ -94,7 +94,7 @@ impl HummockMetaClient for MockHummockMetaClient {
         task_result: bool,
     ) -> HummockResult<()> {
         self.hummock_manager
-            .report_compact_task(self.context_id, compact_task, task_result)
+            .report_compact_task(compact_task, task_result)
             .await
             .map_err(HummockError::meta_error)
     }

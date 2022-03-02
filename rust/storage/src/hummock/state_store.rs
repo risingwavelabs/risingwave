@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use risingwave_common::error::Result;
 
-use super::HummockStorage;
+use super::{HummockResult, HummockStorage};
 use crate::hummock::iterator::DirectedUserIterator;
 use crate::{StateStore, StateStoreIter};
 
@@ -76,6 +76,11 @@ impl StateStore for HummockStateStore {
 
     async fn wait_epoch(&self, epoch: u64) {
         self.storage.wait_epoch(epoch).await;
+    }
+
+    async fn sync(&self, epoch: Option<u64>) -> Result<()> {
+        self.storage.sync(epoch).await?;
+        Ok(())
     }
 }
 

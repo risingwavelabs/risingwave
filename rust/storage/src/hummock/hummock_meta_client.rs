@@ -66,14 +66,12 @@ impl HummockMetaClient for RpcHummockMetaClient {
         let timer = self.stats.pin_version_latency.start_timer();
         let result = self
             .meta_client
-            .to_owned()
-            .hummock_client
+            .inner
             .pin_version(PinVersionRequest {
                 context_id: self.meta_client.worker_id(),
             })
             .await
-            .map_err(HummockError::meta_error)?
-            .into_inner();
+            .map_err(HummockError::meta_error)?;
         timer.observe_duration();
         Ok(result.pinned_version.unwrap())
     }
@@ -82,8 +80,7 @@ impl HummockMetaClient for RpcHummockMetaClient {
         self.stats.unpin_version_counts.inc();
         let timer = self.stats.unpin_version_latency.start_timer();
         self.meta_client
-            .to_owned()
-            .hummock_client
+            .inner
             .unpin_version(UnpinVersionRequest {
                 context_id: self.meta_client.worker_id(),
                 pinned_version_id,
@@ -99,14 +96,12 @@ impl HummockMetaClient for RpcHummockMetaClient {
         let timer = self.stats.pin_snapshot_latency.start_timer();
         let result = self
             .meta_client
-            .to_owned()
-            .hummock_client
+            .inner
             .pin_snapshot(PinSnapshotRequest {
                 context_id: self.meta_client.worker_id(),
             })
             .await
-            .map_err(HummockError::meta_error)?
-            .into_inner();
+            .map_err(HummockError::meta_error)?;
         timer.observe_duration();
         Ok(result.snapshot.unwrap().epoch)
     }
@@ -115,8 +110,7 @@ impl HummockMetaClient for RpcHummockMetaClient {
         self.stats.unpin_snapshot_counts.inc();
         let timer = self.stats.unpin_snapshot_latency.start_timer();
         self.meta_client
-            .to_owned()
-            .hummock_client
+            .inner
             .unpin_snapshot(UnpinSnapshotRequest {
                 context_id: self.meta_client.worker_id(),
                 snapshot: Some(HummockSnapshot {
@@ -134,12 +128,10 @@ impl HummockMetaClient for RpcHummockMetaClient {
         let timer = self.stats.get_new_table_id_latency.start_timer();
         let result = self
             .meta_client
-            .to_owned()
-            .hummock_client
+            .inner
             .get_new_table_id(GetNewTableIdRequest {})
             .await
-            .map_err(HummockError::meta_error)?
-            .into_inner();
+            .map_err(HummockError::meta_error)?;
         timer.observe_duration();
         Ok(result.table_id)
     }
@@ -153,8 +145,7 @@ impl HummockMetaClient for RpcHummockMetaClient {
         let timer = self.stats.add_tables_latency.start_timer();
         let resp = self
             .meta_client
-            .to_owned()
-            .hummock_client
+            .inner
             .add_tables(AddTablesRequest {
                 context_id: self.meta_client.worker_id(),
                 tables: sstables,
@@ -163,7 +154,7 @@ impl HummockMetaClient for RpcHummockMetaClient {
             .await
             .map_err(HummockError::meta_error)?;
         timer.observe_duration();
-        Ok(resp.into_inner().version.unwrap())
+        Ok(resp.version.unwrap())
     }
 
     async fn get_compaction_task(&self) -> HummockResult<Option<CompactTask>> {
@@ -171,14 +162,10 @@ impl HummockMetaClient for RpcHummockMetaClient {
         let timer = self.stats.get_compaction_task_latency.start_timer();
         let result = self
             .meta_client
-            .to_owned()
-            .hummock_client
-            .get_compaction_tasks(GetCompactionTasksRequest {
-                context_id: self.meta_client.worker_id(),
-            })
+            .inner
+            .get_compaction_tasks(GetCompactionTasksRequest {})
             .await
-            .map_err(HummockError::meta_error)?
-            .into_inner();
+            .map_err(HummockError::meta_error)?;
         timer.observe_duration();
         Ok(result.compact_task)
     }
@@ -191,10 +178,8 @@ impl HummockMetaClient for RpcHummockMetaClient {
         self.stats.report_compaction_task_counts.inc();
         let timer = self.stats.report_compaction_task_latency.start_timer();
         self.meta_client
-            .to_owned()
-            .hummock_client
+            .inner
             .report_compaction_tasks(ReportCompactionTasksRequest {
-                context_id: self.meta_client.worker_id(),
                 compact_task: Some(compact_task),
                 task_result,
             })

@@ -13,12 +13,12 @@
 #![feature(option_result_contains)]
 
 mod barrier;
-mod cluster;
+pub mod cluster;
 mod dashboard;
 mod hummock;
-mod manager;
+pub mod manager;
 mod model;
 pub mod rpc;
-mod storage;
+pub mod storage;
 mod stream;
 pub mod test_utils;

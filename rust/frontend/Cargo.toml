@@ -42,8 +42,12 @@ tracing-subscriber = "0.3"
 uuid = "0.8"
 
 [dev-dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.8"
 serial_test = "*"
 tempfile = "3"
+walkdir = "2"
 
 [[bin]]
 name = "frontend-v2"

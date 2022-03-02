@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
@@ -16,7 +17,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     /// The result is based on a snapshot corresponding to the given `epoch`.
     async fn get(&self, key: &[u8], epoch: u64) -> Result<Option<Bytes>>;
 
-    /// Scan `limit` number of keys from the keyspace. If `limit` is `None`, scan all elements.
+    /// Scan `limit` number of keys from a key range. If `limit` is `None`, scan all elements.
     /// The result is based on a snapshot corresponding to the given `epoch`.
     ///
     ///
@@ -60,7 +61,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     ///   per-key modification history (e.g. in compaction), not across different keys.
     async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>, epoch: u64) -> Result<()>;
 
-    /// Open and return an iterator for given `prefix`.
+    /// Open and return an iterator for given `key_range`.
     /// The returned iterator will iterate data based on a snapshot corresponding to the given
     /// `epoch`.
     async fn iter<R, B>(&self, key_range: R, epoch: u64) -> Result<Self::Iter<'_>>
@@ -68,7 +69,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]>;
 
-    /// Open and return a reversed iterator for given `prefix`.
+    /// Open and return a reversed iterator for given `key_range`.
     /// The returned iterator will iterate data based on a snapshot corresponding to the given
     /// `epoch`
     async fn reverse_iter<R, B>(&self, _key_range: R, _epoch: u64) -> Result<Self::Iter<'_>>
@@ -86,6 +87,13 @@ pub trait StateStore: Send + Sync + 'static + Clone {
 
     /// Wait until the epoch is committed and its data is ready to read.
     async fn wait_epoch(&self, _epoch: u64) {}
+
+    /// Sync buffered data to S3.
+    /// If epoch is None, all buffered data will be synced.
+    /// Otherwise, only data of the provided epoch will be synced.
+    async fn sync(&self, _epoch: Option<u64>) -> Result<()> {
+        Ok(())
+    }
 
     fn monitored(self, stats: Arc<StateStoreStats>) -> Monitored<Self> {
         Monitored::new(self, stats)

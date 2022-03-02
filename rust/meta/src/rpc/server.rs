@@ -49,6 +49,7 @@ pub async fn rpc_serve(
 
     let fragment_manager = Arc::new(FragmentManager::new(meta_store_ref.clone()).await.unwrap());
     let hummock_manager = Arc::new(hummock::HummockManager::new(env.clone()).await.unwrap());
+    let compactor_manager = Arc::new(hummock::CompactorManager::new());
     let notification_manager = Arc::new(NotificationManager::new());
     let cluster_manager = Arc::new(
         StoredClusterManager::new(
@@ -112,7 +113,7 @@ pub async fn rpc_serve(
         cluster_manager,
         env,
     );
-    let hummock_srv = HummockServiceImpl::new(hummock_manager);
+    let hummock_srv = HummockServiceImpl::new(hummock_manager.clone(), compactor_manager.clone());
     let notification_srv = NotificationServiceImpl::new(notification_manager);
 
     if let Some(prometheus_addr) = prometheus_addr {
@@ -142,6 +143,11 @@ pub async fn rpc_serve(
             .await
             .unwrap();
     });
+
+    tokio::spawn(hummock::start_compaction_loop(
+        hummock_manager,
+        compactor_manager,
+    ));
 
     (join_handle, shutdown_send)
 }

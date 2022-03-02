@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::sync::Arc;
 
 use moka::future::Cache;
@@ -30,6 +31,17 @@ impl StateStoreImpl {
         Self::MemoryStateStore(
             MemoryStateStore::shared().monitored(DEFAULT_STATE_STORE_STATS.clone()),
         )
+    }
+}
+
+impl Debug for StateStoreImpl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StateStoreImpl::HummockStateStore(_hummock) => write!(f, "HummockStateStore(_)"),
+            StateStoreImpl::MemoryStateStore(_memory) => write!(f, "MemoryStateStore(_)"),
+            StateStoreImpl::RocksDBStateStore(_rocksdb) => write!(f, "RocksDBStateStore(_)"),
+            StateStoreImpl::TikvStateStore(_tikv) => write!(f, "TikvStateStore(_)"),
+        }
     }
 }
 

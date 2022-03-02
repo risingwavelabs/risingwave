@@ -4,6 +4,7 @@ use std::sync::{Mutex, MutexGuard};
 
 use futures::channel::mpsc::{Receiver, Sender};
 use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_storage::StateStoreImpl;
 
 use crate::executor::Message;
 
@@ -52,14 +53,17 @@ pub struct SharedContext {
     pub(crate) addr: SocketAddr,
 
     pub(crate) barrier_manager: Mutex<LocalBarrierManager>,
+
+    pub(crate) state_store: StateStoreImpl,
 }
 
 impl SharedContext {
-    pub fn new(addr: SocketAddr) -> Self {
+    pub fn new(addr: SocketAddr, state_store: StateStoreImpl) -> Self {
         Self {
             channel_map: Mutex::new(HashMap::new()),
             addr,
             barrier_manager: Mutex::new(LocalBarrierManager::new()),
+            state_store,
         }
     }
 
@@ -69,6 +73,7 @@ impl SharedContext {
             channel_map: Mutex::new(HashMap::new()),
             addr: *LOCAL_TEST_ADDR,
             barrier_manager: Mutex::new(LocalBarrierManager::for_test()),
+            state_store: StateStoreImpl::shared_in_memory_store(),
         }
     }
 
