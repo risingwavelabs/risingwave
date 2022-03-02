@@ -90,6 +90,11 @@ async fn test_compaction_same_key_not_split() {
             )
             .await
             .unwrap();
+        storage
+            .shared_buffer_manager()
+            .sync(Some(epoch))
+            .await
+            .unwrap();
     }
 
     // 2. commit epoch

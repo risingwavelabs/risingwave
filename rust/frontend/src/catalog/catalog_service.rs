@@ -326,12 +326,14 @@ impl CatalogConnector {
 mod tests {
 
     use risingwave_common::types::DataType;
-    use risingwave_meta::test_utils::LocalMeta;
-    use risingwave_pb::plan::ColumnDesc;
+    use risingwave_pb::meta::table::Info;
+    use risingwave_pb::plan::{ColumnDesc, TableSourceInfo};
+    use risingwave_rpc_client::MetaClient;
 
     use crate::catalog::catalog_service::{
         CatalogConnector, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
     };
+    use crate::test_utils::FrontendMockMetaClient;
 
     fn create_test_table(test_table_name: &str, columns: Vec<(String, DataType)>) -> Table {
         let column_descs = columns
@@ -345,19 +347,19 @@ mod tests {
         Table {
             table_name: test_table_name.to_string(),
             column_descs,
+            info: Info::TableSource(TableSourceInfo::default()).into(),
             ..Default::default()
         }
     }
 
-    use risingwave_pb::meta::{GetCatalogRequest, Table};
+    use risingwave_pb::meta::Table;
 
     use crate::catalog::table_catalog::ROWID_NAME;
 
     #[tokio::test]
     async fn test_create_and_drop_table() {
         // Init meta and catalog.
-        let meta = LocalMeta::start(12000).await;
-        let mut meta_client = meta.create_client().await;
+        let meta_client = MetaClient::mock(FrontendMockMetaClient::new().await);
         let catalog_mgr = CatalogConnector::new(meta_client.clone());
 
         // Create db and schema.
@@ -392,13 +394,7 @@ mod tests {
             .is_some());
 
         // Get catalog from meta and check the table info.
-        let req = GetCatalogRequest { node_id: 0 };
-        let response = meta_client
-            .catalog_client
-            .get_catalog(req.clone())
-            .await
-            .unwrap();
-        let catalog = response.get_ref().catalog.as_ref().unwrap();
+        let catalog = meta_client.get_catalog().await.unwrap();
         assert_eq!(catalog.tables.len(), 1);
         assert_eq!(catalog.tables[0].table_name, test_table_name);
         let expected_table = create_test_table(
@@ -422,18 +418,8 @@ mod tests {
             .get_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, test_table_name)
             .is_none());
         // Ensure the table has been dropped from meta.
-        meta_client
-            .catalog_client
-            .get_catalog(req.clone())
-            .await
-            .unwrap()
-            .get_ref()
-            .catalog
-            .as_ref()
-            .map(|catalog| {
-                assert_eq!(catalog.tables.len(), 0);
-            })
-            .unwrap();
+        let catalog = meta_client.get_catalog().await.unwrap();
+        assert_eq!(catalog.tables.len(), 0);
 
         catalog_mgr
             .drop_schema(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME)
@@ -444,18 +430,8 @@ mod tests {
             .get_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, test_table_name)
             .is_none());
         // Ensure the schema has been dropped from meta.
-        meta_client
-            .catalog_client
-            .get_catalog(req.clone())
-            .await
-            .unwrap()
-            .get_ref()
-            .catalog
-            .as_ref()
-            .map(|catalog| {
-                assert_eq!(catalog.schemas.len(), 0);
-            })
-            .unwrap();
+        let catalog = meta_client.get_catalog().await.unwrap();
+        assert_eq!(catalog.schemas.len(), 0);
 
         catalog_mgr
             .drop_database(DEFAULT_DATABASE_NAME)
@@ -466,19 +442,7 @@ mod tests {
             .get_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, test_table_name)
             .is_none());
         // Ensure the db has been dropped from meta.
-        meta_client
-            .catalog_client
-            .get_catalog(req.clone())
-            .await
-            .unwrap()
-            .get_ref()
-            .catalog
-            .as_ref()
-            .map(|catalog| {
-                assert_eq!(catalog.databases.len(), 0);
-            })
-            .unwrap();
-
-        meta.stop().await;
+        let catalog = meta_client.get_catalog().await.unwrap();
+        assert_eq!(catalog.databases.len(), 0);
     }
 }

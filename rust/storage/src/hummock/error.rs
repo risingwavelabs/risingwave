@@ -19,6 +19,8 @@ pub enum HummockError {
     MetaError(String),
     #[error("Invalid WriteBatch.")]
     InvalidWriteBatch,
+    #[error("SharedBuffer error {0}.")]
+    SharedBufferError(String),
 }
 
 impl HummockError {
@@ -44,6 +46,10 @@ impl HummockError {
 
     pub fn invalid_write_batch() -> TracedHummockError {
         Self::InvalidWriteBatch.into()
+    }
+
+    pub fn shared_buffer_error(error: impl ToString) -> TracedHummockError {
+        Self::SharedBufferError(error.to_string()).into()
     }
 }
 

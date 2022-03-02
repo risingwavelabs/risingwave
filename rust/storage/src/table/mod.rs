@@ -5,6 +5,7 @@ pub mod test;
 
 use std::any::Any;
 use std::borrow::Cow;
+use std::fmt::Debug;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -22,7 +23,7 @@ use crate::TableColumnDesc;
 /// The interface between executors and storage should be table-oriented.
 /// `Database` is a logical concept and stored as metadata information.
 #[async_trait::async_trait]
-pub trait TableManager: Sync + Send + AsRef<dyn Any> {
+pub trait TableManager: Debug + Sync + Send + AsRef<dyn Any> {
     /// Create a specific table.
     async fn create_table_v2(
         &self,

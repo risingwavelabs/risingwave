@@ -9,13 +9,18 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{
     ArrayBuilder, ArrayImpl, I64ArrayBuilder, InternalError, RwError, StreamChunk,
 };
-use risingwave_common::catalog::{ColumnId, Schema, TableId};
+use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::error::Result;
+use risingwave_common::try_match_expand;
+use risingwave_pb::stream_plan;
+use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_source::*;
-use tokio::sync::mpsc::UnboundedReceiver;
+use risingwave_storage::StateStore;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
 use crate::executor::monitor::DEFAULT_COMPUTE_STATS;
-use crate::executor::{Executor, Message, PkIndices, PkIndicesRef};
+use crate::executor::{Executor, ExecutorBuilder, Message, PkIndices, PkIndicesRef};
+use crate::task::{ExecutorParams, StreamManagerCore};
 
 /// [`SourceExecutor`] is a streaming source, from risingwave's batch table, or external systems
 /// such as Kafka.
@@ -41,6 +46,58 @@ pub struct SourceExecutor {
     /// attributes of the OpenTelemetry monitor
     attributes: Vec<KeyValue>,
     source_output_row_count: Counter<u64>,
+}
+
+pub struct SourceExecutorBuilder {}
+
+impl ExecutorBuilder for SourceExecutorBuilder {
+    fn new_boxed_executor(
+        params: ExecutorParams,
+        node: &stream_plan::StreamNode,
+        _store: impl StateStore,
+        stream: &mut StreamManagerCore,
+    ) -> Result<Box<dyn Executor>> {
+        let node = try_match_expand!(node.get_node().unwrap(), Node::SourceNode)?;
+        let (sender, barrier_receiver) = unbounded_channel();
+        stream
+            .context
+            .lock_barrier_manager()
+            .register_sender(params.actor_id, sender);
+
+        let source_id = TableId::from(&node.table_ref_id);
+        let source_desc = params.env.source_manager().get_source(&source_id)?;
+
+        let column_ids: Vec<_> = node
+            .get_column_ids()
+            .iter()
+            .map(|i| ColumnId::from(*i))
+            .collect();
+        let mut fields = Vec::with_capacity(column_ids.len());
+        for &column_id in &column_ids {
+            let column_desc = source_desc
+                .columns
+                .iter()
+                .find(|c| c.column_id == column_id)
+                .unwrap();
+            fields.push(Field::with_name(
+                column_desc.data_type.clone(),
+                column_desc.name.clone(),
+            ));
+        }
+        let schema = Schema::new(fields);
+
+        Ok(Box::new(SourceExecutor::new(
+            source_id,
+            source_desc,
+            column_ids,
+            schema,
+            params.pk_indices,
+            barrier_receiver,
+            params.executor_id,
+            params.operator_id,
+            params.op_info,
+        )?))
+    }
 }
 
 impl SourceExecutor {

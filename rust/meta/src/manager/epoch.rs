@@ -64,6 +64,12 @@ pub struct MemEpochGenerator {
     current_epoch: Mutex<Epoch>,
 }
 
+impl Default for MemEpochGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MemEpochGenerator {
     pub fn new() -> Self {
         MemEpochGenerator {
