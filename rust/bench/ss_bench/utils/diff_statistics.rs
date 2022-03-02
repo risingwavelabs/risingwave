@@ -22,8 +22,7 @@ pub(crate) struct MyHistogram {
 
 impl DiffStat {
     pub(crate) fn update_stat(&mut self) {
-        let stat = DEFAULT_STATE_STORE_STATS.clone();
-        let stat = (*stat).clone();
+        let stat = (**DEFAULT_STATE_STORE_STATS).clone();
         // (Ting Sun) TODO: eliminate this clone
         let prev = self.cur_stat.clone();
         self.cur_stat = stat;
