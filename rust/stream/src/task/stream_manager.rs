@@ -239,7 +239,8 @@ fn update_upstreams(context: &SharedContext, ids: &[UpDownActorIds]) {
 
 impl StreamManagerCore {
     fn new(addr: SocketAddr, state_store: StateStoreImpl) -> Self {
-        Self::with_store_and_context(state_store, SharedContext::new(addr))
+        let context = SharedContext::new(addr, state_store.clone());
+        Self::with_store_and_context(state_store, context)
     }
 
     fn with_store_and_context(state_store: StateStoreImpl, context: SharedContext) -> Self {
