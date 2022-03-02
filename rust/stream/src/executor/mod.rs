@@ -429,22 +429,22 @@ pub trait ExecutorBuilder {
         executor_params: ExecutorParams,
         node: &stream_plan::StreamNode,
         store: impl StateStore,
-        steam: &mut StreamManagerCore,
+        stream: &mut StreamManagerCore,
     ) -> Result<Box<dyn Executor>>;
 }
 #[macro_export]
 macro_rules! build_executor {
-    ($source: expr,$a: expr,$b: expr,$c: expr, $($proto_type_name:path => $data_type:ty),*) => {
-        match $a.get_node().unwrap() {
+    ($source: expr,$node: expr,$store: expr,$stream: expr, $($proto_type_name:path => $data_type:ty),*) => {
+        match $node.get_node().unwrap() {
             $(
                 $proto_type_name(..) => {
-                    <$data_type>::new_boxed_executor($source,$a,$b,$c)
+                    <$data_type>::new_boxed_executor($source,$node,$store,$stream)
                 },
             )*
             _ => Err(RwError::from(
               ErrorCode::InternalError(format!(
                 "unsupported node:{:?}",
-                $a.get_node().unwrap()
+                $node.get_node().unwrap()
               )),
             )),
         }
@@ -453,11 +453,11 @@ macro_rules! build_executor {
 
 pub fn create_executor(
     executor_params: ExecutorParams,
-    steam: &mut StreamManagerCore,
+    stream: &mut StreamManagerCore,
     node: &stream_plan::StreamNode,
     store: impl StateStore,
 ) -> Result<Box<dyn Executor>> {
-    let real_executor = build_executor! { executor_params,node,store,steam,
+    let real_executor = build_executor! { executor_params,node,store,stream,
       Node::SourceNode => SourceExecutorBuilder,
       Node::ProjectNode => ProjectExecutorBuilder,
       Node::TopNNode => TopNExecutorBuilder,
