@@ -151,9 +151,7 @@ message CompactTask {
   bool is_target_ultimate_and_leveling = 7;
 }
 
-message GetCompactionTasksRequest {
-  uint32 context_id = 1;
-}
+message GetCompactionTasksRequest {}
 
 message GetCompactionTasksResponse {
   common.Status status = 1;
@@ -161,7 +159,6 @@ message GetCompactionTasksResponse {
 }
 
 message ReportCompactionTasksRequest {
-  uint32 context_id = 1;
   CompactTask compact_task = 2;
   bool task_result = 3;
 }
@@ -213,10 +210,17 @@ message GetNewTableIdResponse {
   uint64 table_id = 2;
 }
 
+message CompactTasksRequest {}
+
+message CompactTasksResponse {
+  CompactTask compact_task = 1;
+}
+
 service HummockManagerService {
   rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
   rpc UnpinVersion(UnpinVersionRequest) returns (UnpinVersionResponse);
   rpc AddTables(AddTablesRequest) returns (AddTablesResponse);
+  // TODO remove me
   rpc GetCompactionTasks(GetCompactionTasksRequest) returns (GetCompactionTasksResponse);
   rpc ReportCompactionTasks(ReportCompactionTasksRequest) returns (ReportCompactionTasksResponse);
   rpc PinSnapshot(PinSnapshotRequest) returns (PinSnapshotResponse);
@@ -224,4 +228,5 @@ service HummockManagerService {
   rpc CommitEpoch(CommitEpochRequest) returns (CommitEpochResponse);
   rpc AbortEpoch(AbortEpochRequest) returns (AbortEpochResponse);
   rpc GetNewTableId(GetNewTableIdRequest) returns (GetNewTableIdResponse);
+  rpc CompactTasks(CompactTasksRequest) returns (stream CompactTasksResponse);
 }

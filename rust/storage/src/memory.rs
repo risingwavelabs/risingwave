@@ -9,15 +9,12 @@ use lazy_static::lazy_static;
 use risingwave_common::error::Result;
 use tokio::sync::Mutex;
 
-use crate::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
 use crate::{StateStore, StateStoreIter};
 
 /// An in-memory state store
 #[derive(Clone)]
 pub struct MemoryStateStore {
     inner: Arc<Mutex<BTreeMap<Bytes, Bytes>>>,
-
-    stats: Arc<StateStoreStats>,
 }
 
 impl Default for MemoryStateStore {
@@ -48,7 +45,6 @@ impl MemoryStateStore {
     pub fn new() -> Self {
         Self {
             inner: Arc::new(Mutex::new(BTreeMap::new())),
-            stats: DEFAULT_STATE_STORE_STATS.clone(),
         }
     }
 
@@ -86,9 +82,6 @@ impl MemoryStateStore {
         }
         let inner = self.inner.lock().await;
         for (key, value) in inner.range(to_bytes_range(key_range)) {
-            self.stats
-                .iter_next_size
-                .observe((key.len() + value.len()) as f64);
             data.push((key.clone(), value.clone()));
             if let Some(limit) = limit && data.len() >= limit {
                 break;
@@ -126,17 +119,8 @@ impl StateStore for MemoryStateStore {
     type Iter<'a> = MemoryStateStoreIter;
 
     async fn get(&self, key: &[u8], _epoch: u64) -> Result<Option<Bytes>> {
-        self.stats.get_counts.inc();
-        let timer = self.stats.get_latency.start_timer();
         let inner = self.inner.lock().await;
         let res = inner.get(key).cloned();
-        timer.observe_duration();
-
-        self.stats.get_key_size.observe(key.len() as f64);
-        self.stats
-            .get_value_size
-            .observe(res.as_ref().map(|x| x.len()).unwrap_or(0) as f64);
-
         Ok(res)
     }
 
@@ -150,7 +134,6 @@ impl StateStore for MemoryStateStore {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]>,
     {
-        self.stats.range_scan_counts.inc();
         self.scan_inner(key_range, limit).await
     }
 
@@ -164,7 +147,6 @@ impl StateStore for MemoryStateStore {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]>,
     {
-        self.stats.reverse_range_scan_counts.inc();
         self.reverse_scan_inner(key_range, limit).await
     }
 
@@ -193,15 +175,11 @@ impl StateStore for MemoryStateStore {
 
 pub struct MemoryStateStoreIter {
     inner: btree_map::IntoIter<Bytes, Bytes>,
-    stats: Arc<StateStoreStats>,
 }
 
 impl MemoryStateStoreIter {
     fn new(iter: btree_map::IntoIter<Bytes, Bytes>) -> Self {
-        Self {
-            inner: iter,
-            stats: DEFAULT_STATE_STORE_STATS.clone(),
-        }
+        Self { inner: iter }
     }
 }
 
@@ -210,14 +188,6 @@ impl StateStoreIter for MemoryStateStoreIter {
     type Item = (Bytes, Bytes);
 
     async fn next(&mut self) -> Result<Option<Self::Item>> {
-        let timer = self.stats.iter_next_latency.start_timer();
-        let res = self.inner.next();
-        timer.observe_duration();
-        if res.is_some() {
-            self.stats
-                .iter_next_size
-                .observe((res.as_ref().unwrap().0.len() + res.as_ref().unwrap().1.len()) as f64)
-        }
-        Ok(res)
+        Ok(self.inner.next())
     }
 }

@@ -53,7 +53,7 @@ async fn get_hummock_storage() -> HummockStorage {
         &options.remote_dir,
         Some(Arc::new(Cache::new(65536))),
     ));
-    HummockStorage::new(
+    HummockStorage::with_default_stats(
         obj_client.clone(),
         options.clone(),
         local_version_manager.clone(),
@@ -71,8 +71,7 @@ async fn test_compaction_basic() {
 
 #[tokio::test]
 async fn test_compaction_same_key_not_split() {
-    let mut storage = get_hummock_storage().await;
-    storage.shutdown_compactor().await.unwrap();
+    let storage = get_hummock_storage().await;
     let sub_compact_context = SubCompactContext {
         options: storage.options().clone(),
         local_version_manager: storage.local_version_manager().clone(),
@@ -89,6 +88,11 @@ async fn test_compaction_same_key_not_split() {
                 once((b"same_key".to_vec(), HummockValue::Put(b"value".to_vec()))),
                 epoch,
             )
+            .await
+            .unwrap();
+        storage
+            .shared_buffer_manager()
+            .sync(Some(epoch))
             .await
             .unwrap();
     }

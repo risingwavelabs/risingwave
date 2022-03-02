@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use risingwave_common::catalog::{ColumnId, TableId};
@@ -14,7 +15,7 @@ use crate::{HighLevelKafkaSource, SourceConfig, SourceFormat, SourceImpl, Source
 
 pub type SourceRef = Arc<SourceImpl>;
 
-pub trait SourceManager: Sync + Send {
+pub trait SourceManager: Debug + Sync + Send {
     fn create_source(
         &self,
         source_id: &TableId,
@@ -56,7 +57,7 @@ impl From<&TableColumnDesc> for SourceColumnDesc {
 }
 
 /// `SourceDesc` is used to describe a `Source`
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SourceDesc {
     pub source: SourceRef,
     pub format: SourceFormat,
@@ -66,6 +67,7 @@ pub struct SourceDesc {
 
 pub type SourceManagerRef = Arc<dyn SourceManager>;
 
+#[derive(Debug)]
 pub struct MemSourceManager {
     sources: Mutex<HashMap<TableId, SourceDesc>>,
 }

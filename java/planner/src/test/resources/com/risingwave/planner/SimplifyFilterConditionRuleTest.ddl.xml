@@ -1,0 +1,19 @@
+<Root>
+    <Resource>
+        <![CDATA[
+create table x(a int not null, b bigint not null, c varchar(100) not null)
+        ]]>
+    </Resource>
+
+    <Resource>
+        <![CDATA[
+create table y(d int not null, e bigint not null, f varchar(100) not null)
+        ]]>
+    </Resource>
+
+    <Resource>
+        <![CDATA[
+create table z(i int not null, j bigint not null, k varchar(100) not null)
+        ]]>
+    </Resource>
+</Root>

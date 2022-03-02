@@ -88,7 +88,7 @@ mod handlers {
             .await
             .map_err(err)?
             .iter()
-            .filter(|t| t.is_materialized_view)
+            .filter(|t| t.is_materialized_view())
             .map(|mv| (mv.table_ref_id.as_ref().unwrap().table_id, mv.clone()))
             .collect::<Vec<_>>();
         Ok(Json(materialized_views))

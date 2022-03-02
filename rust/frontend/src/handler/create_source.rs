@@ -1,6 +1,8 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
+use risingwave_pb::meta::table::Info;
 use risingwave_pb::meta::Table;
+use risingwave_pb::plan::{RowFormatType, StreamSourceInfo};
 use risingwave_source::ProtobufParser;
 use risingwave_sqlparser::ast::{CreateSourceStatement, ProtobufSchema, SourceSchema};
 
@@ -10,10 +12,16 @@ use crate::session::SessionImpl;
 fn create_protobuf_table_schema(schema: &ProtobufSchema) -> Result<Table> {
     let parser = ProtobufParser::new(&schema.row_schema_location.0, &schema.message_name.0)?;
     let column_descs = parser.map_to_columns()?;
+    let info = StreamSourceInfo {
+        append_only: true,
+        row_format: RowFormatType::Protobuf as i32,
+        row_schema_location: schema.row_schema_location.0.clone(),
+        ..Default::default()
+    };
+
     Ok(Table {
         column_descs,
-        row_format: schema.row_schema_location.0.clone(),
-        row_schema_location: schema.row_schema_location.0.clone(),
+        info: Some(Info::StreamSource(info)),
         ..Default::default()
     })
 }
@@ -26,10 +34,13 @@ pub(super) async fn handle_create_source(
         SourceSchema::Protobuf(protobuf_schema) => create_protobuf_table_schema(protobuf_schema)?,
         SourceSchema::Json => todo!(),
     };
+    match table.info.as_mut().unwrap() {
+        Info::StreamSource(info) => {
+            info.properties = stmt.with_properties.into();
+        }
+        _ => unreachable!(),
+    }
     table.table_name = stmt.source_name.value.clone();
-    table.is_source = true;
-    table.properties = stmt.with_properties.into();
-    table.append_only = true;
 
     let catalog_mgr = session.env().catalog_mgr();
     catalog_mgr
@@ -50,7 +61,6 @@ mod tests {
     use std::io::Write;
 
     use risingwave_common::types::DataType;
-    use risingwave_meta::test_utils::LocalMeta;
     use tempfile::NamedTempFile;
 
     use crate::catalog::table_catalog::ROWID_NAME;
@@ -80,10 +90,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn handle_create_source() {
-        let meta = LocalMeta::start(12001).await;
-
         let proto_file = create_proto_file();
         let sql = format!(
             r#"CREATE SOURCE t
@@ -91,7 +98,7 @@ mod tests {
     ROW FORMAT PROTOBUF MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://{}'"#,
             proto_file.path().to_str().unwrap()
         );
-        let frontend = LocalFrontend::new(&meta).await;
+        let frontend = LocalFrontend::new().await;
         frontend.run_sql(sql).await.unwrap();
 
         let catalog_manager = frontend.session().env().catalog_mgr();
@@ -108,7 +115,5 @@ mod tests {
         expected_map.insert("zipcode".to_string(), DataType::Int64);
         expected_map.insert("rate".to_string(), DataType::Float32);
         assert_eq!(columns, expected_map);
-
-        meta.stop().await;
     }
 }
