@@ -57,9 +57,9 @@ impl StatDiff {
 
         println!(
             "
-        writebatch
-          {}
-          OPS: {}  {} bytes/sec",
+    writebatch
+      {}
+      OPS: {}  {} bytes/sec",
             latency, ops, bytes_pre_sec
         );
     }
