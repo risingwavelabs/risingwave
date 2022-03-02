@@ -342,44 +342,6 @@ impl<'a> SelectBuilder<'a> {
         }
     }
 
-    // select * from t;
-    pub async fn scan_all(mut self) -> SelectBuilder<'a> {
-        let table_ref = self
-            .runner
-            .get_global_env()
-            .table_manager_ref()
-            .get_table(&TableId::default())
-            .unwrap();
-
-        if let Ok(column_table_ref) = downcast_arc::<TestTable>(table_ref.into_any()) {
-            let column_ids = column_table_ref
-                .column_descs()
-                .iter()
-                .map(|c| c.column_id.get_id())
-                .collect();
-            let scan = RowSeqScanNode {
-                table_ref_id: None,
-                column_ids,
-                fields: vec![],
-            };
-
-            self.plan = PlanFragment {
-                root: Some(PlanNode {
-                    children: vec![],
-                    node_body: Some(NodeBody::RowSeqScan(scan)),
-                    identity: "SeqScanExecutor".to_string(),
-                }),
-                exchange_info: Some(ExchangeInfo {
-                    mode: 0,
-                    distribution: None,
-                }),
-            };
-            self
-        } else {
-            unreachable!()
-        }
-    }
-
     pub fn run_task(&mut self) -> &mut Self {
         self.runner.run_task(&self.plan).unwrap();
         self
