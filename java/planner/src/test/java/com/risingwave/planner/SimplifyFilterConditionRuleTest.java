@@ -21,7 +21,9 @@ public class SimplifyFilterConditionRuleTest extends BatchPlanTestBase {
   @BeforeAll
   public void initAll() {
     super.init();
-    executionContext.getSessionConfiguration().setByString(OPTIMIZER_ENABLE_CALCITE_SUBQUERY_EXPAND.getKey(), "false");
+    executionContext
+        .getSessionConfiguration()
+        .setByString(OPTIMIZER_ENABLE_CALCITE_SUBQUERY_EXPAND.getKey(), "false");
     program = HepOptimizerProgram.builder().addRule(SimplifyFilterConditionRule.INSTANCE).build();
   }
 

@@ -40,30 +40,9 @@ public abstract class BatchPlanTestBase extends SqlTestBase {
     String sql = testCase.getSql();
 
     SqlNode ast = parseSql(sql);
-
-    verifyPhyPlan(testCase, ast);
-    verifyDistPlan(testCase, ast);
-  }
-
-  protected void runTestCaseWithProgram(PlannerTestCase testCase, OptimizerProgram program) {
-    String sql = testCase.getSql();
-
-    SqlNode ast = parseSql(sql);
-
-    verifyPlanWithProgram(testCase, ast, program);
-
-  }
-
-  protected void verifyPlanWithProgram(PlannerTestCase testCase, SqlNode ast, OptimizerProgram program) {
-    var root  = batchPlanner.plan(ast, executionContext, relCollation -> program);
-    if (testCase.getPlan().isPresent()) {
-      String explainedPlan = ExplainWriter.explainPlan(root);
-      assertEquals(testCase.getPlan().get(), explainedPlan, "Plan not match!");
-    }
-  }
-
-  protected void verifyPhyPlan(PlannerTestCase testCase, SqlNode ast) {
     BatchPlan phyPlan = batchPlanner.planPhysical(ast, executionContext);
+    ast = parseSql(sql);
+    BatchPlan distPlan = batchPlanner.planDistributed(ast, executionContext);
 
     if (testCase.getPlan().isPresent()) {
       String explainedPlan = ExplainWriter.explainPlan(phyPlan.getRoot());
@@ -75,6 +54,11 @@ public abstract class BatchPlanTestBase extends SqlTestBase {
       assertEquals(testCase.getPhyPlan().get(), explainedPlan, "Plan not match!");
     }
 
+    if (testCase.getDistPlan().isPresent()) {
+      String explainedPlan = ExplainWriter.explainPlan(distPlan.getRoot());
+      assertEquals(testCase.getDistPlan().get(), explainedPlan, "Plan not match!");
+    }
+
     if (testCase.getJson().isPresent()) {
       // We still assume that the parsed json test case contains json value only.
       String serializedJsonPlan = Messages.jsonFormat(phyPlan.getRoot().serialize());
@@ -83,13 +67,20 @@ public abstract class BatchPlanTestBase extends SqlTestBase {
     }
   }
 
-  protected void verifyDistPlan(PlannerTestCase testCase, SqlNode ast) {
-    BatchPlan distPlan = batchPlanner.planDistributed(ast, executionContext);
+  protected void runTestCaseWithProgram(PlannerTestCase testCase, OptimizerProgram program) {
+    String sql = testCase.getSql();
 
+    SqlNode ast = parseSql(sql);
 
-    if (testCase.getDistPlan().isPresent()) {
-      String explainedPlan = ExplainWriter.explainPlan(distPlan.getRoot());
-      assertEquals(testCase.getDistPlan().get(), explainedPlan, "Plan not match!");
+    verifyPlanWithProgram(testCase, ast, program);
+  }
+
+  protected void verifyPlanWithProgram(
+      PlannerTestCase testCase, SqlNode ast, OptimizerProgram program) {
+    var root = batchPlanner.plan(ast, executionContext, relCollation -> program);
+    if (testCase.getPlan().isPresent()) {
+      String explainedPlan = ExplainWriter.explainPlan(root);
+      assertEquals(testCase.getPlan().get(), explainedPlan, "Plan not match!");
     }
   }
 }

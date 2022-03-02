@@ -2,7 +2,6 @@ package com.risingwave.planner;
 
 import akka.actor.typed.ActorSystem;
 import akka.actor.typed.SpawnProtocol;
-import com.google.common.collect.Lists;
 import com.google.inject.AbstractModule;
 import com.google.inject.Provides;
 import com.google.inject.Singleton;
@@ -57,9 +56,10 @@ public class TestPlannerModule extends AbstractModule {
   @Singleton
   @Provides
   static Configuration getConfiguration() {
-    var testConfig = TestPlannerModule.class.getClassLoader()
-        .getResourceAsStream("config.properties");
-    return Configuration.load(testConfig, FrontendServerConfigurations.class, LeaderServerConfigurations.class);
+    var testConfig =
+        TestPlannerModule.class.getClassLoader().getResourceAsStream("config.properties");
+    return Configuration.load(
+        testConfig, FrontendServerConfigurations.class, LeaderServerConfigurations.class);
   }
 
   @Singleton

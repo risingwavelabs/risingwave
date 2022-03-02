@@ -12,6 +12,7 @@ import org.apache.calcite.plan.hep.HepProgramBuilder;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.tools.RuleSet;
 
+/** A wrapper against calcite's HepOptimizerProgram. */
 public class HepOptimizerProgram implements OptimizerProgram {
   private final HepProgram hepProgram;
 
@@ -33,6 +34,7 @@ public class HepOptimizerProgram implements OptimizerProgram {
     return new Builder();
   }
 
+  /** Program builder. */
   public static class Builder {
     private HepMatchOrder matchOrder = HepMatchOrder.ARBITRARY;
     private int matchLimit = Integer.MAX_VALUE;

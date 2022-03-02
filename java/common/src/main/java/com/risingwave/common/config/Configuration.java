@@ -54,9 +54,7 @@ public class Configuration {
     var configEntry = confRegistry.get(stringKey);
     if (configEntry == null) {
       throw new PgException(
-          PgErrorCode.CONFIG_FILE_ERROR,
-          "Config entry '%s' not found!",
-          stringKey);
+          PgErrorCode.CONFIG_FILE_ERROR, "Config entry '%s' not found!", stringKey);
     } else {
       return configEntry;
     }
