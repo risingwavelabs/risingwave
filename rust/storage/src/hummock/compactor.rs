@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use bytes::{Bytes, BytesMut};
 use futures::stream::{self, StreamExt};
+use futures::Future;
 use risingwave_pb::hummock::{CompactTask, LevelEntry, LevelType, SstableInfo};
 
 use super::iterator::{ConcatIterator, HummockIterator, MergeIterator};
@@ -12,16 +13,14 @@ use super::sstable_manager::SSTableManagerRef;
 use super::version_cmp::VersionedComparator;
 use super::{
     HummockError, HummockMetaClient, HummockOptions, HummockResult, HummockStorage, HummockValue,
-    LocalVersionManager, SSTableIterator,
+    LocalVersionManager, SSTableBuilder, SSTableIterator,
 };
-use crate::object::ObjectStore;
 
 #[derive(Clone)]
 pub struct SubCompactContext {
     // TODO: remove Arc?
     pub options: Arc<HummockOptions>,
     pub local_version_manager: Arc<LocalVersionManager>,
-    pub obj_client: Arc<dyn ObjectStore>,
     pub hummock_meta_client: Arc<dyn HummockMetaClient>,
     pub sstable_manager: SSTableManagerRef,
 }
@@ -126,17 +125,17 @@ impl Compactor {
         Ok(())
     }
 
-    async fn sub_compact(
-        context: SubCompactContext,
+    pub async fn compact_and_build_sst<B, F>(
+        sst_builder: &mut CapacitySplitTableBuilder<B>,
         kr: KeyRange,
         mut iter: MergeIterator<'_>,
-        output_sst_infos: &mut Vec<SstableInfo>,
-        is_target_ultimate_and_leveling: bool,
+        has_user_key_overlap: bool,
         watermark: Epoch,
-    ) -> HummockResult<()> {
-        // NOTICE: should be user_key overlap, NOT full_key overlap!
-        let has_user_key_overlap = !is_target_ultimate_and_leveling;
-
+    ) -> HummockResult<()>
+    where
+        B: FnMut() -> F,
+        F: Future<Output = HummockResult<(u64, SSTableBuilder)>>,
+    {
         if !kr.left.is_empty() {
             iter.seek(&kr.left).await?;
         } else {
@@ -145,12 +144,6 @@ impl Compactor {
 
         let mut skip_key = BytesMut::new();
         let mut last_key = BytesMut::new();
-
-        let mut builder = CapacitySplitTableBuilder::new(|| async {
-            let table_id = context.hummock_meta_client.get_new_table_id().await?;
-            let builder = HummockStorage::get_builder(&context.options);
-            Ok((table_id, builder))
-        });
 
         while iter.is_valid() {
             let iter_key = iter.key();
@@ -189,12 +182,34 @@ impl Compactor {
                 }
             }
 
-            builder
+            sst_builder
                 .add_full_key(FullKey::from_slice(iter_key), iter.value(), is_new_user_key)
                 .await?;
 
             iter.next().await?;
         }
+        Ok(())
+    }
+
+    pub async fn sub_compact(
+        context: SubCompactContext,
+        kr: KeyRange,
+        iter: MergeIterator<'_>,
+        output_sst_infos: &mut Vec<SstableInfo>,
+        // TODO: better naming
+        is_target_ultimate_and_leveling: bool,
+        watermark: Epoch,
+    ) -> HummockResult<()> {
+        // NOTICE: should be user_key overlap, NOT full_key overlap!
+        let mut builder = CapacitySplitTableBuilder::new(|| async {
+            let table_id = context.hummock_meta_client.get_new_table_id().await?;
+            let builder = HummockStorage::get_builder(&context.options);
+            Ok((table_id, builder))
+        });
+
+        let has_user_key_overlap = !is_target_ultimate_and_leveling;
+        Compactor::compact_and_build_sst(&mut builder, kr, iter, has_user_key_overlap, watermark)
+            .await?;
 
         // Seal table for each split
         builder.seal_current();

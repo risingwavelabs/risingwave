@@ -4,6 +4,9 @@ import static java.util.Objects.requireNonNull;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.risingwave.common.exception.PgErrorCode;
+import com.risingwave.common.exception.PgException;
+import com.risingwave.proto.plan.RowFormatType;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -19,7 +22,7 @@ public class CreateTableInfo {
   private final ImmutableMap<String, String> properties;
   private final boolean appendOnly;
   private final boolean source;
-  private final String rowFormat;
+  private final RowFormatType rowFormat;
   private final String rowSchemaLocation;
   private final ImmutableList<TableCatalog.TableId> dependentTables;
 
@@ -30,7 +33,7 @@ public class CreateTableInfo {
       ImmutableMap<String, String> properties,
       boolean appendOnly,
       boolean source,
-      String rowFormat,
+      RowFormatType rowFormat,
       String rowSchemaLocation,
       ImmutableList<TableCatalog.TableId> dependentTables) {
     this.name = tableName;
@@ -76,7 +79,7 @@ public class CreateTableInfo {
     return properties;
   }
 
-  public String getRowFormat() {
+  public RowFormatType getRowFormat() {
     return rowFormat;
   }
 
@@ -97,7 +100,7 @@ public class CreateTableInfo {
     protected boolean appendOnly = false;
     protected boolean mv = false;
     protected boolean source = false;
-    protected String rowFormat = "";
+    protected RowFormatType rowFormat = RowFormatType.UNRECOGNIZED;
     protected String rowSchemaLocation = "";
     protected List<TableCatalog.TableId> dependentTables = new ArrayList<>();
 
@@ -138,12 +141,41 @@ public class CreateTableInfo {
       this.properties = properties;
     }
 
-    public void setRowFormat(String rowFormat) {
+    public Builder setRowFormatFromString(String rowFormatString) {
+      RowFormatType rowFormat;
+      switch (rowFormatString.toLowerCase()) {
+        case "json":
+          rowFormat = RowFormatType.JSON;
+          break;
+        case "avro":
+          rowFormat = RowFormatType.AVRO;
+          break;
+        case "protobuf":
+          rowFormat = RowFormatType.PROTOBUF;
+          break;
+        case "debezium-json":
+          rowFormat = RowFormatType.DEBEZIUM_JSON;
+          break;
+        default:
+          throw new PgException(PgErrorCode.PROTOCOL_VIOLATION, "unsupported row format");
+      }
+
       this.rowFormat = rowFormat;
+      return this;
+    }
+
+    public Builder setRowFormat(RowFormatType rowFormat) {
+      this.rowFormat = rowFormat;
+      return this;
     }
 
     public void setDependentTables(List<TableCatalog.TableId> dependentTables) {
       this.dependentTables = dependentTables;
+    }
+
+    public Builder addDependentTable(TableCatalog.TableId dependentTable) {
+      this.dependentTables.add(dependentTable);
+      return this;
     }
 
     public CreateTableInfo build() {

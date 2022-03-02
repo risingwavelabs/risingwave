@@ -22,7 +22,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::data::barrier::Mutation as ProstMutation;
@@ -31,13 +31,16 @@ use risingwave_pb::data::{
     Actors as MutationActors, AddMutation, Barrier as ProstBarrier, Epoch as ProstEpoch,
     NothingMutation, StopMutation, StreamMessage as ProstStreamMessage, UpdateMutation,
 };
+use risingwave_pb::stream_plan;
+use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_storage::StateStore;
 use smallvec::SmallVec;
 pub use source::*;
 pub use top_n::*;
 pub use top_n_appendonly::*;
 use tracing::trace_span;
 
-use crate::task::ENABLE_BARRIER_AGGREGATION;
+use crate::task::{ExecutorParams, StreamManagerCore, ENABLE_BARRIER_AGGREGATION};
 
 mod actor;
 mod aggregation;
@@ -419,6 +422,57 @@ pub fn pk_input_array_refs<'a>(
         .iter()
         .map(|pk_idx| columns[*pk_idx].array_ref())
         .collect()
+}
+
+pub trait ExecutorBuilder {
+    fn new_boxed_executor(
+        executor_params: ExecutorParams,
+        node: &stream_plan::StreamNode,
+        store: impl StateStore,
+        stream: &mut StreamManagerCore,
+    ) -> Result<Box<dyn Executor>>;
+}
+#[macro_export]
+macro_rules! build_executor {
+    ($source: expr,$node: expr,$store: expr,$stream: expr, $($proto_type_name:path => $data_type:ty),*) => {
+        match $node.get_node().unwrap() {
+            $(
+                $proto_type_name(..) => {
+                    <$data_type>::new_boxed_executor($source,$node,$store,$stream)
+                },
+            )*
+            _ => Err(RwError::from(
+              ErrorCode::InternalError(format!(
+                "unsupported node:{:?}",
+                $node.get_node().unwrap()
+              )),
+            )),
+        }
+    }
+}
+
+pub fn create_executor(
+    executor_params: ExecutorParams,
+    stream: &mut StreamManagerCore,
+    node: &stream_plan::StreamNode,
+    store: impl StateStore,
+) -> Result<Box<dyn Executor>> {
+    let real_executor = build_executor! { executor_params,node,store,stream,
+      Node::SourceNode => SourceExecutorBuilder,
+      Node::ProjectNode => ProjectExecutorBuilder,
+      Node::TopNNode => TopNExecutorBuilder,
+      Node::AppendOnlyTopNNode => AppendOnlyTopNExecutorBuilder,
+      Node::LocalSimpleAggNode => LocalSimpleAggExecutorBuilder,
+      Node::GlobalSimpleAggNode => SimpleAggExecutorBuilder,
+      Node::HashAggNode => HashAggExecutorBuilder,
+      Node::HashJoinNode => HashJoinExecutorBuilder,
+      Node::ChainNode => ChainExecutorBuilder,
+      Node::BatchPlanNode => BatchQueryExecutorBuilder,
+      Node::MergeNode => MergeExecutorBuilder,
+      Node::MaterializeNode => MaterializeExecutorBuilder,
+      Node::FilterNode => FilterExecutorBuilder
+    }?;
+    Ok(real_executor)
 }
 
 /// `SimpleExecutor` accepts a single chunk as input.

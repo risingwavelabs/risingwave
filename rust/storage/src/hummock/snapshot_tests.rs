@@ -3,6 +3,8 @@
 #[cfg(test)]
 use std::sync::Arc;
 
+use risingwave_pb::hummock::SstableInfo;
+
 use super::*;
 use crate::hummock::iterator::test_utils::{
     default_builder_opt_for_test, iterator_test_key_of, iterator_test_key_of_epoch,

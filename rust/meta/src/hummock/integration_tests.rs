@@ -77,9 +77,8 @@ async fn test_compaction_same_key_not_split() {
     let sub_compact_context = SubCompactContext {
         options: storage.options().clone(),
         local_version_manager: storage.local_version_manager().clone(),
-        obj_client: storage.obj_client().clone(),
-        hummock_meta_client: storage.hummock_meta_client().clone(),
         sstable_manager: storage.sstable_manager(),
+        hummock_meta_client: storage.hummock_meta_client().clone(),
     };
 
     // 1. add sstables
@@ -91,6 +90,11 @@ async fn test_compaction_same_key_not_split() {
                 once((b"same_key".to_vec(), HummockValue::Put(b"value".to_vec()))),
                 epoch,
             )
+            .await
+            .unwrap();
+        storage
+            .shared_buffer_manager()
+            .sync(Some(epoch))
             .await
             .unwrap();
     }
