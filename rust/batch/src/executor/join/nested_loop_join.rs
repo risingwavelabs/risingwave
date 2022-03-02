@@ -260,7 +260,9 @@ impl NestedLoopJoinExecutor {
             let probe_result = match self.join_type {
                 JoinType::Inner => self.do_inner_join(),
                 JoinType::LeftOuter => self.do_left_outer_join(),
-                JoinType::RightOuter => self.do_right_outer_join(),
+                JoinType::RightOuter => self.do_inner_join(),
+                JoinType::LeftSemi => self.do_inner_join(),
+                JoinType::LeftAnti => self.do_inner_join(),
                 _ => unimplemented!("Do not support other join types!"),
             }?;
 
@@ -272,13 +274,22 @@ impl NestedLoopJoinExecutor {
                 // loop. But currently seems like it do not have too much gain. Will
                 // keep look on it.
                 if ret_chunk.capacity() > 0 {
-                    let (mut left_data_chunk, return_data_chunk) = self
-                        .chunk_builder
-                        .append_chunk(SlicedDataChunk::new_checked(ret_chunk)?)?;
-                    // Have checked last chunk is None in before. Now swap to buffer it.
-                    std::mem::swap(&mut self.last_chunk, &mut left_data_chunk);
-                    if let Some(inner_chunk) = return_data_chunk {
-                        return Ok(Some(inner_chunk));
+                    if self.join_type == JoinType::LeftSemi {
+                        let return_data_chunk = self.chunk_builder.append_one_row_ref(
+                            self.probe_side_source.get_current_row_ref().unwrap(),
+                        )?;
+                        if let Some(inner_chunk) = return_data_chunk {
+                            return Ok(Some(inner_chunk));
+                        }
+                    } else {
+                        let (mut left_data_chunk, return_data_chunk) = self
+                            .chunk_builder
+                            .append_chunk(SlicedDataChunk::new_checked(ret_chunk)?)?;
+                        // Have checked last chunk is None in before. Now swap to buffer it.
+                        std::mem::swap(&mut self.last_chunk, &mut left_data_chunk);
+                        if let Some(inner_chunk) = return_data_chunk {
+                            return Ok(Some(inner_chunk));
+                        }
                     }
                 }
             }
@@ -296,8 +307,10 @@ impl NestedLoopJoinExecutor {
     /// table and append row if not matched in [`NestedLoopJoinState::Probe`].
     fn probe_remaining(&mut self) -> Result<Option<DataChunk>> {
         match self.join_type {
-            JoinType::RightOuter => self.do_probe_remaining(),
-            _ => unimplemented!(),
+            JoinType::RightOuter => self.do_probe_remaining_right_outer(),
+            JoinType::RightSemi => self.do_probe_remaining_right_semi(),
+            JoinType::RightAnti => self.do_probe_remaining_right_anti(),
+            _ => unimplemented!(""),
         }
     }
 
@@ -359,7 +372,7 @@ impl NestedLoopJoinExecutor {
         Ok(ret)
     }
 
-    fn do_probe_remaining(&mut self) -> Result<Option<DataChunk>> {
+    fn do_probe_remaining_right_outer(&mut self) -> Result<Option<DataChunk>> {
         while let Some(cur_row) = self.build_table.get_current_row_ref() {
             if !self
                 .build_table
@@ -381,8 +394,53 @@ impl NestedLoopJoinExecutor {
         Ok(None)
     }
 
-    fn do_right_outer_join(&mut self) -> Result<ProbeResult> {
-        self.do_inner_join()
+    fn do_probe_remaining_right_semi(&mut self) -> Result<Option<DataChunk>> {
+        while let Some(cur_row) = self.build_table.get_current_row_ref() {
+            if self
+                .build_table
+                .is_build_matched(self.build_table.get_current_row_id())?
+            {
+                if let Some(ret_chunk) = self.chunk_builder.append_one_row_ref(cur_row)? {
+                    return Ok(Some(ret_chunk));
+                }
+            }
+            self.build_table.advance_row();
+        }
+        Ok(None)
+    }
+
+    fn do_probe_remaining_right_anti(&mut self) -> Result<Option<DataChunk>> {
+        while let Some(cur_row) = self.build_table.get_current_row_ref() {
+            if !self
+                .build_table
+                .is_build_matched(self.build_table.get_current_row_id())?
+            {
+                if let Some(ret_chunk) = self.chunk_builder.append_one_row_ref(cur_row)? {
+                    return Ok(Some(ret_chunk));
+                }
+            }
+            self.build_table.advance_row();
+        }
+        Ok(None)
+    }
+
+    fn do_left_anti_join(&mut self) -> Result<ProbeResult> {
+        let ret = self.do_inner_join()?;
+        // Append (probed_row, None) to chunk builder if current row finished probing and do not
+        // find any match.
+        if ret.cur_row_finished {
+            if !self.probe_side_source.get_cur_row_matched() {
+                assert!(ret.chunk.is_none());
+                let probe_row = self.probe_side_source.get_current_row_ref().unwrap();
+                let ret = self.chunk_builder.append_one_row_ref(probe_row)?;
+                return Ok(ProbeResult {
+                    cur_row_finished: true,
+                    chunk: ret,
+                });
+            }
+            self.probe_side_source.set_cur_row_matched(false);
+        }
+        Ok(ret)
     }
 
     /// The layout be like:
