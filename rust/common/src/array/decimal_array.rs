@@ -80,6 +80,7 @@ impl Array for DecimalArray {
             values,
             array_type: ArrayType::Decimal as i32,
             struct_array_data: None,
+            list_array_data: None,
         })
     }
 

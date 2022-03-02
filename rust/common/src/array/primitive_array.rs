@@ -127,6 +127,7 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
             values: vec![buffer],
             array_type: T::array_type() as i32,
             struct_array_data: None,
+            list_array_data: None,
         })
     }
 

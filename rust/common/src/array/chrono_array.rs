@@ -70,6 +70,7 @@ macro_rules! get_chrono_array {
                         values: vec![buffer],
                         array_type: Self::get_array_type() as i32,
                         struct_array_data: None,
+                        list_array_data: None,
                     })
                 }
 

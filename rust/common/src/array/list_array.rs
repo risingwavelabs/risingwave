@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_pb::data::{
-    Array as ProstArray, ArrayType as ProstArrayType, DataType as ProstDataType, StructArrayData,
+    Array as ProstArray, ArrayType as ProstArrayType, DataType as ProstDataType, ListArrayData,
 };
 
 use super::{
@@ -153,7 +153,8 @@ impl Array for ListArray {
             .collect::<Result<Vec<ProstDataType>>>()?;
         Ok(ProstArray {
             array_type: ProstArrayType::List as i32,
-            struct_array_data: Some(StructArrayData {
+            struct_array_data: None,
+            list_array_data: Some(ListArrayData {
                 children_array,
                 children_type,
             }),
@@ -199,7 +200,7 @@ impl ListArray {
         );
         let bitmap: Bitmap = array.get_null_bitmap()?.try_into()?;
         let cardinality = bitmap.len();
-        let array_data = array.get_struct_array_data()?;
+        let array_data = array.get_list_array_data()?;
         let children = array_data
             .children_array
             .iter()

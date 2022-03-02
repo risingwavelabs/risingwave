@@ -157,6 +157,7 @@ impl Array for StructArray {
                 children_array,
                 children_type,
             }),
+            list_array_data: None,
             null_bitmap: Some(self.bitmap.to_protobuf()?),
             values: vec![],
         })

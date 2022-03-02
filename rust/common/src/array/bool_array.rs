@@ -65,6 +65,7 @@ impl Array for BoolArray {
             values: vec![values],
             array_type: ArrayType::Bool as i32,
             struct_array_data: None,
+            list_array_data: None,
         })
     }
 
