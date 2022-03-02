@@ -210,7 +210,6 @@ impl<'a> TableBuilder<'a> {
                     ..CoreDefault::default()
                 })
                 .collect_vec(),
-            is_materialized_view: false,
             ..Default::default()
         };
 

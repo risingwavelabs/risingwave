@@ -6,8 +6,8 @@ use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
-use risingwave_pb::plan::create_source_node::RowFormatType;
 use risingwave_pb::plan::plan_node::NodeBody;
+use risingwave_pb::plan::RowFormatType;
 use risingwave_source::parser::JSONParser;
 use risingwave_source::{
     DebeziumJsonParser, HighLevelKafkaSourceConfig, ProtobufParser, SourceColumnDesc, SourceConfig,
@@ -70,8 +70,9 @@ impl BoxedExecutorBuilder for CreateSourceExecutor {
         )?;
 
         let table_id = TableId::from(&node.table_ref_id);
+        let info = node.get_info().unwrap();
 
-        let row_id_index = node.get_row_id_index();
+        let row_id_index = info.get_row_id_index();
 
         let columns = node
             .get_column_descs()
@@ -87,16 +88,16 @@ impl BoxedExecutorBuilder for CreateSourceExecutor {
             })
             .collect::<Result<Vec<SourceColumnDesc>>>()?;
 
-        let format = match node.get_format()? {
+        let format = match info.get_row_format().unwrap() {
             RowFormatType::Json => SourceFormat::Json,
             RowFormatType::Protobuf => SourceFormat::Protobuf,
             RowFormatType::Avro => SourceFormat::Avro,
             RowFormatType::DebeziumJson => SourceFormat::DebeziumJson,
         };
 
-        let properties = node.get_properties();
+        let properties = info.get_properties();
 
-        let schema_location = node.get_schema_location();
+        let schema_location = info.get_row_schema_location();
 
         if format == SourceFormat::Protobuf && schema_location.is_empty() {
             return Err(RwError::from(ProtocolError(

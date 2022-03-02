@@ -1,6 +1,7 @@
 package com.risingwave.catalog;
 
 import com.google.common.collect.ImmutableMap;
+import com.risingwave.proto.plan.RowFormatType;
 import java.util.Collection;
 import org.apache.calcite.rel.RelCollation;
 import org.apache.calcite.schema.Schema;
@@ -21,7 +22,7 @@ public class MaterializedViewCatalog extends TableCatalog {
       ImmutableIntList primaryKeyColumnIds,
       DataDistributionType distributionType,
       ImmutableMap<String, String> properties,
-      String rowFormat,
+      RowFormatType rowFormat,
       String rowSchemaLocation,
       RelCollation collation,
       boolean associated) {
