@@ -541,12 +541,10 @@ mod tests {
         let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
             mock_hummock_meta_service.clone(),
         ));
-        let (mock_tx, _) = tokio::sync::mpsc::unbounded_channel();
         let shared_buffer_manager = SharedBufferManager::new(
             Arc::new(HummockOptions::default_for_test()),
             vm.clone(),
             obj_client.clone(),
-            mock_tx,
             DEFAULT_STATE_STORE_STATS.clone(),
             mock_hummock_meta_client.clone(),
         );

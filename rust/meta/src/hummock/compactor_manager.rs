@@ -40,6 +40,12 @@ pub struct CompactorManager {
     inner: RwLock<CompactorManagerInner>,
 }
 
+impl Default for CompactorManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CompactorManager {
     pub fn new() -> Self {
         Self {
