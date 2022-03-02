@@ -300,6 +300,15 @@ impl SharedBufferManager {
     pub async fn wait(self) -> Result<()> {
         self.uploader_handle.await.unwrap()
     }
+
+    pub fn reset(&mut self) {
+        // Reset uploader item
+        self.uploader_tx
+            .send(SharedBufferUploaderItem::Reset)
+            .unwrap();
+        // Clear shared buffer
+        self.shared_buffer.write().clear();
+    }
 }
 
 #[derive(Debug)]
@@ -315,6 +324,7 @@ pub struct SyncItem {
 pub enum SharedBufferUploaderItem {
     Batch(SharedBufferBatch),
     Sync(SyncItem),
+    Reset,
 }
 
 pub struct SharedBufferUploader {
@@ -433,6 +443,10 @@ impl SharedBufferUploader {
                         )
                     })?;
                 }
+                Ok(())
+            }
+            SharedBufferUploaderItem::Reset => {
+                self.batches_to_upload.clear();
                 Ok(())
             }
         }
@@ -994,5 +1008,47 @@ mod tests {
             merge_iterator.next().await.unwrap();
         }
         assert!(!merge_iterator.is_valid());
+    }
+
+    #[tokio::test]
+    async fn test_shared_buffer_manager_reset() {
+        let mut shared_buffer_manager = new_shared_buffer_manager();
+
+        let mut keys = Vec::new();
+        for i in 0..4 {
+            keys.push(format!("key_test_{:05}", i).as_bytes().to_vec());
+        }
+        let mut idx = 0;
+
+        // Write batches
+        let epoch = 1;
+        let shared_buffer_items =
+            generate_and_write_batch(&keys, &[], epoch, &mut idx, &shared_buffer_manager);
+
+        // Get and check value with epoch 0..=epoch1
+        for (idx, key) in keys.iter().enumerate() {
+            assert_eq!(
+                shared_buffer_manager.get(key.as_slice(), ..=epoch).unwrap(),
+                shared_buffer_items[idx].1
+            );
+        }
+
+        // Reset shared buffer. Expect all keys are gone.
+        shared_buffer_manager.reset();
+        for item in &shared_buffer_items {
+            assert_eq!(shared_buffer_manager.get(item.0.as_slice(), ..=epoch), None);
+        }
+
+        // Generate new items overlapping with old items and check
+        keys.push(format!("key_test_{:05}", 100).as_bytes().to_vec());
+        let epoch = 1;
+        let new_shared_buffer_items =
+            generate_and_write_batch(&keys, &[], epoch, &mut idx, &shared_buffer_manager);
+        for (idx, key) in keys.iter().enumerate() {
+            assert_eq!(
+                shared_buffer_manager.get(key.as_slice(), ..=epoch).unwrap(),
+                new_shared_buffer_items[idx].1
+            );
+        }
     }
 }
