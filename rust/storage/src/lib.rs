@@ -26,7 +26,8 @@ pub mod metrics;
 pub mod monitor;
 pub mod object;
 pub mod panic_store;
-mod store;
+pub mod store;
+pub mod store_impl;
 pub mod table;
 pub mod write_batch;
 
@@ -44,7 +45,8 @@ pub mod tikv;
 
 pub use keyspace::{Keyspace, Segment};
 use risingwave_common::catalog::ColumnId;
-pub use store::{StateStore, StateStoreImpl, StateStoreIter};
+pub use store::{StateStore, StateStoreIter};
+pub use store_impl::StateStoreImpl;
 
 #[derive(Clone, Debug)]
 pub struct TableColumnDesc {
