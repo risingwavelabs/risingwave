@@ -52,6 +52,7 @@ message DataType {
     TIMESTAMPZ = 13;
     SYMBOL = 14;
     STRUCT = 15;
+    LIST = 16;
   }
   TypeName type_name = 1;
   // Data length for char.
@@ -69,6 +70,11 @@ message StructArrayData {
   repeated DataType children_type = 2;
 }
 
+message ListArrayData {
+  repeated Array children_array = 1;
+  repeated DataType children_type = 2;
+}
+
 enum ArrayType {
   INT16 = 0;
   INT32 = 1;
@@ -82,6 +88,7 @@ enum ArrayType {
   TIME = 9;
   TIMESTAMP = 10;
   STRUCT = 11;
+  LIST = 12;
 }
 
 message Array {
@@ -89,6 +96,7 @@ message Array {
   Buffer null_bitmap = 2;
   repeated Buffer values = 3;
   StructArrayData struct_array_data = 4;
+  ListArrayData list_array_data = 5;
 }
 
 // New column proto def to replace fixed width column. This def
