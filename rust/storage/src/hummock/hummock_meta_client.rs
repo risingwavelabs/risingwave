@@ -12,7 +12,7 @@ use crate::hummock::{
     HummockEpoch, HummockError, HummockResult, HummockSSTableId, HummockVersionId,
     TracedHummockError,
 };
-use crate::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
+use crate::monitor::StateStoreStats;
 
 #[derive(Default)]
 pub struct RetryableError {}
@@ -47,23 +47,20 @@ pub trait HummockMetaClient: Send + Sync + 'static {
     async fn abort_epoch(&self, epoch: HummockEpoch) -> HummockResult<()>;
 }
 
-pub struct RPCHummockMetaClient {
+pub struct RpcHummockMetaClient {
     meta_client: MetaClient,
     stats: Arc<StateStoreStats>,
 }
 
-impl RPCHummockMetaClient {
-    pub fn new(meta_client: MetaClient) -> RPCHummockMetaClient {
-        RPCHummockMetaClient {
-            meta_client,
-            stats: DEFAULT_STATE_STORE_STATS.clone(),
-        }
+impl RpcHummockMetaClient {
+    pub fn new(meta_client: MetaClient, stats: Arc<StateStoreStats>) -> RpcHummockMetaClient {
+        RpcHummockMetaClient { meta_client, stats }
     }
 }
 
 // TODO #93 idempotent retry
 #[async_trait]
-impl HummockMetaClient for RPCHummockMetaClient {
+impl HummockMetaClient for RpcHummockMetaClient {
     async fn pin_version(&self) -> HummockResult<HummockVersion> {
         self.stats.pin_version_counts.inc();
         let timer = self.stats.pin_version_latency.start_timer();

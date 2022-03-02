@@ -15,8 +15,9 @@ use risingwave_pb::plan::create_table_node::Info;
 use risingwave_pb::plan::ColumnDesc;
 use risingwave_source::{MemSourceManager, SourceManager};
 use risingwave_storage::memory::MemoryStateStore;
+use risingwave_storage::monitor::DEFAULT_STATE_STORE_STATS;
 use risingwave_storage::table::{SimpleTableManager, TableManager};
-use risingwave_storage::{Keyspace, StateStoreImpl};
+use risingwave_storage::{Keyspace, StateStore, StateStoreImpl};
 use risingwave_stream::executor::{
     Barrier, Epoch, Executor as StreamExecutor, MaterializeExecutor, Message, PkIndices,
     SourceExecutor,
@@ -67,7 +68,11 @@ impl BatchExecutor for SingleChunkExecutor {
 #[tokio::test]
 async fn test_table_v2_materialize() -> Result<()> {
     let memory_state_store = MemoryStateStore::new();
-    let store = StateStoreImpl::MemoryStateStore(memory_state_store.clone());
+    let store = StateStoreImpl::MemoryStateStore(
+        memory_state_store
+            .clone()
+            .monitored(DEFAULT_STATE_STORE_STATS.clone()),
+    );
     let source_manager = Arc::new(MemSourceManager::new());
     let table_manager = Arc::new(SimpleTableManager::new(store));
     let source_table_id = TableId::default();

@@ -41,7 +41,7 @@ use self::key::{key_with_epoch, user_key, FullKey};
 use self::shared_buffer::SharedBufferManager;
 pub use self::state_store::*;
 use self::utils::{bloom_filter_sstables, range_overlap};
-use super::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
+use super::monitor::StateStoreStats;
 use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::iterator::ReverseUserIterator;
 use crate::hummock::local_version_manager::LocalVersionManager;
@@ -114,13 +114,33 @@ pub struct HummockStorage {
 }
 
 impl HummockStorage {
+    /// Create a [`HummockStorage`] with default stats. Should only used by tests.
+    pub async fn with_default_stats(
+        obj_client: Arc<dyn ObjectStore>,
+        options: HummockOptions,
+        local_version_manager: Arc<LocalVersionManager>,
+        hummock_meta_client: Arc<dyn HummockMetaClient>,
+    ) -> HummockResult<Self> {
+        use crate::monitor::DEFAULT_STATE_STORE_STATS;
+
+        Self::new(
+            obj_client,
+            options,
+            local_version_manager,
+            hummock_meta_client,
+            DEFAULT_STATE_STORE_STATS.clone(),
+        )
+        .await
+    }
+
+    /// Create a [`HummockStorage`].
     pub async fn new(
         obj_client: Arc<dyn ObjectStore>,
         options: HummockOptions,
         local_version_manager: Arc<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
-    ) -> HummockResult<HummockStorage> {
-        let stats = DEFAULT_STATE_STORE_STATS.clone();
+        stats: Arc<StateStoreStats>,
+    ) -> HummockResult<Self> {
         let options = Arc::new(options);
 
         let shared_buffer_manager = Arc::new(SharedBufferManager::new(
@@ -162,10 +182,6 @@ impl HummockStorage {
     /// the key is not found. If `Err()` is returned, the searching for the key
     /// failed due to other non-EOF errors.
     pub async fn get(&self, key: &[u8], epoch: u64) -> HummockResult<Option<Vec<u8>>> {
-        self.stats.get_counts.inc();
-        self.stats.get_key_size.observe(key.len() as f64);
-        let timer = self.stats.get_latency.start_timer();
-
         let mut table_iters: Vec<BoxedHummockIterator> = Vec::new();
 
         let version = self.local_version_manager.get_version()?;
@@ -222,10 +238,6 @@ impl HummockStorage {
             true => it.value().into_put_value().map(|x| x.to_vec()),
             false => None,
         };
-        timer.observe_duration();
-        self.stats
-            .get_value_size
-            .observe((value.as_ref().map(|x| x.len()).unwrap_or(0) + 1) as f64);
 
         Ok(value)
     }
@@ -241,8 +253,6 @@ impl HummockStorage {
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
     {
-        self.stats.range_scan_counts.inc();
-
         let version = self.local_version_manager.get_version()?;
 
         // Filter out tables that overlap with given `key_range`
@@ -272,13 +282,14 @@ impl HummockStorage {
         };
 
         // TODO: avoid this clone
-        Ok(UserIterator::new_with_epoch(
+        Ok(UserIterator::new(
             mi,
             (
                 key_range.start_bound().map(|b| b.as_ref().to_owned()),
                 key_range.end_bound().map(|b| b.as_ref().to_owned()),
             ),
             epoch,
+            self.stats.clone(),
         ))
     }
 
@@ -293,8 +304,6 @@ impl HummockStorage {
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
     {
-        self.stats.range_scan_counts.inc();
-
         let version = self.local_version_manager.get_version()?;
 
         // Filter out tables that overlap with given `key_range`

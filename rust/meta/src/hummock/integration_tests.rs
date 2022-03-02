@@ -53,7 +53,7 @@ async fn get_hummock_storage() -> HummockStorage {
         &options.remote_dir,
         Some(Arc::new(Cache::new(65536))),
     ));
-    HummockStorage::new(
+    HummockStorage::with_default_stats(
         obj_client.clone(),
         options.clone(),
         local_version_manager.clone(),
