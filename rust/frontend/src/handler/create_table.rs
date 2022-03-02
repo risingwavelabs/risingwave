@@ -35,7 +35,7 @@ fn convert_data_type(data_type: &AstDataType) -> DataType {
     }
 }
 
-pub(super) async fn handle_create_table(
+pub async fn handle_create_table(
     session: &RwSession,
     table_name: ObjectName,
     columns: Vec<ColumnDef>,

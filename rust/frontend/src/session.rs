@@ -68,7 +68,6 @@ pub struct RwSession {
 }
 
 impl RwSession {
-    #[cfg(test)]
     pub fn new(env: FrontendEnv, database: String) -> Self {
         Self { env, database }
     }
