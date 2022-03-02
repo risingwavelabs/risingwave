@@ -16,6 +16,7 @@ use crate::rocksdb_local::RocksDBStateStore;
 use crate::tikv::TikvStateStore;
 use crate::StateStore;
 
+/// The type erased [`StateStore`].
 #[derive(Clone)]
 pub enum StateStoreImpl {
     HummockStateStore(Monitored<HummockStateStore>),

@@ -7,6 +7,7 @@ use futures::Future;
 use risingwave_common::error::Result;
 
 use super::StateStoreStats;
+use crate::write_batch::WriteBatch;
 use crate::{StateStore, StateStoreIter};
 
 /// A state store wrapper for monitoring metrics.
@@ -139,6 +140,18 @@ where
     {
         self.monitored_iter(self.inner.reverse_iter(key_range, epoch))
             .await
+    }
+
+    async fn wait_epoch(&self, epoch: u64) {
+        self.inner.wait_epoch(epoch).await
+    }
+
+    async fn sync(&self, epoch: Option<u64>) -> Result<()> {
+        self.inner.sync(epoch).await
+    }
+
+    fn monitored(self, _stats: Arc<StateStoreStats>) -> MonitoredStateStore<Self> {
+        panic!("the state store is already monitored")
     }
 }
 
