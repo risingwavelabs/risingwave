@@ -37,10 +37,6 @@ pub trait MetaStore: Sync + Send + 'static {
     async fn get_cf(&self, cf: &str, key: &[u8]) -> Result<Vec<u8>> {
         self.snapshot().get_cf(cf, key).await
     }
-
-    fn get_transaction(&self) -> Transaction {
-        Transaction::new()
-    }
 }
 
 // Error of metastore

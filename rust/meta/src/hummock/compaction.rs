@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::hummock::level_handler::{LevelHandler, SSTableStat};
 use crate::hummock::model::HUMMOCK_DEFAULT_CF_NAME;
-use crate::storage::{MetaStore, Operation, Transaction};
+use crate::storage::{MetaStore, Transaction};
 
 /// Hummock `compact_status` key
 /// `cf(hummock_default)`: `hummock_compact_status_key` -> `CompactStatus`
@@ -52,12 +52,12 @@ impl CompactStatus {
     }
 
     pub fn update_in_transaction(&self, trx: &mut Transaction) {
-        trx.add_operations(vec![Operation::Put {
-            cf: CompactStatus::cf_name().to_string(),
-            key: CompactStatus::key().as_bytes().to_vec(),
+        trx.put(
+            CompactStatus::cf_name().to_string(),
+            CompactStatus::key().as_bytes().to_vec(),
             // TODO replace unwrap
-            value: bincode::serialize(&self).unwrap(),
-        }]);
+            bincode::serialize(&self).unwrap(),
+        );
     }
 
     pub fn get_compact_task(&mut self) -> Option<CompactTask> {
