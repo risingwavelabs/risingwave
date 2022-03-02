@@ -5,7 +5,7 @@ use risingwave_storage::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
 
 use crate::utils::metric_display::MetricDisplay;
 
-pub(crate) struct DiffStat {
+pub(crate) struct StatDiff {
     pub(crate) prev_stat: StateStoreStats,
     pub(crate) cur_stat: StateStoreStats,
 }
@@ -17,7 +17,7 @@ pub(crate) struct MyHistogram {
     pub(crate) total_sum: f64,
 }
 
-impl DiffStat {
+impl StatDiff {
     pub(crate) fn update_stat(&mut self) {
         let stat = (**DEFAULT_STATE_STORE_STATS).clone();
         // (Ting Sun) TODO: eliminate this clone
@@ -33,7 +33,7 @@ impl DiffStat {
         let cur_latency_hist = metric.get_histogram();
 
         let latency = {
-            let latency_hist = DiffStat::histogram_diff(prev_latency_hist, cur_latency_hist);
+            let latency_hist = StatDiff::histogram_diff(prev_latency_hist, cur_latency_hist);
             MetricDisplay::new(&latency_hist)
         };
 

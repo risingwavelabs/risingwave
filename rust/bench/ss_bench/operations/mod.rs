@@ -35,7 +35,7 @@ impl Operations {
     pub(crate) async fn run(store: impl StateStore, opts: &Opts) {
         let reg = Registry::new();
         let stat = StateStoreStats::new(&reg);
-        let mut diff_stat = DiffStat {
+        let mut stat_diff = StatDiff {
             prev_stat: stat.clone(),
             cur_stat: stat,
         };
@@ -58,11 +58,11 @@ impl Operations {
                 other => unimplemented!("operation \"{}\" is not supported.", other),
             }
 
-            diff_stat.update_stat();
+            stat_diff.update_stat();
 
             // display metrics
             match operation {
-                "writebatch" => diff_stat.display_write_batch(),
+                "writebatch" => stat_diff.display_write_batch(),
                 // (Sun Ting) TODO: implement other performance displays
                 "deleterandom" => {}
                 "getrandom" => {}
