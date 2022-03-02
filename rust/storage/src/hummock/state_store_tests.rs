@@ -33,10 +33,10 @@ async fn test_prometheus_endpoint_hummock() {
     let hummock_options = HummockOptions::default_for_test();
     let object_client = Arc::new(InMemObjectStore::new());
     let sstable_manager = mock_sstable_manager_with_object_store(object_client.clone());
-    let local_version_manager = Arc::new(LocalVersionManager::new(sstable_manager, None));
+    let local_version_manager = Arc::new(LocalVersionManager::new(sstable_manager.clone(), None));
     let _hummock_storage = HummockStorage::new(
-        object_client,
         hummock_options,
+        sstable_manager,
         local_version_manager,
         Arc::new(MockHummockMetaClient::new(Arc::new(
             MockHummockMetaService::new(),
@@ -70,10 +70,10 @@ async fn test_basic() {
     let object_client = Arc::new(InMemObjectStore::new());
     let sstable_manager = mock_sstable_manager_with_object_store(object_client.clone());
     let hummock_options = HummockOptions::default_for_test();
-    let local_version_manager = Arc::new(LocalVersionManager::new(sstable_manager, None));
+    let local_version_manager = Arc::new(LocalVersionManager::new(sstable_manager.clone(), None));
     let hummock_storage = HummockStorage::new(
-        object_client,
         hummock_options,
+        sstable_manager,
         local_version_manager,
         Arc::new(MockHummockMetaClient::new(Arc::new(
             MockHummockMetaService::new(),
@@ -226,14 +226,14 @@ async fn test_reload_storage() {
     let object_store = Arc::new(InMemObjectStore::new());
     let sstable_manager = mock_sstable_manager_with_object_store(object_store.clone());
     let hummock_options = HummockOptions::default_for_test();
-    let local_version_manager = Arc::new(LocalVersionManager::new(sstable_manager, None));
+    let local_version_manager = Arc::new(LocalVersionManager::new(sstable_manager.clone(), None));
     let hummock_meta_client = Arc::new(MockHummockMetaClient::new(Arc::new(
         MockHummockMetaService::new(),
     )));
 
     let hummock_storage = HummockStorage::new(
-        object_store.clone(),
         hummock_options,
+        sstable_manager.clone(),
         local_version_manager.clone(),
         hummock_meta_client.clone(),
     )
@@ -276,8 +276,8 @@ async fn test_reload_storage() {
     // Mock somthing happened to storage internal, and storage is reloaded.
     drop(hummock_storage);
     let hummock_storage = HummockStorage::new(
-        object_store,
         HummockOptions::default_for_test(),
+        sstable_manager,
         local_version_manager,
         hummock_meta_client,
     )

@@ -7,7 +7,7 @@ use std::sync::Arc;
 use super::variants::*;
 use crate::hummock::key::{key_with_epoch, user_key, Epoch};
 use crate::hummock::{
-    sstable_manager, HummockResult, HummockValue, SSTable, SSTableBuilder, SSTableBuilderOptions,
+    sstable_manager, HummockResult, HummockValue, SSTableBuilder, SSTableBuilderOptions, Sstable,
 };
 use crate::object::{InMemObjectStore, ObjectStoreRef};
 
@@ -162,7 +162,7 @@ macro_rules! test_key {
     };
 }
 
-use sstable_manager::{SSTableManager, SSTableManagerRef};
+use sstable_manager::{SSTableManagerRef, SstableManager};
 pub(crate) use test_key;
 
 pub type TestIterator = TestIteratorInner<FORWARD>;
@@ -280,7 +280,7 @@ pub async fn gen_test_sstable(
     table_idx: u64,
     opts: SSTableBuilderOptions,
     sstable_manager: SSTableManagerRef,
-) -> SSTable {
+) -> Sstable {
     gen_test_sstable_base(table_idx, opts, |x| x, sstable_manager).await
 }
 
@@ -292,7 +292,7 @@ pub async fn gen_test_sstable_base(
     opts: SSTableBuilderOptions,
     idx_mapping: impl Fn(usize) -> usize,
     sstable_manager: SSTableManagerRef,
-) -> SSTable {
+) -> Sstable {
     let mut b = SSTableBuilder::new(opts);
 
     for i in 0..TEST_KEYS_COUNT {
@@ -304,8 +304,11 @@ pub async fn gen_test_sstable_base(
 
     // get remote table
     let (data, meta) = b.finish();
-    sstable_manager.put(0, &meta, data).await.unwrap();
-    SSTable { id: 0, meta }
+    sstable_manager.put(table_idx, &meta, data).await.unwrap();
+    Sstable {
+        id: table_idx,
+        meta,
+    }
 }
 
 pub fn mock_sstable_manager() -> SSTableManagerRef {
@@ -315,7 +318,7 @@ pub fn mock_sstable_manager() -> SSTableManagerRef {
 
 pub fn mock_sstable_manager_with_object_store(object_store: ObjectStoreRef) -> SSTableManagerRef {
     let path = "test".to_string();
-    Arc::new(SSTableManager::new(object_store, path))
+    Arc::new(SstableManager::new(object_store, path))
 }
 
 #[cfg(test)]

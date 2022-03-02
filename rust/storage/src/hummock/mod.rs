@@ -51,7 +51,6 @@ use super::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
 use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::iterator::ReverseUserIterator;
 use crate::hummock::local_version_manager::LocalVersionManager;
-use crate::object::ObjectStore;
 
 pub type HummockTTL = u64;
 pub type HummockSSTableId = u64;
@@ -108,8 +107,6 @@ pub struct HummockStorage {
 
     local_version_manager: Arc<LocalVersionManager>,
 
-    obj_client: Arc<dyn ObjectStore>,
-
     /// Receiver of the compactor.
     #[allow(dead_code)]
     rx: Arc<PLMutex<Option<mpsc::UnboundedReceiver<()>>>>,
@@ -130,8 +127,8 @@ pub struct HummockStorage {
 
 impl HummockStorage {
     pub async fn new(
-        obj_client: Arc<dyn ObjectStore>,
         options: HummockOptions,
+        sstable_manager: SSTableManagerRef,
         local_version_manager: Arc<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> HummockResult<HummockStorage> {
@@ -146,11 +143,6 @@ impl HummockStorage {
         let hummock_meta_client_for_compact = hummock_meta_client.clone();
         let rx = Arc::new(PLMutex::new(Some(trigger_compact_rx)));
         let rx_for_compact = rx.clone();
-
-        let sstable_manager = Arc::new(SSTableManager::new(
-            obj_client.clone(),
-            arc_options.remote_dir.clone(),
-        ));
 
         let shared_buffer_manager = Arc::new(SharedBufferManager::new(
             arc_options.clone(),
@@ -180,7 +172,6 @@ impl HummockStorage {
         let instance = Self {
             options: arc_options,
             local_version_manager,
-            obj_client,
             rx,
             stop_compact_tx,
             compactor_joinhandle: Arc::new(PLMutex::new(Some(tokio::spawn(async move {
@@ -460,11 +451,9 @@ impl HummockStorage {
     pub fn options(&self) -> &Arc<HummockOptions> {
         &self.options
     }
+
     pub fn local_version_manager(&self) -> &Arc<LocalVersionManager> {
         &self.local_version_manager
-    }
-    pub fn obj_client(&self) -> &Arc<dyn ObjectStore> {
-        &self.obj_client
     }
 
     pub async fn wait_epoch(&self, epoch: HummockEpoch) {

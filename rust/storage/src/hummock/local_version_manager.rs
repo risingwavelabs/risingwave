@@ -14,7 +14,7 @@ use super::Block;
 use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::sstable_manager::SSTableManagerRef;
 use crate::hummock::{
-    HummockEpoch, HummockError, HummockResult, HummockSSTableId, HummockVersionId, SSTable,
+    HummockEpoch, HummockError, HummockResult, HummockSSTableId, HummockVersionId, Sstable,
     INVALID_VERSION_ID,
 };
 
@@ -59,7 +59,7 @@ impl ScopedLocalVersion {
 /// versions in storage service.
 pub struct LocalVersionManager {
     current_version: RwLock<Option<Arc<ScopedLocalVersion>>>,
-    sstables: RwLock<BTreeMap<HummockSSTableId, Arc<SSTable>>>,
+    sstables: RwLock<BTreeMap<HummockSSTableId, Arc<Sstable>>>,
     sstable_manager: SSTableManagerRef,
 
     pub block_cache: Arc<Cache<Vec<u8>, Arc<Block>>>,
@@ -179,20 +179,20 @@ impl LocalVersionManager {
         }
     }
 
-    fn try_get_sstable_from_cache(&self, table_id: HummockSSTableId) -> Option<Arc<SSTable>> {
+    fn try_get_sstable_from_cache(&self, table_id: HummockSSTableId) -> Option<Arc<Sstable>> {
         self.sstables.read().get(&table_id).cloned()
     }
 
-    fn add_sstable_to_cache(&self, sstable: Arc<SSTable>) {
+    fn add_sstable_to_cache(&self, sstable: Arc<Sstable>) {
         self.sstables.write().insert(sstable.id, sstable);
     }
 
-    pub async fn pick_few_tables(&self, table_ids: &[u64]) -> HummockResult<Vec<Arc<SSTable>>> {
+    pub async fn pick_few_tables(&self, table_ids: &[u64]) -> HummockResult<Vec<Arc<Sstable>>> {
         let mut tables = vec![];
         for table_id in table_ids {
             let sstable = match self.try_get_sstable_from_cache(*table_id) {
                 None => {
-                    let fetched_sstable = Arc::new(SSTable {
+                    let fetched_sstable = Arc::new(Sstable {
                         id: *table_id,
                         meta: self.sstable_manager.meta(*table_id).await?,
                     });
@@ -210,9 +210,9 @@ impl LocalVersionManager {
     pub async fn tables(
         &self,
         levels: &[risingwave_pb::hummock::Level],
-    ) -> HummockResult<Vec<Arc<SSTable>>> {
+    ) -> HummockResult<Vec<Arc<Sstable>>> {
         // Should the LevelType be returned and made use of?
-        let mut out: Vec<Arc<SSTable>> = Vec::new();
+        let mut out: Vec<Arc<Sstable>> = Vec::new();
         for level in levels {
             match level.level_type() {
                 LevelType::Overlapping => {

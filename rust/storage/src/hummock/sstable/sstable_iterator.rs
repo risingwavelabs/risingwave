@@ -4,7 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use super::super::{HummockResult, HummockValue};
-use super::{BlockIterator, SSTable, SeekPos};
+use super::{BlockIterator, Sstable, SeekPos};
 use crate::hummock::iterator::variants::FORWARD;
 use crate::hummock::iterator::HummockIterator;
 use crate::hummock::version_cmp::VersionedComparator;
@@ -16,7 +16,7 @@ pub trait SSTableIteratorType {
     type SSTableIterator: SSTableIteratorBase;
     const DIRECTION: usize;
 
-    fn new(table: Arc<SSTable>, sstable_manager: SSTableManagerRef) -> Self::SSTableIterator;
+    fn new(table: Arc<Sstable>, sstable_manager: SSTableManagerRef) -> Self::SSTableIterator;
 }
 
 /// Iterates on a table.
@@ -28,13 +28,13 @@ pub struct SSTableIterator {
     cur_idx: usize,
 
     /// Reference to the table
-    pub table: Arc<SSTable>,
+    pub table: Arc<Sstable>,
 
     sstable_manager: SSTableManagerRef,
 }
 
 impl SSTableIterator {
-    pub fn new(table: Arc<SSTable>, sstable_manager: SSTableManagerRef) -> Self {
+    pub fn new(table: Arc<Sstable>, sstable_manager: SSTableManagerRef) -> Self {
         Self {
             block_iter: None,
             cur_idx: 0,
@@ -144,7 +144,7 @@ impl SSTableIteratorType for SSTableIterator {
     type SSTableIterator = SSTableIterator;
     const DIRECTION: usize = FORWARD;
 
-    fn new(table: Arc<SSTable>, sstable_manager: SSTableManagerRef) -> Self::SSTableIterator {
+    fn new(table: Arc<Sstable>, sstable_manager: SSTableManagerRef) -> Self::SSTableIterator {
         SSTableIterator::new(table, sstable_manager)
     }
 }

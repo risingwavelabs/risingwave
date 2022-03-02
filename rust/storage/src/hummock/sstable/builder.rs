@@ -264,7 +264,7 @@ pub(super) mod tests {
     use super::*;
     use crate::hummock::iterator::test_utils::mock_sstable_manager;
     use crate::hummock::key::key_with_epoch;
-    use crate::hummock::sstable::SSTable;
+    use crate::hummock::sstable::Sstable;
     use crate::hummock::SSTableManagerRef;
 
     /// Number of keys in table generated in `generate_table`.
@@ -338,7 +338,7 @@ pub(super) mod tests {
     pub async fn gen_test_sstable(
         opts: SSTableBuilderOptions,
         sstable_manager: SSTableManagerRef,
-    ) -> SSTable {
+    ) -> Sstable {
         const REMOTE_DIR: &str = "test";
         let mut b = SSTableBuilder::new(opts);
 
@@ -352,7 +352,7 @@ pub(super) mod tests {
         // get remote table
         let (data, meta) = b.finish();
         sstable_manager.put(0, &meta, data).await.unwrap();
-        SSTable { id: 0, meta }
+        Sstable { id: 0, meta }
     }
 
     fn key(prefix: &[u8], i: usize) -> Bytes {

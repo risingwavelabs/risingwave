@@ -11,14 +11,14 @@ use super::Block;
 use crate::hummock::{HummockError, HummockResult};
 use crate::object::{BlockLocation, ObjectStoreRef};
 
-pub struct SSTableManager {
+pub struct SstableManager {
     path: String,
     store: ObjectStoreRef,
     // TODO: Refactor block cache.
     block_cache: Cache<(u64, u64), Arc<Block>>,
 }
 
-impl SSTableManager {
+impl SstableManager {
     pub fn new(store: ObjectStoreRef, path: String) -> Self {
         Self {
             path,
@@ -144,4 +144,4 @@ impl SSTableManager {
     }
 }
 
-pub type SSTableManagerRef = Arc<SSTableManager>;
+pub type SSTableManagerRef = Arc<SstableManager>;

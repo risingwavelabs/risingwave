@@ -9,7 +9,7 @@ use risingwave_rpc_client::MetaClient;
 
 use crate::hummock::hummock_meta_client::RPCHummockMetaClient;
 use crate::hummock::local_version_manager::LocalVersionManager;
-use crate::hummock::{HummockResult, HummockStateStore, SSTableManager};
+use crate::hummock::{HummockResult, HummockStateStore, SstableManager};
 use crate::memory::MemoryStateStore;
 use crate::object::S3ObjectStore;
 use crate::rocksdb_local::RocksDBStateStore;
@@ -172,13 +172,12 @@ impl StateStoreImpl {
                     S3ObjectStore::new_with_minio(minio.strip_prefix("hummock+").unwrap()).await,
                 );
                 let remote_dir = "hummock_001";
-                let sstable_manager = Arc::new(SSTableManager::new(
+                let sstable_manager = Arc::new(SstableManager::new(
                     object_client.clone(),
                     remote_dir.to_string(),
                 ));
                 StateStoreImpl::HummockStateStore(HummockStateStore::new(
                     HummockStorage::new(
-                        object_client.clone(),
                         HummockOptions {
                             sstable_size: 256 * (1 << 20),
                             block_size: 64 * (1 << 10),
@@ -186,6 +185,7 @@ impl StateStoreImpl {
                             remote_dir: remote_dir.to_string(),
                             checksum_algo: ChecksumAlg::Crc32c,
                         },
+                        sstable_manager.clone(),
                         Arc::new(LocalVersionManager::new(
                             sstable_manager,
                             // TODO: configurable block cache in config
@@ -207,13 +207,12 @@ impl StateStoreImpl {
                 );
 
                 let remote_dir = "hummock_001";
-                let sstable_manager = Arc::new(SSTableManager::new(
+                let sstable_manager = Arc::new(SstableManager::new(
                     s3_store.clone(),
                     remote_dir.to_string(),
                 ));
                 StateStoreImpl::HummockStateStore(HummockStateStore::new(
                     HummockStorage::new(
-                        s3_store.clone(),
                         HummockOptions {
                             sstable_size: 256 * (1 << 20),
                             block_size: 64 * (1 << 10),
@@ -221,6 +220,7 @@ impl StateStoreImpl {
                             remote_dir: remote_dir.to_string(),
                             checksum_algo: ChecksumAlg::Crc32c,
                         },
+                        sstable_manager.clone(),
                         Arc::new(LocalVersionManager::new(
                             sstable_manager,
                             Some(Arc::new(Cache::new(65536))),

@@ -108,12 +108,12 @@ impl Block {
 }
 
 /// [`SSTable`] represents a SST in object store.
-pub struct SSTable {
+pub struct Sstable {
     pub id: u64,
     pub meta: SstableMeta,
 }
 
-impl SSTable {
+impl Sstable {
     pub fn new(id: u64, meta: SstableMeta) -> Self {
         Self { id, meta }
     }

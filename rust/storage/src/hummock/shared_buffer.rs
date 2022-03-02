@@ -461,7 +461,7 @@ mod tests {
     use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
     use crate::hummock::shared_buffer::SharedBufferManager;
     use crate::hummock::value::HummockValue;
-    use crate::hummock::{HummockOptions, SSTableManager};
+    use crate::hummock::{HummockOptions, SstableManager};
     use crate::monitor::DEFAULT_STATE_STORE_STATS;
     use crate::object::{InMemObjectStore, ObjectStore};
 
@@ -541,7 +541,7 @@ mod tests {
     async fn test_shared_buffer_manager() {
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
         let remote_dir = "/test";
-        let sstable_manager = Arc::new(SSTableManager::new(obj_client, remote_dir.to_string()));
+        let sstable_manager = Arc::new(SstableManager::new(obj_client, remote_dir.to_string()));
         let vm = Arc::new(LocalVersionManager::new(sstable_manager.clone(), None));
         let mock_hummock_meta_service = Arc::new(MockHummockMetaService::new());
         let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(

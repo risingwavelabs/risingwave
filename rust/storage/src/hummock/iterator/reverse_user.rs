@@ -251,7 +251,7 @@ mod tests {
     use crate::hummock::iterator::variants::BACKWARD;
     use crate::hummock::iterator::BoxedHummockIterator;
     use crate::hummock::key::{prev_key, user_key};
-    use crate::hummock::sstable::{SSTable, SSTableIterator};
+    use crate::hummock::sstable::{SSTableIterator, Sstable};
     use crate::hummock::value::HummockValue;
     use crate::hummock::{ReverseSSTableIterator, SSTableBuilder, SSTableManagerRef};
 
@@ -369,16 +369,16 @@ mod tests {
         let sstable_manager = mock_sstable_manager();
         // key=[table, idx, epoch], value
         let kv_pairs = vec![
-            (0, 2, 300, HummockValue::Delete),
-            (0, 1, 100, HummockValue::Put(test_value_of(0, 1))),
+            (2, 300, HummockValue::Delete),
+            (1, 100, HummockValue::Put(test_value_of(0, 1))),
         ];
-        let table0 = add_kv_pair(kv_pairs, sstable_manager.clone()).await;
+        let table0 = add_kv_pair(0, kv_pairs, sstable_manager.clone()).await;
 
         let kv_pairs = vec![
-            (0, 2, 400, HummockValue::Put(test_value_of(0, 2))),
-            (0, 1, 200, HummockValue::Delete),
+            (2, 400, HummockValue::Put(test_value_of(0, 2))),
+            (1, 200, HummockValue::Delete),
         ];
-        let table1 = add_kv_pair(kv_pairs, sstable_manager.clone()).await;
+        let table1 = add_kv_pair(0, kv_pairs, sstable_manager.clone()).await;
 
         let iters: Vec<BoxedHummockIterator> = vec![
             Box::new(SSTableIterator::new(
@@ -408,24 +408,24 @@ mod tests {
         let sstable_manager = mock_sstable_manager();
         // key=[table, idx, epoch], value
         let kv_pairs = vec![
-            (0, 0, 200, HummockValue::Delete),
-            (0, 0, 100, HummockValue::Put(test_value_of(0, 0))),
-            (0, 1, 200, HummockValue::Put(test_value_of(0, 1))),
-            (0, 1, 100, HummockValue::Delete),
-            (0, 2, 400, HummockValue::Delete),
-            (0, 2, 300, HummockValue::Put(test_value_of(0, 2))),
-            (0, 2, 200, HummockValue::Delete),
-            (0, 2, 100, HummockValue::Put(test_value_of(0, 2))),
-            (0, 3, 100, HummockValue::Put(test_value_of(0, 3))),
-            (0, 5, 200, HummockValue::Delete),
-            (0, 5, 100, HummockValue::Put(test_value_of(0, 5))),
-            (0, 6, 100, HummockValue::Put(test_value_of(0, 6))),
-            (0, 7, 300, HummockValue::Put(test_value_of(0, 7))),
-            (0, 7, 200, HummockValue::Delete),
-            (0, 7, 100, HummockValue::Put(test_value_of(0, 7))),
-            (0, 8, 100, HummockValue::Put(test_value_of(0, 8))),
+            (0, 200, HummockValue::Delete),
+            (0, 100, HummockValue::Put(test_value_of(0, 0))),
+            (1, 200, HummockValue::Put(test_value_of(0, 1))),
+            (1, 100, HummockValue::Delete),
+            (2, 400, HummockValue::Delete),
+            (2, 300, HummockValue::Put(test_value_of(0, 2))),
+            (2, 200, HummockValue::Delete),
+            (2, 100, HummockValue::Put(test_value_of(0, 2))),
+            (3, 100, HummockValue::Put(test_value_of(0, 3))),
+            (5, 200, HummockValue::Delete),
+            (5, 100, HummockValue::Put(test_value_of(0, 5))),
+            (6, 100, HummockValue::Put(test_value_of(0, 6))),
+            (7, 300, HummockValue::Put(test_value_of(0, 7))),
+            (7, 200, HummockValue::Delete),
+            (7, 100, HummockValue::Put(test_value_of(0, 7))),
+            (8, 100, HummockValue::Put(test_value_of(0, 8))),
         ];
-        let table = add_kv_pair(kv_pairs, sstable_manager.clone()).await;
+        let table = add_kv_pair(0, kv_pairs, sstable_manager.clone()).await;
         let iters: Vec<BoxedHummockIterator> = vec![Box::new(ReverseSSTableIterator::new(
             Arc::new(table),
             sstable_manager,
@@ -490,21 +490,21 @@ mod tests {
         let sstable_manager = mock_sstable_manager();
         // key=[table, idx, epoch], value
         let kv_pairs = vec![
-            (0, 0, 200, HummockValue::Delete),
-            (0, 0, 100, HummockValue::Put(test_value_of(0, 0))),
-            (0, 1, 200, HummockValue::Put(test_value_of(0, 1))),
-            (0, 1, 100, HummockValue::Delete),
-            (0, 2, 300, HummockValue::Put(test_value_of(0, 2))),
-            (0, 2, 200, HummockValue::Delete),
-            (0, 2, 100, HummockValue::Delete),
-            (0, 3, 100, HummockValue::Put(test_value_of(0, 3))),
-            (0, 5, 200, HummockValue::Delete),
-            (0, 5, 100, HummockValue::Put(test_value_of(0, 5))),
-            (0, 6, 100, HummockValue::Put(test_value_of(0, 6))),
-            (0, 7, 100, HummockValue::Put(test_value_of(0, 7))),
-            (0, 8, 100, HummockValue::Put(test_value_of(0, 8))),
+            (0, 200, HummockValue::Delete),
+            (0, 100, HummockValue::Put(test_value_of(0, 0))),
+            (1, 200, HummockValue::Put(test_value_of(0, 1))),
+            (1, 100, HummockValue::Delete),
+            (2, 300, HummockValue::Put(test_value_of(0, 2))),
+            (2, 200, HummockValue::Delete),
+            (2, 100, HummockValue::Delete),
+            (3, 100, HummockValue::Put(test_value_of(0, 3))),
+            (5, 200, HummockValue::Delete),
+            (5, 100, HummockValue::Put(test_value_of(0, 5))),
+            (6, 100, HummockValue::Put(test_value_of(0, 6))),
+            (7, 100, HummockValue::Put(test_value_of(0, 7))),
+            (8, 100, HummockValue::Put(test_value_of(0, 8))),
         ];
-        let table = add_kv_pair(kv_pairs, sstable_manager.clone()).await;
+        let table = add_kv_pair(0, kv_pairs, sstable_manager.clone()).await;
         let iters: Vec<BoxedHummockIterator> = vec![Box::new(ReverseSSTableIterator::new(
             Arc::new(table),
             sstable_manager,
@@ -569,22 +569,22 @@ mod tests {
         let sstable_manager = mock_sstable_manager();
         // key=[table, idx, epoch], value
         let kv_pairs = vec![
-            (0, 0, 200, HummockValue::Delete),
-            (0, 0, 100, HummockValue::Put(test_value_of(0, 0))),
-            (0, 1, 200, HummockValue::Put(test_value_of(0, 1))),
-            (0, 1, 100, HummockValue::Delete),
-            (0, 2, 300, HummockValue::Put(test_value_of(0, 2))),
-            (0, 2, 200, HummockValue::Delete),
-            (0, 2, 100, HummockValue::Delete),
-            (0, 3, 100, HummockValue::Put(test_value_of(0, 3))),
-            (0, 5, 200, HummockValue::Delete),
-            (0, 5, 100, HummockValue::Put(test_value_of(0, 5))),
-            (0, 6, 100, HummockValue::Put(test_value_of(0, 6))),
-            (0, 7, 200, HummockValue::Delete),
-            (0, 7, 100, HummockValue::Put(test_value_of(0, 7))),
-            (0, 8, 100, HummockValue::Put(test_value_of(0, 8))),
+            (0, 200, HummockValue::Delete),
+            (0, 100, HummockValue::Put(test_value_of(0, 0))),
+            (1, 200, HummockValue::Put(test_value_of(0, 1))),
+            (1, 100, HummockValue::Delete),
+            (2, 300, HummockValue::Put(test_value_of(0, 2))),
+            (2, 200, HummockValue::Delete),
+            (2, 100, HummockValue::Delete),
+            (3, 100, HummockValue::Put(test_value_of(0, 3))),
+            (5, 200, HummockValue::Delete),
+            (5, 100, HummockValue::Put(test_value_of(0, 5))),
+            (6, 100, HummockValue::Put(test_value_of(0, 6))),
+            (7, 200, HummockValue::Delete),
+            (7, 100, HummockValue::Put(test_value_of(0, 7))),
+            (8, 100, HummockValue::Put(test_value_of(0, 8))),
         ];
-        let table = add_kv_pair(kv_pairs, sstable_manager.clone()).await;
+        let table = add_kv_pair(0, kv_pairs, sstable_manager.clone()).await;
         let iters: Vec<BoxedHummockIterator> = vec![Box::new(ReverseSSTableIterator::new(
             Arc::new(table),
             sstable_manager,
@@ -647,22 +647,22 @@ mod tests {
         let sstable_manager = mock_sstable_manager();
         // key=[table, idx, epoch], value
         let kv_pairs = vec![
-            (0, 0, 200, HummockValue::Delete),
-            (0, 0, 100, HummockValue::Put(test_value_of(0, 0))),
-            (0, 1, 200, HummockValue::Put(test_value_of(0, 1))),
-            (0, 1, 100, HummockValue::Delete),
-            (0, 2, 300, HummockValue::Put(test_value_of(0, 2))),
-            (0, 2, 200, HummockValue::Delete),
-            (0, 2, 100, HummockValue::Delete),
-            (0, 3, 100, HummockValue::Put(test_value_of(0, 3))),
-            (0, 5, 200, HummockValue::Delete),
-            (0, 5, 100, HummockValue::Put(test_value_of(0, 5))),
-            (0, 6, 100, HummockValue::Put(test_value_of(0, 6))),
-            (0, 7, 200, HummockValue::Delete),
-            (0, 7, 100, HummockValue::Put(test_value_of(0, 7))),
-            (0, 8, 100, HummockValue::Put(test_value_of(0, 8))),
+            (0, 200, HummockValue::Delete),
+            (0, 100, HummockValue::Put(test_value_of(0, 0))),
+            (1, 200, HummockValue::Put(test_value_of(0, 1))),
+            (1, 100, HummockValue::Delete),
+            (2, 300, HummockValue::Put(test_value_of(0, 2))),
+            (2, 200, HummockValue::Delete),
+            (2, 100, HummockValue::Delete),
+            (3, 100, HummockValue::Put(test_value_of(0, 3))),
+            (5, 200, HummockValue::Delete),
+            (5, 100, HummockValue::Put(test_value_of(0, 5))),
+            (6, 100, HummockValue::Put(test_value_of(0, 6))),
+            (7, 200, HummockValue::Delete),
+            (7, 100, HummockValue::Put(test_value_of(0, 7))),
+            (8, 100, HummockValue::Put(test_value_of(0, 8))),
         ];
-        let table = add_kv_pair(kv_pairs, sstable_manager.clone()).await;
+        let table = add_kv_pair(0, kv_pairs, sstable_manager.clone()).await;
         let iters: Vec<BoxedHummockIterator> = vec![Box::new(ReverseSSTableIterator::new(
             Arc::new(table),
             sstable_manager,
@@ -739,12 +739,12 @@ mod tests {
     }
 
     async fn chaos_test_case(
-        table: SSTable,
+        table: Sstable,
         start_bound: Bound<Vec<u8>>,
         end_bound: Bound<Vec<u8>>,
         truth: &BTreeMap<Vec<u8>, BTreeMap<Epoch, HummockValue<Vec<u8>>>>,
+        sstable_manager: SSTableManagerRef,
     ) {
-        let sstable_manager = mock_sstable_manager();
         let start_key = match &start_bound {
             Bound::Included(b) => prev_key(&b.clone()),
             Bound::Excluded(b) => b.clone(),
@@ -848,7 +848,7 @@ mod tests {
         let (data, meta) = b.finish();
         let sstable_manager = mock_sstable_manager();
         sstable_manager.put(0, &meta, data).await.unwrap();
-        let table = SSTable { id: 0, meta };
+        let table = Sstable { id: 0, meta };
 
         let repeat = 20;
         for _ in 0..repeat {
@@ -861,12 +861,20 @@ mod tests {
                 "begin_key:{:?},end_key:{:?}",
                 begin_key_bytes, end_key_bytes
             );
-            chaos_test_case(clone_sst(&table), Unbounded, Unbounded, &truth).await;
+            chaos_test_case(
+                clone_sst(&table),
+                Unbounded,
+                Unbounded,
+                &truth,
+                sstable_manager.clone(),
+            )
+            .await;
             chaos_test_case(
                 clone_sst(&table),
                 Unbounded,
                 Included(end_key_bytes.clone()),
                 &truth,
+                sstable_manager.clone(),
             )
             .await;
             chaos_test_case(
@@ -874,6 +882,7 @@ mod tests {
                 Included(begin_key_bytes.clone()),
                 Unbounded,
                 &truth,
+                sstable_manager.clone(),
             )
             .await;
             chaos_test_case(
@@ -881,6 +890,7 @@ mod tests {
                 Excluded(begin_key_bytes.clone()),
                 Unbounded,
                 &truth,
+                sstable_manager.clone(),
             )
             .await;
             chaos_test_case(
@@ -888,6 +898,7 @@ mod tests {
                 Included(begin_key_bytes.clone()),
                 Included(end_key_bytes.clone()),
                 &truth,
+                sstable_manager.clone(),
             )
             .await;
             chaos_test_case(
@@ -895,6 +906,7 @@ mod tests {
                 Excluded(begin_key_bytes),
                 Included(end_key_bytes),
                 &truth,
+                sstable_manager.clone(),
             )
             .await;
         }
@@ -902,27 +914,28 @@ mod tests {
 
     // key=[table, idx, epoch], value
     async fn add_kv_pair(
-        kv_pairs: Vec<(u64, usize, u64, HummockValue<Vec<u8>>)>,
+        table_id: u64,
+        kv_pairs: Vec<(usize, u64, HummockValue<Vec<u8>>)>,
         sstable_manager: SSTableManagerRef,
-    ) -> SSTable {
+    ) -> Sstable {
         let mut b = SSTableBuilder::new(default_builder_opt_for_test());
         for kv in kv_pairs {
             b.add(
-                key_range_test_key(kv.0, kv.1, kv.2).as_slice(),
-                kv.3.as_slice(),
+                key_range_test_key(table_id, kv.0, kv.1).as_slice(),
+                kv.2.as_slice(),
             );
         }
         let (data, meta) = b.finish();
-        sstable_manager.put(0, &meta, data).await.unwrap();
-        SSTable { id: 0, meta }
+        sstable_manager.put(table_id, &meta, data).await.unwrap();
+        Sstable { id: table_id, meta }
     }
 
     fn key_range_test_key(table: u64, idx: usize, epoch: u64) -> Vec<u8> {
         iterator_test_key_of_epoch(table, idx, epoch)
     }
 
-    fn clone_sst(sst: &SSTable) -> SSTable {
-        SSTable {
+    fn clone_sst(sst: &Sstable) -> Sstable {
+        Sstable {
             id: sst.id,
             meta: sst.meta.clone(),
         }
