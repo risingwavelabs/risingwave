@@ -191,10 +191,6 @@ impl HummockStorage {
     /// the key is not found. If `Err()` is returned, the searching for the key
     /// failed due to other non-EOF errors.
     pub async fn get(&self, key: &[u8], epoch: u64) -> HummockResult<Option<Vec<u8>>> {
-        self.stats.get_counts.inc();
-        self.stats.get_key_size.observe(key.len() as f64);
-        let timer = self.stats.get_latency.start_timer();
-
         let mut table_iters: Vec<BoxedHummockIterator> = Vec::new();
 
         let version = self.local_version_manager.get_version()?;
@@ -243,10 +239,6 @@ impl HummockStorage {
             true => it.value().into_put_value().map(|x| x.to_vec()),
             false => None,
         };
-        timer.observe_duration();
-        self.stats
-            .get_value_size
-            .observe((value.as_ref().map(|x| x.len()).unwrap_or(0) + 1) as f64);
 
         Ok(value)
     }
@@ -262,8 +254,6 @@ impl HummockStorage {
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
     {
-        self.stats.range_scan_counts.inc();
-
         let version = self.local_version_manager.get_version()?;
 
         // Filter out tables that overlap with given `key_range`
@@ -320,8 +310,6 @@ impl HummockStorage {
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
     {
-        self.stats.range_scan_counts.inc();
-
         let version = self.local_version_manager.get_version()?;
 
         // Filter out tables that overlap with given `key_range`

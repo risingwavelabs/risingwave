@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use futures::Future;
 use risingwave_common::error::Result;
 
 use super::StateStoreStats;
@@ -18,6 +19,31 @@ pub struct MonitoredStateStore<S> {
 impl<S> MonitoredStateStore<S> {
     pub fn new(inner: S, stats: Arc<StateStoreStats>) -> Self {
         Self { inner, stats }
+    }
+}
+
+impl<S> MonitoredStateStore<S>
+where
+    S: StateStore,
+{
+    async fn monitored_iter<'a, I>(
+        &self,
+        iter: I,
+    ) -> Result<<MonitoredStateStore<S> as StateStore>::Iter<'a>>
+    where
+        I: Future<Output = Result<S::Iter<'a>>>,
+    {
+        self.stats.iter_counts.inc();
+
+        let timer = self.stats.iter_seek_latency.start_timer();
+        let iter = iter.await?;
+        timer.observe_duration();
+
+        let monitored = MonitoredStateStoreIter {
+            inner: iter,
+            stats: self.stats.clone(),
+        };
+        Ok(monitored)
     }
 }
 
@@ -41,6 +67,36 @@ where
         }
 
         Ok(value)
+    }
+
+    async fn scan<R, B>(
+        &self,
+        key_range: R,
+        limit: Option<usize>,
+        epoch: u64,
+    ) -> Result<Vec<(Bytes, Bytes)>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]>,
+    {
+        self.stats.range_scan_counts.inc();
+
+        self.inner.scan(key_range, limit, epoch).await
+    }
+
+    async fn reverse_scan<R, B>(
+        &self,
+        key_range: R,
+        limit: Option<usize>,
+        epoch: u64,
+    ) -> Result<Vec<(Bytes, Bytes)>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]>,
+    {
+        self.stats.reverse_range_scan_counts.inc();
+
+        self.inner.scan(key_range, limit, epoch).await
     }
 
     async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>, epoch: u64) -> Result<()> {
@@ -72,17 +128,16 @@ where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]>,
     {
-        self.stats.iter_counts.inc();
+        self.monitored_iter(self.inner.iter(key_range, epoch)).await
+    }
 
-        let timer = self.stats.iter_seek_latency.start_timer();
-        let iter = self.inner.iter(key_range, epoch).await?;
-        timer.observe_duration();
-
-        let monitored = MonitoredStateStoreIter {
-            inner: iter,
-            stats: self.stats.clone(),
-        };
-        Ok(monitored)
+    async fn reverse_iter<R, B>(&self, key_range: R, epoch: u64) -> Result<Self::Iter<'_>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]>,
+    {
+        self.monitored_iter(self.inner.reverse_iter(key_range, epoch))
+            .await
     }
 }
 
