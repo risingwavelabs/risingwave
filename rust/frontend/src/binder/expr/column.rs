@@ -1,3 +1,4 @@
+use risingwave_common::array::RwError;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::Ident;
 
@@ -17,33 +18,36 @@ impl Binder {
                 )
             }
         };
+        let columns = self.context.columns.get(column_name).ok_or_else(|| {
+            RwError::from(ErrorCode::ItemNotFound(format!(
+                "Invalid column: {}",
+                column_name
+            )))
+        })?;
         match table_name {
-            Some(table_name) => match self.context.tables.get(table_name) {
-                Some(columns) => match columns.get(column_name) {
+            Some(table_name) => {
+                match columns
+                    .iter()
+                    .find(|column| column.table_name == *table_name)
+                {
                     Some(column) => Ok(ExprImpl::InputRef(Box::new(InputRef::new(
-                        column.id,
+                        column.index,
                         column.data_type.clone(),
                     )))),
-                    None => Err(ErrorCode::ItemNotFound(format!(
-                        "Invalid column: {}",
-                        column_name
-                    ))
-                    .into()),
-                },
-                None => {
-                    Err(ErrorCode::ItemNotFound(format!("Invalid table: {}", table_name)).into())
+                    None => Err(
+                        ErrorCode::ItemNotFound(format!("Invalid table: {}", table_name)).into(),
+                    ),
                 }
-            },
+            }
             None => {
-                for columns in self.context.tables.values() {
-                    if let Some(column) = columns.get(column_name) {
-                        return Ok(ExprImpl::InputRef(Box::new(InputRef::new(
-                            column.id,
-                            column.data_type.clone(),
-                        ))));
-                    }
+                if columns.len() > 1 {
+                    Err(ErrorCode::InternalError("Ambiguous column name".into()).into())
+                } else {
+                    Ok(ExprImpl::InputRef(Box::new(InputRef::new(
+                        columns[0].index,
+                        columns[0].data_type.clone(),
+                    ))))
                 }
-                Err(ErrorCode::ItemNotFound(format!("Invalid column: {}", column_name)).into())
             }
         }
     }

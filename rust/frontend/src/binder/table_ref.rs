@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{ObjectName, TableFactor, TableWithJoins};
 
@@ -58,18 +56,16 @@ impl Binder {
             .ok_or_else(|| ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name)))?;
         let columns = table_catalog.columns().to_vec();
 
-        self.context.tables.insert(table_name.clone(), {
-            let mut column_name_map = HashMap::new();
-            for column in &columns {
-                column_name_map.insert(
-                    column.name().to_string(),
-                    ColumnBinding {
-                        id: column.id() as usize,
-                        data_type: column.data_type(),
-                    },
-                );
-            }
-            column_name_map
+        columns.iter().enumerate().for_each(|(index, column)| {
+            self.context
+                .columns
+                .entry(column.name().to_string())
+                .or_default()
+                .push(ColumnBinding::new(
+                    table_name.clone(),
+                    index,
+                    column.data_type(),
+                ))
         });
 
         Ok(BaseTableRef {

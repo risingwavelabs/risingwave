@@ -3,20 +3,32 @@ use std::collections::HashMap;
 use risingwave_common::types::DataType;
 
 pub struct ColumnBinding {
-    pub id: usize,
+    pub table_name: String,
+    pub index: usize,
     pub data_type: DataType,
 }
 
+impl ColumnBinding {
+    pub fn new(table_name: String, index: usize, data_type: DataType) -> Self {
+        ColumnBinding {
+            table_name,
+            index,
+            data_type,
+        }
+    }
+}
+
 pub struct BindContext {
-    // Mapping table name to columns.
-    pub tables: HashMap<String, HashMap<String, ColumnBinding>>,
+    // Mapping column name to `ColumnBinding`
+    pub columns: HashMap<String, Vec<ColumnBinding>>,
 }
 
 impl BindContext {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         BindContext {
-            tables: HashMap::new(),
+            // tables: HashMap::new(),
+            columns: HashMap::new(),
         }
     }
 }
