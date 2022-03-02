@@ -11,7 +11,7 @@ use crate::hummock::hummock_meta_client::RpcHummockMetaClient;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::HummockStateStore;
 use crate::memory::MemoryStateStore;
-use crate::monitor::StateStoreStats;
+use crate::monitor::{MonitoredStateStore as Monitored, StateStoreStats};
 use crate::object::S3ObjectStore;
 use crate::rocksdb_local::RocksDBStateStore;
 use crate::tikv::TikvStateStore;
@@ -95,6 +95,10 @@ pub trait StateStore: Send + Sync + 'static + Clone {
 
     /// Wait until the epoch is committed and its data is ready to read.
     async fn wait_epoch(&self, _epoch: u64) {}
+
+    fn monitored(self, stats: Arc<StateStoreStats>) -> Monitored<Self> {
+        Monitored::new(self, stats)
+    }
 }
 
 #[async_trait]
@@ -122,15 +126,19 @@ where
 
 #[derive(Clone)]
 pub enum StateStoreImpl {
-    HummockStateStore(HummockStateStore),
-    MemoryStateStore(MemoryStateStore),
-    RocksDBStateStore(RocksDBStateStore),
-    TikvStateStore(TikvStateStore),
+    HummockStateStore(Monitored<HummockStateStore>),
+    MemoryStateStore(Monitored<MemoryStateStore>),
+    RocksDBStateStore(Monitored<RocksDBStateStore>),
+    TikvStateStore(Monitored<TikvStateStore>),
 }
 
 impl StateStoreImpl {
     pub fn shared_in_memory_store() -> Self {
-        Self::MemoryStateStore(MemoryStateStore::shared())
+        use crate::monitor::DEFAULT_STATE_STORE_STATS;
+
+        Self::MemoryStateStore(
+            MemoryStateStore::shared().monitored(DEFAULT_STATE_STORE_STATS.clone()),
+        )
     }
 }
 
@@ -154,12 +162,13 @@ impl StateStoreImpl {
     ) -> Result<Self> {
         let store = match s {
             "in_memory" | "in-memory" => StateStoreImpl::shared_in_memory_store(),
+
             tikv if tikv.starts_with("tikv") => {
-                StateStoreImpl::TikvStateStore(TikvStateStore::new(vec![tikv
-                    .strip_prefix("tikv://")
-                    .unwrap()
-                    .to_string()]))
+                let inner =
+                    TikvStateStore::new(vec![tikv.strip_prefix("tikv://").unwrap().to_string()]);
+                StateStoreImpl::TikvStateStore(inner.monitored(stats))
             }
+
             minio if minio.starts_with("hummock+minio://") => {
                 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 
@@ -170,7 +179,7 @@ impl StateStoreImpl {
                     S3ObjectStore::new_with_minio(minio.strip_prefix("hummock+").unwrap()).await,
                 );
                 let remote_dir = "hummock_001";
-                StateStoreImpl::HummockStateStore(HummockStateStore::new(
+                let inner = HummockStateStore::new(
                     HummockStorage::new(
                         object_client.clone(),
                         HummockOptions {
@@ -188,12 +197,14 @@ impl StateStoreImpl {
                             Some(Arc::new(Cache::new(65536))),
                         )),
                         Arc::new(RpcHummockMetaClient::new(meta_client, stats.clone())),
-                        stats,
+                        stats.clone(),
                     )
                     .await
                     .map_err(RwError::from)?,
-                ))
+                );
+                StateStoreImpl::HummockStateStore(inner.monitored(stats))
             }
+
             s3 if s3.starts_with("hummock+s3://") => {
                 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 
@@ -203,7 +214,7 @@ impl StateStoreImpl {
                 );
 
                 let remote_dir = "hummock_001";
-                StateStoreImpl::HummockStateStore(HummockStateStore::new(
+                let inner = HummockStateStore::new(
                     HummockStorage::new(
                         s3_store.clone(),
                         HummockOptions {
@@ -219,17 +230,20 @@ impl StateStoreImpl {
                             Some(Arc::new(Cache::new(65536))),
                         )),
                         Arc::new(RpcHummockMetaClient::new(meta_client, stats.clone())),
-                        stats,
+                        stats.clone(),
                     )
                     .await
                     .map_err(RwError::from)?,
-                ))
+                );
+                StateStoreImpl::HummockStateStore(inner.monitored(stats))
             }
+
             rocksdb if rocksdb.starts_with("rocksdb_local://") => {
-                StateStoreImpl::RocksDBStateStore(RocksDBStateStore::new(
-                    rocksdb.strip_prefix("rocksdb_local://").unwrap(),
-                ))
+                let inner =
+                    RocksDBStateStore::new(rocksdb.strip_prefix("rocksdb_local://").unwrap());
+                StateStoreImpl::RocksDBStateStore(inner.monitored(stats))
             }
+
             other => unimplemented!("{} state store is not supported", other),
         };
 
