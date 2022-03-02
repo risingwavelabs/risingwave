@@ -6,7 +6,7 @@ use risingwave_pb::plan::ColumnDesc;
 use risingwave_sqlparser::ast::{ColumnDef, DataType as AstDataType, ObjectName};
 
 use crate::catalog::catalog_service::DEFAULT_SCHEMA_NAME;
-use crate::session::RwSession;
+use crate::session::SessionImpl;
 
 fn columns_to_prost(columns: &[ColumnDef]) -> Result<Vec<ColumnDesc>> {
     columns
@@ -35,7 +35,7 @@ fn convert_data_type(data_type: &AstDataType) -> DataType {
 }
 
 pub(super) async fn handle_create_table(
-    session: &RwSession,
+    session: &SessionImpl,
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
 ) -> Result<PgResponse> {

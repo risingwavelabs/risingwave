@@ -3,10 +3,10 @@ use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::ObjectName;
 
 use crate::catalog::catalog_service::DEFAULT_SCHEMA_NAME;
-use crate::session::RwSession;
+use crate::session::SessionImpl;
 
 pub(super) async fn handle_drop_table(
-    session: &RwSession,
+    session: &SessionImpl,
     table_name: ObjectName,
 ) -> Result<PgResponse> {
     let str_table_name = table_name.to_string();

@@ -5,7 +5,7 @@ use risingwave_source::ProtobufParser;
 use risingwave_sqlparser::ast::{CreateSourceStatement, ProtobufSchema, SourceSchema};
 
 use crate::catalog::catalog_service::DEFAULT_SCHEMA_NAME;
-use crate::session::RwSession;
+use crate::session::SessionImpl;
 
 fn create_protobuf_table_schema(schema: &ProtobufSchema) -> Result<Table> {
     let parser = ProtobufParser::new(&schema.row_schema_location.0, &schema.message_name.0)?;
@@ -19,7 +19,7 @@ fn create_protobuf_table_schema(schema: &ProtobufSchema) -> Result<Table> {
 }
 
 pub(super) async fn handle_create_source(
-    session: &RwSession,
+    session: &SessionImpl,
     stmt: CreateSourceStatement,
 ) -> Result<PgResponse> {
     let mut table = match &stmt.source_schema {

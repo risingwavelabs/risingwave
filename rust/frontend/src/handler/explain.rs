@@ -6,10 +6,10 @@ use risingwave_sqlparser::ast::Statement;
 
 use crate::binder::Binder;
 use crate::planner::Planner;
-use crate::session::RwSession;
+use crate::session::SessionImpl;
 
 pub(super) fn handle_explain(
-    session: &RwSession,
+    session: &SessionImpl,
     stmt: Statement,
     _verbose: bool,
 ) -> Result<PgResponse> {
