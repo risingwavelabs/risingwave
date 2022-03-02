@@ -131,7 +131,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             .collect_vec();
         let kind = calc_hash_key_kind(&keys);
         let args = HashAggExecutorDispatcherArgs {
-            input: params.input.remove(0),
+            input,
             agg_calls,
             key_indices,
             keyspace,
