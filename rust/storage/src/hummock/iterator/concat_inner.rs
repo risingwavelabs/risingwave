@@ -7,7 +7,7 @@ use super::variants::*;
 use crate::hummock::iterator::HummockIterator;
 use crate::hummock::value::HummockValue;
 use crate::hummock::version_cmp::VersionedComparator;
-use crate::hummock::{HummockResult, Sstable, SSTableIteratorType, SstableManagerRef};
+use crate::hummock::{HummockResult, SSTableIteratorType, Sstable, SstableManagerRef};
 
 /// Serves as the concrete implementation of `ConcatIterator` and `ReverseConcatIterator`.
 pub struct ConcatIteratorInner<TI: SSTableIteratorType> {

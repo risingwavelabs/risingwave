@@ -164,8 +164,8 @@ impl HummockStorage {
             local_version_manager,
             stats,
             hummock_meta_client,
-            shared_buffer_manager,
             sstable_manager,
+            shared_buffer_manager,
         };
         Ok(instance)
     }

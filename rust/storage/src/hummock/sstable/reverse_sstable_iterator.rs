@@ -8,8 +8,8 @@ use crate::hummock::iterator::HummockIterator;
 use crate::hummock::value::HummockValue;
 use crate::hummock::version_cmp::VersionedComparator;
 use crate::hummock::{
-    BlockIterator, HummockResult, Sstable, SSTableIteratorBase, SSTableIteratorType,
-    SstableManagerRef, SeekPos,
+    BlockIterator, HummockResult, SSTableIteratorBase, SSTableIteratorType, SeekPos, Sstable,
+    SstableManagerRef,
 };
 
 /// Reversely iterates on a table.

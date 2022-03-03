@@ -162,7 +162,7 @@ macro_rules! test_key {
     };
 }
 
-use sstable_manager::{SstableManagerRef, SstableManager};
+use sstable_manager::{SstableManager, SstableManagerRef};
 pub(crate) use test_key;
 
 pub type TestIterator = TestIteratorInner<FORWARD>;

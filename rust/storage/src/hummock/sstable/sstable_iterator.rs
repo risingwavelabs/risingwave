@@ -4,7 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use super::super::{HummockResult, HummockValue};
-use super::{BlockIterator, Sstable, SeekPos};
+use super::{BlockIterator, SeekPos, Sstable};
 use crate::hummock::iterator::variants::FORWARD;
 use crate::hummock::iterator::HummockIterator;
 use crate::hummock::version_cmp::VersionedComparator;
