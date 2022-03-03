@@ -11,6 +11,7 @@ pub struct StreamExchange {
     schema: Schema,
     dist: Distribution,
 }
+
 impl StreamExchange {
     pub fn new(input: PlanRef, dist: Distribution) -> Self {
         let schema = input.schema().clone();
@@ -21,11 +22,13 @@ impl StreamExchange {
         }
     }
 }
+
 impl fmt::Display for StreamExchange {
     fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
         todo!()
     }
 }
+
 impl PlanTreeNodeUnary for StreamExchange {
     fn input(&self) -> PlanRef {
         self.input.clone()
@@ -40,6 +43,7 @@ impl WithDistribution for StreamExchange {
         &self.dist
     }
 }
+
 impl WithOrder for StreamExchange {}
 
 impl WithSchema for StreamExchange {
@@ -47,4 +51,5 @@ impl WithSchema for StreamExchange {
         &self.schema
     }
 }
+
 impl ToStreamProst for StreamExchange {}

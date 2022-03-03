@@ -20,12 +20,12 @@ use risingwave_pb::meta::{
 use risingwave_rpc_client::{MetaClient, MetaClientInner};
 use tonic::Request;
 
-use crate::session::{FrontendEnv, RwSession};
+use crate::session::{FrontendEnv, SessionImpl};
 use crate::FrontendOpts;
 
 pub struct LocalFrontend {
     pub opts: FrontendOpts,
-    pub session: RwSession,
+    pub session: SessionImpl,
 }
 
 impl LocalFrontend {
@@ -36,7 +36,7 @@ impl LocalFrontend {
         let env = FrontendEnv::with_meta_client(meta_client, &opts)
             .await
             .unwrap();
-        let session = RwSession::new(env, "dev".to_string());
+        let session = SessionImpl::new(env, "dev".to_string());
         Self { opts, session }
     }
 
@@ -48,7 +48,7 @@ impl LocalFrontend {
         self.session.run_statement(sql.as_str()).await
     }
 
-    pub fn session(&self) -> &RwSession {
+    pub fn session(&self) -> &SessionImpl {
         &self.session
     }
 }

@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
 use bytes::Bytes;
+use futures::future::try_join_all;
+use itertools::Itertools;
 use risingwave_common::array::RwError;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
@@ -29,6 +31,14 @@ impl ObjectStore for InMemObjectStore {
         } else {
             self.get_object(path, |obj| Ok(obj.clone())).await?
         }
+    }
+
+    async fn readv(&self, path: &str, block_locs: Vec<BlockLocation>) -> Result<Vec<Bytes>> {
+        let futures = block_locs
+            .into_iter()
+            .map(|block_loc| self.read(path, Some(block_loc)))
+            .collect_vec();
+        try_join_all(futures).await
     }
 
     async fn metadata(&self, path: &str) -> Result<ObjectMetadata> {

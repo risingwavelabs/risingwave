@@ -2,8 +2,9 @@ use fixedbitset::FixedBitSet;
 
 use crate::expr::{get_inputs_col_index, Expr, ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::utils::Condition;
-#[derive(Debug, Clone)]
+
 /// the join predicate used in optimizer
+#[derive(Debug, Clone)]
 pub struct EqJoinPredicate {
     /// other conditions, linked with AND conjunction.
     other_cond: Condition,
@@ -13,6 +14,7 @@ pub struct EqJoinPredicate {
     /// now all are normal equal(not null-safe-equal),
     eq_keys: Vec<(InputRef, InputRef)>,
 }
+
 #[allow(dead_code)]
 impl EqJoinPredicate {
     /// the new method for `JoinPredicate` without any analysis, check or rewrite.

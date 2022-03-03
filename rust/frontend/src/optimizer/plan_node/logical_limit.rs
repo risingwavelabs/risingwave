@@ -30,6 +30,7 @@ impl LogicalLimit {
         Self::new(input, limit, offset).into_plan_ref()
     }
 }
+
 impl PlanTreeNodeUnary for LogicalLimit {
     fn input(&self) -> PlanRef {
         self.input.clone()
@@ -44,19 +45,24 @@ impl fmt::Display for LogicalLimit {
         todo!()
     }
 }
+
 impl WithOrder for LogicalLimit {}
+
 impl WithDistribution for LogicalLimit {}
+
 impl WithSchema for LogicalLimit {
     fn schema(&self) -> &Schema {
         &self.schema
     }
 }
+
 impl ColPrunable for LogicalLimit {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
         let new_input = self.input.prune_col(required_cols);
         self.clone_with_input(new_input).into_plan_ref()
     }
 }
+
 impl ToBatch for LogicalLimit {
     fn to_batch(&self) -> PlanRef {
         let new_input = self.input().to_batch();
@@ -64,6 +70,7 @@ impl ToBatch for LogicalLimit {
         BatchLimit::new(new_logical).into_plan_ref()
     }
 }
+
 impl ToStream for LogicalLimit {
     fn to_stream(&self) -> PlanRef {
         panic!("there is no limit stream operator");
