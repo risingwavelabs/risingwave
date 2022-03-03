@@ -7,7 +7,6 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::{ensure, gen_error};
-
 use risingwave_storage::TableColumnDesc;
 
 use crate::table_v2::TableSourceV2;
@@ -208,7 +207,6 @@ mod tests {
     use risingwave_common::error::Result;
     use risingwave_common::types::DataType;
     use risingwave_storage::memory::MemoryStateStore;
-    
     use risingwave_storage::{Keyspace, TableColumnDesc};
 
     use crate::*;

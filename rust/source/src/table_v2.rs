@@ -6,7 +6,6 @@ use rand::prelude::SliceRandom;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
-
 use risingwave_storage::TableColumnDesc;
 use tokio::sync::mpsc;
 
@@ -174,7 +173,6 @@ impl Source for TableSourceV2 {
 
 #[cfg(test)]
 mod tests {
-    
 
     use assert_matches::assert_matches;
     use itertools::Itertools;
@@ -182,7 +180,6 @@ mod tests {
     use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
     use risingwave_storage::memory::MemoryStateStore;
-    
     use risingwave_storage::Keyspace;
 
     use super::*;

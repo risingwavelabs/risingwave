@@ -159,7 +159,7 @@ mod tests {
         MemSourceManager, Source, SourceManager, StreamSourceReader, TableV2ReaderContext,
     };
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::{SimpleTableManager};
+    use risingwave_storage::table::SimpleTableManager;
     use risingwave_storage::*;
 
     use super::*;
