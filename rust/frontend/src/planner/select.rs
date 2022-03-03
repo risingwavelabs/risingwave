@@ -21,10 +21,10 @@ impl Planner {
     }
     pub(super) fn plan_local_filter(
         &mut self,
-        TableRef: PlanRef,
+        table_ref: PlanRef,
         predicate: ExprImpl,
     ) -> Result<PlanRef> {
-        LogicalFilter::create(TableRef, predicate)
+        LogicalFilter::create(table_ref, predicate)
     }
     /// Helper to create a dummy node as child of LogicalProject.
     /// For example, `select 1+2, 3*4` will be `Project([1+2, 3+4]) - Values([[0]])`.
