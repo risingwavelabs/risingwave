@@ -1,7 +1,7 @@
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::Values;
+use risingwave_sqlparser::ast::{Expr as AstExpr, Values};
 
 use crate::binder::Binder;
 use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall};
@@ -17,7 +17,11 @@ impl Binder {
         let vec2d = values.0;
         let bound = vec2d
             .into_iter()
-            .map(|vec| vec.into_iter().map(|expr| self.bind_expr(expr)).collect())
+            .map(|vec| {
+                vec.into_iter()
+                    .map(|expr| self.bind_values_expr(expr))
+                    .collect()
+            })
             .collect::<Result<Vec<Vec<_>>>>()?;
         // calc column type and insert casts here
         let mut types = bound[0]
@@ -40,6 +44,17 @@ impl Binder {
             .collect::<Vec<Vec<ExprImpl>>>();
         let schema = Schema::new(types.into_iter().map(Field::unnamed).collect());
         Ok(BoundValues { rows, schema })
+    }
+
+    fn bind_values_expr(&mut self, expr: AstExpr) -> Result<ExprImpl> {
+        let expr = self.bind_expr(expr)?;
+        match expr {
+            ExprImpl::AggCall(_) => Err(ErrorCode::InvalidInputSyntax(
+                "aggregate functions are not allowed in VALUES".to_string(),
+            )
+            .into()),
+            _ => Ok(expr),
+        }
     }
 
     /// Find compatible type for `left` and `right`.

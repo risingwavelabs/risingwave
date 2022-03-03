@@ -82,13 +82,15 @@ fn check_err<T>(
         (None, Err(e)) => Err(anyhow!("unexpected {} error: {}", ctx, e)),
         (Some(e), Ok(_)) => Err(anyhow!("expected {} error: {}", ctx, e)),
         (Some(l), Err(r)) => {
-            if *l == r.to_string() {
+            let expected_err = l.clone().trim().to_string();
+            let actual_err = r.to_string().trim().to_string();
+            if expected_err == actual_err {
                 Ok(None)
             } else {
                 return Err(anyhow!(
-                    "Expected {context} error: {}, Actual {context} error: {}",
-                    l,
-                    r,
+                    "Expected {context} error: {}\n  Actual {context} error: {}",
+                    expected_err,
+                    actual_err,
                     context = ctx
                 ));
             }
