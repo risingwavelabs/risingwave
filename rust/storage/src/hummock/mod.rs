@@ -289,6 +289,7 @@ impl HummockStorage {
                 key_range.end_bound().map(|b| b.as_ref().to_owned()),
             ),
             epoch,
+            Some(version),
         ))
     }
 
@@ -344,6 +345,7 @@ impl HummockStorage {
                 key_range.start_bound().map(|b| b.as_ref().to_owned()),
             ),
             epoch,
+            Some(version),
         ))
     }
 
