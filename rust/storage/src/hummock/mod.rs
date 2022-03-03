@@ -107,7 +107,7 @@ pub struct HummockStorage {
 
     hummock_meta_client: Arc<dyn HummockMetaClient>,
 
-    sstable_manager: SstableManagerRef,
+    sstable_manager: SstableStoreRef,
     /// Manager for immutable shared buffers
     shared_buffer_manager: Arc<SharedBufferManager>,
 }
@@ -116,7 +116,7 @@ impl HummockStorage {
     /// Create a [`HummockStorage`] with default stats. Should only used by tests.
     pub async fn with_default_stats(
         options: HummockOptions,
-        sstable_manager: SstableManagerRef,
+        sstable_manager: SstableStoreRef,
         local_version_manager: Arc<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> HummockResult<Self> {
@@ -135,7 +135,7 @@ impl HummockStorage {
     /// Create a [`HummockStorage`].
     pub async fn new(
         options: HummockOptions,
-        sstable_manager: SstableManagerRef,
+        sstable_manager: SstableStoreRef,
         local_version_manager: Arc<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         stats: Arc<StateStoreStats>,
@@ -392,7 +392,7 @@ impl HummockStorage {
         &self.options
     }
 
-    pub fn sstable_manager(&self) -> SstableManagerRef {
+    pub fn sstable_manager(&self) -> SstableStoreRef {
         self.sstable_manager.clone()
     }
 

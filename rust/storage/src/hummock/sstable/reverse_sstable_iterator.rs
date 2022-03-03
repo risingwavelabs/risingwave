@@ -9,7 +9,7 @@ use crate::hummock::value::HummockValue;
 use crate::hummock::version_cmp::VersionedComparator;
 use crate::hummock::{
     BlockIterator, HummockResult, SSTableIteratorBase, SSTableIteratorType, SeekPos, Sstable,
-    SstableManagerRef,
+    SstableStoreRef,
 };
 
 /// Reversely iterates on a table.
@@ -23,11 +23,11 @@ pub struct ReverseSSTableIterator {
     /// Reference to the table
     pub table: Arc<Sstable>,
 
-    sstable_manager: SstableManagerRef,
+    sstable_manager: SstableStoreRef,
 }
 
 impl ReverseSSTableIterator {
-    pub fn new(table: Arc<Sstable>, sstable_manager: SstableManagerRef) -> Self {
+    pub fn new(table: Arc<Sstable>, sstable_manager: SstableStoreRef) -> Self {
         Self {
             block_iter: None,
             cur_idx: table.meta.block_metas.len() - 1,
@@ -135,7 +135,7 @@ impl SSTableIteratorType for ReverseSSTableIterator {
     type SSTableIterator = ReverseSSTableIterator;
     const DIRECTION: usize = BACKWARD;
 
-    fn new(table: Arc<Sstable>, sstable_manager: SstableManagerRef) -> Self::SSTableIterator {
+    fn new(table: Arc<Sstable>, sstable_manager: SstableStoreRef) -> Self::SSTableIterator {
         ReverseSSTableIterator::new(table, sstable_manager)
     }
 }

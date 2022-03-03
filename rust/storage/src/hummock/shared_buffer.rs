@@ -16,7 +16,7 @@ use super::key_range::KeyRange;
 use super::local_version_manager::LocalVersionManager;
 use super::utils::range_overlap;
 use super::value::HummockValue;
-use super::{key, HummockError, HummockOptions, HummockResult, SstableManagerRef};
+use super::{key, HummockError, HummockOptions, HummockResult, SstableStoreRef};
 use crate::monitor::StateStoreStats;
 
 type SharedBufferItem = (Vec<u8>, HummockValue<Vec<u8>>);
@@ -160,7 +160,7 @@ impl SharedBufferManager {
     pub fn new(
         options: Arc<HummockOptions>,
         local_version_manager: Arc<LocalVersionManager>,
-        sstable_manager: SstableManagerRef,
+        sstable_manager: SstableStoreRef,
 
         stats: Arc<StateStoreStats>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -336,7 +336,7 @@ pub struct SharedBufferUploader {
     /// Statistics.
     stats: Arc<StateStoreStats>,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
-    sstable_manager: SstableManagerRef,
+    sstable_manager: SstableStoreRef,
 
     rx: tokio::sync::mpsc::UnboundedReceiver<SharedBufferUploaderItem>,
 }
@@ -345,7 +345,7 @@ impl SharedBufferUploader {
     pub fn new(
         options: Arc<HummockOptions>,
         local_version_manager: Arc<LocalVersionManager>,
-        sstable_manager: SstableManagerRef,
+        sstable_manager: SstableStoreRef,
         stats: Arc<StateStoreStats>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         rx: tokio::sync::mpsc::UnboundedReceiver<SharedBufferUploaderItem>,
@@ -479,7 +479,7 @@ mod tests {
     use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
     use crate::hummock::shared_buffer::SharedBufferManager;
     use crate::hummock::value::HummockValue;
-    use crate::hummock::{HummockOptions, SstableManager};
+    use crate::hummock::{HummockOptions, SstableStore};
     use crate::monitor::DEFAULT_STATE_STORE_STATS;
     use crate::object::{InMemObjectStore, ObjectStore};
 
@@ -616,7 +616,7 @@ mod tests {
     fn new_shared_buffer_manager() -> SharedBufferManager {
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
         let remote_dir = "/test";
-        let sstable_manager = Arc::new(SstableManager::new(obj_client, remote_dir.to_string()));
+        let sstable_manager = Arc::new(SstableStore::new(obj_client, remote_dir.to_string()));
         let vm = Arc::new(LocalVersionManager::new(sstable_manager.clone(), None));
         let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(Arc::new(
             MockHummockMetaService::new(),

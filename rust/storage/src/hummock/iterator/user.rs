@@ -251,7 +251,7 @@ mod tests {
     use crate::hummock::key::user_key;
     use crate::hummock::sstable::{SSTableIterator, Sstable};
     use crate::hummock::value::HummockValue;
-    use crate::hummock::{SSTableBuilder, SstableManagerRef};
+    use crate::hummock::{SSTableBuilder, SstableStoreRef};
 
     #[tokio::test]
     async fn test_basic() {
@@ -717,12 +717,10 @@ mod tests {
     }
 
     // key=[table, idx, epoch], value
-
-    // key=[table, idx, epoch], value
     async fn add_kv_pair(
         sst_id: u64,
         kv_pairs: Vec<(u64, usize, u64, HummockValue<Vec<u8>>)>,
-        sstable_manager: SstableManagerRef,
+        sstable_manager: SstableStoreRef,
     ) -> Sstable {
         let mut b = SSTableBuilder::new(default_builder_opt_for_test());
         for kv in kv_pairs {

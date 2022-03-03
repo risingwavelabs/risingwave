@@ -162,7 +162,7 @@ macro_rules! test_key {
     };
 }
 
-use sstable_manager::{SstableManager, SstableManagerRef};
+use sstable_manager::{SstableStore, SstableStoreRef};
 pub(crate) use test_key;
 
 pub type TestIterator = TestIteratorInner<FORWARD>;
@@ -279,7 +279,7 @@ pub fn test_value_of(table: u64, idx: usize) -> Vec<u8> {
 pub async fn gen_test_sstable(
     table_idx: u64,
     opts: SSTableBuilderOptions,
-    sstable_manager: SstableManagerRef,
+    sstable_manager: SstableStoreRef,
 ) -> Sstable {
     gen_test_sstable_base(table_idx, opts, |x| x, sstable_manager).await
 }
@@ -291,7 +291,7 @@ pub async fn gen_test_sstable_base(
     table_idx: u64,
     opts: SSTableBuilderOptions,
     idx_mapping: impl Fn(usize) -> usize,
-    sstable_manager: SstableManagerRef,
+    sstable_manager: SstableStoreRef,
 ) -> Sstable {
     let mut b = SSTableBuilder::new(opts);
 
@@ -311,14 +311,14 @@ pub async fn gen_test_sstable_base(
     }
 }
 
-pub fn mock_sstable_manager() -> SstableManagerRef {
+pub fn mock_sstable_manager() -> SstableStoreRef {
     let object_store = Arc::new(InMemObjectStore::new());
     mock_sstable_manager_with_object_store(object_store)
 }
 
-pub fn mock_sstable_manager_with_object_store(object_store: ObjectStoreRef) -> SstableManagerRef {
+pub fn mock_sstable_manager_with_object_store(object_store: ObjectStoreRef) -> SstableStoreRef {
     let path = "test".to_string();
-    Arc::new(SstableManager::new(object_store, path))
+    Arc::new(SstableStore::new(object_store, path))
 }
 
 #[cfg(test)]

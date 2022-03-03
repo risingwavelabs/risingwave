@@ -15,7 +15,7 @@ use super::iterator::{ConcatIterator, HummockIterator, MergeIterator};
 use super::key::{get_epoch, Epoch, FullKey};
 use super::key_range::KeyRange;
 use super::multi_builder::CapacitySplitTableBuilder;
-use super::sstable_manager::SstableManagerRef;
+use super::sstable_manager::SstableStoreRef;
 use super::version_cmp::VersionedComparator;
 use super::{
     HummockError, HummockMetaClient, HummockOptions, HummockResult, HummockStorage, HummockValue,
@@ -27,7 +27,7 @@ pub struct SubCompactContext {
     pub options: Arc<HummockOptions>,
     pub local_version_manager: Arc<LocalVersionManager>,
     pub hummock_meta_client: Arc<dyn HummockMetaClient>,
-    pub sstable_manager: SstableManagerRef,
+    pub sstable_manager: SstableStoreRef,
 }
 
 pub struct Compactor;
@@ -273,7 +273,7 @@ impl Compactor {
         options: Arc<HummockOptions>,
         local_version_manager: Arc<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
-        sstable_manager: SstableManagerRef,
+        sstable_manager: SstableStoreRef,
     ) -> (JoinHandle<()>, UnboundedSender<()>) {
         let sub_compact_context = SubCompactContext {
             options,
