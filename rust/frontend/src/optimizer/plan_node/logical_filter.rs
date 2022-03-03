@@ -3,10 +3,10 @@ use std::fmt;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 
-use super::{ColPrunable, IntoPlanRef, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use super::{ColPrunable, LogicalProject, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
 use crate::expr::{assert_input_ref, ExprImpl};
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
-use crate::utils::Condition;
+use crate::utils::{ColIndexMapping, Condition};
 
 #[derive(Debug, Clone)]
 pub struct LogicalFilter {
@@ -31,7 +31,7 @@ impl LogicalFilter {
     /// the function will check if the predicate is bool expression
     pub fn create(input: PlanRef, predicate: ExprImpl) -> Result<PlanRef> {
         let predicate = Condition::with_expr(predicate);
-        Ok(Self::new(input, predicate).into_plan_ref())
+        Ok(Self::new(input, predicate).into())
     }
 }
 
@@ -60,7 +60,13 @@ impl WithSchema for LogicalFilter {
     }
 }
 
-impl ColPrunable for LogicalFilter {}
+impl ColPrunable for LogicalFilter {
+    fn prune_col(&self, required_cols: &fixedbitset::FixedBitSet) -> PlanRef {
+        // TODO: replace default impl
+        let mapping = ColIndexMapping::with_remaining_columns(required_cols);
+        LogicalProject::with_mapping(self.clone().into(), mapping).into()
+    }
+}
 
 impl ToBatch for LogicalFilter {
     fn to_batch(&self) -> PlanRef {

@@ -40,7 +40,6 @@ pub trait PlanNode:
     + WithDistribution
     + WithSchema
     + ColPrunable
-    + IntoPlanRef
     + ToBatch
     + ToStream
     + ToDistributedBatch
@@ -273,21 +272,13 @@ macro_rules! enum_plan_node_type {
 }
 for_all_plan_nodes! { enum_plan_node_type }
 
-pub trait IntoPlanRef {
-    fn into_plan_ref(self) -> PlanRef;
-    fn clone_as_plan_ref(&self) -> PlanRef;
-}
-
 /// impl fn plan_ref for each node.
 macro_rules! impl_plan_ref {
     ([], $( { $convention:ident, $name:ident }),*) => {
         paste!{
-            $(impl IntoPlanRef for [<$convention $name>] {
-                fn into_plan_ref(self) -> PlanRef {
+            $(impl Into<PlanRef> for [<$convention $name>] {
+                fn into(self) -> PlanRef {
                     std::rc::Rc::new(self)
-                }
-                fn clone_as_plan_ref(&self) -> PlanRef {
-                    self.clone().into_plan_ref()
                 }
             })*
         }

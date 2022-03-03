@@ -4,8 +4,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 
 use super::{
-    BatchProject, ColPrunable, IntoPlanRef, PlanRef, PlanTreeNodeUnary, StreamProject, ToBatch,
-    ToStream,
+    BatchProject, ColPrunable, PlanRef, PlanTreeNodeUnary, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{assert_input_ref, Expr, ExprImpl, InputRef};
 use crate::optimizer::property::{Distribution, WithDistribution, WithOrder, WithSchema};
@@ -38,7 +37,7 @@ impl LogicalProject {
         exprs: Vec<ExprImpl>,
         expr_alias: Vec<Option<String>>,
     ) -> PlanRef {
-        Self::new(input, exprs, expr_alias).into_plan_ref()
+        Self::new(input, exprs, expr_alias).into()
     }
 
     pub fn with_mapping(input: PlanRef, mapping: ColIndexMapping) -> PlanRef {
@@ -55,7 +54,7 @@ impl LogicalProject {
             .collect();
 
         let alias = vec![None; exprs.len()];
-        LogicalProject::new(input, exprs, alias).into_plan_ref()
+        LogicalProject::new(input, exprs, alias).into()
     }
 
     fn derive_schema(exprs: &[ExprImpl], expr_alias: &[Option<String>]) -> Schema {
@@ -113,13 +112,19 @@ impl WithSchema for LogicalProject {
     }
 }
 
-impl ColPrunable for LogicalProject {}
+impl ColPrunable for LogicalProject {
+    fn prune_col(&self, required_cols: &fixedbitset::FixedBitSet) -> PlanRef {
+        // TODO: replace default impl
+        let mapping = ColIndexMapping::with_remaining_columns(required_cols);
+        LogicalProject::with_mapping(self.clone().into(), mapping).into()
+    }
+}
 
 impl ToBatch for LogicalProject {
     fn to_batch(&self) -> PlanRef {
         let new_input = self.input().to_batch();
         let new_logical = self.clone_with_input(new_input);
-        BatchProject::new(new_logical).into_plan_ref()
+        BatchProject::new(new_logical).into()
     }
 }
 
@@ -127,7 +132,7 @@ impl ToStream for LogicalProject {
     fn to_stream_with_dist_required(&self, required_dist: &Distribution) -> PlanRef {
         let new_input = self.input().to_stream_with_dist_required(required_dist);
         let new_logical = self.clone_with_input(new_input);
-        StreamProject::new(new_logical).into_plan_ref()
+        StreamProject::new(new_logical).into()
     }
     fn to_stream(&self) -> PlanRef {
         self.to_stream_with_dist_required(Distribution::any())

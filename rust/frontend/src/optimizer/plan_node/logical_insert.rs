@@ -4,10 +4,11 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
-use super::{ColPrunable, IntoPlanRef, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use super::{ColPrunable, LogicalProject, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
 use crate::binder::BaseTableRef;
 use crate::catalog::ColumnId;
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
+use crate::utils::ColIndexMapping;
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -66,7 +67,13 @@ impl fmt::Display for LogicalInsert {
     }
 }
 
-impl ColPrunable for LogicalInsert {}
+impl ColPrunable for LogicalInsert {
+    fn prune_col(&self, required_cols: &fixedbitset::FixedBitSet) -> PlanRef {
+        // TODO: replace default impl
+        let mapping = ColIndexMapping::with_remaining_columns(required_cols);
+        LogicalProject::with_mapping(self.clone().into(), mapping).into()
+    }
+}
 
 impl ToBatch for LogicalInsert {
     fn to_batch(&self) -> PlanRef {
