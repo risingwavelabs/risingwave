@@ -76,14 +76,16 @@ async fn test_hummock_pin_unpin() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_hummock_get_compact_task() -> Result<()> {
+async fn test_hummock_compaction_task() -> Result<()> {
     let env = MetaSrvEnv::for_test().await;
     let hummock_manager = HummockManager::new(env.clone()).await?;
     let context_id = 0;
 
+    // No compaction task available.
     let task = hummock_manager.get_compact_task().await?;
     assert_eq!(task, None);
 
+    // Add some sstables and commit.
     let epoch: u64 = 1;
     let mut table_id = 1;
     let original_tables = generate_test_tables(epoch, &mut table_id);
@@ -93,8 +95,8 @@ async fn test_hummock_get_compact_task() -> Result<()> {
         .unwrap();
     hummock_manager.commit_epoch(epoch).await.unwrap();
 
-    let task = hummock_manager.get_compact_task().await?;
-    let compact_task = task.unwrap();
+    // Get a compaction task.
+    let compact_task = hummock_manager.get_compact_task().await.unwrap().unwrap();
     assert_eq!(
         compact_task
             .get_input_ssts()
@@ -104,6 +106,31 @@ async fn test_hummock_get_compact_task() -> Result<()> {
         0
     );
     assert_eq!(compact_task.get_task_id(), 1);
+
+    // Cancel the task and succeed.
+    assert!(hummock_manager
+        .report_compact_task(compact_task.clone(), false)
+        .await
+        .unwrap());
+    // Cancel the task and told the task is not found, which may have been processed previously.
+    assert!(!hummock_manager
+        .report_compact_task(compact_task.clone(), false)
+        .await
+        .unwrap());
+
+    // Get a compaction task.
+    let compact_task = hummock_manager.get_compact_task().await.unwrap().unwrap();
+    assert_eq!(compact_task.get_task_id(), 2);
+    // Finish the task and succeed.
+    assert!(hummock_manager
+        .report_compact_task(compact_task.clone(), true)
+        .await
+        .unwrap());
+    // Finish the task and told the task is not found, which may have been processed previously.
+    assert!(!hummock_manager
+        .report_compact_task(compact_task.clone(), true)
+        .await
+        .unwrap());
 
     Ok(())
 }

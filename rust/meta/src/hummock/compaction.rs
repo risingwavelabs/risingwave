@@ -290,7 +290,7 @@ impl CompactStatus {
     }
 
     /// Return Some(Vec<table info to add>, Vec<table id to delete>) if succeeds.
-    /// Return None if the task has been reported previously.
+    /// Return None if the task has been processed previously.
     #[allow(clippy::needless_collect)]
     pub fn report_compact_task(
         &mut self,
@@ -309,7 +309,7 @@ impl CompactStatus {
                     );
                 }
                 if delete_table_ids.is_empty() {
-                    // The task has been reported previously.
+                    // The task has been processed previously.
                     return None;
                 }
                 match &mut self.level_handlers[compact_task.target_level as usize] {
@@ -333,7 +333,7 @@ impl CompactStatus {
             }
             false => {
                 if !self.cancel_compact_task(compact_task.task_id) {
-                    // The task has been reported previously.
+                    // The task has been processed previously.
                     return None;
                 }
                 // The task is cancelled successfully.
