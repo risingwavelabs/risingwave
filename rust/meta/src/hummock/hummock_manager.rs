@@ -415,15 +415,17 @@ where
             .sum();
         let output_sst_count = compact_task.sorted_output_ssts.len();
 
-        let (sorted_output_ssts, delete_table_ids) = compact_status.report_compact_task(
+        let (sorted_output_ssts, delete_table_ids) = match compact_status.report_compact_task(
             output_table_compact_entries,
             compact_task,
             task_result,
-        );
-        if delete_table_ids.is_empty() {
-            // The task already has been reported previously.
-            return Ok(());
-        }
+        ) {
+            None => {
+                // The task has been reported previously.
+                return Ok(());
+            }
+            Some((sorted_output_ssts, delete_table_ids)) => (sorted_output_ssts, delete_table_ids),
+        };
         compact_status.update_in_transaction(&mut transaction);
         let versioning_guard = self.versioning.write().await;
         if task_result {
@@ -495,6 +497,8 @@ where
                 input_sst_count,
                 output_sst_count
             );
+        } else {
+            tracing::debug!("Cancel hummock compaction task id {}", compact_task_id);
         }
         Ok(())
     }
