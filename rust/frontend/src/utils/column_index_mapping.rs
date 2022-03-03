@@ -89,6 +89,23 @@ impl ColIndexMapping {
         Self::new(map)
     }
 
+    /// An identity mapping with some indexes filtered out.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// let mapping =
+    ///     ColIndexMapping::with_filter(&FixedBitSet::with_capacity_and_blocks(5, vec![0b10101]));
+    /// assert_eq!(mapping.map, vec![Some(0), Some(1), None, Some(3), Some(4)]);
+    /// ```
+    pub fn with_filter(filter: &FixedBitSet) -> Self {
+        let mut map = vec![None; filter.len()];
+        for i in filter.ones() {
+            map[i] = Some(i);
+        }
+        Self::new(map)
+    }
+
     /// Remove the given columns, and maps the remaining columns to a consecutive range starting
     /// from 0.
     ///
@@ -114,6 +131,11 @@ impl ColIndexMapping {
 
     #[must_use]
     pub fn composite(&self, following: &Self) -> Self {
+        println!(
+            "composing {:?} and {:?}",
+            self.mapping_pairs().collect::<Vec<_>>(),
+            following.mapping_pairs().collect::<Vec<_>>()
+        );
         let mut map = self.map.clone();
         for tar in &mut map {
             *tar = tar.and_then(|index| following.try_map(index));
@@ -141,7 +163,7 @@ impl ColIndexMapping {
         self.target_upper
     }
     pub fn source_upper(&self) -> usize {
-        self.map.len()
+        self.map.len() - 1
     }
 }
 

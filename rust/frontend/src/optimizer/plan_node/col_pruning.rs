@@ -2,6 +2,7 @@ use fixedbitset::FixedBitSet;
 use paste::paste;
 
 use super::*;
+use crate::expr::{ExprVisitor, InputRef};
 use crate::{for_batch_plan_nodes, for_stream_plan_nodes};
 
 /// The trait for column pruning, only logical plan node will use it, though all plan node impl it.
@@ -24,3 +25,14 @@ macro_rules! ban_prune_col {
 }
 for_batch_plan_nodes! { ban_prune_col }
 for_stream_plan_nodes! { ban_prune_col }
+
+/// Union all `InputRef`s in the expression with the initial `required_cols`.
+pub struct CollectRequiredCols {
+    pub required_cols: FixedBitSet,
+}
+
+impl ExprVisitor for CollectRequiredCols {
+    fn visit_input_ref(&mut self, expr: &InputRef) {
+        self.required_cols.insert(expr.index());
+    }
+}

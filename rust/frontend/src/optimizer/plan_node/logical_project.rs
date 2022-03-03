@@ -40,8 +40,23 @@ impl LogicalProject {
         Self::new(input, exprs, expr_alias).into()
     }
 
-    pub fn with_mapping(input: PlanRef, mapping: ColIndexMapping) -> PlanRef {
-        let mut input_refs = vec![None; mapping.target_upper()];
+    /// Creates a `LogicalProject` which select some columns from the input.
+    ///
+    /// `mapping` should maps from `(0..input_fields.len())` to a consecutive range starting from 0.
+    ///
+    /// This is useful in column pruning when we want to add a project to ensure the output schema
+    /// is correct.
+    pub fn with_mapping(input: PlanRef, mapping: ColIndexMapping) -> Self {
+        println!(
+            "with_mapping {:?}",
+            mapping.mapping_pairs().collect::<Vec<_>>()
+        );
+        assert_eq!(
+            input.schema().fields().len(),
+            mapping.source_upper() + 1,
+            "invalid mapping given"
+        );
+        let mut input_refs = vec![None; mapping.target_upper() + 1];
         for (src, tar) in mapping.mapping_pairs() {
             assert_eq!(input_refs[tar], None);
             input_refs[tar] = Some(src);
@@ -54,7 +69,7 @@ impl LogicalProject {
             .collect();
 
         let alias = vec![None; exprs.len()];
-        LogicalProject::new(input, exprs, alias).into()
+        LogicalProject::new(input, exprs, alias)
     }
 
     fn derive_schema(exprs: &[ExprImpl], expr_alias: &[Option<String>]) -> Schema {

@@ -276,9 +276,9 @@ for_all_plan_nodes! { enum_plan_node_type }
 macro_rules! impl_plan_ref {
     ([], $( { $convention:ident, $name:ident }),*) => {
         paste!{
-            $(impl Into<PlanRef> for [<$convention $name>] {
-                fn into(self) -> PlanRef {
-                    std::rc::Rc::new(self)
+            $(impl From<[<$convention $name>]> for PlanRef {
+                fn from(plan: [<$convention $name>]) -> Self {
+                    std::rc::Rc::new(plan)
                 }
             })*
         }
