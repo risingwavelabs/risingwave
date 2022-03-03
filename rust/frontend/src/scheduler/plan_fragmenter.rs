@@ -222,7 +222,7 @@ mod tests {
 
     use std::sync::Arc;
 
-    use risingwave_pb::common::{WorkerNode, WorkerType};
+    use risingwave_pb::common::{ParallelUnit, WorkerNode, WorkerType};
     use risingwave_pb::plan::JoinType;
 
     use crate::optimizer::plan_node::{
@@ -308,18 +308,21 @@ mod tests {
             r#type: WorkerType::ComputeNode as i32,
             host: None,
             state: risingwave_pb::common::worker_node::State::Running as i32,
+            parallel_units: vec![ParallelUnit { id: 1 }],
         };
         let worker2 = WorkerNode {
             id: 1,
             r#type: WorkerType::ComputeNode as i32,
             host: None,
             state: risingwave_pb::common::worker_node::State::Running as i32,
+            parallel_units: vec![ParallelUnit { id: 2 }],
         };
         let worker3 = WorkerNode {
             id: 2,
             r#type: WorkerType::ComputeNode as i32,
             host: None,
             state: risingwave_pb::common::worker_node::State::Running as i32,
+            parallel_units: vec![ParallelUnit { id: 3 }],
         };
         let workers = vec![worker1.clone(), worker2.clone(), worker3.clone()];
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(workers));
