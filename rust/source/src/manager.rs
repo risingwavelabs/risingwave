@@ -125,7 +125,7 @@ impl SourceManager for MemSourceManager {
             .map(SourceColumnDesc::from)
             .collect();
 
-        let source = SourceImpl::TableV2(TableSourceV2::new(table));
+        let source = SourceImpl::TableV2(TableSourceV2::new(table.column_descs().to_vec()));
 
         // Table sources do not need columns and format
         let desc = SourceDesc {
