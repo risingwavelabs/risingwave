@@ -4038,6 +4038,7 @@ dependencies = [
  "aws-sdk-s3",
  "aws-smithy-http",
  "aws-smithy-types",
+ "aws-types",
  "byteorder",
  "bytes",
  "chrono",

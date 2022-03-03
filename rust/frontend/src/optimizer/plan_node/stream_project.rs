@@ -9,16 +9,19 @@ use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 pub struct StreamProject {
     logical: LogicalProject,
 }
+
 impl fmt::Display for StreamProject {
     fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
         todo!()
     }
 }
+
 impl StreamProject {
     pub fn new(logical: LogicalProject) -> Self {
         StreamProject { logical }
     }
 }
+
 impl PlanTreeNodeUnary for StreamProject {
     fn input(&self) -> PlanRef {
         self.logical.input()
@@ -35,5 +38,7 @@ impl WithSchema for StreamProject {
 }
 
 impl WithDistribution for StreamProject {}
+
 impl WithOrder for StreamProject {}
+
 impl ToStreamProst for StreamProject {}

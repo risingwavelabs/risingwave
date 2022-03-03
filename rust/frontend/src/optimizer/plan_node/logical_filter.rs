@@ -14,6 +14,7 @@ pub struct LogicalFilter {
     input: PlanRef,
     schema: Schema,
 }
+
 impl LogicalFilter {
     pub fn new(input: PlanRef, predicate: Condition) -> Self {
         for cond in &predicate.conjunctions {
@@ -33,6 +34,7 @@ impl LogicalFilter {
         Ok(Self::new(input, predicate).into_plan_ref())
     }
 }
+
 impl PlanTreeNodeUnary for LogicalFilter {
     fn input(&self) -> PlanRef {
         self.input.clone()
@@ -47,19 +49,25 @@ impl fmt::Display for LogicalFilter {
         todo!()
     }
 }
+
 impl WithOrder for LogicalFilter {}
+
 impl WithDistribution for LogicalFilter {}
+
 impl WithSchema for LogicalFilter {
     fn schema(&self) -> &Schema {
         &self.schema
     }
 }
+
 impl ColPrunable for LogicalFilter {}
+
 impl ToBatch for LogicalFilter {
     fn to_batch(&self) -> PlanRef {
         todo!()
     }
 }
+
 impl ToStream for LogicalFilter {
     fn to_stream(&self) -> PlanRef {
         todo!()

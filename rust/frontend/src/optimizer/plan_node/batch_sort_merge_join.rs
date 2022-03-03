@@ -9,12 +9,14 @@ use super::{
 use crate::optimizer::property::{
     Direction, Distribution, FieldOrder, Order, WithDistribution, WithOrder, WithSchema,
 };
+
 #[derive(Debug, Clone)]
 pub struct BatchSortMergeJoin {
     logical: LogicalJoin,
     eq_join_predicate: EqJoinPredicate,
     order: Order,
 }
+
 impl BatchSortMergeJoin {
     pub fn new(logical: LogicalJoin, eq_join_predicate: EqJoinPredicate) -> Self {
         let order = Self::derive_order(logical.left().order(), logical.right().order());
@@ -89,15 +91,19 @@ impl WithOrder for BatchSortMergeJoin {
         &self.order
     }
 }
+
 impl WithDistribution for BatchSortMergeJoin {}
+
 impl WithSchema for BatchSortMergeJoin {
     fn schema(&self) -> &Schema {
         self.logical.schema()
     }
 }
+
 impl ToDistributedBatch for BatchSortMergeJoin {
     fn to_distributed(&self) -> PlanRef {
         todo!()
     }
 }
+
 impl ToBatchProst for BatchSortMergeJoin {}

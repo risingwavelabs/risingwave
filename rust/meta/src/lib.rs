@@ -13,6 +13,7 @@
 #![feature(option_result_contains)]
 #![feature(let_chains)]
 #![feature(type_alias_impl_trait)]
+#![feature(map_first_last)]
 
 mod barrier;
 pub mod cluster;
