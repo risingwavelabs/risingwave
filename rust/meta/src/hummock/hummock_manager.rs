@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use itertools::Itertools;
+use itertools::{enumerate, Itertools};
 use prost::Message;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::hummock::hummock_version::HummockVersionRefId;
@@ -21,6 +21,7 @@ use crate::hummock::model::{
 };
 use crate::manager::{IdCategory, IdGeneratorManagerRef, MetaSrvEnv};
 use crate::model::{MetadataModel, Transactional, Worker};
+use crate::rpc::metrics::MetaMetrics;
 use crate::storage::{Error, MetaStore, Transaction};
 
 pub struct HummockManager<S> {
@@ -35,6 +36,8 @@ pub struct HummockManager<S> {
     // requested from. We need to fix it.
     compaction: Mutex<Compaction<S>>,
     versioning: RwLock<Versioning<S>>,
+
+    metrics: Arc<MetaMetrics>,
 }
 
 struct Compaction<S> {
@@ -49,7 +52,7 @@ impl<S> HummockManager<S>
 where
     S: MetaStore,
 {
-    pub async fn new(env: MetaSrvEnv<S>) -> Result<HummockManager<S>> {
+    pub async fn new(env: MetaSrvEnv<S>, metrics: Arc<MetaMetrics>) -> Result<HummockManager<S>> {
         let instance = HummockManager {
             id_gen_manager_ref: env.id_gen_manager_ref(),
             versioning: RwLock::new(Versioning {
@@ -58,6 +61,7 @@ where
             compaction: Mutex::new(Compaction {
                 meta_store_ref: env.meta_store_ref(),
             }),
+            metrics,
         };
 
         instance.initialize_meta().await?;
@@ -200,6 +204,20 @@ where
         .await
     }
 
+    fn trigger_sst_stat(&self, compact_status: &CompactStatus) {
+        for (idx, level_handler) in enumerate(compact_status.level_handlers.iter()) {
+            let sst_cnt = match level_handler {
+                LevelHandler::Nonoverlapping(ssts, _) => ssts.len(),
+                LevelHandler::Overlapping(ssts, _) => ssts.len(),
+            };
+            self.metrics
+                .level_payload
+                .get_metric_with_label_values(&[&(String::from("L") + &idx.to_string())])
+                .unwrap()
+                .set(sst_cnt as i64);
+        }
+    }
+
     pub async fn add_tables(
         &self,
         context_id: HummockContextId,
@@ -297,6 +315,8 @@ where
             Some(context_id),
         )
         .await?;
+
+        self.trigger_sst_stat(&compact_status);
 
         Ok(hummock_version)
     }
@@ -506,6 +526,9 @@ where
                 output_sst_count
             );
         }
+
+        self.trigger_sst_stat(&compact_status);
+
         Ok(())
     }
 

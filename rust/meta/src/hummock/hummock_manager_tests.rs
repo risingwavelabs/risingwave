@@ -14,6 +14,7 @@ use crate::hummock::test_utils::*;
 use crate::hummock::HummockManager;
 use crate::manager::{MetaSrvEnv, NotificationManager};
 use crate::model::MetadataModel;
+use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MemStore;
 
 async fn setup_compute_env(
@@ -25,7 +26,11 @@ async fn setup_compute_env(
     WorkerNode,
 ) {
     let env = MetaSrvEnv::for_test().await;
-    let hummock_manager = Arc::new(HummockManager::new(env.clone()).await.unwrap());
+    let hummock_manager = Arc::new(
+        HummockManager::new(env.clone(), Arc::new(MetaMetrics::new()))
+            .await
+            .unwrap(),
+    );
     let cluster_manager = Arc::new(
         StoredClusterManager::new(
             env.clone(),

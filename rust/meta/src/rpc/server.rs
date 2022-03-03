@@ -48,7 +48,12 @@ pub async fn rpc_serve(
         MetaSrvEnv::<MemStore>::new(meta_store_ref.clone(), epoch_generator_ref.clone()).await;
 
     let fragment_manager = Arc::new(FragmentManager::new(meta_store_ref.clone()).await.unwrap());
-    let hummock_manager = Arc::new(hummock::HummockManager::new(env.clone()).await.unwrap());
+    let meta_metrics = Arc::new(MetaMetrics::new());
+    let hummock_manager = Arc::new(
+        hummock::HummockManager::new(env.clone(), meta_metrics.clone())
+            .await
+            .unwrap(),
+    );
     let compactor_manager = Arc::new(hummock::CompactorManager::new());
     let notification_manager = Arc::new(NotificationManager::new());
     let cluster_manager = Arc::new(
@@ -72,7 +77,6 @@ pub async fn rpc_serve(
         tokio::spawn(dashboard_service.serve()); // TODO: join dashboard service back to local
                                                  // thread
     }
-    let meta_metrics = Arc::new(MetaMetrics::new());
     let barrier_manager_ref = Arc::new(BarrierManager::new(
         env.clone(),
         cluster_manager.clone(),

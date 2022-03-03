@@ -14,10 +14,15 @@ use crate::cluster::StoredClusterManager;
 use crate::hummock::mock_hummock_meta_client::MockHummockMetaClient;
 use crate::hummock::HummockManager;
 use crate::manager::{MetaSrvEnv, NotificationManager};
+use crate::rpc::metrics::MetaMetrics;
 
 async fn get_hummock_meta_client() -> MockHummockMetaClient {
     let env = MetaSrvEnv::for_test().await;
-    let hummock_manager = Arc::new(HummockManager::new(env.clone()).await.unwrap());
+    let hummock_manager = Arc::new(
+        HummockManager::new(env.clone(), Arc::new(MetaMetrics::new()))
+            .await
+            .unwrap(),
+    );
     let notification_manager = Arc::new(NotificationManager::new());
     let cluster_manager =
         StoredClusterManager::new(env, Some(hummock_manager.clone()), notification_manager)
