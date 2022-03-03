@@ -16,7 +16,7 @@ use super::key_range::KeyRange;
 use super::local_version_manager::LocalVersionManager;
 use super::utils::range_overlap;
 use super::value::HummockValue;
-use super::{key, HummockError, HummockOptions, HummockResult, SSTableManagerRef};
+use super::{key, HummockError, HummockOptions, HummockResult, SstableManagerRef};
 use crate::monitor::StateStoreStats;
 
 type SharedBufferItem = (Vec<u8>, HummockValue<Vec<u8>>);
@@ -150,7 +150,7 @@ impl SharedBufferManager {
     pub fn new(
         options: Arc<HummockOptions>,
         local_version_manager: Arc<LocalVersionManager>,
-        sstable_manager: SSTableManagerRef,
+        sstable_manager: SstableManagerRef,
         compactor_tx: tokio::sync::mpsc::UnboundedSender<()>,
         stats: Arc<StateStoreStats>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -320,7 +320,7 @@ pub struct SharedBufferUploader {
     /// Statistics.
     stats: Arc<StateStoreStats>,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
-    sstable_manager: SSTableManagerRef,
+    sstable_manager: SstableManagerRef,
 
     rx: tokio::sync::mpsc::UnboundedReceiver<SharedBufferUploaderItem>,
 }
@@ -329,7 +329,7 @@ impl SharedBufferUploader {
     pub fn new(
         options: Arc<HummockOptions>,
         local_version_manager: Arc<LocalVersionManager>,
-        sstable_manager: SSTableManagerRef,
+        sstable_manager: SstableManagerRef,
         compactor_tx: tokio::sync::mpsc::UnboundedSender<()>,
         stats: Arc<StateStoreStats>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,

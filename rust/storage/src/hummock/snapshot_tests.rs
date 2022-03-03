@@ -61,7 +61,7 @@ async fn gen_and_upload_table(
 }
 
 async fn gen_and_upload_table_with_sstable_manager(
-    sstable_manager: SSTableManagerRef,
+    sstable_manager: SstableManagerRef,
     vm: Arc<LocalVersionManager>,
     hummock_meta_client: &dyn HummockMetaClient,
     kv_pairs: Vec<(usize, HummockValue<Vec<u8>>)>,

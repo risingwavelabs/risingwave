@@ -144,4 +144,4 @@ impl SstableManager {
     }
 }
 
-pub type SSTableManagerRef = Arc<SstableManager>;
+pub type SstableManagerRef = Arc<SstableManager>;

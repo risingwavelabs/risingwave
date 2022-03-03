@@ -9,7 +9,7 @@ use super::iterator::{ConcatIterator, HummockIterator, MergeIterator};
 use super::key::{get_epoch, Epoch, FullKey};
 use super::key_range::KeyRange;
 use super::multi_builder::CapacitySplitTableBuilder;
-use super::sstable_manager::SSTableManagerRef;
+use super::sstable_manager::SstableManagerRef;
 use super::version_cmp::VersionedComparator;
 use super::{
     HummockError, HummockMetaClient, HummockOptions, HummockResult, HummockStorage, HummockValue,
@@ -22,7 +22,7 @@ pub struct SubCompactContext {
     pub options: Arc<HummockOptions>,
     pub local_version_manager: Arc<LocalVersionManager>,
     pub hummock_meta_client: Arc<dyn HummockMetaClient>,
-    pub sstable_manager: SSTableManagerRef,
+    pub sstable_manager: SstableManagerRef,
 }
 
 pub struct Compactor;

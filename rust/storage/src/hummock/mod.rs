@@ -120,7 +120,7 @@ pub struct HummockStorage {
 
     hummock_meta_client: Arc<dyn HummockMetaClient>,
 
-    sstable_manager: SSTableManagerRef,
+    sstable_manager: SstableManagerRef,
     /// Manager for immutable shared buffers
     shared_buffer_manager: Arc<SharedBufferManager>,
 }
@@ -128,7 +128,7 @@ pub struct HummockStorage {
 impl HummockStorage {
     pub async fn new(
         options: HummockOptions,
-        sstable_manager: SSTableManagerRef,
+        sstable_manager: SstableManagerRef,
         local_version_manager: Arc<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> HummockResult<HummockStorage> {
@@ -440,7 +440,7 @@ impl HummockStorage {
             .unwrap()
     }
 
-    pub fn sstable_manager(&self) -> SSTableManagerRef {
+    pub fn sstable_manager(&self) -> SstableManagerRef {
         self.sstable_manager.clone()
     }
 
