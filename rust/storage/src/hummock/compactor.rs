@@ -273,7 +273,7 @@ impl Compactor {
         options: Arc<HummockOptions>,
         local_version_manager: Arc<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
-        sstable_manager: SstableManagerRef,
+        sstable_manager: SstableStoreRef,
     ) -> (JoinHandle<()>, UnboundedSender<()>) {
         let sub_compact_context = SubCompactContext {
             options,
