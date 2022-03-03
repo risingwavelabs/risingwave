@@ -122,7 +122,7 @@ async fn get_state_store_impl(opts: &Opts, stats: Arc<StateStoreStats>) -> Resul
                 MetaClient::new(meta_address).await?,
                 stats.clone(),
             ));
-            let sstable_manager = Arc::new(SstableStore::new(
+            let sstable_store = Arc::new(SstableStore::new(
                 object_client.clone(),
                 remote_dir.to_string(),
             ));
@@ -135,9 +135,9 @@ async fn get_state_store_impl(opts: &Opts, stats: Arc<StateStoreStats>) -> Resul
                         remote_dir: remote_dir.to_string(),
                         checksum_algo: get_checksum_algo(opts.checksum_algo.as_ref()),
                     },
-                    sstable_manager.clone(),
+                    sstable_store.clone(),
                     Arc::new(LocalVersionManager::new(
-                        sstable_manager,
+                        sstable_store,
                         Some(Arc::new(Cache::new(65536))),
                     )),
                     hummock_meta_client,
@@ -156,7 +156,7 @@ async fn get_state_store_impl(opts: &Opts, stats: Arc<StateStoreStats>) -> Resul
                 MetaClient::new(meta_address).await?,
                 stats.clone(),
             ));
-            let sstable_manager =
+            let sstable_store =
                 Arc::new(SstableStore::new(s3_store.clone(), remote_dir.to_string()));
             StateStoreImpl::Hummock(HummockStateStore::new(
                 HummockStorage::new(
@@ -167,9 +167,9 @@ async fn get_state_store_impl(opts: &Opts, stats: Arc<StateStoreStats>) -> Resul
                         remote_dir: remote_dir.to_string(),
                         checksum_algo: get_checksum_algo(opts.checksum_algo.as_ref()),
                     },
-                    sstable_manager.clone(),
+                    sstable_store.clone(),
                     Arc::new(LocalVersionManager::new(
-                        sstable_manager,
+                        sstable_store,
                         Some(Arc::new(Cache::new(65536))),
                     )),
                     hummock_meta_client,

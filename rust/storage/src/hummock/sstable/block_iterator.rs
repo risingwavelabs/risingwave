@@ -235,9 +235,9 @@ mod tests {
         let (data, meta) = b.finish();
 
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
-        let sstable_manager = SstableStore::new(obj_client, REMOTE_DIR.to_string());
-        sstable_manager.put(0, &meta, data).await.unwrap();
-        let block = sstable_manager.get(0, &meta, 0).await.unwrap();
+        let sstable_store = SstableStore::new(obj_client, REMOTE_DIR.to_string());
+        sstable_store.put(0, &meta, data).await.unwrap();
+        let block = sstable_store.get(0, &meta, 0).await.unwrap();
 
         let mut blk_iter = BlockIterator::new(block);
         let mut idx = 0;

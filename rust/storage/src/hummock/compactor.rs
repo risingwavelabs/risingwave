@@ -15,7 +15,7 @@ use super::iterator::{ConcatIterator, HummockIterator, MergeIterator};
 use super::key::{get_epoch, Epoch, FullKey};
 use super::key_range::KeyRange;
 use super::multi_builder::CapacitySplitTableBuilder;
-use super::sstable_manager::SstableStoreRef;
+use super::sstable_store::SstableStoreRef;
 use super::version_cmp::VersionedComparator;
 use super::{
     HummockError, HummockMetaClient, HummockOptions, HummockResult, HummockStorage, HummockValue,
@@ -27,7 +27,7 @@ pub struct SubCompactContext {
     pub options: Arc<HummockOptions>,
     pub local_version_manager: Arc<LocalVersionManager>,
     pub hummock_meta_client: Arc<dyn HummockMetaClient>,
-    pub sstable_manager: SstableStoreRef,
+    pub sstable_store: SstableStoreRef,
 }
 
 pub struct Compactor;
@@ -69,14 +69,14 @@ impl Compactor {
                     .map(|table| -> Box<dyn HummockIterator> {
                         Box::new(SSTableIterator::new(
                             table.clone(),
-                            context.sstable_manager.clone(),
+                            context.sstable_store.clone(),
                         ))
                     })
                     .chain(non_overlapping_table_seqs.iter().map(
                         |tableseq| -> Box<dyn HummockIterator> {
                             Box::new(ConcatIterator::new(
                                 tableseq.clone(),
-                                context.sstable_manager.clone(),
+                                context.sstable_store.clone(),
                             ))
                         },
                     )),
@@ -222,7 +222,7 @@ impl Compactor {
         output_sst_infos.reserve(builder.len());
         // TODO: decide upload concurrency
         for (table_id, data, meta) in builder.finish() {
-            context.sstable_manager.put(table_id, &meta, data).await?;
+            context.sstable_store.put(table_id, &meta, data).await?;
             let info = SstableInfo {
                 id: table_id,
                 key_range: Some(risingwave_pb::hummock::KeyRange {
@@ -273,13 +273,13 @@ impl Compactor {
         options: Arc<HummockOptions>,
         local_version_manager: Arc<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
-        sstable_manager: SstableStoreRef,
+        sstable_store: SstableStoreRef,
     ) -> (JoinHandle<()>, UnboundedSender<()>) {
         let sub_compact_context = SubCompactContext {
             options,
             local_version_manager,
             hummock_meta_client,
-            sstable_manager,
+            sstable_store,
         };
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
         let stream_retry_interval = Duration::from_secs(60);

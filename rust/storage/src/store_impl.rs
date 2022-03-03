@@ -83,7 +83,7 @@ impl StateStoreImpl {
                     S3ObjectStore::new_with_minio(minio.strip_prefix("hummock+").unwrap()).await,
                 );
                 let remote_dir = "hummock_001";
-                let sstable_manager =
+                let sstable_store =
                     Arc::new(SstableStore::new(object_client, remote_dir.to_string()));
                 let inner = HummockStateStore::new(
                     HummockStorage::new(
@@ -94,9 +94,9 @@ impl StateStoreImpl {
                             remote_dir: remote_dir.to_string(),
                             checksum_algo: ChecksumAlg::Crc32c,
                         },
-                        sstable_manager.clone(),
+                        sstable_store.clone(),
                         Arc::new(LocalVersionManager::new(
-                            sstable_manager,
+                            sstable_store,
                             // TODO: configurable block cache in config
                             // 1GB block cache (65536 blocks * 64KB block)
                             Some(Arc::new(Cache::new(65536))),
@@ -119,7 +119,7 @@ impl StateStoreImpl {
                 );
 
                 let remote_dir = "hummock_001";
-                let sstable_manager = Arc::new(SstableStore::new(s3_store, remote_dir.to_string()));
+                let sstable_store = Arc::new(SstableStore::new(s3_store, remote_dir.to_string()));
                 let inner = HummockStateStore::new(
                     HummockStorage::new(
                         HummockOptions {
@@ -129,9 +129,9 @@ impl StateStoreImpl {
                             remote_dir: remote_dir.to_string(),
                             checksum_algo: ChecksumAlg::Crc32c,
                         },
-                        sstable_manager.clone(),
+                        sstable_store.clone(),
                         Arc::new(LocalVersionManager::new(
-                            sstable_manager,
+                            sstable_store,
                             Some(Arc::new(Cache::new(65536))),
                         )),
                         Arc::new(RpcHummockMetaClient::new(meta_client, stats.clone())),

@@ -23,16 +23,16 @@ pub struct ReverseSSTableIterator {
     /// Reference to the table
     pub table: Arc<Sstable>,
 
-    sstable_manager: SstableStoreRef,
+    sstable_store: SstableStoreRef,
 }
 
 impl ReverseSSTableIterator {
-    pub fn new(table: Arc<Sstable>, sstable_manager: SstableStoreRef) -> Self {
+    pub fn new(table: Arc<Sstable>, sstable_store: SstableStoreRef) -> Self {
         Self {
             block_iter: None,
             cur_idx: table.meta.block_metas.len() - 1,
             table,
-            sstable_manager,
+            sstable_store,
         }
     }
 
@@ -42,7 +42,7 @@ impl ReverseSSTableIterator {
             self.block_iter = None;
         } else {
             let block = self
-                .sstable_manager
+                .sstable_store
                 .get(self.table.id, &self.table.meta, idx as u64)
                 .await?;
             let mut block_iter = BlockIterator::new(block);
@@ -135,8 +135,8 @@ impl SSTableIteratorType for ReverseSSTableIterator {
     type SSTableIterator = ReverseSSTableIterator;
     const DIRECTION: usize = BACKWARD;
 
-    fn new(table: Arc<Sstable>, sstable_manager: SstableStoreRef) -> Self::SSTableIterator {
-        ReverseSSTableIterator::new(table, sstable_manager)
+    fn new(table: Arc<Sstable>, sstable_store: SstableStoreRef) -> Self::SSTableIterator {
+        ReverseSSTableIterator::new(table, sstable_store)
     }
 }
 
@@ -149,20 +149,20 @@ mod tests {
     use super::super::builder::tests::*;
     use super::*;
     use crate::assert_bytes_eq;
-    use crate::hummock::iterator::test_utils::mock_sstable_manager;
+    use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::key::key_with_epoch;
     use crate::hummock::sstable::builder::tests::gen_test_sstable;
 
     #[tokio::test]
     async fn test_reverse_sstable_iterator() {
         // build remote table
-        let sstable_manager = mock_sstable_manager();
-        let table = gen_test_sstable(default_builder_opt_for_test(), sstable_manager.clone()).await;
+        let sstable_store = mock_sstable_store();
+        let table = gen_test_sstable(default_builder_opt_for_test(), sstable_store.clone()).await;
         // We should have at least 10 blocks, so that table iterator test could cover more code
         // path.
         assert!(table.meta.block_metas.len() > 10);
 
-        let mut sstable_iter = ReverseSSTableIterator::new(Arc::new(table), sstable_manager);
+        let mut sstable_iter = ReverseSSTableIterator::new(Arc::new(table), sstable_store);
         let mut cnt = TEST_KEYS_COUNT;
         sstable_iter.rewind().await.unwrap();
 
@@ -180,13 +180,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_reverse_sstable_seek() {
-        let sstable_manager = mock_sstable_manager();
-        let table = gen_test_sstable(default_builder_opt_for_test(), sstable_manager.clone()).await;
+        let sstable_store = mock_sstable_store();
+        let table = gen_test_sstable(default_builder_opt_for_test(), sstable_store.clone()).await;
         // We should have at least 10 blocks, so that table iterator test could cover more code
         // path.
         assert!(table.meta.block_metas.len() > 10);
         let table = Arc::new(table);
-        let mut sstable_iter = ReverseSSTableIterator::new(table.clone(), sstable_manager);
+        let mut sstable_iter = ReverseSSTableIterator::new(table.clone(), sstable_store);
         let mut all_key_to_test = (0..TEST_KEYS_COUNT).collect_vec();
         let mut rng = thread_rng();
         all_key_to_test.shuffle(&mut rng);

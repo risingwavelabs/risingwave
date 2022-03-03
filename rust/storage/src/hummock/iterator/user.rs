@@ -244,7 +244,7 @@ mod tests {
     use super::*;
     use crate::hummock::iterator::test_utils::{
         default_builder_opt_for_test, iterator_test_key_of, iterator_test_key_of_epoch,
-        mock_sstable_manager, test_key, test_value_of, TestIteratorBuilder, TEST_KEYS_COUNT,
+        mock_sstable_store, test_key, test_value_of, TestIteratorBuilder, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::variants::FORWARD;
     use crate::hummock::iterator::BoxedHummockIterator;
@@ -349,29 +349,29 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete() {
-        let sstable_manager = mock_sstable_manager();
+        let sstable_store = mock_sstable_store();
 
         // key=[table, idx, epoch], value
         let kv_pairs = vec![
             (0, 1, 100, HummockValue::Put(test_value_of(0, 1))),
             (0, 2, 300, HummockValue::Delete),
         ];
-        let table0 = add_kv_pair(0, kv_pairs, sstable_manager.clone()).await;
+        let table0 = add_kv_pair(0, kv_pairs, sstable_store.clone()).await;
 
         let kv_pairs = vec![
             (0, 1, 200, HummockValue::Delete),
             (0, 2, 400, HummockValue::Put(test_value_of(0, 2))),
         ];
-        let table1 = add_kv_pair(1, kv_pairs, sstable_manager.clone()).await;
+        let table1 = add_kv_pair(1, kv_pairs, sstable_store.clone()).await;
 
         let iters: Vec<BoxedHummockIterator> = vec![
             Box::new(SSTableIterator::new(
                 Arc::new(table0),
-                sstable_manager.clone(),
+                sstable_store.clone(),
             )),
             Box::new(SSTableIterator::new(
                 Arc::new(table1),
-                sstable_manager.clone(),
+                sstable_store.clone(),
             )),
         ];
         let mi = MergeIterator::new(iters);
@@ -392,7 +392,7 @@ mod tests {
     // left..=end
     #[tokio::test]
     async fn test_range_inclusive() {
-        let sstable_manager = mock_sstable_manager();
+        let sstable_store = mock_sstable_store();
         // key=[table, idx, epoch], value
         let kv_pairs = vec![
             (0, 0, 200, HummockValue::Delete),
@@ -410,10 +410,10 @@ mod tests {
             (0, 7, 100, HummockValue::Put(test_value_of(0, 7))),
             (0, 8, 100, HummockValue::Put(test_value_of(0, 8))),
         ];
-        let table = add_kv_pair(0, kv_pairs, sstable_manager.clone()).await;
+        let table = add_kv_pair(0, kv_pairs, sstable_store.clone()).await;
         let iters: Vec<BoxedHummockIterator> = vec![Box::new(SSTableIterator::new(
             Arc::new(table),
-            sstable_manager,
+            sstable_store,
         ))];
         let mi = MergeIterator::new(iters);
 
@@ -472,7 +472,7 @@ mod tests {
     // left..end
     #[tokio::test]
     async fn test_range() {
-        let sstable_manager = mock_sstable_manager();
+        let sstable_store = mock_sstable_store();
         // key=[table, idx, epoch], value
         let kv_pairs = vec![
             (0, 0, 200, HummockValue::Delete),
@@ -489,10 +489,10 @@ mod tests {
             (0, 7, 100, HummockValue::Put(test_value_of(0, 7))),
             (0, 8, 100, HummockValue::Put(test_value_of(0, 8))),
         ];
-        let table = add_kv_pair(0, kv_pairs, sstable_manager.clone()).await;
+        let table = add_kv_pair(0, kv_pairs, sstable_store.clone()).await;
         let iters: Vec<BoxedHummockIterator> = vec![Box::new(SSTableIterator::new(
             Arc::new(table),
-            sstable_manager,
+            sstable_store,
         ))];
         let mi = MergeIterator::new(iters);
 
@@ -551,7 +551,7 @@ mod tests {
     // ..=right
     #[tokio::test]
     async fn test_range_to_inclusive() {
-        let sstable_manager = mock_sstable_manager();
+        let sstable_store = mock_sstable_store();
         // key=[table, idx, epoch], value
         let kv_pairs = vec![
             (0, 0, 200, HummockValue::Delete),
@@ -569,10 +569,10 @@ mod tests {
             (0, 7, 100, HummockValue::Put(test_value_of(0, 7))),
             (0, 8, 100, HummockValue::Put(test_value_of(0, 8))),
         ];
-        let table = add_kv_pair(0, kv_pairs, sstable_manager.clone()).await;
+        let table = add_kv_pair(0, kv_pairs, sstable_store.clone()).await;
         let iters: Vec<BoxedHummockIterator> = vec![Box::new(SSTableIterator::new(
             Arc::new(table),
-            sstable_manager,
+            sstable_store,
         ))];
         let mi = MergeIterator::new(iters);
         let end_key = Included(user_key(key_range_test_key(0, 7, 0).as_slice()).to_vec());
@@ -633,7 +633,7 @@ mod tests {
     // left..
     #[tokio::test]
     async fn test_range_from() {
-        let sstable_manager = mock_sstable_manager();
+        let sstable_store = mock_sstable_store();
         // key=[table, idx, epoch], value
         let kv_pairs = vec![
             (0, 0, 200, HummockValue::Delete),
@@ -651,10 +651,10 @@ mod tests {
             (0, 7, 100, HummockValue::Put(test_value_of(0, 7))),
             (0, 8, 100, HummockValue::Put(test_value_of(0, 8))),
         ];
-        let table = add_kv_pair(0, kv_pairs, sstable_manager.clone()).await;
+        let table = add_kv_pair(0, kv_pairs, sstable_store.clone()).await;
         let iters: Vec<BoxedHummockIterator> = vec![Box::new(SSTableIterator::new(
             Arc::new(table),
-            sstable_manager,
+            sstable_store,
         ))];
         let mi = MergeIterator::new(iters);
         let begin_key = Included(user_key(key_range_test_key(0, 2, 0).as_slice()).to_vec());
@@ -720,7 +720,7 @@ mod tests {
     async fn add_kv_pair(
         sst_id: u64,
         kv_pairs: Vec<(u64, usize, u64, HummockValue<Vec<u8>>)>,
-        sstable_manager: SstableStoreRef,
+        sstable_store: SstableStoreRef,
     ) -> Sstable {
         let mut b = SSTableBuilder::new(default_builder_opt_for_test());
         for kv in kv_pairs {
@@ -730,7 +730,7 @@ mod tests {
             );
         }
         let (data, meta) = b.finish();
-        sstable_manager.put(sst_id, &meta, data).await.unwrap();
+        sstable_store.put(sst_id, &meta, data).await.unwrap();
         Sstable { id: sst_id, meta }
     }
 

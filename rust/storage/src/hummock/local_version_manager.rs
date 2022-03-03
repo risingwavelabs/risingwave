@@ -12,7 +12,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use super::shared_buffer::SharedBufferManager;
 use super::Block;
 use crate::hummock::hummock_meta_client::HummockMetaClient;
-use crate::hummock::sstable_manager::SstableStoreRef;
+use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{
     HummockEpoch, HummockError, HummockResult, HummockSSTableId, HummockVersionId, Sstable,
     INVALID_VERSION_ID,
@@ -60,7 +60,7 @@ impl ScopedLocalVersion {
 pub struct LocalVersionManager {
     current_version: RwLock<Option<Arc<ScopedLocalVersion>>>,
     sstables: RwLock<BTreeMap<HummockSSTableId, Arc<Sstable>>>,
-    sstable_manager: SstableStoreRef,
+    sstable_store: SstableStoreRef,
 
     pub block_cache: Arc<Cache<Vec<u8>, Arc<Block>>>,
     update_notifier_tx: tokio::sync::watch::Sender<HummockVersionId>,
@@ -73,7 +73,7 @@ pub struct LocalVersionManager {
 
 impl LocalVersionManager {
     pub fn new(
-        sstable_manager: SstableStoreRef,
+        sstable_store: SstableStoreRef,
         block_cache: Option<Arc<Cache<Vec<u8>, Arc<Block>>>>,
     ) -> LocalVersionManager {
         let (update_notifier_tx, _) = tokio::sync::watch::channel(INVALID_VERSION_ID);
@@ -81,7 +81,7 @@ impl LocalVersionManager {
 
         LocalVersionManager {
             current_version: RwLock::new(None),
-            sstable_manager,
+            sstable_store,
             sstables: RwLock::new(BTreeMap::new()),
 
             block_cache: if let Some(block_cache) = block_cache {
@@ -194,7 +194,7 @@ impl LocalVersionManager {
                 None => {
                     let fetched_sstable = Arc::new(Sstable {
                         id: *table_id,
-                        meta: self.sstable_manager.meta(*table_id).await?,
+                        meta: self.sstable_store.meta(*table_id).await?,
                     });
                     self.add_sstable_to_cache(fetched_sstable.clone());
                     fetched_sstable
