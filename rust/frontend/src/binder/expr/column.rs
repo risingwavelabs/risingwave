@@ -51,4 +51,17 @@ impl Binder {
             }
         }
     }
+
+    pub fn bind_all_columns(&mut self) -> Result<Vec<ExprImpl>> {
+        let mut bound_columns = vec![];
+        self.context.columns.values().for_each(|columns| {
+            columns.iter().for_each(|column| {
+                bound_columns.push(ExprImpl::InputRef(Box::new(InputRef::new(
+                    column.index,
+                    column.data_type.clone(),
+                ))));
+            });
+        });
+        Ok(bound_columns)
+    }
 }

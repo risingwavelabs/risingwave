@@ -15,7 +15,9 @@ impl Binder {
                 }
                 SelectItem::ExprWithAlias { .. } => todo!(),
                 SelectItem::QualifiedWildcard(_) => todo!(),
-                SelectItem::Wildcard => todo!(),
+                SelectItem::Wildcard => {
+                    select_list.extend(self.bind_all_columns()?.into_iter());
+                }
             }
         }
         Ok(select_list)
