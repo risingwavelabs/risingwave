@@ -9,7 +9,7 @@ pub(crate) type WorkerNodeId = u32;
 
 /// The global environment for task execution.
 /// The instance will be shared by every task.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct StreamEnvironment {
     /// The table manager.
     table_manager: TableManagerRef,

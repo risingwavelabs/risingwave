@@ -27,19 +27,7 @@ impl FrontendEnv {
             .register(opts.host.parse().unwrap(), WorkerType::Frontend)
             .await
             .unwrap();
-
-        // Create default database when env init.
-        let catalog_manager = CatalogConnector::new(meta_client.clone());
-        catalog_manager
-            .create_database(DEFAULT_DATABASE_NAME)
-            .await?;
-        catalog_manager
-            .create_schema(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME)
-            .await?;
-        Ok(Self {
-            meta_client,
-            catalog_manager,
-        })
+        Self::with_meta_client(meta_client, opts).await
     }
 
     pub async fn with_meta_client(
@@ -80,7 +68,6 @@ pub struct RwSession {
 }
 
 impl RwSession {
-    #[cfg(test)]
     pub fn new(env: FrontendEnv, database: String) -> Self {
         Self { env, database }
     }
@@ -135,7 +122,6 @@ impl Session for RwSession {
 mod tests {
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_run_statement() {
         use std::ffi::OsString;
 

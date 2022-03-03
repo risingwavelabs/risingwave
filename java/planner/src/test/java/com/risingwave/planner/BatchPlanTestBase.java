@@ -3,6 +3,7 @@ package com.risingwave.planner;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.risingwave.planner.planner.batch.BatchPlanner;
+import com.risingwave.planner.program.OptimizerProgram;
 import com.risingwave.planner.rel.physical.BatchPlan;
 import com.risingwave.planner.rel.serialization.ExplainWriter;
 import com.risingwave.planner.util.PlannerTestCase;
@@ -63,6 +64,23 @@ public abstract class BatchPlanTestBase extends SqlTestBase {
       String serializedJsonPlan = Messages.jsonFormat(phyPlan.getRoot().serialize());
       String ans = testCase.getJson().get().stripTrailing();
       assertEquals(ans, serializedJsonPlan, "Json not match!");
+    }
+  }
+
+  protected void runTestCaseWithProgram(PlannerTestCase testCase, OptimizerProgram program) {
+    String sql = testCase.getSql();
+
+    SqlNode ast = parseSql(sql);
+
+    verifyPlanWithProgram(testCase, ast, program);
+  }
+
+  protected void verifyPlanWithProgram(
+      PlannerTestCase testCase, SqlNode ast, OptimizerProgram program) {
+    var root = batchPlanner.plan(ast, executionContext, relCollation -> program);
+    if (testCase.getPlan().isPresent()) {
+      String explainedPlan = ExplainWriter.explainPlan(root);
+      assertEquals(testCase.getPlan().get(), explainedPlan, "Plan not match!");
     }
   }
 }

@@ -33,7 +33,7 @@
     }
   ],
   "ignore_labels": [
-    "ignore"
+    "no-release-log"
   ],
   "sort": "ASC",
   "template": "${{CHANGELOG}}\n\n<details>\n<summary>Uncategorized</summary>\n\n${{UNCATEGORIZED}}\n</details>",

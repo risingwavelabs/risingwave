@@ -199,6 +199,7 @@ mod tests {
     use risingwave_pb::data::DataType;
     use risingwave_pb::plan::ColumnDesc;
     use risingwave_storage::memory::MemoryStateStore;
+    use risingwave_storage::monitor::{MonitoredStateStore, DEFAULT_STATE_STORE_STATS};
     use risingwave_storage::table::{SimpleTableManager, TableManager};
     use risingwave_storage::{Keyspace, StateStoreImpl};
 
@@ -210,7 +211,7 @@ mod tests {
         // Prepare storage and memtable.
         let store = MemoryStateStore::new();
         let store_mgr = Arc::new(SimpleTableManager::new(StateStoreImpl::MemoryStateStore(
-            store.clone(),
+            store.clone().monitored(DEFAULT_STATE_STORE_STATS.clone()),
         )));
         let table_id = TableId::new(1);
         // Two columns of int32 type, the first column is PK.
@@ -284,7 +285,7 @@ mod tests {
             "MaterializeExecutor".to_string(),
         ));
 
-        let table = downcast_arc::<MViewTable<MemoryStateStore>>(
+        let table = downcast_arc::<MViewTable<MonitoredStateStore<MemoryStateStore>>>(
             store_mgr.get_table(&table_id).unwrap().into_any(),
         )
         .unwrap();
