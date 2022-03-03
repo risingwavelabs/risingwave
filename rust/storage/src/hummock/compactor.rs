@@ -272,14 +272,14 @@ impl Compactor {
     pub fn start_compactor(
         options: Arc<HummockOptions>,
         local_version_manager: Arc<LocalVersionManager>,
-        obj_client: Arc<dyn ObjectStore>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
+        sstable_manager: SstableManagerRef,
     ) -> (JoinHandle<()>, UnboundedSender<()>) {
         let sub_compact_context = SubCompactContext {
             options,
             local_version_manager,
-            obj_client,
             hummock_meta_client,
+            sstable_manager,
         };
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
         let stream_retry_interval = Duration::from_secs(60);

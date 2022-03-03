@@ -61,8 +61,8 @@ pub async fn compute_node_serve(
         let (compactor_join_handle, compactor_shutdown_sender) = Compactor::start_compactor(
             hummock.inner().storage.options().clone(),
             hummock.inner().storage.local_version_manager().clone(),
-            hummock.inner().storage.obj_client().clone(),
             hummock.inner().storage.hummock_meta_client().clone(),
+            hummock.inner().storage.sstable_manager(),
         );
         compactor_handle = Some((compactor_join_handle, compactor_shutdown_sender));
     }
