@@ -40,10 +40,11 @@ pub trait MetaStore: Sync + Send + 'static {
 }
 
 // Error of metastore
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum Error {
     ItemNotFound(String),
     TransactionAbort(),
+    Internal(anyhow::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -55,6 +56,10 @@ impl From<Error> for RwError {
             Error::TransactionAbort() => {
                 RwError::from(ErrorCode::InternalError("transaction aborted".to_owned()))
             }
+            Error::Internal(e) => RwError::from(ErrorCode::InternalError(format!(
+                "meta internal error: {}",
+                e
+            ))),
         }
     }
 }

@@ -1,3 +1,4 @@
+mod etcd_meta_store;
 mod mem_meta_store;
 mod meta_store;
 #[cfg(test)]
