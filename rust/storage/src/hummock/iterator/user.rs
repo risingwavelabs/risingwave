@@ -1,12 +1,10 @@
 use std::ops::Bound::{self, *};
-use std::sync::Arc;
 
 use super::{HummockIterator, MergeIterator};
 use crate::hummock::iterator::ReverseUserIterator;
 use crate::hummock::key::{get_epoch, key_with_epoch, user_key as to_user_key, Epoch};
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
-use crate::monitor::StateStoreStats;
 
 pub enum DirectedUserIterator<'a> {
     Forward(UserIterator<'a>),
@@ -77,10 +75,6 @@ pub struct UserIterator<'a> {
 
     /// Only read values if `ts <= self.read_epoch`.
     read_epoch: Epoch,
-
-    #[allow(dead_code)]
-    // TODO: separate state store stats with hummock stats
-    stats: Arc<StateStoreStats>,
 }
 
 // TODO: decide wheher this should also impl `HummockIterator`
@@ -91,14 +85,7 @@ impl<'a> UserIterator<'a> {
         iterator: MergeIterator<'a>,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
     ) -> Self {
-        use crate::monitor::DEFAULT_STATE_STORE_STATS;
-
-        Self::new(
-            iterator,
-            key_range,
-            Epoch::MAX,
-            DEFAULT_STATE_STORE_STATS.clone(),
-        )
+        Self::new(iterator, key_range, Epoch::MAX)
     }
 
     /// Create [`UserIterator`] with given `read_epoch`.
@@ -106,7 +93,6 @@ impl<'a> UserIterator<'a> {
         iterator: MergeIterator<'a>,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
-        stats: Arc<StateStoreStats>,
     ) -> Self {
         Self {
             iterator,
@@ -115,7 +101,6 @@ impl<'a> UserIterator<'a> {
             last_key: Vec::new(),
             last_val: Vec::new(),
             read_epoch,
-            stats,
         }
     }
 

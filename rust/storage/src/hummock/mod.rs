@@ -102,9 +102,6 @@ pub struct HummockStorage {
 
     local_version_manager: Arc<LocalVersionManager>,
 
-    /// Statistics.
-    stats: Arc<StateStoreStats>,
-
     hummock_meta_client: Arc<dyn HummockMetaClient>,
 
     sstable_manager: SstableStoreRef,
@@ -138,6 +135,7 @@ impl HummockStorage {
         sstable_manager: SstableStoreRef,
         local_version_manager: Arc<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
+        // TODO: should be separated `HummockStats` instead of `StateStoreStats`.
         stats: Arc<StateStoreStats>,
     ) -> HummockResult<Self> {
         let options = Arc::new(options);
@@ -161,7 +159,6 @@ impl HummockStorage {
         let instance = Self {
             options,
             local_version_manager,
-            stats,
             hummock_meta_client,
             sstable_manager,
             shared_buffer_manager,
@@ -288,7 +285,6 @@ impl HummockStorage {
                 key_range.end_bound().map(|b| b.as_ref().to_owned()),
             ),
             epoch,
-            self.stats.clone(),
         ))
     }
 
