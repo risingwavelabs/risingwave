@@ -1,7 +1,6 @@
 pub mod mview;
 pub mod row_table;
 mod simple_manager;
-pub mod test;
 
 use std::any::Any;
 use std::borrow::Cow;
