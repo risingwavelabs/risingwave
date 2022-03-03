@@ -154,8 +154,7 @@ impl HummockStorage {
             local_version_manager.clone(),
             hummock_meta_client.clone(),
             shared_buffer_manager.clone(),
-        )
-        .await;
+        );
         // Ensure at least one available version in cache.
         local_version_manager.wait_epoch(HummockEpoch::MIN).await;
 
@@ -168,10 +167,6 @@ impl HummockStorage {
             shared_buffer_manager,
         };
         Ok(instance)
-    }
-
-    pub fn get_options(&self) -> Arc<HummockOptions> {
-        self.options.clone()
     }
 
     /// Get the value of a specified `key`.

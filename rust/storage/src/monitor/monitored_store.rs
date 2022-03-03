@@ -21,6 +21,9 @@ impl<S> MonitoredStateStore<S> {
     pub fn new(inner: S, stats: Arc<StateStoreStats>) -> Self {
         Self { inner, stats }
     }
+    pub fn inner(&self) -> &S {
+        &self.inner
+    }
 }
 
 impl<S> MonitoredStateStore<S>
