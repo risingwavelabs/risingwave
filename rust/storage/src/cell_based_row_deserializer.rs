@@ -1,5 +1,8 @@
+use std::collections::HashMap;
+
 use bytes::Bytes;
 use risingwave_common::array::Row;
+use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
 use risingwave_common::types::Datum;
 use risingwave_common::util::ordered::{
@@ -10,8 +13,11 @@ use crate::TableColumnDesc;
 
 #[derive(Clone)]
 pub struct CellBasedRowDeserializer {
-    table_column_descs: Vec<TableColumnDesc>,
+    /// A mapping from column id to its desc and the index in the row.
+    columns: HashMap<ColumnId, (TableColumnDesc, usize)>,
+
     data: Vec<Datum>,
+
     /// `CellBasedRowDeserializer` does not deserialize pk itself. We need to take the key in as
     /// we have to know the cell id of each datum. So `pk_bytes` serves as an additional check
     /// which should also be done on the caller side.
@@ -21,8 +27,14 @@ pub struct CellBasedRowDeserializer {
 impl CellBasedRowDeserializer {
     pub fn new(table_column_descs: Vec<TableColumnDesc>) -> Self {
         let num_cells = table_column_descs.len();
+        let columns = table_column_descs
+            .into_iter()
+            .enumerate()
+            .map(|(index, d)| (d.column_id, (d, index)))
+            .collect();
+
         Self {
-            table_column_descs,
+            columns,
             data: vec![None; num_cells],
             pk_bytes: None,
         }
@@ -51,11 +63,11 @@ impl CellBasedRowDeserializer {
         if cell_id == NULL_ROW_SPECIAL_CELL_ID {
             // do nothing
         } else {
-            // FIXME: generate a mapping from column_id or cell_id to index.
-            let data_type = &self.table_column_descs[cell_id as usize].data_type;
-            let datum = deserialize_cell(cell, data_type)?;
-            assert!(self.data.get(cell_id as usize).unwrap().is_none());
-            *self.data.get_mut(cell_id as usize).unwrap() = datum;
+            let (column_desc, index) = &self.columns[&cell_id];
+            if let Some(datum) = deserialize_cell(cell, &column_desc.data_type)? {
+                let old = self.data.get_mut(*index).unwrap().replace(datum);
+                assert!(old.is_none());
+            }
         }
         Ok(result)
     }
@@ -63,7 +75,7 @@ impl CellBasedRowDeserializer {
     pub fn take(&mut self) -> Option<(Vec<u8>, Row)> {
         let cur_pk_bytes = self.pk_bytes.take();
         cur_pk_bytes.map(|bytes| {
-            let ret = self.data.iter_mut().map(std::mem::take).collect::<Vec<_>>();
+            let ret = self.data.iter_mut().map(Option::take).collect::<Vec<_>>();
             (bytes, Row(ret))
         })
     }
@@ -82,7 +94,7 @@ mod tests {
 
     #[test]
     fn test_cell_based_deserializer() {
-        let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
+        let column_ids = vec![ColumnId::from(5), ColumnId::from(3), ColumnId::from(7)];
         let table_column_descs = vec![
             TableColumnDesc::unnamed(column_ids[0], DataType::Char),
             TableColumnDesc::unnamed(column_ids[1], DataType::Int32),
