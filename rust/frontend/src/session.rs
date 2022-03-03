@@ -62,12 +62,12 @@ impl FrontendEnv {
     }
 }
 
-pub struct RwSession {
+pub struct SessionImpl {
     env: FrontendEnv,
     database: String,
 }
 
-impl RwSession {
+impl SessionImpl {
     pub fn new(env: FrontendEnv, database: String) -> Self {
         Self { env, database }
     }
@@ -81,20 +81,20 @@ impl RwSession {
     }
 }
 
-pub struct RwSessionManager {
+pub struct SessionManagerImpl {
     env: FrontendEnv,
 }
 
-impl SessionManager for RwSessionManager {
+impl SessionManager for SessionManagerImpl {
     fn connect(&self) -> Box<dyn Session> {
-        Box::new(RwSession {
+        Box::new(SessionImpl {
             env: self.env.clone(),
             database: "dev".to_string(),
         })
     }
 }
 
-impl RwSessionManager {
+impl SessionManagerImpl {
     pub async fn new(opts: &FrontendOpts) -> Result<Self> {
         Ok(Self {
             env: FrontendEnv::init(opts).await?,
@@ -103,7 +103,7 @@ impl RwSessionManager {
 }
 
 #[async_trait::async_trait]
-impl Session for RwSession {
+impl Session for SessionImpl {
     async fn run_statement(
         &self,
         sql: &str,
@@ -134,7 +134,7 @@ mod tests {
         let args: [OsString; 0] = []; // No argument.
         let mut opts = FrontendOpts::parse_from(args);
         opts.meta_addr = format!("http://{}", meta.meta_addr());
-        let mgr = RwSessionManager::new(&opts).await.unwrap();
+        let mgr = SessionManagerImpl::new(&opts).await.unwrap();
         // Check default database is created.
         assert!(mgr
             .env
