@@ -9,7 +9,9 @@ use risingwave_pb::hummock::{
     HummockSnapshot, HummockTablesToDelete, HummockVersion, Level, LevelType, SstableInfo,
     UncommittedEpoch,
 };
-use risingwave_storage::hummock::{HummockContextId, HummockEpoch, HummockError, HummockSSTableId, HummockVersionId, INVALID_EPOCH};
+use risingwave_storage::hummock::{
+    HummockContextId, HummockEpoch, HummockSSTableId, HummockVersionId, INVALID_EPOCH,
+};
 use tokio::sync::{Mutex, RwLock};
 
 use crate::hummock::compaction::CompactStatus;
@@ -109,8 +111,9 @@ where
             .await
     }
 
-    /// We use worker node id as the context_id.
-    /// If the context_id is provided, the transaction will abort if the context id is not valid, in other words the worker node is not a valid member of the cluster.
+    /// We use worker node id as the `context_id`.
+    /// If the `context_id` is provided, the transaction will abort if the `context_id` is not
+    /// valid, which means the worker node is not a valid member of the cluster.
     async fn commit_trx(
         &self,
         meta_store_ref: &S,
@@ -119,12 +122,15 @@ where
     ) -> Result<()> {
         if let Some(context_id) = context_id {
             // Get the worker's key in meta store
-            let workers = Worker::list(meta_store_ref).await?.into_iter().filter(|worker|worker.worker_id() == context_id).collect_vec();
-            assert!(workers.len()<=1);
+            let workers = Worker::list(meta_store_ref)
+                .await?
+                .into_iter()
+                .filter(|worker| worker.worker_id() == context_id)
+                .collect_vec();
+            assert!(workers.len() <= 1);
             if let Some(worker) = workers.first() {
                 trx.check_exists(Worker::cf_name(), worker.key()?.encode_to_vec());
-            }
-            else {
+            } else {
                 // The worker is not found in cluster.
                 return Err(Error::TransactionAbort().into());
             }
