@@ -743,8 +743,7 @@ public class PrimaryKeyDerivationVisitor
             batchPlan.getTableId(),
             batchPlan.getPrimaryKeyColumnIds(),
             ImmutableIntList.copyOf(newPrimaryKeyIndices),
-            newColumnIds.build(),
-            batchPlan.getFields());
+            newColumnIds.build());
 
     var info = new PrimaryKeyIndicesAndPositionMap(newPrimaryKeyIndices, ImmutableMap.of());
     LOGGER.debug("leave RwStreamBatchPlan");

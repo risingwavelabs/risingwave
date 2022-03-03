@@ -26,7 +26,6 @@ public class RwStreamBatchPlan extends TableScan implements RisingWaveStreamingR
   private final ImmutableList<ColumnCatalog.ColumnId> primaryKeyColumnIds;
   private final ImmutableList<ColumnCatalog.ColumnId> columnIds;
   private final ImmutableIntList primaryKeyIndices;
-  private final ImmutableList<Field> fields;
 
   /**
    * BatchPlanNode is used for mv on mv snapshot read.
@@ -48,14 +47,12 @@ public class RwStreamBatchPlan extends TableScan implements RisingWaveStreamingR
       TableCatalog.TableId tableId,
       ImmutableList<ColumnCatalog.ColumnId> primaryKeyColumnIds,
       ImmutableIntList primaryKeyIndices,
-      ImmutableList<ColumnCatalog.ColumnId> columnIds,
-      ImmutableList<Field> fields) {
+      ImmutableList<ColumnCatalog.ColumnId> columnIds) {
     super(cluster, traitSet, hints, table);
     this.tableId = tableId;
     this.primaryKeyColumnIds = primaryKeyColumnIds;
     this.primaryKeyIndices = primaryKeyIndices;
     this.columnIds = columnIds;
-    this.fields = fields;
   }
 
   public TableCatalog.TableId getTableId() {
@@ -72,10 +69,6 @@ public class RwStreamBatchPlan extends TableScan implements RisingWaveStreamingR
 
   public ImmutableList<ColumnCatalog.ColumnId> getColumnIds() {
     return columnIds;
-  }
-
-  public ImmutableList<Field> getFields() {
-    return fields;
   }
 
   /** Derive row type from table catalog */
@@ -102,12 +95,27 @@ public class RwStreamBatchPlan extends TableScan implements RisingWaveStreamingR
     return writer;
   }
 
+  public ImmutableList<Field> getFields() {
+    var table = getTable().unwrapOrThrow(TableCatalog.class);
+    var builder = ImmutableList.<Field>builder();
+    for (var columnId : columnIds) {
+      var column = table.getColumnChecked(columnId);
+      var field =
+          Field.newBuilder()
+              .setDataType(column.getDesc().getDataType().getProtobufType())
+              .setName(column.getName())
+              .build();
+      builder.add(field);
+    }
+    return builder.build();
+  }
+
   @Override
   public StreamNode serialize() {
     BatchPlanNode.Builder builder = BatchPlanNode.newBuilder();
     builder.setTableRefId(Messages.getTableRefId(tableId)).addAllPkIndices(primaryKeyIndices);
     columnIds.forEach(c -> builder.addColumnIds(c.getValue()));
-    fields.forEach(builder::addFields);
+    getFields().forEach(builder::addFields);
     BatchPlanNode batchPlanNode = builder.build();
     return StreamNode.newBuilder()
         .setBatchPlanNode(batchPlanNode)

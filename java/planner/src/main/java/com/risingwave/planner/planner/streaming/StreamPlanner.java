@@ -116,9 +116,7 @@ public class StreamPlanner implements Planner<StreamingPlan> {
       if (source != null && source.isMaterializedView()) {
         // source is a materialized view source
         assert source instanceof MaterializedViewCatalog;
-        if (parent != null) {
-          assert indexInParent >= 0;
-        }
+        assert parent == null || indexInParent >= 0;
 
         var tableSourceNode = (RwStreamTableSource) node;
         var sourceColumnIds = source.getAllColumnIds();
@@ -138,6 +136,17 @@ public class StreamPlanner implements Planner<StreamingPlan> {
         for (var idx : sourcePrimaryKeyColumnIds) {
           primaryKeyColumnIdsBuilder.add(sourceColumnIds.get(idx));
         }
+
+        RwStreamBatchPlan batchPlan =
+            new RwStreamBatchPlan(
+                node.getCluster(),
+                node.getTraitSet(),
+                tableSourceNode.getHints(),
+                node.getTable(),
+                tableSourceNode.getTableId(),
+                primaryKeyColumnIdsBuilder.build(),
+                ImmutableIntList.of(),
+                tableSourceNode.getColumnIds());
 
         var upstreamFieldsBuilder = ImmutableList.<Field>builder();
         if (source.isAssociatedMaterializedView()) {
@@ -160,18 +169,6 @@ public class StreamPlanner implements Planner<StreamingPlan> {
           }
         }
         var upstreamFields = upstreamFieldsBuilder.build();
-
-        RwStreamBatchPlan batchPlan =
-            new RwStreamBatchPlan(
-                node.getCluster(),
-                node.getTraitSet(),
-                ((RwStreamTableSource) node).getHints(),
-                node.getTable(),
-                tableSourceNode.getTableId(),
-                primaryKeyColumnIdsBuilder.build(),
-                ImmutableIntList.of(),
-                tableSourceNode.getColumnIds(),
-                upstreamFields);
 
         RwStreamChain chain =
             new RwStreamChain(
