@@ -15,6 +15,7 @@ pub struct ColIndexMapping {
     /// The source column index is the subscript.
     map: Vec<Option<usize>>,
 }
+
 impl ColIndexMapping {
     /// Create a partial mapping which maps the subscripts range `(0..map.len())` to the
     /// corresponding element.
@@ -35,6 +36,7 @@ impl ColIndexMapping {
     /// Positive offset:
     ///
     /// ```rust
+    /// # use frontend::utils::ColIndexMapping;
     /// let mapping = ColIndexMapping::with_shift_offset(3, 3);
     /// assert_eq!(mapping.map(0), 3);
     /// assert_eq!(mapping.map(1), 4);
@@ -44,6 +46,7 @@ impl ColIndexMapping {
     /// Negative offset:
     ///
     ///  ```rust
+    /// # use frontend::utils::ColIndexMapping;
     /// let mapping = ColIndexMapping::with_shift_offset(6, -3);
     /// assert_eq!(mapping.try_map(0), None);
     /// assert_eq!(mapping.try_map(1), None);
@@ -71,6 +74,8 @@ impl ColIndexMapping {
     /// # Examples
     ///
     /// ```rust
+    /// # use fixedbitset::FixedBitSet;
+    /// # use frontend::utils::ColIndexMapping;
     /// let mut remaining_cols = FixedBitSet::with_capacity(5);
     /// remaining_cols.insert(1);
     /// remaining_cols.insert(3);
@@ -89,29 +94,14 @@ impl ColIndexMapping {
         Self::new(map)
     }
 
-    /// An identity mapping with some indexes filtered out.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// let mapping =
-    ///     ColIndexMapping::with_filter(&FixedBitSet::with_capacity_and_blocks(5, vec![0b10101]));
-    /// assert_eq!(mapping.map, vec![Some(0), Some(1), None, Some(3), Some(4)]);
-    /// ```
-    pub fn with_filter(filter: &FixedBitSet) -> Self {
-        let mut map = vec![None; filter.len()];
-        for i in filter.ones() {
-            map[i] = Some(i);
-        }
-        Self::new(map)
-    }
-
     /// Remove the given columns, and maps the remaining columns to a consecutive range starting
     /// from 0.
     ///
     /// # Examples
     ///
     /// ```rust
+    /// # use fixedbitset::FixedBitSet;
+    /// # use frontend::utils::ColIndexMapping;
     /// let mut removed_cols = FixedBitSet::with_capacity(5);
     /// removed_cols.insert(0);
     /// removed_cols.insert(2);
@@ -151,6 +141,7 @@ impl ColIndexMapping {
             .enumerate()
             .filter_map(|(src, tar)| tar.map(|tar| (src, tar)))
     }
+
     pub fn try_map(&self, index: usize) -> Option<usize> {
         *self.map.get(index)?
     }
@@ -162,6 +153,7 @@ impl ColIndexMapping {
     pub fn target_upper(&self) -> usize {
         self.target_upper
     }
+
     pub fn source_upper(&self) -> usize {
         self.map.len() - 1
     }
