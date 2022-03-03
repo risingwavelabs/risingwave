@@ -2,7 +2,9 @@ use std::sync::atomic::{self, AtomicI64};
 
 use anyhow;
 use async_trait::async_trait;
-use etcd_client::{Client, Error as EtcdError, GetOptions, KvClient, Txn, Compare, CompareOp, TxnOp};
+use etcd_client::{
+    Client, Compare, CompareOp, Error as EtcdError, GetOptions, KvClient, Txn, TxnOp,
+};
 use futures::Future;
 use tokio::sync::Mutex;
 
@@ -16,6 +18,7 @@ impl From<EtcdError> for Error {
 
 const REVISION_UNINITIALIZED: i64 = -1;
 
+#[derive(Clone)]
 pub struct EtcdMetaStore {
     client: Client,
 }
@@ -35,10 +38,7 @@ fn encode_etcd_key(cf: &str, key: &[u8]) -> Vec<u8> {
 }
 
 impl EtcdSnapshot {
-    async fn view_inner<V: SnapshotViewer>(
-        &self,
-        view: V
-    ) -> Result<V::Output> {
+    async fn view_inner<V: SnapshotViewer>(&self, view: V) -> Result<V::Output> {
         loop {
             let revision = self.revision.load(atomic::Ordering::Relaxed);
             if revision != REVISION_UNINITIALIZED {
@@ -126,11 +126,7 @@ impl SnapshotViewer for ListViewer {
                     "Etcd response missing header"
                 )));
             };
-            let value = res
-                .kvs()
-                .iter()
-                .map(|kv| kv.value().to_vec())
-                .collect();
+            let value = res.kvs().iter().map(|kv| kv.value().to_vec()).collect();
             Ok((new_revision, value))
         }
     }
@@ -139,13 +135,23 @@ impl SnapshotViewer for ListViewer {
 #[async_trait]
 impl Snapshot for EtcdSnapshot {
     async fn list_cf(&self, cf: &str) -> Result<Vec<Vec<u8>>> {
-        let view = ListViewer { key: encode_etcd_key(cf, &[]) };
+        let view = ListViewer {
+            key: encode_etcd_key(cf, &[]),
+        };
         self.view_inner(view).await
     }
 
     async fn get_cf(&self, cf: &str, key: &[u8]) -> Result<Vec<u8>> {
-        let view = GetViewer { key: encode_etcd_key(cf, key) };
+        let view = GetViewer {
+            key: encode_etcd_key(cf, key),
+        };
         self.view_inner(view).await
+    }
+}
+
+impl EtcdMetaStore {
+    pub fn new(client: Client) -> Self {
+        Self { client }
     }
 }
 
@@ -179,20 +185,18 @@ impl MetaStore for EtcdMetaStore {
 
     async fn txn(&self, trx: Transaction) -> Result<()> {
         let (preconditions, operations) = trx.into_parts();
-        let when = preconditions.into_iter().map(|cond| {
-            match cond {
+        let when = preconditions
+            .into_iter()
+            .map(|cond| match cond {
                 super::Precondition::KeyExists { cf, key } => {
-                    Compare::value(
-                        encode_etcd_key(&cf, &key),
-                        CompareOp::Equal,
-                        vec![],
-                    )
+                    Compare::value(encode_etcd_key(&cf, &key), CompareOp::Equal, vec![])
                 }
-            }
-        }).collect::<Vec<_>>();
+            })
+            .collect::<Vec<_>>();
 
-        let then = operations.into_iter().map(|op| {
-            match op {
+        let then = operations
+            .into_iter()
+            .map(|op| match op {
                 super::Operation::Put { cf, key, value } => {
                     let key = encode_etcd_key(&cf, &key);
                     let value = value.to_vec();
@@ -202,8 +206,8 @@ impl MetaStore for EtcdMetaStore {
                     let key = encode_etcd_key(&cf, &key);
                     TxnOp::delete(key, None)
                 }
-            }
-        }).collect::<Vec<_>>();
+            })
+            .collect::<Vec<_>>();
 
         let etcd_txn = Txn::new().when(when).and_then(then);
         self.client.kv_client().txn(etcd_txn).await?;

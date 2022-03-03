@@ -1,6 +1,9 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use etcd_client::Client as EtcdClient;
+use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::{Result, RwError};
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
 use risingwave_pb::meta::catalog_service_server::CatalogServiceServer;
 use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
@@ -26,10 +29,11 @@ use crate::rpc::service::epoch_service::EpochServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
 use crate::rpc::service::hummock_service::HummockServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
-use crate::storage::MemStore;
+use crate::storage::{EtcdMetaStore, MemStore, MetaStore};
 use crate::stream::{FragmentManager, StreamManager};
 
 pub enum MetaStoreBackend {
+    Etcd { endpoints: Vec<String> },
     Mem,
 }
 
@@ -38,14 +42,31 @@ pub async fn rpc_serve(
     prometheus_addr: Option<SocketAddr>,
     dashboard_addr: Option<SocketAddr>,
     meta_store_backend: MetaStoreBackend,
+) -> Result<(JoinHandle<()>, UnboundedSender<()>)> {
+    Ok(match meta_store_backend {
+        MetaStoreBackend::Etcd { endpoints } => {
+            let client = EtcdClient::connect(endpoints, None).await.map_err(|e| {
+                RwError::from(InternalError(format!("failed to connect etcd {}", e)))
+            })?;
+            let meta_store_ref = Arc::new(EtcdMetaStore::new(client));
+            rpc_serve_with_store(addr, prometheus_addr, dashboard_addr, meta_store_ref).await
+        }
+        MetaStoreBackend::Mem => {
+            let meta_store_ref = Arc::new(MemStore::default());
+            rpc_serve_with_store(addr, prometheus_addr, dashboard_addr, meta_store_ref).await
+        }
+    })
+}
+
+pub async fn rpc_serve_with_store<S: MetaStore>(
+    addr: SocketAddr,
+    prometheus_addr: Option<SocketAddr>,
+    dashboard_addr: Option<SocketAddr>,
+    meta_store_ref: Arc<S>,
 ) -> (JoinHandle<()>, UnboundedSender<()>) {
     let listener = TcpListener::bind(addr).await.unwrap();
-    let meta_store_ref = match meta_store_backend {
-        MetaStoreBackend::Mem => Arc::new(MemStore::default()),
-    };
     let epoch_generator_ref = Arc::new(MemEpochGenerator::new());
-    let env =
-        MetaSrvEnv::<MemStore>::new(meta_store_ref.clone(), epoch_generator_ref.clone()).await;
+    let env = MetaSrvEnv::<S>::new(meta_store_ref.clone(), epoch_generator_ref.clone()).await;
 
     let fragment_manager = Arc::new(FragmentManager::new(meta_store_ref.clone()).await.unwrap());
     let hummock_manager = Arc::new(hummock::HummockManager::new(env.clone()).await.unwrap());
@@ -105,9 +126,9 @@ pub async fn rpc_serve(
 
     let epoch_srv = EpochServiceImpl::new(epoch_generator_ref.clone());
     let heartbeat_srv = HeartbeatServiceImpl::new();
-    let catalog_srv = CatalogServiceImpl::<MemStore>::new(env.clone(), catalog_manager_ref);
-    let cluster_srv = ClusterServiceImpl::<MemStore>::new(cluster_manager.clone());
-    let stream_srv = StreamServiceImpl::<MemStore>::new(
+    let catalog_srv = CatalogServiceImpl::<S>::new(env.clone(), catalog_manager_ref);
+    let cluster_srv = ClusterServiceImpl::<S>::new(cluster_manager.clone());
+    let stream_srv = StreamServiceImpl::<S>::new(
         stream_manager_ref,
         fragment_manager.clone(),
         cluster_manager,

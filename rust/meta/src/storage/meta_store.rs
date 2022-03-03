@@ -17,7 +17,7 @@ pub trait Snapshot: Sync + Send + 'static {
 
 /// `MetaStore` defines the functions used to operate metadata.
 #[async_trait]
-pub trait MetaStore: Sync + Send + 'static {
+pub trait MetaStore: Clone + Sync + Send + 'static {
     type Snapshot: Snapshot;
 
     fn snapshot(&self) -> Self::Snapshot;

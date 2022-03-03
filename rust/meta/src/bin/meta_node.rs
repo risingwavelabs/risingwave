@@ -64,6 +64,8 @@ async fn main() {
 
     info!("Starting meta server at {}", addr);
     let (join_handle, _shutdown_send) =
-        rpc_serve(addr, prometheus_addr, dashboard_addr, MetaStoreBackend::Mem).await;
+        rpc_serve(addr, prometheus_addr, dashboard_addr, MetaStoreBackend::Mem)
+            .await
+            .unwrap();
     join_handle.await.unwrap();
 }
