@@ -258,7 +258,7 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
     use risingwave_source::*;
-    use risingwave_storage::table::test::TestTable;
+    
     use risingwave_storage::TableColumnDesc;
     use tokio::sync::mpsc::unbounded_channel;
 

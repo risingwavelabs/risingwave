@@ -7,7 +7,7 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::{ensure, gen_error};
-use risingwave_storage::table::ScannableTableRef;
+
 use risingwave_storage::TableColumnDesc;
 
 use crate::table_v2::TableSourceV2;
@@ -208,7 +208,7 @@ mod tests {
     use risingwave_common::error::Result;
     use risingwave_common::types::DataType;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::mview::MViewTable;
+    
     use risingwave_storage::{Keyspace, TableColumnDesc};
 
     use crate::*;
@@ -291,7 +291,7 @@ mod tests {
             })
             .collect();
 
-        let keyspace = Keyspace::table_root(MemoryStateStore::new(), &table_id);
+        let _keyspace = Keyspace::table_root(MemoryStateStore::new(), &table_id);
 
         let mem_source_manager = MemSourceManager::new();
         let res = mem_source_manager.create_table_source_v2(&table_id, table_columns);
