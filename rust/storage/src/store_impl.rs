@@ -119,8 +119,7 @@ impl StateStoreImpl {
                 );
 
                 let remote_dir = "hummock_001";
-                let sstable_manager =
-                    Arc::new(SstableStore::new(s3_store, remote_dir.to_string()));
+                let sstable_manager = Arc::new(SstableStore::new(s3_store, remote_dir.to_string()));
                 let inner = HummockStateStore::new(
                     HummockStorage::new(
                         HummockOptions {

@@ -156,10 +156,8 @@ async fn get_state_store_impl(opts: &Opts, stats: Arc<StateStoreStats>) -> Resul
                 MetaClient::new(meta_address).await?,
                 stats.clone(),
             ));
-            let sstable_manager = Arc::new(SstableStore::new(
-                s3_store.clone(),
-                remote_dir.to_string(),
-            ));
+            let sstable_manager =
+                Arc::new(SstableStore::new(s3_store.clone(), remote_dir.to_string()));
             StateStoreImpl::Hummock(HummockStateStore::new(
                 HummockStorage::new(
                     HummockOptions {

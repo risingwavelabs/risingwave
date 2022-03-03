@@ -1,5 +1,3 @@
-// TODO: Refactor this file. SSTableManager shoule be shared whthin the same context.
-
 #[cfg(test)]
 use std::sync::Arc;
 
