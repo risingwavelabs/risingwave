@@ -62,12 +62,13 @@ impl CellBasedRowDeserializer {
         let cell_id = deserialize_column_id(cell_id_bytes)?;
         if cell_id == NULL_ROW_SPECIAL_CELL_ID {
             // do nothing
-        } else {
-            let (column_desc, index) = &self.columns[&cell_id];
+        } else if let Some((column_desc, index)) = self.columns.get(&cell_id) {
             if let Some(datum) = deserialize_cell(cell, &column_desc.data_type)? {
                 let old = self.data.get_mut(*index).unwrap().replace(datum);
                 assert!(old.is_none());
             }
+        } else {
+            // ignore this cell
         }
         Ok(result)
     }
@@ -84,6 +85,7 @@ impl CellBasedRowDeserializer {
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
+    use itertools::Itertools;
     use risingwave_common::array::Row;
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::types::{DataType, ScalarImpl};
@@ -94,11 +96,17 @@ mod tests {
 
     #[test]
     fn test_cell_based_deserializer() {
-        let column_ids = vec![ColumnId::from(5), ColumnId::from(3), ColumnId::from(7)];
+        let column_ids = vec![
+            ColumnId::from(5),
+            ColumnId::from(3),
+            ColumnId::from(7),
+            ColumnId::from(1),
+        ];
         let table_column_descs = vec![
             TableColumnDesc::unnamed(column_ids[0], DataType::Char),
             TableColumnDesc::unnamed(column_ids[1], DataType::Int32),
             TableColumnDesc::unnamed(column_ids[2], DataType::Int64),
+            TableColumnDesc::unnamed(column_ids[3], DataType::Float64),
         ];
         let pk1 = vec![0u8, 0u8, 0u8, 0u8];
         let pk2 = vec![0u8, 0u8, 0u8, 1u8];
@@ -107,20 +115,23 @@ mod tests {
             Some(ScalarImpl::Utf8("abc".to_string())),
             None,
             Some(ScalarImpl::Int64(1500)),
+            Some(ScalarImpl::Float64(233.3f64.into())),
         ]);
-        let row2 = Row(vec![None, None, None]);
+        let row2 = Row(vec![None, None, None, None]);
         let row3 = Row(vec![
             None,
             Some(ScalarImpl::Int32(2020)),
             Some(ScalarImpl::Int64(2021)),
+            Some(ScalarImpl::Float64(666.6f64.into())),
         ]);
         let bytes1 = serialize_pk_and_row(&pk1, &Some(row1.clone()), &column_ids).unwrap();
         let bytes2 = serialize_pk_and_row(&pk2, &Some(row2.clone()), &column_ids).unwrap();
         let bytes3 = serialize_pk_and_row(&pk3, &Some(row3.clone()), &column_ids).unwrap();
         let bytes = [bytes1, bytes2, bytes3].concat();
 
+        let partial_table_column_descs = table_column_descs.into_iter().skip(1).take(3).collect();
         let mut result = vec![];
-        let mut deserializer = CellBasedRowDeserializer::new(table_column_descs);
+        let mut deserializer = CellBasedRowDeserializer::new(partial_table_column_descs);
         for (key_bytes, value_bytes) in bytes {
             let pk_and_row = deserializer
                 .deserialize(&Bytes::from(key_bytes), &Bytes::from(value_bytes.unwrap()))
@@ -131,6 +142,12 @@ mod tests {
         }
         let pk_and_row = deserializer.take();
         result.push(pk_and_row.unwrap().1);
-        assert_eq!(vec![row1, row2, row3], result);
+
+        for (expected, result) in [row1, row2, row3].into_iter().zip_eq(result.into_iter()) {
+            assert_eq!(
+                expected.0.into_iter().skip(1).take(3).collect_vec(),
+                result.0
+            );
+        }
     }
 }
