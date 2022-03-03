@@ -16,6 +16,12 @@ struct Opts {
 
     #[clap(long)]
     prometheus_host: Option<String>,
+
+    #[clap(long, default_value_t = String::from(""))]
+    backend: String,
+
+    #[clap(long, default_value_t = String::from(""))]
+    etcd_endpoints: String,
 }
 
 /// Configure log targets for all `RisingWave` crates. When new crates are added and TRACE level
@@ -61,11 +67,21 @@ async fn main() {
     let addr = opts.host.parse().unwrap();
     let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
     let prometheus_addr = opts.prometheus_host.map(|x| x.parse().unwrap());
+    let backend = match opts.backend.as_str() {
+        "etcd" => MetaStoreBackend::Etcd {
+            endpoints: opts
+                .etcd_endpoints
+                .split(',')
+                .map(|x| x.to_string())
+                .collect(),
+        },
+        "mem" | "" => MetaStoreBackend::Mem,
+        _ => panic!("unknown backend"),
+    };
 
     info!("Starting meta server at {}", addr);
-    let (join_handle, _shutdown_send) =
-        rpc_serve(addr, prometheus_addr, dashboard_addr, MetaStoreBackend::Mem)
-            .await
-            .unwrap();
+    let (join_handle, _shutdown_send) = rpc_serve(addr, prometheus_addr, dashboard_addr, backend)
+        .await
+        .unwrap();
     join_handle.await.unwrap();
 }

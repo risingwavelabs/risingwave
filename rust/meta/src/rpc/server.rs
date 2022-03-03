@@ -1,7 +1,8 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
-use etcd_client::Client as EtcdClient;
+use etcd_client::{Client as EtcdClient, ConnectOptions};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
@@ -45,9 +46,15 @@ pub async fn rpc_serve(
 ) -> Result<(JoinHandle<()>, UnboundedSender<()>)> {
     Ok(match meta_store_backend {
         MetaStoreBackend::Etcd { endpoints } => {
-            let client = EtcdClient::connect(endpoints, None).await.map_err(|e| {
-                RwError::from(InternalError(format!("failed to connect etcd {}", e)))
-            })?;
+            let client = EtcdClient::connect(
+                endpoints,
+                Some(
+                    ConnectOptions::default()
+                        .with_keep_alive(Duration::from_secs(3), Duration::from_secs(5)),
+                ),
+            )
+            .await
+            .map_err(|e| RwError::from(InternalError(format!("failed to connect etcd {}", e))))?;
             let meta_store_ref = Arc::new(EtcdMetaStore::new(client));
             rpc_serve_with_store(addr, prometheus_addr, dashboard_addr, meta_store_ref).await
         }
