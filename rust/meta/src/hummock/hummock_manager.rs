@@ -392,7 +392,7 @@ where
         }
     }
 
-    /// `report_compact_task` is retryable. task_id in compact_task parameter is used as the
+    /// `report_compact_task` is retryable. `task_id` in `compact_task` parameter is used as the
     /// idempotency key.
     pub async fn report_compact_task(
         &self,
