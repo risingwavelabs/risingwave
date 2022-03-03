@@ -23,6 +23,7 @@ pub trait ToStream {
         required_dist.enforce_if_not_satisfies(ret, Order::any())
     }
 }
+
 /// `ToBatch` allows to convert a logical plan node to batch physical node
 /// with an optional required order.
 ///
