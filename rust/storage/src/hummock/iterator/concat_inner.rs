@@ -7,7 +7,7 @@ use super::variants::*;
 use crate::hummock::iterator::HummockIterator;
 use crate::hummock::value::HummockValue;
 use crate::hummock::version_cmp::VersionedComparator;
-use crate::hummock::{HummockResult, SSTableIteratorType, Sstable, SstableManagerRef};
+use crate::hummock::{HummockResult, SSTableIteratorType, Sstable, SstableStoreRef};
 
 /// Serves as the concrete implementation of `ConcatIterator` and `ReverseConcatIterator`.
 pub struct ConcatIteratorInner<TI: SSTableIteratorType> {
@@ -20,14 +20,14 @@ pub struct ConcatIteratorInner<TI: SSTableIteratorType> {
     /// All non-overlapping tables.
     tables: Vec<Arc<Sstable>>,
 
-    sstable_manager: SstableManagerRef,
+    sstable_manager: SstableStoreRef,
 }
 
 impl<TI: SSTableIteratorType> ConcatIteratorInner<TI> {
     /// Caller should make sure that `tables` are non-overlapping,
     /// arranged in ascending order when it serves as a forward iterator,
     /// and arranged in descending order when it serves as a reverse iterator.
-    pub fn new(tables: Vec<Arc<Sstable>>, sstable_manager: SstableManagerRef) -> Self {
+    pub fn new(tables: Vec<Arc<Sstable>>, sstable_manager: SstableStoreRef) -> Self {
         Self {
             sstable_iter: None,
             cur_idx: 0,

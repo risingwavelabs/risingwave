@@ -8,7 +8,7 @@ use risingwave_rpc_client::MetaClient;
 
 use crate::hummock::hummock_meta_client::RpcHummockMetaClient;
 use crate::hummock::local_version_manager::LocalVersionManager;
-use crate::hummock::{HummockStateStore, SstableManager};
+use crate::hummock::{HummockStateStore, SstableStore};
 use crate::memory::MemoryStateStore;
 use crate::monitor::{MonitoredStateStore as Monitored, StateStoreStats};
 use crate::object::S3ObjectStore;
@@ -84,7 +84,7 @@ impl StateStoreImpl {
                 );
                 let remote_dir = "hummock_001";
                 let sstable_manager =
-                    Arc::new(SstableManager::new(object_client, remote_dir.to_string()));
+                    Arc::new(SstableStore::new(object_client, remote_dir.to_string()));
                 let inner = HummockStateStore::new(
                     HummockStorage::new(
                         HummockOptions {
@@ -120,7 +120,7 @@ impl StateStoreImpl {
 
                 let remote_dir = "hummock_001";
                 let sstable_manager =
-                    Arc::new(SstableManager::new(s3_store, remote_dir.to_string()));
+                    Arc::new(SstableStore::new(s3_store, remote_dir.to_string()));
                 let inner = HummockStateStore::new(
                     HummockStorage::new(
                         HummockOptions {
