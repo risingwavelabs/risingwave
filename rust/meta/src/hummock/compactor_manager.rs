@@ -62,6 +62,7 @@ impl CompactorManager {
         loop {
             // No available compactor
             if guard.compactors.is_empty() {
+                tracing::warn!("No compactor is available.");
                 return false;
             }
             let compactor_index = guard.next_compactor % guard.compactors.len();

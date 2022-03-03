@@ -30,9 +30,9 @@ impl tokio_retry::Condition<TracedHummockError> for RetryableError {
 #[async_trait]
 pub trait HummockMetaClient: Send + Sync + 'static {
     async fn pin_version(&self) -> HummockResult<HummockVersion>;
-    async fn unpin_version(&self, _pinned_version_id: HummockVersionId) -> HummockResult<()>;
+    async fn unpin_version(&self, pinned_version_id: HummockVersionId) -> HummockResult<()>;
     async fn pin_snapshot(&self) -> HummockResult<HummockEpoch>;
-    async fn unpin_snapshot(&self, _pinned_epoch: HummockEpoch) -> HummockResult<()>;
+    async fn unpin_snapshot(&self, pinned_epoch: HummockEpoch) -> HummockResult<()>;
     async fn get_new_table_id(&self) -> HummockResult<HummockSSTableId>;
     async fn add_tables(
         &self,
@@ -45,17 +45,11 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         compact_task: CompactTask,
         task_result: bool,
     ) -> HummockResult<()>;
-    async fn commit_epoch(&self, _epoch: HummockEpoch) -> HummockResult<()> {
-        unimplemented!()
-    }
-    async fn abort_epoch(&self, _epoch: HummockEpoch) -> HummockResult<()> {
-        unimplemented!()
-    }
+    async fn commit_epoch(&self, epoch: HummockEpoch) -> HummockResult<()>;
+    async fn abort_epoch(&self, epoch: HummockEpoch) -> HummockResult<()>;
     async fn subscribe_compact_tasks(
         &self,
-    ) -> HummockResult<Streaming<SubscribeCompactTasksResponse>> {
-        unimplemented!()
-    }
+    ) -> HummockResult<Streaming<SubscribeCompactTasksResponse>>;
 }
 
 pub struct RpcHummockMetaClient {
@@ -198,6 +192,14 @@ impl HummockMetaClient for RpcHummockMetaClient {
             .map_err(HummockError::meta_error)?;
         timer.observe_duration();
         Ok(())
+    }
+
+    async fn commit_epoch(&self, _epoch: HummockEpoch) -> HummockResult<()> {
+        unimplemented!()
+    }
+
+    async fn abort_epoch(&self, _epoch: HummockEpoch) -> HummockResult<()> {
+        unimplemented!()
     }
 
     async fn subscribe_compact_tasks(
