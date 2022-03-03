@@ -1,7 +1,9 @@
 use std::ops::Bound::{self, *};
+use std::sync::Arc;
 
 use crate::hummock::iterator::{HummockIterator, ReverseMergeIterator};
 use crate::hummock::key::{get_epoch, key_with_epoch, user_key as to_user_key, Epoch};
+use crate::hummock::local_version_manager::ScopedLocalVersion;
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
 
@@ -30,6 +32,9 @@ pub struct ReverseUserIterator<'a> {
 
     /// Only read values if `epoch <= self.read_epoch`.
     read_epoch: Epoch,
+
+    /// Ensures the SSTs needed by `iterator` won't be vacuumed.
+    _version: Arc<ScopedLocalVersion>,
 }
 
 impl<'a> ReverseUserIterator<'a> {
@@ -39,7 +44,12 @@ impl<'a> ReverseUserIterator<'a> {
         iterator: ReverseMergeIterator<'a>,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
     ) -> Self {
-        Self::new_with_epoch(iterator, key_range, Epoch::MAX)
+        Self::new_with_epoch(
+            iterator,
+            key_range,
+            Epoch::MAX,
+            Arc::new(ScopedLocalVersion::for_test()),
+        )
     }
 
     /// Create [`UserIterator`] with given `read_epoch`.
@@ -47,6 +57,7 @@ impl<'a> ReverseUserIterator<'a> {
         iterator: ReverseMergeIterator<'a>,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
+        version: Arc<ScopedLocalVersion>,
     ) -> Self {
         Self {
             iterator,
@@ -57,6 +68,7 @@ impl<'a> ReverseUserIterator<'a> {
             last_val: Vec::new(),
             last_delete: true,
             read_epoch,
+            _version: version,
         }
     }
 
