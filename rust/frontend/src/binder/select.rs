@@ -15,10 +15,7 @@ pub struct BoundSelect {
 impl Binder {
     pub(super) fn bind_select(&mut self, select: Select) -> Result<BoundSelect> {
         let from = self.bind_vec_table_with_joins(select.from)?;
-        let selection = match select.selection {
-            None => None,
-            Some(t) => Some(Binder::bind_expr(self, t).unwrap()),
-        };
+        let selection = select.selection.map(|expr| self.bind_expr(expr)).transpose()?;
         Ok(BoundSelect {
             distinct: select.distinct,
             projection: vec![],
