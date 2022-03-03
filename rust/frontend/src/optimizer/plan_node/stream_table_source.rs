@@ -9,6 +9,7 @@ use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 pub struct StreamTableSource {
     // TODO(catalog)
 }
+
 impl WithSchema for StreamTableSource {
     fn schema(&self) -> &Schema {
         todo!()
@@ -23,5 +24,7 @@ impl fmt::Display for StreamTableSource {
 }
 
 impl WithDistribution for StreamTableSource {}
+
 impl WithOrder for StreamTableSource {}
+
 impl ToStreamProst for StreamTableSource {}

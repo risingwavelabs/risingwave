@@ -11,6 +11,7 @@ use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 
 use super::TableIterRef;
+use crate::cell_based_row_deserializer::CellBasedRowDeserializer;
 use crate::table::{ScannableTable, TableIter};
 use crate::{Keyspace, StateStore, TableColumnDesc};
 
@@ -99,6 +100,7 @@ impl<S: StateStore> MViewTable<S> {
     async fn iter(&self, epoch: u64) -> Result<MViewTableIter<S>> {
         MViewTableIter::new(
             self.keyspace.clone(),
+            self.column_descs.clone(),
             self.schema.clone(),
             self.pk_columns.clone(),
             epoch,
@@ -118,7 +120,8 @@ impl<S: StateStore> MViewTable<S> {
             .get(
                 &[
                     &serialize_pk(&pk, &self.sort_key_serializer)?[..],
-                    &serialize_cell_idx(cell_idx as i32)?[..],
+                    &serialize_column_id(&ColumnId::from(cell_idx as i32))?
+                    // &serialize_cell_idx(cell_idx as i32)?[..],
                 ]
                 .concat(),
                 epoch,
@@ -139,6 +142,8 @@ impl<S: StateStore> MViewTable<S> {
 
 pub struct MViewTableIter<S: StateStore> {
     keyspace: Keyspace<S>,
+    #[allow(dead_code)]
+    // TODO: MViewTableIter will be discarded later?
     schema: Schema,
     // TODO: why pk_columns is not used??
     #[allow(dead_code)]
@@ -153,6 +158,8 @@ pub struct MViewTableIter<S: StateStore> {
     err_msg: Option<String>,
     /// A epoch representing the read snapshot
     epoch: u64,
+    /// Cell-based row deserializer
+    cell_based_row_deserializer: CellBasedRowDeserializer,
 }
 
 impl<'a, S: StateStore> MViewTableIter<S> {
@@ -161,11 +168,14 @@ impl<'a, S: StateStore> MViewTableIter<S> {
 
     async fn new(
         keyspace: Keyspace<S>,
+        table_descs: Vec<TableColumnDesc>,
         schema: Schema,
         pk_columns: Vec<usize>,
         epoch: u64,
     ) -> Result<Self> {
         keyspace.state_store().wait_epoch(epoch).await;
+
+        let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_descs);
 
         let iter = Self {
             keyspace,
@@ -176,6 +186,7 @@ impl<'a, S: StateStore> MViewTableIter<S> {
             done: false,
             err_msg: None,
             epoch,
+            cell_based_row_deserializer,
         };
         Ok(iter)
     }
@@ -216,9 +227,6 @@ impl<S: StateStore> TableIter for MViewTableIter<S> {
             }
         }
 
-        let mut pk_buf = vec![];
-        let mut restored = 0;
-        let mut row = vec![];
         loop {
             let (key, value) = match self.buf.get(self.next_idx) {
                 Some(kv) => kv,
@@ -227,24 +235,13 @@ impl<S: StateStore> TableIter for MViewTableIter<S> {
                     self.consume_more().await?;
                     if let Some(item) = self.buf.first() {
                         item
-                    } else if restored == 0 {
-                        // No more items
-                        self.done = true;
-                        return Ok(None);
                     } else {
-                        // current item is incomplete
+                        let pk_and_row = self.cell_based_row_deserializer.take();
                         self.done = true;
-                        self.err_msg = Some(String::from("incomplete item"));
-                        return Err(ErrorCode::InternalError(
-                            self.err_msg.as_ref().unwrap().clone(),
-                        )
-                        .into());
+                        return Ok(pk_and_row.map(|(_pk, row)| row));
                     }
                 }
             };
-
-            self.next_idx += 1;
-
             tracing::trace!(
                 target: "events::stream::mview::scan",
                 "mview scanned key = {:?}, value = {:?}",
@@ -257,22 +254,13 @@ impl<S: StateStore> TableIter for MViewTableIter<S> {
                 return Err(ErrorCode::InternalError("corrupted key".to_owned()).into());
             }
 
-            let cur_pk_buf = &key[self.keyspace.key().len()..key.len() - 4];
-            if restored == 0 {
-                pk_buf = cur_pk_buf.to_owned();
-            } else if pk_buf != cur_pk_buf {
-                return Err(ErrorCode::InternalError("primary key incorrect".to_owned()).into());
-            }
-
-            let datum = deserialize_cell(&value[..], &self.schema.data_types()[restored])?;
-            row.push(datum);
-
-            restored += 1;
-            if restored == self.schema.len() {
-                break;
+            let pk_and_row = self.cell_based_row_deserializer.deserialize(key, value)?;
+            self.next_idx += 1;
+            match pk_and_row {
+                Some(_) => return Ok(pk_and_row.map(|(_pk, row)| row)),
+                None => {}
             }
         }
-        Ok(Some(Row::new(row)))
     }
 }
 

@@ -19,6 +19,7 @@
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 
+pub mod cell_based_row_deserializer;
 pub mod hummock;
 pub mod keyspace;
 pub mod memory;

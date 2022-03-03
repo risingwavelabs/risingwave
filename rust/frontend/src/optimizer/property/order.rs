@@ -7,12 +7,14 @@ use crate::optimizer::PlanRef;
 pub struct Order {
     pub field_order: Vec<FieldOrder>,
 }
+
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct FieldOrder {
     pub index: usize,
     pub direct: Direction,
 }
+
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Direction {
@@ -20,8 +22,8 @@ pub enum Direction {
     Desc,
     Any, // only used in order requirement
 }
-#[allow(dead_code)]
 
+#[allow(dead_code)]
 impl Direction {
     pub fn satisfies(&self, other: &Direction) -> bool {
         match other {
@@ -67,12 +69,14 @@ impl Order {
         self.field_order.is_empty()
     }
 }
+
 pub trait WithOrder {
     // use the default impl will not affect correctness, but insert unnecessary Sort in plan
     fn order(&self) -> &Order {
         Order::any()
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::{Direction, FieldOrder, Order};
