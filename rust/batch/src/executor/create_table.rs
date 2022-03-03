@@ -86,7 +86,8 @@ impl Executor for CreateTableExecutor {
                 info!("Create table id:{}", &self.table_id.table_id());
                 let _table = self
                     .table_manager
-                    .create_table_v2(&self.table_id, table_columns.clone());
+                    .create_table_v2(&self.table_id, table_columns.clone())
+                    .await?;
                 self.source_manager
                     .create_table_source_v2(&self.table_id, table_columns)?;
             }
