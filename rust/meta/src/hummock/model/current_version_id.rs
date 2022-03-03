@@ -4,7 +4,7 @@ use risingwave_pb::hummock::hummock_version::HummockVersionRefId;
 use risingwave_storage::hummock::{HummockVersionId, FIRST_VERSION_ID};
 
 use crate::hummock::model::HUMMOCK_DEFAULT_CF_NAME;
-use crate::storage::{MetaStore, Operation, Transaction};
+use crate::storage::{MetaStore, Transaction};
 
 /// Hummock version id key.
 /// `cf(hummock_default)`: `hummock_version_id_key` -> `HummockVersionRefId`
@@ -50,11 +50,11 @@ impl CurrentHummockVersionId {
     }
 
     pub fn update_in_transaction(&self, trx: &mut Transaction) {
-        trx.add_operations(vec![Operation::Put {
-            cf: CurrentHummockVersionId::cf_name().to_string(),
-            key: CurrentHummockVersionId::key().as_bytes().to_vec(),
-            value: HummockVersionRefId { id: self.id }.encode_to_vec(),
-        }]);
+        trx.put(
+            CurrentHummockVersionId::cf_name().to_string(),
+            CurrentHummockVersionId::key().as_bytes().to_vec(),
+            HummockVersionRefId { id: self.id }.encode_to_vec(),
+        );
     }
 
     pub fn id(&self) -> HummockVersionId {

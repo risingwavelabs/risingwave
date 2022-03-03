@@ -38,6 +38,8 @@ impl SharedBufferBatch {
     }
 
     pub fn get(&self, user_key: &[u8]) -> Option<HummockValue<Vec<u8>>> {
+        // Perform binary search on user key because the items in SharedBufferBatch is ordered by
+        // user key.
         match self
             .inner
             .binary_search_by(|m| key::user_key(m.0.as_slice()).cmp(user_key))
@@ -126,11 +128,19 @@ impl<const DIRECTION: usize> HummockIterator for SharedBufferBatchIterator<DIREC
     }
 
     async fn seek(&mut self, key: &[u8]) -> super::HummockResult<()> {
+        // Perform binary search on user key because the items in SharedBufferBatch is ordered by
+        // user key.
         match self
             .inner
             .binary_search_by(|probe| key::user_key(probe.0.as_slice()).cmp(key::user_key(key)))
         {
-            Ok(i) => self.current_idx = i,
+            Ok(i) => {
+                self.current_idx = i;
+                // Move onto the next item if key epoch > seek epoch
+                if key::get_epoch(self.key()) > key::get_epoch(key) {
+                    self.current_idx += 1;
+                }
+            }
             Err(i) => self.current_idx = i,
         }
         Ok(())
@@ -151,7 +161,7 @@ impl SharedBufferManager {
         options: Arc<HummockOptions>,
         local_version_manager: Arc<LocalVersionManager>,
         sstable_manager: SstableManagerRef,
-        compactor_tx: tokio::sync::mpsc::UnboundedSender<()>,
+
         stats: Arc<StateStoreStats>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> Self {
@@ -160,7 +170,6 @@ impl SharedBufferManager {
             options,
             local_version_manager,
             sstable_manager,
-            compactor_tx,
             stats,
             hummock_meta_client,
             uploader_rx,
@@ -314,9 +323,6 @@ pub struct SharedBufferUploader {
     local_version_manager: Arc<LocalVersionManager>,
     options: Arc<HummockOptions>,
 
-    /// Notify the compactor to compact after every sync().
-    compactor_tx: tokio::sync::mpsc::UnboundedSender<()>,
-
     /// Statistics.
     stats: Arc<StateStoreStats>,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -330,7 +336,6 @@ impl SharedBufferUploader {
         options: Arc<HummockOptions>,
         local_version_manager: Arc<LocalVersionManager>,
         sstable_manager: SstableManagerRef,
-        compactor_tx: tokio::sync::mpsc::UnboundedSender<()>,
         stats: Arc<StateStoreStats>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         rx: tokio::sync::mpsc::UnboundedReceiver<SharedBufferUploaderItem>,
@@ -339,7 +344,7 @@ impl SharedBufferUploader {
             batches_to_upload: BTreeMap::new(),
             options,
             local_version_manager,
-            compactor_tx,
+
             stats,
             hummock_meta_client,
             sstable_manager,
@@ -386,9 +391,6 @@ impl SharedBufferUploader {
         let timer = self.stats.batch_write_add_l0_latency.start_timer();
         let version = self.hummock_meta_client.add_tables(epoch, tables).await?;
         timer.observe_duration();
-
-        // Notify the compactor
-        self.compactor_tx.send(()).ok();
 
         // Ensure the added data is available locally
         self.local_version_manager.try_set_version(version);
@@ -455,7 +457,9 @@ mod tests {
     use crate::hummock::iterator::test_utils::{
         iterator_test_key_of, iterator_test_key_of_epoch, test_value_of,
     };
-    use crate::hummock::iterator::{BoxedHummockIterator, HummockIterator, MergeIterator};
+    use crate::hummock::iterator::{
+        BoxedHummockIterator, HummockIterator, MergeIterator, ReverseMergeIterator,
+    };
     use crate::hummock::key::{key_with_epoch, user_key};
     use crate::hummock::local_version_manager::LocalVersionManager;
     use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
@@ -466,7 +470,7 @@ mod tests {
     use crate::object::{InMemObjectStore, ObjectStore};
 
     #[tokio::test]
-    async fn test_shared_buffer_batch() {
+    async fn test_shared_buffer_batch_basic() {
         let epoch = 1;
         let shared_buffer_items = vec![
             (
@@ -538,59 +542,136 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_shared_buffer_manager() {
+    async fn test_shared_buffer_batch_seek() {
+        let epoch = 1;
+        let shared_buffer_items = vec![
+            (
+                iterator_test_key_of_epoch(0, 0, epoch),
+                HummockValue::Put(b"value1".to_vec()),
+            ),
+            (
+                iterator_test_key_of_epoch(0, 1, epoch),
+                HummockValue::Put(b"value2".to_vec()),
+            ),
+            (
+                iterator_test_key_of_epoch(0, 2, epoch),
+                HummockValue::Put(b"value3".to_vec()),
+            ),
+        ];
+        let shared_buffer_batch = SharedBufferBatch::new(shared_buffer_items.clone(), epoch);
+
+        // Seek to 2nd key with current epoch, expect last two items to return
+        let mut iter = shared_buffer_batch.iter();
+        iter.seek(&iterator_test_key_of_epoch(0, 1, epoch))
+            .await
+            .unwrap();
+        for item in &shared_buffer_items[1..] {
+            assert!(iter.is_valid());
+            assert_eq!(iter.key(), item.0.as_slice());
+            assert_eq!(iter.value(), item.1.as_slice());
+            iter.next().await.unwrap();
+        }
+        assert!(!iter.is_valid());
+
+        // Seek to 2nd key with future epoch, expect last two items to return
+        let mut iter = shared_buffer_batch.iter();
+        iter.seek(&iterator_test_key_of_epoch(0, 1, epoch + 1))
+            .await
+            .unwrap();
+        for item in &shared_buffer_items[1..] {
+            assert!(iter.is_valid());
+            assert_eq!(iter.key(), item.0.as_slice());
+            assert_eq!(iter.value(), item.1.as_slice());
+            iter.next().await.unwrap();
+        }
+        assert!(!iter.is_valid());
+
+        // Seek to 2nd key with old epoch, expect last item to return
+        let mut iter = shared_buffer_batch.iter();
+        iter.seek(&iterator_test_key_of_epoch(0, 1, epoch - 1))
+            .await
+            .unwrap();
+        let item = shared_buffer_items.last().unwrap();
+        assert!(iter.is_valid());
+        assert_eq!(iter.key(), item.0.as_slice());
+        assert_eq!(iter.value(), item.1.as_slice());
+        iter.next().await.unwrap();
+        assert!(!iter.is_valid());
+    }
+
+    fn new_shared_buffer_manager() -> SharedBufferManager {
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
         let remote_dir = "/test";
         let sstable_manager = Arc::new(SstableManager::new(obj_client, remote_dir.to_string()));
         let vm = Arc::new(LocalVersionManager::new(sstable_manager.clone(), None));
-        let mock_hummock_meta_service = Arc::new(MockHummockMetaService::new());
-        let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
-            mock_hummock_meta_service.clone(),
-        ));
-        let (mock_tx, _) = tokio::sync::mpsc::unbounded_channel();
-        let shared_buffer_manager = SharedBufferManager::new(
+        let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(Arc::new(
+            MockHummockMetaService::new(),
+        )));
+        SharedBufferManager::new(
             Arc::new(HummockOptions::default_for_test()),
-            vm.clone(),
+            vm,
             sstable_manager,
-            mock_tx,
             DEFAULT_STATE_STORE_STATS.clone(),
-            mock_hummock_meta_client.clone(),
-        );
+            mock_hummock_meta_client,
+        )
+    }
+
+    fn generate_and_write_batch(
+        put_keys: &[Vec<u8>],
+        delete_keys: &[Vec<u8>],
+        epoch: u64,
+        idx: &mut usize,
+        shared_buffer_manager: &SharedBufferManager,
+    ) -> Vec<(Vec<u8>, HummockValue<Vec<u8>>)> {
+        let mut shared_buffer_items = Vec::new();
+        for key in put_keys {
+            shared_buffer_items.push((
+                key_with_epoch(key.clone(), epoch),
+                HummockValue::Put(test_value_of(0, *idx)),
+            ));
+            *idx += 1;
+        }
+        for key in delete_keys {
+            shared_buffer_items.push((key_with_epoch(key.clone(), epoch), HummockValue::Delete));
+        }
+        shared_buffer_items.sort_by(|l, r| user_key(l.0.as_slice()).cmp(r.0.as_slice()));
+        shared_buffer_manager
+            .write_batch(shared_buffer_items.clone(), epoch)
+            .unwrap();
+        shared_buffer_items
+    }
+
+    #[tokio::test]
+    async fn test_shared_buffer_manager_get() {
+        let shared_buffer_manager = new_shared_buffer_manager();
 
         let mut keys = Vec::new();
         for i in 0..4 {
             keys.push(format!("key_test_{:05}", i).as_bytes().to_vec());
         }
+        let mut idx = 0;
 
         // Write batch in epoch1
         let epoch1 = 1;
-        let mut shared_buffer_items1 = Vec::new();
-        for (i, key) in keys.iter().enumerate().take(3) {
-            shared_buffer_items1.push((
-                key_with_epoch(key.clone(), epoch1),
-                HummockValue::Put(test_value_of(0, i)),
-            ))
-        }
-        shared_buffer_manager
-            .write_batch(shared_buffer_items1.clone(), epoch1)
-            .unwrap();
+        let put_keys_in_epoch1 = &keys[..3];
+        let shared_buffer_items1 = generate_and_write_batch(
+            put_keys_in_epoch1,
+            &[],
+            epoch1,
+            &mut idx,
+            &shared_buffer_manager,
+        );
 
         // Write batch in epoch2, with key1 overlapping with epoch1 and key2 deleted.
         let epoch2 = epoch1 + 1;
-        let mut shared_buffer_items2 = Vec::new();
-        for i in 0..3 {
-            shared_buffer_items2.push((
-                key_with_epoch(keys[i + 1].clone(), epoch2),
-                if i == 1 {
-                    HummockValue::Delete
-                } else {
-                    HummockValue::Put(test_value_of(0, 2 * i))
-                },
-            ));
-        }
-        shared_buffer_manager
-            .write_batch(shared_buffer_items2.clone(), epoch2)
-            .unwrap();
+        let put_keys_in_epoch2 = &[&keys[1..2], &keys[3..4]].concat();
+        let shared_buffer_items2 = generate_and_write_batch(
+            put_keys_in_epoch2,
+            &keys[2..3],
+            epoch2,
+            &mut idx,
+            &shared_buffer_manager,
+        );
 
         // Get and check value with epoch 0..=epoch1
         for i in 0..3 {
@@ -645,6 +726,39 @@ mod tests {
                 shared_buffer_items2[i].1
             );
         }
+    }
+
+    #[tokio::test]
+    async fn test_shared_buffer_manager_iter() {
+        let shared_buffer_manager = new_shared_buffer_manager();
+
+        let mut keys = Vec::new();
+        for i in 0..4 {
+            keys.push(format!("key_test_{:05}", i).as_bytes().to_vec());
+        }
+        let mut idx = 0;
+
+        // Write batch in epoch1
+        let epoch1 = 1;
+        let put_keys_in_epoch1 = &keys[..3];
+        let shared_buffer_items1 = generate_and_write_batch(
+            put_keys_in_epoch1,
+            &[],
+            epoch1,
+            &mut idx,
+            &shared_buffer_manager,
+        );
+
+        // Write batch in epoch2, with key1 overlapping with epoch1 and key2 deleted.
+        let epoch2 = epoch1 + 1;
+        let put_keys_in_epoch2 = &[&keys[1..2], &keys[3..4]].concat();
+        let shared_buffer_items2 = generate_and_write_batch(
+            put_keys_in_epoch2,
+            &keys[2..3],
+            epoch2,
+            &mut idx,
+            &shared_buffer_manager,
+        );
 
         // Forward iterator with 0..=epoch1
         let range = keys[0].clone()..=keys[3].clone();
@@ -732,6 +846,140 @@ mod tests {
         );
         merge_iterator.rewind().await.unwrap();
         for i in 0..3 {
+            assert!(merge_iterator.is_valid());
+            assert_eq!(
+                merge_iterator.key(),
+                key_with_epoch(keys[i + 1].clone(), epoch2)
+            );
+            assert_eq!(
+                merge_iterator.value().to_owned_value(),
+                shared_buffer_items2[i].1
+            );
+            merge_iterator.next().await.unwrap();
+        }
+        assert!(!merge_iterator.is_valid());
+    }
+
+    #[tokio::test]
+    async fn test_shared_buffer_manager_reverse_iter() {
+        let shared_buffer_manager = new_shared_buffer_manager();
+
+        let mut keys = Vec::new();
+        for i in 0..4 {
+            keys.push(format!("key_test_{:05}", i).as_bytes().to_vec());
+        }
+        let mut idx = 0;
+
+        // Write batch in epoch1
+        let epoch1 = 1;
+        let put_keys_in_epoch1 = &keys[..3];
+        let shared_buffer_items1 = generate_and_write_batch(
+            put_keys_in_epoch1,
+            &[],
+            epoch1,
+            &mut idx,
+            &shared_buffer_manager,
+        );
+
+        // Write batch in epoch2, with key1 overlapping with epoch1 and key2 deleted.
+        let epoch2 = epoch1 + 1;
+        let put_keys_in_epoch2 = &[&keys[1..2], &keys[3..4]].concat();
+        let shared_buffer_items2 = generate_and_write_batch(
+            put_keys_in_epoch2,
+            &keys[2..3],
+            epoch2,
+            &mut idx,
+            &shared_buffer_manager,
+        );
+
+        // Backward iterator with 0..=epoch1
+        let range = keys[3].clone()..=keys[0].clone();
+        let iters = shared_buffer_manager.reverse_iters(&range, ..=epoch1);
+        assert_eq!(iters.len(), 1);
+        let mut merge_iterator = ReverseMergeIterator::new(
+            iters
+                .into_iter()
+                .map(|i| Box::new(i) as BoxedHummockIterator),
+        );
+        merge_iterator.rewind().await.unwrap();
+        for i in (0..3).rev() {
+            assert!(merge_iterator.is_valid());
+            assert_eq!(
+                merge_iterator.key(),
+                key_with_epoch(keys[i].clone(), epoch1)
+            );
+            assert_eq!(
+                merge_iterator.value().to_owned_value(),
+                shared_buffer_items1[i].1
+            );
+            merge_iterator.next().await.unwrap();
+        }
+        assert!(!merge_iterator.is_valid());
+
+        // Backward iterator with 0..=epoch2
+        let iters = shared_buffer_manager.reverse_iters(&range, ..=epoch2);
+        assert_eq!(iters.len(), 2);
+        let mut merge_iterator = ReverseMergeIterator::new(
+            iters
+                .into_iter()
+                .map(|i| Box::new(i) as BoxedHummockIterator),
+        );
+        merge_iterator.rewind().await.unwrap();
+        assert!(merge_iterator.is_valid());
+        assert_eq!(
+            merge_iterator.key(),
+            key_with_epoch(keys[3].clone(), epoch2)
+        );
+        assert_eq!(
+            merge_iterator.value().to_owned_value(),
+            shared_buffer_items2[2].1
+        );
+        merge_iterator.next().await.unwrap();
+
+        for i in (0..2).rev() {
+            assert_eq!(
+                merge_iterator.key(),
+                key_with_epoch(keys[i + 1].clone(), epoch1)
+            );
+            assert_eq!(
+                merge_iterator.value().to_owned_value(),
+                shared_buffer_items1[i + 1].1
+            );
+            merge_iterator.next().await.unwrap();
+            assert!(merge_iterator.is_valid());
+            assert_eq!(
+                merge_iterator.key(),
+                key_with_epoch(keys[i + 1].clone(), epoch2)
+            );
+            assert_eq!(
+                merge_iterator.value().to_owned_value(),
+                shared_buffer_items2[i].1
+            );
+            merge_iterator.next().await.unwrap();
+        }
+
+        assert!(merge_iterator.is_valid());
+        assert_eq!(
+            merge_iterator.key(),
+            key_with_epoch(keys[0].clone(), epoch1)
+        );
+        assert_eq!(
+            merge_iterator.value().to_owned_value(),
+            shared_buffer_items1[0].1
+        );
+        merge_iterator.next().await.unwrap();
+        assert!(!merge_iterator.is_valid());
+
+        // Backward iterator with epoch2..=epoch2
+        let iters = shared_buffer_manager.reverse_iters(&range, epoch2..=epoch2);
+        assert_eq!(iters.len(), 1);
+        let mut merge_iterator = ReverseMergeIterator::new(
+            iters
+                .into_iter()
+                .map(|i| Box::new(i) as BoxedHummockIterator),
+        );
+        merge_iterator.rewind().await.unwrap();
+        for i in (0..3).rev() {
             assert!(merge_iterator.is_valid());
             assert_eq!(
                 merge_iterator.key(),

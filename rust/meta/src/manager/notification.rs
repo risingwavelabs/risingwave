@@ -20,6 +20,7 @@ pub type Notification = Result<SubscribeResponse, Status>;
 const BUFFER_SIZE: usize = 4;
 
 /// [`NotificationManager`] is used to send notification to frontend and backend.
+#[derive(Default)]
 pub struct NotificationManager {
     fe_observers: DashMap<WorkerKey, Sender<Notification>>,
     be_observers: DashMap<WorkerKey, Sender<Notification>>,

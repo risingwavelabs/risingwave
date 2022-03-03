@@ -70,18 +70,7 @@ where
         ctx: CreateMaterializedViewContext,
     ) -> Result<()> {
         let actor_ids = table_fragments.actor_ids();
-        let source_actor_ids = table_fragments.source_actor_ids();
-
-        // Divide all actors into source and non-source actors.
-        let non_source_actor_ids = actor_ids
-            .clone()
-            .into_iter()
-            .filter(|id| !source_actor_ids.contains(id))
-            .collect::<Vec<_>>();
-
-        let locations = self
-            .scheduler
-            .schedule(&non_source_actor_ids, &source_actor_ids)?;
+        let locations = self.scheduler.schedule(&actor_ids)?;
 
         table_fragments.set_locations(locations.actor_locations.clone());
         let actor_map = table_fragments.actor_map();

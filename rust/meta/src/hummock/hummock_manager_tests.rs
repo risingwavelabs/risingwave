@@ -81,7 +81,7 @@ async fn test_hummock_get_compact_task() -> Result<()> {
     let hummock_manager = HummockManager::new(env.clone()).await?;
     let context_id = 0;
 
-    let task = hummock_manager.get_compact_task(context_id).await?;
+    let task = hummock_manager.get_compact_task().await?;
     assert_eq!(task, None);
 
     let epoch: u64 = 1;
@@ -93,7 +93,7 @@ async fn test_hummock_get_compact_task() -> Result<()> {
         .unwrap();
     hummock_manager.commit_epoch(epoch).await.unwrap();
 
-    let task = hummock_manager.get_compact_task(context_id).await?;
+    let task = hummock_manager.get_compact_task().await?;
     let compact_task = task.unwrap();
     assert_eq!(
         compact_task

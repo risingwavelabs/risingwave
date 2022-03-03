@@ -211,8 +211,8 @@ impl<S: StateStore> AggExecutor for SimpleAggExecutor<S> {
         let mut new_ops = Vec::with_capacity(2);
 
         // --- Retrieve modified states and put the changes into the builders ---
-        let _is_empty = states
-            .build_changes(&mut builders, &mut new_ops, None, epoch)
+        states
+            .build_changes(&mut builders, &mut new_ops, epoch)
             .await?;
 
         let columns: Vec<Column> = builders

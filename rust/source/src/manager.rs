@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use risingwave_common::catalog::{ColumnId, TableId};
@@ -14,7 +15,7 @@ use crate::{HighLevelKafkaSource, SourceConfig, SourceFormat, SourceImpl, Source
 
 pub type SourceRef = Arc<SourceImpl>;
 
-pub trait SourceManager: Sync + Send {
+pub trait SourceManager: Debug + Sync + Send {
     fn create_source(
         &self,
         source_id: &TableId,
@@ -56,7 +57,7 @@ impl From<&TableColumnDesc> for SourceColumnDesc {
 }
 
 /// `SourceDesc` is used to describe a `Source`
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SourceDesc {
     pub source: SourceRef,
     pub format: SourceFormat,
@@ -66,6 +67,7 @@ pub struct SourceDesc {
 
 pub type SourceManagerRef = Arc<dyn SourceManager>;
 
+#[derive(Debug)]
 pub struct MemSourceManager {
     sources: Mutex<HashMap<TableId, SourceDesc>>,
 }
@@ -199,15 +201,11 @@ impl Default for MemSourceManager {
 mod tests {
     use std::sync::Arc;
 
-    use risingwave_common::array::*;
     use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
-    use risingwave_common::column_nonnull;
     use risingwave_common::error::Result;
     use risingwave_common::types::DataType;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::mview::MViewTable;
-    use risingwave_storage::table::test::TestTable;
-    use risingwave_storage::table::ScannableTable;
     use risingwave_storage::{Keyspace, TableColumnDesc};
 
     use crate::*;
@@ -231,18 +229,8 @@ mod tests {
             properties: Default::default(),
         });
 
-        let table = Arc::new(TestTable::new(
-            &TableId::default(),
-            vec![TableColumnDesc::unnamed(ColumnId::from(0), DataType::Int64)],
-        ));
-
-        let chunk0 = DataChunk::builder()
-            .columns(vec![column_nonnull!(I64Array, [0])])
-            .build();
-        table.append(chunk0).await.unwrap();
-
-        let source_columns = table
-            .column_descs()
+        let columns = vec![TableColumnDesc::unnamed(ColumnId::from(0), DataType::Int64)];
+        let source_columns = columns
             .iter()
             .map(|c| SourceColumnDesc {
                 name: "123".to_string(),

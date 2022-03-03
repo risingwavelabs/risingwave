@@ -34,7 +34,7 @@ async fn test_prometheus_endpoint_hummock() {
     let object_client = Arc::new(InMemObjectStore::new());
     let sstable_manager = mock_sstable_manager_with_object_store(object_client.clone());
     let local_version_manager = Arc::new(LocalVersionManager::new(sstable_manager.clone(), None));
-    let _hummock_storage = HummockStorage::new(
+    let _hummock_storage = HummockStorage::with_default_stats(
         hummock_options,
         sstable_manager,
         local_version_manager,
@@ -70,8 +70,9 @@ async fn test_basic() {
     let object_client = Arc::new(InMemObjectStore::new());
     let sstable_manager = mock_sstable_manager_with_object_store(object_client.clone());
     let hummock_options = HummockOptions::default_for_test();
+
     let local_version_manager = Arc::new(LocalVersionManager::new(sstable_manager.clone(), None));
-    let hummock_storage = HummockStorage::new(
+    let hummock_storage = HummockStorage::with_default_stats(
         hummock_options,
         sstable_manager,
         local_version_manager,
@@ -231,7 +232,7 @@ async fn test_reload_storage() {
         MockHummockMetaService::new(),
     )));
 
-    let hummock_storage = HummockStorage::new(
+    let hummock_storage = HummockStorage::with_default_stats(
         hummock_options,
         sstable_manager.clone(),
         local_version_manager.clone(),
@@ -275,7 +276,7 @@ async fn test_reload_storage() {
 
     // Mock somthing happened to storage internal, and storage is reloaded.
     drop(hummock_storage);
-    let hummock_storage = HummockStorage::new(
+    let hummock_storage = HummockStorage::with_default_stats(
         HummockOptions::default_for_test(),
         sstable_manager,
         local_version_manager,

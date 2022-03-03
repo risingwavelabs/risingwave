@@ -1,9 +1,7 @@
 use core::default::Default as CoreDefault;
 
 use itertools::Itertools;
-use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
-use risingwave_common::util::downcast_arc;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::{Column, DataType};
 use risingwave_pb::expr::expr_node::RexNode;
@@ -13,12 +11,10 @@ use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::values_node::ExprTuple;
 use risingwave_pb::plan::{
     exchange_info, ColumnDesc, CreateTableNode, ExchangeInfo, Field as NodeField, InsertNode,
-    PlanFragment, PlanNode, QueryId, RowSeqScanNode, StageId, TaskId as ProstTaskId,
-    TaskSinkId as ProstSinkId, ValuesNode,
+    PlanFragment, PlanNode, QueryId, StageId, TaskId as ProstTaskId, TaskSinkId as ProstSinkId,
+    ValuesNode,
 };
 use risingwave_pb::task_service::GetDataResponse;
-use risingwave_storage::table::test::TestTable;
-use risingwave_storage::table::ScannableTable;
 
 use super::*;
 use crate::rpc::service::exchange::ExchangeWriter;
@@ -339,44 +335,6 @@ impl<'a> SelectBuilder<'a> {
                     distribution: None,
                 }),
             },
-        }
-    }
-
-    // select * from t;
-    pub async fn scan_all(mut self) -> SelectBuilder<'a> {
-        let table_ref = self
-            .runner
-            .get_global_env()
-            .table_manager_ref()
-            .get_table(&TableId::default())
-            .unwrap();
-
-        if let Ok(column_table_ref) = downcast_arc::<TestTable>(table_ref.into_any()) {
-            let column_ids = column_table_ref
-                .column_descs()
-                .iter()
-                .map(|c| c.column_id.get_id())
-                .collect();
-            let scan = RowSeqScanNode {
-                table_ref_id: None,
-                column_ids,
-                fields: vec![],
-            };
-
-            self.plan = PlanFragment {
-                root: Some(PlanNode {
-                    children: vec![],
-                    node_body: Some(NodeBody::RowSeqScan(scan)),
-                    identity: "SeqScanExecutor".to_string(),
-                }),
-                exchange_info: Some(ExchangeInfo {
-                    mode: 0,
-                    distribution: None,
-                }),
-            };
-            self
-        } else {
-            unreachable!()
         }
     }
 

@@ -148,7 +148,7 @@ async fn test_snapshot() {
     ));
 
     let hummock_options = HummockOptions::default_for_test();
-    let hummock_storage = HummockStorage::new(
+    let hummock_storage = HummockStorage::with_default_stats(
         hummock_options,
         sstable_manager,
         vm.clone(),
@@ -222,7 +222,7 @@ async fn test_snapshot_range_scan() {
         mock_hummock_meta_service.clone(),
     ));
     let hummock_options = HummockOptions::default_for_test();
-    let hummock_storage = HummockStorage::new(
+    let hummock_storage = HummockStorage::with_default_stats(
         hummock_options,
         sstable_manager,
         vm.clone(),
@@ -276,7 +276,7 @@ async fn test_snapshot_reverse_range_scan() {
         mock_hummock_meta_service.clone(),
     ));
     let hummock_options = HummockOptions::default_for_test();
-    let hummock_storage = HummockStorage::new(
+    let hummock_storage = HummockStorage::with_default_stats(
         hummock_options,
         sstable_manager.clone(),
         vm.clone(),
