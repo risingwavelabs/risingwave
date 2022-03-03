@@ -59,15 +59,19 @@ pub const FIRST_VERSION_ID: HummockVersionId = 1;
 
 #[derive(Default, Debug, Clone)]
 pub struct HummockOptions {
-    /// target size of the SSTable
+    /// Target size of the SSTable.
     pub sstable_size: u32,
-    /// size of each block in bytes in SST
+
+    /// Size of each block in bytes in SST.
     pub block_size: u32,
-    /// false positive probability of Bloom filter
+
+    /// False positive probability of bloom filter.
     pub bloom_false_positive: f64,
-    /// remote directory for storing data and metadata objects
-    pub remote_dir: String,
-    /// checksum algorithm
+
+    /// Data directory for storing data and metadata objects.
+    pub data_directory: String,
+
+    /// checksum algorithm.
     pub checksum_algo: ChecksumAlg,
 }
 
@@ -78,7 +82,7 @@ impl HummockOptions {
             sstable_size: 256 * (1 << 20),
             block_size: 64 * (1 << 10),
             bloom_false_positive: 0.1,
-            remote_dir: "hummock_001".to_string(),
+            data_directory: "hummock_001".to_string(),
             checksum_algo: ChecksumAlg::XxHash64,
         }
     }
@@ -89,7 +93,7 @@ impl HummockOptions {
             sstable_size: 4 * (1 << 10),
             block_size: 1 << 10,
             bloom_false_positive: 0.1,
-            remote_dir: "hummock_001_small".to_string(),
+            data_directory: "hummock_001_small".to_string(),
             checksum_algo: ChecksumAlg::XxHash64,
         }
     }

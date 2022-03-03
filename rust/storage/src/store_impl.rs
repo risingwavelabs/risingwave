@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use moka::future::Cache;
 use risingwave_common::array::RwError;
+use risingwave_common::config::StorageConfig;
 use risingwave_common::error::Result;
 use risingwave_rpc_client::MetaClient;
 
@@ -59,40 +60,50 @@ macro_rules! dispatch_state_store {
 }
 
 impl StateStoreImpl {
-    pub async fn from_str(
+    pub async fn new(
         s: &str,
+        config: Arc<StorageConfig>,
         meta_client: MetaClient,
         stats: Arc<StateStoreStats>,
     ) -> Result<Self> {
         let store = match s {
-            "in_memory" | "in-memory" => StateStoreImpl::shared_in_memory_store(),
-
-            tikv if tikv.starts_with("tikv") => {
-                let inner =
-                    TikvStateStore::new(vec![tikv.strip_prefix("tikv://").unwrap().to_string()]);
-                StateStoreImpl::TikvStateStore(inner.monitored(stats))
-            }
-
-            minio if minio.starts_with("hummock+minio://") => {
+            hummock if hummock.starts_with("hummock") => {
                 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 
                 use crate::hummock::{HummockOptions, HummockStorage};
-                // TODO: initialize those settings in a yaml file or command line instead of
-                // hard-coding (#2165).
-                let object_client = Arc::new(
-                    S3ObjectStore::new_with_minio(minio.strip_prefix("hummock+").unwrap()).await,
-                );
-                let remote_dir = "hummock_001";
-                let sstable_manager =
-                    Arc::new(SstableStore::new(object_client, remote_dir.to_string()));
+
+                let object_store = match hummock {
+                    s3 if s3.starts_with("hummock+s3://") => Arc::new(
+                        S3ObjectStore::new(s3.strip_prefix("hummock+s3://").unwrap().to_string())
+                            .await,
+                    ),
+                    minio if minio.starts_with("hummock+minio://") => Arc::new(
+                        S3ObjectStore::new_with_minio(minio.strip_prefix("hummock+").unwrap())
+                            .await,
+                    ),
+                    other => {
+                        unimplemented!("{} Hummock only supports s3 and minio for now.", other)
+                    }
+                };
+
+                let sstable_manager = Arc::new(SstableStore::new(
+                    object_store,
+                    config.data_directory.to_string(),
+                ));
                 let inner = HummockStateStore::new(
                     HummockStorage::new(
                         HummockOptions {
-                            sstable_size: 256 * (1 << 20),
-                            block_size: 64 * (1 << 10),
-                            bloom_false_positive: 0.1,
-                            remote_dir: remote_dir.to_string(),
-                            checksum_algo: ChecksumAlg::Crc32c,
+                            sstable_size: config.sstable_size,
+                            block_size: config.block_size,
+                            bloom_false_positive: config.bloom_false_positive,
+                            data_directory: config.data_directory.to_string(),
+                            checksum_algo: match config.checksum_algo.as_str() {
+                                "crc32c" => ChecksumAlg::Crc32c,
+                                "xxhash64" => ChecksumAlg::XxHash64,
+                                other => {
+                                    unimplemented!("{} is not supported for Hummock", other)
+                                }
+                            },
                         },
                         sstable_manager.clone(),
                         Arc::new(LocalVersionManager::new(
@@ -110,37 +121,12 @@ impl StateStoreImpl {
                 StateStoreImpl::HummockStateStore(inner.monitored(stats))
             }
 
-            s3 if s3.starts_with("hummock+s3://") => {
-                use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
+            "in_memory" | "in-memory" => StateStoreImpl::shared_in_memory_store(),
 
-                use crate::hummock::{HummockOptions, HummockStorage};
-                let s3_store = Arc::new(
-                    S3ObjectStore::new(s3.strip_prefix("hummock+s3://").unwrap().to_string()).await,
-                );
-
-                let remote_dir = "hummock_001";
-                let sstable_manager = Arc::new(SstableStore::new(s3_store, remote_dir.to_string()));
-                let inner = HummockStateStore::new(
-                    HummockStorage::new(
-                        HummockOptions {
-                            sstable_size: 256 * (1 << 20),
-                            block_size: 64 * (1 << 10),
-                            bloom_false_positive: 0.1,
-                            remote_dir: remote_dir.to_string(),
-                            checksum_algo: ChecksumAlg::Crc32c,
-                        },
-                        sstable_manager.clone(),
-                        Arc::new(LocalVersionManager::new(
-                            sstable_manager,
-                            Some(Arc::new(Cache::new(65536))),
-                        )),
-                        Arc::new(RpcHummockMetaClient::new(meta_client, stats.clone())),
-                        stats.clone(),
-                    )
-                    .await
-                    .map_err(RwError::from)?,
-                );
-                StateStoreImpl::HummockStateStore(inner.monitored(stats))
+            tikv if tikv.starts_with("tikv") => {
+                let inner =
+                    TikvStateStore::new(vec![tikv.strip_prefix("tikv://").unwrap().to_string()]);
+                StateStoreImpl::TikvStateStore(inner.monitored(stats))
             }
 
             rocksdb if rocksdb.starts_with("rocksdb_local://") => {

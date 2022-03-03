@@ -30,6 +30,7 @@ fn load_config(opts: &ComputeNodeOpts) -> ComputeNodeConfig {
     if opts.config_path.is_empty() {
         return ComputeNodeConfig::default();
     }
+
     let config_path = PathBuf::from(opts.config_path.to_owned());
     ComputeNodeConfig::init(config_path).unwrap()
 }
@@ -51,9 +52,15 @@ pub async fn compute_node_serve(
 
     // Initialize state store.
     let stats = DEFAULT_STATE_STORE_STATS.clone();
-    let state_store = StateStoreImpl::from_str(&opts.state_store, meta_client.clone(), stats)
-        .await
-        .unwrap();
+    let storage_config = Arc::new(config.storage.clone());
+    let state_store = StateStoreImpl::new(
+        &opts.state_store,
+        storage_config,
+        meta_client.clone(),
+        stats,
+    )
+    .await
+    .unwrap();
 
     // A hummock compactor is deployed along with compute node for now.
     let mut compactor_handle = None;
