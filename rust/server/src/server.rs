@@ -53,9 +53,14 @@ pub async fn compute_node_serve(
     // Initialize state store.
     let stats = DEFAULT_STATE_STORE_STATS.clone();
     let storage_config = Arc::new(config.storage.clone());
-    let state_store = StateStoreImpl::new(storage_config, meta_client.clone(), stats)
-        .await
-        .unwrap();
+    let state_store = StateStoreImpl::new(
+        &opts.state_store,
+        storage_config,
+        meta_client.clone(),
+        stats,
+    )
+    .await
+    .unwrap();
 
     // A hummock compactor is deployed along with compute node for now.
     let mut compactor_handle = None;

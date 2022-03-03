@@ -61,11 +61,11 @@ macro_rules! dispatch_state_store {
 
 impl StateStoreImpl {
     pub async fn new(
+        s: &str,
         config: Arc<StorageConfig>,
         meta_client: MetaClient,
         stats: Arc<StateStoreStats>,
     ) -> Result<Self> {
-        let s = config.state_backend.as_str();
         let store = match s {
             hummock if hummock.starts_with("hummock") => {
                 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;

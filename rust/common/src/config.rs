@@ -11,7 +11,6 @@ const DEFAULT_CHUNK_SIZE: u32 = 1024;
 const DEFAULT_SST_SIZE: u32 = 256 * (1 << 20);
 const DEFAULT_BLOCK_SIZE: u32 = 64 * (1 << 10);
 const DEFAULT_BLOOM_FALSE_POSITIVE: f64 = 0.1;
-const DEFAULT_STATE_BACKEND: &str = "in-memory";
 const DEFAULT_DATA_DIRECTORY: &str = "hummock_001";
 const DEFAULT_CHECKSUM_ALGORITHM: &str = "crc32c";
 
@@ -79,9 +78,6 @@ impl Default for StreamingConfig {
 /// Currently all configurations are server before they can be specified with DDL syntaxes.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StorageConfig {
-    /// Specifies the state backend (e.g. Hummock, RocksDB, etc.)
-    pub state_backend: String,
-
     /// Target size of the SSTable.
     pub sstable_size: u32,
 
@@ -101,7 +97,6 @@ pub struct StorageConfig {
 impl Default for StorageConfig {
     fn default() -> Self {
         Self {
-            state_backend: DEFAULT_STATE_BACKEND.to_string(),
             sstable_size: DEFAULT_SST_SIZE,
             block_size: DEFAULT_BLOCK_SIZE,
             bloom_false_positive: DEFAULT_BLOOM_FALSE_POSITIVE,

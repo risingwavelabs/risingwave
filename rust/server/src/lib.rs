@@ -28,6 +28,9 @@ pub struct ComputeNodeOpts {
     #[clap(long, default_value = "127.0.0.1:5688")]
     pub host: String,
 
+    #[clap(long, default_value = "in-memory")]
+    pub state_store: String,
+
     #[clap(long, default_value = "127.0.0.1:1222")]
     pub prometheus_listener_addr: String,
 
