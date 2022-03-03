@@ -53,7 +53,7 @@ impl From<&Vec<ParallelUnitId>> for ConsistentHashMapping {
 }
 
 impl ConsistentHashMapping {
-    pub fn update(
+    pub fn update_mapping(
         &mut self,
         virtual_key: VirtualKey,
         parallel_unit_id: ParallelUnitId,
@@ -85,5 +85,9 @@ impl ConsistentHashMapping {
             .iter()
             .map(|parallel_unit| parallel_unit.id)
             .collect()
+    }
+
+    pub fn clear_mapping(&mut self) {
+        self.0.parallel_units.clear();
     }
 }
