@@ -1,7 +1,8 @@
 use risingwave_common::error::Result;
 
 use crate::binder::BoundSelect;
-use crate::optimizer::plan_node::PlanRef;
+use crate::expr::ExprImpl;
+use crate::optimizer::plan_node::{PlanRef, LogicalProject};
 use crate::planner::Planner;
 
 impl Planner {
@@ -22,5 +23,15 @@ impl Planner {
     /// on optimizer.
     fn create_dummy_values(&self) -> Result<PlanRef> {
         todo!()
+    }
+
+    fn plan_projection(
+        &mut self,
+        input: PlanRef,
+        projection: Vec<ExprImpl>,
+    ) -> Result<PlanRef> {
+        // TODO: support alias.
+        let expr_alias = vec![None; projection.len()];
+        Ok(LogicalProject::create(input, projection, expr_alias))
     }
 }
