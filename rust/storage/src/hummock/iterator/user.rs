@@ -79,7 +79,7 @@ pub struct UserIterator<'a> {
     read_epoch: Epoch,
 
     /// Ensures the SSTs needed by `iterator` won't be vacuumed.
-    _version: Arc<ScopedLocalVersion>,
+    _version: Option<Arc<ScopedLocalVersion>>,
 }
 
 // TODO: decide wheher this should also impl `HummockIterator`
@@ -90,12 +90,7 @@ impl<'a> UserIterator<'a> {
         iterator: MergeIterator<'a>,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
     ) -> Self {
-        Self::new(
-            iterator,
-            key_range,
-            Epoch::MAX,
-            Arc::new(ScopedLocalVersion::for_test()),
-        )
+        Self::new(iterator, key_range, Epoch::MAX, None)
     }
 
     /// Create [`UserIterator`] with given `read_epoch`.
@@ -103,7 +98,7 @@ impl<'a> UserIterator<'a> {
         iterator: MergeIterator<'a>,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
-        version: Arc<ScopedLocalVersion>,
+        version: Option<Arc<ScopedLocalVersion>>,
     ) -> Self {
         Self {
             iterator,

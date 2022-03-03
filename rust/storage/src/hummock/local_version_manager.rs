@@ -40,20 +40,6 @@ impl ScopedLocalVersion {
         }
     }
 
-    #[cfg(test)]
-    pub fn for_test() -> Self {
-        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        ScopedLocalVersion {
-            version: Arc::new(HummockVersion {
-                id: 0,
-                levels: vec![],
-                uncommitted_epochs: vec![],
-                max_committed_epoch: 0,
-            }),
-            unpin_worker_tx: tx,
-        }
-    }
-
     pub fn id(&self) -> HummockVersionId {
         self.version.id
     }

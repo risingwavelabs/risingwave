@@ -34,7 +34,7 @@ pub struct ReverseUserIterator<'a> {
     read_epoch: Epoch,
 
     /// Ensures the SSTs needed by `iterator` won't be vacuumed.
-    _version: Arc<ScopedLocalVersion>,
+    _version: Option<Arc<ScopedLocalVersion>>,
 }
 
 impl<'a> ReverseUserIterator<'a> {
@@ -44,12 +44,7 @@ impl<'a> ReverseUserIterator<'a> {
         iterator: ReverseMergeIterator<'a>,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
     ) -> Self {
-        Self::new_with_epoch(
-            iterator,
-            key_range,
-            Epoch::MAX,
-            Arc::new(ScopedLocalVersion::for_test()),
-        )
+        Self::new_with_epoch(iterator, key_range, Epoch::MAX, None)
     }
 
     /// Create [`UserIterator`] with given `read_epoch`.
@@ -57,7 +52,7 @@ impl<'a> ReverseUserIterator<'a> {
         iterator: ReverseMergeIterator<'a>,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
-        version: Arc<ScopedLocalVersion>,
+        version: Option<Arc<ScopedLocalVersion>>,
     ) -> Self {
         Self {
             iterator,
