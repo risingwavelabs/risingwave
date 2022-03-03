@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::mpsc::channel;
-use std::sync::{Arc, RwLock};
+use std::sync::{mpsc, Arc, RwLock};
 
 use rand::distributions::{Distribution as RandDistribution, Uniform};
 use risingwave_common::error::Result;
@@ -12,14 +11,13 @@ use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
 use crate::scheduler::plan_fragmenter::{Query, QueryStageRef, StageId};
 
-type ScheduledStageSender = std::sync::mpsc::Sender<ScheduledStage>;
-type ScheduledStageReceiver = std::sync::mpsc::Receiver<ScheduledStage>;
 pub(crate) type TaskId = u64;
 
+/// The scheduler
 pub(crate) struct BatchScheduler {
     worker_manager: WorkerNodeManagerRef,
-    scheduled_stage_sender: ScheduledStageSender,
-    scheduled_stage_receiver: ScheduledStageReceiver,
+    scheduled_stage_sender: mpsc::Sender<ScheduledStage>,
+    scheduled_stage_receiver: mpsc::Receiver<ScheduledStage>,
     scheduled_stages_map: HashMap<StageId, ScheduledStageRef>,
 }
 
@@ -74,7 +72,7 @@ pub(crate) type AugmentedStageRef = Arc<AugmentedStage>;
 impl BatchScheduler {
     /// Used in tests.
     pub fn mock(worker_manager: WorkerNodeManagerRef) -> Self {
-        let (sender, receiver) = channel();
+        let (sender, receiver) = mpsc::channel();
         Self {
             worker_manager,
             scheduled_stage_sender: sender,

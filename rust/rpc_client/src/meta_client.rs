@@ -12,8 +12,8 @@ use risingwave_pb::hummock::{
     AddTablesRequest, AddTablesResponse, GetCompactionTasksRequest, GetCompactionTasksResponse,
     GetNewTableIdRequest, GetNewTableIdResponse, PinSnapshotRequest, PinSnapshotResponse,
     PinVersionRequest, PinVersionResponse, ReportCompactionTasksRequest,
-    ReportCompactionTasksResponse, UnpinSnapshotRequest, UnpinSnapshotResponse,
-    UnpinVersionRequest, UnpinVersionResponse,
+    ReportCompactionTasksResponse, SubscribeCompactTasksRequest, SubscribeCompactTasksResponse,
+    UnpinSnapshotRequest, UnpinSnapshotResponse, UnpinVersionRequest, UnpinVersionResponse,
 };
 use risingwave_pb::meta::catalog_service_client::CatalogServiceClient;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
@@ -309,6 +309,13 @@ pub trait MetaClientInner: Send + Sync {
     ) -> std::result::Result<GetNewTableIdResponse, tonic::Status> {
         unimplemented!()
     }
+
+    async fn subscribe_compact_tasks(
+        &self,
+        _req: SubscribeCompactTasksRequest,
+    ) -> std::result::Result<Streaming<SubscribeCompactTasksResponse>, tonic::Status> {
+        unimplemented!()
+    }
 }
 
 /// Client to meta server. Cloning the instance is lightweight.
@@ -538,6 +545,18 @@ impl MetaClientInner for GrpcMetaClient {
             .hummock_client
             .to_owned()
             .get_new_table_id(req)
+            .await?
+            .into_inner())
+    }
+
+    async fn subscribe_compact_tasks(
+        &self,
+        req: SubscribeCompactTasksRequest,
+    ) -> std::result::Result<Streaming<SubscribeCompactTasksResponse>, tonic::Status> {
+        Ok(self
+            .hummock_client
+            .to_owned()
+            .subscribe_compact_tasks(req)
             .await?
             .into_inner())
     }

@@ -4,23 +4,28 @@ use super::PlanPass;
 use crate::optimizer::property::{Distribution, Order};
 use crate::optimizer::rule::BoxedRule;
 use crate::optimizer::PlanRef;
-#[allow(dead_code)]
+
 /// Traverse order of [`HeuristicOptimizer`]
+#[allow(dead_code)]
 pub enum ApplyOrder {
     TopDown,
     BottomUp,
 }
+
 impl Default for ApplyOrder {
     fn default() -> Self {
         ApplyOrder::TopDown
     }
 }
+
 // TODO: we should have a builder of HeuristicOptimizer here
-/// a rule based heuristic optimzer, which traverse every nodes and try to apply each rules on them.
+/// A rule-based heuristic optimizer, which traverses every plan nodes and tries to
+/// apply each rule on them.
 pub struct HeuristicOptimizer {
     apply_order: ApplyOrder,
     rules: Vec<BoxedRule>,
 }
+
 impl HeuristicOptimizer {
     fn optimize_self_node(&mut self, mut plan: PlanRef) -> PlanRef {
         for rule in &self.rules {

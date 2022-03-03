@@ -114,6 +114,7 @@ pub mod IdCategory {
     pub const Actor: IdCategoryType = 6;
     pub const HummockSnapshot: IdCategoryType = 7;
     pub const HummockSSTableId: IdCategoryType = 8;
+    pub const ParallelUnit: IdCategoryType = 9;
 }
 
 pub type IdGeneratorManagerRef<S> = Arc<IdGeneratorManager<S>>;
@@ -131,6 +132,7 @@ pub struct IdGeneratorManager<S> {
     actor: Arc<StoredIdGenerator<S>>,
     hummock_snapshot: Arc<StoredIdGenerator<S>>,
     hummock_ss_table_id: Arc<StoredIdGenerator<S>>,
+    parallel_unit: Arc<StoredIdGenerator<S>>,
 }
 
 impl<S> IdGeneratorManager<S>
@@ -158,6 +160,9 @@ where
                 StoredIdGenerator::new(meta_store_ref.clone(), "hummock_ss_table_id", Some(1))
                     .await,
             ),
+            parallel_unit: Arc::new(
+                StoredIdGenerator::new(meta_store_ref.clone(), "parallel_unit", None).await,
+            ),
         }
     }
 
@@ -173,6 +178,7 @@ where
             IdCategory::HummockSnapshot => &self.hummock_snapshot,
             IdCategory::Worker => &self.worker,
             IdCategory::HummockSSTableId => &self.hummock_ss_table_id,
+            IdCategory::ParallelUnit => &self.parallel_unit,
             _ => unreachable!(),
         }
     }

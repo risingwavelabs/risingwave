@@ -24,12 +24,12 @@ use risingwave_rpc_client::{MetaClient, MetaClientInner, NotificationStream};
 use tokio::task::JoinHandle;
 use tonic::Request;
 
-use crate::session::{FrontendEnv, RwSession};
+use crate::session::{FrontendEnv, SessionImpl};
 use crate::FrontendOpts;
 
 pub struct LocalFrontend {
     pub opts: FrontendOpts,
-    pub session: RwSession,
+    pub session: SessionImpl,
     pub observer_join_handle: JoinHandle<()>,
 }
 
@@ -41,7 +41,7 @@ impl LocalFrontend {
         let (env, observer_join_handle) = FrontendEnv::with_meta_client(meta_client, &opts)
             .await
             .unwrap();
-        let session = RwSession::new(env, "dev".to_string());
+        let session = SessionImpl::new(env, "dev".to_string());
         Self {
             opts,
             session,
@@ -57,7 +57,7 @@ impl LocalFrontend {
         self.session.run_statement(sql.as_str()).await
     }
 
-    pub fn session(&self) -> &RwSession {
+    pub fn session(&self) -> &SessionImpl {
         &self.session
     }
 }

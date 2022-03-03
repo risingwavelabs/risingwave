@@ -3,9 +3,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use risingwave_pb::hummock::{
     AddTablesRequest, CommitEpochRequest, CompactTask, GetNewTableIdRequest, HummockSnapshot,
-    HummockVersion, PinSnapshotRequest, PinVersionRequest, SstableInfo, UnpinSnapshotRequest,
-    UnpinVersionRequest,
+    HummockVersion, PinSnapshotRequest, PinVersionRequest, SstableInfo,
+    SubscribeCompactTasksResponse, UnpinSnapshotRequest, UnpinVersionRequest,
 };
+use tonic::Streaming;
 
 use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::mock::MockHummockMetaService;
@@ -102,6 +103,12 @@ impl HummockMetaClient for MockHummockMetaClient {
     }
 
     async fn abort_epoch(&self, _epoch: HummockEpoch) -> HummockResult<()> {
+        unimplemented!()
+    }
+
+    async fn subscribe_compact_tasks(
+        &self,
+    ) -> HummockResult<Streaming<SubscribeCompactTasksResponse>> {
         unimplemented!()
     }
 }

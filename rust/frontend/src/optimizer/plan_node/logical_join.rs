@@ -21,11 +21,13 @@ pub struct LogicalJoin {
     join_type: JoinType,
     schema: Schema,
 }
+
 impl fmt::Display for LogicalJoin {
     fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
         todo!()
     }
 }
+
 impl LogicalJoin {
     pub(crate) fn new(left: PlanRef, right: PlanRef, join_type: JoinType, on: Condition) -> Self {
         let schema = Self::derive_schema(left.schema(), right.schema(), join_type);
@@ -47,6 +49,7 @@ impl LogicalJoin {
     ) -> PlanRef {
         Self::new(left, right, join_type, Condition::with_expr(on_clause)).into_plan_ref()
     }
+
     fn derive_schema(left: &Schema, right: &Schema, join_type: JoinType) -> Schema {
         let mut new_fields = Vec::with_capacity(left.fields.len() + right.fields.len());
         match join_type {
@@ -64,6 +67,7 @@ impl LogicalJoin {
         &self.on
     }
 }
+
 impl PlanTreeNodeBinary for LogicalJoin {
     fn left(&self) -> PlanRef {
         self.left.clone()
@@ -79,13 +83,17 @@ impl PlanTreeNodeBinary for LogicalJoin {
 }
 impl_plan_tree_node_for_binary! {LogicalJoin}
 impl WithOrder for LogicalJoin {}
+
 impl WithDistribution for LogicalJoin {}
+
 impl WithSchema for LogicalJoin {
     fn schema(&self) -> &Schema {
         &self.schema
     }
 }
+
 impl ColPrunable for LogicalJoin {}
+
 impl ToBatch for LogicalJoin {
     fn to_batch_with_order_required(&self, _required_order: &Order) -> PlanRef {
         let predicate = EqJoinPredicate::create(
@@ -132,6 +140,7 @@ impl ToBatch for LogicalJoin {
         self.to_batch_with_order_required(Order::any())
     }
 }
+
 impl ToStream for LogicalJoin {
     fn to_stream(&self) -> PlanRef {
         let predicate = EqJoinPredicate::create(

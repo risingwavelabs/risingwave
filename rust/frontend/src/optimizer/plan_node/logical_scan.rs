@@ -39,8 +39,8 @@ impl LogicalScan {
         table_id: TableId,
         columns: Vec<ColumnId>,
         schema: Schema,
-    ) -> Result<Self> {
-        Ok(Self::new(table_name, table_id, columns, schema))
+    ) -> Result<PlanRef> {
+        Ok(Self::new(table_name, table_id, columns, schema).into_plan_ref())
     }
 }
 
@@ -51,6 +51,7 @@ impl WithSchema for LogicalScan {
 }
 impl_plan_tree_node_for_leaf! {LogicalScan}
 impl WithOrder for LogicalScan {}
+
 impl WithDistribution for LogicalScan {}
 
 impl fmt::Display for LogicalScan {
@@ -67,12 +68,15 @@ impl fmt::Display for LogicalScan {
             .finish()
     }
 }
+
 impl ColPrunable for LogicalScan {}
+
 impl ToBatch for LogicalScan {
     fn to_batch(&self) -> PlanRef {
         BatchSeqScan::new(self.clone()).into_plan_ref()
     }
 }
+
 impl ToStream for LogicalScan {
     fn to_stream(&self) -> PlanRef {
         todo!()

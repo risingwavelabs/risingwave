@@ -4,31 +4,38 @@ use std::sync::Arc;
 
 use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
+use itertools::Itertools;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_pb::common::worker_node::State;
-use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
+use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
 use crate::hummock::HummockManager;
-use crate::manager::{IdCategory, IdGeneratorManagerRef, MetaSrvEnv, NotificationManagerRef};
+use crate::manager::{
+    HashDispatchManager, HashDispatchManagerRef, IdCategory, IdGeneratorManagerRef, MetaSrvEnv,
+    NotificationManagerRef,
+};
 use crate::model::{MetadataModel, Worker};
 use crate::storage::MetaStore;
 
 pub type NodeId = u32;
+pub type ParallelUnitId = u32;
 pub type NodeLocations = HashMap<NodeId, WorkerNode>;
+pub type StoredClusterManagerRef<S> = Arc<StoredClusterManager<S>>;
+
+const DEFAULT_WORKNODE_PARALLEL_DEGREE: usize = 8;
 
 /// [`StoredClusterManager`] manager cluster/worker meta data in [`MetaStore`].
 pub struct StoredClusterManager<S> {
     meta_store_ref: Arc<S>,
     id_gen_manager_ref: IdGeneratorManagerRef<S>,
     hummock_manager_ref: Option<Arc<HummockManager<S>>>,
+    dispatch_manager_ref: HashDispatchManagerRef<S>,
     workers: DashMap<WorkerKey, Worker>,
     nm: NotificationManagerRef,
 }
-
-pub type StoredClusterManagerRef<S> = Arc<StoredClusterManager<S>>;
 
 pub struct WorkerKey(pub HostAddress);
 
@@ -62,15 +69,23 @@ where
             "Worker::list fail"
         )?;
         let worker_map = DashMap::new();
+        let mut compute_nodes = Vec::new();
 
         workers.iter().for_each(|w| {
             worker_map.insert(WorkerKey(w.key().unwrap()), w.clone());
+            if w.worker_type() == WorkerType::ComputeNode {
+                compute_nodes.push(w.worker_node());
+            }
         });
+
+        let dispatch_manager_ref =
+            Arc::new(HashDispatchManager::new(&compute_nodes, meta_store_ref.clone()).await?);
 
         Ok(Self {
             meta_store_ref,
             id_gen_manager_ref: env.id_gen_manager_ref(),
             hummock_manager_ref,
+            dispatch_manager_ref,
             workers: worker_map,
             nm,
         })
@@ -84,18 +99,38 @@ where
         match self.workers.entry(WorkerKey(host_address.clone())) {
             Entry::Occupied(o) => Ok((o.get().to_protobuf(), false)),
             Entry::Vacant(v) => {
-                let id = self
+                let worker_id = self
                     .id_gen_manager_ref
                     .generate::<{ IdCategory::Worker }>()
                     .await?;
+
+                let start_id = self
+                    .id_gen_manager_ref
+                    .generate_interval::<{ IdCategory::ParallelUnit }>(
+                        DEFAULT_WORKNODE_PARALLEL_DEGREE as i32,
+                    )
+                    .await? as usize;
+                let parallel_units = (start_id..start_id + DEFAULT_WORKNODE_PARALLEL_DEGREE)
+                    .map(|id| ParallelUnit { id: id as u32 })
+                    .collect_vec();
+
                 let worker_node = WorkerNode {
-                    id: id as u32,
+                    id: worker_id as u32,
                     r#type: r#type as i32,
                     host: Some(host_address.clone()),
                     state: State::Starting as i32,
+                    parallel_units,
                 };
+
                 let worker = Worker::from_protobuf(worker_node.clone());
                 worker.insert(&*self.meta_store_ref).await?;
+
+                // Alter consistent hash mapping
+                if r#type == WorkerType::ComputeNode {
+                    self.dispatch_manager_ref
+                        .add_worker_mapping(&worker.worker_node())
+                        .await?;
+                }
 
                 Ok((v.insert(worker).to_protobuf(), true))
             }
@@ -160,6 +195,12 @@ where
                     // resource owned by stale worker nodes.
                     hummock_manager_ref
                         .release_context_resource(entry.1.to_protobuf().id)
+                        .await?;
+                }
+                let worker = entry.1;
+                if worker.worker_type() == WorkerType::ComputeNode {
+                    self.dispatch_manager_ref
+                        .delete_worker_mapping(&worker.worker_node())
                         .await?;
                 }
                 Ok(())

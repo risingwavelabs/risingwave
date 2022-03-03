@@ -190,12 +190,12 @@ where
         }
     }
 
-    type CompactTasksStream = RwReceiverStream<CompactTasksResponse>;
+    type SubscribeCompactTasksStream = RwReceiverStream<SubscribeCompactTasksResponse>;
 
-    async fn compact_tasks(
+    async fn subscribe_compact_tasks(
         &self,
-        _request: Request<CompactTasksRequest>,
-    ) -> Result<Response<Self::CompactTasksStream>, Status> {
+        _request: Request<SubscribeCompactTasksRequest>,
+    ) -> Result<Response<Self::SubscribeCompactTasksStream>, Status> {
         let rx = self.compactor_manager.add_compactor().await;
         Ok(Response::new(RwReceiverStream::new(rx)))
     }

@@ -2,12 +2,12 @@ use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
-use super::{HummockResult, SSTable};
+use super::{HummockResult, Sstable};
 
 pub fn bloom_filter_sstables(
-    tables: Vec<Arc<SSTable>>,
+    tables: Vec<Arc<Sstable>>,
     key: &[u8],
-) -> HummockResult<Vec<Arc<SSTable>>> {
+) -> HummockResult<Vec<Arc<Sstable>>> {
     let bf_tables = tables
         .into_iter()
         .filter(|table| !table.surely_not_have_user_key(key))
