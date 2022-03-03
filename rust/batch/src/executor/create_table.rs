@@ -84,13 +84,8 @@ impl Executor for CreateTableExecutor {
             Info::TableSource(_) => {
                 // Create table_v2.
                 info!("Create table id:{}", &self.table_id.table_id());
-
-                let table = self
-                    .table_manager
-                    .create_table_v2(&self.table_id, table_columns)
-                    .await?;
                 self.source_manager
-                    .create_table_source_v2(&self.table_id, table)?;
+                    .create_table_source_v2(&self.table_id, table_columns)?;
             }
             Info::MaterializedView(info) => {
                 if info.associated_table_ref_id.is_some() {

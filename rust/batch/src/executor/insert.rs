@@ -208,10 +208,7 @@ mod tests {
 
         // Create the first table.
         let table_id = TableId::new(0);
-        let table = table_manager
-            .create_table_v2(&table_id, table_columns.to_vec())
-            .await?;
-        source_manager.create_table_source_v2(&table_id, table)?;
+        source_manager.create_table_source_v2(&table_id, table_columns.to_vec())?;
 
         // Create reader
         let source_desc = source_manager.get_source(&table_id)?;
