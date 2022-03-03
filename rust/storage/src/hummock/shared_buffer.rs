@@ -16,9 +16,8 @@ use super::key_range::KeyRange;
 use super::local_version_manager::LocalVersionManager;
 use super::utils::range_overlap;
 use super::value::HummockValue;
-use super::{key, HummockError, HummockOptions, HummockResult};
+use super::{key, HummockError, HummockOptions, HummockResult, SstableManagerRef};
 use crate::monitor::StateStoreStats;
-use crate::object::ObjectStore;
 
 type SharedBufferItem = (Vec<u8>, HummockValue<Vec<u8>>);
 
@@ -161,7 +160,8 @@ impl SharedBufferManager {
     pub fn new(
         options: Arc<HummockOptions>,
         local_version_manager: Arc<LocalVersionManager>,
-        obj_client: Arc<dyn ObjectStore>,
+        sstable_manager: SstableManagerRef,
+
         stats: Arc<StateStoreStats>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> Self {
@@ -169,7 +169,7 @@ impl SharedBufferManager {
         let uploader = SharedBufferUploader::new(
             options,
             local_version_manager,
-            obj_client,
+            sstable_manager,
             stats,
             hummock_meta_client,
             uploader_rx,
@@ -322,11 +322,11 @@ pub struct SharedBufferUploader {
     batches_to_upload: BTreeMap<u64, Vec<SharedBufferBatch>>,
     local_version_manager: Arc<LocalVersionManager>,
     options: Arc<HummockOptions>,
-    obj_client: Arc<dyn ObjectStore>,
 
     /// Statistics.
     stats: Arc<StateStoreStats>,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
+    sstable_manager: SstableManagerRef,
 
     rx: tokio::sync::mpsc::UnboundedReceiver<SharedBufferUploaderItem>,
 }
@@ -335,7 +335,7 @@ impl SharedBufferUploader {
     pub fn new(
         options: Arc<HummockOptions>,
         local_version_manager: Arc<LocalVersionManager>,
-        obj_client: Arc<dyn ObjectStore>,
+        sstable_manager: SstableManagerRef,
         stats: Arc<StateStoreStats>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         rx: tokio::sync::mpsc::UnboundedReceiver<SharedBufferUploaderItem>,
@@ -344,9 +344,10 @@ impl SharedBufferUploader {
             batches_to_upload: BTreeMap::new(),
             options,
             local_version_manager,
-            obj_client,
+
             stats,
             hummock_meta_client,
+            sstable_manager,
             rx,
         }
     }
@@ -368,8 +369,8 @@ impl SharedBufferUploader {
         let sub_compact_context = SubCompactContext {
             options: self.options.clone(),
             local_version_manager: self.local_version_manager.clone(),
-            obj_client: self.obj_client.clone(),
             hummock_meta_client: self.hummock_meta_client.clone(),
+            sstable_manager: self.sstable_manager.clone(),
         };
         let mut tables = Vec::new();
         Compactor::sub_compact(
@@ -464,7 +465,7 @@ mod tests {
     use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
     use crate::hummock::shared_buffer::SharedBufferManager;
     use crate::hummock::value::HummockValue;
-    use crate::hummock::HummockOptions;
+    use crate::hummock::{HummockOptions, SstableManager};
     use crate::monitor::DEFAULT_STATE_STORE_STATS;
     use crate::object::{InMemObjectStore, ObjectStore};
 
@@ -601,18 +602,15 @@ mod tests {
     fn new_shared_buffer_manager() -> SharedBufferManager {
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
         let remote_dir = "/test";
-        let vm = Arc::new(LocalVersionManager::new(
-            obj_client.clone(),
-            remote_dir,
-            None,
-        ));
+        let sstable_manager = Arc::new(SstableManager::new(obj_client, remote_dir.to_string()));
+        let vm = Arc::new(LocalVersionManager::new(sstable_manager.clone(), None));
         let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(Arc::new(
             MockHummockMetaService::new(),
         )));
         SharedBufferManager::new(
             Arc::new(HummockOptions::default_for_test()),
             vm,
-            obj_client,
+            sstable_manager,
             DEFAULT_STATE_STORE_STATS.clone(),
             mock_hummock_meta_client,
         )
