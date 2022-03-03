@@ -49,6 +49,7 @@ pub trait PlanTreeNode {
 
 /// See [`PlanTreeNode`](super)
 pub trait PlanTreeNodeLeaf: Clone {}
+
 /// See [`PlanTreeNode`](super)
 pub trait PlanTreeNodeUnary {
     fn input(&self) -> PlanRef;
@@ -65,6 +66,7 @@ pub trait PlanTreeNodeUnary {
         Distribution::any()
     }
 }
+
 /// See [`PlanTreeNode`](super)
 pub trait PlanTreeNodeBinary {
     fn left(&self) -> PlanRef;

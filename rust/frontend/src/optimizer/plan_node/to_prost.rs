@@ -6,7 +6,9 @@ use super::*;
 use crate::{
     for_all_plan_nodes, for_batch_plan_nodes, for_logical_plan_nodes, for_stream_plan_nodes,
 };
+
 pub trait ToProst: ToBatchProst + ToStreamProst {}
+
 pub trait ToBatchProst {
     fn to_batch_prost_body(&self) -> pb_batch_node::NodeBody {
         unimplemented!()

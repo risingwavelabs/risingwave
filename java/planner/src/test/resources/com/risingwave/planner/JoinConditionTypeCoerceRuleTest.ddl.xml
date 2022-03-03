@@ -1,0 +1,23 @@
+<Root>
+    <Resource>
+        <![CDATA[
+create table T1(a int not null, b bigint not null, c real not null, d double precision not null, e numeric not null)
+        ]]>
+    </Resource>
+
+    <Resource>
+        <![CDATA[
+create table T2(a int not null, b bigint not null, c real not null, d double precision not null, e numeric not null)
+        ]]>
+    </Resource>
+    <Resource>
+        <![CDATA[
+create table T3(t3a varchar(100) not null, t3b smallint not null, t3c int not null)
+        ]]>
+    </Resource>
+    <Resource>
+        <![CDATA[
+create table T4(t4a varchar(100) not null, t4b smallint not null, t4c int not null)
+        ]]>
+    </Resource>
+</Root>

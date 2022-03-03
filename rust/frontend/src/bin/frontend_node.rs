@@ -9,7 +9,7 @@ async fn main() {
     use std::sync::Arc;
 
     use clap::StructOpt;
-    use frontend::session::RwSessionManager;
+    use frontend::session::SessionManagerImpl;
     use frontend::FrontendOpts;
     use pgwire::pg_server::pg_serve;
 
@@ -40,6 +40,6 @@ async fn main() {
 
     tracing_subscriber::registry().with(fmt_layer).init();
 
-    let session_mgr = Arc::new(RwSessionManager::new(&opts).await.unwrap());
+    let session_mgr = Arc::new(SessionManagerImpl::new(&opts).await.unwrap());
     pg_serve(&opts.host, session_mgr).await.unwrap();
 }

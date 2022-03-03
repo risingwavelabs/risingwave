@@ -16,9 +16,8 @@ use super::key_range::KeyRange;
 use super::local_version_manager::LocalVersionManager;
 use super::utils::range_overlap;
 use super::value::HummockValue;
-use super::{key, HummockError, HummockOptions, HummockResult};
+use super::{key, HummockError, HummockOptions, HummockResult, SstableStoreRef};
 use crate::monitor::StateStoreStats;
-use crate::object::ObjectStore;
 
 type SharedBufferItem = (Vec<u8>, HummockValue<Vec<u8>>);
 
@@ -161,7 +160,8 @@ impl SharedBufferManager {
     pub fn new(
         options: Arc<HummockOptions>,
         local_version_manager: Arc<LocalVersionManager>,
-        obj_client: Arc<dyn ObjectStore>,
+        sstable_manager: SstableStoreRef,
+
         stats: Arc<StateStoreStats>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> Self {
@@ -169,7 +169,7 @@ impl SharedBufferManager {
         let uploader = SharedBufferUploader::new(
             options,
             local_version_manager,
-            obj_client,
+            sstable_manager,
             stats,
             hummock_meta_client,
             uploader_rx,
@@ -300,6 +300,15 @@ impl SharedBufferManager {
     pub async fn wait(self) -> Result<()> {
         self.uploader_handle.await.unwrap()
     }
+
+    pub fn reset(&mut self, epoch: u64) {
+        // Reset uploader item.
+        self.uploader_tx
+            .send(SharedBufferUploaderItem::Reset(epoch))
+            .unwrap();
+        // Remove items of the given epoch from shared buffer
+        self.shared_buffer.write().remove(&epoch);
+    }
 }
 
 #[derive(Debug)]
@@ -315,6 +324,7 @@ pub struct SyncItem {
 pub enum SharedBufferUploaderItem {
     Batch(SharedBufferBatch),
     Sync(SyncItem),
+    Reset(u64),
 }
 
 pub struct SharedBufferUploader {
@@ -322,11 +332,11 @@ pub struct SharedBufferUploader {
     batches_to_upload: BTreeMap<u64, Vec<SharedBufferBatch>>,
     local_version_manager: Arc<LocalVersionManager>,
     options: Arc<HummockOptions>,
-    obj_client: Arc<dyn ObjectStore>,
 
     /// Statistics.
     stats: Arc<StateStoreStats>,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
+    sstable_manager: SstableStoreRef,
 
     rx: tokio::sync::mpsc::UnboundedReceiver<SharedBufferUploaderItem>,
 }
@@ -335,7 +345,7 @@ impl SharedBufferUploader {
     pub fn new(
         options: Arc<HummockOptions>,
         local_version_manager: Arc<LocalVersionManager>,
-        obj_client: Arc<dyn ObjectStore>,
+        sstable_manager: SstableStoreRef,
         stats: Arc<StateStoreStats>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         rx: tokio::sync::mpsc::UnboundedReceiver<SharedBufferUploaderItem>,
@@ -344,9 +354,10 @@ impl SharedBufferUploader {
             batches_to_upload: BTreeMap::new(),
             options,
             local_version_manager,
-            obj_client,
+
             stats,
             hummock_meta_client,
+            sstable_manager,
             rx,
         }
     }
@@ -368,8 +379,8 @@ impl SharedBufferUploader {
         let sub_compact_context = SubCompactContext {
             options: self.options.clone(),
             local_version_manager: self.local_version_manager.clone(),
-            obj_client: self.obj_client.clone(),
             hummock_meta_client: self.hummock_meta_client.clone(),
+            sstable_manager: self.sstable_manager.clone(),
         };
         let mut tables = Vec::new();
         Compactor::sub_compact(
@@ -435,6 +446,10 @@ impl SharedBufferUploader {
                 }
                 Ok(())
             }
+            SharedBufferUploaderItem::Reset(epoch) => {
+                self.batches_to_upload.remove(&epoch);
+                Ok(())
+            }
         }
     }
 
@@ -464,7 +479,7 @@ mod tests {
     use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
     use crate::hummock::shared_buffer::SharedBufferManager;
     use crate::hummock::value::HummockValue;
-    use crate::hummock::HummockOptions;
+    use crate::hummock::{HummockOptions, SstableStore};
     use crate::monitor::DEFAULT_STATE_STORE_STATS;
     use crate::object::{InMemObjectStore, ObjectStore};
 
@@ -601,18 +616,15 @@ mod tests {
     fn new_shared_buffer_manager() -> SharedBufferManager {
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
         let remote_dir = "/test";
-        let vm = Arc::new(LocalVersionManager::new(
-            obj_client.clone(),
-            remote_dir,
-            None,
-        ));
+        let sstable_manager = Arc::new(SstableStore::new(obj_client, remote_dir.to_string()));
+        let vm = Arc::new(LocalVersionManager::new(sstable_manager.clone(), None));
         let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(Arc::new(
             MockHummockMetaService::new(),
         )));
         SharedBufferManager::new(
             Arc::new(HummockOptions::default_for_test()),
             vm,
-            obj_client,
+            sstable_manager,
             DEFAULT_STATE_STORE_STATS.clone(),
             mock_hummock_meta_client,
         )
@@ -994,5 +1006,47 @@ mod tests {
             merge_iterator.next().await.unwrap();
         }
         assert!(!merge_iterator.is_valid());
+    }
+
+    #[tokio::test]
+    async fn test_shared_buffer_manager_reset() {
+        let mut shared_buffer_manager = new_shared_buffer_manager();
+
+        let mut keys = Vec::new();
+        for i in 0..4 {
+            keys.push(format!("key_test_{:05}", i).as_bytes().to_vec());
+        }
+        let mut idx = 0;
+
+        // Write batches
+        let epoch = 1;
+        let shared_buffer_items =
+            generate_and_write_batch(&keys, &[], epoch, &mut idx, &shared_buffer_manager);
+
+        // Get and check value with epoch 0..=epoch1
+        for (idx, key) in keys.iter().enumerate() {
+            assert_eq!(
+                shared_buffer_manager.get(key.as_slice(), ..=epoch).unwrap(),
+                shared_buffer_items[idx].1
+            );
+        }
+
+        // Reset shared buffer. Expect all keys are gone.
+        shared_buffer_manager.reset(epoch);
+        for item in &shared_buffer_items {
+            assert_eq!(shared_buffer_manager.get(item.0.as_slice(), ..=epoch), None);
+        }
+
+        // Generate new items overlapping with old items and check
+        keys.push(format!("key_test_{:05}", 100).as_bytes().to_vec());
+        let epoch = 1;
+        let new_shared_buffer_items =
+            generate_and_write_batch(&keys, &[], epoch, &mut idx, &shared_buffer_manager);
+        for (idx, key) in keys.iter().enumerate() {
+            assert_eq!(
+                shared_buffer_manager.get(key.as_slice(), ..=epoch).unwrap(),
+                new_shared_buffer_items[idx].1
+            );
+        }
     }
 }
