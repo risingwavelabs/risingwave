@@ -289,6 +289,9 @@ impl CompactStatus {
         }
     }
 
+    /// Return (Vec<table info to add>, Vec<table id to delete>)
+    /// Both Vec would be empty if the task is either cancelled, or it has already been reported
+    /// previously.
     #[allow(clippy::needless_collect)]
     pub fn report_compact_task(
         &mut self,
@@ -305,6 +308,10 @@ impl CompactStatus {
                             .pop_task_input(compact_task.task_id)
                             .into_iter(),
                     );
+                }
+                if delete_table_ids.is_empty() {
+                    // The task already has been reported previously.
+                    return (vec![], vec![]);
                 }
                 match &mut self.level_handlers[compact_task.target_level as usize] {
                     LevelHandler::Overlapping(l_n, _) | LevelHandler::Nonoverlapping(l_n, _) => {

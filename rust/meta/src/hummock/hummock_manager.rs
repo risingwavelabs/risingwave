@@ -392,6 +392,8 @@ where
         }
     }
 
+    /// `report_compact_task` is retryable. task_id in compact_task parameter is used as the
+    /// idempotency key.
     pub async fn report_compact_task(
         &self,
         compact_task: CompactTask,
@@ -411,6 +413,10 @@ where
             compact_task,
             task_result,
         );
+        if delete_table_ids.is_empty() {
+            // The task already has been reported previously.
+            return Ok(());
+        }
         compact_status.update_in_transaction(&mut transaction);
         let versioning_guard = self.versioning.write().await;
         if task_result {
