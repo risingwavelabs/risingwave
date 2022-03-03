@@ -44,7 +44,9 @@ impl PlanTreeNodeUnary for LogicalFilter {
 impl_plan_tree_node_for_unary! {LogicalFilter}
 impl fmt::Display for LogicalFilter {
     fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
-        todo!()
+        _f.debug_struct("LogicalFilter")
+            .field("predicate", &self.predicate)
+            .finish()
     }
 }
 impl WithOrder for LogicalFilter {}

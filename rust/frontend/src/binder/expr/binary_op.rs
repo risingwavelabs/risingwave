@@ -19,6 +19,10 @@ impl Binder {
             BinaryOperator::Multiply => ExprType::Multiply,
             BinaryOperator::Divide => ExprType::Divide,
             BinaryOperator::Modulo => ExprType::Modulus,
+            BinaryOperator::Lt => ExprType::LessThan,
+            BinaryOperator::LtEq => ExprType::LessThanOrEqual,
+            BinaryOperator::Gt => ExprType::GreaterThan,
+            BinaryOperator::GtEq => ExprType::GreaterThanOrEqual,
             _ => return Err(ErrorCode::NotImplementedError(format!("{:?}", op)).into()),
         };
         let desc = format!(

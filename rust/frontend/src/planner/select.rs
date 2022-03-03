@@ -1,26 +1,26 @@
 use risingwave_common::error::Result;
-use crate::expr::ExprImpl;
+
 use crate::binder::BoundSelect;
+use crate::expr::ExprImpl;
+pub use crate::optimizer::plan_node::LogicalFilter;
 use crate::optimizer::plan_node::PlanRef;
 use crate::planner::Planner;
-pub use crate::optimizer::plan_node::LogicalFilter;
 impl Planner {
     pub(super) fn plan_select(&mut self, select: BoundSelect) -> Result<PlanRef> {
         let mut root = match select.from {
             None => self.create_dummy_values()?,
             Some(t) => self.plan_table_ref(t)?,
         };
-        // root= self.plan_local_filter(root, select.selection.unwrap())?;
-        root= match select.selection {
-            None=>root,
-            Some(t)=>self.plan_local_filter(root, t)?,
+        root = match select.selection {
+            None => root,
+            Some(t) => self.plan_local_filter(root, t)?,
         };
-        // mut root with LogicalFilter and LogicalProject here
+        // mut root with LogicalProject here
         Ok(root)
     }
     pub(super) fn plan_local_filter(
         &mut self,
-        TableRef: PlanRef, 
+        TableRef: PlanRef,
         predicate: ExprImpl,
     ) -> Result<PlanRef> {
         LogicalFilter::create(TableRef, predicate)

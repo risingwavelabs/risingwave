@@ -13,8 +13,10 @@
 
 - sql: |
     create table t (v1 bigint, v2 double precision);
-    select * from t where v1>3;
-
+    select * from t where 1<2;
+  plan: |
+    LogicalFilter { predicate: Condition { conjunctions: [FunctionCall(FunctionCall { func_type: LessThan, return_type: Boolean, inputs: [Literal(Literal { data: Some(Int32(1)), data_type: Int32 }), Literal(Literal { data: Some(Int32(2)), data_type: Int32 })] })] } }
+      LogicalScan { table: "t", columns: ["_row_id", "v1", "v2"] }
 
 - sql: |
     create table t (v1 int, v2 int);
