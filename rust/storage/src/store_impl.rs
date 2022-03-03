@@ -86,7 +86,7 @@ impl StateStoreImpl {
                     }
                 };
 
-                let sstable_manager = Arc::new(SstableManager::new(
+                let sstable_manager = Arc::new(SstableStore::new(
                     object_store,
                     config.data_directory.to_string(),
                 ));
