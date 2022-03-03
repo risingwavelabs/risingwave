@@ -1,7 +1,5 @@
 package com.risingwave.planner;
 
-import static com.risingwave.common.config.BatchPlannerConfigurations.OPTIMIZER_ENABLE_CALCITE_SUBQUERY_EXPAND;
-
 import com.risingwave.planner.program.HepOptimizerProgram;
 import com.risingwave.planner.program.OptimizerProgram;
 import com.risingwave.planner.rules.logical.subquery.JoinPushExpressionsRule;
