@@ -4,7 +4,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::array::Row;
-use risingwave_common::catalog::{ColumnId, Field, Schema};
+use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::Datum;
 use risingwave_common::util::ordered::*;
@@ -13,7 +13,20 @@ use risingwave_common::util::sort_util::OrderType;
 use super::TableIterRef;
 use crate::cell_based_row_deserializer::CellBasedRowDeserializer;
 use crate::table::{ScannableTable, TableIter};
-use crate::{Keyspace, StateStore, TableColumnDesc};
+use crate::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl, TableColumnDesc};
+
+pub fn new_adhoc_mview_table(
+    state_store: StateStoreImpl,
+    table_id: &TableId,
+    column_ids: &[ColumnId],
+    fields: &[Field],
+) -> Arc<dyn ScannableTable> {
+    dispatch_state_store!(state_store, state_store, {
+        let keyspace = Keyspace::table_root(state_store, table_id);
+        let table = MViewTable::new_adhoc(keyspace, &column_ids, &fields);
+        Arc::new(table) as Arc<dyn ScannableTable>
+    })
+}
 
 /// `MViewTable` provides a readable cell-based row table interface,
 /// so that data can be queried by AP engine.
@@ -24,8 +37,10 @@ pub struct MViewTable<S: StateStore> {
 
     column_descs: Vec<TableColumnDesc>,
 
+    // TODO(bugen): this field is redundant since table should be read-only
     pk_columns: Vec<usize>,
 
+    // TODO(bugen): this field is redundant since table should be read-only
     sort_key_serializer: OrderedRowSerializer,
 }
 
@@ -90,6 +105,23 @@ impl<S: StateStore> MViewTable<S> {
         }
     }
 
+    pub fn new_adhoc(keyspace: Keyspace<S>, column_ids: &[ColumnId], fields: &[Field]) -> Self {
+        let schema = Schema::new(fields.to_vec());
+        let column_descs = column_ids
+            .iter()
+            .zip_eq(fields.iter())
+            .map(|(column_id, field)| TableColumnDesc::unnamed(*column_id, field.data_type.clone()))
+            .collect();
+
+        Self {
+            keyspace,
+            schema,
+            column_descs,
+            pk_columns: vec![],
+            sort_key_serializer: OrderedRowSerializer::new(vec![]),
+        }
+    }
+
     // TODO(MrCroxx): Refactor this after statestore iter is finished.
     // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`
     async fn iter(&self, epoch: u64) -> Result<MViewTableIter<S>> {
@@ -106,6 +138,7 @@ impl<S: StateStore> MViewTable<S> {
     // TODO(MrCroxx): More interfaces are needed besides cell get.
     // The returned Datum is from a snapshot corresponding to the given `epoch`
     // TODO(eric): remove this...
+    // TODO(bugen): remove this...
     pub async fn get(&self, pk: Row, cell_idx: usize, epoch: u64) -> Result<Option<Datum>> {
         debug_assert!(cell_idx < self.schema.len());
         // TODO(MrCroxx): More efficient encoding is needed.

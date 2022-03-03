@@ -171,11 +171,10 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     // Since we have not polled `Materialize`, we cannot scan anything from this table
     let table = table_manager.get_table(&mview_id)?;
-    let data_column_ids = vec![0, 1];
+    // let data_column_ids = vec![0, 1];
 
     let mut scan = RowSeqScanExecutor::new(
         table.clone(),
-        data_column_ids.clone(),
         1024,
         true,
         "RowSeqExecutor".to_string(),
@@ -216,7 +215,6 @@ async fn test_table_v2_materialize() -> Result<()> {
     // Scan the table again, we are able to get the data now!
     let mut scan = RowSeqScanExecutor::new(
         table.clone(),
-        data_column_ids.clone(),
         1024,
         true,
         "RowSeqScanExecutor".to_string(),

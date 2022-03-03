@@ -31,28 +31,6 @@ impl AsRef<dyn Any> for SimpleTableManager {
 
 #[async_trait::async_trait]
 impl TableManager for SimpleTableManager {
-    async fn create_table_v2(
-        &self,
-        table_id: &TableId,
-        table_columns: Vec<TableColumnDesc>,
-    ) -> Result<ScannableTableRef> {
-        let mut tables = self.lock_tables();
-
-        ensure!(
-            !tables.contains_key(table_id),
-            "Table id already exists: {:?}",
-            table_id
-        );
-
-        let table = dispatch_state_store!(self.state_store(), store, {
-            let keyspace = Keyspace::table_root(store, table_id);
-            Arc::new(MViewTable::new_batch(keyspace, table_columns)) as ScannableTableRef
-        });
-        tables.insert(*table_id, table.clone());
-
-        Ok(table)
-    }
-
     fn get_table(&self, table_id: &TableId) -> Result<ScannableTableRef> {
         let tables = self.lock_tables();
         tables
@@ -62,14 +40,14 @@ impl TableManager for SimpleTableManager {
     }
 
     // TODO: the data in StateStore should also be dropped directly/through unpin or some other way.
-    async fn drop_table(&self, table_id: &TableId) -> Result<()> {
-        let mut tables = self.lock_tables();
-        ensure!(
-            tables.contains_key(table_id),
-            "Table does not exist: {:?}",
-            table_id
-        );
-        tables.remove(table_id);
+    async fn drop_table(&self, _table_id: &TableId) -> Result<()> {
+        // let mut tables = self.lock_tables();
+        // ensure!(
+        //     tables.contains_key(table_id),
+        //     "Table does not exist: {:?}",
+        //     table_id
+        // );
+        // tables.remove(table_id);
         Ok(())
     }
 

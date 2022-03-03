@@ -4,6 +4,7 @@ use std::sync::Arc;
 use risingwave_common::config::BatchConfig;
 use risingwave_source::{SourceManager, SourceManagerRef};
 use risingwave_storage::table::{TableManager, TableManagerRef};
+use risingwave_storage::StateStoreImpl;
 
 use crate::task::BatchManager;
 
@@ -30,6 +31,8 @@ pub struct BatchEnvironment {
 
     /// Current worker node id.
     worker_id: WorkerNodeId,
+
+    state_store: StateStoreImpl,
 }
 
 impl BatchEnvironment {
@@ -40,6 +43,7 @@ impl BatchEnvironment {
         server_addr: SocketAddr,
         config: Arc<BatchConfig>,
         worker_id: WorkerNodeId,
+        state_store: StateStoreImpl,
     ) -> Self {
         BatchEnvironment {
             table_manager,
@@ -48,6 +52,7 @@ impl BatchEnvironment {
             source_manager,
             config,
             worker_id,
+            state_store,
         }
     }
 
@@ -64,6 +69,7 @@ impl BatchEnvironment {
             source_manager: std::sync::Arc::new(MemSourceManager::new()),
             config: Arc::new(BatchConfig::default()),
             worker_id: WorkerNodeId::default(),
+            state_store: StateStoreImpl::shared_in_memory_store(),
         }
     }
 
@@ -97,5 +103,9 @@ impl BatchEnvironment {
 
     pub fn worker_id(&self) -> WorkerNodeId {
         self.worker_id
+    }
+
+    pub fn state_store(&self) -> StateStoreImpl {
+        self.state_store.clone()
     }
 }

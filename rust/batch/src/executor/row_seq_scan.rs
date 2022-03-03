@@ -2,10 +2,12 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
-use risingwave_common::catalog::{Schema, TableId};
+use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::error::Result;
 use risingwave_pb::plan::plan_node::NodeBody;
+use risingwave_storage::table::mview::{new_adhoc_mview_table, MViewTable};
 use risingwave_storage::table::{ScannableTable, TableIterRef};
+use risingwave_storage::{dispatch_state_store, Keyspace, StateStoreImpl};
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::executor::{Executor, ExecutorBuilder};
@@ -17,8 +19,6 @@ pub struct RowSeqScanExecutor {
     iter: Option<TableIterRef>,
     primary: bool,
 
-    column_ids: Vec<i32>,
-    column_indices: Vec<usize>,
     chunk_size: usize,
     schema: Schema,
     identity: String,
@@ -32,31 +32,17 @@ impl RowSeqScanExecutor {
 
     pub fn new(
         table: Arc<dyn ScannableTable>,
-        column_ids: Vec<i32>,
         chunk_size: usize,
         primary: bool,
         identity: String,
         epoch: u64,
     ) -> Self {
-        // Currently row_id for table_v2 is totally a mess, we override this function to match the
-        // behavior of column ids of mviews.
-        // FIXME: remove this hack
-        let column_indices = column_ids.iter().map(|&id| id as usize).collect_vec();
-
-        let table_schema = table.schema();
-        let schema = Schema::new(
-            column_indices
-                .iter()
-                .map(|idx| table_schema.fields().get(*idx).cloned().unwrap())
-                .collect_vec(),
-        );
+        let schema = table.schema().into_owned();
 
         Self {
             table,
             iter: None,
             primary,
-            column_ids,
-            column_indices,
             chunk_size,
             schema,
             identity,
@@ -84,17 +70,26 @@ impl BoxedExecutorBuilder for RowSeqScanExecutor {
         )?;
 
         let table_id = TableId::from(&seq_scan_node.table_ref_id);
+        let column_ids = seq_scan_node
+            .column_ids
+            .iter()
+            .map(|column_id| ColumnId::new(*column_id))
+            .collect_vec();
+        let fields = seq_scan_node
+            .fields
+            .iter()
+            .map(|field| Field::from(field))
+            .collect_vec();
 
-        let table = source
-            .global_batch_env()
-            .table_manager()
-            .get_table(&table_id)?;
-
-        let column_ids = seq_scan_node.get_column_ids().clone();
+        let table = new_adhoc_mview_table(
+            source.global_batch_env().state_store(),
+            &table_id,
+            &column_ids,
+            &fields,
+        );
 
         Ok(Box::new(Self::new(
             table,
-            column_ids,
             Self::DEFAULT_CHUNK_SIZE,
             source.task_id.task_id == 0,
             source.plan_node().get_identity().clone(),
@@ -122,8 +117,9 @@ impl Executor for RowSeqScanExecutor {
 
         let iter = self.iter.as_mut().expect("executor not open");
 
+        let column_indices = (0..self.table.schema().len()).collect_vec();
         self.table
-            .collect_from_iter(iter, &self.column_indices, Some(self.chunk_size))
+            .collect_from_iter(iter, &column_indices, Some(self.chunk_size))
             .await
     }
 

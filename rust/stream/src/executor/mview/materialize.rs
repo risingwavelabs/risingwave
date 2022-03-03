@@ -54,13 +54,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
             .map(|id| ColumnId::from(*id))
             .collect();
 
-        let keyspace = if node.associated_table_ref_id.is_some() {
-            // share the keyspace between mview and table v2
-            let associated_table_id = TableId::from(&node.associated_table_ref_id);
-            Keyspace::table_root(store, &associated_table_id)
-        } else {
-            Keyspace::table_root(store, &table_id)
-        };
+        let keyspace = Keyspace::table_root(store, &table_id);
 
         Ok(Box::new(MaterializeExecutor::new(
             params.input.remove(0),

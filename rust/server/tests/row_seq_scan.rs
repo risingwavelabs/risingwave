@@ -3,6 +3,7 @@ use std::sync::Arc;
 extern crate risingwave;
 extern crate risingwave_batch;
 
+use itertools::Itertools;
 use risingwave_batch::executor::{Executor, RowSeqScanExecutor};
 use risingwave_common::array::{Array, Row};
 use risingwave_common::catalog::{ColumnId, Field, Schema};
@@ -25,26 +26,19 @@ async fn test_row_seq_scan() -> Result<()> {
         Field::unnamed(DataType::Int64),
     ]);
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
-    let pk_columns = vec![0];
-    let orderings = vec![OrderType::Ascending];
+    // let pk_columns = vec![0];
+    // let orderings = vec![OrderType::Ascending];
     let mut state =
         ManagedMViewState::new(keyspace.clone(), column_ids, vec![OrderType::Ascending]);
 
-    let table = Arc::new(MViewTable::new(
+    let table = Arc::new(MViewTable::new_adhoc(
         keyspace.clone(),
-        schema.clone(),
-        pk_columns.clone(),
-        orderings,
+        &[ColumnId::from(0), ColumnId::from(1)],
+        &schema.fields().iter().take(2).cloned().collect_vec(),
     ));
 
-    let mut executor = RowSeqScanExecutor::new(
-        table,
-        vec![0, 1],
-        1,
-        true,
-        "RowSeqScanExecutor".to_string(),
-        u64::MAX,
-    );
+    let mut executor =
+        RowSeqScanExecutor::new(table, 1, true, "RowSeqScanExecutor".to_string(), u64::MAX);
 
     let epoch: u64 = 0;
     state.put(

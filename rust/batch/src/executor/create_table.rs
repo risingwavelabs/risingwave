@@ -84,10 +84,10 @@ impl Executor for CreateTableExecutor {
             Info::TableSource(_) => {
                 // Create table_v2.
                 info!("Create table id:{}", &self.table_id.table_id());
-                let _table = self
-                    .table_manager
-                    .create_table_v2(&self.table_id, table_columns.clone())
-                    .await?;
+                // let _table = self
+                //     .table_manager
+                //     .create_table_v2(&self.table_id, table_columns.clone())
+                //     .await?;
                 self.source_manager
                     .create_table_source_v2(&self.table_id, table_columns)?;
             }
@@ -100,10 +100,10 @@ impl Executor for CreateTableExecutor {
                         self.table_id, associated_table_id
                     );
 
-                    self.table_manager.register_associated_materialized_view(
-                        &associated_table_id,
-                        &self.table_id,
-                    )?;
+                    // self.table_manager.register_associated_materialized_view(
+                    //     &associated_table_id,
+                    //     &self.table_id,
+                    // )?;
                     self.source_manager.register_associated_materialized_view(
                         &associated_table_id,
                         &self.table_id,

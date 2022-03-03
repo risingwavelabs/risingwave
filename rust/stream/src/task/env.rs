@@ -4,6 +4,7 @@ use std::sync::Arc;
 use risingwave_common::config::StreamingConfig;
 use risingwave_source::{SourceManager, SourceManagerRef};
 use risingwave_storage::table::{TableManager, TableManagerRef};
+use risingwave_storage::StateStoreImpl;
 
 pub(crate) type WorkerNodeId = u32;
 
@@ -25,6 +26,8 @@ pub struct StreamEnvironment {
 
     /// Current worker node id.
     worker_id: WorkerNodeId,
+
+    state_store: StateStoreImpl,
 }
 
 impl StreamEnvironment {
@@ -34,6 +37,7 @@ impl StreamEnvironment {
         server_addr: SocketAddr,
         config: Arc<StreamingConfig>,
         worker_id: WorkerNodeId,
+        state_store: StateStoreImpl,
     ) -> Self {
         StreamEnvironment {
             table_manager,
@@ -41,6 +45,7 @@ impl StreamEnvironment {
             source_manager,
             config,
             worker_id,
+            state_store,
         }
     }
 
@@ -56,6 +61,7 @@ impl StreamEnvironment {
             source_manager: Arc::new(MemSourceManager::new()),
             config: Arc::new(StreamingConfig::default()),
             worker_id: WorkerNodeId::default(),
+            state_store: StateStoreImpl::shared_in_memory_store(),
         }
     }
 
@@ -85,5 +91,9 @@ impl StreamEnvironment {
 
     pub fn worker_id(&self) -> WorkerNodeId {
         self.worker_id
+    }
+
+    pub fn state_store(&self) -> StateStoreImpl {
+        self.state_store.clone()
     }
 }

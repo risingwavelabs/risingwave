@@ -1,11 +1,12 @@
 use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::{Op, RwError, StreamChunk};
-use risingwave_common::catalog::{Schema, TableId};
+use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_storage::table::mview::new_adhoc_mview_table;
 use risingwave_storage::table::{ScannableTableRef, TableIterRef};
 use risingwave_storage::StateStore;
 
@@ -54,8 +55,24 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
     ) -> Result<Box<dyn Executor>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::BatchPlanNode)?;
         let table_id = TableId::from(&node.table_ref_id);
-        let table_manager = params.env.table_manager();
-        let table = table_manager.get_table(&table_id)?;
+
+        let column_ids = node
+            .column_ids
+            .iter()
+            .map(|column_id| ColumnId::new(*column_id))
+            .collect_vec();
+        let fields = node
+            .fields
+            .iter()
+            .map(|field| Field::from(field))
+            .collect_vec();
+
+        let table = new_adhoc_mview_table(
+            params.env.state_store(),
+            &table_id,
+            &column_ids,
+            &fields,
+        );
 
         Ok(Box::new(BatchQueryExecutor::new(
             table.clone(),
