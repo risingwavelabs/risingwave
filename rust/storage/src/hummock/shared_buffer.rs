@@ -301,13 +301,13 @@ impl SharedBufferManager {
         self.uploader_handle.await.unwrap()
     }
 
-    pub fn reset(&mut self) {
-        // Reset uploader item
+    pub fn reset(&mut self, epoch: u64) {
+        // Reset uploader item.
         self.uploader_tx
-            .send(SharedBufferUploaderItem::Reset)
+            .send(SharedBufferUploaderItem::Reset(epoch))
             .unwrap();
-        // Clear shared buffer
-        self.shared_buffer.write().clear();
+        // Remove items of the given epoch from shared buffer
+        self.shared_buffer.write().remove(&epoch);
     }
 }
 
@@ -324,7 +324,7 @@ pub struct SyncItem {
 pub enum SharedBufferUploaderItem {
     Batch(SharedBufferBatch),
     Sync(SyncItem),
-    Reset,
+    Reset(u64),
 }
 
 pub struct SharedBufferUploader {
@@ -445,8 +445,8 @@ impl SharedBufferUploader {
                 }
                 Ok(())
             }
-            SharedBufferUploaderItem::Reset => {
-                self.batches_to_upload.clear();
+            SharedBufferUploaderItem::Reset(epoch) => {
+                self.batches_to_upload.remove(&epoch);
                 Ok(())
             }
         }
@@ -1034,7 +1034,7 @@ mod tests {
         }
 
         // Reset shared buffer. Expect all keys are gone.
-        shared_buffer_manager.reset();
+        shared_buffer_manager.reset(epoch);
         for item in &shared_buffer_items {
             assert_eq!(shared_buffer_manager.get(item.0.as_slice(), ..=epoch), None);
         }
