@@ -51,8 +51,7 @@ impl CellBasedRowDeserializer {
         if cell_id == NULL_ROW_SPECIAL_CELL_ID {
             // do nothing
         } else {
-            // We remark here that column_id may not be monotonically increasing, so `!=` instead of
-            // `<` is needed here.
+            // FIXME: generate a mapping from column_id or cell_id to index.
             let data_type = &self.table_column_descs[cell_id as usize].data_type;
             let datum = deserialize_cell(cell, data_type)?;
             assert!(self.data.get(cell_id as usize).unwrap().is_none());
@@ -62,12 +61,11 @@ impl CellBasedRowDeserializer {
     }
 
     pub fn take(&mut self) -> Option<(Vec<u8>, Row)> {
-        if self.pk_bytes.is_none() {
-            return None;
-        }
-        let cur_pk_bytes = self.pk_bytes.take().unwrap();
-        let ret = self.data.iter_mut().map(std::mem::take).collect::<Vec<_>>();
-        Some((cur_pk_bytes, Row(ret)))
+        let cur_pk_bytes = self.pk_bytes.take();
+        cur_pk_bytes.map(|bytes| {
+            let ret = self.data.iter_mut().map(std::mem::take).collect::<Vec<_>>();
+            (bytes, Row(ret))
+        })
     }
 }
 
@@ -86,9 +84,9 @@ mod tests {
     fn test_cell_based_deserializer() {
         let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
         let table_column_descs = vec![
-            TableColumnDesc::unnamed(column_ids[0].clone(), DataType::Char),
-            TableColumnDesc::unnamed(column_ids[1].clone(), DataType::Int32),
-            TableColumnDesc::unnamed(column_ids[2].clone(), DataType::Int64),
+            TableColumnDesc::unnamed(column_ids[0], DataType::Char),
+            TableColumnDesc::unnamed(column_ids[1], DataType::Int32),
+            TableColumnDesc::unnamed(column_ids[2], DataType::Int64),
         ];
         let pk1 = vec![0u8, 0u8, 0u8, 0u8];
         let pk2 = vec![0u8, 0u8, 0u8, 1u8];
