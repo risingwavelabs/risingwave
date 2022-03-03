@@ -9,12 +9,15 @@ use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{Database, Schema, SubscribeResponse, Table};
 use risingwave_rpc_client::MetaClient;
+use tokio::sync::watch::Sender;
 use tokio::task::JoinHandle;
 use tonic::Streaming;
 
 use crate::catalog::catalog_service::CatalogCache;
 use crate::catalog::{CatalogError, DatabaseId, SchemaId};
 use crate::scheduler::schedule::WorkerNodeManagerRef;
+
+pub const UPDATE_FINISH_NOTIFICATION: i32 = 0;
 
 /// `ObserverManager` is used to update data based on notification from meta.
 /// Call `start` to spawn a new asynchronous task
@@ -23,6 +26,7 @@ pub(crate) struct ObserverManager {
     rx: Streaming<SubscribeResponse>,
     worker_node_manager: WorkerNodeManagerRef,
     catalog_cache: Arc<RwLock<CatalogCache>>,
+    catalog_updated_tx: Sender<i32>,
 }
 
 impl ObserverManager {
@@ -31,12 +35,14 @@ impl ObserverManager {
         addr: SocketAddr,
         worker_node_manager: WorkerNodeManagerRef,
         catalog_cache: Arc<RwLock<CatalogCache>>,
+        catalog_updated_tx: Sender<i32>,
     ) -> Self {
         let rx = client.subscribe(addr, WorkerType::Frontend).await.unwrap();
         Self {
             rx,
             worker_node_manager,
             catalog_cache,
+            catalog_updated_tx,
         }
     }
 
@@ -106,12 +112,16 @@ impl ObserverManager {
                 .catalog_cache
                 .write()
                 .unwrap()
-                .create_database(db_name, db_id),
-            Operation::Delete => self.catalog_cache.write().unwrap().drop_database(db_name),
+                .create_database(db_name, db_id)?,
+            Operation::Delete => self.catalog_cache.write().unwrap().drop_database(db_name)?,
             _ => Err(RwError::from(InternalError(
                 "Unsupported operation.".to_string(),
-            ))),
+            )))?,
         }
+
+        self.catalog_updated_tx
+            .send(UPDATE_FINISH_NOTIFICATION)
+            .map_err(|e| RwError::from(InternalError(e.to_string())))
     }
 
     /// `update_schema` is called in `start` method.
@@ -133,21 +143,24 @@ impl ObserverManager {
         let schema_id = schema_ref_id.schema_id as SchemaId;
 
         match operation {
-            Operation::Add => {
-                self.catalog_cache
-                    .write()
-                    .unwrap()
-                    .create_schema(&db_name, schema_name, schema_id)
-            }
+            Operation::Add => self.catalog_cache.write().unwrap().create_schema(
+                &db_name,
+                schema_name,
+                schema_id,
+            )?,
             Operation::Delete => self
                 .catalog_cache
                 .write()
                 .unwrap()
-                .drop_schema(&db_name, schema_name),
+                .drop_schema(&db_name, schema_name)?,
             _ => Err(RwError::from(InternalError(
                 "Unsupported operation.".to_string(),
-            ))),
+            )))?,
         }
+
+        self.catalog_updated_tx
+            .send(UPDATE_FINISH_NOTIFICATION)
+            .map_err(|e| RwError::from(InternalError(e.to_string())))
     }
 
     /// `update_table` is called in `start` method.
@@ -180,16 +193,20 @@ impl ObserverManager {
                 self.catalog_cache
                     .write()
                     .unwrap()
-                    .create_table(&db_name, &schema_name, &table)
+                    .create_table(&db_name, &schema_name, &table)?
             }
             Operation::Delete => self.catalog_cache.write().unwrap().drop_table(
                 &db_name,
                 &schema_name,
                 &table.table_name,
-            ),
+            )?,
             _ => Err(RwError::from(InternalError(
                 "Unsupported operation.".to_string(),
-            ))),
+            )))?,
         }
+
+        self.catalog_updated_tx
+            .send(UPDATE_FINISH_NOTIFICATION)
+            .map_err(|e| RwError::from(InternalError(e.to_string())))
     }
 }

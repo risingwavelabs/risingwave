@@ -6,13 +6,14 @@ use risingwave_common::error::Result;
 use risingwave_pb::common::WorkerType;
 use risingwave_rpc_client::MetaClient;
 use risingwave_sqlparser::parser::Parser;
+use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 use crate::catalog::catalog_service::{
     CatalogCache, CatalogConnector, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
 };
 use crate::handler::handle;
-use crate::observer::observer_manager::ObserverManager;
+use crate::observer::observer_manager::{ObserverManager, UPDATE_FINISH_NOTIFICATION};
 use crate::scheduler::schedule::WorkerNodeManager;
 use crate::FrontendOpts;
 
@@ -32,8 +33,13 @@ impl FrontendEnv {
         // Register in meta by calling `AddWorkerNode` RPC.
         meta_client.register(host, WorkerType::Frontend).await?;
 
+        let (catalog_updated_tx, catalog_updated_rx) = watch::channel(UPDATE_FINISH_NOTIFICATION);
         let catalog_cache = Arc::new(RwLock::new(CatalogCache::new(meta_client.clone()).await?));
-        let catalog_manager = CatalogConnector::new(meta_client.clone(), catalog_cache.clone());
+        let catalog_manager = CatalogConnector::new(
+            meta_client.clone(),
+            catalog_cache.clone(),
+            catalog_updated_rx,
+        );
 
         let worker_node_manager = Arc::new(WorkerNodeManager::new(meta_client.clone()).await?);
 
@@ -42,6 +48,7 @@ impl FrontendEnv {
             host,
             worker_node_manager,
             catalog_cache,
+            catalog_updated_tx,
         )
         .await;
         let observer_join_handle = observer_manager.start();
@@ -78,8 +85,13 @@ impl FrontendEnv {
         // Register in meta by calling `AddWorkerNode` RPC.
         meta_client.register(host, WorkerType::Frontend).await?;
 
+        let (catalog_updated_tx, catalog_updated_rx) = watch::channel(UPDATE_FINISH_NOTIFICATION);
         let catalog_cache = Arc::new(RwLock::new(CatalogCache::new(meta_client.clone()).await?));
-        let catalog_manager = CatalogConnector::new(meta_client.clone(), catalog_cache.clone());
+        let catalog_manager = CatalogConnector::new(
+            meta_client.clone(),
+            catalog_cache.clone(),
+            catalog_updated_rx,
+        );
 
         let worker_node_manager = Arc::new(WorkerNodeManager::new(meta_client.clone()).await?);
 
@@ -88,6 +100,7 @@ impl FrontendEnv {
             host,
             worker_node_manager,
             catalog_cache,
+            catalog_updated_tx,
         )
         .await;
         let observer_join_handle = observer_manager.start();

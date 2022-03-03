@@ -298,16 +298,18 @@ mod tests {
 
     use risingwave_meta::test_utils::LocalMeta;
     use risingwave_pb::common::{HostAddress, WorkerType};
+    use tokio::sync::watch;
 
     use super::WorkerNodeManager;
     use crate::catalog::catalog_service::CatalogCache;
-    use crate::observer::observer_manager::ObserverManager;
+    use crate::observer::observer_manager::{ObserverManager, UPDATE_FINISH_NOTIFICATION};
 
     #[tokio::test]
     async fn test_add_and_delete_worker_node() {
         let meta = LocalMeta::start(12009).await;
         let mut meta_client = meta.create_client().await;
 
+        let (catalog_updated_tx, _) = watch::channel(UPDATE_FINISH_NOTIFICATION);
         let catalog_cache = Arc::new(RwLock::new(
             CatalogCache::new(meta_client.clone()).await.unwrap(),
         ));
@@ -319,6 +321,7 @@ mod tests {
             "127.0.0.1:12345".parse().unwrap(),
             worker_node_manager.clone(),
             catalog_cache,
+            catalog_updated_tx,
         )
         .await;
         let observer_join_handle = observer_manager.start();

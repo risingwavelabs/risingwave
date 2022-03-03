@@ -1,15 +1,14 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use std::time::Duration;
 
-use log::info;
 use risingwave_common::array::RwError;
+use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_pb::meta::{Catalog, Database, Schema, Table};
 use risingwave_pb::plan::{ColumnDesc, DatabaseRefId, SchemaRefId, TableRefId};
 use risingwave_rpc_client::MetaClient;
-use tokio::time;
+use tokio::sync::watch::Receiver;
 
 use crate::catalog::database_catalog::DatabaseCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
@@ -189,13 +188,19 @@ impl TryFrom<Catalog> for CatalogCache {
 pub struct CatalogConnector {
     meta_client: MetaClient,
     catalog_cache: Arc<RwLock<CatalogCache>>,
+    catalog_updated_rx: Receiver<i32>,
 }
 
 impl CatalogConnector {
-    pub fn new(meta_client: MetaClient, catalog_cache: Arc<RwLock<CatalogCache>>) -> Self {
+    pub fn new(
+        meta_client: MetaClient,
+        catalog_cache: Arc<RwLock<CatalogCache>>,
+        catalog_updated_rx: Receiver<i32>,
+    ) -> Self {
         Self {
             meta_client,
             catalog_cache,
+            catalog_updated_rx,
         }
     }
 
@@ -214,8 +219,11 @@ impl CatalogConnector {
             .get_database(db_name)
             .is_none()
         {
-            info!("Wait to create database: {}", db_name);
-            time::sleep(Duration::from_micros(10)).await;
+            self.catalog_updated_rx
+                .to_owned()
+                .changed()
+                .await
+                .map_err(|e| RwError::from(InternalError(e.to_string())))?;
         }
         Ok(())
     }
@@ -247,8 +255,11 @@ impl CatalogConnector {
             .get_schema(db_name, schema_name)
             .is_none()
         {
-            info!("Wait to create schema: {}", schema_name);
-            time::sleep(Duration::from_micros(10)).await;
+            self.catalog_updated_rx
+                .to_owned()
+                .changed()
+                .await
+                .map_err(|e| RwError::from(InternalError(e.to_string())))?;
         }
         Ok(())
     }
@@ -300,8 +311,11 @@ impl CatalogConnector {
             .get_table(db_name, schema_name, &table.table_name)
             .is_none()
         {
-            info!("Wait to create table: {}", table.table_name);
-            time::sleep(Duration::from_micros(10)).await;
+            self.catalog_updated_rx
+                .to_owned()
+                .changed()
+                .await
+                .map_err(|e| RwError::from(InternalError(e.to_string())))?;
         }
         Ok(())
     }
@@ -322,6 +336,19 @@ impl CatalogConnector {
 
         let table_ref_id = TableRefId::from(&table_id);
         self.meta_client.drop_table(table_ref_id).await?;
+        while self
+            .catalog_cache
+            .read()
+            .unwrap()
+            .get_table(db_name, schema_name, table_name)
+            .is_some()
+        {
+            self.catalog_updated_rx
+                .to_owned()
+                .changed()
+                .await
+                .map_err(|e| RwError::from(InternalError(e.to_string())))?;
+        }
         Ok(())
     }
 
@@ -348,6 +375,19 @@ impl CatalogConnector {
             schema_id,
         };
         self.meta_client.drop_schema(schema_ref_id).await?;
+        while self
+            .catalog_cache
+            .read()
+            .unwrap()
+            .get_schema(db_name, schema_name)
+            .is_some()
+        {
+            self.catalog_updated_rx
+                .to_owned()
+                .changed()
+                .await
+                .map_err(|e| RwError::from(InternalError(e.to_string())))?;
+        }
         Ok(())
     }
 
@@ -361,6 +401,19 @@ impl CatalogConnector {
             .id() as i32;
         let database_ref_id = DatabaseRefId { database_id };
         self.meta_client.drop_database(database_ref_id).await?;
+        while self
+            .catalog_cache
+            .read()
+            .unwrap()
+            .get_database(db_name)
+            .is_some()
+        {
+            self.catalog_updated_rx
+                .to_owned()
+                .changed()
+                .await
+                .map_err(|e| RwError::from(InternalError(e.to_string())))?;
+        }
         Ok(())
     }
 
@@ -413,11 +466,12 @@ mod tests {
     use risingwave_meta::test_utils::LocalMeta;
     use risingwave_pb::meta::table::Info;
     use risingwave_pb::plan::{ColumnDesc, TableSourceInfo};
+    use tokio::sync::watch;
 
     use crate::catalog::catalog_service::{
         CatalogCache, CatalogConnector, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
     };
-    use crate::observer::observer_manager::ObserverManager;
+    use crate::observer::observer_manager::{ObserverManager, UPDATE_FINISH_NOTIFICATION};
     use crate::scheduler::schedule::WorkerNodeManager;
 
     fn create_test_table(test_table_name: &str, columns: Vec<(String, DataType)>) -> Table {
@@ -446,10 +500,16 @@ mod tests {
         // Init meta and catalog.
         let meta = LocalMeta::start(12000).await;
         let mut meta_client = meta.create_client().await;
+
+        let (catalog_updated_tx, catalog_updated_rx) = watch::channel(UPDATE_FINISH_NOTIFICATION);
         let catalog_cache = Arc::new(RwLock::new(
             CatalogCache::new(meta_client.clone()).await.unwrap(),
         ));
-        let catalog_mgr = CatalogConnector::new(meta_client.clone(), catalog_cache.clone());
+        let catalog_mgr = CatalogConnector::new(
+            meta_client.clone(),
+            catalog_cache.clone(),
+            catalog_updated_rx,
+        );
 
         let worker_node_manager =
             Arc::new(WorkerNodeManager::new(meta_client.clone()).await.unwrap());
@@ -459,6 +519,7 @@ mod tests {
             "127.0.0.1:12345".parse().unwrap(),
             worker_node_manager,
             catalog_cache,
+            catalog_updated_tx,
         )
         .await;
         let observer_join_handle = observer_manager.start();
