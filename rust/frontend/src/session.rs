@@ -27,53 +27,8 @@ pub struct FrontendEnv {
 
 impl FrontendEnv {
     pub async fn init(opts: &FrontendOpts) -> Result<(Self, JoinHandle<()>)> {
-        let host = opts.host.parse().unwrap();
-        let mut meta_client = MetaClient::new(opts.meta_addr.clone().as_str()).await?;
-
-        // Register in meta by calling `AddWorkerNode` RPC.
-        meta_client.register(host, WorkerType::Frontend).await?;
-
-        let (catalog_updated_tx, catalog_updated_rx) = watch::channel(UPDATE_FINISH_NOTIFICATION);
-        let catalog_cache = Arc::new(RwLock::new(CatalogCache::new(meta_client.clone()).await?));
-        let catalog_manager = CatalogConnector::new(
-            meta_client.clone(),
-            catalog_cache.clone(),
-            catalog_updated_rx,
-        );
-
-        let worker_node_manager = Arc::new(WorkerNodeManager::new(meta_client.clone()).await?);
-
-        let observer_manager = ObserverManager::new(
-            meta_client.clone(),
-            host,
-            worker_node_manager,
-            catalog_cache,
-            catalog_updated_tx,
-        )
-        .await;
-        let observer_join_handle = observer_manager.start();
-
-        meta_client.activate(host).await?;
-
-        // Create default database when env init.
-        // TODO(Zehua) If two frontends start together, maybe both of them call `create_database`.
-        // One of them will fail to start because of duplicate error.
-        let db_name = DEFAULT_DATABASE_NAME;
-        let schema_name = DEFAULT_SCHEMA_NAME;
-        if catalog_manager.get_database(db_name).is_none() {
-            catalog_manager.create_database(db_name).await?;
-        }
-        if catalog_manager.get_schema(db_name, schema_name).is_none() {
-            catalog_manager.create_schema(db_name, schema_name).await?;
-        }
-
-        Ok((
-            Self {
-                meta_client,
-                catalog_manager,
-            },
-            observer_join_handle,
-        ))
+        let meta_client = MetaClient::new(opts.meta_addr.clone().as_str()).await?;
+        Self::with_meta_client(meta_client, opts).await
     }
 
     pub async fn with_meta_client(
@@ -141,7 +96,6 @@ pub struct RwSession {
 }
 
 impl RwSession {
-    #[cfg(test)]
     pub fn new(env: FrontendEnv, database: String) -> Self {
         Self { env, database }
     }
@@ -204,7 +158,6 @@ impl Session for RwSession {
 mod tests {
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_run_statement() {
         use std::ffi::OsString;
 

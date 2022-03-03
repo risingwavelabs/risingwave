@@ -296,18 +296,18 @@ mod tests {
     use std::sync::{Arc, RwLock};
     use std::time::Duration;
 
-    use risingwave_meta::test_utils::LocalMeta;
     use risingwave_pb::common::{HostAddress, WorkerType};
+    use risingwave_rpc_client::MetaClient;
     use tokio::sync::watch;
 
     use super::WorkerNodeManager;
     use crate::catalog::catalog_service::CatalogCache;
     use crate::observer::observer_manager::{ObserverManager, UPDATE_FINISH_NOTIFICATION};
+    use crate::test_utils::FrontendMockMetaClient;
 
     #[tokio::test]
     async fn test_add_and_delete_worker_node() {
-        let meta = LocalMeta::start(12009).await;
-        let mut meta_client = meta.create_client().await;
+        let mut meta_client = MetaClient::mock(FrontendMockMetaClient::new().await);
 
         let (catalog_updated_tx, _) = watch::channel(UPDATE_FINISH_NOTIFICATION);
         let catalog_cache = Arc::new(RwLock::new(
@@ -324,7 +324,7 @@ mod tests {
             catalog_updated_tx,
         )
         .await;
-        let observer_join_handle = observer_manager.start();
+        observer_manager.start();
 
         // Add worker node
         let socket_addr = "127.0.0.1:6789".parse().unwrap();
@@ -351,10 +351,5 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(100)).await;
         let worker_nodes = worker_node_manager.list_worker_nodes();
         assert_eq!(0, worker_nodes.len());
-
-        // Client should be shut down before meta stops. Otherwise it will get stuck in
-        // `join_handle.await` in `meta.stop()` because of graceful shutdown.
-        observer_join_handle.abort();
-        meta.stop().await;
     }
 }

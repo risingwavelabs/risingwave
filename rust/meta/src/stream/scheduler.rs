@@ -102,11 +102,7 @@ where
     /// The result `Vec<WorkerNode>` contains two parts.
     /// The first part is the schedule result of `actors`, the second part is the schedule result of
     /// `enforced_round_actors`.
-    pub fn schedule(
-        &self,
-        actors: &[ActorId],
-        enforce_round_actors: &[ActorId],
-    ) -> Result<ScheduledLocations> {
+    pub fn schedule(&self, actors: &[ActorId]) -> Result<ScheduledLocations> {
         let nodes = self.cluster_manager.list_worker_node(
             WorkerType::ComputeNode,
             Some(risingwave_pb::common::worker_node::State::Running),
@@ -114,22 +110,7 @@ where
         if nodes.is_empty() {
             return Err(InternalError("no available node exist".to_string()).into());
         }
-        // Assume that the number of actors to be forcefully scheduled by round robin is the same as
-        // the number of worker nodes.
-        if !enforce_round_actors.is_empty() && enforce_round_actors.len() % nodes.len() != 0 {
-            return Err(InternalError(
-                "the source actor number does not match worker number!".to_string(),
-            )
-            .into());
-        }
         let mut actor_locations = BTreeMap::new();
-        enforce_round_actors
-            .iter()
-            .enumerate()
-            .for_each(|(idx, actor)| {
-                actor_locations.insert(*actor, nodes[idx % nodes.len()].id);
-            });
-
         actors
             .iter()
             .enumerate()
@@ -169,7 +150,6 @@ mod test {
         let cluster_manager =
             Arc::new(StoredClusterManager::new(env.clone(), None, notification_manager).await?);
         let actors = (0..15).collect::<Vec<u32>>();
-        let source_actors = (20..30).collect::<Vec<u32>>();
         for i in 0..10 {
             let host = HostAddress {
                 host: "127.0.0.1".to_string(),
@@ -186,7 +166,7 @@ mod test {
         );
 
         let simple_schedule = Scheduler::new(ScheduleCategory::Simple, cluster_manager.clone());
-        let nodes = simple_schedule.schedule(&actors, &[])?;
+        let nodes = simple_schedule.schedule(&actors)?;
         assert_eq!(nodes.actor_locations.len(), actors.len());
         assert!(nodes
             .actor_locations
@@ -195,7 +175,7 @@ mod test {
 
         let round_bin_schedule =
             Scheduler::new(ScheduleCategory::RoundRobin, cluster_manager.clone());
-        let nodes = round_bin_schedule.schedule(&actors, &[])?;
+        let nodes = round_bin_schedule.schedule(&actors)?;
         assert_eq!(nodes.actor_locations.len(), actors.len());
         assert!(nodes
             .actor_locations
@@ -204,20 +184,8 @@ mod test {
             .all(|(idx, (_, &n))| n == workers[idx % workers.len()].id));
 
         let hash_schedule = Scheduler::new(ScheduleCategory::Hash, cluster_manager.clone());
-        let nodes = hash_schedule.schedule(&actors, &[])?;
+        let nodes = hash_schedule.schedule(&actors)?;
         assert_eq!(nodes.actor_locations.len(), actors.len());
-
-        let round_bin_schedule2 =
-            Scheduler::new(ScheduleCategory::RoundRobin, cluster_manager.clone());
-        let nodes = round_bin_schedule2.schedule(&actors, &source_actors)?;
-        assert_eq!(nodes.actor_locations.len(), 25);
-        assert!(actors.iter().enumerate().all(|(idx, actor)| {
-            nodes.actor_locations[actor] == workers[idx % workers.len()].id
-        }));
-        assert!(source_actors.iter().enumerate().all(|(idx, actor)| {
-            nodes.actor_locations[actor] == workers[idx % workers.len()].id
-        }));
-
         Ok(())
     }
 }

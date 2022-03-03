@@ -7,11 +7,10 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::{Database, Schema, SubscribeResponse, Table};
-use risingwave_rpc_client::MetaClient;
+use risingwave_pb::meta::{Database, Schema, Table};
+use risingwave_rpc_client::{MetaClient, NotificationStream};
 use tokio::sync::watch::Sender;
 use tokio::task::JoinHandle;
-use tonic::Streaming;
 
 use crate::catalog::catalog_service::CatalogCache;
 use crate::catalog::{CatalogError, DatabaseId, SchemaId};
@@ -23,7 +22,7 @@ pub const UPDATE_FINISH_NOTIFICATION: i32 = 0;
 /// Call `start` to spawn a new asynchronous task
 /// which receives meta's notification and update frontend's data.
 pub(crate) struct ObserverManager {
-    rx: Streaming<SubscribeResponse>,
+    rx: Box<dyn NotificationStream>,
     worker_node_manager: WorkerNodeManagerRef,
     catalog_cache: Arc<RwLock<CatalogCache>>,
     catalog_updated_tx: Sender<i32>,
@@ -51,7 +50,7 @@ impl ObserverManager {
     pub fn start(mut self) -> JoinHandle<()> {
         tokio::spawn(async move {
             loop {
-                if let Ok(resp) = self.rx.message().await {
+                if let Ok(resp) = self.rx.next().await {
                     if resp.is_none() {
                         error!("Stream of notification terminated.");
                         break;
@@ -114,9 +113,11 @@ impl ObserverManager {
                 .unwrap()
                 .create_database(db_name, db_id)?,
             Operation::Delete => self.catalog_cache.write().unwrap().drop_database(db_name)?,
-            _ => Err(RwError::from(InternalError(
-                "Unsupported operation.".to_string(),
-            )))?,
+            _ => {
+                return Err(RwError::from(InternalError(
+                    "Unsupported operation.".to_string(),
+                )))
+            }
         }
 
         self.catalog_updated_tx
@@ -153,9 +154,11 @@ impl ObserverManager {
                 .write()
                 .unwrap()
                 .drop_schema(&db_name, schema_name)?,
-            _ => Err(RwError::from(InternalError(
-                "Unsupported operation.".to_string(),
-            )))?,
+            _ => {
+                return Err(RwError::from(InternalError(
+                    "Unsupported operation.".to_string(),
+                )))
+            }
         }
 
         self.catalog_updated_tx
@@ -200,9 +203,11 @@ impl ObserverManager {
                 &schema_name,
                 &table.table_name,
             )?,
-            _ => Err(RwError::from(InternalError(
-                "Unsupported operation.".to_string(),
-            )))?,
+            _ => {
+                return Err(RwError::from(InternalError(
+                    "Unsupported operation.".to_string(),
+                )))
+            }
         }
 
         self.catalog_updated_tx

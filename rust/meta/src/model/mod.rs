@@ -9,7 +9,7 @@ use prost::Message;
 use risingwave_common::error::Result;
 pub use stream::*;
 
-use crate::storage::{self, MetaStore, Operation, Transaction};
+use crate::storage::{self, MetaStore, Transaction};
 
 pub type ActorId = u32;
 pub type FragmentId = u32;
@@ -100,18 +100,15 @@ pub trait MetadataModel: Sized {
 /// Read operations can be supported if necessary.
 pub trait Transactional: MetadataModel {
     fn upsert_in_transaction(&self, trx: &mut Transaction) -> risingwave_common::error::Result<()> {
-        trx.add_operations(vec![Operation::Put {
-            cf: Self::cf_name(),
-            key: self.key()?.encode_to_vec(),
-            value: self.to_protobuf_encoded_vec(),
-        }]);
+        trx.put(
+            Self::cf_name(),
+            self.key()?.encode_to_vec(),
+            self.to_protobuf_encoded_vec(),
+        );
         Ok(())
     }
     fn delete_in_transaction(&self, trx: &mut Transaction) -> risingwave_common::error::Result<()> {
-        trx.add_operations(vec![Operation::Delete {
-            cf: Self::cf_name(),
-            key: self.key()?.encode_to_vec(),
-        }]);
+        trx.delete(Self::cf_name(), self.key()?.encode_to_vec());
         Ok(())
     }
 }
