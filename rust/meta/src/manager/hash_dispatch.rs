@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use std::collections::{BTreeMap, HashMap};
+use std::slice;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -26,7 +27,7 @@ impl<S> HashDispatchManager<S>
 where
     S: MetaStore,
 {
-    pub async fn new(compute_nodes: Vec<&WorkerNode>, meta_store_ref: Arc<S>) -> Result<Self> {
+    pub async fn new(compute_nodes: &[WorkerNode], meta_store_ref: Arc<S>) -> Result<Self> {
         let mut core = HashDispatchManagerCore::new(meta_store_ref);
         if !compute_nodes.is_empty() {
             core.add_worker_mapping_from_empty(compute_nodes).await?;
@@ -39,7 +40,8 @@ where
     pub async fn add_worker_mapping(&self, compute_node: &WorkerNode) -> Result<()> {
         let mut core = self.core.lock().await;
         if core.load_balancer.is_empty() {
-            core.add_worker_mapping_from_empty(vec![compute_node]).await
+            core.add_worker_mapping_from_empty(slice::from_ref(compute_node))
+                .await
         } else {
             core.add_worker_mapping(compute_node).await
         }
@@ -98,10 +100,7 @@ where
         }
     }
 
-    async fn add_worker_mapping_from_empty(
-        &mut self,
-        compute_nodes: Vec<&WorkerNode>,
-    ) -> Result<()> {
+    async fn add_worker_mapping_from_empty(&mut self, compute_nodes: &[WorkerNode]) -> Result<()> {
         assert!(
             !compute_nodes.is_empty(),
             "There should be at least one compute node."
@@ -341,7 +340,7 @@ mod tests {
             })
             .collect_vec();
 
-        let hash_dispatch_manager = HashDispatchManager::new(vec![], meta_store_ref).await?;
+        let hash_dispatch_manager = HashDispatchManager::new(&[], meta_store_ref).await?;
 
         for node in &worker_nodes {
             hash_dispatch_manager.add_worker_mapping(node).await?;
@@ -400,8 +399,7 @@ mod tests {
             .collect_vec();
 
         let hash_dispatch_manager =
-            HashDispatchManager::new(init_worker_nodes.iter().collect_vec(), meta_store_ref)
-                .await?;
+            HashDispatchManager::new(&init_worker_nodes, meta_store_ref).await?;
         assert_core(&hash_dispatch_manager).await;
         assert_parallel_unit_count(
             &hash_dispatch_manager,

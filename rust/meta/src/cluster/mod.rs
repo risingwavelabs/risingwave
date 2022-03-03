@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
-use itertools::Itertools;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
@@ -78,10 +77,8 @@ where
             }
         });
 
-        let dispatch_manager_ref = Arc::new(
-            HashDispatchManager::new(compute_nodes.iter().collect_vec(), meta_store_ref.clone())
-                .await?,
-        );
+        let dispatch_manager_ref =
+            Arc::new(HashDispatchManager::new(&compute_nodes, meta_store_ref.clone()).await?);
 
         Ok(Self {
             meta_store_ref,
