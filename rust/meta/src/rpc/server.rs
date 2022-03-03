@@ -98,7 +98,7 @@ pub async fn rpc_serve(
         .unwrap(),
     );
     let catalog_manager_ref = Arc::new(
-        StoredCatalogManager::new(meta_store_ref.clone())
+        StoredCatalogManager::new(meta_store_ref.clone(), notification_manager.clone())
             .await
             .unwrap(),
     );
