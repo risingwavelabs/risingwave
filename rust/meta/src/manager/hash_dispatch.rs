@@ -218,7 +218,7 @@ where
 
             // Update key mapping
             for key in allocated_keys.clone() {
-                self.key_mapping.update(key, parallel_unit_id)?;
+                self.key_mapping.update_mapping(key, parallel_unit_id)?;
             }
 
             // Add new keys to owner mapping
@@ -238,6 +238,11 @@ where
     }
 
     async fn delete_worker_mapping(&mut self, compute_node: &WorkerNode) -> Result<()> {
+        assert!(
+            !self.owner_mapping.is_empty(),
+            "HashDispatcherManager: mapping is currently empty, cannot delete worker mapping."
+        );
+
         let parallel_units = &compute_node.parallel_units;
         let mut released_keys = Vec::new();
 
@@ -255,9 +260,19 @@ where
                 })
                 .retain(|&candidate_parallel_unit_id| candidate_parallel_unit_id != parallel_unit_id);
 
+            if self.load_balancer.get(&owned_key_count).unwrap().is_empty() {
+                self.load_balancer.remove(&owned_key_count);
+            }
+
             // Add to released keys for future reallocation
             released_keys.extend(owned_keys);
         });
+
+        // All compute nodes have been deleted from the cluster.
+        if self.load_balancer.is_empty() {
+            self.key_mapping.clear_mapping();
+            return Ok(());
+        }
 
         for released_key in released_keys {
             let mut entry = self
@@ -277,7 +292,7 @@ where
 
             // Update key mapping
             self.key_mapping
-                .update(released_key, candidate_parallel_unit)?;
+                .update_mapping(released_key, candidate_parallel_unit)?;
 
             // Update owner mapping
             self.owner_mapping
@@ -352,12 +367,31 @@ mod tests {
         )
         .await;
 
+        // Delete half of the nodes
         let mut deleted_count = 0u32;
         for node in &worker_nodes {
             if node.get_id() % 2 == 0 {
                 hash_dispatch_manager.delete_worker_mapping(node).await?;
-                assert_core(&hash_dispatch_manager).await;
                 deleted_count += 1;
+                if deleted_count != worker_count {
+                    assert_core(&hash_dispatch_manager).await;
+                }
+            }
+        }
+        assert_parallel_unit_count(
+            &hash_dispatch_manager,
+            (worker_count - deleted_count) * parallel_unit_per_node,
+        )
+        .await;
+
+        // Delete the rest of the nodes
+        for node in &worker_nodes {
+            if node.get_id() % 2 == 1 {
+                hash_dispatch_manager.delete_worker_mapping(node).await?;
+                deleted_count += 1;
+                if deleted_count != worker_count {
+                    assert_core(&hash_dispatch_manager).await;
+                }
             }
         }
         assert_parallel_unit_count(
