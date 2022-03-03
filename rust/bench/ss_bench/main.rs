@@ -134,6 +134,7 @@ async fn get_state_store_impl(opts: &Opts, stats: Arc<StateStoreStats>) -> Resul
                         bloom_false_positive: opts.bloom_false_positive,
                         remote_dir: remote_dir.to_string(),
                         checksum_algo: get_checksum_algo(opts.checksum_algo.as_ref()),
+                        async_checkpoint_enabled: true,
                     },
                     sstable_manager.clone(),
                     Arc::new(LocalVersionManager::new(
@@ -166,6 +167,7 @@ async fn get_state_store_impl(opts: &Opts, stats: Arc<StateStoreStats>) -> Resul
                         bloom_false_positive: opts.bloom_false_positive,
                         remote_dir: remote_dir.to_string(),
                         checksum_algo: get_checksum_algo(opts.checksum_algo.as_ref()),
+                        async_checkpoint_enabled: true,
                     },
                     sstable_manager.clone(),
                     Arc::new(LocalVersionManager::new(

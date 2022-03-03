@@ -69,6 +69,8 @@ pub struct HummockOptions {
     pub remote_dir: String,
     /// checksum algorithm
     pub checksum_algo: ChecksumAlg,
+    /// enable async checkpoint or not
+    pub async_checkpoint_enabled: bool,
 }
 
 impl HummockOptions {
@@ -80,6 +82,7 @@ impl HummockOptions {
             bloom_false_positive: 0.1,
             remote_dir: "hummock_001".to_string(),
             checksum_algo: ChecksumAlg::XxHash64,
+            async_checkpoint_enabled: true
         }
     }
 
@@ -91,6 +94,7 @@ impl HummockOptions {
             bloom_false_positive: 0.1,
             remote_dir: "hummock_001_small".to_string(),
             checksum_algo: ChecksumAlg::XxHash64,
+            async_checkpoint_enabled: true
         }
     }
 }
@@ -366,12 +370,17 @@ impl HummockStorage {
             .collect_vec();
         self.shared_buffer_manager.write_batch(batch, epoch)?;
 
-        // self.sync(epoch).await?;
+        if !self.options.async_checkpoint_enabled {
+            return self.shared_buffer_manager.sync(Some(epoch)).await
+        }
         Ok(())
     }
 
     pub async fn sync(&self, epoch: Option<u64>) -> HummockResult<()> {
-        self.shared_buffer_manager.sync(epoch).await
+        if self.options.async_checkpoint_enabled {
+            return self.shared_buffer_manager.sync(epoch).await
+        }
+        Ok(())
     }
 
     fn get_builder(options: &HummockOptions) -> SSTableBuilder {

@@ -93,6 +93,7 @@ impl StateStoreImpl {
                             bloom_false_positive: 0.1,
                             remote_dir: remote_dir.to_string(),
                             checksum_algo: ChecksumAlg::Crc32c,
+                            async_checkpoint_enabled: true,
                         },
                         sstable_manager.clone(),
                         Arc::new(LocalVersionManager::new(
@@ -128,6 +129,7 @@ impl StateStoreImpl {
                             bloom_false_positive: 0.1,
                             remote_dir: remote_dir.to_string(),
                             checksum_algo: ChecksumAlg::Crc32c,
+                            async_checkpoint_enabled: true,
                         },
                         sstable_manager.clone(),
                         Arc::new(LocalVersionManager::new(
