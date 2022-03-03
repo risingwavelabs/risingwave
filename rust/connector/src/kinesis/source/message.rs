@@ -4,7 +4,7 @@ use aws_sdk_kinesis::model::Record;
 
 // use aws_smithy_types::Blob;
 // use aws_sdk_kinesis::error::GetRecordsError;
-use crate::base::SourceMessage;
+use crate::base::{SourceMessage, SourceOffset};
 
 #[derive(Clone, Debug)]
 pub struct KinesisMessage {
@@ -17,6 +17,10 @@ pub struct KinesisMessage {
 impl SourceMessage for KinesisMessage {
     fn payload(&self) -> anyhow::Result<Option<&[u8]>> {
         Ok(self.payload.as_ref().map(|payload| payload.as_ref()))
+    }
+
+    fn offset(&self) -> anyhow::Result<Option<SourceOffset>> {
+        Ok(Some(SourceOffset::String(self.sequence_number.clone())))
     }
 }
 

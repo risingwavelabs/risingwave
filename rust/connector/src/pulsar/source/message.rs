@@ -1,10 +1,17 @@
-use crate::base::SourceMessage;
+use crate::base::{SourceMessage, SourceOffset};
 
-#[derive(Copy, Clone, Debug)]
-pub struct PulsarMessage {}
+pub struct PulsarMessage {
+    pub(crate) message: pulsar::consumer::Message<Vec<u8>>,
+}
 
 impl SourceMessage for PulsarMessage {
     fn payload(&self) -> anyhow::Result<Option<&[u8]>> {
-        todo!()
+        Ok(Some(self.message.payload.data.as_ref()))
+    }
+
+    fn offset(&self) -> anyhow::Result<Option<SourceOffset>> {
+        Ok(Some(SourceOffset::Number(
+            self.message.message_id.id.entry_id as i64,
+        )))
     }
 }
