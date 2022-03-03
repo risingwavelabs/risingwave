@@ -85,7 +85,15 @@ where
     {
         self.stats.range_scan_counts.inc();
 
-        self.inner.scan(key_range, limit, epoch).await
+        let timer = self.stats.range_scan_latency.start_timer();
+        let result = self.inner.scan(key_range, limit, epoch).await?;
+        timer.observe_duration();
+
+        self.stats
+            .range_scan_size
+            .observe(result.iter().map(|(k, v)| k.len() + v.len()).sum::<usize>() as _);
+
+        Ok(result)
     }
 
     async fn reverse_scan<R, B>(
@@ -100,7 +108,15 @@ where
     {
         self.stats.reverse_range_scan_counts.inc();
 
-        self.inner.scan(key_range, limit, epoch).await
+        let timer = self.stats.range_scan_latency.start_timer();
+        let result = self.inner.scan(key_range, limit, epoch).await?;
+        timer.observe_duration();
+
+        self.stats
+            .range_scan_size
+            .observe(result.iter().map(|(k, v)| k.len() + v.len()).sum::<usize>() as _);
+
+        Ok(result)
     }
 
     async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>, epoch: u64) -> Result<()> {
