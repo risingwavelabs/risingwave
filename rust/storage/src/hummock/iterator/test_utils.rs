@@ -1,13 +1,15 @@
 #![allow(dead_code)]
 
+// TODO: Cleanup this file, see issue #547 .
+
 use std::sync::Arc;
 
 use super::variants::*;
 use crate::hummock::key::{key_with_epoch, user_key, Epoch};
 use crate::hummock::{
-    cloud, HummockResult, HummockValue, SSTable, SSTableBuilder, SSTableBuilderOptions,
+    sstable_manager, HummockResult, HummockValue, SSTableBuilder, SSTableBuilderOptions, Sstable,
 };
-use crate::object::{InMemObjectStore, ObjectStore};
+use crate::object::{InMemObjectStore, ObjectStoreRef};
 
 pub trait IndexMapper: Fn(u64, usize) -> Vec<u8> + Send + Sync + 'static {}
 impl<T> IndexMapper for T where T: Fn(u64, usize) -> Vec<u8> + Send + Sync + 'static {}
@@ -160,7 +162,7 @@ macro_rules! test_key {
     };
 }
 
-use risingwave_pb::hummock::SstableMeta;
+use sstable_manager::{SstableManager, SstableManagerRef};
 pub(crate) use test_key;
 
 pub type TestIterator = TestIteratorInner<FORWARD>;
@@ -274,8 +276,12 @@ pub fn test_value_of(table: u64, idx: usize) -> Vec<u8> {
         .to_vec()
 }
 
-pub async fn gen_test_sstable(table_idx: u64, opts: SSTableBuilderOptions) -> SSTable {
-    gen_test_sstable_base(table_idx, opts, |x| x).await
+pub async fn gen_test_sstable(
+    table_idx: u64,
+    opts: SSTableBuilderOptions,
+    sstable_manager: SstableManagerRef,
+) -> Sstable {
+    gen_test_sstable_base(table_idx, opts, |x| x, sstable_manager).await
 }
 
 /// Generate a test table used in almost all table-related tests. Developers may verify the
@@ -285,8 +291,8 @@ pub async fn gen_test_sstable_base(
     table_idx: u64,
     opts: SSTableBuilderOptions,
     idx_mapping: impl Fn(usize) -> usize,
-) -> SSTable {
-    const REMOTE_DIR: &str = "test";
+    sstable_manager: SstableManagerRef,
+) -> Sstable {
     let mut b = SSTableBuilder::new(opts);
 
     for i in 0..TEST_KEYS_COUNT {
@@ -298,27 +304,21 @@ pub async fn gen_test_sstable_base(
 
     // get remote table
     let (data, meta) = b.finish();
-    let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
-    upload_and_load_sst(obj_client, 0, meta, data, REMOTE_DIR)
-        .await
-        .unwrap()
+    sstable_manager.put(table_idx, &meta, data).await.unwrap();
+    Sstable {
+        id: table_idx,
+        meta,
+    }
 }
 
-pub async fn upload_and_load_sst(
-    obj_client: Arc<dyn ObjectStore>,
-    sst_id: u64,
-    meta: SstableMeta,
-    data: Bytes,
-    path: &str,
-) -> HummockResult<SSTable> {
-    cloud::upload(&obj_client, sst_id, &meta, data, path).await?;
-    Ok(SSTable {
-        id: sst_id,
-        meta,
-        obj_client,
-        data_path: cloud::get_sst_data_path(path, sst_id),
-        block_cache: Arc::new(moka::future::Cache::new(65536)),
-    })
+pub fn mock_sstable_manager() -> SstableManagerRef {
+    let object_store = Arc::new(InMemObjectStore::new());
+    mock_sstable_manager_with_object_store(object_store)
+}
+
+pub fn mock_sstable_manager_with_object_store(object_store: ObjectStoreRef) -> SstableManagerRef {
+    let path = "test".to_string();
+    Arc::new(SstableManager::new(object_store, path))
 }
 
 #[cfg(test)]
