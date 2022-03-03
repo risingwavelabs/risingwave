@@ -178,7 +178,7 @@ impl MetaStore for EtcdMetaStore {
     async fn delete_cf(&self, cf: &str, key: &[u8]) -> Result<()> {
         self.client
             .kv_client()
-            .delete(encode_etcd_key(cf, &key), None)
+            .delete(encode_etcd_key(cf, key), None)
             .await?;
         Ok(())
     }
