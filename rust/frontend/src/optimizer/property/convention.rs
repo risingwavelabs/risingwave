@@ -2,6 +2,7 @@ use paste::paste;
 
 use super::super::plan_node::*;
 use crate::for_all_plan_nodes;
+
 #[derive(Debug, PartialEq)]
 pub enum Convention {
     Logical,

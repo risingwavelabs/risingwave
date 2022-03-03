@@ -12,8 +12,8 @@ use risingwave_pb::hummock::{
     AddTablesRequest, AddTablesResponse, GetCompactionTasksRequest, GetCompactionTasksResponse,
     GetNewTableIdRequest, GetNewTableIdResponse, PinSnapshotRequest, PinSnapshotResponse,
     PinVersionRequest, PinVersionResponse, ReportCompactionTasksRequest,
-    ReportCompactionTasksResponse, UnpinSnapshotRequest, UnpinSnapshotResponse,
-    UnpinVersionRequest, UnpinVersionResponse,
+    ReportCompactionTasksResponse, SubscribeCompactTasksRequest, SubscribeCompactTasksResponse,
+    UnpinSnapshotRequest, UnpinSnapshotResponse, UnpinVersionRequest, UnpinVersionResponse,
 };
 use risingwave_pb::meta::catalog_service_client::CatalogServiceClient;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
@@ -23,13 +23,15 @@ use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
 use risingwave_pb::meta::{
     ActivateWorkerNodeRequest, ActivateWorkerNodeResponse, AddWorkerNodeRequest,
-    AddWorkerNodeResponse, Catalog, CreateRequest, CreateResponse, Database, DropRequest,
-    DropResponse, GetCatalogRequest, GetCatalogResponse, HeartbeatRequest, HeartbeatResponse,
+    AddWorkerNodeResponse, Catalog, CreateRequest, CreateResponse, Database,
+    DeleteWorkerNodeRequest, DeleteWorkerNodeResponse, DropRequest, DropResponse,
+    GetCatalogRequest, GetCatalogResponse, HeartbeatRequest, HeartbeatResponse,
     ListAllNodesRequest, ListAllNodesResponse, Schema, SubscribeRequest, SubscribeResponse, Table,
 };
 use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
+use tokio::sync::mpsc::Receiver;
 use tonic::transport::{Channel, Endpoint};
-use tonic::Streaming;
+use tonic::{Status, Streaming};
 
 type DatabaseId = i32;
 type SchemaId = i32;
@@ -70,14 +72,14 @@ impl MetaClient {
         &self,
         addr: SocketAddr,
         worker_type: WorkerType,
-    ) -> Result<Streaming<SubscribeResponse>> {
-        let host = Some(HostAddress {
+    ) -> Result<Box<dyn NotificationStream>> {
+        let host_address = HostAddress {
             host: addr.ip().to_string(),
             port: addr.port() as i32,
-        });
+        };
         let request = SubscribeRequest {
             worker_type: worker_type as i32,
-            host,
+            host: Some(host_address),
         };
         self.inner.subscribe(request).await
     }
@@ -167,6 +169,19 @@ impl MetaClient {
         Ok(())
     }
 
+    /// Unregister the current node to the cluster.
+    pub async fn unregister(&self, addr: SocketAddr) -> Result<()> {
+        let host_address = HostAddress {
+            host: addr.ip().to_string(),
+            port: addr.port() as i32,
+        };
+        let request = DeleteWorkerNodeRequest {
+            host: Some(host_address),
+        };
+        MetaClientInner::delete_worker_node(self.inner.as_ref(), request).await?;
+        Ok(())
+    }
+
     /// Get live nodes with the specified type.
     /// # Arguments
     /// * `worker_type` `WorkerType` of the nodes
@@ -184,6 +199,7 @@ impl MetaClient {
         Ok(resp.nodes)
     }
 
+    /// Get Catalog from meta.
     pub async fn get_catalog(&self) -> Result<Catalog> {
         let mut resp = self.inner.get_catalog(GetCatalogRequest {}).await?;
         let catalog = resp.catalog.take().unwrap();
@@ -196,7 +212,7 @@ impl MetaClient {
 /// and directly call a mocked serivce method.
 #[async_trait::async_trait]
 pub trait MetaClientInner: Send + Sync {
-    async fn subscribe(&self, _req: SubscribeRequest) -> Result<Streaming<SubscribeResponse>> {
+    async fn subscribe(&self, _req: SubscribeRequest) -> Result<Box<dyn NotificationStream>> {
         unimplemented!()
     }
 
@@ -208,6 +224,13 @@ pub trait MetaClientInner: Send + Sync {
         &self,
         _req: ActivateWorkerNodeRequest,
     ) -> Result<ActivateWorkerNodeResponse> {
+        unimplemented!()
+    }
+
+    async fn delete_worker_node(
+        &self,
+        _req: DeleteWorkerNodeRequest,
+    ) -> Result<DeleteWorkerNodeResponse> {
         unimplemented!()
     }
 
@@ -286,6 +309,13 @@ pub trait MetaClientInner: Send + Sync {
     ) -> std::result::Result<GetNewTableIdResponse, tonic::Status> {
         unimplemented!()
     }
+
+    async fn subscribe_compact_tasks(
+        &self,
+        _req: SubscribeCompactTasksRequest,
+    ) -> std::result::Result<Streaming<SubscribeCompactTasksResponse>, tonic::Status> {
+        unimplemented!()
+    }
 }
 
 /// Client to meta server. Cloning the instance is lightweight.
@@ -326,14 +356,15 @@ impl GrpcMetaClient {
 impl MetaClientInner for GrpcMetaClient {
     // TODO(TaoWu): Use macro to refactor the following methods.
 
-    async fn subscribe(&self, request: SubscribeRequest) -> Result<Streaming<SubscribeResponse>> {
-        Ok(self
-            .notification_client
-            .to_owned()
-            .subscribe(request)
-            .await
-            .to_rw_result()?
-            .into_inner())
+    async fn subscribe(&self, request: SubscribeRequest) -> Result<Box<dyn NotificationStream>> {
+        Ok(Box::new(
+            self.notification_client
+                .to_owned()
+                .subscribe(request)
+                .await
+                .to_rw_result()?
+                .into_inner(),
+        ))
     }
 
     async fn add_worker_node(&self, req: AddWorkerNodeRequest) -> Result<AddWorkerNodeResponse> {
@@ -354,6 +385,19 @@ impl MetaClientInner for GrpcMetaClient {
             .cluster_client
             .to_owned()
             .activate_worker_node(req)
+            .await
+            .to_rw_result()?
+            .into_inner())
+    }
+
+    async fn delete_worker_node(
+        &self,
+        req: DeleteWorkerNodeRequest,
+    ) -> Result<DeleteWorkerNodeResponse> {
+        Ok(self
+            .cluster_client
+            .to_owned()
+            .delete_worker_node(req)
             .await
             .to_rw_result()?
             .into_inner())
@@ -503,5 +547,43 @@ impl MetaClientInner for GrpcMetaClient {
             .get_new_table_id(req)
             .await?
             .into_inner())
+    }
+
+    async fn subscribe_compact_tasks(
+        &self,
+        req: SubscribeCompactTasksRequest,
+    ) -> std::result::Result<Streaming<SubscribeCompactTasksResponse>, tonic::Status> {
+        Ok(self
+            .hummock_client
+            .to_owned()
+            .subscribe_compact_tasks(req)
+            .await?
+            .into_inner())
+    }
+}
+
+#[async_trait::async_trait]
+pub trait NotificationStream: Send {
+    /// Ok(Some) => receive a `SubscribeResponse`.
+    /// Ok(None) => stream terminates.
+    /// Err => error happens.
+    async fn next(&mut self) -> Result<Option<SubscribeResponse>>;
+}
+
+#[async_trait::async_trait]
+impl NotificationStream for Streaming<SubscribeResponse> {
+    async fn next(&mut self) -> Result<Option<SubscribeResponse>> {
+        self.message().await.to_rw_result()
+    }
+}
+
+#[async_trait::async_trait]
+impl NotificationStream for Receiver<std::result::Result<SubscribeResponse, Status>> {
+    async fn next(&mut self) -> Result<Option<SubscribeResponse>> {
+        match self.recv().await {
+            Some(Ok(x)) => Ok(Some(x)),
+            Some(Err(e)) => Err(e).to_rw_result(),
+            None => Ok(None),
+        }
     }
 }

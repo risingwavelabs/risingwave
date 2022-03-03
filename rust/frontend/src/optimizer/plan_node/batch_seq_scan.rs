@@ -10,6 +10,7 @@ use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 pub struct BatchSeqScan {
     logical: LogicalScan,
 }
+
 impl WithSchema for BatchSeqScan {
     fn schema(&self) -> &Schema {
         self.logical.schema()
@@ -28,11 +29,15 @@ impl fmt::Display for BatchSeqScan {
         todo!()
     }
 }
+
 impl WithOrder for BatchSeqScan {}
+
 impl WithDistribution for BatchSeqScan {}
+
 impl ToDistributedBatch for BatchSeqScan {
     fn to_distributed(&self) -> PlanRef {
         self.clone().into_plan_ref()
     }
 }
+
 impl ToBatchProst for BatchSeqScan {}

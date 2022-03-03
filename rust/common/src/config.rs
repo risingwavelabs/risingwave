@@ -8,8 +8,11 @@ use crate::error::{Result, RwError};
 
 const DEFAULT_HEARTBEAT_INTERVAL: u32 = 100;
 const DEFAULT_CHUNK_SIZE: u32 = 1024;
-const DEFAULT_SST_SIZE: u32 = 1024;
-const DEFAULT_BLOCK_SIZE: u32 = 1024;
+const DEFAULT_SST_SIZE: u32 = 256 * (1 << 20);
+const DEFAULT_BLOCK_SIZE: u32 = 64 * (1 << 10);
+const DEFAULT_BLOOM_FALSE_POSITIVE: f64 = 0.1;
+const DEFAULT_DATA_DIRECTORY: &str = "hummock_001";
+const DEFAULT_CHECKSUM_ALGORITHM: &str = "crc32c";
 
 /// TODO(TaoWu): The configs here may be preferable to be managed under corresponding module
 /// separately.
@@ -30,7 +33,7 @@ pub struct ComputeNodeConfig {
 
     // Below for Hummock.
     #[serde(default)]
-    pub hummock: HummockConfig,
+    pub storage: StorageConfig,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -72,18 +75,33 @@ impl Default for StreamingConfig {
     }
 }
 
+/// Currently all configurations are server before they can be specified with DDL syntaxes.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct HummockConfig {
-    pub sst_size: u32,
+pub struct StorageConfig {
+    /// Target size of the SSTable.
+    pub sstable_size: u32,
 
+    /// Size of each block in bytes in SST.
     pub block_size: u32,
+
+    /// False positive probability of bloom filter.
+    pub bloom_false_positive: f64,
+
+    /// Remote directory for storing data and metadata objects.
+    pub data_directory: String,
+
+    /// Checksum algorithm (Crc32c, XxHash64).
+    pub checksum_algo: String,
 }
 
-impl Default for HummockConfig {
+impl Default for StorageConfig {
     fn default() -> Self {
         Self {
-            sst_size: DEFAULT_SST_SIZE,
+            sstable_size: DEFAULT_SST_SIZE,
             block_size: DEFAULT_BLOCK_SIZE,
+            bloom_false_positive: DEFAULT_BLOOM_FALSE_POSITIVE,
+            data_directory: DEFAULT_DATA_DIRECTORY.to_string(),
+            checksum_algo: DEFAULT_CHECKSUM_ALGORITHM.to_string(),
         }
     }
 }
@@ -114,6 +132,6 @@ mod tests {
         assert_eq!(cfg.server.heartbeat_interval, DEFAULT_HEARTBEAT_INTERVAL);
 
         let cfg: ComputeNodeConfig = toml::from_str("").unwrap();
-        assert_eq!(cfg.hummock.block_size, DEFAULT_BLOCK_SIZE);
+        assert_eq!(cfg.storage.block_size, DEFAULT_BLOCK_SIZE);
     }
 }

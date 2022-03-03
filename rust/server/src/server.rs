@@ -14,6 +14,7 @@ use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::MetaClient;
 use risingwave_source::MemSourceManager;
+use risingwave_storage::hummock::compactor::Compactor;
 use risingwave_storage::monitor::DEFAULT_STATE_STORE_STATS;
 use risingwave_storage::table::SimpleTableManager;
 use risingwave_storage::StateStoreImpl;
@@ -29,6 +30,7 @@ fn load_config(opts: &ComputeNodeOpts) -> ComputeNodeConfig {
     if opts.config_path.is_empty() {
         return ComputeNodeConfig::default();
     }
+
     let config_path = PathBuf::from(opts.config_path.to_owned());
     ComputeNodeConfig::init(config_path).unwrap()
 }
@@ -50,9 +52,27 @@ pub async fn compute_node_serve(
 
     // Initialize state store.
     let stats = DEFAULT_STATE_STORE_STATS.clone();
-    let state_store = StateStoreImpl::from_str(&opts.state_store, meta_client.clone(), stats)
-        .await
-        .unwrap();
+    let storage_config = Arc::new(config.storage.clone());
+    let state_store = StateStoreImpl::new(
+        &opts.state_store,
+        storage_config,
+        meta_client.clone(),
+        stats,
+    )
+    .await
+    .unwrap();
+
+    // A hummock compactor is deployed along with compute node for now.
+    let mut compactor_handle = None;
+    if let StateStoreImpl::HummockStateStore(hummock) = state_store.clone() {
+        let (compactor_join_handle, compactor_shutdown_sender) = Compactor::start_compactor(
+            hummock.inner().storage.options().clone(),
+            hummock.inner().storage.local_version_manager().clone(),
+            hummock.inner().storage.hummock_meta_client().clone(),
+            hummock.inner().storage.sstable_manager(),
+        );
+        compactor_handle = Some((compactor_join_handle, compactor_shutdown_sender));
+    }
 
     // Initialize the managers.
     let table_mgr = Arc::new(SimpleTableManager::new(state_store.clone()));
@@ -89,7 +109,14 @@ pub async fn compute_node_serve(
             .serve_with_shutdown(addr, async move {
                 tokio::select! {
                   _ = tokio::signal::ctrl_c() => {},
-                  _ = shutdown_recv.recv() => {},
+                  _ = shutdown_recv.recv() => {
+                        // Gracefully shutdown compactor
+                        if let Some((compactor_join_handle, compactor_shutdown_sender)) = compactor_handle {
+                            if compactor_shutdown_sender.send(()).is_ok() {
+                                compactor_join_handle.await.unwrap();
+                            }
+                        }
+                    },
                 }
             })
             .await

@@ -1,8 +1,7 @@
-#![allow(dead_code)]
-
 use std::sync::Arc;
 
 use itertools::Itertools;
+use prost::Message;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::hummock::hummock_version::HummockVersionRefId;
 use risingwave_pb::hummock::{
@@ -21,8 +20,8 @@ use crate::hummock::model::{
     CurrentHummockVersionId, HummockContextPinnedSnapshotExt, HummockContextPinnedVersionExt,
 };
 use crate::manager::{IdCategory, IdGeneratorManagerRef, MetaSrvEnv};
-use crate::model::{MetadataModel, Transactional};
-use crate::storage::{MetaStore, Transaction};
+use crate::model::{MetadataModel, Transactional, Worker};
+use crate::storage::{Error, MetaStore, Transaction};
 
 pub struct HummockManager<S> {
     id_gen_manager_ref: IdGeneratorManagerRef<S>,
@@ -106,20 +105,35 @@ where
         };
         init_version.upsert_in_transaction(&mut transaction)?;
 
-        // TODO #93: Cancel all compact_tasks
+        // TODO #546: Cancel all compact_tasks
 
         self.commit_trx(compaction_guard.meta_store_ref.as_ref(), transaction, None)
             .await
     }
 
+    /// We use worker node id as the `context_id`.
+    /// If the `context_id` is provided, the transaction will abort if the `context_id` is not
+    /// valid, which means the worker node is not a valid member of the cluster.
     async fn commit_trx(
         &self,
         meta_store_ref: &S,
-        trx: Transaction,
+        mut trx: Transaction,
         context_id: Option<HummockContextId>,
     ) -> Result<()> {
-        if let Some(_context_id) = context_id {
-            // TODO check context validity
+        if let Some(context_id) = context_id {
+            // Get the worker's key in meta store
+            let workers = Worker::list(meta_store_ref)
+                .await?
+                .into_iter()
+                .filter(|worker| worker.worker_id() == context_id)
+                .collect_vec();
+            assert!(workers.len() <= 1);
+            if let Some(worker) = workers.first() {
+                trx.check_exists(Worker::cf_name(), worker.key()?.encode_to_vec());
+            } else {
+                // The worker is not found in cluster.
+                return Err(Error::TransactionAbort().into());
+            }
         }
         meta_store_ref.txn(trx).await.map_err(Into::into)
     }
@@ -406,6 +420,15 @@ where
         let mut transaction = Transaction::default();
         let mut compact_status =
             CompactStatus::get(compaction_guard.meta_store_ref.as_ref()).await?;
+
+        let compact_task_id = compact_task.task_id;
+        let input_sst_count: usize = compact_task
+            .input_ssts
+            .iter()
+            .map(|v| v.level.as_ref().unwrap().table_ids.len())
+            .sum();
+        let output_sst_count = compact_task.sorted_output_ssts.len();
+
         let (sorted_output_ssts, delete_table_ids) = compact_status.report_compact_task(
             output_table_compact_entries,
             compact_task,
@@ -475,6 +498,14 @@ where
         }
         self.commit_trx(compaction_guard.meta_store_ref.as_ref(), transaction, None)
             .await?;
+        if task_result {
+            tracing::debug!(
+                "Finish hummock compaction task id {}, compact {} SSTs to {} SSTs",
+                compact_task_id,
+                input_sst_count,
+                output_sst_count
+            );
+        }
         Ok(())
     }
 

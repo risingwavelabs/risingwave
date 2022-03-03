@@ -11,13 +11,12 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use super::shared_buffer::SharedBufferManager;
 use super::Block;
-use crate::hummock::cloud::{get_sst_data_path, get_sst_meta};
 use crate::hummock::hummock_meta_client::HummockMetaClient;
+use crate::hummock::sstable_manager::SstableStoreRef;
 use crate::hummock::{
-    HummockEpoch, HummockError, HummockResult, HummockSSTableId, HummockVersionId, SSTable,
+    HummockEpoch, HummockError, HummockResult, HummockSSTableId, HummockVersionId, Sstable,
     INVALID_VERSION_ID,
 };
-use crate::object::ObjectStore;
 
 pub struct ScopedLocalVersion {
     version: Arc<HummockVersion>,
@@ -60,10 +59,9 @@ impl ScopedLocalVersion {
 /// versions in storage service.
 pub struct LocalVersionManager {
     current_version: RwLock<Option<Arc<ScopedLocalVersion>>>,
-    sstables: RwLock<BTreeMap<HummockSSTableId, Arc<SSTable>>>,
+    sstables: RwLock<BTreeMap<HummockSSTableId, Arc<Sstable>>>,
+    sstable_manager: SstableStoreRef,
 
-    obj_client: Arc<dyn ObjectStore>,
-    remote_dir: Arc<String>,
     pub block_cache: Arc<Cache<Vec<u8>, Arc<Block>>>,
     update_notifier_tx: tokio::sync::watch::Sender<HummockVersionId>,
     unpin_worker_tx: UnboundedSender<Arc<HummockVersion>>,
@@ -75,8 +73,7 @@ pub struct LocalVersionManager {
 
 impl LocalVersionManager {
     pub fn new(
-        obj_client: Arc<dyn ObjectStore>,
-        remote_dir: &str,
+        sstable_manager: SstableStoreRef,
         block_cache: Option<Arc<Cache<Vec<u8>, Arc<Block>>>>,
     ) -> LocalVersionManager {
         let (update_notifier_tx, _) = tokio::sync::watch::channel(INVALID_VERSION_ID);
@@ -84,9 +81,9 @@ impl LocalVersionManager {
 
         LocalVersionManager {
             current_version: RwLock::new(None),
+            sstable_manager,
             sstables: RwLock::new(BTreeMap::new()),
-            obj_client,
-            remote_dir: Arc::new(remote_dir.to_string()),
+
             block_cache: if let Some(block_cache) = block_cache {
                 block_cache
             } else {
@@ -106,7 +103,7 @@ impl LocalVersionManager {
         }
     }
 
-    pub async fn start_workers(
+    pub fn start_workers(
         local_version_manager: Arc<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         shared_buffer_manager: Arc<SharedBufferManager>,
@@ -182,26 +179,22 @@ impl LocalVersionManager {
         }
     }
 
-    fn try_get_sstable_from_cache(&self, table_id: HummockSSTableId) -> Option<Arc<SSTable>> {
+    fn try_get_sstable_from_cache(&self, table_id: HummockSSTableId) -> Option<Arc<Sstable>> {
         self.sstables.read().get(&table_id).cloned()
     }
 
-    fn add_sstable_to_cache(&self, sstable: Arc<SSTable>) {
+    fn add_sstable_to_cache(&self, sstable: Arc<Sstable>) {
         self.sstables.write().insert(sstable.id, sstable);
     }
 
-    pub async fn pick_few_tables(&self, table_ids: &[u64]) -> HummockResult<Vec<Arc<SSTable>>> {
+    pub async fn pick_few_tables(&self, table_ids: &[u64]) -> HummockResult<Vec<Arc<Sstable>>> {
         let mut tables = vec![];
         for table_id in table_ids {
             let sstable = match self.try_get_sstable_from_cache(*table_id) {
                 None => {
-                    let fetched_sstable = Arc::new(SSTable {
+                    let fetched_sstable = Arc::new(Sstable {
                         id: *table_id,
-                        meta: get_sst_meta(self.obj_client.clone(), &self.remote_dir, *table_id)
-                            .await?,
-                        obj_client: self.obj_client.clone(),
-                        data_path: get_sst_data_path(&self.remote_dir, *table_id),
-                        block_cache: self.block_cache.clone(),
+                        meta: self.sstable_manager.meta(*table_id).await?,
                     });
                     self.add_sstable_to_cache(fetched_sstable.clone());
                     fetched_sstable
@@ -217,9 +210,9 @@ impl LocalVersionManager {
     pub async fn tables(
         &self,
         levels: &[risingwave_pb::hummock::Level],
-    ) -> HummockResult<Vec<Arc<SSTable>>> {
+    ) -> HummockResult<Vec<Arc<Sstable>>> {
         // Should the LevelType be returned and made use of?
-        let mut out: Vec<Arc<SSTable>> = Vec::new();
+        let mut out: Vec<Arc<Sstable>> = Vec::new();
         for level in levels {
             match level.level_type() {
                 LevelType::Overlapping => {

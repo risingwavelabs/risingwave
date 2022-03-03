@@ -98,7 +98,7 @@ pub async fn rpc_serve(
         .unwrap(),
     );
     let catalog_manager_ref = Arc::new(
-        StoredCatalogManager::new(meta_store_ref.clone())
+        StoredCatalogManager::new(meta_store_ref.clone(), notification_manager.clone())
             .await
             .unwrap(),
     );
@@ -120,6 +120,9 @@ pub async fn rpc_serve(
         meta_metrics.boot_metrics_service(prometheus_addr);
     }
 
+    let (compaction_join_handle, compaction_shutdown_sender) =
+        hummock::start_compaction_trigger(hummock_manager, compactor_manager);
+
     let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
     let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()
@@ -136,18 +139,17 @@ pub async fn rpc_serve(
                 async move {
                     tokio::select! {
                       _ = tokio::signal::ctrl_c() => {},
-                      _ = shutdown_recv.recv() => {},
+                      _ = shutdown_recv.recv() => {
+                            if compaction_shutdown_sender.send(()).is_ok() {
+                                compaction_join_handle.await.unwrap();
+                            }
+                        },
                     }
                 },
             )
             .await
             .unwrap();
     });
-
-    tokio::spawn(hummock::start_compaction_loop(
-        hummock_manager,
-        compactor_manager,
-    ));
 
     (join_handle, shutdown_send)
 }

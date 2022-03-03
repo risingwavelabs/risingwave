@@ -3946,6 +3946,7 @@ dependencies = [
  "async-trait",
  "risingwave-pb",
  "risingwave_common",
+ "tokio",
  "tonic",
 ]
 

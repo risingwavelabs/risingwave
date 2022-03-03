@@ -1,7 +1,7 @@
 use std::cmp::Reverse;
 
-use bytes::BufMut;
 use itertools::Itertools;
+use memcomparable::from_slice;
 
 use super::OrderedDatum::{NormalOrder, ReversedOrder};
 use super::OrderedRow;
@@ -13,6 +13,9 @@ use crate::types::{
     Decimal, ScalarImpl,
 };
 use crate::util::sort_util::{OrderPair, OrderType};
+
+/// The special `cell_id` reserved for a whole null row is -1.
+pub const NULL_ROW_SPECIAL_CELL_ID: i32 = -1;
 
 /// We can use memcomparable serialization to serialize data
 /// and flip the bits if the order of that datum is descending.
@@ -98,23 +101,68 @@ impl OrderedRowDeserializer {
     }
 }
 
+type KeyBytes = Vec<u8>;
+type ValueBytes = Vec<u8>;
+
+pub fn serialize_pk_and_row(
+    pk_buf: &[u8],
+    row: &Option<Row>,
+    column_ids: &[ColumnId],
+) -> Result<Vec<(KeyBytes, Option<ValueBytes>)>> {
+    if let Some(values) = row.as_ref() {
+        assert_eq!(values.0.len(), column_ids.len());
+    }
+    let mut result = vec![];
+    let mut all_null = true;
+    for (index, column_id) in column_ids.iter().enumerate() {
+        let key = [pk_buf, serialize_column_id(column_id)?.as_slice()].concat();
+        match row {
+            Some(values) => match &values[index] {
+                None => {
+                    // This is when the datum is null. If all the datum in a row is null,
+                    // we serialize this null row specially by only using one cell encoding.
+                }
+                datum => {
+                    all_null = false;
+                    let value = serialize_cell(datum)?;
+                    result.push((key, Some(value)));
+                }
+            },
+            None => {
+                // A `None` of row means deleting that row, while the a `None` of datum represents a
+                // null.
+                all_null = false;
+                result.push((key, None));
+            }
+        }
+    }
+    if all_null {
+        // Here we use a special column id -1 to represent a row consisting of all null values.
+        // `MViewTable` has a `get` interface which accepts a cell id. A null row in this case
+        // would return null datum as it has only a single cell with column id == -1 and `get`
+        // gets nothing.
+        let key = [
+            pk_buf,
+            serialize_column_id(&ColumnId::from(NULL_ROW_SPECIAL_CELL_ID))?.as_slice(),
+        ]
+        .concat();
+        let value = serialize_cell(&None)?;
+        result.push((key, Some(value)));
+    }
+    Ok(result)
+}
+
 pub fn serialize_pk(pk: &Row, serializer: &OrderedRowSerializer) -> Result<Vec<u8>> {
     let mut result = vec![];
     serializer.serialize(pk, &mut result);
     Ok(result)
 }
 
-// TODO(eric): deprecated. Remove when possible
-pub fn serialize_cell_idx(cell_idx: i32) -> Result<Vec<u8>> {
-    let mut buf = Vec::with_capacity(4);
-    buf.put_i32(cell_idx);
-    debug_assert_eq!(buf.len(), 4);
-    Ok(buf)
-}
-
 pub fn serialize_column_id(column_id: &ColumnId) -> Result<Vec<u8>> {
-    let mut buf = Vec::with_capacity(4);
-    buf.put_i32(column_id.get_id());
+    use serde::Serialize;
+    let mut serializer = memcomparable::Serializer::new(vec![]);
+    column_id.get_id().serialize(&mut serializer)?;
+    let buf = serializer.into_inner();
     debug_assert_eq!(buf.len(), 4);
     Ok(buf)
 }
@@ -153,6 +201,12 @@ pub fn deserialize_cell(bytes: &[u8], ty: &DataType) -> Result<Datum> {
             Ok(datum)
         }
     }
+}
+
+pub fn deserialize_column_id(bytes: &[u8]) -> Result<i32> {
+    assert_eq!(bytes.len(), 4);
+    let column_id = from_slice::<i32>(bytes)?;
+    Ok(column_id)
 }
 
 fn deserialize_decimal(bytes: &[u8]) -> Result<Datum> {

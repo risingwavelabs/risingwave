@@ -1,6 +1,7 @@
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{ObjectName, TableFactor, TableWithJoins};
 
+use super::bind_context::ColumnBinding;
 use crate::binder::Binder;
 use crate::catalog::catalog_service::DEFAULT_SCHEMA_NAME;
 use crate::catalog::column_catalog::ColumnCatalog;
@@ -53,10 +54,24 @@ impl Binder {
             .get_schema(&schema_name)
             .and_then(|c| c.get_table(&table_name))
             .ok_or_else(|| ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name)))?;
+        let columns = table_catalog.columns().to_vec();
+
+        columns.iter().enumerate().for_each(|(index, column)| {
+            self.context
+                .columns
+                .entry(column.name().to_string())
+                .or_default()
+                .push(ColumnBinding::new(
+                    table_name.clone(),
+                    index,
+                    column.data_type(),
+                ))
+        });
+
         Ok(BaseTableRef {
             name: table_name,
             table_id: table_catalog.id(),
-            columns: table_catalog.columns().into(),
+            columns,
         })
     }
 }
