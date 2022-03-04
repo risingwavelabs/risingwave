@@ -8,7 +8,7 @@ use operations::*;
 use risingwave_common::config::StorageConfig;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::monitor::DEFAULT_STATE_STORE_STATS;
-use risingwave_storage::StateStoreImpl;
+use risingwave_storage::{dispatch_state_store, StateStoreImpl};
 
 use crate::utils::store_statistics::print_statistics;
 
@@ -124,12 +124,7 @@ async fn main() {
             }
         };
 
-    match state_store {
-        StateStoreImpl::HummockStateStore(store) => Operations::run(store, &opts).await,
-        StateStoreImpl::MemoryStateStore(store) => Operations::run(store, &opts).await,
-        StateStoreImpl::RocksDBStateStore(store) => Operations::run(store, &opts).await,
-        StateStoreImpl::TikvStateStore(store) => Operations::run(store, &opts).await,
-    };
+    dispatch_state_store!(state_store, store, { Operations::run(store, &opts).await });
 
     if opts.statistics {
         print_statistics(&stats);
