@@ -1,5 +1,6 @@
 use std::fmt;
 
+use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use log::debug;
 use risingwave_common::catalog::{Field, Schema};
@@ -7,7 +8,8 @@ use risingwave_common::catalog::{Field, Schema};
 use super::{
     BatchProject, ColPrunable, PlanRef, PlanTreeNodeUnary, StreamProject, ToBatch, ToStream,
 };
-use crate::expr::{assert_input_ref, Expr, ExprImpl, InputRef};
+use crate::expr::{assert_input_ref, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
+use crate::optimizer::plan_node::CollectRequiredCols;
 use crate::optimizer::property::{Distribution, WithDistribution, WithOrder, WithSchema};
 use crate::utils::ColIndexMapping;
 
@@ -48,10 +50,7 @@ impl LogicalProject {
     /// This is useful in column pruning when we want to add a project to ensure the output schema
     /// is correct.
     pub fn with_mapping(input: PlanRef, mapping: ColIndexMapping) -> Self {
-        debug!(
-            "with_mapping {:?}",
-            mapping.mapping_pairs().collect::<Vec<_>>()
-        );
+        debug!("with_mapping {:?}", mapping);
         assert_eq!(
             input.schema().fields().len(),
             mapping.source_upper() + 1,
@@ -129,10 +128,41 @@ impl WithSchema for LogicalProject {
 }
 
 impl ColPrunable for LogicalProject {
-    fn prune_col(&self, required_cols: &fixedbitset::FixedBitSet) -> PlanRef {
-        // TODO: replace default impl
-        let mapping = ColIndexMapping::with_remaining_columns(required_cols);
-        LogicalProject::with_mapping(self.clone().into(), mapping).into()
+    fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
+        assert!(
+            required_cols.is_subset(&FixedBitSet::from_iter(0..self.schema().fields().len())),
+            "invalid required cols: {}, only {} columns available",
+            required_cols,
+            self.schema().fields().len()
+        );
+
+        let mut visitor = CollectRequiredCols {
+            required_cols: FixedBitSet::with_capacity(self.input.schema().fields().len()),
+        };
+        required_cols.ones().for_each(|id| {
+            visitor.visit_expr(&self.exprs[id]);
+        });
+
+        let child_required_cols = visitor.required_cols;
+        let mut mapping = ColIndexMapping::with_remaining_columns(&child_required_cols);
+
+        let (exprs, expr_alias, fields) = required_cols
+            .ones()
+            .map(|id| {
+                (
+                    mapping.rewrite_expr(self.exprs[id].clone()),
+                    self.expr_alias[id].clone(),
+                    self.schema.fields[id].clone(),
+                )
+            })
+            .multiunzip();
+        Self {
+            exprs,
+            expr_alias,
+            input: self.input.prune_col(&child_required_cols),
+            schema: Schema { fields },
+        }
+        .into()
     }
 }
 
@@ -152,5 +182,93 @@ impl ToStream for LogicalProject {
     }
     fn to_stream(&self) -> PlanRef {
         self.to_stream_with_dist_required(Distribution::any())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use risingwave_common::catalog::{Field, TableId};
+    use risingwave_common::types::DataType;
+    use risingwave_pb::expr::expr_node::Type;
+
+    use super::*;
+    use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
+    use crate::optimizer::plan_node::LogicalScan;
+
+    #[test]
+    /// Pruning
+    /// ```text
+    /// Project(1, input_ref(2), input_ref(0)<5)
+    ///   TableScan(v1, v2, v3)
+    /// ```
+    /// with required columns `[1, 2]` will result in
+    /// ```text
+    /// Project(input_ref(1), input_ref(0)<5)
+    ///   TableScan(v1, v3)
+    /// ```
+    fn test_prune_project() {
+        let ty = DataType::Int32;
+        let fields: Vec<Field> = vec![
+            Field {
+                data_type: ty.clone(),
+                name: "v1".to_string(),
+            },
+            Field {
+                data_type: ty.clone(),
+                name: "v2".to_string(),
+            },
+            Field {
+                data_type: ty.clone(),
+                name: "v3".to_string(),
+            },
+        ];
+        let table_scan = LogicalScan::new(
+            "test".to_string(),
+            TableId::new(0),
+            vec![1.into(), 2.into(), 3.into()],
+            Schema {
+                fields: fields.clone(),
+            },
+        );
+        let project = LogicalProject::new(
+            table_scan.into(),
+            vec![
+                ExprImpl::Literal(Box::new(Literal::new(None, ty.clone()))),
+                InputRef::new(2, ty.clone()).to_expr_impl(),
+                ExprImpl::FunctionCall(Box::new(
+                    FunctionCall::new(
+                        Type::LessThan,
+                        vec![
+                            ExprImpl::InputRef(Box::new(InputRef::new(0, ty.clone()))),
+                            ExprImpl::Literal(Box::new(Literal::new(None, ty))),
+                        ],
+                    )
+                    .unwrap(),
+                )),
+            ],
+            vec![None; 3],
+        );
+
+        // Perform the prune
+        let mut required_cols = FixedBitSet::with_capacity(3);
+        required_cols.insert(1);
+        required_cols.insert(2);
+        let plan = project.prune_col(&required_cols);
+
+        // Check the result
+        let project = plan.as_logical_project().unwrap();
+        assert_eq!(project.exprs().len(), 2);
+        assert_eq_input_ref!(&project.exprs()[0], 1);
+        match project.exprs()[1].clone() {
+            ExprImpl::FunctionCall(call) => assert_eq_input_ref!(&call.inputs()[0], 0),
+            _ => panic!("Expected function call"),
+        }
+
+        let scan = project.input();
+        let scan = scan.as_logical_scan().unwrap();
+        assert_eq!(scan.schema().fields().len(), 2);
+        assert_eq!(scan.schema().fields()[0], fields[0]);
+        assert_eq!(scan.schema().fields()[1], fields[2]);
     }
 }

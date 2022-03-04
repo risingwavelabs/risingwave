@@ -1,5 +1,6 @@
 use std::fmt;
 
+use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 
@@ -70,7 +71,14 @@ impl fmt::Display for LogicalScan {
 }
 
 impl ColPrunable for LogicalScan {
-    fn prune_col(&self, required_cols: &fixedbitset::FixedBitSet) -> PlanRef {
+    fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
+        assert!(
+            required_cols.is_subset(&FixedBitSet::from_iter(0..self.schema().fields().len())),
+            "invalid required cols: {}, only {} columns available",
+            required_cols,
+            self.schema().fields().len()
+        );
+
         let (columns, fields) = required_cols
             .ones()
             .map(|id| (self.columns[id], self.schema.fields[id].clone()))

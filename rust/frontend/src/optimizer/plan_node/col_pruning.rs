@@ -17,7 +17,7 @@ pub trait ColPrunable {
     ///
     /// When implementing this method for a node, it may require its children to produce additional
     /// columns besides `required_cols`. In this case, it may need to insert a
-    /// [`LogicalProject`](super::LogicalProject) above to satisfy the given `required_cols`.
+    /// [`LogicalProject`](super::LogicalProject) above to have a correct schema.
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef;
 }
 

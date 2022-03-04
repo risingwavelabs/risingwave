@@ -116,17 +116,8 @@ mod tests {
     use risingwave_pb::expr::expr_node::Type;
 
     use super::*;
-    use crate::expr::{FunctionCall, InputRef, Literal};
+    use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
     use crate::optimizer::plan_node::LogicalScan;
-
-    macro_rules! assert_eq_input_ref {
-        ($e:expr, $index:expr) => {
-            match $e {
-                ExprImpl::InputRef(i) => assert_eq!(i.index(), $index),
-                _ => assert!(false, "Expected input ref, found {:?}", $e),
-            }
-        };
-    }
 
     #[test]
     /// Pruning
