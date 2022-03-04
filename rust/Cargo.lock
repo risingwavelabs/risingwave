@@ -1452,6 +1452,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "etcd-client"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d267091320c099e5b53e81261e7fc01c5280d308da0444f7cd4ee94696569820"
+dependencies = [
+ "http",
+ "prost 0.9.0",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tonic-build",
+ "tower-service",
+]
+
+[[package]]
 name = "event-listener"
 version = "2.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3880,6 +3895,7 @@ name = "risingwave_meta"
 version = "0.1.3"
 dependencies = [
  "anyhow",
+ "assert_matches",
  "async-recursion",
  "async-stream",
  "async-trait",
@@ -3892,6 +3908,7 @@ dependencies = [
  "crc32fast",
  "dashmap 5.1.0",
  "either",
+ "etcd-client",
  "futures 0.3.21",
  "hex",
  "hyper",

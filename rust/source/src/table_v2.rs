@@ -7,7 +7,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
 use risingwave_storage::TableColumnDesc;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 use crate::{BatchSourceReader, Source, StreamSourceReader};
 
@@ -17,7 +17,7 @@ struct TableSourceV2Core {
     ///
     /// When a `StreamReader` is created, a channel will be created and the sender will be
     /// saved here. The insert statement will take one channel randomly.
-    changes_txs: Vec<mpsc::UnboundedSender<StreamChunk>>,
+    changes_txs: Vec<mpsc::UnboundedSender<(StreamChunk, oneshot::Sender<()>)>>,
 }
 
 /// [`TableSourceV2`] is a special internal source to handle table updates from user,
@@ -58,17 +58,29 @@ impl TableSourceV2 {
         (((worker_id as u64) << 32) + (local_row_id as u64)) as i64
     }
 
-    /// Write stream chunk into table. Changes writen here will be simply passed to the associated
-    /// streaming task via channel, and then be materialized to storage there.
-    pub async fn write_chunk(&self, chunk: StreamChunk) -> Result<()> {
-        let core = self.core.read().unwrap();
+    /// Asynchronously write stream chunk into table. Changes writen here will be simply passed to
+    /// the associated streaming task via channel, and then be materialized to storage there.
+    pub fn write_chunk(&self, chunk: StreamChunk) -> Result<oneshot::Receiver<()>> {
+        let tx = {
+            let core = self.core.read().unwrap();
+            core.changes_txs
+                .choose(&mut rand::thread_rng())
+                .expect("no table reader exists")
+                .clone()
+        };
 
-        let tx = core
-            .changes_txs
-            .choose(&mut rand::thread_rng())
-            .expect("no table reader exists");
-        tx.send(chunk).expect("write chunk to table reader failed");
+        let (notifier_tx, notifier_rx) = oneshot::channel();
+        tx.send((chunk, notifier_tx))
+            .expect("write chunk to table reader failed");
 
+        Ok(notifier_rx)
+    }
+
+    /// Write stream chunk into table using `write_chunk`, and then block until a reader consumes
+    /// the chunk.
+    pub async fn blocking_write_chunk(&self, chunk: StreamChunk) -> Result<()> {
+        let rx = self.write_chunk(chunk)?;
+        rx.await.unwrap();
         Ok(())
     }
 }
@@ -104,7 +116,7 @@ impl BatchSourceReader for TableV2BatchReader {
 pub struct TableV2StreamReader {
     /// The receiver of the changes channel. This field is `Some` only if the reader has been
     /// `open`ed.
-    rx: mpsc::UnboundedReceiver<StreamChunk>,
+    rx: mpsc::UnboundedReceiver<(StreamChunk, oneshot::Sender<()>)>,
 
     /// Mappings from the source column to the column to be read.
     column_indices: Vec<usize>,
@@ -117,10 +129,14 @@ impl StreamSourceReader for TableV2StreamReader {
     }
 
     async fn next(&mut self) -> Result<StreamChunk> {
-        let chunk = match self.rx.recv().await {
-            Some(chunk) => chunk,
-            None => panic!("TableSourceV2 dropped before associated streaming task terminated"),
-        };
+        let (chunk, notifier) = self
+            .rx
+            .recv()
+            .await
+            .expect("TableSourceV2 dropped before associated streaming task terminated");
+
+        // Caveats: this function is an arm of `tokio::select`. We should ensure there's no `await`
+        // after here.
 
         let (ops, columns, bitmap) = chunk.into_inner();
 
@@ -129,8 +145,10 @@ impl StreamSourceReader for TableV2StreamReader {
             .iter()
             .map(|i| columns[*i].clone())
             .collect();
+        let chunk = StreamChunk::new(ops, selected_columns, bitmap);
 
-        Ok(StreamChunk::new(ops, selected_columns, bitmap))
+        notifier.send(()).ok();
+        Ok(chunk)
     }
 }
 
@@ -174,6 +192,8 @@ impl Source for TableSourceV2 {
 #[cfg(test)]
 mod tests {
 
+    use std::sync::Arc;
+
     use assert_matches::assert_matches;
     use itertools::Itertools;
     use risingwave_common::array::{Array, I64Array, Op};
@@ -196,17 +216,20 @@ mod tests {
 
     #[tokio::test]
     async fn test_table_source_v2() -> Result<()> {
-        let source = new_source();
+        let source = Arc::new(new_source());
         let mut reader = source.stream_reader(TableV2ReaderContext, vec![ColumnId::from(0)])?;
 
         macro_rules! write_chunk {
             ($i:expr) => {{
+                let source = source.clone();
                 let chunk = StreamChunk::new(
                     vec![Op::Insert],
                     vec![column_nonnull!(I64Array, [$i])],
                     None,
                 );
-                source.write_chunk(chunk).await?;
+                tokio::spawn(async move {
+                    source.blocking_write_chunk(chunk).await.unwrap();
+                })
             }};
         }
 

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use risingwave_batch::executor::{
     CreateTableExecutor, Executor as BatchExecutor, InsertExecutor, RowSeqScanExecutor,
 };
-use risingwave_common::array::{Array, DataChunk, F64Array};
+use risingwave_common::array::{Array, DataChunk, F64Array, RwError};
 use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::column_nonnull;
 use risingwave_common::error::Result;
@@ -16,11 +16,10 @@ use risingwave_pb::plan::ColumnDesc;
 use risingwave_source::{MemSourceManager, SourceManager};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::monitor::DEFAULT_STATE_STORE_STATS;
-use risingwave_storage::table::{SimpleTableManager, TableManager};
 use risingwave_storage::{Keyspace, StateStore, StateStoreImpl};
 use risingwave_stream::executor::{
-    Barrier, Epoch, Executor as StreamExecutor, MaterializeExecutor, Message, PkIndices,
-    SourceExecutor,
+    new_adhoc_mview_table, Barrier, Epoch, Executor as StreamExecutor, MaterializeExecutor,
+    Message, PkIndices, SourceExecutor,
 };
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -74,7 +73,6 @@ async fn test_table_v2_materialize() -> Result<()> {
             .monitored(DEFAULT_STATE_STORE_STATS.clone()),
     );
     let source_manager = Arc::new(MemSourceManager::new());
-    let table_manager = Arc::new(SimpleTableManager::new(store));
     let source_table_id = TableId::default();
     let table_columns = vec![
         // data
@@ -100,7 +98,6 @@ async fn test_table_v2_materialize() -> Result<()> {
     // Create table v2 using `CreateTableExecutor`
     let mut create_table = CreateTableExecutor::new(
         source_table_id,
-        table_manager.clone(),
         source_manager.clone(),
         table_columns,
         "CreateTableExecutor".to_string(),
@@ -128,7 +125,6 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     // Register associated materialized view
     let mview_id = TableId::new(1);
-    table_manager.register_associated_materialized_view(&source_table_id, &mview_id)?;
     source_manager.register_associated_materialized_view(&source_table_id, &mview_id)?;
 
     // Create a `SourceExecutor` to read the changes
@@ -153,7 +149,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         Box::new(stream_source),
         keyspace.clone(),
         vec![OrderPair::new(1, OrderType::Ascending)],
-        all_column_ids,
+        all_column_ids.clone(),
         2,
         "MaterializeExecutor".to_string(),
     );
@@ -161,21 +157,27 @@ async fn test_table_v2_materialize() -> Result<()> {
     // Add some data using `InsertExecutor`, assuming we are inserting into the "mv"
     let columns = vec![column_nonnull! { F64Array, [1.14, 5.14] }];
     let chunk = DataChunk::builder().columns(columns.clone()).build();
-    let insert_inner = SingleChunkExecutor::new(chunk, all_schema);
+    let insert_inner = SingleChunkExecutor::new(chunk, all_schema.clone());
     let mut insert =
         InsertExecutor::new(mview_id, source_manager.clone(), Box::new(insert_inner), 0);
 
-    insert.open().await?;
-    insert.next().await?;
-    insert.close().await?;
+    tokio::spawn(async move {
+        insert.open().await?;
+        insert.next().await?;
+        insert.close().await?;
+        Ok::<_, RwError>(())
+    });
 
     // Since we have not polled `Materialize`, we cannot scan anything from this table
-    let table = table_manager.get_table(&mview_id)?;
-    let data_column_ids = vec![0, 1];
+    let table = new_adhoc_mview_table(
+        store.clone(),
+        &source_table_id,
+        &all_column_ids,
+        all_schema.fields(),
+    );
 
     let mut scan = RowSeqScanExecutor::new(
         table.clone(),
-        data_column_ids.clone(),
         1024,
         true,
         "RowSeqExecutor".to_string(),
@@ -216,7 +218,6 @@ async fn test_table_v2_materialize() -> Result<()> {
     // Scan the table again, we are able to get the data now!
     let mut scan = RowSeqScanExecutor::new(
         table.clone(),
-        data_column_ids.clone(),
         1024,
         true,
         "RowSeqScanExecutor".to_string(),

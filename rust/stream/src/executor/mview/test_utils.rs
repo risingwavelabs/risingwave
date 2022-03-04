@@ -17,7 +17,7 @@ pub async fn gen_basic_table(row_count: usize) -> MViewTable<MemoryStateStore> {
         vec![0.into(), 1.into(), 2.into()],
         vec![OrderType::Ascending, OrderType::Descending],
     );
-    let table = MViewTable::new(keyspace.clone(), schema, pk_columns.clone(), orderings);
+    let table = MViewTable::new_for_test(keyspace.clone(), schema, pk_columns.clone(), orderings);
     let epoch: u64 = 0;
 
     for idx in 0..row_count {

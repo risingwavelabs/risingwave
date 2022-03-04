@@ -14,8 +14,8 @@ use crate::types::{
 };
 use crate::util::sort_util::{OrderPair, OrderType};
 
-/// The special `cell_id` reserved for a whole null row is -1.
-pub const NULL_ROW_SPECIAL_CELL_ID: i32 = -1;
+/// The special `cell_id` reserved for a whole null row is `i32::MIN`.
+pub const NULL_ROW_SPECIAL_CELL_ID: ColumnId = ColumnId::new(i32::MIN);
 
 /// We can use memcomparable serialization to serialize data
 /// and flip the bits if the order of that datum is descending.
@@ -143,7 +143,7 @@ pub fn serialize_pk_and_row(
         // gets nothing.
         let key = [
             pk_buf,
-            serialize_column_id(&ColumnId::from(NULL_ROW_SPECIAL_CELL_ID))?.as_slice(),
+            serialize_column_id(&NULL_ROW_SPECIAL_CELL_ID)?.as_slice(),
         ]
         .concat();
         let value = serialize_cell(&None)?;
@@ -203,10 +203,10 @@ pub fn deserialize_cell(bytes: &[u8], ty: &DataType) -> Result<Datum> {
     }
 }
 
-pub fn deserialize_column_id(bytes: &[u8]) -> Result<i32> {
+pub fn deserialize_column_id(bytes: &[u8]) -> Result<ColumnId> {
     assert_eq!(bytes.len(), 4);
     let column_id = from_slice::<i32>(bytes)?;
-    Ok(column_id)
+    Ok(column_id.into())
 }
 
 fn deserialize_decimal(bytes: &[u8]) -> Result<Datum> {
