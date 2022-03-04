@@ -2,14 +2,12 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::error::Result;
 use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_storage::table::TableManagerRef;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::executor::{Executor, ExecutorBuilder};
 
 pub(super) struct DropTableExecutor {
     table_id: TableId,
-    table_manager: TableManagerRef,
     schema: Schema,
     identity: String,
 }
@@ -25,7 +23,6 @@ impl BoxedExecutorBuilder for DropTableExecutor {
 
         Ok(Box::new(Self {
             table_id,
-            table_manager: source.global_batch_env().table_manager_ref(),
             schema: Schema { fields: vec![] },
             identity: "DropTableExecutor".to_string(),
         }))

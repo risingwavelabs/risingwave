@@ -6,7 +6,6 @@ use risingwave_pb::plan::create_table_node::Info;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::ColumnDesc;
 use risingwave_source::SourceManagerRef;
-use risingwave_storage::table::TableManagerRef;
 use risingwave_storage::TableColumnDesc;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
@@ -14,7 +13,6 @@ use crate::executor::{Executor, ExecutorBuilder};
 
 pub struct CreateTableExecutor {
     table_id: TableId,
-    table_manager: TableManagerRef,
     source_manager: SourceManagerRef,
     table_columns: Vec<ColumnDesc>,
     identity: String,
@@ -26,7 +24,6 @@ pub struct CreateTableExecutor {
 impl CreateTableExecutor {
     pub fn new(
         table_id: TableId,
-        table_manager: TableManagerRef,
         source_manager: SourceManagerRef,
         table_columns: Vec<ColumnDesc>,
         identity: String,
@@ -34,7 +31,6 @@ impl CreateTableExecutor {
     ) -> Self {
         Self {
             table_id,
-            table_manager,
             source_manager,
             table_columns,
             identity,
@@ -54,7 +50,6 @@ impl BoxedExecutorBuilder for CreateTableExecutor {
 
         Ok(Box::new(Self {
             table_id,
-            table_manager: source.global_batch_env().table_manager_ref(),
             source_manager: source.global_batch_env().source_manager_ref(),
             table_columns: node.column_descs.clone(),
             identity: "CreateTableExecutor".to_string(),
