@@ -4,20 +4,10 @@ mod operations;
 mod utils;
 
 use clap::Parser;
-
 use operations::*;
 use risingwave_common::config::StorageConfig;
-
-
 use risingwave_rpc_client::MetaClient;
-
-
-
-
-use risingwave_storage::monitor::{DEFAULT_STATE_STORE_STATS};
-
-
-
+use risingwave_storage::monitor::DEFAULT_STATE_STORE_STATS;
 use risingwave_storage::StateStoreImpl;
 
 use crate::utils::store_statistics::print_statistics;
