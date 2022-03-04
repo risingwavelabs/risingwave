@@ -90,7 +90,7 @@ impl HummockOptions {
             bloom_false_positive: 0.1,
             data_directory: "hummock_001".to_string(),
             checksum_algo: ChecksumAlg::XxHash64,
-            async_checkpoint_enabled: true
+            async_checkpoint_enabled: true,
         }
     }
 
@@ -102,7 +102,7 @@ impl HummockOptions {
             bloom_false_positive: 0.1,
             data_directory: "hummock_001_small".to_string(),
             checksum_algo: ChecksumAlg::XxHash64,
-            async_checkpoint_enabled: true
+            async_checkpoint_enabled: true,
         }
     }
 }
@@ -382,7 +382,7 @@ impl HummockStorage {
         self.shared_buffer_manager.write_batch(batch, epoch)?;
 
         if !self.options.async_checkpoint_enabled {
-            return self.shared_buffer_manager.sync(Some(epoch)).await
+            return self.shared_buffer_manager.sync(Some(epoch)).await;
         }
         Ok(())
     }
@@ -410,7 +410,7 @@ impl HummockStorage {
 
     pub async fn sync(&self, epoch: Option<u64>) -> HummockResult<()> {
         if self.options.async_checkpoint_enabled {
-            return self.shared_buffer_manager.sync(epoch).await
+            return self.shared_buffer_manager.sync(epoch).await;
         }
         Ok(())
     }
