@@ -51,7 +51,7 @@ impl TryFrom<&Table> for TableCatalog {
             if !names.insert(col.name.clone()) {
                 return Err(CatalogError::Duplicated("column", col.name.clone()).into());
             }
-            table_catalog.add_column(&col.name, ColumnDesc::new(col.get_column_type()?.into()))?;
+            table_catalog.add_column(&col.name, ColumnDesc::from(col.clone()))?;
         }
         Ok(table_catalog)
     }

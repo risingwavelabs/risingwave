@@ -12,7 +12,7 @@ use risingwave_common::vector_op::cast::str_to_date;
 use risingwave_pb::plan::ColumnDesc;
 use serde::de::Deserialize;
 use serde_protobuf::de::Deserializer;
-use serde_protobuf::descriptor::{Descriptors, FieldType};
+use serde_protobuf::descriptor::{Descriptors, FieldDescriptor, FieldType};
 use serde_value::Value;
 use url::Url;
 
@@ -115,16 +115,7 @@ impl ProtobufParser {
         };
         msg.fields()
             .iter()
-            .map(|f| {
-                let field_type = f.field_type(&self.descriptors);
-                let column_type =
-                    protobuf_type_mapping(&field_type, f.is_repeated())?.to_protobuf()?;
-                Ok(ColumnDesc {
-                    column_type: Some(column_type),
-                    name: f.name().to_string(),
-                    ..Default::default()
-                })
-            })
+            .map(|f| Ok(date_type_to_col_desc(f, &self.descriptors, "".to_string())))
             .collect::<Result<Vec<ColumnDesc>>>()
     }
 }
@@ -154,6 +145,9 @@ fn protobuf_type_mapping(field_type: &FieldType, is_repeated: bool) -> Result<Da
         FieldType::Int32 | FieldType::SFixed32 | FieldType::SInt32 => DataType::Int32,
         FieldType::Bool => DataType::Boolean,
         FieldType::String => DataType::Varchar,
+        FieldType::Message(_d) => DataType::Struct {
+            fields: vec![].into(),
+        },
         actual_type => {
             return Err(
                 NotImplementedError(format!("unsupported field type: {:?}", actual_type)).into(),
@@ -161,6 +155,41 @@ fn protobuf_type_mapping(field_type: &FieldType, is_repeated: bool) -> Result<Da
         }
     };
     Ok(t)
+}
+
+pub fn date_type_to_col_desc(
+    field_descriptor: &FieldDescriptor,
+    descriptors: &Descriptors,
+    lastname: String,
+) -> ColumnDesc {
+    let field_type = field_descriptor.field_type(descriptors);
+    let data_type = protobuf_type_mapping(&field_type, field_descriptor.is_repeated()).unwrap();
+    if let FieldType::Message(m) = field_type {
+        let column_vec = m
+            .fields()
+            .iter()
+            .map(|f| {
+                date_type_to_col_desc(
+                    f,
+                    descriptors,
+                    lastname.clone() + field_descriptor.name() + ".",
+                )
+            })
+            .collect();
+        ColumnDesc {
+            column_type: Some(data_type.to_protobuf().unwrap()),
+            column_descs: column_vec,
+            struct_name: m.name().to_string(),
+            name: lastname + field_descriptor.name(),
+            ..Default::default()
+        }
+    } else {
+        ColumnDesc {
+            column_type: Some(data_type.to_protobuf().unwrap()),
+            name: lastname + field_descriptor.name(),
+            ..Default::default()
+        }
+    }
 }
 
 impl SourceParser for ProtobufParser {

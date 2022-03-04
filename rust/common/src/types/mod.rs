@@ -130,6 +130,43 @@ impl DataType {
         }
     }
 
+    // pub fn col_desc_to_data_type(column_desc: &ColumnDesc) -> DataType {
+    //     if column_desc.column_type.as_ref().unwrap().type_name == TypeName::Struct as i32 {
+    //         let v = column_desc
+    //             .column_descs
+    //             .iter()
+    //             .map(|c| {
+    //                 Self::col_desc_to_data_type(c)
+    //             })
+    //             .collect_vec();
+    //         DataType::Struct { fields: v.into() }
+    //     } else {
+    //         DataType::to_data_type(column_desc.column_type.as_ref().unwrap().type_name)
+    //     }
+    // }
+
+    pub fn type_to_string(type_name: i32) -> String {
+        let name = match type_name {
+            1 => "Boolean",
+            2 => "Int16",
+            3 => "Int32",
+            4 => "Int64",
+            5 => "Float32",
+            6 => "Float64",
+            7 => "Decimal",
+            8 => "Date",
+            9 => "Char",
+            10 => "Varchar",
+            11 => "Time",
+            12 => "Timestamp",
+            13 => "Timestampz",
+            14 => "Interval",
+            15 => "Struct",
+            _ => "",
+        };
+        name.to_string()
+    }
+
     pub fn to_protobuf(&self) -> Result<ProstDataType> {
         Ok(ProstDataType {
             type_name: self.prost_type_name() as i32,

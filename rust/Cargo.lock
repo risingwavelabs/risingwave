@@ -3812,6 +3812,7 @@ dependencies = [
  "risingwave-pb",
  "rust_decimal",
  "serde",
+ "serde-protobuf",
  "thiserror",
  "tokio",
  "tokio-stream",

@@ -8,6 +8,7 @@ mod create_source;
 pub mod create_table;
 pub mod drop_table;
 mod explain;
+pub mod show_table;
 
 pub(super) async fn handle(session: &RwSession, stmt: Statement) -> Result<PgResponse> {
     match stmt {
@@ -21,6 +22,10 @@ pub(super) async fn handle(session: &RwSession, stmt: Statement) -> Result<PgRes
         Statement::Drop(drop_statement) => {
             let table_object_name = ObjectName(vec![drop_statement.name]);
             drop_table::handle_drop_table(session, table_object_name).await
+        }
+        Statement::ShowVariable { variable } => {
+            let table_object_name = ObjectName(vec![variable[1].clone()]);
+            show_table::handle_show_table(session, table_object_name).await
         }
         _ => Err(ErrorCode::NotImplementedError(format!("Unhandled ast: {:?}", stmt)).into()),
     }
