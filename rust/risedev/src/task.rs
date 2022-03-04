@@ -1,6 +1,7 @@
 mod compute_node_service;
 mod configure_tmux_service;
 mod ensure_stop_service;
+mod etcd_service;
 mod frontend_service;
 mod frontend_service_v2;
 mod grafana_service;
@@ -24,6 +25,7 @@ use tempfile::TempDir;
 pub use self::compute_node_service::*;
 pub use self::configure_tmux_service::*;
 pub use self::ensure_stop_service::*;
+pub use self::etcd_service::*;
 pub use self::frontend_service::*;
 pub use self::frontend_service_v2::*;
 pub use self::grafana_service::*;

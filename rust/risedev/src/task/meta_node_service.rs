@@ -41,6 +41,16 @@ impl Task for MetaNodeService {
             self.config.exporter_address, self.config.exporter_port
         ));
 
+        cmd.arg("--backend").arg(&self.config.backend);
+
+        if self.config.backend == "etcd"
+            && let Some(ref etcd) = self.config.provide_etcd_backend
+            && let Some(etcd) = etcd.get(0)
+        {
+            cmd.arg("--etcd-endpoints")
+                .arg(format!("{}:{}", etcd.address, etcd.port));
+        }
+
         if !self.config.user_managed {
             ctx.run_command(ctx.tmux_run(cmd)?)?;
             ctx.pb.set_message("started");

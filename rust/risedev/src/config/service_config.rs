@@ -25,6 +25,8 @@ pub struct MetaNodeConfig {
     pub exporter_address: String,
     pub exporter_port: u16,
     pub user_managed: bool,
+    pub backend: String,
+    pub provide_etcd_backend: Option<Vec<EtcdConfig>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -51,6 +53,16 @@ pub struct MinioConfig {
     pub hummock_password: String,
     pub hummock_bucket: String,
     pub provide_prometheus: Option<Vec<PrometheusConfig>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct EtcdConfig {
+    pub id: String,
+    // TODO: only one node etcd is supported.
+    pub address: String,
+    pub port: u16,
+    pub peer_port: u16,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -89,6 +101,7 @@ pub enum ServiceConfig {
     Frontend(FrontendConfig),
     FrontendV2(FrontendConfig),
     Minio(MinioConfig),
+    Etcd(EtcdConfig),
     Prometheus(PrometheusConfig),
     Grafana(GrafanaConfig),
     Jaeger(JaegerConfig),
@@ -102,6 +115,7 @@ impl ServiceConfig {
             Self::Frontend(c) => &c.id,
             Self::FrontendV2(c) => &c.id,
             Self::Minio(c) => &c.id,
+            Self::Etcd(c) => &c.id,
             Self::Prometheus(c) => &c.id,
             Self::Grafana(c) => &c.id,
             Self::Jaeger(c) => &c.id,

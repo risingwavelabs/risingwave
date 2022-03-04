@@ -99,6 +99,7 @@ fn task_main(
         let service = services.get(step).unwrap();
         ports.push(match service {
             ServiceConfig::Minio(c) => (c.port, c.id.clone()),
+            ServiceConfig::Etcd(c) => (c.port, c.id.clone()),
             ServiceConfig::Prometheus(c) => (c.port, c.id.clone()),
             ServiceConfig::ComputeNode(c) => (c.port, c.id.clone()),
             ServiceConfig::MetaNode(c) => (c.port, c.id.clone()),
@@ -132,6 +133,12 @@ fn task_main(
 
                 let mut task = risedev::ConfigureMinioTask::new(c.clone())?;
                 task.execute(&mut ctx)?;
+            }
+            ServiceConfig::Etcd(c) => {
+                let mut ctx =
+                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
+                let mut service = risedev::EtcdService::new(c.clone())?;
+                service.execute(&mut ctx)?;
             }
             ServiceConfig::Prometheus(c) => {
                 let mut ctx =
