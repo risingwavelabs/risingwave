@@ -48,7 +48,7 @@ impl EtcdSnapshot {
             } else {
                 // Slow path
                 let _g = self.init_lock.lock().await;
-                let revision = self.revision.load(atomic::Ordering::Relaxed);
+                let revision = self.revision.load(atomic::Ordering::Acquire);
                 if revision != REVISION_UNINITIALIZED {
                     // Double check failed, release the lock.
                     continue;
