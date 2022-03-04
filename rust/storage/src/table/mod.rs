@@ -26,10 +26,6 @@ use crate::TableColumnDesc;
 /// `Database` is a logical concept and stored as metadata information.
 #[async_trait::async_trait]
 pub trait TableManager: Debug + Sync + Send + AsRef<dyn Any> {
-
-    /// Drop a specific table.
-    async fn drop_table(&self, table_id: &TableId) -> Result<()>;
-
     /// Create materialized view.
     fn create_materialized_view(
         &self,
@@ -45,9 +41,6 @@ pub trait TableManager: Debug + Sync + Send + AsRef<dyn Any> {
         associated_table_id: &TableId,
         mview_id: &TableId,
     ) -> Result<ScannableTableRef>;
-
-    /// Drop materialized view.
-    async fn drop_materialized_view(&self, table_id: &TableId) -> Result<()>;
 }
 
 #[async_trait::async_trait]

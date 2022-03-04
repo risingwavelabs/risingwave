@@ -39,10 +39,8 @@ impl Executor for DropTableExecutor {
     }
 
     async fn next(&mut self) -> Result<Option<DataChunk>> {
-        self.table_manager
-            .drop_table(&self.table_id)
-            .await
-            .map(|_| None)
+        // TODO: ddl may not need to be executed on compute node
+        Ok(None)
     }
 
     async fn close(&mut self) -> Result<()> {

@@ -31,18 +31,6 @@ impl AsRef<dyn Any> for SimpleTableManager {
 
 #[async_trait::async_trait]
 impl TableManager for SimpleTableManager {
-    // TODO: the data in StateStore should also be dropped directly/through unpin or some other way.
-    async fn drop_table(&self, _table_id: &TableId) -> Result<()> {
-        // let mut tables = self.lock_tables();
-        // ensure!(
-        //     tables.contains_key(table_id),
-        //     "Table does not exist: {:?}",
-        //     table_id
-        // );
-        // tables.remove(table_id);
-        Ok(())
-    }
-
     fn create_materialized_view(
         &self,
         table_id: &TableId,
@@ -105,10 +93,6 @@ impl TableManager for SimpleTableManager {
         // Simply associate the mview id to the table
         tables.insert(*mview_id, table.clone());
         Ok(table)
-    }
-
-    async fn drop_materialized_view(&self, table_id: &TableId) -> Result<()> {
-        self.drop_table(table_id).await
     }
 }
 
