@@ -4,6 +4,7 @@ use std::vec;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use log::debug;
 
 use crate::expr::{ExprRewriter, InputRef};
 
@@ -121,7 +122,7 @@ impl ColIndexMapping {
 
     #[must_use]
     pub fn composite(&self, following: &Self) -> Self {
-        println!(
+        debug!(
             "composing {:?} and {:?}",
             self.mapping_pairs().collect::<Vec<_>>(),
             following.mapping_pairs().collect::<Vec<_>>()

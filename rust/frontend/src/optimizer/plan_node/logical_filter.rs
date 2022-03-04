@@ -82,11 +82,6 @@ impl ColPrunable for LogicalFilter {
             schema,
         };
 
-        println!(
-            "required_cols: {}, {}",
-            required_cols, visitor.required_cols
-        );
-
         LogicalProject::with_mapping(
             filter.into(),
             ColIndexMapping::with_remaining_columns(

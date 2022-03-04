@@ -68,10 +68,8 @@ impl fmt::Display for LogicalInsert {
 }
 
 impl ColPrunable for LogicalInsert {
-    fn prune_col(&self, required_cols: &fixedbitset::FixedBitSet) -> PlanRef {
-        // TODO: replace default impl
-        let mapping = ColIndexMapping::with_remaining_columns(required_cols);
-        LogicalProject::with_mapping(self.clone().into(), mapping).into()
+    fn prune_col(&self, _required_cols: &fixedbitset::FixedBitSet) -> PlanRef {
+        panic!("column pruning should not be called on insert")
     }
 }
 

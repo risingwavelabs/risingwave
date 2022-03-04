@@ -1,6 +1,7 @@
 use std::fmt;
 
 use itertools::Itertools;
+use log::debug;
 use risingwave_common::catalog::{Field, Schema};
 
 use super::{
@@ -47,7 +48,7 @@ impl LogicalProject {
     /// This is useful in column pruning when we want to add a project to ensure the output schema
     /// is correct.
     pub fn with_mapping(input: PlanRef, mapping: ColIndexMapping) -> Self {
-        println!(
+        debug!(
             "with_mapping {:?}",
             mapping.mapping_pairs().collect::<Vec<_>>()
         );
