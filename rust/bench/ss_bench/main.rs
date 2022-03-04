@@ -4,21 +4,11 @@ mod operations;
 mod utils;
 
 use clap::Parser;
-use moka::future::Cache;
 use operations::*;
-use risingwave_common::error::{Result, RwError};
-use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
+use risingwave_common::config::StorageConfig;
 use risingwave_rpc_client::MetaClient;
-use risingwave_storage::hummock::hummock_meta_client::RpcHummockMetaClient;
-use risingwave_storage::hummock::local_version_manager::LocalVersionManager;
-use risingwave_storage::hummock::{
-    HummockOptions, HummockStateStore, HummockStorage, SstableStore,
-};
-use risingwave_storage::memory::MemoryStateStore;
-use risingwave_storage::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
-use risingwave_storage::object::S3ObjectStore;
-use risingwave_storage::rocksdb_local::RocksDBStateStore;
-use risingwave_storage::tikv::TikvStateStore;
+use risingwave_storage::monitor::DEFAULT_STATE_STORE_STATS;
+use risingwave_storage::{dispatch_state_store, StateStoreImpl};
 
 use crate::utils::store_statistics::print_statistics;
 
@@ -88,105 +78,6 @@ pub(crate) struct Opts {
     statistics: bool,
 }
 
-fn get_checksum_algo(algo: &str) -> ChecksumAlg {
-    match algo {
-        "crc32c" => ChecksumAlg::Crc32c,
-        "xxhash64" => ChecksumAlg::XxHash64,
-        other => unimplemented!("checksum algorithm \"{}\" is not supported", other),
-    }
-}
-
-#[derive(Clone)]
-pub(crate) enum StateStoreImpl {
-    Hummock(HummockStateStore),
-    Memory(MemoryStateStore),
-    RocksDB(RocksDBStateStore),
-    Tikv(TikvStateStore),
-}
-
-async fn get_state_store_impl(opts: &Opts, stats: Arc<StateStoreStats>) -> Result<StateStoreImpl> {
-    let meta_address = "127.0.0.1:5691";
-
-    let instance = match opts.store.as_ref() {
-        "in-memory" | "in_memory" => StateStoreImpl::Memory(MemoryStateStore::new()),
-        tikv if tikv.starts_with("tikv") => StateStoreImpl::Tikv(TikvStateStore::new(vec![tikv
-            .strip_prefix("tikv://")
-            .unwrap()
-            .to_string()])),
-        minio if minio.starts_with("hummock+minio://") => {
-            let object_client = Arc::new(
-                S3ObjectStore::new_with_minio(minio.strip_prefix("hummock+").unwrap()).await,
-            );
-            let remote_dir = "hummock_001";
-            let hummock_meta_client = Arc::new(RpcHummockMetaClient::new(
-                MetaClient::new(meta_address).await?,
-                stats.clone(),
-            ));
-            let sstable_manager = Arc::new(SstableStore::new(
-                object_client.clone(),
-                remote_dir.to_string(),
-            ));
-            StateStoreImpl::Hummock(HummockStateStore::new(
-                HummockStorage::new(
-                    HummockOptions {
-                        sstable_size: opts.table_size_mb * (1 << 20),
-                        block_size: opts.block_size_kb * (1 << 10),
-                        bloom_false_positive: opts.bloom_false_positive,
-                        data_directory: remote_dir.to_string(),
-                        checksum_algo: get_checksum_algo(opts.checksum_algo.as_ref()),
-                    },
-                    sstable_manager.clone(),
-                    Arc::new(LocalVersionManager::new(
-                        sstable_manager,
-                        Some(Arc::new(Cache::new(65536))),
-                    )),
-                    hummock_meta_client,
-                    stats,
-                )
-                .await
-                .map_err(RwError::from)?,
-            ))
-        }
-        s3 if s3.starts_with("hummock+s3://") => {
-            let s3_store = Arc::new(
-                S3ObjectStore::new(s3.strip_prefix("hummock+s3://").unwrap().to_string()).await,
-            );
-            let remote_dir = "hummock_001";
-            let hummock_meta_client = Arc::new(RpcHummockMetaClient::new(
-                MetaClient::new(meta_address).await?,
-                stats.clone(),
-            ));
-            let sstable_manager =
-                Arc::new(SstableStore::new(s3_store.clone(), remote_dir.to_string()));
-            StateStoreImpl::Hummock(HummockStateStore::new(
-                HummockStorage::new(
-                    HummockOptions {
-                        sstable_size: opts.table_size_mb * (1 << 20),
-                        block_size: opts.block_size_kb * (1 << 10),
-                        bloom_false_positive: opts.bloom_false_positive,
-                        data_directory: remote_dir.to_string(),
-                        checksum_algo: get_checksum_algo(opts.checksum_algo.as_ref()),
-                    },
-                    sstable_manager.clone(),
-                    Arc::new(LocalVersionManager::new(
-                        sstable_manager,
-                        Some(Arc::new(Cache::new(65536))),
-                    )),
-                    hummock_meta_client,
-                    stats,
-                )
-                .await
-                .map_err(RwError::from)?,
-            ))
-        }
-        rocksdb if rocksdb.starts_with("rocksdb_local://") => StateStoreImpl::RocksDB(
-            RocksDBStateStore::new(rocksdb.strip_prefix("rocksdb_local://").unwrap()),
-        ),
-        other => unimplemented!("state store \"{}\" is not supported", other),
-    };
-    Ok(instance)
-}
-
 fn preprocess_options(opts: &mut Opts) {
     if opts.reads < 0 {
         opts.reads = opts.num;
@@ -213,20 +104,27 @@ async fn main() {
     preprocess_options(&mut opts);
     println!("Configurations after preprocess:\n {:?}", &opts);
 
-    let state_store = match get_state_store_impl(&opts, stats.clone()).await {
-        Ok(state_store_impl) => state_store_impl,
-        Err(_) => {
-            eprintln!("Failed to get state_store");
-            return;
-        }
-    };
+    let config = Arc::new(StorageConfig {
+        bloom_false_positive: opts.bloom_false_positive,
+        checksum_algo: opts.checksum_algo.clone(),
+        sstable_size: opts.table_size_mb * (1 << 20),
+        block_size: opts.block_size_kb * (1 << 10),
+        data_directory: "hummock_001".to_string(),
+    });
 
-    match state_store {
-        StateStoreImpl::Hummock(store) => Operations::run(store, &opts).await,
-        StateStoreImpl::Memory(store) => Operations::run(store, &opts).await,
-        StateStoreImpl::RocksDB(store) => Operations::run(store, &opts).await,
-        StateStoreImpl::Tikv(store) => Operations::run(store, &opts).await,
-    };
+    let meta_address = "http://127.0.0.1:5690";
+    let hummock_meta_client = MetaClient::new(meta_address).await.unwrap();
+
+    let state_store =
+        match StateStoreImpl::new(&opts.store, config, hummock_meta_client, stats.clone()).await {
+            Ok(state_store_impl) => state_store_impl,
+            Err(_) => {
+                eprintln!("Failed to get state_store");
+                return;
+            }
+        };
+
+    dispatch_state_store!(state_store, store, { Operations::run(store, &opts).await });
 
     if opts.statistics {
         print_statistics(&stats);
