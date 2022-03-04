@@ -17,7 +17,7 @@ pub trait Snapshot: Sync + Send + 'static {
 
 /// `MetaStore` defines the functions used to operate metadata.
 #[async_trait]
-pub trait MetaStore: Sync + Send + 'static {
+pub trait MetaStore: Clone + Sync + Send + 'static {
     type Snapshot: Snapshot;
 
     fn snapshot(&self) -> Self::Snapshot;
@@ -40,10 +40,11 @@ pub trait MetaStore: Sync + Send + 'static {
 }
 
 // Error of metastore
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum Error {
     ItemNotFound(String),
     TransactionAbort(),
+    Internal(anyhow::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -55,6 +56,10 @@ impl From<Error> for RwError {
             Error::TransactionAbort() => {
                 RwError::from(ErrorCode::InternalError("transaction aborted".to_owned()))
             }
+            Error::Internal(e) => RwError::from(ErrorCode::InternalError(format!(
+                "meta internal error: {}",
+                e
+            ))),
         }
     }
 }

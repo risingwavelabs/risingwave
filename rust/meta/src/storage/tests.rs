@@ -1,3 +1,4 @@
+use assert_matches::assert_matches;
 use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::error::Result;
@@ -155,8 +156,10 @@ async fn test_meta_store_transaction<S: MetaStore>(meta_store: &S) -> Result<()>
     let mut trx = Transaction::default();
     trx.check_exists(cf.to_owned(), kvs[4].0.to_owned());
     trx.put(cf.to_owned(), kvs[3].0.to_owned(), kvs[3].1.to_owned());
-    let expected = Error::TransactionAbort();
-    assert_eq!(meta_store.txn(trx).await.unwrap_err(), expected);
+    assert_matches!(
+        meta_store.txn(trx).await.unwrap_err(),
+        Error::TransactionAbort()
+    );
     assert_eq!(0, meta_store.list_cf(cf).await.unwrap().len());
 
     Ok(())

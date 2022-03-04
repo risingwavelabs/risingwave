@@ -1,8 +1,6 @@
 use std::collections::HashSet;
-use std::sync::Arc;
 
 use futures::{SinkExt, StreamExt};
-use risingwave_common::config::StreamingConfig;
 use risingwave_pb::common::{ActorInfo, HostAddress};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
@@ -10,8 +8,6 @@ use risingwave_pb::plan::Field;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::*;
 use risingwave_pb::stream_service::*;
-use risingwave_source::MemSourceManager;
-use risingwave_storage::table::SimpleTableManager;
 
 use super::*;
 use crate::executor::{Barrier, Epoch, Message, Mutation};
@@ -225,13 +221,7 @@ async fn test_stream_proto() {
         )
         .unwrap();
 
-    let env = StreamEnvironment::new(
-        Arc::new(SimpleTableManager::with_in_memory_store()),
-        Arc::new(MemSourceManager::new()),
-        std::net::SocketAddr::V4("127.0.0.1:5688".parse().unwrap()),
-        Arc::new(StreamingConfig::default()),
-        WorkerNodeId::default(),
-    );
+    let env = StreamEnvironment::for_test();
     stream_manager
         .build_actors(&[1, 3, 7, 11, 13], env)
         .unwrap();
