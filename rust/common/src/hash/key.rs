@@ -6,7 +6,9 @@ use std::io::{Cursor, Read};
 use chrono::{Datelike, Timelike};
 use itertools::Itertools;
 
-use crate::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, StructRef, ListRef};
+use crate::array::{
+    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, ListRef, StructRef,
+};
 use crate::error::Result;
 use crate::types::{
     Datum, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,

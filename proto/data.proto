@@ -72,7 +72,6 @@ message StructArrayData {
 
 message ListArrayData {
   repeated Array children_array = 1;
-  repeated DataType children_type = 2;
 }
 
 enum ArrayType {

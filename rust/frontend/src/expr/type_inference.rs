@@ -76,9 +76,7 @@ pub fn infer_type(func_type: ExprType, inputs_type: Vec<DataType>) -> Option<Dat
         DataTypeName::Struct => DataType::Struct {
             fields: Arc::new([]),
         },
-        DataTypeName::List => DataType::List {
-            fields: Arc::new([]),
-        },
+        DataTypeName::List => DataType::List { },
     })
 }
 

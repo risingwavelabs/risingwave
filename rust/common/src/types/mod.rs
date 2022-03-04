@@ -27,7 +27,9 @@ pub use interval::*;
 pub use ordered_float::IntoOrdered;
 use paste::paste;
 
-use crate::array::{ArrayBuilderImpl, PrimitiveArrayItemType, StructRef, StructValue, ListRef, ListValue};
+use crate::array::{
+    ArrayBuilderImpl, ListRef, ListValue, PrimitiveArrayItemType, StructRef, StructValue,
+};
 
 pub type OrderedF32 = ordered_float::OrderedFloat<f32>;
 pub type OrderedF64 = ordered_float::OrderedFloat<f64>;
@@ -49,7 +51,7 @@ pub enum DataType {
     Timestampz,
     Interval,
     Struct { fields: Arc<[DataType]> },
-    List { fields: Arc<[DataType]> },
+    List {},
 }
 
 const DECIMAL_DEFAULT_PRECISION: u32 = 20;
@@ -84,9 +86,7 @@ impl From<&ProstDataType> for DataType {
             TypeName::Struct => DataType::Struct {
                 fields: Arc::new([]),
             },
-            TypeName::List => DataType::List {
-                fields: Arc::new([]),
-            },
+            TypeName::List => DataType::List {},
         }
     }
 }

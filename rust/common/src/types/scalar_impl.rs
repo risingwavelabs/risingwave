@@ -1,6 +1,6 @@
 use super::*;
-use crate::array::struct_array::{StructRef, StructValue};
 use crate::array::list_array::{ListRef, ListValue};
+use crate::array::struct_array::{StructRef, StructValue};
 use crate::{for_all_native_types, for_all_scalar_variants};
 
 /// `ScalarPartialOrd` allows comparison between `Scalar` and `ScalarRef`.

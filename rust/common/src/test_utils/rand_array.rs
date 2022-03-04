@@ -11,7 +11,7 @@ use rand::prelude::Distribution;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 
-use crate::array::{Array, ArrayBuilder, ArrayRef, StructValue, ListValue};
+use crate::array::{Array, ArrayBuilder, ArrayRef, ListValue, StructValue};
 use crate::types::{
     Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, NativeType,
     Scalar,

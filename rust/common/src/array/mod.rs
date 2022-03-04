@@ -9,12 +9,12 @@ pub mod data_chunk_iter;
 mod decimal_array;
 pub mod interval_array;
 mod iterator;
+pub mod list_array;
 mod macros;
 mod primitive_array;
 pub mod stream_chunk;
 mod stream_chunk_iter;
 pub mod struct_array;
-pub mod list_array;
 mod utf8_array;
 mod value_reader;
 
@@ -32,12 +32,12 @@ pub use data_chunk_iter::{Row, RowDeserializer, RowRef};
 pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
 pub use interval_array::{IntervalArray, IntervalArrayBuilder};
 pub use iterator::ArrayIterator;
+pub use list_array::{ListArray, ListArrayBuilder, ListRef, ListValue};
 use paste::paste;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayItemType};
 use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType};
 pub use stream_chunk::{Op, StreamChunk};
 pub use struct_array::{StructArray, StructArrayBuilder, StructRef, StructValue};
-pub use list_array::{ListArray, ListArrayBuilder, ListRef, ListValue};
 pub use utf8_array::*;
 
 use crate::array::iterator::ArrayImplIterator;
@@ -183,7 +183,7 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
 pub enum ArrayMeta {
     Simple, // Simple array without given any extra metadata.
     Struct { children: Arc<[DataType]> },
-    List { children: Arc<[DataType]> },
+    List {},
 }
 
 /// Implement `compact` on array, which removes element according to `visibility`.

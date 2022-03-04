@@ -22,7 +22,6 @@ use crate::types::{DataType, Datum, DatumRef, Scalar, ScalarRefImpl};
 pub struct ListArrayBuilder {
     bitmap: BitmapBuilder,
     children_array: Vec<ArrayBuilderImpl>,
-    children_type: Arc<[DataType]>,
     len: usize,
 }
 
@@ -36,24 +35,15 @@ impl ArrayBuilder for ListArrayBuilder {
 
     #[cfg(test)]
     fn new(capacity: usize) -> Result<Self> {
-        Self::new_with_meta(
-            capacity,
-            ArrayMeta::List {
-                children: Arc::new([]),
-            },
-        )
+        Self::new_with_meta(capacity, ArrayMeta::List {})
     }
 
     fn new_with_meta(capacity: usize, meta: ArrayMeta) -> Result<Self> {
-        if let ArrayMeta::List { children } = meta {
-            let children_array = children
-                .iter()
-                .map(|a| a.create_array_builder(capacity))
-                .try_collect()?;
+        if let ArrayMeta::List {} = meta {
+            let children_array = Vec::new();
             Ok(Self {
                 bitmap: BitmapBuilder::with_capacity(capacity),
                 children_array,
-                children_type: children,
                 len: 0,
             })
         } else {
@@ -101,7 +91,6 @@ impl ArrayBuilder for ListArrayBuilder {
         Ok(ListArray {
             bitmap: self.bitmap.finish(),
             children,
-            children_type: self.children_type,
             len: self.len,
         })
     }
@@ -111,7 +100,6 @@ impl ArrayBuilder for ListArrayBuilder {
 pub struct ListArray {
     bitmap: Bitmap,
     children: Vec<ArrayImpl>,
-    children_type: Arc<[DataType]>,
     len: usize,
 }
 
@@ -137,7 +125,9 @@ impl Array for ListArray {
     }
 
     fn iter(&self) -> Self::Iter<'_> {
-        ArrayIterator::new(self)
+
+        let res = ArrayIterator::new(self);
+        res
     }
 
     fn to_protobuf(&self) -> Result<ProstArray> {
@@ -146,18 +136,10 @@ impl Array for ListArray {
             .iter()
             .map(|a| a.to_protobuf())
             .collect::<Result<Vec<ProstArray>>>()?;
-        let children_type = self
-            .children_type
-            .iter()
-            .map(|t| t.to_protobuf())
-            .collect::<Result<Vec<ProstDataType>>>()?;
         Ok(ProstArray {
             array_type: ProstArrayType::List as i32,
             struct_array_data: None,
-            list_array_data: Some(ListArrayData {
-                children_array,
-                children_type,
-            }),
+            list_array_data: Some(ListArrayData { children_array }),
             null_bitmap: Some(self.bitmap.to_protobuf()?),
             values: vec![],
         })
@@ -176,19 +158,12 @@ impl Array for ListArray {
     }
 
     fn create_builder(&self, capacity: usize) -> Result<super::ArrayBuilderImpl> {
-        let array_builder = ListArrayBuilder::new_with_meta(
-            capacity,
-            ArrayMeta::List {
-                children: self.children_type.clone(),
-            },
-        )?;
+        let array_builder = ListArrayBuilder::new_with_meta(capacity, ArrayMeta::List {})?;
         Ok(ArrayBuilderImpl::List(array_builder))
     }
 
     fn array_meta(&self) -> ArrayMeta {
-        ArrayMeta::List {
-            children: self.children_type.clone(),
-        }
+        ArrayMeta::List {}
     }
 }
 
@@ -206,36 +181,20 @@ impl ListArray {
             .iter()
             .map(|child| ArrayImpl::from_protobuf(child, cardinality))
             .collect::<Result<Vec<ArrayImpl>>>()?;
-        let children_type: Arc<[DataType]> = array_data
-            .children_type
-            .iter()
-            .map(DataType::from)
-            .collect::<Vec<DataType>>()
-            .into();
         let arr = ListArray {
             bitmap,
             children,
-            children_type,
             len: cardinality,
         };
         Ok(arr.into())
     }
 
-    pub fn children_array_types(&self) -> &[DataType] {
-        &self.children_type
-    }
-
     #[cfg(test)]
-    pub fn from_slices(
-        null_bitmap: &[bool],
-        children: Vec<ArrayImpl>,
-        children_type: Vec<DataType>,
-    ) -> Result<ListArray> {
+    pub fn from_slices(null_bitmap: &[bool], children: Vec<ArrayImpl>) -> Result<ListArray> {
         let cardinality = null_bitmap.len();
         let bitmap = Bitmap::try_from(null_bitmap.to_vec())?;
         Ok(ListArray {
             bitmap,
-            children_type: children_type.into(),
             len: cardinality,
             children,
         })
@@ -290,7 +249,12 @@ impl<'a> ListRef<'a> {
     pub fn fields_ref(&self) -> Vec<DatumRef<'a>> {
         match self {
             ListRef::Indexed { arr, idx } => {
-                arr.children.iter().map(|a| a.value_at(*idx)).collect()
+                // arr.children.iter().map(|a| a.value_at(*idx)).collect();
+                if arr.children.len() != 0 {
+                arr.children[*idx].iter().map(|a| a).collect()
+                } else {
+                    vec![]
+                }
             }
             ListRef::ValueRef { val } => val
                 .fields
@@ -386,7 +350,7 @@ mod tests {
     // `CREATE TYPE foo_empty as ();`, e.g.
     #[test]
     fn test_list_new_empty() {
-        let arr = ListArray::from_slices(&[true, false, true, false], vec![], vec![]).unwrap();
+        let arr = ListArray::from_slices(&[true, false, true, false], vec![]).unwrap();
         let actual = ListArray::from_protobuf(&arr.to_protobuf().unwrap()).unwrap();
         assert_eq!(ArrayImpl::List(arr), actual);
     }
@@ -395,12 +359,11 @@ mod tests {
     fn test_list_with_fields() {
         use crate::array::*;
         let arr = ListArray::from_slices(
-            &[false, true, false, true],
+            &[true, true],
             vec![
-                array! { I32Array, [None, Some(1), None, Some(2)] }.into(),
-                array! { F32Array, [None, Some(3.0), None, Some(4.0)] }.into(),
+                array! { Utf8Array, [Some("a"), Some("bb"), Some("ccc")] }.into(),
+                array! { Utf8Array, [None, Some("dddd"), Some("eeeee")] }.into(),
             ],
-            vec![DataType::Int32, DataType::Float32],
         )
         .unwrap();
         let actual = ListArray::from_protobuf(&arr.to_protobuf().unwrap()).unwrap();
@@ -411,51 +374,18 @@ mod tests {
         assert_eq!(
             list_values,
             vec![
-                None,
                 Some(ListValue::new(vec![
-                    Some(ScalarImpl::Int32(1)),
-                    Some(ScalarImpl::Float32(3.0.into())),
+                    Some(ScalarImpl::Utf8("a".into())),
+                    Some(ScalarImpl::Utf8("bb".into())),
+                    Some(ScalarImpl::Utf8("ccc".into())),
                 ])),
-                None,
                 Some(ListValue::new(vec![
-                    Some(ScalarImpl::Int32(2)),
-                    Some(ScalarImpl::Float32(4.0.into())),
-                ])),
+                    None,
+                    Some(ScalarImpl::Utf8("dddd".into())),
+                    Some(ScalarImpl::Utf8("eeeee".into())),
+                ]))
             ]
         );
-
-        let mut builder = ListArrayBuilder::new_with_meta(
-            4,
-            ArrayMeta::List {
-                children: Arc::new([DataType::Int32, DataType::Float32]),
-            },
-        )
-        .unwrap();
-        list_values.iter().for_each(|v| {
-            builder
-                .append(v.as_ref().map(|s| s.as_scalar_ref()))
-                .unwrap()
-        });
-        let arr = builder.finish().unwrap();
-        assert_eq!(arr.values_vec(), list_values);
-    }
-
-    // Ensure `create_builder` exactly copies the same metadata.
-    #[test]
-    fn test_list_create_builder() {
-        use crate::array::*;
-        let arr = ListArray::from_slices(
-            &[true],
-            vec![
-                array! { I32Array, [Some(1)] }.into(),
-                array! { F32Array, [Some(2.0)] }.into(),
-            ],
-            vec![DataType::Int32, DataType::Float32],
-        )
-        .unwrap();
-        let builder = arr.create_builder(4).unwrap();
-        let arr2 = try_match_expand!(builder.finish().unwrap(), ArrayImpl::List).unwrap();
-        assert_eq!(arr.array_meta(), arr2.array_meta());
     }
 
     #[test]
