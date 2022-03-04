@@ -289,13 +289,15 @@ impl CompactStatus {
         }
     }
 
+    /// Return Some(Vec<table info to add>, Vec<table id to delete>) if succeeds.
+    /// Return None if the task has been processed previously.
     #[allow(clippy::needless_collect)]
     pub fn report_compact_task(
         &mut self,
         output_table_compact_entries: Vec<SSTableStat>,
         compact_task: CompactTask,
         task_result: bool,
-    ) -> (Vec<SstableInfo>, Vec<HummockSSTableId>) {
+    ) -> Option<(Vec<SstableInfo>, Vec<HummockSSTableId>)> {
         let mut delete_table_ids = vec![];
         match task_result {
             true => {
@@ -305,6 +307,10 @@ impl CompactStatus {
                             .pop_task_input(compact_task.task_id)
                             .into_iter(),
                     );
+                }
+                if delete_table_ids.is_empty() {
+                    // The task has been processed previously.
+                    return None;
                 }
                 match &mut self.level_handlers[compact_task.target_level as usize] {
                     LevelHandler::Overlapping(l_n, _) | LevelHandler::Nonoverlapping(l_n, _) => {
@@ -322,20 +328,27 @@ impl CompactStatus {
                         .collect();
                     }
                 }
-                (compact_task.sorted_output_ssts, delete_table_ids)
+                // The task is finished successfully.
+                Some((compact_task.sorted_output_ssts, delete_table_ids))
             }
             false => {
-                self.cancel_compact_task(compact_task.task_id);
-                (vec![], vec![])
+                if !self.cancel_compact_task(compact_task.task_id) {
+                    // The task has been processed previously.
+                    return None;
+                }
+                // The task is cancelled successfully.
+                Some((vec![], vec![]))
             }
         }
     }
 
-    pub fn cancel_compact_task(&mut self, task_id: u64) {
+    pub fn cancel_compact_task(&mut self, task_id: u64) -> bool {
         // TODO: loop only in input levels
+        let mut changed = false;
         for level_handler in &mut self.level_handlers {
-            level_handler.unassign_task(task_id);
+            changed = changed || level_handler.unassign_task(task_id);
         }
+        changed
     }
 }
 

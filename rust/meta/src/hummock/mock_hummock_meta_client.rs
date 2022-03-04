@@ -100,6 +100,7 @@ impl HummockMetaClient for MockHummockMetaClient {
             .report_compact_task(compact_task, task_result)
             .await
             .map_err(HummockError::meta_error)
+            .map(|_| ())
     }
 
     async fn commit_epoch(&self, epoch: HummockEpoch) -> HummockResult<()> {

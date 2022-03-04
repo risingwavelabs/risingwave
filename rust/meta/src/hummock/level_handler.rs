@@ -43,18 +43,20 @@ impl LevelHandler {
         }
     }
 
-    pub fn unassign_task(&mut self, unassign_task_id: u64) {
+    pub fn unassign_task(&mut self, unassign_task_id: u64) -> bool {
         self.clear_compacting_range(unassign_task_id);
-
+        let mut changed = false;
         match self {
             LevelHandler::Overlapping(l_n, _) | LevelHandler::Nonoverlapping(l_n, _) => {
                 for SSTableStat { compact_task, .. } in l_n {
                     if *compact_task == Some(unassign_task_id) {
                         *compact_task = None;
+                        changed = true;
                     }
                 }
             }
         }
+        changed
     }
 
     pub fn pop_task_input(&mut self, finished_task_id: u64) -> Vec<u64> {
