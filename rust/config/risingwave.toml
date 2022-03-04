@@ -1,5 +1,3 @@
-# Note: this configuration file is not used actually
-
 [server]
 heartbeat_interval = 100
 
@@ -9,6 +7,9 @@ chunk_size = 1024
 [streaming]
 chunk_size = 1024
 
-[hummock]
-sst_size = 268435456 # 256MB
-block_size = 65536 # 64KB
+[storage]
+sstable_size = 268435456
+block_size = 4096
+bloom_false_positive = 0.1
+data_directory = "hummock_001"
+checksum_algo = "crc32c"

@@ -6,7 +6,6 @@ use rand::prelude::SliceRandom;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
-use risingwave_storage::table::ScannableTableRef;
 use risingwave_storage::TableColumnDesc;
 use tokio::sync::mpsc;
 
@@ -14,8 +13,6 @@ use crate::{BatchSourceReader, Source, StreamSourceReader};
 
 #[derive(Debug)]
 struct TableSourceV2Core {
-    _table: ScannableTableRef,
-
     /// The senders of the changes channel.
     ///
     /// When a `StreamReader` is created, a channel will be created and the sender will be
@@ -41,11 +38,8 @@ pub struct TableSourceV2 {
 }
 
 impl TableSourceV2 {
-    pub fn new(table: ScannableTableRef) -> Self {
-        let column_descs = table.column_descs().into_owned();
-
+    pub fn new(column_descs: Vec<TableColumnDesc>) -> Self {
         let core = TableSourceV2Core {
-            _table: table,
             changes_txs: vec![],
         };
 
@@ -179,7 +173,6 @@ impl Source for TableSourceV2 {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
     use assert_matches::assert_matches;
     use itertools::Itertools;
@@ -187,20 +180,18 @@ mod tests {
     use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::mview::MViewTable;
     use risingwave_storage::Keyspace;
 
     use super::*;
 
     fn new_source() -> TableSourceV2 {
         let store = MemoryStateStore::new();
-        let keyspace = Keyspace::table_root(store, &Default::default());
-        let table = Arc::new(MViewTable::new_batch(
-            keyspace,
-            vec![TableColumnDesc::unnamed(ColumnId::from(0), DataType::Int64)],
-        ));
+        let _keyspace = Keyspace::table_root(store, &Default::default());
 
-        TableSourceV2::new(table)
+        TableSourceV2::new(vec![TableColumnDesc::unnamed(
+            ColumnId::from(0),
+            DataType::Int64,
+        )])
     }
 
     #[tokio::test]

@@ -4,7 +4,8 @@ use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServic
 use risingwave_pb::hummock::*;
 use tonic::{Request, Response, Status};
 
-use crate::hummock::HummockManager;
+use crate::hummock::{CompactorManager, HummockManager};
+use crate::rpc::service::RwReceiverStream;
 use crate::storage::MetaStore;
 
 pub struct HummockServiceImpl<S>
@@ -12,14 +13,21 @@ where
     S: MetaStore,
 {
     hummock_manager: Arc<HummockManager<S>>,
+    compactor_manager: Arc<CompactorManager>,
 }
 
 impl<S> HummockServiceImpl<S>
 where
     S: MetaStore,
 {
-    pub fn new(hummock_manager: Arc<HummockManager<S>>) -> Self {
-        HummockServiceImpl { hummock_manager }
+    pub fn new(
+        hummock_manager: Arc<HummockManager<S>>,
+        compactor_manager: Arc<CompactorManager>,
+    ) -> Self {
+        HummockServiceImpl {
+            hummock_manager,
+            compactor_manager,
+        }
     }
 }
 
@@ -78,10 +86,9 @@ where
 
     async fn get_compaction_tasks(
         &self,
-        request: Request<GetCompactionTasksRequest>,
+        _request: Request<GetCompactionTasksRequest>,
     ) -> Result<Response<GetCompactionTasksResponse>, Status> {
-        let req = request.into_inner();
-        let result = self.hummock_manager.get_compact_task(req.context_id).await;
+        let result = self.hummock_manager.get_compact_task().await;
         match result {
             Ok(compact_task) => Ok(Response::new(GetCompactionTasksResponse {
                 status: None,
@@ -103,7 +110,7 @@ where
             Some(compact_task) => {
                 let result = self
                     .hummock_manager
-                    .report_compact_task(req.context_id, compact_task, req.task_result)
+                    .report_compact_task(compact_task, req.task_result)
                     .await;
                 match result {
                     Ok(_) => Ok(Response::new(ReportCompactionTasksResponse {
@@ -171,9 +178,8 @@ where
 
     async fn get_new_table_id(
         &self,
-        request: Request<GetNewTableIdRequest>,
+        _request: Request<GetNewTableIdRequest>,
     ) -> Result<Response<GetNewTableIdResponse>, Status> {
-        let _req = request.into_inner();
         let result = self.hummock_manager.get_new_table_id().await;
         match result {
             Ok(table_id) => Ok(Response::new(GetNewTableIdResponse {
@@ -182,5 +188,15 @@ where
             })),
             Err(e) => Err(e.to_grpc_status()),
         }
+    }
+
+    type SubscribeCompactTasksStream = RwReceiverStream<SubscribeCompactTasksResponse>;
+
+    async fn subscribe_compact_tasks(
+        &self,
+        _request: Request<SubscribeCompactTasksRequest>,
+    ) -> Result<Response<Self::SubscribeCompactTasksStream>, Status> {
+        let rx = self.compactor_manager.add_compactor().await;
+        Ok(Response::new(RwReceiverStream::new(rx)))
     }
 }

@@ -15,6 +15,7 @@ import com.risingwave.planner.rel.streaming.RwStreamProject;
 import com.risingwave.planner.rel.streaming.RwStreamSort;
 import com.risingwave.planner.rel.streaming.RwStreamTableSource;
 import com.risingwave.planner.rel.streaming.join.RwStreamHashJoin;
+import com.risingwave.planner.rules.logical.NormalizeJoinConditionRule;
 import com.risingwave.planner.rules.streaming.aggregate.StreamingShuffleAggRule;
 import com.risingwave.planner.rules.streaming.aggregate.StreamingSingleModeAggRule;
 import com.risingwave.planner.rules.streaming.aggregate.StreamingTwoPhaseAggRule;
@@ -34,7 +35,8 @@ public class StreamingRuleSets {
           RwLogicalValues.RwValuesConverterRule.INSTANCE,
           RwLogicalScan.RwLogicalScanConverterRule.INSTANCE,
           RwLogicalSort.RwLogicalSortConverterRule.INSTANCE,
-          RwLogicalJoin.RwLogicalJoinConverterRule.INSTANCE);
+          RwLogicalJoin.RwLogicalJoinConverterRule.INSTANCE,
+          NormalizeJoinConditionRule.Config.DEFAULT.toRule());
 
   public static final RuleSet STREAMING_CONVERTER_RULES =
       RuleSets.ofList(

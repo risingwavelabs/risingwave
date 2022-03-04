@@ -1,7 +1,5 @@
 pub mod mview;
 pub mod row_table;
-mod simple_manager;
-pub mod test;
 
 use std::any::Any;
 use std::borrow::Cow;
@@ -10,51 +8,10 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
-use risingwave_common::catalog::{Schema, TableId};
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
-use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::plan::ColumnDesc;
-pub use simple_manager::*;
 
 use crate::TableColumnDesc;
-
-/// `TableManager` is an abstraction of managing a collection of tables.
-/// The interface between executors and storage should be table-oriented.
-/// `Database` is a logical concept and stored as metadata information.
-#[async_trait::async_trait]
-pub trait TableManager: Sync + Send + AsRef<dyn Any> {
-    /// Create a specific table.
-    async fn create_table_v2(
-        &self,
-        table_id: &TableId,
-        table_columns: Vec<TableColumnDesc>,
-    ) -> Result<ScannableTableRef>;
-
-    /// Get a specific table.
-    fn get_table(&self, table_id: &TableId) -> Result<ScannableTableRef>;
-
-    /// Drop a specific table.
-    async fn drop_table(&self, table_id: &TableId) -> Result<()>;
-
-    /// Create materialized view.
-    fn create_materialized_view(
-        &self,
-        table_id: &TableId,
-        columns: &[ColumnDesc],
-        pk_columns: Vec<usize>,
-        orderings: Vec<OrderType>,
-    ) -> Result<()>;
-
-    /// Create materialized view associated to table v2
-    fn register_associated_materialized_view(
-        &self,
-        associated_table_id: &TableId,
-        mview_id: &TableId,
-    ) -> Result<ScannableTableRef>;
-
-    /// Drop materialized view.
-    async fn drop_materialized_view(&self, table_id: &TableId) -> Result<()>;
-}
 
 #[async_trait::async_trait]
 pub trait TableIter: Send {
@@ -62,12 +19,16 @@ pub trait TableIter: Send {
 }
 
 #[async_trait::async_trait]
+// deprecated and to be removed
+// deprecated and to be removed
+/// deprecated and to be removed
 pub trait ScannableTable: Sync + Send + Any + core::fmt::Debug {
     /// Open and return an iterator.
     async fn iter(&self, epoch: u64) -> Result<TableIterRef>;
 
     /// Collect data chunk with the target `chunk_size` from the given `iter`, projected on
     /// `indices`. If there's no more data, return `None`.
+    // TODO(bugen): column indices / ids should directly specified in adhoc table, not here.
     async fn collect_from_iter(
         &self,
         iter: &mut TableIterRef,
@@ -126,7 +87,7 @@ pub trait ScannableTable: Sync + Send + Any + core::fmt::Debug {
     /// scanning differs according to this property.
     fn is_shared_storage(&self) -> bool;
 }
+
 /// Reference of a `TableManager`.
-pub type TableManagerRef = Arc<dyn TableManager>;
 pub type ScannableTableRef = Arc<dyn ScannableTable>;
 pub type TableIterRef = Box<dyn TableIter>;

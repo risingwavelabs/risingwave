@@ -11,14 +11,17 @@
 #![feature(binary_heap_drain_sorted)]
 #![feature(const_fn_trait_bound)]
 #![feature(option_result_contains)]
+#![feature(let_chains)]
+#![feature(type_alias_impl_trait)]
+#![feature(map_first_last)]
 
 mod barrier;
-mod cluster;
+pub mod cluster;
 mod dashboard;
 mod hummock;
-mod manager;
+pub mod manager;
 mod model;
 pub mod rpc;
-mod storage;
+pub mod storage;
 mod stream;
 pub mod test_utils;

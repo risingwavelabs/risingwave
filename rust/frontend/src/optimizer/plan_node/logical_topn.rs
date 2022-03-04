@@ -31,6 +31,7 @@ impl LogicalTopN {
         Self::new(input, limit, offset, order).into_plan_ref()
     }
 }
+
 impl PlanTreeNodeUnary for LogicalTopN {
     fn input(&self) -> PlanRef {
         self.input.clone()
@@ -45,19 +46,25 @@ impl fmt::Display for LogicalTopN {
         todo!()
     }
 }
+
 impl WithOrder for LogicalTopN {}
+
 impl WithDistribution for LogicalTopN {}
+
 impl WithSchema for LogicalTopN {
     fn schema(&self) -> &Schema {
         &self.schema
     }
 }
+
 impl ColPrunable for LogicalTopN {}
+
 impl ToBatch for LogicalTopN {
     fn to_batch(&self) -> PlanRef {
         todo!()
     }
 }
+
 impl ToStream for LogicalTopN {
     fn to_stream(&self) -> PlanRef {
         todo!()

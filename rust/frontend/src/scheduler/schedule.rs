@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::mpsc::channel;
-use std::sync::{Arc, RwLock};
+use std::sync::{mpsc, Arc, RwLock};
 
 use rand::distributions::{Distribution as RandDistribution, Uniform};
 use risingwave_common::error::Result;
@@ -12,14 +11,13 @@ use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
 use crate::scheduler::plan_fragmenter::{Query, QueryStageRef, StageId};
 
-type ScheduledStageSender = std::sync::mpsc::Sender<ScheduledStage>;
-type ScheduledStageReceiver = std::sync::mpsc::Receiver<ScheduledStage>;
 pub(crate) type TaskId = u64;
 
+/// The scheduler
 pub(crate) struct BatchScheduler {
     worker_manager: WorkerNodeManagerRef,
-    scheduled_stage_sender: ScheduledStageSender,
-    scheduled_stage_receiver: ScheduledStageReceiver,
+    scheduled_stage_sender: mpsc::Sender<ScheduledStage>,
+    scheduled_stage_receiver: mpsc::Receiver<ScheduledStage>,
     scheduled_stages_map: HashMap<StageId, ScheduledStageRef>,
 }
 
@@ -74,7 +72,7 @@ pub(crate) type AugmentedStageRef = Arc<AugmentedStage>;
 impl BatchScheduler {
     /// Used in tests.
     pub fn mock(worker_manager: WorkerNodeManagerRef) -> Self {
-        let (sender, receiver) = channel();
+        let (sender, receiver) = mpsc::channel();
         Self {
             worker_manager,
             scheduled_stage_sender: sender,
@@ -120,7 +118,7 @@ impl WorkerNodeManager {
     }
 
     pub fn remove_worker_node(&self, node: WorkerNode) {
-        self.worker_nodes.write().unwrap().retain(|x| *x == node);
+        self.worker_nodes.write().unwrap().retain(|x| *x != node);
     }
 
     /// Get a random worker node.
@@ -288,5 +286,68 @@ impl BatchScheduler {
         let scheduled_stage =
             ScheduledStage::from_augmented_stage(augmented_stage, scheduled_tasks);
         self.scheduled_stage_sender.send(scheduled_stage).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, RwLock};
+    use std::time::Duration;
+
+    use risingwave_pb::common::{HostAddress, WorkerType};
+    use risingwave_rpc_client::MetaClient;
+    use tokio::sync::watch;
+
+    use super::WorkerNodeManager;
+    use crate::catalog::catalog_service::CatalogCache;
+    use crate::observer::observer_manager::{ObserverManager, UPDATE_FINISH_NOTIFICATION};
+    use crate::test_utils::FrontendMockMetaClient;
+
+    #[tokio::test]
+    async fn test_add_and_delete_worker_node() {
+        let mut meta_client = MetaClient::mock(FrontendMockMetaClient::new().await);
+
+        let (catalog_updated_tx, _) = watch::channel(UPDATE_FINISH_NOTIFICATION);
+        let catalog_cache = Arc::new(RwLock::new(
+            CatalogCache::new(meta_client.clone()).await.unwrap(),
+        ));
+        let worker_node_manager =
+            Arc::new(WorkerNodeManager::new(meta_client.clone()).await.unwrap());
+
+        let observer_manager = ObserverManager::new(
+            meta_client.clone(),
+            "127.0.0.1:12345".parse().unwrap(),
+            worker_node_manager.clone(),
+            catalog_cache,
+            catalog_updated_tx,
+        )
+        .await;
+        observer_manager.start();
+
+        // Add worker node
+        let socket_addr = "127.0.0.1:6789".parse().unwrap();
+        meta_client
+            .register(socket_addr, WorkerType::ComputeNode)
+            .await
+            .unwrap();
+        meta_client.activate(socket_addr).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let mut worker_nodes = worker_node_manager.list_worker_nodes();
+        assert_eq!(1, worker_nodes.len());
+        let worker_node_0 = worker_nodes.pop().unwrap();
+        assert_eq!(WorkerType::ComputeNode, worker_node_0.r#type());
+        assert_eq!(
+            &HostAddress {
+                host: "127.0.0.1".to_string(),
+                port: 6789
+            },
+            worker_node_0.get_host().unwrap()
+        );
+
+        // Delete worker node
+        meta_client.unregister(socket_addr).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let worker_nodes = worker_node_manager.list_worker_nodes();
+        assert_eq!(0, worker_nodes.len());
     }
 }

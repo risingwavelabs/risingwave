@@ -2,22 +2,59 @@ use std::cmp::Ordering;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
+use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::hummock::{
     HummockContextPinnedSnapshot, HummockContextPinnedVersion, HummockSnapshot, SstableInfo,
 };
-use risingwave_storage::hummock::{FIRST_VERSION_ID, INVALID_EPOCH};
+use risingwave_storage::hummock::{HummockContextId, FIRST_VERSION_ID, INVALID_EPOCH};
 
+use crate::cluster::StoredClusterManager;
 use crate::hummock::test_utils::*;
 use crate::hummock::HummockManager;
-use crate::manager::MetaSrvEnv;
+use crate::manager::{MetaSrvEnv, NotificationManager};
 use crate::model::MetadataModel;
+use crate::rpc::metrics::MetaMetrics;
+use crate::storage::MemStore;
+
+async fn setup_compute_env(
+    port: i32,
+) -> (
+    MetaSrvEnv<MemStore>,
+    Arc<HummockManager<MemStore>>,
+    Arc<StoredClusterManager<MemStore>>,
+    WorkerNode,
+) {
+    let env = MetaSrvEnv::for_test().await;
+    let hummock_manager = Arc::new(
+        HummockManager::new(env.clone(), Arc::new(MetaMetrics::new()))
+            .await
+            .unwrap(),
+    );
+    let cluster_manager = Arc::new(
+        StoredClusterManager::new(
+            env.clone(),
+            Some(hummock_manager.clone()),
+            Arc::new(NotificationManager::new()),
+        )
+        .await
+        .unwrap(),
+    );
+    let fake_host_address = HostAddress {
+        host: "127.0.0.1".to_string(),
+        port,
+    };
+    let (worker_node, _) = cluster_manager
+        .add_worker_node(fake_host_address, WorkerType::ComputeNode)
+        .await
+        .unwrap();
+    (env, hummock_manager, cluster_manager, worker_node)
+}
 
 #[tokio::test]
 async fn test_hummock_pin_unpin() -> Result<()> {
-    let env = MetaSrvEnv::for_test().await;
-    let hummock_manager = HummockManager::new(env.clone()).await?;
-    let context_id = 0;
+    let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
+    let context_id = worker_node.id;
     let version_id = FIRST_VERSION_ID;
     let epoch = INVALID_EPOCH;
 
@@ -76,14 +113,15 @@ async fn test_hummock_pin_unpin() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_hummock_get_compact_task() -> Result<()> {
-    let env = MetaSrvEnv::for_test().await;
-    let hummock_manager = HummockManager::new(env.clone()).await?;
-    let context_id = 0;
+async fn test_hummock_compaction_task() -> Result<()> {
+    let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
+    let context_id = worker_node.id;
 
-    let task = hummock_manager.get_compact_task(context_id).await?;
+    // No compaction task available.
+    let task = hummock_manager.get_compact_task().await?;
     assert_eq!(task, None);
 
+    // Add some sstables and commit.
     let epoch: u64 = 1;
     let mut table_id = 1;
     let original_tables = generate_test_tables(epoch, &mut table_id);
@@ -93,8 +131,8 @@ async fn test_hummock_get_compact_task() -> Result<()> {
         .unwrap();
     hummock_manager.commit_epoch(epoch).await.unwrap();
 
-    let task = hummock_manager.get_compact_task(context_id).await?;
-    let compact_task = task.unwrap();
+    // Get a compaction task.
+    let compact_task = hummock_manager.get_compact_task().await.unwrap().unwrap();
     assert_eq!(
         compact_task
             .get_input_ssts()
@@ -105,14 +143,38 @@ async fn test_hummock_get_compact_task() -> Result<()> {
     );
     assert_eq!(compact_task.get_task_id(), 1);
 
+    // Cancel the task and succeed.
+    assert!(hummock_manager
+        .report_compact_task(compact_task.clone(), false)
+        .await
+        .unwrap());
+    // Cancel the task and told the task is not found, which may have been processed previously.
+    assert!(!hummock_manager
+        .report_compact_task(compact_task.clone(), false)
+        .await
+        .unwrap());
+
+    // Get a compaction task.
+    let compact_task = hummock_manager.get_compact_task().await.unwrap().unwrap();
+    assert_eq!(compact_task.get_task_id(), 2);
+    // Finish the task and succeed.
+    assert!(hummock_manager
+        .report_compact_task(compact_task.clone(), true)
+        .await
+        .unwrap());
+    // Finish the task and told the task is not found, which may have been processed previously.
+    assert!(!hummock_manager
+        .report_compact_task(compact_task.clone(), true)
+        .await
+        .unwrap());
+
     Ok(())
 }
 
 #[tokio::test]
 async fn test_hummock_table() -> Result<()> {
-    let env = MetaSrvEnv::for_test().await;
-    let hummock_manager = HummockManager::new(env.clone()).await?;
-    let context_id = 0;
+    let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
+    let context_id = worker_node.id;
 
     let epoch: u64 = 1;
     let mut table_id = 1;
@@ -154,9 +216,8 @@ async fn test_hummock_table() -> Result<()> {
 
 #[tokio::test]
 async fn test_hummock_transaction() -> Result<()> {
-    let env = MetaSrvEnv::for_test().await;
-    let hummock_manager = HummockManager::new(env.clone()).await?;
-    let context_id = 0;
+    let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
+    let context_id = worker_node.id;
     let mut table_id = 1;
     let mut committed_tables = vec![];
 
@@ -348,10 +409,19 @@ async fn test_hummock_transaction() -> Result<()> {
 
 #[tokio::test]
 async fn test_release_context_resource() -> Result<()> {
-    let env = MetaSrvEnv::for_test().await;
-    let hummock_manager = Arc::new(HummockManager::new(env.clone()).await?);
-    let context_id_1 = 1;
-    let context_id_2 = 2;
+    let (env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(1).await;
+    let context_id_1 = worker_node.id;
+
+    let fake_host_address_2 = HostAddress {
+        host: "127.0.0.1".to_string(),
+        port: 2,
+    };
+    let (worker_node_2, _) = cluster_manager
+        .add_worker_node(fake_host_address_2, WorkerType::ComputeNode)
+        .await
+        .unwrap();
+    let context_id_2 = worker_node_2.id;
+
     assert_eq!(
         HummockContextPinnedVersion::list(&*env.meta_store_ref())
             .await
@@ -422,4 +492,42 @@ async fn test_release_context_resource() -> Result<()> {
         0
     );
     Ok(())
+}
+
+#[tokio::test]
+async fn test_context_id_validation() {
+    let (_env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
+    let invalid_context_id = HummockContextId::MAX;
+    let context_id = worker_node.id;
+    let epoch: u64 = 1;
+    let mut table_id = 1;
+    let original_tables = generate_test_tables(epoch, &mut table_id);
+
+    // Invalid context id is rejected.
+    let error = hummock_manager
+        .add_tables(invalid_context_id, original_tables.clone(), epoch)
+        .await
+        .unwrap_err();
+    assert!(matches!(error.inner(), ErrorCode::InternalError(_)));
+    assert_eq!(error.to_string(), "internal error: transaction aborted");
+
+    // Valid context id is accepted.
+    hummock_manager
+        .add_tables(context_id, original_tables.clone(), epoch)
+        .await
+        .unwrap();
+
+    hummock_manager.pin_version(context_id).await.unwrap();
+    // Pin multiple times is OK.
+    hummock_manager.pin_version(context_id).await.unwrap();
+
+    // Remove the node from cluster will invalidate context id.
+    cluster_manager
+        .delete_worker_node(worker_node.host.unwrap())
+        .await
+        .unwrap();
+    // Invalid context id is rejected.
+    let error = hummock_manager.pin_version(context_id).await.unwrap_err();
+    assert!(matches!(error.inner(), ErrorCode::InternalError(_)));
+    assert_eq!(error.to_string(), "internal error: transaction aborted");
 }

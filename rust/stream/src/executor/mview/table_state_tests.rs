@@ -18,7 +18,7 @@ async fn test_mview_table() {
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
     let keyspace = Keyspace::executor_root(state_store, 0x42);
     let mut state = ManagedMViewState::new(keyspace.clone(), column_ids, order_types.clone());
-    let table = MViewTable::new(keyspace.clone(), schema, pk_columns.clone(), order_types);
+    let table = MViewTable::new_for_test(keyspace.clone(), schema, pk_columns.clone(), order_types);
     let epoch: u64 = 0;
 
     state.put(
@@ -42,36 +42,36 @@ async fn test_mview_table() {
 
     let epoch = u64::MAX;
     let cell_1_0 = table
-        .get(Row(vec![Some(1_i32.into()), Some(11_i32.into())]), 0, epoch)
+        .get_for_test(Row(vec![Some(1_i32.into()), Some(11_i32.into())]), 0, epoch)
         .await
         .unwrap();
     assert!(cell_1_0.is_some());
     assert_eq!(*cell_1_0.unwrap().unwrap().as_int32(), 1);
     let cell_1_1 = table
-        .get(Row(vec![Some(1_i32.into()), Some(11_i32.into())]), 1, epoch)
+        .get_for_test(Row(vec![Some(1_i32.into()), Some(11_i32.into())]), 1, epoch)
         .await
         .unwrap();
     assert!(cell_1_1.is_some());
     assert_eq!(*cell_1_1.unwrap().unwrap().as_int32(), 11);
     let cell_1_2 = table
-        .get(Row(vec![Some(1_i32.into()), Some(11_i32.into())]), 2, epoch)
+        .get_for_test(Row(vec![Some(1_i32.into()), Some(11_i32.into())]), 2, epoch)
         .await
         .unwrap();
     assert!(cell_1_2.is_some());
     assert_eq!(*cell_1_2.unwrap().unwrap().as_int32(), 111);
 
     let cell_2_0 = table
-        .get(Row(vec![Some(2_i32.into()), Some(22_i32.into())]), 0, epoch)
+        .get_for_test(Row(vec![Some(2_i32.into()), Some(22_i32.into())]), 0, epoch)
         .await
         .unwrap();
     assert!(cell_2_0.is_none());
     let cell_2_1 = table
-        .get(Row(vec![Some(2_i32.into()), Some(22_i32.into())]), 1, epoch)
+        .get_for_test(Row(vec![Some(2_i32.into()), Some(22_i32.into())]), 1, epoch)
         .await
         .unwrap();
     assert!(cell_2_1.is_none());
     let cell_2_2 = table
-        .get(Row(vec![Some(2_i32.into()), Some(22_i32.into())]), 2, epoch)
+        .get_for_test(Row(vec![Some(2_i32.into()), Some(22_i32.into())]), 2, epoch)
         .await
         .unwrap();
     assert!(cell_2_2.is_none());
@@ -86,7 +86,7 @@ async fn test_mview_table_for_string() {
     let keyspace = Keyspace::executor_root(state_store, 0x42);
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
     let mut state = ManagedMViewState::new(keyspace.clone(), column_ids, order_types.clone());
-    let table = MViewTable::new(keyspace.clone(), schema, pk_columns.clone(), order_types);
+    let table = MViewTable::new_for_test(keyspace.clone(), schema, pk_columns.clone(), order_types);
     let epoch: u64 = 0;
 
     state.put(
@@ -119,7 +119,7 @@ async fn test_mview_table_for_string() {
 
     let epoch = u64::MAX;
     let cell_1_0 = table
-        .get(
+        .get_for_test(
             Row(vec![
                 Some("1".to_string().into()),
                 Some("11".to_string().into()),
@@ -135,7 +135,7 @@ async fn test_mview_table_for_string() {
         Some("1".to_string())
     );
     let cell_1_1 = table
-        .get(
+        .get_for_test(
             Row(vec![
                 Some("1".to_string().into()),
                 Some("11".to_string().into()),
@@ -151,7 +151,7 @@ async fn test_mview_table_for_string() {
         Some("11".to_string())
     );
     let cell_1_2 = table
-        .get(
+        .get_for_test(
             Row(vec![
                 Some("1".to_string().into()),
                 Some("11".to_string().into()),
@@ -168,7 +168,7 @@ async fn test_mview_table_for_string() {
     );
 
     let cell_2_0 = table
-        .get(
+        .get_for_test(
             Row(vec![
                 Some("2".to_string().into()),
                 Some("22".to_string().into()),
@@ -180,7 +180,7 @@ async fn test_mview_table_for_string() {
         .unwrap();
     assert!(cell_2_0.is_none());
     let cell_2_1 = table
-        .get(
+        .get_for_test(
             Row(vec![
                 Some("2".to_string().into()),
                 Some("22".to_string().into()),
@@ -192,7 +192,7 @@ async fn test_mview_table_for_string() {
         .unwrap();
     assert!(cell_2_1.is_none());
     let cell_2_2 = table
-        .get(
+        .get_for_test(
             Row(vec![
                 Some("2".to_string().into()),
                 Some("22".to_string().into()),
@@ -215,7 +215,7 @@ async fn test_mview_table_iter() {
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
 
     let mut state = ManagedMViewState::new(keyspace.clone(), column_ids, order_types.clone());
-    let table = MViewTable::new(keyspace.clone(), schema, pk_columns.clone(), order_types);
+    let table = MViewTable::new_for_test(keyspace.clone(), schema, pk_columns.clone(), order_types);
     let epoch: u64 = 0;
 
     state.put(
@@ -278,13 +278,13 @@ async fn test_multi_mview_table_iter() {
         order_types.clone(),
     );
 
-    let table_1 = MViewTable::new(
+    let table_1 = MViewTable::new_for_test(
         keyspace_1.clone(),
         schema_1.clone(),
         pk_columns.clone(),
         order_types.clone(),
     );
-    let table_2 = MViewTable::new(
+    let table_2 = MViewTable::new_for_test(
         keyspace_2.clone(),
         schema_2.clone(),
         pk_columns.clone(),
@@ -379,7 +379,7 @@ async fn test_mview_scan_empty_column_ids_cardinality() {
     let keyspace = Keyspace::executor_root(state_store, 0x42);
 
     let mut state = ManagedMViewState::new(keyspace.clone(), column_ids, order_types.clone());
-    let table = MViewTable::new(keyspace.clone(), schema, pk_columns.clone(), order_types);
+    let table = MViewTable::new_for_test(keyspace.clone(), schema, pk_columns.clone(), order_types);
     let epoch: u64 = 0;
 
     state.put(

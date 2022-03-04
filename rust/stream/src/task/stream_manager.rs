@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
+use std::fmt::Debug;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
@@ -67,6 +68,20 @@ pub struct ExecutorParams {
     pub actor_id: u32,
 }
 
+impl Debug for ExecutorParams {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ExecutorParams")
+            .field("env", &"...")
+            .field("pk_indices", &self.pk_indices)
+            .field("executor_id", &self.executor_id)
+            .field("operator_id", &self.operator_id)
+            .field("op_info", &self.op_info)
+            .field("input", &self.input)
+            .field("actor_id", &self.actor_id)
+            .finish()
+    }
+}
+
 impl StreamManager {
     fn with_core(core: StreamManagerCore) -> Self {
         Self {
@@ -123,11 +138,12 @@ impl StreamManager {
 
     pub async fn drop_materialized_view(
         &self,
-        table_id: &TableId,
-        env: StreamEnvironment,
+        _table_id: &TableId,
+        _env: StreamEnvironment,
     ) -> Result<()> {
-        let table_manager = env.table_manager();
-        table_manager.drop_materialized_view(table_id).await
+        // TODO(august): the data in StateStore should also be dropped directly/through unpin or
+        // some other way.
+        Ok(())
     }
 
     pub fn take_receiver(&self, ids: UpDownActorIds) -> Result<Receiver<Message>> {
