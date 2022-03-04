@@ -82,6 +82,7 @@ macro_rules! for_all_metrics {
             get_new_table_id_latency: Histogram,
             get_compaction_task_latency: Histogram,
             report_compaction_task_latency: Histogram,
+            compaction_upload_sst_counts: GenericCounter<AtomicU64>,
         }
     };
 }
@@ -431,6 +432,15 @@ impl StateStoreStats {
         let report_compaction_task_latency =
             register_histogram_with_registry!(report_compaction_task_latency_opts, registry)
                 .unwrap();
+
+        // --
+        let compaction_upload_sst_counts = register_int_counter_with_registry!(
+            "state_store_compaction_upload_sst_counts",
+            "Total number of sst uploads during compaction",
+            registry
+        )
+        .unwrap();
+
         Self {
             get_latency,
             get_key_size,
@@ -473,6 +483,7 @@ impl StateStoreStats {
             get_new_table_id_latency,
             get_compaction_task_latency,
             report_compaction_task_latency,
+            compaction_upload_sst_counts,
         }
     }
 }

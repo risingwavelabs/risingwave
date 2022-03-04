@@ -21,6 +21,7 @@ use super::{
     HummockError, HummockMetaClient, HummockOptions, HummockResult, HummockStorage, HummockValue,
     LocalVersionManager, SSTableBuilder, SSTableIterator,
 };
+use crate::monitor::DEFAULT_STATE_STORE_STATS;
 
 #[derive(Clone)]
 pub struct SubCompactContext {
@@ -220,9 +221,11 @@ impl Compactor {
         builder.seal_current();
 
         output_sst_infos.reserve(builder.len());
+        let stats = DEFAULT_STATE_STORE_STATS.clone();
         // TODO: decide upload concurrency
         for (table_id, data, meta) in builder.finish() {
             context.sstable_manager.put(table_id, &meta, data).await?;
+            stats.compaction_upload_sst_counts.inc();
             let info = SstableInfo {
                 id: table_id,
                 key_range: Some(risingwave_pb::hummock::KeyRange {
