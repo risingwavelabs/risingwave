@@ -23,6 +23,12 @@ impl Binder {
                 _ => None,
             };
             if let Some(kind) = agg_kind {
+                if self.context.in_values_clause {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "aggregate functions are not allowed in VALUES".to_string(),
+                    )
+                    .into());
+                }
                 return Ok(ExprImpl::AggCall(Box::new(AggCall::new(kind, inputs)?)));
             }
             let function_type = match function_name.value.as_str() {
