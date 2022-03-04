@@ -135,6 +135,9 @@ impl StreamSourceReader for TableV2StreamReader {
             .await
             .expect("TableSourceV2 dropped before associated streaming task terminated");
 
+        // Caveats: this function is an arm of `tokio::select`. We should ensure there's no `await`
+        // after here.
+
         let (ops, columns, bitmap) = chunk.into_inner();
 
         let selected_columns = self
@@ -144,8 +147,6 @@ impl StreamSourceReader for TableV2StreamReader {
             .collect();
         let chunk = StreamChunk::new(ops, selected_columns, bitmap);
 
-        // Caveats: this function is an arm of `tokio::select`. We should ensure there's no `await`
-        // after here.
         notifier.send(()).ok();
         Ok(chunk)
     }

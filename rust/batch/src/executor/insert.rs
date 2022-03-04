@@ -99,7 +99,7 @@ impl Executor for InsertExecutor {
         // Wait for all chunks to be taken / written.
         try_join_all(notifiers).await.map_err(|_| {
             RwError::from(ErrorCode::InternalError(
-                "failed to wait chunks to be writeen".to_owned(),
+                "failed to wait chunks to be written".to_owned(),
             ))
         })?;
 
@@ -229,7 +229,7 @@ mod tests {
         // Insert
         let mut insert_executor =
             InsertExecutor::new(table_id, source_manager.clone(), Box::new(mock_executor), 0);
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             insert_executor.open().await.unwrap();
             let fields = &insert_executor.schema().fields;
             assert_eq!(fields[0].data_type, DataType::Int64);
@@ -283,6 +283,8 @@ mod tests {
         let full_range = (Bound::<Vec<u8>>::Unbounded, Bound::<Vec<u8>>::Unbounded);
         let store_content = store.scan(full_range, None, epoch).await?;
         assert!(store_content.is_empty());
+
+        handle.await.unwrap();
 
         Ok(())
     }
