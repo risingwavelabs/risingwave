@@ -48,7 +48,13 @@ pub async fn rpc_serve(
         MetaSrvEnv::<MemStore>::new(meta_store_ref.clone(), epoch_generator_ref.clone()).await;
 
     let fragment_manager = Arc::new(FragmentManager::new(meta_store_ref.clone()).await.unwrap());
-    let hummock_manager = Arc::new(hummock::HummockManager::new(env.clone()).await.unwrap());
+    let meta_metrics = Arc::new(MetaMetrics::new());
+    let hummock_manager = Arc::new(
+        hummock::HummockManager::new(env.clone(), meta_metrics.clone())
+            .await
+            .unwrap(),
+    );
+    let compactor_manager = Arc::new(hummock::CompactorManager::new());
     let notification_manager = Arc::new(NotificationManager::new());
     let cluster_manager = Arc::new(
         StoredClusterManager::new(
@@ -71,7 +77,6 @@ pub async fn rpc_serve(
         tokio::spawn(dashboard_service.serve()); // TODO: join dashboard service back to local
                                                  // thread
     }
-    let meta_metrics = Arc::new(MetaMetrics::new());
     let barrier_manager_ref = Arc::new(BarrierManager::new(
         env.clone(),
         cluster_manager.clone(),
@@ -97,7 +102,7 @@ pub async fn rpc_serve(
         .unwrap(),
     );
     let catalog_manager_ref = Arc::new(
-        StoredCatalogManager::new(meta_store_ref.clone())
+        StoredCatalogManager::new(meta_store_ref.clone(), notification_manager.clone())
             .await
             .unwrap(),
     );
@@ -112,12 +117,15 @@ pub async fn rpc_serve(
         cluster_manager,
         env,
     );
-    let hummock_srv = HummockServiceImpl::new(hummock_manager);
+    let hummock_srv = HummockServiceImpl::new(hummock_manager.clone(), compactor_manager.clone());
     let notification_srv = NotificationServiceImpl::new(notification_manager);
 
     if let Some(prometheus_addr) = prometheus_addr {
         meta_metrics.boot_metrics_service(prometheus_addr);
     }
+
+    let (compaction_join_handle, compaction_shutdown_sender) =
+        hummock::start_compaction_trigger(hummock_manager, compactor_manager);
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
     let join_handle = tokio::spawn(async move {
@@ -135,7 +143,11 @@ pub async fn rpc_serve(
                 async move {
                     tokio::select! {
                       _ = tokio::signal::ctrl_c() => {},
-                      _ = shutdown_recv.recv() => {},
+                      _ = shutdown_recv.recv() => {
+                            if compaction_shutdown_sender.send(()).is_ok() {
+                                compaction_join_handle.await.unwrap();
+                            }
+                        },
                     }
                 },
             )
@@ -144,17 +156,4 @@ pub async fn rpc_serve(
     });
 
     (join_handle, shutdown_send)
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::rpc::server::{rpc_serve, MetaStoreBackend};
-
-    #[tokio::test]
-    async fn test_server_shutdown() {
-        let addr = "127.0.0.1:9527".parse().unwrap();
-        let (join_handle, shutdown_send) = rpc_serve(addr, None, None, MetaStoreBackend::Mem).await;
-        shutdown_send.send(()).unwrap();
-        join_handle.await.unwrap();
-    }
 }

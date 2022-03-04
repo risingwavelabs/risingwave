@@ -3,8 +3,10 @@ use std::sync::Arc;
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::Statement;
 
+mod bind_context;
 mod expr;
 mod insert;
+mod projection;
 mod query;
 mod select;
 mod set_expr;
@@ -12,6 +14,7 @@ mod statement;
 mod table_ref;
 mod values;
 
+pub use bind_context::BindContext;
 pub use insert::BoundInsert;
 pub use query::BoundQuery;
 pub use select::BoundSelect;
@@ -25,11 +28,17 @@ use crate::catalog::database_catalog::DatabaseCatalog;
 pub struct Binder {
     #[allow(dead_code)]
     catalog: Arc<DatabaseCatalog>,
+
+    // TODO: support subquery.
+    context: BindContext,
 }
 
 impl Binder {
     pub fn new(catalog: Arc<DatabaseCatalog>) -> Binder {
-        Binder { catalog }
+        Binder {
+            catalog,
+            context: BindContext::new(),
+        }
     }
     pub fn bind(&mut self, stmt: Statement) -> Result<BoundStatement> {
         self.bind_statement(stmt)

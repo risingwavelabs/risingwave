@@ -20,8 +20,6 @@ use crate::risingwave_common::array::Array;
 
 /// Nested loop join executor.
 ///
-/// Currently the Nested Loop Join do not only consider INNER JOIN.
-/// OUTER/SEMI/ANTI JOIN will be added in future PR.
 ///
 /// High Level Idea:
 /// 1. Iterate tuple from probe table.
@@ -269,8 +267,20 @@ impl NestedLoopJoinExecutor {
             if probe_result.cur_row_finished {
                 self.probe_side_source.advance_row();
             }
-            if let Some(inner_chunk) = probe_result.chunk {
-                return Ok(Some(inner_chunk));
+            if let Some(ret_chunk) = probe_result.chunk {
+                // Note: we can avoid the append chunk in join -- Only do it in the begin of outer
+                // loop. But currently seems like it do not have too much gain. Will
+                // keep look on it.
+                if ret_chunk.capacity() > 0 {
+                    let (mut left_data_chunk, return_data_chunk) = self
+                        .chunk_builder
+                        .append_chunk(SlicedDataChunk::new_checked(ret_chunk)?)?;
+                    // Have checked last chunk is None in before. Now swap to buffer it.
+                    std::mem::swap(&mut self.last_chunk, &mut left_data_chunk);
+                    if let Some(inner_chunk) = return_data_chunk {
+                        return Ok(Some(inner_chunk));
+                    }
+                }
             }
         } else {
             self.state = if self.join_type.need_join_remaining() {
@@ -292,10 +302,9 @@ impl NestedLoopJoinExecutor {
     }
 
     fn do_inner_join(&mut self) -> Result<ProbeResult> {
-        while let Some(build_side_chunk) = self.build_table.get_current_chunk() {
+        if let Some(build_side_chunk) = self.build_table.get_current_chunk() {
             // Checked the option before, so impossible to panic.
             let probe_row = self.probe_side_source.get_current_row_ref().unwrap();
-            // let build_side_chunk = &self.build_table.inner_table[self.build_table.chunk_idx];
             let const_row_chunk =
                 self.convert_row_to_chunk(&probe_row, build_side_chunk.capacity())?;
             let new_chunk = Self::concatenate(&const_row_chunk, build_side_chunk)?;
@@ -315,28 +324,17 @@ impl NestedLoopJoinExecutor {
                 }
             }
             self.build_table.advance_chunk();
-            // Note: we can avoid the append chunk in join -- Only do it in the begin of outer loop.
-            // But currently seems like it do not have too much gain. Will keep look on
-            // it.
-            if ret_chunk.capacity() > 0 {
-                let (mut left_data_chunk, return_data_chunk) = self
-                    .chunk_builder
-                    .append_chunk(SlicedDataChunk::new_checked(ret_chunk)?)?;
-                // Have checked last chunk is None in before. Now swap to buffer it.
-                std::mem::swap(&mut self.last_chunk, &mut left_data_chunk);
-                if let Some(inner_chunk) = return_data_chunk {
-                    return Ok(ProbeResult {
-                        cur_row_finished: false,
-                        chunk: Some(inner_chunk),
-                    });
-                }
-            }
+            Ok(ProbeResult {
+                cur_row_finished: false,
+                chunk: Some(ret_chunk),
+            })
+        } else {
+            self.build_table.reset_chunk();
+            Ok(ProbeResult {
+                cur_row_finished: true,
+                chunk: None,
+            })
         }
-        self.build_table.reset_chunk();
-        Ok(ProbeResult {
-            cur_row_finished: true,
-            chunk: None,
-        })
     }
 
     fn do_left_outer_join(&mut self) -> Result<ProbeResult> {

@@ -1,0 +1,4 @@
+query R
+select revenue from tpch_q19;
+----
+33530.5144

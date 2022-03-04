@@ -12,6 +12,7 @@ aws-endpoint = "0.8"
 aws-sdk-s3 = "0.8"
 aws-smithy-http = "0.38"
 aws-smithy-types = "0.38"
+aws-types = { version = "0.8", features = ["hardcoded-credentials"] }
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 chrono = "0.4"

@@ -1,7 +1,7 @@
 use std::cmp::Reverse;
 
-use bytes::BufMut;
 use itertools::Itertools;
+use memcomparable::from_slice;
 
 use super::OrderedDatum::{NormalOrder, ReversedOrder};
 use super::OrderedRow;
@@ -13,6 +13,9 @@ use crate::types::{
     Decimal, ScalarImpl,
 };
 use crate::util::sort_util::{OrderPair, OrderType};
+
+/// The special `cell_id` reserved for a whole null row is -1.
+pub const NULL_ROW_SPECIAL_CELL_ID: i32 = -1;
 
 /// We can use memcomparable serialization to serialize data
 /// and flip the bits if the order of that datum is descending.
@@ -44,24 +47,23 @@ impl OrderedArraysSerializer {
     }
 }
 
+/// `OrderedRowSerializer` expects that the input row contains exactly the values needed to be
+/// serialized, not more and not less. This is because `Row` always needs to be constructed from
+/// chunk manually.
 pub struct OrderedRowSerializer {
-    order_pairs: Vec<OrderPair>,
+    order_types: Vec<OrderType>,
 }
 
 impl OrderedRowSerializer {
-    pub fn new(order_pairs: Vec<OrderPair>) -> Self {
-        Self { order_pairs }
+    pub fn new(order_types: Vec<OrderType>) -> Self {
+        Self { order_types }
     }
 
     pub fn serialize(&self, row: &Row, append_to: &mut Vec<u8>) {
-        for OrderPair {
-            order_type,
-            column_idx,
-        } in &self.order_pairs
-        {
+        for (datum, order_type) in row.0.iter().zip_eq(self.order_types.iter()) {
             let mut serializer = memcomparable::Serializer::new(vec![]);
             serializer.set_reverse(*order_type == OrderType::Descending);
-            serialize_datum_into(&row.0[*column_idx], &mut serializer).unwrap();
+            serialize_datum_into(datum, &mut serializer).unwrap();
             append_to.extend(serializer.into_inner());
         }
     }
@@ -99,23 +101,68 @@ impl OrderedRowDeserializer {
     }
 }
 
+type KeyBytes = Vec<u8>;
+type ValueBytes = Vec<u8>;
+
+pub fn serialize_pk_and_row(
+    pk_buf: &[u8],
+    row: &Option<Row>,
+    column_ids: &[ColumnId],
+) -> Result<Vec<(KeyBytes, Option<ValueBytes>)>> {
+    if let Some(values) = row.as_ref() {
+        assert_eq!(values.0.len(), column_ids.len());
+    }
+    let mut result = vec![];
+    let mut all_null = true;
+    for (index, column_id) in column_ids.iter().enumerate() {
+        let key = [pk_buf, serialize_column_id(column_id)?.as_slice()].concat();
+        match row {
+            Some(values) => match &values[index] {
+                None => {
+                    // This is when the datum is null. If all the datum in a row is null,
+                    // we serialize this null row specially by only using one cell encoding.
+                }
+                datum => {
+                    all_null = false;
+                    let value = serialize_cell(datum)?;
+                    result.push((key, Some(value)));
+                }
+            },
+            None => {
+                // A `None` of row means deleting that row, while the a `None` of datum represents a
+                // null.
+                all_null = false;
+                result.push((key, None));
+            }
+        }
+    }
+    if all_null {
+        // Here we use a special column id -1 to represent a row consisting of all null values.
+        // `MViewTable` has a `get` interface which accepts a cell id. A null row in this case
+        // would return null datum as it has only a single cell with column id == -1 and `get`
+        // gets nothing.
+        let key = [
+            pk_buf,
+            serialize_column_id(&ColumnId::from(NULL_ROW_SPECIAL_CELL_ID))?.as_slice(),
+        ]
+        .concat();
+        let value = serialize_cell(&None)?;
+        result.push((key, Some(value)));
+    }
+    Ok(result)
+}
+
 pub fn serialize_pk(pk: &Row, serializer: &OrderedRowSerializer) -> Result<Vec<u8>> {
     let mut result = vec![];
     serializer.serialize(pk, &mut result);
     Ok(result)
 }
 
-// TODO(eric): deprecated. Remove when possible
-pub fn serialize_cell_idx(cell_idx: i32) -> Result<Vec<u8>> {
-    let mut buf = Vec::with_capacity(4);
-    buf.put_i32(cell_idx);
-    debug_assert_eq!(buf.len(), 4);
-    Ok(buf)
-}
-
 pub fn serialize_column_id(column_id: &ColumnId) -> Result<Vec<u8>> {
-    let mut buf = Vec::with_capacity(4);
-    buf.put_i32(column_id.get_id());
+    use serde::Serialize;
+    let mut serializer = memcomparable::Serializer::new(vec![]);
+    column_id.get_id().serialize(&mut serializer)?;
+    let buf = serializer.into_inner();
     debug_assert_eq!(buf.len(), 4);
     Ok(buf)
 }
@@ -156,6 +203,12 @@ pub fn deserialize_cell(bytes: &[u8], ty: &DataType) -> Result<Datum> {
     }
 }
 
+pub fn deserialize_column_id(bytes: &[u8]) -> Result<i32> {
+    assert_eq!(bytes.len(), 4);
+    let column_id = from_slice::<i32>(bytes)?;
+    Ok(column_id)
+}
+
 fn deserialize_decimal(bytes: &[u8]) -> Result<Datum> {
     // None denotes NULL which is a valid value while Err means invalid encoding.
     let null_tag = bytes[0];
@@ -193,8 +246,6 @@ fn deserialize_decimal(bytes: &[u8]) -> Result<Datum> {
 
 #[cfg(test)]
 mod tests {
-    use itertools::Itertools;
-
     use super::*;
     use crate::array::{I16Array, Utf8Array};
     use crate::array_nonnull;
@@ -202,10 +253,7 @@ mod tests {
 
     #[test]
     fn test_ordered_row_serializer() {
-        let orders = vec![
-            OrderPair::new(0, OrderType::Descending),
-            OrderPair::new(1, OrderType::Ascending),
-        ];
+        let orders = vec![OrderType::Descending, OrderType::Ascending];
         let serializer = OrderedRowSerializer::new(orders);
         let row1 = Row(vec![Some(Int16(5)), Some(Utf8("abc".to_string()))]);
         let row2 = Row(vec![Some(Int16(5)), Some(Utf8("abd".to_string()))]);
@@ -284,12 +332,8 @@ mod tests {
 
     #[test]
     fn test_ordered_row_deserializer() {
-        let order_pairs = vec![
-            OrderPair::new(0, OrderType::Descending),
-            OrderPair::new(1, OrderType::Ascending),
-        ];
-        let order_types = order_pairs.iter().map(|o| o.order_type).collect_vec();
-        let serializer = OrderedRowSerializer::new(order_pairs);
+        let order_types = vec![OrderType::Descending, OrderType::Ascending];
+        let serializer = OrderedRowSerializer::new(order_types.clone());
         let schema = vec![DataType::Varchar, DataType::Int16];
         let row1 = Row(vec![Some(Utf8("abc".to_string())), Some(Int16(5))]);
         let row2 = Row(vec![Some(Utf8("abd".to_string())), Some(Int16(5))]);

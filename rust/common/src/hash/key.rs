@@ -1,16 +1,17 @@
 use std::convert::TryInto;
 use std::default::Default;
+use std::fmt::Debug;
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::io::{Cursor, Read};
 
 use chrono::{Datelike, Timelike};
 use itertools::Itertools;
 
-use crate::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, StructRef};
+use crate::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, Row, StructRef};
 use crate::error::Result;
 use crate::types::{
-    Datum, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
-    OrderedF32, OrderedF64, ScalarRef,
+    DataType, Datum, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
+    NaiveTimeWrapper, OrderedF32, OrderedF64, ScalarRef, ToOwnedDatum,
 };
 use crate::util::hash_util::CRC32FastBuilder;
 
@@ -58,7 +59,7 @@ pub trait HashKeySerDe<'a>: ScalarRef<'a> {
 /// Current comparison implementation treats `null == null`. This is consistent with postgresql's
 /// group by implementation, but not join. In pg's join implementation, `null != null`, and the join
 /// executor should take care of this.
-pub trait HashKey: Hash + Eq + Sized + Send + Sync + 'static {
+pub trait HashKey: Clone + Debug + Hash + Eq + Sized + Send + Sync + 'static {
     type S: HashKeySerializer<K = Self>;
 
     fn build(column_idxes: &[usize], data_chunk: &DataChunk) -> Result<Vec<Self>> {
@@ -81,6 +82,20 @@ pub trait HashKey: Hash + Eq + Sized + Send + Sync + 'static {
             .collect())
     }
 
+    #[inline(always)]
+    fn deserialize<'a>(self, data_types: impl Iterator<Item = &'a DataType>) -> Result<Row> {
+        let mut builders = data_types
+            .map(|dt| dt.create_array_builder(1))
+            .collect::<Result<Vec<_>>>()?;
+
+        self.deserialize_to_builders(&mut builders)?;
+        builders
+            .into_iter()
+            .map(|builder| -> Result<Datum> { Ok(builder.finish()?.value_at(0).to_owned_datum()) })
+            .collect::<Result<Vec<_>>>()
+            .map(Row)
+    }
+
     fn deserialize_to_builders(self, array_builders: &mut [ArrayBuilderImpl]) -> Result<()>;
 
     fn has_null(&self) -> bool;
@@ -89,6 +104,7 @@ pub trait HashKey: Hash + Eq + Sized + Send + Sync + 'static {
 /// Designed for hash keys with at most `N` serialized bytes.
 ///
 /// See [`crate::executor::hash_map::calc_hash_key_kind`]
+#[derive(Clone, Debug)]
 pub struct FixedSizeKey<const N: usize> {
     hash_code: u64,
     key: [u8; N],
@@ -98,6 +114,7 @@ pub struct FixedSizeKey<const N: usize> {
 /// Designed for hash keys which can't be represented by [`FixedSizeKey`].
 ///
 /// See [`crate::executor::hash_map::calc_hash_key_kind`]
+#[derive(Clone, Debug)]
 pub struct SerializedKey {
     key: Vec<Datum>,
     hash_code: u64,
@@ -595,7 +612,7 @@ mod tests {
         ArrayRef, BoolArray, DataChunk, DecimalArray, F32Array, F64Array, I16Array, I32Array,
         I32ArrayBuilder, I64Array, NaiveDateArray, NaiveDateTimeArray, NaiveTimeArray, Utf8Array,
     };
-    use crate::collection::hash_map::{
+    use crate::hash::{
         HashKey, Key128, Key16, Key256, Key32, Key64, KeySerialized, PrecomputedBuildHasher,
     };
     use crate::test_utils::rand_array::seed_rand_array_ref;

@@ -10,13 +10,11 @@ use tokio::sync::OnceCell;
 use tokio::task;
 
 use super::{StateStore, StateStoreIter};
-use crate::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
 
 #[derive(Clone)]
 pub struct RocksDBStateStore {
     storage: Arc<OnceCell<RocksDBStorage>>,
     db_path: String,
-    stats: Arc<StateStoreStats>,
 }
 
 impl RocksDBStateStore {
@@ -24,7 +22,6 @@ impl RocksDBStateStore {
         Self {
             storage: Arc::new(OnceCell::new()),
             db_path: db_path.to_string(),
-            stats: DEFAULT_STATE_STORE_STATS.clone(),
         }
     }
 
@@ -40,7 +37,6 @@ impl StateStore for RocksDBStateStore {
     type Iter<'a> = RocksDBStateStoreIter;
 
     async fn get(&self, key: &[u8], _epoch: u64) -> Result<Option<Bytes>> {
-        self.stats.get_counts.inc();
         self.storage().await.get(key).await
     }
 
@@ -71,7 +67,6 @@ pub fn next_prefix(prefix: &[u8]) -> Vec<u8> {
 }
 
 pub struct RocksDBStateStoreIter {
-    store: RocksDBStateStore,
     iter: Option<Box<DBIterator<Arc<DB>>>>,
     key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
 }
@@ -97,16 +92,14 @@ impl RocksDBStateStoreIter {
 
         let mut iter = store.storage().await.iter().await;
         task::spawn_blocking(move || {
-            let seek_key;
-            if is_start_unbounded {
-                seek_key = SeekKey::Start;
+            let seek_key = if is_start_unbounded {
+                SeekKey::Start
             } else {
-                seek_key = SeekKey::from(start_key.as_slice());
-            }
+                SeekKey::from(start_key.as_slice())
+            };
             iter.seek(seek_key)
                 .map_err(|e| RwError::from(InternalError(e)))?;
             Ok(Self {
-                store,
                 iter: Some(Box::new(iter)),
                 key_range: range,
             })
@@ -163,8 +156,7 @@ impl StateStoreIter for RocksDBStateStoreIter {
         .unwrap();
 
         self.iter = Some(iter);
-        let kv = kv?;
-        Ok(kv)
+        kv
     }
 }
 
@@ -217,7 +209,7 @@ impl RocksDBStorage {
             let mut opts = WriteOptions::default();
             opts.set_sync(true);
             db.write_opt(&wb, &opts)
-                .map_err(|e| InternalError(e).into())
+                .map_or_else(|e| Err(InternalError(e).into()), |_| Ok(()))
         })
         .await?
     }
@@ -251,11 +243,11 @@ mod tests {
     #[tokio::test]
     async fn test_rocksdb() {
         let rocksdb_state_store = RocksDBStateStore::new("/tmp/default");
-        let result = rocksdb_state_store.get("key1".as_bytes()).await;
+        let result = rocksdb_state_store.get("key1".as_bytes(), 0).await;
         assert_eq!(result.unwrap(), None);
-        let result = rocksdb_state_store.get("key2".as_bytes()).await;
+        let result = rocksdb_state_store.get("key2".as_bytes(), 0).await;
         assert_eq!(result.unwrap(), None);
-        let result = rocksdb_state_store.get("key3".as_bytes()).await;
+        let result = rocksdb_state_store.get("key3".as_bytes(), 0).await;
         assert_eq!(result.unwrap(), None);
 
         let kv_pairs: Vec<(Bytes, Option<Bytes>)> = vec![
@@ -265,30 +257,28 @@ mod tests {
         ];
         rocksdb_state_store.ingest_batch(kv_pairs, 0).await.unwrap();
         let result = rocksdb_state_store
-            .get("key1".as_bytes())
+            .get("key1".as_bytes(), 0)
             .await
             .unwrap()
             .unwrap();
         assert!(result.eq(&Bytes::from("val1")));
         let result = rocksdb_state_store
-            .get("key2".as_bytes())
+            .get("key2".as_bytes(), 0)
             .await
             .unwrap()
             .unwrap();
         assert!(result.eq(&Bytes::from("val2")));
         let result = rocksdb_state_store
-            .get("key3".as_bytes())
+            .get("key3".as_bytes(), 0)
             .await
             .unwrap()
             .unwrap();
         assert!(result.eq(&Bytes::from("val3")));
-        let result = rocksdb_state_store.get("key4".as_bytes()).await;
+        let result = rocksdb_state_store.get("key4".as_bytes(), 0).await;
         assert_eq!(result.unwrap(), None);
 
-        let result = rocksdb_state_store
-            .scan("key".as_bytes(), Some(2))
-            .await
-            .unwrap();
+        let range = "key1".as_bytes().."key3".as_bytes();
+        let result = rocksdb_state_store.scan(range, Some(2), 0).await.unwrap();
         assert!(result.get(0).unwrap().0.eq(&Bytes::from("key1")));
         assert!(result.get(1).unwrap().0.eq(&Bytes::from("key2")));
     }

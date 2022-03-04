@@ -47,6 +47,7 @@ impl ColIndexMapping {
         cols.toggle_range(..);
         Self::with_remaining_columns(&cols)
     }
+
     #[must_use]
     pub fn composite(&self, following: &Self) -> Self {
         let mut map = self.map.clone();

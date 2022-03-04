@@ -1,27 +1,33 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use bytes::{Bytes, BytesMut};
 use futures::stream::{self, StreamExt};
-use risingwave_pb::hummock::{CompactTask, LevelEntry, LevelType, SstableInfo};
+use futures::Future;
+use risingwave_common::error::RwError;
+use risingwave_pb::hummock::{
+    CompactTask, LevelEntry, LevelType, SstableInfo, SubscribeCompactTasksResponse,
+};
+use tokio::sync::mpsc::UnboundedSender;
+use tokio::task::JoinHandle;
 
 use super::iterator::{ConcatIterator, HummockIterator, MergeIterator};
 use super::key::{get_epoch, Epoch, FullKey};
 use super::key_range::KeyRange;
 use super::multi_builder::CapacitySplitTableBuilder;
+use super::sstable_manager::SstableStoreRef;
 use super::version_cmp::VersionedComparator;
 use super::{
     HummockError, HummockMetaClient, HummockOptions, HummockResult, HummockStorage, HummockValue,
-    LocalVersionManager, SSTableIterator,
+    LocalVersionManager, SSTableBuilder, SSTableIterator,
 };
-use crate::hummock::cloud;
-use crate::object::ObjectStore;
 
+#[derive(Clone)]
 pub struct SubCompactContext {
-    // TODO: remove Arc?
     pub options: Arc<HummockOptions>,
     pub local_version_manager: Arc<LocalVersionManager>,
-    pub obj_client: Arc<dyn ObjectStore>,
     pub hummock_meta_client: Arc<dyn HummockMetaClient>,
+    pub sstable_manager: SstableStoreRef,
 }
 
 pub struct Compactor;
@@ -61,21 +67,22 @@ impl Compactor {
                 overlapping_tables
                     .iter()
                     .map(|table| -> Box<dyn HummockIterator> {
-                        Box::new(SSTableIterator::new(table.clone()))
+                        Box::new(SSTableIterator::new(
+                            table.clone(),
+                            context.sstable_manager.clone(),
+                        ))
                     })
                     .chain(non_overlapping_table_seqs.iter().map(
                         |tableseq| -> Box<dyn HummockIterator> {
-                            Box::new(ConcatIterator::new(tableseq.clone()))
+                            Box::new(ConcatIterator::new(
+                                tableseq.clone(),
+                                context.sstable_manager.clone(),
+                            ))
                         },
                     )),
             );
 
-            let spawn_context = SubCompactContext {
-                options: context.options.clone(),
-                local_version_manager: context.local_version_manager.clone(),
-                obj_client: context.obj_client.clone(),
-                hummock_meta_client: context.hummock_meta_client.clone(),
-            };
+            let context_clone = context.clone();
             let spawn_kr = KeyRange {
                 left: Bytes::copy_from_slice(kr.get_left()),
                 right: Bytes::copy_from_slice(kr.get_right()),
@@ -88,7 +95,7 @@ impl Compactor {
                 tokio::spawn(async move {
                     (
                         Compactor::sub_compact(
-                            spawn_context,
+                            context_clone,
                             spawn_kr,
                             iter,
                             &mut output_needing_vacuum,
@@ -123,17 +130,17 @@ impl Compactor {
         Ok(())
     }
 
-    async fn sub_compact(
-        context: SubCompactContext,
+    pub async fn compact_and_build_sst<B, F>(
+        sst_builder: &mut CapacitySplitTableBuilder<B>,
         kr: KeyRange,
         mut iter: MergeIterator<'_>,
-        output_sst_infos: &mut Vec<SstableInfo>,
-        is_target_ultimate_and_leveling: bool,
+        has_user_key_overlap: bool,
         watermark: Epoch,
-    ) -> HummockResult<()> {
-        // NOTICE: should be user_key overlap, NOT full_key overlap!
-        let has_user_key_overlap = !is_target_ultimate_and_leveling;
-
+    ) -> HummockResult<()>
+    where
+        B: FnMut() -> F,
+        F: Future<Output = HummockResult<(u64, SSTableBuilder)>>,
+    {
         if !kr.left.is_empty() {
             iter.seek(&kr.left).await?;
         } else {
@@ -142,12 +149,6 @@ impl Compactor {
 
         let mut skip_key = BytesMut::new();
         let mut last_key = BytesMut::new();
-
-        let mut builder = CapacitySplitTableBuilder::new(|| async {
-            let table_id = context.hummock_meta_client.get_new_table_id().await?;
-            let builder = HummockStorage::get_builder(&context.options);
-            Ok((table_id, builder))
-        });
 
         while iter.is_valid() {
             let iter_key = iter.key();
@@ -186,27 +187,42 @@ impl Compactor {
                 }
             }
 
-            builder
+            sst_builder
                 .add_full_key(FullKey::from_slice(iter_key), iter.value(), is_new_user_key)
                 .await?;
 
             iter.next().await?;
         }
+        Ok(())
+    }
+
+    pub async fn sub_compact(
+        context: SubCompactContext,
+        kr: KeyRange,
+        iter: MergeIterator<'_>,
+        output_sst_infos: &mut Vec<SstableInfo>,
+        // TODO: better naming
+        is_target_ultimate_and_leveling: bool,
+        watermark: Epoch,
+    ) -> HummockResult<()> {
+        // NOTICE: should be user_key overlap, NOT full_key overlap!
+        let mut builder = CapacitySplitTableBuilder::new(|| async {
+            let table_id = context.hummock_meta_client.get_new_table_id().await?;
+            let builder = HummockStorage::get_builder(&context.options);
+            Ok((table_id, builder))
+        });
+
+        let has_user_key_overlap = !is_target_ultimate_and_leveling;
+        Compactor::compact_and_build_sst(&mut builder, kr, iter, has_user_key_overlap, watermark)
+            .await?;
 
         // Seal table for each split
         builder.seal_current();
 
         output_sst_infos.reserve(builder.len());
         // TODO: decide upload concurrency
-        for (table_id, blocks, meta) in builder.finish() {
-            cloud::upload(
-                &context.obj_client,
-                table_id,
-                &meta,
-                blocks,
-                context.options.remote_dir.as_str(),
-            )
-            .await?;
+        for (table_id, data, meta) in builder.finish() {
+            context.sstable_manager.put(table_id, &meta, data).await?;
             let info = SstableInfo {
                 id: table_id,
                 key_range: Some(risingwave_pb::hummock::KeyRange {
@@ -221,12 +237,10 @@ impl Compactor {
         Ok(())
     }
 
-    pub async fn compact(context: &SubCompactContext) -> HummockResult<()> {
-        let mut compact_task = match context.hummock_meta_client.get_compaction_task().await? {
-            Some(task) => task,
-            None => return Ok(()),
-        };
-
+    pub async fn compact(
+        context: &SubCompactContext,
+        mut compact_task: CompactTask,
+    ) -> HummockResult<()> {
         let result = Compactor::run_compact(context, &mut compact_task).await;
         if result.is_err() {
             for _sst_to_delete in &compact_task.sorted_output_ssts {
@@ -253,5 +267,84 @@ impl Compactor {
             // FIXME: error message in `result` should not be ignored
             Err(HummockError::object_io_error("compaction failed."))
         }
+    }
+
+    pub fn start_compactor(
+        options: Arc<HummockOptions>,
+        local_version_manager: Arc<LocalVersionManager>,
+        hummock_meta_client: Arc<dyn HummockMetaClient>,
+        sstable_manager: SstableStoreRef,
+    ) -> (JoinHandle<()>, UnboundedSender<()>) {
+        let sub_compact_context = SubCompactContext {
+            options,
+            local_version_manager,
+            hummock_meta_client,
+            sstable_manager,
+        };
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
+        let stream_retry_interval = Duration::from_secs(60);
+        let join_handle = tokio::spawn(async move {
+            let mut min_interval = tokio::time::interval(stream_retry_interval);
+            // This outer loop is to recreate stream
+            'start_stream: loop {
+                tokio::select! {
+                    // Wait for interval
+                    _ = min_interval.tick() => {},
+                    // Shutdown compactor
+                    _ = shutdown_rx.recv() => {
+                        tracing::info!("compactor is shutting down");
+                        return;
+                    }
+                }
+
+                let mut stream = match sub_compact_context
+                    .hummock_meta_client
+                    .subscribe_compact_tasks()
+                    .await
+                {
+                    Ok(stream) => stream,
+                    Err(e) => {
+                        tracing::warn!("failed to subscribe_compact_tasks. {}", RwError::from(e));
+                        continue 'start_stream;
+                    }
+                };
+
+                // This inner loop is to consume stream
+                loop {
+                    let message = tokio::select! {
+                        message = stream.message() => {
+                            message
+                        },
+                        // Shutdown compactor
+                        _ = shutdown_rx.recv() => {
+                            tracing::info!("compactor is shutting down");
+                            return
+                        }
+                    };
+                    match message {
+                        // The inner Some is the side effect of generated code.
+                        Ok(Some(SubscribeCompactTasksResponse {
+                            compact_task: Some(compact_task),
+                        })) => {
+                            if let Err(e) =
+                                Compactor::compact(&sub_compact_context, compact_task).await
+                            {
+                                tracing::warn!("failed to compact. {}", RwError::from(e));
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!("failed to consume stream. {}", e.message());
+                            continue 'start_stream;
+                        }
+                        _ => {
+                            // The stream is exhausted
+                            continue 'start_stream;
+                        }
+                    }
+                }
+            }
+        });
+
+        (join_handle, shutdown_tx)
     }
 }

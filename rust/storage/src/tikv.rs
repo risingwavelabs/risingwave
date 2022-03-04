@@ -4,22 +4,19 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use risingwave_common::array::{InternalError, RwError};
 use risingwave_common::error::{Result, ToRwResult};
 use tikv_client::{BoundRange, KvPair, TransactionClient};
 use tokio::sync::OnceCell;
 
 use super::StateStore;
-use crate::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
 use crate::StateStoreIter;
 
 const SCAN_LIMIT: usize = 100;
 #[derive(Clone)]
 pub struct TikvStateStore {
-    // client: Arc<AsyncOnce<tikv_client::transaction::Client>>,
-    // client: Option<Arc<Mutex<tikv_client::transaction::Client>>>,
     client: Arc<OnceCell<tikv_client::transaction::Client>>,
     pd: Vec<String>,
-    stats: Arc<StateStoreStats>,
 }
 
 impl TikvStateStore {
@@ -28,7 +25,6 @@ impl TikvStateStore {
         Self {
             client: Arc::new(OnceCell::new()),
             pd: pd_endpoints,
-            stats: DEFAULT_STATE_STORE_STATS.clone(),
         }
     }
     pub async fn client(&self) -> &tikv_client::transaction::Client {
@@ -40,21 +36,18 @@ impl TikvStateStore {
             .await
     }
 }
+
 #[async_trait]
 impl StateStore for TikvStateStore {
     type Iter<'a> = TikvStateStoreIter;
 
     async fn get(&self, key: &[u8], _epoch: u64) -> Result<Option<Bytes>> {
-        self.stats.get_counts.inc();
         let mut txn = self.client().await.begin_optimistic().await.unwrap();
         let res = txn
             .get(key.to_owned())
             .await
-            .map(|x| x.map(Bytes::from))
-            .map_err(anyhow::Error::new)
-            .to_rw_result();
-        txn.commit().await.unwrap();
-        res
+            .map_or(Err(RwError::from(InternalError("".into()))), Ok)?;
+        Ok(res.map(Bytes::from))
     }
 
     async fn scan<R, B>(
@@ -162,8 +155,6 @@ impl StateStoreIter for TikvStateStoreIter {
     type Item = (Bytes, Bytes);
 
     async fn next(&mut self) -> Result<Option<Self::Item>> {
-        // self.store.get_client().await;
-
         let mut txn = self.store.client().await.begin_optimistic().await.unwrap();
         if self.index == self.kv_pair_buffer.len() {
             let range = if self.kv_pair_buffer.is_empty() {

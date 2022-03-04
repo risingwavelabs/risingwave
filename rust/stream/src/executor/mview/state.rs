@@ -4,7 +4,7 @@ use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
 use risingwave_common::util::ordered::*;
-use risingwave_common::util::sort_util::OrderPair;
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::managed_state::flush_status::HashMapFlushStatus as FlushStatus;
@@ -17,8 +17,8 @@ pub struct ManagedMViewState<S: StateStore> {
     /// Column IDs of each column in the input schema
     column_ids: Vec<ColumnId>,
 
-    /// Column and ordering of primary key (for assertion)
-    keys: Vec<OrderPair>,
+    /// Ordering of primary key (for assertion)
+    order_types: Vec<OrderType>,
 
     /// Serializer to serialize keys from input rows
     key_serializer: OrderedRowSerializer,
@@ -28,34 +28,36 @@ pub struct ManagedMViewState<S: StateStore> {
 }
 
 impl<S: StateStore> ManagedMViewState<S> {
-    pub fn new(keyspace: Keyspace<S>, column_ids: Vec<ColumnId>, keys: Vec<OrderPair>) -> Self {
+    pub fn new(
+        keyspace: Keyspace<S>,
+        column_ids: Vec<ColumnId>,
+        order_types: Vec<OrderType>,
+    ) -> Self {
         // TODO(eric): refactor this later...
-        let keys_for_serializer = keys
-            .iter()
-            .enumerate()
-            .map(|(idx, ord)| OrderPair::new(idx, ord.order_type))
-            .collect::<Vec<_>>();
-
         Self {
             keyspace,
             column_ids,
             cache: HashMap::new(),
-            keys,
-            key_serializer: OrderedRowSerializer::new(keys_for_serializer),
+            order_types: order_types.clone(),
+            key_serializer: OrderedRowSerializer::new(order_types),
         }
     }
 
     pub fn put(&mut self, pk: Row, value: Row) {
-        assert_eq!(self.keys.len(), pk.size());
+        assert_eq!(self.order_types.len(), pk.size());
         assert_eq!(self.column_ids.len(), value.size());
 
         FlushStatus::do_insert(self.cache.entry(pk), value);
     }
 
     pub fn delete(&mut self, pk: Row) {
-        assert_eq!(self.keys.len(), pk.size());
+        assert_eq!(self.order_types.len(), pk.size());
 
         FlushStatus::do_delete(self.cache.entry(pk));
+    }
+
+    pub fn clear_cache(&mut self) {
+        self.cache.clear();
     }
 
     // TODO(MrCroxx): flush can be performed in another coroutine by taking the snapshot of
@@ -68,25 +70,14 @@ impl<S: StateStore> ManagedMViewState<S> {
         for (pk, cells) in self.cache.drain() {
             let row = cells.into_option();
             let pk_buf = serialize_pk(&pk, &self.key_serializer)?;
-            for (index, column_id) in self.column_ids.iter().enumerate() {
-                // TODO(MrCroxx): More efficient encoding is needed.
-                // format: [ pk_buf | cell_idx (4B)]
-                let key = [
-                    pk_buf.as_slice(),
-                    serialize_column_id(column_id)?.as_slice(),
-                ]
-                .concat();
-
-                match &row {
-                    Some(values) => {
-                        let value = serialize_cell(&values[index])?;
-                        local.put(key, value)
-                    }
+            let bytes = serialize_pk_and_row(&pk_buf, &row, &self.column_ids)?;
+            for (key, value) in bytes {
+                match value {
+                    Some(val) => local.put(key, val),
                     None => local.delete(key),
-                };
+                }
             }
         }
-
         batch.ingest(epoch).await.unwrap();
         Ok(())
     }
@@ -111,7 +102,7 @@ mod tests {
         let mut state = ManagedMViewState::new(
             keyspace.clone(),
             vec![0.into(), 1.into()],
-            vec![OrderPair::new(0, OrderType::Ascending)],
+            vec![OrderType::Ascending],
         );
         let mut epoch: u64 = 0;
         state.put(

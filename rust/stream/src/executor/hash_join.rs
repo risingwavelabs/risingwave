@@ -9,13 +9,18 @@ use risingwave_common::array::{
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_common::expr::RowExpression;
+use risingwave_common::try_match_expand;
 use risingwave_common::types::{DataType, ToOwnedDatum};
+use risingwave_pb::stream_plan;
+use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::keyspace::Segment;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::barrier_align::{AlignedMessage, BarrierAligner};
 use super::managed_state::join::*;
-use super::{Executor, ExecutorState, Message, PkIndices, PkIndicesRef, StatefuleExecutor};
+use super::{Executor, ExecutorState, Message, PkIndices, PkIndicesRef, StatefulExecutor};
+use crate::executor::ExecutorBuilder;
+use crate::task::{ExecutorParams, StreamManagerCore};
 
 /// The `JoinType` and `SideType` are to mimic a enum, because currently
 /// enum is not supported in const generic.
@@ -197,6 +202,20 @@ impl<S: StateStore> JoinSide<S> {
     }
 }
 
+pub struct HashJoinExecutorBuilder {}
+
+impl ExecutorBuilder for HashJoinExecutorBuilder {
+    fn new_boxed_executor(
+        params: ExecutorParams,
+        node: &stream_plan::StreamNode,
+        store: impl StateStore,
+        stream: &mut StreamManagerCore,
+    ) -> Result<Box<dyn Executor>> {
+        let node = try_match_expand!(node.get_node().unwrap(), Node::HashJoinNode)?;
+        stream.create_hash_join_node(params, node, store)
+    }
+}
+
 /// `HashJoinExecutor` takes two input streams and runs equal hash join on them.
 /// The output columns are the concatenation of left and right columns.
 pub struct HashJoinExecutor<S: StateStore, const T: JoinTypePrimitive> {
@@ -266,7 +285,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<S,
                 let epoch = barrier.epoch.curr;
                 self.side_l.ht.update_epoch(epoch);
                 self.side_r.ht.update_epoch(epoch);
-                self.update_executor_state(ExecutorState::ACTIVE(barrier.epoch.curr));
+                self.update_executor_state(ExecutorState::Active(barrier.epoch.curr));
                 Ok(Message::Barrier(barrier))
             }
         }
@@ -293,6 +312,12 @@ impl<S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<S,
         self.side_r.clear_cache();
 
         Ok(())
+    }
+
+    fn reset(&mut self, epoch: u64) {
+        self.side_l.ht.clear();
+        self.side_r.ht.clear();
+        self.update_executor_state(ExecutorState::Active(epoch));
     }
 }
 
@@ -382,7 +407,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
             debug_r,
             identity: format!("HashJoinExecutor {:X}", executor_id),
             op_info,
-            executor_state: ExecutorState::INIT,
+            executor_state: ExecutorState::Init,
         }
     }
 
@@ -634,7 +659,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
     }
 }
 
-impl<S: StateStore, const T: JoinTypePrimitive> StatefuleExecutor for HashJoinExecutor<S, T> {
+impl<S: StateStore, const T: JoinTypePrimitive> StatefulExecutor for HashJoinExecutor<S, T> {
     fn executor_state(&self) -> &ExecutorState {
         &self.executor_state
     }

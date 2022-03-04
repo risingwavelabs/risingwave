@@ -9,10 +9,13 @@ use operations::*;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 use risingwave_rpc_client::MetaClient;
-use risingwave_storage::hummock::hummock_meta_client::RPCHummockMetaClient;
+use risingwave_storage::hummock::hummock_meta_client::RpcHummockMetaClient;
 use risingwave_storage::hummock::local_version_manager::LocalVersionManager;
-use risingwave_storage::hummock::{HummockOptions, HummockStateStore, HummockStorage};
+use risingwave_storage::hummock::{
+    HummockOptions, HummockStateStore, HummockStorage, SstableStore,
+};
 use risingwave_storage::memory::MemoryStateStore;
+use risingwave_storage::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
 use risingwave_storage::object::S3ObjectStore;
 use risingwave_storage::rocksdb_local::RocksDBStateStore;
 use risingwave_storage::tikv::TikvStateStore;
@@ -101,7 +104,7 @@ pub(crate) enum StateStoreImpl {
     Tikv(TikvStateStore),
 }
 
-async fn get_state_store_impl(opts: &Opts) -> Result<StateStoreImpl> {
+async fn get_state_store_impl(opts: &Opts, stats: Arc<StateStoreStats>) -> Result<StateStoreImpl> {
     let meta_address = "127.0.0.1:5691";
 
     let instance = match opts.store.as_ref() {
@@ -115,25 +118,30 @@ async fn get_state_store_impl(opts: &Opts) -> Result<StateStoreImpl> {
                 S3ObjectStore::new_with_minio(minio.strip_prefix("hummock+").unwrap()).await,
             );
             let remote_dir = "hummock_001";
-            let hummock_meta_client = Arc::new(RPCHummockMetaClient::new(
+            let hummock_meta_client = Arc::new(RpcHummockMetaClient::new(
                 MetaClient::new(meta_address).await?,
+                stats.clone(),
+            ));
+            let sstable_manager = Arc::new(SstableStore::new(
+                object_client.clone(),
+                remote_dir.to_string(),
             ));
             StateStoreImpl::Hummock(HummockStateStore::new(
                 HummockStorage::new(
-                    object_client.clone(),
                     HummockOptions {
                         sstable_size: opts.table_size_mb * (1 << 20),
                         block_size: opts.block_size_kb * (1 << 10),
                         bloom_false_positive: opts.bloom_false_positive,
-                        remote_dir: remote_dir.to_string(),
+                        data_directory: remote_dir.to_string(),
                         checksum_algo: get_checksum_algo(opts.checksum_algo.as_ref()),
                     },
+                    sstable_manager.clone(),
                     Arc::new(LocalVersionManager::new(
-                        object_client,
-                        remote_dir,
+                        sstable_manager,
                         Some(Arc::new(Cache::new(65536))),
                     )),
                     hummock_meta_client,
+                    stats,
                 )
                 .await
                 .map_err(RwError::from)?,
@@ -144,25 +152,28 @@ async fn get_state_store_impl(opts: &Opts) -> Result<StateStoreImpl> {
                 S3ObjectStore::new(s3.strip_prefix("hummock+s3://").unwrap().to_string()).await,
             );
             let remote_dir = "hummock_001";
-            let hummock_meta_client = Arc::new(RPCHummockMetaClient::new(
+            let hummock_meta_client = Arc::new(RpcHummockMetaClient::new(
                 MetaClient::new(meta_address).await?,
+                stats.clone(),
             ));
+            let sstable_manager =
+                Arc::new(SstableStore::new(s3_store.clone(), remote_dir.to_string()));
             StateStoreImpl::Hummock(HummockStateStore::new(
                 HummockStorage::new(
-                    s3_store.clone(),
                     HummockOptions {
                         sstable_size: opts.table_size_mb * (1 << 20),
                         block_size: opts.block_size_kb * (1 << 10),
                         bloom_false_positive: opts.bloom_false_positive,
-                        remote_dir: remote_dir.to_string(),
+                        data_directory: remote_dir.to_string(),
                         checksum_algo: get_checksum_algo(opts.checksum_algo.as_ref()),
                     },
+                    sstable_manager.clone(),
                     Arc::new(LocalVersionManager::new(
-                        s3_store,
-                        remote_dir,
+                        sstable_manager,
                         Some(Arc::new(Cache::new(65536))),
                     )),
                     hummock_meta_client,
+                    stats,
                 )
                 .await
                 .map_err(RwError::from)?,
@@ -196,12 +207,13 @@ fn preprocess_options(opts: &mut Opts) {
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
     let mut opts = Opts::parse();
+    let stats = DEFAULT_STATE_STORE_STATS.clone();
 
     println!("Configurations before preprocess:\n {:?}", &opts);
     preprocess_options(&mut opts);
     println!("Configurations after preprocess:\n {:?}", &opts);
 
-    let state_store = match get_state_store_impl(&opts).await {
+    let state_store = match get_state_store_impl(&opts, stats.clone()).await {
         Ok(state_store_impl) => state_store_impl,
         Err(_) => {
             eprintln!("Failed to get state_store");
@@ -217,6 +229,6 @@ async fn main() {
     };
 
     if opts.statistics {
-        print_statistics();
+        print_statistics(&stats);
     }
 }
