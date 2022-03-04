@@ -26,8 +26,6 @@ use crate::TableColumnDesc;
 /// `Database` is a logical concept and stored as metadata information.
 #[async_trait::async_trait]
 pub trait TableManager: Debug + Sync + Send + AsRef<dyn Any> {
-    /// Get a specific table.
-    fn get_table(&self, table_id: &TableId) -> Result<ScannableTableRef>;
 
     /// Drop a specific table.
     async fn drop_table(&self, table_id: &TableId) -> Result<()>;

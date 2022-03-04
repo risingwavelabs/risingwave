@@ -184,6 +184,7 @@ impl<S: StateStore> SimpleExecutor for MaterializeExecutor<S> {
 mod tests {
     use std::sync::Arc;
 
+    use itertools::Itertools;
     use risingwave_common::array::{I32Array, Op, Row};
     use risingwave_common::catalog::{ColumnId, Schema, TableId};
     use risingwave_common::column_nonnull;
@@ -203,10 +204,13 @@ mod tests {
     #[tokio::test]
     async fn test_materialize_executor() {
         // Prepare storage and memtable.
-        let store = MemoryStateStore::new();
-        let store_mgr = Arc::new(SimpleTableManager::new(StateStoreImpl::MemoryStateStore(
-            store.clone().monitored(DEFAULT_STATE_STORE_STATS.clone()),
-        )));
+        let memory_state_store = MemoryStateStore::new();
+        let store = StateStoreImpl::MemoryStateStore(
+            memory_state_store
+                .clone()
+                .monitored(DEFAULT_STATE_STORE_STATS.clone()),
+        );
+        let store_mgr = Arc::new(SimpleTableManager::new(store.clone()));
         let table_id = TableId::new(1);
         // Two columns of int32 type, the first column is PK.
         let columns = vec![
@@ -232,7 +236,7 @@ mod tests {
         let column_ids = columns
             .iter()
             .map(|c| ColumnId::from(c.column_id))
-            .collect();
+            .collect_vec();
         let pks = vec![0_usize];
         let orderings = vec![OrderType::Ascending];
 
@@ -270,19 +274,19 @@ mod tests {
             ],
         );
 
+        let table = downcast_arc::<MViewTable<MonitoredStateStore<MemoryStateStore>>>(
+            new_adhoc_mview_table(store, &table_id, &column_ids, schema.fields()).into_any(),
+        )
+        .unwrap();
+
         let mut materialize_executor = Box::new(MaterializeExecutor::new(
             Box::new(source),
-            Keyspace::table_root(store, &table_id),
+            Keyspace::table_root(memory_state_store, &table_id),
             vec![OrderPair::new(0, OrderType::Ascending)],
             column_ids,
             1,
             "MaterializeExecutor".to_string(),
         ));
-
-        let table = downcast_arc::<MViewTable<MonitoredStateStore<MemoryStateStore>>>(
-            store_mgr.get_table(&table_id).unwrap().into_any(),
-        )
-        .unwrap();
 
         materialize_executor.next().await.unwrap();
         let epoch = u64::MAX;

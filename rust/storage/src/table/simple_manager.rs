@@ -31,14 +31,6 @@ impl AsRef<dyn Any> for SimpleTableManager {
 
 #[async_trait::async_trait]
 impl TableManager for SimpleTableManager {
-    fn get_table(&self, table_id: &TableId) -> Result<ScannableTableRef> {
-        let tables = self.lock_tables();
-        tables
-            .get(table_id)
-            .cloned()
-            .ok_or_else(|| InternalError(format!("Table id not exists: {:?}", table_id)).into())
-    }
-
     // TODO: the data in StateStore should also be dropped directly/through unpin or some other way.
     async fn drop_table(&self, _table_id: &TableId) -> Result<()> {
         // let mut tables = self.lock_tables();
