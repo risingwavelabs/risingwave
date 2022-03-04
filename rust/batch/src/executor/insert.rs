@@ -159,7 +159,6 @@ mod tests {
         MemSourceManager, Source, SourceManager, StreamSourceReader, TableV2ReaderContext,
     };
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::SimpleTableManager;
     use risingwave_storage::*;
 
     use super::*;
@@ -168,7 +167,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_insert_executor_for_table_v2() -> Result<()> {
-        let _table_manager = Arc::new(SimpleTableManager::with_in_memory_store());
         let source_manager = Arc::new(MemSourceManager::new());
         let store = MemoryStateStore::new();
 
