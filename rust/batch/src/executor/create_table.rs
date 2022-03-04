@@ -78,10 +78,7 @@ impl Executor for CreateTableExecutor {
             Info::TableSource(_) => {
                 // Create table_v2.
                 info!("Create table id:{}", &self.table_id.table_id());
-                // let _table = self
-                //     .table_manager
-                //     .create_table_v2(&self.table_id, table_columns.clone())
-                //     .await?;
+
                 self.source_manager
                     .create_table_source_v2(&self.table_id, table_columns)?;
             }
@@ -94,10 +91,6 @@ impl Executor for CreateTableExecutor {
                         self.table_id, associated_table_id
                     );
 
-                    // self.table_manager.register_associated_materialized_view(
-                    //     &associated_table_id,
-                    //     &self.table_id,
-                    // )?;
                     self.source_manager.register_associated_materialized_view(
                         &associated_table_id,
                         &self.table_id,
@@ -105,26 +98,7 @@ impl Executor for CreateTableExecutor {
                 } else {
                     // Create normal MV.
                     info!("create materialized view: id={:?}", self.table_id);
-
-                    // let order_pairs: Vec<_> = info
-                    //     .column_orders
-                    //     .iter()
-                    //     .map(OrderPair::from_prost)
-                    //     .collect();
-
-                    // let orderings = order_pairs
-                    //     .iter()
-                    //     .map(|order| order.order_type)
-                    //     .collect::<Vec<_>>();
-
-                    // let pk_indices = info.pk_indices.iter().map(|key| *key as usize).collect();
-
-                    // self.table_manager.create_materialized_view(
-                    //     &self.table_id,
-                    //     &self.table_columns,
-                    //     pk_indices,
-                    //     orderings,
-                    // )?;
+                    // TODO: there's nothing to do on compute node for creating mv
                 }
             }
         }

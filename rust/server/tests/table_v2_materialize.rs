@@ -125,7 +125,6 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     // Register associated materialized view
     let mview_id = TableId::new(1);
-    // table_manager.register_associated_materialized_view(&source_table_id, &mview_id)?;
     source_manager.register_associated_materialized_view(&source_table_id, &mview_id)?;
 
     // Create a `SourceExecutor` to read the changes

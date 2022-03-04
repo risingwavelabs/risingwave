@@ -234,12 +234,6 @@ mod tests {
             .iter()
             .map(|c| ColumnId::from(c.column_id))
             .collect_vec();
-        // let pks = vec![0_usize];
-        // let orderings = vec![OrderType::Ascending];
-
-        // store_mgr
-        //     .create_materialized_view(&table_id, &columns, pks.clone(), orderings)
-        //     .unwrap();
 
         // Prepare source chunks.
         let chunk1 = StreamChunk::new(
@@ -284,12 +278,13 @@ mod tests {
         ));
 
         materialize_executor.next().await.unwrap();
-        // let _epoch = u64::MAX;
+
         // First stream chunk. We check the existence of (3) -> (3,6)
         match materialize_executor.next().await.unwrap() {
             Message::Barrier(_) => {
+                // FIXME: restore this test by using new `RowTable` interface
                 // let datum = table
-                //     .get(Row(vec![Some(3_i32.into())]), 1, epoch)
+                //     .get(Row(vec![Some(3_i32.into())]), 1, u64::MAX)
                 //     .await
                 //     .unwrap()
                 //     .unwrap();
@@ -302,8 +297,9 @@ mod tests {
         // Second stream chunk. We check the existence of (7) -> (7,8)
         match materialize_executor.next().await.unwrap() {
             Message::Barrier(_) => {
+                // FIXME: restore this test by using new `RowTable` interface
                 // let datum = table
-                //     .get(Row(vec![Some(7_i32.into())]), 1, epoch)
+                //     .get(Row(vec![Some(7_i32.into())]), 1, u64::MAX)
                 //     .await
                 //     .unwrap()
                 //     .unwrap();

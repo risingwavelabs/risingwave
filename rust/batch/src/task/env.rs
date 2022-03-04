@@ -28,6 +28,7 @@ pub struct BatchEnvironment {
     /// Current worker node id.
     worker_id: WorkerNodeId,
 
+    /// State store for table scanning.
     state_store: StateStoreImpl,
 }
 
