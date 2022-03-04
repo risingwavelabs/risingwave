@@ -4,11 +4,10 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
-use super::{ColPrunable, LogicalProject, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use super::{ColPrunable, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
 use crate::binder::BaseTableRef;
 use crate::catalog::ColumnId;
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
-use crate::utils::ColIndexMapping;
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
