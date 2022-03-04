@@ -28,6 +28,7 @@ pub trait ScannableTable: Sync + Send + Any + core::fmt::Debug {
 
     /// Collect data chunk with the target `chunk_size` from the given `iter`, projected on
     /// `indices`. If there's no more data, return `None`.
+    // TODO(bugen): column indices / ids should directly specified in adhoc table, not here.
     async fn collect_from_iter(
         &self,
         iter: &mut TableIterRef,
