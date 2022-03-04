@@ -1,11 +1,12 @@
 use std::fmt;
 
+use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::expr::AggKind;
 use risingwave_common::types::DataType;
 
-use super::{ColPrunable, LogicalProject, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use super::{ColPrunable, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
 use crate::expr::ExprImpl;
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 use crate::utils::ColIndexMapping;
@@ -137,10 +138,46 @@ impl WithSchema for LogicalAgg {
 }
 
 impl ColPrunable for LogicalAgg {
-    fn prune_col(&self, required_cols: &fixedbitset::FixedBitSet) -> PlanRef {
-        // TODO: replace default impl
-        let mapping = ColIndexMapping::with_remaining_columns(required_cols);
-        LogicalProject::with_mapping(self.clone().into(), mapping).into()
+    fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
+        assert!(
+            required_cols.is_subset(&FixedBitSet::from_iter(0..self.schema().fields().len())),
+            "invalid required cols: {}, only {} columns available",
+            required_cols,
+            self.schema().fields().len()
+        );
+
+        let mut child_required_cols =
+            FixedBitSet::with_capacity(self.input.schema().fields().len());
+        let (mut agg_calls, agg_call_alias, mut group_keys): (Vec<_>, Vec<_>, Vec<_>) =
+            required_cols
+                .ones()
+                .map(|id| {
+                    let agg_call = self.agg_calls[id].clone();
+                    child_required_cols.extend(agg_call.inputs.iter().copied());
+                    (
+                        agg_call,
+                        self.agg_call_alias[id].clone(),
+                        self.group_keys[id],
+                    )
+                })
+                .multiunzip();
+
+        let mapping = ColIndexMapping::with_remaining_columns(&child_required_cols);
+        agg_calls.iter_mut().for_each(|agg_call| {
+            agg_call
+                .inputs
+                .iter_mut()
+                .for_each(|i| *i = mapping.map(*i));
+        });
+        group_keys.iter_mut().for_each(|i| *i = mapping.map(*i));
+
+        LogicalAgg::new(
+            agg_calls,
+            agg_call_alias,
+            group_keys,
+            self.input.prune_col(&child_required_cols),
+        )
+        .into()
     }
 }
 
