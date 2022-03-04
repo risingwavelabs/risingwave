@@ -61,11 +61,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             .iter()
             .map(|column_id| ColumnId::new(*column_id))
             .collect_vec();
-        let fields = node
-            .fields
-            .iter()
-            .map(|field| Field::from(field))
-            .collect_vec();
+        let fields = node.fields.iter().map(Field::from).collect_vec();
 
         let table =
             new_adhoc_mview_table(params.env.state_store(), &table_id, &column_ids, &fields);

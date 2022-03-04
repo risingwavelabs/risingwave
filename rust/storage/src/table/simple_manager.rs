@@ -1,17 +1,11 @@
 use std::any::Any;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Mutex, MutexGuard};
 
-use risingwave_common::array::InternalError;
-use risingwave_common::catalog::{Schema, TableId};
-use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::util::sort_util::OrderType;
-use risingwave_common::{ensure, gen_error};
-use risingwave_pb::plan::ColumnDesc;
+use risingwave_common::catalog::TableId;
 
 use super::{ScannableTableRef, TableManager};
-use crate::table::mview::MViewTable;
-use crate::{dispatch_state_store, Keyspace, StateStoreImpl, TableColumnDesc};
+use crate::StateStoreImpl;
 
 /// Manages all tables in the storage backend.
 #[derive(Debug)]

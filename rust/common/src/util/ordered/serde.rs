@@ -14,7 +14,7 @@ use crate::types::{
 };
 use crate::util::sort_util::{OrderPair, OrderType};
 
-/// The special `cell_id` reserved for a whole null row is i32::MIN.
+/// The special `cell_id` reserved for a whole null row is `i32::MIN`.
 pub const NULL_ROW_SPECIAL_CELL_ID: ColumnId = ColumnId::new(i32::MIN);
 
 /// We can use memcomparable serialization to serialize data
@@ -143,7 +143,7 @@ pub fn serialize_pk_and_row(
         // gets nothing.
         let key = [
             pk_buf,
-            serialize_column_id(&ColumnId::from(NULL_ROW_SPECIAL_CELL_ID))?.as_slice(),
+            serialize_column_id(&NULL_ROW_SPECIAL_CELL_ID)?.as_slice(),
         ]
         .concat();
         let value = serialize_cell(&None)?;

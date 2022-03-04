@@ -2,7 +2,6 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::OrderPair;
 use risingwave_pb::plan::create_table_node::Info;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::ColumnDesc;

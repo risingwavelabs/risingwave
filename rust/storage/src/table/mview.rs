@@ -23,7 +23,7 @@ pub fn new_adhoc_mview_table(
 ) -> Arc<dyn ScannableTable> {
     dispatch_state_store!(state_store, state_store, {
         let keyspace = Keyspace::table_root(state_store, table_id);
-        let table = MViewTable::new_adhoc(keyspace, &column_ids, &fields);
+        let table = MViewTable::new_adhoc(keyspace, column_ids, fields);
         Arc::new(table) as Arc<dyn ScannableTable>
     })
 }

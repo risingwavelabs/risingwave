@@ -10,10 +10,8 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
-use risingwave_common::catalog::{Schema, TableId};
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
-use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::plan::ColumnDesc;
 pub use simple_manager::*;
 
 use crate::TableColumnDesc;

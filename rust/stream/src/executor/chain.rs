@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};

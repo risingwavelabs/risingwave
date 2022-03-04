@@ -16,7 +16,7 @@ use risingwave_pb::plan::ColumnDesc;
 use risingwave_source::{MemSourceManager, SourceManager};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::monitor::DEFAULT_STATE_STORE_STATS;
-use risingwave_storage::table::{SimpleTableManager, TableManager};
+use risingwave_storage::table::SimpleTableManager;
 use risingwave_storage::{Keyspace, StateStore, StateStoreImpl};
 use risingwave_stream::executor::{
     new_adhoc_mview_table, Barrier, Epoch, Executor as StreamExecutor, MaterializeExecutor,

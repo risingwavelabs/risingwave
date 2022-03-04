@@ -5,9 +5,8 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::error::Result;
 use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_storage::table::mview::{new_adhoc_mview_table, MViewTable};
+use risingwave_storage::table::mview::new_adhoc_mview_table;
 use risingwave_storage::table::{ScannableTable, TableIterRef};
-use risingwave_storage::{dispatch_state_store, Keyspace, StateStoreImpl};
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::executor::{Executor, ExecutorBuilder};
@@ -75,11 +74,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutor {
             .iter()
             .map(|column_id| ColumnId::new(*column_id))
             .collect_vec();
-        let fields = seq_scan_node
-            .fields
-            .iter()
-            .map(|field| Field::from(field))
-            .collect_vec();
+        let fields = seq_scan_node.fields.iter().map(Field::from).collect_vec();
 
         let table = new_adhoc_mview_table(
             source.global_batch_env().state_store(),
