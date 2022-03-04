@@ -194,7 +194,7 @@ pub fn str_to_bool(input: &str) -> Result<bool> {
     {
         Ok(false)
     } else {
-        Err(InvalidInputSyntax(format!("{} is not a valid bool", input)).into())
+        Err(InvalidInputSyntax(format!("'{}' is not a valid bool", input)).into())
     }
 }
 

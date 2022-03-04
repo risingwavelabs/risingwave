@@ -61,4 +61,3 @@
     values(max(1));
   binder_error: |
     Invalid input syntax: aggregate functions are not allowed in VALUES
-
