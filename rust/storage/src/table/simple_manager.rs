@@ -30,71 +30,7 @@ impl AsRef<dyn Any> for SimpleTableManager {
 }
 
 #[async_trait::async_trait]
-impl TableManager for SimpleTableManager {
-    fn create_materialized_view(
-        &self,
-        table_id: &TableId,
-        columns: &[ColumnDesc],
-        pk_columns: Vec<usize>,
-        orderings: Vec<OrderType>,
-    ) -> Result<()> {
-        tracing::debug!("create materialized view: {:?}", table_id);
-
-        let mut tables = self.lock_tables();
-        ensure!(
-            !tables.contains_key(table_id),
-            "Table id already exists: {:?}",
-            table_id
-        );
-        let column_count = columns.len();
-        ensure!(column_count > 0, "There must be more than one column in MV");
-        let schema = Schema::try_from(columns)?;
-
-        let table: ScannableTableRef = dispatch_state_store!(self.state_store(), store, {
-            Arc::new(MViewTable::new(
-                Keyspace::table_root(store, table_id),
-                schema,
-                pk_columns,
-                orderings,
-            ))
-        });
-
-        tables.insert(*table_id, table);
-        Ok(())
-    }
-
-    fn register_associated_materialized_view(
-        &self,
-        associated_table_id: &TableId,
-        mview_id: &TableId,
-    ) -> Result<ScannableTableRef> {
-        tracing::debug!(
-            "register associated materialized view: associated_table_id={:?}, mview_id={:?}",
-            associated_table_id,
-            mview_id
-        );
-
-        let mut tables = self.lock_tables();
-        let table = tables
-            .get(associated_table_id)
-            .ok_or_else(|| {
-                // TODO: make this "panic"
-                ErrorCode::CatalogError(
-                    anyhow::anyhow!(
-                        "associated table {:?} for table_v2 {:?} not exist",
-                        associated_table_id,
-                        mview_id
-                    )
-                    .into(),
-                )
-            })?
-            .clone();
-
-        // Simply associate the mview id to the table
-        tables.insert(*mview_id, table.clone());
-        Ok(table)
-    }
-}
+impl TableManager for SimpleTableManager {}
 
 impl SimpleTableManager {
     pub fn new(state_store: StateStoreImpl) -> Self {

@@ -25,23 +25,7 @@ use crate::TableColumnDesc;
 /// tables. The interface between executors and storage should be table-oriented.
 /// `Database` is a logical concept and stored as metadata information.
 #[async_trait::async_trait]
-pub trait TableManager: Debug + Sync + Send + AsRef<dyn Any> {
-    /// Create materialized view.
-    fn create_materialized_view(
-        &self,
-        table_id: &TableId,
-        columns: &[ColumnDesc],
-        pk_columns: Vec<usize>,
-        orderings: Vec<OrderType>,
-    ) -> Result<()>;
-
-    /// Create materialized view associated to table v2
-    fn register_associated_materialized_view(
-        &self,
-        associated_table_id: &TableId,
-        mview_id: &TableId,
-    ) -> Result<ScannableTableRef>;
-}
+pub trait TableManager: Debug + Sync + Send + AsRef<dyn Any> {}
 
 #[async_trait::async_trait]
 pub trait TableIter: Send {

@@ -210,7 +210,7 @@ mod tests {
                 .clone()
                 .monitored(DEFAULT_STATE_STORE_STATS.clone()),
         );
-        let store_mgr = Arc::new(SimpleTableManager::new(store.clone()));
+        // let store_mgr = Arc::new(SimpleTableManager::new(store.clone()));
         let table_id = TableId::new(1);
         // Two columns of int32 type, the first column is PK.
         let columns = vec![
@@ -237,12 +237,13 @@ mod tests {
             .iter()
             .map(|c| ColumnId::from(c.column_id))
             .collect_vec();
-        let pks = vec![0_usize];
-        let orderings = vec![OrderType::Ascending];
+        // let pks = vec![0_usize];
+        // let orderings = vec![OrderType::Ascending];
 
-        store_mgr
-            .create_materialized_view(&table_id, &columns, pks.clone(), orderings)
-            .unwrap();
+        // store_mgr
+        //     .create_materialized_view(&table_id, &columns, pks.clone(), orderings)
+        //     .unwrap();
+
         // Prepare source chunks.
         let chunk1 = StreamChunk::new(
             vec![Op::Insert, Op::Insert, Op::Insert],

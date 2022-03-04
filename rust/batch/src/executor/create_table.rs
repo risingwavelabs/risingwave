@@ -112,25 +112,25 @@ impl Executor for CreateTableExecutor {
                     // Create normal MV.
                     info!("create materialized view: id={:?}", self.table_id);
 
-                    let order_pairs: Vec<_> = info
-                        .column_orders
-                        .iter()
-                        .map(OrderPair::from_prost)
-                        .collect();
+                    // let order_pairs: Vec<_> = info
+                    //     .column_orders
+                    //     .iter()
+                    //     .map(OrderPair::from_prost)
+                    //     .collect();
 
-                    let orderings = order_pairs
-                        .iter()
-                        .map(|order| order.order_type)
-                        .collect::<Vec<_>>();
+                    // let orderings = order_pairs
+                    //     .iter()
+                    //     .map(|order| order.order_type)
+                    //     .collect::<Vec<_>>();
 
-                    let pk_indices = info.pk_indices.iter().map(|key| *key as usize).collect();
+                    // let pk_indices = info.pk_indices.iter().map(|key| *key as usize).collect();
 
-                    self.table_manager.create_materialized_view(
-                        &self.table_id,
-                        &self.table_columns,
-                        pk_indices,
-                        orderings,
-                    )?;
+                    // self.table_manager.create_materialized_view(
+                    //     &self.table_id,
+                    //     &self.table_columns,
+                    //     pk_indices,
+                    //     orderings,
+                    // )?;
                 }
             }
         }

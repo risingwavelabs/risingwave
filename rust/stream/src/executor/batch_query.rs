@@ -67,12 +67,8 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             .map(|field| Field::from(field))
             .collect_vec();
 
-        let table = new_adhoc_mview_table(
-            params.env.state_store(),
-            &table_id,
-            &column_ids,
-            &fields,
-        );
+        let table =
+            new_adhoc_mview_table(params.env.state_store(), &table_id, &column_ids, &fields);
 
         Ok(Box::new(BatchQueryExecutor::new(
             table.clone(),
