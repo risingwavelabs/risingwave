@@ -2,19 +2,16 @@ use core::fmt;
 use std::cmp::Ordering;
 use std::fmt::{Debug, Display};
 use std::hash::{Hash, Hasher};
-use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_pb::data::{
-    Array as ProstArray, ArrayType as ProstArrayType, DataType as ProstDataType, ListArrayData,
-};
+use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, ListArrayData};
 
 use super::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, NULL_VAL_FOR_HASH,
 };
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::error::Result;
-use crate::types::{DataType, Datum, DatumRef, Scalar, ScalarRefImpl};
+use crate::types::{Datum, DatumRef, Scalar, ScalarRefImpl};
 
 /// This is a naive implementation of list array.
 /// We will eventually move to a more efficient flatten implementation.
@@ -125,9 +122,7 @@ impl Array for ListArray {
     }
 
     fn iter(&self) -> Self::Iter<'_> {
-
-        let res = ArrayIterator::new(self);
-        res
+        ArrayIterator::new(self)
     }
 
     fn to_protobuf(&self) -> Result<ProstArray> {
@@ -250,8 +245,8 @@ impl<'a> ListRef<'a> {
         match self {
             ListRef::Indexed { arr, idx } => {
                 // arr.children.iter().map(|a| a.value_at(*idx)).collect();
-                if arr.children.len() != 0 {
-                arr.children[*idx].iter().map(|a| a).collect()
+                if !arr.children.is_empty() {
+                    arr.children[*idx].iter().collect()
                 } else {
                     vec![]
                 }
