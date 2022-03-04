@@ -18,7 +18,9 @@ impl LocalMeta {
     pub async fn start(port: u16) -> Self {
         let addr = Self::meta_addr_inner(port).parse().unwrap();
         let (join_handle, shutdown_sender) =
-            crate::rpc::server::rpc_serve(addr, None, None, MetaStoreBackend::Mem).await;
+            crate::rpc::server::rpc_serve(addr, None, None, MetaStoreBackend::Mem)
+                .await
+                .unwrap();
         Self {
             port,
             join_handle,
