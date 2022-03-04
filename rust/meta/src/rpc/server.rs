@@ -1,6 +1,10 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
+use etcd_client::{Client as EtcdClient, ConnectOptions};
+use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::{Result, RwError};
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
 use risingwave_pb::meta::catalog_service_server::CatalogServiceServer;
 use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
@@ -26,10 +30,11 @@ use crate::rpc::service::epoch_service::EpochServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
 use crate::rpc::service::hummock_service::HummockServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
-use crate::storage::MemStore;
+use crate::storage::{EtcdMetaStore, MemStore, MetaStore};
 use crate::stream::{FragmentManager, StreamManager};
 
 pub enum MetaStoreBackend {
+    Etcd { endpoints: Vec<String> },
     Mem,
 }
 
@@ -38,17 +43,45 @@ pub async fn rpc_serve(
     prometheus_addr: Option<SocketAddr>,
     dashboard_addr: Option<SocketAddr>,
     meta_store_backend: MetaStoreBackend,
+) -> Result<(JoinHandle<()>, UnboundedSender<()>)> {
+    Ok(match meta_store_backend {
+        MetaStoreBackend::Etcd { endpoints } => {
+            let client = EtcdClient::connect(
+                endpoints,
+                Some(
+                    ConnectOptions::default()
+                        .with_keep_alive(Duration::from_secs(3), Duration::from_secs(5)),
+                ),
+            )
+            .await
+            .map_err(|e| RwError::from(InternalError(format!("failed to connect etcd {}", e))))?;
+            let meta_store_ref = Arc::new(EtcdMetaStore::new(client));
+            rpc_serve_with_store(addr, prometheus_addr, dashboard_addr, meta_store_ref).await
+        }
+        MetaStoreBackend::Mem => {
+            let meta_store_ref = Arc::new(MemStore::default());
+            rpc_serve_with_store(addr, prometheus_addr, dashboard_addr, meta_store_ref).await
+        }
+    })
+}
+
+pub async fn rpc_serve_with_store<S: MetaStore>(
+    addr: SocketAddr,
+    prometheus_addr: Option<SocketAddr>,
+    dashboard_addr: Option<SocketAddr>,
+    meta_store_ref: Arc<S>,
 ) -> (JoinHandle<()>, UnboundedSender<()>) {
     let listener = TcpListener::bind(addr).await.unwrap();
-    let meta_store_ref = match meta_store_backend {
-        MetaStoreBackend::Mem => Arc::new(MemStore::default()),
-    };
     let epoch_generator_ref = Arc::new(MemEpochGenerator::new());
-    let env =
-        MetaSrvEnv::<MemStore>::new(meta_store_ref.clone(), epoch_generator_ref.clone()).await;
+    let env = MetaSrvEnv::<S>::new(meta_store_ref.clone(), epoch_generator_ref.clone()).await;
 
     let fragment_manager = Arc::new(FragmentManager::new(meta_store_ref.clone()).await.unwrap());
-    let hummock_manager = Arc::new(hummock::HummockManager::new(env.clone()).await.unwrap());
+    let meta_metrics = Arc::new(MetaMetrics::new());
+    let hummock_manager = Arc::new(
+        hummock::HummockManager::new(env.clone(), meta_metrics.clone())
+            .await
+            .unwrap(),
+    );
     let compactor_manager = Arc::new(hummock::CompactorManager::new());
     let notification_manager = Arc::new(NotificationManager::new());
     let cluster_manager = Arc::new(
@@ -72,7 +105,6 @@ pub async fn rpc_serve(
         tokio::spawn(dashboard_service.serve()); // TODO: join dashboard service back to local
                                                  // thread
     }
-    let meta_metrics = Arc::new(MetaMetrics::new());
     let barrier_manager_ref = Arc::new(BarrierManager::new(
         env.clone(),
         cluster_manager.clone(),
@@ -98,16 +130,16 @@ pub async fn rpc_serve(
         .unwrap(),
     );
     let catalog_manager_ref = Arc::new(
-        StoredCatalogManager::new(meta_store_ref.clone())
+        StoredCatalogManager::new(meta_store_ref.clone(), notification_manager.clone())
             .await
             .unwrap(),
     );
 
     let epoch_srv = EpochServiceImpl::new(epoch_generator_ref.clone());
     let heartbeat_srv = HeartbeatServiceImpl::new();
-    let catalog_srv = CatalogServiceImpl::<MemStore>::new(env.clone(), catalog_manager_ref);
-    let cluster_srv = ClusterServiceImpl::<MemStore>::new(cluster_manager.clone());
-    let stream_srv = StreamServiceImpl::<MemStore>::new(
+    let catalog_srv = CatalogServiceImpl::<S>::new(env.clone(), catalog_manager_ref);
+    let cluster_srv = ClusterServiceImpl::<S>::new(cluster_manager.clone());
+    let stream_srv = StreamServiceImpl::<S>::new(
         stream_manager_ref,
         fragment_manager.clone(),
         cluster_manager,
@@ -119,6 +151,9 @@ pub async fn rpc_serve(
     if let Some(prometheus_addr) = prometheus_addr {
         meta_metrics.boot_metrics_service(prometheus_addr);
     }
+
+    let (compaction_join_handle, compaction_shutdown_sender) =
+        hummock::start_compaction_trigger(hummock_manager, compactor_manager);
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
     let join_handle = tokio::spawn(async move {
@@ -136,18 +171,17 @@ pub async fn rpc_serve(
                 async move {
                     tokio::select! {
                       _ = tokio::signal::ctrl_c() => {},
-                      _ = shutdown_recv.recv() => {},
+                      _ = shutdown_recv.recv() => {
+                            if compaction_shutdown_sender.send(()).is_ok() {
+                                compaction_join_handle.await.unwrap();
+                            }
+                        },
                     }
                 },
             )
             .await
             .unwrap();
     });
-
-    tokio::spawn(hummock::start_compaction_loop(
-        hummock_manager,
-        compactor_manager,
-    ));
 
     (join_handle, shutdown_send)
 }

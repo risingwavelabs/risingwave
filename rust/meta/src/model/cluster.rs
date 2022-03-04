@@ -38,4 +38,8 @@ impl Worker {
     pub fn worker_node(&self) -> WorkerNode {
         self.0.clone()
     }
+
+    pub fn worker_id(&self) -> u32 {
+        self.0.id
+    }
 }

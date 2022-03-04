@@ -260,7 +260,6 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
     use risingwave_source::*;
-    use risingwave_storage::table::test::TestTable;
     use risingwave_storage::TableColumnDesc;
     use tokio::sync::mpsc::unbounded_channel;
 
@@ -292,10 +291,8 @@ mod tests {
                 name: String::new(),
             },
         ];
-        let table = Arc::new(TestTable::new(&table_id, table_columns));
-
         let source_manager = MemSourceManager::new();
-        source_manager.create_table_source_v2(&table_id, table.clone())?;
+        source_manager.create_table_source_v2(&table_id, table_columns)?;
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.clone().source;
 
@@ -435,10 +432,8 @@ mod tests {
                 name: String::new(),
             },
         ];
-        let table = Arc::new(TestTable::new(&table_id, table_columns));
-
         let source_manager = MemSourceManager::new();
-        source_manager.create_table_source_v2(&table_id, table.clone())?;
+        source_manager.create_table_source_v2(&table_id, table_columns)?;
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.clone().source;
 

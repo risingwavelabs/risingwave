@@ -4,9 +4,9 @@ use std::sync::Arc;
 use super::{HummockIterator, MergeIterator};
 use crate::hummock::iterator::ReverseUserIterator;
 use crate::hummock::key::{get_epoch, key_with_epoch, user_key as to_user_key, Epoch};
+use crate::hummock::local_version_manager::ScopedLocalVersion;
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
-use crate::monitor::StateStoreStats;
 
 pub enum DirectedUserIterator<'a> {
     Forward(UserIterator<'a>),
@@ -78,9 +78,8 @@ pub struct UserIterator<'a> {
     /// Only read values if `ts <= self.read_epoch`.
     read_epoch: Epoch,
 
-    #[allow(dead_code)]
-    // TODO: separate state store stats with hummock stats
-    stats: Arc<StateStoreStats>,
+    /// Ensures the SSTs needed by `iterator` won't be vacuumed.
+    _version: Option<Arc<ScopedLocalVersion>>,
 }
 
 // TODO: decide wheher this should also impl `HummockIterator`
@@ -91,14 +90,7 @@ impl<'a> UserIterator<'a> {
         iterator: MergeIterator<'a>,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
     ) -> Self {
-        use crate::monitor::DEFAULT_STATE_STORE_STATS;
-
-        Self::new(
-            iterator,
-            key_range,
-            Epoch::MAX,
-            DEFAULT_STATE_STORE_STATS.clone(),
-        )
+        Self::new(iterator, key_range, Epoch::MAX, None)
     }
 
     /// Create [`UserIterator`] with given `read_epoch`.
@@ -106,7 +98,7 @@ impl<'a> UserIterator<'a> {
         iterator: MergeIterator<'a>,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
-        stats: Arc<StateStoreStats>,
+        version: Option<Arc<ScopedLocalVersion>>,
     ) -> Self {
         Self {
             iterator,
@@ -115,7 +107,7 @@ impl<'a> UserIterator<'a> {
             last_key: Vec::new(),
             last_val: Vec::new(),
             read_epoch,
-            stats,
+            _version: version,
         }
     }
 
@@ -251,7 +243,7 @@ mod tests {
     use crate::hummock::key::user_key;
     use crate::hummock::sstable::{SSTableIterator, Sstable};
     use crate::hummock::value::HummockValue;
-    use crate::hummock::{SSTableBuilder, SstableManagerRef};
+    use crate::hummock::{SSTableBuilder, SstableStoreRef};
 
     #[tokio::test]
     async fn test_basic() {
@@ -717,12 +709,10 @@ mod tests {
     }
 
     // key=[table, idx, epoch], value
-
-    // key=[table, idx, epoch], value
     async fn add_kv_pair(
         sst_id: u64,
         kv_pairs: Vec<(u64, usize, u64, HummockValue<Vec<u8>>)>,
-        sstable_manager: SstableManagerRef,
+        sstable_manager: SstableStoreRef,
     ) -> Sstable {
         let mut b = SSTableBuilder::new(default_builder_opt_for_test());
         for kv in kv_pairs {

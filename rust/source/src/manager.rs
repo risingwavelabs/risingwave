@@ -7,7 +7,6 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::{ensure, gen_error};
-use risingwave_storage::table::ScannableTableRef;
 use risingwave_storage::TableColumnDesc;
 
 use crate::table_v2::TableSourceV2;
@@ -25,7 +24,11 @@ pub trait SourceManager: Debug + Sync + Send {
         columns: Vec<SourceColumnDesc>,
         row_id_index: Option<usize>,
     ) -> Result<()>;
-    fn create_table_source_v2(&self, table_id: &TableId, table: ScannableTableRef) -> Result<()>;
+    fn create_table_source_v2(
+        &self,
+        table_id: &TableId,
+        columns: Vec<TableColumnDesc>,
+    ) -> Result<()>;
     fn register_associated_materialized_view(
         &self,
         associated_table_id: &TableId,
@@ -110,7 +113,11 @@ impl SourceManager for MemSourceManager {
         Ok(())
     }
 
-    fn create_table_source_v2(&self, table_id: &TableId, table: ScannableTableRef) -> Result<()> {
+    fn create_table_source_v2(
+        &self,
+        table_id: &TableId,
+        columns: Vec<TableColumnDesc>,
+    ) -> Result<()> {
         let mut sources = self.get_sources()?;
 
         ensure!(
@@ -119,18 +126,13 @@ impl SourceManager for MemSourceManager {
             table_id
         );
 
-        let columns = table
-            .column_descs()
-            .iter()
-            .map(SourceColumnDesc::from)
-            .collect();
-
-        let source = SourceImpl::TableV2(TableSourceV2::new(table));
+        let source_columns = columns.iter().map(SourceColumnDesc::from).collect();
+        let source = SourceImpl::TableV2(TableSourceV2::new(columns));
 
         // Table sources do not need columns and format
         let desc = SourceDesc {
             source: Arc::new(source),
-            columns,
+            columns: source_columns,
             format: SourceFormat::Invalid,
             row_id_index: Some(0), // always use the first column as row_id
         };
@@ -205,7 +207,6 @@ mod tests {
     use risingwave_common::error::Result;
     use risingwave_common::types::DataType;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::mview::MViewTable;
     use risingwave_storage::{Keyspace, TableColumnDesc};
 
     use crate::*;
@@ -288,11 +289,10 @@ mod tests {
             })
             .collect();
 
-        let keyspace = Keyspace::table_root(MemoryStateStore::new(), &table_id);
+        let _keyspace = Keyspace::table_root(MemoryStateStore::new(), &table_id);
 
-        let table_v2 = Arc::new(MViewTable::new_batch(keyspace, table_columns));
         let mem_source_manager = MemSourceManager::new();
-        let res = mem_source_manager.create_table_source_v2(&table_id, table_v2);
+        let res = mem_source_manager.create_table_source_v2(&table_id, table_columns);
         assert!(res.is_ok());
 
         // get source

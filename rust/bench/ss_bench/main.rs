@@ -12,7 +12,7 @@ use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::hummock_meta_client::RpcHummockMetaClient;
 use risingwave_storage::hummock::local_version_manager::LocalVersionManager;
 use risingwave_storage::hummock::{
-    HummockOptions, HummockStateStore, HummockStorage, SstableManager,
+    HummockOptions, HummockStateStore, HummockStorage, SstableStore,
 };
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
@@ -122,7 +122,7 @@ async fn get_state_store_impl(opts: &Opts, stats: Arc<StateStoreStats>) -> Resul
                 MetaClient::new(meta_address).await?,
                 stats.clone(),
             ));
-            let sstable_manager = Arc::new(SstableManager::new(
+            let sstable_manager = Arc::new(SstableStore::new(
                 object_client.clone(),
                 remote_dir.to_string(),
             ));
@@ -132,7 +132,7 @@ async fn get_state_store_impl(opts: &Opts, stats: Arc<StateStoreStats>) -> Resul
                         sstable_size: opts.table_size_mb * (1 << 20),
                         block_size: opts.block_size_kb * (1 << 10),
                         bloom_false_positive: opts.bloom_false_positive,
-                        remote_dir: remote_dir.to_string(),
+                        data_directory: remote_dir.to_string(),
                         checksum_algo: get_checksum_algo(opts.checksum_algo.as_ref()),
                     },
                     sstable_manager.clone(),
@@ -156,17 +156,15 @@ async fn get_state_store_impl(opts: &Opts, stats: Arc<StateStoreStats>) -> Resul
                 MetaClient::new(meta_address).await?,
                 stats.clone(),
             ));
-            let sstable_manager = Arc::new(SstableManager::new(
-                s3_store.clone(),
-                remote_dir.to_string(),
-            ));
+            let sstable_manager =
+                Arc::new(SstableStore::new(s3_store.clone(), remote_dir.to_string()));
             StateStoreImpl::Hummock(HummockStateStore::new(
                 HummockStorage::new(
                     HummockOptions {
                         sstable_size: opts.table_size_mb * (1 << 20),
                         block_size: opts.block_size_kb * (1 << 10),
                         bloom_false_positive: opts.bloom_false_positive,
-                        remote_dir: remote_dir.to_string(),
+                        data_directory: remote_dir.to_string(),
                         checksum_algo: get_checksum_algo(opts.checksum_algo.as_ref()),
                     },
                     sstable_manager.clone(),

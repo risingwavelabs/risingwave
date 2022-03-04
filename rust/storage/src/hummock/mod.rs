@@ -59,15 +59,19 @@ pub const FIRST_VERSION_ID: HummockVersionId = 1;
 
 #[derive(Default, Debug, Clone)]
 pub struct HummockOptions {
-    /// target size of the SSTable
+    /// Target size of the SSTable.
     pub sstable_size: u32,
-    /// size of each block in bytes in SST
+
+    /// Size of each block in bytes in SST.
     pub block_size: u32,
-    /// false positive probability of Bloom filter
+
+    /// False positive probability of bloom filter.
     pub bloom_false_positive: f64,
-    /// remote directory for storing data and metadata objects
-    pub remote_dir: String,
-    /// checksum algorithm
+
+    /// Data directory for storing data and metadata objects.
+    pub data_directory: String,
+
+    /// checksum algorithm.
     pub checksum_algo: ChecksumAlg,
 }
 
@@ -78,7 +82,7 @@ impl HummockOptions {
             sstable_size: 256 * (1 << 20),
             block_size: 64 * (1 << 10),
             bloom_false_positive: 0.1,
-            remote_dir: "hummock_001".to_string(),
+            data_directory: "hummock_001".to_string(),
             checksum_algo: ChecksumAlg::XxHash64,
         }
     }
@@ -89,7 +93,7 @@ impl HummockOptions {
             sstable_size: 4 * (1 << 10),
             block_size: 1 << 10,
             bloom_false_positive: 0.1,
-            remote_dir: "hummock_001_small".to_string(),
+            data_directory: "hummock_001_small".to_string(),
             checksum_algo: ChecksumAlg::XxHash64,
         }
     }
@@ -102,12 +106,9 @@ pub struct HummockStorage {
 
     local_version_manager: Arc<LocalVersionManager>,
 
-    /// Statistics.
-    stats: Arc<StateStoreStats>,
-
     hummock_meta_client: Arc<dyn HummockMetaClient>,
 
-    sstable_manager: SstableManagerRef,
+    sstable_manager: SstableStoreRef,
     /// Manager for immutable shared buffers
     shared_buffer_manager: Arc<SharedBufferManager>,
 }
@@ -116,7 +117,7 @@ impl HummockStorage {
     /// Create a [`HummockStorage`] with default stats. Should only used by tests.
     pub async fn with_default_stats(
         options: HummockOptions,
-        sstable_manager: SstableManagerRef,
+        sstable_manager: SstableStoreRef,
         local_version_manager: Arc<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> HummockResult<Self> {
@@ -135,9 +136,10 @@ impl HummockStorage {
     /// Create a [`HummockStorage`].
     pub async fn new(
         options: HummockOptions,
-        sstable_manager: SstableManagerRef,
+        sstable_manager: SstableStoreRef,
         local_version_manager: Arc<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
+        // TODO: should be separated `HummockStats` instead of `StateStoreStats`.
         stats: Arc<StateStoreStats>,
     ) -> HummockResult<Self> {
         let options = Arc::new(options);
@@ -154,24 +156,18 @@ impl HummockStorage {
             local_version_manager.clone(),
             hummock_meta_client.clone(),
             shared_buffer_manager.clone(),
-        )
-        .await;
+        );
         // Ensure at least one available version in cache.
         local_version_manager.wait_epoch(HummockEpoch::MIN).await;
 
         let instance = Self {
             options,
             local_version_manager,
-            stats,
             hummock_meta_client,
             sstable_manager,
             shared_buffer_manager,
         };
         Ok(instance)
-    }
-
-    pub fn get_options(&self) -> Arc<HummockOptions> {
-        self.options.clone()
     }
 
     /// Get the value of a specified `key`.
@@ -293,7 +289,7 @@ impl HummockStorage {
                 key_range.end_bound().map(|b| b.as_ref().to_owned()),
             ),
             epoch,
-            self.stats.clone(),
+            Some(version),
         ))
     }
 
@@ -349,6 +345,7 @@ impl HummockStorage {
                 key_range.start_bound().map(|b| b.as_ref().to_owned()),
             ),
             epoch,
+            Some(version),
         ))
     }
 
@@ -397,7 +394,7 @@ impl HummockStorage {
         &self.options
     }
 
-    pub fn sstable_manager(&self) -> SstableManagerRef {
+    pub fn sstable_manager(&self) -> SstableStoreRef {
         self.sstable_manager.clone()
     }
 
