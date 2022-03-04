@@ -1,7 +1,7 @@
 use rdkafka::message::BorrowedMessage;
 use rdkafka::Message;
 
-use crate::base::SourceMessage;
+use crate::base::{SourceMessage, SourceOffset};
 
 #[derive(Clone)]
 pub struct KafkaMessage {
@@ -14,6 +14,10 @@ pub struct KafkaMessage {
 impl SourceMessage for KafkaMessage {
     fn payload(&self) -> anyhow::Result<Option<&[u8]>> {
         Ok(self.payload.as_ref().map(|payload| payload.as_ref()))
+    }
+
+    fn offset(&self) -> anyhow::Result<Option<SourceOffset>> {
+        Ok(Some(SourceOffset::Number(self.offset)))
     }
 }
 
