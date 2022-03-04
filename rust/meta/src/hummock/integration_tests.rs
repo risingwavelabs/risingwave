@@ -8,6 +8,7 @@ use risingwave_storage::hummock::compactor::{Compactor, SubCompactContext};
 use risingwave_storage::hummock::local_version_manager::LocalVersionManager;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{HummockOptions, HummockStorage, SstableStore};
+use risingwave_storage::monitor::DEFAULT_STATE_STORE_STATS;
 use risingwave_storage::object::InMemObjectStore;
 
 use crate::cluster::StoredClusterManager;
@@ -83,6 +84,7 @@ async fn test_compaction_same_key_not_split() {
         local_version_manager: storage.local_version_manager().clone(),
         sstable_manager: storage.sstable_manager(),
         hummock_meta_client: storage.hummock_meta_client().clone(),
+        stats: DEFAULT_STATE_STORE_STATS.clone(),
     };
 
     // 1. add sstables
