@@ -36,7 +36,7 @@ struct SourceReader {
 
 /// `SourceReader` will be turned into this stream type.
 type ReaderStream =
-    Pin<Box<dyn Stream<Item = Either<Result<StreamChunk>, Result<Message>>> + Send>>;
+    Pin<Box<dyn Stream<Item = Either<Result<Message>, Result<StreamChunk>>> + Send>>;
 
 /// [`SourceExecutor`] is a streaming source, from risingwave's batch table, or external systems
 /// such as Kafka.
@@ -232,12 +232,12 @@ impl SourceReader {
         PollNext::Left
     }
 
-    pub fn into_stream(self) -> impl Stream<Item = Either<Result<StreamChunk>, Result<Message>>> {
+    pub fn into_stream(self) -> impl Stream<Item = Either<Result<Message>, Result<StreamChunk>>> {
         let stream_reader = Self::stream_reader(self.stream_reader);
         let barrier_receiver = Self::barrier_receiver(self.barrier_receiver);
         select_with_strategy(
-            barrier_receiver.map(Either::Right),
-            stream_reader.map(Either::Left),
+            barrier_receiver.map(Either::Left),
+            stream_reader.map(Either::Right),
             Self::prio_left,
         )
     }
@@ -254,7 +254,11 @@ impl Executor for SourceExecutor {
         }
 
         match self.reader_stream.as_mut().unwrap().next().await {
-            Some(Either::Left(chunk)) => {
+            // This branch will be preferred.
+            Some(Either::Left(message)) => message,
+
+            // If there's barrier, this branch will be deferred.
+            Some(Either::Right(chunk)) => {
                 let mut chunk = chunk?;
 
                 // Refill row id only if not a table source.
@@ -269,7 +273,7 @@ impl Executor for SourceExecutor {
                     .add(chunk.cardinality() as u64, &self.attributes);
                 Ok(Message::Chunk(chunk))
             }
-            Some(Either::Right(message)) => message,
+
             None => unreachable!(),
         }
     }
