@@ -4,10 +4,9 @@ use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 
-use super::{ColPrunable, LogicalProject, PlanRef, ToBatch, ToStream};
+use super::{ColPrunable, PlanRef, ToBatch, ToStream};
 use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
-use crate::utils::ColIndexMapping;
 
 #[derive(Debug, Clone)]
 pub struct LogicalValues {
