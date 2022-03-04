@@ -15,6 +15,7 @@
 #![feature(let_chains)]
 #![feature(hash_drain_filter)]
 #![feature(drain_filter)]
+#![feature(generators)]
 
 #[macro_use]
 extern crate log;
