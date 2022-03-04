@@ -426,11 +426,14 @@ where
         }
     }
 
+    /// `report_compact_task` is retryable. `task_id` in `compact_task` parameter is used as the
+    /// idempotency key. Return Ok(false) to indicate the `task_id` is not found, which may have
+    /// been processed previously.
     pub async fn report_compact_task(
         &self,
         compact_task: CompactTask,
         task_result: bool,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let output_table_compact_entries: Vec<_> = compact_task
             .sorted_output_ssts
             .iter()
@@ -449,11 +452,17 @@ where
             .sum();
         let output_sst_count = compact_task.sorted_output_ssts.len();
 
-        let (sorted_output_ssts, delete_table_ids) = compact_status.report_compact_task(
+        let (sorted_output_ssts, delete_table_ids) = match compact_status.report_compact_task(
             output_table_compact_entries,
             compact_task,
             task_result,
-        );
+        ) {
+            None => {
+                // The task is not found.
+                return Ok(false);
+            }
+            Some((sorted_output_ssts, delete_table_ids)) => (sorted_output_ssts, delete_table_ids),
+        };
         compact_status.update_in_transaction(&mut transaction);
         let versioning_guard = self.versioning.write().await;
         if task_result {
@@ -525,11 +534,11 @@ where
                 input_sst_count,
                 output_sst_count
             );
+        } else {
+            tracing::debug!("Cancel hummock compaction task id {}", compact_task_id);
         }
-
         self.trigger_sst_stat(&compact_status);
-
-        Ok(())
+        Ok(true)
     }
 
     pub async fn commit_epoch(&self, epoch: HummockEpoch) -> Result<()> {

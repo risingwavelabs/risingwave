@@ -47,6 +47,7 @@ impl StateStore for TikvStateStore {
             .get(key.to_owned())
             .await
             .map_or(Err(RwError::from(InternalError("".into()))), Ok)?;
+        txn.commit().await.unwrap();
         Ok(res.map(Bytes::from))
     }
 

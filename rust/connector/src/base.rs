@@ -1,8 +1,14 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
+pub enum SourceOffset {
+    Number(i64),
+    String(String),
+}
+
 pub trait SourceMessage {
     fn payload(&self) -> Result<Option<&[u8]>>;
+    fn offset(&self) -> Result<Option<SourceOffset>>;
 }
 
 pub trait SourceSplit {

@@ -39,10 +39,10 @@ impl SourceReader for PulsarSplitReader {
         for msg in chunk {
             let msg = msg.map_err(|e| anyhow!(e))?;
 
-            let message_id = msg.message_id;
+            let entry_id = msg.message_id.id.entry_id;
 
             let should_stop = match self.split.stop_offset {
-                PulsarOffset::MessageID(id) => message_id.id.entry_id >= id,
+                PulsarOffset::MessageID(id) => entry_id >= id,
                 PulsarOffset::Timestamp(timestamp) => {
                     msg.payload.metadata.event_time() >= timestamp
                 }
@@ -58,7 +58,7 @@ impl SourceReader for PulsarSplitReader {
                 break;
             }
 
-            ret.push(PulsarMessage {});
+            ret.push(PulsarMessage { message: msg });
         }
 
         Ok(Some(ret))

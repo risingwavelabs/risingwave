@@ -190,27 +190,29 @@ impl Executor for SourceExecutor {
             self.reader.open().await?;
             self.first_execution = false;
         }
+
         // FIXME: may lose message
         tokio::select! {
-          biased; // to ensure `FLUSH` run after any `INSERT`.
+            biased; // Prefer barrier than stream chunk.
 
-          chunk = self.reader.next() => {
-            let mut chunk = chunk?;
-
-            // Refill row id only if not a table source.
-            // Note(eric): Currently, rows from external sources are filled with row_ids here,
-            // but rows from tables (by insert statements) are filled in InsertExecutor.
-            //
-            // TODO: in the future, we may add row_id column here for TableV2 as well
-            if !matches!(self.source_desc.source.as_ref(), SourceImpl::TableV2(_)) {
-              chunk = self.refill_row_id_column(chunk);
+            message = self.barrier_receiver.recv() => {
+                message.ok_or_else(|| RwError::from(InternalError("stream closed unexpectedly".to_string())))
             }
-            self.source_output_row_count.add(chunk.cardinality() as u64, &self.attributes);
-            Ok(Message::Chunk(chunk))
-          }
-          message = self.barrier_receiver.recv() => {
-            message.ok_or_else(|| RwError::from(InternalError("stream closed unexpectedly".to_string())))
-          }
+
+            chunk = self.reader.next() => {
+                let mut chunk = chunk?;
+
+                // Refill row id only if not a table source.
+                // Note(eric): Currently, rows from external sources are filled with row_ids here,
+                // but rows from tables (by insert statements) are filled in InsertExecutor.
+                //
+                // TODO: in the future, we may add row_id column here for TableV2 as well
+                if !matches!(self.source_desc.source.as_ref(), SourceImpl::TableV2(_)) {
+                    chunk = self.refill_row_id_column(chunk);
+                }
+                self.source_output_row_count.add(chunk.cardinality() as u64, &self.attributes);
+                Ok(Message::Chunk(chunk))
+            }
         }
     }
 
@@ -293,7 +295,6 @@ mod tests {
         source_manager.create_table_source_v2(&table_id, table_columns)?;
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.clone().source;
-        let table_source = source.as_table_v2();
 
         // Prepare test data chunks
         let rowid_arr1: Arc<ArrayImpl> = Arc::new(array_nonnull! { I64Array, [0, 0, 0] }.into());
@@ -334,7 +335,7 @@ mod tests {
 
         let (barrier_sender, barrier_receiver) = unbounded_channel();
 
-        let mut source = SourceExecutor::new(
+        let mut source_executor = SourceExecutor::new(
             table_id,
             source_desc,
             column_ids,
@@ -347,6 +348,14 @@ mod tests {
         )
         .unwrap();
 
+        let write_chunk = |chunk: StreamChunk| {
+            let source = source.clone();
+            tokio::spawn(async move {
+                let table_source = source.as_table_v2();
+                table_source.blocking_write_chunk(chunk).await.unwrap();
+            });
+        };
+
         barrier_sender
             .send(Message::Barrier(Barrier {
                 epoch: Epoch::new_test_epoch(1),
@@ -355,10 +364,10 @@ mod tests {
             .unwrap();
 
         // Write 1st chunk
-        table_source.write_chunk(chunk1).await?;
+        write_chunk(chunk1);
 
         for _ in 0..2 {
-            match source.next().await.unwrap() {
+            match source_executor.next().await.unwrap() {
                 Message::Chunk(chunk) => {
                     assert_eq!(3, chunk.columns().len());
                     assert_eq!(
@@ -378,9 +387,9 @@ mod tests {
         }
 
         // Write 2nd chunk
-        table_source.write_chunk(chunk2).await?;
+        write_chunk(chunk2);
 
-        if let Message::Chunk(chunk) = source.next().await.unwrap() {
+        if let Message::Chunk(chunk) = source_executor.next().await.unwrap() {
             assert_eq!(3, chunk.columns().len());
             assert_eq!(
                 col1_arr2.iter().collect_vec(),
@@ -427,7 +436,6 @@ mod tests {
         source_manager.create_table_source_v2(&table_id, table_columns)?;
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.clone().source;
-        let table_source = source.as_table_v2();
 
         // Prepare test data chunks
         let rowid_arr1: Arc<ArrayImpl> = Arc::new(array_nonnull! { I64Array, [0, 0, 0] }.into());
@@ -455,7 +463,7 @@ mod tests {
         let pk_indices = vec![0];
 
         let (barrier_sender, barrier_receiver) = unbounded_channel();
-        let mut source = SourceExecutor::new(
+        let mut source_executor = SourceExecutor::new(
             table_id,
             source_desc,
             column_ids,
@@ -468,7 +476,15 @@ mod tests {
         )
         .unwrap();
 
-        table_source.write_chunk(chunk.clone()).await?;
+        let write_chunk = |chunk: StreamChunk| {
+            let source = source.clone();
+            tokio::spawn(async move {
+                let table_source = source.as_table_v2();
+                table_source.blocking_write_chunk(chunk).await.unwrap();
+            });
+        };
+
+        write_chunk(chunk.clone());
 
         barrier_sender
             .send(Message::Barrier(
@@ -476,9 +492,9 @@ mod tests {
             ))
             .unwrap();
 
-        source.next().await.unwrap();
-        source.next().await.unwrap();
-        table_source.write_chunk(chunk).await?;
+        source_executor.next().await.unwrap();
+        source_executor.next().await.unwrap();
+        write_chunk(chunk);
 
         Ok(())
     }
