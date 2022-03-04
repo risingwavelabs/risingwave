@@ -65,6 +65,13 @@ impl WithSchema for LogicalFilter {
 
 impl ColPrunable for LogicalFilter {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
+        assert!(
+            required_cols.is_subset(&FixedBitSet::from_iter(0..self.schema().fields().len())),
+            "invalid required cols: {}, only {} columns available",
+            required_cols,
+            self.schema().fields().len()
+        );
+
         let mut visitor = CollectRequiredCols {
             required_cols: required_cols.clone(),
         };
@@ -74,13 +81,7 @@ impl ColPrunable for LogicalFilter {
         let mut mapping = ColIndexMapping::with_remaining_columns(&visitor.required_cols);
         predicate = predicate.rewrite_expr(&mut mapping);
 
-        let input = self.input.prune_col(&visitor.required_cols);
-        let schema = input.schema().clone();
-        let filter = LogicalFilter {
-            predicate,
-            input,
-            schema,
-        };
+        let filter = LogicalFilter::new(self.input.prune_col(&visitor.required_cols), predicate);
 
         if required_cols == &visitor.required_cols {
             filter.into()

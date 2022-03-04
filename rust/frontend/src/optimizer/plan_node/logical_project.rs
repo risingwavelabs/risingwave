@@ -146,22 +146,20 @@ impl ColPrunable for LogicalProject {
         let child_required_cols = visitor.required_cols;
         let mut mapping = ColIndexMapping::with_remaining_columns(&child_required_cols);
 
-        let (exprs, expr_alias, fields) = required_cols
+        let (exprs, expr_alias) = required_cols
             .ones()
             .map(|id| {
                 (
                     mapping.rewrite_expr(self.exprs[id].clone()),
                     self.expr_alias[id].clone(),
-                    self.schema.fields[id].clone(),
                 )
             })
-            .multiunzip();
-        Self {
+            .unzip();
+        LogicalProject::new(
+            self.input.prune_col(&child_required_cols),
             exprs,
             expr_alias,
-            input: self.input.prune_col(&child_required_cols),
-            schema: Schema { fields },
-        }
+        )
         .into()
     }
 }
