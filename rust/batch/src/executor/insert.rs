@@ -1,6 +1,7 @@
 use std::iter::once;
 use std::sync::Arc;
 
+use futures::future::try_join_all;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{
     ArrayBuilder, ArrayImpl, DataChunk, I64ArrayBuilder, Op, PrimitiveArrayBuilder, StreamChunk,
@@ -65,7 +66,9 @@ impl Executor for InsertExecutor {
         let source_desc = self.source_manager.get_source(&self.table_id)?;
         let source = source_desc.source.as_table_v2();
 
+        let mut notifiers = Vec::new();
         let mut rows_inserted = 0;
+
         while let Some(child_chunk) = self.child.next().await? {
             let len = child_chunk.capacity();
             assert!(child_chunk.visibility().is_none());
@@ -87,9 +90,18 @@ impl Executor for InsertExecutor {
             let columns = child_columns.chain(rowid_column).collect();
             let chunk = StreamChunk::new(vec![Op::Insert; len], columns, None);
 
-            source.write_chunk(chunk).await?;
+            let notifier = source.write_chunk(chunk)?;
+
+            notifiers.push(notifier);
             rows_inserted += len;
         }
+
+        // Wait for all chunks to be taken / written.
+        try_join_all(notifiers).await.map_err(|_| {
+            RwError::from(ErrorCode::InternalError(
+                "failed to wait chunks to be writeen".to_owned(),
+            ))
+        })?;
 
         // create ret value
         {

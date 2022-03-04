@@ -352,7 +352,7 @@ mod tests {
             let source = source.clone();
             tokio::spawn(async move {
                 let table_source = source.as_table_v2();
-                table_source.write_chunk(chunk).await.unwrap();
+                table_source.blocking_write_chunk(chunk).await.unwrap();
             });
         };
 
@@ -480,7 +480,7 @@ mod tests {
             let source = source.clone();
             tokio::spawn(async move {
                 let table_source = source.as_table_v2();
-                table_source.write_chunk(chunk).await.unwrap();
+                table_source.blocking_write_chunk(chunk).await.unwrap();
             });
         };
 

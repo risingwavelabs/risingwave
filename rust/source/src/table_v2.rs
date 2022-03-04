@@ -2,7 +2,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::RwLock;
 
 use async_trait::async_trait;
-use log::warn;
 use rand::prelude::SliceRandom;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnId;
@@ -59,30 +58,29 @@ impl TableSourceV2 {
         (((worker_id as u64) << 32) + (local_row_id as u64)) as i64
     }
 
-    /// Write stream chunk into table. Changes writen here will be simply passed to the associated
-    /// streaming task via channel, and then be materialized to storage there.
-    ///
-    /// Note: this function will block until a reader consumes the chunk.
-    pub async fn write_chunk(&self, chunk: StreamChunk) -> Result<()> {
-        let notifier_rx = {
+    /// Asynchronously write stream chunk into table. Changes writen here will be simply passed to
+    /// the associated streaming task via channel, and then be materialized to storage there.
+    pub fn write_chunk(&self, chunk: StreamChunk) -> Result<oneshot::Receiver<()>> {
+        let tx = {
             let core = self.core.read().unwrap();
-
-            let tx = core
-                .changes_txs
+            core.changes_txs
                 .choose(&mut rand::thread_rng())
-                .expect("no table reader exists");
-
-            let (notifier_tx, notifier_rx) = oneshot::channel();
-            tx.send((chunk, notifier_tx))
-                .expect("write chunk to table reader failed");
-
-            notifier_rx
+                .expect("no table reader exists")
+                .clone()
         };
 
-        if notifier_rx.await.is_err() {
-            warn!("failed to wait for reader consuming the data chunk");
-        }
+        let (notifier_tx, notifier_rx) = oneshot::channel();
+        tx.send((chunk, notifier_tx))
+            .expect("write chunk to table reader failed");
 
+        Ok(notifier_rx)
+    }
+
+    /// Write stream chunk into table using `write_chunk`, and then block until a reader consumes
+    /// the chunk.
+    pub async fn blocking_write_chunk(&self, chunk: StreamChunk) -> Result<()> {
+        let rx = self.write_chunk(chunk)?;
+        rx.await.unwrap();
         Ok(())
     }
 }
@@ -193,6 +191,8 @@ impl Source for TableSourceV2 {
 #[cfg(test)]
 mod tests {
 
+    use std::sync::Arc;
+
     use assert_matches::assert_matches;
     use itertools::Itertools;
     use risingwave_common::array::{Array, I64Array, Op};
@@ -227,7 +227,7 @@ mod tests {
                     None,
                 );
                 tokio::spawn(async move {
-                    source.write_chunk(chunk).await.unwrap();
+                    source.blocking_write_chunk(chunk).await.unwrap();
                 })
             }};
         }
