@@ -22,20 +22,6 @@ impl Binder {
             .selection
             .map(|expr| self.bind_expr(expr))
             .transpose()?;
-        // let return_type= select.selection.clone().unwrap();
-        // let return_type = match select.selection{
-        //     Some(expr)=>expr.return_type(),
-        //     None=>None,
-        // }
-        // let return_type = select.selection.map(|expr| expr.return_type())
-        // let return_type = select.selection.map(|expr| self.bind_expr(expr)).unwrap();
-        // if return_type != DataType::Boolean {
-        //     return ErrorCode::InvalidInputSyntax(
-        //         "argument of WHERE (must be type boolean)".to_string(),
-        //         return_type,
-        //     )
-        //     .transpose();
-        // }
         if let Some(selection) = &selection {
             if !matches!(selection.return_type(), DataType::Boolean) {
                 return Err(ErrorCode::InternalError(
