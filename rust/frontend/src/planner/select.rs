@@ -13,19 +13,20 @@ impl Planner {
         };
         root = match select.selection {
             None => root,
-            Some(t) => self.plan_local_filter(root, t)?,
+            Some(t) => LogicalFilter::create(root, t)?,
+            // self.plan_local_filter(root, t)?,
         };
         root = self.plan_projection(root, select.projection)?;
         // mut root with LogicalFilter and LogicalProject here
         Ok(root)
     }
-    pub(super) fn plan_local_filter(
-        &mut self,
-        table_ref: PlanRef,
-        predicate: ExprImpl,
-    ) -> Result<PlanRef> {
-        LogicalFilter::create(table_ref, predicate)
-    }
+    // pub(super) fn plan_local_filter(
+    //     &mut self,
+    //     input: PlanRef,
+    //     predicate: ExprImpl,
+    // ) -> Result<PlanRef> {
+    //     LogicalFilter::create(input, predicate)
+    // }
     /// Helper to create a dummy node as child of LogicalProject.
     /// For example, `select 1+2, 3*4` will be `Project([1+2, 3+4]) - Values([[0]])`.
     ///
