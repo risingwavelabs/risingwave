@@ -218,6 +218,15 @@ command = "rust/target/${BUILD_MODE_DIR}/risedev-playground"
 args = ["dev-frontend"]
 description = "Start a RisingWave playground with dev-frontend config"
 
+[tasks.dev-meta-node]
+category = "RiseDev - Start"
+dependencies = [
+  "pre-start-playground"
+]
+command = "rust/target/${BUILD_MODE_DIR}/risedev-playground"
+args = ["dev-meta-node"]
+description = "Start a RisingWave playground with dev-meta-node config"
+
 [tasks.kill-playground]
 category = "RiseDev - Stop"
 description = "kill playground"

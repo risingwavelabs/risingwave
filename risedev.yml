@@ -59,6 +59,15 @@ risedev:
       # If user-managed is true, developers should start the frontend, and RiseDev will wait for its start.
       user-managed: true
 
+  # `dev-meta-node` have the same settings as default except the the meta node will be started by user.
+  dev-meta-node:
+    - use: minio
+    - use: meta-node
+      # If user-managed is true, developers should start the frontend, and RiseDev will wait for its start.
+      user-managed: true
+    - use: compute-node
+    - use: frontend
+
 # The `use` field specified in the above `risedev` section will refer to the templates below.
 template:
   minio:

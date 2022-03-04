@@ -1,6 +1,7 @@
 use std::iter::once;
 use std::sync::Arc;
 
+use futures::future::try_join_all;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{
     ArrayBuilder, ArrayImpl, DataChunk, I64ArrayBuilder, Op, PrimitiveArrayBuilder, StreamChunk,
@@ -65,7 +66,9 @@ impl Executor for InsertExecutor {
         let source_desc = self.source_manager.get_source(&self.table_id)?;
         let source = source_desc.source.as_table_v2();
 
+        let mut notifiers = Vec::new();
         let mut rows_inserted = 0;
+
         while let Some(child_chunk) = self.child.next().await? {
             let len = child_chunk.capacity();
             assert!(child_chunk.visibility().is_none());
@@ -87,9 +90,18 @@ impl Executor for InsertExecutor {
             let columns = child_columns.chain(rowid_column).collect();
             let chunk = StreamChunk::new(vec![Op::Insert; len], columns, None);
 
-            source.write_chunk(chunk).await?;
+            let notifier = source.write_chunk(chunk)?;
+
+            notifiers.push(notifier);
             rows_inserted += len;
         }
+
+        // Wait for all chunks to be taken / written.
+        try_join_all(notifiers).await.map_err(|_| {
+            RwError::from(ErrorCode::InternalError(
+                "failed to wait chunks to be written".to_owned(),
+            ))
+        })?;
 
         // create ret value
         {
@@ -159,7 +171,6 @@ mod tests {
         MemSourceManager, Source, SourceManager, StreamSourceReader, TableV2ReaderContext,
     };
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::SimpleTableManager;
     use risingwave_storage::*;
 
     use super::*;
@@ -168,7 +179,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_insert_executor_for_table_v2() -> Result<()> {
-        let _table_manager = Arc::new(SimpleTableManager::with_in_memory_store());
         let source_manager = Arc::new(MemSourceManager::new());
         let store = MemoryStateStore::new();
 
@@ -216,23 +226,27 @@ mod tests {
         let mut reader =
             source.stream_reader(TableV2ReaderContext, vec![0.into(), 1.into(), 2.into()])?;
 
+        // Insert
         let mut insert_executor =
             InsertExecutor::new(table_id, source_manager.clone(), Box::new(mock_executor), 0);
-        insert_executor.open().await.unwrap();
-        let fields = &insert_executor.schema().fields;
-        assert_eq!(fields[0].data_type, DataType::Int64);
-        let result = insert_executor.next().await?.unwrap();
-        insert_executor.close().await.unwrap();
-        assert_eq!(
-            result
-                .column_at(0)
-                .array()
-                .as_int64()
-                .iter()
-                .collect::<Vec<_>>(),
-            vec![Some(5)] // inserted rows
-        );
+        let handle = tokio::spawn(async move {
+            insert_executor.open().await.unwrap();
+            let fields = &insert_executor.schema().fields;
+            assert_eq!(fields[0].data_type, DataType::Int64);
+            let result = insert_executor.next().await.unwrap().unwrap();
+            insert_executor.close().await.unwrap();
+            assert_eq!(
+                result
+                    .column_at(0)
+                    .array()
+                    .as_int64()
+                    .iter()
+                    .collect::<Vec<_>>(),
+                vec![Some(5)] // inserted rows
+            );
+        });
 
+        // Read
         reader.open().await?;
         let chunk = reader.next().await?;
 
@@ -269,6 +283,8 @@ mod tests {
         let full_range = (Bound::<Vec<u8>>::Unbounded, Bound::<Vec<u8>>::Unbounded);
         let store_content = store.scan(full_range, None, epoch).await?;
         assert!(store_content.is_empty());
+
+        handle.await.unwrap();
 
         Ok(())
     }

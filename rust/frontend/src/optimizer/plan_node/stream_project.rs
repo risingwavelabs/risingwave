@@ -2,7 +2,7 @@ use std::fmt;
 
 use risingwave_common::catalog::Schema;
 
-use super::{IntoPlanRef, LogicalProject, PlanRef, PlanTreeNodeUnary, ToStreamProst};
+use super::{LogicalProject, PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 
 #[derive(Debug, Clone)]

@@ -138,11 +138,12 @@ impl StreamManager {
 
     pub async fn drop_materialized_view(
         &self,
-        table_id: &TableId,
-        env: StreamEnvironment,
+        _table_id: &TableId,
+        _env: StreamEnvironment,
     ) -> Result<()> {
-        let table_manager = env.table_manager();
-        table_manager.drop_materialized_view(table_id).await
+        // TODO(august): the data in StateStore should also be dropped directly/through unpin or
+        // some other way.
+        Ok(())
     }
 
     pub fn take_receiver(&self, ids: UpDownActorIds) -> Result<Receiver<Message>> {
