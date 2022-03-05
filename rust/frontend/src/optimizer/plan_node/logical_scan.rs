@@ -3,7 +3,7 @@ use std::fmt;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 
-use super::{ColPrunable, IntoPlanRef, PlanRef, ToBatch, ToStream};
+use super::{ColPrunable, PlanRef, ToBatch, ToStream};
 use crate::catalog::{ColumnId, TableId};
 use crate::optimizer::plan_node::BatchSeqScan;
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
@@ -39,8 +39,8 @@ impl LogicalScan {
         table_id: TableId,
         columns: Vec<ColumnId>,
         schema: Schema,
-    ) -> Result<Self> {
-        Ok(Self::new(table_name, table_id, columns, schema))
+    ) -> Result<PlanRef> {
+        Ok(Self::new(table_name, table_id, columns, schema).into())
     }
 }
 
@@ -51,6 +51,7 @@ impl WithSchema for LogicalScan {
 }
 impl_plan_tree_node_for_leaf! {LogicalScan}
 impl WithOrder for LogicalScan {}
+
 impl WithDistribution for LogicalScan {}
 
 impl fmt::Display for LogicalScan {
@@ -67,12 +68,29 @@ impl fmt::Display for LogicalScan {
             .finish()
     }
 }
-impl ColPrunable for LogicalScan {}
-impl ToBatch for LogicalScan {
-    fn to_batch(&self) -> PlanRef {
-        BatchSeqScan::new(self.clone()).into_plan_ref()
+
+impl ColPrunable for LogicalScan {
+    fn prune_col(&self, required_cols: &fixedbitset::FixedBitSet) -> PlanRef {
+        let (columns, fields) = required_cols
+            .ones()
+            .map(|id| (self.columns[id], self.schema.fields[id].clone()))
+            .unzip();
+        Self {
+            table_name: self.table_name.clone(),
+            table_id: self.table_id,
+            columns,
+            schema: Schema { fields },
+        }
+        .into()
     }
 }
+
+impl ToBatch for LogicalScan {
+    fn to_batch(&self) -> PlanRef {
+        BatchSeqScan::new(self.clone()).into()
+    }
+}
+
 impl ToStream for LogicalScan {
     fn to_stream(&self) -> PlanRef {
         todo!()

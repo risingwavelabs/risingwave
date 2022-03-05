@@ -8,7 +8,6 @@ use itertools::Itertools;
 
 mod sstable;
 pub use sstable::*;
-mod cloud;
 pub mod compactor;
 mod error;
 pub mod hummock_meta_client;
@@ -21,6 +20,7 @@ pub(crate) mod mock;
 mod shared_buffer;
 #[cfg(test)]
 mod snapshot_tests;
+mod sstable_manager;
 mod state_store;
 #[cfg(test)]
 mod state_store_tests;
@@ -39,13 +39,13 @@ use self::iterator::{
 };
 use self::key::{key_with_epoch, user_key, FullKey};
 use self::shared_buffer::SharedBufferManager;
+pub use self::sstable_manager::*;
 pub use self::state_store::*;
 use self::utils::{bloom_filter_sstables, range_overlap};
 use super::monitor::StateStoreStats;
 use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::iterator::ReverseUserIterator;
 use crate::hummock::local_version_manager::LocalVersionManager;
-use crate::object::ObjectStore;
 
 pub type HummockTTL = u64;
 pub type HummockSSTableId = u64;
@@ -59,15 +59,19 @@ pub const FIRST_VERSION_ID: HummockVersionId = 1;
 
 #[derive(Default, Debug, Clone)]
 pub struct HummockOptions {
-    /// target size of the SSTable
+    /// Target size of the SSTable.
     pub sstable_size: u32,
-    /// size of each block in bytes in SST
+
+    /// Size of each block in bytes in SST.
     pub block_size: u32,
-    /// false positive probability of Bloom filter
+
+    /// False positive probability of bloom filter.
     pub bloom_false_positive: f64,
-    /// remote directory for storing data and metadata objects
-    pub remote_dir: String,
-    /// checksum algorithm
+
+    /// Data directory for storing data and metadata objects.
+    pub data_directory: String,
+
+    /// checksum algorithm.
     pub checksum_algo: ChecksumAlg,
 }
 
@@ -78,7 +82,7 @@ impl HummockOptions {
             sstable_size: 256 * (1 << 20),
             block_size: 64 * (1 << 10),
             bloom_false_positive: 0.1,
-            remote_dir: "hummock_001".to_string(),
+            data_directory: "hummock_001".to_string(),
             checksum_algo: ChecksumAlg::XxHash64,
         }
     }
@@ -89,7 +93,7 @@ impl HummockOptions {
             sstable_size: 4 * (1 << 10),
             block_size: 1 << 10,
             bloom_false_positive: 0.1,
-            remote_dir: "hummock_001_small".to_string(),
+            data_directory: "hummock_001_small".to_string(),
             checksum_algo: ChecksumAlg::XxHash64,
         }
     }
@@ -102,13 +106,9 @@ pub struct HummockStorage {
 
     local_version_manager: Arc<LocalVersionManager>,
 
-    obj_client: Arc<dyn ObjectStore>,
-
-    /// Statistics.
-    stats: Arc<StateStoreStats>,
-
     hummock_meta_client: Arc<dyn HummockMetaClient>,
 
+    sstable_manager: SstableStoreRef,
     /// Manager for immutable shared buffers
     shared_buffer_manager: Arc<SharedBufferManager>,
 }
@@ -116,16 +116,16 @@ pub struct HummockStorage {
 impl HummockStorage {
     /// Create a [`HummockStorage`] with default stats. Should only used by tests.
     pub async fn with_default_stats(
-        obj_client: Arc<dyn ObjectStore>,
         options: HummockOptions,
+        sstable_manager: SstableStoreRef,
         local_version_manager: Arc<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> HummockResult<Self> {
         use crate::monitor::DEFAULT_STATE_STORE_STATS;
 
         Self::new(
-            obj_client,
             options,
+            sstable_manager,
             local_version_manager,
             hummock_meta_client,
             DEFAULT_STATE_STORE_STATS.clone(),
@@ -135,10 +135,11 @@ impl HummockStorage {
 
     /// Create a [`HummockStorage`].
     pub async fn new(
-        obj_client: Arc<dyn ObjectStore>,
         options: HummockOptions,
+        sstable_manager: SstableStoreRef,
         local_version_manager: Arc<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
+        // TODO: should be separated `HummockStats` instead of `StateStoreStats`.
         stats: Arc<StateStoreStats>,
     ) -> HummockResult<Self> {
         let options = Arc::new(options);
@@ -146,7 +147,7 @@ impl HummockStorage {
         let shared_buffer_manager = Arc::new(SharedBufferManager::new(
             options.clone(),
             local_version_manager.clone(),
-            obj_client.clone(),
+            sstable_manager.clone(),
             stats.clone(),
             hummock_meta_client.clone(),
         ));
@@ -155,24 +156,18 @@ impl HummockStorage {
             local_version_manager.clone(),
             hummock_meta_client.clone(),
             shared_buffer_manager.clone(),
-        )
-        .await;
+        );
         // Ensure at least one available version in cache.
         local_version_manager.wait_epoch(HummockEpoch::MIN).await;
 
         let instance = Self {
             options,
             local_version_manager,
-            obj_client,
-            stats,
             hummock_meta_client,
+            sstable_manager,
             shared_buffer_manager,
         };
         Ok(instance)
-    }
-
-    pub fn get_options(&self) -> Arc<HummockOptions> {
-        self.options.clone()
     }
 
     /// Get the value of a specified `key`.
@@ -203,11 +198,10 @@ impl HummockStorage {
                             .await?,
                         key,
                     )?;
-                    table_iters.extend(
-                        tables.into_iter().map(|table| {
-                            Box::new(SSTableIterator::new(table)) as BoxedHummockIterator
-                        }),
-                    )
+                    table_iters.extend(tables.into_iter().map(|table| {
+                        Box::new(SSTableIterator::new(table, self.sstable_manager.clone()))
+                            as BoxedHummockIterator
+                    }))
                 }
                 LevelType::Nonoverlapping => {
                     let tables = bloom_filter_sstables(
@@ -216,7 +210,10 @@ impl HummockStorage {
                             .await?,
                         key,
                     )?;
-                    table_iters.push(Box::new(ConcatIterator::new(tables)))
+                    table_iters.push(Box::new(ConcatIterator::new(
+                        tables,
+                        self.sstable_manager.clone(),
+                    )))
                 }
             }
         }
@@ -266,7 +263,10 @@ impl HummockStorage {
                 let table_end = user_key(t.meta.largest_key.as_slice());
                 range_overlap(&key_range, table_start, table_end, false)
             })
-            .map(|t| Box::new(SSTableIterator::new(t)) as BoxedHummockIterator);
+            .map(|t| {
+                Box::new(SSTableIterator::new(t, self.sstable_manager.clone()))
+                    as BoxedHummockIterator
+            });
 
         let mi = if version.max_committed_epoch() < epoch {
             // Take shared buffers into consideration if the read epoch is above the max committed
@@ -289,7 +289,7 @@ impl HummockStorage {
                 key_range.end_bound().map(|b| b.as_ref().to_owned()),
             ),
             epoch,
-            self.stats.clone(),
+            Some(version),
         ))
     }
 
@@ -317,7 +317,10 @@ impl HummockStorage {
                 let table_end = user_key(t.meta.largest_key.as_slice());
                 range_overlap(&key_range, table_start, table_end, true)
             })
-            .map(|t| Box::new(ReverseSSTableIterator::new(t)) as BoxedHummockIterator);
+            .map(|t| {
+                Box::new(ReverseSSTableIterator::new(t, self.sstable_manager.clone()))
+                    as BoxedHummockIterator
+            });
 
         let reverse_merge_iterator = if version.max_committed_epoch() < epoch {
             // Take shared buffers into consideration if the read epoch is above the max committed
@@ -342,6 +345,7 @@ impl HummockStorage {
                 key_range.start_bound().map(|b| b.as_ref().to_owned()),
             ),
             epoch,
+            Some(version),
         ))
     }
 
@@ -389,11 +393,13 @@ impl HummockStorage {
     pub fn options(&self) -> &Arc<HummockOptions> {
         &self.options
     }
+
+    pub fn sstable_manager(&self) -> SstableStoreRef {
+        self.sstable_manager.clone()
+    }
+
     pub fn local_version_manager(&self) -> &Arc<LocalVersionManager> {
         &self.local_version_manager
-    }
-    pub fn obj_client(&self) -> &Arc<dyn ObjectStore> {
-        &self.obj_client
     }
 
     pub async fn wait_epoch(&self, epoch: HummockEpoch) {

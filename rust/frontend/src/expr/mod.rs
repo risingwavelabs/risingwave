@@ -13,6 +13,8 @@ mod utils;
 pub use utils::*;
 mod expr_rewriter;
 pub use expr_rewriter::*;
+mod expr_visitor;
+pub use expr_visitor::*;
 pub type ExprType = risingwave_pb::expr::expr_node::Type;
 
 /// the trait of bound exprssions

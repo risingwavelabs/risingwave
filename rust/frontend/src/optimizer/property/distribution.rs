@@ -1,6 +1,7 @@
 use super::super::plan_node::*;
 use crate::optimizer::property::{Convention, Order};
 use crate::optimizer::PlanRef;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Distribution {
     Any,
@@ -11,6 +12,7 @@ pub enum Distribution {
 }
 
 static ANY_DISTRIBUTION: Distribution = Distribution::Any;
+
 #[allow(dead_code)]
 impl Distribution {
     pub fn enforce_if_not_satisfies(&self, plan: PlanRef, required_order: &Order) -> PlanRef {
@@ -23,9 +25,9 @@ impl Distribution {
     fn enforce(&self, plan: PlanRef, required_order: &Order) -> PlanRef {
         match plan.convention() {
             Convention::Batch => {
-                BatchExchange::new(plan, required_order.clone(), self.clone()).into_plan_ref()
+                BatchExchange::new(plan, required_order.clone(), self.clone()).into()
             }
-            Convention::Stream => StreamExchange::new(plan, self.clone()).into_plan_ref(),
+            Convention::Stream => StreamExchange::new(plan, self.clone()).into(),
             _ => unreachable!(),
         }
     }
@@ -70,12 +72,14 @@ impl Distribution {
         matches!(self, Distribution::Any)
     }
 }
+
 pub trait WithDistribution {
     // use the default impl will not affect correctness, but insert unnecessary Exchange in plan
     fn distribution(&self) -> &Distribution {
         Distribution::any()
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::Distribution;
@@ -84,10 +88,12 @@ mod tests {
         assert!(uni.satisfies(sub));
         assert!(!sub.satisfies(uni));
     }
+
     fn test_hash_shard_false(d1: &Distribution, d2: &Distribution) {
         assert!(!d1.satisfies(d2));
         assert!(!d2.satisfies(d1));
     }
+
     #[test]
     fn hash_shard_satisfy() {
         let d1 = Distribution::HashShard(vec![0, 2, 4, 6, 8]);

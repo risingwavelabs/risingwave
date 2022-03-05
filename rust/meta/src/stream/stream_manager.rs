@@ -389,8 +389,9 @@ mod tests {
             cluster_manager.activate_worker_node(host).await?;
 
             let fragment_manager = Arc::new(FragmentManager::new(env.meta_store_ref()).await?);
-            let hummock_manager = Arc::new(HummockManager::new(env.clone()).await?);
             let meta_metrics = Arc::new(MetaMetrics::new());
+            let hummock_manager =
+                Arc::new(HummockManager::new(env.clone(), meta_metrics.clone()).await?);
             let barrier_manager_ref = Arc::new(BarrierManager::new(
                 env.clone(),
                 cluster_manager.clone(),

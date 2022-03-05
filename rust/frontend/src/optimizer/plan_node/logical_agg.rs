@@ -5,15 +5,18 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::expr::AggKind;
 use risingwave_common::types::DataType;
 
-use super::{ColPrunable, IntoPlanRef, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use super::{ColPrunable, LogicalProject, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
 use crate::expr::ExprImpl;
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
+use crate::utils::ColIndexMapping;
+
 #[derive(Clone, Debug)]
 pub struct PlanAggCall {
     pub agg_kind: AggKind,
     pub return_type: DataType,
     pub inputs: Vec<usize>,
 }
+
 #[derive(Clone, Debug)]
 pub struct LogicalAgg {
     agg_calls: Vec<PlanAggCall>,
@@ -72,8 +75,11 @@ impl LogicalAgg {
         Schema { fields }
     }
 
-    /// will anlyze the select exprs and group exprs, and construct a plan
-    /// LogicalProject-LogicalAgg-LogicalProject-input
+    /// `create` will analyze the select exprs and group exprs, and construct a plan like
+    ///
+    /// ```text
+    /// LogicalProject -> LogicalAgg -> LogicalProject -> input
+    /// ```
     #[allow(unused_variables)]
     pub fn create(
         select_exprs: Vec<ExprImpl>,
@@ -99,6 +105,7 @@ impl LogicalAgg {
         self.group_keys.as_ref()
     }
 }
+
 impl PlanTreeNodeUnary for LogicalAgg {
     fn input(&self) -> PlanRef {
         self.input.clone()
@@ -118,19 +125,31 @@ impl fmt::Display for LogicalAgg {
         todo!()
     }
 }
+
 impl WithOrder for LogicalAgg {}
+
 impl WithDistribution for LogicalAgg {}
+
 impl WithSchema for LogicalAgg {
     fn schema(&self) -> &Schema {
         &self.schema
     }
 }
-impl ColPrunable for LogicalAgg {}
+
+impl ColPrunable for LogicalAgg {
+    fn prune_col(&self, required_cols: &fixedbitset::FixedBitSet) -> PlanRef {
+        // TODO: replace default impl
+        let mapping = ColIndexMapping::with_remaining_columns(required_cols);
+        LogicalProject::with_mapping(self.clone().into(), mapping).into()
+    }
+}
+
 impl ToBatch for LogicalAgg {
     fn to_batch(&self) -> PlanRef {
         todo!()
     }
 }
+
 impl ToStream for LogicalAgg {
     fn to_stream(&self) -> PlanRef {
         todo!()

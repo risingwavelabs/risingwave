@@ -10,12 +10,12 @@ use crate::optimizer::PlanRef;
 
 pub(crate) type StageId = u64;
 
+/// The Fragmenter splits query plan into fragments.
 struct BatchPlanFragmenter {
     stage_graph_builder: StageGraphBuilder,
     next_stage_id: u64,
 }
 
-/// Split query into fragments.
 impl BatchPlanFragmenter {
     pub fn new() -> Self {
         Self {
@@ -222,14 +222,14 @@ mod tests {
 
     use std::sync::Arc;
 
-    use risingwave_pb::common::{WorkerNode, WorkerType};
+    use risingwave_pb::common::{ParallelUnit, WorkerNode, WorkerType};
     use risingwave_pb::plan::JoinType;
 
     use crate::optimizer::plan_node::{
-        BatchExchange, BatchHashJoin, BatchSeqScan, EqJoinPredicate, IntoPlanRef, LogicalJoin,
-        PlanNodeType,
+        BatchExchange, BatchHashJoin, BatchSeqScan, EqJoinPredicate, LogicalJoin, PlanNodeType,
     };
     use crate::optimizer::property::{Distribution, Order};
+    use crate::optimizer::PlanRef;
     use crate::scheduler::plan_fragmenter::BatchPlanFragmenter;
     use crate::scheduler::schedule::{BatchScheduler, WorkerNodeManager};
     use crate::utils::Condition;
@@ -243,20 +243,20 @@ mod tests {
         //     /    \
         //   Scan  Scan
         //
-        let batch_plan_node = BatchSeqScan::default().into_plan_ref();
-        let batch_exchange_node1 = BatchExchange::new(
+        let batch_plan_node: PlanRef = BatchSeqScan::default().into();
+        let batch_exchange_node1: PlanRef = BatchExchange::new(
             batch_plan_node.clone(),
             Order::default(),
             Distribution::AnyShard,
         )
-        .into_plan_ref();
-        let batch_exchange_node2 = BatchExchange::new(
+        .into();
+        let batch_exchange_node2: PlanRef = BatchExchange::new(
             batch_plan_node.clone(),
             Order::default(),
             Distribution::AnyShard,
         )
-        .into_plan_ref();
-        let hash_join_node = BatchHashJoin::new(
+        .into();
+        let hash_join_node: PlanRef = BatchHashJoin::new(
             LogicalJoin::new(
                 batch_exchange_node1.clone(),
                 batch_exchange_node2.clone(),
@@ -265,13 +265,13 @@ mod tests {
             ),
             EqJoinPredicate::create(0, 0, Condition::true_cond()),
         )
-        .into_plan_ref();
-        let batch_exchange_node3 = BatchExchange::new(
+        .into();
+        let batch_exchange_node3: PlanRef = BatchExchange::new(
             hash_join_node.clone(),
             Order::default(),
             Distribution::Single,
         )
-        .into_plan_ref();
+        .into();
 
         // Break the plan node into fragments.
         let fragmenter = BatchPlanFragmenter::new();
@@ -308,18 +308,21 @@ mod tests {
             r#type: WorkerType::ComputeNode as i32,
             host: None,
             state: risingwave_pb::common::worker_node::State::Running as i32,
+            parallel_units: vec![ParallelUnit { id: 1 }],
         };
         let worker2 = WorkerNode {
             id: 1,
             r#type: WorkerType::ComputeNode as i32,
             host: None,
             state: risingwave_pb::common::worker_node::State::Running as i32,
+            parallel_units: vec![ParallelUnit { id: 2 }],
         };
         let worker3 = WorkerNode {
             id: 2,
             r#type: WorkerType::ComputeNode as i32,
             host: None,
             state: risingwave_pb::common::worker_node::State::Running as i32,
+            parallel_units: vec![ParallelUnit { id: 3 }],
         };
         let workers = vec![worker1.clone(), worker2.clone(), worker3.clone()];
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(workers));

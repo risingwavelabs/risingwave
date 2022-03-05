@@ -17,60 +17,84 @@ use std::time::Duration;
 
 pub use compactor_manager::*;
 pub use hummock_manager::*;
-use tracing::error;
+use tokio::sync::mpsc::UnboundedSender;
+use tokio::task::JoinHandle;
 
 use crate::storage::MetaStore;
 
 const COMPACT_TRIGGER_INTERVAL: Duration = Duration::from_secs(10);
 /// Starts a worker to conditionally trigger compaction.
-pub async fn start_compaction_loop<S>(
+pub fn start_compaction_trigger<S>(
     hummock_manager_ref: Arc<HummockManager<S>>,
     compactor_manager_ref: Arc<CompactorManager>,
-) where
+) -> (JoinHandle<()>, UnboundedSender<()>)
+where
     S: MetaStore,
 {
-    let hummock_manager_ref = Arc::downgrade(&hummock_manager_ref);
-    let compactor_manager_ref = Arc::downgrade(&compactor_manager_ref);
-    loop {
-        tokio::time::sleep(COMPACT_TRIGGER_INTERVAL).await;
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
+    let join_handle = tokio::spawn(async move {
+        let mut min_interval = tokio::time::interval(COMPACT_TRIGGER_INTERVAL);
+        loop {
+            tokio::select! {
+                // Wait for interval
+                _ = min_interval.tick() => {},
+                // Shutdown compactor
+                _ = shutdown_rx.recv() => {
+                    tracing::info!("compaction trigger is shutting down");
+                    return;
+                }
+            }
 
-        // Get strong references to CompactorManager and HummockManager
-        let compactor_manager_ref = match compactor_manager_ref.upgrade() {
-            None => {
-                return;
-            }
-            Some(compactor_manager_ref) => compactor_manager_ref,
-        };
-        let hummock_manager_ref = match hummock_manager_ref.upgrade() {
-            None => {
-                return;
-            }
-            Some(hummock_manager_ref) => hummock_manager_ref,
-        };
-
-        // Get a compact task and assign it to a compactor
-        let compact_task = match hummock_manager_ref.get_compact_task().await {
-            Ok(Some(compact_task)) => compact_task,
-            Ok(None) => {
-                continue;
-            }
-            Err(e) => {
-                error!("failed to get_compact_task {}", e);
-                continue;
-            }
-        };
-        if !compactor_manager_ref
-            .try_assign_compact_task(compact_task.clone())
-            .await
-        {
-            // TODO #546: Cancel a task only requires task_id. compact_task.clone() can be
-            // avoided.
-            if let Err(e) = hummock_manager_ref
-                .report_compact_task(compact_task, false)
+            // Get a compact task and assign it to a compactor
+            let compact_task = match hummock_manager_ref.get_compact_task().await {
+                Ok(Some(compact_task)) => compact_task,
+                Ok(None) => {
+                    continue;
+                }
+                Err(e) => {
+                    tracing::warn!("failed to get_compact_task {}", e);
+                    continue;
+                }
+            };
+            if !compactor_manager_ref
+                .try_assign_compact_task(compact_task.clone())
                 .await
             {
-                error!("failed to report_compact_task {}", e);
+                // TODO #546: Cancel a task only requires task_id. compact_task.clone() can be
+                // avoided.
+                if let Err(e) = hummock_manager_ref
+                    .report_compact_task(compact_task, false)
+                    .await
+                {
+                    tracing::warn!("failed to report_compact_task {}", e);
+                }
             }
         }
+    });
+
+    (join_handle, shutdown_tx)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use crate::hummock::{start_compaction_trigger, CompactorManager, HummockManager};
+    use crate::manager::MetaSrvEnv;
+    use crate::rpc::metrics::MetaMetrics;
+
+    #[tokio::test]
+    async fn test_shutdown_compaction_trigger() {
+        let env = MetaSrvEnv::for_test().await;
+        let hummock_manager_ref = Arc::new(
+            HummockManager::new(env.clone(), Arc::new(MetaMetrics::new()))
+                .await
+                .unwrap(),
+        );
+        let compactor_manager_ref = Arc::new(CompactorManager::new());
+        let (join_handle, shutdown_sender) =
+            start_compaction_trigger(hummock_manager_ref, compactor_manager_ref);
+        shutdown_sender.send(()).unwrap();
+        join_handle.await.unwrap();
     }
 }

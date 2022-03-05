@@ -1,5 +1,7 @@
 use aws_sdk_s3::{Client, Endpoint, Region};
 use aws_smithy_http::body::SdkBody;
+use futures::future::try_join_all;
+use itertools::Itertools;
 use risingwave_common::array::RwError;
 use risingwave_common::error::{BoxedError, ErrorCode, Result};
 
@@ -61,6 +63,14 @@ impl ObjectStore for S3ObjectStore {
         Ok(val)
     }
 
+    async fn readv(&self, path: &str, block_locs: Vec<BlockLocation>) -> Result<Vec<Bytes>> {
+        let futures = block_locs
+            .into_iter()
+            .map(|block_loc| self.read(path, Some(block_loc)))
+            .collect_vec();
+        try_join_all(futures).await
+    }
+
     async fn metadata(&self, path: &str) -> Result<ObjectMetadata> {
         let resp = self
             .client
@@ -102,7 +112,6 @@ impl S3ObjectStore {
 
     /// Create a minio client. The server should be like `minio://key:secret@address:port/bucket`.
     pub async fn new_with_minio(server: &str) -> Self {
-        // TODO: don't hard-code configurations
         let server = server.strip_prefix("minio://").unwrap();
         let (access_key_id, rest) = server.split_once(':').unwrap();
         let (secret_access_key, rest) = rest.split_once('@').unwrap();

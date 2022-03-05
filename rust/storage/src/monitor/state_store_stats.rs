@@ -20,6 +20,9 @@ pub const BATCH_WRITE_LATENCY_SCALE: f64 = 0.1;
 pub const BATCH_WRITE_BUILD_TABLE_LATENCY_SCALE: f64 = 0.0001;
 pub const BATCH_WRITE_ADD_L0_LATENCT_SCALE: f64 = 0.00001;
 
+pub const RANGE_SCAN_SIZE_SCALE: f64 = 10000.0;
+pub const RANGE_SCAN_LATENCY_SCALE: f64 = 0.1;
+
 pub const ITER_NEXT_LATENCY_SCALE: f64 = 0.0001;
 pub const ITER_SEEK_LATENCY_SCALE: f64 = 0.0001;
 pub const ITER_NEXT_SIZE_SCALE: f64 = 400.0;
@@ -46,6 +49,8 @@ macro_rules! for_all_metrics {
 
             range_scan_counts: GenericCounter<AtomicU64>,
             reverse_range_scan_counts: GenericCounter<AtomicU64>,
+            range_scan_size: Histogram,
+            range_scan_latency: Histogram,
 
             batched_write_counts: GenericCounter<AtomicU64>,
             batch_write_tuple_counts: GenericCounter<AtomicU64>,
@@ -162,6 +167,24 @@ impl StateStoreStats {
             registry
         )
         .unwrap();
+
+        let buckets = DEFAULT_BUCKETS.map(|x| x * RANGE_SCAN_SIZE_SCALE).to_vec();
+        let opts = histogram_opts!(
+            "state_store_range_scan_size",
+            "Total bytes gotten from state store scan(), for calculating read throughput",
+            buckets
+        );
+        let range_scan_size = register_histogram_with_registry!(opts, registry).unwrap();
+
+        let buckets = DEFAULT_BUCKETS
+            .map(|x| x * RANGE_SCAN_LATENCY_SCALE)
+            .to_vec();
+        let opts = histogram_opts!(
+            "state_store_range_scan_latency",
+            "Total time of scan that have been issued to state store",
+            buckets
+        );
+        let range_scan_latency = register_histogram_with_registry!(opts, registry).unwrap();
 
         // ----- write_batch -----
         let batched_write_counts = register_int_counter_with_registry!(
@@ -417,6 +440,8 @@ impl StateStoreStats {
 
             range_scan_counts,
             reverse_range_scan_counts,
+            range_scan_size,
+            range_scan_latency,
 
             batched_write_counts,
             batch_write_tuple_counts,

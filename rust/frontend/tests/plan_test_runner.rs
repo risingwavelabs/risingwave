@@ -4,7 +4,7 @@ use anyhow::{anyhow, Result};
 use frontend::binder::Binder;
 use frontend::handler::{create_table, drop_table};
 use frontend::planner::Planner;
-use frontend::session::RwSession;
+use frontend::session::SessionImpl;
 use frontend::test_utils::LocalFrontend;
 use risingwave_common::array::RwError;
 use risingwave_sqlparser::ast::{ObjectName, Statement};
@@ -43,7 +43,7 @@ impl TestCase {
         Ok(())
     }
 
-    fn test_query(&self, stmt: &Statement, session: &RwSession) -> Result<()> {
+    fn test_query(&self, stmt: &Statement, session: &SessionImpl) -> Result<()> {
         let catalog = session
             .env()
             .catalog_mgr()

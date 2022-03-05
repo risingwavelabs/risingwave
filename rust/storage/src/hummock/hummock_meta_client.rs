@@ -4,9 +4,11 @@ use async_trait::async_trait;
 use risingwave_pb::hummock::{
     AddTablesRequest, CompactTask, GetCompactionTasksRequest, GetNewTableIdRequest,
     HummockSnapshot, HummockVersion, PinSnapshotRequest, PinVersionRequest,
-    ReportCompactionTasksRequest, SstableInfo, UnpinSnapshotRequest, UnpinVersionRequest,
+    ReportCompactionTasksRequest, SstableInfo, SubscribeCompactTasksRequest,
+    SubscribeCompactTasksResponse, UnpinSnapshotRequest, UnpinVersionRequest,
 };
 use risingwave_rpc_client::MetaClient;
+use tonic::Streaming;
 
 use crate::hummock::{
     HummockEpoch, HummockError, HummockResult, HummockSSTableId, HummockVersionId,
@@ -28,9 +30,9 @@ impl tokio_retry::Condition<TracedHummockError> for RetryableError {
 #[async_trait]
 pub trait HummockMetaClient: Send + Sync + 'static {
     async fn pin_version(&self) -> HummockResult<HummockVersion>;
-    async fn unpin_version(&self, _pinned_version_id: HummockVersionId) -> HummockResult<()>;
+    async fn unpin_version(&self, pinned_version_id: HummockVersionId) -> HummockResult<()>;
     async fn pin_snapshot(&self) -> HummockResult<HummockEpoch>;
-    async fn unpin_snapshot(&self, _pinned_epoch: HummockEpoch) -> HummockResult<()>;
+    async fn unpin_snapshot(&self, pinned_epoch: HummockEpoch) -> HummockResult<()>;
     async fn get_new_table_id(&self) -> HummockResult<HummockSSTableId>;
     async fn add_tables(
         &self,
@@ -45,10 +47,15 @@ pub trait HummockMetaClient: Send + Sync + 'static {
     ) -> HummockResult<()>;
     async fn commit_epoch(&self, epoch: HummockEpoch) -> HummockResult<()>;
     async fn abort_epoch(&self, epoch: HummockEpoch) -> HummockResult<()>;
+    async fn subscribe_compact_tasks(
+        &self,
+    ) -> HummockResult<Streaming<SubscribeCompactTasksResponse>>;
 }
 
 pub struct RpcHummockMetaClient {
     meta_client: MetaClient,
+
+    // TODO: should be separated `HummockStats` instead of `StateStoreStats`.
     stats: Arc<StateStoreStats>,
 }
 
@@ -195,5 +202,18 @@ impl HummockMetaClient for RpcHummockMetaClient {
 
     async fn abort_epoch(&self, _epoch: HummockEpoch) -> HummockResult<()> {
         unimplemented!()
+    }
+
+    async fn subscribe_compact_tasks(
+        &self,
+    ) -> HummockResult<Streaming<SubscribeCompactTasksResponse>> {
+        let stream = self
+            .meta_client
+            .to_owned()
+            .inner
+            .subscribe_compact_tasks(SubscribeCompactTasksRequest {})
+            .await
+            .map_err(HummockError::meta_error)?;
+        Ok(stream)
     }
 }
