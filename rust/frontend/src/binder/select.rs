@@ -23,11 +23,12 @@ impl Binder {
             .map(|expr| self.bind_expr(expr))
             .transpose()?;
         if let Some(selection) = &selection {
-            let return_type=selection.return_type();
+            let return_type = selection.return_type();
             if !matches!(return_type, DataType::Boolean) {
-                return Err(ErrorCode::InternalError(
-                    format!("argument of WHERE must be boolean, not type {:?}",return_type),
-                )
+                return Err(ErrorCode::InternalError(format!(
+                    "argument of WHERE must be boolean, not type {:?}",
+                    return_type
+                ))
                 .into());
             }
         }
