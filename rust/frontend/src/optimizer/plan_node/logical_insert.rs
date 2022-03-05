@@ -4,7 +4,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
-use super::{ColPrunable, IntoPlanRef, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use super::{ColPrunable, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
 use crate::binder::BaseTableRef;
 use crate::catalog::ColumnId;
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
@@ -51,7 +51,9 @@ impl WithSchema for LogicalInsert {
         &self.schema
     }
 }
+
 impl WithOrder for LogicalInsert {}
+
 impl WithDistribution for LogicalInsert {}
 
 impl fmt::Display for LogicalInsert {
@@ -63,12 +65,19 @@ impl fmt::Display for LogicalInsert {
         )
     }
 }
-impl ColPrunable for LogicalInsert {}
+
+impl ColPrunable for LogicalInsert {
+    fn prune_col(&self, _required_cols: &fixedbitset::FixedBitSet) -> PlanRef {
+        panic!("column pruning should not be called on insert")
+    }
+}
+
 impl ToBatch for LogicalInsert {
     fn to_batch(&self) -> PlanRef {
         todo!()
     }
 }
+
 impl ToStream for LogicalInsert {
     fn to_stream(&self) -> PlanRef {
         todo!()

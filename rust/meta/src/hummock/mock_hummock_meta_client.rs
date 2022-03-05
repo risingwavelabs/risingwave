@@ -1,11 +1,14 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use risingwave_pb::hummock::{CompactTask, HummockSnapshot, HummockVersion, SstableInfo};
+use risingwave_pb::hummock::{
+    CompactTask, HummockSnapshot, HummockVersion, SstableInfo, SubscribeCompactTasksResponse,
+};
 use risingwave_storage::hummock::hummock_meta_client::HummockMetaClient;
 use risingwave_storage::hummock::{
     HummockContextId, HummockEpoch, HummockError, HummockResult, HummockSSTableId, HummockVersionId,
 };
+use tonic::Streaming;
 
 use crate::hummock::HummockManager;
 use crate::storage::MemStore;
@@ -97,6 +100,7 @@ impl HummockMetaClient for MockHummockMetaClient {
             .report_compact_task(compact_task, task_result)
             .await
             .map_err(HummockError::meta_error)
+            .map(|_| ())
     }
 
     async fn commit_epoch(&self, epoch: HummockEpoch) -> HummockResult<()> {
@@ -111,5 +115,11 @@ impl HummockMetaClient for MockHummockMetaClient {
             .abort_epoch(epoch)
             .await
             .map_err(HummockError::meta_error)
+    }
+
+    async fn subscribe_compact_tasks(
+        &self,
+    ) -> HummockResult<Streaming<SubscribeCompactTasksResponse>> {
+        unimplemented!()
     }
 }

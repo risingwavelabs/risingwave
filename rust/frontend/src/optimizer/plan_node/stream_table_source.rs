@@ -2,13 +2,14 @@ use std::fmt;
 
 use risingwave_common::catalog::Schema;
 
-use super::{IntoPlanRef, ToStreamProst};
+use super::ToStreamProst;
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 
 #[derive(Debug, Clone)]
 pub struct StreamTableSource {
     // TODO(catalog)
 }
+
 impl WithSchema for StreamTableSource {
     fn schema(&self) -> &Schema {
         todo!()
@@ -23,5 +24,7 @@ impl fmt::Display for StreamTableSource {
 }
 
 impl WithDistribution for StreamTableSource {}
+
 impl WithOrder for StreamTableSource {}
+
 impl ToStreamProst for StreamTableSource {}

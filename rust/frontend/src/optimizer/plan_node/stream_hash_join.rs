@@ -2,18 +2,20 @@ use std::fmt;
 
 use risingwave_common::catalog::Schema;
 
-use super::{IntoPlanRef, LogicalJoin, PlanRef, PlanTreeNodeBinary, ToStreamProst};
+use super::{LogicalJoin, PlanRef, PlanTreeNodeBinary, ToStreamProst};
 use crate::optimizer::property::{Distribution, WithDistribution, WithOrder, WithSchema};
 
 #[derive(Debug, Clone)]
 pub struct StreamHashJoin {
     logical: LogicalJoin,
 }
+
 impl StreamHashJoin {
     pub fn new(logical: LogicalJoin) -> Self {
         Self { logical }
     }
 }
+
 impl fmt::Display for StreamHashJoin {
     fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
         todo!()
@@ -43,6 +45,9 @@ impl WithSchema for StreamHashJoin {
         self.logical.schema()
     }
 }
+
 impl WithDistribution for StreamHashJoin {}
+
 impl WithOrder for StreamHashJoin {}
+
 impl ToStreamProst for StreamHashJoin {}
