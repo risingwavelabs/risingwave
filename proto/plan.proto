@@ -36,6 +36,8 @@ message ColumnDesc {
   string name = 2;
   int32 column_id = 3;
   bool is_hidden = 4;
+  string struct_name = 5;
+  repeated ColumnDesc column_descs = 6;
 }
 
 message StreamSourceInfo {
