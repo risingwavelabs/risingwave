@@ -1,5 +1,4 @@
 use itertools::Itertools;
-use pgwire::types::Row;
 use risingwave_common::types::DataType;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::plan::ColumnDesc as ProstColumnDesc;
@@ -35,30 +34,6 @@ impl ColumnDesc {
 
     pub fn sub_type_name(&self) -> Vec<ColumnDesc> {
         self.sub_type_name.clone()
-    }
-
-    pub fn get_rows(&self) -> Vec<Row> {
-        if let DataType::Struct { fields: _f } = self.data_type() {
-            let mut v = vec![];
-            let option = vec![Some(self.sub_name.clone()), Some(self.get_type_name())];
-            v.push(Row::new(option));
-            for col in &self.sub_type_name {
-                v.append(&mut col.get_rows());
-            }
-            v
-        } else {
-            let option = vec![Some(self.sub_name.clone()), Some(self.get_type_name())];
-            vec![Row::new(option)]
-        }
-    }
-
-    fn get_type_name(&self) -> String {
-        let name = DataType::type_to_string(self.data_type.type_index());
-        if name == *"Struct" {
-            self.type_name.as_ref().unwrap().to_string()
-        } else {
-            name
-        }
     }
 }
 

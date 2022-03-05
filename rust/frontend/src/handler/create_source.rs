@@ -64,6 +64,7 @@ mod tests {
     use tempfile::NamedTempFile;
 
     use crate::catalog::table_catalog::ROWID_NAME;
+    use crate::handler::show_table::column_to_rows;
     use crate::test_utils::LocalFrontend;
 
     /// Returns the file.
@@ -166,7 +167,7 @@ mod tests {
 
         let mut rows = vec![];
         for col in table.columns() {
-            rows.append(&mut col.col_desc_ref().get_rows());
+            rows.append(&mut column_to_rows(col.col_desc_ref()));
         }
         let columns = rows
             .iter()
