@@ -115,6 +115,17 @@ impl StreamService for StreamServiceImpl {
             .await
             .map_err(|e| e.to_grpc_status())?;
 
+        // Wait for all actors to finish this barrier.
+        match rx {
+            Some(rx) => {
+                info!("Awaiting rx.");
+                rx.await.unwrap();
+            }
+            None => {
+                error!("Failed to send barrier as rx is not valid.");
+            },
+        }
+
         Ok(Response::new(InjectBarrierResponse {
             request_id: req.request_id,
             status: None,

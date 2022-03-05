@@ -105,12 +105,11 @@ impl StreamManager {
         barrier: &Barrier,
         actor_ids_to_send: impl IntoIterator<Item = u32>,
         actor_ids_to_collect: impl IntoIterator<Item = u32>,
-    ) -> Result<oneshot::Receiver<()>> {
+    ) -> Result<Option<oneshot::Receiver<()>>> {
         let core = self.core.lock().unwrap();
         let mut barrier_manager = core.context.lock_barrier_manager();
         let rx = barrier_manager
-            .send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?
-            .expect("no rx for local mode");
+            .send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
         Ok(rx)
     }
 
