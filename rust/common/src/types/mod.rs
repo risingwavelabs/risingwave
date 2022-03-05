@@ -130,21 +130,6 @@ impl DataType {
         }
     }
 
-    // pub fn col_desc_to_data_type(column_desc: &ColumnDesc) -> DataType {
-    //     if column_desc.column_type.as_ref().unwrap().type_name == TypeName::Struct as i32 {
-    //         let v = column_desc
-    //             .column_descs
-    //             .iter()
-    //             .map(|c| {
-    //                 Self::col_desc_to_data_type(c)
-    //             })
-    //             .collect_vec();
-    //         DataType::Struct { fields: v.into() }
-    //     } else {
-    //         DataType::to_data_type(column_desc.column_type.as_ref().unwrap().type_name)
-    //     }
-    // }
-
     pub fn type_to_string(type_name: i32) -> String {
         let name = match type_name {
             1 => "Boolean",

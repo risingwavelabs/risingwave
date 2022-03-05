@@ -295,7 +295,7 @@ impl CatalogConnector {
 
     /// Get catalog will not query meta service. The sync of schema is done by periodically push of
     /// meta. Frontend should not pull and update the catalog voluntarily.
-    // #[cfg(test)]
+    #[cfg(test)]
     pub fn get_table(
         &self,
         db_name: &str,

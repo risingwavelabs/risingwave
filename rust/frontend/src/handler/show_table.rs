@@ -1,12 +1,9 @@
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::{PgResponse, StatementType};
-use pgwire::types::Row;
 use risingwave_common::error::Result;
-use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::ObjectName;
 
 use crate::catalog::catalog_service::DEFAULT_SCHEMA_NAME;
-use crate::catalog::column_catalog::ColumnDesc;
 use crate::session::RwSession;
 pub async fn handle_show_table(session: &RwSession, table_name: ObjectName) -> Result<PgResponse> {
     let str_table_name = table_name.to_string();
@@ -24,7 +21,7 @@ pub async fn handle_show_table(session: &RwSession, table_name: ObjectName) -> R
 
     let mut rows = vec![];
     for col in table.columns() {
-        rows.append(&mut column_desc_to_rows(col.col_desc_ref()));
+        rows.append(&mut col.col_desc_ref().get_rows());
     }
 
     Ok(PgResponse::new(
@@ -36,36 +33,6 @@ pub async fn handle_show_table(session: &RwSession, table_name: ObjectName) -> R
             PgFieldDescriptor::new("data_type".to_owned(), TypeOid::Varchar),
         ],
     ))
-}
-
-pub fn column_desc_to_rows(column_desc: &ColumnDesc) -> Vec<Row> {
-    if let DataType::Struct { fields: _f } = column_desc.data_type() {
-        let mut v = vec![];
-        let option = vec![
-            Some(column_desc.sub_name.clone()),
-            Some(get_type_name(column_desc)),
-        ];
-        v.push(Row::new(option));
-        for col in &column_desc.sub_type_name {
-            v.append(&mut column_desc_to_rows(col));
-        }
-        v
-    } else {
-        let option = vec![
-            Some(column_desc.sub_name.clone()),
-            Some(get_type_name(column_desc)),
-        ];
-        vec![Row::new(option)]
-    }
-}
-
-fn get_type_name(col: &ColumnDesc) -> String {
-    let name = DataType::type_to_string(col.data_type.type_index());
-    if name == *"Struct" {
-        col.type_name.as_ref().unwrap().to_string()
-    } else {
-        name
-    }
 }
 
 #[cfg(test)]
