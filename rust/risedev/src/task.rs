@@ -11,6 +11,7 @@ mod minio_service;
 mod prometheus_service;
 mod task_configure_grpc_node;
 mod task_configure_minio;
+mod task_etcd_ready_check;
 
 use std::env;
 use std::path::{Path, PathBuf};
@@ -20,6 +21,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use indicatif::ProgressBar;
+use isahc::Body;
 use tempfile::TempDir;
 
 pub use self::compute_node_service::*;
@@ -35,8 +37,9 @@ pub use self::minio_service::*;
 pub use self::prometheus_service::*;
 pub use self::task_configure_grpc_node::*;
 pub use self::task_configure_minio::*;
+pub use self::task_etcd_ready_check::*;
 use crate::util::{complete_spin, get_program_args, get_program_name};
-use crate::wait_tcp::{wait_http, wait_tcp, wait_tcp_available};
+use crate::wait_tcp::{wait_http, wait_http_with_cb, wait_tcp, wait_tcp_available};
 
 pub trait Task: 'static + Send {
     /// Execute the task
@@ -154,8 +157,23 @@ where
             self.id.as_ref().unwrap(),
             Some(Duration::from_secs(30)),
             true,
-        )?;
-        Ok(())
+        )
+    }
+
+    pub fn wait_http_with_cb(
+        &mut self,
+        server: impl AsRef<str>,
+        cb: impl Fn(Body) -> bool,
+    ) -> anyhow::Result<()> {
+        wait_http_with_cb(
+            server,
+            &mut self.log,
+            self.status_file.as_ref().unwrap(),
+            self.id.as_ref().unwrap(),
+            Some(Duration::from_secs(30)),
+            true,
+            cb,
+        )
     }
 
     pub fn wait_tcp_close(&mut self, server: impl AsRef<str>) -> anyhow::Result<()> {

@@ -7,7 +7,7 @@ use std::time::Duration;
 use anyhow::anyhow;
 use console::style;
 use isahc::prelude::*;
-use isahc::Request;
+use isahc::{Body, Request};
 
 pub fn wait_tcp(
     server: impl AsRef<str>,
@@ -57,14 +57,14 @@ pub fn wait_tcp(
     }
 }
 
-// TODO: unify this function with `wait_tcp`.
-pub fn wait_http(
+pub fn wait_http_with_cb(
     server: impl AsRef<str>,
     f: &mut impl std::io::Write,
     p: impl AsRef<Path>,
     id: &str,
     timeout: Option<std::time::Duration>,
     detect_failure: bool,
+    resp_cb: impl Fn(Body) -> bool,
 ) -> anyhow::Result<()> {
     let server = server.as_ref();
     let p = p.as_ref();
@@ -84,7 +84,11 @@ pub fn wait_http(
         {
             Ok(resp) => {
                 if resp.status().is_success() {
-                    return Ok(());
+                    let body = resp.into_body();
+                    if resp_cb(body) {
+                        return Ok(());
+                    }
+                    last_error = Some(anyhow!("health check callback failed."))
                 } else {
                     last_error = Some(anyhow!("http failed with status: {}", resp.status()));
                 }
@@ -112,6 +116,18 @@ pub fn wait_http(
 
         sleep(Duration::from_millis(30));
     }
+}
+
+// TODO: unify this function with `wait_tcp`.
+pub fn wait_http(
+    server: impl AsRef<str>,
+    f: &mut impl std::io::Write,
+    p: impl AsRef<Path>,
+    id: &str,
+    timeout: Option<std::time::Duration>,
+    detect_failure: bool,
+) -> anyhow::Result<()> {
+    wait_http_with_cb(server, f, p, id, timeout, detect_failure, |_| true)
 }
 
 pub fn wait_tcp_available(

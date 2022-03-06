@@ -46,11 +46,6 @@ impl Task for EtcdService {
 
         ctx.run_command(ctx.tmux_run(cmd)?)?;
 
-        ctx.complete_spin();
-
-        ctx.pb
-            .set_message(format!("api {}:{}", self.config.address, self.config.port));
-
         Ok(())
     }
 

@@ -139,6 +139,9 @@ fn task_main(
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
                 let mut service = risedev::EtcdService::new(c.clone())?;
                 service.execute(&mut ctx)?;
+
+                let mut task = risedev::EtcdReadyCheckTask::new(c.clone())?;
+                task.execute(&mut ctx)?;
             }
             ServiceConfig::Prometheus(c) => {
                 let mut ctx =
