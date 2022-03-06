@@ -5,6 +5,8 @@ ETCD_SYSTEM = "${SYSTEM}"
 ETCD_VER = "v3.6.0-alpha.0" # Only v.3.6.0-alpha.0 supported darwin-arm64.
 ETCD_DOWNLOAD_URL_LINUX = "https://github.com/etcd-io/etcd/releases/download/${ETCD_VER}/etcd-${ETCD_VER}-${ETCD_SYSTEM}.tar.gz"
 ETCD_DOWNLOAD_URL_OTHER = "https://github.com/etcd-io/etcd/releases/download/${ETCD_VER}/etcd-${ETCD_VER}-${ETCD_SYSTEM}.zip"
+ETCD_DOWNLOAD_PATH = "${PREFIX_TMP}/etcd.tar.gz"
+ETCD_RELEASE = "etcd-${ETCD_VER}-${ETCD_SYSTEM}"
 
 [tasks.download-etcd]
 category = "Etcd"
@@ -14,32 +16,24 @@ description = "Download and extract Etcd"
 script = '''
 #!@shell
 set -e
-if [ -f "${PREFIX_BIN}/etcd" ]; then
+if [ -d "${PREFIX_BIN}/etcd" ]; then
     exit 0
 fi
 echo "Etcd Server not found, downloading"
-rm -f "${PREFIX_TMP}/etcd-${ETCD_VER}-${ETCD_SYSTEM}.tar.gz"
-rm -rf "${PREFIX_TMP}/etcd-download-test" && mkdir -p "${PREFIX_TMP}/etcd-download-test"
-if [[ $ETCD_SYSTEM == linux* ]]; then
-    echo "${ETCD_DOWNLOAD_URL_LINUX}"
-    curl -L "${ETCD_DOWNLOAD_URL_LINUX}" -o "${PREFIX_TMP}/etcd-${ETCD_VER}-${ETCD_SYSTEM}.tar.gz"
-    tar xzvf "${PREFIX_TMP}/etcd-${ETCD_VER}-${ETCD_SYSTEM}.tar.gz" -C "${PREFIX_TMP}/etcd-download-test" --strip-components=1
-    rm -f "${PREFIX_TMP}/etcd-${ETCD_VER}-${ETCD_SYSTEM}.tar.gz"
+rm -f ""
+if [[ "$ETCD_SYSTEM" == linux* ]]; then
+    curl -L "${ETCD_DOWNLOAD_URL_LINUX}" -o "${ETCD_DOWNLOAD_PATH}"
+    tar -xf "${ETCD_DOWNLOAD_PATH}" -C "${PREFIX_TMP}"
 else
-    echo "${ETCD_DOWNLOAD_URL_OTHER}"
-    curl -L "${ETCD_DOWNLOAD_URL_OTHER}" -o "${PREFIX_TMP}/etcd-${ETCD_VER}-${ETCD_SYSTEM}.zip"
-    unzip "${PREFIX_TMP}/etcd-${ETCD_VER}-${ETCD_SYSTEM}.zip" -d "${PREFIX_TMP}/etcd-download-test"
-    mv "${PREFIX_TMP}/etcd-download-test/etcd-${ETCD_VER}-${ETCD_SYSTEM}/*" "${PREFIX_TMP}/etcd-download-test/"
-    rmdir "${PREFIX_TMP}/etcd-download-test/etcd-${ETCD_VER}-${ETCD_SYSTEM}/"
-    rm -f "${PREFIX_TMP}/etcd-${ETCD_VER}-${ETCD_SYSTEM}.zip"
+    curl -L "${ETCD_DOWNLOAD_URL_OTHER}" -o "${ETCD_DOWNLOAD_PATH}"
+    unzip "${ETCD_DOWNLOAD_PATH}" -d "${PREFIX_TMP}"
 fi
 
-"${PREFIX_TMP}/etcd-download-test/etcd" --version
-"${PREFIX_TMP}/etcd-download-test/etcdctl" version
-"${PREFIX_TMP}/etcd-download-test/etcdutl" version
+rm "${ETCD_DOWNLOAD_PATH}"
 
-chmod +x "${PREFIX_TMP}/etcd-download-test/etcd"
-mv "${PREFIX_TMP}/etcd-download-test/etcd" "${PREFIX_BIN}/etcd"
-mv "${PREFIX_TMP}/etcd-download-test/etcdctl" "${PREFIX_BIN}/etcdctl"
-mv "${PREFIX_TMP}/etcd-download-test/etcdutl" "${PREFIX_BIN}/etcdutl"
+mv "${PREFIX_TMP}/${ETCD_RELEASE}" "${PREFIX_BIN}/etcd"
+
+"${PREFIX_BIN}/etcd/etcd" --version
+"${PREFIX_BIN}/etcd/etcdctl" version
+"${PREFIX_BIN}/etcd/etcdutl" version
 '''
