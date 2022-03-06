@@ -146,7 +146,9 @@ fn protobuf_type_mapping(field_type: &FieldType, is_repeated: bool) -> Result<Da
         FieldType::Int32 | FieldType::SFixed32 | FieldType::SInt32 => DataType::Int32,
         FieldType::Bool => DataType::Boolean,
         FieldType::String => DataType::Varchar,
-        FieldType::Message(_d) => DataType::Struct {fields: Arc::new([]) },
+        FieldType::Message(_d) => DataType::Struct {
+            fields: Arc::new([]),
+        },
         actual_type => {
             return Err(
                 NotImplementedError(format!("unsupported field type: {:?}", actual_type)).into(),
@@ -172,7 +174,8 @@ pub fn date_type_to_col_desc(
                     f,
                     descriptors,
                     lastname.clone() + field_descriptor.name() + ".",
-                ).unwrap()
+                )
+                .unwrap()
             })
             .collect();
         Ok(ColumnDesc {

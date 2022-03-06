@@ -23,9 +23,8 @@ pub(super) async fn handle(session: &SessionImpl, stmt: Statement) -> Result<PgR
             let table_object_name = ObjectName(vec![drop_statement.name]);
             drop_table::handle_drop_table(session, table_object_name).await
         }
-        Statement::ShowVariable { variable } => {
-            let table_object_name = ObjectName(vec![variable[1].clone()]);
-            show_table::handle_show_table(session, table_object_name).await
+        Statement::ShowTable { table_name } => {
+            show_table::handle_show_table(session, table_name).await
         }
         _ => Err(ErrorCode::NotImplementedError(format!("Unhandled ast: {:?}", stmt)).into()),
     }

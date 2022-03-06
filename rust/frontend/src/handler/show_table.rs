@@ -1,4 +1,5 @@
 use std::sync::Arc;
+
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
@@ -32,10 +33,14 @@ pub fn column_to_rows(column_desc: &ColumnDesc) -> Vec<Row> {
 }
 
 fn get_type_name(col: &ColumnDesc) -> String {
-    if col.data_type == (DataType::Struct { fields: Arc::new([]) }) {
+    if col.data_type
+        == (DataType::Struct {
+            fields: Arc::new([]),
+        })
+    {
         col.type_name.as_ref().unwrap().to_string()
-    }else {
-        format!("{:?}",&col.data_type)
+    } else {
+        format!("{:?}", &col.data_type)
     }
 }
 

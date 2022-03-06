@@ -2308,9 +2308,15 @@ impl Parser {
     }
 
     pub fn parse_show(&mut self) -> Result<Statement, ParserError> {
-        Ok(Statement::ShowVariable {
-            variable: self.parse_identifiers()?,
-        })
+        let is_show_table = self.parse_keyword(Keyword::TABLE);
+        let table_name = self.parse_object_name()?;
+        if is_show_table {
+            Ok(Statement::ShowTable { table_name })
+        } else {
+            Ok(Statement::ShowVariable {
+                variable: self.parse_identifiers()?,
+            })
+        }
     }
 
     pub fn parse_table_and_joins(&mut self) -> Result<TableWithJoins, ParserError> {
