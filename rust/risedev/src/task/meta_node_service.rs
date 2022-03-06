@@ -2,7 +2,7 @@ use std::env;
 use std::path::Path;
 use std::process::Command;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
 use super::{ExecuteContext, Task};
 use crate::MetaNodeConfig;
@@ -45,8 +45,8 @@ impl Task for MetaNodeService {
 
         if self.config.backend == "etcd"
             && let Some(ref etcd) = self.config.provide_etcd_backend
-            && let Some(etcd) = etcd.get(0)
         {
+            let etcd = etcd.get(0).ok_or_else(|| anyhow!("only one etcd config expected"))?;
             cmd.arg("--etcd-endpoints")
                 .arg(format!("{}:{}", etcd.address, etcd.port));
         }
