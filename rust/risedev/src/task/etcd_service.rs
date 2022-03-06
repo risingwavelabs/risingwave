@@ -17,7 +17,9 @@ impl EtcdService {
 
     fn etcd() -> Result<Command> {
         let prefix_bin = env::var("PREFIX_BIN")?;
-        Ok(Command::new(Path::new(&prefix_bin).join("etcd")))
+        Ok(Command::new(
+            Path::new(&prefix_bin).join("etcd").join("etcd"),
+        ))
     }
 }
 
