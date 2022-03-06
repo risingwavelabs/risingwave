@@ -170,9 +170,6 @@ template:
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
 
-    # Meta store backend
-    backend: "mem"
-
     # Etcd backend config
     provide-etcd-backend: "etcd*"
 

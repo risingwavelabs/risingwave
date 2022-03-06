@@ -25,7 +25,6 @@ pub struct MetaNodeConfig {
     pub exporter_address: String,
     pub exporter_port: u16,
     pub user_managed: bool,
-    pub backend: String,
     pub provide_etcd_backend: Option<Vec<EtcdConfig>>,
 }
 

@@ -41,14 +41,22 @@ impl Task for MetaNodeService {
             self.config.exporter_address, self.config.exporter_port
         ));
 
-        cmd.arg("--backend").arg(&self.config.backend);
-
-        if self.config.backend == "etcd"
-            && let Some(ref etcd) = self.config.provide_etcd_backend
-        {
-            let etcd = etcd.get(0).ok_or_else(|| anyhow!("only one etcd config expected"))?;
-            cmd.arg("--etcd-endpoints")
-                .arg(format!("{}:{}", etcd.address, etcd.port));
+        match self.config.provide_etcd_backend.as_ref().map(|v| &v[..]) {
+            Some([]) => {
+                cmd.arg("--backend").arg("mem");
+            }
+            Some([etcd]) => {
+                cmd.arg("--backend")
+                    .arg("etcd")
+                    .arg("--etcd-endpoints")
+                    .arg(format!("{}:{}", etcd.address, etcd.port));
+            }
+            _ => {
+                return Err(anyhow!(
+                    "unexpected etcd config {:?}",
+                    self.config.provide_etcd_backend
+                ))
+            }
         }
 
         if !self.config.user_managed {
