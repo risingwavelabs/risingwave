@@ -3738,6 +3738,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "risingwave-all"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "frontend",
+ "pgwire",
+ "risingwave",
+ "risingwave_meta",
+ "tokio",
+]
+
+[[package]]
 name = "risingwave-pb"
 version = "0.1.0"
 dependencies = [

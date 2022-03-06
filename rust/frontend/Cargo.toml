@@ -51,4 +51,3 @@ walkdir = "2"
 [[bin]]
 name = "frontend-v2"
 path = "src/bin/frontend_node.rs"
-

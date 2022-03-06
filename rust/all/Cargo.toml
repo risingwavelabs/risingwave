@@ -1,0 +1,14 @@
+[package]
+name = "risingwave-all"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+frontend = { path = "../frontend" }
+risingwave = { path = "../server" }
+risingwave_meta = { path = "../meta" }
+clap = "*"
+pgwire = { path = "../utils/pgwire" }
+tokio = "*"

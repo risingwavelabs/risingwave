@@ -18,4 +18,5 @@ members = [
   "tests/regress",
   "utils/memcomparable",
   "utils/pgwire",
+  "all"
 ]
