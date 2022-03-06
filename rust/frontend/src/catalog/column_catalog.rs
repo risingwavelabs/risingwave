@@ -38,7 +38,7 @@ impl ColumnDesc {
 }
 
 pub fn to_column_desc(col: &ProstColumnDesc) -> ColumnDesc {
-    if col.column_type.as_ref().unwrap().type_name == TypeName::Struct as i32 {
+    if col.column_type.as_ref().expect("wrong type").type_name == TypeName::Struct as i32 {
         let v = col.column_descs.iter().map(to_column_desc).collect_vec();
         ColumnDesc {
             data_type: col.get_column_type().expect("column type not found").into(),
