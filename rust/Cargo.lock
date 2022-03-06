@@ -3674,6 +3674,7 @@ dependencies = [
  "itertools 0.10.3",
  "regex",
  "serde",
+ "serde_json",
  "serde_yaml",
  "tempfile",
  "yaml-rust",
