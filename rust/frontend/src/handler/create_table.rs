@@ -7,7 +7,7 @@ use risingwave_sqlparser::ast::{ColumnDef, ObjectName};
 
 use crate::binder::expr::bind_data_type;
 use crate::catalog::catalog_service::DEFAULT_SCHEMA_NAME;
-use crate::session::SessionImpl;
+use crate::session::QueryContext;
 
 fn columns_to_prost(columns: &[ColumnDef]) -> Result<Vec<ColumnDesc>> {
     columns
@@ -25,10 +25,11 @@ fn columns_to_prost(columns: &[ColumnDef]) -> Result<Vec<ColumnDesc>> {
 }
 
 pub async fn handle_create_table(
-    session: &SessionImpl,
+    context: QueryContext<'_>,
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
 ) -> Result<PgResponse> {
+    let session = context.session;
     let mut table = Table {
         info: Info::TableSource(TableSourceInfo::default()).into(),
         ..Default::default()
