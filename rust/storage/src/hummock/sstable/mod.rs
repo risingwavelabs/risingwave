@@ -113,9 +113,8 @@ impl Block {
     pub fn encode_meta(meta: &SstableMeta, checksum_algo: ChecksumAlg) -> HummockResult<Bytes> {
         let mut buf = BytesMut::with_capacity(DEFAULT_META_BUFFER_CAPACITY);
         meta.encode(&mut buf).map_err(HummockError::encode_error)?;
-        let len = buf.len();
         buf.put_u32_le(0);
-        buf.put_u32(len as u32);
+        buf.put_u32(1);
         let checksum = checksum(checksum_algo, &buf);
         checksum
             .encode(&mut buf)
@@ -156,5 +155,27 @@ impl Sstable {
 
     pub fn block_count(&self) -> usize {
         self.meta.block_metas.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::builder::tests::default_builder_opt_for_test;
+    use super::*;
+    use crate::hummock::value::HummockValue;
+    use crate::hummock::SSTableBuilder;
+
+    #[test]
+    fn test_meta_enc_dec() {
+        let options = default_builder_opt_for_test();
+        let mut builder = SSTableBuilder::new(options.clone());
+        builder.add(b"test_key_0", HummockValue::Put(b"test_value_0"));
+        builder.add(b"test_key_1", HummockValue::Put(b"test_value_1"));
+        builder.add(b"test_key_2", HummockValue::Put(b"test_value_2"));
+        let (_, meta) = builder.finish();
+        let encoded_meta = Block::encode_meta(&meta, options.checksum_algo).unwrap();
+        let meta_block = Block::decode(encoded_meta, 0).unwrap();
+        let decoded_meta = SstableMeta::decode(meta_block.inner_data()).unwrap();
+        assert_eq!(meta, decoded_meta);
     }
 }
