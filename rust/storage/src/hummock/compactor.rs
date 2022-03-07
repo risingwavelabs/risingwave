@@ -15,19 +15,22 @@ use super::iterator::{ConcatIterator, HummockIterator, MergeIterator};
 use super::key::{get_epoch, Epoch, FullKey};
 use super::key_range::KeyRange;
 use super::multi_builder::CapacitySplitTableBuilder;
-use super::sstable_manager::SstableStoreRef;
+use super::sstable_store::SstableStoreRef;
 use super::version_cmp::VersionedComparator;
 use super::{
     HummockError, HummockMetaClient, HummockOptions, HummockResult, HummockStorage, HummockValue,
-    LocalVersionManager, SSTableBuilder, SSTableIterator,
+    LocalVersionManager, SSTableBuilder, SSTableIterator, Sstable,
 };
+use crate::monitor::StateStoreStats;
 
 #[derive(Clone)]
 pub struct SubCompactContext {
     pub options: Arc<HummockOptions>,
     pub local_version_manager: Arc<LocalVersionManager>,
     pub hummock_meta_client: Arc<dyn HummockMetaClient>,
-    pub sstable_manager: SstableStoreRef,
+    pub sstable_store: SstableStoreRef,
+    pub stats: Arc<StateStoreStats>,
+    pub is_share_buffer_compact: bool,
 }
 
 pub struct Compactor;
@@ -69,14 +72,14 @@ impl Compactor {
                     .map(|table| -> Box<dyn HummockIterator> {
                         Box::new(SSTableIterator::new(
                             table.clone(),
-                            context.sstable_manager.clone(),
+                            context.sstable_store.clone(),
                         ))
                     })
                     .chain(non_overlapping_table_seqs.iter().map(
                         |tableseq| -> Box<dyn HummockIterator> {
                             Box::new(ConcatIterator::new(
                                 tableseq.clone(),
-                                context.sstable_manager.clone(),
+                                context.sstable_store.clone(),
                             ))
                         },
                     )),
@@ -222,12 +225,21 @@ impl Compactor {
         output_sst_infos.reserve(builder.len());
         // TODO: decide upload concurrency
         for (table_id, data, meta) in builder.finish() {
-            context.sstable_manager.put(table_id, &meta, data).await?;
+            let sst = Sstable { id: table_id, meta };
+            context
+                .sstable_store
+                .put(&sst, data, super::CachePolicy::Fill)
+                .await?;
+            if context.is_share_buffer_compact {
+                context.stats.addtable_upload_sst_counts.inc();
+            } else {
+                context.stats.compaction_upload_sst_counts.inc();
+            }
             let info = SstableInfo {
                 id: table_id,
                 key_range: Some(risingwave_pb::hummock::KeyRange {
-                    left: meta.get_smallest_key().to_vec(),
-                    right: meta.get_largest_key().to_vec(),
+                    left: sst.meta.get_smallest_key().to_vec(),
+                    right: sst.meta.get_largest_key().to_vec(),
                     inf: false,
                 }),
             };
@@ -273,13 +285,16 @@ impl Compactor {
         options: Arc<HummockOptions>,
         local_version_manager: Arc<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
-        sstable_manager: SstableStoreRef,
+        sstable_store: SstableStoreRef,
+        stats: Arc<StateStoreStats>,
     ) -> (JoinHandle<()>, UnboundedSender<()>) {
         let sub_compact_context = SubCompactContext {
             options,
             local_version_manager,
             hummock_meta_client,
-            sstable_manager,
+            sstable_store,
+            stats,
+            is_share_buffer_compact: false,
         };
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
         let stream_retry_interval = Duration::from_secs(60);

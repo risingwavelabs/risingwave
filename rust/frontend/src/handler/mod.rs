@@ -2,7 +2,7 @@ use pgwire::pg_response::PgResponse;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{ObjectName, Statement};
 
-use crate::session::SessionImpl;
+use crate::session::{QueryContext, SessionImpl};
 
 mod create_source;
 pub mod create_table;
@@ -10,17 +10,18 @@ pub mod drop_table;
 mod explain;
 
 pub(super) async fn handle(session: &SessionImpl, stmt: Statement) -> Result<PgResponse> {
+    let context = QueryContext::new(session);
     match stmt {
         Statement::Explain {
             statement, verbose, ..
-        } => explain::handle_explain(session, *statement, verbose),
-        Statement::CreateSource(stmt) => create_source::handle_create_source(session, stmt).await,
+        } => explain::handle_explain(context, *statement, verbose),
+        Statement::CreateSource(stmt) => create_source::handle_create_source(context, stmt).await,
         Statement::CreateTable { name, columns, .. } => {
-            create_table::handle_create_table(session, name, columns).await
+            create_table::handle_create_table(context, name, columns).await
         }
         Statement::Drop(drop_statement) => {
             let table_object_name = ObjectName(vec![drop_statement.name]);
-            drop_table::handle_drop_table(session, table_object_name).await
+            drop_table::handle_drop_table(context, table_object_name).await
         }
         _ => Err(ErrorCode::NotImplementedError(format!("Unhandled ast: {:?}", stmt)).into()),
     }
