@@ -4,7 +4,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::array::Row;
-use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::Datum;
 use risingwave_common::util::ordered::*;
@@ -13,7 +13,7 @@ use risingwave_common::util::sort_util::OrderType;
 use super::TableIterRef;
 use crate::cell_based_row_deserializer::CellBasedRowDeserializer;
 use crate::table::{ScannableTable, TableIter};
-use crate::{dispatch_state_store, ColumnDesc, Keyspace, StateStore, StateStoreImpl};
+use crate::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
 
 pub fn new_adhoc_mview_table(
     state_store: StateStoreImpl,

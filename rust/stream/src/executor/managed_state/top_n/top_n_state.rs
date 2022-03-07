@@ -380,10 +380,11 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::catalog::ColumnDesc;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::{Keyspace, StateStore, ColumnDesc};
+    use risingwave_storage::{Keyspace, StateStore};
 
     use super::*;
     use crate::executor::managed_state::top_n::top_n_state::ManagedTopNState;

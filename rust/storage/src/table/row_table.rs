@@ -1,13 +1,13 @@
 #![allow(dead_code)]
 #![allow(unused)]
 use risingwave_common::array::Row;
-use risingwave_common::catalog::ColumnId;
+use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
 use risingwave_common::types::Datum;
 use risingwave_common::util::ordered::*;
 
 use super::TableIter;
-use crate::{ColumnDesc, IndexDesc, Keyspace, StateStore};
+use crate::{IndexDesc, Keyspace, StateStore};
 
 /// `RowTable` is the interface accessing relational data in KV(`StateStore`) with encoding format:
 /// [keyspace | pk | `column_id` (4B)] -> value.

@@ -319,10 +319,9 @@ mod tests {
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{ArrayImpl, I32Array, I64Array, Op, StreamChunk, Utf8Array};
     use risingwave_common::array_nonnull;
-    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::catalog::{ColumnDesc, Field, Schema};
     use risingwave_common::types::DataType;
     use risingwave_source::*;
-    use risingwave_storage::ColumnDesc;
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::*;

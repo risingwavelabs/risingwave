@@ -2,14 +2,12 @@ use std::collections::HashMap;
 
 use bytes::Bytes;
 use risingwave_common::array::Row;
-use risingwave_common::catalog::ColumnId;
+use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
 use risingwave_common::types::Datum;
 use risingwave_common::util::ordered::{
     deserialize_cell, deserialize_column_id, NULL_ROW_SPECIAL_CELL_ID,
 };
-
-use crate::ColumnDesc;
 
 #[derive(Clone)]
 pub struct CellBasedRowDeserializer {
@@ -87,12 +85,11 @@ mod tests {
     use bytes::Bytes;
     use itertools::Itertools;
     use risingwave_common::array::Row;
-    use risingwave_common::catalog::ColumnId;
+    use risingwave_common::catalog::{ColumnDesc, ColumnId};
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::ordered::serialize_pk_and_row;
 
     use crate::cell_based_row_deserializer::CellBasedRowDeserializer;
-    use crate::ColumnDesc;
 
     #[test]
     fn test_cell_based_deserializer() {

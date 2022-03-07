@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use risingwave_common::array::{DataChunk, Op, Row, StreamChunk};
-use risingwave_common::catalog::{ColumnId, Schema};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::try_match_expand;
 use risingwave_common::types::ToOwnedDatum;
@@ -10,7 +10,7 @@ use risingwave_pb::plan::OrderType as ProstOrderType;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
-use risingwave_storage::{Keyspace, Segment, StateStore, ColumnDesc};
+use risingwave_storage::{Keyspace, Segment, StateStore};
 
 use super::{ExecutorState, StatefulExecutor};
 use crate::executor::managed_state::top_n::variants::*;

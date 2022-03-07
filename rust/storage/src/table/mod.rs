@@ -8,10 +8,8 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_common::error::Result;
-
-use crate::ColumnDesc;
 
 #[async_trait::async_trait]
 pub trait TableIter: Send {
