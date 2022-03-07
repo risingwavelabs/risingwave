@@ -1,7 +1,7 @@
 use clap::StructOpt;
 use log::info;
-use risingwave::server::compute_node_serve;
-use risingwave::ComputeNodeOpts;
+use risingwave_compute::server::compute_node_serve;
+use risingwave_compute::ComputeNodeOpts;
 use tikv_jemallocator::Jemalloc;
 use tracing::Level;
 use tracing_subscriber::filter;
@@ -77,7 +77,7 @@ async fn main() {
             .with_service_name("compute")
             // disable proxy
             .with_http_client(isahc::HttpClient::builder().proxy(None).build().unwrap())
-            .install_batch(risingwave::trace_runtime::RwTokio)
+            .install_batch(risingwave_compute::trace_runtime::RwTokio)
             .unwrap();
 
         let opentelemetry_layer = tracing_opentelemetry::layer().with_tracer(tracer);

@@ -1,6 +1,6 @@
 [package]
 edition = "2021"
-name = "risingwave"
+name = "risingwave_compute"
 version = "0.1.3"
 
 [dependencies]
