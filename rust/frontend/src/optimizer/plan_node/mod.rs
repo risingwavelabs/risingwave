@@ -97,23 +97,14 @@ impl dyn PlanNode {
 
 #[macro_use]
 mod plan_tree_node;
-
 pub use plan_tree_node::*;
-
 mod col_pruning;
-
 pub use col_pruning::*;
-
 mod convert;
-
 pub use convert::*;
-
 mod eq_join_predicate;
-
 pub use eq_join_predicate::*;
-
 mod to_prost;
-
 pub use to_prost::*;
 
 mod batch_exchange;
