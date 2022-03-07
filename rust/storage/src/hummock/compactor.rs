@@ -21,6 +21,7 @@ use super::{
     HummockError, HummockMetaClient, HummockOptions, HummockResult, HummockStorage, HummockValue,
     LocalVersionManager, SSTableBuilder, SSTableIterator, Sstable,
 };
+use crate::monitor::StateStoreStats;
 
 #[derive(Clone)]
 pub struct SubCompactContext {
@@ -28,6 +29,8 @@ pub struct SubCompactContext {
     pub local_version_manager: Arc<LocalVersionManager>,
     pub hummock_meta_client: Arc<dyn HummockMetaClient>,
     pub sstable_store: SstableStoreRef,
+    pub stats: Arc<StateStoreStats>,
+    pub is_share_buffer_compact: bool,
 }
 
 pub struct Compactor;
@@ -227,6 +230,11 @@ impl Compactor {
                 .sstable_store
                 .put(&sst, data, super::CachePolicy::Fill)
                 .await?;
+            if context.is_share_buffer_compact {
+                context.stats.addtable_upload_sst_counts.inc();
+            } else {
+                context.stats.compaction_upload_sst_counts.inc();
+            }
             let info = SstableInfo {
                 id: table_id,
                 key_range: Some(risingwave_pb::hummock::KeyRange {
@@ -278,12 +286,15 @@ impl Compactor {
         local_version_manager: Arc<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         sstable_store: SstableStoreRef,
+        stats: Arc<StateStoreStats>,
     ) -> (JoinHandle<()>, UnboundedSender<()>) {
         let sub_compact_context = SubCompactContext {
             options,
             local_version_manager,
             hummock_meta_client,
             sstable_store,
+            stats,
+            is_share_buffer_compact: false,
         };
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
         let stream_retry_interval = Duration::from_secs(60);
