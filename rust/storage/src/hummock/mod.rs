@@ -394,7 +394,8 @@ impl HummockStorage {
                 )
             })
             .collect_vec();
-        self.shared_buffer_manager.write_batch(batch, epoch)?;
+        self.shared_buffer_manager
+            .replicate_remote_batch(batch, epoch)?;
 
         // self.sync(epoch).await?;
         Ok(())
