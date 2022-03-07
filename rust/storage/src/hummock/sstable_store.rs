@@ -9,6 +9,8 @@ use super::{Block, BlockCache, Sstable};
 use crate::hummock::{HummockError, HummockResult};
 use crate::object::{BlockLocation, ObjectStoreRef};
 
+const META_BLOCK_IDX: u64 = u64::MAX;
+
 // TODO: Define policy based on use cases (read / comapction / ...).
 pub enum CachePolicy {
     Disable,
@@ -62,7 +64,9 @@ impl SstableStore {
                     .await;
             }
             let meta_block = Block::decode(meta, 0).map_err(HummockError::decode_error)?;
-            self.block_cache.insert(sst.id, u64::MAX, meta_block).await;
+            self.block_cache
+                .insert(sst.id, META_BLOCK_IDX, meta_block)
+                .await;
         }
 
         Ok(())
@@ -108,8 +112,6 @@ impl SstableStore {
     }
 
     pub async fn meta(&self, sst_id: u64, policy: CachePolicy) -> HummockResult<SstableMeta> {
-        // TODO(MrCroxx): meta should also be a `Block` later and managed in block cache.
-
         let fetch_meta = async move {
             let path = self.get_sst_meta_path(sst_id);
             let buf = self
@@ -123,10 +125,10 @@ impl SstableStore {
         let meta_block = match policy {
             CachePolicy::Fill => {
                 self.block_cache
-                    .get_or_insert_with(sst_id, u64::MAX, fetch_meta)
+                    .get_or_insert_with(sst_id, META_BLOCK_IDX, fetch_meta)
                     .await
             }
-            CachePolicy::NotFill => match self.block_cache.get(sst_id, u64::MAX) {
+            CachePolicy::NotFill => match self.block_cache.get(sst_id, META_BLOCK_IDX) {
                 Some(block) => Ok(block),
                 None => fetch_meta.await,
             },
