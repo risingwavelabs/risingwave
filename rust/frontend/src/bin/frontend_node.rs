@@ -9,9 +9,9 @@ async fn main() {
     use std::sync::Arc;
 
     use clap::StructOpt;
-    use frontend::session::SessionManagerImpl;
-    use frontend::FrontendOpts;
     use pgwire::pg_server::pg_serve;
+    use risingwave_frontend::session::SessionManagerImpl;
+    use risingwave_frontend::FrontendOpts;
 
     let opts: FrontendOpts = FrontendOpts::parse();
 

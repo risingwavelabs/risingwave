@@ -1,8 +1,5 @@
 use std::sync::Arc;
 
-extern crate risingwave;
-extern crate risingwave_batch;
-
 use itertools::Itertools;
 use risingwave_batch::executor::{Executor, RowSeqScanExecutor};
 use risingwave_common::array::{Array, Row};
