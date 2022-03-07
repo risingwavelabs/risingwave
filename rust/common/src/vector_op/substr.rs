@@ -23,10 +23,10 @@ pub fn substr_start_for(
     writer: BytesWriter,
 ) -> Result<BytesGuard> {
     if count < 0 {
-        return Err(ErrorCode::InvalidInputSyntax(
-            String::from("non-negative substring length"),
-            count.to_string(),
-        )
+        return Err(ErrorCode::InvalidInputSyntax(format!(
+            "length in substr should be non-negative: {}",
+            count
+        ))
         .into());
     }
     let begin = max(start - 1, 0) as usize;
