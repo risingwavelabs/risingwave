@@ -1,12 +1,12 @@
 use std::fmt;
 
+use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 
-use super::{ColPrunable, LogicalProject, PlanRef, ToBatch, ToStream};
+use super::{ColPrunable, PlanRef, ToBatch, ToStream};
 use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
-use crate::utils::ColIndexMapping;
 
 #[derive(Debug, Clone)]
 pub struct LogicalValues {
@@ -56,10 +56,23 @@ impl fmt::Display for LogicalValues {
 }
 
 impl ColPrunable for LogicalValues {
-    fn prune_col(&self, required_cols: &fixedbitset::FixedBitSet) -> PlanRef {
-        // TODO: replace default impl
-        let mapping = ColIndexMapping::with_remaining_columns(required_cols);
-        LogicalProject::with_mapping(self.clone().into(), mapping).into()
+    fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
+        assert!(
+            required_cols.is_subset(&FixedBitSet::from_iter(0..self.schema().fields().len())),
+            "Invalid required cols: {}, only {} columns available",
+            required_cols,
+            self.schema().fields().len()
+        );
+
+        let (rows, fields) = required_cols
+            .ones()
+            .map(|id| (self.rows[id].clone(), self.schema.fields[id].clone()))
+            .unzip();
+        Self {
+            rows,
+            schema: Schema { fields },
+        }
+        .into()
     }
 }
 
