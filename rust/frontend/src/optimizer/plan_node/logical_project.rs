@@ -268,15 +268,19 @@ mod tests {
                 Literal::new(None, ty.clone()).into(),
                 InputRef::new(0, DataType::Boolean).into(),
             ],
-            vec![Some("c1".to_string()), None, None],
+            vec![None;3],
         );
 
         assert!(outer.input().as_logical_scan().is_some());
-        let schema = outer.schema();
-        assert_eq!(schema.fields().len(), 3);
-        assert_eq!(schema.fields[0].name, "c1");
-        assert_eq!(schema.fields[1].name, "expr0");
-        assert_eq!(schema.fields[2].name, "aa");
+        assert_eq!(outer.exprs().len(), 3);
+        assert_eq_input_ref!(&outer.exprs()[0], 0);
+        match outer.exprs()[2].clone() {
+            ExprImpl::FunctionCall(call) => {
+                assert_eq_input_ref!(&call.inputs()[0], 1);
+                assert_eq_input_ref!(&call.inputs()[1], 2);
+            }
+            _ => panic!("Expected function call"),
+        }
 
         let outermost = LogicalProject::new(
             outer.into(),
@@ -285,9 +289,8 @@ mod tests {
         );
 
         assert!(outermost.input().as_logical_scan().is_some());
-        let schema = outermost.schema();
-        assert_eq!(schema.fields().len(), 1);
-        assert_eq!(schema.fields[0].name, "c1");
+        assert_eq!(outermost.exprs().len(), 1);
+        assert_eq_input_ref!(&outermost.exprs()[0], 0);
     }
 
     #[test]
