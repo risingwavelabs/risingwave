@@ -38,7 +38,7 @@ impl ColIndexMapping {
     /// Positive offset:
     ///
     /// ```rust
-    /// # use frontend::utils::ColIndexMapping;
+    /// # use risingwave_frontend::utils::ColIndexMapping;
     /// let mapping = ColIndexMapping::with_shift_offset(3, 3);
     /// assert_eq!(mapping.map(0), 3);
     /// assert_eq!(mapping.map(1), 4);
@@ -48,7 +48,7 @@ impl ColIndexMapping {
     /// Negative offset:
     ///
     ///  ```rust
-    /// # use frontend::utils::ColIndexMapping;
+    /// # use risingwave_frontend::utils::ColIndexMapping;
     /// let mapping = ColIndexMapping::with_shift_offset(6, -3);
     /// assert_eq!(mapping.try_map(0), None);
     /// assert_eq!(mapping.try_map(1), None);
@@ -77,7 +77,7 @@ impl ColIndexMapping {
     ///
     /// ```rust
     /// # use fixedbitset::FixedBitSet;
-    /// # use frontend::utils::ColIndexMapping;
+    /// # use risingwave_frontend::utils::ColIndexMapping;
     /// let mut remaining_cols = FixedBitSet::with_capacity(5);
     /// remaining_cols.insert(1);
     /// remaining_cols.insert(3);
@@ -103,7 +103,7 @@ impl ColIndexMapping {
     ///
     /// ```rust
     /// # use fixedbitset::FixedBitSet;
-    /// # use frontend::utils::ColIndexMapping;
+    /// # use risingwave_frontend::utils::ColIndexMapping;
     /// let mut removed_cols = FixedBitSet::with_capacity(5);
     /// removed_cols.insert(0);
     /// removed_cols.insert(2);
