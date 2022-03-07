@@ -8,10 +8,8 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_common::error::Result;
-
-use crate::TableColumnDesc;
 
 #[async_trait::async_trait]
 pub trait TableIter: Send {
@@ -81,7 +79,7 @@ pub trait ScannableTable: Sync + Send + Any + core::fmt::Debug {
 
     fn schema(&self) -> Cow<Schema>;
 
-    fn column_descs(&self) -> Cow<[TableColumnDesc]>;
+    fn column_descs(&self) -> Cow<[ColumnDesc]>;
 
     /// Indicates whether this table is backed with a shared storage. The behavior of distributed
     /// scanning differs according to this property.

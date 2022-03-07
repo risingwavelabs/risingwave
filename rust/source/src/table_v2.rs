@@ -4,9 +4,8 @@ use std::sync::RwLock;
 use async_trait::async_trait;
 use rand::prelude::SliceRandom;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::ColumnId;
+use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
-use risingwave_storage::TableColumnDesc;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::{BatchSourceReader, Source, StreamSourceReader};
@@ -31,14 +30,14 @@ pub struct TableSourceV2 {
     core: RwLock<TableSourceV2Core>,
 
     /// All columns in this table.
-    column_descs: Vec<TableColumnDesc>,
+    column_descs: Vec<ColumnDesc>,
 
     /// Curren allocated row id.
     next_row_id: AtomicUsize,
 }
 
 impl TableSourceV2 {
-    pub fn new(column_descs: Vec<TableColumnDesc>) -> Self {
+    pub fn new(column_descs: Vec<ColumnDesc>) -> Self {
         let core = TableSourceV2Core {
             changes_txs: vec![],
         };
@@ -208,7 +207,7 @@ mod tests {
         let store = MemoryStateStore::new();
         let _keyspace = Keyspace::table_root(store, &Default::default());
 
-        TableSourceV2::new(vec![TableColumnDesc::unnamed(
+        TableSourceV2::new(vec![ColumnDesc::unnamed(
             ColumnId::from(0),
             DataType::Int64,
         )])

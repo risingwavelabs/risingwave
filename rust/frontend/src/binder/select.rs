@@ -1,8 +1,11 @@
-use risingwave_common::error::Result;
+use std::fmt::Debug;
+
+use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::Select;
 
 use crate::binder::{Binder, TableRef};
-use crate::expr::ExprImpl;
+use crate::expr::{Expr, ExprImpl};
 
 #[derive(Debug)]
 pub struct BoundSelect {
@@ -15,12 +18,26 @@ pub struct BoundSelect {
 impl Binder {
     pub(super) fn bind_select(&mut self, select: Select) -> Result<BoundSelect> {
         let from = self.bind_vec_table_with_joins(select.from)?;
+        let selection = select
+            .selection
+            .map(|expr| self.bind_expr(expr))
+            .transpose()?;
+        if let Some(selection) = &selection {
+            let return_type = selection.return_type();
+            if !matches!(return_type, DataType::Boolean) {
+                return Err(ErrorCode::InternalError(format!(
+                    "argument of WHERE must be boolean, not type {:?}",
+                    return_type
+                ))
+                .into());
+            }
+        }
         let projection = self.bind_projection(select.projection)?;
         Ok(BoundSelect {
             distinct: select.distinct,
             projection,
             from,
-            selection: None,
+            selection,
         })
     }
 }

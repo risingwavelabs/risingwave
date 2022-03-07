@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use std::fmt::Debug;
 use std::vec;
 
 use fixedbitset::FixedBitSet;
@@ -122,11 +123,7 @@ impl ColIndexMapping {
 
     #[must_use]
     pub fn composite(&self, following: &Self) -> Self {
-        debug!(
-            "composing {:?} and {:?}",
-            self.mapping_pairs().collect::<Vec<_>>(),
-            following.mapping_pairs().collect::<Vec<_>>()
-        );
+        debug!("composing {:?} and {:?}", self, following);
         let mut map = self.map.clone();
         for tar in &mut map {
             *tar = tar.and_then(|index| following.try_map(index));
@@ -163,6 +160,18 @@ impl ColIndexMapping {
 impl ExprRewriter for ColIndexMapping {
     fn rewrite_input_ref(&mut self, input_ref: InputRef) -> InputRef {
         InputRef::new(self.map(input_ref.index()), input_ref.data_type())
+    }
+}
+
+impl Debug for ColIndexMapping {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "ColIndexMapping({})",
+            self.mapping_pairs()
+                .map(|(src, dst)| format!("{}->{}", src, dst))
+                .join(",")
+        )
     }
 }
 

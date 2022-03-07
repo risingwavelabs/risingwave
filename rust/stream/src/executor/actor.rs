@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use risingwave_common::error::Result;
-use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use tracing_futures::Instrument;
 
 use super::{Mutation, StreamConsumer};
@@ -41,29 +40,9 @@ impl Actor {
             match message {
                 Ok(Some(barrier)) => {
                     // collect barriers to local barrier manager
-                    let collect_res = self
-                        .context
+                    self.context
                         .lock_barrier_manager()
                         .collect(self.id, &barrier)?;
-
-                    if let Some(barrier_state) = collect_res {
-                        // sync states to S3 when the barrier has flowed through all actors
-                        // TODO: make this async
-                        dispatch_state_store!(&self.context.state_store, store, {
-                            match store.sync(Some(barrier.epoch.prev)).await {
-                                Ok(_) => (),
-                                // TODO: Handle sync failure by propagating it
-                                // back to global barrier manager
-                                Err(e) => panic!(
-                                "Failed to sync state store after receving barrier {:?} due to {}",
-                                barrier,
-                                e
-                            ),
-                            }
-                        });
-                        // Notify about barrier finishing.
-                        barrier_state.notify();
-                    }
 
                     // then stop this actor if asked
                     if let Some(Mutation::Stop(actors)) = barrier.mutation.as_deref() {
