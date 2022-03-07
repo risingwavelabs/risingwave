@@ -82,6 +82,7 @@ macro_rules! for_all_metrics {
             get_new_table_id_latency: Histogram,
             get_compaction_task_latency: Histogram,
             report_compaction_task_latency: Histogram,
+            addtable_upload_sst_counts: GenericCounter<AtomicU64>,
             compaction_upload_sst_counts: GenericCounter<AtomicU64>,
         }
     };
@@ -434,6 +435,14 @@ impl StateStoreStats {
                 .unwrap();
 
         // --
+        let addtable_upload_sst_counts = register_int_counter_with_registry!(
+            "state_store_addtable_upload_sst_counts",
+            "Total number of sst uploads when shared buffer adds tables",
+            registry
+        )
+        .unwrap();
+
+        // --
         let compaction_upload_sst_counts = register_int_counter_with_registry!(
             "state_store_compaction_upload_sst_counts",
             "Total number of sst uploads during compaction",
@@ -483,6 +492,7 @@ impl StateStoreStats {
             get_new_table_id_latency,
             get_compaction_task_latency,
             report_compaction_task_latency,
+            addtable_upload_sst_counts,
             compaction_upload_sst_counts,
         }
     }

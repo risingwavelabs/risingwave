@@ -30,6 +30,7 @@ pub struct SubCompactContext {
     pub hummock_meta_client: Arc<dyn HummockMetaClient>,
     pub sstable_manager: SstableStoreRef,
     pub stats: Arc<StateStoreStats>,
+    pub is_share_buffer_compact: bool,
 }
 
 pub struct Compactor;
@@ -225,7 +226,11 @@ impl Compactor {
         // TODO: decide upload concurrency
         for (table_id, data, meta) in builder.finish() {
             context.sstable_manager.put(table_id, &meta, data).await?;
-            context.stats.compaction_upload_sst_counts.inc();
+            if context.is_share_buffer_compact {
+                context.stats.addtable_upload_sst_counts.inc();
+            } else {
+                context.stats.compaction_upload_sst_counts.inc();
+            }
             let info = SstableInfo {
                 id: table_id,
                 key_range: Some(risingwave_pb::hummock::KeyRange {
@@ -285,6 +290,7 @@ impl Compactor {
             hummock_meta_client,
             sstable_manager,
             stats,
+            is_share_buffer_compact: false,
         };
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
         let stream_retry_interval = Duration::from_secs(60);

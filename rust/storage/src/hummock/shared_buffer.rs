@@ -383,6 +383,7 @@ impl SharedBufferUploader {
             hummock_meta_client: self.hummock_meta_client.clone(),
             sstable_manager: self.sstable_manager.clone(),
             stats: self.stats.clone(),
+            is_share_buffer_compact: true,
         };
         let mut tables = Vec::new();
         Compactor::sub_compact(

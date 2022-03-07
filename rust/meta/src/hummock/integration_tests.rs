@@ -85,6 +85,7 @@ async fn test_compaction_same_key_not_split() {
         sstable_manager: storage.sstable_manager(),
         hummock_meta_client: storage.hummock_meta_client().clone(),
         stats: DEFAULT_STATE_STORE_STATS.clone(),
+        is_share_buffer_compact: false,
     };
 
     // 1. add sstables
