@@ -106,6 +106,7 @@ impl SstableStore {
         }
     }
 
+    // TODO(MrCroxx): meta should also be a `Block` later and managed in block cache.
     pub async fn meta(&self, sst_id: u64) -> HummockResult<SstableMeta> {
         let path = self.get_sst_meta_path(sst_id);
         let buf = self
