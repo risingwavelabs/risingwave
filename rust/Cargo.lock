@@ -1625,6 +1625,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "futures-async-stream"
+version = "0.2.5"
+source = "git+https://github.com/taiki-e/futures-async-stream?rev=944f407#944f407c90f5ec86f4d90fdca1dc0cf6b20d47dc"
+dependencies = [
+ "futures-async-stream-macro",
+ "futures-core",
+ "pin-project",
+]
+
+[[package]]
+name = "futures-async-stream-macro"
+version = "0.2.5"
+source = "git+https://github.com/taiki-e/futures-async-stream?rev=944f407#944f407c90f5ec86f4d90fdca1dc0cf6b20d47dc"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "futures-channel"
 version = "0.3.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3654,6 +3674,7 @@ dependencies = [
  "itertools 0.10.3",
  "regex",
  "serde",
+ "serde_json",
  "serde_yaml",
  "tempfile",
  "yaml-rust",
@@ -4095,6 +4116,7 @@ dependencies = [
  "either",
  "farmhash",
  "futures 0.3.21",
+ "futures-async-stream",
  "itertools 0.10.3",
  "lazy_static",
  "log",

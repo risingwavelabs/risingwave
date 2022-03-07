@@ -16,6 +16,7 @@ dyn-clone = "1"
 either = "1"
 farmhash = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
+futures-async-stream = { git = "https://github.com/taiki-e/futures-async-stream", rev = "944f407" }
 itertools = "0.10"
 lazy_static = "1"
 log = "0.4"

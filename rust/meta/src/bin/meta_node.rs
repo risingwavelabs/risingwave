@@ -6,7 +6,7 @@ use tracing_subscriber::filter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::prelude::*;
 
-#[derive(Parser)]
+#[derive(Debug, Parser)]
 struct Opts {
     #[clap(long, default_value = "127.0.0.1:5690")]
     host: String,
