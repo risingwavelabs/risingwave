@@ -1,6 +1,7 @@
 use std::iter::once;
 use std::sync::Arc;
 
+use bytes::Bytes;
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 use risingwave_storage::hummock::compactor::{Compactor, SubCompactContext};
@@ -90,7 +91,10 @@ async fn test_compaction_same_key_not_split() {
     for _ in 0..kv_count {
         storage
             .write_batch(
-                once((b"same_key".to_vec(), HummockValue::Put(b"value".to_vec()))),
+                once((
+                    Bytes::from(&b"same_key"[..]),
+                    HummockValue::Put(Bytes::from(&b"value"[..])),
+                )),
                 epoch,
             )
             .await
