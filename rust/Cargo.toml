@@ -16,6 +16,7 @@ members = [
   "storage",
   "stream",
   "tests/regress",
+  "utils/logging",
   "utils/memcomparable",
   "utils/pgwire",
 ]

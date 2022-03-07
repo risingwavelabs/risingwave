@@ -17,19 +17,11 @@ either = "1"
 farmhash = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hyper = "0.14"
-isahc = "1" # isahc is the http client used for tracing. Always set it as the same version as opentelemetry-jaeger's.
 itertools = "0.10"
 lazy_static = "1"
 log = "0.4"
 memcomparable = { path = "../utils/memcomparable" }
 num-traits = "0.2"
-opentelemetry = { version = "0.17", features = ["rt-tokio", "trace"] }
-opentelemetry-jaeger = { version = "0.16", features = [
-    "rt-tokio",
-    "collector_client",
-    "isahc",
-    "isahc_collector_client",
-] }
 paste = "1"
 prometheus = { version = "0.13", features = ["process"] }
 prost = "0.9"
@@ -37,6 +29,7 @@ rdkafka = { version = "0.28", features = ["cmake-build"] }
 risingwave-pb = { path = "../prost" }
 risingwave_batch = { path = "../batch" }
 risingwave_common = { path = "../common" }
+risingwave_logging = { path = "../utils/logging" }
 risingwave_meta = { path = "../meta" }
 risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_source = { path = "../source" }
@@ -48,7 +41,6 @@ serde_json = "1"
 smallvec = "1"
 static_assertions = "1"
 thiserror = "1"
-thrift = "0.15" # thift is used for our implementation of `RwTokio` runtime. Always set it as the same version as opentelemetry-jaeger's.
 tikv-jemallocator = "0.4"
 tokio = { version = "1", features = [
     "rt",
@@ -62,8 +54,6 @@ tokio = { version = "1", features = [
 tokio-stream = "0.1"
 tonic = "0.6"
 tracing = { version = "0.1", features = ["release_max_level_info"] }
-tracing-opentelemetry = "0.17"
-tracing-subscriber = "0.3"
 twox-hash = "1"
 url = "2"
 
