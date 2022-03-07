@@ -43,3 +43,17 @@ impl Expr for ExprImpl {
         self
     }
 }
+
+#[cfg(test)]
+/// Asserts that the expression is an [`InputRef`] with the given index.
+macro_rules! assert_eq_input_ref {
+    ($e:expr, $index:expr) => {
+        match $e {
+            ExprImpl::InputRef(i) => assert_eq!(i.index(), $index),
+            _ => assert!(false, "Expected input ref, found {:?}", $e),
+        }
+    };
+}
+
+#[cfg(test)]
+pub(crate) use assert_eq_input_ref;

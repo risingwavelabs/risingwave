@@ -189,7 +189,7 @@ impl MetaStore for EtcdMetaStore {
             .into_iter()
             .map(|cond| match cond {
                 super::Precondition::KeyExists { cf, key } => {
-                    Compare::value(encode_etcd_key(&cf, &key), CompareOp::Equal, vec![])
+                    Compare::value(encode_etcd_key(&cf, &key), CompareOp::NotEqual, vec![])
                 }
             })
             .collect::<Vec<_>>();
@@ -210,7 +210,10 @@ impl MetaStore for EtcdMetaStore {
             .collect::<Vec<_>>();
 
         let etcd_txn = Txn::new().when(when).and_then(then);
-        self.client.kv_client().txn(etcd_txn).await?;
-        Ok(())
+        if !self.client.kv_client().txn(etcd_txn).await?.succeeded() {
+            Err(Error::TransactionAbort())
+        } else {
+            Ok(())
+        }
     }
 }

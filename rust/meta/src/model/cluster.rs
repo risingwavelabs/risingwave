@@ -6,7 +6,7 @@ use crate::model::MetadataModel;
 /// Column family name for cluster.
 const WORKER_CF_NAME: &str = "cf/worker";
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Worker(WorkerNode);
 
 impl MetadataModel for Worker {

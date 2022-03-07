@@ -30,11 +30,15 @@ message TableRefId {
   int32 table_id = 2;
 }
 
-// ColumnDesc defines a column in a table
 message ColumnDesc {
   data.DataType column_type = 1;
-  string name = 2;
-  int32 column_id = 3;
+  int32 column_id = 2;
+  // we store the column name in column desc now just for debug, but in future we should store it in ColumnCatalog but not here
+  string name = 3;
+}
+
+message ColumnCatalog {
+  ColumnDesc column_desc = 1;
   bool is_hidden = 4;
 }
 
