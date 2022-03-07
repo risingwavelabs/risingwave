@@ -18,7 +18,7 @@
 mod barrier;
 pub mod cluster;
 mod dashboard;
-mod hummock;
+pub mod hummock;
 pub mod manager;
 mod model;
 pub mod rpc;

@@ -10,7 +10,8 @@ use risingwave_pb::hummock::{
     UncommittedEpoch,
 };
 use risingwave_storage::hummock::{
-    HummockContextId, HummockEpoch, HummockSSTableId, HummockVersionId, INVALID_EPOCH,
+    HummockContextId, HummockEpoch, HummockRefCount, HummockSSTableId, HummockVersionId,
+    INVALID_EPOCH,
 };
 use tokio::sync::{Mutex, RwLock};
 
@@ -676,6 +677,79 @@ where
         }
         if !to_commit {
             return Ok(());
+        }
+        self.commit_trx(versioning_guard.meta_store_ref.as_ref(), transaction, None)
+            .await
+    }
+
+    /// List version ids in ascending order. TODO: support limit parameter
+    pub async fn list_version_ids_asc(&self) -> Result<Vec<HummockVersionId>> {
+        let versioning_guard = self.versioning.read().await;
+        let version_ids = HummockVersion::list(versioning_guard.meta_store_ref.as_ref())
+            .await?
+            .iter()
+            .map(|version| version.id)
+            .sorted()
+            .collect_vec();
+        Ok(version_ids)
+    }
+
+    /// Get the reference count of given version id
+    pub async fn get_version_pin_count(
+        &self,
+        version_id: HummockVersionId,
+    ) -> Result<HummockRefCount> {
+        let versioning_guard = self.versioning.read().await;
+        let version_pins =
+            HummockContextPinnedVersion::list(versioning_guard.meta_store_ref.as_ref()).await?;
+        let count = version_pins
+            .iter()
+            .filter(|version_pin| version_pin.version_id.contains(&version_id))
+            .count();
+        Ok(count as HummockRefCount)
+    }
+
+    /// Get the version detail of given version id
+    pub async fn get_ssts_to_delete(
+        &self,
+        version_id: HummockVersionId,
+    ) -> Result<Vec<HummockSSTableId>> {
+        let versioning_guard = self.versioning.read().await;
+        let ssts_to_delete = HummockTablesToDelete::select(
+            versioning_guard.meta_store_ref.as_ref(),
+            &HummockVersionRefId { id: version_id },
+        )
+        .await?;
+        match ssts_to_delete {
+            None => Ok(vec![]),
+            Some(ssts) => Ok(ssts.id),
+        }
+    }
+
+    pub async fn delete_version(&self, version_id: HummockVersionId) -> Result<()> {
+        let versioning_guard = self.versioning.write().await;
+        let mut transaction = Transaction::default();
+        let key = HummockVersionRefId { id: version_id };
+        // Delete record in HummockVersion if any.
+        let version =
+            HummockVersion::select(versioning_guard.meta_store_ref.as_ref(), &key).await?;
+        if let Some(version) = version {
+            version.delete_in_transaction(&mut transaction)?;
+        }
+        // Delete record in HummockTablesToDelete if any.
+        let ssts_to_delete =
+            HummockTablesToDelete::select(versioning_guard.meta_store_ref.as_ref(), &key).await?;
+        if let Some(ssts_to_delete) = ssts_to_delete {
+            ssts_to_delete.delete_in_transaction(&mut transaction)?;
+        }
+        // Delete record in HummockContextPinnedVersion if any.
+        let version_pins =
+            HummockContextPinnedVersion::list(versioning_guard.meta_store_ref.as_ref()).await?;
+        for mut version_pin in version_pins {
+            if version_pin.version_id.contains(&version_id) {
+                version_pin.unpin_version(version_id);
+                version_pin.update_in_transaction(&mut transaction)?;
+            }
         }
         self.commit_trx(versioning_guard.meta_store_ref.as_ref(), transaction, None)
             .await

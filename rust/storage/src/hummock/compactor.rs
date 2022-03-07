@@ -6,7 +6,7 @@ use futures::stream::{self, StreamExt};
 use futures::Future;
 use risingwave_common::error::RwError;
 use risingwave_pb::hummock::{
-    CompactTask, LevelEntry, LevelType, SstableInfo, SubscribeCompactTasksResponse,
+    CompactTask, LevelEntry, LevelType, SstableInfo, SubscribeCompactTasksResponse, VacuumTask,
 };
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
@@ -21,6 +21,7 @@ use super::{
     HummockError, HummockMetaClient, HummockOptions, HummockResult, HummockStorage, HummockValue,
     LocalVersionManager, SSTableBuilder, SSTableIterator, Sstable,
 };
+use crate::hummock::vacuum::Vacuum;
 use crate::monitor::StateStoreStats;
 
 #[derive(Clone)]
@@ -292,7 +293,7 @@ impl Compactor {
             options,
             local_version_manager,
             hummock_meta_client,
-            sstable_store,
+            sstable_store: sstable_store.clone(),
             stats,
             is_share_buffer_compact: false,
         };
@@ -339,12 +340,20 @@ impl Compactor {
                     match message {
                         // The inner Some is the side effect of generated code.
                         Ok(Some(SubscribeCompactTasksResponse {
-                            compact_task: Some(compact_task),
+                            compact_task,
+                            vacuum_task,
                         })) => {
-                            if let Err(e) =
-                                Compactor::compact(&sub_compact_context, compact_task).await
-                            {
-                                tracing::warn!("failed to compact. {}", RwError::from(e));
+                            if let Some(compact_task) = compact_task {
+                                if let Err(e) =
+                                    Compactor::compact(&sub_compact_context, compact_task).await
+                                {
+                                    tracing::warn!("failed to compact. {}", RwError::from(e));
+                                }
+                            }
+                            if let Some(VacuumTask { task: Some(task) }) = vacuum_task {
+                                if let Err(e) = Vacuum::vacuum(sstable_store.clone(), task).await {
+                                    tracing::warn!("failed to vacuum. {}", e);
+                                }
                             }
                         }
                         Err(e) => {
