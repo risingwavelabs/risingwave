@@ -33,13 +33,15 @@ message TableRefId {
 message ColumnDesc {
   data.DataType column_type = 1;
   int32 column_id = 2;
-  // we store the column name in column desc now just for debug, but in future we should store it in ColumnCatalog but not here  
+  // we store the column name in column desc now just for debug, but in future we should store it in ColumnCatalog but not here
   string name = 3;
 }
-message ColumnCatalog{
+
+message ColumnCatalog {
   ColumnDesc column_desc = 1;
   bool is_hidden = 4;
 }
+
 message StreamSourceInfo {
   bool append_only = 1;
   map<string, string> properties = 2;
