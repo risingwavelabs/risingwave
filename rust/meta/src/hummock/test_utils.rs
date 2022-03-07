@@ -3,7 +3,7 @@ use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo};
 use risingwave_storage::hummock::key::key_with_epoch;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    HummockEpoch, HummockSSTableId, SSTableBuilder, SSTableBuilderOptions,
+    HummockEpoch, HummockSSTableId, SSTableBuilderOptions, SstableBuilder,
 };
 
 pub fn generate_test_tables(epoch: u64, table_id: &mut u64) -> Vec<SstableInfo> {
@@ -17,7 +17,7 @@ pub fn generate_test_tables(epoch: u64, table_id: &mut u64) -> Vec<SstableInfo> 
 
     let mut tables = vec![];
     for i in 0..2 {
-        let mut b = SSTableBuilder::new(opt.clone());
+        let mut b = SstableBuilder::new(opt.clone());
         let kv_pairs = vec![
             (i, HummockValue::Put(b"test".as_slice())),
             (i * 10, HummockValue::Put(b"test".as_slice())),

@@ -378,9 +378,9 @@ impl HummockStorage {
         self.shared_buffer_manager.sync(epoch).await
     }
 
-    fn get_builder(options: &HummockOptions) -> SSTableBuilder {
+    fn get_builder(options: &HummockOptions) -> SstableBuilder {
         // TODO: use different option values (especially table_size) for compaction
-        SSTableBuilder::new(SSTableBuilderOptions {
+        SstableBuilder::new(SSTableBuilderOptions {
             table_capacity: options.sstable_size,
             block_size: options.block_size,
             bloom_false_positive: options.bloom_false_positive,

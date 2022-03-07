@@ -62,7 +62,7 @@ pub struct SSTableBuilderOptions {
 /// - Table data is simply a sequence of blocks.
 /// - Metadata is the prost-encoded `SstableMeta` data and essential information to determine the
 /// checksum.
-pub struct SSTableBuilder {
+pub struct SstableBuilder {
     options: SSTableBuilderOptions,
 
     meta: SstableMeta,
@@ -81,7 +81,7 @@ pub struct SSTableBuilder {
     key_hashes: Vec<u32>,
 }
 
-impl SSTableBuilder {
+impl SstableBuilder {
     /// Create new builder from options
     pub fn new(options: SSTableBuilderOptions) -> Self {
         Self {
@@ -280,14 +280,14 @@ pub(super) mod tests {
             checksum_algo: risingwave_pb::hummock::checksum::Algorithm::XxHash64,
         };
 
-        let b = SSTableBuilder::new(opt);
+        let b = SstableBuilder::new(opt);
 
         b.finish();
     }
 
     #[test]
     fn test_smallest_key_and_largest_key() {
-        let mut b = SSTableBuilder::new(default_builder_opt_for_test());
+        let mut b = SstableBuilder::new(default_builder_opt_for_test());
 
         for i in 0..TEST_KEYS_COUNT {
             b.add(
@@ -340,7 +340,7 @@ pub(super) mod tests {
         sstable_store: SstableStoreRef,
     ) -> Sstable {
         const REMOTE_DIR: &str = "test";
-        let mut b = SSTableBuilder::new(opts);
+        let mut b = SstableBuilder::new(opts);
 
         for i in 0..TEST_KEYS_COUNT {
             b.add(

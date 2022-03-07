@@ -260,7 +260,7 @@ mod tests {
     use crate::hummock::key::{prev_key, user_key};
     use crate::hummock::sstable::{SSTableIterator, Sstable};
     use crate::hummock::value::HummockValue;
-    use crate::hummock::{CachePolicy, ReverseSSTableIterator, SSTableBuilder, SstableStoreRef};
+    use crate::hummock::{CachePolicy, ReverseSSTableIterator, SstableBuilder, SstableStoreRef};
 
     #[tokio::test]
     async fn test_reverse_user_basic() {
@@ -846,7 +846,7 @@ mod tests {
             }
         }
         // We inject the key value pairs into the table.
-        let mut b = SSTableBuilder::new(default_builder_opt_for_test());
+        let mut b = SstableBuilder::new(default_builder_opt_for_test());
         for (key, inserts) in &truth {
             for (time, value) in inserts {
                 let full_key = key_with_epoch(key.clone(), *time);
@@ -929,7 +929,7 @@ mod tests {
         kv_pairs: Vec<(u64, usize, u64, HummockValue<Vec<u8>>)>,
         sstable_store: SstableStoreRef,
     ) -> Sstable {
-        let mut b = SSTableBuilder::new(default_builder_opt_for_test());
+        let mut b = SstableBuilder::new(default_builder_opt_for_test());
         for kv in kv_pairs {
             b.add(
                 key_range_test_key(kv.0, kv.1, kv.2).as_slice(),

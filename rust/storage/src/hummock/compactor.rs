@@ -19,7 +19,7 @@ use super::sstable_store::SstableStoreRef;
 use super::version_cmp::VersionedComparator;
 use super::{
     HummockError, HummockMetaClient, HummockOptions, HummockResult, HummockStorage, HummockValue,
-    LocalVersionManager, SSTableBuilder, SSTableIterator, Sstable,
+    LocalVersionManager, SSTableIterator, Sstable, SstableBuilder,
 };
 use crate::monitor::StateStoreStats;
 
@@ -142,7 +142,7 @@ impl Compactor {
     ) -> HummockResult<()>
     where
         B: FnMut() -> F,
-        F: Future<Output = HummockResult<(u64, SSTableBuilder)>>,
+        F: Future<Output = HummockResult<(u64, SstableBuilder)>>,
     {
         if !kr.left.is_empty() {
             iter.seek(&kr.left).await?;

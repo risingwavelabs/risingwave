@@ -4,11 +4,11 @@ use risingwave_pb::hummock::SstableMeta;
 
 use crate::hummock::key::{Epoch, FullKey};
 use crate::hummock::value::HummockValue;
-use crate::hummock::{HummockResult, SSTableBuilder};
+use crate::hummock::{HummockResult, SstableBuilder};
 
 struct SSTableBuilderWrapper {
     id: u64,
-    builder: SSTableBuilder,
+    builder: SstableBuilder,
     sealed: bool,
 }
 
@@ -28,7 +28,7 @@ pub struct CapacitySplitTableBuilder<B> {
 impl<B, F> CapacitySplitTableBuilder<B>
 where
     B: FnMut() -> F,
-    F: Future<Output = HummockResult<(u64, SSTableBuilder)>>,
+    F: Future<Output = HummockResult<(u64, SstableBuilder)>>,
 {
     /// Create a new [`CapacitySplitTableBuilder`] using given configuration generator.
     pub fn new(get_id_and_builder: B) -> Self {
@@ -142,7 +142,7 @@ mod tests {
         let get_id_and_builder = || async {
             Ok((
                 next_id.fetch_add(1, SeqCst),
-                SSTableBuilder::new(SSTableBuilderOptions {
+                SstableBuilder::new(SSTableBuilderOptions {
                     table_capacity,
                     block_size,
                     bloom_false_positive: 0.1,
@@ -170,7 +170,7 @@ mod tests {
         let mut builder = CapacitySplitTableBuilder::new(|| async {
             Ok((
                 next_id.fetch_add(1, SeqCst),
-                SSTableBuilder::new(default_builder_opt_for_test()),
+                SstableBuilder::new(default_builder_opt_for_test()),
             ))
         });
 
@@ -209,7 +209,7 @@ mod tests {
         let mut builder = CapacitySplitTableBuilder::new(|| async {
             Ok((
                 next_id.fetch_add(1, SeqCst),
-                SSTableBuilder::new(default_builder_opt_for_test()),
+                SstableBuilder::new(default_builder_opt_for_test()),
             ))
         });
 

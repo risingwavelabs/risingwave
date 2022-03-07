@@ -7,7 +7,7 @@ use std::sync::Arc;
 use super::variants::*;
 use crate::hummock::key::{key_with_epoch, user_key, Epoch};
 use crate::hummock::{
-    sstable_store, HummockResult, HummockValue, SSTableBuilder, SSTableBuilderOptions, Sstable,
+    sstable_store, HummockResult, HummockValue, SSTableBuilderOptions, Sstable, SstableBuilder,
 };
 use crate::object::{InMemObjectStore, ObjectStoreRef};
 
@@ -293,7 +293,7 @@ pub async fn gen_test_sstable_base(
     idx_mapping: impl Fn(usize) -> usize,
     sstable_store: SstableStoreRef,
 ) -> Sstable {
-    let mut b = SSTableBuilder::new(opts);
+    let mut b = SstableBuilder::new(opts);
 
     for i in 0..TEST_KEYS_COUNT {
         b.add(

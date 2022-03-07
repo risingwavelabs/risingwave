@@ -163,12 +163,12 @@ mod tests {
     use super::builder::tests::default_builder_opt_for_test;
     use super::*;
     use crate::hummock::value::HummockValue;
-    use crate::hummock::SSTableBuilder;
+    use crate::hummock::SstableBuilder;
 
     #[test]
     fn test_meta_enc_dec() {
         let options = default_builder_opt_for_test();
-        let mut builder = SSTableBuilder::new(options.clone());
+        let mut builder = SstableBuilder::new(options.clone());
         builder.add(b"test_key_0", HummockValue::Put(b"test_value_0"));
         builder.add(b"test_key_1", HummockValue::Put(b"test_value_1"));
         builder.add(b"test_key_2", HummockValue::Put(b"test_value_2"));

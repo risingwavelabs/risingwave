@@ -10,7 +10,7 @@ use crate::hummock::iterator::test_utils::{
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
 use crate::hummock::value::HummockValue;
-use crate::hummock::SSTableBuilder;
+use crate::hummock::SstableBuilder;
 use crate::object::{InMemObjectStore, ObjectStore};
 
 const TEST_KEY_TABLE_ID: u64 = 233;
@@ -28,7 +28,7 @@ async fn gen_and_upload_table(
     }
     let table_id = hummock_meta_client.get_new_table_id().await.unwrap();
 
-    let mut b = SSTableBuilder::new(default_builder_opt_for_test());
+    let mut b = SstableBuilder::new(default_builder_opt_for_test());
     for kv in kv_pairs {
         b.add(
             &iterator_test_key_of_epoch(TEST_KEY_TABLE_ID, kv.0, epoch),
@@ -78,7 +78,7 @@ async fn gen_and_upload_table_with_sstable_store(
     }
     let table_id = hummock_meta_client.get_new_table_id().await.unwrap();
 
-    let mut b = SSTableBuilder::new(default_builder_opt_for_test());
+    let mut b = SstableBuilder::new(default_builder_opt_for_test());
     for kv in kv_pairs {
         b.add(
             &iterator_test_key_of_epoch(TEST_KEY_TABLE_ID, kv.0, epoch),

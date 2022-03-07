@@ -203,7 +203,7 @@ mod tests {
     use bytes::{Bytes, BytesMut};
     use itertools::Itertools;
 
-    use super::super::{SSTableBuilder, SSTableBuilderOptions};
+    use super::super::{SSTableBuilderOptions, SstableBuilder};
     use super::*;
     use crate::hummock::{CachePolicy, HummockValue, Sstable, SstableStore};
     use crate::object::{InMemObjectStore, ObjectStore};
@@ -218,7 +218,7 @@ mod tests {
             checksum_algo: risingwave_pb::hummock::checksum::Algorithm::XxHash64,
         };
 
-        let mut b = SSTableBuilder::new(opt);
+        let mut b = SstableBuilder::new(opt);
         for i in 0..10 {
             b.add(
                 format!("key_test_{}", i).as_bytes(),
