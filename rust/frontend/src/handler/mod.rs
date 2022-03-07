@@ -2,7 +2,7 @@ use pgwire::pg_response::PgResponse;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{ObjectName, Statement};
 
-use crate::session::{ExecutionContext, SessionImpl};
+use crate::session::{QueryContext, SessionImpl};
 
 mod create_source;
 pub mod create_table;
@@ -10,7 +10,7 @@ pub mod drop_table;
 mod explain;
 
 pub(super) async fn handle(session: &SessionImpl, stmt: Statement) -> Result<PgResponse> {
-    let context = ExecutionContext::new(session);
+    let context = QueryContext::new(session);
     match stmt {
         Statement::Explain {
             statement, verbose, ..

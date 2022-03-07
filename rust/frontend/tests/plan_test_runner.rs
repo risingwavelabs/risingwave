@@ -4,7 +4,7 @@ use anyhow::{anyhow, Result};
 use frontend::binder::Binder;
 use frontend::handler::{create_table, drop_table};
 use frontend::planner::Planner;
-use frontend::session::ExecutionContext;
+use frontend::session::QueryContext;
 use frontend::test_utils::LocalFrontend;
 use risingwave_common::array::RwError;
 use risingwave_sqlparser::ast::{ObjectName, Statement};
@@ -25,7 +25,7 @@ impl TestCase {
         let session = frontend.session();
         let statements = Parser::parse_sql(&self.sql).unwrap();
         for stmt in statements {
-            let context = ExecutionContext::new(session);
+            let context = QueryContext::new(session);
             match stmt.clone() {
                 Statement::Query(_) | Statement::Insert { .. } => {
                     self.test_query(&stmt, context)?
@@ -43,7 +43,7 @@ impl TestCase {
         Ok(())
     }
 
-    fn test_query(&self, stmt: &Statement, context: ExecutionContext<'_>) -> Result<()> {
+    fn test_query(&self, stmt: &Statement, context: QueryContext<'_>) -> Result<()> {
         let session = context.session;
         let catalog = session
             .env()

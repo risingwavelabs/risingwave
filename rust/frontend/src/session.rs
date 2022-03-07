@@ -16,11 +16,11 @@ use crate::handler::handle;
 use crate::observer::observer_manager::{ObserverManager, UPDATE_FINISH_NOTIFICATION};
 use crate::scheduler::schedule::WorkerNodeManager;
 use crate::FrontendOpts;
-pub struct ExecutionContext<'a> {
+pub struct QueryContext<'a> {
     pub session: &'a SessionImpl,
 }
 
-impl<'a> ExecutionContext<'a> {
+impl<'a> QueryContext<'a> {
     pub fn new(session: &'a SessionImpl) -> Self {
         Self { session }
     }

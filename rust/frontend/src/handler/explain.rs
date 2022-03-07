@@ -6,10 +6,10 @@ use risingwave_sqlparser::ast::Statement;
 
 use crate::binder::Binder;
 use crate::planner::Planner;
-use crate::session::ExecutionContext;
+use crate::session::QueryContext;
 
 pub(super) fn handle_explain(
-    context: ExecutionContext<'_>,
+    context: QueryContext<'_>,
     stmt: Statement,
     _verbose: bool,
 ) -> Result<PgResponse> {
