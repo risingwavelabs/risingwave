@@ -21,6 +21,8 @@ pub enum HummockError {
     InvalidWriteBatch,
     #[error("SharedBuffer error {0}.")]
     SharedBufferError(String),
+    #[error("Other error {0}.")]
+    Other(String),
 }
 
 impl HummockError {
