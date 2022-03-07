@@ -23,7 +23,7 @@ use risingwave_source::*;
 use risingwave_storage::StateStore;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
-use crate::executor::monitor::DEFAULT_COMPUTE_STATS;
+use crate::executor::monitor::{DEFAULT_COMPUTE_STATS,StreamingMetrics};
 use crate::executor::{Executor, ExecutorBuilder, Message, PkIndices, PkIndicesRef};
 use crate::task::{ExecutorParams, StreamManagerCore};
 
@@ -70,6 +70,7 @@ pub struct SourceExecutor {
     attributes: Vec<KeyValue>,
 
     source_output_row_count: Counter<u64>,
+    metrics: Arc<StreamingMetrics>,
 }
 
 pub struct SourceExecutorBuilder {}
@@ -177,6 +178,7 @@ impl SourceExecutor {
                 .init(),
             op_info,
             reader_stream: None,
+            metrics:Arc::new(StreamingMetrics::new()),
         })
     }
 
@@ -269,6 +271,8 @@ impl Executor for SourceExecutor {
                 if !matches!(self.source_desc.source.as_ref(), SourceImpl::TableV2(_)) {
                     chunk = self.refill_row_id_column(chunk);
                 }
+                let source_identify = "Table_".to_string() + &self.source_id.table_id().to_string();
+                self.metrics.source_output_row_count.with_label_values(&[source_identify.as_str()]).inc_by(chunk.cardinality() as u64);
                 self.source_output_row_count
                     .add(chunk.cardinality() as u64, &self.attributes);
                 Ok(Message::Chunk(chunk))

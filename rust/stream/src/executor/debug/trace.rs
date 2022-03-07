@@ -1,5 +1,5 @@
 use std::fmt::{Debug, Formatter};
-
+use std::sync::Arc;
 use async_trait::async_trait;
 use opentelemetry::metrics::{Counter, MeterProvider};
 use opentelemetry::KeyValue;
@@ -7,7 +7,7 @@ use risingwave_common::error::Result;
 use tracing::event;
 use tracing_futures::Instrument;
 
-use crate::executor::monitor::DEFAULT_COMPUTE_STATS;
+use crate::executor::monitor::{DEFAULT_COMPUTE_STATS, StreamingMetrics};
 use crate::executor::{Executor, Message};
 
 /// `TraceExecutor` prints data passing in the stream graph to stdout.
@@ -32,7 +32,7 @@ pub struct TraceExecutor {
     /// attributes of the OpenTelemetry monitor
     attributes: Vec<KeyValue>,
     actor_row_count: Counter<u64>,
-
+    metrics: Arc<StreamingMetrics>,
     span_name: String,
 }
 
@@ -70,6 +70,7 @@ impl TraceExecutor {
                 .u64_counter("stream_actor_row_count")
                 .with_description("Total number of rows that have been ouput from each actor")
                 .init(),
+            metrics:Arc::new(StreamingMetrics::new()),
             span_name,
         }
     }
@@ -97,6 +98,7 @@ impl super::DebugExecutor for TraceExecutor {
             Ok(message) => {
                 if let Message::Chunk(ref chunk) = message {
                     if chunk.cardinality() > 0 {
+                        self.metrics.actor_row_count.with_label_values(&[self.actor_id.to_string().as_str()]).inc_by(chunk.cardinality() as u64);
                         self.actor_row_count
                             .add(chunk.cardinality() as u64, &self.attributes);
                         event!(tracing::Level::TRACE, prev = %input_desc, msg = "chunk", "input = \n{:#?}", chunk);
