@@ -1,6 +1,8 @@
 use risingwave_common::types::{DataType, ScalarImpl};
 
-use crate::expr::{to_conjunctions, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, Literal};
+use crate::expr::{
+    to_conjunctions, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, Literal,
+};
 
 #[derive(Debug, Clone)]
 pub struct Condition {
@@ -54,5 +56,11 @@ impl Condition {
                 .map(|expr| rewriter.rewrite_expr(expr))
                 .collect(),
         }
+    }
+
+    pub fn visit_expr(&self, visitor: &mut impl ExprVisitor) {
+        self.conjunctions
+            .iter()
+            .for_each(|expr| visitor.visit_expr(expr))
     }
 }

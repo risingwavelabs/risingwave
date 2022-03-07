@@ -2,6 +2,7 @@ extend = [
   {path = "rust/risedev/grafana.toml"},
   {path = "rust/risedev/prometheus.toml"},
   {path = "rust/risedev/minio.toml"},
+  {path = "rust/risedev/etcd.toml"},
   {path = "rust/risedev/jaeger.toml"},
   {path = "rust/risedev/risedev-components.toml"},
 ]
@@ -138,6 +139,7 @@ description = "Prepare playground by downloading necessary tools and build requi
 dependencies = [
   "download-minio",
   "download-mcli",
+  "download-etcd",
   "download-grafana",
   "download-prometheus",
   "download-jaeger",
@@ -215,6 +217,15 @@ dependencies = [
 command = "rust/target/${BUILD_MODE_DIR}/risedev-playground"
 args = ["dev-frontend"]
 description = "Start a RisingWave playground with dev-frontend config"
+
+[tasks.dev-meta-node]
+category = "RiseDev - Start"
+dependencies = [
+  "pre-start-playground"
+]
+command = "rust/target/${BUILD_MODE_DIR}/risedev-playground"
+args = ["dev-meta-node"]
+description = "Start a RisingWave playground with dev-meta-node config"
 
 [tasks.kill-playground]
 category = "RiseDev - Stop"

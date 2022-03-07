@@ -4,14 +4,14 @@ use risingwave_common::catalog::Schema;
 use risingwave_pb::plan::JoinType;
 
 use super::{
-    ColPrunable, IntoPlanRef, PlanRef, PlanTreeNodeBinary, StreamHashJoin, ToBatch, ToStream,
+    ColPrunable, LogicalProject, PlanRef, PlanTreeNodeBinary, StreamHashJoin, ToBatch, ToStream,
 };
 use crate::expr::ExprImpl;
 use crate::optimizer::plan_node::{
     BatchHashJoin, BatchSortMergeJoin, EqJoinPredicate, LogicalFilter,
 };
 use crate::optimizer::property::{Distribution, Order, WithDistribution, WithOrder, WithSchema};
-use crate::utils::Condition;
+use crate::utils::{ColIndexMapping, Condition};
 
 #[derive(Debug, Clone)]
 pub struct LogicalJoin {
@@ -47,7 +47,7 @@ impl LogicalJoin {
         join_type: JoinType,
         on_clause: ExprImpl,
     ) -> PlanRef {
-        Self::new(left, right, join_type, Condition::with_expr(on_clause)).into_plan_ref()
+        Self::new(left, right, join_type, Condition::with_expr(on_clause)).into()
     }
 
     fn derive_schema(left: &Schema, right: &Schema, join_type: JoinType) -> Schema {
@@ -92,7 +92,13 @@ impl WithSchema for LogicalJoin {
     }
 }
 
-impl ColPrunable for LogicalJoin {}
+impl ColPrunable for LogicalJoin {
+    fn prune_col(&self, required_cols: &fixedbitset::FixedBitSet) -> PlanRef {
+        // TODO: replace default impl
+        let mapping = ColIndexMapping::with_remaining_columns(required_cols);
+        LogicalProject::with_mapping(self.clone().into(), mapping).into()
+    }
+}
 
 impl ToBatch for LogicalJoin {
     fn to_batch_with_order_required(&self, _required_order: &Order) -> PlanRef {
@@ -119,11 +125,11 @@ impl ToBatch for LogicalJoin {
                     .left()
                     .to_batch_with_order_required(&right_required_order);
                 let new_logical = self.clone_with_left_right(new_left, new_right);
-                BatchSortMergeJoin::new(new_logical, predicate.clone()).into_plan_ref()
+                BatchSortMergeJoin::new(new_logical, predicate.clone()).into()
             } else {
                 let new_right = self.left().to_batch();
                 let new_logical = self.clone_with_left_right(new_left, new_right);
-                BatchHashJoin::new(new_logical, predicate.clone()).into_plan_ref()
+                BatchHashJoin::new(new_logical, predicate.clone()).into()
             };
 
             if need_pull_filter {
@@ -155,6 +161,6 @@ impl ToStream for LogicalJoin {
         let right = self
             .right()
             .to_stream_with_dist_required(&Distribution::HashShard(predicate.right_eq_indexes()));
-        StreamHashJoin::new(self.clone_with_left_right(left, right)).into_plan_ref()
+        StreamHashJoin::new(self.clone_with_left_right(left, right)).into()
     }
 }

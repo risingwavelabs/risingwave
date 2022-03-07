@@ -3,10 +3,10 @@ use std::fmt;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 
-use super::{ColPrunable, PlanRef, ToBatch, ToStream};
+use super::{ColPrunable, LogicalProject, PlanRef, ToBatch, ToStream};
 use crate::expr::{Expr, ExprImpl};
-use crate::optimizer::plan_node::IntoPlanRef;
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
+use crate::utils::ColIndexMapping;
 
 #[derive(Debug, Clone)]
 pub struct LogicalValues {
@@ -55,7 +55,13 @@ impl fmt::Display for LogicalValues {
     }
 }
 
-impl ColPrunable for LogicalValues {}
+impl ColPrunable for LogicalValues {
+    fn prune_col(&self, required_cols: &fixedbitset::FixedBitSet) -> PlanRef {
+        // TODO: replace default impl
+        let mapping = ColIndexMapping::with_remaining_columns(required_cols);
+        LogicalProject::with_mapping(self.clone().into(), mapping).into()
+    }
+}
 
 impl ToBatch for LogicalValues {
     fn to_batch(&self) -> PlanRef {

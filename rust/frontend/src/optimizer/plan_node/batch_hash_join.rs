@@ -3,8 +3,7 @@ use std::fmt;
 use risingwave_common::catalog::Schema;
 
 use super::{
-    EqJoinPredicate, IntoPlanRef, LogicalJoin, PlanRef, PlanTreeNodeBinary, ToBatchProst,
-    ToDistributedBatch,
+    EqJoinPredicate, LogicalJoin, PlanRef, PlanTreeNodeBinary, ToBatchProst, ToDistributedBatch,
 };
 use crate::optimizer::property::{Distribution, WithDistribution, WithOrder, WithSchema};
 
@@ -77,7 +76,7 @@ impl ToDistributedBatch for BatchHashJoin {
             &Distribution::HashShard(self.eq_join_predicate().right_eq_indexes()),
         );
 
-        self.clone_with_left_right(left, right).into_plan_ref()
+        self.clone_with_left_right(left, right).into()
     }
 }
 
