@@ -7,7 +7,6 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::{ensure, gen_error};
-use risingwave_storage::TableColumnDesc;
 
 use crate::table_v2::TableSourceV2;
 use crate::{HighLevelKafkaSource, SourceConfig, SourceFormat, SourceImpl, SourceParser};
@@ -24,11 +23,7 @@ pub trait SourceManager: Debug + Sync + Send {
         columns: Vec<SourceColumnDesc>,
         row_id_index: Option<usize>,
     ) -> Result<()>;
-    fn create_table_source_v2(
-        &self,
-        table_id: &TableId,
-        columns: Vec<TableColumnDesc>,
-    ) -> Result<()>;
+    fn create_table_source_v2(&self, table_id: &TableId, columns: Vec<ColumnDesc>) -> Result<()>;
     fn register_associated_materialized_view(
         &self,
         associated_table_id: &TableId,
@@ -48,8 +43,8 @@ pub struct SourceColumnDesc {
     pub skip_parse: bool,
 }
 
-impl From<&TableColumnDesc> for SourceColumnDesc {
-    fn from(c: &TableColumnDesc) -> Self {
+impl From<&ColumnDesc> for SourceColumnDesc {
+    fn from(c: &ColumnDesc) -> Self {
         Self {
             name: c.name.clone(),
             data_type: c.data_type.clone(),
@@ -113,11 +108,7 @@ impl SourceManager for MemSourceManager {
         Ok(())
     }
 
-    fn create_table_source_v2(
-        &self,
-        table_id: &TableId,
-        columns: Vec<TableColumnDesc>,
-    ) -> Result<()> {
+    fn create_table_source_v2(&self, table_id: &TableId, columns: Vec<ColumnDesc>) -> Result<()> {
         let mut sources = self.get_sources()?;
 
         ensure!(
@@ -207,7 +198,7 @@ mod tests {
     use risingwave_common::error::Result;
     use risingwave_common::types::DataType;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::{Keyspace, TableColumnDesc};
+    use risingwave_storage::Keyspace;
 
     use crate::*;
 
@@ -230,7 +221,7 @@ mod tests {
             properties: Default::default(),
         });
 
-        let columns = vec![TableColumnDesc::unnamed(ColumnId::from(0), DataType::Int64)];
+        let columns = vec![ColumnDesc::unnamed(ColumnId::from(0), DataType::Int64)];
         let source_columns = columns
             .iter()
             .map(|c| SourceColumnDesc {
@@ -282,7 +273,7 @@ mod tests {
             .fields
             .iter()
             .enumerate()
-            .map(|(i, f)| TableColumnDesc {
+            .map(|(i, f)| ColumnDesc {
                 data_type: f.data_type.clone(),
                 column_id: ColumnId::from(i as i32), // use column index as column id
                 name: f.name.clone(),

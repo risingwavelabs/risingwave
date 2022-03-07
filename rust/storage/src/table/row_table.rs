@@ -7,7 +7,7 @@ use risingwave_common::types::Datum;
 use risingwave_common::util::ordered::*;
 
 use super::TableIter;
-use crate::{IndexDesc, Keyspace, StateStore, TableColumnDesc};
+use crate::{ColumnDesc, IndexDesc, Keyspace, StateStore};
 
 /// `RowTable` is the interface accessing relational data in KV(`StateStore`) with encoding format:
 /// [keyspace | pk | `column_id` (4B)] -> value.
@@ -23,11 +23,11 @@ impl<S: StateStore> RowTable<S> {
         todo!()
     }
 
-    pub async fn get(&self, pk: Row, column: TableColumnDesc, epoch: u64) -> Result<Option<Datum>> {
+    pub async fn get(&self, pk: Row, column: ColumnDesc, epoch: u64) -> Result<Option<Datum>> {
         todo!()
     }
 
-    pub async fn get_row(&self, pk: Row, columns: Vec<TableColumnDesc>, epoch: u64) -> Result<Row> {
+    pub async fn get_row(&self, pk: Row, columns: Vec<ColumnDesc>, epoch: u64) -> Result<Row> {
         todo!()
     }
 }
@@ -40,7 +40,7 @@ pub struct RowTableRowIter<S: StateStore> {
 }
 
 impl<'a, S: StateStore> RowTableRowIter<S> {
-    async fn new(keyspace: Keyspace<S>, columns: Vec<TableColumnDesc>, epoch: u64) -> Result<Self> {
+    async fn new(keyspace: Keyspace<S>, columns: Vec<ColumnDesc>, epoch: u64) -> Result<Self> {
         todo!()
     }
     pub async fn next(&mut self) -> Result<Option<Row>> {

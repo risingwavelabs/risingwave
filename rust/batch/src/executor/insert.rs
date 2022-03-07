@@ -204,7 +204,7 @@ mod tests {
             .fields
             .iter()
             .enumerate()
-            .map(|(i, f)| TableColumnDesc {
+            .map(|(i, f)| ColumnDesc {
                 data_type: f.data_type.clone(),
                 column_id: ColumnId::from(i as i32), // use column index as column id
                 name: f.name.clone(),

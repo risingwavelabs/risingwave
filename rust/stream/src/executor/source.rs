@@ -322,7 +322,7 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
     use risingwave_source::*;
-    use risingwave_storage::TableColumnDesc;
+    use risingwave_storage::ColumnDesc;
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::*;
@@ -337,17 +337,17 @@ mod tests {
         let col2_type = DataType::Varchar;
 
         let table_columns = vec![
-            TableColumnDesc {
+            ColumnDesc {
                 column_id: ColumnId::from(0),
                 data_type: rowid_type.clone(),
                 name: String::new(),
             },
-            TableColumnDesc {
+            ColumnDesc {
                 column_id: ColumnId::from(1),
                 data_type: col1_type.clone(),
                 name: String::new(),
             },
-            TableColumnDesc {
+            ColumnDesc {
                 column_id: ColumnId::from(2),
                 data_type: col2_type.clone(),
                 name: String::new(),
@@ -478,17 +478,17 @@ mod tests {
         let col2_type = DataType::Varchar;
 
         let table_columns = vec![
-            TableColumnDesc {
+            ColumnDesc {
                 column_id: ColumnId::from(0),
                 data_type: rowid_type.clone(),
                 name: String::new(),
             },
-            TableColumnDesc {
+            ColumnDesc {
                 column_id: ColumnId::from(1),
                 data_type: col1_type.clone(),
                 name: String::new(),
             },
-            TableColumnDesc {
+            ColumnDesc {
                 column_id: ColumnId::from(2),
                 data_type: col2_type.clone(),
                 name: String::new(),

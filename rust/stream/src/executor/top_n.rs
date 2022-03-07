@@ -10,7 +10,7 @@ use risingwave_pb::plan::OrderType as ProstOrderType;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
-use risingwave_storage::{Keyspace, Segment, StateStore, TableColumnDesc};
+use risingwave_storage::{Keyspace, Segment, StateStore, ColumnDesc};
 
 use super::{ExecutorState, StatefulExecutor};
 use crate::executor::managed_state::top_n::variants::*;
@@ -136,7 +136,7 @@ impl<S: StateStore> TopNExecutor<S> {
             .iter()
             .enumerate()
             .map(|(id, data_type)| {
-                TableColumnDesc::unnamed(ColumnId::from(id as i32), data_type.clone())
+                ColumnDesc::unnamed(ColumnId::from(id as i32), data_type.clone())
             })
             .collect::<Vec<_>>();
         let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_column_descs);

@@ -6,7 +6,7 @@ use risingwave_pb::plan::create_table_node::Info;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::ColumnDesc;
 use risingwave_source::SourceManagerRef;
-use risingwave_storage::TableColumnDesc;
+use risingwave_storage::ColumnDesc;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::executor::{Executor, ExecutorBuilder};
@@ -66,7 +66,7 @@ impl Executor for CreateTableExecutor {
             .to_owned()
             .iter()
             .map(|col| {
-                Ok(TableColumnDesc {
+                Ok(ColumnDesc {
                     data_type: DataType::from(col.get_column_type()?),
                     column_id: ColumnId::from(col.get_column_id()),
                     name: col.get_name().to_string(),

@@ -9,12 +9,12 @@ use risingwave_common::util::ordered::{
     deserialize_cell, deserialize_column_id, NULL_ROW_SPECIAL_CELL_ID,
 };
 
-use crate::TableColumnDesc;
+use crate::ColumnDesc;
 
 #[derive(Clone)]
 pub struct CellBasedRowDeserializer {
     /// A mapping from column id to its desc and the index in the row.
-    columns: HashMap<ColumnId, (TableColumnDesc, usize)>,
+    columns: HashMap<ColumnId, (ColumnDesc, usize)>,
 
     data: Vec<Datum>,
 
@@ -25,7 +25,7 @@ pub struct CellBasedRowDeserializer {
 }
 
 impl CellBasedRowDeserializer {
-    pub fn new(table_column_descs: Vec<TableColumnDesc>) -> Self {
+    pub fn new(table_column_descs: Vec<ColumnDesc>) -> Self {
         let num_cells = table_column_descs.len();
         let columns = table_column_descs
             .into_iter()
@@ -92,7 +92,7 @@ mod tests {
     use risingwave_common::util::ordered::serialize_pk_and_row;
 
     use crate::cell_based_row_deserializer::CellBasedRowDeserializer;
-    use crate::TableColumnDesc;
+    use crate::ColumnDesc;
 
     #[test]
     fn test_cell_based_deserializer() {
@@ -103,10 +103,10 @@ mod tests {
             ColumnId::from(1),
         ];
         let table_column_descs = vec![
-            TableColumnDesc::unnamed(column_ids[0], DataType::Char),
-            TableColumnDesc::unnamed(column_ids[1], DataType::Int32),
-            TableColumnDesc::unnamed(column_ids[2], DataType::Int64),
-            TableColumnDesc::unnamed(column_ids[3], DataType::Float64),
+            ColumnDesc::unnamed(column_ids[0], DataType::Char),
+            ColumnDesc::unnamed(column_ids[1], DataType::Int32),
+            ColumnDesc::unnamed(column_ids[2], DataType::Int64),
+            ColumnDesc::unnamed(column_ids[3], DataType::Float64),
         ];
         let pk1 = vec![0u8, 0u8, 0u8, 0u8];
         let pk2 = vec![0u8, 0u8, 0u8, 1u8];

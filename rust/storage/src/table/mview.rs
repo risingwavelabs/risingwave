@@ -13,7 +13,7 @@ use risingwave_common::util::sort_util::OrderType;
 use super::TableIterRef;
 use crate::cell_based_row_deserializer::CellBasedRowDeserializer;
 use crate::table::{ScannableTable, TableIter};
-use crate::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl, TableColumnDesc};
+use crate::{dispatch_state_store, ColumnDesc, Keyspace, StateStore, StateStoreImpl};
 
 pub fn new_adhoc_mview_table(
     state_store: StateStoreImpl,
@@ -35,7 +35,7 @@ pub struct MViewTable<S: StateStore> {
 
     schema: Schema,
 
-    column_descs: Vec<TableColumnDesc>,
+    column_descs: Vec<ColumnDesc>,
 
     // TODO(bugen): this field is redundant since table should be scan-only
     pk_columns: Vec<usize>,
@@ -69,7 +69,7 @@ impl<S: StateStore> MViewTable<S> {
             .map(|(column_index, f)| {
                 // For mview, column id is exactly the index, so we perform conversion here.
                 let column_id = ColumnId::from(column_index as i32);
-                TableColumnDesc::unnamed(column_id, f.data_type.clone())
+                ColumnDesc::unnamed(column_id, f.data_type.clone())
             })
             .collect_vec();
 
@@ -89,7 +89,7 @@ impl<S: StateStore> MViewTable<S> {
         let column_descs = column_ids
             .iter()
             .zip_eq(fields.iter())
-            .map(|(column_id, field)| TableColumnDesc::unnamed(*column_id, field.data_type.clone()))
+            .map(|(column_id, field)| ColumnDesc::unnamed(*column_id, field.data_type.clone()))
             .collect();
 
         Self {
@@ -170,11 +170,7 @@ impl<'a, S: StateStore> MViewTableIter<S> {
     // TODO: adjustable limit
     const SCAN_LIMIT: usize = 1024;
 
-    async fn new(
-        keyspace: Keyspace<S>,
-        table_descs: Vec<TableColumnDesc>,
-        epoch: u64,
-    ) -> Result<Self> {
+    async fn new(keyspace: Keyspace<S>, table_descs: Vec<ColumnDesc>, epoch: u64) -> Result<Self> {
         keyspace.state_store().wait_epoch(epoch).await;
 
         let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_descs);
@@ -281,7 +277,7 @@ where
         Cow::Borrowed(&self.schema)
     }
 
-    fn column_descs(&self) -> Cow<[TableColumnDesc]> {
+    fn column_descs(&self) -> Cow<[ColumnDesc]> {
         Cow::Borrowed(&self.column_descs)
     }
 
