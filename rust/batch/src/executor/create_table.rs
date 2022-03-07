@@ -1,12 +1,11 @@
 use risingwave_common::array::DataChunk;
-use risingwave_common::catalog::{ColumnId, Schema, TableId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_pb::plan::create_table_node::Info;
 use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_pb::plan::ColumnDesc;
+use risingwave_pb::plan::ColumnDesc as ColumnDescProto;
 use risingwave_source::SourceManagerRef;
-use risingwave_storage::TableColumnDesc;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::executor::{Executor, ExecutorBuilder};
@@ -14,7 +13,7 @@ use crate::executor::{Executor, ExecutorBuilder};
 pub struct CreateTableExecutor {
     table_id: TableId,
     source_manager: SourceManagerRef,
-    table_columns: Vec<ColumnDesc>,
+    table_columns: Vec<ColumnDescProto>,
     identity: String,
 
     /// Other info for creating table.
@@ -25,7 +24,7 @@ impl CreateTableExecutor {
     pub fn new(
         table_id: TableId,
         source_manager: SourceManagerRef,
-        table_columns: Vec<ColumnDesc>,
+        table_columns: Vec<ColumnDescProto>,
         identity: String,
         info: Info,
     ) -> Self {
@@ -66,7 +65,7 @@ impl Executor for CreateTableExecutor {
             .to_owned()
             .iter()
             .map(|col| {
-                Ok(TableColumnDesc {
+                Ok(ColumnDesc {
                     data_type: DataType::from(col.get_column_type()?),
                     column_id: ColumnId::from(col.get_column_id()),
                     name: col.get_name().to_string(),
