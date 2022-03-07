@@ -2309,8 +2309,8 @@ impl Parser {
 
     pub fn parse_show(&mut self) -> Result<Statement, ParserError> {
         let is_show_table = self.parse_keyword(Keyword::TABLE);
-        let table_name = self.parse_object_name()?;
         if is_show_table {
+            let table_name = self.parse_object_name()?;
             Ok(Statement::ShowTable { table_name })
         } else {
             Ok(Statement::ShowVariable {

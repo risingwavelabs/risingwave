@@ -18,7 +18,7 @@ impl ColumnDesc {
     pub fn new(data_type: DataType) -> Self {
         ColumnDesc {
             data_type,
-            type_name: Some("".to_string()),
+            type_name: None,
             sub_name: "".to_string(),
             sub_type_name: vec![],
         }
@@ -26,14 +26,6 @@ impl ColumnDesc {
 
     pub fn data_type(&self) -> DataType {
         self.data_type.clone()
-    }
-
-    pub fn type_name(&self) -> String {
-        self.type_name.as_ref().unwrap().to_string()
-    }
-
-    pub fn sub_type_name(&self) -> Vec<ColumnDesc> {
-        self.sub_type_name.clone()
     }
 }
 
