@@ -110,10 +110,13 @@ impl Block {
         Ok(blk)
     }
 
+    /// Encode [`SstableMeta`] to bytes with the same pattern as data block.
     pub fn encode_meta(meta: &SstableMeta, checksum_algo: ChecksumAlg) -> HummockResult<Bytes> {
         let mut buf = BytesMut::with_capacity(DEFAULT_META_BUFFER_CAPACITY);
         meta.encode(&mut buf).map_err(HummockError::encode_error)?;
+        // meta entry offset
         buf.put_u32_le(0);
+        // meta entry len (always 1)
         buf.put_u32(1);
         let checksum = checksum(checksum_algo, &buf);
         checksum
