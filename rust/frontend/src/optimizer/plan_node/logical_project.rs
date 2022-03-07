@@ -268,7 +268,7 @@ mod tests {
                 Literal::new(None, ty.clone()).into(),
                 InputRef::new(0, DataType::Boolean).into(),
             ],
-            vec![None;3],
+            vec![None; 3],
         );
 
         assert!(outer.input().as_logical_scan().is_some());
