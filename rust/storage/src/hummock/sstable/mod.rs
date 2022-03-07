@@ -20,12 +20,16 @@ mod utils;
 
 use std::sync::Arc;
 
-use bytes::{Buf, Bytes};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use prost::Message;
+use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 use risingwave_pb::hummock::{Checksum, SstableMeta};
 use utils::verify_checksum;
 
 use super::{HummockError, HummockResult};
+use crate::hummock::sstable::utils::checksum;
+
+const DEFAULT_META_BUFFER_CAPACITY: usize = 4096;
 
 /// Block contains several entries. It can be obtained from an SST.
 #[derive(Default)]
@@ -105,9 +109,27 @@ impl Block {
 
         Ok(blk)
     }
+
+    pub fn encode_meta(meta: &SstableMeta, checksum_algo: ChecksumAlg) -> HummockResult<Bytes> {
+        let mut buf = BytesMut::with_capacity(DEFAULT_META_BUFFER_CAPACITY);
+        meta.encode(&mut buf).map_err(HummockError::encode_error)?;
+        let len = buf.len();
+        buf.put_u32_le(0);
+        buf.put_u32(len as u32);
+        let checksum = checksum(checksum_algo, &buf);
+        checksum
+            .encode(&mut buf)
+            .map_err(HummockError::encode_error)?;
+        buf.put_u32(checksum.encoded_len() as u32);
+        Ok(buf.freeze())
+    }
+
+    pub fn inner_data(&self) -> Bytes {
+        self.data.slice(..self.entries_index_start)
+    }
 }
 
-/// [`SSTable`] is a handle for accessing SST in [`TableManager`].
+/// [`Sstable`] is a handle for accessing SST in [`SstableStore`].
 pub struct Sstable {
     pub id: u64,
     pub meta: SstableMeta,

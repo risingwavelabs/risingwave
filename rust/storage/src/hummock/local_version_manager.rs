@@ -162,7 +162,10 @@ impl LocalVersionManager {
         for sst_id in sst_ids {
             ssts.push(Arc::new(Sstable {
                 id: *sst_id,
-                meta: self.sstable_store.meta(*sst_id).await?,
+                meta: self
+                    .sstable_store
+                    .meta(*sst_id, super::CachePolicy::Fill)
+                    .await?,
             }));
         }
         Ok(ssts)

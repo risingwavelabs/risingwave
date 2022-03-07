@@ -235,7 +235,11 @@ mod tests {
         let (data, meta) = b.finish();
 
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
-        let sstable_store = SstableStore::new(obj_client, REMOTE_DIR.to_string());
+        let sstable_store = SstableStore::new(
+            obj_client,
+            REMOTE_DIR.to_string(),
+            risingwave_pb::hummock::checksum::Algorithm::XxHash64,
+        );
         let sst = Sstable { id: 0, meta };
         sstable_store
             .put(&sst, data, CachePolicy::Fill)

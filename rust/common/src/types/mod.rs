@@ -326,7 +326,6 @@ pub fn serialize_datum_ref_not_null_into(
         .serialize(serializer)
 }
 
-// TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions.
 // TODO: specify `NULL FIRST` or `NULL LAST`.
 pub fn serialize_datum_into(
     datum: &Datum,
@@ -341,7 +340,6 @@ pub fn serialize_datum_into(
     Ok(())
 }
 
-// TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions.
 pub fn serialize_datum_not_null_into(
     datum: &Datum,
     serializer: &mut memcomparable::Serializer<impl BufMut>,
@@ -352,7 +350,6 @@ pub fn serialize_datum_not_null_into(
         .serialize(serializer)
 }
 
-// TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions.
 pub fn deserialize_datum_from(
     ty: &DataType,
     deserializer: &mut memcomparable::Deserializer<impl Buf>,
@@ -365,7 +362,6 @@ pub fn deserialize_datum_from(
     }
 }
 
-// TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions.
 pub fn deserialize_datum_not_null_from(
     ty: DataType,
     deserializer: &mut memcomparable::Deserializer<impl Buf>,

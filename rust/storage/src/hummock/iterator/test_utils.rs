@@ -321,7 +321,12 @@ pub fn mock_sstable_store() -> SstableStoreRef {
 
 pub fn mock_sstable_store_with_object_store(object_store: ObjectStoreRef) -> SstableStoreRef {
     let path = "test".to_string();
-    Arc::new(SstableStore::new(object_store, path))
+    // FIXME: Use default checksum algo here, refactor later.
+    Arc::new(SstableStore::new(
+        object_store,
+        path,
+        risingwave_pb::hummock::checksum::Algorithm::XxHash64,
+    ))
 }
 
 #[cfg(test)]

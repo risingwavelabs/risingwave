@@ -617,15 +617,20 @@ mod tests {
     }
 
     fn new_shared_buffer_manager() -> SharedBufferManager {
+        let hummock_options = HummockOptions::default_for_test();
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
-        let remote_dir = "/test";
-        let sstable_store = Arc::new(SstableStore::new(obj_client, remote_dir.to_string()));
+        let remote_dir = hummock_options.data_directory.clone();
+        let sstable_store = Arc::new(SstableStore::new(
+            obj_client,
+            remote_dir.to_string(),
+            hummock_options.checksum_algo.clone(),
+        ));
         let vm = Arc::new(LocalVersionManager::new(sstable_store.clone()));
         let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(Arc::new(
             MockHummockMetaService::new(),
         )));
         SharedBufferManager::new(
-            Arc::new(HummockOptions::default_for_test()),
+            Arc::new(hummock_options),
             vm,
             sstable_store,
             DEFAULT_STATE_STORE_STATS.clone(),

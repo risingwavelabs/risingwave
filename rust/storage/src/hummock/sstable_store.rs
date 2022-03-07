@@ -1,10 +1,8 @@
-// TODO(MrCroxx): This file needs to be refactored.
-
 use std::sync::Arc;
 
 use bytes::Bytes;
-use moka::future::Cache;
 use prost::Message;
+use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 use risingwave_pb::hummock::SstableMeta;
 
 use super::{Block, BlockCache, Sstable};
@@ -22,24 +20,21 @@ pub struct SstableStore {
     path: String,
     store: ObjectStoreRef,
     block_cache: BlockCache,
-    // TODO: meta is also supposed to be block, and meta cache will be removed.
-    meta_cache: Cache<u64, SstableMeta>,
+    checksum_algo: ChecksumAlg,
 }
 
 impl SstableStore {
-    pub fn new(store: ObjectStoreRef, path: String) -> Self {
+    pub fn new(store: ObjectStoreRef, path: String, checksum_algo: ChecksumAlg) -> Self {
         Self {
             path,
             store,
             block_cache: BlockCache::new(65536),
-            meta_cache: Cache::new(1024),
+            checksum_algo,
         }
     }
 
     pub async fn put(&self, sst: &Sstable, data: Bytes, policy: CachePolicy) -> HummockResult<()> {
-        // TODO(MrCroxx): Temporarily disable meta checksum. Make meta a normal block later and
-        // reuse block encoding later.
-        let meta = Bytes::from(sst.meta.encode_to_vec());
+        let meta = Block::encode_meta(&sst.meta, self.checksum_algo)?;
 
         let data_path = self.get_sst_data_path(sst.id);
         self.store
@@ -48,7 +43,7 @@ impl SstableStore {
             .map_err(HummockError::object_io_error)?;
 
         let meta_path = self.get_sst_meta_path(sst.id);
-        if let Err(e) = self.store.upload(&meta_path, meta).await {
+        if let Err(e) = self.store.upload(&meta_path, meta.clone()).await {
             self.store
                 .delete(&data_path)
                 .await
@@ -64,8 +59,10 @@ impl SstableStore {
                 let block = Block::decode(data.slice(offset..offset + len), offset)?;
                 self.block_cache
                     .insert(sst.id, block_idx as u64, block)
-                    .await
+                    .await;
             }
+            let meta_block = Block::decode(meta, 0).map_err(HummockError::decode_error)?;
+            self.block_cache.insert(sst.id, u64::MAX, meta_block).await;
         }
 
         Ok(())
@@ -110,28 +107,41 @@ impl SstableStore {
         }
     }
 
-    pub async fn meta(&self, sst_id: u64) -> HummockResult<SstableMeta> {
+    pub async fn meta(&self, sst_id: u64, policy: CachePolicy) -> HummockResult<SstableMeta> {
         // TODO(MrCroxx): meta should also be a `Block` later and managed in block cache.
-        if let Some(meta) = self.meta_cache.get(&sst_id) {
-            return Ok(meta);
-        }
-        let path = self.get_sst_meta_path(sst_id);
-        let buf = self
-            .store
-            .read(&path, None)
-            .await
-            .map_err(HummockError::object_io_error)?;
-        let meta = SstableMeta::decode(buf).map_err(HummockError::decode_error)?;
-        self.meta_cache.insert(sst_id, meta.clone()).await;
+
+        let fetch_meta = async move {
+            let path = self.get_sst_meta_path(sst_id);
+            let buf = self
+                .store
+                .read(&path, None)
+                .await
+                .map_err(HummockError::object_io_error)?;
+            Block::decode(buf, 0)
+        };
+
+        let meta_block = match policy {
+            CachePolicy::Fill => {
+                self.block_cache
+                    .get_or_insert_with(sst_id, u64::MAX, fetch_meta)
+                    .await
+            }
+            CachePolicy::NotFill => match self.block_cache.get(sst_id, u64::MAX) {
+                Some(block) => Ok(block),
+                None => fetch_meta.await,
+            },
+            CachePolicy::Disable => fetch_meta.await,
+        }?;
+
+        let meta =
+            SstableMeta::decode(meta_block.inner_data()).map_err(HummockError::decode_error)?;
         Ok(meta)
     }
 
-    // TODO(MrCroxx): Maybe use `&SSTable` directly?
     fn get_sst_meta_path(&self, sst_id: u64) -> String {
         format!("{}/{}.meta", self.path, sst_id)
     }
 
-    // TODO(MrCroxx): Maybe use `&SSTable` directly?
     fn get_sst_data_path(&self, sst_id: u64) -> String {
         format!("{}/{}.data", self.path, sst_id)
     }

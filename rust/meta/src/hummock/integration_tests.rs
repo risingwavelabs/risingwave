@@ -54,7 +54,11 @@ async fn get_hummock_storage() -> HummockStorage {
     };
     let hummock_meta_client = Arc::new(get_hummock_meta_client().await);
     let obj_client = Arc::new(InMemObjectStore::new());
-    let sstable_store = Arc::new(SstableStore::new(obj_client.clone(), remote_dir));
+    let sstable_store = Arc::new(SstableStore::new(
+        obj_client.clone(),
+        remote_dir,
+        options.checksum_algo,
+    ));
     let local_version_manager = Arc::new(LocalVersionManager::new(sstable_store.clone()));
     HummockStorage::with_default_stats(
         options.clone(),

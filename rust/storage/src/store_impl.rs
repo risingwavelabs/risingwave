@@ -84,10 +84,17 @@ impl StateStoreImpl {
                         unimplemented!("{} Hummock only supports s3 and minio for now.", other)
                     }
                 };
-
+                let checksum_algo = match config.checksum_algo.as_str() {
+                    "crc32c" => ChecksumAlg::Crc32c,
+                    "xxhash64" => ChecksumAlg::XxHash64,
+                    other => {
+                        unimplemented!("{} is not supported for Hummock", other)
+                    }
+                };
                 let sstable_store = Arc::new(SstableStore::new(
                     object_store,
                     config.data_directory.to_string(),
+                    checksum_algo,
                 ));
                 let inner = HummockStateStore::new(
                     HummockStorage::new(
@@ -96,13 +103,7 @@ impl StateStoreImpl {
                             block_size: config.block_size,
                             bloom_false_positive: config.bloom_false_positive,
                             data_directory: config.data_directory.to_string(),
-                            checksum_algo: match config.checksum_algo.as_str() {
-                                "crc32c" => ChecksumAlg::Crc32c,
-                                "xxhash64" => ChecksumAlg::XxHash64,
-                                other => {
-                                    unimplemented!("{} is not supported for Hummock", other)
-                                }
-                            },
+                            checksum_algo,
                         },
                         sstable_store.clone(),
                         Arc::new(LocalVersionManager::new(sstable_store)),
