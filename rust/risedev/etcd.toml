@@ -5,7 +5,8 @@ ETCD_SYSTEM = "${SYSTEM}"
 ETCD_VER = "v3.6.0-alpha.0" # Only v.3.6.0-alpha.0 supported darwin-arm64.
 ETCD_DOWNLOAD_URL_LINUX = "https://github.com/etcd-io/etcd/releases/download/${ETCD_VER}/etcd-${ETCD_VER}-${ETCD_SYSTEM}.tar.gz"
 ETCD_DOWNLOAD_URL_OTHER = "https://github.com/etcd-io/etcd/releases/download/${ETCD_VER}/etcd-${ETCD_VER}-${ETCD_SYSTEM}.zip"
-ETCD_DOWNLOAD_PATH = "${PREFIX_TMP}/etcd.tar.gz"
+ETCD_DOWNLOAD_PATH_LINUX = "${PREFIX_TMP}/etcd.tar.gz"
+ETCD_DOWNLOAD_PATH_OTHER = "${PREFIX_TMP}/etcd.zip"
 ETCD_RELEASE = "etcd-${ETCD_VER}-${ETCD_SYSTEM}"
 
 [tasks.download-etcd]
@@ -21,11 +22,11 @@ if [ -d "${PREFIX_BIN}/etcd" ]; then
 fi
 echo "Etcd Server not found, downloading"
 if [[ "$ETCD_SYSTEM" == linux* ]]; then
-    curl -L "${ETCD_DOWNLOAD_URL_LINUX}" -o "${ETCD_DOWNLOAD_PATH}"
-    tar -xf "${ETCD_DOWNLOAD_PATH}" -C "${PREFIX_TMP}"
+    curl -L "${ETCD_DOWNLOAD_URL_LINUX}" -o "${ETCD_DOWNLOAD_PATH_LINUX}"
+    tar -xf "${ETCD_DOWNLOAD_PATH_LINUX}" -C "${PREFIX_TMP}"
 else
-    curl -L "${ETCD_DOWNLOAD_URL_OTHER}" -o "${ETCD_DOWNLOAD_PATH}"
-    unzip "${ETCD_DOWNLOAD_PATH}" -d "${PREFIX_TMP}"
+    curl -L "${ETCD_DOWNLOAD_URL_OTHER}" -o "${ETCD_DOWNLOAD_PATH_OTHER}"
+    unzip "${ETCD_DOWNLOAD_PATH_OTHER}" -d "${PREFIX_TMP}"
 fi
 
 rm "${ETCD_DOWNLOAD_PATH}"
