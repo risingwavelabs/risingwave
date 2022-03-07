@@ -121,7 +121,9 @@ impl SstableStore {
             .read(&path, None)
             .await
             .map_err(HummockError::object_io_error)?;
-        SstableMeta::decode(buf).map_err(HummockError::decode_error)
+        let meta = SstableMeta::decode(buf).map_err(HummockError::decode_error)?;
+        self.meta_cache.insert(sst_id, meta.clone()).await;
+        Ok(meta)
     }
 
     // TODO(MrCroxx): Maybe use `&SSTable` directly?
