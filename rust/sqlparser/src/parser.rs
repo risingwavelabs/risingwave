@@ -308,8 +308,12 @@ impl Parser {
                     op: UnaryOperator::Not,
                     expr: Box::new(self.parse_subexpr(Self::UNARY_NOT_PREC)?),
                 }),
-                Keyword::ROW => Ok(Expr::Row(self.parse_parenthesized_exprs()?)),
-                Keyword::ARRAY => Ok(Expr::Array(self.parse_bracketed_exprs()?)),
+                Keyword::ROW => Ok(Expr::Row(
+                    self.parse_token_wrapped_exprs(&Token::LParen, &Token::RParen)?,
+                )),
+                Keyword::ARRAY => Ok(Expr::Array(
+                    self.parse_token_wrapped_exprs(&Token::LBracket, &Token::RBracket)?,
+                )),
                 // Here `w` is a word, check if it's a part of a multi-part
                 // identifier, a function call, or a simple identifier:
                 _ => match self.peek_token() {
@@ -389,7 +393,13 @@ impl Parser {
                 Ok(expr)
             }
 
-            Token::LBrace => Ok(Expr::Array(self.parse_braced_exprs()?)),
+            Token::LBrace => {
+                self.prev_token();
+                Ok(Expr::Array(self.parse_token_wrapped_exprs(
+                    &Token::LBrace,
+                    &Token::RBrace,
+                )?))
+            }
             unexpected => self.expected("an expression:", unexpected),
         }?;
 
@@ -1959,34 +1969,21 @@ impl Parser {
         }
     }
 
-    pub fn parse_parenthesized_exprs(&mut self) -> Result<Vec<Expr>, ParserError> {
-        if self.consume_token(&Token::LParen) {
+    /// Parse a comma-separated list from a wrapped expression
+    pub fn parse_token_wrapped_exprs(
+        &mut self,
+        left: &Token,
+        right: &Token,
+    ) -> Result<Vec<Expr>, ParserError> {
+        if self.consume_token(left) {
             let exprs = self.parse_comma_separated(Parser::parse_expr)?;
-            self.expect_token(&Token::RParen)?;
+            self.expect_token(right)?;
             Ok(exprs)
         } else {
-            self.expected("a list of expressions in parentheses", self.peek_token())
-        }
-    }
-
-    pub fn parse_bracketed_exprs(&mut self) -> Result<Vec<Expr>, ParserError> {
-        if self.consume_token(&Token::LBracket) {
-            let exprs = self.parse_comma_separated(Parser::parse_expr)?;
-            self.expect_token(&Token::RBracket)?;
-            Ok(exprs)
-        } else {
-            self.expected("an array of expressions in brackets", self.peek_token())
-        }
-    }
-
-    pub fn parse_braced_exprs(&mut self) -> Result<Vec<Expr>, ParserError> {
-        self.prev_token();
-        if self.consume_token(&Token::LBrace) {
-            let exprs = self.parse_comma_separated(Parser::parse_expr)?;
-            self.expect_token(&Token::RBrace)?;
-            Ok(exprs)
-        } else {
-            self.expected("an array of expressions in braces", self.peek_token())
+            self.expected(
+                format!("an array of expressions in {} and {}", left, right).as_str(),
+                self.peek_token(),
+            )
         }
     }
 
