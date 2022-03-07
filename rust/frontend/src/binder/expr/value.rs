@@ -12,8 +12,13 @@ impl Binder {
             Value::SingleQuotedString(s) => {
                 Ok(Literal::new(Some(ScalarImpl::Utf8(s)), DataType::Varchar))
             }
+            Value::Boolean(b) => self.bind_bool(b),
             _ => Err(ErrorCode::NotImplementedError(format!("{:?}", value)).into()),
         }
+    }
+
+    fn bind_bool(&mut self, b: bool) -> Result<Literal> {
+        Ok(Literal::new(Some(ScalarImpl::Bool(b)), DataType::Boolean))
     }
 
     fn bind_number(&mut self, s: String, _b: bool) -> Result<Literal> {

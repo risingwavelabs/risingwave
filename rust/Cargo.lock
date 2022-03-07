@@ -3974,6 +3974,7 @@ dependencies = [
  "env_logger",
  "log",
  "path-absolutize",
+ "similar",
  "tokio",
 ]
 

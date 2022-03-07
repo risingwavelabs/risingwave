@@ -1,3 +1,4 @@
+use risingwave_common::error::Result;
 use risingwave_common::expr::AggKind;
 use risingwave_common::types::DataType;
 
@@ -10,12 +11,20 @@ pub struct AggCall {
     inputs: Vec<ExprImpl>,
 }
 impl AggCall {
-    #![allow(unreachable_code)]
-    #![allow(unused_variables)]
     #![allow(clippy::diverging_sub_expression)]
-    pub fn new(agg_kind: AggKind, inputs: Vec<ExprImpl>) -> Option<Self> {
-        let return_type = todo!(); // should be derived from inputs
-        Some(AggCall {
+    /// Returns error if the function name matches with an existing function
+    /// but with illegal arguments. `Ok(None)` is returned when there's no matching
+    /// function.
+    pub fn new(agg_kind: AggKind, inputs: Vec<ExprImpl>) -> Result<Self> {
+        // TODO(TaoWu): Add arguments validator.
+        let return_type = match agg_kind {
+            AggKind::Min => inputs.get(0).unwrap().return_type(),
+            AggKind::Max => inputs.get(0).unwrap().return_type(),
+            AggKind::Sum => DataType::Int64,
+            AggKind::Count => DataType::Int64,
+            _ => todo!(),
+        }; // should be derived from inputs
+        Ok(AggCall {
             agg_kind,
             return_type,
             inputs,
