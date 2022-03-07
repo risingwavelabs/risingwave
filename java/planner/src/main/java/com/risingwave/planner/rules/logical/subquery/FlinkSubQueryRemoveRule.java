@@ -18,7 +18,11 @@
 
 package com.risingwave.planner.rules.logical.subquery;
 
+import static com.google.common.base.Verify.verify;
+
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Streams;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -34,6 +38,8 @@ import org.apache.calcite.plan.RelOptUtil;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.RelShuttleImpl;
 import org.apache.calcite.rel.core.Filter;
+import org.apache.calcite.rel.core.JoinRelType;
+import org.apache.calcite.rel.core.RelFactories;
 import org.apache.calcite.rel.logical.LogicalFilter;
 import org.apache.calcite.rel.logical.LogicalJoin;
 import org.apache.calcite.rel.logical.LogicalProject;
@@ -67,12 +73,12 @@ import org.apache.calcite.util.Util;
  * <p>This file is adapted from flink.
  */
 public class FlinkSubQueryRemoveRule extends RelOptRule {
+  public static final FlinkSubQueryRemoveRule SINGLETON = new FlinkSubQueryRemoveRule();
 
   public FlinkSubQueryRemoveRule(
-      RelOptRuleOperand operand,
-      RelBuilderFactory relBuilderFactory,
-      String description) {
-    super(operand, relBuilderFactory, description);
+  ) {
+    super(operandJ(Filter.class, null, RexUtil.SubQueryFinder.FILTER_PREDICATE, any()),
+        RelFactories.LOGICAL_BUILDER, "FlinkSubQueryRemoveRule:Filter");
   }
 
   public void onMatch(RelOptRuleCall call) {
@@ -86,39 +92,37 @@ public class FlinkSubQueryRemoveRule extends RelOptRule {
       return;
     }
 
-    var subQueryCall = findSubQuery(condition)
-    if (subQueryCall.isEmpty) {
+    var subQueryCall = findSubQuery(condition);
+    if (subQueryCall.isEmpty()) {
       // ignore scalar query
-      return
+      return;
     }
 
-    var decorrelate = SubQueryDecorrelator.decorrelateQuery(filter)
+    var decorrelate = SubQueryDecorrelator.decorrelateQuery(filter);
     if (decorrelate == null) {
       // can't handle the query
-      return
+      return;
     }
 
-    var relBuilder = call.builder.asInstanceOf[FlinkRelBuilder]
-    relBuilder.push(filter.getInput) // push join left
+    var relBuilder = (RelBuilder) call.builder();
+    relBuilder.push(filter.getInput()); // push join left
 
-    var newCondition = handleSubQuery(subQueryCall.get, condition, relBuilder, decorrelate)
-    newCondition match {
-      case Some(c) =>
-        if (hasCorrelatedExpressions(c)) {
-          // some correlated expressions can not be replaced in this rule,
-          // so we must keep the VariablesSet for decorrelating later in new filter
-          // RelBuilder.filter can not create Filter with VariablesSet arg
-          var newFilter = filter.copy(filter.getTraitSet, relBuilder.build(), c)
-          relBuilder.push(newFilter)
-        } else {
-          // all correlated expressions are replaced,
-          // so we can create a new filter without any VariablesSet
-          relBuilder.filter(c)
-        }
-        relBuilder.project(fields(relBuilder, filter.getRowType.getFieldCount))
-        call.transformTo(relBuilder.build)
-      case _ => // do nothing
-    }
+    var newCondition = handleSubQuery(subQueryCall.get(), condition, relBuilder, decorrelate);
+    newCondition.ifPresent(c -> {
+      if (hasCorrelatedExpressions(Lists.newArrayList(c))) {
+        // some correlated expressions can not be replaced in this rule,
+        // so we must keep the VariablesSet for decorrelating later in new filter
+        // RelBuilder.filter can not create Filter with VariablesSet arg
+        var newFilter = filter.copy(filter.getTraitSet(), relBuilder.build(), c);
+        relBuilder.push(newFilter);
+      } else {
+        // all correlated expressions are replaced,
+        // so we can create a new filter without any VariablesSet
+        relBuilder.filter(c);
+      }
+      relBuilder.project(fields(relBuilder, filter.getRowType().getFieldCount()));
+      call.transformTo(relBuilder.build());
+    });
   }
 
   private Optional<RexNode> handleSubQuery(
@@ -133,17 +137,18 @@ public class FlinkSubQueryRemoveRule extends RelOptRule {
       return Optional.empty();
     }
 
-    var target = apply(subQueryCall, relBuilder, decorrelate)
-    if (target.isEmpty) {
-      return None
+    var target = apply(subQueryCall, relBuilder, decorrelate);
+    if (target.isEmpty()) {
+      return Optional.empty();
     }
 
-    var newCondition = replaceSubQuery(condition, subQueryCall, target.get)
-    var nextSubQueryCall = findSubQuery(newCondition)
-    nextSubQueryCall match {
-    case Some(subQuery) =>handleSubQuery(subQuery, newCondition, relBuilder, decorrelate)
-    case _ =>Some(newCondition)
-  }
+    var newCondition = replaceSubQuery(condition, subQueryCall, target.get());
+    var nextSubQueryCall = findSubQuery(newCondition);
+    if (nextSubQueryCall.isPresent()) {
+      return handleSubQuery(nextSubQueryCall.get(), newCondition, relBuilder, decorrelate);
+    } else {
+      return Optional.of(newCondition);
+    }
   }
 
   private Optional<RexNode> apply(
@@ -162,121 +167,128 @@ public class FlinkSubQueryRemoveRule extends RelOptRule {
 
     var equivarent = decorrelate.getSubQueryEquivalent(subQuery);
 
-    subQuery.getKind match {
-    // IN and NOT IN
-    //
-    // NOT IN is a NULL-aware (left) anti join e.g. col NOT IN expr Construct the condition.
-    // A NULL in one of the conditions is regarded as a positive result;
-    // such a row will be filtered out by the Anti-Join operator.
-    //
-    // Rewrite logic for NOT IN:
-    // Expand the NOT IN expression with the NULL-aware semantic to its full form.
-    // That is from:
-    //   (a1,a2,...) = (b1,b2,...)
-    // to
-    //   (a1=b1 OR isnull(a1=b1)) AND (a2=b2 OR isnull(a2=b2)) AND ...
-    //
-    // After that, add back the correlated join predicate(s) in the subquery
-    // Example:
-    // SELECT ... FROM A WHERE A.A1 NOT IN (SELECT B.B1 FROM B WHERE B.B2 = A.A2 AND B.B3 > 1)
-    // will have the final conditions in the ANTI JOIN as
-    // (A.A1 = B.B1 OR ISNULL(A.A1 = B.B1)) AND (B.B2 = A.A2)
-    case SqlKind.IN =>
-      // TODO:
-      // Calcite does not support project with correlated expressions.
-      // e.g.
-      // SELECT b FROM l WHERE (
-      // CASE WHEN a IN (SELECT i FROM t1 WHERE l.b = t1.j) THEN 1 ELSE 2 END)
-      // IN (SELECT d FROM r)
+    switch (subQuery.getKind()) {
+      // IN and NOT IN
       //
-      // we can not create project with VariablesSet arg, and
-      // the result of RelDecorrelator is also wrong.
-      if (hasCorrelatedExpressions(subQuery.getOperands:_ *)){
-      return None
-    }
-
-    var(newRight, joinCondition) = if (equivarent != null) {
-      // IN has correlation variables
-      (equivarent.getKey, Some(equivarent.getValue))
-    } else {
-      // IN has no correlation variables
-      (subQuery.rel, None)
-    }
-    // adds projection if the operands of IN contains non-RexInputRef nodes
-    // e.g. SELECT * FROM l WHERE a + 1 IN (SELECT c FROM r)
-    var(newOperands, newJoinCondition) =
-        handleSubQueryOperands(subQuery, joinCondition, relBuilder)
-    var leftFieldCount = relBuilder.peek().getRowType.getFieldCount
-
-    relBuilder.push(newRight) // push join right
-
-    var joinConditions = newOperands
-        .zip(relBuilder.fields())
-        .map {
-      case (op, f) =>
-        var inCondition = relBuilder.equals(op, RexUtil.shift(f, leftFieldCount))
-        if (withNot) {
-          relBuilder.or(inCondition, relBuilder.isNull(inCondition))
-        } else {
-          inCondition
+      // NOT IN is a NULL-aware (left) anti join e.g. col NOT IN expr Construct the condition.
+      // A NULL in one of the conditions is regarded as a positive result;
+      // such a row will be filtered out by the Anti-Join operator.
+      //
+      // Rewrite logic for NOT IN:
+      // Expand the NOT IN expression with the NULL-aware semantic to its full form.
+      // That is from:
+      //   (a1,a2,...) = (b1,b2,...)
+      // to
+      //   (a1=b1 OR isnull(a1=b1)) AND (a2=b2 OR isnull(a2=b2)) AND ...
+      //
+      // After that, add back the correlated join predicate(s) in the subquery
+      // Example:
+      // SELECT ... FROM A WHERE A.A1 NOT IN (SELECT B.B1 FROM B WHERE B.B2 = A.A2 AND B.B3 > 1)
+      // will have the final conditions in the ANTI JOIN as
+      // (A.A1 = B.B1 OR ISNULL(A.A1 = B.B1)) AND (B.B2 = A.A2)
+      case IN: {
+        // TODO:
+        // Calcite does not support project with correlated expressions.
+        // e.g.
+        // SELECT b FROM l WHERE (
+        // CASE WHEN a IN (SELECT i FROM t1 WHERE l.b = t1.j) THEN 1 ELSE 2 END)
+        // IN (SELECT d FROM r)
+        //
+        // we can not create project with VariablesSet arg, and
+        // the result of RelDecorrelator is also wrong.
+        if (hasCorrelatedExpressions(subQuery.getOperands())) {
+          return Optional.empty();
         }
-    }.toBuffer
 
-    newJoinCondition.foreach(joinConditions += _)
+        RelNode newRight;
+        Optional<RexNode> joinCondition;
+        if (equivarent != null) {
+          newRight = equivarent.getKey();
+          joinCondition = Optional.of(equivarent.getValue());
+        } else {
+          newRight = subQuery.rel;
+          joinCondition = Optional.empty();
+        }
 
-    if (withNot) {
-      relBuilder.join(JoinRelType.ANTI, joinConditions)
-    } else {
-      relBuilder.join(JoinRelType.SEMI, joinConditions)
-    }
-    Some(relBuilder.literal(true))
+        // adds projection if the operands of IN contains non-RexInputRef nodes
+        // e.g. SELECT * FROM l WHERE a + 1 IN (SELECT c FROM r)
+        var tmp = handleSubQueryOperands(subQuery, joinCondition, relBuilder);
+        var newOperands = tmp.getKey();
+        var newJoinCondition = tmp.getValue();
 
-    // EXISTS and NOT EXISTS
-    case SqlKind.EXISTS =>
-      var joinCondition = if (equivarent != null) {
-      // EXISTS has correlation variables
-      relBuilder.push(equivarent.getKey) // push join right
-      require(equivarent.getValue != null)
-      equivarent.getValue
-    } else {
-      // EXISTS has no correlation variables
-      //
-      // e.g. (table `l` has two columns: `a`, `b`, and table `r` has two columns: `c`, `d`)
-      // SELECT * FROM l WHERE EXISTS (SELECT * FROM r)
-      // which can be converted to:
-      //
-      // LogicalProject(a=[$0], b=[$1])
-      //  LogicalJoin(condition=[$2], joinType=[semi])
-      //    LogicalTableScan(table=[[builtin, default, l]])
-      //    LogicalProject($f0=[IS NOT NULL($0)])
-      //     LogicalAggregate(group=[{}], m=[MIN($0)])
-      //       LogicalProject(i=[true])
-      //         LogicalTableScan(table=[[builtin, default, r]])
-      //
-      // MIN($0) will return null when table `r` is empty,
-      // so add LogicalProject($f0=[IS NOT NULL($0)]) to check null varue
-      var leftFieldCount = relBuilder.peek().getRowType.getFieldCount
-      relBuilder.push(subQuery.rel) // push join right
-      // adds LogicalProject(i=[true]) to join right
-      relBuilder.project(relBuilder.alias(relBuilder.literal(true), "i"))
-      // adds LogicalAggregate(group=[{}], agg#0=[MIN($0)]) to join right
-      relBuilder.aggregate(relBuilder.groupKey(), relBuilder.min("m", relBuilder.field(0)))
-      // adds LogicalProject($f0=[IS NOT NULL($0)]) to check null varue
-      relBuilder.project(relBuilder.isNotNull(relBuilder.field(0)))
-      var fieldType = relBuilder.peek().getRowType.getFieldList.get(0).getType
-      // join condition references project result directly
-      new RexInputRef(leftFieldCount, fieldType)
-    }
+        var leftFieldCount = relBuilder.peek().getRowType().getFieldCount();
 
-      if (withNot) {
-        relBuilder.join(JoinRelType.ANTI, joinCondition)
-      } else {
-        relBuilder.join(JoinRelType.SEMI, joinCondition)
+        relBuilder.push(newRight); // push join right
+
+        var joinConditions = Streams.zip(newOperands.stream(),
+            relBuilder.fields().stream(),
+            (op, f) -> {
+              var inCondition = relBuilder.equals(op, RexUtil.shift(f, leftFieldCount));
+              if (withNot) {
+                return relBuilder.or(inCondition, relBuilder.isNull(inCondition));
+              } else {
+                return inCondition;
+              }
+            }).collect(Collectors.toList());
+
+        newJoinCondition.ifPresent(x -> joinConditions.add(x));
+
+        if (withNot) {
+          relBuilder.join(JoinRelType.ANTI, joinConditions);
+        } else {
+          relBuilder.join(JoinRelType.SEMI, joinConditions);
+        }
+        return Optional.of(relBuilder.literal(true));
       }
-      Some(relBuilder.literal(true))
 
-    case _ =>None
-  }
+      // EXISTS and NOT EXISTS
+      case EXISTS: {
+        RexNode joinCondition;
+        if (equivarent != null) {
+          // EXISTS has correlation variables
+          relBuilder.push(equivarent.getKey()); // push join right
+          verify(equivarent.getValue() != null);
+          joinCondition = equivarent.getValue();
+        } else {
+          // EXISTS has no correlation variables
+          //
+          // e.g. (table `l` has two columns: `a`, `b`, and table `r` has two columns: `c`, `d`)
+          // SELECT * FROM l WHERE EXISTS (SELECT * FROM r)
+          // which can be converted to:
+          //
+          // LogicalProject(a=[$0], b=[$1])
+          //  LogicalJoin(condition=[$2], joinType=[semi])
+          //    LogicalTableScan(table=[[builtin, default, l]])
+          //    LogicalProject($f0=[IS NOT NULL($0)])
+          //     LogicalAggregate(group=[{}], m=[MIN($0)])
+          //       LogicalProject(i=[true])
+          //         LogicalTableScan(table=[[builtin, default, r]])
+          //
+          // MIN($0) will return null when table `r` is empty,
+          // so add LogicalProject($f0=[IS NOT NULL($0)]) to check null varue
+          var leftFieldCount = relBuilder.peek().getRowType().getFieldCount();
+          relBuilder.push(subQuery.rel); // push join right
+          // adds LogicalProject(i=[true]) to join right
+          relBuilder.project(relBuilder.alias(relBuilder.literal(true), "i"));
+          // adds LogicalAggregate(group=[{}], agg#0=[MIN($0)]) to join right
+          relBuilder.aggregate(relBuilder.groupKey(), relBuilder.min("m", relBuilder.field(0)));
+          // adds LogicalProject($f0=[IS NOT NULL($0)]) to check null varue
+          relBuilder.project(relBuilder.isNotNull(relBuilder.field(0)));
+          var fieldType = relBuilder.peek().getRowType().getFieldList().get(0).getType();
+          // join condition references project result directly
+          joinCondition = new RexInputRef(leftFieldCount, fieldType);
+        }
+
+        if (withNot) {
+          relBuilder.join(JoinRelType.ANTI, joinCondition);
+        } else {
+          relBuilder.join(JoinRelType.SEMI, joinCondition);
+        }
+        return Optional.of(relBuilder.literal(true));
+      }
+      default:
+        return Optional.empty();
+    }
   }
 
   private List<RexNode> fields(RelBuilder builder, int fieldCount) {
@@ -364,7 +376,7 @@ public class FlinkSubQueryRemoveRule extends RelOptRule {
       RelBuilder relBuilder) {
     var operands = subQuery.getOperands();
     // operands is empty or all operands are RexInputRef
-    if (operands.isEmpty() || operands.stream().allMatch(x -> x instanceof RexInputRef) {
+    if (operands.isEmpty() || operands.stream().allMatch(x -> x instanceof RexInputRef)) {
       return Pair.of(operands, joinCondition);
     }
 
@@ -501,12 +513,3 @@ public class FlinkSubQueryRemoveRule extends RelOptRule {
     return found;
   }
 }
-
-  object FlinkSubQueryRemoveRule {
-
-    var FILTER=new FlinkSubQueryRemoveRule(
-    operandJ(classOf[Filter],null,RexUtil.SubQueryFinder.FILTER_PREDICATE,any),
-    FlinkRelFactories.FLINK_REL_BUILDER,
-    "FlinkSubQueryRemoveRule:Filter")
-
-    }
