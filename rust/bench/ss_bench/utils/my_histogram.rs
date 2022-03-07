@@ -1,7 +1,6 @@
 use std::fmt::{Display, Formatter};
 
 use itertools::Itertools;
-use prometheus::core::{AtomicU64, Collector, GenericCounter, Metric};
 use prometheus::proto::Histogram;
 
 pub(crate) struct MyHistogram {
@@ -105,6 +104,7 @@ impl Display for MyHistogram {
 
 #[cfg(test)]
 mod tests {
+    use prometheus::core::Metric;
     use prometheus::{histogram_opts, register_histogram_with_registry, Registry};
 
     use super::*;
