@@ -20,6 +20,8 @@ echo "MinIO Server not found, downloading"
 curl -fL -o "${PREFIX_TMP}/minio" "${MINIO_DOWNLOAD_BIN}"
 chmod +x "${PREFIX_TMP}/minio"
 mv "${PREFIX_TMP}/minio" "${PREFIX_BIN}/minio"
+
+"${PREFIX_BIN}/minio" --version
 '''
 
 [tasks.download-mcli]
@@ -37,4 +39,6 @@ echo "MinIO Client not found, downloading"
 curl -fL -o "${PREFIX_TMP}/mcli" "${MCLI_DOWNLOAD_BIN}"
 chmod +x "${PREFIX_TMP}/mcli"
 mv "${PREFIX_TMP}/mcli" "${PREFIX_BIN}/mcli"
+
+"${PREFIX_BIN}/mcli" --version
 '''

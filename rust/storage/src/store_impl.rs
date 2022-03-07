@@ -1,7 +1,6 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use moka::future::Cache;
 use risingwave_common::array::RwError;
 use risingwave_common::config::StorageConfig;
 use risingwave_common::error::Result;
@@ -86,7 +85,7 @@ impl StateStoreImpl {
                     }
                 };
 
-                let sstable_manager = Arc::new(SstableStore::new(
+                let sstable_store = Arc::new(SstableStore::new(
                     object_store,
                     config.data_directory.to_string(),
                 ));
@@ -105,13 +104,8 @@ impl StateStoreImpl {
                                 }
                             },
                         },
-                        sstable_manager.clone(),
-                        Arc::new(LocalVersionManager::new(
-                            sstable_manager,
-                            // TODO: configurable block cache in config
-                            // 1GB block cache (65536 blocks * 64KB block)
-                            Some(Arc::new(Cache::new(65536))),
-                        )),
+                        sstable_store.clone(),
+                        Arc::new(LocalVersionManager::new(sstable_store)),
                         Arc::new(RpcHummockMetaClient::new(meta_client, stats.clone())),
                         stats.clone(),
                     )

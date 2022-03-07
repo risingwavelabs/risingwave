@@ -2,7 +2,7 @@ use std::env;
 use std::path::Path;
 use std::process::Command;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
 use super::{ExecuteContext, Task};
 use crate::MetaNodeConfig;
@@ -40,6 +40,24 @@ impl Task for MetaNodeService {
             "{}:{}",
             self.config.exporter_address, self.config.exporter_port
         ));
+
+        match self.config.provide_etcd_backend.as_ref().map(|v| &v[..]) {
+            Some([]) => {
+                cmd.arg("--backend").arg("mem");
+            }
+            Some([etcd]) => {
+                cmd.arg("--backend")
+                    .arg("etcd")
+                    .arg("--etcd-endpoints")
+                    .arg(format!("{}:{}", etcd.address, etcd.port));
+            }
+            _ => {
+                return Err(anyhow!(
+                    "unexpected etcd config {:?}",
+                    self.config.provide_etcd_backend
+                ))
+            }
+        }
 
         if !self.config.user_managed {
             ctx.run_command(ctx.tmux_run(cmd)?)?;

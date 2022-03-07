@@ -112,11 +112,11 @@ ENABLE_BUILD_FRONTEND=true
 This environment file will then be read by cargo-make, which decides whether or not to run a step.
 
 ```
-[cargo-make] INFO - Skipping Task: check-risedev-configured 
+[cargo-make] INFO - Skipping Task: check-risedev-configured
 [cargo-make] INFO - Running Task: download-minio
 [cargo-make] INFO - Running Task: download-mcli
-[cargo-make] INFO - Skipping Task: download-grafana 
-[cargo-make] INFO - Skipping Task: download-prometheus 
+[cargo-make] INFO - Skipping Task: download-grafana
+[cargo-make] INFO - Skipping Task: download-prometheus
 [cargo-make] INFO - Running Task: build-risingwave
 ```
 

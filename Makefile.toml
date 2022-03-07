@@ -2,6 +2,7 @@ extend = [
   {path = "rust/risedev/grafana.toml"},
   {path = "rust/risedev/prometheus.toml"},
   {path = "rust/risedev/minio.toml"},
+  {path = "rust/risedev/etcd.toml"},
   {path = "rust/risedev/jaeger.toml"},
   {path = "rust/risedev/risedev-components.toml"},
 ]
@@ -138,6 +139,7 @@ description = "Prepare playground by downloading necessary tools and build requi
 dependencies = [
   "download-minio",
   "download-mcli",
+  "download-etcd",
   "download-grafana",
   "download-prometheus",
   "download-jaeger",

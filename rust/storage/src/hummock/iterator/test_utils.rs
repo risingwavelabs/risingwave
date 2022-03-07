@@ -7,7 +7,7 @@ use std::sync::Arc;
 use super::variants::*;
 use crate::hummock::key::{key_with_epoch, user_key, Epoch};
 use crate::hummock::{
-    sstable_manager, HummockResult, HummockValue, SSTableBuilder, SSTableBuilderOptions, Sstable,
+    sstable_store, HummockResult, HummockValue, SSTableBuilder, SSTableBuilderOptions, Sstable,
 };
 use crate::object::{InMemObjectStore, ObjectStoreRef};
 
@@ -162,7 +162,7 @@ macro_rules! test_key {
     };
 }
 
-use sstable_manager::{SstableStore, SstableStoreRef};
+use sstable_store::{CachePolicy, SstableStore, SstableStoreRef};
 pub(crate) use test_key;
 
 pub type TestIterator = TestIteratorInner<FORWARD>;
@@ -279,9 +279,9 @@ pub fn test_value_of(table: u64, idx: usize) -> Vec<u8> {
 pub async fn gen_test_sstable(
     table_idx: u64,
     opts: SSTableBuilderOptions,
-    sstable_manager: SstableStoreRef,
+    sstable_store: SstableStoreRef,
 ) -> Sstable {
-    gen_test_sstable_base(table_idx, opts, |x| x, sstable_manager).await
+    gen_test_sstable_base(table_idx, opts, |x| x, sstable_store).await
 }
 
 /// Generate a test table used in almost all table-related tests. Developers may verify the
@@ -291,7 +291,7 @@ pub async fn gen_test_sstable_base(
     table_idx: u64,
     opts: SSTableBuilderOptions,
     idx_mapping: impl Fn(usize) -> usize,
-    sstable_manager: SstableStoreRef,
+    sstable_store: SstableStoreRef,
 ) -> Sstable {
     let mut b = SSTableBuilder::new(opts);
 
@@ -302,21 +302,24 @@ pub async fn gen_test_sstable_base(
         );
     }
 
-    // get remote table
     let (data, meta) = b.finish();
-    sstable_manager.put(table_idx, &meta, data).await.unwrap();
-    Sstable {
+    let sst = Sstable {
         id: table_idx,
         meta,
-    }
+    };
+    sstable_store
+        .put(&sst, data, CachePolicy::Fill)
+        .await
+        .unwrap();
+    sst
 }
 
-pub fn mock_sstable_manager() -> SstableStoreRef {
+pub fn mock_sstable_store() -> SstableStoreRef {
     let object_store = Arc::new(InMemObjectStore::new());
-    mock_sstable_manager_with_object_store(object_store)
+    mock_sstable_store_with_object_store(object_store)
 }
 
-pub fn mock_sstable_manager_with_object_store(object_store: ObjectStoreRef) -> SstableStoreRef {
+pub fn mock_sstable_store_with_object_store(object_store: ObjectStoreRef) -> SstableStoreRef {
     let path = "test".to_string();
     Arc::new(SstableStore::new(object_store, path))
 }
