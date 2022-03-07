@@ -1,3 +1,5 @@
+// NOTICE: `Substitute` is adapted from the [RisingLight](https://github.com/risinglightdb/risinglight/blob/53ccdf96f36267c4703386577eeeff1da18bdf13/src/optimizer/plan_nodes/logical_projection.rs) project.
+
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
@@ -23,6 +25,19 @@ pub struct LogicalProject {
 
 impl LogicalProject {
     fn new(input: PlanRef, exprs: Vec<ExprImpl>, expr_alias: Vec<Option<String>>) -> Self {
+        // Merge contiguous Project nodes.
+        if let Some(input) = input.as_logical_project() {
+            let mut subst = Substitute {
+                mapping: input.exprs.clone(),
+            };
+            let exprs = exprs
+                .iter()
+                .cloned()
+                .map(|expr| subst.rewrite_expr(expr))
+                .collect();
+            return LogicalProject::new(input.input(), exprs, expr_alias);
+        }
+
         let schema = Self::derive_schema(&exprs, &expr_alias);
         for expr in &exprs {
             assert_input_ref(expr, input.schema().fields().len());
@@ -183,6 +198,24 @@ impl ToStream for LogicalProject {
     }
 }
 
+/// Substitute `InputRef` with corresponding `ExprImpl`.
+struct Substitute {
+    mapping: Vec<ExprImpl>,
+}
+
+impl ExprRewriter for Substitute {
+    fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
+        assert_eq!(
+            self.mapping[input_ref.index()].return_type(),
+            input_ref.return_type(),
+            "Type mismatch when substituting {:?} with {:?}",
+            input_ref,
+            self.mapping[input_ref.index()],
+        );
+        self.mapping[input_ref.index()].clone()
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -193,6 +226,69 @@ mod tests {
     use super::*;
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
     use crate::optimizer::plan_node::LogicalScan;
+
+    #[test]
+    fn test_contiguous_project() {
+        let ty = DataType::Int32;
+        let fields: Vec<Field> = (1..4)
+            .map(|i| Field {
+                data_type: ty.clone(),
+                name: format!("v{}", i),
+            })
+            .collect();
+        let table_scan = LogicalScan::new(
+            "test".to_string(),
+            TableId::new(0),
+            vec![1.into(), 2.into(), 3.into()],
+            Schema {
+                fields: fields.clone(),
+            },
+        );
+        let inner = LogicalProject::new(
+            table_scan.into(),
+            vec![
+                FunctionCall::new(
+                    Type::Equal,
+                    vec![
+                        InputRef::new(1, ty.clone()).into(),
+                        InputRef::new(2, ty.clone()).into(),
+                    ],
+                )
+                .unwrap()
+                .into(),
+                InputRef::new(0, ty.clone()).into(),
+            ],
+            vec![Some("aa".to_string()), Some("bb".to_string())],
+        );
+
+        let outer = LogicalProject::new(
+            inner.into(),
+            vec![
+                InputRef::new(1, ty.clone()).into(),
+                Literal::new(None, ty.clone()).into(),
+                InputRef::new(0, DataType::Boolean).into(),
+            ],
+            vec![Some("c1".to_string()), None, None],
+        );
+
+        assert!(outer.input().as_logical_scan().is_some());
+        let schema = outer.schema();
+        assert_eq!(schema.fields().len(), 3);
+        assert_eq!(schema.fields[0].name, "c1");
+        assert_eq!(schema.fields[1].name, "expr0");
+        assert_eq!(schema.fields[2].name, "aa");
+
+        let outermost = LogicalProject::new(
+            outer.into(),
+            vec![InputRef::new(0, ty.clone()).into()],
+            vec![None],
+        );
+
+        assert!(outermost.input().as_logical_scan().is_some());
+        let schema = outermost.schema();
+        assert_eq!(schema.fields().len(), 1);
+        assert_eq!(schema.fields[0].name, "c1");
+    }
 
     #[test]
     /// Pruning
