@@ -622,8 +622,8 @@ mod tests {
         let remote_dir = hummock_options.data_directory.clone();
         let sstable_store = Arc::new(SstableStore::new(
             obj_client,
-            remote_dir.to_string(),
-            hummock_options.checksum_algo.clone(),
+            remote_dir,
+            hummock_options.checksum_algo,
         ));
         let vm = Arc::new(LocalVersionManager::new(sstable_store.clone()));
         let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(Arc::new(

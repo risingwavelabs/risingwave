@@ -150,7 +150,7 @@ async fn test_snapshot() {
     let sstable_store = Arc::new(SstableStore::new(
         object_store.clone(),
         remote_dir.to_string(),
-        hummock_options.checksum_algo.clone(),
+        hummock_options.checksum_algo,
     ));
     let vm = Arc::new(LocalVersionManager::new(sstable_store.clone()));
     let mock_hummock_meta_service = Arc::new(MockHummockMetaService::new());
@@ -226,7 +226,7 @@ async fn test_snapshot_range_scan() {
     let sstable_store = Arc::new(SstableStore::new(
         object_store.clone(),
         remote_dir.clone(),
-        hummock_options.checksum_algo.clone(),
+        hummock_options.checksum_algo,
     ));
     let vm = Arc::new(LocalVersionManager::new(sstable_store.clone()));
     let mock_hummock_meta_service = Arc::new(MockHummockMetaService::new());
@@ -280,7 +280,7 @@ async fn test_snapshot_reverse_range_scan() {
     let sstable_store = Arc::new(SstableStore::new(
         object_store.clone(),
         hummock_options.data_directory.clone(),
-        hummock_options.checksum_algo.clone(),
+        hummock_options.checksum_algo,
     ));
     let vm = Arc::new(LocalVersionManager::new(sstable_store.clone()));
     let mock_hummock_meta_service = Arc::new(MockHummockMetaService::new());
