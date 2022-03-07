@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use moka::future::Cache;
 use prost::Message;
 use risingwave_pb::hummock::SstableMeta;
 
@@ -21,6 +22,8 @@ pub struct SstableStore {
     path: String,
     store: ObjectStoreRef,
     block_cache: BlockCache,
+    // TODO: meta is also supposed to be block, and meta cache will be removed.
+    meta_cache: Cache<u64, SstableMeta>,
 }
 
 impl SstableStore {
@@ -29,6 +32,7 @@ impl SstableStore {
             path,
             store,
             block_cache: BlockCache::new(65536),
+            meta_cache: Cache::new(1024),
         }
     }
 
@@ -106,8 +110,11 @@ impl SstableStore {
         }
     }
 
-    // TODO(MrCroxx): meta should also be a `Block` later and managed in block cache.
     pub async fn meta(&self, sst_id: u64) -> HummockResult<SstableMeta> {
+        // TODO(MrCroxx): meta should also be a `Block` later and managed in block cache.
+        if let Some(meta) = self.meta_cache.get(&sst_id) {
+            return Ok(meta);
+        }
         let path = self.get_sst_meta_path(sst_id);
         let buf = self
             .store
