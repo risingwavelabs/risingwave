@@ -9,15 +9,19 @@ use risingwave_meta::cluster::StoredClusterManager;
 use risingwave_meta::manager::{
     MemEpochGenerator, MetaSrvEnv, NotificationManager, StoredCatalogManager,
 };
-use risingwave_meta::rpc::{CatalogServiceImpl, ClusterServiceImpl};
+use risingwave_meta::rpc::{CatalogServiceImpl, ClusterServiceImpl, NotificationServiceImpl};
 use risingwave_meta::storage::MemStore;
 use risingwave_pb::meta::catalog_service_server::CatalogService;
 use risingwave_pb::meta::cluster_service_server::ClusterService;
+use risingwave_pb::meta::notification_service_server::NotificationService;
 use risingwave_pb::meta::{
-    AddWorkerNodeRequest, AddWorkerNodeResponse, CreateRequest, CreateResponse, DropRequest,
-    DropResponse, GetCatalogRequest, GetCatalogResponse, ListAllNodesRequest, ListAllNodesResponse,
+    ActivateWorkerNodeRequest, ActivateWorkerNodeResponse, AddWorkerNodeRequest,
+    AddWorkerNodeResponse, CreateRequest, CreateResponse, DeleteWorkerNodeRequest,
+    DeleteWorkerNodeResponse, DropRequest, DropResponse, GetCatalogRequest, GetCatalogResponse,
+    ListAllNodesRequest, ListAllNodesResponse, SubscribeRequest,
 };
-use risingwave_rpc_client::{MetaClient, MetaClientInner};
+use risingwave_rpc_client::{MetaClient, MetaClientInner, NotificationStream};
+use tokio::task::JoinHandle;
 use tonic::Request;
 
 use crate::session::{FrontendEnv, SessionImpl};
@@ -26,6 +30,7 @@ use crate::FrontendOpts;
 pub struct LocalFrontend {
     pub opts: FrontendOpts,
     pub session: SessionImpl,
+    pub observer_join_handle: JoinHandle<()>,
 }
 
 impl LocalFrontend {
@@ -33,11 +38,15 @@ impl LocalFrontend {
         let args: [OsString; 0] = []; // No argument.
         let opts: FrontendOpts = FrontendOpts::parse_from(args);
         let meta_client = MetaClient::mock(FrontendMockMetaClient::new().await);
-        let env = FrontendEnv::with_meta_client(meta_client, &opts)
+        let (env, observer_join_handle) = FrontendEnv::with_meta_client(meta_client, &opts)
             .await
             .unwrap();
         let session = SessionImpl::new(env, "dev".to_string());
-        Self { opts, session }
+        Self {
+            opts,
+            session,
+            observer_join_handle,
+        }
     }
 
     pub async fn run_sql(
@@ -56,6 +65,7 @@ impl LocalFrontend {
 pub struct FrontendMockMetaClient {
     catalog_srv: CatalogServiceImpl<MemStore>,
     cluster_srv: ClusterServiceImpl<MemStore>,
+    notification_srv: NotificationServiceImpl,
 }
 
 impl FrontendMockMetaClient {
@@ -64,21 +74,23 @@ impl FrontendMockMetaClient {
         let epoch_generator = Arc::new(MemEpochGenerator::default());
         let env = MetaSrvEnv::<MemStore>::new(meta_store.clone(), epoch_generator.clone()).await;
 
-        let catalog_manager =
-            Arc::new(StoredCatalogManager::new(meta_store.clone()).await.unwrap());
-
-        let catalog_srv = CatalogServiceImpl::<MemStore>::new(env.clone(), catalog_manager);
-
         let notification_manager = Arc::new(NotificationManager::new());
-        let cluster_manager = Arc::new(
-            StoredClusterManager::new(env, None, notification_manager)
+        let catalog_manager = Arc::new(
+            StoredCatalogManager::new(meta_store.clone(), notification_manager.clone())
                 .await
                 .unwrap(),
         );
-        let cluster_srv = ClusterServiceImpl::<MemStore>::new(cluster_manager);
+
+        let cluster_manager = Arc::new(
+            StoredClusterManager::new(env.clone(), None, notification_manager.clone())
+                .await
+                .unwrap(),
+        );
+
         Self {
-            catalog_srv,
-            cluster_srv,
+            catalog_srv: CatalogServiceImpl::<MemStore>::new(env, catalog_manager),
+            cluster_srv: ClusterServiceImpl::<MemStore>::new(cluster_manager),
+            notification_srv: NotificationServiceImpl::new(notification_manager),
         }
     }
 }
@@ -128,5 +140,40 @@ impl MetaClientInner for FrontendMockMetaClient {
             .await
             .to_rw_result()?
             .into_inner())
+    }
+
+    async fn activate_worker_node(
+        &self,
+        req: ActivateWorkerNodeRequest,
+    ) -> Result<ActivateWorkerNodeResponse> {
+        Ok(self
+            .cluster_srv
+            .activate_worker_node(Request::new(req))
+            .await
+            .to_rw_result()?
+            .into_inner())
+    }
+
+    async fn delete_worker_node(
+        &self,
+        req: DeleteWorkerNodeRequest,
+    ) -> Result<DeleteWorkerNodeResponse> {
+        Ok(self
+            .cluster_srv
+            .delete_worker_node(Request::new(req))
+            .await
+            .to_rw_result()?
+            .into_inner())
+    }
+
+    async fn subscribe(&self, req: SubscribeRequest) -> Result<Box<dyn NotificationStream>> {
+        Ok(Box::new(
+            self.notification_srv
+                .subscribe(Request::new(req))
+                .await
+                .to_rw_result()?
+                .into_inner()
+                .into_inner(),
+        ))
     }
 }

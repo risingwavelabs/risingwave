@@ -16,7 +16,6 @@ use risingwave_rpc_client::MetaClient;
 use risingwave_source::MemSourceManager;
 use risingwave_storage::hummock::compactor::Compactor;
 use risingwave_storage::monitor::DEFAULT_STATE_STORE_STATS;
-use risingwave_storage::table::SimpleTableManager;
 use risingwave_storage::StateStoreImpl;
 use risingwave_stream::task::{StreamEnvironment, StreamManager};
 use tokio::sync::mpsc::UnboundedSender;
@@ -30,6 +29,7 @@ fn load_config(opts: &ComputeNodeOpts) -> ComputeNodeConfig {
     if opts.config_path.is_empty() {
         return ComputeNodeConfig::default();
     }
+
     let config_path = PathBuf::from(opts.config_path.to_owned());
     ComputeNodeConfig::init(config_path).unwrap()
 }
@@ -51,9 +51,15 @@ pub async fn compute_node_serve(
 
     // Initialize state store.
     let stats = DEFAULT_STATE_STORE_STATS.clone();
-    let state_store = StateStoreImpl::from_str(&opts.state_store, meta_client.clone(), stats)
-        .await
-        .unwrap();
+    let storage_config = Arc::new(config.storage.clone());
+    let state_store = StateStoreImpl::new(
+        &opts.state_store,
+        storage_config,
+        meta_client.clone(),
+        stats,
+    )
+    .await
+    .unwrap();
 
     // A hummock compactor is deployed along with compute node for now.
     let mut compactor_handle = None;
@@ -68,25 +74,25 @@ pub async fn compute_node_serve(
     }
 
     // Initialize the managers.
-    let table_mgr = Arc::new(SimpleTableManager::new(state_store.clone()));
     let batch_mgr = Arc::new(BatchManager::new());
-    let stream_mgr = Arc::new(StreamManager::new(addr, state_store));
+    let stream_mgr = Arc::new(StreamManager::new(addr, state_store.clone()));
     let source_mgr = Arc::new(MemSourceManager::new());
 
     // Initialize batch environment.
     let batch_config = Arc::new(config.batch.clone());
     let batch_env = BatchEnvironment::new(
-        table_mgr.clone(),
         source_mgr.clone(),
         batch_mgr.clone(),
         addr,
         batch_config,
         worker_id,
+        state_store.clone(),
     );
 
     // Initialize the streaming environment.
     let stream_config = Arc::new(config.streaming.clone());
-    let stream_env = StreamEnvironment::new(table_mgr, source_mgr, addr, stream_config, worker_id);
+    let stream_env =
+        StreamEnvironment::new(source_mgr, addr, stream_config, worker_id, state_store);
 
     // Boot the runtime gRPC services.
     let batch_srv = BatchServiceImpl::new(batch_mgr.clone(), batch_env);

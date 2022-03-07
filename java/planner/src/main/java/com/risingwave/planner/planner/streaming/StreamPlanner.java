@@ -116,9 +116,7 @@ public class StreamPlanner implements Planner<StreamingPlan> {
       if (source != null && source.isMaterializedView()) {
         // source is a materialized view source
         assert source instanceof MaterializedViewCatalog;
-        if (parent != null) {
-          assert indexInParent >= 0;
-        }
+        assert parent == null || indexInParent >= 0;
 
         var tableSourceNode = (RwStreamTableSource) node;
         var sourceColumnIds = source.getAllColumnIds();
@@ -143,35 +141,34 @@ public class StreamPlanner implements Planner<StreamingPlan> {
             new RwStreamBatchPlan(
                 node.getCluster(),
                 node.getTraitSet(),
-                ((RwStreamTableSource) node).getHints(),
+                tableSourceNode.getHints(),
                 node.getTable(),
                 tableSourceNode.getTableId(),
                 primaryKeyColumnIdsBuilder.build(),
                 ImmutableIntList.of(),
                 tableSourceNode.getColumnIds());
 
-        var upstreamFields = ImmutableList.<Field>builder();
-        if (!source.isAssociatedMaterializedView()) {
-          for (int i = 0; i < source.getAllColumns().size(); i++) {
-            var column = source.getAllColumns().get(i);
+        var upstreamFieldsBuilder = ImmutableList.<Field>builder();
+        if (source.isAssociatedMaterializedView()) {
+          for (var column : source.getAllColumnsV2()) {
             var field =
                 Field.newBuilder()
                     .setDataType(column.getDesc().getDataType().getProtobufType())
                     .setName(column.getName())
                     .build();
-            upstreamFields.add(field);
+            upstreamFieldsBuilder.add(field);
           }
         } else {
-          for (int i = 0; i < source.getAllColumnsV2().size(); i++) {
-            var column = source.getAllColumnsV2().get(i);
+          for (var column : source.getAllColumns()) {
             var field =
                 Field.newBuilder()
                     .setDataType(column.getDesc().getDataType().getProtobufType())
                     .setName(column.getName())
                     .build();
-            upstreamFields.add(field);
+            upstreamFieldsBuilder.add(field);
           }
         }
+        var upstreamFields = upstreamFieldsBuilder.build();
 
         RwStreamChain chain =
             new RwStreamChain(
@@ -180,7 +177,7 @@ public class StreamPlanner implements Planner<StreamingPlan> {
                 tableSourceNode.getTableId(),
                 ImmutableIntList.of(),
                 tableSourceNode.getColumnIds(),
-                upstreamFields.build(),
+                upstreamFields,
                 List.of(batchPlan));
         if (parent != null) {
           parent.replaceInput(indexInParent, chain);

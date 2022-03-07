@@ -5,9 +5,10 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::expr::AggKind;
 use risingwave_common::types::DataType;
 
-use super::{ColPrunable, IntoPlanRef, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use super::{ColPrunable, LogicalProject, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
 use crate::expr::ExprImpl;
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
+use crate::utils::ColIndexMapping;
 
 #[derive(Clone, Debug)]
 pub struct PlanAggCall {
@@ -135,7 +136,13 @@ impl WithSchema for LogicalAgg {
     }
 }
 
-impl ColPrunable for LogicalAgg {}
+impl ColPrunable for LogicalAgg {
+    fn prune_col(&self, required_cols: &fixedbitset::FixedBitSet) -> PlanRef {
+        // TODO: replace default impl
+        let mapping = ColIndexMapping::with_remaining_columns(required_cols);
+        LogicalProject::with_mapping(self.clone().into(), mapping).into()
+    }
+}
 
 impl ToBatch for LogicalAgg {
     fn to_batch(&self) -> PlanRef {

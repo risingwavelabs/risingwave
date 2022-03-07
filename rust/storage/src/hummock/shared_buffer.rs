@@ -161,7 +161,7 @@ impl SharedBufferManager {
         options: Arc<HummockOptions>,
         local_version_manager: Arc<LocalVersionManager>,
         sstable_store: SstableStoreRef,
-
+        // TODO: should be separated `HummockStats` instead of `StateStoreStats`.
         stats: Arc<StateStoreStats>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> Self {
@@ -334,6 +334,7 @@ pub struct SharedBufferUploader {
     options: Arc<HummockOptions>,
 
     /// Statistics.
+    // TODO: should be separated `HummockStats` instead of `StateStoreStats`.
     stats: Arc<StateStoreStats>,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
     sstable_store: SstableStoreRef,

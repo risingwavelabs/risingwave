@@ -11,6 +11,7 @@ use itertools::Itertools;
 pub enum Components {
     MinIO,
     PrometheusAndGrafana,
+    Etcd,
     Tracing,
     ComputeNodeAndMetaNode,
     Frontend,
@@ -22,6 +23,7 @@ impl Components {
         match self {
             Self::MinIO => "MinIO / MinIO-CLI",
             Self::PrometheusAndGrafana => "Prometheus / Grafana",
+            Self::Etcd => "Etcd",
             Self::ComputeNodeAndMetaNode => "Build compute-node / meta-node",
             Self::Frontend => "Build frontend",
             Self::Tracing => "Tracing / Jaeger",
@@ -40,6 +42,11 @@ Required by Hummock state store.
             Self::PrometheusAndGrafana => {
                 "
 Required if you want to view metrics."
+            }
+            Self::Etcd => {
+                "
+Required if you want to persistent meta-node data.
+                "
             }
             Self::ComputeNodeAndMetaNode => {
                 "
@@ -69,6 +76,7 @@ Build RisingWave in release mode"
         match self {
             Self::MinIO => "ENABLE_MINIO",
             Self::PrometheusAndGrafana => "ENABLE_PROMETHEUS_GRAFANA",
+            Self::Etcd => "ENABLE_ETCD",
             Self::ComputeNodeAndMetaNode => "ENABLE_BUILD_RUST",
             Self::Frontend => "ENABLE_BUILD_FRONTEND",
             Self::Tracing => "ENABLE_COMPUTE_TRACING",

@@ -48,7 +48,7 @@ impl Order {
     }
     pub fn enforce(&self, plan: PlanRef) -> PlanRef {
         assert_eq!(plan.convention(), Convention::Batch);
-        BatchSort::new(plan, self.clone()).into_plan_ref()
+        BatchSort::new(plan, self.clone()).into()
     }
     pub fn satisfies(&self, other: &Order) -> bool {
         if self.field_order.len() < other.field_order.len() {

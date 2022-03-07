@@ -7,4 +7,12 @@ edition = "2021"
 async-trait = "0.1"
 risingwave-pb = { path = "../prost" }
 risingwave_common = { path = "../common" }
+tokio = { version = "1", features = [
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "time",
+    "signal",
+] }
 tonic = "0.6"

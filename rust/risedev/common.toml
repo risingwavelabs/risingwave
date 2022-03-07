@@ -11,6 +11,7 @@ PREFIX_LOG = "${PREFIX}/log"
 PREFIX_TMP = "${PREFIX}/tmp"
 
 HUMMOCK_PATH = "${PREFIX_DATA}/hummock"
+META_STORE_PATH = "${PREFIX_DATA}/meta"
 BUILD_MODE_DIR = { source = "${ENABLE_RELEASE_PROFILE}", default_value = "debug", mapping = { true = "release" } }
 RISINGWAVE_BUILD_PROFILE = { source = "${ENABLE_RELEASE_PROFILE}", default_value = "dev", mapping = { true = "release" } }
 
@@ -27,6 +28,7 @@ mkdir "${PREFIX_CONFIG}"
 mkdir "${PREFIX_CONFIG}/mcli"
 mkdir "${PREFIX_LOG}"
 mkdir "${HUMMOCK_PATH}"
+mkdir "${PREFIX_PATH}"
 '''
 
 [tasks.check-risedev-configured]

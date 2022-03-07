@@ -5,7 +5,8 @@ use hyper::{Body, Request, Response};
 use itertools::Itertools;
 use prometheus::{
     histogram_opts, register_histogram_vec_with_registry, register_histogram_with_registry,
-    Encoder, Histogram, HistogramVec, Registry, TextEncoder, DEFAULT_BUCKETS,
+    register_int_gauge_vec_with_registry, Encoder, Histogram, HistogramVec, IntGaugeVec, Registry,
+    TextEncoder, DEFAULT_BUCKETS,
 };
 use tower::make::Shared;
 use tower::ServiceBuilder;
@@ -23,6 +24,8 @@ pub struct MetaMetrics {
     pub grpc_latency: HistogramVec,
     /// latency of each barrier
     pub barrier_latency: Histogram,
+    /// num of SSTs in each level
+    pub level_payload: IntGaugeVec,
 }
 
 impl MetaMetrics {
@@ -45,10 +48,19 @@ impl MetaMetrics {
         );
         let barrier_latency = register_histogram_with_registry!(opts, registry).unwrap();
 
+        let level_payload = register_int_gauge_vec_with_registry!(
+            "storage_level_sst_num",
+            "num of SSTs in each level",
+            &["level_index"],
+            registry
+        )
+        .unwrap();
+
         Self {
             registry,
             grpc_latency,
             barrier_latency,
+            level_payload,
         }
     }
 

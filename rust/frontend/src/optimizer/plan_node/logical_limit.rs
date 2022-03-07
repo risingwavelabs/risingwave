@@ -3,7 +3,7 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::Schema;
 
-use super::{BatchLimit, ColPrunable, IntoPlanRef, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use super::{BatchLimit, ColPrunable, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 
 #[derive(Debug, Clone)]
@@ -27,7 +27,7 @@ impl LogicalLimit {
 
     /// the function will check if the cond is bool expression
     pub fn create(input: PlanRef, limit: usize, offset: usize) -> PlanRef {
-        Self::new(input, limit, offset).into_plan_ref()
+        Self::new(input, limit, offset).into()
     }
 }
 
@@ -59,7 +59,7 @@ impl WithSchema for LogicalLimit {
 impl ColPrunable for LogicalLimit {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
         let new_input = self.input.prune_col(required_cols);
-        self.clone_with_input(new_input).into_plan_ref()
+        self.clone_with_input(new_input).into()
     }
 }
 
@@ -67,7 +67,7 @@ impl ToBatch for LogicalLimit {
     fn to_batch(&self) -> PlanRef {
         let new_input = self.input().to_batch();
         let new_logical = self.clone_with_input(new_input);
-        BatchLimit::new(new_logical).into_plan_ref()
+        BatchLimit::new(new_logical).into()
     }
 }
 

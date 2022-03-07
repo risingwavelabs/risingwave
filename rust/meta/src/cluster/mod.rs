@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
+use itertools::Itertools;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
@@ -103,18 +104,15 @@ where
                     .generate::<{ IdCategory::Worker }>()
                     .await?;
 
-                let mut parallel_units = Vec::with_capacity(DEFAULT_WORKNODE_PARALLEL_DEGREE);
                 let start_id = self
                     .id_gen_manager_ref
                     .generate_interval::<{ IdCategory::ParallelUnit }>(
                         DEFAULT_WORKNODE_PARALLEL_DEGREE as i32,
                     )
                     .await? as usize;
-                for parallel_unit_id in start_id..start_id + DEFAULT_WORKNODE_PARALLEL_DEGREE {
-                    parallel_units.push(ParallelUnit {
-                        id: parallel_unit_id as u32,
-                    });
-                }
+                let parallel_units = (start_id..start_id + DEFAULT_WORKNODE_PARALLEL_DEGREE)
+                    .map(|id| ParallelUnit { id: id as u32 })
+                    .collect_vec();
 
                 let worker_node = WorkerNode {
                     id: worker_id as u32,
@@ -151,7 +149,7 @@ where
                 worker.insert(self.meta_store_ref.as_ref()).await?;
                 entry.insert(worker);
 
-                // Notify frontends of new compute node
+                // Notify frontends of new compute node.
                 if worker_node.r#type == WorkerType::ComputeNode as i32 {
                     self.nm
                         .notify(
@@ -179,6 +177,7 @@ where
                 let worker_node = entry.1.to_protobuf();
                 Worker::delete(&*self.meta_store_ref, &host_address).await?;
 
+                // Notify frontends to delete compute node.
                 if worker_node.r#type == WorkerType::ComputeNode as i32 {
                     self.nm
                         .notify(
