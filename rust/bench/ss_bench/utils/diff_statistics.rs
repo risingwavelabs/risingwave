@@ -1,20 +1,11 @@
-use itertools::Itertools;
 use prometheus::core::Metric;
-use prometheus::proto::Histogram;
 use risingwave_storage::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
 
-use crate::utils::metric_display::MetricDisplay;
+use crate::utils::my_histogram::MyHistogram;
 
 pub(crate) struct StatDiff {
     pub(crate) prev_stat: StateStoreStats,
     pub(crate) cur_stat: StateStoreStats,
-}
-
-pub(crate) struct MyHistogram {
-    pub(crate) upper_bound_list: Vec<f64>,
-    pub(crate) count_list: Vec<u64>,
-    pub(crate) total_count: u64,
-    pub(crate) total_sum: f64,
 }
 
 impl StatDiff {
@@ -32,10 +23,7 @@ impl StatDiff {
         let metric = self.cur_stat.batch_write_latency.metric();
         let cur_latency_hist = metric.get_histogram();
 
-        let latency = {
-            let latency_hist = StatDiff::histogram_diff(prev_latency_hist, cur_latency_hist);
-            MetricDisplay::new(&latency_hist)
-        };
+        let latency = MyHistogram::from_diff(prev_latency_hist, cur_latency_hist);
 
         let time_consume = cur_latency_hist.get_sample_sum() - prev_latency_hist.get_sample_sum();
 
@@ -62,25 +50,5 @@ impl StatDiff {
       OPS: {}  {} bytes/sec",
             latency, ops, bytes_pre_sec
         );
-    }
-
-    fn histogram_diff(prev: &Histogram, cur: &Histogram) -> MyHistogram {
-        let prev_buckets = prev.get_bucket();
-        let cur_buckets = cur.get_bucket();
-        let bucket_bounds = prev_buckets
-            .iter()
-            .map(|bucket| bucket.get_upper_bound())
-            .collect_vec();
-
-        MyHistogram {
-            upper_bound_list: bucket_bounds,
-            count_list: prev_buckets
-                .iter()
-                .zip_eq(cur_buckets.iter())
-                .map(|(pb, cb)| cb.get_cumulative_count() - pb.get_cumulative_count())
-                .collect_vec(),
-            total_sum: cur.get_sample_sum() - prev.get_sample_sum(),
-            total_count: cur.get_sample_count() - prev.get_sample_count(),
-        }
     }
 }

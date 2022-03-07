@@ -2,6 +2,8 @@ use prometheus::core::{AtomicU64, Collector, GenericCounter, Metric};
 use prometheus::Histogram;
 use risingwave_storage::for_all_metrics;
 
+use crate::utils::my_histogram::MyHistogram;
+
 pub(crate) fn get_percentile(histogram: &Histogram, p: f64) -> f64 {
     let metric = histogram.metric();
     let histogram = metric.get_histogram();
@@ -48,10 +50,11 @@ impl Print for Histogram {
     fn print(&self) {
         let desc = &self.desc()[0].fq_name;
 
-        let p50 = get_percentile(self, 50.0);
-        let p95 = get_percentile(self, 95.0);
-        let p99 = get_percentile(self, 99.0);
-        let p100 = get_percentile(self, 100.0);
+        let histogram = MyHistogram::from_prom_hist(self.metric().get_histogram());
+        let p50 = histogram.get_percentile(50.0);
+        let p95 = histogram.get_percentile(95.0);
+        let p99 = histogram.get_percentile(99.0);
+        let p100 = histogram.get_percentile(100.0);
 
         let sample_count = self.get_sample_count();
         let sample_sum = self.get_sample_sum();
