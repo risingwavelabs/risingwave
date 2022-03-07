@@ -107,7 +107,7 @@ impl Block {
     }
 }
 
-/// [`SSTable`] represents a SST in object store.
+/// [`SSTable`] is a handle for accessing SST in [`TableManager`].
 pub struct Sstable {
     pub id: u64,
     pub meta: SstableMeta,

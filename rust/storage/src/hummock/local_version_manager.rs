@@ -4,18 +4,15 @@ use std::ops::DerefMut;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
-use moka::future::Cache;
 use parking_lot::{Mutex, RwLock};
 use risingwave_pb::hummock::{HummockVersion, Level, LevelType};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use super::shared_buffer::SharedBufferManager;
-use super::Block;
 use crate::hummock::hummock_meta_client::HummockMetaClient;
-use crate::hummock::sstable_manager::SstableStoreRef;
+use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{
-    HummockEpoch, HummockError, HummockResult, HummockSSTableId, HummockVersionId, Sstable,
-    INVALID_VERSION_ID,
+    HummockEpoch, HummockError, HummockResult, HummockVersionId, Sstable, INVALID_VERSION_ID,
 };
 
 pub struct ScopedLocalVersion {
@@ -59,10 +56,8 @@ impl ScopedLocalVersion {
 /// versions in storage service.
 pub struct LocalVersionManager {
     current_version: RwLock<Option<Arc<ScopedLocalVersion>>>,
-    sstables: RwLock<BTreeMap<HummockSSTableId, Arc<Sstable>>>,
-    sstable_manager: SstableStoreRef,
+    sstable_store: SstableStoreRef,
 
-    pub block_cache: Arc<Cache<Vec<u8>, Arc<Block>>>,
     update_notifier_tx: tokio::sync::watch::Sender<HummockVersionId>,
     unpin_worker_tx: UnboundedSender<Arc<HummockVersion>>,
     unpin_worker_rx: Mutex<Option<UnboundedReceiver<Arc<HummockVersion>>>>,
@@ -72,30 +67,13 @@ pub struct LocalVersionManager {
 }
 
 impl LocalVersionManager {
-    pub fn new(
-        sstable_manager: SstableStoreRef,
-        block_cache: Option<Arc<Cache<Vec<u8>, Arc<Block>>>>,
-    ) -> LocalVersionManager {
+    pub fn new(sstable_store: SstableStoreRef) -> LocalVersionManager {
         let (update_notifier_tx, _) = tokio::sync::watch::channel(INVALID_VERSION_ID);
         let (unpin_worker_tx, unpin_worker_rx) = tokio::sync::mpsc::unbounded_channel();
 
         LocalVersionManager {
             current_version: RwLock::new(None),
-            sstable_manager,
-            sstables: RwLock::new(BTreeMap::new()),
-
-            block_cache: if let Some(block_cache) = block_cache {
-                block_cache
-            } else {
-                #[cfg(test)]
-                {
-                    Arc::new(Cache::new(2333))
-                }
-                #[cfg(not(test))]
-                {
-                    panic!("must enable block cache in production mode")
-                }
-            },
+            sstable_store,
             update_notifier_tx,
             unpin_worker_tx,
             unpin_worker_rx: Mutex::new(Some(unpin_worker_rx)),
@@ -179,31 +157,15 @@ impl LocalVersionManager {
         }
     }
 
-    fn try_get_sstable_from_cache(&self, table_id: HummockSSTableId) -> Option<Arc<Sstable>> {
-        self.sstables.read().get(&table_id).cloned()
-    }
-
-    fn add_sstable_to_cache(&self, sstable: Arc<Sstable>) {
-        self.sstables.write().insert(sstable.id, sstable);
-    }
-
-    pub async fn pick_few_tables(&self, table_ids: &[u64]) -> HummockResult<Vec<Arc<Sstable>>> {
-        let mut tables = vec![];
-        for table_id in table_ids {
-            let sstable = match self.try_get_sstable_from_cache(*table_id) {
-                None => {
-                    let fetched_sstable = Arc::new(Sstable {
-                        id: *table_id,
-                        meta: self.sstable_manager.meta(*table_id).await?,
-                    });
-                    self.add_sstable_to_cache(fetched_sstable.clone());
-                    fetched_sstable
-                }
-                Some(cached_sstable) => cached_sstable,
-            };
-            tables.push(sstable);
+    pub async fn pick_few_tables(&self, sst_ids: &[u64]) -> HummockResult<Vec<Arc<Sstable>>> {
+        let mut ssts = Vec::with_capacity(sst_ids.len());
+        for sst_id in sst_ids {
+            ssts.push(Arc::new(Sstable {
+                id: *sst_id,
+                meta: self.sstable_store.meta(*sst_id).await?,
+            }));
         }
-        Ok(tables)
+        Ok(ssts)
     }
 
     /// Get the iterators on the underlying tables.

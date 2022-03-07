@@ -20,19 +20,19 @@ pub struct ConcatIteratorInner<TI: SSTableIteratorType> {
     /// All non-overlapping tables.
     tables: Vec<Arc<Sstable>>,
 
-    sstable_manager: SstableStoreRef,
+    sstable_store: SstableStoreRef,
 }
 
 impl<TI: SSTableIteratorType> ConcatIteratorInner<TI> {
     /// Caller should make sure that `tables` are non-overlapping,
     /// arranged in ascending order when it serves as a forward iterator,
     /// and arranged in descending order when it serves as a reverse iterator.
-    pub fn new(tables: Vec<Arc<Sstable>>, sstable_manager: SstableStoreRef) -> Self {
+    pub fn new(tables: Vec<Arc<Sstable>>, sstable_store: SstableStoreRef) -> Self {
         Self {
             sstable_iter: None,
             cur_idx: 0,
             tables,
-            sstable_manager,
+            sstable_store,
         }
     }
 
@@ -41,7 +41,7 @@ impl<TI: SSTableIteratorType> ConcatIteratorInner<TI> {
         if idx >= self.tables.len() {
             self.sstable_iter = None;
         } else {
-            let mut sstable_iter = TI::new(self.tables[idx].clone(), self.sstable_manager.clone());
+            let mut sstable_iter = TI::new(self.tables[idx].clone(), self.sstable_store.clone());
             if let Some(key) = seek_key {
                 sstable_iter.seek(key).await?;
             } else {
