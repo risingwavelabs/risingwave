@@ -165,7 +165,7 @@ impl Row {
         Ok(serializer.into_inner())
     }
 
-    /// Deserialize a datum in the row to a memcomparable bytes. The datum must not be null.
+    /// Serialize a datum in the row to a memcomparable bytes. The datum must not be null.
     ///
     /// !Panics
     ///

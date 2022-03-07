@@ -16,6 +16,7 @@
 #![feature(map_first_last)]
 
 mod barrier;
+mod catalog;
 pub mod cluster;
 mod dashboard;
 pub mod hummock;
