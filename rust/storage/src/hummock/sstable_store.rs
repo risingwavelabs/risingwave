@@ -30,6 +30,7 @@ impl SstableStore {
         Self {
             path,
             store,
+            // TODO: Temporarily use approximate 64MiB block cache. Make it configurable later.
             block_cache: BlockCache::new(65536),
             checksum_algo,
         }
@@ -54,7 +55,6 @@ impl SstableStore {
         }
 
         if let CachePolicy::Fill = policy {
-            // TODO: use concurrent put object
             for (block_idx, meta) in sst.meta.block_metas.iter().enumerate() {
                 let offset = meta.offset as usize;
                 let len = meta.len as usize;

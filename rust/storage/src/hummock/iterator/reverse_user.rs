@@ -939,7 +939,7 @@ mod tests {
         let (data, meta) = b.finish();
         let sst = Sstable { id: sst_id, meta };
         sstable_store
-            .put(&sst, data, CachePolicy::Disable)
+            .put(&sst, data, CachePolicy::Fill)
             .await
             .unwrap();
         sst
