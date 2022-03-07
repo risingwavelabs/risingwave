@@ -2,8 +2,8 @@ use std::fmt;
 
 use risingwave_common::catalog::Schema;
 
-use super::{ColPrunable, LogicalProject, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
-use crate::optimizer::property::{Order, WithDistribution, WithOrder, WithSchema};
+use super::{ColPrunable, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use crate::optimizer::property::{FieldOrder, Order, WithDistribution, WithOrder, WithSchema};
 use crate::utils::ColIndexMapping;
 
 #[derive(Debug, Clone)]
@@ -60,9 +60,20 @@ impl WithSchema for LogicalTopN {
 
 impl ColPrunable for LogicalTopN {
     fn prune_col(&self, required_cols: &fixedbitset::FixedBitSet) -> PlanRef {
-        // TODO: replace default impl
         let mapping = ColIndexMapping::with_remaining_columns(required_cols);
-        LogicalProject::with_mapping(self.clone().into(), mapping).into()
+        let new_order = Order {
+            field_order: self
+                .order
+                .field_order
+                .iter()
+                .map(|fo| FieldOrder {
+                    index: mapping.map(fo.index),
+                    direct: fo.direct.clone(),
+                })
+                .collect(),
+        };
+        let new_input = self.input.prune_col(required_cols);
+        Self::new(new_input, self.limit, self.offset, new_order).into()
     }
 }
 
