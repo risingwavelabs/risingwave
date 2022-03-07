@@ -52,7 +52,8 @@ SELECT bool 'false' AS false;
 
 SELECT bool 'foo' AS error;
 ERROR:  Invalid input syntax: 'foo' is not a valid bool
-true 
+SELECT bool 'y' AS true;
+ true 
 ------
  t
 (1 row)
