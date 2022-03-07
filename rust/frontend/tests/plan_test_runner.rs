@@ -4,7 +4,7 @@ use anyhow::{anyhow, Result};
 use frontend::binder::Binder;
 use frontend::handler::{create_table, drop_table};
 use frontend::planner::Planner;
-use frontend::session::SessionImpl;
+use frontend::session::ExecutionContext;
 use frontend::test_utils::LocalFrontend;
 use risingwave_common::array::RwError;
 use risingwave_sqlparser::ast::{ObjectName, Statement};
@@ -23,19 +23,19 @@ impl TestCase {
     async fn run(&self) -> Result<()> {
         let frontend = LocalFrontend::new().await;
         let session = frontend.session();
-
         let statements = Parser::parse_sql(&self.sql).unwrap();
         for stmt in statements {
+            let context = ExecutionContext::new(session);
             match stmt.clone() {
                 Statement::Query(_) | Statement::Insert { .. } => {
-                    self.test_query(&stmt, session)?
+                    self.test_query(&stmt, context)?
                 }
                 Statement::CreateTable { name, columns, .. } => {
-                    create_table::handle_create_table(session, name, columns).await?;
+                    create_table::handle_create_table(context, name, columns).await?;
                 }
                 Statement::Drop(drop_statement) => {
                     let table_object_name = ObjectName(vec![drop_statement.name]);
-                    drop_table::handle_drop_table(session, table_object_name).await?;
+                    drop_table::handle_drop_table(context, table_object_name).await?;
                 }
                 _ => return Err(anyhow!("Unsupported statement type")),
             }
@@ -43,7 +43,8 @@ impl TestCase {
         Ok(())
     }
 
-    fn test_query(&self, stmt: &Statement, session: &SessionImpl) -> Result<()> {
+    fn test_query(&self, stmt: &Statement, context: ExecutionContext<'_>) -> Result<()> {
+        let session = context.session;
         let catalog = session
             .env()
             .catalog_mgr()

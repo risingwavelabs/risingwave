@@ -6,13 +6,14 @@ use risingwave_sqlparser::ast::Statement;
 
 use crate::binder::Binder;
 use crate::planner::Planner;
-use crate::session::SessionImpl;
+use crate::session::ExecutionContext;
 
 pub(super) fn handle_explain(
-    session: &SessionImpl,
+    context: ExecutionContext<'_>,
     stmt: Statement,
     _verbose: bool,
 ) -> Result<PgResponse> {
+    let session = context.session;
     let catalog_mgr = session.env().catalog_mgr();
     let catalog = catalog_mgr
         .get_database_snapshot(session.database())
