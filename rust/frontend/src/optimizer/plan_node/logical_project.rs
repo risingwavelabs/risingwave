@@ -240,9 +240,7 @@ mod tests {
             "test".to_string(),
             TableId::new(0),
             vec![1.into(), 2.into(), 3.into()],
-            Schema {
-                fields: fields.clone(),
-            },
+            Schema { fields },
         );
         let inner = LogicalProject::new(
             table_scan.into(),
@@ -282,11 +280,8 @@ mod tests {
             _ => panic!("Expected function call"),
         }
 
-        let outermost = LogicalProject::new(
-            outer.into(),
-            vec![InputRef::new(0, ty.clone()).into()],
-            vec![None],
-        );
+        let outermost =
+            LogicalProject::new(outer.into(), vec![InputRef::new(0, ty).into()], vec![None]);
 
         assert!(outermost.input().as_logical_scan().is_some());
         assert_eq!(outermost.exprs().len(), 1);
