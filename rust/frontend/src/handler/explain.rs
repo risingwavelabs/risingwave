@@ -22,10 +22,9 @@ pub(super) fn handle_explain(
     let mut binder = Binder::new(catalog);
     let bound = binder.bind(stmt)?;
     let mut planner = Planner::new();
-    let plan = planner.plan(bound)?;
+    let plan = planner.plan(bound)?.gen_batch_query_plan();
     let mut output = String::new();
-    plan.into_logical()
-        .explain(0, &mut output)
+    plan.explain(0, &mut output)
         .map_err(|e| ErrorCode::InternalError(e.to_string()))?;
 
     let rows = output
