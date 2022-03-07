@@ -409,10 +409,7 @@ impl HummockStorage {
     }
 
     pub async fn sync(&self, epoch: Option<u64>) -> HummockResult<()> {
-        if self.options.async_checkpoint_enabled {
-            return self.shared_buffer_manager.sync(epoch).await;
-        }
-        Ok(())
+        self.shared_buffer_manager.sync(epoch).await
     }
 
     fn get_builder(options: &HummockOptions) -> SSTableBuilder {
