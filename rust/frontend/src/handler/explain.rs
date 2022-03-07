@@ -24,7 +24,8 @@ pub(super) fn handle_explain(
     let mut planner = Planner::new();
     let plan = planner.plan(bound)?;
     let mut output = String::new();
-    plan.explain(0, &mut output)
+    plan.into_logical()
+        .explain(0, &mut output)
         .map_err(|e| ErrorCode::InternalError(e.to_string()))?;
 
     let rows = output

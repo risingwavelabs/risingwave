@@ -20,7 +20,7 @@ use risingwave_common::catalog::Schema;
 /// column is required in optimization, but the final generated plan will remove the unnecessary
 /// column in the result.
 #[derive(Debug, Clone)]
-struct PlanRoot {
+pub struct PlanRoot {
     logical_plan: PlanRef,
     required_dist: Distribution,
     required_order: Order,
@@ -56,6 +56,10 @@ impl PlanRoot {
     /// Get a reference to the plan root's schema.
     fn schema(&self) -> &Schema {
         &self.schema
+    }
+
+    pub fn into_logical(self) -> PlanRef {
+        self.logical_plan
     }
 
     /// optimize and generate a batch query plan
