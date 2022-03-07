@@ -19,7 +19,7 @@ use super::sstable_store::SstableStoreRef;
 use super::version_cmp::VersionedComparator;
 use super::{
     HummockError, HummockMetaClient, HummockOptions, HummockResult, HummockStorage, HummockValue,
-    LocalVersionManager, SSTableBuilder, SSTableIterator,
+    LocalVersionManager, SSTableBuilder, SSTableIterator, Sstable,
 };
 
 #[derive(Clone)]
@@ -222,12 +222,16 @@ impl Compactor {
         output_sst_infos.reserve(builder.len());
         // TODO: decide upload concurrency
         for (table_id, data, meta) in builder.finish() {
-            context.sstable_store.put(table_id, &meta, data).await?;
+            let sst = Sstable { id: table_id, meta };
+            context
+                .sstable_store
+                .put(&sst, data, super::CachePolicy::Fill)
+                .await?;
             let info = SstableInfo {
                 id: table_id,
                 key_range: Some(risingwave_pb::hummock::KeyRange {
-                    left: meta.get_smallest_key().to_vec(),
-                    right: meta.get_largest_key().to_vec(),
+                    left: sst.meta.get_smallest_key().to_vec(),
+                    right: sst.meta.get_largest_key().to_vec(),
                     inf: false,
                 }),
             };

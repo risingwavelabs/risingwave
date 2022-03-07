@@ -162,7 +162,7 @@ macro_rules! test_key {
     };
 }
 
-use sstable_store::{SstableStore, SstableStoreRef};
+use sstable_store::{CachePolicy, SstableStore, SstableStoreRef};
 pub(crate) use test_key;
 
 pub type TestIterator = TestIteratorInner<FORWARD>;
@@ -302,13 +302,16 @@ pub async fn gen_test_sstable_base(
         );
     }
 
-    // get remote table
     let (data, meta) = b.finish();
-    sstable_store.put(table_idx, &meta, data).await.unwrap();
-    Sstable {
+    let sst = Sstable {
         id: table_idx,
         meta,
-    }
+    };
+    sstable_store
+        .put(&sst, data, CachePolicy::Fill)
+        .await
+        .unwrap();
+    sst
 }
 
 pub fn mock_sstable_store() -> SstableStoreRef {

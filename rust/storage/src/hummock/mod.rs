@@ -6,6 +6,8 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 
+mod block_cache;
+pub use block_cache::*;
 mod sstable;
 pub use sstable::*;
 pub mod compactor;

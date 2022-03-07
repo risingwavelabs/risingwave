@@ -617,7 +617,7 @@ mod tests {
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
         let remote_dir = "/test";
         let sstable_store = Arc::new(SstableStore::new(obj_client, remote_dir.to_string()));
-        let vm = Arc::new(LocalVersionManager::new(sstable_store.clone(), None));
+        let vm = Arc::new(LocalVersionManager::new(sstable_store.clone()));
         let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(Arc::new(
             MockHummockMetaService::new(),
         )));

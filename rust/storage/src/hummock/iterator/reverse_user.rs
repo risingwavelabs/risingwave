@@ -253,7 +253,7 @@ mod tests {
     use crate::hummock::key::{prev_key, user_key};
     use crate::hummock::sstable::{SSTableIterator, Sstable};
     use crate::hummock::value::HummockValue;
-    use crate::hummock::{ReverseSSTableIterator, SSTableBuilder, SstableStoreRef};
+    use crate::hummock::{CachePolicy, ReverseSSTableIterator, SSTableBuilder, SstableStoreRef};
 
     #[tokio::test]
     async fn test_reverse_user_basic() {
@@ -848,8 +848,11 @@ mod tests {
         }
         let (data, meta) = b.finish();
         let sstable_store = mock_sstable_store();
-        sstable_store.put(0, &meta, data).await.unwrap();
-        let table = Sstable { id: 0, meta };
+        let sst = Sstable { id: 0, meta };
+        sstable_store
+            .put(&sst, data, CachePolicy::Fill)
+            .await
+            .unwrap();
 
         let repeat = 20;
         for _ in 0..repeat {
@@ -863,7 +866,7 @@ mod tests {
                 begin_key_bytes, end_key_bytes
             );
             chaos_test_case(
-                clone_sst(&table),
+                clone_sst(&sst),
                 Unbounded,
                 Unbounded,
                 &truth,
@@ -871,7 +874,7 @@ mod tests {
             )
             .await;
             chaos_test_case(
-                clone_sst(&table),
+                clone_sst(&sst),
                 Unbounded,
                 Included(end_key_bytes.clone()),
                 &truth,
@@ -879,7 +882,7 @@ mod tests {
             )
             .await;
             chaos_test_case(
-                clone_sst(&table),
+                clone_sst(&sst),
                 Included(begin_key_bytes.clone()),
                 Unbounded,
                 &truth,
@@ -887,7 +890,7 @@ mod tests {
             )
             .await;
             chaos_test_case(
-                clone_sst(&table),
+                clone_sst(&sst),
                 Excluded(begin_key_bytes.clone()),
                 Unbounded,
                 &truth,
@@ -895,7 +898,7 @@ mod tests {
             )
             .await;
             chaos_test_case(
-                clone_sst(&table),
+                clone_sst(&sst),
                 Included(begin_key_bytes.clone()),
                 Included(end_key_bytes.clone()),
                 &truth,
@@ -903,7 +906,7 @@ mod tests {
             )
             .await;
             chaos_test_case(
-                clone_sst(&table),
+                clone_sst(&sst),
                 Excluded(begin_key_bytes),
                 Included(end_key_bytes),
                 &truth,
@@ -927,8 +930,12 @@ mod tests {
             );
         }
         let (data, meta) = b.finish();
-        sstable_store.put(sst_id, &meta, data).await.unwrap();
-        Sstable { id: sst_id, meta }
+        let sst = Sstable { id: sst_id, meta };
+        sstable_store
+            .put(&sst, data, CachePolicy::Disable)
+            .await
+            .unwrap();
+        sst
     }
 
     fn key_range_test_key(table: u64, idx: usize, epoch: u64) -> Vec<u8> {

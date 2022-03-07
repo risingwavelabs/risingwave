@@ -1,7 +1,6 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use moka::future::Cache;
 use risingwave_common::array::RwError;
 use risingwave_common::error::Result;
 use risingwave_rpc_client::MetaClient;
@@ -95,12 +94,7 @@ impl StateStoreImpl {
                             checksum_algo: ChecksumAlg::Crc32c,
                         },
                         sstable_store.clone(),
-                        Arc::new(LocalVersionManager::new(
-                            sstable_store,
-                            // TODO: configurable block cache in config
-                            // 1GB block cache (65536 blocks * 64KB block)
-                            Some(Arc::new(Cache::new(65536))),
-                        )),
+                        Arc::new(LocalVersionManager::new(sstable_store)),
                         Arc::new(RpcHummockMetaClient::new(meta_client, stats.clone())),
                         stats.clone(),
                     )
@@ -130,10 +124,7 @@ impl StateStoreImpl {
                             checksum_algo: ChecksumAlg::Crc32c,
                         },
                         sstable_store.clone(),
-                        Arc::new(LocalVersionManager::new(
-                            sstable_store,
-                            Some(Arc::new(Cache::new(65536))),
-                        )),
+                        Arc::new(LocalVersionManager::new(sstable_store)),
                         Arc::new(RpcHummockMetaClient::new(meta_client, stats.clone())),
                         stats.clone(),
                     )

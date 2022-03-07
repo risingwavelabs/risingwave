@@ -265,7 +265,7 @@ pub(super) mod tests {
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::key::key_with_epoch;
     use crate::hummock::sstable::Sstable;
-    use crate::hummock::SstableStoreRef;
+    use crate::hummock::{CachePolicy, SstableStoreRef};
 
     /// Number of keys in table generated in `generate_table`.
     pub const TEST_KEYS_COUNT: usize = 10000;
@@ -349,10 +349,13 @@ pub(super) mod tests {
             );
         }
 
-        // get remote table
         let (data, meta) = b.finish();
-        sstable_store.put(0, &meta, data).await.unwrap();
-        Sstable { id: 0, meta }
+        let sst = Sstable { id: 0, meta };
+        sstable_store
+            .put(&sst, data, CachePolicy::Disable)
+            .await
+            .unwrap();
+        sst
     }
 
     fn key(prefix: &[u8], i: usize) -> Bytes {

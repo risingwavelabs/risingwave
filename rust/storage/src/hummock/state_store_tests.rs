@@ -33,7 +33,7 @@ async fn test_prometheus_endpoint_hummock() {
     let hummock_options = HummockOptions::default_for_test();
     let object_client = Arc::new(InMemObjectStore::new());
     let sstable_store = mock_sstable_store_with_object_store(object_client.clone());
-    let local_version_manager = Arc::new(LocalVersionManager::new(sstable_store.clone(), None));
+    let local_version_manager = Arc::new(LocalVersionManager::new(sstable_store.clone()));
     let _hummock_storage = HummockStorage::with_default_stats(
         hummock_options,
         sstable_store,
@@ -71,7 +71,7 @@ async fn test_basic() {
     let sstable_store = mock_sstable_store_with_object_store(object_client.clone());
     let hummock_options = HummockOptions::default_for_test();
 
-    let local_version_manager = Arc::new(LocalVersionManager::new(sstable_store.clone(), None));
+    let local_version_manager = Arc::new(LocalVersionManager::new(sstable_store.clone()));
     let hummock_storage = HummockStorage::with_default_stats(
         hummock_options,
         sstable_store,
@@ -227,7 +227,7 @@ async fn test_reload_storage() {
     let object_store = Arc::new(InMemObjectStore::new());
     let sstable_store = mock_sstable_store_with_object_store(object_store.clone());
     let hummock_options = HummockOptions::default_for_test();
-    let local_version_manager = Arc::new(LocalVersionManager::new(sstable_store.clone(), None));
+    let local_version_manager = Arc::new(LocalVersionManager::new(sstable_store.clone()));
     let hummock_meta_client = Arc::new(MockHummockMetaClient::new(Arc::new(
         MockHummockMetaService::new(),
     )));

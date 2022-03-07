@@ -21,7 +21,7 @@ pub struct ReverseSSTableIterator {
     cur_idx: usize,
 
     /// Reference to the table
-    pub table: Arc<Sstable>,
+    pub sst: Arc<Sstable>,
 
     sstable_store: SstableStoreRef,
 }
@@ -31,19 +31,19 @@ impl ReverseSSTableIterator {
         Self {
             block_iter: None,
             cur_idx: table.meta.block_metas.len() - 1,
-            table,
+            sst: table,
             sstable_store,
         }
     }
 
     /// Seek to a block, and then seek to the key if `seek_key` is given.
     async fn seek_idx(&mut self, idx: isize, seek_key: Option<&[u8]>) -> HummockResult<()> {
-        if idx >= self.table.block_count() as isize || idx < 0 {
+        if idx >= self.sst.block_count() as isize || idx < 0 {
             self.block_iter = None;
         } else {
             let block = self
                 .sstable_store
-                .get(self.table.id, &self.table.meta, idx as u64)
+                .get(&self.sst, idx as u64, crate::hummock::CachePolicy::Fill)
                 .await?;
             let mut block_iter = BlockIterator::new(block);
             if let Some(key) = seek_key {
@@ -100,13 +100,13 @@ impl HummockIterator for ReverseSSTableIterator {
     /// Instead of setting idx to 0th block, a `ReverseSSTableIterator` rewinds to the last block in
     /// the table.
     async fn rewind(&mut self) -> HummockResult<()> {
-        self.seek_idx(self.table.block_count() as isize - 1, None)
+        self.seek_idx(self.sst.block_count() as isize - 1, None)
             .await
     }
 
     async fn seek(&mut self, key: &[u8]) -> HummockResult<()> {
         let block_idx = self
-            .table
+            .sst
             .meta
             .block_metas
             .partition_point(|block_meta| {

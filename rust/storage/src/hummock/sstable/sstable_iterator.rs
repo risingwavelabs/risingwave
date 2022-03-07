@@ -27,8 +27,8 @@ pub struct SSTableIterator {
     /// Current block index.
     cur_idx: usize,
 
-    /// Reference to the table
-    pub table: Arc<Sstable>,
+    /// Reference to the sst
+    pub sst: Arc<Sstable>,
 
     sstable_store: SstableStoreRef,
 }
@@ -38,7 +38,7 @@ impl SSTableIterator {
         Self {
             block_iter: None,
             cur_idx: 0,
-            table,
+            sst: table,
             sstable_store,
         }
     }
@@ -48,15 +48,15 @@ impl SSTableIterator {
         tracing::trace!(
             target: "events::storage::sstable::block_seek",
             "table iterator seek: table_id = {}, block_id = {}",
-            self.table.id,
+            self.sst.id,
             idx,
         );
-        if idx >= self.table.block_count() {
+        if idx >= self.sst.block_count() {
             self.block_iter = None;
         } else {
             let block = self
                 .sstable_store
-                .get(self.table.id, &self.table.meta, idx as u64)
+                .get(&self.sst, idx as u64, crate::hummock::CachePolicy::Fill)
                 .await?;
             let mut block_iter = BlockIterator::new(block);
             if let Some(key) = seek_key {
@@ -116,7 +116,7 @@ impl HummockIterator for SSTableIterator {
 
     async fn seek(&mut self, key: &[u8]) -> HummockResult<()> {
         let block_idx = self
-            .table
+            .sst
             .meta
             .block_metas
             .partition_point(|block_meta| {

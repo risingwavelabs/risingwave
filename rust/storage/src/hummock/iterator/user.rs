@@ -251,7 +251,7 @@ mod tests {
     use crate::hummock::key::user_key;
     use crate::hummock::sstable::{SSTableIterator, Sstable};
     use crate::hummock::value::HummockValue;
-    use crate::hummock::{SSTableBuilder, SstableStoreRef};
+    use crate::hummock::{CachePolicy, SSTableBuilder, SstableStoreRef};
 
     #[tokio::test]
     async fn test_basic() {
@@ -730,8 +730,12 @@ mod tests {
             );
         }
         let (data, meta) = b.finish();
-        sstable_store.put(sst_id, &meta, data).await.unwrap();
-        Sstable { id: sst_id, meta }
+        let sst = Sstable { id: sst_id, meta };
+        sstable_store
+            .put(&sst, data, CachePolicy::Fill)
+            .await
+            .unwrap();
+        sst
     }
 
     fn key_range_test_key(table: u64, idx: usize, epoch: u64) -> Vec<u8> {
