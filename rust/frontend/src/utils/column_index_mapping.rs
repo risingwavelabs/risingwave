@@ -7,7 +7,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use log::debug;
 
-use crate::expr::{ExprRewriter, InputRef};
+use crate::expr::{ExprImpl, ExprRewriter, InputRef};
 
 /// `ColIndexMapping` is a partial mapping from usize to usize.
 ///
@@ -158,8 +158,8 @@ impl ColIndexMapping {
 }
 
 impl ExprRewriter for ColIndexMapping {
-    fn rewrite_input_ref(&mut self, input_ref: InputRef) -> InputRef {
-        InputRef::new(self.map(input_ref.index()), input_ref.data_type())
+    fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
+        InputRef::new(self.map(input_ref.index()), input_ref.data_type()).into()
     }
 }
 

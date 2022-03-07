@@ -1,7 +1,7 @@
 use risingwave_common::types::{DataType, ScalarImpl};
 
 use crate::expr::{
-    to_conjunctions, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, Literal,
+    to_conjunctions, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, Literal,
 };
 
 #[derive(Debug, Clone)]
@@ -31,11 +31,11 @@ impl Condition {
             for expr in iter {
                 ret = FunctionCall::new(ExprType::And, vec![ret, expr])
                     .unwrap()
-                    .to_expr_impl();
+                    .into();
             }
             ret
         } else {
-            Literal::new(Some(ScalarImpl::Bool(true)), DataType::Boolean).to_expr_impl()
+            Literal::new(Some(ScalarImpl::Bool(true)), DataType::Boolean).into()
         }
     }
 

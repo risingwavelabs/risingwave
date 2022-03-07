@@ -65,7 +65,7 @@ impl LogicalProject {
         let exprs: Vec<ExprImpl> = input_refs
             .into_iter()
             .map(|i| i.unwrap())
-            .map(|i| InputRef::new(i, input_schema.fields()[i].data_type()).to_expr_impl())
+            .map(|i| InputRef::new(i, input_schema.fields()[i].data_type()).into())
             .collect();
 
         let alias = vec![None; exprs.len()];
@@ -233,7 +233,7 @@ mod tests {
             table_scan.into(),
             vec![
                 ExprImpl::Literal(Box::new(Literal::new(None, ty.clone()))),
-                InputRef::new(2, ty.clone()).to_expr_impl(),
+                InputRef::new(2, ty.clone()).into(),
                 ExprImpl::FunctionCall(Box::new(
                     FunctionCall::new(
                         Type::LessThan,
