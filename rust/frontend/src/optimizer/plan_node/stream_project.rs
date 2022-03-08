@@ -5,6 +5,8 @@ use risingwave_common::catalog::Schema;
 use super::{LogicalProject, PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 
+/// `StreamProject` implements [`super::LogicalProject`] to evaluate specified expressions on input
+/// rows.
 #[derive(Debug, Clone)]
 pub struct StreamProject {
     logical: LogicalProject,

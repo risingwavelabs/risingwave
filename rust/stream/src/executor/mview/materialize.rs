@@ -202,7 +202,7 @@ mod tests {
     async fn test_materialize_executor() {
         // Prepare storage and memtable.
         let memory_state_store = MemoryStateStore::new();
-        let store = StateStoreImpl::MemoryStateStore(
+        let _state_store_impl = StateStoreImpl::MemoryStateStore(
             memory_state_store
                 .clone()
                 .monitored(DEFAULT_STATE_STORE_STATS.clone()),
@@ -266,11 +266,11 @@ mod tests {
             ],
         );
 
-        let _table = new_adhoc_mview_table(store, &table_id, &column_ids, schema.fields());
+        let keyspace = Keyspace::table_root(memory_state_store, &table_id);
 
         let mut materialize_executor = Box::new(MaterializeExecutor::new(
             Box::new(source),
-            Keyspace::table_root(memory_state_store, &table_id),
+            keyspace,
             vec![OrderPair::new(0, OrderType::Ascending)],
             column_ids,
             1,

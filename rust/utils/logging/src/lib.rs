@@ -1,19 +1,12 @@
-use clap::StructOpt;
-use log::info;
-use risingwave::server::compute_node_serve;
-use risingwave::ComputeNodeOpts;
-use tikv_jemallocator::Jemalloc;
+mod trace_runtime;
+
 use tracing::Level;
 use tracing_subscriber::filter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::prelude::*;
 
-#[global_allocator]
-static GLOBAL: Jemalloc = Jemalloc;
-
 /// Configure log targets for all `RisingWave` crates. When new crates are added and TRACE level
 /// logs are needed, add them here.
-#[allow(dead_code)]
 fn configure_risingwave_targets(targets: filter::Targets) -> filter::Targets {
     targets
         // enable trace for most modules
@@ -26,9 +19,8 @@ fn configure_risingwave_targets(targets: filter::Targets) -> filter::Targets {
         .with_target("events", Level::ERROR)
 }
 
-#[cfg(not(tarpaulin_include))]
-#[tokio::main]
-async fn main() {
+/// Init logger for RisingWave binaries.
+pub fn init_risingwave_logger(enable_jaeger_tracing: bool) {
     use std::panic;
 
     let default_hook = panic::take_hook();
@@ -39,8 +31,6 @@ async fn main() {
     }));
 
     use isahc::config::Configurable;
-
-    let opts = ComputeNodeOpts::parse();
 
     let fmt_layer = {
         // Configure log output to stdout
@@ -65,7 +55,7 @@ async fn main() {
         fmt_layer.with_filter(filter)
     };
 
-    if opts.enable_jaeger_tracing {
+    if enable_jaeger_tracing {
         // With Jaeger tracing enabled, we should configure opentelemetry endpoints.
 
         opentelemetry::global::set_text_map_propagator(opentelemetry_jaeger::Propagator::new());
@@ -77,7 +67,7 @@ async fn main() {
             .with_service_name("compute")
             // disable proxy
             .with_http_client(isahc::HttpClient::builder().proxy(None).build().unwrap())
-            .install_batch(risingwave::trace_runtime::RwTokio)
+            .install_batch(trace_runtime::RwTokio)
             .unwrap();
 
         let opentelemetry_layer = tracing_opentelemetry::layer().with_tracer(tracer);
@@ -99,12 +89,18 @@ async fn main() {
     }
 
     // TODO: add file-appender tracing subscriber in the future
+}
 
-    info!("meta address: {}", opts.meta_address.clone());
+/// Common set-up for all RisingWave binaries. Currently, this includes:
+///
+/// * Set panic hook to abort the whole process.
+pub fn oneshot_common() {
+    use std::panic;
 
-    let addr = opts.host.parse().unwrap();
-    info!("Starting server at {}", addr);
+    let default_hook = panic::take_hook();
 
-    let (join_handle, _shutdown_send) = compute_node_serve(addr, opts).await;
-    join_handle.await.unwrap();
+    panic::set_hook(Box::new(move |info| {
+        default_hook(info);
+        std::process::abort();
+    }));
 }

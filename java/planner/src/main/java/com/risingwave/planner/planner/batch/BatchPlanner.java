@@ -15,6 +15,7 @@ import static com.risingwave.planner.rules.physical.BatchRuleSets.LOGICAL_OPTIMI
 import static com.risingwave.planner.rules.physical.BatchRuleSets.LOGICAL_REWRITE_RULES;
 import static com.risingwave.planner.rules.physical.BatchRuleSets.PHYSICAL_CONVERTER_RULES;
 
+import com.risingwave.common.config.BatchPlannerConfigurations;
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.planner.planner.Planner;
 import com.risingwave.planner.program.ChainedOptimizerProgram;
@@ -22,6 +23,7 @@ import com.risingwave.planner.program.HepOptimizerProgram;
 import com.risingwave.planner.program.JoinReorderProgram;
 import com.risingwave.planner.program.OptimizerProgram;
 import com.risingwave.planner.program.SubQueryRewriteProgram;
+import com.risingwave.planner.program.SubQueryRewriteProgram2;
 import com.risingwave.planner.program.VolcanoOptimizerProgram;
 import com.risingwave.planner.rel.common.dist.RwDistributions;
 import com.risingwave.planner.rel.physical.BatchPlan;
@@ -30,7 +32,7 @@ import com.risingwave.planner.rel.physical.RwBatchProject;
 import com.risingwave.planner.rel.serialization.ExplainWriter;
 import com.risingwave.planner.rules.physical.BatchRuleSets;
 import com.risingwave.planner.sql.SqlConverter;
-import java.util.function.Function;
+import java.util.function.BiFunction;
 import org.apache.calcite.rel.RelCollation;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.RelRoot;
@@ -53,10 +55,10 @@ public class BatchPlanner implements Planner<BatchPlan> {
   public RelNode plan(
       SqlNode ast,
       ExecutionContext context,
-      Function<RelCollation, OptimizerProgram> optimizerProgramProvider) {
+      BiFunction<ExecutionContext, RelCollation, OptimizerProgram> optimizerProgramProvider) {
     SqlConverter sqlConverter = SqlConverter.builder(context).build();
     RelRoot rawRoot = sqlConverter.toRel(ast);
-    OptimizerProgram optimizerProgram = optimizerProgramProvider.apply(rawRoot.collation);
+    OptimizerProgram optimizerProgram = optimizerProgramProvider.apply(context, rawRoot.collation);
     RelNode optimized = optimizerProgram.optimize(rawRoot.rel, context);
     if (!rawRoot.isRefTrivial()) {
       LogicalProject proj = (LogicalProject) rawRoot.withRel(optimized).project(true);
@@ -74,14 +76,15 @@ public class BatchPlanner implements Planner<BatchPlan> {
 
   public RelNode planLogical(SqlNode ast, ExecutionContext context) {
     RelNode result =
-        plan(ast, context, relCollation -> buildOptimizerProgram(LOGICAL_CBO, relCollation));
+        plan(
+            ast, context, (c, relCollation) -> buildOptimizerProgram(LOGICAL_CBO, relCollation, c));
     log.info("Create logical plan:\n {}", ExplainWriter.explainPlan(result));
     return result;
   }
 
   public BatchPlan planPhysical(SqlNode ast, ExecutionContext context) {
     RelNode result =
-        plan(ast, context, relCollation -> buildOptimizerProgram(PHYSICAL, relCollation));
+        plan(ast, context, (c, relCollation) -> buildOptimizerProgram(PHYSICAL, relCollation, c));
     RisingWaveBatchPhyRel root = (RisingWaveBatchPhyRel) result;
     log.debug("Create physical plan:\n {}", ExplainWriter.explainPlan(root));
     return new BatchPlan(root);
@@ -89,17 +92,26 @@ public class BatchPlanner implements Planner<BatchPlan> {
 
   public BatchPlan planDistributed(SqlNode ast, ExecutionContext context) {
     RelNode result =
-        plan(ast, context, relCollation -> buildOptimizerProgram(DISTRIBUTED, relCollation));
+        plan(
+            ast, context, (c, relCollation) -> buildOptimizerProgram(DISTRIBUTED, relCollation, c));
     RisingWaveBatchPhyRel root = (RisingWaveBatchPhyRel) result;
     log.debug("Create distributed plan:\n {}", ExplainWriter.explainPlan(root));
     return new BatchPlan(root);
   }
 
   private static OptimizerProgram buildOptimizerProgram(
-      OptimizerPhase optimizeLevel, RelCollation requiredCollation) {
+      OptimizerPhase optimizeLevel, RelCollation requiredCollation, ExecutionContext context) {
     ChainedOptimizerProgram.Builder builder = ChainedOptimizerProgram.builder(optimizeLevel);
 
-    builder.addLast(SUBQUERY_REWRITE, SubQueryRewriteProgram.INSTANCE);
+    var useNewSubqueryPlanner =
+        context
+            .getSessionConfiguration()
+            .get(BatchPlannerConfigurations.ENABLE_NEW_SUBQUERY_PLANNER);
+    if (useNewSubqueryPlanner) {
+      builder.addLast(SUBQUERY_REWRITE, new SubQueryRewriteProgram2());
+    } else {
+      builder.addLast(SUBQUERY_REWRITE, SubQueryRewriteProgram.INSTANCE);
+    }
 
     builder.addLast(
         LOGICAL_REWRITE, HepOptimizerProgram.builder().addRules(LOGICAL_REWRITE_RULES).build());

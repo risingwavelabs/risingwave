@@ -12,13 +12,23 @@ use crate::optimizer::plan_node::LogicalProject;
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 use crate::utils::ColIndexMapping;
 
+/// Aggregation Call
 #[derive(Clone, Debug)]
 pub struct PlanAggCall {
+    /// Kind of aggregation function
     pub agg_kind: AggKind,
+
+    /// Data type of the returned column
     pub return_type: DataType,
+
+    /// Column indexes of input columns
     pub inputs: Vec<usize>,
 }
 
+/// `LogicalAgg` groups input data by their group keys and computes aggregation functions.
+///
+/// It corresponds to the `GROUP BY` operator in a SQL query statement together with the aggregate
+/// functions in the `SELECT` clause.
 #[derive(Clone, Debug)]
 pub struct LogicalAgg {
     agg_calls: Vec<PlanAggCall>,

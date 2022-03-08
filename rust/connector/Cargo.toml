@@ -35,8 +35,8 @@ prost = "0.9"
 protobuf = "2"
 pulsar = { git = "https://github.com/shanicky/pulsar-rs.git", rev = "3b6353943833057f4379a354c1754a4e86fa57ff" }
 rdkafka = { version = "0.28", features = ["cmake-build"] }
-risingwave-pb = { path = "../prost" }
 risingwave_common = { path = "../common" }
+risingwave_pb = { path = "../prost" }
 risingwave_storage = { path = "../storage" }
 serde = { version = "1", features = ["derive"] }
 serde_derive = "1"
