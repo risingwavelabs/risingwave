@@ -106,9 +106,7 @@ impl<S: StateStore> Executor for RowSeqScanExecutor<S> {
         }
 
         let iter = self.iter.as_mut().expect("executor not open");
-
-        let column_indices = (0..self.table.schema().len()).collect_vec();
-        iter.collect_datachunk_from_iter(&self.table, &column_indices, Some(self.chunk_size))
+        iter.collect_datachunk_from_iter(&self.table, Some(self.chunk_size))
             .await
     }
 

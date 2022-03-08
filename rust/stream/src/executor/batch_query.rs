@@ -109,10 +109,8 @@ impl<S: StateStore> Executor for BatchQueryExecutor<S> {
         }
 
         let iter = self.iter.as_mut().unwrap();
-        let column_indices = (0..self.table.schema().len()).collect_vec();
-
         let data_chunk = iter
-            .collect_datachunk_from_iter(&self.table, &column_indices, Some(self.batch_size))
+            .collect_datachunk_from_iter(&self.table, Some(self.batch_size))
             .await?
             .ok_or_else(|| RwError::from(ErrorCode::Eof))?;
 

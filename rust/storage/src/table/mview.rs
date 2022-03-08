@@ -206,25 +206,17 @@ impl<S: StateStore> MViewTableIter<S> {
     pub async fn collect_datachunk_from_iter(
         &mut self,
         mview_table: &MViewTable<S>,
-        indices: &[usize],
         chunk_size: Option<usize>,
     ) -> Result<Option<DataChunk>> {
         let schema = &mview_table.schema;
-        let mut builders = indices
-            .iter()
-            .map(|i| {
-                schema.fields()[*i]
-                    .data_type()
-                    .create_array_builder(chunk_size.unwrap_or(0))
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let mut builders = schema.create_array_builders(chunk_size.unwrap_or(0))?;
 
         let mut row_count = 0;
         for _ in 0..chunk_size.unwrap_or(usize::MAX) {
             match self.next().await? {
                 Some(row) => {
-                    for (&index, builder) in indices.iter().zip_eq(builders.iter_mut()) {
-                        builder.append_datum(&row.0[index])?;
+                    for (datum, builder) in row.0.into_iter().zip_eq(builders.iter_mut()) {
+                        builder.append_datum(&datum)?;
                     }
                     row_count += 1;
                 }
@@ -232,7 +224,7 @@ impl<S: StateStore> MViewTableIter<S> {
             }
         }
 
-        let chunk = if indices.is_empty() {
+        let chunk = if schema.len() == 0 {
             // Generate some dummy data to ensure a correct cardinality, which might be used by
             // count(*).
             DataChunk::new_dummy(row_count)

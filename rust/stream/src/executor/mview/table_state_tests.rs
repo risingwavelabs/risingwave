@@ -402,7 +402,7 @@ async fn test_mview_scan_empty_column_ids_cardinality() {
 
     let chunk = {
         let mut iter = table.iter(u64::MAX).await.unwrap();
-        iter.collect_datachunk_from_iter(&table, &[0, 1, 2], None)
+        iter.collect_datachunk_from_iter(&table, None)
             .await
             .unwrap()
             .unwrap()
