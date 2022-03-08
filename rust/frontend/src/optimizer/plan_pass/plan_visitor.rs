@@ -39,4 +39,5 @@ macro_rules! def_visitor {
         }
     }
 }
+
 for_all_plan_nodes! { def_visitor }

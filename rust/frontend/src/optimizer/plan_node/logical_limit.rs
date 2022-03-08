@@ -6,6 +6,7 @@ use risingwave_common::catalog::Schema;
 use super::{BatchLimit, ColPrunable, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 
+/// `LogicalLimit` fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone)]
 pub struct LogicalLimit {
     input: PlanRef,

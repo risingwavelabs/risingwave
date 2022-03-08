@@ -9,6 +9,8 @@ use crate::optimizer::property::{
     Direction, Distribution, FieldOrder, Order, WithDistribution, WithOrder, WithSchema,
 };
 
+/// `BatchSortMergeJoin` implements [`super::LogicalJoin`] by merging left & right relations in
+/// a streaming manner. The input relation must have been ordered by the equi-join key(s).
 #[derive(Debug, Clone)]
 pub struct BatchSortMergeJoin {
     logical: LogicalJoin,

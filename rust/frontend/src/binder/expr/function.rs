@@ -2,6 +2,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::expr::AggKind;
 use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr};
 
+use crate::binder::bind_context::Clause;
 use crate::binder::Binder;
 use crate::expr::{AggCall, ExprImpl, ExprType, FunctionCall};
 
@@ -23,12 +24,7 @@ impl Binder {
                 _ => None,
             };
             if let Some(kind) = agg_kind {
-                if self.context.in_values_clause {
-                    return Err(ErrorCode::InvalidInputSyntax(
-                        "aggregate functions are not allowed in VALUES".to_string(),
-                    )
-                    .into());
-                }
+                self.ensure_aggregate_allowed()?;
                 return Ok(ExprImpl::AggCall(Box::new(AggCall::new(kind, inputs)?)));
             }
             let function_type = match function_name.value.as_str() {
@@ -50,6 +46,19 @@ impl Binder {
                     .into(),
             )
         }
+    }
+
+    fn ensure_aggregate_allowed(&self) -> Result<()> {
+        if let Some(clause) = self.context.clause {
+            if clause == Clause::Values || clause == Clause::Where {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "aggregate functions are not allowed in {}",
+                    clause
+                ))
+                .into());
+            }
+        }
+        Ok(())
     }
 
     fn bind_function_expr_arg(&mut self, arg_expr: FunctionArgExpr) -> Result<ExprImpl> {

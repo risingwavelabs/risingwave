@@ -5,6 +5,7 @@ use risingwave_common::catalog::Schema;
 use super::{LogicalLimit, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::property::{Distribution, WithDistribution, WithOrder, WithSchema};
 
+/// `BatchLimit` implements [`super::LogicalLimit`] to fetch specified rows from input
 #[derive(Debug, Clone)]
 pub struct BatchLimit {
     logical: LogicalLimit,

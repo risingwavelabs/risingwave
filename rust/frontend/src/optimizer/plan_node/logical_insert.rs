@@ -9,6 +9,10 @@ use crate::binder::BaseTableRef;
 use crate::catalog::ColumnId;
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 
+/// `LogicalInsert` iterates on input relation and insert the data into specified table.
+///
+/// It corresponds to the `INSERT` statements in SQL. Especially, for `INSERT ... VALUES`
+/// statements, the input relation would be [`super::LogicalValues`].
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct LogicalInsert {

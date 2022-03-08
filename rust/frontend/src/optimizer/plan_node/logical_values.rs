@@ -8,6 +8,7 @@ use super::{ColPrunable, PlanRef, ToBatch, ToStream};
 use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 
+/// `LogicalValues` build rows according to a list of expressions
 #[derive(Debug, Clone)]
 pub struct LogicalValues {
     rows: Vec<Vec<ExprImpl>>,

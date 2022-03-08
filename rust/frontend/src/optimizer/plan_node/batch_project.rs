@@ -5,6 +5,8 @@ use risingwave_common::catalog::Schema;
 use super::{LogicalProject, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::property::{Distribution, WithDistribution, WithOrder, WithSchema};
 
+/// `BatchProject` implements [`super::LogicalProject`] to evaluate specified expressions on input
+/// rows
 #[derive(Debug, Clone)]
 pub struct BatchProject {
     logical: LogicalProject,

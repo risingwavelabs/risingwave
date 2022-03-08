@@ -6,7 +6,7 @@ use risingwave_sqlparser::ast::Statement;
 mod bind_context;
 pub(crate) mod expr;
 mod insert;
-mod projection;
+mod project;
 mod query;
 mod select;
 mod set_expr;
@@ -25,6 +25,7 @@ pub use values::BoundValues;
 
 use crate::catalog::database_catalog::DatabaseCatalog;
 
+/// `Binder` binds the identifiers in AST to columns in relations
 pub struct Binder {
     #[allow(dead_code)]
     catalog: Arc<DatabaseCatalog>,
