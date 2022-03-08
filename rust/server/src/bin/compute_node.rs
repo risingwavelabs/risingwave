@@ -1,110 +1,16 @@
 use clap::StructOpt;
-use log::info;
-use risingwave_compute::server::compute_node_serve;
-use risingwave_compute::ComputeNodeOpts;
 use tikv_jemallocator::Jemalloc;
-use tracing::Level;
-use tracing_subscriber::filter;
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::prelude::*;
 
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
-/// Configure log targets for all `RisingWave` crates. When new crates are added and TRACE level
-/// logs are needed, add them here.
-#[allow(dead_code)]
-fn configure_risingwave_targets(targets: filter::Targets) -> filter::Targets {
-    targets
-        // enable trace for most modules
-        .with_target("risingwave_stream", Level::TRACE)
-        .with_target("risingwave_batch", Level::TRACE)
-        .with_target("risingwave_storage", Level::TRACE)
-        // disable events that are too verbose
-        // if you want to enable any of them, find the target name and set it to `TRACE`
-        // .with_target("events::stream::mview::scan", Level::TRACE)
-        .with_target("events", Level::ERROR)
-}
-
 #[cfg(not(tarpaulin_include))]
 #[tokio::main]
 async fn main() {
-    use std::panic;
+    let opts = risingwave_compute::ComputeNodeOpts::parse();
 
-    let default_hook = panic::take_hook();
+    risingwave_logging::oneshot_common();
+    risingwave_logging::init_risingwave_logger(opts.enable_jaeger_tracing);
 
-    panic::set_hook(Box::new(move |info| {
-        default_hook(info);
-        std::process::abort();
-    }));
-
-    use isahc::config::Configurable;
-
-    let opts = ComputeNodeOpts::parse();
-
-    let fmt_layer = {
-        // Configure log output to stdout
-        let fmt_layer = tracing_subscriber::fmt::layer().compact().with_ansi(false);
-        let filter = filter::Targets::new()
-            // Only enable WARN and ERROR for 3rd-party crates
-            .with_target("aws_endpoint", Level::WARN)
-            .with_target("hyper", Level::WARN)
-            .with_target("h2", Level::WARN)
-            .with_target("tower", Level::WARN)
-            .with_target("isahc", Level::WARN);
-
-        // Configure RisingWave's own crates to log at TRACE level, uncomment the following line if
-        // needed.
-
-        // let filter = configure_risingwave_targets(filter);
-
-        // Enable DEBUG level for all other crates
-        // TODO: remove this in release mode
-        let filter = filter.with_default(Level::DEBUG);
-
-        fmt_layer.with_filter(filter)
-    };
-
-    if opts.enable_jaeger_tracing {
-        // With Jaeger tracing enabled, we should configure opentelemetry endpoints.
-
-        opentelemetry::global::set_text_map_propagator(opentelemetry_jaeger::Propagator::new());
-
-        let tracer = opentelemetry_jaeger::new_pipeline()
-            // TODO: use UDP tracing in production environment
-            .with_collector_endpoint("http://127.0.0.1:14268/api/traces")
-            // TODO: change service name to compute-{port}
-            .with_service_name("compute")
-            // disable proxy
-            .with_http_client(isahc::HttpClient::builder().proxy(None).build().unwrap())
-            .install_batch(risingwave_compute::trace_runtime::RwTokio)
-            .unwrap();
-
-        let opentelemetry_layer = tracing_opentelemetry::layer().with_tracer(tracer);
-
-        // Configure RisingWave's own crates to log at TRACE level, and ignore all third-party
-        // crates
-        let filter = filter::Targets::new();
-        let filter = configure_risingwave_targets(filter);
-
-        let opentelemetry_layer = opentelemetry_layer.with_filter(filter);
-
-        tracing_subscriber::registry()
-            .with(fmt_layer)
-            .with(opentelemetry_layer)
-            .init();
-    } else {
-        // Otherwise, simply enable fmt_layer.
-        tracing_subscriber::registry().with(fmt_layer).init();
-    }
-
-    // TODO: add file-appender tracing subscriber in the future
-
-    info!("meta address: {}", opts.meta_address.clone());
-
-    let addr = opts.host.parse().unwrap();
-    info!("Starting server at {}", addr);
-
-    let (join_handle, _shutdown_send) = compute_node_serve(addr, opts).await;
-    join_handle.await.unwrap();
+    risingwave_compute::start(opts).await
 }
