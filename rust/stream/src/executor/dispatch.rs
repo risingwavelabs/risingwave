@@ -8,6 +8,7 @@ use futures::channel::mpsc::Sender;
 use futures::SinkExt;
 use itertools::Itertools;
 use risingwave_common::array::Op;
+use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::util::addr::is_local_address;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use tracing::event;
@@ -51,9 +52,21 @@ impl LocalOutput {
 #[async_trait]
 impl Output for LocalOutput {
     async fn send(&mut self, message: Message) -> Result<()> {
-        // local channel should never fail
-        self.ch.send(message).await.unwrap();
-        Ok(())
+        // Local channel might fail (e.g. terminated by external sources).
+        match self.ch.send(message).await {
+            Ok(_) => Ok(()),
+            Err(_) => {
+                error!(
+                    "[Dispatcher (ActorId: {})] Output channels have been terminated",
+                    self.actor_id
+                );
+                return Err(InternalError(format!(
+                    "[Dispatcher (ActorId: {})] Output channels have been terminated",
+                    self.actor_id
+                ))
+                .into());
+            }
+        }
     }
 
     fn actor_id(&self) -> ActorId {

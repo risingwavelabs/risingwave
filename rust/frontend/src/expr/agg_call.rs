@@ -13,8 +13,7 @@ pub struct AggCall {
 impl AggCall {
     #![allow(clippy::diverging_sub_expression)]
     /// Returns error if the function name matches with an existing function
-    /// but with illegal arguments. `Ok(None)` is returned when there's no matching
-    /// function.
+    /// but with illegal arguments.
     pub fn new(agg_kind: AggKind, inputs: Vec<ExprImpl>) -> Result<Self> {
         // TODO(TaoWu): Add arguments validator.
         let return_type = match agg_kind {

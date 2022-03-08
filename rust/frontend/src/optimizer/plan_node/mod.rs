@@ -11,7 +11,7 @@
 //! - each field in the node struct are private
 //! - recommend to implement the construction of Node in a unified `new()` function, if have multi
 //!   methods to construct, make they have a consistent behavior
-//! - all field should be valued in construction, so the porperties' derivation should be finished
+//! - all field should be valued in construction, so the properties' derivation should be finished
 //!   in the `new()` function.
 
 use std::fmt::{Debug, Display};
@@ -167,7 +167,7 @@ pub use stream_table_source::StreamTableSource;
 /// macro_rules! use_plan {
 ///     ([], $({ $convention:ident, $name:ident }),*) => {};
 /// }
-/// frontend::for_all_plan_nodes! { use_plan }
+/// risingwave_frontend::for_all_plan_nodes! { use_plan }
 /// ```
 /// See the following implementations for example.
 #[macro_export]
@@ -259,7 +259,7 @@ macro_rules! enum_plan_node_type {
       /// each enum value represent a PlanNode struct type, help us to dispatch and downcast
       #[derive(PartialEq, Debug)]
       pub enum PlanNodeType{
-        $(  [<$convention $name>] ),*
+        $( [<$convention $name>] ),*
       }
 
       $(impl PlanNode for [<$convention $name>] {

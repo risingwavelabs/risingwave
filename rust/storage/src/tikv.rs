@@ -131,6 +131,30 @@ impl StateStore for TikvStateStore {
         );
         Ok(TikvStateStoreIter::new(self.clone(), range).await)
     }
+
+    async fn replicate_batch(
+        &self,
+        kv_pairs: Vec<(Bytes, Option<Bytes>)>,
+        epoch: u64,
+    ) -> Result<()> {
+        unimplemented!()
+    }
+
+    async fn reverse_iter<R, B>(&self, _key_range: R, _epoch: u64) -> Result<Self::Iter<'_>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]>,
+    {
+        unimplemented!()
+    }
+
+    async fn wait_epoch(&self, _epoch: u64) {
+        unimplemented!()
+    }
+
+    async fn sync(&self, _epoch: Option<u64>) -> Result<()> {
+        unimplemented!()
+    }
 }
 
 pub struct TikvStateStoreIter {

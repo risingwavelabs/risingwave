@@ -61,7 +61,7 @@ impl SstableStore {
             for (block_idx, meta) in sst.meta.block_metas.iter().enumerate() {
                 let offset = meta.offset as usize;
                 let len = meta.len as usize;
-                let block = Block::decode(data.slice(offset..offset + len), offset)?;
+                let block = Arc::new(Block::decode(data.slice(offset..offset + len))?);
                 self.block_cache
                     .insert(sst.id, block_idx as u64, block)
                     .await
@@ -93,7 +93,8 @@ impl SstableStore {
                 .read(&data_path, Some(block_loc))
                 .await
                 .map_err(HummockError::object_io_error)?;
-            Block::decode(block_data, block_meta.offset as usize)
+            let block = Block::decode(block_data)?;
+            Ok(Arc::new(block))
         };
 
         match policy {
@@ -127,13 +128,17 @@ impl SstableStore {
     }
 
     // TODO(MrCroxx): Maybe use `&SSTable` directly?
-    fn get_sst_meta_path(&self, sst_id: u64) -> String {
+    pub fn get_sst_meta_path(&self, sst_id: u64) -> String {
         format!("{}/{}.meta", self.path, sst_id)
     }
 
     // TODO(MrCroxx): Maybe use `&SSTable` directly?
-    fn get_sst_data_path(&self, sst_id: u64) -> String {
+    pub fn get_sst_data_path(&self, sst_id: u64) -> String {
         format!("{}/{}.data", self.path, sst_id)
+    }
+
+    pub fn store(&self) -> ObjectStoreRef {
+        self.store.clone()
     }
 }
 

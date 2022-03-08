@@ -50,6 +50,7 @@ impl OrderedArraysSerializer {
 /// `OrderedRowSerializer` expects that the input row contains exactly the values needed to be
 /// serialized, not more and not less. This is because `Row` always needs to be constructed from
 /// chunk manually.
+#[derive(Clone)]
 pub struct OrderedRowSerializer {
     order_types: Vec<OrderType>,
 }

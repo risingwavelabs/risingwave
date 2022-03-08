@@ -1,6 +1,6 @@
 package com.risingwave.planner;
 
-import static com.risingwave.common.config.BatchPlannerConfigurations.OPTIMIZER_ENABLE_CALCITE_SUBQUERY_EXPAND;
+import static com.risingwave.common.config.BatchPlannerConfigurations.ENABLE_NEW_SUBQUERY_PLANNER;
 
 import com.risingwave.planner.program.HepOptimizerProgram;
 import com.risingwave.planner.program.OptimizerProgram;
@@ -23,7 +23,7 @@ public class SimplifyFilterConditionRuleTest extends BatchPlanTestBase {
     super.init();
     executionContext
         .getSessionConfiguration()
-        .setByString(OPTIMIZER_ENABLE_CALCITE_SUBQUERY_EXPAND.getKey(), "false");
+        .setByString(ENABLE_NEW_SUBQUERY_PLANNER.getKey(), "true");
     program = HepOptimizerProgram.builder().addRule(SimplifyFilterConditionRule.INSTANCE).build();
   }
 

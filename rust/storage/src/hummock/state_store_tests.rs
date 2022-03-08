@@ -117,12 +117,7 @@ async fn test_basic() {
 
     // Write first batch.
     hummock_storage
-        .write_batch(
-            batch1
-                .into_iter()
-                .map(|(k, v)| (k.to_vec(), v.map(|x| x.to_vec()).into())),
-            epoch1,
-        )
+        .write_batch(batch1.into_iter().map(|(k, v)| (k, v.into())), epoch1)
         .await
         .unwrap();
 
@@ -140,12 +135,7 @@ async fn test_basic() {
     // Write second batch.
     let epoch2 = epoch1 + 1;
     hummock_storage
-        .write_batch(
-            batch2
-                .into_iter()
-                .map(|(k, v)| (k.to_vec(), v.map(|x| x.to_vec()).into())),
-            epoch2,
-        )
+        .write_batch(batch2.into_iter().map(|(k, v)| (k, v.into())), epoch2)
         .await
         .unwrap();
 
@@ -156,12 +146,7 @@ async fn test_basic() {
     // Write third batch.
     let epoch3 = epoch2 + 1;
     hummock_storage
-        .write_batch(
-            batch3
-                .into_iter()
-                .map(|(k, v)| (k.to_vec(), v.map(|x| x.to_vec()).into())),
-            epoch3,
-        )
+        .write_batch(batch3.into_iter().map(|(k, v)| (k, v.into())), epoch3)
         .await
         .unwrap();
 
@@ -265,12 +250,7 @@ async fn test_reload_storage() {
 
     // Write first batch.
     hummock_storage
-        .write_batch(
-            batch1
-                .into_iter()
-                .map(|(k, v)| (k.to_vec(), v.map(|x| x.to_vec()).into())),
-            epoch1,
-        )
+        .write_batch(batch1.into_iter().map(|(k, v)| (k, v.into())), epoch1)
         .await
         .unwrap();
 
@@ -299,12 +279,7 @@ async fn test_reload_storage() {
     // Write second batch.
     let epoch2 = epoch1 + 1;
     hummock_storage
-        .write_batch(
-            batch2
-                .into_iter()
-                .map(|(k, v)| (k.to_vec(), v.map(|x| x.to_vec()).into())),
-            epoch2,
-        )
+        .write_batch(batch2.into_iter().map(|(k, v)| (k, v.into())), epoch2)
         .await
         .unwrap();
 

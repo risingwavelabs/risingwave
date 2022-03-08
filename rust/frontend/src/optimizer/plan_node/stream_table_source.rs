@@ -5,6 +5,8 @@ use risingwave_common::catalog::Schema;
 use super::ToStreamProst;
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 
+/// `StreamTableSource` continuously streams data from internal table or various kinds of
+/// external sources.
 #[derive(Debug, Clone)]
 pub struct StreamTableSource {
     // TODO(catalog)

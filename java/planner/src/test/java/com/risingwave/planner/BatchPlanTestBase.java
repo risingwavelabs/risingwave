@@ -77,7 +77,7 @@ public abstract class BatchPlanTestBase extends SqlTestBase {
 
   protected void verifyPlanWithProgram(
       PlannerTestCase testCase, SqlNode ast, OptimizerProgram program) {
-    var root = batchPlanner.plan(ast, executionContext, relCollation -> program);
+    var root = batchPlanner.plan(ast, executionContext, (c, relCollation) -> program);
     if (testCase.getPlan().isPresent()) {
       String explainedPlan = ExplainWriter.explainPlan(root);
       assertEquals(testCase.getPlan().get(), explainedPlan, "Plan not match!");

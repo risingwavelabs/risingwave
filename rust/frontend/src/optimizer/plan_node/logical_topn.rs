@@ -6,6 +6,7 @@ use super::{ColPrunable, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
 use crate::optimizer::property::{FieldOrder, Order, WithDistribution, WithOrder, WithSchema};
 use crate::utils::ColIndexMapping;
 
+/// `LogicalTopN` sorts the input data and fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone)]
 pub struct LogicalTopN {
     input: PlanRef,

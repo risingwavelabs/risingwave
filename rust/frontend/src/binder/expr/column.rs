@@ -34,9 +34,11 @@ impl Binder {
                         column.index,
                         column.data_type.clone(),
                     )))),
-                    None => Err(
-                        ErrorCode::ItemNotFound(format!("Invalid table: {}", table_name)).into(),
-                    ),
+                    None => Err(ErrorCode::ItemNotFound(format!(
+                        "missing FROM-clause entry for table \"{}\"",
+                        table_name
+                    ))
+                    .into()),
                 }
             }
             None => {

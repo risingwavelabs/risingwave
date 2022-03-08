@@ -1,12 +1,12 @@
 // Data-driven tests.
 
 use anyhow::{anyhow, Result};
-use frontend::binder::Binder;
-use frontend::handler::{create_table, drop_table};
-use frontend::planner::Planner;
-use frontend::session::QueryContext;
-use frontend::test_utils::LocalFrontend;
 use risingwave_common::array::RwError;
+use risingwave_frontend::binder::Binder;
+use risingwave_frontend::handler::{create_table, drop_table};
+use risingwave_frontend::planner::Planner;
+use risingwave_frontend::session::QueryContext;
+use risingwave_frontend::test_utils::LocalFrontend;
 use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use serde::Deserialize;

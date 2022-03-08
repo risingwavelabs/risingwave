@@ -1,0 +1,38 @@
+[package]
+name = "risingwave_cmd"
+version = "0.1.3"
+edition = "2021"
+
+[dependencies]
+clap = { version = "3", features = ["derive"] }
+risingwave_compute = { path = "../compute" }
+risingwave_ctl = { path = "../ctl" }
+risingwave_frontend = { path = "../frontend" }
+risingwave_logging = { path = "../utils/logging" }
+risingwave_meta = { path = "../meta" }
+tikv-jemallocator = "0.4"
+tokio = { version = "1", features = [
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "time",
+    "signal",
+    "fs",
+] }
+
+[[bin]]
+name = "frontend-v2"
+path = "src/bin/frontend_node.rs"
+
+[[bin]]
+name = "meta-node"
+path = "src/bin/meta_node.rs"
+
+[[bin]]
+name = "compute-node"
+path = "src/bin/compute_node.rs"
+
+[[bin]]
+name = "risingwave-ctl"
+path = "src/bin/ctl.rs"
