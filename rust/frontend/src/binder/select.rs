@@ -11,7 +11,7 @@ use crate::expr::{Expr, ExprImpl};
 #[derive(Debug)]
 pub struct BoundSelect {
     pub distinct: bool,
-    pub projection: Vec<ExprImpl>,
+    pub project: Vec<ExprImpl>,
     pub from: Option<TableRef>,
     pub selection: Option<ExprImpl>,
 }
@@ -37,10 +37,10 @@ impl Binder {
                 .into());
             }
         }
-        let projection = self.bind_project(select.projection)?;
+        let project = self.bind_project(select.project)?;
         Ok(BoundSelect {
             distinct: select.distinct,
-            projection,
+            project,
             from,
             selection,
         })
