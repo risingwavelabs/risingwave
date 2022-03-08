@@ -29,7 +29,7 @@ macro_rules! impl_to_prost {
       }
     }
 }
-for_all_plan_nodes! {impl_to_prost}
+for_all_plan_nodes! { impl_to_prost }
 /// impl a panic `ToBatchProst` for logical and stream node.
 macro_rules! ban_to_batch_prost {
     ([], $( { $convention:ident, $name:ident }),*) => {

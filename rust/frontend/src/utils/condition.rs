@@ -6,9 +6,10 @@ use crate::expr::{
 
 #[derive(Debug, Clone)]
 pub struct Condition {
-    /// condition bool expressions, linked with AND conjunction
+    /// Condition expressions in conjunction form (combined with `AND`)
     pub conjunctions: Vec<ExprImpl>,
 }
+
 impl Condition {
     pub fn with_expr(expr: ExprImpl) -> Self {
         Self {

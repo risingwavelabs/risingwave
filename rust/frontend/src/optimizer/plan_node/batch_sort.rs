@@ -5,6 +5,8 @@ use risingwave_common::catalog::Schema;
 use super::{PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::property::{Distribution, Order, WithDistribution, WithOrder, WithSchema};
 
+/// `BatchSort` buffers all data from input and sort these rows by specified order, providing the
+/// collation required by user or parent plan node.
 #[derive(Debug, Clone)]
 pub struct BatchSort {
     order: Order,
