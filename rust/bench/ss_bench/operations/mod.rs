@@ -53,15 +53,17 @@ impl Operations {
 
             stat_display.update_stat();
 
-            // display metrics
-            match operation {
-                "writebatch" => stat_display.display_write_batch(),
-                "deleterandom" => stat_display.display_delete_random(),
-                // (Sun Ting) TODO: implement other performance displays
-                "getrandom" => {}
-                "getseq" => {}
-                "prefixscanrandom" => {}
-                other => unimplemented!("operation \"{}\" is not supported.", other),
+            // display metrics from state store metric system
+            if opts.calibrate_metric {
+                match operation {
+                    "writebatch" => stat_display.display_write_batch(),
+                    "deleterandom" => stat_display.display_delete_random(),
+                    // (Sun Ting) TODO: implement other performance displays
+                    "getrandom" => {}
+                    "getseq" => {}
+                    "prefixscanrandom" => {}
+                    other => unimplemented!("operation \"{}\" is not supported.", other),
+                }
             }
         }
     }

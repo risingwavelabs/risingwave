@@ -76,6 +76,9 @@ pub(crate) struct Opts {
     // ----- flag -----
     #[clap(long)]
     statistics: bool,
+
+    #[clap(long)]
+    calibrate_metric: bool,
 }
 
 fn preprocess_options(opts: &mut Opts) {
