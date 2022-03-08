@@ -66,7 +66,14 @@ where
         (join_handle, shutdown_tx)
     }
 
+    /// `vacuum_trigger_loop` runs vacuum over a list of version once.
     /// Return false if shutdown has been signalled.
+    /// A SST can be deleted when:
+    /// - The SST is contained only in the smallest version.
+    /// - The smallest version is not the greatest version at the same time. We never vacuum the
+    ///   greatest version.
+    /// - The smallest version is not being referenced, and we know it won't be referenced in the
+    ///   future because only greatest version can be newly referenced.
     async fn vacuum_trigger_loop(
         vacuum: &VacuumTrigger<S>,
         shutdown_rx: &mut UnboundedReceiver<()>,
@@ -98,7 +105,8 @@ where
                     continue 'retry;
                 }
 
-                // Vacuum this version in two steps. The two steps are not atomic, but they are both retryable.
+                // Vacuum this version in two steps. The two steps are not atomic, but they are both
+                // retryable.
                 let ssts_to_delete = vacuum
                     .hummock_manager_ref
                     .get_ssts_to_delete(*version_id)
@@ -106,8 +114,14 @@ where
                 if !ssts_to_delete.is_empty() {
                     // Step 1. Delete SSTs in object store.
                     // TODO: Currently We reuse the compactor node as vacuum node.
-                    // TODO: Currently we don't block step 2 until vacuum task is completed by assigned worker in step 1. This can leads to orphan SSTs if the vacuum task fails.
-                    tracing::debug!("try to vacuum {} tracked SSTs", ssts_to_delete.len());
+                    // TODO: Currently we don't block step 2 until vacuum task is completed by
+                    // assigned worker in step 1. This can leads to orphan SSTs if the vacuum task
+                    // fails.
+                    tracing::debug!(
+                        "try to vacuum {} tracked SSTs, {:?}",
+                        ssts_to_delete.len(),
+                        ssts_to_delete
+                    );
                     if !vacuum
                         .compactor_manager_ref
                         .try_assign_compact_task(

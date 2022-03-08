@@ -709,7 +709,8 @@ where
         Ok(count as HummockRefCount)
     }
 
-    /// Get the SSTable ids which are guaranteed not to be used after `version_id`
+    /// Get the `SSTable` ids which are guaranteed not to be included after `version_id`, thus they
+    /// can be deleted if all versions LE than `version_id` are not referenced.
     pub async fn get_ssts_to_delete(
         &self,
         version_id: HummockVersionId,
