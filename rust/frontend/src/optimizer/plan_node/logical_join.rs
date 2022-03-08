@@ -13,6 +13,11 @@ use crate::optimizer::plan_node::{
 use crate::optimizer::property::{Distribution, Order, WithDistribution, WithOrder, WithSchema};
 use crate::utils::{ColIndexMapping, Condition};
 
+/// `LogicalJoin` that combines two relations according to some condition.
+///
+/// Each output row has fields from the left and right inputs. The set of output rows is a subset
+/// of the cartesian product of the two inputs; precisely which subset depends on the join
+/// condition.
 #[derive(Debug, Clone)]
 pub struct LogicalJoin {
     left: PlanRef,

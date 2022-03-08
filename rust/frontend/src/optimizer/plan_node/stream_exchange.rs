@@ -5,6 +5,8 @@ use risingwave_common::catalog::Schema;
 use super::{PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::optimizer::property::{Distribution, WithDistribution, WithOrder, WithSchema};
 
+/// `StreamExchange` imposes a particular distribution on its input
+/// without changing its content.
 #[derive(Debug, Clone)]
 pub struct StreamExchange {
     input: PlanRef,

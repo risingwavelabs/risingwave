@@ -77,7 +77,11 @@ impl Actor {
                 }
                 Ok(None) => {}
                 Err(err) => {
-                    warn!("Actor polling failed: {:?}", err);
+                    warn!("Actor ({:?}) polling failed: {:?}", self.id, err);
+
+                    // Remove the actor from the barrier manager no matter this actor has been
+                    // registered to the barrier manager or not.
+                    self.context.lock_barrier_manager().withdraw_actor(self.id);
                     return Err(err);
                 }
             }
