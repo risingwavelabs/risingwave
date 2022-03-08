@@ -1,10 +1,8 @@
 use std::collections::BTreeSet;
 
 use bytes::Bytes;
-use prometheus::Registry;
 use rand::prelude::StdRng;
 use rand::SeedableRng;
-use risingwave_storage::monitor::StateStoreStats;
 use risingwave_storage::StateStore;
 
 use crate::utils::diff_statistics::*;

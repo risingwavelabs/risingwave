@@ -3,7 +3,7 @@ use std::fmt::{Display, Formatter};
 use itertools::Itertools;
 use prometheus::proto::Histogram;
 
-#[derive(Clone, Default,Debug)]
+#[derive(Clone, Default, Debug)]
 pub(crate) struct MyHistogram {
     pub(crate) upper_bound_list: Vec<f64>,
     pub(crate) count_list: Vec<u64>,
@@ -59,18 +59,14 @@ impl MyHistogram {
     pub(crate) fn from_diff(prev: &MyHistogram, cur: &MyHistogram) -> MyHistogram {
         MyHistogram {
             upper_bound_list: cur.upper_bound_list.clone(),
-            count_list: match prev.count_list.is_empty(){
-                true =>{
-                    cur.count_list.clone()
-                }
-                false =>{
-                    prev
+            count_list: match prev.count_list.is_empty() {
+                true => cur.count_list.clone(),
+                false => prev
                     .count_list
                     .iter()
                     .zip_eq(cur.count_list.iter())
                     .map(|(&pb, &cb)| cb - pb)
-                    .collect_vec()
-                }
+                    .collect_vec(),
             },
             total_sum: cur.total_sum - prev.total_sum,
             total_count: cur.total_count - prev.total_count,

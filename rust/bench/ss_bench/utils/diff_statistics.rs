@@ -1,5 +1,4 @@
-use prometheus::core::Metric;
-use risingwave_storage::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
+use risingwave_storage::monitor::DEFAULT_STATE_STORE_STATS;
 
 use super::my_state_store_stats::MyStateStoreStats;
 use crate::utils::my_histogram::MyHistogram;
@@ -11,7 +10,7 @@ pub(crate) struct StatDiff {
 }
 
 impl StatDiff {
-    pub(crate) fn update_stat(&mut self) { 
+    pub(crate) fn update_stat(&mut self) {
         // (Ting Sun) TODO: eliminate this clone
         self.prev_stat = self.cur_stat.clone();
         self.cur_stat = MyStateStoreStats::from_prom_stats(&**DEFAULT_STATE_STORE_STATS);
