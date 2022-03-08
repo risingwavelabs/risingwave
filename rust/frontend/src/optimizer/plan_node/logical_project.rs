@@ -1,5 +1,3 @@
-// NOTICE: `Substitute` is adapted from the [RisingLight](https://github.com/risinglightdb/risinglight/blob/53ccdf96f36267c4703386577eeeff1da18bdf13/src/optimizer/plan_nodes/logical_projection.rs) project.
-
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
