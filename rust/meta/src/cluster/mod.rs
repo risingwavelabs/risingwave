@@ -115,31 +115,15 @@ where
                     .id_gen_manager_ref
                     .generate::<{ IdCategory::Worker }>()
                     .await?;
-                let parallel_degree = DEFAULT_WORKNODE_PARALLEL_DEGREE as usize;
-                let start_id = self
-                    .id_gen_manager_ref
-                    .generate_interval::<{ IdCategory::ParallelUnit }>(parallel_degree as i32)
-                    .await? as usize;
-                let parallel_units = (start_id..start_id + parallel_degree)
-                    .map(|id| {
-                        let id = id as u32;
-                        let r#type = if id % DEFAULT_HASH_SIMPLE_RATIO == 0 {
-                            ParallelUnitType::Simple as i32
-                        } else {
-                            ParallelUnitType::Hash as i32
-                        };
-                        let parallel_unit = ParallelUnit {
-                            id,
-                            r#type,
-                            node_host: Some(host_address.clone()),
-                        };
-                        self.parallel_unit_map
-                            .entry(r#type)
-                            .or_default()
-                            .push(parallel_unit.clone());
-                        parallel_unit
-                    })
-                    .collect_vec();
+                let parallel_units = if r#type == WorkerType::ComputeNode {
+                    self.generate_cn_parallel_units(
+                        DEFAULT_WORKNODE_PARALLEL_DEGREE as usize,
+                        &host_address,
+                    )
+                    .await?
+                } else {
+                    vec![]
+                };
 
                 let worker_node = WorkerNode {
                     id: worker_id as u32,
@@ -255,6 +239,37 @@ where
                 Ok(())
             }
         }
+    }
+
+    async fn generate_cn_parallel_units(
+        &self,
+        parallel_degree: usize,
+        host: &HostAddress,
+    ) -> Result<Vec<ParallelUnit>> {
+        let start_id = self
+            .id_gen_manager_ref
+            .generate_interval::<{ IdCategory::ParallelUnit }>(parallel_degree as i32)
+            .await? as usize;
+        Ok((start_id..start_id + parallel_degree)
+            .map(|id| {
+                let id = id as u32;
+                let r#type = if id % DEFAULT_HASH_SIMPLE_RATIO == 0 {
+                    ParallelUnitType::Simple as i32
+                } else {
+                    ParallelUnitType::Hash as i32
+                };
+                let parallel_unit = ParallelUnit {
+                    id,
+                    r#type,
+                    node_host: Some(host.clone()),
+                };
+                self.parallel_unit_map
+                    .entry(r#type)
+                    .or_default()
+                    .push(parallel_unit.clone());
+                parallel_unit
+            })
+            .collect_vec())
     }
 
     /// Get live nodes with the specified type and state.
