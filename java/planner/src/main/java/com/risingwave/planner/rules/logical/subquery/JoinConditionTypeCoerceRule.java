@@ -44,7 +44,7 @@ import org.apache.calcite.sql.type.SqlTypeUtil;
  *
  * <p>This file is adapted from flink.
  */
-class JoinConditionTypeCoerceRule extends RelOptRule {
+public class JoinConditionTypeCoerceRule extends RelOptRule {
   public static final JoinConditionTypeCoerceRule INSTANCE = new JoinConditionTypeCoerceRule();
 
   public JoinConditionTypeCoerceRule() {
