@@ -47,10 +47,6 @@ impl fmt::Display for LogicalLimit {
     }
 }
 
-impl WithOrder for LogicalLimit {}
-
-impl WithDistribution for LogicalLimit {}
-
 impl ColPrunable for LogicalLimit {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
         self.must_contain_columns(required_cols);

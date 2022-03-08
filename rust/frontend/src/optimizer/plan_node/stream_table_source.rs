@@ -26,6 +26,4 @@ impl fmt::Display for StreamTableSource {
     }
 }
 
-impl WithOrder for StreamTableSource {}
-
 impl ToStreamProst for StreamTableSource {}

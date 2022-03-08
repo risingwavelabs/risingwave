@@ -44,6 +44,4 @@ impl WithSchema for StreamProject {
     }
 }
 
-impl WithOrder for StreamProject {}
-
 impl ToStreamProst for StreamProject {}

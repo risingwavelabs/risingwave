@@ -133,10 +133,6 @@ impl fmt::Display for LogicalProject {
     }
 }
 
-impl WithOrder for LogicalProject {}
-
-impl WithDistribution for LogicalProject {}
-
 impl ColPrunable for LogicalProject {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
         self.must_contain_columns(required_cols);

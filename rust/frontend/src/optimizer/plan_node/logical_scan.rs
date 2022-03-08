@@ -48,9 +48,6 @@ impl LogicalScan {
 }
 
 impl_plan_tree_node_for_leaf! {LogicalScan}
-impl WithOrder for LogicalScan {}
-
-impl WithDistribution for LogicalScan {}
 
 impl fmt::Display for LogicalScan {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

@@ -60,10 +60,6 @@ impl fmt::Display for LogicalFilter {
     }
 }
 
-impl WithOrder for LogicalFilter {}
-
-impl WithDistribution for LogicalFilter {}
-
 impl ColPrunable for LogicalFilter {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
         self.must_contain_columns(required_cols);

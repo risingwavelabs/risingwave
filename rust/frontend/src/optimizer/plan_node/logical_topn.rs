@@ -52,10 +52,6 @@ impl fmt::Display for LogicalTopN {
     }
 }
 
-impl WithOrder for LogicalTopN {}
-
-impl WithDistribution for LogicalTopN {}
-
 impl ColPrunable for LogicalTopN {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
         self.must_contain_columns(required_cols);

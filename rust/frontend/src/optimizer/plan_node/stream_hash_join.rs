@@ -54,6 +54,4 @@ impl WithSchema for StreamHashJoin {
     }
 }
 
-impl WithOrder for StreamHashJoin {}
-
 impl ToStreamProst for StreamHashJoin {}

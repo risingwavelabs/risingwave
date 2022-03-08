@@ -73,7 +73,11 @@ pub struct LogicalBase {
 pub struct BatchBase {
     //    TODO: assign nodeId from executor
     //    pub id: PlanNodeId,
+    /// the order property of the PlanNode's output, store an `Order::any()` here will not affect
+    /// correctness, but insert unnecessary sort in plan
     pub order: Order,
+    /// the distribution property of the PlanNode's output, store an `Distribution::any()` here
+    /// will not affect correctness, but insert unnecessary exchange in plan
     pub dist: Distribution,
 }
 
@@ -83,6 +87,8 @@ pub struct BatchBase {
 pub struct StreamBase {
     //    TODO: assign nodeId from executor
     //    pub id: PlanNodeId,
+    /// the distribution property of the PlanNode's output, store an `Distribution::any()` here
+    /// will not affect correctness, but insert unnecessary exchange in plan
     pub dist: Distribution,
     // TODO: pk derive
     // pub pk_indices: Vec<u32>,

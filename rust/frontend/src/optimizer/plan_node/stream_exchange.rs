@@ -42,8 +42,6 @@ impl PlanTreeNodeUnary for StreamExchange {
 }
 impl_plan_tree_node_for_unary! {StreamExchange}
 
-impl WithOrder for StreamExchange {}
-
 impl WithSchema for StreamExchange {
     fn schema(&self) -> &Schema {
         &self.schema

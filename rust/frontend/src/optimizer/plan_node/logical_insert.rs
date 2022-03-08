@@ -51,10 +51,6 @@ impl PlanTreeNodeUnary for LogicalInsert {
 }
 impl_plan_tree_node_for_unary! {LogicalInsert}
 
-impl WithOrder for LogicalInsert {}
-
-impl WithDistribution for LogicalInsert {}
-
 impl fmt::Display for LogicalInsert {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(

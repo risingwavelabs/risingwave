@@ -90,9 +90,6 @@ impl PlanTreeNodeBinary for LogicalJoin {
     }
 }
 impl_plan_tree_node_for_binary! {LogicalJoin}
-impl WithOrder for LogicalJoin {}
-
-impl WithDistribution for LogicalJoin {}
 
 impl ColPrunable for LogicalJoin {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {

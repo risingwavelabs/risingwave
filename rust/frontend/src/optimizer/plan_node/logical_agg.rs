@@ -139,10 +139,6 @@ impl fmt::Display for LogicalAgg {
     }
 }
 
-impl WithOrder for LogicalAgg {}
-
-impl WithDistribution for LogicalAgg {}
-
 impl ColPrunable for LogicalAgg {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
         self.must_contain_columns(required_cols);
