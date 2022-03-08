@@ -20,7 +20,7 @@ impl BatchProject {
 
 impl fmt::Display for BatchProject {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.logical.fmt(f)
+        self.logical.fmt_with_name(f, "BatchProject")
     }
 }
 

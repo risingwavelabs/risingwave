@@ -27,7 +27,9 @@ impl BatchSeqScan {
 impl_plan_tree_node_for_leaf! {BatchSeqScan}
 impl fmt::Display for BatchSeqScan {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.logical.fmt(f)
+        let mut s = f.debug_struct("BatchScan");
+        self.logical.fmt_fields(&mut s);
+        s.finish()
     }
 }
 
