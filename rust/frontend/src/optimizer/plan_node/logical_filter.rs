@@ -1,7 +1,6 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
-use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 
 use super::{
@@ -109,7 +108,7 @@ impl ToStream for LogicalFilter {
 #[cfg(test)]
 mod tests {
 
-    use risingwave_common::catalog::{Field, TableId};
+    use risingwave_common::catalog::{Field, Schema, TableId};
     use risingwave_common::types::DataType;
     use risingwave_pb::expr::expr_node::Type;
 
