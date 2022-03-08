@@ -1,3 +1,5 @@
+use crate::types::DataType;
+
 /// Column ID is the unique identifier of a column in a table. Different from table ID,
 /// column ID is not globally unique.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -24,5 +26,22 @@ impl From<i32> for ColumnId {
 impl std::fmt::Display for ColumnId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ColumnDesc {
+    pub data_type: DataType,
+    pub column_id: ColumnId,
+    pub name: String, // for debugging
+}
+
+impl ColumnDesc {
+    pub fn unnamed(column_id: ColumnId, data_type: DataType) -> ColumnDesc {
+        ColumnDesc {
+            data_type,
+            column_id,
+            name: String::new(),
+        }
     }
 }

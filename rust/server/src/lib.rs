@@ -18,7 +18,6 @@ extern crate test;
 
 pub mod rpc;
 pub mod server;
-pub mod trace_runtime;
 
 use clap::Parser;
 
@@ -47,4 +46,17 @@ pub struct ComputeNodeOpts {
     /// Enable reporting tracing information to jaeger
     #[clap(long)]
     pub enable_jaeger_tracing: bool,
+}
+
+use crate::server::compute_node_serve;
+
+/// Start compute node
+pub async fn start(opts: ComputeNodeOpts) {
+    tracing::info!("meta address: {}", opts.meta_address.clone());
+
+    let addr = opts.host.parse().unwrap();
+    tracing::info!("Starting server at {}", addr);
+
+    let (join_handle, _shutdown_send) = compute_node_serve(addr, opts).await;
+    join_handle.await.unwrap();
 }
