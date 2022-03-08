@@ -98,17 +98,15 @@ where
                     continue 'retry;
                 }
 
-                // Vacuum this version
+                // Vacuum this version in two steps. The two steps are not atomic, but they are both retryable.
                 let ssts_to_delete = vacuum
                     .hummock_manager_ref
                     .get_ssts_to_delete(*version_id)
                     .await?;
                 if !ssts_to_delete.is_empty() {
-                    // The two steps are not atomic, but they are both retryable.
                     // Step 1. Delete SSTs in object store.
                     // TODO: Currently We reuse the compactor node as vacuum node.
-                    // TODO: Currently we don't block on the vacuum task to finish before step 2.
-                    // This can leads to orphan SSTs if the vacuum task fails.
+                    // TODO: Currently we don't block step 2 until vacuum task is completed by assigned worker in step 1. This can leads to orphan SSTs if the vacuum task fails.
                     tracing::debug!("try to vacuum {} tracked SSTs", ssts_to_delete.len());
                     if !vacuum
                         .compactor_manager_ref

@@ -22,7 +22,7 @@ impl Vacuum {
                         .delete(sstable_store_ref.get_sst_data_path(*sstable_id).as_str())
                         .await?;
                 }
-                tracing::debug!("vacuum {} tracked SSTs", tracked.sstable_ids.len());
+                tracing::debug!("vacuum {} tracked SSTs, {:?}", tracked.sstable_ids.len(), tracked.sstable_ids);
             }
             Task::Orphan(_orphan) => {
                 // #93

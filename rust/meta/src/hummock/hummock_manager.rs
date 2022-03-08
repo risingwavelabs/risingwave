@@ -512,7 +512,7 @@ where
             version.upsert_in_transaction(&mut transaction)?;
             let mut tables_to_delete = HummockTablesToDelete::select(
                 &*versioning_guard.meta_store_ref,
-                &HummockVersionRefId { id: new_version_id },
+                &HummockVersionRefId { id: old_version_id },
             )
             .await?
             .unwrap_or(HummockTablesToDelete {
@@ -709,7 +709,7 @@ where
         Ok(count as HummockRefCount)
     }
 
-    /// Get the version detail of given version id
+    /// Get the SSTable ids which are guaranteed not to be used after `version_id`
     pub async fn get_ssts_to_delete(
         &self,
         version_id: HummockVersionId,
@@ -726,6 +726,7 @@ where
         }
     }
 
+    /// Delete metadata of the given `version_id`
     pub async fn delete_version(&self, version_id: HummockVersionId) -> Result<()> {
         let versioning_guard = self.versioning.write().await;
         let mut transaction = Transaction::default();
