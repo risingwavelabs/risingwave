@@ -48,7 +48,7 @@ impl Block {
         entry_offsets.push(data_len as u32);
 
         // base key
-        let base_header = Header::decode_from_bytes(data.slice(..HEADER_SIZE));
+        let base_header = Header::decode(&mut data.slice(..HEADER_SIZE));
         let base_key = data.slice(HEADER_SIZE..HEADER_SIZE + base_header.diff as usize);
 
         Ok(Block {
@@ -77,7 +77,7 @@ impl Block {
         use bytes::BytesMut;
         assert!(index < self.entry_offsets.len());
         let buf = self.raw_entry(index);
-        let header = Header::decode_from_bytes(buf.slice(..HEADER_SIZE));
+        let header = Header::decode(&mut buf.slice(..HEADER_SIZE));
         let mut key = BytesMut::with_capacity(header.overlap as usize + header.diff as usize);
         key.extend_from_slice(&self.base_key.slice(..header.overlap as usize));
         key.extend_from_slice(&buf.slice(HEADER_SIZE..HEADER_SIZE + header.diff as usize));

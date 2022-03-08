@@ -35,13 +35,7 @@ impl Header {
     }
 
     /// Decode decodes the header.
-    pub fn decode(&mut self, bytes: &mut impl Buf) {
-        let h = bytes.get_u32_le();
-        self.overlap = (h >> 16) as u16;
-        self.diff = h as u16;
-    }
-
-    pub fn decode_from_bytes(mut bytes: Bytes) -> Self {
+    pub fn decode(bytes: &mut impl Buf) -> Self {
         let h = bytes.get_u32_le();
         Self {
             overlap: (h >> 16) as u16,
@@ -310,7 +304,7 @@ pub(super) mod tests {
 
     #[test]
     fn test_header_encode_decode() {
-        let mut header = Header {
+        let header = Header {
             overlap: 23333,
             diff: 23334,
         };
@@ -318,9 +312,9 @@ pub(super) mod tests {
         let mut buf = BytesMut::new();
         header.encode(&mut buf);
         let mut buf = buf.freeze();
-        header.decode(&mut buf);
-        assert_eq!(header.overlap, 23333);
-        assert_eq!(header.diff, 23334);
+        let decoded_header = Header::decode(&mut buf);
+        assert_eq!(decoded_header.overlap, 23333);
+        assert_eq!(decoded_header.diff, 23334);
     }
 
     /// The key (with epoch 0) of an index in the test table

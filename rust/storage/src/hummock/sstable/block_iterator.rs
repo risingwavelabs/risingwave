@@ -61,8 +61,7 @@ impl BlockIterator {
 
         let mut entry_data = self.block.raw_entry(i as usize);
 
-        let mut header = Header::default();
-        header.decode(&mut entry_data);
+        let header = Header::decode(&mut entry_data);
 
         // TODO: merge this truncate with the following key truncate
         if header.overlap > self.perv_overlap {
