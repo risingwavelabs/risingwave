@@ -10,6 +10,7 @@ use crate::storage::{MetaStore, Transaction};
 /// `cf(hummock_default)`: `hummock_version_id_key` -> `HummockVersionRefId`
 const HUMMOCK_VERSION_ID_LEY: &str = "version_id";
 
+/// `CurrentHummockVersionId` tracks the current version id.
 pub struct CurrentHummockVersionId {
     id: HummockVersionId,
 }

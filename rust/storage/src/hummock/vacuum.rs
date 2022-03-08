@@ -1,5 +1,5 @@
 use risingwave_pb::hummock::vacuum_task;
-use risingwave_pb::hummock::vacuum_task::Task;
+use risingwave_pb::hummock::vacuum_task::{Task, VaccumOrphanData, VacuumTrackedData};
 
 use crate::hummock::SstableStoreRef;
 
@@ -11,8 +11,9 @@ impl Vacuum {
         vacuum_task: vacuum_task::Task,
     ) -> risingwave_common::error::Result<()> {
         match vacuum_task {
-            Task::Tracked(tracked) => {
-                for sstable_id in &tracked.sstable_ids {
+            Task::Tracked(VacuumTrackedData { sstable_ids })
+            | Task::Orphan(VaccumOrphanData { sstable_ids }) => {
+                for sstable_id in &sstable_ids {
                     sstable_store_ref
                         .store()
                         .delete(sstable_store_ref.get_sst_meta_path(*sstable_id).as_str())
@@ -24,13 +25,9 @@ impl Vacuum {
                 }
                 tracing::debug!(
                     "vacuum {} tracked SSTs, {:?}",
-                    tracked.sstable_ids.len(),
-                    tracked.sstable_ids
+                    sstable_ids.len(),
+                    sstable_ids
                 );
-            }
-            Task::Orphan(_orphan) => {
-                // #93
-                todo!()
             }
         }
         Ok(())

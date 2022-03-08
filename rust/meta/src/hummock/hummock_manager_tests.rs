@@ -4,7 +4,7 @@ use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::{
-    HummockContextPinnedSnapshot, HummockContextPinnedVersion, HummockSnapshot, SstableInfo,
+    HummockContextPinnedSnapshot, HummockContextPinnedVersion, HummockSnapshot,
 };
 use risingwave_storage::hummock::{HummockContextId, FIRST_VERSION_ID, INVALID_EPOCH};
 
@@ -133,7 +133,7 @@ async fn test_hummock_compaction_task() -> Result<()> {
 
 #[tokio::test]
 async fn test_hummock_table() -> Result<()> {
-    let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
+    let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
 
     let epoch: u64 = 1;
@@ -144,14 +144,6 @@ async fn test_hummock_table() -> Result<()> {
         .await
         .unwrap();
     hummock_manager.commit_epoch(epoch).await.unwrap();
-
-    // Confirm tables are successfully added
-    let fetched_tables = SstableInfo::list(&*env.meta_store_ref())
-        .await?
-        .into_iter()
-        .sorted_by_key(|t| t.id)
-        .collect_vec();
-    assert_eq!(original_tables, fetched_tables);
 
     let pinned_version = hummock_manager.pin_version(context_id).await?;
     assert_eq!(

@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use itertools::{enumerate, Itertools};
 use prometheus::core::{AtomicF64, GenericGauge};
@@ -8,7 +9,7 @@ use risingwave_pb::hummock::hummock_version::HummockVersionRefId;
 use risingwave_pb::hummock::{
     CompactMetrics, CompactTask, HummockContextPinnedSnapshot, HummockContextPinnedVersion,
     HummockContextRefId, HummockSnapshot, HummockTablesToDelete, HummockVersion, Level, LevelType,
-    SstableInfo, SstableRefId, TableSetStatistics, UncommittedEpoch,
+    SstableIdInfo, SstableInfo, SstableRefId, TableSetStatistics, UncommittedEpoch,
 };
 use risingwave_storage::hummock::{
     HummockContextId, HummockEpoch, HummockRefCount, HummockSSTableId, HummockVersionId,
@@ -20,6 +21,7 @@ use crate::hummock::compaction::CompactStatus;
 use crate::hummock::level_handler::{LevelHandler, SSTableStat};
 use crate::hummock::model::{
     CurrentHummockVersionId, HummockContextPinnedSnapshotExt, HummockContextPinnedVersionExt,
+    INVALID_CREATE_TIMESTAMP,
 };
 use crate::manager::{IdCategory, IdGeneratorManagerRef, MetaSrvEnv};
 use crate::model::{MetadataModel, Transactional, Worker};
@@ -318,29 +320,39 @@ where
         .await?
         .unwrap();
 
-        let current_tables = SstableInfo::list(&*versioning_guard.meta_store_ref).await?;
-        if tables
+        let existent_sstable_ids = SstableIdInfo::list(&*versioning_guard.meta_store_ref)
+            .await?
+            .into_iter()
+            .filter(|e| tables.iter().any(|t| t.id == e.id))
+            .collect_vec();
+
+        #[cfg(not(test))]
+        // The sstable ids are acquired via get_new_table_id
+        assert_eq!(existent_sstable_ids.len(), tables.len());
+
+        if existent_sstable_ids
             .iter()
-            .any(|t| current_tables.iter().any(|ct| ct.id == t.id))
+            .any(|t| t.meta_create_timestamp != 0)
         {
             // Retry an add_tables request is OK if the original request has completed successfully.
             return Ok(hummock_version);
         }
+        let meta_create_timestamp = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        for mut existent_sstable_id in existent_sstable_ids {
+            existent_sstable_id.meta_create_timestamp = meta_create_timestamp;
+            existent_sstable_id.upsert_in_transaction(&mut transaction)?;
+        }
 
         // check whether the epoch is valid
         // TODO: return error instead of panic
-        // TODO: the validation is temporarily disabled until
-        // the new barrier manager design is integrated
-        // if epoch <= hummock_version.max_committed_epoch {
-        //   panic!(
-        //     "Epoch {} <= max_committed_epoch {}",
-        //     epoch, hummock_version.max_committed_epoch
-        //   );
-        // }
-
-        // add tables
-        for table in &tables {
-            table.upsert_in_transaction(&mut transaction)?
+        if epoch <= hummock_version.max_committed_epoch {
+            panic!(
+                "Epoch {} <= max_committed_epoch {}",
+                epoch, hummock_version.max_committed_epoch
+            );
         }
 
         // create new_version by adding tables in UncommittedEpoch
@@ -509,7 +521,7 @@ where
         let output_sst_count = compact_task.sorted_output_ssts.len();
 
         let compact_task_metrics = compact_task.metrics.take();
-        let (sorted_output_ssts, delete_table_ids) = match compact_status.report_compact_task(
+        let delete_table_ids = match compact_status.report_compact_task(
             output_table_compact_entries,
             compact_task,
             task_result,
@@ -518,7 +530,7 @@ where
                 // The task is not found.
                 return Ok(false);
             }
-            Some((sorted_output_ssts, delete_table_ids)) => (sorted_output_ssts, delete_table_ids),
+            Some(delete_table_ids) => delete_table_ids,
         };
         compact_status.update_in_transaction(&mut transaction);
         let versioning_guard = self.versioning.write().await;
@@ -559,10 +571,6 @@ where
                 uncommitted_epochs: old_version.uncommitted_epochs,
                 max_committed_epoch: old_version.max_committed_epoch,
             };
-
-            for table in sorted_output_ssts {
-                table.upsert_in_transaction(&mut transaction)?
-            }
 
             version.id = new_version_id;
             version.upsert_in_transaction(&mut transaction)?;
@@ -688,7 +696,7 @@ where
 
                 // remove tables of the aborting epoch
                 for table_id in &uncommitted_epoch.table_ids {
-                    SstableInfo::delete_in_transaction(
+                    SstableIdInfo::delete_in_transaction(
                         SstableRefId { id: *table_id },
                         &mut transaction,
                     )?;
@@ -708,10 +716,25 @@ where
 
     pub async fn get_new_table_id(&self) -> Result<HummockSSTableId> {
         // TODO id_gen_manager generates u32, we need u64
-        self.id_gen_manager_ref
+        let sstable_id = self
+            .id_gen_manager_ref
             .generate::<{ IdCategory::HummockSSTableId }>()
             .await
-            .map(|id| id as HummockSSTableId)
+            .map(|id| id as HummockSSTableId)?;
+
+        let versioning_guard = self.versioning.write().await;
+        SstableIdInfo {
+            id: sstable_id,
+            id_create_timestamp: SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+            meta_create_timestamp: INVALID_CREATE_TIMESTAMP,
+        }
+        .insert(versioning_guard.meta_store_ref.as_ref())
+        .await?;
+
+        Ok(sstable_id)
     }
 
     pub async fn release_context_resource(&self, context_id: HummockContextId) -> Result<()> {
@@ -818,7 +841,10 @@ where
         if let Some(ssts_to_delete) = ssts_to_delete {
             // Delete tracked sstables.
             for sst_id in ssts_to_delete.id {
-                SstableInfo::delete_in_transaction(SstableRefId { id: sst_id }, &mut transaction)?;
+                SstableIdInfo::delete_in_transaction(
+                    SstableRefId { id: sst_id },
+                    &mut transaction,
+                )?;
             }
             HummockTablesToDelete::delete_in_transaction(
                 HummockVersionRefId {
@@ -839,5 +865,10 @@ where
 
         self.commit_trx(versioning_guard.meta_store_ref.as_ref(), transaction, None)
             .await
+    }
+
+    pub async fn list_sstable_id_infos_asc(&self) -> Result<Vec<SstableIdInfo>> {
+        let versioning_guard = self.versioning.read().await;
+        SstableIdInfo::list(versioning_guard.meta_store_ref.as_ref()).await
     }
 }

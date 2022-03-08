@@ -8,6 +8,7 @@ use crate::model::{MetadataModel, Transactional};
 /// `cf(hummock_sstable_to_delete)`: `HummockVersionRefId` -> `HummockTablesToDelete`
 const HUMMOCK_DELETION_CF_NAME: &str = "cf/hummock_sstable_to_delete";
 
+/// `HummockTablesToDelete` tracks `SSTables` no longer needed after the given version.
 impl MetadataModel for HummockTablesToDelete {
     type ProstType = HummockTablesToDelete;
     type KeyType = HummockVersionRefId;

@@ -9,6 +9,7 @@ use crate::storage::Transaction;
 /// `cf(hummock_context_pinned_version)`: `HummockContextRefId` -> `HummockContextPinnedVersion`
 const HUMMOCK_CONTEXT_PINNED_VERSION_CF_NAME: &str = "cf/hummock_context_pinned_version";
 
+/// `HummockContextPinnedVersion` tracks pinned versions by given context id.
 impl MetadataModel for HummockContextPinnedVersion {
     type ProstType = HummockContextPinnedVersion;
     type KeyType = HummockContextRefId;
