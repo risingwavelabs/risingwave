@@ -39,7 +39,7 @@ pub struct SharedContext {
     /// 2. The RPC client at the downstream actor forwards received `Message` to one channel in
     /// `ReceiverExecutor` or `MergerExecutor`.
     /// 3. The RPC `Output` at the upstream actor forwards received `Message` to
-    /// `ExchangeServiceImpl`.       
+    /// `ExchangeServiceImpl`.
     ///
     /// The channel serves as a buffer because `ExchangeServiceImpl`
     /// is on the server-side and we will also introduce backpressure.
@@ -54,6 +54,7 @@ pub struct SharedContext {
 
     pub(crate) barrier_manager: Mutex<LocalBarrierManager>,
 
+    #[allow(dead_code)]
     pub(crate) state_store: StateStoreImpl,
 }
 

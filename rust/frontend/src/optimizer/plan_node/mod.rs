@@ -167,7 +167,7 @@ pub use stream_table_source::StreamTableSource;
 /// macro_rules! use_plan {
 ///     ([], $({ $convention:ident, $name:ident }),*) => {};
 /// }
-/// frontend::for_all_plan_nodes! { use_plan }
+/// risingwave_frontend::for_all_plan_nodes! { use_plan }
 /// ```
 /// See the following implementations for example.
 #[macro_export]

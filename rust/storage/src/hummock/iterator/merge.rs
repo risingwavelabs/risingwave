@@ -11,7 +11,7 @@ mod test {
 
     use super::*;
     use crate::hummock::iterator::test_utils::{
-        default_builder_opt_for_test, gen_test_sstable, iterator_test_key_of, mock_sstable_manager,
+        default_builder_opt_for_test, gen_test_sstable, iterator_test_key_of, mock_sstable_store,
         test_key, test_value_of, TestIteratorBuilder, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::{BoxedHummockIterator, HummockIterator};
@@ -100,17 +100,17 @@ mod test {
 
     #[tokio::test]
     async fn test_merge_invalidate_reset() {
-        let sstable_manager = mock_sstable_manager();
+        let sstable_store = mock_sstable_store();
         let table0 =
-            gen_test_sstable(0, default_builder_opt_for_test(), sstable_manager.clone()).await;
+            gen_test_sstable(0, default_builder_opt_for_test(), sstable_store.clone()).await;
         let table1 =
-            gen_test_sstable(1, default_builder_opt_for_test(), sstable_manager.clone()).await;
+            gen_test_sstable(1, default_builder_opt_for_test(), sstable_store.clone()).await;
         let iters: Vec<BoxedHummockIterator> = vec![
             Box::new(SSTableIterator::new(
                 Arc::new(table0),
-                sstable_manager.clone(),
+                sstable_store.clone(),
             )),
-            Box::new(SSTableIterator::new(Arc::new(table1), sstable_manager)),
+            Box::new(SSTableIterator::new(Arc::new(table1), sstable_store)),
         ];
 
         let mut mi = MergeIterator::new(iters);

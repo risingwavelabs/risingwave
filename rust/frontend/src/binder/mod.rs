@@ -4,7 +4,7 @@ use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::Statement;
 
 mod bind_context;
-mod expr;
+pub(crate) mod expr;
 mod insert;
 mod projection;
 mod query;

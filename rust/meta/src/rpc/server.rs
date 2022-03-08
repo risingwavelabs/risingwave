@@ -33,6 +33,7 @@ use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::storage::{EtcdMetaStore, MemStore, MetaStore};
 use crate::stream::{FragmentManager, StreamManager};
 
+#[derive(Debug)]
 pub enum MetaStoreBackend {
     Etcd { endpoints: Vec<String> },
     Mem,

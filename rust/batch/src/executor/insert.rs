@@ -164,7 +164,7 @@ mod tests {
     use std::sync::Arc;
 
     use risingwave_common::array::{Array, I64Array};
-    use risingwave_common::catalog::{ColumnId, Field, Schema};
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
     use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
     use risingwave_source::{
@@ -204,7 +204,7 @@ mod tests {
             .fields
             .iter()
             .enumerate()
-            .map(|(i, f)| TableColumnDesc {
+            .map(|(i, f)| ColumnDesc {
                 data_type: f.data_type.clone(),
                 column_id: ColumnId::from(i as i32), // use column index as column id
                 name: f.name.clone(),
