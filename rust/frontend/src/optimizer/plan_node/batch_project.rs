@@ -5,7 +5,7 @@ use risingwave_common::catalog::Schema;
 use super::{
     BatchBase, LogicalProject, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
 };
-use crate::optimizer::property::{Distribution, Order, WithDistribution, WithOrder, WithSchema};
+use crate::optimizer::property::{Distribution, Order, WithSchema};
 
 /// `BatchProject` implements [`super::LogicalProject`] to evaluate specified expressions on input
 /// rows

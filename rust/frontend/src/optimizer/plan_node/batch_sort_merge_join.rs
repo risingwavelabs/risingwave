@@ -7,7 +7,7 @@ use super::{
     ToDistributedBatch,
 };
 use crate::optimizer::property::{
-    Direction, Distribution, FieldOrder, Order, WithDistribution, WithOrder, WithSchema,
+    Direction, Distribution, FieldOrder, Order, WithOrder, WithSchema,
 };
 
 /// `BatchSortMergeJoin` implements [`super::LogicalJoin`] by merging left & right relations in

@@ -4,7 +4,7 @@ use risingwave_common::catalog::Schema;
 
 use super::{BatchBase, PlanRef, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::plan_node::LogicalScan;
-use crate::optimizer::property::{Distribution, Order, WithDistribution, WithOrder, WithSchema};
+use crate::optimizer::property::{Distribution, Order, WithSchema};
 
 /// `BatchSeqScan` implements [`super::LogicalScan`] to scan from a row-oriented table
 #[derive(Debug, Clone)]

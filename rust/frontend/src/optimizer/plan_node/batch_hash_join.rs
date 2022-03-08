@@ -6,7 +6,7 @@ use super::{
     BatchBase, EqJoinPredicate, LogicalJoin, PlanRef, PlanTreeNodeBinary, ToBatchProst,
     ToDistributedBatch,
 };
-use crate::optimizer::property::{Distribution, Order, WithDistribution, WithOrder, WithSchema};
+use crate::optimizer::property::{Distribution, Order, WithSchema};
 
 /// `BatchHashJoin` implements [`super::LogicalJoin`] with hash table. It builds a hash table
 /// from inner (right-side) relation and then probes with data from outer (left-side) relation to
