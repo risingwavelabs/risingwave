@@ -1,4 +1,4 @@
-use bytes::{Buf, BufMut};
+use bytes::{Buf, BufMut, Bytes};
 
 use super::{HummockError, HummockResult};
 
@@ -107,8 +107,33 @@ impl<'a> HummockValue<&'a [u8]> {
     }
 }
 
+impl HummockValue<Bytes> {
+    pub fn as_slice(&self) -> HummockValue<&[u8]> {
+        match self {
+            HummockValue::Put(x) => HummockValue::Put(&x[..]),
+            HummockValue::Delete => HummockValue::Delete,
+        }
+    }
+
+    pub fn to_vec(&self) -> HummockValue<Vec<u8>> {
+        match self {
+            HummockValue::Put(x) => HummockValue::Put(x.to_vec()),
+            HummockValue::Delete => HummockValue::Delete,
+        }
+    }
+}
+
 impl From<Option<Vec<u8>>> for HummockValue<Vec<u8>> {
     fn from(data: Option<Vec<u8>>) -> Self {
+        match data {
+            Some(data) => Self::Put(data),
+            None => Self::Delete,
+        }
+    }
+}
+
+impl From<Option<Bytes>> for HummockValue<Bytes> {
+    fn from(data: Option<Bytes>) -> Self {
         match data {
             Some(data) => Self::Put(data),
             None => Self::Delete,
@@ -121,6 +146,15 @@ impl<'a> From<Option<&'a [u8]>> for HummockValue<&'a [u8]> {
         match data {
             Some(data) => Self::Put(data),
             None => Self::Delete,
+        }
+    }
+}
+
+impl From<HummockValue<Vec<u8>>> for HummockValue<Bytes> {
+    fn from(data: HummockValue<Vec<u8>>) -> Self {
+        match data {
+            HummockValue::Put(x) => HummockValue::Put(x.into()),
+            HummockValue::Delete => HummockValue::Delete,
         }
     }
 }
