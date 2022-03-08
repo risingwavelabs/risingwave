@@ -5,8 +5,8 @@ edition = "2021"
 
 [dependencies]
 async-trait = "0.1"
-risingwave-pb = { path = "../prost" }
 risingwave_common = { path = "../common" }
+risingwave_pb = { path = "../prost" }
 tokio = { version = "1", features = [
     "rt",
     "rt-multi-thread",
