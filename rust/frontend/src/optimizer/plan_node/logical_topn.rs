@@ -11,7 +11,7 @@ use crate::utils::ColIndexMapping;
 /// `LogicalTopN` sorts the input data and fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone)]
 pub struct LogicalTopN {
-    pub(super) base: LogicalBase,
+    pub base: LogicalBase,
     input: PlanRef,
     limit: usize,
     offset: usize,

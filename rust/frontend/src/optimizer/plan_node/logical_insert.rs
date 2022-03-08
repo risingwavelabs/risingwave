@@ -16,7 +16,7 @@ use crate::optimizer::property::{WithDistribution, WithOrder};
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct LogicalInsert {
-    pub(super) base: LogicalBase,
+    pub base: LogicalBase,
     table: BaseTableRef,
     columns: Vec<ColumnId>,
     input: PlanRef,

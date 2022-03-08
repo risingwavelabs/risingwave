@@ -24,7 +24,7 @@ macro_rules! impl_with_schema_for_logical_node {
         $(paste! {
             impl WithSchema for [<$convention $name>] {
                 fn schema(&self) -> &Schema {
-                    &self.base().schema
+                    &self.base.schema
                 }
             }
         })*

@@ -1,7 +1,9 @@
+use paste::paste;
+
 use super::super::plan_node::*;
 use super::Convention;
+use crate::for_batch_plan_nodes;
 use crate::optimizer::PlanRef;
-
 #[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
 pub struct Order {
@@ -76,6 +78,19 @@ pub trait WithOrder {
         Order::any()
     }
 }
+
+macro_rules! impl_with_order {
+    ([], $( { $convention:ident, $name:ident }),*) => {
+        $(paste! {
+            impl WithOrder for [<$convention $name>] {
+                fn order(&self) -> &Order {
+                    &self.base.order
+                }
+            }
+        })*
+    }
+}
+for_batch_plan_nodes! {impl_with_order }
 
 #[cfg(test)]
 mod tests {

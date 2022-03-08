@@ -13,7 +13,7 @@ use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct LogicalScan {
-    pub(super) base: LogicalBase,
+    pub base: LogicalBase,
     table_name: String,
     table_id: TableId,
     columns: Vec<ColumnId>,

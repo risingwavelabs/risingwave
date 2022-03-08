@@ -328,17 +328,3 @@ macro_rules! impl_down_cast_fn {
     }
 }
 for_all_plan_nodes! { impl_down_cast_fn }
-
-macro_rules! impl_get_logical_base {
-    ([], $( { $convention:ident, $name:ident }),*) => {
-        $(paste! {
-            impl  [<$convention $name>] {
-                pub fn base(&self) -> &LogicalBase {
-                    &self.base
-                }
-            }
-        })*
-    }
-}
-
-for_logical_plan_nodes! { impl_get_logical_base }

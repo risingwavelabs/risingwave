@@ -2,13 +2,14 @@ use std::fmt;
 
 use risingwave_common::catalog::Schema;
 
-use super::{PlanRef, ToBatchProst, ToDistributedBatch};
+use super::{BatchBase, PlanRef, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::plan_node::LogicalScan;
-use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
+use crate::optimizer::property::{Distribution, Order, WithDistribution, WithOrder, WithSchema};
 
 /// `BatchSeqScan` implements [`super::LogicalScan`] to scan from a row-oriented table
 #[derive(Debug, Clone)]
 pub struct BatchSeqScan {
+    pub base: BatchBase,
     logical: LogicalScan,
 }
 
@@ -20,7 +21,13 @@ impl WithSchema for BatchSeqScan {
 
 impl BatchSeqScan {
     pub fn new(logical: LogicalScan) -> Self {
-        Self { logical }
+        // TODO: derive from input
+        let base = BatchBase {
+            order: Order::any().clone(),
+            dist: Distribution::any().clone(),
+        };
+
+        Self { logical, base }
     }
 }
 
@@ -30,10 +37,6 @@ impl fmt::Display for BatchSeqScan {
         todo!()
     }
 }
-
-impl WithOrder for BatchSeqScan {}
-
-impl WithDistribution for BatchSeqScan {}
 
 impl ToDistributedBatch for BatchSeqScan {
     fn to_distributed(&self) -> PlanRef {

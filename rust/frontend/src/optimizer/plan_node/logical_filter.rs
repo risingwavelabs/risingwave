@@ -17,7 +17,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// If the condition allows nulls, then a null value is treated the same as false.
 #[derive(Debug, Clone)]
 pub struct LogicalFilter {
-    pub(super) base: LogicalBase,
+    pub base: LogicalBase,
     predicate: Condition,
     input: PlanRef,
 }

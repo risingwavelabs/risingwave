@@ -1,4 +1,7 @@
+use paste::paste;
+
 use super::super::plan_node::*;
+use crate::for_batch_plan_nodes;
 use crate::optimizer::property::{Convention, Order};
 use crate::optimizer::PlanRef;
 
@@ -79,6 +82,19 @@ pub trait WithDistribution {
         Distribution::any()
     }
 }
+
+macro_rules! impl_with_dist {
+    ([], $( { $convention:ident, $name:ident }),*) => {
+        $(paste! {
+            impl WithDistribution for [<$convention $name>] {
+                fn distribution(&self) -> &Distribution {
+                    &self.base.dist
+                }
+            }
+        })*
+    }
+}
+for_batch_plan_nodes! {impl_with_dist }
 
 #[cfg(test)]
 mod tests {
