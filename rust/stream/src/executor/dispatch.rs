@@ -56,8 +56,15 @@ impl Output for LocalOutput {
         match self.ch.send(message).await {
             Ok(_) => Ok(()),
             Err(_) => {
-                error!("[Dispatcher (ActorId: {})] Output channels have been terminated", self.actor_id);
-                return Err(InternalError(format!("[Dispatcher (ActorId: {})] Output channels have been terminated", self.actor_id)).into());
+                error!(
+                    "[Dispatcher (ActorId: {})] Output channels have been terminated",
+                    self.actor_id
+                );
+                return Err(InternalError(format!(
+                    "[Dispatcher (ActorId: {})] Output channels have been terminated",
+                    self.actor_id
+                ))
+                .into());
             }
         }
     }

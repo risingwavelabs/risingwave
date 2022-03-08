@@ -255,8 +255,13 @@ impl Executor for MergeExecutor {
             }
 
             if futures.is_empty() {
-                // All channels are terminated. This could happen when all upstream actors have been terminated.
-                return Err(InternalError(format!("[MergeExecutor (ActorId: {})] All channels have been terminated", self.actor_id)).into());
+                // All channels are terminated. This could happen when all upstream actors have been
+                // terminated.
+                return Err(InternalError(format!(
+                    "[MergeExecutor (ActorId: {})] All channels have been terminated",
+                    self.actor_id
+                ))
+                .into());
             }
 
             let ((message, from), _id, remains) = select_all(futures)
@@ -288,7 +293,11 @@ impl Executor for MergeExecutor {
                     self.blocked.push(from);
                 }
                 None => {
-                    return Err(InternalError(format!("[MergeExecutor (ActorId: {})] No message received from channels.", self.actor_id)).into());
+                    return Err(InternalError(format!(
+                        "[MergeExecutor (ActorId: {})] No message received from channels.",
+                        self.actor_id
+                    ))
+                    .into());
                 }
             }
 
@@ -302,10 +311,13 @@ impl Executor for MergeExecutor {
                 let barrier = self.next_barrier.take().unwrap();
                 return Ok(Message::Barrier(barrier));
             }
-            
-            if self.active.is_empty()
-            {
-                return Err(InternalError(format!("[MergeExecutor (ActorId: {})] Active is empty.", self.actor_id)).into());
+
+            if self.active.is_empty() {
+                return Err(InternalError(format!(
+                    "[MergeExecutor (ActorId: {})] Active is empty.",
+                    self.actor_id
+                ))
+                .into());
             }
         }
     }

@@ -217,15 +217,6 @@ impl LocalBarrierManager {
             }
         }
 
-        // if let BarrierState::Managed(managed_state) = &mut self.state {
-        //     // If no available senders, set state to `None` and return empty receiver.
-        //     // Otherwise, active remaining actors will be collected upon notification.
-        //     if self.senders.is_empty() {
-        //         managed_state.take().unwrap();
-        //         return Ok(None);
-        //     }
-        // }
-
         // Actors to stop should still accept this barrier, but won't get sent to in next times.
         if let Some(Mutation::Stop(actors)) = barrier.mutation.as_deref() {
             for actor in actors {
