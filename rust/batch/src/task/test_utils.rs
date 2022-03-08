@@ -225,7 +225,7 @@ impl<'a> TableBuilder<'a> {
 
     fn build_insert_values_plan(&self) -> Result<PlanFragment> {
         let insert = InsertNode {
-            table_ref_id: None,
+            table_source_ref_id: None,
             column_ids: vec![0; self.col_types.len()],
         };
 

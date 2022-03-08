@@ -1,7 +1,6 @@
 use risingwave_common::array::DataChunk;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId};
+use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::error::Result;
-use risingwave_common::types::DataType;
 use risingwave_pb::plan::create_table_node::Info;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::ColumnDesc as ColumnDescProto;
@@ -78,15 +77,11 @@ impl Executor for CreateTableExecutor {
                         "create associated materialized view: id={:?}, associated={:?}",
                         self.table_id, associated_table_id
                     );
-
-                    self.source_manager.register_associated_materialized_view(
-                        &associated_table_id,
-                        &self.table_id,
-                    )?;
+                    // TODO: there's nothing to do on compute node here for creating associated mv
                 } else {
                     // Create normal MV.
                     info!("create materialized view: id={:?}", self.table_id);
-                    // TODO: there's nothing to do on compute node for creating mv
+                    // TODO: there's nothing to do on compute node here for creating mv
                 }
             }
         }
