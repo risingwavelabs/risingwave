@@ -224,7 +224,7 @@ impl<S: StateStore> MViewTableIter<S> {
             }
         }
 
-        let chunk = if schema.len() == 0 {
+        let chunk = if schema.is_empty() {
             // Generate some dummy data to ensure a correct cardinality, which might be used by
             // count(*).
             DataChunk::new_dummy(row_count)
