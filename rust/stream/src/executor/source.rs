@@ -2,7 +2,7 @@ use std::fmt::{Debug, Formatter};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-
+use std::net::SocketAddr;
 use async_trait::async_trait;
 use either::Either;
 use futures::stream::{select_with_strategy, PollNext};
@@ -270,7 +270,8 @@ impl Executor for SourceExecutor {
                 // TODO: in the future, we may add row_id column here for TableV2 as well
                 if !matches!(self.source_desc.source.as_ref(), SourceImpl::TableV2(_)) {
                     chunk = self.refill_row_id_column(chunk);
-                }
+                }        
+                self.metrics.boot_metrics_service(prometheus_addr);
                 let source_identify = "Table_".to_string() + &self.source_id.table_id().to_string();
                 self.metrics.source_output_row_count.with_label_values(&[source_identify.as_str()]).inc_by(chunk.cardinality() as u64);
                 self.source_output_row_count

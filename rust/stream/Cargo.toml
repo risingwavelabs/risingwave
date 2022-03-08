@@ -17,6 +17,7 @@ either = "1"
 farmhash = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { git = "https://github.com/taiki-e/futures-async-stream", rev = "944f407" }
+hyper = "0.14"
 itertools = "0.10"
 lazy_static = "1"
 log = "0.4"
@@ -50,6 +51,8 @@ tokio = { version = "1", features = [
 ] }
 tokio-stream = "0.1"
 tonic = "0.6"
+tower = { version = "0.4", features = ["util", "load-shed"] }
+tower-http = { version = "0.2", features = ["add-extension", "cors"] }
 tracing = { version = "0.1", features = ["release_max_level_info"] }
 tracing-futures = "0.2"
 twox-hash = "1"
