@@ -33,12 +33,7 @@ pub(crate) struct PerfMetrics {
 impl Operations {
     /// Run operations in the `--benchmarks` option
     pub(crate) async fn run(store: impl StateStore, opts: &Opts) {
-        let reg = Registry::new();
-        let stat = StateStoreStats::new(&reg);
-        let mut stat_diff = StatDiff {
-            prev_stat: stat.clone(),
-            cur_stat: stat,
-        };
+        let mut stat_diff = StatDiff::default();
 
         let mut runner = Operations {
             keys: vec![],
@@ -57,14 +52,12 @@ impl Operations {
                 "prefixscanrandom" => runner.prefix_scan_random(&store, opts).await,
                 other => unimplemented!("operation \"{}\" is not supported.", other),
             }
-
             stat_diff.update_stat();
-
             // display metrics
             match operation {
                 "writebatch" => stat_diff.display_write_batch(),
+                "deleterandom" => stat_diff.display_delete_random(),
                 // (Sun Ting) TODO: implement other performance displays
-                "deleterandom" => {}
                 "getrandom" => {}
                 "getseq" => {}
                 "prefixscanrandom" => {}

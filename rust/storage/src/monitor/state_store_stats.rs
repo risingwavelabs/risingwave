@@ -96,6 +96,7 @@ macro_rules! define_state_store_stats {
         /// a `RisingWave` instance. More granular utilizations of per `materialization view`
         /// job or a executor should be collected by views like `StateStats` and `JobStats`.
         #[derive(Debug, Clone)]
+        // #[derive(Debug)]
         pub struct StateStoreStats {
             $( pub $name: $type, )*
         }
