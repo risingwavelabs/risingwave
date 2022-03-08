@@ -109,3 +109,39 @@ impl PlanRoot {
         plan
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::catalog::Field;
+    use risingwave_common::types::DataType;
+
+    use super::*;
+    use crate::catalog::{ColumnId, TableId};
+    use crate::optimizer::plan_node::LogicalScan;
+
+    #[test]
+    fn test_as_subplan() {
+        let scan = LogicalScan::create(
+            "test_table".into(),
+            TableId::new(3),
+            vec![ColumnId::new(2), ColumnId::new(7)],
+            Schema::new(vec![
+                Field::with_name(DataType::Int32, "v1".into()),
+                Field::with_name(DataType::Varchar, "v2".into()),
+            ]),
+        )
+        .unwrap();
+        let out_fields = FixedBitSet::with_capacity_and_blocks(2, [1]);
+        let root = PlanRoot::new(
+            scan,
+            Distribution::any().clone(),
+            Order::any().clone(),
+            out_fields,
+        );
+        let subplan = root.as_subplan();
+        assert_eq!(
+            subplan.schema(),
+            &Schema::new(vec![Field::with_name(DataType::Int32, "v1".into()),])
+        );
+    }
+}
