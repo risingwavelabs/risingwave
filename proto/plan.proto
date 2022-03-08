@@ -42,8 +42,6 @@ message ColumnDesc {
 message ColumnCatalog {
   ColumnDesc column_desc = 1;
   bool is_hidden = 4;
-  string struct_name = 5;
-  repeated ColumnDesc column_descs = 6;
 }
 
 message StreamSourceInfo {
