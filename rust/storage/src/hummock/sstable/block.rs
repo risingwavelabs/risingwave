@@ -1,4 +1,4 @@
-use bytes::{Buf, Bytes, BytesMut};
+use bytes::{Buf, Bytes};
 use prost::Message;
 use risingwave_pb::hummock::Checksum;
 
@@ -10,12 +10,10 @@ use crate::hummock::{Header, HummockError, HummockResult, HEADER_SIZE};
 pub struct Block {
     /// Entries data only, uncompressed.
     data: Bytes,
-    /// Entry indices.
+    /// Entry indices with a dummy index.
     entry_offsets: Vec<u32>,
     /// Block size in SST, taking compression, checksum, indices into account.
     size: usize,
-    /// Uncompressed data size of the block.
-    data_size: usize,
     /// Base key for prefix compression.
     base_key: Bytes,
 }
@@ -47,6 +45,7 @@ impl Block {
         for _ in 0..n_entries {
             entry_offsets.push(indices.get_u32_le());
         }
+        entry_offsets.push(data_len as u32);
 
         // base key
         let base_header = Header::decode_from_bytes(data.slice(..HEADER_SIZE));
@@ -56,13 +55,8 @@ impl Block {
             data: data.slice(..data_len),
             entry_offsets,
             size,
-            data_size: data_len,
             base_key,
         })
-    }
-
-    pub fn raw_data(&self) -> Bytes {
-        self.data.clone()
     }
 
     /// Raw entry data of give entry index.
@@ -71,16 +65,16 @@ impl Block {
     /// ```
     pub fn raw_entry(&self, index: usize) -> Bytes {
         assert!(index < self.entry_offsets.len());
-        let begin = self.entry_offsets[index] as usize;
-        let end = self
-            .entry_offsets
-            .get(index + 1)
-            .map_or(self.data_size, |&x| x as usize);
-        self.data.slice(begin..end)
+        self.data
+            .slice(self.entry_offsets[index] as usize..self.entry_offsets[index + 1] as usize)
     }
 
     /// Decoded key/value of given entry index.
+    ///
+    /// For test only, block is always accessed by [`BlockIterator`].
+    #[cfg(test)]
     pub fn entry(&self, index: usize) -> (Bytes, Bytes) {
+        use bytes::BytesMut;
         assert!(index < self.entry_offsets.len());
         let buf = self.raw_entry(index);
         let header = Header::decode_from_bytes(buf.slice(..HEADER_SIZE));
@@ -92,26 +86,20 @@ impl Block {
         (key, value)
     }
 
+    /// Block size in SST, taking compression, checksum, indices into account.
     pub fn size(&self) -> usize {
         self.size
-    }
-
-    pub fn data_size(&self) -> usize {
-        self.data_size
     }
 
     /// Count of entries.
     #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
-        self.entry_offsets.len()
+        self.entry_offsets.len() - 1
     }
 
+    /// Base key for prefix compression.
     pub fn base_key(&self) -> Bytes {
         self.base_key.clone()
-    }
-
-    pub fn entry_offsets(&self) -> &[u32] {
-        &self.entry_offsets
     }
 }
 
