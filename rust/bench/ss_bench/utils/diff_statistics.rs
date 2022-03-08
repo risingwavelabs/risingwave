@@ -41,17 +41,9 @@ impl StatDiff {
     }
 
     fn display_batch_inner(&mut self) -> PerfMetrics {
-        // let metric = self.prev_stat.batch_write_latency.metric();
-        // let prev_latency_hist = metric.get_histogram();
-        // let metric = self.cur_stat.batch_write_latency.metric();
-        // let cur_latency_hist = metric.get_histogram();
-
-        // let metric = self.prev_stat.batch_write_latency.metric();
         let prev_latency_hist = &self.prev_stat.batch_write_latency;
-        // let metric = self.cur_stat.batch_write_latency.metric();
         let cur_latency_hist = &self.cur_stat.batch_write_latency;
 
-        let latency = MyHistogram::from_diff(prev_latency_hist, cur_latency_hist);
         let time_consume = cur_latency_hist.total_sum - prev_latency_hist.total_sum;
 
         let ops = {
@@ -68,7 +60,7 @@ impl StatDiff {
         };
 
         PerfMetrics {
-            histogram: latency,
+            histogram: MyHistogram::from_diff(prev_latency_hist, cur_latency_hist),
             qps: ops,
             bytes_pre_sec,
         }
