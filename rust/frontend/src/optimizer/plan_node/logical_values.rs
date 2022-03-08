@@ -11,7 +11,7 @@ use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 /// `LogicalValues` build rows according to a list of expressions
 #[derive(Debug, Clone)]
 pub struct LogicalValues {
-    base: LogicalBase,
+    pub(super) base: LogicalBase,
     rows: Vec<Vec<ExprImpl>>,
 }
 

@@ -17,7 +17,7 @@ use crate::utils::ColIndexMapping;
 /// `LogicalProject` computes a set of expressions from its input relation.
 #[derive(Debug, Clone)]
 pub struct LogicalProject {
-    base: LogicalBase,
+    pub(super) base: LogicalBase,
     exprs: Vec<ExprImpl>,
     expr_alias: Vec<Option<String>>,
     input: PlanRef,

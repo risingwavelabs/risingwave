@@ -9,7 +9,7 @@ use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 /// `LogicalLimit` fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone)]
 pub struct LogicalLimit {
-    base: LogicalBase,
+    pub(super) base: LogicalBase,
     input: PlanRef,
     limit: usize,
     offset: usize,

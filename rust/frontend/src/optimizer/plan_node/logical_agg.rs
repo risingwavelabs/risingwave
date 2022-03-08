@@ -31,7 +31,7 @@ pub struct PlanAggCall {
 /// functions in the `SELECT` clause.
 #[derive(Clone, Debug)]
 pub struct LogicalAgg {
-    base: LogicalBase,
+    pub(super) base: LogicalBase,
     agg_calls: Vec<PlanAggCall>,
     agg_call_alias: Vec<Option<String>>,
     group_keys: Vec<usize>,

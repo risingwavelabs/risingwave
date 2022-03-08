@@ -23,7 +23,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// condition.
 #[derive(Debug, Clone)]
 pub struct LogicalJoin {
-    base: LogicalBase,
+    pub(super) base: LogicalBase,
     left: PlanRef,
     right: PlanRef,
     on: Condition,
