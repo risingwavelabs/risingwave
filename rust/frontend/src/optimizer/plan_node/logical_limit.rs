@@ -3,26 +3,27 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::Schema;
 
-use super::{BatchLimit, ColPrunable, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use super::{BatchLimit, ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 
 /// `LogicalLimit` fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone)]
 pub struct LogicalLimit {
+    base: LogicalBase,
     input: PlanRef,
     limit: usize,
     offset: usize,
-    schema: Schema,
 }
 
 impl LogicalLimit {
     fn new(input: PlanRef, limit: usize, offset: usize) -> Self {
         let schema = input.schema().clone();
+        let base = LogicalBase { schema };
         LogicalLimit {
             input,
             limit,
             offset,
-            schema,
+            base,
         }
     }
 
@@ -50,12 +51,6 @@ impl fmt::Display for LogicalLimit {
 impl WithOrder for LogicalLimit {}
 
 impl WithDistribution for LogicalLimit {}
-
-impl WithSchema for LogicalLimit {
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-}
 
 impl ColPrunable for LogicalLimit {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {

@@ -4,15 +4,15 @@ use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 
-use super::{ColPrunable, PlanRef, ToBatch, ToStream};
+use super::{ColPrunable, LogicalBase, PlanRef, ToBatch, ToStream};
 use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 
 /// `LogicalValues` build rows according to a list of expressions
 #[derive(Debug, Clone)]
 pub struct LogicalValues {
+    base: LogicalBase,
     rows: Vec<Vec<ExprImpl>>,
-    schema: Schema,
 }
 
 impl LogicalValues {
@@ -23,7 +23,8 @@ impl LogicalValues {
                 assert_eq!(schema.fields()[i].data_type(), expr.return_type())
             }
         }
-        Self { rows, schema }
+        let base = LogicalBase { schema };
+        Self { rows, base }
     }
 
     /// Create a LogicalValues node. Used by planner.
@@ -35,12 +36,6 @@ impl LogicalValues {
     /// Get a reference to the logical values' rows.
     pub fn rows(&self) -> &[Vec<ExprImpl>] {
         self.rows.as_ref()
-    }
-}
-
-impl WithSchema for LogicalValues {
-    fn schema(&self) -> &Schema {
-        &self.schema
     }
 }
 
@@ -62,13 +57,9 @@ impl ColPrunable for LogicalValues {
 
         let (rows, fields) = required_cols
             .ones()
-            .map(|id| (self.rows[id].clone(), self.schema.fields[id].clone()))
+            .map(|id| (self.rows[id].clone(), self.schema().fields[id].clone()))
             .unzip();
-        Self {
-            rows,
-            schema: Schema { fields },
-        }
-        .into()
+        Self::new(rows, Schema { fields }).into()
     }
 }
 

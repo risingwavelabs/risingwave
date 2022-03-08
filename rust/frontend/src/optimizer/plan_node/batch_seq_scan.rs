@@ -7,7 +7,7 @@ use crate::optimizer::plan_node::LogicalScan;
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 
 /// `BatchSeqScan` implements [`super::LogicalScan`] to scan from a row-oriented table
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct BatchSeqScan {
     logical: LogicalScan,
 }

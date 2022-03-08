@@ -54,23 +54,35 @@ pub trait PlanNode:
 impl_downcast!(PlanNode);
 pub type PlanRef = Rc<dyn PlanNode>;
 
+#[derive(Clone, Debug)]
 pub struct PlanNodeId(i32);
 
-/// the common fields of nodes with corresponding convention, please make a field named `base` in
+/// the common fields of logical nodes, please make a field named `base` in
 /// every planNode and correctly valued it when construct the planNode.
+#[derive(Clone, Debug)]
 pub struct LogicalBase {
-    pub id: PlanNodeId,
+    //    TODO: assign nodeId from executor
+    //    pub id: PlanNodeId,
     pub schema: Schema,
 }
 
-pub struct PhysicalBase {
-    pub id: PlanNodeId,
+/// the common fields of batch nodes, please make a field named `base` in
+/// every planNode and correctly valued it when construct the planNode.
+
+#[derive(Clone, Debug)]
+pub struct BatchBase {
+    //    TODO: assign nodeId from executor
+    //    pub id: PlanNodeId,
     pub order: Order,
     pub dist: Distribution,
 }
 
-pub struct StreamingBase {
-    pub id: PlanNodeId,
+/// the common fields of stream nodes, please make a field named `base` in
+/// every planNode and correctly valued it when construct the planNode.
+#[derive(Clone, Debug)]
+pub struct StreamBase {
+    //    TODO: assign nodeId from executor
+    //    pub id: PlanNodeId,
     pub dist: Distribution,
     pub pk_indices: Vec<u32>,
 }

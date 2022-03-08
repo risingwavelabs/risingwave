@@ -5,7 +5,8 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 
 use super::{
-    ColPrunable, CollectRequiredCols, LogicalProject, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream,
+    ColPrunable, CollectRequiredCols, LogicalBase, LogicalProject, PlanRef, PlanTreeNodeUnary,
+    ToBatch, ToStream,
 };
 use crate::expr::{assert_input_ref, ExprImpl};
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
@@ -17,9 +18,9 @@ use crate::utils::{ColIndexMapping, Condition};
 /// If the condition allows nulls, then a null value is treated the same as false.
 #[derive(Debug, Clone)]
 pub struct LogicalFilter {
+    base: LogicalBase,
     predicate: Condition,
     input: PlanRef,
-    schema: Schema,
 }
 
 impl LogicalFilter {
@@ -28,9 +29,10 @@ impl LogicalFilter {
             assert_input_ref(cond, input.schema().fields().len());
         }
         let schema = input.schema().clone();
+        let base = LogicalBase { schema };
         LogicalFilter {
             input,
-            schema,
+            base,
             predicate,
         }
     }
@@ -62,12 +64,6 @@ impl fmt::Display for LogicalFilter {
 impl WithOrder for LogicalFilter {}
 
 impl WithDistribution for LogicalFilter {}
-
-impl WithSchema for LogicalFilter {
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-}
 
 impl ColPrunable for LogicalFilter {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {

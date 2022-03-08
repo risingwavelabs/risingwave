@@ -6,7 +6,8 @@ use risingwave_common::catalog::Schema;
 use risingwave_pb::plan::JoinType;
 
 use super::{
-    ColPrunable, LogicalProject, PlanRef, PlanTreeNodeBinary, StreamHashJoin, ToBatch, ToStream,
+    ColPrunable, LogicalBase, LogicalProject, PlanRef, PlanTreeNodeBinary, StreamHashJoin, ToBatch,
+    ToStream,
 };
 use crate::expr::ExprImpl;
 use crate::optimizer::plan_node::{
@@ -22,11 +23,11 @@ use crate::utils::{ColIndexMapping, Condition};
 /// condition.
 #[derive(Debug, Clone)]
 pub struct LogicalJoin {
+    base: LogicalBase,
     left: PlanRef,
     right: PlanRef,
     on: Condition,
     join_type: JoinType,
-    schema: Schema,
 }
 
 impl fmt::Display for LogicalJoin {
@@ -38,13 +39,13 @@ impl fmt::Display for LogicalJoin {
 impl LogicalJoin {
     pub(crate) fn new(left: PlanRef, right: PlanRef, join_type: JoinType, on: Condition) -> Self {
         let schema = Self::derive_schema(left.schema(), right.schema(), join_type);
-
+        let base = LogicalBase { schema };
         LogicalJoin {
             left,
             right,
-            schema,
             join_type,
             on,
+            base,
         }
     }
 
@@ -92,12 +93,6 @@ impl_plan_tree_node_for_binary! {LogicalJoin}
 impl WithOrder for LogicalJoin {}
 
 impl WithDistribution for LogicalJoin {}
-
-impl WithSchema for LogicalJoin {
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-}
 
 impl ColPrunable for LogicalJoin {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {

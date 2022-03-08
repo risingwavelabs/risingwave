@@ -11,21 +11,22 @@ use crate::utils::ColIndexMapping;
 /// `LogicalTopN` sorts the input data and fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone)]
 pub struct LogicalTopN {
+    base: LogicalBase,
     input: PlanRef,
     limit: usize,
     offset: usize,
-    schema: Schema,
     order: Order,
 }
 
 impl LogicalTopN {
     fn new(input: PlanRef, limit: usize, offset: usize, order: Order) -> Self {
         let schema = input.schema().clone();
+        let base = LogicalBase { schema };
         LogicalTopN {
             input,
             limit,
             offset,
-            schema,
+            base,
             order,
         }
     }
@@ -54,12 +55,6 @@ impl fmt::Display for LogicalTopN {
 impl WithOrder for LogicalTopN {}
 
 impl WithDistribution for LogicalTopN {}
-
-impl WithSchema for LogicalTopN {
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-}
 
 impl ColPrunable for LogicalTopN {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {

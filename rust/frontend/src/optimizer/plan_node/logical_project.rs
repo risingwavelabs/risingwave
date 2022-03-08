@@ -6,7 +6,8 @@ use log::debug;
 use risingwave_common::catalog::{Field, Schema};
 
 use super::{
-    BatchProject, ColPrunable, PlanRef, PlanTreeNodeUnary, StreamProject, ToBatch, ToStream,
+    BatchProject, ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary, StreamProject, ToBatch,
+    ToStream,
 };
 use crate::expr::{assert_input_ref, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::plan_node::CollectRequiredCols;
@@ -16,10 +17,10 @@ use crate::utils::ColIndexMapping;
 /// `LogicalProject` computes a set of expressions from its input relation.
 #[derive(Debug, Clone)]
 pub struct LogicalProject {
+    base: LogicalBase,
     exprs: Vec<ExprImpl>,
     expr_alias: Vec<Option<String>>,
     input: PlanRef,
-    schema: Schema,
 }
 
 impl LogicalProject {
@@ -41,9 +42,10 @@ impl LogicalProject {
         for expr in &exprs {
             assert_input_ref(expr, input.schema().fields().len());
         }
+        let base = LogicalBase { schema };
         LogicalProject {
             input,
-            schema,
+            base,
             exprs,
             expr_alias,
         }
@@ -134,12 +136,6 @@ impl fmt::Display for LogicalProject {
 impl WithOrder for LogicalProject {}
 
 impl WithDistribution for LogicalProject {}
-
-impl WithSchema for LogicalProject {
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-}
 
 impl ColPrunable for LogicalProject {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {

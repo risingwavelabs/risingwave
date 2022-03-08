@@ -4,7 +4,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
-use super::{ColPrunable, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use super::{ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
 use crate::binder::BaseTableRef;
 use crate::catalog::ColumnId;
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
@@ -16,21 +16,22 @@ use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct LogicalInsert {
+    base: LogicalBase,
     table: BaseTableRef,
     columns: Vec<ColumnId>,
     input: PlanRef,
-    schema: Schema,
 }
 
 impl LogicalInsert {
     /// Create a LogicalInsert node. Used internally by optimizer.
     pub fn new(input: PlanRef, table: BaseTableRef, columns: Vec<ColumnId>) -> Self {
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
+        let base = LogicalBase { schema };
         Self {
             table,
             columns,
             input,
-            schema,
+            base,
         }
     }
 
@@ -49,12 +50,6 @@ impl PlanTreeNodeUnary for LogicalInsert {
     }
 }
 impl_plan_tree_node_for_unary! {LogicalInsert}
-
-impl WithSchema for LogicalInsert {
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-}
 
 impl WithOrder for LogicalInsert {}
 
