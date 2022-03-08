@@ -1,5 +1,8 @@
 use super::{AggCall, Expr, ExprImpl, FunctionCall, InputRef, Literal};
 
+/// By default, `ExprRewriter` simply traverses the expression tree and leaves nodes unchanged.
+/// Implementations can override a subset of methods and perform transformation on some particular
+/// types of expression.
 pub trait ExprRewriter {
     fn rewrite_expr(&mut self, expr: ExprImpl) -> ExprImpl {
         match expr {
