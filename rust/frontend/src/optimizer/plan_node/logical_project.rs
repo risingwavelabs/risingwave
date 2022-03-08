@@ -143,12 +143,7 @@ impl WithSchema for LogicalProject {
 
 impl ColPrunable for LogicalProject {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
-        assert!(
-            required_cols.is_subset(&FixedBitSet::from_iter(0..self.schema().fields().len())),
-            "Invalid required cols: {}, only {} columns available",
-            required_cols,
-            self.schema().fields().len()
-        );
+        self.must_contain_columns(required_cols);
 
         let mut visitor = CollectRequiredCols {
             required_cols: FixedBitSet::with_capacity(self.input.schema().fields().len()),
