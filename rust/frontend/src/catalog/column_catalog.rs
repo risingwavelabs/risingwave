@@ -1,6 +1,4 @@
-use itertools::Itertools;
 use risingwave_common::types::DataType;
-use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::plan::ColumnDesc as ProstColumnDesc;
 
 use crate::catalog::ColumnId;
@@ -10,8 +8,6 @@ use crate::catalog::ColumnId;
 pub struct ColumnDesc {
     pub data_type: DataType,
     pub type_name: Option<String>,
-    pub sub_name: String,
-    pub sub_columns: Vec<ColumnDesc>,
 }
 
 impl ColumnDesc {
@@ -19,8 +15,6 @@ impl ColumnDesc {
         ColumnDesc {
             data_type,
             type_name: None,
-            sub_name: "".to_string(),
-            sub_columns: vec![],
         }
     }
 
@@ -29,28 +23,12 @@ impl ColumnDesc {
     }
 }
 
-pub fn to_column_desc(col: &ProstColumnDesc) -> ColumnDesc {
-    if col.column_type.as_ref().expect("wrong type").type_name == TypeName::Struct as i32 {
-        let v = col.column_descs.iter().map(to_column_desc).collect_vec();
-        ColumnDesc {
-            data_type: col.get_column_type().expect("column type not found").into(),
-            type_name: Some(col.get_struct_name().to_string()),
-            sub_name: col.name.clone(),
-            sub_columns: v,
-        }
-    } else {
-        ColumnDesc {
-            data_type: col.get_column_type().expect("column type not found").into(),
-            type_name: Some(col.get_struct_name().to_string()),
-            sub_name: col.name.clone(),
-            sub_columns: vec![],
-        }
-    }
-}
-
 impl From<ProstColumnDesc> for ColumnDesc {
     fn from(col: ProstColumnDesc) -> Self {
-        to_column_desc(&col)
+        ColumnDesc {
+            data_type: col.get_column_type().expect("column type not found").into(),
+            type_name: Some(col.get_struct_name().to_string()),
+        }
     }
 }
 
@@ -60,11 +38,22 @@ pub struct ColumnCatalog {
     id: ColumnId,
     name: String,
     desc: ColumnDesc,
+    pub sub_catalogs: Vec<ColumnCatalog>,
 }
 
 impl ColumnCatalog {
-    pub fn new(id: ColumnId, name: String, desc: ColumnDesc) -> ColumnCatalog {
-        ColumnCatalog { id, name, desc }
+    pub fn new(
+        id: ColumnId,
+        name: String,
+        desc: ColumnDesc,
+        sub_catalogs: Vec<ColumnCatalog>,
+    ) -> ColumnCatalog {
+        ColumnCatalog {
+            id,
+            name,
+            desc,
+            sub_catalogs,
+        }
     }
 
     pub fn id(&self) -> ColumnId {

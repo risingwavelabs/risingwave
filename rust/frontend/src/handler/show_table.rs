@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
@@ -8,39 +6,40 @@ use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::ObjectName;
 
 use crate::catalog::catalog_service::DEFAULT_SCHEMA_NAME;
-use crate::catalog::column_catalog::ColumnDesc;
+use crate::catalog::column_catalog::ColumnCatalog;
 use crate::session::SessionImpl;
 
-pub fn column_to_rows(column_desc: &ColumnDesc) -> Vec<Row> {
-    if let DataType::Struct { fields: _f } = column_desc.data_type() {
+pub fn column_to_rows(column_catalog: &ColumnCatalog) -> Vec<Row> {
+    if let DataType::Struct { fields: _f } = column_catalog.data_type() {
         let mut v = vec![];
         let option = vec![
-            Some(column_desc.sub_name.clone()),
-            Some(get_type_name(column_desc)),
+            Some(column_catalog.name().to_string()),
+            Some(get_type_name(column_catalog)),
         ];
         v.push(Row::new(option));
-        for col in &column_desc.sub_columns {
+        for col in &column_catalog.sub_catalogs {
             v.append(&mut column_to_rows(col));
         }
         v
     } else {
         let option = vec![
-            Some(column_desc.sub_name.clone()),
-            Some(get_type_name(column_desc)),
+            Some(column_catalog.name().to_string()),
+            Some(get_type_name(column_catalog)),
         ];
         vec![Row::new(option)]
     }
 }
 
-fn get_type_name(col: &ColumnDesc) -> String {
-    if col.data_type
-        == (DataType::Struct {
-            fields: Arc::new([]),
-        })
-    {
-        col.type_name.as_ref().unwrap().to_string()
+fn get_type_name(column_catalog: &ColumnCatalog) -> String {
+    if let DataType::Struct { fields: _f } = column_catalog.data_type() {
+        column_catalog
+            .col_desc_ref()
+            .type_name
+            .as_ref()
+            .unwrap()
+            .to_string()
     } else {
-        format!("{:?}", &col.data_type)
+        format!("{:?}", &column_catalog.data_type())
     }
 }
 
@@ -63,11 +62,11 @@ pub async fn handle_show_table(
 
     let mut rows = vec![];
     for col in table.columns() {
-        rows.append(&mut column_to_rows(col.col_desc_ref()));
+        rows.append(&mut column_to_rows(col));
     }
 
     Ok(PgResponse::new(
-        StatementType::SHOW_PARAMETERS,
+        StatementType::SHOW_TABLE,
         0,
         rows,
         vec![

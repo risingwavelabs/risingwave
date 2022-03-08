@@ -1,6 +1,6 @@
 use std::path::Path;
-use std::sync::Arc;
 
+use itertools::Itertools;
 use protobuf::descriptor::FileDescriptorSet;
 use protobuf::RepeatedField;
 use risingwave_common::array::Op;
@@ -135,7 +135,11 @@ macro_rules! protobuf_match_type {
 }
 
 /// Maps a protobuf field type to a DB column type.
-fn protobuf_type_mapping(field_type: &FieldType, is_repeated: bool) -> Result<DataType> {
+fn protobuf_type_mapping(
+    field_type: &FieldType,
+    is_repeated: bool,
+    data_types: Vec<DataType>,
+) -> Result<DataType> {
     if is_repeated {
         return Err(NotImplementedError("repeated field is not supported".to_string()).into());
     }
@@ -147,7 +151,7 @@ fn protobuf_type_mapping(field_type: &FieldType, is_repeated: bool) -> Result<Da
         FieldType::Bool => DataType::Boolean,
         FieldType::String => DataType::Varchar,
         FieldType::Message(_d) => DataType::Struct {
-            fields: Arc::new([]),
+            fields: data_types.into(),
         },
         actual_type => {
             return Err(
@@ -158,15 +162,22 @@ fn protobuf_type_mapping(field_type: &FieldType, is_repeated: bool) -> Result<Da
     Ok(t)
 }
 
+fn extract_data_type(column_vec: Vec<ColumnDesc>) -> Vec<DataType> {
+    column_vec
+        .iter()
+        .map(|c| c.get_column_type().expect("column type not found").into())
+        .collect_vec()
+}
+
 pub fn date_type_to_col_desc(
     field_descriptor: &FieldDescriptor,
     descriptors: &Descriptors,
     lastname: String,
 ) -> Result<ColumnDesc> {
     let field_type = field_descriptor.field_type(descriptors);
-    let data_type = protobuf_type_mapping(&field_type, field_descriptor.is_repeated()).unwrap();
+    // let data_type = protobuf_type_mapping(&field_type, field_descriptor.is_repeated()).unwrap();
     if let FieldType::Message(m) = field_type {
-        let column_vec = m
+        let column_vec: Vec<ColumnDesc> = m
             .fields()
             .iter()
             .map(|f| {
@@ -179,7 +190,16 @@ pub fn date_type_to_col_desc(
             })
             .collect();
         Ok(ColumnDesc {
-            column_type: Some(data_type.to_protobuf().unwrap()),
+            column_type: Some(
+                protobuf_type_mapping(
+                    &field_type,
+                    field_descriptor.is_repeated(),
+                    extract_data_type(column_vec.clone()),
+                )
+                .unwrap()
+                .to_protobuf()
+                .unwrap(),
+            ),
             column_descs: column_vec,
             struct_name: m.name().to_string(),
             name: lastname + field_descriptor.name(),
@@ -187,7 +207,12 @@ pub fn date_type_to_col_desc(
         })
     } else {
         Ok(ColumnDesc {
-            column_type: Some(data_type.to_protobuf().unwrap()),
+            column_type: Some(
+                protobuf_type_mapping(&field_type, field_descriptor.is_repeated(), vec![])
+                    .unwrap()
+                    .to_protobuf()
+                    .unwrap(),
+            ),
             name: lastname + field_descriptor.name(),
             ..Default::default()
         })

@@ -169,7 +169,7 @@ mod tests {
 
         let mut rows = vec![];
         for col in table.columns() {
-            rows.append(&mut column_to_rows(col.col_desc_ref()));
+            rows.append(&mut column_to_rows(col));
         }
         let columns = rows
             .iter()
