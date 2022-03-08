@@ -15,7 +15,7 @@ impl Planner {
             None => root,
             Some(t) => LogicalFilter::create(root, t)?,
         };
-        root = self.plan_projection(root, select.projection)?;
+        root = self.plan_project(root, select.select_items)?;
         Ok(root)
     }
     /// Helper to create a dummy node as child of LogicalProject.
@@ -27,9 +27,9 @@ impl Planner {
         todo!()
     }
 
-    fn plan_projection(&mut self, input: PlanRef, projection: Vec<ExprImpl>) -> Result<PlanRef> {
+    fn plan_project(&mut self, input: PlanRef, project: Vec<ExprImpl>) -> Result<PlanRef> {
         // TODO: support alias.
-        let expr_alias = vec![None; projection.len()];
-        Ok(LogicalProject::create(input, projection, expr_alias))
+        let expr_alias = vec![None; project.len()];
+        Ok(LogicalProject::create(input, project, expr_alias))
     }
 }
