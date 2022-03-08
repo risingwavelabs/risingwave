@@ -31,7 +31,7 @@ pub(crate) struct PerfMetrics {
 impl Operations {
     /// Run operations in the `--benchmarks` option
     pub(crate) async fn run(store: impl StateStore, opts: &Opts) {
-        let mut stat_diff = DisplayMetrics::default();
+        let mut stat_diff = DisplayStat::default();
 
         let mut runner = Operations {
             keys: vec![],

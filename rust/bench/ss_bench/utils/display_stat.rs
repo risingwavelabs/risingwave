@@ -7,12 +7,12 @@ use super::my_metrics::MyStateStoreStats;
 use crate::utils::my_metrics::MyHistogram;
 
 #[derive(Default)]
-pub(crate) struct DisplayMetrics {
+pub(crate) struct DisplayStat {
     pub(crate) prev_stat: MyStateStoreStats,
     pub(crate) cur_stat: MyStateStoreStats,
 }
 
-impl DisplayMetrics {
+impl DisplayStat {
     pub(crate) fn update_stat(&mut self) {
         // (Ting Sun) TODO: eliminate this clone
         self.prev_stat = self.cur_stat.clone();
