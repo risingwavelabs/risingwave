@@ -13,6 +13,7 @@ use crate::optimizer::plan_node::CollectRequiredCols;
 use crate::optimizer::property::{Distribution, WithDistribution, WithOrder, WithSchema};
 use crate::utils::ColIndexMapping;
 
+/// `LogicalProject` computes a set of expressions from its input relation.
 #[derive(Debug, Clone)]
 pub struct LogicalProject {
     exprs: Vec<ExprImpl>,

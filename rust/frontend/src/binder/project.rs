@@ -5,9 +5,9 @@ use crate::binder::Binder;
 use crate::expr::ExprImpl;
 
 impl Binder {
-    pub fn bind_projection(&mut self, projection: Vec<SelectItem>) -> Result<Vec<ExprImpl>> {
+    pub fn bind_project(&mut self, select_items: Vec<SelectItem>) -> Result<Vec<ExprImpl>> {
         let mut select_list = vec![];
-        for item in projection {
+        for item in select_items {
             match item {
                 SelectItem::UnnamedExpr(expr) => {
                     let expr = self.bind_expr(expr)?;

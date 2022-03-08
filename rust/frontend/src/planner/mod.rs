@@ -11,7 +11,7 @@ mod statement;
 mod table_ref;
 mod values;
 
-/// `Planner` converts a bounded statement to a `PlanNode` tree
+/// `Planner` converts a bounded statement to a [`crate::optimizer::plan_node::PlanNode`] tree
 pub struct Planner {}
 
 impl Planner {
