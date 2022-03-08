@@ -38,6 +38,8 @@ risedev:
     # - use: grafana
     # If you want to enable tracing, uncomment the following line.
     # - use: jaeger
+    # If you want to use the new frontend, uncomment the following line.
+    # - use: frontend-v2
 
   # `dev-compute-node` have the same settings as default except the the compute node will be started by user.
   dev-compute-node:
