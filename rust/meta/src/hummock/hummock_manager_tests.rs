@@ -491,3 +491,100 @@ async fn test_context_id_validation() {
     assert!(matches!(error.inner(), ErrorCode::InternalError(_)));
     assert_eq!(error.to_string(), "internal error: transaction aborted");
 }
+
+#[tokio::test]
+async fn test_hummock_manager_basic() {
+    let (_env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(1).await;
+    let context_id_1 = worker_node.id;
+
+    let fake_host_address_2 = HostAddress {
+        host: "127.0.0.1".to_string(),
+        port: 2,
+    };
+    let (worker_node_2, _) = cluster_manager
+        .add_worker_node(fake_host_address_2, WorkerType::ComputeNode)
+        .await
+        .unwrap();
+    let context_id_2 = worker_node_2.id;
+
+    // test list_version_ids_asc
+    assert_eq!(
+        hummock_manager.list_version_ids_asc().await.unwrap().len(),
+        1
+    );
+
+    // Add some sstables and commit.
+    let epoch: u64 = 1;
+    let mut table_id = 1;
+    let (original_tables, _) = generate_test_tables(epoch, &mut table_id);
+    hummock_manager
+        .add_tables(context_id_1, original_tables.clone(), epoch)
+        .await
+        .unwrap();
+
+    // test list_version_ids_asc
+    assert_eq!(
+        hummock_manager.list_version_ids_asc().await.unwrap(),
+        vec![FIRST_VERSION_ID, FIRST_VERSION_ID + 1]
+    );
+
+    // test get_version_pin_count
+    assert_eq!(
+        hummock_manager
+            .get_version_pin_count(FIRST_VERSION_ID + 1)
+            .await
+            .unwrap(),
+        0
+    );
+    for _ in 0..2 {
+        let version = hummock_manager.pin_version(context_id_1).await.unwrap();
+        assert_eq!(version.id, FIRST_VERSION_ID + 1);
+        assert_eq!(
+            hummock_manager
+                .get_version_pin_count(FIRST_VERSION_ID + 1)
+                .await
+                .unwrap(),
+            1
+        );
+    }
+
+    for _ in 0..2 {
+        let version = hummock_manager.pin_version(context_id_2).await.unwrap();
+        assert_eq!(version.id, FIRST_VERSION_ID + 1);
+        assert_eq!(
+            hummock_manager
+                .get_version_pin_count(FIRST_VERSION_ID + 1)
+                .await
+                .unwrap(),
+            2
+        );
+    }
+
+    // test get_ssts_to_delete
+    assert!(hummock_manager
+        .get_ssts_to_delete(FIRST_VERSION_ID)
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(hummock_manager
+        .get_ssts_to_delete(FIRST_VERSION_ID + 1)
+        .await
+        .unwrap()
+        .is_empty());
+    // even nonexistent version
+    assert!(hummock_manager
+        .get_ssts_to_delete(FIRST_VERSION_ID + 100)
+        .await
+        .unwrap()
+        .is_empty());
+
+    // test delete_version
+    hummock_manager
+        .delete_version(FIRST_VERSION_ID)
+        .await
+        .unwrap();
+    assert_eq!(
+        hummock_manager.list_version_ids_asc().await.unwrap(),
+        vec![FIRST_VERSION_ID + 1]
+    );
+}
