@@ -1,6 +1,9 @@
-use risingwave_common::array::Row;
+use risingwave_common::array::{Row, RowDeserializer};
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, ScalarImpl};
+
+use crate::storage::MetaStore;
 
 /// `rw_catalog.rw_authid` catalog table, which is compatible with `pg_authid` in
 /// postgresql.
@@ -41,4 +44,14 @@ lazy_static::lazy_static! {
         None,
         None,
     ])];
+}
+
+pub async fn list_auth_ids<S: MetaStore>(store: &S) -> Result<Vec<Row>> {
+    let mut rows = Vec::new();
+    for bytes in store.list_cf("cf/rw_authid").await? {
+        let deserializer = RowDeserializer::new(RW_AUTHID_SCHEMA.data_types());
+        rows.push(deserializer.deserialize(&bytes)?);
+    }
+
+    Ok(rows)
 }
