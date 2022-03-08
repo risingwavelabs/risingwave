@@ -8,7 +8,7 @@ use super::{
     ToBatch, ToStream,
 };
 use crate::expr::{assert_input_ref, ExprImpl};
-use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
+use crate::optimizer::property::{WithSchema};
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalFilter` iterates over its input and returns elements for which `predicate` evaluates to

@@ -3,7 +3,7 @@ use std::fmt;
 use risingwave_common::catalog::Schema;
 
 use super::{LogicalProject, PlanRef, PlanTreeNodeUnary, StreamBase, ToStreamProst};
-use crate::optimizer::property::{Distribution, WithOrder, WithSchema};
+use crate::optimizer::property::{Distribution, WithSchema};
 
 /// `StreamProject` implements [`super::LogicalProject`] to evaluate specified expressions on input
 /// rows.

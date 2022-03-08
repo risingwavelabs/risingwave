@@ -3,7 +3,7 @@ use std::fmt;
 use risingwave_common::catalog::Schema;
 
 use super::{PlanRef, PlanTreeNodeUnary, StreamBase, ToStreamProst};
-use crate::optimizer::property::{Distribution, WithDistribution, WithOrder, WithSchema};
+use crate::optimizer::property::{Distribution, WithDistribution, WithSchema};
 
 /// `StreamExchange` imposes a particular distribution on its input
 /// without changing its content.

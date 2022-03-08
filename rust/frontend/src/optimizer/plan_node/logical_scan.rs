@@ -7,7 +7,7 @@ use risingwave_common::error::Result;
 use super::{ColPrunable, LogicalBase, PlanRef, ToBatch, ToStream};
 use crate::catalog::{ColumnId, TableId};
 use crate::optimizer::plan_node::BatchSeqScan;
-use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
+use crate::optimizer::property::{WithSchema};
 
 /// `LogicalScan` returns contents of a table or other equivalent object
 #[derive(Debug, Clone)]

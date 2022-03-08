@@ -6,7 +6,7 @@ use risingwave_common::error::Result;
 
 use super::{ColPrunable, LogicalBase, PlanRef, ToBatch, ToStream};
 use crate::expr::{Expr, ExprImpl};
-use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
+use crate::optimizer::property::{WithSchema};
 
 /// `LogicalValues` build rows according to a list of expressions
 #[derive(Debug, Clone)]

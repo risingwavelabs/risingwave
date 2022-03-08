@@ -3,7 +3,7 @@ use std::fmt;
 use risingwave_common::catalog::Schema;
 
 use super::{StreamBase, ToStreamProst};
-use crate::optimizer::property::{WithOrder, WithSchema};
+use crate::optimizer::property::{WithSchema};
 
 /// `StreamTableSource` continuously streams data from internal table or various kinds of
 /// external sources.

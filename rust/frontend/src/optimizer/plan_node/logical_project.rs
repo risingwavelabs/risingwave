@@ -11,7 +11,7 @@ use super::{
 };
 use crate::expr::{assert_input_ref, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::plan_node::CollectRequiredCols;
-use crate::optimizer::property::{Distribution, WithDistribution, WithOrder, WithSchema};
+use crate::optimizer::property::{Distribution, WithSchema};
 use crate::utils::ColIndexMapping;
 
 /// `LogicalProject` computes a set of expressions from its input relation.

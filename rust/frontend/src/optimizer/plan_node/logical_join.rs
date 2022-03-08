@@ -13,7 +13,7 @@ use crate::expr::ExprImpl;
 use crate::optimizer::plan_node::{
     BatchHashJoin, BatchSortMergeJoin, CollectRequiredCols, EqJoinPredicate, LogicalFilter,
 };
-use crate::optimizer::property::{Distribution, Order, WithDistribution, WithOrder};
+use crate::optimizer::property::{Distribution, Order};
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalJoin` that combines two relations according to some condition.

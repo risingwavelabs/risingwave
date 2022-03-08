@@ -9,7 +9,7 @@ use risingwave_common::types::DataType;
 use super::{ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
 use crate::expr::ExprImpl;
 use crate::optimizer::plan_node::LogicalProject;
-use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
+use crate::optimizer::property::{WithSchema};
 use crate::utils::ColIndexMapping;
 
 /// Aggregation Call

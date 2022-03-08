@@ -7,7 +7,7 @@ use risingwave_common::types::DataType;
 use super::{ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
 use crate::binder::BaseTableRef;
 use crate::catalog::ColumnId;
-use crate::optimizer::property::{WithDistribution, WithOrder};
+
 
 /// `LogicalInsert` iterates on input relation and insert the data into specified table.
 ///
