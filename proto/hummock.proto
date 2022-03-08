@@ -214,6 +214,19 @@ message SubscribeCompactTasksRequest {}
 
 message SubscribeCompactTasksResponse {
   CompactTask compact_task = 1;
+  VacuumTask vacuum_task = 2;
+}
+
+message VacuumTask {
+  message VacuumTrackedData {
+    repeated uint64 sstable_ids = 1;
+  }
+  message VaccumOrphanData {}
+
+  oneof task {
+    VacuumTrackedData tracked = 1;
+    VaccumOrphanData orphan = 2;
+  }
 }
 
 service HummockManagerService {

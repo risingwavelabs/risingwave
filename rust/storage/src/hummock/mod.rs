@@ -28,6 +28,7 @@ mod state_store;
 #[cfg(test)]
 mod state_store_tests;
 mod utils;
+mod vacuum;
 pub mod value;
 mod version_cmp;
 

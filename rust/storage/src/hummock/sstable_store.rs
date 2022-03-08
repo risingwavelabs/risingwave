@@ -128,13 +128,17 @@ impl SstableStore {
     }
 
     // TODO(MrCroxx): Maybe use `&SSTable` directly?
-    fn get_sst_meta_path(&self, sst_id: u64) -> String {
+    pub fn get_sst_meta_path(&self, sst_id: u64) -> String {
         format!("{}/{}.meta", self.path, sst_id)
     }
 
     // TODO(MrCroxx): Maybe use `&SSTable` directly?
-    fn get_sst_data_path(&self, sst_id: u64) -> String {
+    pub fn get_sst_data_path(&self, sst_id: u64) -> String {
         format!("{}/{}.data", self.path, sst_id)
+    }
+
+    pub fn store(&self) -> ObjectStoreRef {
+        self.store.clone()
     }
 }
 
