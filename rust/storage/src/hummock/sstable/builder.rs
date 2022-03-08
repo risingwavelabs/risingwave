@@ -40,6 +40,14 @@ impl Header {
         self.overlap = (h >> 16) as u16;
         self.diff = h as u16;
     }
+
+    pub fn decode_from_bytes(mut bytes: Bytes) -> Self {
+        let h = bytes.get_u32_le();
+        Self {
+            overlap: (h >> 16) as u16,
+            diff: h as u16,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -339,7 +347,6 @@ pub(super) mod tests {
         opts: SSTableBuilderOptions,
         sstable_store: SstableStoreRef,
     ) -> Sstable {
-        const REMOTE_DIR: &str = "test";
         let mut b = SSTableBuilder::new(opts);
 
         for i in 0..TEST_KEYS_COUNT {
@@ -356,10 +363,6 @@ pub(super) mod tests {
             .await
             .unwrap();
         sst
-    }
-
-    fn key(prefix: &[u8], i: usize) -> Bytes {
-        Bytes::from([prefix, format!("{:04}", i).as_bytes()].concat())
     }
 
     pub fn default_builder_opt_for_test() -> SSTableBuilderOptions {

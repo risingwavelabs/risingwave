@@ -4,7 +4,7 @@ use std::sync::Arc;
 use bytes::{Bytes, BytesMut};
 use itertools::Itertools;
 
-use super::{Block, Header, HEADER_SIZE};
+use super::{Block, Header};
 use crate::hummock::version_cmp::VersionedComparator;
 
 pub enum SeekPos {
@@ -17,14 +17,10 @@ pub enum SeekPos {
 pub struct BlockIterator {
     /// current index of iterator
     idx: isize,
-    /// base key of the block
-    base_key: Bytes,
     /// key of current entry
     key: BytesMut,
     /// raw value of current entry
     val: Bytes,
-    /// block data in bytes
-    data: Bytes,
     /// block struct
     block: Arc<Block>,
     /// previous overlap key, used to construct key of current entry from
@@ -34,13 +30,10 @@ pub struct BlockIterator {
 
 impl BlockIterator {
     pub fn new(block: Arc<Block>) -> Self {
-        let data = block.data.slice(..block.entries_index_start);
         Self {
             block,
-            base_key: Bytes::new(),
             key: BytesMut::new(),
             val: Bytes::new(),
-            data,
             perv_overlap: 0,
             idx: 0,
         }
@@ -49,17 +42,15 @@ impl BlockIterator {
     /// Replace block inside iterator and reset the iterator
     pub fn set_block(&mut self, block: Arc<Block>) {
         self.idx = 0;
-        self.base_key.clear();
         self.perv_overlap = 0;
         self.key.clear();
         self.val.clear();
-        self.data = block.data.slice(..block.entries_index_start);
         self.block = block;
     }
 
     #[inline]
     fn entry_offsets(&self) -> &[u32] {
-        &self.block.entry_offsets
+        self.block.entry_offsets()
     }
 
     /// Update the internal state of the iterator to use the value and key of a given index.
@@ -75,22 +66,16 @@ impl BlockIterator {
 
         let start_offset = self.entry_offsets()[i as usize] as u32;
 
-        if self.base_key.is_empty() {
-            let mut base_header = Header::default();
-            base_header.decode(&mut self.data.slice(..));
-            // TODO: combine this decode with header decode to avoid slice ptr copy
-            self.base_key = self
-                .data
-                .slice(HEADER_SIZE..HEADER_SIZE + base_header.diff as usize);
-        }
-
         let end_offset = if self.idx as usize + 1 == self.entry_offsets().len() {
-            self.data.len()
+            self.block.data_size()
         } else {
             self.entry_offsets()[self.idx as usize + 1] as usize
         };
 
-        let mut entry_data = self.data.slice(start_offset as usize..end_offset as usize);
+        let mut entry_data = self
+            .block
+            .raw_data()
+            .slice(start_offset as usize..end_offset as usize);
         let mut header = Header::default();
         header.decode(&mut entry_data);
 
@@ -98,7 +83,7 @@ impl BlockIterator {
         if header.overlap > self.perv_overlap {
             self.key.truncate(self.perv_overlap as usize);
             self.key.extend_from_slice(
-                &self.base_key[self.perv_overlap as usize..header.overlap as usize],
+                &self.block.base_key()[self.perv_overlap as usize..header.overlap as usize],
             );
         }
         self.perv_overlap = header.overlap;
