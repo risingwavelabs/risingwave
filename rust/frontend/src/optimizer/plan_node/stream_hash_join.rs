@@ -2,7 +2,7 @@ use std::fmt;
 
 use risingwave_common::catalog::Schema;
 
-use super::{LogicalJoin, PlanRef, PlanTreeNodeBinary, ToStreamProst};
+use super::{LogicalJoin, PlanRef, PlanTreeNodeBinary, StreamBase, ToStreamProst};
 use crate::optimizer::property::{Distribution, WithDistribution, WithOrder, WithSchema};
 
 /// `BatchHashJoin` implements [`super::LogicalJoin`] with hash table. It builds a hash table
@@ -10,12 +10,17 @@ use crate::optimizer::property::{Distribution, WithDistribution, WithOrder, With
 /// get output rows.
 #[derive(Debug, Clone)]
 pub struct StreamHashJoin {
+    pub base: StreamBase,
     logical: LogicalJoin,
 }
 
 impl StreamHashJoin {
     pub fn new(logical: LogicalJoin) -> Self {
-        Self { logical }
+        // TODO: derive from input
+        let base = StreamBase {
+            dist: Distribution::any().clone(),
+        };
+        Self { logical, base }
     }
 }
 
@@ -48,8 +53,6 @@ impl WithSchema for StreamHashJoin {
         self.logical.schema()
     }
 }
-
-impl WithDistribution for StreamHashJoin {}
 
 impl WithOrder for StreamHashJoin {}
 

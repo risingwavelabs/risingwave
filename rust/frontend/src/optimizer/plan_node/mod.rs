@@ -84,7 +84,8 @@ pub struct StreamBase {
     //    TODO: assign nodeId from executor
     //    pub id: PlanNodeId,
     pub dist: Distribution,
-    pub pk_indices: Vec<u32>,
+    // TODO: pk derive
+    // pub pk_indices: Vec<u32>,
 }
 
 impl dyn PlanNode {

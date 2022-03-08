@@ -1,9 +1,9 @@
 use paste::paste;
 
 use super::super::plan_node::*;
-use crate::for_batch_plan_nodes;
 use crate::optimizer::property::{Convention, Order};
 use crate::optimizer::PlanRef;
+use crate::{for_batch_plan_nodes, for_stream_plan_nodes};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Distribution {
@@ -95,6 +95,7 @@ macro_rules! impl_with_dist {
     }
 }
 for_batch_plan_nodes! {impl_with_dist }
+for_stream_plan_nodes! {impl_with_dist }
 
 #[cfg(test)]
 mod tests {
