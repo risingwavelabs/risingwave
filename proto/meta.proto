@@ -75,6 +75,7 @@ message DropRequest {
 
 message DropResponse {
   common.Status status = 1;
+  uint64 version = 2;
 }
 
 message GetCatalogRequest {}

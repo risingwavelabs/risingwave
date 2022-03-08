@@ -131,9 +131,13 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         .unwrap(),
     );
     let catalog_manager_ref = Arc::new(
-        StoredCatalogManager::new(meta_store_ref.clone(), notification_manager.clone())
-            .await
-            .unwrap(),
+        StoredCatalogManager::new(
+            meta_store_ref.clone(),
+            epoch_generator_ref.clone(),
+            notification_manager.clone(),
+        )
+        .await
+        .unwrap(),
     );
 
     let epoch_srv = EpochServiceImpl::new(epoch_generator_ref.clone());

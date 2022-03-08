@@ -114,6 +114,10 @@ where
     #[cfg(not(tarpaulin_include))]
     async fn drop(&self, request: Request<DropRequest>) -> Result<Response<DropResponse>, Status> {
         let req = request.into_inner();
+        let version = self
+            .epoch_generator
+            .generate()
+            .map_err(|e| e.to_grpc_status())?;
         let result = match req.get_catalog_id().map_err(tonic_err)? {
             CatalogId::DatabaseId(database_ref_id) => {
                 self.stored_catalog_manager
@@ -131,7 +135,10 @@ where
         };
 
         match result {
-            Ok(_) => Ok(Response::new(DropResponse { status: None })),
+            Ok(_) => Ok(Response::new(DropResponse {
+                status: None,
+                version: version.into_inner(),
+            })),
             Err(e) => Err(e.to_grpc_status()),
         }
     }

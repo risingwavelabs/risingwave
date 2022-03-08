@@ -5,7 +5,7 @@ use dashmap::DashMap;
 use futures::future;
 use risingwave_common::array::RwError;
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result as RwResult, ToRwResult};
+use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
@@ -15,7 +15,7 @@ use tonic::Status;
 
 use crate::cluster::WorkerKey;
 
-pub type Notification = Result<SubscribeResponse, Status>;
+pub type Notification = std::result::Result<SubscribeResponse, Status>;
 
 const BUFFER_SIZE: usize = 4;
 
@@ -50,7 +50,7 @@ impl NotificationManager {
         &self,
         host_address: HostAddress,
         worker_type: WorkerType,
-    ) -> RwResult<ReceiverStream<Notification>> {
+    ) -> Result<ReceiverStream<Notification>> {
         let (tx, rx) = mpsc::channel(BUFFER_SIZE);
         match worker_type {
             WorkerType::ComputeNode => self.be_observers.insert(WorkerKey(host_address), tx),
@@ -73,7 +73,7 @@ impl NotificationManager {
         operation: Operation,
         info: &Info,
         target_type: NotificationTarget,
-    ) -> RwResult<()> {
+    ) -> Result<()> {
         future::join_all(self.get_iter(target_type).map(|e| async move {
             e.value()
                 .send(Ok(SubscribeResponse {
@@ -90,7 +90,7 @@ impl NotificationManager {
         }))
         .await
         .into_iter()
-        .collect::<RwResult<()>>()
+        .collect::<Result<()>>()
     }
 
     /// Return iter of frontend observers or compute node observers or their combination.

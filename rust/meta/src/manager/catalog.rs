@@ -12,7 +12,7 @@ use risingwave_pb::meta::{Catalog, Database, Schema, Table};
 use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
 use tokio::sync::Mutex;
 
-use super::{NotificationManagerRef, NotificationTarget};
+use super::{EpochGeneratorRef, NotificationManagerRef, NotificationTarget};
 use crate::model::MetadataModel;
 use crate::storage::MetaStore;
 
@@ -21,6 +21,7 @@ use crate::storage::MetaStore;
 pub struct StoredCatalogManager<S> {
     core: Mutex<CatalogManagerCore>,
     meta_store_ref: Arc<S>,
+    epoch_generator: EpochGeneratorRef,
     nm: NotificationManagerRef,
 }
 
@@ -30,7 +31,11 @@ impl<S> StoredCatalogManager<S>
 where
     S: MetaStore,
 {
-    pub async fn new(meta_store_ref: Arc<S>, nm: NotificationManagerRef) -> Result<Self> {
+    pub async fn new(
+        meta_store_ref: Arc<S>,
+        epoch_generator: EpochGeneratorRef,
+        nm: NotificationManagerRef,
+    ) -> Result<Self> {
         let databases = Database::list(&*meta_store_ref).await?;
         let schemas = Schema::list(&*meta_store_ref).await?;
         let tables = Table::list(&*meta_store_ref).await?;
@@ -39,6 +44,7 @@ where
         Ok(Self {
             core,
             meta_store_ref,
+            epoch_generator,
             nm,
         })
     }
@@ -79,7 +85,9 @@ where
         let database_id = DatabaseId::from(&Some(database_ref_id.clone()));
         if core.has_database(&database_id) {
             Database::delete(&*self.meta_store_ref, database_ref_id).await?;
-            let database = core.delete_database(&database_id).unwrap();
+            let mut database = core.delete_database(&database_id).unwrap();
+            let version = self.epoch_generator.generate()?.into_inner();
+            database.version = version;
 
             // Notify frontends to delete database.
             self.nm
@@ -125,7 +133,9 @@ where
         let schema_id = SchemaId::from(&Some(schema_ref_id.clone()));
         if core.has_schema(&schema_id) {
             Schema::delete(&*self.meta_store_ref, schema_ref_id).await?;
-            let schema = core.delete_schema(&schema_id).unwrap();
+            let mut schema = core.delete_schema(&schema_id).unwrap();
+            let version = self.epoch_generator.generate()?.into_inner();
+            schema.version = version;
 
             // Notify frontends to delete schema.
             self.nm
@@ -150,7 +160,7 @@ where
             table.insert(&*self.meta_store_ref).await?;
             core.add_table(table.clone());
 
-            if let TableInfo::MaterializedView(mview_info) = table.get_info().unwrap() {
+            if let TableInfo::MaterializedView(mview_info) = table.get_info()? {
                 for table_ref_id in &mview_info.dependent_tables {
                     let dependent_table_id = TableId::from(&Some(table_ref_id.clone()));
                     core.increase_ref_count(dependent_table_id);
@@ -189,23 +199,23 @@ where
                 .into()),
                 None => {
                     Table::delete(&*self.meta_store_ref, table_ref_id).await?;
-                    let table = core.delete_table(&table_id).unwrap();
-                    let dependent_tables: Vec<TableId> = if let TableInfo::MaterializedView(
-                        mview_info,
-                    ) = table.get_info().unwrap()
-                    {
-                        mview_info
-                            .dependent_tables
-                            .clone()
-                            .into_iter()
-                            .map(|table_ref_id| TableId::from(&Some(table_ref_id)))
-                            .collect()
-                    } else {
-                        Default::default()
-                    };
+                    let mut table = core.delete_table(&table_id).unwrap();
+                    let dependent_tables: Vec<TableId> =
+                        if let TableInfo::MaterializedView(mview_info) = table.get_info()? {
+                            mview_info
+                                .dependent_tables
+                                .clone()
+                                .into_iter()
+                                .map(|table_ref_id| TableId::from(&Some(table_ref_id)))
+                                .collect()
+                        } else {
+                            Default::default()
+                        };
                     for dependent_table_id in dependent_tables {
                         core.decrease_ref_count(dependent_table_id);
                     }
+                    let version = self.epoch_generator.generate()?.into_inner();
+                    table.version = version;
 
                     // Notify frontends to delete table.
                     self.nm
