@@ -61,7 +61,25 @@ impl CompactStatus {
     }
 
     pub fn get_compact_task(&mut self) -> Option<CompactTask> {
-        let select_level = 0u32;
+        let num_levels = self.level_handlers.len();
+        let mut idle_levels = Vec::with_capacity(num_levels - 1);
+        for (level_handler_idx, level_handler) in
+            self.level_handlers[..num_levels - 1].iter().enumerate()
+        {
+            match level_handler {
+                LevelHandler::Overlapping(_, compacting_key_ranges)
+                | LevelHandler::Nonoverlapping(_, compacting_key_ranges) => {
+                    if compacting_key_ranges.is_empty() {
+                        idle_levels.push(level_handler_idx);
+                    }
+                }
+            }
+        }
+        let select_level = if idle_levels.is_empty() {
+            0
+        } else {
+            *idle_levels.first().unwrap() as u32
+        };
 
         enum SearchResult {
             Found(Vec<u64>, Vec<u64>, Vec<KeyRange>),
