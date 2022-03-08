@@ -20,7 +20,7 @@ set -e
 if [ -d "${PREFIX_BIN}/etcd" ]; then
     exit 0
 fi
-echo "Etcd Server not found, downloading"
+echo "Etcd Server for $ETCD_SYSTEM not found, downloading"
 if [[ "$ETCD_SYSTEM" == linux* ]]; then
     curl -L "${ETCD_DOWNLOAD_URL_LINUX}" -o "${ETCD_DOWNLOAD_PATH_LINUX}"
     tar -xf "${ETCD_DOWNLOAD_PATH_LINUX}" -C "${PREFIX_TMP}"
