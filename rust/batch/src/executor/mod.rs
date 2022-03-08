@@ -134,7 +134,7 @@ impl<'a> ExecutorBuilder<'a> {
     fn try_build(&self) -> Result<BoxedExecutor> {
         let real_executor = build_executor! { self,
             NodeBody::CreateTable => CreateTableExecutor,
-            NodeBody::RowSeqScan => RowSeqScanExecutor,
+            NodeBody::RowSeqScan => RowSeqScanExecutorBuilder,
             NodeBody::Insert => InsertExecutor,
             NodeBody::DropTable => DropTableExecutor,
             NodeBody::Exchange => ExchangeExecutor,

@@ -3,6 +3,7 @@ use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use bytes::Bytes;
 use itertools::Itertools;
 use parking_lot::RwLock as PLRwLock;
 use risingwave_common::error::Result;
@@ -19,7 +20,7 @@ use super::value::HummockValue;
 use super::{key, HummockError, HummockOptions, HummockResult, SstableStoreRef};
 use crate::monitor::StateStoreStats;
 
-type SharedBufferItem = (Vec<u8>, HummockValue<Vec<u8>>);
+type SharedBufferItem = (Bytes, HummockValue<Bytes>);
 
 /// A write batch stored in the shared buffer.
 #[derive(Clone, Debug)]
@@ -42,9 +43,9 @@ impl SharedBufferBatch {
         // user key.
         match self
             .inner
-            .binary_search_by(|m| key::user_key(m.0.as_slice()).cmp(user_key))
+            .binary_search_by(|m| key::user_key(&m.0).cmp(user_key))
         {
-            Ok(i) => Some(self.inner[i].1.clone()),
+            Ok(i) => Some(self.inner[i].1.to_vec()),
             Err(_) => None,
         }
     }
@@ -58,19 +59,19 @@ impl SharedBufferBatch {
     }
 
     pub fn start_key(&self) -> &[u8] {
-        self.inner.first().unwrap().0.as_slice()
+        &self.inner.first().unwrap().0
     }
 
     pub fn end_key(&self) -> &[u8] {
-        self.inner.last().unwrap().0.as_slice()
+        &self.inner.last().unwrap().0
     }
 
     pub fn start_user_key(&self) -> &[u8] {
-        key::user_key(self.inner.first().unwrap().0.as_slice())
+        key::user_key(&self.inner.first().unwrap().0)
     }
 
     pub fn end_user_key(&self) -> &[u8] {
-        key::user_key(self.inner.last().unwrap().0.as_slice())
+        key::user_key(&self.inner.last().unwrap().0)
     }
 
     pub fn epoch(&self) -> u64 {
@@ -111,7 +112,7 @@ impl<const DIRECTION: usize> HummockIterator for SharedBufferBatchIterator<DIREC
     }
 
     fn key(&self) -> &[u8] {
-        self.current_item().0.as_slice()
+        &self.current_item().0
     }
 
     fn value(&self) -> HummockValue<&[u8]> {
@@ -132,7 +133,7 @@ impl<const DIRECTION: usize> HummockIterator for SharedBufferBatchIterator<DIREC
         // user key.
         match self
             .inner
-            .binary_search_by(|probe| key::user_key(probe.0.as_slice()).cmp(key::user_key(key)))
+            .binary_search_by(|probe| key::user_key(&probe.0).cmp(key::user_key(key)))
         {
             Ok(i) => {
                 self.current_idx = i;
@@ -193,6 +194,21 @@ impl SharedBufferManager {
         self.uploader_tx
             .send(SharedBufferUploaderItem::Batch(batch))
             .map_err(HummockError::shared_buffer_error)
+    }
+
+    /// Put a write batch into shared buffer. The batch will won't be synced to S3 asynchronously.
+    pub fn replicate_remote_batch(
+        &self,
+        batch: Vec<SharedBufferItem>,
+        epoch: u64,
+    ) -> HummockResult<()> {
+        let batch = SharedBufferBatch::new(batch, epoch);
+        self.shared_buffer
+            .write()
+            .entry(epoch)
+            .or_insert(BTreeMap::new())
+            .insert(batch.end_user_key().to_vec(), batch.clone());
+        Ok(())
     }
 
     // TODO: support time-based syncing
@@ -470,6 +486,9 @@ impl SharedBufferUploader {
 mod tests {
     use std::sync::Arc;
 
+    use bytes::Bytes;
+    use itertools::Itertools;
+
     use super::SharedBufferBatch;
     use crate::hummock::iterator::test_utils::{
         iterator_test_key_of, iterator_test_key_of_epoch, test_value_of,
@@ -485,6 +504,15 @@ mod tests {
     use crate::hummock::{HummockOptions, SstableStore};
     use crate::monitor::DEFAULT_STATE_STORE_STATS;
     use crate::object::{InMemObjectStore, ObjectStore};
+
+    fn transform_shared_buffer(
+        batches: Vec<(Vec<u8>, HummockValue<Vec<u8>>)>,
+    ) -> Vec<(Bytes, HummockValue<Bytes>)> {
+        batches
+            .into_iter()
+            .map(|(k, v)| (k.into(), v.into()))
+            .collect_vec()
+    }
 
     #[tokio::test]
     async fn test_shared_buffer_batch_basic() {
@@ -503,18 +531,19 @@ mod tests {
                 HummockValue::Put(b"value3".to_vec()),
             ),
         ];
-        let shared_buffer_batch = SharedBufferBatch::new(shared_buffer_items.clone(), epoch);
+        let shared_buffer_batch =
+            SharedBufferBatch::new(transform_shared_buffer(shared_buffer_items.clone()), epoch);
 
         // Sketch
         assert_eq!(shared_buffer_batch.start_key(), shared_buffer_items[0].0);
         assert_eq!(shared_buffer_batch.end_key(), shared_buffer_items[2].0);
         assert_eq!(
             shared_buffer_batch.start_user_key(),
-            user_key(shared_buffer_items[0].0.as_slice())
+            user_key(&shared_buffer_items[0].0)
         );
         assert_eq!(
             shared_buffer_batch.end_user_key(),
-            user_key(shared_buffer_items[2].0.as_slice())
+            user_key(&shared_buffer_items[2].0)
         );
 
         // Point lookup
@@ -575,7 +604,8 @@ mod tests {
                 HummockValue::Put(b"value3".to_vec()),
             ),
         ];
-        let shared_buffer_batch = SharedBufferBatch::new(shared_buffer_items.clone(), epoch);
+        let shared_buffer_batch =
+            SharedBufferBatch::new(transform_shared_buffer(shared_buffer_items.clone()), epoch);
 
         // Seek to 2nd key with current epoch, expect last two items to return
         let mut iter = shared_buffer_batch.iter();
@@ -643,19 +673,25 @@ mod tests {
         let mut shared_buffer_items = Vec::new();
         for key in put_keys {
             shared_buffer_items.push((
-                key_with_epoch(key.clone(), epoch),
-                HummockValue::Put(test_value_of(0, *idx)),
+                Bytes::from(key_with_epoch(key.clone(), epoch)),
+                HummockValue::Put(test_value_of(0, *idx).into()),
             ));
             *idx += 1;
         }
         for key in delete_keys {
-            shared_buffer_items.push((key_with_epoch(key.clone(), epoch), HummockValue::Delete));
+            shared_buffer_items.push((
+                Bytes::from(key_with_epoch(key.clone(), epoch)),
+                HummockValue::Delete,
+            ));
         }
-        shared_buffer_items.sort_by(|l, r| user_key(l.0.as_slice()).cmp(r.0.as_slice()));
+        shared_buffer_items.sort_by(|l, r| user_key(&l.0).cmp(&r.0));
         shared_buffer_manager
             .write_batch(shared_buffer_items.clone(), epoch)
             .unwrap();
         shared_buffer_items
+            .iter()
+            .map(|(k, v)| (k.to_vec(), v.to_vec()))
+            .collect_vec()
     }
 
     #[tokio::test]

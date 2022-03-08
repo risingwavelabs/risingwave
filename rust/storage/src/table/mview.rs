@@ -1,35 +1,22 @@
-use std::borrow::Cow;
 use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
-use risingwave_common::array::Row;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+use risingwave_common::array::column::Column;
+use risingwave_common::array::{DataChunk, Row};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::Datum;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 
-use super::TableIterRef;
 use crate::cell_based_row_deserializer::CellBasedRowDeserializer;
-use crate::table::{ScannableTable, TableIter};
-use crate::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
-
-pub fn new_adhoc_mview_table(
-    state_store: StateStoreImpl,
-    table_id: &TableId,
-    column_ids: &[ColumnId],
-    fields: &[Field],
-) -> Arc<dyn ScannableTable> {
-    dispatch_state_store!(state_store, state_store, {
-        let keyspace = Keyspace::table_root(state_store, table_id);
-        let table = MViewTable::new_adhoc(keyspace, column_ids, fields);
-        Arc::new(table) as Arc<dyn ScannableTable>
-    })
-}
+use crate::table::TableIter;
+use crate::{Keyspace, StateStore};
 
 /// `MViewTable` provides a readable cell-based row table interface,
 /// so that data can be queried by AP engine.
+#[derive(Clone)]
 pub struct MViewTable<S: StateStore> {
     keyspace: Keyspace<S>,
 
@@ -102,7 +89,7 @@ impl<S: StateStore> MViewTable<S> {
     }
 
     // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`
-    async fn iter(&self, epoch: u64) -> Result<MViewTableIter<S>> {
+    pub async fn iter(&self, epoch: u64) -> Result<MViewTableIter<S>> {
         MViewTableIter::new(self.keyspace.clone(), self.column_descs.clone(), epoch).await
     }
 
@@ -147,6 +134,10 @@ impl<S: StateStore> MViewTable<S> {
             Ok(None)
         }
     }
+
+    pub fn schema(&self) -> &Schema {
+        &self.schema
+    }
 }
 
 pub struct MViewTableIter<S: StateStore> {
@@ -166,7 +157,7 @@ pub struct MViewTableIter<S: StateStore> {
     cell_based_row_deserializer: CellBasedRowDeserializer,
 }
 
-impl<'a, S: StateStore> MViewTableIter<S> {
+impl<S: StateStore> MViewTableIter<S> {
     // TODO: adjustable limit
     const SCAN_LIMIT: usize = 1024;
 
@@ -210,6 +201,46 @@ impl<'a, S: StateStore> MViewTableIter<S> {
         self.next_idx = 0;
 
         Ok(())
+    }
+
+    pub async fn collect_datachunk_from_iter(
+        &mut self,
+        mview_table: &MViewTable<S>,
+        chunk_size: Option<usize>,
+    ) -> Result<Option<DataChunk>> {
+        let schema = &mview_table.schema;
+        let mut builders = schema.create_array_builders(chunk_size.unwrap_or(0))?;
+
+        let mut row_count = 0;
+        for _ in 0..chunk_size.unwrap_or(usize::MAX) {
+            match self.next().await? {
+                Some(row) => {
+                    for (datum, builder) in row.0.into_iter().zip_eq(builders.iter_mut()) {
+                        builder.append_datum(&datum)?;
+                    }
+                    row_count += 1;
+                }
+                None => break,
+            }
+        }
+
+        let chunk = if schema.is_empty() {
+            // Generate some dummy data to ensure a correct cardinality, which might be used by
+            // count(*).
+            DataChunk::new_dummy(row_count)
+        } else {
+            let columns: Vec<Column> = builders
+                .into_iter()
+                .map(|builder| builder.finish().map(|a| Column::new(Arc::new(a))))
+                .try_collect()?;
+            DataChunk::builder().columns(columns).build()
+        };
+
+        if chunk.cardinality() == 0 {
+            Ok(None)
+        } else {
+            Ok(Some(chunk))
+        }
     }
 }
 
@@ -257,31 +288,5 @@ impl<S: StateStore> TableIter for MViewTableIter<S> {
                 None => {}
             }
         }
-    }
-}
-
-#[async_trait::async_trait]
-impl<S> ScannableTable for MViewTable<S>
-where
-    S: StateStore,
-{
-    async fn iter(&self, epoch: u64) -> Result<TableIterRef> {
-        Ok(Box::new(self.iter(epoch).await?))
-    }
-
-    fn into_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Sync + Send> {
-        self
-    }
-
-    fn schema(&self) -> Cow<Schema> {
-        Cow::Borrowed(&self.schema)
-    }
-
-    fn column_descs(&self) -> Cow<[ColumnDesc]> {
-        Cow::Borrowed(&self.column_descs)
-    }
-
-    fn is_shared_storage(&self) -> bool {
-        true
     }
 }

@@ -16,10 +16,11 @@ use risingwave_pb::plan::ColumnDesc;
 use risingwave_source::{MemSourceManager, SourceManager};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::monitor::DEFAULT_STATE_STORE_STATS;
+use risingwave_storage::table::mview::MViewTable;
 use risingwave_storage::{Keyspace, StateStore, StateStoreImpl};
 use risingwave_stream::executor::{
-    new_adhoc_mview_table, Barrier, Epoch, Executor as StreamExecutor, MaterializeExecutor,
-    Message, PkIndices, SourceExecutor,
+    Barrier, Epoch, Executor as StreamExecutor, MaterializeExecutor, Message, PkIndices,
+    SourceExecutor,
 };
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -67,7 +68,7 @@ impl BatchExecutor for SingleChunkExecutor {
 #[tokio::test]
 async fn test_table_v2_materialize() -> Result<()> {
     let memory_state_store = MemoryStateStore::new();
-    let store = StateStoreImpl::MemoryStateStore(
+    let _state_store_impl = StateStoreImpl::MemoryStateStore(
         memory_state_store
             .clone()
             .monitored(DEFAULT_STATE_STORE_STATS.clone()),
@@ -144,7 +145,7 @@ async fn test_table_v2_materialize() -> Result<()> {
     )?;
 
     // Create a `Materialize` to write the changes to storage
-    let keyspace = Keyspace::table_root(memory_state_store, &source_table_id);
+    let keyspace = Keyspace::table_root(memory_state_store.clone(), &source_table_id);
     let mut materialize = MaterializeExecutor::new(
         Box::new(stream_source),
         keyspace.clone(),
@@ -169,12 +170,8 @@ async fn test_table_v2_materialize() -> Result<()> {
     });
 
     // Since we have not polled `Materialize`, we cannot scan anything from this table
-    let table = new_adhoc_mview_table(
-        store.clone(),
-        &source_table_id,
-        &all_column_ids,
-        all_schema.fields(),
-    );
+    let keyspace = Keyspace::table_root(memory_state_store, &source_table_id);
+    let table = MViewTable::new_adhoc(keyspace, &all_column_ids, all_schema.fields());
 
     let mut scan = RowSeqScanExecutor::new(
         table.clone(),

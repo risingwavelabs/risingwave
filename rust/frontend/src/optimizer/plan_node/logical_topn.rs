@@ -1,9 +1,11 @@
 use std::fmt;
 
+use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::Schema;
 
-use super::{ColPrunable, LogicalProject, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
-use crate::optimizer::property::{Order, WithDistribution, WithOrder, WithSchema};
+use super::{ColPrunable, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use crate::optimizer::plan_node::LogicalProject;
+use crate::optimizer::property::{FieldOrder, Order, WithDistribution, WithOrder, WithSchema};
 use crate::utils::ColIndexMapping;
 
 /// `LogicalTopN` sorts the input data and fetches up to `limit` rows from `offset`
@@ -60,10 +62,46 @@ impl WithSchema for LogicalTopN {
 }
 
 impl ColPrunable for LogicalTopN {
-    fn prune_col(&self, required_cols: &fixedbitset::FixedBitSet) -> PlanRef {
-        // TODO: replace default impl
-        let mapping = ColIndexMapping::with_remaining_columns(required_cols);
-        LogicalProject::with_mapping(self.clone().into(), mapping).into()
+    fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
+        assert!(
+            required_cols.is_subset(&FixedBitSet::from_iter(0..self.schema().fields().len())),
+            "Invalid required cols: {}, only {} columns available",
+            required_cols,
+            self.schema().fields().len()
+        );
+
+        let mut input_required_cols = required_cols.clone();
+        self.order
+            .field_order
+            .iter()
+            .for_each(|fo| input_required_cols.insert(fo.index));
+
+        let mapping = ColIndexMapping::with_remaining_columns(&input_required_cols);
+        let new_order = Order {
+            field_order: self
+                .order
+                .field_order
+                .iter()
+                .map(|fo| FieldOrder {
+                    index: mapping.map(fo.index),
+                    direct: fo.direct.clone(),
+                })
+                .collect(),
+        };
+        let new_input = self.input.prune_col(required_cols);
+        let top_n = Self::new(new_input, self.limit, self.offset, new_order).into();
+
+        if *required_cols == input_required_cols {
+            top_n
+        } else {
+            LogicalProject::with_mapping(
+                top_n,
+                ColIndexMapping::with_remaining_columns(
+                    &required_cols.ones().map(|i| mapping.map(i)).collect(),
+                ),
+            )
+            .into()
+        }
     }
 }
 
