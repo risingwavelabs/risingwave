@@ -12,10 +12,8 @@ impl Planner {
         let input = self.plan_query(insert.source)?.as_subplan();
         // `columns` not used by backend yet.
         let plan: PlanRef = LogicalInsert::create(input, insert.table, vec![])?.into();
-        let order = Order {
-            field_order: vec![],
-        };
-        let dist = Distribution::Any;
+        let order = Order::any().clone();
+        let dist = Distribution::any().clone();
         let mut out_fields = FixedBitSet::with_capacity(plan.schema().len());
         out_fields.insert_range(..);
         let root = PlanRoot::new(plan, dist, order, out_fields);
