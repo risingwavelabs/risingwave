@@ -7,7 +7,7 @@ use risingwave_pb::hummock::hummock_version::HummockVersionRefId;
 use risingwave_pb::hummock::{
     CompactTask, HummockContextPinnedSnapshot, HummockContextPinnedVersion, HummockContextRefId,
     HummockSnapshot, HummockTablesToDelete, HummockVersion, Level, LevelType, SstableInfo,
-    UncommittedEpoch,
+    SstableRefId, UncommittedEpoch,
 };
 use risingwave_storage::hummock::{
     HummockContextId, HummockEpoch, HummockRefCount, HummockSSTableId, HummockVersionId,
@@ -521,7 +521,12 @@ where
             });
             tables_to_delete.id.extend(delete_table_ids);
             if tables_to_delete.id.is_empty() {
-                tables_to_delete.delete_in_transaction(&mut transaction)?;
+                HummockTablesToDelete::delete_in_transaction(
+                    HummockVersionRefId {
+                        id: tables_to_delete.version_id,
+                    },
+                    &mut transaction,
+                )?;
             } else {
                 tables_to_delete.upsert_in_transaction(&mut transaction)?;
             }
@@ -626,11 +631,10 @@ where
 
                 // remove tables of the aborting epoch
                 for table_id in &uncommitted_epoch.table_ids {
-                    SstableInfo {
-                        id: *table_id,
-                        key_range: None,
-                    }
-                    .delete_in_transaction(&mut transaction)?
+                    SstableInfo::delete_in_transaction(
+                        SstableRefId { id: *table_id },
+                        &mut transaction,
+                    )?;
                 }
                 hummock_version.uncommitted_epochs.swap_remove(idx);
 
@@ -663,7 +667,12 @@ where
         .await?;
         let mut to_commit = false;
         if let Some(pinned_version) = pinned_version {
-            pinned_version.delete_in_transaction(&mut transaction)?;
+            HummockContextPinnedVersion::delete_in_transaction(
+                HummockContextRefId {
+                    id: pinned_version.context_id,
+                },
+                &mut transaction,
+            )?;
             to_commit = true;
         }
         let pinned_snapshot = HummockContextPinnedSnapshot::select(
@@ -672,7 +681,12 @@ where
         )
         .await?;
         if let Some(pinned_snapshot) = pinned_snapshot {
-            pinned_snapshot.delete_in_transaction(&mut transaction)?;
+            HummockContextPinnedSnapshot::delete_in_transaction(
+                HummockContextRefId {
+                    id: pinned_snapshot.context_id,
+                },
+                &mut transaction,
+            )?;
             to_commit = true;
         }
         if !to_commit {
@@ -736,13 +750,25 @@ where
         let version =
             HummockVersion::select(versioning_guard.meta_store_ref.as_ref(), &key).await?;
         if let Some(version) = version {
-            version.delete_in_transaction(&mut transaction)?;
+            HummockVersion::delete_in_transaction(
+                HummockVersionRefId { id: version.id },
+                &mut transaction,
+            )?;
         }
         // Delete record in HummockTablesToDelete if any.
         let ssts_to_delete =
             HummockTablesToDelete::select(versioning_guard.meta_store_ref.as_ref(), &key).await?;
         if let Some(ssts_to_delete) = ssts_to_delete {
-            ssts_to_delete.delete_in_transaction(&mut transaction)?;
+            // Delete tracked sstables.
+            for sst_id in ssts_to_delete.id {
+                SstableInfo::delete_in_transaction(SstableRefId { id: sst_id }, &mut transaction)?;
+            }
+            HummockTablesToDelete::delete_in_transaction(
+                HummockVersionRefId {
+                    id: ssts_to_delete.version_id,
+                },
+                &mut transaction,
+            )?;
         }
         // Delete record in HummockContextPinnedVersion if any.
         let version_pins =
@@ -753,6 +779,7 @@ where
                 version_pin.update_in_transaction(&mut transaction)?;
             }
         }
+
         self.commit_trx(versioning_guard.meta_store_ref.as_ref(), transaction, None)
             .await
     }
