@@ -1,7 +1,7 @@
 use risingwave_storage::monitor::DEFAULT_STATE_STORE_STATS;
 
-use super::my_state_store_stats::MyStateStoreStats;
-use crate::utils::my_histogram::MyHistogram;
+use super::my_metrics::MyStateStoreStats;
+use crate::utils::my_metrics::MyHistogram;
 
 #[derive(Default)]
 pub(crate) struct StatDiff {

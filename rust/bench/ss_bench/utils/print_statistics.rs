@@ -2,7 +2,7 @@ use prometheus::core::{AtomicU64, Collector, GenericCounter, Metric};
 use prometheus::Histogram;
 use risingwave_storage::for_all_metrics;
 
-use crate::utils::my_histogram::MyHistogram;
+use crate::utils::my_metrics::MyHistogram;
 
 /// Define extension method `print` used in `print_statistics`.
 trait Print {
