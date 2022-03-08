@@ -10,7 +10,7 @@ use risingwave_rpc_client::MetaClient;
 use risingwave_storage::monitor::DEFAULT_STATE_STORE_STATS;
 use risingwave_storage::{dispatch_state_store, StateStoreImpl};
 
-use crate::utils::print_statistics::print_statistics;
+use crate::utils::display_stat::print_statistics;
 
 #[derive(Parser, Debug)]
 pub(crate) struct Opts {

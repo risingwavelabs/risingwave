@@ -5,7 +5,7 @@ use rand::prelude::StdRng;
 use rand::SeedableRng;
 use risingwave_storage::StateStore;
 
-use crate::utils::diff_statistics::*;
+use crate::utils::display_stat::*;
 use crate::utils::latency_stat::LatencyStat;
 use crate::Opts;
 pub(crate) mod get;
@@ -31,7 +31,7 @@ pub(crate) struct PerfMetrics {
 impl Operations {
     /// Run operations in the `--benchmarks` option
     pub(crate) async fn run(store: impl StateStore, opts: &Opts) {
-        let mut stat_diff = StatDiff::default();
+        let mut stat_diff = DisplayMetrics::default();
 
         let mut runner = Operations {
             keys: vec![],
@@ -50,7 +50,9 @@ impl Operations {
                 "prefixscanrandom" => runner.prefix_scan_random(&store, opts).await,
                 other => unimplemented!("operation \"{}\" is not supported.", other),
             }
+
             stat_diff.update_stat();
+
             // display metrics
             match operation {
                 "writebatch" => stat_diff.display_write_batch(),
