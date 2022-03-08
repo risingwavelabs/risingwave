@@ -83,7 +83,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             .await
             .unwrap(),
     );
-    let compactor_manager = Arc::new(hummock::CompactorManager::new());
+    let compactor_manager = Arc::new(hummock::CompactorManager::default());
     let notification_manager = Arc::new(NotificationManager::new());
     let cluster_manager = Arc::new(
         StoredClusterManager::new(

@@ -310,56 +310,44 @@ impl CompactStatus {
     /// Return Some(Vec<table info to add>, Vec<table id to delete>) if succeeds.
     /// Return None if the task has been processed previously.
     #[allow(clippy::needless_collect)]
-    pub fn report_compact_task(
+    pub fn finish_compact_task(
         &mut self,
         output_table_compact_entries: Vec<SSTableStat>,
         compact_task: CompactTask,
-        task_result: bool,
     ) -> Option<(Vec<SstableInfo>, Vec<HummockSSTableId>)> {
         let mut delete_table_ids = vec![];
-        match task_result {
-            true => {
-                for LevelEntry { level_idx, .. } in compact_task.input_ssts {
-                    delete_table_ids.extend(
-                        self.level_handlers[level_idx as usize]
-                            .pop_task_input(compact_task.task_id)
-                            .into_iter(),
-                    );
-                }
-                if delete_table_ids.is_empty() {
-                    // The task has been processed previously.
-                    return None;
-                }
-                match &mut self.level_handlers[compact_task.target_level as usize] {
-                    LevelHandler::Overlapping(l_n, _) | LevelHandler::Nonoverlapping(l_n, _) => {
-                        let old_ln = std::mem::take(l_n);
-                        *l_n = itertools::merge_join_by(
-                            old_ln,
-                            output_table_compact_entries,
-                            |l, r| l.key_range.cmp(&r.key_range),
-                        )
-                        .flat_map(|either_or_both| match either_or_both {
-                            EitherOrBoth::Both(a, b) => vec![a, b].into_iter(),
-                            EitherOrBoth::Left(a) => vec![a].into_iter(),
-                            EitherOrBoth::Right(b) => vec![b].into_iter(),
-                        })
-                        .collect();
-                    }
-                }
-                // The task is finished successfully.
-                Some((compact_task.sorted_output_ssts, delete_table_ids))
-            }
-            false => {
-                if !self.cancel_compact_task(compact_task.task_id) {
-                    // The task has been processed previously.
-                    return None;
-                }
-                // The task is cancelled successfully.
-                Some((vec![], vec![]))
+
+        for LevelEntry { level_idx, .. } in compact_task.input_ssts {
+            delete_table_ids.extend(
+                self.level_handlers[level_idx as usize]
+                    .pop_task_input(compact_task.task_id)
+                    .into_iter(),
+            );
+        }
+        if delete_table_ids.is_empty() {
+            // The task has been processed previously.
+            return None;
+        }
+        match &mut self.level_handlers[compact_task.target_level as usize] {
+            LevelHandler::Overlapping(l_n, _) | LevelHandler::Nonoverlapping(l_n, _) => {
+                let old_ln = std::mem::take(l_n);
+                *l_n = itertools::merge_join_by(old_ln, output_table_compact_entries, |l, r| {
+                    l.key_range.cmp(&r.key_range)
+                })
+                .flat_map(|either_or_both| match either_or_both {
+                    EitherOrBoth::Both(a, b) => vec![a, b].into_iter(),
+                    EitherOrBoth::Left(a) => vec![a].into_iter(),
+                    EitherOrBoth::Right(b) => vec![b].into_iter(),
+                })
+                .collect();
             }
         }
+        // The task is finished successfully.
+        Some((compact_task.sorted_output_ssts, delete_table_ids))
     }
 
+    /// Return true if succeeds.
+    /// Return false if the task has been processed previously.
     pub fn cancel_compact_task(&mut self, task_id: u64) -> bool {
         // TODO: loop only in input levels
         let mut changed = false;

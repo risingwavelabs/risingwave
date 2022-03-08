@@ -105,12 +105,12 @@ async fn test_hummock_compaction_task() -> Result<()> {
 
     // Cancel the task and succeed.
     assert!(hummock_manager
-        .report_compact_task(compact_task.clone(), false)
+        .cancel_compact_task(compact_task.task_id)
         .await
         .unwrap());
     // Cancel the task and told the task is not found, which may have been processed previously.
     assert!(!hummock_manager
-        .report_compact_task(compact_task.clone(), false)
+        .cancel_compact_task(compact_task.task_id)
         .await
         .unwrap());
 
@@ -119,12 +119,12 @@ async fn test_hummock_compaction_task() -> Result<()> {
     assert_eq!(compact_task.get_task_id(), 2);
     // Finish the task and succeed.
     assert!(hummock_manager
-        .report_compact_task(compact_task.clone(), true)
+        .finish_compact_task(compact_task.clone())
         .await
         .unwrap());
     // Finish the task and told the task is not found, which may have been processed previously.
     assert!(!hummock_manager
-        .report_compact_task(compact_task.clone(), true)
+        .finish_compact_task(compact_task.clone())
         .await
         .unwrap());
 

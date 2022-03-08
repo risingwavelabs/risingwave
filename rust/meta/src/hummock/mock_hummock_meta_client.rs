@@ -89,11 +89,19 @@ impl HummockMetaClient for MockHummockMetaClient {
         compact_task: CompactTask,
         task_result: bool,
     ) -> HummockResult<()> {
-        self.hummock_manager
-            .report_compact_task(compact_task, task_result)
-            .await
-            .map_err(HummockError::meta_error)
-            .map(|_| ())
+        if task_result {
+            self.hummock_manager
+                .finish_compact_task(compact_task)
+                .await
+                .map_err(HummockError::meta_error)
+                .map(|_| ())
+        } else {
+            self.hummock_manager
+                .cancel_compact_task(compact_task.task_id)
+                .await
+                .map_err(HummockError::meta_error)
+                .map(|_| ())
+        }
     }
 
     async fn commit_epoch(&self, epoch: HummockEpoch) -> HummockResult<()> {

@@ -94,14 +94,26 @@ where
                 status: None,
             })),
             Some(compact_task) => {
-                let result = self
-                    .hummock_manager
-                    .report_compact_task(compact_task, req.task_result)
-                    .await;
+                let compact_task_id = compact_task.task_id;
+                let result = match req.task_result {
+                    true => self.hummock_manager.finish_compact_task(compact_task).await,
+                    false => {
+                        self.hummock_manager
+                            .cancel_compact_task(compact_task_id)
+                            .await
+                    }
+                };
                 match result {
-                    Ok(_) => Ok(Response::new(ReportCompactionTasksResponse {
-                        status: None,
-                    })),
+                    Ok(_) => {
+                        // It's OK the status of compact tasks tracked in CompactorManager is behind
+                        // the ground truth in HummockManager.
+                        self.compactor_manager
+                            .unassign_compact_task(compact_task_id)
+                            .await;
+                        Ok(Response::new(ReportCompactionTasksResponse {
+                            status: None,
+                        }))
+                    }
                     Err(e) => Err(e.to_grpc_status()),
                 }
             }

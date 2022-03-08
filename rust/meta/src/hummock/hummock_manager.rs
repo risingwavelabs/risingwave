@@ -430,11 +430,7 @@ where
     /// `report_compact_task` is retryable. `task_id` in `compact_task` parameter is used as the
     /// idempotency key. Return Ok(false) to indicate the `task_id` is not found, which may have
     /// been processed previously.
-    pub async fn report_compact_task(
-        &self,
-        compact_task: CompactTask,
-        task_result: bool,
-    ) -> Result<bool> {
+    pub async fn finish_compact_task(&self, compact_task: CompactTask) -> Result<bool> {
         let output_table_compact_entries: Vec<_> = compact_task
             .sorted_output_ssts
             .iter()
@@ -453,11 +449,9 @@ where
             .sum();
         let output_sst_count = compact_task.sorted_output_ssts.len();
 
-        let (sorted_output_ssts, delete_table_ids) = match compact_status.report_compact_task(
-            output_table_compact_entries,
-            compact_task,
-            task_result,
-        ) {
+        let (sorted_output_ssts, delete_table_ids) = match compact_status
+            .finish_compact_task(output_table_compact_entries, compact_task)
+        {
             None => {
                 // The task is not found.
                 return Ok(false);
@@ -466,84 +460,95 @@ where
         };
         compact_status.update_in_transaction(&mut transaction);
         let versioning_guard = self.versioning.write().await;
-        if task_result {
-            let mut current_version_id =
-                CurrentHummockVersionId::get(versioning_guard.meta_store_ref.as_ref()).await?;
-            let old_version_id = current_version_id.increase();
-            let new_version_id = current_version_id.id();
-            current_version_id.update_in_transaction(&mut transaction);
-            let old_version = HummockVersion::select(
-                &*versioning_guard.meta_store_ref,
-                &HummockVersionRefId { id: old_version_id },
-            )
-            .await?
-            .unwrap();
-            let mut version = HummockVersion {
-                id: new_version_id,
-                levels: compact_status
-                    .level_handlers
-                    .iter()
-                    .map(|level_handler| match level_handler {
-                        LevelHandler::Overlapping(l_n, _) => Level {
-                            level_type: LevelType::Overlapping as i32,
-                            table_ids: l_n
-                                .iter()
-                                .map(|SSTableStat { table_id, .. }| *table_id)
-                                .collect(),
-                        },
-                        LevelHandler::Nonoverlapping(l_n, _) => Level {
-                            level_type: LevelType::Nonoverlapping as i32,
-                            table_ids: l_n
-                                .iter()
-                                .map(|SSTableStat { table_id, .. }| *table_id)
-                                .collect(),
-                        },
-                    })
-                    .collect(),
-                uncommitted_epochs: old_version.uncommitted_epochs,
-                max_committed_epoch: old_version.max_committed_epoch,
-            };
-
-            for table in sorted_output_ssts {
-                table.upsert_in_transaction(&mut transaction)?
-            }
-
-            version.id = new_version_id;
-            version.upsert_in_transaction(&mut transaction)?;
-            let mut tables_to_delete = HummockTablesToDelete::select(
-                &*versioning_guard.meta_store_ref,
-                &HummockVersionRefId { id: old_version_id },
-            )
-            .await?
-            .unwrap_or(HummockTablesToDelete {
-                version_id: new_version_id,
-                id: vec![],
-            });
-            tables_to_delete.id.extend(delete_table_ids);
-            if tables_to_delete.id.is_empty() {
-                HummockTablesToDelete::delete_in_transaction(
-                    HummockVersionRefId {
-                        id: tables_to_delete.version_id,
+        let mut current_version_id =
+            CurrentHummockVersionId::get(versioning_guard.meta_store_ref.as_ref()).await?;
+        let old_version_id = current_version_id.increase();
+        let new_version_id = current_version_id.id();
+        current_version_id.update_in_transaction(&mut transaction);
+        let old_version = HummockVersion::select(
+            &*versioning_guard.meta_store_ref,
+            &HummockVersionRefId { id: old_version_id },
+        )
+        .await?
+        .unwrap();
+        let mut version = HummockVersion {
+            id: new_version_id,
+            levels: compact_status
+                .level_handlers
+                .iter()
+                .map(|level_handler| match level_handler {
+                    LevelHandler::Overlapping(l_n, _) => Level {
+                        level_type: LevelType::Overlapping as i32,
+                        table_ids: l_n
+                            .iter()
+                            .map(|SSTableStat { table_id, .. }| *table_id)
+                            .collect(),
                     },
-                    &mut transaction,
-                )?;
-            } else {
-                tables_to_delete.upsert_in_transaction(&mut transaction)?;
-            }
+                    LevelHandler::Nonoverlapping(l_n, _) => Level {
+                        level_type: LevelType::Nonoverlapping as i32,
+                        table_ids: l_n
+                            .iter()
+                            .map(|SSTableStat { table_id, .. }| *table_id)
+                            .collect(),
+                    },
+                })
+                .collect(),
+            uncommitted_epochs: old_version.uncommitted_epochs,
+            max_committed_epoch: old_version.max_committed_epoch,
+        };
+
+        for table in sorted_output_ssts {
+            table.upsert_in_transaction(&mut transaction)?
         }
+
+        version.id = new_version_id;
+        version.upsert_in_transaction(&mut transaction)?;
+        let mut tables_to_delete = HummockTablesToDelete::select(
+            &*versioning_guard.meta_store_ref,
+            &HummockVersionRefId { id: old_version_id },
+        )
+        .await?
+        .unwrap_or(HummockTablesToDelete {
+            version_id: new_version_id,
+            id: vec![],
+        });
+        tables_to_delete.id.extend(delete_table_ids);
+        if tables_to_delete.id.is_empty() {
+            HummockTablesToDelete::delete_in_transaction(
+                HummockVersionRefId {
+                    id: tables_to_delete.version_id,
+                },
+                &mut transaction,
+            )?;
+        } else {
+            tables_to_delete.upsert_in_transaction(&mut transaction)?;
+        }
+
         self.commit_trx(compaction_guard.meta_store_ref.as_ref(), transaction, None)
             .await?;
-        if task_result {
-            tracing::debug!(
-                "Finish hummock compaction task id {}, compact {} SSTs to {} SSTs",
-                compact_task_id,
-                input_sst_count,
-                output_sst_count
-            );
-        } else {
-            tracing::debug!("Cancel hummock compaction task id {}", compact_task_id);
-        }
+        tracing::debug!(
+            "Finish hummock compaction task id {}, compact {} SSTs to {} SSTs",
+            compact_task_id,
+            input_sst_count,
+            output_sst_count
+        );
         self.trigger_sst_stat(&compact_status);
+        Ok(true)
+    }
+
+    pub async fn cancel_compact_task(&self, compact_task_id: u64) -> Result<bool> {
+        let compaction_guard = self.compaction.lock().await;
+        let mut compact_status =
+            CompactStatus::get(compaction_guard.meta_store_ref.as_ref()).await?;
+        if !compact_status.cancel_compact_task(compact_task_id) {
+            // The task is not found.
+            return Ok(false);
+        }
+        let mut transaction = Transaction::default();
+        compact_status.update_in_transaction(&mut transaction);
+        self.commit_trx(compaction_guard.meta_store_ref.as_ref(), transaction, None)
+            .await?;
+        tracing::debug!("Cancel hummock compaction task id {}", compact_task_id);
         Ok(true)
     }
 

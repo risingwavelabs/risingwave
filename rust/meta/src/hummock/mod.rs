@@ -70,18 +70,26 @@ where
                     continue;
                 }
             };
+            let compact_task_id = compact_task.task_id;
             if !compactor_manager_ref
-                .try_assign_compact_task(Some(compact_task.clone()), None)
+                .try_assign_compact_task(Some(compact_task), None)
                 .await
             {
-                // TODO #546: Cancel a task only requires task_id. compact_task.clone() can be
-                // avoided.
                 if let Err(e) = hummock_manager_ref
-                    .report_compact_task(compact_task, false)
+                    .cancel_compact_task(compact_task_id)
                     .await
                 {
-                    tracing::warn!("failed to report_compact_task {}", e);
+                    tracing::warn!("failed to cancel_compact_task {}", e);
                 }
+            }
+
+            let timeout_compact_tasks = compactor_manager_ref.get_timeout_compact_task().await;
+            for task_id in timeout_compact_tasks {
+                if let Err(e) = hummock_manager_ref.cancel_compact_task(task_id).await {
+                    tracing::warn!("failed to cancel_timeout_compact_task #{}, {}", task_id, e);
+                    continue;
+                }
+                compactor_manager_ref.unassign_compact_task(task_id).await;
             }
         }
     });
@@ -105,7 +113,7 @@ mod tests {
                 .await
                 .unwrap(),
         );
-        let compactor_manager_ref = Arc::new(CompactorManager::new());
+        let compactor_manager_ref = Arc::new(CompactorManager::default());
         let (join_handle, shutdown_sender) =
             start_compaction_trigger(hummock_manager_ref, compactor_manager_ref);
         shutdown_sender.send(()).unwrap();

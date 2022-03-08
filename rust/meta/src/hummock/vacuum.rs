@@ -164,7 +164,7 @@ mod tests {
     #[tokio::test]
     async fn test_shutdown_vacuum() {
         let (_env, hummock_manager, _cluster_manager, _worker_node) = setup_compute_env(80).await;
-        let compactor_manager = Arc::new(CompactorManager::new());
+        let compactor_manager = Arc::new(CompactorManager::default());
         let vacuum = VacuumTrigger::new(hummock_manager, compactor_manager);
         let (join_handle, shutdown_sender) = VacuumTrigger::start_vacuum_trigger(vacuum).await;
         shutdown_sender.send(()).unwrap();

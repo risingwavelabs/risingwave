@@ -67,6 +67,17 @@ impl Compactor {
         for (kr_idx, kr) in compact_task.splits.iter().enumerate() {
             let mut output_needing_vacuum = vec![];
 
+            // TODO #546: `Compactor` should handle the error that some SSTs to compact have been
+            // GCed in s3. The error can happen as follow:
+            // - 1. Compactor A is assigned a compact task #1 by CompactorManager in meta node.
+            // - 2. Compactor A cannot finish compact task #1 in time for some reason, for example
+            //   network delay or heavy calculation.
+            // - 3. After some time, the CompactorManager marks compact task #1 as timeout and
+            //   reassigns it to Compactor B.
+            // - 4. Compactor B finishes compact task #1 and reports to CompactorManager.
+            // - 5. SSTs compacted by task #1 are removed from S3 by Vacuum.
+            // - 6. Compactor A continues to process compact task #1, but it may find some SSTs
+            //   missing in S3.
             let iter = MergeIterator::new(
                 overlapping_tables
                     .iter()
