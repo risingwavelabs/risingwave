@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use std::fmt::Debug;
 use std::vec;
 
 use fixedbitset::FixedBitSet;
@@ -37,7 +38,7 @@ impl ColIndexMapping {
     /// Positive offset:
     ///
     /// ```rust
-    /// # use frontend::utils::ColIndexMapping;
+    /// # use risingwave_frontend::utils::ColIndexMapping;
     /// let mapping = ColIndexMapping::with_shift_offset(3, 3);
     /// assert_eq!(mapping.map(0), 3);
     /// assert_eq!(mapping.map(1), 4);
@@ -47,7 +48,7 @@ impl ColIndexMapping {
     /// Negative offset:
     ///
     ///  ```rust
-    /// # use frontend::utils::ColIndexMapping;
+    /// # use risingwave_frontend::utils::ColIndexMapping;
     /// let mapping = ColIndexMapping::with_shift_offset(6, -3);
     /// assert_eq!(mapping.try_map(0), None);
     /// assert_eq!(mapping.try_map(1), None);
@@ -76,7 +77,7 @@ impl ColIndexMapping {
     ///
     /// ```rust
     /// # use fixedbitset::FixedBitSet;
-    /// # use frontend::utils::ColIndexMapping;
+    /// # use risingwave_frontend::utils::ColIndexMapping;
     /// let mut remaining_cols = FixedBitSet::with_capacity(5);
     /// remaining_cols.insert(1);
     /// remaining_cols.insert(3);
@@ -102,7 +103,7 @@ impl ColIndexMapping {
     ///
     /// ```rust
     /// # use fixedbitset::FixedBitSet;
-    /// # use frontend::utils::ColIndexMapping;
+    /// # use risingwave_frontend::utils::ColIndexMapping;
     /// let mut removed_cols = FixedBitSet::with_capacity(5);
     /// removed_cols.insert(0);
     /// removed_cols.insert(2);
@@ -122,11 +123,7 @@ impl ColIndexMapping {
 
     #[must_use]
     pub fn composite(&self, following: &Self) -> Self {
-        debug!(
-            "composing {:?} and {:?}",
-            self.mapping_pairs().collect::<Vec<_>>(),
-            following.mapping_pairs().collect::<Vec<_>>()
-        );
+        debug!("composing {:?} and {:?}", self, following);
         let mut map = self.map.clone();
         for tar in &mut map {
             *tar = tar.and_then(|index| following.try_map(index));
@@ -163,6 +160,18 @@ impl ColIndexMapping {
 impl ExprRewriter for ColIndexMapping {
     fn rewrite_input_ref(&mut self, input_ref: InputRef) -> InputRef {
         InputRef::new(self.map(input_ref.index()), input_ref.data_type())
+    }
+}
+
+impl Debug for ColIndexMapping {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "ColIndexMapping({})",
+            self.mapping_pairs()
+                .map(|(src, dst)| format!("{}->{}", src, dst))
+                .join(",")
+        )
     }
 }
 

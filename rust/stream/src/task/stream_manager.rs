@@ -100,7 +100,7 @@ impl StreamManager {
 
     /// Broadcast a barrier to all senders. Returns a receiver which will get notified when this
     /// barrier is finished.
-    pub fn send_barrier(
+    fn send_barrier(
         &self,
         barrier: &Barrier,
         actor_ids_to_send: impl IntoIterator<Item = u32>,
@@ -112,6 +112,34 @@ impl StreamManager {
             .send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?
             .expect("no rx for local mode");
         Ok(rx)
+    }
+
+    /// Broadcast a barrier to all senders. Returns when the barrier is fully collected.
+    pub async fn send_and_collect_barrier(
+        &self,
+        barrier: &Barrier,
+        actor_ids_to_send: impl IntoIterator<Item = u32>,
+        actor_ids_to_collect: impl IntoIterator<Item = u32>,
+    ) -> Result<()> {
+        let rx = self.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
+
+        // Wait for all actors finishing this barrier.
+        rx.await.unwrap();
+
+        // Sync states from shared buffer to S3 before telling meta service we've done.
+        dispatch_state_store!(self.state_store(), store, {
+            match store.sync(Some(barrier.epoch.prev)).await {
+                Ok(_) => {}
+                // TODO: Handle sync failure by propagating it
+                // back to global barrier manager
+                Err(e) => panic!(
+                    "Failed to sync state store after receving barrier {:?} due to {}",
+                    barrier, e
+                ),
+            }
+        });
+
+        Ok(())
     }
 
     /// Broadcast a barrier to all senders. Returns immediately, and caller won't be notified when
@@ -203,6 +231,10 @@ impl StreamManager {
     pub fn take_sink(&self, ids: UpDownActorIds) -> Receiver<Message> {
         let core = self.core.lock().unwrap();
         core.context.take_receiver(&ids).unwrap()
+    }
+
+    pub fn state_store(&self) -> StateStoreImpl {
+        self.core.lock().unwrap().state_store.clone()
     }
 }
 

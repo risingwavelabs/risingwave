@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use itertools::*;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Op, Row};
-use risingwave_common::catalog::{ColumnId, Schema};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::try_match_expand;
 use risingwave_common::types::ToOwnedDatum;
@@ -16,7 +16,7 @@ use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
 use risingwave_storage::keyspace::Segment;
-use risingwave_storage::{Keyspace, StateStore, TableColumnDesc};
+use risingwave_storage::{Keyspace, StateStore};
 
 use super::{ExecutorState, PkIndicesRef, StatefulExecutor};
 use crate::executor::managed_state::top_n::variants::*;
@@ -175,7 +175,7 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
             .iter()
             .enumerate()
             .map(|(id, data_type)| {
-                TableColumnDesc::unnamed(ColumnId::from(id as i32), data_type.clone())
+                ColumnDesc::unnamed(ColumnId::from(id as i32), data_type.clone())
             })
             .collect::<Vec<_>>();
         let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_column_descs);

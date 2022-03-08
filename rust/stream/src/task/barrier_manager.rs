@@ -11,7 +11,7 @@ use crate::executor::*;
 /// Note that this option will significantly increase the overhead of tracing.
 pub const ENABLE_BARRIER_AGGREGATION: bool = false;
 
-pub struct ManagedBarrierState {
+struct ManagedBarrierState {
     epoch: u64,
 
     /// Notify that the collection is finished.
@@ -22,7 +22,7 @@ pub struct ManagedBarrierState {
 }
 
 impl ManagedBarrierState {
-    pub fn notify(self) {
+    fn notify(self) {
         // Notify about barrier finishing.
         if self.collect_notifier.send(()).is_err() {
             warn!(
@@ -167,15 +167,9 @@ impl LocalBarrierManager {
 
     /// When a [`StreamConsumer`] (typically [`DispatchExecutor`]) get a barrier, it should report
     /// and collect this barrier with its own `actor_id` using this function.
-    /// Return the owned `ManagedBarrierState` when finishing collecting barriers from all
-    /// actors
-    pub fn collect(
-        &mut self,
-        actor_id: u32,
-        barrier: &Barrier,
-    ) -> Result<Option<ManagedBarrierState>> {
+    pub fn collect(&mut self, actor_id: u32, barrier: &Barrier) -> Result<()> {
         match &mut self.state {
-            BarrierState::Local => Ok(None),
+            BarrierState::Local => {}
 
             BarrierState::Managed(managed_state) => {
                 let current_epoch = managed_state.as_ref().map(|s| s.epoch);
@@ -205,11 +199,13 @@ impl LocalBarrierManager {
                 if state.remaining_actors.is_empty() {
                     let state = managed_state.take().unwrap();
                     self.last_epoch = Some(state.epoch);
-                    return Ok(Some(state));
+                    // Notify about barrier finishing.
+                    state.notify();
                 }
-                Ok(None)
             }
         }
+
+        Ok(())
     }
 
     /// Returns whether [`BarrierState`] is `Local`.
@@ -271,9 +267,7 @@ mod tests {
 
         // Report to local barrier manager
         for (i, (actor_id, barrier)) in collected_barriers.into_iter().enumerate() {
-            if let Some(barrier_state) = manager.collect(actor_id, &barrier).unwrap() {
-                barrier_state.notify();
-            }
+            manager.collect(actor_id, &barrier).unwrap();
             let notified = collect_rx.try_recv().is_ok();
             assert_eq!(notified, i == count - 1);
         }

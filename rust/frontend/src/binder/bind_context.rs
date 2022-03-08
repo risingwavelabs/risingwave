@@ -21,6 +21,7 @@ impl ColumnBinding {
 pub struct BindContext {
     // Mapping column name to `ColumnBinding`
     pub columns: HashMap<String, Vec<ColumnBinding>>,
+    pub in_values_clause: bool,
 }
 
 impl BindContext {
@@ -29,6 +30,7 @@ impl BindContext {
         BindContext {
             // tables: HashMap::new(),
             columns: HashMap::new(),
+            in_values_clause: false,
         }
     }
 }
