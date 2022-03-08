@@ -248,7 +248,7 @@ where
                         );
 
                         // This RPC returns only if this worker node has collected this barrier.
-                        // TODO(xiangyhu): Injection errors should be further distinguished like:
+                        // TODO(#742): Injection errors should be further distinguished like:
                         // 1. Non-fatal injection errors (like inner-DAG barrier propagation errors)
                         // should not panic `BarrierManager`. 2. If this
                         // worker node has not collected this barrier, it might should retry.

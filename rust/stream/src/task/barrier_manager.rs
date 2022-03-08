@@ -101,7 +101,7 @@ impl LocalBarrierManager {
     /// When actor is cancelled or aborted, it should call this method to withdraw itself.
     /// For example, a source actor might be cancelled because of Kafka stream timeout,
     /// which would cause a chain of actors (itself and the downstream actors to abort).
-    /// TODO(xiangyhu): Should let global stream manager know the cancelled actors and decide what
+    /// TODO(#742): Should let global stream manager know the cancelled actors and decide what
     /// to do.
     pub fn withdraw_actor(&mut self, actor_id: u32) {
         debug!("withdraw actor: {}", actor_id);
@@ -144,7 +144,7 @@ impl LocalBarrierManager {
             let mut to_send: HashSet<u32> = actor_ids_to_send.into_iter().collect();
             // For failed actors that have been locally observed
             // and not tracked by global stream manager, untrack them.
-            // TODO(xiangyhu): Global stream manager should know failed actors and untrack them.
+            // TODO(#742): Global stream manager should know failed actors and untrack them.
             to_send.retain(|actor_id| !self.failed_senders.contains(actor_id));
 
             match &self.state {
@@ -171,7 +171,7 @@ impl LocalBarrierManager {
         );
         // For failed actors that have been locally observed
         // and not tracked by global stream manager, untrack them.
-        // TODO(xiangyhu): Global stream manager should know failed actors and untrack them.
+        // TODO(#742): Global stream manager should know failed actors and untrack them.
         to_collect.retain(|actor_id| !self.failed_senders.contains(actor_id));
 
         info!(
