@@ -60,18 +60,7 @@ impl BoxedExecutorBuilder for CreateTableExecutor {
 #[async_trait::async_trait]
 impl Executor for CreateTableExecutor {
     async fn open(&mut self) -> Result<()> {
-        let table_columns = self
-            .table_columns
-            .to_owned()
-            .iter()
-            .map(|col| {
-                Ok(ColumnDesc {
-                    data_type: DataType::from(col.get_column_type()?),
-                    column_id: ColumnId::from(col.get_column_id()),
-                    name: col.get_name().to_string(),
-                })
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let table_columns = self.table_columns.iter().cloned().map(Into::into).collect();
 
         match &self.info {
             Info::TableSource(_) => {
