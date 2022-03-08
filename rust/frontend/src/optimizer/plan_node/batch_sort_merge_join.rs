@@ -6,9 +6,7 @@ use super::{
     BatchBase, EqJoinPredicate, LogicalJoin, PlanRef, PlanTreeNodeBinary, ToBatchProst,
     ToDistributedBatch,
 };
-use crate::optimizer::property::{
-    Direction, Distribution, FieldOrder, Order, WithOrder, WithSchema,
-};
+use crate::optimizer::property::{Direction, Distribution, FieldOrder, Order, WithSchema};
 
 /// `BatchSortMergeJoin` implements [`super::LogicalJoin`] by merging left & right relations in
 /// a streaming manner. The input relation must have been ordered by the equi-join key(s).

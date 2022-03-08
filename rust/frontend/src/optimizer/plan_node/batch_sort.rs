@@ -3,7 +3,7 @@ use std::fmt;
 use risingwave_common::catalog::Schema;
 
 use super::{BatchBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
-use crate::optimizer::property::{Distribution, Order, WithDistribution, WithOrder, WithSchema};
+use crate::optimizer::property::{Distribution, Order, WithSchema};
 
 /// `BatchSort` buffers all data from input and sort these rows by specified order, providing the
 /// collation required by user or parent plan node.
