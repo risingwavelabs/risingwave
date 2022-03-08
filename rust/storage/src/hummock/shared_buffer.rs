@@ -160,7 +160,7 @@ impl SharedBufferManager {
     pub fn new(
         options: Arc<HummockOptions>,
         local_version_manager: Arc<LocalVersionManager>,
-        sstable_manager: SstableStoreRef,
+        sstable_store: SstableStoreRef,
         // TODO: should be separated `HummockStats` instead of `StateStoreStats`.
         stats: Arc<StateStoreStats>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -169,7 +169,7 @@ impl SharedBufferManager {
         let uploader = SharedBufferUploader::new(
             options,
             local_version_manager,
-            sstable_manager,
+            sstable_store,
             stats,
             hummock_meta_client,
             uploader_rx,
@@ -337,7 +337,7 @@ pub struct SharedBufferUploader {
     // TODO: should be separated `HummockStats` instead of `StateStoreStats`.
     stats: Arc<StateStoreStats>,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
-    sstable_manager: SstableStoreRef,
+    sstable_store: SstableStoreRef,
 
     rx: tokio::sync::mpsc::UnboundedReceiver<SharedBufferUploaderItem>,
 }
@@ -346,7 +346,7 @@ impl SharedBufferUploader {
     pub fn new(
         options: Arc<HummockOptions>,
         local_version_manager: Arc<LocalVersionManager>,
-        sstable_manager: SstableStoreRef,
+        sstable_store: SstableStoreRef,
         stats: Arc<StateStoreStats>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         rx: tokio::sync::mpsc::UnboundedReceiver<SharedBufferUploaderItem>,
@@ -358,7 +358,7 @@ impl SharedBufferUploader {
 
             stats,
             hummock_meta_client,
-            sstable_manager,
+            sstable_store,
             rx,
         }
     }
@@ -381,7 +381,9 @@ impl SharedBufferUploader {
             options: self.options.clone(),
             local_version_manager: self.local_version_manager.clone(),
             hummock_meta_client: self.hummock_meta_client.clone(),
-            sstable_manager: self.sstable_manager.clone(),
+            sstable_store: self.sstable_store.clone(),
+            stats: self.stats.clone(),
+            is_share_buffer_compact: true,
         };
         let mut tables = Vec::new();
         Compactor::sub_compact(
@@ -617,15 +619,15 @@ mod tests {
     fn new_shared_buffer_manager() -> SharedBufferManager {
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
         let remote_dir = "/test";
-        let sstable_manager = Arc::new(SstableStore::new(obj_client, remote_dir.to_string()));
-        let vm = Arc::new(LocalVersionManager::new(sstable_manager.clone(), None));
+        let sstable_store = Arc::new(SstableStore::new(obj_client, remote_dir.to_string()));
+        let vm = Arc::new(LocalVersionManager::new(sstable_store.clone()));
         let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(Arc::new(
             MockHummockMetaService::new(),
         )));
         SharedBufferManager::new(
             Arc::new(HummockOptions::default_for_test()),
             vm,
-            sstable_manager,
+            sstable_store,
             DEFAULT_STATE_STORE_STATS.clone(),
             mock_hummock_meta_client,
         )

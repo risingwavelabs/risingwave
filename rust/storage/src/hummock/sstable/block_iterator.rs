@@ -205,7 +205,7 @@ mod tests {
 
     use super::super::{SSTableBuilder, SSTableBuilderOptions};
     use super::*;
-    use crate::hummock::{HummockValue, SstableStore};
+    use crate::hummock::{CachePolicy, HummockValue, Sstable, SstableStore};
     use crate::object::{InMemObjectStore, ObjectStore};
 
     #[tokio::test]
@@ -235,9 +235,13 @@ mod tests {
         let (data, meta) = b.finish();
 
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
-        let sstable_manager = SstableStore::new(obj_client, REMOTE_DIR.to_string());
-        sstable_manager.put(0, &meta, data).await.unwrap();
-        let block = sstable_manager.get(0, &meta, 0).await.unwrap();
+        let sstable_store = SstableStore::new(obj_client, REMOTE_DIR.to_string());
+        let sst = Sstable { id: 0, meta };
+        sstable_store
+            .put(&sst, data, CachePolicy::Fill)
+            .await
+            .unwrap();
+        let block = sstable_store.get(&sst, 0, CachePolicy::Fill).await.unwrap();
 
         let mut blk_iter = BlockIterator::new(block);
         let mut idx = 0;

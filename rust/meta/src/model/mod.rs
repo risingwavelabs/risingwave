@@ -18,7 +18,7 @@ pub type FragmentId = u32;
 
 /// `MetadataModel` defines basic model operations in CRUD.
 #[async_trait]
-pub trait MetadataModel: Sized {
+pub trait MetadataModel: std::fmt::Debug + Sized {
     /// Serialized prost message type.
     type ProstType: Message + Default;
     /// Serialized key type.

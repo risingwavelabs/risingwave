@@ -50,27 +50,10 @@ pub use store::{StateStore, StateStoreIter};
 pub use store_impl::StateStoreImpl;
 
 #[derive(Clone, Debug)]
-pub struct TableColumnDesc {
-    pub data_type: DataType,
-    pub column_id: ColumnId,
-    pub name: String, // for debugging
-}
-
-#[derive(Clone, Debug)]
 pub struct IndexDesc {
     pub column_id: ColumnId,
     pub data_type: DataType,
     pub order: OrderType,
-}
-
-impl TableColumnDesc {
-    pub fn unnamed(column_id: ColumnId, data_type: DataType) -> TableColumnDesc {
-        TableColumnDesc {
-            data_type,
-            column_id,
-            name: String::new(),
-        }
-    }
 }
 
 pub enum TableScanOptions {

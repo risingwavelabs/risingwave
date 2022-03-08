@@ -1,13 +1,13 @@
 use std::iter::once;
 use std::sync::Arc;
 
-use moka::future::Cache;
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 use risingwave_storage::hummock::compactor::{Compactor, SubCompactContext};
 use risingwave_storage::hummock::local_version_manager::LocalVersionManager;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{HummockOptions, HummockStorage, SstableStore};
+use risingwave_storage::monitor::DEFAULT_STATE_STORE_STATS;
 use risingwave_storage::object::InMemObjectStore;
 
 use crate::cluster::StoredClusterManager;
@@ -54,14 +54,11 @@ async fn get_hummock_storage() -> HummockStorage {
     };
     let hummock_meta_client = Arc::new(get_hummock_meta_client().await);
     let obj_client = Arc::new(InMemObjectStore::new());
-    let sstable_manager = Arc::new(SstableStore::new(obj_client.clone(), remote_dir));
-    let local_version_manager = Arc::new(LocalVersionManager::new(
-        sstable_manager.clone(),
-        Some(Arc::new(Cache::new(65536))),
-    ));
+    let sstable_store = Arc::new(SstableStore::new(obj_client.clone(), remote_dir));
+    let local_version_manager = Arc::new(LocalVersionManager::new(sstable_store.clone()));
     HummockStorage::with_default_stats(
         options.clone(),
-        sstable_manager,
+        sstable_store,
         local_version_manager.clone(),
         hummock_meta_client.clone(),
     )
@@ -81,8 +78,10 @@ async fn test_compaction_same_key_not_split() {
     let sub_compact_context = SubCompactContext {
         options: storage.options().clone(),
         local_version_manager: storage.local_version_manager().clone(),
-        sstable_manager: storage.sstable_manager(),
+        sstable_store: storage.sstable_store(),
         hummock_meta_client: storage.hummock_meta_client().clone(),
+        stats: DEFAULT_STATE_STORE_STATS.clone(),
+        is_share_buffer_compact: false,
     };
 
     // 1. add sstables
