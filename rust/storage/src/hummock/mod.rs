@@ -4,6 +4,7 @@ use std::fmt;
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
+use bytes::Bytes;
 use itertools::Itertools;
 
 mod block_cache;
@@ -189,7 +190,7 @@ impl HummockStorage {
             .shared_buffer_manager
             .get(key, (version.max_committed_epoch() + 1)..=epoch)
         {
-            return Ok(v.into_put_value());
+            return Ok(v.into_put_value().map(|x| x.to_vec()));
         }
 
         for level in &version.levels() {
@@ -363,13 +364,39 @@ impl HummockStorage {
     ///   been committed. If such case happens, the outcome is non-predictable.
     pub async fn write_batch(
         &self,
-        kv_pairs: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
+        kv_pairs: impl Iterator<Item = (Bytes, HummockValue<Bytes>)>,
         epoch: u64,
     ) -> HummockResult<()> {
         let batch = kv_pairs
-            .map(|i| (FullKey::from_user_key(i.0, epoch).into_inner(), i.1))
+            .map(|i| {
+                (
+                    Bytes::from(FullKey::from_user_key(i.0.to_vec(), epoch).into_inner()),
+                    i.1,
+                )
+            })
             .collect_vec();
         self.shared_buffer_manager.write_batch(batch, epoch)?;
+
+        // self.sync(epoch).await?;
+        Ok(())
+    }
+
+    /// Replicate batch to shared buffer, without uploading to the storage backend.
+    pub async fn replicate_batch(
+        &self,
+        kv_pairs: impl Iterator<Item = (Bytes, HummockValue<Bytes>)>,
+        epoch: u64,
+    ) -> HummockResult<()> {
+        let batch = kv_pairs
+            .map(|i| {
+                (
+                    Bytes::from(FullKey::from_user_key(i.0.to_vec(), epoch).into_inner()),
+                    i.1,
+                )
+            })
+            .collect_vec();
+        self.shared_buffer_manager
+            .replicate_remote_batch(batch, epoch)?;
 
         // self.sync(epoch).await?;
         Ok(())
