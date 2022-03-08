@@ -32,6 +32,11 @@ import com.risingwave.planner.rules.distributed.join.BroadcastJoinRule;
 import com.risingwave.planner.rules.distributed.join.ShuffleJoinRule;
 import com.risingwave.planner.rules.logical.ProjectToTableScanRule;
 import com.risingwave.planner.rules.logical.SimpleCountStarColumnPruningRule;
+import com.risingwave.planner.rules.logical.subquery.FlinkSubQueryRemoveRule;
+import com.risingwave.planner.rules.logical.subquery.JoinConditionTypeCoerceRule;
+import com.risingwave.planner.rules.logical.subquery.JoinPushExpressionsRule;
+import com.risingwave.planner.rules.logical.subquery.RewriteSubQueryRule;
+import com.risingwave.planner.rules.logical.subquery.SimplifyFilterConditionRule;
 import org.apache.calcite.rel.rules.AggregateExtractProjectRule;
 import org.apache.calcite.rel.rules.CoreRules;
 import org.apache.calcite.rel.rules.ProjectJoinTransposeRule;
@@ -42,6 +47,14 @@ import org.apache.calcite.tools.RuleSets;
 /** Planner rule sets. */
 public class BatchRuleSets {
   private BatchRuleSets() {}
+
+  public static final RuleSet NEW_SUB_QUERY_RULES =
+      RuleSets.ofList(
+          SimplifyFilterConditionRule.INSTANCE,
+          RewriteSubQueryRule.INSTANCE,
+          FlinkSubQueryRemoveRule.SINGLETON,
+          JoinConditionTypeCoerceRule.INSTANCE,
+          JoinPushExpressionsRule.INSTANCE);
 
   public static final RuleSet SUB_QUERY_REWRITE_RULES =
       RuleSets.ofList(
