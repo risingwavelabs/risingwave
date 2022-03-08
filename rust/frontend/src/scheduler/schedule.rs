@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::{mpsc, Arc, RwLock};
+use std::sync::{Arc, RwLock};
+use tokio::sync::mpsc;
 
 use rand::distributions::{Distribution as RandDistribution, Uniform};
 use risingwave_common::error::Result;
@@ -21,6 +22,7 @@ pub(crate) struct BatchScheduler {
     scheduled_stages_map: HashMap<StageId, ScheduledStageRef>,
 }
 
+#[derive(Debug)]
 pub(crate) struct ScheduledStage {
     pub assignments: HashMap<TaskId, WorkerNode>,
     pub augmented_stage: AugmentedStageRef,
@@ -43,6 +45,7 @@ impl ScheduledStage {
 }
 pub(crate) type ScheduledStageRef = Arc<ScheduledStage>;
 
+#[derive(Debug)]
 pub(crate) struct AugmentedStage {
     pub query_stage: QueryStageRef,
     pub exchange_source: HashMap<StageId, ScheduledStageRef>,
@@ -72,7 +75,7 @@ pub(crate) type AugmentedStageRef = Arc<AugmentedStage>;
 impl BatchScheduler {
     /// Used in tests.
     pub fn mock(worker_manager: WorkerNodeManagerRef) -> Self {
-        let (sender, receiver) = mpsc::channel();
+        let (sender, receiver) = mpsc::channel(10);
         Self {
             worker_manager,
             scheduled_stage_sender: sender,
@@ -142,16 +145,16 @@ pub(crate) struct QueryResultLocation {
 
 impl BatchScheduler {
     /// Given a `Query` (Already split by )
-    pub fn schedule(&mut self, query: &Query) -> QueryResultLocation {
+    pub async fn schedule(&mut self, query: &Query) -> QueryResultLocation {
         // First schedule all leaf stages.
         for leaf_stage_id in &query.leaf_stages() {
             let stage = query.stage_graph.get_stage_unchecked(leaf_stage_id);
             let child_stages = query.stage_graph.get_child_stages_unchecked(leaf_stage_id);
-            self.schedule_stage(stage, child_stages);
+            self.schedule_stage(stage, child_stages).await;
         }
 
         loop {
-            let scheduled_stage = self.scheduled_stage_receiver.recv().unwrap();
+            let scheduled_stage = self.scheduled_stage_receiver.recv().await.unwrap();
             let cur_stage_id = scheduled_stage.id();
             self.scheduled_stages_map
                 .insert(cur_stage_id, Arc::new(scheduled_stage));
@@ -161,7 +164,7 @@ impl BatchScheduler {
                 let stage = query.stage_graph.get_stage_unchecked(parent_id);
                 let child_stages = query.stage_graph.get_child_stages_unchecked(parent_id);
                 if self.all_child_scheduled(child_stages) {
-                    self.schedule_stage(stage, child_stages);
+                    self.schedule_stage(stage, child_stages).await;
                 }
             }
 
@@ -196,7 +199,7 @@ impl BatchScheduler {
     /// and write results into channel.
     ///
     /// Calculate available workers, parallelism for each stage.
-    fn schedule_stage(
+    async fn schedule_stage(
         &mut self,
         query_stage_ref: QueryStageRef,
         child_scheduled_stage: &HashSet<StageId>,
@@ -242,7 +245,7 @@ impl BatchScheduler {
             &scheduled_children,
             cur_stage_worker_nodes,
             next_stage_parallelism as u32,
-        )));
+        ))).await;
     }
 
     /// Check whether plan node has a table scan node. If true, the parallelism should be
@@ -273,7 +276,7 @@ impl BatchScheduler {
 
     /// Wrap scheduled stages into task and send to compute node for execution.
     /// TODO(Bowen): Introduce Compute Client to do task distribution.
-    fn do_stage_execution(&mut self, augmented_stage: AugmentedStageRef) {
+    async fn do_stage_execution(&mut self, augmented_stage: AugmentedStageRef) {
         let mut scheduled_tasks = HashMap::new();
 
         for task_id in 0..augmented_stage.parallelism {
@@ -285,7 +288,7 @@ impl BatchScheduler {
 
         let scheduled_stage =
             ScheduledStage::from_augmented_stage(augmented_stage, scheduled_tasks);
-        self.scheduled_stage_sender.send(scheduled_stage).unwrap();
+        self.scheduled_stage_sender.send(scheduled_stage).await.unwrap();
     }
 }
 
