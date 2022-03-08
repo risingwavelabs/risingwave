@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 pub mod plan_node;
 use fixedbitset::FixedBitSet;
+use itertools::Itertools as _;
 pub use plan_node::PlanRef;
 pub mod plan_pass;
 pub mod property;
@@ -8,6 +9,9 @@ pub mod rule;
 
 use property::{Distribution, Order};
 use risingwave_common::catalog::Schema;
+
+use self::plan_node::LogicalProject;
+use crate::expr::{Expr as _, InputRef};
 
 /// `PlanRoot` is used to describe a plan. planner will construct a `PlanRoot` with LogicalNode and
 /// required distribution and order. And `PlanRoot` can generate corresponding streaming or batch
@@ -58,8 +62,24 @@ impl PlanRoot {
         &self.schema
     }
 
-    pub fn into_logical(self) -> PlanRef {
-        self.logical_plan
+    /// Transform the PlanRoot back to a PlanRef suitable to be used as a subplan, for example as
+    /// insert source or subquery. This ignores Order but retains post-Order pruning (`out_fields`).
+    pub fn as_subplan(self) -> PlanRef {
+        if self.out_fields.count_ones(..) == self.out_fields.len() {
+            return self.logical_plan;
+        }
+        let (exprs, expr_aliases) = self
+            .out_fields
+            .ones()
+            .zip_eq(self.schema.fields)
+            .map(|(index, field)| {
+                (
+                    InputRef::new(index, field.data_type).to_expr_impl(),
+                    Some(field.name),
+                )
+            })
+            .unzip();
+        LogicalProject::create(self.logical_plan, exprs, expr_aliases)
     }
 
     /// optimize and generate a batch query plan
