@@ -32,7 +32,7 @@ impl Binder {
                 .into());
             }
         }
-        let projection = self.bind_projection(select.projection)?;
+        let projection = self.bind_project(select.projection)?;
         Ok(BoundSelect {
             distinct: select.distinct,
             projection,
