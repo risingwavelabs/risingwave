@@ -20,10 +20,13 @@ use std::rc::Rc;
 use downcast_rs::{impl_downcast, Downcast};
 use dyn_clone::{self, DynClone};
 use paste::paste;
+use risingwave_common::catalog::Schema;
 use risingwave_pb::plan::PlanNode as BatchPlanProst;
 use risingwave_pb::stream_plan::StreamNode as StreamPlanProst;
 
-use super::property::{WithConvention, WithDistribution, WithOrder, WithSchema};
+use super::property::{
+    Distribution, Order, WithConvention, WithDistribution, WithOrder, WithSchema,
+};
 
 /// The common trait over all plan nodes. Used by optimizer framework which will treate all node as
 /// `dyn PlanNode`
@@ -50,6 +53,27 @@ pub trait PlanNode:
 
 impl_downcast!(PlanNode);
 pub type PlanRef = Rc<dyn PlanNode>;
+
+pub struct PlanNodeId(i32);
+
+/// the common fields of nodes with corresponding convention, please make a field named `base` in
+/// every planNode and correctly valued it when construct the planNode.
+pub struct LogicalBase {
+    pub id: PlanNodeId,
+    pub schema: Schema,
+}
+
+pub struct PhysicalBase {
+    pub id: PlanNodeId,
+    pub order: Order,
+    pub dist: Distribution,
+}
+
+pub struct StreamingBase {
+    pub id: PlanNodeId,
+    pub dist: Distribution,
+    pub pk_indices: Vec<u32>,
+}
 
 impl dyn PlanNode {
     /// Write explain the whole plan tree.
