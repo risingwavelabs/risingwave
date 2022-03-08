@@ -161,6 +161,10 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
         DataTypeName::Date,
         DataTypeName::Timestampz,
     ];
+    let str_types = vec![
+        DataTypeName::Char,
+        DataTypeName::Varchar,
+    ];
     let atm_exprs = vec![
         ExprType::Add,
         ExprType::Subtract,
@@ -168,7 +172,38 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
         ExprType::Divide,
         ExprType::Modulus,
     ];
-
+    // String Exprs that possibly accept one num and return a str
+    let str_unary_num_exprs_to_str = vec![
+        ExprType::Substr,
+    ];
+    // String Exprs that possibly accept two nums and return a str
+    let str_binary_num_exprs_to_str = vec![
+        ExprType::Substr,
+    ];
+    // String Exprs that possibly accept one str and return a num
+    let str_unary_exprs_to_num = vec![
+        ExprType::Length,
+    ];
+    // String Exprs that possibly accept one str and return a str
+    let str_unary_exprs_to_str = vec![
+        ExprType::Length,
+        ExprType::Trim,
+        ExprType::Ltrim,
+        ExprType::Rtrim,
+        ExprType::Lower,
+        ExprType::Upper,
+    ];
+    // String Exprs that possibly accept two strs and return a str
+    let str_binary_str_exprs_to_str = vec![
+        ExprType::Trim,
+        ExprType::Ltrim,
+        ExprType::Rtrim,
+        ExprType::Position,
+    ];
+    // String Exprs that possibly accept three strs and return a str
+    let str_ternary_str_exprs_to_str = vec![
+        ExprType::Replace,
+    ];
     let cmp_exprs = vec![
         ExprType::Equal,
         ExprType::NotEqual,
@@ -193,13 +228,51 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
         ExprType::StreamNullByRowCount,
     ];
 
-    for (expr, t1, t2) in iproduct!(atm_exprs, num_types.clone(), num_types.clone()) {
+    for (expr, str, pos) in iproduct!(str_unary_num_exprs_to_str.clone(), str_types.clone(), num_types.clone()) {
+        map.insert(
+            FuncSign::new_binary(expr, str, pos),
+            DataTypeName::Varchar,
+        );
+    }
+    for (expr, str, pos1, pos2) in iproduct!(str_binary_num_exprs_to_str.clone(), str_types.clone(), num_types.clone(), num_types.clone()) {
+        map.insert(
+            FuncSign::new_ternary(expr, str, pos1, pos2),
+            DataTypeName::Varchar,
+        );
+    }
+    for (expr, str) in iproduct!(str_unary_exprs_to_num.clone(), str_types.clone()) {
+        map.insert(
+            FuncSign::new_unary(expr, str),
+            DataTypeName::Int32,
+        );
+    }
+    for (expr, str) in iproduct!(str_unary_exprs_to_str.clone(), str_types.clone()) {
+        map.insert(
+            FuncSign::new_unary(expr, str),
+            DataTypeName::Varchar,
+        );
+    }
+    for (expr, str1, str2) in iproduct!(str_binary_str_exprs_to_str.clone(), str_types.clone(), str_types.clone()) {
+        map.insert(
+            FuncSign::new_binary(expr, str1, str2),
+            DataTypeName::Varchar,
+        );
+    }
+    for (expr, str1, str2, str3) in iproduct!(str_ternary_str_exprs_to_str.clone(), str_types.clone(), str_types.clone(), str_types.clone()) {
+        map.insert(
+            FuncSign::new_ternary(expr, str1, str2, str3),
+            DataTypeName::Varchar,
+        );
+    }
+    // todo: remove possible clone to improve performance, check the implementation of new funcs
+
+    for (expr, t1, t2) in iproduct!(atm_exprs.clone(), num_types.clone(), num_types.clone()) {
         map.insert(
             FuncSign::new_binary(expr, t1, t2),
             arithmetic_type_derive(t1, t2),
         );
     }
-    for (expr, t1, t2) in iproduct!(cmp_exprs.clone(), num_types.clone(), num_types) {
+    for (expr, t1, t2) in iproduct!(cmp_exprs.clone(), num_types.clone(), num_types.clone()) {
         map.insert(FuncSign::new_binary(expr, t1, t2), DataTypeName::Boolean);
     }
     for expr in cmp_exprs {
