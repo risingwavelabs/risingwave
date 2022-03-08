@@ -9,7 +9,7 @@
  --writes 10000 \
  --reads 500 \
  --scans 200 \
- --deletes 2000
+ --deletes 2000 \
  --concurrency-num 4 \
  --seed 233 \
  --statistics
@@ -138,7 +138,7 @@ Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
   - Size (bytes) of each prefix.
   - Default: 5
 
-- `--keys_per_prefix`
+- `--keys-per-prefix`
   
   - Control **average** number of keys generated per prefix.
   - Default: 10
@@ -157,6 +157,9 @@ Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
 
 - `--statistics`
   - Detailed statistics of storage backend
+
+- `--calibrate-metric`
+  - Print performance by both self-measured metric and the state store metric system. This can be used to calibrate metric parameters, especially bucket specification.
 
 # Metrics
 
