@@ -160,6 +160,7 @@ mod tests {
     ROW FORMAT PROTOBUF MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://{}'"#,
             proto_file.path().to_str().unwrap()
         );
+
         let frontend = LocalFrontend::new().await;
         frontend.run_sql(sql).await.unwrap();
 

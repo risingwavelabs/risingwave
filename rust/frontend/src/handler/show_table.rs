@@ -19,7 +19,7 @@ pub fn column_to_rows(column_desc: &ColumnDesc) -> Vec<Row> {
             Some(get_type_name(column_desc)),
         ];
         v.push(Row::new(option));
-        for col in &column_desc.sub_type_name {
+        for col in &column_desc.sub_columns {
             v.append(&mut column_to_rows(col));
         }
         v

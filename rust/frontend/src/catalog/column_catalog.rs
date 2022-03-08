@@ -11,7 +11,7 @@ pub struct ColumnDesc {
     pub data_type: DataType,
     pub type_name: Option<String>,
     pub sub_name: String,
-    pub sub_type_name: Vec<ColumnDesc>,
+    pub sub_columns: Vec<ColumnDesc>,
 }
 
 impl ColumnDesc {
@@ -20,7 +20,7 @@ impl ColumnDesc {
             data_type,
             type_name: None,
             sub_name: "".to_string(),
-            sub_type_name: vec![],
+            sub_columns: vec![],
         }
     }
 
@@ -36,14 +36,14 @@ pub fn to_column_desc(col: &ProstColumnDesc) -> ColumnDesc {
             data_type: col.get_column_type().expect("column type not found").into(),
             type_name: Some(col.get_struct_name().to_string()),
             sub_name: col.name.clone(),
-            sub_type_name: v,
+            sub_columns: v,
         }
     } else {
         ColumnDesc {
             data_type: col.get_column_type().expect("column type not found").into(),
             type_name: Some(col.get_struct_name().to_string()),
             sub_name: col.name.clone(),
-            sub_type_name: vec![],
+            sub_columns: vec![],
         }
     }
 }
