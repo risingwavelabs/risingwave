@@ -15,7 +15,7 @@ impl Planner {
             None => root,
             Some(t) => LogicalFilter::create(root, t)?,
         };
-        root = self.plan_project(root, select.project)?;
+        root = self.plan_project(root, select.select_items)?;
         Ok(root)
     }
     /// Helper to create a dummy node as child of LogicalProject.
