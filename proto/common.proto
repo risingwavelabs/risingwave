@@ -31,8 +31,15 @@ enum WorkerType {
   UNKNOWN = 2;
 }
 
+enum ParallelUnitType {
+  SIMPLE = 0;
+  HASH = 1;
+}
+
 message ParallelUnit {
   uint32 id = 1;
+  ParallelUnitType type = 2;
+  HostAddress node_host = 3;
 }
 
 message WorkerNode {
@@ -56,5 +63,5 @@ message Cluster {
 }
 
 message HashMapping {
-  repeated ParallelUnit parallel_units = 1;
+  repeated uint32 parallel_units = 1;
 }
