@@ -3,7 +3,7 @@ use risingwave_common::catalog::ColumnId;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::mview::MViewTable;
-use risingwave_storage::table::ScannableTable;
+use risingwave_storage::table::TableIter;
 use risingwave_storage::Keyspace;
 
 use crate::executor::test_utils::schemas;
@@ -402,8 +402,7 @@ async fn test_mview_scan_empty_column_ids_cardinality() {
 
     let chunk = {
         let mut iter = table.iter(u64::MAX).await.unwrap();
-        table
-            .collect_from_iter(&mut iter, &[0, 1, 2], None)
+        iter.collect_datachunk_from_iter(&table, &[0, 1, 2], None)
             .await
             .unwrap()
             .unwrap()
