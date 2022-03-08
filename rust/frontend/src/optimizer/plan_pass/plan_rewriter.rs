@@ -5,6 +5,7 @@ use super::super::plan_node::*;
 use super::super::property::Convention;
 use crate::for_all_plan_nodes;
 
+/// Define `PlanRewriter` trait.
 macro_rules! def_rewriter {
     ([], $({ $convention:ident, $name:ident }),*) => {
 

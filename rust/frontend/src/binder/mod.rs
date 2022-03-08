@@ -25,6 +25,7 @@ pub use values::BoundValues;
 
 use crate::catalog::database_catalog::DatabaseCatalog;
 
+/// `Binder` binds the identifiers in AST to columns in relations
 pub struct Binder {
     #[allow(dead_code)]
     catalog: Arc<DatabaseCatalog>,

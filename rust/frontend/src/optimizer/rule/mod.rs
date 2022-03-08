@@ -1,7 +1,8 @@
 //! Define all [`Rule`]
 
 use super::PlanRef;
-/// a one-to-one transform for the PlanNode, every [`Rule`] should downcast and check if the node
+
+/// A one-to-one transform for the PlanNode, every [`Rule`] should downcast and check if the node
 /// matches the rule
 #[allow(unused)]
 #[allow(clippy::result_unit_err)]

@@ -13,7 +13,7 @@ use crate::scheduler::plan_fragmenter::{Query, QueryStageRef, StageId};
 
 pub(crate) type TaskId = u64;
 
-/// The scheduler
+/// `BatchScheduler` dispatch query fragments to compute nodes
 pub(crate) struct BatchScheduler {
     worker_manager: WorkerNodeManagerRef,
     scheduled_stage_sender: mpsc::Sender<ScheduledStage>,

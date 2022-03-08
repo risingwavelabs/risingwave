@@ -10,7 +10,7 @@ use crate::optimizer::PlanRef;
 
 pub(crate) type StageId = u64;
 
-/// The Fragmenter splits query plan into fragments.
+/// `BatchPlanFragmenter` splits query plan stage into fragments.
 struct BatchPlanFragmenter {
     stage_graph_builder: StageGraphBuilder,
     next_stage_id: u64,

@@ -8,6 +8,7 @@ use crate::catalog::{ColumnId, TableId};
 use crate::optimizer::plan_node::BatchSeqScan;
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 
+/// `LogicalScan` returns contents of a table or other equivalent object
 #[derive(Debug, Clone, Default)]
 #[allow(dead_code)]
 pub struct LogicalScan {

@@ -11,6 +11,7 @@ use crate::expr::{assert_input_ref, Expr, ExprImpl, InputRef};
 use crate::optimizer::property::{Distribution, WithDistribution, WithOrder, WithSchema};
 use crate::utils::ColIndexMapping;
 
+/// `LogicalProject` computes a set of expressions from its input relation.
 #[derive(Debug, Clone)]
 pub struct LogicalProject {
     exprs: Vec<ExprImpl>,

@@ -11,6 +11,7 @@ use crate::catalog::TableId;
 pub enum TableRef {
     BaseTable(Box<BaseTableRef>),
 }
+
 #[derive(Debug, Clone)]
 pub struct BaseTableRef {
     pub name: String, // explain-only
