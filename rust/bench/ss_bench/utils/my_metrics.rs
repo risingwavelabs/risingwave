@@ -56,27 +56,6 @@ impl MyHistogram {
         }
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn from_diff_prom(prev: &Histogram, cur: &Histogram) -> MyHistogram {
-        let prev_buckets = prev.get_bucket();
-        let cur_buckets = cur.get_bucket();
-        let bucket_bounds = prev_buckets
-            .iter()
-            .map(|bucket| bucket.get_upper_bound())
-            .collect_vec();
-
-        MyHistogram {
-            upper_bound_list: bucket_bounds,
-            count_list: prev_buckets
-                .iter()
-                .zip_eq(cur_buckets.iter())
-                .map(|(pb, cb)| cb.get_cumulative_count() - pb.get_cumulative_count())
-                .collect_vec(),
-            total_sum: cur.get_sample_sum() - prev.get_sample_sum(),
-            total_count: cur.get_sample_count() - prev.get_sample_count(),
-        }
-    }
-
     pub(crate) fn from_diff(prev: &MyHistogram, cur: &MyHistogram) -> MyHistogram {
         MyHistogram {
             upper_bound_list: cur.upper_bound_list.clone(),
