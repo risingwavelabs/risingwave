@@ -4,8 +4,8 @@ use super::*;
 use crate::optimizer::property::{Distribution, Order};
 use crate::{for_batch_plan_nodes, for_logical_plan_nodes, for_stream_plan_nodes};
 
-/// `ToStream` allows to convert a logical plan node to streaming physical node
-/// with an optional required distribution. The both two funcions should be implement correctly.
+/// `ToStream` converts a logical plan node to streaming physical node
+/// with an optional required distribution.
 ///
 /// when implement this trait you can choose the two ways
 /// - Implement `to_stream` and use the default implementation of `to_stream_with_dist_required`
@@ -70,8 +70,8 @@ pub trait ToDistributedBatch {
     }
 }
 
-/// impl ToBatch for batch and streaming node.
-macro_rules! ban_to_batch {
+/// Implement ToBatch for batch and streaming node.
+macro_rules! impl_to_batch {
   ([], $( { $convention:ident, $name:ident }),*) => {
     paste!{
       $(impl ToBatch for [<$convention $name>] {
@@ -82,11 +82,11 @@ macro_rules! ban_to_batch {
     }
   }
 }
-for_batch_plan_nodes! { ban_to_batch }
-for_stream_plan_nodes! { ban_to_batch }
+for_batch_plan_nodes! { impl_to_batch }
+for_stream_plan_nodes! { impl_to_batch }
 
-/// impl ToStream for batch and streaming node.
-macro_rules! ban_to_stream {
+/// Implement ToStream for batch and streaming node.
+macro_rules! impl_to_stream {
   ([], $( { $convention:ident, $name:ident }),*) => {
     paste!{
       $(impl ToStream for [<$convention $name>] {
@@ -97,8 +97,8 @@ macro_rules! ban_to_stream {
     }
   }
 }
-for_batch_plan_nodes! { ban_to_stream }
-for_stream_plan_nodes! { ban_to_stream }
+for_batch_plan_nodes! { impl_to_stream }
+for_stream_plan_nodes! { impl_to_stream }
 
 /// impl ToDistributedBatch  for logical and streaming node.
 macro_rules! ban_to_distributed {
