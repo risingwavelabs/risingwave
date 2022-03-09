@@ -37,3 +37,20 @@ impl<'a> From<BorrowedMessage<'a>> for InnerMessage {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // #[test]
+    // fn test_Message_serialize() {
+    //     let mock_message = KafkaMessage {
+    //         partition: 1,
+    //         offset: 2,
+    //         payload: Some(vec!["dddd"]),
+    //         key: Some(vec!["demokey"]),
+    //     };
+    //     let to_string = mock_message.to_string()?;
+    //     println!("{}", to_string);
+    // }
+}
