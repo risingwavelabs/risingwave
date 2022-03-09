@@ -118,9 +118,9 @@ async fn main() {
 
     let meta_address = "http://127.0.0.1:5690";
     let mut hummock_meta_client = MetaClient::new(meta_address).await.unwrap();
-    let addr = "127.0.0.1:5690".parse().unwrap();
+    let meta_address = "127.0.0.1:5690".parse().unwrap();
     hummock_meta_client
-        .register(addr, WorkerType::ComputeNode)
+        .register(meta_address, WorkerType::ComputeNode)
         .await
         .unwrap();
 
