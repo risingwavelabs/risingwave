@@ -24,6 +24,12 @@ pub struct MaterializeExecutor<S: StateStore> {
     /// Columns of primary keys
     pk_columns: Vec<usize>,
 
+    /// Columns of group keys
+    ///
+    /// Group columns will only be used to create a shared arrangement. For normal materialized
+    /// view created from source, there should be no group columns.
+    group_columns: Vec<usize>,
+
     /// Identity string
     identity: String,
 
@@ -76,13 +82,43 @@ impl<S: StateStore> MaterializeExecutor<S> {
         executor_id: u64,
         op_info: String,
     ) -> Self {
-        let pk_columns = keys.iter().map(|k| k.column_idx).collect();
-        let pk_order_types = keys.iter().map(|k| k.order_type).collect();
+        Self::new_grouped(
+            input,
+            keyspace,
+            vec![],
+            keys,
+            column_ids,
+            executor_id,
+            op_info,
+        )
+    }
+
+    pub fn new_grouped(
+        input: Box<dyn Executor>,
+        keyspace: Keyspace<S>,
+        group_keys: Vec<OrderPair>,
+        primary_keys: Vec<OrderPair>,
+        column_ids: Vec<ColumnId>,
+        executor_id: u64,
+        op_info: String,
+    ) -> Self {
+        let pk_columns = primary_keys.iter().map(|k| k.column_idx).collect();
+        let pk_order_types = primary_keys.iter().map(|k| k.order_type).collect();
+
+        let group_columns = group_keys.iter().map(|k| k.column_idx).collect();
+        let group_order_types = group_keys.iter().map(|k| k.order_type).collect();
+
         Self {
             input,
-            local_state: ManagedMViewState::new(keyspace, column_ids, pk_order_types),
+            local_state: ManagedMViewState::new_grouped(
+                keyspace,
+                column_ids,
+                pk_order_types,
+                group_order_types,
+            ),
             pk_columns,
-            identity: format!("MaterializeExecutor {:X}", executor_id),
+            identity: format!("GroupMaterializeExecutor {:X}", executor_id),
+            group_columns,
             op_info,
         }
     }
@@ -152,10 +188,11 @@ impl<S: StateStore> SimpleExecutor for MaterializeExecutor<S> {
                 continue;
             }
 
-            // assemble pk row
-            let pk_row = Row(self
-                .pk_columns
-                .iter()
+            // group key first, then primary key
+            let encode_key_iter = self.group_columns.iter().chain(self.pk_columns.iter());
+
+            // assemble arrange key row
+            let arrange_row = Row(encode_key_iter
                 .map(|col_idx| chunk.column_at(*col_idx).array_ref().datum_at(idx))
                 .collect_vec());
 
@@ -168,10 +205,10 @@ impl<S: StateStore> SimpleExecutor for MaterializeExecutor<S> {
 
             match op {
                 Insert | UpdateInsert => {
-                    self.local_state.put(pk_row, row);
+                    self.local_state.put(arrange_row, row);
                 }
                 Delete | UpdateDelete => {
-                    self.local_state.delete(pk_row);
+                    self.local_state.delete(arrange_row);
                 }
             }
         }
@@ -192,8 +229,7 @@ mod tests {
     use risingwave_pb::data::DataType;
     use risingwave_pb::plan::ColumnDesc;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::monitor::DEFAULT_STATE_STORE_STATS;
-    use risingwave_storage::{Keyspace, StateStoreImpl};
+    use risingwave_storage::Keyspace;
 
     use crate::executor::test_utils::*;
     use crate::executor::*;
@@ -202,12 +238,7 @@ mod tests {
     async fn test_materialize_executor() {
         // Prepare storage and memtable.
         let memory_state_store = MemoryStateStore::new();
-        let _state_store_impl = StateStoreImpl::MemoryStateStore(
-            memory_state_store
-                .clone()
-                .monitored(DEFAULT_STATE_STORE_STATS.clone()),
-        );
-        // let store_mgr = Arc::new(SimpleTableManager::new(store.clone()));
+
         let table_id = TableId::new(1);
         // Two columns of int32 type, the first column is PK.
         let columns = vec![

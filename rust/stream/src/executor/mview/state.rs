@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use itertools::Itertools;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
@@ -18,7 +19,10 @@ pub struct ManagedMViewState<S: StateStore> {
     column_ids: Vec<ColumnId>,
 
     /// Ordering of primary key (for assertion)
-    order_types: Vec<OrderType>,
+    pk_order_types: Vec<OrderType>,
+
+    /// Ordering of group key (for assertion)
+    group_order_types: Vec<OrderType>,
 
     /// Serializer to serialize keys from input rows
     key_serializer: OrderedRowSerializer,
@@ -28,32 +32,61 @@ pub struct ManagedMViewState<S: StateStore> {
 }
 
 impl<S: StateStore> ManagedMViewState<S> {
+    /// Create a [`ManagedMViewState`].
     pub fn new(
         keyspace: Keyspace<S>,
         column_ids: Vec<ColumnId>,
-        order_types: Vec<OrderType>,
+        pk_order_types: Vec<OrderType>,
+    ) -> Self {
+        Self::new_grouped(keyspace, column_ids, pk_order_types, vec![])
+    }
+
+    /// Create a [`ManagedMViewState`] with group key.
+    pub fn new_grouped(
+        keyspace: Keyspace<S>,
+        column_ids: Vec<ColumnId>,
+        pk_order_types: Vec<OrderType>,
+        group_order_types: Vec<OrderType>,
     ) -> Self {
         // TODO(eric): refactor this later...
         Self {
             keyspace,
             column_ids,
             cache: HashMap::new(),
-            order_types: order_types.clone(),
-            key_serializer: OrderedRowSerializer::new(order_types),
+            key_serializer: OrderedRowSerializer::new(
+                // We will encode the key as group_keys + primary_keys
+                group_order_types
+                    .iter()
+                    .cloned()
+                    .chain(pk_order_types.iter().cloned())
+                    .collect_vec(),
+            ),
+            pk_order_types,
+            group_order_types,
         }
     }
 
-    pub fn put(&mut self, pk: Row, value: Row) {
-        assert_eq!(self.order_types.len(), pk.size());
+    /// Put a key into the managed mview state. [`arrange_keys`] is composed of group keys and
+    /// primary keys.
+    pub fn put(&mut self, arrange_keys: Row, value: Row) {
+        assert_eq!(
+            self.pk_order_types.len() + self.group_order_types.len(),
+            arrange_keys.size()
+        );
         assert_eq!(self.column_ids.len(), value.size());
 
-        FlushStatus::do_insert(self.cache.entry(pk), value);
+        FlushStatus::do_insert(self.cache.entry(arrange_keys), value);
     }
 
-    pub fn delete(&mut self, pk: Row) {
-        assert_eq!(self.order_types.len(), pk.size());
+    /// Delete a key from the managed mview state. [`arrange_keys`] is composed of group keys and
+    /// primary keys.
+    pub fn delete(&mut self, arrange_keys: Row) {
+        assert_eq!(
+            self.pk_order_types.len() + self.group_order_types.len(),
+            arrange_keys.size()
+        );
 
-        FlushStatus::do_delete(self.cache.entry(pk));
+        FlushStatus::do_delete(self.cache.entry(arrange_keys));
     }
 
     pub fn clear_cache(&mut self) {
@@ -67,10 +100,10 @@ impl<S: StateStore> ManagedMViewState<S> {
         batch.reserve(self.cache.len() * self.column_ids.len());
         let mut local = batch.prefixify(&self.keyspace);
 
-        for (pk, cells) in self.cache.drain() {
+        for (arrange_keys, cells) in self.cache.drain() {
             let row = cells.into_option();
-            let pk_buf = serialize_pk(&pk, &self.key_serializer)?;
-            let bytes = serialize_pk_and_row(&pk_buf, &row, &self.column_ids)?;
+            let arrange_keys_buf = serialize_pk(&arrange_keys, &self.key_serializer)?;
+            let bytes = serialize_pk_and_row(&arrange_keys_buf, &row, &self.column_ids)?;
             for (key, value) in bytes {
                 match value {
                     Some(val) => local.put(key, val),
@@ -78,7 +111,7 @@ impl<S: StateStore> ManagedMViewState<S> {
                 }
             }
         }
-        batch.ingest(epoch).await.unwrap();
+        batch.ingest(epoch).await?;
         Ok(())
     }
 }
@@ -89,14 +122,12 @@ mod tests {
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
-    use crate::executor::test_utils::schemas;
 
     #[tokio::test]
     async fn test_mview_state() {
         // Only assert pk and columns can be successfully put/delete/flush,
         // and the ammount of rows is expected.
         let state_store = MemoryStateStore::new();
-        let _schema = schemas::ii();
         let keyspace = Keyspace::executor_root(state_store.clone(), 0x42);
 
         let mut state = ManagedMViewState::new(

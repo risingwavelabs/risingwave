@@ -208,6 +208,7 @@ pub fn create_in_memory_keyspace() -> Keyspace<MemoryStateStore> {
     Keyspace::executor_root(MemoryStateStore::new(), 0x2333)
 }
 
+#[allow(dead_code)]
 pub mod schemas {
     use risingwave_common::catalog::*;
     use risingwave_common::types::DataType;
