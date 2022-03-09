@@ -44,9 +44,9 @@
       LogicalScan { table: "t", columns: ["_row_id", "v1", "v2"] }
 
 - sql: |
-    values(cast(1 as int));
+    values(cast(1 as bigint));
   plan: |
-    LogicalValues { rows: [[Cast(1:Int32)]], schema: Schema { fields: [:Int32] } }
+    LogicalValues { rows: [[1:Int32::Int64]], schema: Schema { fields: [:Int64] } }
 
 - sql: |
     values(not true);

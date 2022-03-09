@@ -79,6 +79,14 @@ impl std::fmt::Debug for ExprImpl {
                 write!(f, ":{:?}", literal.return_type())
             }
             Self::FunctionCall(func_call) => {
+                if let ExprType::Cast = func_call.get_expr_type() {
+                    return write!(
+                        f,
+                        "{:?}::{:?}",
+                        func_call.inputs()[0],
+                        func_call.return_type()
+                    );
+                }
                 let func_name = format!("{:?}", func_call.get_expr_type());
                 let mut builder = f.debug_tuple(&func_name);
                 func_call.inputs().iter().for_each(|child| {
