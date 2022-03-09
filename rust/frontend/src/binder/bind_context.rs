@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::Display;
 
-use risingwave_common::array::RwError;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 
@@ -49,12 +48,10 @@ pub struct BindContext {
 
 impl BindContext {
     pub fn get_index(&self, column_name: &String) -> Result<usize> {
-        let columns = self.indexs_of.get(column_name).ok_or_else(|| {
-            RwError::from(ErrorCode::ItemNotFound(format!(
-                "Invalid column: {}",
-                column_name
-            )))
-        })?;
+        let columns = self
+            .indexs_of
+            .get(column_name)
+            .ok_or_else(|| ErrorCode::ItemNotFound(format!("Invalid column: {}", column_name)))?;
         if columns.len() > 1 {
             Err(ErrorCode::InternalError("Ambiguous column name".into()).into())
         } else {
@@ -66,12 +63,10 @@ impl BindContext {
         column_name: &String,
         table_name: &String,
     ) -> Result<usize> {
-        let column_indexs = self.indexs_of.get(column_name).ok_or_else(|| {
-            RwError::from(ErrorCode::ItemNotFound(format!(
-                "Invalid column: {}",
-                column_name
-            )))
-        })?;
+        let column_indexs = self
+            .indexs_of
+            .get(column_name)
+            .ok_or_else(|| ErrorCode::ItemNotFound(format!("Invalid column: {}", column_name)))?;
         match column_indexs
             .iter()
             .find(|column_index| self.columns[**column_index].table_name == *table_name)
