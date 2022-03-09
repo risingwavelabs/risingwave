@@ -1,3 +1,4 @@
+use std::str::from_utf8;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -9,13 +10,11 @@ use rdkafka::consumer::stream_consumer::StreamPartitionQueue;
 use rdkafka::consumer::{Consumer, DefaultConsumerContext, StreamConsumer};
 use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
 
-use crate::base::SourceReader;
+use crate::base::{SourceMessage, SourceReader};
 use crate::kafka::source::message::KafkaMessage;
 use crate::kafka::split::{KafkaOffset, KafkaSplit};
 
 const KAFKA_MAX_FETCH_MESSAGES: usize = 1024;
-
-pub struct KafkaSourceReader {}
 
 pub struct KafkaSplitReader {
     consumer: Arc<StreamConsumer<DefaultConsumerContext>>,
@@ -26,10 +25,7 @@ pub struct KafkaSplitReader {
 
 #[async_trait]
 impl SourceReader for KafkaSplitReader {
-    type Message = KafkaMessage;
-    type Split = KafkaSplit;
-
-    async fn next(&mut self) -> Result<Option<Vec<Self::Message>>> {
+    async fn next(&mut self) -> Result<Option<Vec<Vec<u8>>>> {
         let mut stream = self
             .partition_queue
             .stream()
@@ -59,13 +55,14 @@ impl SourceReader for KafkaSplitReader {
                 }
             }
 
-            ret.push(KafkaMessage::from(msg));
+            ret.push(KafkaMessage::from(msg).serialize()?.into_bytes());
         }
 
         Ok(Some(ret))
     }
 
-    async fn assign_split(&mut self, split: KafkaSplit) -> Result<()> {
+    async fn assign_split<'a>(&mut self, split: &'a [u8]) -> Result<()> {
+        let split: KafkaSplit = serde_json::from_str(from_utf8(split)?)?;
         let mut tpl = TopicPartitionList::new();
 
         let offset = match split.start_offset {
@@ -99,10 +96,6 @@ impl KafkaSplitReader {
         config.set("topic.metadata.refresh.interval.ms", "30000");
         config.set("fetch.message.max.bytes", "134217728");
         config.set("auto.offset.reset", "earliest");
-
-        // for (k, v) in &self.properties {
-        //   config.set(k, v);
-        // }
 
         if config.get("group.id").is_none() {
             config.set(

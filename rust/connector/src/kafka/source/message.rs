@@ -1,9 +1,11 @@
+use anyhow::anyhow;
 use rdkafka::message::BorrowedMessage;
 use rdkafka::Message;
+use serde::{Deserialize, Serialize};
 
 use crate::base::{SourceMessage, SourceOffset};
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct KafkaMessage {
     partition: i32,
     offset: i64,
@@ -19,6 +21,10 @@ impl SourceMessage for KafkaMessage {
     fn offset(&self) -> anyhow::Result<Option<SourceOffset>> {
         Ok(Some(SourceOffset::Number(self.offset)))
     }
+
+    fn serialize(&self) -> anyhow::Result<String> {
+        serde_json::to_string(self).map_err(|e| anyhow!(e))
+    }
 }
 
 impl<'a> From<BorrowedMessage<'a>> for KafkaMessage {
@@ -30,4 +36,21 @@ impl<'a> From<BorrowedMessage<'a>> for KafkaMessage {
             payload: message.payload().map(|m| m.to_vec()),
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // #[test]
+    // fn test_Message_serialize() {
+    //     let mock_message = KafkaMessage {
+    //         partition: 1,
+    //         offset: 2,
+    //         payload: Some(vec!["dddd"]),
+    //         key: Some(vec!["demokey"]),
+    //     };
+    //     let to_string = mock_message.to_string()?;
+    //     println!("{}", to_string);
+    // }
 }
