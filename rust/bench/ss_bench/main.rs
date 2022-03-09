@@ -124,14 +124,9 @@ async fn main() {
         .await
         .unwrap();
 
-    let state_store =
-        match StateStoreImpl::new(&opts.store, config, hummock_meta_client, stats.clone()).await {
-            Ok(state_store_impl) => state_store_impl,
-            Err(_) => {
-                eprintln!("Failed to get state_store");
-                return;
-            }
-        };
+    let state_store = StateStoreImpl::new(&opts.store, config, hummock_meta_client, stats.clone())
+        .await
+        .expect("Failed to get state_store");
 
     dispatch_state_store!(state_store, store, { Operations::run(store, &opts).await });
 
