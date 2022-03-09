@@ -1,8 +1,8 @@
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::{expr_node, ExprNode};
 
-use crate::array::{DataChunk, RwError};
-use crate::error::{ErrorCode, Result};
+use crate::array::DataChunk;
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::expr_binary_bytes::new_substr_start;
 use crate::expr::expr_binary_nonnull::{new_binary_expr, new_like_default, new_position_expr};
 use crate::expr::expr_binary_nullable::new_nullable_binary_expr;
