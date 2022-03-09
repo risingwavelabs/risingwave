@@ -32,7 +32,7 @@ pub async fn list_materialized_views<S: MetaStore>(store: &S) -> Result<Vec<Row>
                     Some(ScalarImpl::from(table.get_table_name().to_owned())),
                     mv.associated_table_ref_id
                         .as_ref()
-                        .and_then(|table| Some(ScalarImpl::from(table.table_id))),
+                        .map(|table| ScalarImpl::from(table.table_id)),
                 ])
             } else {
                 unreachable!()

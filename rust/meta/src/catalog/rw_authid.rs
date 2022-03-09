@@ -1,4 +1,4 @@
-use risingwave_common::array::{Row, RowDeserializer};
+use risingwave_common::array::Row;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, ScalarImpl};
@@ -24,9 +24,9 @@ lazy_static::lazy_static! {
 pub async fn list_auth_info<S: MetaStore>(_store: &S) -> Result<Vec<Row>> {
     Ok(vec![Row::new(vec![
         Some(ScalarImpl::Utf8("risingwave".into())),
-        Some(ScalarImpl::Boolean(true)),
-        Some(ScalarImpl::Boolean(true)),
-        Some(ScalarImpl::Boolean(true)),
-        None
+        Some(ScalarImpl::Bool(true)),
+        Some(ScalarImpl::Bool(true)),
+        Some(ScalarImpl::Bool(true)),
+        None,
     ])])
 }

@@ -3,15 +3,16 @@ use std::collections::HashMap;
 use std::sync::RwLock;
 
 use risingwave_common::array::Row;
-use risingwave_common::catalog::{Schema, TableId};
+use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
-use risingwave_pb::meta::Table;
+use risingwave_pb::meta::{Database, Schema, Table};
 use risingwave_pb::plan::{ColumnDesc, DatabaseRefId, SchemaRefId, TableRefId};
 
 use crate::catalog::rw_authid::*;
 use crate::catalog::rw_materialized_view::*;
 use crate::catalog::rw_stream_source::*;
 use crate::catalog::rw_table_source::*;
+use crate::model::MetadataModel;
 use crate::storage::MetaStore;
 
 mod rw_authid;
@@ -47,7 +48,11 @@ macro_rules! catalog_table_impl {
 }
 
 const SYSTEM_CATALOG_DATABASE_ID: i32 = 1;
+// TODO: changing sys database name from "dev" to another name, currently only for compatibility
+//  with the frontend.
+const SYSTEM_CATALOG_DATABASE_NAME: &str = "dev";
 const SYSTEM_CATALOG_SCHEMA_ID: i32 = 1;
+const SYSTEM_CATALOG_SCHEMA_NAME: &str = "rw_catalog";
 
 for_all_catalog_table_impl! { catalog_table_impl }
 
@@ -67,13 +72,6 @@ macro_rules! impl_catalog_func {
             pub fn name(&self) -> &'static str {
                 match self {
                     $( Self::$table => &$name, )*
-                }
-            }
-
-            /// Returns the schema of the table.
-            pub fn schema(&self) -> &'static Schema {
-                match self {
-                    $( Self::$table => &$schema, )*
                 }
             }
 
@@ -128,7 +126,7 @@ pub struct SystemCatalogSrv {
 }
 
 impl SystemCatalogSrv {
-    pub fn new() -> Self {
+    pub async fn new<S: MetaStore>(store: &S) -> Result<Self> {
         let mut catalogs = HashMap::new();
         macro_rules! init_catalog_mapping {
             ([], $( { $table:ident, $id:expr, $name:ident, $schema:ident, $list_fn:ident } ),*) => {
@@ -145,14 +143,47 @@ impl SystemCatalogSrv {
 
         for_all_catalog_table_impl! { init_catalog_mapping }
 
-        Self {
-            catalogs: RwLock::new(catalogs),
+        // initialize system catalogs data in meta store if needed.
+        let database_ref_id = DatabaseRefId {
+            database_id: SYSTEM_CATALOG_DATABASE_ID,
+        };
+        let schema_ref_id = SchemaRefId {
+            database_ref_id: Some(database_ref_id.clone()),
+            schema_id: SYSTEM_CATALOG_SCHEMA_ID,
+        };
+        if Database::select(store, &database_ref_id).await?.is_none() {
+            Database {
+                database_ref_id: Some(database_ref_id),
+                database_name: SYSTEM_CATALOG_DATABASE_NAME.to_string(),
+                ..Default::default()
+            }
+            .insert(store)
+            .await?;
         }
+
+        if Schema::select(store, &schema_ref_id).await?.is_none() {
+            Schema {
+                schema_ref_id: Some(schema_ref_id),
+                schema_name: SYSTEM_CATALOG_SCHEMA_NAME.to_string(),
+                ..Default::default()
+            }
+            .insert(store)
+            .await?;
+        }
+
+        Ok(Self {
+            catalogs: RwLock::new(catalogs),
+        })
     }
 
     pub fn get_table(&self, table_id: &TableId) -> Option<RwCatalogTable> {
         let guard = self.catalogs.read().unwrap();
         guard.get(table_id).cloned()
+    }
+
+    pub fn list_tables(&self) -> Vec<RwCatalogTable> {
+        let guard = self.catalogs.read().unwrap();
+        guard.values().cloned().collect()
     }
 }
 
@@ -166,18 +197,10 @@ mod tests {
         let store = MetaSrvEnv::for_test().await.meta_store_ref();
         assert_eq!(RwCatalogTable::Auth.table_id().table_id, 1);
         assert_eq!(RwCatalogTable::Auth.name(), RW_AUTH_NAME);
-        assert_eq!(
-            RwCatalogTable::Auth.schema().fields,
-            RW_AUTH_SCHEMA.fields
-        );
         assert!(RwCatalogTable::Auth.list(&*store).await?.is_empty());
 
         assert_eq!(RwCatalogTable::StreamSource.table_id().table_id, 2);
         assert_eq!(RwCatalogTable::StreamSource.name(), RW_STREAM_SOURCE_NAME);
-        assert_eq!(
-            RwCatalogTable::StreamSource.schema().fields,
-            RW_STREAM_SOURCE_SCHEMA.fields
-        );
         assert_eq!(
             RwCatalogTable::StreamSource.catalog().table_name,
             RW_STREAM_SOURCE_NAME
@@ -188,7 +211,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_system_catalog_srv() -> Result<()> {
-        let catalog_srv = SystemCatalogSrv::new();
+        let store = MetaSrvEnv::for_test().await.meta_store_ref();
+        let catalog_srv = SystemCatalogSrv::new(&*store).await?;
         assert_eq!(
             catalog_srv.get_table(&TableId { table_id: 1 }),
             Some(RwCatalogTable::Auth)
