@@ -61,11 +61,23 @@ pub struct StreamManager {
 
 pub struct ExecutorParams {
     pub env: StreamEnvironment,
+
+    /// Indices of primary keys
     pub pk_indices: PkIndices,
+
+    /// Executor id, unique across all actors.
     pub executor_id: u64,
+
+    /// Operator id, unique for each operator in fragment.
     pub operator_id: u64,
+
+    /// Information of the operator from plan node.
     pub op_info: String,
+
+    /// The input executor.
     pub input: Vec<Box<dyn Executor>>,
+
+    /// Id of the actor.
     pub actor_id: u32,
 }
 
