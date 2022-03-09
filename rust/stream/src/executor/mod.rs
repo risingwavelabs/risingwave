@@ -281,11 +281,11 @@ impl Message {
     /// will not continue, false otherwise.
     pub fn is_terminate(&self) -> bool {
         matches!(
-          self,
-          Message::Barrier(Barrier {
-            mutation,
-            ..
-          }) if mutation.as_deref().unwrap().is_stop()
+            self,
+            Message::Barrier(Barrier {
+                mutation,
+                ..
+            }) if mutation.as_deref().unwrap().is_stop()
         )
     }
 
@@ -443,10 +443,10 @@ macro_rules! build_executor {
                 },
             )*
             _ => Err(RwError::from(
-              ErrorCode::InternalError(format!(
-                "unsupported node:{:?}",
-                $node.get_node().unwrap()
-              )),
+                ErrorCode::InternalError(format!(
+                    "unsupported node:{:?}",
+                    $node.get_node().unwrap()
+                )),
             )),
         }
     }

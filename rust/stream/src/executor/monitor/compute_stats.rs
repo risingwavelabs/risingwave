@@ -6,8 +6,8 @@ pub struct ComputeStats {
 }
 
 lazy_static::lazy_static! {
-  pub static ref
-  DEFAULT_COMPUTE_STATS: Arc<ComputeStats> = Arc::new(ComputeStats::new());
+    pub static ref
+        DEFAULT_COMPUTE_STATS: Arc<ComputeStats> = Arc::new(ComputeStats::new());
 }
 
 impl Default for ComputeStats {
@@ -15,6 +15,7 @@ impl Default for ComputeStats {
         Self::new()
     }
 }
+
 impl ComputeStats {
     pub fn new() -> Self {
         let prometheus_exporter = opentelemetry_prometheus::exporter()

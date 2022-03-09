@@ -394,20 +394,20 @@ mod tests {
             // expect n chunks
             for _ in 0..CHANNEL_NUMBER {
                 assert_matches!(merger.next().await.unwrap(), Message::Chunk(chunk) => {
-                  assert_eq!(chunk.ops().len() as u64, epoch);
+                    assert_eq!(chunk.ops().len() as u64, epoch);
                 });
             }
             // expect a barrier
             assert_matches!(merger.next().await.unwrap(), Message::Barrier(Barrier{epoch:barrier_epoch,mutation:_,..}) => {
-              assert_eq!(barrier_epoch.curr, epoch);
+                assert_eq!(barrier_epoch.curr, epoch);
             });
         }
         assert_matches!(
-          merger.next().await.unwrap(),
-          Message::Barrier(Barrier {
-            mutation,
-            ..
-          }) if mutation.as_deref().unwrap().is_stop()
+            merger.next().await.unwrap(),
+            Message::Barrier(Barrier {
+                mutation,
+                ..
+            }) if mutation.as_deref().unwrap().is_stop()
         );
 
         for handle in handles {
@@ -498,13 +498,13 @@ mod tests {
             remote_input.run().await
         });
         assert_matches!(rx.next().await.unwrap(), Message::Chunk(chunk) => {
-          let (ops, columns, visibility) = chunk.into_inner();
-          assert_eq!(ops.len() as u64, 0);
-          assert_eq!(columns.len() as u64, 0);
-          assert_eq!(visibility, None);
+            let (ops, columns, visibility) = chunk.into_inner();
+            assert_eq!(ops.len() as u64, 0);
+            assert_eq!(columns.len() as u64, 0);
+            assert_eq!(visibility, None);
         });
         assert_matches!(rx.next().await.unwrap(), Message::Barrier(Barrier { epoch: barrier_epoch, mutation: _, .. }) => {
-          assert_eq!(barrier_epoch.curr, 12345);
+            assert_eq!(barrier_epoch.curr, 12345);
         });
         assert!(rpc_called.load(Ordering::SeqCst));
         input_handle.await.unwrap();

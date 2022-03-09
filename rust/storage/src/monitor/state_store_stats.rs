@@ -105,8 +105,8 @@ macro_rules! define_state_store_stats {
 for_all_metrics! { define_state_store_stats }
 
 lazy_static::lazy_static! {
-  pub static ref
-  DEFAULT_STATE_STORE_STATS: Arc<StateStoreStats> = Arc::new(StateStoreStats::new(prometheus::default_registry()));
+    pub static ref
+        DEFAULT_STATE_STORE_STATS: Arc<StateStoreStats> = Arc::new(StateStoreStats::new(prometheus::default_registry()));
 }
 
 impl StateStoreStats {

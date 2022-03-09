@@ -35,38 +35,38 @@ where
 }
 
 macro_rules! impl_primitive_array_item_type {
-  ([], $({ $scalar_type:ty, $variant_type:ident } ),*) => {
-    $(
-      impl PrimitiveArrayItemType for $scalar_type {
-        fn erase_array_type(arr: PrimitiveArray<Self>) -> ArrayImpl {
-          ArrayImpl::$variant_type(arr)
-        }
+    ([], $({ $scalar_type:ty, $variant_type:ident } ),*) => {
+        $(
+        impl PrimitiveArrayItemType for $scalar_type {
+            fn erase_array_type(arr: PrimitiveArray<Self>) -> ArrayImpl {
+                ArrayImpl::$variant_type(arr)
+            }
 
-        fn try_into_array(arr: ArrayImpl) -> Option<PrimitiveArray<Self>> {
-          match arr {
-            ArrayImpl::$variant_type(inner) => Some(inner),
-            _ => None,
-          }
-        }
+            fn try_into_array(arr: ArrayImpl) -> Option<PrimitiveArray<Self>> {
+                match arr {
+                    ArrayImpl::$variant_type(inner) => Some(inner),
+                    _ => None,
+                }
+            }
 
-        fn try_into_array_ref(arr: &ArrayImpl) -> Option<&PrimitiveArray<Self>> {
-          match arr {
-            ArrayImpl::$variant_type(inner) => Some(inner),
-            _ => None,
-          }
-        }
+            fn try_into_array_ref(arr: &ArrayImpl) -> Option<&PrimitiveArray<Self>> {
+                match arr {
+                    ArrayImpl::$variant_type(inner) => Some(inner),
+                    _ => None,
+                }
+            }
 
-        fn array_type() -> ArrayType {
-          ArrayType::$variant_type
-        }
+            fn array_type() -> ArrayType {
+                ArrayType::$variant_type
+            }
 
-        fn create_array_builder(capacity: usize) -> Result<ArrayBuilderImpl> {
-          let array_builder = PrimitiveArrayBuilder::<$scalar_type>::new(capacity)?;
-          Ok(ArrayBuilderImpl::$variant_type(array_builder))
+            fn create_array_builder(capacity: usize) -> Result<ArrayBuilderImpl> {
+                let array_builder = PrimitiveArrayBuilder::<$scalar_type>::new(capacity)?;
+                Ok(ArrayBuilderImpl::$variant_type(array_builder))
+            }
         }
-      }
-    )*
-  };
+        )*
+    };
 }
 
 for_all_native_types! { impl_primitive_array_item_type }

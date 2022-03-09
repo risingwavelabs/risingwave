@@ -52,50 +52,50 @@ macro_rules! gen_cast_impl {
 }
 
 macro_rules! gen_cast {
-  ($($x:tt, )* ) => {
-    gen_cast_impl! {
-      [$($x),*],
-      { varchar, date, str_to_date},
-      { varchar, timestamp, str_to_timestamp},
-      { varchar, timestampz, str_to_timestampz},
-      { varchar, int16, str_to_i16},
-      { varchar, int32, str_to_i32},
-      { varchar, int64, str_to_i64},
-      { varchar, float32, str_to_real},
-      { varchar, float64, str_to_double},
-      { varchar, decimal, str_to_decimal},
-      { varchar, boolean, str_to_bool},
-      { boolean, varchar, bool_to_str},
-      // TODO: decide whether nullability-cast should be allowed (#2350)
-      { boolean, boolean, |x| Ok(x)},
-      { int16, int32, general_cast },
-      { int16, int64, general_cast },
-      { int16, float32, general_cast },
-      { int16, float64, general_cast },
-      { int16, decimal, general_cast },
-      { int32, int16, general_cast },
-      { int32, int64, general_cast },
-      { int32, float64, general_cast },
-      { int32, decimal, general_cast },
-      { int64, int16, general_cast },
-      { int64, int32, general_cast },
-      { int64, decimal, general_cast },
-      { float32, float64, general_cast },
-      { float32, decimal, general_cast },
-      { float32, int16, to_i16 },
-      { float32, int32, to_i32 },
-      { float32, int64, to_i64 },
-      { float64, decimal, general_cast },
-      { float64, int16, to_i16 },
-      { float64, int32, to_i32 },
-      { float64, int64, to_i64 },
-      { decimal, decimal, dec_to_dec },
-      { decimal, int16, deci_to_i16 },
-      { decimal, int32, deci_to_i32 },
-      { decimal, int64, deci_to_i64 },
-      { date, timestamp, date_to_timestamp }
-    }
-  };
+    ($($x:tt, )* ) => {
+        gen_cast_impl! {
+        [$($x),*],
+        { varchar, date, str_to_date},
+        { varchar, timestamp, str_to_timestamp},
+        { varchar, timestampz, str_to_timestampz},
+        { varchar, int16, str_to_i16},
+        { varchar, int32, str_to_i32},
+        { varchar, int64, str_to_i64},
+        { varchar, float32, str_to_real},
+        { varchar, float64, str_to_double},
+        { varchar, decimal, str_to_decimal},
+        { varchar, boolean, str_to_bool},
+        { boolean, varchar, bool_to_str},
+        // TODO: decide whether nullability-cast should be allowed (#2350)
+        { boolean, boolean, |x| Ok(x)},
+        { int16, int32, general_cast },
+        { int16, int64, general_cast },
+        { int16, float32, general_cast },
+        { int16, float64, general_cast },
+        { int16, decimal, general_cast },
+        { int32, int16, general_cast },
+        { int32, int64, general_cast },
+        { int32, float64, general_cast },
+        { int32, decimal, general_cast },
+        { int64, int16, general_cast },
+        { int64, int32, general_cast },
+        { int64, decimal, general_cast },
+        { float32, float64, general_cast },
+        { float32, decimal, general_cast },
+        { float32, int16, to_i16 },
+        { float32, int32, to_i32 },
+        { float32, int64, to_i64 },
+        { float64, decimal, general_cast },
+        { float64, int16, to_i16 },
+        { float64, int32, to_i32 },
+        { float64, int64, to_i64 },
+        { decimal, decimal, dec_to_dec },
+        { decimal, int16, deci_to_i16 },
+        { decimal, int32, deci_to_i32 },
+        { decimal, int64, deci_to_i64 },
+        { date, timestamp, date_to_timestamp }
+        }
+    };
 }
 
 /// This macro helps to create neg expression.

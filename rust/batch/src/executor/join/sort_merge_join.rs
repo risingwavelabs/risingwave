@@ -366,9 +366,11 @@ mod tests {
                     array! {I32Array, [Some(3), Some(4), Some(6), Some(6), Some(8)]}.into(),
                 ));
                 let column2 = Column::new(Arc::new(
-          array! {F32Array, [Some(6.6f32), Some(0.7f32), Some(5.5f32), Some(5.6f32), Some(7.0f32)]}
-            .into(),
-        ));
+                    array! {F32Array, [
+                        Some(6.6f32), Some(0.7f32), Some(5.5f32), Some(5.6f32), Some(7.0f32)
+                    ]}
+                    .into(),
+                ));
 
                 let chunk =
                     DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");

@@ -117,40 +117,40 @@ pub fn create_agg_state_unary(
     use crate::expr::data_types::*;
 
     macro_rules! gen_arms {
-      [$(($agg:ident, $fn:expr, $in:tt, $ret:tt)),* $(,)?] => {
-      match (
-        input_type,
-        agg_type,
-        return_type.clone(),
-        distinct,
-      ) {
-        $(
-        ($in! { type_match_pattern }, AggKind::$agg, $ret! { type_match_pattern }, false) => {
-          Box::new(GeneralAgg::<$in! { type_array }, _, $ret! { type_array }>::new(
-            return_type,
-            input_col_idx,
-            $fn,
-          ))
-        },
-        ($in! { type_match_pattern }, AggKind::$agg, $ret! { type_match_pattern }, true) => {
-          Box::new(GeneralDistinctAgg::<$in! { type_array }, _, $ret! { type_array }>::new(
-            return_type,
-            input_col_idx,
-            $fn,
-          ))
-        },
-        )*
-        (unimpl_input, unimpl_agg, unimpl_ret, distinct) => {
-          return Err(
-            ErrorCode::InternalError(format!(
-              "unsupported aggregator: type={:?} input={:?} output={:?} distinct={}",
-              unimpl_agg, unimpl_input, unimpl_ret, distinct
-            ))
-            .into(),
-          )
-        }
-      }
-    };
+        [$(($agg:ident, $fn:expr, $in:tt, $ret:tt)),* $(,)?] => {
+            match (
+                input_type,
+                agg_type,
+                return_type.clone(),
+                distinct,
+            ) {
+                $(
+                    ($in! { type_match_pattern }, AggKind::$agg, $ret! { type_match_pattern }, false) => {
+                        Box::new(GeneralAgg::<$in! { type_array }, _, $ret! { type_array }>::new(
+                            return_type,
+                            input_col_idx,
+                            $fn,
+                        ))
+                    },
+                    ($in! { type_match_pattern }, AggKind::$agg, $ret! { type_match_pattern }, true) => {
+                        Box::new(GeneralDistinctAgg::<$in! { type_array }, _, $ret! { type_array }>::new(
+                            return_type,
+                            input_col_idx,
+                            $fn,
+                        ))
+                    },
+                )*
+                (unimpl_input, unimpl_agg, unimpl_ret, distinct) => {
+                    return Err(
+                        ErrorCode::InternalError(format!(
+                        "unsupported aggregator: type={:?} input={:?} output={:?} distinct={}",
+                        unimpl_agg, unimpl_input, unimpl_ret, distinct
+                        ))
+                        .into(),
+                    )
+                }
+            }
+        };
     }
 
     let state: Box<dyn Aggregator> = gen_arms![
