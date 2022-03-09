@@ -113,7 +113,7 @@ impl LogicalProject {
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
         f.debug_struct(name)
             .field("exprs", self.exprs())
-            .field("expr_alias", &format_args!("{:?}", self.expr_alias()))
+            .field("expr_alias", &self.expr_alias())
             .finish()
     }
 }
