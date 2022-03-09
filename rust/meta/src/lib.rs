@@ -9,7 +9,6 @@
 #![feature(trait_alias)]
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
-#![feature(const_fn_trait_bound)]
 #![feature(option_result_contains)]
 #![feature(let_chains)]
 #![feature(type_alias_impl_trait)]
