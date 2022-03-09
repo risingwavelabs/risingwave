@@ -50,7 +50,7 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
   private final ConcurrentMap<ColumnCatalog.ColumnId, ColumnCatalog> columnById;
   private final ConcurrentMap<ColumnCatalog.ColumnName, ColumnCatalog> columnByName;
   private final boolean source;
-  private final ImmutableIntList primaryKeyColumnIds;
+  private final ImmutableIntList primaryKeyIndices;
   private final DataDistributionType distributionType;
   private final ImmutableMap<String, String> properties;
   private final RowFormatType rowFormat;
@@ -64,7 +64,7 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
       TableName name,
       Collection<ColumnCatalog> columns,
       boolean source,
-      ImmutableIntList primaryKeyColumnIds,
+      ImmutableIntList primaryKeyIndices,
       DataDistributionType distributionType,
       ImmutableMap<String, String> properties,
       RowFormatType rowFormat,
@@ -80,7 +80,7 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
     this.columnById = EntityBase.groupBy(columns, ColumnCatalog::getId);
     this.columnByName = EntityBase.groupBy(columns, ColumnCatalog::getEntityName);
     this.source = source;
-    this.primaryKeyColumnIds = primaryKeyColumnIds;
+    this.primaryKeyIndices = primaryKeyIndices;
     this.distributionType = distributionType;
     this.properties = properties;
     this.rowFormat = rowFormat;
@@ -109,8 +109,8 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
     return false;
   }
 
-  public ImmutableIntList getPrimaryKeyColumnIds() {
-    return primaryKeyColumnIds;
+  public ImmutableIntList getPrimaryKeyIndices() {
+    return primaryKeyIndices;
   }
 
   public DataDistributionType getDistributionType() {
@@ -276,7 +276,7 @@ public class TableCatalog extends EntityBase<TableCatalog.TableId, TableCatalog.
         .add("id", getId())
         .add("entityName", getEntityName())
         .add("columns", columns)
-        .add("primaryKeyColumnIds", primaryKeyColumnIds)
+        .add("primaryKeyIndices", primaryKeyIndices)
         .add("distributionType", distributionType)
         .add("rowIdColumn", rowIdColumn)
         .toString();

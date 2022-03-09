@@ -1,6 +1,6 @@
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+use risingwave_common::catalog::{ColumnDesc, Schema, TableId};
 use risingwave_common::error::Result;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_storage::table::mview::{MViewTable, MViewTableIter};
@@ -67,23 +67,11 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
         )?;
 
         let table_id = TableId::from(&seq_scan_node.table_ref_id);
-        // TODO(lmatz): Send ColumnDesc directly.
-        let column_ids = seq_scan_node
-            .column_ids
+        let column_descs = seq_scan_node
+            .column_descs
             .iter()
-            .map(|column_id| ColumnId::new(*column_id))
+            .map(|column_desc| ColumnDesc::from(column_desc.clone()))
             .collect_vec();
-        let fields = seq_scan_node.fields.iter().map(Field::from).collect_vec();
-        let column_descs = column_ids
-            .into_iter()
-            .zip_eq(fields.into_iter())
-            .map(|(column_id, field)| ColumnDesc {
-                data_type: field.data_type,
-                column_id,
-                name: field.name,
-            })
-            .collect_vec();
-
         dispatch_state_store!(source.global_batch_env().state_store(), state_store, {
             let keyspace = Keyspace::table_root(state_store, &table_id);
             let table = MViewTable::new_adhoc(keyspace, column_descs);

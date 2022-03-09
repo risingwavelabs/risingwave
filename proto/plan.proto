@@ -61,8 +61,7 @@ message MaterializedViewInfo {
 
 message RowSeqScanNode {
   TableRefId table_ref_id = 1;
-  repeated int32 column_ids = 2;
-  repeated Field fields = 3;
+  repeated ColumnDesc column_descs = 2;
 }
 
 message SourceScanNode {
