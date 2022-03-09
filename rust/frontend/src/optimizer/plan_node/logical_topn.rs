@@ -1,31 +1,31 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
-use risingwave_common::catalog::Schema;
 
-use super::{ColPrunable, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use super::{ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
 use crate::optimizer::plan_node::LogicalProject;
-use crate::optimizer::property::{FieldOrder, Order, WithDistribution, WithOrder, WithSchema};
+use crate::optimizer::property::{FieldOrder, Order, WithSchema};
 use crate::utils::ColIndexMapping;
 
 /// `LogicalTopN` sorts the input data and fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone)]
 pub struct LogicalTopN {
+    pub base: LogicalBase,
     input: PlanRef,
     limit: usize,
     offset: usize,
-    schema: Schema,
     order: Order,
 }
 
 impl LogicalTopN {
     fn new(input: PlanRef, limit: usize, offset: usize, order: Order) -> Self {
         let schema = input.schema().clone();
+        let base = LogicalBase { schema };
         LogicalTopN {
             input,
             limit,
             offset,
-            schema,
+            base,
             order,
         }
     }
@@ -48,16 +48,6 @@ impl_plan_tree_node_for_unary! {LogicalTopN}
 impl fmt::Display for LogicalTopN {
     fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
         todo!()
-    }
-}
-
-impl WithOrder for LogicalTopN {}
-
-impl WithDistribution for LogicalTopN {}
-
-impl WithSchema for LogicalTopN {
-    fn schema(&self) -> &Schema {
-        &self.schema
     }
 }
 
