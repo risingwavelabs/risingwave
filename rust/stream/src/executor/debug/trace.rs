@@ -25,6 +25,7 @@ pub struct TraceExecutor {
     /// Actor id
     #[allow(dead_code)]
     actor_id: u32,
+    actor_id_string: String,
 
     // monitor
     metrics: Arc<StreamingMetrics>,
@@ -55,6 +56,7 @@ impl TraceExecutor {
             input_desc,
             input_pos,
             actor_id,
+            actor_id_string: actor_id.to_string(),
             metrics: streaming_metrics,
             span_name,
         }
@@ -85,7 +87,7 @@ impl super::DebugExecutor for TraceExecutor {
                     if chunk.cardinality() > 0 {
                         self.metrics
                             .actor_row_count
-                            .with_label_values(&[self.actor_id.to_string().as_str()])
+                            .with_label_values(&[self.actor_id_string.as_str()])
                             .inc_by(chunk.cardinality() as u64);
                         event!(tracing::Level::TRACE, prev = %input_desc, msg = "chunk", "input = \n{:#?}", chunk);
                     }

@@ -65,6 +65,7 @@ pub struct SourceExecutor {
 
     // monitor
     metrics: Arc<StreamingMetrics>,
+    source_identify: String,
 }
 
 pub struct SourceExecutorBuilder {}
@@ -164,6 +165,7 @@ impl SourceExecutor {
             op_info,
             reader_stream: None,
             metrics: streaming_metrics,
+            source_identify: "Table_".to_string() + &source_id.table_id().to_string(),
         })
     }
 
@@ -257,10 +259,9 @@ impl Executor for SourceExecutor {
                     chunk = self.refill_row_id_column(chunk);
                 }
 
-                let source_identify = "Table_".to_string() + &self.source_id.table_id().to_string();
                 self.metrics
                     .source_output_row_count
-                    .with_label_values(&[source_identify.as_str()])
+                    .with_label_values(&[self.source_identify.as_str()])
                     .inc_by(chunk.cardinality() as u64);
                 Ok(Message::Chunk(chunk))
             }
@@ -526,9 +527,7 @@ mod tests {
             1,
             1,
             "SourceExecutor".to_string(),
-            Arc::new(StreamingMetrics::new(
-                prometheus::default_registry().clone(),
-            )),
+            Arc::new(StreamingMetrics::unused()),
         )
         .unwrap();
 
