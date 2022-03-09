@@ -6,20 +6,21 @@ use log::debug;
 use risingwave_common::catalog::{Field, Schema};
 
 use super::{
-    BatchProject, ColPrunable, PlanRef, PlanTreeNodeUnary, StreamProject, ToBatch, ToStream,
+    BatchProject, ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary, StreamProject, ToBatch,
+    ToStream,
 };
 use crate::expr::{assert_input_ref, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::plan_node::CollectInputRef;
-use crate::optimizer::property::{Distribution, WithDistribution, WithOrder, WithSchema};
+use crate::optimizer::property::{Distribution, WithSchema};
 use crate::utils::ColIndexMapping;
 
 /// `LogicalProject` computes a set of expressions from its input relation.
 #[derive(Debug, Clone)]
 pub struct LogicalProject {
+    pub base: LogicalBase,
     exprs: Vec<ExprImpl>,
     expr_alias: Vec<Option<String>>,
     input: PlanRef,
-    schema: Schema,
 }
 
 impl LogicalProject {
@@ -41,9 +42,10 @@ impl LogicalProject {
         for expr in &exprs {
             assert_input_ref(expr, input.schema().fields().len());
         }
+        let base = LogicalBase { schema };
         LogicalProject {
             input,
-            schema,
+            base,
             exprs,
             expr_alias,
         }
@@ -109,6 +111,13 @@ impl LogicalProject {
     pub fn expr_alias(&self) -> &[Option<String>] {
         self.expr_alias.as_ref()
     }
+
+    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
+        f.debug_struct(name)
+            .field("exprs", self.exprs())
+            .field("expr_alias", &self.expr_alias())
+            .finish()
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalProject {
@@ -124,31 +133,13 @@ impl_plan_tree_node_for_unary! {LogicalProject}
 
 impl fmt::Display for LogicalProject {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("LogicalProject")
-            .field("exprs", self.exprs())
-            .field("expr_alias", &format_args!("{:?}", self.expr_alias()))
-            .finish()
-    }
-}
-
-impl WithOrder for LogicalProject {}
-
-impl WithDistribution for LogicalProject {}
-
-impl WithSchema for LogicalProject {
-    fn schema(&self) -> &Schema {
-        &self.schema
+        self.fmt_with_name(f, "LogicalProject")
     }
 }
 
 impl ColPrunable for LogicalProject {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
-        assert!(
-            required_cols.is_subset(&FixedBitSet::from_iter(0..self.schema().fields().len())),
-            "Invalid required cols: {}, only {} columns available",
-            required_cols,
-            self.schema().fields().len()
-        );
+        self.must_contain_columns(required_cols);
 
         let mut visitor = CollectInputRef {
             input_bits: FixedBitSet::with_capacity(self.input.schema().fields().len()),

@@ -12,26 +12,26 @@ public class MaterializedViewCatalog extends TableCatalog {
 
   private final RelCollation collation;
 
-  private boolean associated;
+  private final TableId associated;
 
   public MaterializedViewCatalog(
       TableId id,
       TableName name,
       Collection<ColumnCatalog> columns,
       boolean stream,
-      ImmutableIntList primaryKeyColumnIds,
+      ImmutableIntList primaryKeyIndices,
       DataDistributionType distributionType,
       ImmutableMap<String, String> properties,
       RowFormatType rowFormat,
       String rowSchemaLocation,
       RelCollation collation,
-      boolean associated) {
+      TableId associated) {
     super(
         id,
         name,
         columns,
         stream,
-        primaryKeyColumnIds,
+        primaryKeyIndices,
         distributionType,
         properties,
         rowFormat,
@@ -51,6 +51,10 @@ public class MaterializedViewCatalog extends TableCatalog {
 
   @Override
   public boolean isAssociatedMaterializedView() {
+    return associated != null;
+  }
+
+  public TableId getAssociatedTableId() {
     return associated;
   }
 

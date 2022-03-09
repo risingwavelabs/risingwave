@@ -1,13 +1,16 @@
+use anyhow::anyhow;
+use serde::{Deserialize, Serialize};
+
 use crate::base::SourceSplit;
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum PulsarOffset {
     MessageID(u64),
     Timestamp(u64),
     None,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PulsarSplit {
     pub(crate) sub_topic: String,
     pub(crate) start_offset: PulsarOffset,
@@ -27,5 +30,9 @@ impl PulsarSplit {
 impl SourceSplit for PulsarSplit {
     fn id(&self) -> String {
         self.sub_topic.clone()
+    }
+
+    fn to_string(&self) -> anyhow::Result<String> {
+        serde_json::to_string(self).map_err(|e| anyhow!(e))
     }
 }

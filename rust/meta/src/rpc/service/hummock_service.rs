@@ -84,20 +84,6 @@ where
         }
     }
 
-    async fn get_compaction_tasks(
-        &self,
-        _request: Request<GetCompactionTasksRequest>,
-    ) -> Result<Response<GetCompactionTasksResponse>, Status> {
-        let result = self.hummock_manager.get_compact_task().await;
-        match result {
-            Ok(compact_task) => Ok(Response::new(GetCompactionTasksResponse {
-                status: None,
-                compact_task,
-            })),
-            Err(e) => Err(e.to_grpc_status()),
-        }
-    }
-
     async fn report_compaction_tasks(
         &self,
         request: Request<ReportCompactionTasksRequest>,

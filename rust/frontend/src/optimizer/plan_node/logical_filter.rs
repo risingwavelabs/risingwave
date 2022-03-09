@@ -1,14 +1,14 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
-use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 
 use super::{
-    ColPrunable, CollectInputRef, LogicalProject, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream,
+    ColPrunable, CollectInputRef, LogicalBase, LogicalProject, PlanRef, PlanTreeNodeUnary, ToBatch,
+    ToStream,
 };
 use crate::expr::{assert_input_ref, ExprImpl};
-use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
+use crate::optimizer::property::WithSchema;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalFilter` iterates over its input and returns elements for which `predicate` evaluates to
@@ -17,9 +17,9 @@ use crate::utils::{ColIndexMapping, Condition};
 /// If the condition allows nulls, then a null value is treated the same as false.
 #[derive(Debug, Clone)]
 pub struct LogicalFilter {
+    pub base: LogicalBase,
     predicate: Condition,
     input: PlanRef,
-    schema: Schema,
 }
 
 impl LogicalFilter {
@@ -28,9 +28,10 @@ impl LogicalFilter {
             assert_input_ref(cond, input.schema().fields().len());
         }
         let schema = input.schema().clone();
+        let base = LogicalBase { schema };
         LogicalFilter {
             input,
-            schema,
+            base,
             predicate,
         }
     }
@@ -64,24 +65,9 @@ impl fmt::Display for LogicalFilter {
     }
 }
 
-impl WithOrder for LogicalFilter {}
-
-impl WithDistribution for LogicalFilter {}
-
-impl WithSchema for LogicalFilter {
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-}
-
 impl ColPrunable for LogicalFilter {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
-        assert!(
-            required_cols.is_subset(&FixedBitSet::from_iter(0..self.schema().fields().len())),
-            "Invalid required cols: {}, only {} columns available",
-            required_cols,
-            self.schema().fields().len()
-        );
+        self.must_contain_columns(required_cols);
 
         let mut visitor = CollectInputRef {
             input_bits: required_cols.clone(),
@@ -123,7 +109,7 @@ impl ToStream for LogicalFilter {
 #[cfg(test)]
 mod tests {
 
-    use risingwave_common::catalog::{Field, TableId};
+    use risingwave_common::catalog::{Field, Schema, TableId};
     use risingwave_common::types::DataType;
     use risingwave_pb::expr::expr_node::Type;
 

@@ -60,11 +60,23 @@ pub struct StreamManager {
 
 pub struct ExecutorParams {
     pub env: StreamEnvironment,
+
+    /// Indices of primary keys
     pub pk_indices: PkIndices,
+
+    /// Executor id, unique across all actors.
     pub executor_id: u64,
+
+    /// Operator id, unique for each operator in fragment.
     pub operator_id: u64,
+
+    /// Information of the operator from plan node.
     pub op_info: String,
+
+    /// The input executor.
     pub input: Vec<Box<dyn Executor>>,
+
+    /// Id of the actor.
     pub actor_id: u32,
 }
 
@@ -105,10 +117,12 @@ impl StreamManager {
         barrier: &Barrier,
         actor_ids_to_send: impl IntoIterator<Item = u32>,
         actor_ids_to_collect: impl IntoIterator<Item = u32>,
-    ) -> Result<Option<oneshot::Receiver<()>>> {
+    ) -> Result<oneshot::Receiver<()>> {
         let core = self.core.lock().unwrap();
         let mut barrier_manager = core.context.lock_barrier_manager();
-        let rx = barrier_manager.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
+        let rx = barrier_manager
+            .send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?
+            .expect("no rx for local mode");
         Ok(rx)
     }
 
@@ -121,16 +135,8 @@ impl StreamManager {
     ) -> Result<()> {
         let rx = self.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
 
-        // Wait for all actors to finish this barrier.
-        match rx {
-            Some(rx) => {
-                info!("Awaiting rx.");
-                rx.await.unwrap();
-            }
-            None => {
-                error!("Failed to send barrier as rx is not valid.");
-            }
-        }
+        // Wait for all actors finishing this barrier.
+        rx.await.unwrap();
 
         // Sync states from shared buffer to S3 before telling meta service we've done.
         dispatch_state_store!(self.state_store(), store, {

@@ -2,25 +2,26 @@ use std::fmt;
 
 use risingwave_common::catalog::Schema;
 
-use super::{PlanRef, PlanTreeNodeUnary, ToStreamProst};
-use crate::optimizer::property::{Distribution, WithDistribution, WithOrder, WithSchema};
+use super::{PlanRef, PlanTreeNodeUnary, StreamBase, ToStreamProst};
+use crate::optimizer::property::{Distribution, WithDistribution, WithSchema};
 
 /// `StreamExchange` imposes a particular distribution on its input
 /// without changing its content.
 #[derive(Debug, Clone)]
 pub struct StreamExchange {
+    pub base: StreamBase,
     input: PlanRef,
     schema: Schema,
-    dist: Distribution,
 }
 
 impl StreamExchange {
     pub fn new(input: PlanRef, dist: Distribution) -> Self {
         let schema = input.schema().clone();
+        let base = StreamBase { dist };
         StreamExchange {
             input,
             schema,
-            dist,
+            base,
         }
     }
 }
@@ -40,13 +41,6 @@ impl PlanTreeNodeUnary for StreamExchange {
     }
 }
 impl_plan_tree_node_for_unary! {StreamExchange}
-impl WithDistribution for StreamExchange {
-    fn distribution(&self) -> &Distribution {
-        &self.dist
-    }
-}
-
-impl WithOrder for StreamExchange {}
 
 impl WithSchema for StreamExchange {
     fn schema(&self) -> &Schema {

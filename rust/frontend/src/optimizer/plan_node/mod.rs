@@ -20,10 +20,13 @@ use std::rc::Rc;
 use downcast_rs::{impl_downcast, Downcast};
 use dyn_clone::{self, DynClone};
 use paste::paste;
+use risingwave_common::catalog::Schema;
 use risingwave_pb::plan::PlanNode as BatchPlanProst;
 use risingwave_pb::stream_plan::StreamNode as StreamPlanProst;
 
-use super::property::{WithConvention, WithDistribution, WithOrder, WithSchema};
+use super::property::{
+    Distribution, Order, WithConvention, WithDistribution, WithOrder, WithSchema,
+};
 
 /// The common trait over all plan nodes. Used by optimizer framework which will treate all node as
 /// `dyn PlanNode`
@@ -50,6 +53,46 @@ pub trait PlanNode:
 
 impl_downcast!(PlanNode);
 pub type PlanRef = Rc<dyn PlanNode>;
+
+#[derive(Clone, Debug)]
+pub struct PlanNodeId(i32);
+
+/// the common fields of logical nodes, please make a field named `base` in
+/// every planNode and correctly valued it when construct the planNode.
+#[derive(Clone, Debug)]
+pub struct LogicalBase {
+    //    TODO: assign nodeId from executor
+    //    pub id: PlanNodeId,
+    pub schema: Schema,
+}
+
+/// the common fields of batch nodes, please make a field named `base` in
+/// every planNode and correctly valued it when construct the planNode.
+
+#[derive(Clone, Debug)]
+pub struct BatchBase {
+    //    TODO: assign nodeId from executor
+    //    pub id: PlanNodeId,
+    /// the order property of the PlanNode's output, store an `Order::any()` here will not affect
+    /// correctness, but insert unnecessary sort in plan
+    pub order: Order,
+    /// the distribution property of the PlanNode's output, store an `Distribution::any()` here
+    /// will not affect correctness, but insert unnecessary exchange in plan
+    pub dist: Distribution,
+}
+
+/// the common fields of stream nodes, please make a field named `base` in
+/// every planNode and correctly valued it when construct the planNode.
+#[derive(Clone, Debug)]
+pub struct StreamBase {
+    //    TODO: assign nodeId from executor
+    //    pub id: PlanNodeId,
+    /// the distribution property of the PlanNode's output, store an `Distribution::any()` here
+    /// will not affect correctness, but insert unnecessary exchange in plan
+    pub dist: Distribution,
+    // TODO: pk derive
+    // pub pk_indices: Vec<u32>,
+}
 
 impl dyn PlanNode {
     /// Write explain the whole plan tree.
@@ -97,23 +140,14 @@ impl dyn PlanNode {
 
 #[macro_use]
 mod plan_tree_node;
-
 pub use plan_tree_node::*;
-
 mod col_pruning;
-
 pub use col_pruning::*;
-
 mod convert;
-
 pub use convert::*;
-
 mod eq_join_predicate;
-
 pub use eq_join_predicate::*;
-
 mod to_prost;
-
 pub use to_prost::*;
 
 mod batch_exchange;

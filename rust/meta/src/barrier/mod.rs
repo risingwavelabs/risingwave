@@ -5,8 +5,7 @@ use std::time::Duration;
 
 use futures::future::try_join_all;
 use itertools::Itertools;
-use risingwave_common::array::RwError;
-use risingwave_common::error::{Result, ToRwResult};
+use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::data::Barrier;
@@ -248,12 +247,6 @@ where
                         );
 
                         // This RPC returns only if this worker node has collected this barrier.
-                        // TODO(#742): Injection errors should be further distinguished like:
-                        // 1. Non-fatal injection errors (like inner-DAG barrier propagation errors)
-                        // should not panic `BarrierManager`. 2. If this
-                        // worker node has not collected this barrier, it might should retry.
-                        // 3. BarrierManager should distinguish failures and let `StreamManager`
-                        // cancel related jobs.
                         client.inject_barrier(request).await.to_rw_result()?;
 
                         Ok::<_, RwError>(())

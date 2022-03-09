@@ -1,10 +1,8 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use log::info;
-use risingwave_common::array::RwError;
 use risingwave_common::config::StorageConfig;
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 use risingwave_rpc_client::MetaClient;
 
 use crate::hummock::hummock_meta_client::RpcHummockMetaClient;
@@ -73,24 +71,14 @@ impl StateStoreImpl {
                 use crate::hummock::{HummockOptions, HummockStorage};
 
                 let object_store = match hummock {
-                    s3 if s3.starts_with("hummock+s3://") => {
-                        info!("Compute node is configured to use Hummock and s3 as state store.");
-                        Arc::new(
-                            S3ObjectStore::new(
-                                s3.strip_prefix("hummock+s3://").unwrap().to_string(),
-                            )
+                    s3 if s3.starts_with("hummock+s3://") => Arc::new(
+                        S3ObjectStore::new(s3.strip_prefix("hummock+s3://").unwrap().to_string())
                             .await,
-                        )
-                    }
-                    minio if minio.starts_with("hummock+minio://") => {
-                        info!(
-                            "Compute node is configured to use Hummock and minio as state store."
-                        );
-                        Arc::new(
-                            S3ObjectStore::new_with_minio(minio.strip_prefix("hummock+").unwrap())
-                                .await,
-                        )
-                    }
+                    ),
+                    minio if minio.starts_with("hummock+minio://") => Arc::new(
+                        S3ObjectStore::new_with_minio(minio.strip_prefix("hummock+").unwrap())
+                            .await,
+                    ),
                     other => {
                         unimplemented!("{} Hummock only supports s3 and minio for now.", other)
                     }
@@ -126,20 +114,15 @@ impl StateStoreImpl {
                 StateStoreImpl::HummockStateStore(inner.monitored(stats))
             }
 
-            "in_memory" | "in-memory" => {
-                info!("Compute node is configured to use in-memory state store.");
-                StateStoreImpl::shared_in_memory_store()
-            }
+            "in_memory" | "in-memory" => StateStoreImpl::shared_in_memory_store(),
 
             tikv if tikv.starts_with("tikv") => {
-                info!("Compute node is configured to use TiKV as state store.");
                 let inner =
                     TikvStateStore::new(vec![tikv.strip_prefix("tikv://").unwrap().to_string()]);
                 StateStoreImpl::TikvStateStore(inner.monitored(stats))
             }
 
             rocksdb if rocksdb.starts_with("rocksdb_local://") => {
-                info!("Compute node is configured to use RocksDB as state store.");
                 let inner =
                     RocksDBStateStore::new(rocksdb.strip_prefix("rocksdb_local://").unwrap());
                 StateStoreImpl::RocksDBStateStore(inner.monitored(stats))

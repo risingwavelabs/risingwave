@@ -54,7 +54,7 @@ public class TableNodeSerializer {
 
       MaterializedViewCatalog materializedViewCatalog = (MaterializedViewCatalog) catalog;
       // Set primary key columns.
-      info.addAllPkIndices(materializedViewCatalog.getPrimaryKeyColumnIds());
+      info.addAllPkIndices(materializedViewCatalog.getPrimaryKeyIndices());
 
       // Set column orders.
       // Sort key serialization starts. The column that is in primary key but not sort key should be
@@ -90,7 +90,7 @@ public class TableNodeSerializer {
           columnOrders.add(columnOrder);
         }
       }
-      for (var primaryKeyIndex : materializedViewCatalog.getPrimaryKeyColumnIds()) {
+      for (var primaryKeyIndex : materializedViewCatalog.getPrimaryKeyIndices()) {
         if (!columnAdded.contains(primaryKeyIndex)) {
           RexInputRef inputRef =
               root.getCluster().getRexBuilder().makeInputRef(root.getInput(), primaryKeyIndex);

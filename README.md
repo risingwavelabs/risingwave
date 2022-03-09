@@ -145,7 +145,7 @@ Now you can use the Postgres shell to try out your SQL command!
 Thanks for your interest in contributing to the project, please refer to the [CONTRIBUTING.md](https://github.com/singularity-data/risingwave-dev/blob/main/CONTRIBUTING.md).
 
 ## Toolchain
-Currently, we are using nightly toolchain `nightly-2022-01-13`. If anyone needs to upgrade
+Currently, we are using nightly toolchain `nightly-2022-03-09`. If anyone needs to upgrade
 the toolchain, be sure to bump `rust-toolchain` file as well as GitHub workflow.
 
 ## Documentation

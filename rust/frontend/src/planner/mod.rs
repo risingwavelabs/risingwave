@@ -1,7 +1,7 @@
 use risingwave_common::error::Result;
 
 use crate::binder::BoundStatement;
-use crate::optimizer::plan_node::PlanRef;
+use crate::optimizer::PlanRoot;
 
 mod insert;
 mod query;
@@ -19,7 +19,7 @@ impl Planner {
     pub fn new() -> Planner {
         Planner {}
     }
-    pub fn plan(&mut self, stmt: BoundStatement) -> Result<PlanRef> {
+    pub fn plan(&mut self, stmt: BoundStatement) -> Result<PlanRoot> {
         self.plan_statement(stmt)
     }
 }

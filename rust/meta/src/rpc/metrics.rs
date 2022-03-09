@@ -25,7 +25,9 @@ pub struct MetaMetrics {
     /// latency of each barrier
     pub barrier_latency: Histogram,
     /// num of SSTs in each level
-    pub level_payload: IntGaugeVec,
+    pub level_sst_num: IntGaugeVec,
+    /// num of SSTs to be merged to next level in each level
+    pub level_compact_cnt: IntGaugeVec,
 }
 
 impl MetaMetrics {
@@ -48,9 +50,17 @@ impl MetaMetrics {
         );
         let barrier_latency = register_histogram_with_registry!(opts, registry).unwrap();
 
-        let level_payload = register_int_gauge_vec_with_registry!(
+        let level_sst_num = register_int_gauge_vec_with_registry!(
             "storage_level_sst_num",
             "num of SSTs in each level",
+            &["level_index"],
+            registry
+        )
+        .unwrap();
+
+        let level_compact_cnt = register_int_gauge_vec_with_registry!(
+            "storage_level_compact_cnt",
+            "num of SSTs to be merged to next level in each level",
             &["level_index"],
             registry
         )
@@ -60,7 +70,8 @@ impl MetaMetrics {
             registry,
             grpc_latency,
             barrier_latency,
-            level_payload,
+            level_sst_num,
+            level_compact_cnt,
         }
     }
 
