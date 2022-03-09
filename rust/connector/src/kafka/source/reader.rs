@@ -120,7 +120,6 @@ impl KafkaSplitReader {
         // disable partition eof
         config.set("enable.partition.eof", "false");
         config.set("enable.auto.commit", "false");
-        // config.set("max.poll.interval.ms", "10000");
         // config.set("bootstrap.servers", self.bootstrap_servers.join(","));
 
         config
