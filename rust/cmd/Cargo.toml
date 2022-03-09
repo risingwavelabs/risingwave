@@ -3,6 +3,9 @@ name = "risingwave_cmd"
 version = "0.1.3"
 edition = "2021"
 
+[features]
+all-in-one = []
+
 [dependencies]
 clap = { version = "3", features = ["derive"] }
 risingwave_compute = { path = "../compute" }
@@ -36,3 +39,7 @@ path = "src/bin/compute_node.rs"
 [[bin]]
 name = "risectl"
 path = "src/bin/ctl.rs"
+
+[[bin]]
+name = "risingwave"
+path = "src/bin/risingwave.rs"
