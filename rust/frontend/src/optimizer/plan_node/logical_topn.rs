@@ -63,12 +63,7 @@ impl WithSchema for LogicalTopN {
 
 impl ColPrunable for LogicalTopN {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
-        assert!(
-            required_cols.is_subset(&FixedBitSet::from_iter(0..self.schema().fields().len())),
-            "Invalid required cols: {}, only {} columns available",
-            required_cols,
-            self.schema().fields().len()
-        );
+        self.must_contain_columns(required_cols);
 
         let mut input_required_cols = required_cols.clone();
         self.order

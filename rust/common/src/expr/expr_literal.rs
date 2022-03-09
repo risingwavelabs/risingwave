@@ -15,19 +15,19 @@ use crate::expr::Expression;
 use crate::types::{DataType, Datum, Decimal, IntervalUnit, Scalar, ScalarImpl};
 
 macro_rules! array_impl_literal_append {
-  ([$arr_builder: ident, $literal: ident, $cardinality: ident], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-    match ($arr_builder, $literal) {
-      $(
-      (ArrayBuilderImpl::$variant_name(inner), Some(ScalarImpl::$variant_name(v))) => {
-       append_literal_to_arr(inner, Some(v.as_scalar_ref()), $cardinality)?;
-      }
-      (ArrayBuilderImpl::$variant_name(inner), None) => {
-       append_literal_to_arr(inner, None, $cardinality)?;
-      }
-      )*
-      (_, _) => unimplemented!("Do not support values in insert values executor"),
-    }
-  };
+    ([$arr_builder: ident, $literal: ident, $cardinality: ident], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+        match ($arr_builder, $literal) {
+            $(
+                (ArrayBuilderImpl::$variant_name(inner), Some(ScalarImpl::$variant_name(v))) => {
+                    append_literal_to_arr(inner, Some(v.as_scalar_ref()), $cardinality)?;
+                }
+                (ArrayBuilderImpl::$variant_name(inner), None) => {
+                    append_literal_to_arr(inner, None, $cardinality)?;
+                }
+            )*
+            (_, _) => unimplemented!("Do not support values in insert values executor"),
+        }
+    };
 }
 
 #[derive(Debug)]

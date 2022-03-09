@@ -5,9 +5,9 @@ use rand::prelude::StdRng;
 use rand::SeedableRng;
 use risingwave_storage::StateStore;
 
+use crate::utils::display_stat::*;
 use crate::utils::latency_stat::LatencyStat;
 use crate::Opts;
-
 pub(crate) mod get;
 pub(crate) mod prefix_scan_random;
 pub(crate) mod write_batch;
@@ -31,6 +31,8 @@ pub(crate) struct PerfMetrics {
 impl Operations {
     /// Run operations in the `--benchmarks` option
     pub(crate) async fn run(store: impl StateStore, opts: &Opts) {
+        let mut stat_display = DisplayStat::default();
+
         let mut runner = Operations {
             keys: vec![],
             prefixes: vec![],
@@ -38,6 +40,8 @@ impl Operations {
         };
 
         for operation in opts.benchmarks.split(',') {
+            // (Sun Ting) TODO: remove statistics print for each operation
+            // after new performance display is ready
             match operation {
                 "writebatch" => runner.write_batch(&store, opts).await,
                 "deleterandom" => runner.delete_random(&store, opts).await,
@@ -45,6 +49,21 @@ impl Operations {
                 "getseq" => runner.get_seq(&store, opts).await,
                 "prefixscanrandom" => runner.prefix_scan_random(&store, opts).await,
                 other => unimplemented!("operation \"{}\" is not supported.", other),
+            }
+
+            stat_display.update_stat();
+
+            // display metrics from state store metric system
+            if opts.calibrate_metric {
+                match operation {
+                    "writebatch" => stat_display.display_write_batch(),
+                    "deleterandom" => stat_display.display_delete_random(),
+                    // (Sun Ting) TODO: implement other performance displays
+                    "getrandom" => {}
+                    "getseq" => {}
+                    "prefixscanrandom" => {}
+                    other => unimplemented!("operation \"{}\" is not supported.", other),
+                }
             }
         }
     }
