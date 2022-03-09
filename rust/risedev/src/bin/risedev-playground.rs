@@ -1,3 +1,5 @@
+#![feature(let_chains)]
+
 use std::collections::HashMap;
 use std::env;
 use std::fmt::Write;
@@ -244,6 +246,29 @@ fn task_main(
     Ok((stat, log_buffer))
 }
 
+fn preflight_check() {
+    if env::var("http_proxy").is_ok()
+        || env::var("https_proxy").is_ok()
+        || env::var("HTTP_PROXY").is_ok()
+        || env::var("HTTPS_PROXY").is_ok()
+    {
+        if let Ok(x) = env::var("no_proxy") && x.contains("127.0.0.1") && x.contains("::1") {
+            println!(
+                "[{}] {} - You are using proxies for all RisingWave components. Please make sure that `no_proxy` is set for all worker nodes within the cluster.",
+                style("risedev-preflight-check").bold(),
+                style("WARN").yellow().bold()
+            );
+        } else {
+            println!(
+                "[{}] {} - `no_proxy` is not set correctly, which might cause failure in RiseDev and RisingWave. Consider {}.",
+                style("risedev-preflight-check").bold(),
+                style("WARN").yellow().bold(),
+                style("`export no_proxy=localhost,127.0.0.1,::1`").blue().bold()
+            );
+        }
+    }
+}
+
 fn main() -> Result<()> {
     let risedev_config = {
         let mut content = String::new();
@@ -260,6 +285,9 @@ fn main() -> Result<()> {
             &out_str,
         )?;
     }
+
+    preflight_check();
+
     let task_name = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "default".to_string());
