@@ -21,7 +21,7 @@ pub type ExprType = risingwave_pb::expr::expr_node::Type;
 pub trait Expr: Into<ExprImpl> {
     fn return_type(&self) -> DataType;
 }
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub enum ExprImpl {
     // ColumnRef(Box<BoundColumnRef>), might be used in binder.
     InputRef(Box<InputRef>),
@@ -57,6 +57,44 @@ impl From<FunctionCall> for ExprImpl {
 impl From<AggCall> for ExprImpl {
     fn from(agg_call: AggCall) -> Self {
         ExprImpl::AggCall(Box::new(agg_call))
+    }
+}
+
+impl std::fmt::Debug for ExprImpl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InputRef(input_ref) => write!(f, "${}", input_ref.index()),
+            Self::Literal(literal) => {
+                use risingwave_common::for_all_scalar_variants;
+                use risingwave_common::types::ScalarImpl::*;
+                macro_rules! scalar_write_inner {
+                  ([], $( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
+                    match literal.get_data() {
+                        None => write!(f, "null"),
+                      $( Some($variant_name(v)) => write!(f, "{:?}", v) ),*
+                    }?;
+                  };
+                }
+                for_all_scalar_variants! { scalar_write_inner }
+                write!(f, ":{:?}", literal.return_type())
+            }
+            Self::FunctionCall(func_call) => {
+                let func_name = format!("{:?}", func_call.get_expr_type());
+                let mut builder = f.debug_tuple(&func_name);
+                func_call.inputs().iter().for_each(|child| {
+                    builder.field(child);
+                });
+                builder.finish()
+            }
+            Self::AggCall(agg_call) => {
+                let agg_name = format!("{:?}", agg_call.agg_kind());
+                let mut builder = f.debug_tuple(&agg_name);
+                agg_call.inputs().iter().for_each(|child| {
+                    builder.field(child);
+                });
+                builder.finish()
+            }
+        }
     }
 }
 
