@@ -24,10 +24,7 @@ impl Binder {
             None => self.context.get_index(column_name)?,
         };
         let column = &self.context.columns[index];
-        Ok(InputRef::new(
-            column.index,
-            column.data_type.clone(),
-        ).into())
+        Ok(InputRef::new(column.index, column.data_type.clone()).into())
     }
 
     pub fn bind_all_columns(&mut self) -> Result<Vec<ExprImpl>> {
