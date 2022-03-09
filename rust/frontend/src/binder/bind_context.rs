@@ -37,9 +37,6 @@ impl Display for Clause {
 }
 
 pub struct BindContext {
-    // Mapping column name to `ColumnBinding`
-    // pub columns: HashMap<String, Vec<ColumnBinding>>,
-
     // Columns of all tables.
     pub columns: Vec<ColumnBinding>,
     // Mapping column name to indexs in `columns`.
