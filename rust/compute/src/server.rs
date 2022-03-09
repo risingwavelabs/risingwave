@@ -41,6 +41,8 @@ pub async fn compute_node_serve(
 ) -> (JoinHandle<()>, UnboundedSender<()>) {
     // Load the configuration.
     let config = load_config(&opts);
+    info!("Starting compute node with config {:?}", config);
+
     let mut meta_client = MetaClient::new(&opts.meta_address).await.unwrap();
 
     // Register to the cluster. We're not ready to serve until activate is called.
