@@ -3,7 +3,7 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 
 use super::{BatchLimit, ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
-
+use crate::optimizer::property::WithSchema;
 
 /// `LogicalLimit` fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone)]

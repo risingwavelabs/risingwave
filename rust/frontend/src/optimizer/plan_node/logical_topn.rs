@@ -1,11 +1,10 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
-use risingwave_common::catalog::Schema;
 
-use super::{ColPrunable, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use super::{ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
 use crate::optimizer::plan_node::LogicalProject;
-use crate::optimizer::property::{FieldOrder, Order, WithDistribution, WithOrder, WithSchema};
+use crate::optimizer::property::{FieldOrder, Order, WithSchema};
 use crate::utils::ColIndexMapping;
 
 /// `LogicalTopN` sorts the input data and fetches up to `limit` rows from `offset`
