@@ -62,6 +62,15 @@ impl From<AggCall> for ExprImpl {
 
 impl std::fmt::Debug for ExprImpl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Keep the default verbose fmt when `{:#?}` is used.
+        if f.alternate() {
+            return match self {
+                Self::InputRef(arg0) => f.debug_tuple("InputRef").field(arg0).finish(),
+                Self::Literal(arg0) => f.debug_tuple("Literal").field(arg0).finish(),
+                Self::FunctionCall(arg0) => f.debug_tuple("FunctionCall").field(arg0).finish(),
+                Self::AggCall(arg0) => f.debug_tuple("AggCall").field(arg0).finish(),
+            };
+        }
         match self {
             Self::InputRef(input_ref) => write!(f, "${}", input_ref.index()),
             Self::Literal(literal) => {
@@ -80,12 +89,8 @@ impl std::fmt::Debug for ExprImpl {
             }
             Self::FunctionCall(func_call) => {
                 if let ExprType::Cast = func_call.get_expr_type() {
-                    return write!(
-                        f,
-                        "{:?}::{:?}",
-                        func_call.inputs()[0],
-                        func_call.return_type()
-                    );
+                    func_call.inputs()[0].fmt(f)?;
+                    return write!(f, "::{:?}", func_call.return_type());
                 }
                 let func_name = format!("{:?}", func_call.get_expr_type());
                 let mut builder = f.debug_tuple(&func_name);
@@ -119,3 +124,16 @@ macro_rules! assert_eq_input_ref {
 
 #[cfg(test)]
 pub(crate) use assert_eq_input_ref;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_expr_debug_alternate() {
+        let mut e = InputRef::new(1, DataType::Boolean).into();
+        e = FunctionCall::new(ExprType::Not, vec![e]).unwrap().into();
+        let s = format!("{:#?}", e);
+        assert!(s.contains("return_type: Boolean"))
+    }
+}
