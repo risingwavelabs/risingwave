@@ -17,7 +17,7 @@ impl MetaServiceOpts {
     /// Currently, we will read these variables for meta:
     ///
     /// * `RW_META_ADDR`: meta service address
-    pub fn from_env() -> Result<MetaServiceOpts> {
+    pub fn from_env() -> Result<Self> {
         let meta_addr = env::var("RW_META_ADDR").unwrap_or_else(|_| {
             const DEFAULT_ADDR: &str = "http://127.0.0.1:5690";
             tracing::warn!(

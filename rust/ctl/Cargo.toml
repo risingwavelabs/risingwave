@@ -5,7 +5,9 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1"
+bytes = "1"
 clap = { version = "3", features = ["derive"] }
+risingwave_common = { path = "../common" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_storage = { path = "../storage" }
