@@ -105,6 +105,9 @@ impl OrderedRowDeserializer {
 type KeyBytes = Vec<u8>;
 type ValueBytes = Vec<u8>;
 
+/// Serialize a row of data using cell-based serialization, and return corresponding vector of key
+/// and value. If all data of this row are null, there will be one cell of column id `-1` to
+/// represent a row of all null values.
 pub fn serialize_pk_and_row(
     pk_buf: &[u8],
     row: &Option<Row>,
