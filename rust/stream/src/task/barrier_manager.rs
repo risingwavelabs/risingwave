@@ -102,6 +102,9 @@ impl LocalBarrierManager {
     /// When actor is cancelled or aborted, it should call this method to withdraw itself.
     /// For example, a source actor might be cancelled because of Kafka stream timeout,
     /// which would cause a chain of actors (itself and the downstream actors to abort).
+    // TODO: this is a workaround. When an actor (especially the source) encounters a problem, it
+    // should first report the situation to the meta service but not fails itself, and then let the
+    // meta decide whether to send the stop barrier to gracefully exit the actor.
     pub fn withdraw_actor(&mut self, actor_id: u32) {
         debug!("withdraw actor: {}", actor_id);
 
@@ -119,7 +122,6 @@ impl LocalBarrierManager {
     /// Broadcast a barrier to all senders. Returns a receiver which will get notified when this
     /// barrier is finished, in managed mode.
     /// Returns `Ok(None)` is receiver is not available.
-    /// TODO: async collect barrier flush state from hummock.
     pub fn send_barrier(
         &mut self,
         barrier: &Barrier,
@@ -177,6 +179,7 @@ impl LocalBarrierManager {
                 .get(&actor_id)
                 .unwrap_or_else(|| panic!("sender for actor {} does not exist", actor_id));
 
+            // TODO: this is a workaround.
             if let Err(err) = sender.send(Message::Barrier(barrier.clone())) {
                 // Fail to send barrier to this actor (e.g. Kafka source timeout).
                 error!(

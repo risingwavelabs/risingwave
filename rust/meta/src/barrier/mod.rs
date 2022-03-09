@@ -291,6 +291,7 @@ where
             prev_epoch = new_epoch;
 
             // Record failed actors.
+            // TODO: these states should be persisted in actor's status.
             let failed_actors = collect_result?.into_iter().flatten();
             ignored_actors.extend(failed_actors);
 
