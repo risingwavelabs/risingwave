@@ -148,7 +148,7 @@ impl CompactStatus {
 
                     if is_select_idle {
                         let insert_point =
-                            compacting_key_ranges.partition_point(|(ongoing_key_range, _)| {
+                            compacting_key_ranges.partition_point(|(ongoing_key_range, _, _)| {
                                 user_key(&ongoing_key_range.right) < user_key(&key_range.left)
                             });
                         if insert_point >= compacting_key_ranges.len()
@@ -179,7 +179,11 @@ impl CompactStatus {
                                     if overlap_all_idle {
                                         compacting_key_ranges.insert(
                                             insert_point,
-                                            (key_range.clone(), next_task_id),
+                                            (
+                                                key_range.clone(),
+                                                next_task_id,
+                                                select_level_inputs.len() as u64,
+                                            ),
                                         );
 
                                         let mut suc_table_ids =
