@@ -10,9 +10,10 @@ use crate::utils::{ColIndexMapping, Condition};
 ///
 /// For inner join, we can do all kinds of pushdown.
 ///
-/// For left/right semi join, we can push filter to left/right and on, and push on to left/right.
+/// For left/right semi join, we can push filter to left/right and on-clause,
+/// and push on-clause to left/right.
 ///
-/// For left/right anti join, we can push left/right to left/right
+/// For left/right anti join, we can push filter to left/right, but on-clause can not be pushed
 ///
 /// ## Outer Join
 ///
@@ -61,7 +62,7 @@ impl Rule for FilterJoinRule {
             self.can_push_right_from_on(join_type),
             false,
         );
-        assert!(on.is_none());
+        assert!(on.is_none(), "On-clause should not be pushed to on-clause.");
 
         let left_predicate = left_from_filter.and_then(|c1| left_from_on.map(|c2| c1.and(c2)));
         let right_predicate = right_from_filter.and_then(|c1| right_from_on.map(|c2| c1.and(c2)));
@@ -88,7 +89,7 @@ impl Rule for FilterJoinRule {
 
 impl FilterJoinRule {
     /// Try to split and pushdown `predicate` into a join's left/right child or the on clause.
-    /// Returns the pushed predicates. Original predicate will be modified.
+    /// Returns the pushed predicates. The pushed part will be removed from the original predicate.
     ///
     /// `InputRef`s in the right `Condition` are shifted by `-left_col_num`.
     fn push_down(
