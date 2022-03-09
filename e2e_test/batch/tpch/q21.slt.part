@@ -1,3 +1,4 @@
+onlyif risingwave
 statement ok
 SET enable_new_subquery_planner TO on
 
@@ -45,5 +46,6 @@ LIMIT 100;
 ----
 Supplier#000000005 15
 
+onlyif risingwave
 statement ok
 SET enable_new_subquery_planner TO off
