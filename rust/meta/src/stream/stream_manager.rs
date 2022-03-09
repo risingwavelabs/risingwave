@@ -6,6 +6,7 @@ use itertools::Itertools;
 use log::{debug, info};
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::common::ActorInfo;
+use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
 use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
@@ -72,7 +73,21 @@ where
         let actor_ids = table_fragments.actor_ids();
         let locations = self.scheduler.schedule(&actor_ids)?;
 
-        table_fragments.set_locations(locations.actor_locations.clone());
+        let actor_info = locations
+            .actor_locations
+            .iter()
+            .map(|(&actor_id, &node_id)| {
+                (
+                    actor_id,
+                    ActorStatus {
+                        node_id,
+                        state: ActorState::Running as i32,
+                    },
+                )
+            })
+            .collect();
+
+        table_fragments.set_actor_status(actor_info);
         let actor_map = table_fragments.actor_map();
 
         let actor_infos = locations.actor_infos();

@@ -111,11 +111,30 @@ service HeartbeatService {
 }
 
 // Below for stream manager.
+
+// Fragments of a Materialized View
 message TableFragments {
+  // State of MView
   enum State {
     CREATING = 0;
     CREATED = 1;
   }
+
+  // Current state of actor
+  enum ActorState {
+    RUNNING = 0;
+    // e.g. Inactive, Failed...
+  }
+
+  // Runtime information of an actor
+  message ActorStatus {
+    // Current on which node
+    uint32 node_id = 1;
+
+    // Current state
+    ActorState state = 2;
+  }
+
   message Fragment {
     enum FragmentType {
       SOURCE = 0;
@@ -129,7 +148,7 @@ message TableFragments {
   plan.TableRefId table_ref_id = 1;
   State state = 2;
   map<uint32, Fragment> fragments = 3;
-  map<uint32, uint32> actor_locations = 4;
+  map<uint32, ActorStatus> actor_status = 4;
 }
 
 // TODO: remove this when dashboard refactored.

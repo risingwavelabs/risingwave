@@ -14,6 +14,7 @@ use crate::cluster::NodeId;
 use crate::model::{ActorId, MetadataModel, TableFragments};
 use crate::storage::MetaStore;
 
+// TODO(eric): rename to ActorManager
 pub struct FragmentManager<S> {
     meta_store_ref: Arc<S>,
     table_fragments: DashMap<TableId, TableFragments>,
