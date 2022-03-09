@@ -2,6 +2,7 @@ use std::env;
 use std::sync::Arc;
 
 use anyhow::Result;
+use risingwave_pb::common::WorkerType;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::hummock_meta_client::RpcHummockMetaClient;
 use risingwave_storage::monitor::StateStoreStats;
@@ -28,11 +29,16 @@ impl MetaServiceOpts {
         Ok(Self { meta_addr })
     }
 
-    /// Create meta client from options
+    /// Create meta client from options, and register as rise-ctl worker
     pub async fn create_meta_client(&self) -> Result<MetaClient> {
         let mut client = MetaClient::new(&self.meta_addr).await?;
-        // TODO: Currently, we will use worker id 0 to create meta client.
-        client.set_worker_id(0);
+        // FIXME: don't use 127.0.0.1 for ctl
+        let worker_id = client
+            .register("127.0.0.1:2333".parse().unwrap(), WorkerType::RiseCtl)
+            .await?;
+        tracing::info!("registered as RiseCtl worker, worker_id = {}", worker_id);
+        // TODO: remove worker node
+        client.set_worker_id(worker_id);
         Ok(client)
     }
 
