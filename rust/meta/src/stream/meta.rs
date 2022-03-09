@@ -3,10 +3,9 @@ use std::sync::Arc;
 
 use dashmap::mapref::entry::Entry;
 use dashmap::DashMap;
-use risingwave_common::array::RwError;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_plan::StreamActor;

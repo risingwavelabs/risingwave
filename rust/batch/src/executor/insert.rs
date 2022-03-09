@@ -140,7 +140,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
             NodeBody::Insert
         )?;
 
-        let table_id = TableId::from(&insert_node.table_ref_id);
+        let table_id = TableId::from(&insert_node.table_source_ref_id);
 
         let proto_child = source.plan_node.get_children().get(0).ok_or_else(|| {
             RwError::from(ErrorCode::InternalError(String::from(

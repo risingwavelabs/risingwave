@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 use itertools::Itertools;
-use risingwave_common::array::{Op, RwError, StreamChunk};
-use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
@@ -55,6 +55,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
         let node = try_match_expand!(node.get_node().unwrap(), Node::BatchPlanNode)?;
         let table_id = TableId::from(&node.table_ref_id);
 
+        // TODO(lmatz): Send ColumnDesc directly.
         let column_ids = node
             .column_ids
             .iter()
@@ -63,7 +64,17 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
         let fields = node.fields.iter().map(Field::from).collect_vec();
 
         let keyspace = Keyspace::table_root(state_store, &table_id);
-        let table = MViewTable::new_adhoc(keyspace, &column_ids, &fields);
+        let column_descs = column_ids
+            .into_iter()
+            .zip_eq(fields.into_iter())
+            .map(|(column_id, field)| ColumnDesc {
+                data_type: field.data_type,
+                column_id,
+                name: field.name,
+            })
+            .collect_vec();
+
+        let table = MViewTable::new_adhoc(keyspace, column_descs);
         Ok(Box::new(BatchQueryExecutor::new(
             table,
             params.pk_indices,
@@ -110,7 +121,7 @@ impl<S: StateStore> Executor for BatchQueryExecutor<S> {
 
         let iter = self.iter.as_mut().unwrap();
         let data_chunk = iter
-            .collect_datachunk_from_iter(&self.table, Some(self.batch_size))
+            .collect_data_chunk(&self.table, Some(self.batch_size))
             .await?
             .ok_or_else(|| RwError::from(ErrorCode::Eof))?;
 

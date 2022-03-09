@@ -34,5 +34,5 @@ name = "compute-node"
 path = "src/bin/compute_node.rs"
 
 [[bin]]
-name = "risingwave-ctl"
+name = "risectl"
 path = "src/bin/ctl.rs"

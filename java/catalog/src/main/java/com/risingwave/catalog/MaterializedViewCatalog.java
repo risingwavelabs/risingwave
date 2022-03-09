@@ -12,7 +12,7 @@ public class MaterializedViewCatalog extends TableCatalog {
 
   private final RelCollation collation;
 
-  private boolean associated;
+  private final TableId associated;
 
   public MaterializedViewCatalog(
       TableId id,
@@ -25,7 +25,7 @@ public class MaterializedViewCatalog extends TableCatalog {
       RowFormatType rowFormat,
       String rowSchemaLocation,
       RelCollation collation,
-      boolean associated) {
+      TableId associated) {
     super(
         id,
         name,
@@ -51,6 +51,10 @@ public class MaterializedViewCatalog extends TableCatalog {
 
   @Override
   public boolean isAssociatedMaterializedView() {
+    return associated != null;
+  }
+
+  public TableId getAssociatedTableId() {
     return associated;
   }
 

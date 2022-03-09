@@ -10,7 +10,7 @@ async fn main() {
     let opts = risingwave_meta::MetaNodeOpts::parse();
 
     risingwave_logging::oneshot_common();
-    risingwave_logging::init_risingwave_logger(false);
+    risingwave_logging::init_risingwave_logger(false, false);
 
     risingwave_meta::start(opts).await
 }

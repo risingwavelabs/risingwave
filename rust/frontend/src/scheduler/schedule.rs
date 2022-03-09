@@ -1,10 +1,11 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::{mpsc, Arc, RwLock};
+use std::sync::{Arc, RwLock};
 
 use rand::distributions::{Distribution as RandDistribution, Uniform};
 use risingwave_common::error::Result;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_rpc_client::MetaClient;
+use tokio::sync::mpsc;
 
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::optimizer::property::Distribution;
@@ -16,11 +17,12 @@ pub(crate) type TaskId = u64;
 /// `BatchScheduler` dispatches query fragments to compute nodes.
 pub(crate) struct BatchScheduler {
     worker_manager: WorkerNodeManagerRef,
-    scheduled_stage_sender: mpsc::Sender<ScheduledStage>,
-    scheduled_stage_receiver: mpsc::Receiver<ScheduledStage>,
+    scheduled_stage_sender: mpsc::UnboundedSender<ScheduledStage>,
+    scheduled_stage_receiver: mpsc::UnboundedReceiver<ScheduledStage>,
     scheduled_stages_map: HashMap<StageId, ScheduledStageRef>,
 }
 
+#[derive(Debug)]
 pub(crate) struct ScheduledStage {
     pub assignments: HashMap<TaskId, WorkerNode>,
     pub augmented_stage: AugmentedStageRef,
@@ -43,6 +45,7 @@ impl ScheduledStage {
 }
 pub(crate) type ScheduledStageRef = Arc<ScheduledStage>;
 
+#[derive(Debug)]
 pub(crate) struct AugmentedStage {
     pub query_stage: QueryStageRef,
     pub exchange_source: HashMap<StageId, ScheduledStageRef>,
@@ -72,7 +75,7 @@ pub(crate) type AugmentedStageRef = Arc<AugmentedStage>;
 impl BatchScheduler {
     /// Used in tests.
     pub fn mock(worker_manager: WorkerNodeManagerRef) -> Self {
-        let (sender, receiver) = mpsc::channel();
+        let (sender, receiver) = mpsc::unbounded_channel();
         Self {
             worker_manager,
             scheduled_stage_sender: sender,
@@ -142,7 +145,7 @@ pub(crate) struct QueryResultLocation {
 
 impl BatchScheduler {
     /// Given a `Query` (Already split by )
-    pub fn schedule(&mut self, query: &Query) -> QueryResultLocation {
+    pub async fn schedule(&mut self, query: &Query) -> QueryResultLocation {
         // First schedule all leaf stages.
         for leaf_stage_id in &query.leaf_stages() {
             let stage = query.stage_graph.get_stage_unchecked(leaf_stage_id);
@@ -151,7 +154,7 @@ impl BatchScheduler {
         }
 
         loop {
-            let scheduled_stage = self.scheduled_stage_receiver.recv().unwrap();
+            let scheduled_stage = self.scheduled_stage_receiver.recv().await.unwrap();
             let cur_stage_id = scheduled_stage.id();
             self.scheduled_stages_map
                 .insert(cur_stage_id, Arc::new(scheduled_stage));
