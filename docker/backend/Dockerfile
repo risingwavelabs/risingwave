@@ -15,7 +15,7 @@ COPY rust rust
 
 ENV PATH /root/.cargo/bin/:$PATH
 
-# We need to add the `rustfmt` dependency, otherwise `risingwave-pb` will not compile
+# We need to add the `rustfmt` dependency, otherwise `risingwave_pb` will not compile
 RUN rustup self update \
   && rustup set profile minimal \
   && rustup default $(cat "/risingwave/rust/rust-toolchain") \

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::Display;
 
 use risingwave_common::types::DataType;
 
@@ -18,10 +19,26 @@ impl ColumnBinding {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Clause {
+    Where,
+    Values,
+}
+
+impl Display for Clause {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Clause::Where => write!(f, "WHERE"),
+            Clause::Values => write!(f, "VALUES"),
+        }
+    }
+}
+
 pub struct BindContext {
     // Mapping column name to `ColumnBinding`
     pub columns: HashMap<String, Vec<ColumnBinding>>,
-    pub in_values_clause: bool,
+    // `clause` identifies in what clause we are binding.
+    pub clause: Option<Clause>,
 }
 
 impl BindContext {
@@ -30,7 +47,7 @@ impl BindContext {
         BindContext {
             // tables: HashMap::new(),
             columns: HashMap::new(),
-            in_values_clause: false,
+            clause: None,
         }
     }
 }

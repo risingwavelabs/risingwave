@@ -65,10 +65,16 @@ where
     }
 
     /// Ingest this batch into the associated state store.
-    /// `Err` results should be unwrapped by callers.
     pub async fn ingest(mut self, epoch: u64) -> Result<()> {
         self.preprocess()?;
         self.store.ingest_batch(self.batch, epoch).await?;
+        Ok(())
+    }
+
+    /// Ingest this batch into the associated state store, without being persisted.
+    pub async fn replicate_remote(mut self, epoch: u64) -> Result<()> {
+        self.preprocess()?;
+        self.store.replicate_batch(self.batch, epoch).await?;
         Ok(())
     }
 

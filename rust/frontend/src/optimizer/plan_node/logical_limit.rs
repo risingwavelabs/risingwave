@@ -6,6 +6,7 @@ use risingwave_common::catalog::Schema;
 use super::{BatchLimit, ColPrunable, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 
+/// `LogicalLimit` fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone)]
 pub struct LogicalLimit {
     input: PlanRef,
@@ -58,6 +59,8 @@ impl WithSchema for LogicalLimit {
 
 impl ColPrunable for LogicalLimit {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
+        self.must_contain_columns(required_cols);
+
         let new_input = self.input.prune_col(required_cols);
         self.clone_with_input(new_input).into()
     }

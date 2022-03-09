@@ -26,11 +26,9 @@ paste = "1"
 prometheus = { version = "0.13"}
 prost = "0.9"
 rdkafka = { version = "0.28", features = ["cmake-build"] }
-risingwave-pb = { path = "../prost" }
 risingwave_batch = { path = "../batch" }
 risingwave_common = { path = "../common" }
-risingwave_logging = { path = "../utils/logging" }
-risingwave_meta = { path = "../meta" }
+risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_source = { path = "../source" }
 risingwave_storage = { path = "../storage" }
@@ -41,7 +39,6 @@ serde_json = "1"
 smallvec = "1"
 static_assertions = "1"
 thiserror = "1"
-tikv-jemallocator = "0.4"
 tokio = { version = "1", features = [
     "rt",
     "rt-multi-thread",
@@ -62,12 +59,6 @@ url = "2"
 [dev-dependencies]
 rand = "0.8"
 tempfile = "3"
-
-[[bin]]
-name = "compute-node"
-path = "src/bin/compute_node.rs"
-
-[build-dependencies]
 
 [features]
 tikv = ["risingwave_storage/tikv"]

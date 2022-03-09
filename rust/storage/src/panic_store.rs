@@ -34,6 +34,30 @@ impl StateStore for PanicStateStore {
     {
         panic!("should not create iter from the panic state store!");
     }
+
+    async fn replicate_batch(
+        &self,
+        _kv_pairs: Vec<(Bytes, Option<Bytes>)>,
+        _epoch: u64,
+    ) -> Result<()> {
+        panic!("should not replicate batch from the panic state store!");
+    }
+
+    async fn reverse_iter<R, B>(&self, _key_range: R, _epoch: u64) -> Result<Self::Iter<'_>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]>,
+    {
+        panic!("should not create iter from the panic state store!");
+    }
+
+    async fn wait_epoch(&self, _epoch: u64) {
+        panic!("should not wait epoch from the panic state store!");
+    }
+
+    async fn sync(&self, _epoch: Option<u64>) -> Result<()> {
+        panic!("should not sync from the panic state store!");
+    }
 }
 
 pub struct PanicStateStoreIter {}

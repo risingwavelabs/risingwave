@@ -1,6 +1,6 @@
 package com.risingwave.planner.sql;
 
-import static com.risingwave.common.config.BatchPlannerConfigurations.OPTIMIZER_ENABLE_CALCITE_SUBQUERY_EXPAND;
+import static com.risingwave.common.config.BatchPlannerConfigurations.ENABLE_NEW_SUBQUERY_PLANNER;
 import static java.util.Objects.requireNonNull;
 
 import com.risingwave.common.datatype.RisingWaveTypeFactory;
@@ -85,8 +85,7 @@ public class SqlConverter {
       this.config =
           this.config
               .addRelBuilderConfigTransform(c -> c.withSimplify(false))
-              .withExpand(
-                  context.getSessionConfiguration().get(OPTIMIZER_ENABLE_CALCITE_SUBQUERY_EXPAND));
+              .withExpand(!context.getSessionConfiguration().get(ENABLE_NEW_SUBQUERY_PLANNER));
 
       SqlToRelConverter sql2RelConverter =
           new RisingWaveSqlToRelConverter(

@@ -11,6 +11,10 @@ use crate::expr::{assert_input_ref, ExprImpl};
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 use crate::utils::{ColIndexMapping, Condition};
 
+/// `LogicalFilter` iterates over its input and returns elements for which `predicate` evaluates to
+/// true, filtering out the others.
+///
+/// If the condition allows nulls, then a null value is treated the same as false.
 #[derive(Debug, Clone)]
 pub struct LogicalFilter {
     predicate: Condition,
@@ -67,12 +71,7 @@ impl WithSchema for LogicalFilter {
 
 impl ColPrunable for LogicalFilter {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
-        assert!(
-            required_cols.is_subset(&FixedBitSet::from_iter(0..self.schema().fields().len())),
-            "Invalid required cols: {}, only {} columns available",
-            required_cols,
-            self.schema().fields().len()
-        );
+        self.must_contain_columns(required_cols);
 
         let mut visitor = CollectRequiredCols {
             required_cols: required_cols.clone(),

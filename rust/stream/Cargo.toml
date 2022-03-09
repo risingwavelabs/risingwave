@@ -29,8 +29,8 @@ paste = "1"
 prometheus = { version = "0.13", features = ["process"] }
 prost = "0.9"
 rdkafka = { version = "0.28", features = ["cmake-build"] }
-risingwave-pb = { path = "../prost" }
 risingwave_common = { path = "../common" }
+risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_source = { path = "../source" }
 risingwave_storage = { path = "../storage" }
@@ -59,6 +59,5 @@ twox-hash = "1"
 url = "2"
 
 [dev-dependencies]
-approx = "0.5"
 assert_matches = "1"
 rand = "0.8"

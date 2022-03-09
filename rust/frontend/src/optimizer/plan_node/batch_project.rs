@@ -5,6 +5,8 @@ use risingwave_common::catalog::Schema;
 use super::{LogicalProject, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::property::{Distribution, WithDistribution, WithOrder, WithSchema};
 
+/// `BatchProject` implements [`super::LogicalProject`] to evaluate specified expressions on input
+/// rows
 #[derive(Debug, Clone)]
 pub struct BatchProject {
     logical: LogicalProject,
@@ -17,8 +19,8 @@ impl BatchProject {
 }
 
 impl fmt::Display for BatchProject {
-    fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
-        todo!()
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.logical.fmt_with_name(f, "BatchProject")
     }
 }
 

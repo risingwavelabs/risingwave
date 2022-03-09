@@ -8,6 +8,7 @@ use super::{ColPrunable, PlanRef, ToBatch, ToStream};
 use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 
+/// `LogicalValues` build rows according to a list of expressions
 #[derive(Debug, Clone)]
 pub struct LogicalValues {
     rows: Vec<Vec<ExprImpl>>,
@@ -57,12 +58,7 @@ impl fmt::Display for LogicalValues {
 
 impl ColPrunable for LogicalValues {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
-        assert!(
-            required_cols.is_subset(&FixedBitSet::from_iter(0..self.schema().fields().len())),
-            "Invalid required cols: {}, only {} columns available",
-            required_cols,
-            self.schema().fields().len()
-        );
+        self.must_contain_columns(required_cols);
 
         let (rows, fields) = required_cols
             .ones()

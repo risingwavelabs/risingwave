@@ -5,6 +5,8 @@ use risingwave_common::catalog::Schema;
 use super::{PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::property::{Distribution, Order, WithDistribution, WithOrder, WithSchema};
 
+/// `BatchExchange` imposes a particular distribution on its input
+/// without changing its content.
 #[derive(Debug, Clone)]
 pub struct BatchExchange {
     order: Order,
