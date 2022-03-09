@@ -51,9 +51,9 @@ impl Task for FrontendServiceV2 {
             }
             other_size => {
                 return Err(anyhow!(
-          "Cannot start node: {} meta nodes found in this configuration, but only 1 is needed.",
-          other_size
-        ));
+                    "Cannot start node: {} meta nodes found in this configuration, but only 1 is needed.",
+                    other_size
+                ));
             }
         };
 
