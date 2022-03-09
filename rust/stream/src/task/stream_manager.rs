@@ -6,7 +6,6 @@ use std::sync::{Arc, Mutex};
 
 use futures::channel::mpsc::{channel, Receiver};
 use itertools::Itertools;
-use opentelemetry::metrics::registry;
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::expr::{build_from_prost, AggKind, RowExpression};
@@ -20,7 +19,7 @@ use risingwave_pb::{expr, stream_plan, stream_service};
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
-use prometheus::{Registry, register};
+
 use super::FailedActors;
 
 use crate::executor::*;
@@ -54,7 +53,8 @@ pub struct StreamManagerCore {
 
     /// The state store of Hummuck
     state_store: StateStoreImpl,
-    registry: Registry,
+
+    streaming_metrics: Arc<StreamingMetrics>,
 }
 
 /// `StreamManager` manages all stream executors in this project.
@@ -70,7 +70,7 @@ pub struct ExecutorParams {
     pub op_info: String,
     pub input: Vec<Box<dyn Executor>>,
     pub actor_id: u32,
-    pub executor_stats: Option<Arc<StreamingMetrics>>
+    pub executor_stats: Arc<StreamingMetrics>,
 }
 
 impl Debug for ExecutorParams {
@@ -94,8 +94,8 @@ impl StreamManager {
         }
     }
 
-    pub fn new(addr: SocketAddr, state_store: StateStoreImpl, registry: Registry) -> Self {
-        Self::with_core(StreamManagerCore::new(addr, state_store, registry))
+    pub fn new(addr: SocketAddr, state_store: StateStoreImpl, streaming_metrics: Arc<StreamingMetrics>) -> Self {
+        Self::with_core(StreamManagerCore::new(addr, state_store, streaming_metrics))
     }
 
     #[cfg(test)]
@@ -276,12 +276,12 @@ fn update_upstreams(context: &SharedContext, ids: &[UpDownActorIds]) {
 }
 
 impl StreamManagerCore {
-    fn new(addr: SocketAddr, state_store: StateStoreImpl, registry: Registry) -> Self {
+    fn new(addr: SocketAddr, state_store: StateStoreImpl, streaming_metrics: Arc<StreamingMetrics>) -> Self {
         let context = SharedContext::new(addr, state_store.clone());
-        Self::with_store_and_context(state_store, context, registry)
+        Self::with_store_and_context(state_store, context, streaming_metrics)
     }
 
-    fn with_store_and_context(state_store: StateStoreImpl, context: SharedContext,  registry: Registry) -> Self {
+    fn with_store_and_context(state_store: StateStoreImpl, context: SharedContext,  streaming_metrics: Arc<StreamingMetrics>) -> Self {
         let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
 
         Self {
@@ -291,17 +291,18 @@ impl StreamManagerCore {
             actors: HashMap::new(),
             mock_source: (Some(tx), Some(rx)),
             state_store,
-            registry
+            streaming_metrics,
         }
     }
 
     #[cfg(test)]
     fn for_test() -> Self {
-        let register = prometheus::Registry::new();
+        let register = prometheus::default_registry().clone();
+        let streaming_metrics = Arc::new(StreamingMetrics::new(register));
         Self::with_store_and_context(
             StateStoreImpl::shared_in_memory_store(),
             SharedContext::for_test(),
-            register
+            streaming_metrics
         
         )
     }
@@ -380,6 +381,7 @@ impl StreamManagerCore {
         input_pos: usize,
         env: StreamEnvironment,
         store: impl StateStore,
+        streaming_metrics: Arc<StreamingMetrics>
     ) -> Result<Box<dyn Executor>> {
         let op_info = node.get_identity().clone();
         // Create the input executor before creating itself
@@ -396,6 +398,7 @@ impl StreamManagerCore {
                     input_pos,
                     env.clone(),
                     store.clone(),
+                    streaming_metrics.clone(),
                 )
             })
             .try_collect()?;
@@ -410,8 +413,7 @@ impl StreamManagerCore {
         // same.
         let executor_id = ((actor_id as u64) << 32) + node.get_operator_id();
         let operator_id = ((fragment_id as u64) << 32) + node.get_operator_id();
-        let temp_registry = self.registry.clone();
-        let temp_registry1 = self.registry.clone();
+
         let executor_params = ExecutorParams {
             env: env.clone(),
             pk_indices,
@@ -420,10 +422,11 @@ impl StreamManagerCore {
             op_info,
             input,
             actor_id,
-            executor_stats: Some(Arc::new(StreamingMetrics::new(temp_registry))),
+            executor_stats: streaming_metrics,
         };
         let executor = create_executor(executor_params, self, node, store);
-        let executor = Self::wrap_executor_for_debug(executor?, actor_id, input_pos, temp_registry1)?;
+        let temp_streaming_metrics = self.streaming_metrics.clone();
+        let executor = Self::wrap_executor_for_debug(executor?, actor_id, input_pos, temp_streaming_metrics)?;
         Ok(executor)
     }
 
@@ -434,10 +437,10 @@ impl StreamManagerCore {
         actor_id: u32,
         node: &stream_plan::StreamNode,
         env: StreamEnvironment,
-        registry: Registry,
+        streaming_metrics: Arc<StreamingMetrics>,
     ) -> Result<Box<dyn Executor>> {
         dispatch_state_store!(self.state_store.clone(), store, {
-            self.create_nodes_inner(fragment_id, actor_id, node, 0, env, store)
+            self.create_nodes_inner(fragment_id, actor_id, node, 0, env, store, streaming_metrics)
         })
     }
 
@@ -445,7 +448,7 @@ impl StreamManagerCore {
         mut executor: Box<dyn Executor>,
         actor_id: u32,
         input_pos: usize,
-        registry: Registry,
+        streaming_metrics: Arc<StreamingMetrics>
     ) -> Result<Box<dyn Executor>> {
         if !cfg!(debug_assertions) {
             return Ok(executor);
@@ -454,7 +457,7 @@ impl StreamManagerCore {
 
 
         // Trace
-        executor = Box::new(TraceExecutor::new(executor, identity, input_pos, actor_id, registry));
+        executor = Box::new(TraceExecutor::new(executor, identity, input_pos, actor_id, streaming_metrics));
         // Schema check
         executor = Box::new(SchemaCheckExecutor::new(executor));
         // Epoch check
@@ -615,9 +618,8 @@ impl StreamManagerCore {
         for actor_id in actors {
             let actor_id = *actor_id;
             let actor = self.actors.remove(&actor_id).unwrap();
-            let temp_registry = self.registry.clone();
             let executor =
-                self.create_nodes(actor.fragment_id, actor_id, actor.get_nodes()?, env.clone(), temp_registry)?;
+                self.create_nodes(actor.fragment_id, actor_id, actor.get_nodes()?, env.clone(), self.streaming_metrics.clone())?;
             let dispatcher = self.create_dispatcher(
                 executor,
                 actor.get_dispatcher()?,

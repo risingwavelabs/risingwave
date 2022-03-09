@@ -2,9 +2,8 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Request, Response, Server};
-use prometheus::{Encoder, TextEncoder,Registry};
+use hyper::{Body, Request, Response};
+use prometheus::{Encoder, TextEncoder};
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::ComputeNodeConfig;
@@ -79,10 +78,11 @@ pub async fn compute_node_serve(
         compactor_handle = Some((compactor_join_handle, compactor_shutdown_sender));
     }
 
-    let registry = prometheus::Registry::new();
+    let registry = prometheus::default_registry().clone();
+    let streaming_metrics = Arc::new(StreamingMetrics::new(registry.clone()));
     // Initialize the managers.
     let batch_mgr = Arc::new(BatchManager::new());
-    let stream_mgr = Arc::new(StreamManager::new(addr, state_store.clone(), registry.clone()));
+    let stream_mgr = Arc::new(StreamManager::new(addr, state_store.clone(), streaming_metrics.clone()));
     let source_mgr = Arc::new(MemSourceManager::new());
 
     // Initialize batch environment.
@@ -131,7 +131,7 @@ pub async fn compute_node_serve(
 
     // Boot metrics service.
     if opts.metrics_level > 0 {
-        MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone(), registry);
+        MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone(), streaming_metrics.clone());
     }
 
     // All set, let the meta service know we're ready.
@@ -143,23 +143,17 @@ pub async fn compute_node_serve(
 pub struct MetricsManager {}
 
 impl MetricsManager {
-    pub fn boot_metrics_service(listen_addr: String, registry: Registry) {
+    pub fn boot_metrics_service(listen_addr: String, streaming_metrics: Arc<StreamingMetrics>) {
         tokio::spawn(async move {
             info!(
                 "Prometheus listener for Prometheus is set up on http://{}",
                 listen_addr
             );
             let listen_socket_addr: SocketAddr = listen_addr.parse().unwrap();
-            let streaming_metrics = Arc::new(StreamingMetrics::new(registry.clone()));
             let service = ServiceBuilder::new()
             .layer(AddExtensionLayer::new(streaming_metrics))
             .service_fn(Self::metrics_service);
             let serve_future = hyper::Server::bind(&listen_socket_addr).serve(Shared::new(service));
-            // let serve_future =
-            //     Server::bind(&listen_socket_addr).serve(make_service_fn(|_| async {
-            //         Ok::<_, hyper::Error>(service_fn(MetricsManager::metrics_service))
-            //     }));
-
             if let Err(err) = serve_future.await {
                 eprintln!("server error: {}", err);
             }
