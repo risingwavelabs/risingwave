@@ -7,6 +7,7 @@ use crate::catalog::ColumnId;
 #[derive(Debug, Clone)]
 pub struct ColumnDesc {
     pub data_type: DataType,
+    // when the data_type equal to struct, type_name have the value which is struct name
     pub type_name: Option<String>,
 }
 

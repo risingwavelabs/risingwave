@@ -51,6 +51,8 @@ pub struct StreamManagerCore {
 
     /// The state store of Hummuck
     state_store: StateStoreImpl,
+
+    streaming_metrics: Arc<StreamingMetrics>,
 }
 
 /// `StreamManager` manages all stream executors in this project.
@@ -60,12 +62,25 @@ pub struct StreamManager {
 
 pub struct ExecutorParams {
     pub env: StreamEnvironment,
+
+    /// Indices of primary keys
     pub pk_indices: PkIndices,
+
+    /// Executor id, unique across all actors.
     pub executor_id: u64,
+
+    /// Operator id, unique for each operator in fragment.
     pub operator_id: u64,
+
+    /// Information of the operator from plan node.
     pub op_info: String,
+
+    /// The input executor.
     pub input: Vec<Box<dyn Executor>>,
+
+    /// Id of the actor.
     pub actor_id: u32,
+    pub executor_stats: Arc<StreamingMetrics>,
 }
 
 impl Debug for ExecutorParams {
@@ -89,8 +104,12 @@ impl StreamManager {
         }
     }
 
-    pub fn new(addr: SocketAddr, state_store: StateStoreImpl) -> Self {
-        Self::with_core(StreamManagerCore::new(addr, state_store))
+    pub fn new(
+        addr: SocketAddr,
+        state_store: StateStoreImpl,
+        streaming_metrics: Arc<StreamingMetrics>,
+    ) -> Self {
+        Self::with_core(StreamManagerCore::new(addr, state_store, streaming_metrics))
     }
 
     #[cfg(test)]
@@ -105,10 +124,12 @@ impl StreamManager {
         barrier: &Barrier,
         actor_ids_to_send: impl IntoIterator<Item = u32>,
         actor_ids_to_collect: impl IntoIterator<Item = u32>,
-    ) -> Result<Option<oneshot::Receiver<()>>> {
+    ) -> Result<oneshot::Receiver<()>> {
         let core = self.core.lock().unwrap();
         let mut barrier_manager = core.context.lock_barrier_manager();
-        let rx = barrier_manager.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
+        let rx = barrier_manager
+            .send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?
+            .expect("no rx for local mode");
         Ok(rx)
     }
 
@@ -121,16 +142,8 @@ impl StreamManager {
     ) -> Result<()> {
         let rx = self.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
 
-        // Wait for all actors to finish this barrier.
-        match rx {
-            Some(rx) => {
-                info!("Awaiting rx.");
-                rx.await.unwrap();
-            }
-            None => {
-                error!("Failed to send barrier as rx is not valid.");
-            }
-        }
+        // Wait for all actors finishing this barrier.
+        rx.await.unwrap();
 
         // Sync states from shared buffer to S3 before telling meta service we've done.
         dispatch_state_store!(self.state_store(), store, {
@@ -277,12 +290,20 @@ fn update_upstreams(context: &SharedContext, ids: &[UpDownActorIds]) {
 }
 
 impl StreamManagerCore {
-    fn new(addr: SocketAddr, state_store: StateStoreImpl) -> Self {
+    fn new(
+        addr: SocketAddr,
+        state_store: StateStoreImpl,
+        streaming_metrics: Arc<StreamingMetrics>,
+    ) -> Self {
         let context = SharedContext::new(addr, state_store.clone());
-        Self::with_store_and_context(state_store, context)
+        Self::with_store_and_context(state_store, context, streaming_metrics)
     }
 
-    fn with_store_and_context(state_store: StateStoreImpl, context: SharedContext) -> Self {
+    fn with_store_and_context(
+        state_store: StateStoreImpl,
+        context: SharedContext,
+        streaming_metrics: Arc<StreamingMetrics>,
+    ) -> Self {
         let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
 
         Self {
@@ -292,14 +313,18 @@ impl StreamManagerCore {
             actors: HashMap::new(),
             mock_source: (Some(tx), Some(rx)),
             state_store,
+            streaming_metrics,
         }
     }
 
     #[cfg(test)]
     fn for_test() -> Self {
+        let register = prometheus::Registry::new();
+        let streaming_metrics = Arc::new(StreamingMetrics::new(register));
         Self::with_store_and_context(
             StateStoreImpl::shared_in_memory_store(),
             SharedContext::for_test(),
+            streaming_metrics,
         )
     }
 
@@ -416,9 +441,15 @@ impl StreamManagerCore {
             op_info,
             input,
             actor_id,
+            executor_stats: self.streaming_metrics.clone(),
         };
         let executor = create_executor(executor_params, self, node, store);
-        let executor = Self::wrap_executor_for_debug(executor?, actor_id, input_pos)?;
+        let executor = Self::wrap_executor_for_debug(
+            executor?,
+            actor_id,
+            input_pos,
+            self.streaming_metrics.clone(),
+        )?;
         Ok(executor)
     }
 
@@ -439,6 +470,7 @@ impl StreamManagerCore {
         mut executor: Box<dyn Executor>,
         actor_id: u32,
         input_pos: usize,
+        streaming_metrics: Arc<StreamingMetrics>,
     ) -> Result<Box<dyn Executor>> {
         if !cfg!(debug_assertions) {
             return Ok(executor);
@@ -446,7 +478,13 @@ impl StreamManagerCore {
         let identity = executor.identity().to_string();
 
         // Trace
-        executor = Box::new(TraceExecutor::new(executor, identity, input_pos, actor_id));
+        executor = Box::new(TraceExecutor::new(
+            executor,
+            identity,
+            input_pos,
+            actor_id,
+            streaming_metrics,
+        ));
         // Schema check
         executor = Box::new(SchemaCheckExecutor::new(executor));
         // Epoch check

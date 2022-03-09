@@ -1,0 +1,5 @@
+SHOW TABLE t
+---
+SHOW TABLE t
+=>
+ShowTable { table_name: ObjectName([Ident { value: "t", quote_style: None }]) }

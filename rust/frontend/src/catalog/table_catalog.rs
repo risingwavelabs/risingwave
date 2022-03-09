@@ -1,8 +1,7 @@
 use std::collections::HashSet;
 
 use itertools::Itertools;
-use risingwave_common::array::RwError;
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::meta::Table;
@@ -43,7 +42,7 @@ impl TableCatalog {
         self.table_id
     }
 
-    pub fn next_id(&mut self) -> i32 {
+    fn next_column_id(&mut self) -> i32 {
         let id = self.next_column_id;
         self.next_column_id += 1;
         id
@@ -63,14 +62,19 @@ impl TableCatalog {
                 },
                 type_name: Some(col.get_struct_name().to_string()),
             };
-            ColumnCatalog::new(ColumnId::from(self.next_id()), col.name.clone(), desc, v)
+            ColumnCatalog::new(
+                ColumnId::from(self.next_column_id()),
+                col.name.clone(),
+                desc,
+                v,
+            )
         } else {
             let desc = ColumnDesc {
                 data_type: col.get_column_type().expect("column type not found").into(),
                 type_name: Some(col.get_struct_name().to_string()),
             };
             ColumnCatalog::new(
-                ColumnId::from(self.next_id()),
+                ColumnId::from(self.next_column_id()),
                 col.name.clone(),
                 desc,
                 vec![],

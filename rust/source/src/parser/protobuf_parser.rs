@@ -116,7 +116,7 @@ impl ProtobufParser {
         };
         msg.fields()
             .iter()
-            .map(|f| date_type_to_col_desc(f, &self.descriptors, "".to_string()))
+            .map(|f| pb_field_to_col_desc(f, &self.descriptors, "".to_string()))
             .collect::<Result<Vec<ColumnDesc>>>()
     }
 }
@@ -135,11 +135,9 @@ macro_rules! protobuf_match_type {
 }
 
 /// Maps a protobuf field type to a DB column type.
-fn protobuf_type_mapping(
-    field_type: &FieldType,
-    is_repeated: bool,
-    descriptors: &Descriptors,
-) -> Result<DataType> {
+fn protobuf_type_mapping(f: &FieldDescriptor, descriptors: &Descriptors) -> Result<DataType> {
+    let is_repeated = f.is_repeated();
+    let field_type = &f.field_type(descriptors);
     if is_repeated {
         return Err(NotImplementedError("repeated field is not supported".to_string()).into());
     }
@@ -154,10 +152,7 @@ fn protobuf_type_mapping(
             let vec = m
                 .fields()
                 .iter()
-                .map(|f| {
-                    protobuf_type_mapping(&f.field_type(descriptors), f.is_repeated(), descriptors)
-                        .unwrap()
-                })
+                .map(|f| protobuf_type_mapping(f, descriptors).unwrap())
                 .collect_vec();
             DataType::Struct { fields: vec.into() }
         }
@@ -170,32 +165,25 @@ fn protobuf_type_mapping(
     Ok(t)
 }
 
-fn extract_data_type(column_vec: Vec<ColumnDesc>) -> Vec<DataType> {
-    column_vec
-        .iter()
-        .map(|c| c.get_column_type().expect("column type not found").into())
-        .collect_vec()
-}
-
-pub fn date_type_to_col_desc(
+pub fn pb_field_to_col_desc(
     field_descriptor: &FieldDescriptor,
     descriptors: &Descriptors,
     lastname: String,
 ) -> Result<ColumnDesc> {
     let field_type = field_descriptor.field_type(descriptors);
-    let data_type =
-        protobuf_type_mapping(&field_type, field_descriptor.is_repeated(), descriptors).unwrap();
+    let data_type = protobuf_type_mapping(field_descriptor, descriptors)?;
     if let FieldType::Message(m) = field_type {
         let column_vec: Vec<ColumnDesc> = m
             .fields()
             .iter()
             .map(|f| {
-                date_type_to_col_desc(
+                let desc = pb_field_to_col_desc(
                     f,
                     descriptors,
                     lastname.clone() + field_descriptor.name() + ".",
                 )
-                .unwrap()
+                .unwrap();
+                desc
             })
             .collect();
         Ok(ColumnDesc {

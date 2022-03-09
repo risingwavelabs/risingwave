@@ -23,7 +23,7 @@ log = "0.4"
 memcomparable = { path = "../utils/memcomparable" }
 num-traits = "0.2"
 paste = "1"
-prometheus = { version = "0.13", features = ["process"] }
+prometheus = { version = "0.13"}
 prost = "0.9"
 rdkafka = { version = "0.28", features = ["cmake-build"] }
 risingwave_batch = { path = "../batch" }
@@ -50,6 +50,8 @@ tokio = { version = "1", features = [
 ] }
 tokio-stream = "0.1"
 tonic = "0.6"
+tower = { version = "0.4", features = ["util", "load-shed"] }
+tower-http = { version = "0.2", features = ["add-extension", "cors"] }
 tracing = { version = "0.1", features = ["release_max_level_info"] }
 twox-hash = "1"
 url = "2"

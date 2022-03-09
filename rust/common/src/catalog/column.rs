@@ -1,3 +1,5 @@
+use risingwave_pb::plan::ColumnDesc as ProstColumnDesc;
+
 use crate::types::DataType;
 
 /// Column ID is the unique identifier of a column in a table. Different from table ID,
@@ -42,6 +44,24 @@ impl ColumnDesc {
             data_type,
             column_id,
             name: String::new(),
+        }
+    }
+}
+
+impl From<ProstColumnDesc> for ColumnDesc {
+    fn from(prost: ProstColumnDesc) -> Self {
+        let ProstColumnDesc {
+            column_type,
+            column_id,
+            name,
+            struct_name: _,
+            column_descs: _,
+        } = prost;
+
+        Self {
+            data_type: DataType::from(&column_type.unwrap()),
+            column_id: ColumnId::new(column_id),
+            name,
         }
     }
 }

@@ -12,6 +12,7 @@ pub mod show_table;
 
 pub(super) async fn handle(session: &SessionImpl, stmt: Statement) -> Result<PgResponse> {
     let context = QueryContext::new(session);
+    println!("{:?}", stmt);
     match stmt {
         Statement::Explain {
             statement, verbose, ..

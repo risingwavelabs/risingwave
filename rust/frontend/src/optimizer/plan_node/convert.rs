@@ -72,45 +72,45 @@ pub trait ToDistributedBatch {
 
 /// impl ToBatch for batch and streaming node.
 macro_rules! ban_to_batch {
-  ([], $( { $convention:ident, $name:ident }),*) => {
-    paste!{
-      $(impl ToBatch for [<$convention $name>] {
-        fn to_batch(&self) -> PlanRef {
-          panic!("convert into batch is only allowed on logical plan")
+    ([], $( { $convention:ident, $name:ident }),*) => {
+        paste!{
+            $(impl ToBatch for [<$convention $name>] {
+                fn to_batch(&self) -> PlanRef {
+                    panic!("convert into batch is only allowed on logical plan")
+                }
+            })*
         }
-     })*
     }
-  }
 }
 for_batch_plan_nodes! { ban_to_batch }
 for_stream_plan_nodes! { ban_to_batch }
 
 /// impl ToStream for batch and streaming node.
 macro_rules! ban_to_stream {
-  ([], $( { $convention:ident, $name:ident }),*) => {
-    paste!{
-      $(impl ToStream for [<$convention $name>] {
-        fn to_stream(&self) -> PlanRef {
-          panic!("convert into stream is only allowed on logical plan")
+    ([], $( { $convention:ident, $name:ident }),*) => {
+        paste!{
+            $(impl ToStream for [<$convention $name>] {
+                fn to_stream(&self) -> PlanRef {
+                    panic!("convert into stream is only allowed on logical plan")
+                }
+            })*
         }
-     })*
     }
-  }
 }
 for_batch_plan_nodes! { ban_to_stream }
 for_stream_plan_nodes! { ban_to_stream }
 
 /// impl ToDistributedBatch  for logical and streaming node.
 macro_rules! ban_to_distributed {
-  ([], $( { $convention:ident, $name:ident }),*) => {
-    paste!{
-      $(impl ToDistributedBatch for [<$convention $name>] {
-        fn to_distributed(&self) -> PlanRef {
-          panic!("convert into distributed is only allowed on batch plan")
+    ([], $( { $convention:ident, $name:ident }),*) => {
+        paste!{
+            $(impl ToDistributedBatch for [<$convention $name>] {
+                fn to_distributed(&self) -> PlanRef {
+                    panic!("convert into distributed is only allowed on batch plan")
+                }
+            })*
         }
-     })*
     }
-  }
 }
 for_logical_plan_nodes! { ban_to_distributed }
 for_stream_plan_nodes! { ban_to_distributed }

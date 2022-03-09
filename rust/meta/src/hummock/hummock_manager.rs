@@ -206,16 +206,35 @@ where
     }
 
     fn trigger_sst_stat(&self, compact_status: &CompactStatus) {
+        let reduce_compact_cnt = |compacting_key_ranges: &Vec<(
+            risingwave_storage::hummock::key_range::KeyRange,
+            u64,
+            u64,
+        )>| {
+            compacting_key_ranges
+                .iter()
+                .fold(0, |accum, elem| accum + elem.2)
+        };
         for (idx, level_handler) in enumerate(compact_status.level_handlers.iter()) {
-            let sst_cnt = match level_handler {
-                LevelHandler::Nonoverlapping(ssts, _) => ssts.len(),
-                LevelHandler::Overlapping(ssts, _) => ssts.len(),
+            let (sst_num, compact_cnt) = match level_handler {
+                LevelHandler::Nonoverlapping(ssts, compacting_key_ranges) => {
+                    (ssts.len(), reduce_compact_cnt(compacting_key_ranges))
+                }
+                LevelHandler::Overlapping(ssts, compacting_key_ranges) => {
+                    (ssts.len(), reduce_compact_cnt(compacting_key_ranges))
+                }
             };
+            let level_label = String::from("L") + &idx.to_string();
             self.metrics
-                .level_payload
-                .get_metric_with_label_values(&[&(String::from("L") + &idx.to_string())])
+                .level_sst_num
+                .get_metric_with_label_values(&[&level_label])
                 .unwrap()
-                .set(sst_cnt as i64);
+                .set(sst_num as i64);
+            self.metrics
+                .level_compact_cnt
+                .get_metric_with_label_values(&[&level_label])
+                .unwrap()
+                .set(compact_cnt as i64);
         }
     }
 
