@@ -71,7 +71,6 @@ macro_rules! for_all_metrics {
             unpin_snapshot_counts: GenericCounter<AtomicU64>,
             add_tables_counts: GenericCounter<AtomicU64>,
             get_new_table_id_counts: GenericCounter<AtomicU64>,
-            get_compaction_task_counts: GenericCounter<AtomicU64>,
             report_compaction_task_counts: GenericCounter<AtomicU64>,
 
             pin_version_latency: Histogram,
@@ -80,7 +79,6 @@ macro_rules! for_all_metrics {
             unpin_snapshot_latency: Histogram,
             add_tables_latency: Histogram,
             get_new_table_id_latency: Histogram,
-            get_compaction_task_latency: Histogram,
             report_compaction_task_latency: Histogram,
             addtable_upload_sst_counts: GenericCounter<AtomicU64>,
             compaction_upload_sst_counts: GenericCounter<AtomicU64>,
@@ -323,12 +321,6 @@ impl StateStoreStats {
             registry
         )
         .unwrap();
-        let get_compaction_task_counts = register_int_counter_with_registry!(
-            "state_store_get_compaction_task_counts",
-            "Total number of get_compaction_task requests that have been issued to state store",
-            registry
-        )
-        .unwrap();
         let report_compaction_task_counts = register_int_counter_with_registry!(
             "state_store_report_compaction_task_counts",
             "Total number of report_compaction_task requests that have been issued to state store",
@@ -411,18 +403,6 @@ impl StateStoreStats {
 
         // --
         let buckets = DEFAULT_BUCKETS
-            .map(|x| x * GET_COMPATION_TASK_LATENCY_SCALE)
-            .to_vec();
-        let get_compaction_task_latency_opts = histogram_opts!(
-            "state_store_get_compaction_task_latency",
-            "Total latency of get compaction task that have been issued to state store",
-            buckets
-        );
-        let get_compaction_task_latency =
-            register_histogram_with_registry!(get_compaction_task_latency_opts, registry).unwrap();
-
-        // --
-        let buckets = DEFAULT_BUCKETS
             .map(|x| x * REPORT_COMPATION_TASK_LATENCY_SCALE)
             .to_vec();
         let report_compaction_task_latency_opts = histogram_opts!(
@@ -481,7 +461,6 @@ impl StateStoreStats {
             unpin_snapshot_counts,
             add_tables_counts,
             get_new_table_id_counts,
-            get_compaction_task_counts,
             report_compaction_task_counts,
 
             pin_version_latency,
@@ -490,7 +469,6 @@ impl StateStoreStats {
             unpin_snapshot_latency,
             add_tables_latency,
             get_new_table_id_latency,
-            get_compaction_task_latency,
             report_compaction_task_latency,
             addtable_upload_sst_counts,
             compaction_upload_sst_counts,
