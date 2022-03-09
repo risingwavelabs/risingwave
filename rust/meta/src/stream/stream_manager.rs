@@ -338,6 +338,7 @@ mod tests {
             Ok(Response::new(InjectBarrierResponse {
                 request_id: "".to_string(),
                 status: None,
+                failed_actor_ids: Default::default(),
             }))
         }
     }

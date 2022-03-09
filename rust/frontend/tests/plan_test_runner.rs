@@ -59,7 +59,7 @@ impl TestCase {
 
         let plan = Planner::new().plan(bound.unwrap())?;
         let mut output = String::new();
-        plan.explain(0, &mut output)?;
+        plan.as_subplan().explain(0, &mut output)?;
         let expected_plan = self.plan.as_ref().unwrap().clone();
         if expected_plan != output {
             Err(anyhow!(
