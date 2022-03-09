@@ -138,9 +138,7 @@ impl FilterJoinRule {
             None
         };
 
-        if !cannot_pushed.is_empty() {
-            predicate.conjunctions = cannot_pushed;
-        }
+        predicate.conjunctions = cannot_pushed;
 
         (left, right, on)
     }
@@ -178,5 +176,171 @@ impl FilterJoinRule {
             ty,
             JoinType::Inner | JoinType::LeftOuter | JoinType::RightSemi
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rand::Rng;
+    use risingwave_common::types::DataType;
+
+    use super::*;
+    use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
+
+    #[test]
+    fn test_push_down() {
+        let rule = FilterJoinRule {};
+
+        let left_col_num = 3;
+        let right_col_num = 2;
+
+        let ty = DataType::Int32;
+
+        let mut rng = rand::thread_rng();
+        let left: ExprImpl = FunctionCall::new(
+            ExprType::Equal,
+            vec![
+                InputRef::new(rng.gen_range(0..left_col_num), ty.clone()).into(),
+                InputRef::new(rng.gen_range(0..left_col_num), ty.clone()).into(),
+            ],
+        )
+        .unwrap()
+        .into();
+        let right_inputs = vec![
+            InputRef::new(
+                rng.gen_range(left_col_num..left_col_num + right_col_num),
+                ty.clone(),
+            )
+            .into(),
+            InputRef::new(
+                rng.gen_range(left_col_num..left_col_num + right_col_num),
+                ty.clone(),
+            )
+            .into(),
+        ];
+        let right: ExprImpl = FunctionCall::new(ExprType::LessThan, right_inputs.clone())
+            .unwrap()
+            .into();
+        let right_inputs_shifted = right_inputs
+            .iter()
+            .map(|input| match input {
+                ExprImpl::InputRef(i) => {
+                    InputRef::new(i.index() - left_col_num, i.data_type()).into()
+                }
+                _ => panic!("Expect InputRef, got {:?}", input),
+            })
+            .collect();
+        let right_shifted: ExprImpl = FunctionCall::new(ExprType::LessThan, right_inputs_shifted)
+            .unwrap()
+            .into();
+        let other: ExprImpl = FunctionCall::new(
+            ExprType::GreaterThan,
+            vec![
+                InputRef::new(rng.gen_range(0..left_col_num), ty.clone()).into(),
+                InputRef::new(
+                    rng.gen_range(left_col_num..left_col_num + right_col_num),
+                    ty,
+                )
+                .into(),
+            ],
+        )
+        .unwrap()
+        .into();
+
+        let predicate = Condition::with_expr(other.clone())
+            .and(Condition::with_expr(right.clone()))
+            .and(Condition::with_expr(left.clone()));
+
+        // Only push to left
+        let mut predicate_push_left = predicate.clone();
+        let (left_pushed, right_pushed, on_pushed) = rule.push_down(
+            &mut predicate_push_left,
+            left_col_num,
+            right_col_num,
+            true,
+            false,
+            false,
+        );
+
+        assert_eq!(left_pushed.unwrap().conjunctions, vec![left.clone()]);
+        assert!(right_pushed.is_none());
+        assert!(on_pushed.is_none());
+        if predicate_push_left.conjunctions[0] != other {
+            assert_eq!(
+                predicate_push_left.conjunctions,
+                vec![right.clone(), other.clone()]
+            );
+        } else {
+            assert_eq!(
+                predicate_push_left.conjunctions,
+                vec![other.clone(), right.clone()]
+            );
+        }
+
+        // Only push to right
+        let mut predicate_push_right = predicate.clone();
+        let (left_pushed, right_pushed, on_pushed) = rule.push_down(
+            &mut predicate_push_right,
+            left_col_num,
+            right_col_num,
+            false,
+            true,
+            false,
+        );
+
+        assert!(left_pushed.is_none());
+        assert_eq!(
+            right_pushed.unwrap().conjunctions,
+            vec![right_shifted.clone()]
+        );
+        assert!(on_pushed.is_none());
+        if predicate_push_right.conjunctions[0] != other {
+            assert_eq!(
+                predicate_push_right.conjunctions,
+                vec![left.clone(), other.clone()]
+            );
+        } else {
+            assert_eq!(
+                predicate_push_right.conjunctions,
+                vec![other.clone(), left.clone()]
+            );
+        }
+
+        // Push to left, and on
+        let mut predicate_push_left_on = predicate.clone();
+        let (left_pushed, right_pushed, on_pushed) = rule.push_down(
+            &mut predicate_push_left_on,
+            left_col_num,
+            right_col_num,
+            true,
+            false,
+            true,
+        );
+
+        assert_eq!(left_pushed.unwrap().conjunctions, vec![left.clone()]);
+        assert!(right_pushed.is_none());
+        let on_pushed = on_pushed.unwrap();
+        if on_pushed.conjunctions[0] != other {
+            assert_eq!(on_pushed.conjunctions, vec![right, other.clone()]);
+        } else {
+            assert_eq!(on_pushed.conjunctions, vec![other.clone(), right]);
+        }
+        assert_eq!(predicate_push_left_on.conjunctions, vec![]);
+
+        // Push to left, right and on
+        let mut predicate_push_all = predicate;
+        let (left_pushed, right_pushed, on_pushed) = rule.push_down(
+            &mut predicate_push_all,
+            left_col_num,
+            right_col_num,
+            true,
+            true,
+            true,
+        );
+
+        assert_eq!(left_pushed.unwrap().conjunctions, vec![left]);
+        assert_eq!(right_pushed.unwrap().conjunctions, vec![right_shifted]);
+        assert_eq!(on_pushed.unwrap().conjunctions, vec![other]);
+        assert_eq!(predicate_push_all.conjunctions, vec![]);
     }
 }

@@ -96,3 +96,68 @@ impl Condition {
             .for_each(|expr| visitor.visit_expr(expr))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use rand::Rng;
+
+    use super::*;
+    use crate::expr::InputRef;
+
+    #[test]
+    fn test_split() {
+        let left_col_num = 3;
+        let right_col_num = 2;
+
+        let ty = DataType::Int32;
+
+        let mut rng = rand::thread_rng();
+        let left: ExprImpl = FunctionCall::new(
+            ExprType::Equal,
+            vec![
+                InputRef::new(rng.gen_range(0..left_col_num), ty.clone()).into(),
+                InputRef::new(rng.gen_range(0..left_col_num), ty.clone()).into(),
+            ],
+        )
+        .unwrap()
+        .into();
+        let right: ExprImpl = FunctionCall::new(
+            ExprType::LessThan,
+            vec![
+                InputRef::new(
+                    rng.gen_range(left_col_num..left_col_num + right_col_num),
+                    ty.clone(),
+                )
+                .into(),
+                InputRef::new(
+                    rng.gen_range(left_col_num..left_col_num + right_col_num),
+                    ty.clone(),
+                )
+                .into(),
+            ],
+        )
+        .unwrap()
+        .into();
+        let other: ExprImpl = FunctionCall::new(
+            ExprType::GreaterThan,
+            vec![
+                InputRef::new(rng.gen_range(0..left_col_num), ty.clone()).into(),
+                InputRef::new(
+                    rng.gen_range(left_col_num..left_col_num + right_col_num),
+                    ty,
+                )
+                .into(),
+            ],
+        )
+        .unwrap()
+        .into();
+
+        let cond = Condition::with_expr(other.clone())
+            .and(Condition::with_expr(right.clone()))
+            .and(Condition::with_expr(left.clone()));
+        let res = cond.split(left_col_num, right_col_num);
+        assert_eq!(res.0, vec![left]);
+        assert_eq!(res.1, vec![right]);
+        assert_eq!(res.2, vec![other]);
+    }
+}
