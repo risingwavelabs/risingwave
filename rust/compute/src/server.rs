@@ -108,8 +108,8 @@ pub async fn compute_node_serve(
             .add_service(StreamServiceServer::new(stream_srv))
             .serve_with_shutdown(addr, async move {
                 tokio::select! {
-                  _ = tokio::signal::ctrl_c() => {},
-                  _ = shutdown_recv.recv() => {
+                    _ = tokio::signal::ctrl_c() => {},
+                    _ = shutdown_recv.recv() => {
                         // Gracefully shutdown compactor
                         if let Some((compactor_join_handle, compactor_shutdown_sender)) = compactor_handle {
                             if compactor_shutdown_sender.send(()).is_ok() {

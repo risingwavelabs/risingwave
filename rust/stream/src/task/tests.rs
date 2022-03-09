@@ -238,12 +238,12 @@ async fn test_stream_proto() {
         }
         let barrier_epoch = Epoch::new_test_epoch(114514);
         assert!(matches!(
-          sink.next().await.unwrap(),
-          Message::Barrier(Barrier {
-            epoch,
-            mutation,
-            ..
-          }) if mutation.as_deref().unwrap().is_stop() && epoch == barrier_epoch
+            sink.next().await.unwrap(),
+            Message::Barrier(Barrier {
+                epoch,
+                mutation,
+                ..
+            }) if mutation.as_deref().unwrap().is_stop() && epoch == barrier_epoch
         ));
     });
 

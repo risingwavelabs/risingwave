@@ -54,8 +54,8 @@ mod handlers {
     impl IntoResponse for DashboardError {
         fn into_response(self) -> axum::response::Response {
             let mut resp = Json(json!({
-              "error": format!("{}", self.0),
-              "info":  format!("{:?}", self.0),
+                "error": format!("{}", self.0),
+                "info":  format!("{:?}", self.0),
             }))
             .into_response();
             *resp.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;

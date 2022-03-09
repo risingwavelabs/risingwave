@@ -206,32 +206,32 @@ pub use stream_table_source::StreamTableSource;
 /// See the following implementations for example.
 #[macro_export]
 macro_rules! for_all_plan_nodes {
-    ($macro:tt $(, $x:tt)*) => {
-      $macro! {
-          [$($x),*]
-          ,{ Logical, Agg }
-          ,{ Logical, Filter }
-          ,{ Logical, Project }
-          ,{ Logical, Scan }
-          ,{ Logical, Insert }
-          ,{ Logical, Join }
-          ,{ Logical, Values }
-          ,{ Logical, Limit }
-          ,{ Logical, TopN }
-          // ,{ Logical, Sort } we don't need a LogicalSort, just require the Order
-          ,{ Batch, Project }
-          ,{ Batch, SeqScan }
-          ,{ Batch, HashJoin }
-          ,{ Batch, SortMergeJoin }
-          ,{ Batch, Sort }
-          ,{ Batch, Exchange }
-          ,{ Batch, Limit }
-          ,{ Stream, Project }
-          ,{ Stream, TableSource }
-          ,{ Stream, HashJoin }
-          ,{ Stream, Exchange }
-      }
-  };
+    ($macro:ident $(, $x:tt)*) => {
+        $macro! {
+            [$($x),*]
+            ,{ Logical, Agg }
+            ,{ Logical, Filter }
+            ,{ Logical, Project }
+            ,{ Logical, Scan }
+            ,{ Logical, Insert }
+            ,{ Logical, Join }
+            ,{ Logical, Values }
+            ,{ Logical, Limit }
+            ,{ Logical, TopN }
+            // ,{ Logical, Sort } we don't need a LogicalSort, just require the Order
+            ,{ Batch, Project }
+            ,{ Batch, SeqScan }
+            ,{ Batch, HashJoin }
+            ,{ Batch, SortMergeJoin }
+            ,{ Batch, Sort }
+            ,{ Batch, Exchange }
+            ,{ Batch, Limit }
+            ,{ Stream, Project }
+            ,{ Stream, TableSource }
+            ,{ Stream, HashJoin }
+            ,{ Stream, Exchange }
+        }
+    };
 }
 /// `for_logical_plan_nodes` includes all plan nodes with logical convention.
 #[macro_export]
@@ -287,22 +287,21 @@ macro_rules! for_stream_plan_nodes {
 
 /// impl PlanNodeType fn for each node.
 macro_rules! enum_plan_node_type {
-  ([], $( { $convention:ident, $name:ident }),*) => {
-    paste!{
+    ([], $( { $convention:ident, $name:ident }),*) => {
+        paste!{
+            /// each enum value represent a PlanNode struct type, help us to dispatch and downcast
+            #[derive(PartialEq, Debug)]
+            pub enum PlanNodeType{
+                $( [<$convention $name>] ),*
+            }
 
-      /// each enum value represent a PlanNode struct type, help us to dispatch and downcast
-      #[derive(PartialEq, Debug)]
-      pub enum PlanNodeType{
-        $( [<$convention $name>] ),*
-      }
-
-      $(impl PlanNode for [<$convention $name>] {
-          fn node_type(&self) -> PlanNodeType{
-            PlanNodeType::[<$convention $name>]
-          }
-        })*
+            $(impl PlanNode for [<$convention $name>] {
+                fn node_type(&self) -> PlanNodeType{
+                    PlanNodeType::[<$convention $name>]
+                }
+            })*
+        }
     }
-  }
 }
 for_all_plan_nodes! { enum_plan_node_type }
 

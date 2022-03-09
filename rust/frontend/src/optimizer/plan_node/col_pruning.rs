@@ -23,15 +23,15 @@ pub trait ColPrunable {
 
 /// impl ColPrunable for batch and streaming node.
 macro_rules! ban_prune_col {
-  ([], $( { $convention:ident, $name:ident }),*) => {
-    paste!{
-      $(impl ColPrunable for [<$convention $name>] {
-        fn prune_col(&self, _required_cols: &FixedBitSet) -> PlanRef {
-          panic!("column pruning is only allowed on logical plan")
+    ([], $( { $convention:ident, $name:ident }),*) => {
+        paste!{
+            $(impl ColPrunable for [<$convention $name>] {
+                fn prune_col(&self, _required_cols: &FixedBitSet) -> PlanRef {
+                    panic!("column pruning is only allowed on logical plan")
+                }
+            })*
         }
-     })*
     }
-  }
 }
 for_batch_plan_nodes! { ban_prune_col }
 for_stream_plan_nodes! { ban_prune_col }
