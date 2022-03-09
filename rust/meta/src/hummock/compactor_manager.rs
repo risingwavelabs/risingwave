@@ -106,7 +106,9 @@ impl CompactorManager {
 #[cfg(test)]
 mod tests {
     use risingwave_common::error::Result;
-    use risingwave_pb::hummock::{CompactTask, SubscribeCompactTasksResponse};
+    use risingwave_pb::hummock::{
+        CompactMetrics, CompactTask, SubscribeCompactTasksResponse, TableSetStatistics,
+    };
     use tokio::sync::mpsc::error::TryRecvError;
 
     use crate::hummock::CompactorManager;
@@ -120,6 +122,11 @@ mod tests {
             task_id,
             target_level: 0,
             is_target_ultimate_and_leveling: false,
+            metrics: Some(CompactMetrics {
+                read_level_n: Some(TableSetStatistics::default()),
+                read_level_nplus1: Some(TableSetStatistics::default()),
+                write: Some(TableSetStatistics::default()),
+            }),
         }
     }
 

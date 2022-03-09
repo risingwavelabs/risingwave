@@ -1,7 +1,9 @@
 use bytes::Bytes;
 use itertools::{EitherOrBoth, Itertools};
 use risingwave_common::error::Result;
-use risingwave_pb::hummock::{CompactTask, Level, LevelEntry, LevelType, SstableInfo};
+use risingwave_pb::hummock::{
+    CompactMetrics, CompactTask, Level, LevelEntry, LevelType, SstableInfo, TableSetStatistics,
+};
 use risingwave_storage::hummock::key::{user_key, FullKey};
 use risingwave_storage::hummock::key_range::KeyRange;
 use risingwave_storage::hummock::{HummockEpoch, HummockSSTableId};
@@ -304,6 +306,23 @@ impl CompactStatus {
                     is_target_ultimate_and_leveling: target_level as usize
                         == self.level_handlers.len() - 1
                         && is_target_level_leveling,
+                    metrics: Some(CompactMetrics {
+                        read_level_n: Some(TableSetStatistics {
+                            level_idx: select_level,
+                            size_gb: 0f64,
+                            cnt: 0,
+                        }),
+                        read_level_nplus1: Some(TableSetStatistics {
+                            level_idx: target_level,
+                            size_gb: 0f64,
+                            cnt: 0,
+                        }),
+                        write: Some(TableSetStatistics {
+                            level_idx: target_level,
+                            size_gb: 0f64,
+                            cnt: 0,
+                        }),
+                    }),
                 };
                 Some(compact_task)
             }
