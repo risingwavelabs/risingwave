@@ -8,14 +8,12 @@ use risingwave_common::error::Result;
 use risingwave_pb::meta::Table;
 use risingwave_pb::plan::{ColumnDesc, DatabaseRefId, SchemaRefId, TableRefId};
 
-use crate::catalog::rw_auth_members::*;
 use crate::catalog::rw_authid::*;
 use crate::catalog::rw_materialized_view::*;
 use crate::catalog::rw_stream_source::*;
 use crate::catalog::rw_table_source::*;
 use crate::storage::MetaStore;
 
-mod rw_auth_members;
 mod rw_authid;
 mod rw_materialized_view;
 mod rw_stream_source;
@@ -30,11 +28,10 @@ macro_rules! for_all_catalog_table_impl {
     ($macro:tt $(, $x:tt)*) => {
         $macro! {
             [$($x),*],
-            {AuthMembers, 1, RW_AUTH_MEMBERS_NAME, RW_AUTH_MEMBERS_SCHEMA, list_auth_members},
-            {AuthId, 2, RW_AUTHID_NAME, RW_AUTHID_SCHEMA, list_auth_ids},
-            {StreamSource, 3, RW_STREAM_SOURCE_NAME, RW_STREAM_SOURCE_SCHEMA, list_stream_sources},
-            {TableSource, 4, RW_TABLE_SOURCE_NAME, RW_TABLE_SOURCE_SCHEMA, list_table_sources},
-            {MaterializedView, 5, RW_MATERIALIZED_VIEW_NAME, RW_MATERIALIZED_VIEW_SCHEMA, list_materialized_views}
+            {Auth, 1, RW_AUTH_NAME, RW_AUTH_SCHEMA, list_auth_info},
+            {StreamSource, 2, RW_STREAM_SOURCE_NAME, RW_STREAM_SOURCE_SCHEMA, list_stream_sources},
+            {TableSource, 3, RW_TABLE_SOURCE_NAME, RW_TABLE_SOURCE_SCHEMA, list_table_sources},
+            {MaterializedView, 4, RW_MATERIALIZED_VIEW_NAME, RW_MATERIALIZED_VIEW_SCHEMA, list_materialized_views}
         }
     };
 }
@@ -167,23 +164,15 @@ mod tests {
     #[tokio::test]
     async fn test_catalog_table_impl() -> Result<()> {
         let store = MetaSrvEnv::for_test().await.meta_store_ref();
-        assert_eq!(RwCatalogTable::AuthMembers.table_id().table_id, 1);
-        assert_eq!(RwCatalogTable::AuthMembers.name(), RW_AUTH_MEMBERS_NAME);
+        assert_eq!(RwCatalogTable::Auth.table_id().table_id, 1);
+        assert_eq!(RwCatalogTable::Auth.name(), RW_AUTH_NAME);
         assert_eq!(
-            RwCatalogTable::AuthMembers.schema().fields,
-            RW_AUTH_MEMBERS_SCHEMA.fields()
+            RwCatalogTable::Auth.schema().fields,
+            RW_AUTH_SCHEMA.fields
         );
-        assert!(RwCatalogTable::AuthMembers.list(&*store).await?.is_empty());
+        assert!(RwCatalogTable::Auth.list(&*store).await?.is_empty());
 
-        assert_eq!(RwCatalogTable::AuthId.table_id().table_id, 2);
-        assert_eq!(RwCatalogTable::AuthId.name(), RW_AUTHID_NAME);
-        assert_eq!(
-            RwCatalogTable::AuthId.schema().fields,
-            RW_AUTHID_SCHEMA.fields
-        );
-        assert!(RwCatalogTable::AuthId.list(&*store).await?.is_empty());
-
-        assert_eq!(RwCatalogTable::StreamSource.table_id().table_id, 3);
+        assert_eq!(RwCatalogTable::StreamSource.table_id().table_id, 2);
         assert_eq!(RwCatalogTable::StreamSource.name(), RW_STREAM_SOURCE_NAME);
         assert_eq!(
             RwCatalogTable::StreamSource.schema().fields,
@@ -202,14 +191,10 @@ mod tests {
         let catalog_srv = SystemCatalogSrv::new();
         assert_eq!(
             catalog_srv.get_table(&TableId { table_id: 1 }),
-            Some(RwCatalogTable::AuthMembers)
+            Some(RwCatalogTable::Auth)
         );
         assert_eq!(
             catalog_srv.get_table(&TableId { table_id: 2 }),
-            Some(RwCatalogTable::AuthId)
-        );
-        assert_eq!(
-            catalog_srv.get_table(&TableId { table_id: 3 }),
             Some(RwCatalogTable::StreamSource)
         );
 
