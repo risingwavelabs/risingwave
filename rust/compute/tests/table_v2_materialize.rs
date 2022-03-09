@@ -124,10 +124,6 @@ async fn test_table_v2_materialize() -> Result<()> {
         Schema::new(fields)
     };
 
-    // Register associated materialized view
-    let mview_id = TableId::new(1);
-    source_manager.register_associated_materialized_view(&source_table_id, &mview_id)?;
-
     // Create a `SourceExecutor` to read the changes
     let all_column_ids = vec![ColumnId::from(0), ColumnId::from(1)];
     let all_schema = get_schema(&all_column_ids);
@@ -159,8 +155,12 @@ async fn test_table_v2_materialize() -> Result<()> {
     let columns = vec![column_nonnull! { F64Array, [1.14, 5.14] }];
     let chunk = DataChunk::builder().columns(columns.clone()).build();
     let insert_inner = SingleChunkExecutor::new(chunk, all_schema.clone());
-    let mut insert =
-        InsertExecutor::new(mview_id, source_manager.clone(), Box::new(insert_inner), 0);
+    let mut insert = InsertExecutor::new(
+        source_table_id,
+        source_manager.clone(),
+        Box::new(insert_inner),
+        0,
+    );
 
     tokio::spawn(async move {
         insert.open().await?;

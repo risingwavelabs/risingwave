@@ -151,13 +151,6 @@ message CompactTask {
   bool is_target_ultimate_and_leveling = 7;
 }
 
-message GetCompactionTasksRequest {}
-
-message GetCompactionTasksResponse {
-  common.Status status = 1;
-  CompactTask compact_task = 2;
-}
-
 message ReportCompactionTasksRequest {
   CompactTask compact_task = 2;
   bool task_result = 3;
@@ -214,13 +207,25 @@ message SubscribeCompactTasksRequest {}
 
 message SubscribeCompactTasksResponse {
   CompactTask compact_task = 1;
+  VacuumTask vacuum_task = 2;
+}
+
+message VacuumTask {
+  message VacuumTrackedData {
+    repeated uint64 sstable_ids = 1;
+  }
+  message VaccumOrphanData {}
+
+  oneof task {
+    VacuumTrackedData tracked = 1;
+    VaccumOrphanData orphan = 2;
+  }
 }
 
 service HummockManagerService {
   rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
   rpc UnpinVersion(UnpinVersionRequest) returns (UnpinVersionResponse);
   rpc AddTables(AddTablesRequest) returns (AddTablesResponse);
-  rpc GetCompactionTasks(GetCompactionTasksRequest) returns (GetCompactionTasksResponse);
   rpc ReportCompactionTasks(ReportCompactionTasksRequest) returns (ReportCompactionTasksResponse);
   rpc PinSnapshot(PinSnapshotRequest) returns (PinSnapshotResponse);
   rpc UnpinSnapshot(UnpinSnapshotRequest) returns (UnpinSnapshotResponse);

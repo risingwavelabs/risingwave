@@ -86,7 +86,7 @@ message FilterScanNode {
 }
 
 message InsertNode {
-  TableRefId table_ref_id = 1;
+  TableRefId table_source_ref_id = 1;
   repeated int32 column_ids = 2;
 }
 

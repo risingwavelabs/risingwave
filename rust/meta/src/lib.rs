@@ -18,7 +18,7 @@
 mod barrier;
 pub mod cluster;
 mod dashboard;
-mod hummock;
+pub mod hummock;
 pub mod manager;
 mod model;
 pub mod rpc;
@@ -26,9 +26,15 @@ pub mod storage;
 mod stream;
 pub mod test_utils;
 
-use clap::Parser;
+use clap::{ArgEnum, Parser};
 
 use crate::rpc::server::{rpc_serve, MetaStoreBackend};
+
+#[derive(Copy, Clone, Debug, ArgEnum)]
+enum Backend {
+    Mem,
+    Etcd,
+}
 
 #[derive(Debug, Parser)]
 pub struct MetaNodeOpts {
@@ -41,8 +47,8 @@ pub struct MetaNodeOpts {
     #[clap(long)]
     prometheus_host: Option<String>,
 
-    #[clap(long, default_value_t = String::from(""))]
-    backend: String,
+    #[clap(long, arg_enum, default_value_t = Backend::Mem)]
+    backend: Backend,
 
     #[clap(long, default_value_t = String::from(""))]
     etcd_endpoints: String,
@@ -53,16 +59,15 @@ pub async fn start(opts: MetaNodeOpts) {
     let addr = opts.host.parse().unwrap();
     let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
     let prometheus_addr = opts.prometheus_host.map(|x| x.parse().unwrap());
-    let backend = match opts.backend.as_str() {
-        "etcd" => MetaStoreBackend::Etcd {
+    let backend = match opts.backend {
+        Backend::Etcd => MetaStoreBackend::Etcd {
             endpoints: opts
                 .etcd_endpoints
                 .split(',')
                 .map(|x| x.to_string())
                 .collect(),
         },
-        "mem" | "" => MetaStoreBackend::Mem,
-        _ => panic!("unknown backend"),
+        Backend::Mem => MetaStoreBackend::Mem,
     };
 
     tracing::info!("Starting meta server at {}", addr);

@@ -1,6 +1,6 @@
 use fixedbitset::FixedBitSet;
 
-use crate::expr::{get_inputs_col_index, Expr, ExprImpl, ExprType, FunctionCall, InputRef};
+use crate::expr::{get_inputs_col_index, ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::utils::Condition;
 
 /// The join predicate used in optimizer
@@ -96,9 +96,9 @@ impl EqJoinPredicate {
                 .iter()
                 .cloned()
                 .map(|(l, r)| {
-                    FunctionCall::new(ExprType::Equal, vec![l.to_expr_impl(), r.to_expr_impl()])
+                    FunctionCall::new(ExprType::Equal, vec![l.into(), r.into()])
                         .unwrap()
-                        .to_expr_impl()
+                        .into()
                 })
                 .collect(),
         }

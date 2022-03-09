@@ -29,26 +29,26 @@ impl Block {
         let size = data.len();
 
         // varify checksum
-        let checksum_len = data.slice(size - 4..).get_u32() as usize;
+        let checksum_len = (&data[size - 4..]).get_u32() as usize;
         let content_len = size - 4 - checksum_len;
-        let checksum = Checksum::decode(data.slice(content_len..content_len + checksum_len))
+        let checksum = Checksum::decode(&data[content_len..content_len + checksum_len])
             .map_err(HummockError::decode_error)?;
-        verify_checksum(&checksum, &data.slice(..content_len))?;
+        verify_checksum(&checksum, &data[..content_len])?;
 
-        let n_entries = data.slice(content_len - 4..content_len).get_u32() as usize;
+        let n_entries = (&data[content_len - 4..content_len]).get_u32() as usize;
         assert!(n_entries > 0);
 
         // read indices
         let data_len = content_len - 4 - n_entries * 4;
-        let mut indices = data.slice(data_len..content_len - 4);
-        let mut entry_offsets = Vec::with_capacity(n_entries);
+        let mut indices = &data[data_len..content_len - 4];
+        let mut entry_offsets = Vec::with_capacity(n_entries + 1);
         for _ in 0..n_entries {
             entry_offsets.push(indices.get_u32_le());
         }
         entry_offsets.push(data_len as u32);
 
         // base key
-        let base_header = Header::decode(&mut data.slice(..HEADER_SIZE));
+        let base_header = Header::decode(&mut &data[..HEADER_SIZE]);
         let base_key = data.slice(HEADER_SIZE..HEADER_SIZE + base_header.diff as usize);
 
         Ok(Block {
@@ -67,23 +67,6 @@ impl Block {
         assert!(index < self.entry_offsets.len());
         self.data
             .slice(self.entry_offsets[index] as usize..self.entry_offsets[index + 1] as usize)
-    }
-
-    /// Decoded key/value of given entry index.
-    ///
-    /// For test only, block is always accessed by [`BlockIterator`].
-    #[cfg(test)]
-    pub fn entry(&self, index: usize) -> (Bytes, Bytes) {
-        use bytes::BytesMut;
-        assert!(index < self.entry_offsets.len());
-        let buf = self.raw_entry(index);
-        let header = Header::decode(&mut buf.slice(..HEADER_SIZE));
-        let mut key = BytesMut::with_capacity(header.overlap as usize + header.diff as usize);
-        key.extend_from_slice(&self.base_key.slice(..header.overlap as usize));
-        key.extend_from_slice(&buf.slice(HEADER_SIZE..HEADER_SIZE + header.diff as usize));
-        let key = key.freeze();
-        let value = buf.slice(HEADER_SIZE + header.diff as usize..);
-        (key, value)
     }
 
     /// Block size in SST, taking compression, checksum, indices into account.
@@ -105,12 +88,14 @@ impl Block {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use bytes::BytesMut;
 
     use crate::assert_bytes_eq;
     use crate::hummock::key::key_with_epoch;
     use crate::hummock::value::HummockValue;
-    use crate::hummock::{Block, SSTableBuilder, SSTableBuilderOptions};
+    use crate::hummock::{Block, BlockIterator, SSTableBuilder, SSTableBuilderOptions};
 
     fn key(index: usize) -> Vec<u8> {
         key_with_epoch(format!("k{:02}", index).into_bytes(), 0)
@@ -153,16 +138,32 @@ mod tests {
         .unwrap();
         assert_eq!(block0.len(), 2);
         assert_eq!(block1.len(), 2);
-        let (k0, v0) = block0.entry(0);
+
+        let mut iter = BlockIterator::new(Arc::new(block0));
+
+        iter.seek_to_first();
+        let k0 = iter.key().unwrap();
+        let v0 = iter.value().unwrap();
         assert_bytes_eq!(k0, key(0));
         assert_bytes_eq!(v0, put_value_bytes(0));
-        let (k1, v1) = block0.entry(1);
+
+        iter.next();
+        let k1 = iter.key().unwrap();
+        let v1 = iter.value().unwrap();
         assert_bytes_eq!(k1, key(1));
         assert_bytes_eq!(v1, put_value_bytes(1));
-        let (k2, v2) = block1.entry(0);
+
+        iter.set_block(Arc::new(block1));
+
+        iter.seek_to_first();
+        let k2 = iter.key().unwrap();
+        let v2 = iter.value().unwrap();
         assert_bytes_eq!(k2, key(2));
         assert_bytes_eq!(v2, put_value_bytes(2));
-        let (k3, v3) = block1.entry(1);
+
+        iter.next();
+        let k3 = iter.key().unwrap();
+        let v3 = iter.value().unwrap();
         assert_bytes_eq!(k3, key(3));
         assert_bytes_eq!(v3, put_value_bytes(3));
     }

@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use risingwave_pb::hummock::{
-    AddTablesRequest, CompactTask, GetCompactionTasksRequest, GetNewTableIdRequest,
-    HummockSnapshot, HummockVersion, PinSnapshotRequest, PinVersionRequest,
-    ReportCompactionTasksRequest, SstableInfo, SubscribeCompactTasksRequest,
-    SubscribeCompactTasksResponse, UnpinSnapshotRequest, UnpinVersionRequest,
+    AddTablesRequest, CompactTask, GetNewTableIdRequest, HummockSnapshot, HummockVersion,
+    PinSnapshotRequest, PinVersionRequest, ReportCompactionTasksRequest, SstableInfo,
+    SubscribeCompactTasksRequest, SubscribeCompactTasksResponse, UnpinSnapshotRequest,
+    UnpinVersionRequest,
 };
 use risingwave_rpc_client::MetaClient;
 use tonic::Streaming;
@@ -39,7 +39,6 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         epoch: HummockEpoch,
         sstables: Vec<SstableInfo>,
     ) -> HummockResult<HummockVersion>;
-    async fn get_compaction_task(&self) -> HummockResult<Option<CompactTask>>;
     async fn report_compaction_task(
         &self,
         compact_task: CompactTask,
@@ -162,19 +161,6 @@ impl HummockMetaClient for RpcHummockMetaClient {
             .map_err(HummockError::meta_error)?;
         timer.observe_duration();
         Ok(resp.version.unwrap())
-    }
-
-    async fn get_compaction_task(&self) -> HummockResult<Option<CompactTask>> {
-        self.stats.get_compaction_task_counts.inc();
-        let timer = self.stats.get_compaction_task_latency.start_timer();
-        let result = self
-            .meta_client
-            .inner
-            .get_compaction_tasks(GetCompactionTasksRequest {})
-            .await
-            .map_err(HummockError::meta_error)?;
-        timer.observe_duration();
-        Ok(result.compact_task)
     }
 
     async fn report_compaction_task(

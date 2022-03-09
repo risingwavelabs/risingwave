@@ -2,9 +2,11 @@
 members = [
   "batch",
   "bench",
+  "cmd",
   "common",
   "compute",
   "connector",
+  "ctl",
   "frontend",
   "meta",
   "prost",
