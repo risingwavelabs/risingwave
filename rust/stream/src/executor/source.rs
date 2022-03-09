@@ -214,7 +214,17 @@ impl SourceReader {
     #[try_stream(ok = StreamChunk, error = RwError)]
     async fn stream_reader(mut stream_reader: Box<dyn StreamSourceReader>) {
         loop {
-            yield stream_reader.next().await?;
+            match stream_reader.next().await {
+                Err(e) => {
+                    error!("hang up stream reader due to polling error: {}", e);
+
+                    // Drop the reader, then the error might be caught by the writer side.
+                    // Then hang up this stream by breaking the loop.
+                    drop(stream_reader);
+                    break;
+                }
+                item => yield item,
+            }
         }
     }
 
