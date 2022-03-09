@@ -1,4 +1,5 @@
-use risingwave_common::array::{DataChunk, InternalError};
+use risingwave_common::array::DataChunk;
+use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::plan::exchange_info::BroadcastInfo;
 use risingwave_pb::plan::*;

@@ -1,7 +1,6 @@
 use std::collections::HashSet;
 
-use risingwave_common::array::RwError;
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 use risingwave_pb::meta::Table;
 
 use crate::catalog::column_catalog::{ColumnCatalog, ColumnDesc};

@@ -2,9 +2,8 @@ use std::collections::HashMap;
 
 use futures::future::try_join_all;
 use log::debug;
-use risingwave_common::array::RwError;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::{Result, ToRwResult};
+use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::data::barrier::Mutation;
 use risingwave_pb::data::{Actors, AddMutation, NothingMutation, StopMutation};

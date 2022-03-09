@@ -1,12 +1,10 @@
-// use aws_sdk_kinesis::{Client as KinesisClient, SdkError};
-// use aws_sdk_kinesis::output::GetRecordsOutput;
+use anyhow::anyhow;
 use aws_sdk_kinesis::model::Record;
+use serde::{Deserialize, Serialize};
 
-// use aws_smithy_types::Blob;
-// use aws_sdk_kinesis::error::GetRecordsError;
 use crate::base::{SourceMessage, SourceOffset};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct KinesisMessage {
     pub shard_id: String,
     pub sequence_number: String,
@@ -22,6 +20,10 @@ impl SourceMessage for KinesisMessage {
     fn offset(&self) -> anyhow::Result<Option<SourceOffset>> {
         Ok(Some(SourceOffset::String(self.sequence_number.clone())))
     }
+
+    fn serialize(&self) -> anyhow::Result<String> {
+        serde_json::to_string(self).map_err(|e| anyhow!(e))
+    }
 }
 
 impl KinesisMessage {
@@ -31,16 +33,6 @@ impl KinesisMessage {
             sequence_number: message.sequence_number.unwrap(),
             partition_key: message.partition_key.unwrap(),
             payload: Some(message.data.unwrap().into_inner()),
-        }
-    }
-
-    // TODO(tabVersion) remove after debug
-    pub fn default() -> Self {
-        KinesisMessage {
-            shard_id: "shard_id".to_string(),
-            sequence_number: "sequence number".to_string(),
-            partition_key: "partition key".to_string(),
-            payload: None,
         }
     }
 }
