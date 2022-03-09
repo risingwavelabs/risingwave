@@ -6,11 +6,12 @@ mod utils;
 use clap::Parser;
 use operations::*;
 use risingwave_common::config::StorageConfig;
+use risingwave_pb::common::WorkerType;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::monitor::DEFAULT_STATE_STORE_STATS;
 use risingwave_storage::{dispatch_state_store, StateStoreImpl};
 
-use crate::utils::display_stat::print_statistics;
+use crate::utils::display_stats::print_statistics;
 
 #[derive(Parser, Debug)]
 pub(crate) struct Opts {
@@ -78,7 +79,7 @@ pub(crate) struct Opts {
     statistics: bool,
 
     #[clap(long)]
-    calibrate_metric: bool,
+    calibrate_histogram: bool,
 }
 
 fn preprocess_options(opts: &mut Opts) {
@@ -116,16 +117,16 @@ async fn main() {
     });
 
     let meta_address = "http://127.0.0.1:5690";
-    let hummock_meta_client = MetaClient::new(meta_address).await.unwrap();
+    let mut hummock_meta_client = MetaClient::new(meta_address).await.unwrap();
+    let meta_address = "127.0.0.1:5690".parse().unwrap();
+    hummock_meta_client
+        .register(meta_address, WorkerType::ComputeNode)
+        .await
+        .unwrap();
 
-    let state_store =
-        match StateStoreImpl::new(&opts.store, config, hummock_meta_client, stats.clone()).await {
-            Ok(state_store_impl) => state_store_impl,
-            Err(_) => {
-                eprintln!("Failed to get state_store");
-                return;
-            }
-        };
+    let state_store = StateStoreImpl::new(&opts.store, config, hummock_meta_client, stats.clone())
+        .await
+        .expect("Failed to get state_store");
 
     dispatch_state_store!(state_store, store, { Operations::run(store, &opts).await });
 

@@ -193,7 +193,8 @@ impl StateStore for MemoryStateStore {
     }
 
     async fn sync(&self, _epoch: Option<u64>) -> Result<()> {
-        unimplemented!()
+        // memory backend doesn't support push to S3, so this is a no-op
+        Ok(())
     }
 }
 

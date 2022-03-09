@@ -10,7 +10,7 @@ async fn main() {
     let opts = risingwave_frontend::FrontendOpts::parse();
 
     risingwave_logging::oneshot_common();
-    risingwave_logging::init_risingwave_logger(false);
+    risingwave_logging::init_risingwave_logger(false, false);
 
     risingwave_frontend::start(opts).await
 }

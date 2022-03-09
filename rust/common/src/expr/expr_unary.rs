@@ -1,8 +1,7 @@
-use std::marker::PhantomData;
+//! For expression that only accept one value as input (e.g. CAST)
 
 use risingwave_pb::expr::expr_node::Type as ProstType;
 
-/// For expression that only accept one value as input (e.g. CAST)
 use super::template::{UnaryBytesExpression, UnaryExpression};
 use crate::array::*;
 use crate::expr::expr_is_null::{IsNotNullExpression, IsNullExpression};
@@ -34,23 +33,22 @@ use crate::vector_op::upper::upper;
 /// * `$func`: The scalar function for expression, it's a generic function and specialized by the
 ///   type of `$input, $cast`
 macro_rules! gen_cast_impl {
-  ([$child:expr, $ret:expr], $( { $input:tt, $cast:tt, $func:expr } ),*) => {
-    match ($child.return_type(), $ret.clone()) {
-      $(
-          ($input! { type_match_pattern }, $cast! { type_match_pattern }) => {
-            Box::new(UnaryExpression::< $input! { type_array }, $cast! { type_array }, _> {
-              expr_ia1: $child,
-              return_type: $ret.clone(),
-              func: $func,
-              _phantom: PhantomData,
-            })
-          }
-      ),*
-      _ => {
-        unimplemented!("CAST({:?} AS {:?}) not supported yet!", $child.return_type(), $ret)
-      }
-    }
-  };
+    ([$child:expr, $ret:expr], $( { $input:tt, $cast:tt, $func:expr } ),*) => {
+        match ($child.return_type(), $ret.clone()) {
+            $(
+                ($input! { type_match_pattern }, $cast! { type_match_pattern }) => Box::new(
+                    UnaryExpression::< $input! { type_array }, $cast! { type_array }, _>::new(
+                        $child,
+                        $ret.clone(),
+                        $func
+                    )
+                ),
+            )*
+            _ => {
+                unimplemented!("CAST({:?} AS {:?}) not supported yet!", $child.return_type(), $ret)
+            }
+        }
+    };
 }
 
 macro_rules! gen_cast {
@@ -109,15 +107,14 @@ macro_rules! gen_neg_impl {
     ($child:expr, $ret:expr, $($input:tt),*) => {
         match $child.return_type() {
             $(
-                $input! {type_match_pattern} => {
-                    Box::new(UnaryExpression::<$input! {type_array}, $input! {type_array}, _> {
-                        expr_ia1: $child,
-                        return_type: $ret.clone(),
-                        func: general_neg,
-                        _phantom: PhantomData,
-                    })
-                }
-            ),*
+                $input! {type_match_pattern} => Box::new(
+                    UnaryExpression::<$input! {type_array}, $input! {type_array}, _>::new(
+                        $child,
+                        $ret.clone(),
+                        general_neg,
+                    )
+                ),
+            )*
             _ => {
                 unimplemented!("Neg is not supported on {:?}", $child.return_type())
             }
@@ -151,160 +148,144 @@ pub fn new_unary_expr(
         // FIXME: We can not unify char and varchar because they are different in PG while share the
         // same logical type (String type) in our system (#2414).
         (ProstType::Cast, DataType::Date, DataType::Char) => {
-            Box::new(UnaryExpression::<Utf8Array, NaiveDateArray, _> {
-                expr_ia1: child_expr,
+            Box::new(UnaryExpression::<Utf8Array, NaiveDateArray, _>::new(
+                child_expr,
                 return_type,
-                func: str_to_date,
-                _phantom: PhantomData,
-            })
+                str_to_date,
+            ))
         }
         (ProstType::Cast, DataType::Time, DataType::Char) => {
-            Box::new(UnaryExpression::<Utf8Array, NaiveTimeArray, _> {
-                expr_ia1: child_expr,
+            Box::new(UnaryExpression::<Utf8Array, NaiveTimeArray, _>::new(
+                child_expr,
                 return_type,
-                func: str_to_time,
-                _phantom: PhantomData,
-            })
+                str_to_time,
+            ))
         }
         (ProstType::Cast, DataType::Timestamp, DataType::Char) => {
-            Box::new(UnaryExpression::<Utf8Array, NaiveDateTimeArray, _> {
-                expr_ia1: child_expr,
+            Box::new(UnaryExpression::<Utf8Array, NaiveDateTimeArray, _>::new(
+                child_expr,
                 return_type,
-                func: str_to_timestamp,
-                _phantom: PhantomData,
-            })
+                str_to_timestamp,
+            ))
         }
         (ProstType::Cast, DataType::Timestampz, DataType::Char) => {
-            Box::new(UnaryExpression::<Utf8Array, I64Array, _> {
-                expr_ia1: child_expr,
+            Box::new(UnaryExpression::<Utf8Array, I64Array, _>::new(
+                child_expr,
                 return_type,
-                func: str_to_timestampz,
-                _phantom: PhantomData,
-            })
+                str_to_timestampz,
+            ))
         }
         (ProstType::Cast, DataType::Boolean, DataType::Char) => {
-            Box::new(UnaryExpression::<Utf8Array, BoolArray, _> {
-                expr_ia1: child_expr,
+            Box::new(UnaryExpression::<Utf8Array, BoolArray, _>::new(
+                child_expr,
                 return_type,
-                func: str_to_bool,
-                _phantom: PhantomData,
-            })
+                str_to_bool,
+            ))
         }
         (ProstType::Cast, DataType::Decimal, DataType::Char) => {
-            Box::new(UnaryExpression::<Utf8Array, DecimalArray, _> {
-                expr_ia1: child_expr,
+            Box::new(UnaryExpression::<Utf8Array, DecimalArray, _>::new(
+                child_expr,
                 return_type,
-                func: str_to_decimal,
-                _phantom: PhantomData,
-            })
+                str_to_decimal,
+            ))
         }
         (ProstType::Cast, DataType::Float32, DataType::Char) => {
-            Box::new(UnaryExpression::<Utf8Array, F32Array, _> {
-                expr_ia1: child_expr,
+            Box::new(UnaryExpression::<Utf8Array, F32Array, _>::new(
+                child_expr,
                 return_type,
-                func: str_to_real,
-                _phantom: PhantomData,
-            })
+                str_to_real,
+            ))
         }
         (ProstType::Cast, DataType::Float64, DataType::Char) => {
-            Box::new(UnaryExpression::<Utf8Array, F64Array, _> {
-                expr_ia1: child_expr,
+            Box::new(UnaryExpression::<Utf8Array, F64Array, _>::new(
+                child_expr,
                 return_type,
-                func: str_to_double,
-                _phantom: PhantomData,
-            })
+                str_to_double,
+            ))
         }
         (ProstType::Cast, DataType::Int16, DataType::Char) => {
-            Box::new(UnaryExpression::<Utf8Array, I16Array, _> {
-                expr_ia1: child_expr,
+            Box::new(UnaryExpression::<Utf8Array, I16Array, _>::new(
+                child_expr,
                 return_type,
-                func: str_to_i16,
-                _phantom: PhantomData,
-            })
+                str_to_i16,
+            ))
         }
         (ProstType::Cast, DataType::Int32, DataType::Char) => {
-            Box::new(UnaryExpression::<Utf8Array, I32Array, _> {
-                expr_ia1: child_expr,
+            Box::new(UnaryExpression::<Utf8Array, I32Array, _>::new(
+                child_expr,
                 return_type,
-                func: str_to_i32,
-                _phantom: PhantomData,
-            })
+                str_to_i32,
+            ))
         }
         (ProstType::Cast, DataType::Int64, DataType::Char) => {
-            Box::new(UnaryExpression::<Utf8Array, I64Array, _> {
-                expr_ia1: child_expr,
+            Box::new(UnaryExpression::<Utf8Array, I64Array, _>::new(
+                child_expr,
                 return_type,
-                func: str_to_i64,
-                _phantom: PhantomData,
-            })
+                str_to_i64,
+            ))
         }
         (ProstType::Cast, DataType::Char, DataType::Char) => {
-            Box::new(UnaryExpression::<Utf8Array, Utf8Array, _> {
-                expr_ia1: child_expr,
+            Box::new(UnaryExpression::<Utf8Array, Utf8Array, _>::new(
+                child_expr,
                 return_type,
-                func: str_to_str,
-                _phantom: PhantomData,
-            })
+                str_to_str,
+            ))
         }
         (ProstType::Cast, DataType::Varchar, DataType::Char) => {
-            Box::new(UnaryExpression::<Utf8Array, Utf8Array, _> {
-                expr_ia1: child_expr,
+            Box::new(UnaryExpression::<Utf8Array, Utf8Array, _>::new(
+                child_expr,
                 return_type,
-                func: str_to_str,
-                _phantom: PhantomData,
-            })
+                str_to_str,
+            ))
         }
         (ProstType::Cast, _, _) => gen_cast! {child_expr, return_type, },
-        (ProstType::Not, _, _) => Box::new(UnaryNullableExpression::<BoolArray, BoolArray, _> {
-            expr_ia1: child_expr,
-            return_type,
-            func: conjunction::not,
-            _phantom: PhantomData,
-        }),
-        (ProstType::IsTrue, _, _) => Box::new(UnaryNullableExpression::<BoolArray, BoolArray, _> {
-            expr_ia1: child_expr,
-            return_type,
-            func: is_true,
-            _phantom: PhantomData,
-        }),
-        (ProstType::IsNotTrue, _, _) => {
-            Box::new(UnaryNullableExpression::<BoolArray, BoolArray, _> {
-                expr_ia1: child_expr,
+        (ProstType::Not, _, _) => {
+            Box::new(UnaryNullableExpression::<BoolArray, BoolArray, _>::new(
+                child_expr,
                 return_type,
-                func: is_not_true,
-                _phantom: PhantomData,
-            })
+                conjunction::not,
+            ))
+        }
+        (ProstType::IsTrue, _, _) => {
+            Box::new(UnaryNullableExpression::<BoolArray, BoolArray, _>::new(
+                child_expr,
+                return_type,
+                is_true,
+            ))
+        }
+        (ProstType::IsNotTrue, _, _) => {
+            Box::new(UnaryNullableExpression::<BoolArray, BoolArray, _>::new(
+                child_expr,
+                return_type,
+                is_not_true,
+            ))
         }
         (ProstType::IsFalse, _, _) => {
-            Box::new(UnaryNullableExpression::<BoolArray, BoolArray, _> {
-                expr_ia1: child_expr,
+            Box::new(UnaryNullableExpression::<BoolArray, BoolArray, _>::new(
+                child_expr,
                 return_type,
-                func: is_false,
-                _phantom: PhantomData,
-            })
+                is_false,
+            ))
         }
         (ProstType::IsNotFalse, _, _) => {
-            Box::new(UnaryNullableExpression::<BoolArray, BoolArray, _> {
-                expr_ia1: child_expr,
+            Box::new(UnaryNullableExpression::<BoolArray, BoolArray, _>::new(
+                child_expr,
                 return_type,
-                func: is_not_false,
-                _phantom: PhantomData,
-            })
+                is_not_false,
+            ))
         }
         (ProstType::IsNull, _, _) => Box::new(IsNullExpression::new(child_expr)),
         (ProstType::IsNotNull, _, _) => Box::new(IsNotNullExpression::new(child_expr)),
-        (ProstType::Upper, _, _) => Box::new(UnaryBytesExpression::<Utf8Array, _> {
-            expr_ia1: child_expr,
+        (ProstType::Upper, _, _) => Box::new(UnaryBytesExpression::<Utf8Array, _>::new(
+            child_expr,
             return_type,
-            func: upper,
-            _phantom: PhantomData,
-        }),
-        (ProstType::Lower, _, _) => Box::new(UnaryBytesExpression::<Utf8Array, _> {
-            expr_ia1: child_expr,
+            upper,
+        )),
+        (ProstType::Lower, _, _) => Box::new(UnaryBytesExpression::<Utf8Array, _>::new(
+            child_expr,
             return_type,
-            func: lower,
-            _phantom: PhantomData,
-        }),
+            lower,
+        )),
         (ProstType::Neg, _, _) => {
             gen_neg! { child_expr, return_type }
         }
@@ -316,48 +297,43 @@ pub fn new_unary_expr(
 }
 
 pub fn new_length_default(expr_ia1: BoxedExpression, return_type: DataType) -> BoxedExpression {
-    Box::new(UnaryExpression::<Utf8Array, I64Array, _> {
+    Box::new(UnaryExpression::<Utf8Array, I64Array, _>::new(
         expr_ia1,
         return_type,
-        func: length_default,
-        _phantom: PhantomData,
-    })
+        length_default,
+    ))
 }
 
 pub fn new_trim_expr(expr_ia1: BoxedExpression, return_type: DataType) -> BoxedExpression {
-    Box::new(UnaryBytesExpression::<Utf8Array, _> {
+    Box::new(UnaryBytesExpression::<Utf8Array, _>::new(
         expr_ia1,
         return_type,
-        func: trim,
-        _phantom: PhantomData,
-    })
+        trim,
+    ))
 }
 
 pub fn new_ltrim_expr(expr_ia1: BoxedExpression, return_type: DataType) -> BoxedExpression {
-    Box::new(UnaryBytesExpression::<Utf8Array, _> {
+    Box::new(UnaryBytesExpression::<Utf8Array, _>::new(
         expr_ia1,
         return_type,
-        func: ltrim,
-        _phantom: PhantomData,
-    })
+        ltrim,
+    ))
 }
 
 pub fn new_rtrim_expr(expr_ia1: BoxedExpression, return_type: DataType) -> BoxedExpression {
-    Box::new(UnaryBytesExpression::<Utf8Array, _> {
+    Box::new(UnaryBytesExpression::<Utf8Array, _>::new(
         expr_ia1,
         return_type,
-        func: rtrim,
-        _phantom: PhantomData,
-    })
+        rtrim,
+    ))
 }
 
 pub fn new_ascii_expr(expr_ia1: BoxedExpression, return_type: DataType) -> BoxedExpression {
-    Box::new(UnaryExpression::<Utf8Array, I32Array, _> {
+    Box::new(UnaryExpression::<Utf8Array, I32Array, _>::new(
         expr_ia1,
         return_type,
-        func: ascii,
-        _phantom: PhantomData,
-    })
+        ascii,
+    ))
 }
 
 #[cfg(test)]
