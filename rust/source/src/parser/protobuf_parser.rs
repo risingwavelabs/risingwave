@@ -138,7 +138,7 @@ macro_rules! protobuf_match_type {
 fn protobuf_type_mapping(
     field_type: &FieldType,
     is_repeated: bool,
-    data_types: Vec<DataType>,
+    descriptors: &Descriptors,
 ) -> Result<DataType> {
     if is_repeated {
         return Err(NotImplementedError("repeated field is not supported".to_string()).into());
@@ -150,9 +150,17 @@ fn protobuf_type_mapping(
         FieldType::Int32 | FieldType::SFixed32 | FieldType::SInt32 => DataType::Int32,
         FieldType::Bool => DataType::Boolean,
         FieldType::String => DataType::Varchar,
-        FieldType::Message(_d) => DataType::Struct {
-            fields: data_types.into(),
-        },
+        FieldType::Message(m) => {
+            let vec = m
+                .fields()
+                .iter()
+                .map(|f| {
+                    protobuf_type_mapping(&f.field_type(descriptors), f.is_repeated(), descriptors)
+                        .unwrap()
+                })
+                .collect_vec();
+            DataType::Struct { fields: vec.into() }
+        }
         actual_type => {
             return Err(
                 NotImplementedError(format!("unsupported field type: {:?}", actual_type)).into(),
@@ -175,7 +183,8 @@ pub fn date_type_to_col_desc(
     lastname: String,
 ) -> Result<ColumnDesc> {
     let field_type = field_descriptor.field_type(descriptors);
-    // let data_type = protobuf_type_mapping(&field_type, field_descriptor.is_repeated()).unwrap();
+    let data_type =
+        protobuf_type_mapping(&field_type, field_descriptor.is_repeated(), descriptors).unwrap();
     if let FieldType::Message(m) = field_type {
         let column_vec: Vec<ColumnDesc> = m
             .fields()
@@ -190,16 +199,7 @@ pub fn date_type_to_col_desc(
             })
             .collect();
         Ok(ColumnDesc {
-            column_type: Some(
-                protobuf_type_mapping(
-                    &field_type,
-                    field_descriptor.is_repeated(),
-                    extract_data_type(column_vec.clone()),
-                )
-                .unwrap()
-                .to_protobuf()
-                .unwrap(),
-            ),
+            column_type: Some(data_type.to_protobuf().unwrap()),
             column_descs: column_vec,
             struct_name: m.name().to_string(),
             name: lastname + field_descriptor.name(),
@@ -207,12 +207,7 @@ pub fn date_type_to_col_desc(
         })
     } else {
         Ok(ColumnDesc {
-            column_type: Some(
-                protobuf_type_mapping(&field_type, field_descriptor.is_repeated(), vec![])
-                    .unwrap()
-                    .to_protobuf()
-                    .unwrap(),
-            ),
+            column_type: Some(data_type.to_protobuf().unwrap()),
             name: lastname + field_descriptor.name(),
             ..Default::default()
         })
