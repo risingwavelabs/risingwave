@@ -48,7 +48,7 @@ impl LogicalScan {
 
     pub(super) fn fmt_fields(&self, f: &mut fmt::DebugStruct) {
         let columns = self
-            .schema
+            .schema()
             .fields()
             .iter()
             .map(|f| f.name.clone())
