@@ -1,6 +1,9 @@
+use anyhow::anyhow;
+use serde::{Deserialize, Serialize};
+
 use crate::base::SourceSplit;
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum KinesisOffset {
     Earliest,
     Latest,
@@ -9,7 +12,7 @@ pub enum KinesisOffset {
     None,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct KinesisSplit {
     pub(crate) shard_id: String,
     pub(crate) start_position: KinesisOffset,
@@ -19,6 +22,10 @@ pub struct KinesisSplit {
 impl SourceSplit for KinesisSplit {
     fn id(&self) -> String {
         self.shard_id.to_string()
+    }
+
+    fn to_string(&self) -> anyhow::Result<String> {
+        serde_json::to_string(self).map_err(|e| anyhow!(e))
     }
 }
 
