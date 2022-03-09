@@ -165,8 +165,8 @@ Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
 - `--statistics`
   - Detailed statistics of storage backend
 
-- `--calibrate-metric`
-  - Print performance by both self-measured metric and the state store metric system. This can be used to calibrate metric parameters, especially bucket specification.
+- `--calibrate-histogram`
+  - Print performance by both self-measured metric and the state store metric system. This can be used to calibrate histogram parameters, especially bucket specification.
 
 # Metrics
 

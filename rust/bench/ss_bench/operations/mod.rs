@@ -54,7 +54,7 @@ impl Operations {
             stat_display.update_stat();
 
             // display metrics from state store metric system
-            if opts.calibrate_metric {
+            if opts.calibrate_histogram {
                 match operation {
                     "writebatch" => stat_display.display_write_batch(),
                     "deleterandom" => stat_display.display_delete_random(),
