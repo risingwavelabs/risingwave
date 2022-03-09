@@ -1,7 +1,6 @@
-use itertools::Itertools;
 use risingwave_batch::executor::{Executor, RowSeqScanExecutor};
 use risingwave_common::array::{Array, Row};
-use risingwave_common::catalog::{ColumnId, Field, Schema};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
@@ -25,11 +24,12 @@ async fn test_row_seq_scan() -> Result<()> {
     let mut state =
         ManagedMViewState::new(keyspace.clone(), column_ids, vec![OrderType::Ascending]);
 
-    let table = MViewTable::new_adhoc(
-        keyspace,
-        &[ColumnId::from(0), ColumnId::from(1)],
-        &schema.fields().iter().take(2).cloned().collect_vec(),
-    );
+    let column_descs = vec![
+        ColumnDesc::unnamed(ColumnId::from(0), schema[0].data_type.clone()),
+        ColumnDesc::unnamed(ColumnId::from(1), schema[1].data_type.clone()),
+    ];
+
+    let table = MViewTable::new_adhoc(keyspace, column_descs);
 
     let mut executor =
         RowSeqScanExecutor::new(table, 1, true, "RowSeqScanExecutor".to_string(), u64::MAX);

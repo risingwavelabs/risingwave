@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
+use itertools::Itertools;
 use risingwave_batch::executor::{
     CreateTableExecutor, Executor as BatchExecutor, InsertExecutor, RowSeqScanExecutor,
 };
 use risingwave_common::array::{Array, DataChunk, F64Array, RwError};
-use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
 use risingwave_common::column_nonnull;
 use risingwave_common::error::Result;
 use risingwave_common::types::IntoOrdered;
@@ -12,7 +13,7 @@ use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::plan::create_table_node::Info;
-use risingwave_pb::plan::ColumnDesc;
+use risingwave_pb::plan::ColumnDesc as ProstColumnDesc;
 use risingwave_source::{MemSourceManager, SourceManager};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::monitor::DEFAULT_STATE_STORE_STATS;
@@ -77,7 +78,7 @@ async fn test_table_v2_materialize() -> Result<()> {
     let source_table_id = TableId::default();
     let table_columns = vec![
         // data
-        ColumnDesc {
+        ProstColumnDesc {
             column_type: Some(DataType {
                 type_name: TypeName::Double as i32,
                 ..Default::default()
@@ -86,7 +87,7 @@ async fn test_table_v2_materialize() -> Result<()> {
             ..Default::default()
         },
         // row id
-        ColumnDesc {
+        ProstColumnDesc {
             column_type: Some(DataType {
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
@@ -169,9 +170,19 @@ async fn test_table_v2_materialize() -> Result<()> {
         Ok::<_, RwError>(())
     });
 
+    let column_descs = all_column_ids
+        .into_iter()
+        .zip_eq(all_schema.fields.into_iter())
+        .map(|(column_id, field)| ColumnDesc {
+            data_type: field.data_type,
+            column_id,
+            name: field.name,
+        })
+        .collect_vec();
+
     // Since we have not polled `Materialize`, we cannot scan anything from this table
     let keyspace = Keyspace::table_root(memory_state_store, &source_table_id);
-    let table = MViewTable::new_adhoc(keyspace, &all_column_ids, all_schema.fields());
+    let table = MViewTable::new_adhoc(keyspace, column_descs);
 
     let mut scan = RowSeqScanExecutor::new(
         table.clone(),
