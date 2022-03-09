@@ -1,8 +1,10 @@
+use fixedbitset::FixedBitSet;
 use risingwave_common::types::{DataType, ScalarImpl};
 
 use crate::expr::{
     to_conjunctions, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, Literal,
 };
+use crate::optimizer::plan_node::CollectInputRef;
 
 #[derive(Debug, Clone)]
 pub struct Condition {
@@ -26,6 +28,7 @@ impl Condition {
     pub fn always_true(&self) -> bool {
         self.conjunctions.is_empty()
     }
+
     pub fn to_expr(self) -> ExprImpl {
         let mut iter = self.conjunctions.into_iter();
         if let Some(mut ret) = iter.next() {
@@ -40,12 +43,40 @@ impl Condition {
         }
     }
 
-    pub fn and(&mut self, other: Self) {
-        self.conjunctions
-            .reserve(self.conjunctions.len() + other.conjunctions.len());
+    #[must_use]
+    pub fn and(self, other: Self) -> Self {
+        let mut ret = self;
+        ret.conjunctions
+            .reserve(ret.conjunctions.len() + other.conjunctions.len());
         for expr in other.conjunctions {
-            self.conjunctions.push(expr);
+            ret.conjunctions.push(expr);
         }
+        ret
+    }
+
+    #[must_use]
+    /// Split the condition expressions into 3 groups: left, right and others
+    pub fn split(
+        self,
+        left_col_num: usize,
+        right_col_num: usize,
+    ) -> (Vec<ExprImpl>, Vec<ExprImpl>, Vec<ExprImpl>) {
+        let left_bit_map = FixedBitSet::from_iter(0..left_col_num);
+        let right_bit_map = FixedBitSet::from_iter(left_col_num..left_col_num + right_col_num);
+
+        let (mut left, mut right, mut others) = (vec![], vec![], vec![]);
+        self.conjunctions.into_iter().for_each(|expr| {
+            let input_bits = CollectInputRef::collect(&expr, left_col_num + right_col_num);
+            if input_bits.is_subset(&left_bit_map) {
+                left.push(expr)
+            } else if input_bits.is_subset(&right_bit_map) {
+                right.push(expr)
+            } else {
+                others.push(expr)
+            }
+        });
+
+        (left, right, others)
     }
 
     #[must_use]

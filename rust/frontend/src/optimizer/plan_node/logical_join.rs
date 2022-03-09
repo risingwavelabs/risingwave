@@ -10,7 +10,7 @@ use super::{
 };
 use crate::expr::ExprImpl;
 use crate::optimizer::plan_node::{
-    BatchHashJoin, BatchSortMergeJoin, CollectRequiredCols, EqJoinPredicate, LogicalFilter,
+    BatchHashJoin, BatchSortMergeJoin, CollectInputRef, EqJoinPredicate, LogicalFilter,
 };
 use crate::optimizer::property::{Distribution, Order, WithDistribution, WithOrder, WithSchema};
 use crate::utils::{ColIndexMapping, Condition};
@@ -73,6 +73,11 @@ impl LogicalJoin {
     pub fn on(&self) -> &Condition {
         &self.on
     }
+
+    /// Get the join type of the logical join.
+    pub fn join_type(&self) -> JoinType {
+        self.join_type
+    }
 }
 
 impl PlanTreeNodeBinary for LogicalJoin {
@@ -115,17 +120,17 @@ impl ColPrunable for LogicalJoin {
 
         let left_len = self.left.schema().fields.len();
 
-        let mut visitor = CollectRequiredCols {
-            required_cols: required_cols.clone(),
+        let mut visitor = CollectInputRef {
+            input_bits: required_cols.clone(),
         };
         self.on.visit_expr(&mut visitor);
 
         let mut on = self.on.clone();
-        let mut mapping = ColIndexMapping::with_remaining_columns(&visitor.required_cols);
+        let mut mapping = ColIndexMapping::with_remaining_columns(&visitor.input_bits);
         on = on.rewrite_expr(&mut mapping);
 
         let (left_required_cols, right_required_cols): (FixedBitSet, FixedBitSet) =
-            visitor.required_cols.ones().partition_map(|i| {
+            visitor.input_bits.ones().partition_map(|i| {
                 if i < left_len {
                     Either::Left(i)
                 } else {
@@ -140,7 +145,7 @@ impl ColPrunable for LogicalJoin {
             on,
         );
 
-        if required_cols == &visitor.required_cols {
+        if required_cols == &visitor.input_bits {
             join.into()
         } else {
             LogicalProject::with_mapping(
