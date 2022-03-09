@@ -1,4 +1,4 @@
-use risingwave_common::array::InternalError;
+use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use urlencoding::encode;
 

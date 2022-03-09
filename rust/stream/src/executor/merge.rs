@@ -8,7 +8,6 @@ use futures::channel::mpsc::{Receiver, Sender};
 use futures::future::select_all;
 use futures::{SinkExt, StreamExt};
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::ToRwResult;
 use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan;
@@ -253,17 +252,6 @@ impl Executor for MergeExecutor {
             for ch in self.active.drain(..) {
                 futures.push(ch.into_future());
             }
-
-            if futures.is_empty() {
-                // All channels are terminated. This could happen when all upstream actors have been
-                // terminated.
-                return Err(InternalError(format!(
-                    "[MergeExecutor (ActorId: {})] All channels have been terminated",
-                    self.actor_id
-                ))
-                .into());
-            }
-
             let ((message, from), _id, remains) = select_all(futures)
                 .instrument(tracing::trace_span!("idle"))
                 .await;
@@ -271,12 +259,12 @@ impl Executor for MergeExecutor {
                 self.active.push(fut.into_inner().unwrap());
             }
 
-            match message {
-                Some(Message::Chunk(chunk)) => {
+            match message.unwrap() {
+                Message::Chunk(chunk) => {
                     self.active.push(from);
                     return Ok(Message::Chunk(chunk));
                 }
-                Some(Message::Barrier(barrier)) => {
+                Message::Barrier(barrier) => {
                     if let Some(Mutation::Stop(actors)) = barrier.mutation.as_deref() {
                         if actors.contains(&self.actor_id) {
                             self.terminated += 1;
@@ -292,13 +280,6 @@ impl Executor for MergeExecutor {
 
                     self.blocked.push(from);
                 }
-                None => {
-                    return Err(InternalError(format!(
-                        "[MergeExecutor (ActorId: {})] No message received from channels.",
-                        self.actor_id
-                    ))
-                    .into());
-                }
             }
 
             if self.terminated == self.num_inputs {
@@ -311,14 +292,7 @@ impl Executor for MergeExecutor {
                 let barrier = self.next_barrier.take().unwrap();
                 return Ok(Message::Barrier(barrier));
             }
-
-            if self.active.is_empty() {
-                return Err(InternalError(format!(
-                    "[MergeExecutor (ActorId: {})] Active is empty.",
-                    self.actor_id
-                ))
-                .into());
-            }
+            assert!(!self.active.is_empty())
         }
     }
 

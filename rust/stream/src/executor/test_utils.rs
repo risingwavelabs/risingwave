@@ -230,11 +230,13 @@ pub mod schemas {
         int32_n::<3>()
     }
 
+    #[allow(unused)]
     fn varchar_n<const N: usize>() -> Schema {
         field_n::<N>(DataType::Varchar)
     }
 
     /// Create a util schema **for test only** with three varchar fields.
+    #[allow(unused)]
     pub fn sss() -> Schema {
         varchar_n::<3>()
     }

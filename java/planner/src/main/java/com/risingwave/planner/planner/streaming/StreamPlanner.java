@@ -120,20 +120,20 @@ public class StreamPlanner implements Planner<StreamingPlan> {
 
         var tableSourceNode = (RwStreamTableSource) node;
         var sourceColumnIds = source.getAllColumnIds();
-        var sourcePrimaryKeyColumnIds = source.getPrimaryKeyColumnIds();
+        var sourcePrimaryKeyIndices = source.getPrimaryKeyIndices();
         if (source.isAssociatedMaterializedView()) {
           // since we've ignored row_id column for associated mv, the pk should be empty
-          assert sourcePrimaryKeyColumnIds.isEmpty();
+          assert sourcePrimaryKeyIndices.isEmpty();
           var rowIdColumnId = source.getRowIdColumn().getId();
           // manually put back the row_id column
           sourceColumnIds =
               Stream.concat(sourceColumnIds.stream(), Stream.of(rowIdColumnId))
                   .collect(ImmutableList.toImmutableList());
-          sourcePrimaryKeyColumnIds = ImmutableIntList.of(rowIdColumnId.getValue());
+          sourcePrimaryKeyIndices = ImmutableIntList.of(rowIdColumnId.getValue());
         }
 
         var primaryKeyColumnIdsBuilder = ImmutableList.<ColumnCatalog.ColumnId>builder();
-        for (var idx : sourcePrimaryKeyColumnIds) {
+        for (var idx : sourcePrimaryKeyIndices) {
           primaryKeyColumnIdsBuilder.add(sourceColumnIds.get(idx));
         }
 

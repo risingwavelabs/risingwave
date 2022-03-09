@@ -3836,6 +3836,16 @@ dependencies = [
 [[package]]
 name = "risingwave_ctl"
 version = "0.1.3"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "clap",
+ "risingwave_common",
+ "risingwave_pb",
+ "risingwave_rpc_client",
+ "risingwave_storage",
+ "tracing",
+]
 
 [[package]]
 name = "risingwave_frontend"

@@ -475,4 +475,9 @@ impl StateStoreStats {
             report_compaction_task_latency,
         }
     }
+
+    /// Create a new `StateStoreMetrics` instance used in tests or other places.
+    pub fn unused() -> Self {
+        Self::new(&Registry::new())
+    }
 }

@@ -5,13 +5,12 @@
 - sql: select * from t
   binder_error: "Item not found: relation \"t\""
 
-# Because the order in which these column appear in `exprs` is random, I comment this test. I 
-# - sql: |
-#     create table t (v1 bigint, v2 double precision);
-#     select * from t;
-#   plan: |
-#     LogicalProject { exprs: [InputRef(1), InputRef(0), InputRef(2)], expr_alias: [None, None, None] }
-#       LogicalScan { table: "t", columns: ["_row_id", "v1", "v2"] }
+- sql: |
+    create table t (v1 bigint, v2 double precision);
+    select * from t;
+  plan: |
+    LogicalProject { exprs: [InputRef(0), InputRef(1), InputRef(2)], expr_alias: [None, None, None] }
+      LogicalScan { table: "t", columns: ["_row_id", "v1", "v2"] }
 
 - sql: |
     create table t ();
@@ -21,14 +20,13 @@
       LogicalFilter { predicate: Condition { conjunctions: [FunctionCall(FunctionCall { func_type: Or, return_type: Boolean, inputs: [FunctionCall(FunctionCall { func_type: And, return_type: Boolean, inputs: [FunctionCall(FunctionCall { func_type: And, return_type: Boolean, inputs: [FunctionCall(FunctionCall { func_type: And, return_type: Boolean, inputs: [FunctionCall(FunctionCall { func_type: GreaterThan, return_type: Boolean, inputs: [Literal(Literal { data: Some(Int32(1)), data_type: Int32 }), Literal(Literal { data: Some(Int32(2)), data_type: Int32 })] }), FunctionCall(FunctionCall { func_type: Equal, return_type: Boolean, inputs: [Literal(Literal { data: Some(Int32(1)), data_type: Int32 }), Literal(Literal { data: Some(Int32(1)), data_type: Int32 })] })] }), FunctionCall(FunctionCall { func_type: LessThan, return_type: Boolean, inputs: [Literal(Literal { data: Some(Int32(3)), data_type: Int32 }), Literal(Literal { data: Some(Int32(1)), data_type: Int32 })] })] }), FunctionCall(FunctionCall { func_type: NotEqual, return_type: Boolean, inputs: [Literal(Literal { data: Some(Int32(4)), data_type: Int32 }), Literal(Literal { data: Some(Int32(1)), data_type: Int32 })] })] }), FunctionCall(FunctionCall { func_type: And, return_type: Boolean, inputs: [FunctionCall(FunctionCall { func_type: And, return_type: Boolean, inputs: [FunctionCall(FunctionCall { func_type: Equal, return_type: Boolean, inputs: [Literal(Literal { data: Some(Int32(1)), data_type: Int32 }), Literal(Literal { data: Some(Int32(1)), data_type: Int32 })] }), FunctionCall(FunctionCall { func_type: GreaterThanOrEqual, return_type: Boolean, inputs: [Literal(Literal { data: Some(Int32(2)), data_type: Int32 }), Literal(Literal { data: Some(Int32(1)), data_type: Int32 })] })] }), FunctionCall(FunctionCall { func_type: LessThanOrEqual, return_type: Boolean, inputs: [Literal(Literal { data: Some(Int32(1)), data_type: Int32 }), Literal(Literal { data: Some(Int32(2)), data_type: Int32 })] })] })] })] } }
         LogicalScan { table: "t", columns: ["_row_id"] }
 
-# Because the order in which these column appear in `exprs` is random, I comment this test.
-# - sql: |
-#     create table t (v1 int);
-#     select * from t where v1<1;
-#   plan: |
-#     LogicalProject { exprs: [InputRef(0), InputRef(1)], expr_alias: [None, None] }
-#       LogicalFilter { predicate: Condition { conjunctions: [FunctionCall(FunctionCall { func_type: LessThan, return_type: Boolean, inputs: [InputRef(1), Literal(Literal { data: Some(Int32(1)), data_type: Int32 })] })] } }
-#         LogicalScan { table: "t", columns: ["_row_id", "v1"] }
+- sql: |
+    create table t (v1 int);
+    select * from t where v1<1;
+  plan: |
+    LogicalProject { exprs: [InputRef(0), InputRef(1)], expr_alias: [None, None] }
+      LogicalFilter { predicate: Condition { conjunctions: [FunctionCall(FunctionCall { func_type: LessThan, return_type: Boolean, inputs: [InputRef(1), Literal(Literal { data: Some(Int32(1)), data_type: Int32 })] })] } }
+        LogicalScan { table: "t", columns: ["_row_id", "v1"] }
 
 - sql: |
     create table t (v1 int, v2 int);

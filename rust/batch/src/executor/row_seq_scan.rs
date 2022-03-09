@@ -1,6 +1,6 @@
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
-use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
+use risingwave_common::catalog::{ColumnDesc, Schema, TableId};
 use risingwave_common::error::Result;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_storage::table::mview::{MViewTable, MViewTableIter};
@@ -67,16 +67,14 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
         )?;
 
         let table_id = TableId::from(&seq_scan_node.table_ref_id);
-        let column_ids = seq_scan_node
-            .column_ids
+        let column_descs = seq_scan_node
+            .column_descs
             .iter()
-            .map(|column_id| ColumnId::new(*column_id))
+            .map(|column_desc| ColumnDesc::from(column_desc.clone()))
             .collect_vec();
-        let fields = seq_scan_node.fields.iter().map(Field::from).collect_vec();
-
         dispatch_state_store!(source.global_batch_env().state_store(), state_store, {
             let keyspace = Keyspace::table_root(state_store, &table_id);
-            let table = MViewTable::new_adhoc(keyspace, &column_ids, &fields);
+            let table = MViewTable::new_adhoc(keyspace, column_descs);
             Ok(Box::new(RowSeqScanExecutor::new(
                 table,
                 RowSeqScanExecutorBuilder::DEFAULT_CHUNK_SIZE,
@@ -106,7 +104,7 @@ impl<S: StateStore> Executor for RowSeqScanExecutor<S> {
         }
 
         let iter = self.iter.as_mut().expect("executor not open");
-        iter.collect_datachunk_from_iter(&self.table, Some(self.chunk_size))
+        iter.collect_data_chunk(&self.table, Some(self.chunk_size))
             .await
     }
 

@@ -9,19 +9,18 @@ pub enum SourceOffset {
 pub trait SourceMessage {
     fn payload(&self) -> Result<Option<&[u8]>>;
     fn offset(&self) -> Result<Option<SourceOffset>>;
+    fn serialize(&self) -> Result<String>;
 }
 
 pub trait SourceSplit {
     fn id(&self) -> String;
+    fn to_string(&self) -> Result<String>;
 }
 
 #[async_trait]
 pub trait SourceReader: Sized {
-    type Message: SourceMessage + Send + Sync;
-    type Split: SourceSplit + Send + Sync;
-
-    async fn next(&mut self) -> Result<Option<Vec<Self::Message>>>;
-    async fn assign_split(&mut self, split: Self::Split) -> Result<()>;
+    async fn next(&mut self) -> Result<Option<Vec<Vec<u8>>>>;
+    async fn assign_split<'a>(&mut self, split: &'a [u8]) -> Result<()>;
 }
 
 #[async_trait]

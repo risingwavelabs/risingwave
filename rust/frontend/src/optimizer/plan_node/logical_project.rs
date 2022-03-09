@@ -6,20 +6,21 @@ use log::debug;
 use risingwave_common::catalog::{Field, Schema};
 
 use super::{
-    BatchProject, ColPrunable, PlanRef, PlanTreeNodeUnary, StreamProject, ToBatch, ToStream,
+    BatchProject, ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary, StreamProject, ToBatch,
+    ToStream,
 };
 use crate::expr::{assert_input_ref, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::plan_node::CollectRequiredCols;
-use crate::optimizer::property::{Distribution, WithDistribution, WithOrder, WithSchema};
+use crate::optimizer::property::{Distribution, WithSchema};
 use crate::utils::ColIndexMapping;
 
 /// `LogicalProject` computes a set of expressions from its input relation.
 #[derive(Debug, Clone)]
 pub struct LogicalProject {
+    pub base: LogicalBase,
     exprs: Vec<ExprImpl>,
     expr_alias: Vec<Option<String>>,
     input: PlanRef,
-    schema: Schema,
 }
 
 impl LogicalProject {
@@ -41,9 +42,10 @@ impl LogicalProject {
         for expr in &exprs {
             assert_input_ref(expr, input.schema().fields().len());
         }
+        let base = LogicalBase { schema };
         LogicalProject {
             input,
-            schema,
+            base,
             exprs,
             expr_alias,
         }
@@ -113,7 +115,7 @@ impl LogicalProject {
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
         f.debug_struct(name)
             .field("exprs", self.exprs())
-            .field("expr_alias", &format_args!("{:?}", self.expr_alias()))
+            .field("expr_alias", &self.expr_alias())
             .finish()
     }
 }
@@ -132,16 +134,6 @@ impl_plan_tree_node_for_unary! {LogicalProject}
 impl fmt::Display for LogicalProject {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.fmt_with_name(f, "LogicalProject")
-    }
-}
-
-impl WithOrder for LogicalProject {}
-
-impl WithDistribution for LogicalProject {}
-
-impl WithSchema for LogicalProject {
-    fn schema(&self) -> &Schema {
-        &self.schema
     }
 }
 

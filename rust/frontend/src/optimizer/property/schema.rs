@@ -1,5 +1,9 @@
 use fixedbitset::FixedBitSet;
+use paste::paste;
 use risingwave_common::catalog::Schema;
+
+use super::super::plan_node::*;
+use crate::for_logical_plan_nodes;
 
 pub trait WithSchema {
     fn schema(&self) -> &Schema;
@@ -13,3 +17,17 @@ pub trait WithSchema {
         );
     }
 }
+
+/// Define module for each node.
+macro_rules! impl_with_schema_for_logical_node {
+    ([], $( { $convention:ident, $name:ident }),*) => {
+        $(paste! {
+            impl WithSchema for [<$convention $name>] {
+                fn schema(&self) -> &Schema {
+                    &self.base.schema
+                }
+            }
+        })*
+    }
+}
+for_logical_plan_nodes! {impl_with_schema_for_logical_node }
