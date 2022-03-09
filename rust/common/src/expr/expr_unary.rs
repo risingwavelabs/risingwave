@@ -286,6 +286,11 @@ pub fn new_unary_expr(
             return_type,
             lower,
         )),
+        (ProstType::Ascii, _, _) => Box::new(UnaryExpression::<Utf8Array, I32Array, _>::new(
+            child_expr,
+            return_type,
+            ascii,
+        )),
         (ProstType::Neg, _, _) => {
             gen_neg! { child_expr, return_type }
         }
@@ -325,14 +330,6 @@ pub fn new_rtrim_expr(expr_ia1: BoxedExpression, return_type: DataType) -> Boxed
         expr_ia1,
         return_type,
         rtrim,
-    ))
-}
-
-pub fn new_ascii_expr(expr_ia1: BoxedExpression, return_type: DataType) -> BoxedExpression {
-    Box::new(UnaryExpression::<Utf8Array, I32Array, _>::new(
-        expr_ia1,
-        return_type,
-        ascii,
     ))
 }
 
