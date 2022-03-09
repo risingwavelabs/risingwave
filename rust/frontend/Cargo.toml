@@ -19,16 +19,14 @@ parking_lot = "0.12"
 paste = "1"
 pgwire = { path = "../utils/pgwire" }
 rand = "0.8.0"
-risingwave-pb = { path = "../prost" }
 risingwave_common = { path = "../common" }
-risingwave_logging = { path = "../utils/logging" }
 risingwave_meta = { path = "../meta" }
+risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_source = { path = "../source" }
 risingwave_sqlparser = { path = "../sqlparser" }
 smallvec = { version = "1.6.1", features = ["serde"] }
 thiserror = "1"
-tikv-jemallocator = "0.4"
 tokio = { version = "1", features = [
     "rt",
     "rt-multi-thread",
@@ -40,7 +38,6 @@ tokio = { version = "1", features = [
 ] }
 tonic = "0.6"
 tracing = { version = "0.1", features = ["release_max_level_info"] }
-tracing-subscriber = "0.3"
 uuid = "0.8"
 
 [dev-dependencies]
@@ -49,8 +46,3 @@ serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.8"
 tempfile = "3"
 walkdir = "2"
-
-[[bin]]
-name = "frontend-v2"
-path = "src/bin/frontend_node.rs"
-
