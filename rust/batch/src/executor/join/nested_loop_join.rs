@@ -4,7 +4,7 @@ use std::sync::Arc;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::data_chunk_iter::RowRef;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_common::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
@@ -157,7 +157,6 @@ impl NestedLoopJoinExecutor {
         num_tuples: usize,
         data_types: &[DataType],
     ) -> Result<DataChunk> {
-        // let data_types = &self.probe_side_schema;
         let num_columns = data_types.len();
         let mut output_array_builders = data_types
             .iter()
@@ -204,16 +203,21 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
                 let probe_side_schema = left_child.schema().data_types();
                 let right_child = source.clone_for_plan(right_plan).build()?;
 
-                let fields = left_child
-                    .schema()
-                    .fields
-                    .iter()
-                    .chain(right_child.schema().fields.iter())
-                    .map(|f| Field {
-                        data_type: f.data_type.clone(),
-                        name: f.name.clone(),
-                    })
-                    .collect();
+                // TODO(Bowen): Merge this with derive schema in Logical Join (#790).
+                let fields = match join_type {
+                    JoinType::LeftSemi => left_child.schema().fields.clone(),
+                    JoinType::LeftAnti => left_child.schema().fields.clone(),
+                    JoinType::RightSemi => right_child.schema().fields.clone(),
+                    JoinType::RightAnti => right_child.schema().fields.clone(),
+                    _ => left_child
+                        .schema()
+                        .fields
+                        .iter()
+                        .chain(right_child.schema().fields.iter())
+                        .cloned()
+                        .collect(),
+                };
+
                 let schema = Schema { fields };
                 match join_type {
                     JoinType::Inner
@@ -223,7 +227,7 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
                     | JoinType::LeftAnti
                     | JoinType::RightSemi
                     | JoinType::RightAnti => {
-                        // TODO: Support more join type.
+                        // TODO: Support FULL OUTER.
                         let outer_table_source = RowLevelIter::new(left_child);
 
                         let join_state = NestedLoopJoinState::Build;
@@ -301,11 +305,13 @@ impl NestedLoopJoinExecutor {
                 }
             }
         } else {
-            self.state = if self.join_type.need_join_remaining() {
-                NestedLoopJoinState::ProbeRemaining
-            } else {
-                NestedLoopJoinState::Done
-            };
+            self.state =
+                // TODO: Right Semi join can be optimized : Do not need join remaining (#792).
+                if self.join_type.need_join_remaining() || self.join_type == JoinType::RightSemi {
+                    NestedLoopJoinState::ProbeRemaining
+                } else {
+                    NestedLoopJoinState::Done
+                };
         }
         Ok(None)
     }
@@ -337,7 +343,8 @@ impl NestedLoopJoinExecutor {
             // Check the eval result and record some flags to prepare for outer/semi join.
             for (row_idx, vis_opt) in sel_vector.as_bool().iter().enumerate() {
                 if vis_opt == Some(true) {
-                    if self.join_type.need_join_remaining() {
+                    if self.join_type.need_join_remaining() || self.join_type == JoinType::RightSemi
+                    {
                         self.build_table.set_build_matched(RowId::new(
                             self.build_table.get_chunk_idx(),
                             row_idx,
@@ -381,7 +388,8 @@ impl NestedLoopJoinExecutor {
     }
 
     fn do_left_semi_join(&mut self) -> Result<ProbeResult> {
-        let ret = self.do_inner_join()?;
+        let mut ret = self.do_inner_join()?;
+        ret.chunk = None;
         // Append (probed_row, None) to chunk builder if current row finished probing and do not
         // find any match.
         if self.probe_side_source.get_cur_row_matched() {
@@ -731,6 +739,7 @@ mod tests {
             let left_child = self.create_left_executor();
             let right_child = self.create_right_executor();
 
+            // TODO(Bowen): Merge this with derive schema in Logical Join.
             let fields = match self.join_type {
                 JoinType::LeftSemi => left_child.schema().fields.clone(),
                 JoinType::LeftAnti => left_child.schema().fields.clone(),
@@ -745,6 +754,7 @@ mod tests {
                     .collect(),
             };
             let schema = Schema { fields };
+
             let probe_side_schema = left_child.schema().data_types();
 
             Box::new(NestedLoopJoinExecutor {
