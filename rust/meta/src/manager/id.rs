@@ -143,11 +143,18 @@ where
         Self {
             #[cfg(test)]
             test: Arc::new(StoredIdGenerator::new(meta_store_ref.clone(), "test", None).await),
+            // [0,10), Reserved id intervals for database.
             database: Arc::new(
-                StoredIdGenerator::new(meta_store_ref.clone(), "database", None).await,
+                StoredIdGenerator::new(meta_store_ref.clone(), "database", Some(10)).await,
             ),
-            schema: Arc::new(StoredIdGenerator::new(meta_store_ref.clone(), "schema", None).await),
-            table: Arc::new(StoredIdGenerator::new(meta_store_ref.clone(), "table", None).await),
+            // [0,10), Reserved id intervals for schema.
+            schema: Arc::new(
+                StoredIdGenerator::new(meta_store_ref.clone(), "schema", Some(10)).await,
+            ),
+            // [0,100), Reserved id intervals for table.
+            table: Arc::new(
+                StoredIdGenerator::new(meta_store_ref.clone(), "table", Some(100)).await,
+            ),
             worker: Arc::new(StoredIdGenerator::new(meta_store_ref.clone(), "worker", None).await),
             fragment: Arc::new(
                 StoredIdGenerator::new(meta_store_ref.clone(), "fragment", Some(1)).await,
@@ -282,7 +289,7 @@ mod tests {
 
         let ids = future::join_all((0..10000).map(|_i| {
             let manager = &manager;
-            async move { manager.generate::<{ IdCategory::Table }>().await }
+            async move { manager.generate::<{ IdCategory::Worker }>().await }
         }))
         .await
         .into_iter()

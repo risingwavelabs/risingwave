@@ -10,12 +10,16 @@ use risingwave_pb::plan::{ColumnDesc, DatabaseRefId, SchemaRefId, TableRefId};
 
 use crate::catalog::rw_auth_members::*;
 use crate::catalog::rw_authid::*;
-use crate::catalog::rw_source::*;
+use crate::catalog::rw_materialized_view::*;
+use crate::catalog::rw_stream_source::*;
+use crate::catalog::rw_table_source::*;
 use crate::storage::MetaStore;
 
 mod rw_auth_members;
 mod rw_authid;
-mod rw_source;
+mod rw_materialized_view;
+mod rw_stream_source;
+mod rw_table_source;
 
 /// `for_all_catalog_table_impl` includes all system catalogs. If you added a new system catalog, be
 /// sure to add a corresponding entry here.
@@ -28,7 +32,9 @@ macro_rules! for_all_catalog_table_impl {
             [$($x),*],
             {AuthMembers, 1, RW_AUTH_MEMBERS_NAME, RW_AUTH_MEMBERS_SCHEMA, list_auth_members},
             {AuthId, 2, RW_AUTHID_NAME, RW_AUTHID_SCHEMA, list_auth_ids},
-            {Source, 3, RW_SOURCE_NAME, RW_SOURCE_SCHEMA, list_sources}
+            {StreamSource, 3, RW_STREAM_SOURCE_NAME, RW_STREAM_SOURCE_SCHEMA, list_stream_sources},
+            {TableSource, 4, RW_TABLE_SOURCE_NAME, RW_TABLE_SOURCE_SCHEMA, list_table_sources},
+            {MaterializedView, 5, RW_MATERIALIZED_VIEW_NAME, RW_MATERIALIZED_VIEW_SCHEMA, list_materialized_views}
         }
     };
 }
@@ -177,13 +183,16 @@ mod tests {
         );
         assert!(RwCatalogTable::AuthId.list(&*store).await?.is_empty());
 
-        assert_eq!(RwCatalogTable::Source.table_id().table_id, 3);
-        assert_eq!(RwCatalogTable::Source.name(), RW_SOURCE_NAME);
+        assert_eq!(RwCatalogTable::StreamSource.table_id().table_id, 3);
+        assert_eq!(RwCatalogTable::StreamSource.name(), RW_STREAM_SOURCE_NAME);
         assert_eq!(
-            RwCatalogTable::Source.schema().fields,
-            RW_SOURCE_SCHEMA.fields
+            RwCatalogTable::StreamSource.schema().fields,
+            RW_STREAM_SOURCE_SCHEMA.fields
         );
-        assert_eq!(RwCatalogTable::Source.catalog().table_name, RW_SOURCE_NAME);
+        assert_eq!(
+            RwCatalogTable::StreamSource.catalog().table_name,
+            RW_STREAM_SOURCE_NAME
+        );
 
         Ok(())
     }
@@ -198,6 +207,10 @@ mod tests {
         assert_eq!(
             catalog_srv.get_table(&TableId { table_id: 2 }),
             Some(RwCatalogTable::AuthId)
+        );
+        assert_eq!(
+            catalog_srv.get_table(&TableId { table_id: 3 }),
+            Some(RwCatalogTable::StreamSource)
         );
 
         Ok(())
