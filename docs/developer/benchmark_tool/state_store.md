@@ -8,7 +8,6 @@ Before starting ss-bench, the meta service needs to be initialized. A simple way
 ~/code/risingwave: ./risedev d
 ```
 
-
 ```shell
 ~/code/risingwave/rust: cargo run --bin ss-bench -- \
  --benchmarks "writebatch,getseq,getrandom,prefixscanrandom,deleterandom" \
