@@ -28,7 +28,7 @@ async fn main() {
     let mut fns: HashMap<&str, Box<dyn Future<Output = ()>>> = HashMap::new();
 
     fns.insert(
-        "compute",
+        "compute-node",
         Box::new(async move {
             eprintln!("launching compute node");
 
@@ -42,7 +42,7 @@ async fn main() {
     );
 
     fns.insert(
-        "meta",
+        "meta-node",
         Box::new(async move {
             eprintln!("launching meta node");
 
@@ -56,7 +56,7 @@ async fn main() {
     );
 
     fns.insert(
-        "frontend",
+        "frontend-node",
         Box::new(async move {
             eprintln!("launching frontend node");
 
@@ -70,7 +70,7 @@ async fn main() {
     );
 
     fns.insert(
-        "ctl",
+        "risectl",
         Box::new(async move {
             eprintln!("launching risectl");
 

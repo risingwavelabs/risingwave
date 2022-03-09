@@ -18,6 +18,7 @@ pub enum Components {
     ComputeNodeAndMetaNode,
     Frontend,
     Release,
+    AllInOne,
 }
 
 impl Components {
@@ -30,6 +31,7 @@ impl Components {
             Self::Frontend => "Build frontend",
             Self::Tracing => "Tracing / Jaeger",
             Self::Release => "Enable release mode",
+            Self::AllInOne => "Enable all-in-one binary",
         }
         .into()
     }
@@ -70,6 +72,7 @@ you download Jaeger."
                 "
 Build RisingWave in release mode"
             }
+            Self::AllInOne => "Enable all-in-one binary",
         }
         .into()
     }
@@ -83,6 +86,7 @@ Build RisingWave in release mode"
             "ENABLE_BUILD_FRONTEND" => Some(Self::Frontend),
             "ENABLE_COMPUTE_TRACING" => Some(Self::Tracing),
             "ENABLE_RELEASE_PROFILE" => Some(Self::Release),
+            "ENABLE_ALL_IN_ONE" => Some(Self::AllInOne),
             _ => None,
         }
     }
@@ -96,6 +100,7 @@ Build RisingWave in release mode"
             Self::Frontend => "ENABLE_BUILD_FRONTEND",
             Self::Tracing => "ENABLE_COMPUTE_TRACING",
             Self::Release => "ENABLE_RELEASE_PROFILE",
+            Self::AllInOne => "ENABLE_ALL_IN_ONE",
         }
         .into()
     }
