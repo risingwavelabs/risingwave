@@ -43,7 +43,10 @@ impl_plan_tree_node_for_leaf! {LogicalValues}
 
 impl fmt::Display for LogicalValues {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", self)
+        f.debug_struct("LogicalValues")
+            .field("rows", &self.rows)
+            .field("schema", &self.schema())
+            .finish()
     }
 }
 
