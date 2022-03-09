@@ -70,7 +70,7 @@ pub struct SourceExecutor {
     attributes: Vec<KeyValue>,
 
     source_output_row_count: Counter<u64>,
-    metrics: Arc<StreamingMetrics>,
+ //   metrics: Arc<StreamingMetrics>,
 }
 
 pub struct SourceExecutorBuilder {}
@@ -178,7 +178,7 @@ impl SourceExecutor {
                 .init(),
             op_info,
             reader_stream: None,
-            metrics:Arc::new(StreamingMetrics::new()),
+            //metrics: Arc::new(StreamingMetrics::new()),
         })
     }
 
@@ -270,10 +270,11 @@ impl Executor for SourceExecutor {
                 // TODO: in the future, we may add row_id column here for TableV2 as well
                 if !matches!(self.source_desc.source.as_ref(), SourceImpl::TableV2(_)) {
                     chunk = self.refill_row_id_column(chunk);
-                }        
-                self.metrics.boot_metrics_service(prometheus_addr);
+                }
+
+                // self.metrics.boot_metrics_service(prometheus_addr);
                 let source_identify = "Table_".to_string() + &self.source_id.table_id().to_string();
-                self.metrics.source_output_row_count.with_label_values(&[source_identify.as_str()]).inc_by(chunk.cardinality() as u64);
+                //self.metrics.source_output_row_count.with_label_values(&[source_identify.as_str()]).inc_by(chunk.cardinality() as u64);
                 self.source_output_row_count
                     .add(chunk.cardinality() as u64, &self.attributes);
                 Ok(Message::Chunk(chunk))
@@ -324,9 +325,10 @@ mod tests {
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{ArrayImpl, I32Array, I64Array, Op, StreamChunk, Utf8Array};
     use risingwave_common::array_nonnull;
-    use risingwave_common::catalog::{ColumnDesc, Field, Schema};
+    use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
     use risingwave_source::*;
+    use risingwave_storage::TableColumnDesc;
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::*;
@@ -341,17 +343,17 @@ mod tests {
         let col2_type = DataType::Varchar;
 
         let table_columns = vec![
-            ColumnDesc {
+            TableColumnDesc {
                 column_id: ColumnId::from(0),
                 data_type: rowid_type.clone(),
                 name: String::new(),
             },
-            ColumnDesc {
+            TableColumnDesc {
                 column_id: ColumnId::from(1),
                 data_type: col1_type.clone(),
                 name: String::new(),
             },
-            ColumnDesc {
+            TableColumnDesc {
                 column_id: ColumnId::from(2),
                 data_type: col2_type.clone(),
                 name: String::new(),
@@ -482,17 +484,17 @@ mod tests {
         let col2_type = DataType::Varchar;
 
         let table_columns = vec![
-            ColumnDesc {
+            TableColumnDesc {
                 column_id: ColumnId::from(0),
                 data_type: rowid_type.clone(),
                 name: String::new(),
             },
-            ColumnDesc {
+            TableColumnDesc {
                 column_id: ColumnId::from(1),
                 data_type: col1_type.clone(),
                 name: String::new(),
             },
-            ColumnDesc {
+            TableColumnDesc {
                 column_id: ColumnId::from(2),
                 data_type: col2_type.clone(),
                 name: String::new(),

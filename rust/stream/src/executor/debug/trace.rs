@@ -9,7 +9,7 @@ use tracing_futures::Instrument;
 
 use crate::executor::monitor::{DEFAULT_COMPUTE_STATS, StreamingMetrics};
 use crate::executor::{Executor, Message};
-
+use prometheus::Registry;
 /// `TraceExecutor` prints data passing in the stream graph to stdout.
 ///
 /// The position of `TraceExecutor` in graph:
@@ -50,6 +50,7 @@ impl TraceExecutor {
         input_desc: String,
         input_pos: usize,
         actor_id: u32,
+        registry: Registry,
     ) -> Self {
         let meter = DEFAULT_COMPUTE_STATS
             .clone()
@@ -70,7 +71,7 @@ impl TraceExecutor {
                 .u64_counter("stream_actor_row_count")
                 .with_description("Total number of rows that have been ouput from each actor")
                 .init(),
-            metrics:Arc::new(StreamingMetrics::new()),
+            metrics:Arc::new(StreamingMetrics::new(registry)),
             span_name,
         }
     }
@@ -98,6 +99,7 @@ impl super::DebugExecutor for TraceExecutor {
             Ok(message) => {
                 if let Message::Chunk(ref chunk) = message {
                     if chunk.cardinality() > 0 {
+                        // self.metrics.boot_metrics_service()
                         self.metrics.actor_row_count.with_label_values(&[self.actor_id.to_string().as_str()]).inc_by(chunk.cardinality() as u64);
                         self.actor_row_count
                             .add(chunk.cardinality() as u64, &self.attributes);
