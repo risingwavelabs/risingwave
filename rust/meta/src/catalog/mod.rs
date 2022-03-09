@@ -5,6 +5,8 @@ use std::sync::RwLock;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::error::Result;
+use risingwave_pb::meta::Table;
+use risingwave_pb::plan::{ColumnDesc, DatabaseRefId, SchemaRefId, TableRefId};
 
 use crate::catalog::rw_auth_members::*;
 use crate::catalog::rw_authid::*;
@@ -41,6 +43,9 @@ macro_rules! catalog_table_impl {
     };
 }
 
+const SYSTEM_CATALOG_DATABASE_ID: i32 = 1;
+const SYSTEM_CATALOG_SCHEMA_ID: i32 = 1;
+
 for_all_catalog_table_impl! { catalog_table_impl }
 
 macro_rules! impl_catalog_func {
@@ -69,6 +74,39 @@ macro_rules! impl_catalog_func {
                 }
             }
 
+            /// Returns table proto.
+            pub fn catalog(&self) -> Table {
+                match self {
+                    $( Self::$table => {
+                            let column_descs = $schema
+                                .fields
+                                .iter()
+                                .enumerate()
+                                .map(|(id, field)| ColumnDesc {
+                                    column_type: Some(field.data_type.to_protobuf().unwrap()),
+                                    column_id: id as i32,
+                                    name: field.name.clone(),
+                                })
+                                .collect();
+
+                            Table {
+                                table_ref_id: Some(TableRefId {
+                                    schema_ref_id: Some(SchemaRefId {
+                                        database_ref_id: Some(DatabaseRefId {
+                                            database_id: SYSTEM_CATALOG_DATABASE_ID,
+                                        }),
+                                        schema_id: SYSTEM_CATALOG_SCHEMA_ID,
+                                    }),
+                                    table_id: $id,
+                                }),
+                                table_name: $name.to_string(),
+                                column_descs,
+                                ..Default::default()
+                            }
+                    }, )*
+                }
+            }
+
             /// Returns the list of all rows in the table.
             pub async fn list<S: MetaStore>(&self, store: &S) -> Result<Vec<Row>> {
                 match self {
@@ -85,9 +123,6 @@ for_all_catalog_table_impl! { impl_catalog_func }
 pub struct SystemCatalogSrv {
     catalogs: RwLock<HashMap<TableId, RwCatalogTable>>,
 }
-
-const SYSTEM_CATALOG_DATABASE_ID: i32 = 1;
-const SYSTEM_CATALOG_SCHEMA_ID: i32 = 1;
 
 impl SystemCatalogSrv {
     pub fn new() -> Self {
@@ -148,6 +183,7 @@ mod tests {
             RwCatalogTable::Source.schema().fields,
             RW_SOURCE_SCHEMA.fields
         );
+        assert_eq!(RwCatalogTable::Source.catalog().table_name, RW_SOURCE_NAME);
 
         Ok(())
     }
