@@ -1,5 +1,8 @@
+use std::io::Cursor;
+
 use bytes::Bytes;
 use itertools::{EitherOrBoth, Itertools};
+use prost::Message;
 use risingwave_common::error::Result;
 use risingwave_pb::hummock::{CompactTask, Level, LevelEntry, LevelType, SstableInfo};
 use risingwave_storage::hummock::key::{user_key, FullKey};
@@ -47,7 +50,8 @@ impl CompactStatus {
             .get_cf(CompactStatus::cf_name(), CompactStatus::key().as_bytes())
             .await
             // TODO replace unwrap
-            .map(|v| bincode::deserialize(&v).unwrap())
+            .map(|v| risingwave_pb::hummock::CompactStatus::decode(&mut Cursor::new(v)).unwrap())
+            .map(|s| (&s).into())
             .map_err(Into::into)
     }
 
@@ -55,8 +59,7 @@ impl CompactStatus {
         trx.put(
             CompactStatus::cf_name().to_string(),
             CompactStatus::key().as_bytes().to_vec(),
-            // TODO replace unwrap
-            bincode::serialize(&self).unwrap(),
+            risingwave_pb::hummock::CompactStatus::from(self).encode_to_vec(),
         );
     }
 
@@ -352,6 +355,30 @@ impl CompactStatus {
     }
 }
 
+impl Default for CompactStatus {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl From<&CompactStatus> for risingwave_pb::hummock::CompactStatus {
+    fn from(status: &CompactStatus) -> Self {
+        risingwave_pb::hummock::CompactStatus {
+            level_handlers: status.level_handlers.iter().map_into().collect(),
+            next_compact_task_id: status.next_compact_task_id,
+        }
+    }
+}
+
+impl From<&risingwave_pb::hummock::CompactStatus> for CompactStatus {
+    fn from(status: &risingwave_pb::hummock::CompactStatus) -> Self {
+        CompactStatus {
+            level_handlers: status.level_handlers.iter().map_into().collect(),
+            next_compact_task_id: status.next_compact_task_id,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -362,8 +389,9 @@ mod tests {
             level_handlers: vec![],
             next_compact_task_id: 3,
         };
-        let ser = bincode::serialize(&origin).unwrap();
-        let de = bincode::deserialize(&ser).unwrap();
+        let ser = risingwave_pb::hummock::CompactStatus::from(&origin).encode_to_vec();
+        let de = risingwave_pb::hummock::CompactStatus::decode(&mut Cursor::new(ser));
+        let de = (&de.unwrap()).into();
         assert_eq!(origin, de);
 
         Ok(())

@@ -1,4 +1,5 @@
-use bytes::Bytes;
+use itertools::Itertools;
+use risingwave_pb::hummock::level_handler::KeyRangeTaskId;
 use risingwave_pb::hummock::SstableInfo;
 use risingwave_storage::hummock::key_range::KeyRange;
 use serde::{Deserialize, Serialize};
@@ -13,12 +14,29 @@ pub struct SSTableStat {
 impl From<&SstableInfo> for SSTableStat {
     fn from(info: &SstableInfo) -> Self {
         SSTableStat {
-            key_range: KeyRange::new(
-                Bytes::copy_from_slice(&info.key_range.as_ref().unwrap().left),
-                Bytes::copy_from_slice(&info.key_range.as_ref().unwrap().right),
-            ),
+            key_range: info.key_range.as_ref().unwrap().into(),
             table_id: info.id,
             compact_task: None,
+        }
+    }
+}
+
+impl From<&SSTableStat> for risingwave_pb::hummock::SstableStat {
+    fn from(stat: &SSTableStat) -> Self {
+        risingwave_pb::hummock::SstableStat {
+            key_range: Some(stat.key_range.clone().into()),
+            table_id: stat.table_id,
+            compact_task: stat.compact_task,
+        }
+    }
+}
+
+impl From<&risingwave_pb::hummock::SstableStat> for SSTableStat {
+    fn from(stat: &risingwave_pb::hummock::SstableStat) -> Self {
+        SSTableStat {
+            key_range: stat.key_range.as_ref().unwrap().into(),
+            table_id: stat.table_id,
+            compact_task: stat.compact_task,
         }
     }
 }
@@ -83,5 +101,46 @@ impl LevelHandler {
             }
         }
         deleted_table_ids
+    }
+}
+
+impl From<&LevelHandler> for risingwave_pb::hummock::LevelHandler {
+    fn from(lh: &LevelHandler) -> Self {
+        let level_type = match lh {
+            LevelHandler::Nonoverlapping(_, _) => 0,
+            LevelHandler::Overlapping(_, _) => 1,
+        };
+        match lh {
+            LevelHandler::Nonoverlapping(ssts, key_ranges)
+            | LevelHandler::Overlapping(ssts, key_ranges) => risingwave_pb::hummock::LevelHandler {
+                level_type,
+                ssts: ssts
+                    .iter()
+                    .map_into::<risingwave_pb::hummock::SstableStat>()
+                    .collect_vec(),
+                key_ranges: key_ranges
+                    .iter()
+                    .map(|it| KeyRangeTaskId {
+                        key_range: Some(it.0.clone().into()),
+                        task_id: it.1,
+                    })
+                    .collect(),
+            },
+        }
+    }
+}
+
+impl From<&risingwave_pb::hummock::LevelHandler> for LevelHandler {
+    fn from(lh: &risingwave_pb::hummock::LevelHandler) -> Self {
+        let ssts = lh.ssts.iter().map_into::<SSTableStat>().collect();
+        let key_ranges = lh
+            .key_ranges
+            .iter()
+            .map(|it| (it.key_range.as_ref().unwrap().into(), it.task_id))
+            .collect_vec();
+        match lh.level_type {
+            0 => LevelHandler::Nonoverlapping(ssts, key_ranges),
+            _ => LevelHandler::Overlapping(ssts, key_ranges),
+        }
     }
 }

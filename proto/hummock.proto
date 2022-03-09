@@ -151,6 +151,27 @@ message CompactTask {
   bool is_target_ultimate_and_leveling = 7;
 }
 
+message SstableStat {
+  KeyRange key_range = 1;
+  uint64 table_id = 2;
+  optional uint64 compact_task = 3;
+}
+
+message LevelHandler {
+  message KeyRangeTaskId {
+    KeyRange key_range = 1;
+    uint64 task_id = 2;
+  }
+  LevelType level_type = 1;
+  repeated SstableStat ssts = 2;
+  repeated KeyRangeTaskId key_ranges = 3;
+}
+
+message CompactStatus {
+  repeated LevelHandler level_handlers = 1;
+  uint64 next_compact_task_id = 2;
+}
+
 message GetCompactionTasksRequest {}
 
 message GetCompactionTasksResponse {

@@ -86,6 +86,15 @@ impl From<KeyRange> for risingwave_pb::hummock::KeyRange {
     }
 }
 
+impl From<&risingwave_pb::hummock::KeyRange> for KeyRange {
+    fn from(kr: &risingwave_pb::hummock::KeyRange) -> Self {
+        KeyRange::new(
+            Bytes::copy_from_slice(&kr.left),
+            Bytes::copy_from_slice(&kr.right),
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
