@@ -52,7 +52,7 @@ macro_rules! impl_from_float {
                 num if num.is_infinite() && num.is_sign_positive() => Some(Decimal::PositiveINF),
                 num if num.is_infinite() && num.is_sign_negative() => Some(Decimal::NegativeINF),
                 num => {
-                  RustDecimal::$from_float(num).map(Decimal::Normalized)
+                    RustDecimal::$from_float(num).map(Decimal::Normalized)
                 },
             }
         })*

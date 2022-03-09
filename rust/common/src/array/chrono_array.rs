@@ -91,7 +91,7 @@ macro_rules! get_chrono_array {
                 }
             }
 
-             #[derive(Debug)]
+            #[derive(Debug)]
             pub struct $builder {
                 bitmap: BitmapBuilder,
                 data: Vec<$variant_name>

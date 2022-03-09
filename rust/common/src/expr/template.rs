@@ -183,7 +183,7 @@ macro_rules! gen_expr_bytes {
                         $([<expr_ $arg:lower>], )*
                         return_type,
                         func,
-                         _phantom: std::marker::PhantomData,
+                        _phantom: std::marker::PhantomData,
                     }
                 }
             }

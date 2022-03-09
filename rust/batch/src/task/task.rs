@@ -226,10 +226,10 @@ impl BatchTaskExecution {
                 // close it after task error has been set.
                 if let Err(e) = BatchTaskExecution::try_execute(exec, &mut sender)
                     .instrument(tracing::trace_span!(
-                      "batch_execute",
-                      task_id = ?task_id.task_id,
-                      stage_id = ?task_id.stage_id,
-                      query_id = ?task_id.query_id,
+                        "batch_execute",
+                        task_id = ?task_id.task_id,
+                        stage_id = ?task_id.stage_id,
+                        query_id = ?task_id.query_id,
                     ))
                     .await
                 {
