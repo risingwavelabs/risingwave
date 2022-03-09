@@ -37,8 +37,8 @@ risedev:
     - use: compute-node
     - use: frontend
     # If you want to enable metrics, uncomment those two lines.
-    - use: prometheus
-    - use: grafana
+    # - use: prometheus
+    # - use: grafana
     # If you want to enable tracing, uncomment the following line.
     # - use: jaeger
     # If you want to use the new frontend, uncomment the following line.
@@ -133,7 +133,7 @@ template:
     exporter-address: "127.0.0.1"
 
     # Prometheus exporter listen port
-    exporter-port: 1223
+    exporter-port: 1222
 
     # Id of this instance
     id: compute-node-${port}

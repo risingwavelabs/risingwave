@@ -9,4 +9,4 @@ scrape_configs:
 
   - job_name: "hummock_monitor"
     static_configs:
-      - targets: ["localhost:1224"]
+      - targets: ["localhost:1222"]
