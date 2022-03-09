@@ -32,11 +32,13 @@ lazy_static::lazy_static! {
     pub static ref LOCAL_TEST_ADDR: SocketAddr = "127.0.0.1:2333".parse().unwrap();
 }
 
+pub type ActorHandle = JoinHandle<()>;
+
 pub struct StreamManagerCore {
     /// Each processor runs in a future. Upon receiving a `Terminate` message, they will exit.
     /// `handles` store join handles of these futures, and therefore we could wait their
     /// termination.
-    handles: HashMap<u32, JoinHandle<Result<()>>>,
+    handles: HashMap<u32, ActorHandle>,
 
     pub(crate) context: Arc<SharedContext>,
 
@@ -191,9 +193,9 @@ impl StreamManager {
 
     /// This function was called while [`StreamManager`] exited.
     pub async fn wait_all(self) -> Result<()> {
-        let handles = self.core.lock().unwrap().wait_all()?;
+        let handles = self.core.lock().unwrap().take_all_handles()?;
         for (_id, handle) in handles {
-            handle.await??;
+            handle.await?;
         }
         Ok(())
     }
@@ -202,7 +204,7 @@ impl StreamManager {
     pub async fn wait_actors(&self, actor_ids: &[u32]) -> Result<()> {
         let handles = self.core.lock().unwrap().remove_actor_handles(actor_ids)?;
         for handle in handles {
-            handle.await.unwrap()?
+            handle.await.unwrap();
         }
         Ok(())
     }
@@ -614,20 +616,20 @@ impl StreamManagerCore {
             trace!("build actor: {:#?}", &dispatcher);
 
             let actor = Actor::new(dispatcher, actor_id, self.context.clone());
-            self.handles.insert(actor_id, tokio::spawn(actor.run()));
+            self.handles.insert(
+                actor_id,
+                tokio::spawn(async move { actor.run().await.unwrap() }),
+            );
         }
 
         Ok(())
     }
 
-    pub fn wait_all(&mut self) -> Result<HashMap<u32, JoinHandle<Result<()>>>> {
+    pub fn take_all_handles(&mut self) -> Result<HashMap<u32, ActorHandle>> {
         Ok(std::mem::take(&mut self.handles))
     }
 
-    pub fn remove_actor_handles(
-        &mut self,
-        actor_ids: &[u32],
-    ) -> Result<Vec<JoinHandle<Result<()>>>> {
+    pub fn remove_actor_handles(&mut self, actor_ids: &[u32]) -> Result<Vec<ActorHandle>> {
         actor_ids
             .iter()
             .map(|actor_id| {
