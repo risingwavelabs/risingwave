@@ -56,7 +56,7 @@ mod hash_join;
 mod local_simple_agg;
 mod managed_state;
 mod merge;
-mod monitor;
+pub mod monitor;
 mod mview;
 mod project;
 mod source;
