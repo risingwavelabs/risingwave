@@ -11,7 +11,7 @@ use property::{Distribution, Order};
 use risingwave_common::catalog::Schema;
 
 use self::plan_node::LogicalProject;
-use crate::expr::{Expr as _, InputRef};
+use crate::expr::InputRef;
 
 /// `PlanRoot` is used to describe a plan. planner will construct a `PlanRoot` with LogicalNode and
 /// required distribution and order. And `PlanRoot` can generate corresponding streaming or batch
@@ -74,7 +74,7 @@ impl PlanRoot {
             .zip_eq(self.schema.fields)
             .map(|(index, field)| {
                 (
-                    InputRef::new(index, field.data_type).to_expr_impl(),
+                    InputRef::new(index, field.data_type).into(),
                     Some(field.name),
                 )
             })
