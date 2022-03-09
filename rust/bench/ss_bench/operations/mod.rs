@@ -5,7 +5,7 @@ use rand::prelude::StdRng;
 use rand::SeedableRng;
 use risingwave_storage::StateStore;
 
-use crate::utils::display_stat::*;
+use crate::utils::display_stats::*;
 use crate::utils::latency_stat::LatencyStat;
 use crate::Opts;
 pub(crate) mod get;
@@ -31,7 +31,7 @@ pub(crate) struct PerfMetrics {
 impl Operations {
     /// Run operations in the `--benchmarks` option
     pub(crate) async fn run(store: impl StateStore, opts: &Opts) {
-        let mut stat_display = DisplayStat::default();
+        let mut stat_display = DisplayStats::default();
 
         let mut runner = Operations {
             keys: vec![],
