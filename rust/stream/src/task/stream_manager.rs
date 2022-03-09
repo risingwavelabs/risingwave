@@ -20,7 +20,6 @@ use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreI
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
-use super::FailedActors;
 use crate::executor::*;
 use crate::task::{
     ConsumableChannelPair, SharedContext, StreamEnvironment, UpDownActorIds,
@@ -106,12 +105,10 @@ impl StreamManager {
         barrier: &Barrier,
         actor_ids_to_send: impl IntoIterator<Item = u32>,
         actor_ids_to_collect: impl IntoIterator<Item = u32>,
-    ) -> Result<oneshot::Receiver<FailedActors>> {
+    ) -> Result<Option<oneshot::Receiver<()>>> {
         let core = self.core.lock().unwrap();
         let mut barrier_manager = core.context.lock_barrier_manager();
-        let rx = barrier_manager
-            .send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?
-            .expect("no rx for local mode");
+        let rx = barrier_manager.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
         Ok(rx)
     }
 
@@ -121,11 +118,19 @@ impl StreamManager {
         barrier: &Barrier,
         actor_ids_to_send: impl IntoIterator<Item = u32>,
         actor_ids_to_collect: impl IntoIterator<Item = u32>,
-    ) -> Result<FailedActors> {
+    ) -> Result<()> {
         let rx = self.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
 
         // Wait for all actors to finish this barrier.
-        let failed_actors = rx.await.unwrap();
+        match rx {
+            Some(rx) => {
+                info!("Awaiting rx.");
+                rx.await.unwrap();
+            }
+            None => {
+                error!("Failed to send barrier as rx is not valid.");
+            }
+        }
 
         // Sync states from shared buffer to S3 before telling meta service we've done.
         dispatch_state_store!(self.state_store(), store, {
@@ -140,7 +145,7 @@ impl StreamManager {
             }
         });
 
-        Ok(failed_actors)
+        Ok(())
     }
 
     /// Broadcast a barrier to all senders. Returns immediately, and caller won't be notified when
