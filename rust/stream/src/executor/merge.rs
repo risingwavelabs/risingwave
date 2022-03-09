@@ -9,16 +9,13 @@ use futures::future::select_all;
 use futures::{SinkExt, StreamExt};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::ToRwResult;
 use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
-use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
-use risingwave_pb::task_service::{GetStreamRequest, GetStreamResponse};
+use risingwave_pb::task_service::GetStreamResponse;
 use risingwave_rpc_client::ComputeClient;
 use risingwave_storage::StateStore;
-use tonic::transport::Channel;
-use tonic::{Request, Streaming};
+use tonic::Streaming;
 use tracing_futures::Instrument;
 
 use super::{Barrier, Executor, Message, PkIndicesRef, Result};
@@ -27,7 +24,7 @@ use crate::task::{ExecutorParams, StreamManagerCore, UpDownActorIds};
 
 /// Receive data from `gRPC` and forwards to `MergerExecutor`/`ReceiverExecutor`
 pub struct RemoteInput {
-    client: ExchangeServiceClient<Channel>,
+    client: ComputeClient,
     stream: Streaming<GetStreamResponse>,
     sender: Sender<Message>,
 
@@ -42,19 +39,8 @@ impl RemoteInput {
         up_down_ids: UpDownActorIds,
         sender: Sender<Message>,
     ) -> Result<Self> {
-        let mut client = ComputeClient::new(&addr).await?.get_channel();
-        let req = GetStreamRequest {
-            up_fragment_id: up_down_ids.0,
-            down_fragment_id: up_down_ids.1,
-        };
-        let stream = client
-            .get_stream(Request::new(req))
-            .await
-            .to_rw_result_with(format!(
-                "failed to create stream from remote_input {} from fragment {} to fragment {}",
-                addr, up_down_ids.0, up_down_ids.1
-            ))?
-            .into_inner();
+        let client = ComputeClient::new(&addr).await?;
+        let stream = client.get_stream(up_down_ids.0, up_down_ids.1).await?;
         Ok(Self {
             client,
             stream,
@@ -360,9 +346,9 @@ mod tests {
     use risingwave_pb::task_service::exchange_service_server::{
         ExchangeService, ExchangeServiceServer,
     };
-    use risingwave_pb::task_service::{GetDataRequest, GetDataResponse};
+    use risingwave_pb::task_service::{GetDataRequest, GetDataResponse, GetStreamRequest};
     use tokio_stream::wrappers::ReceiverStream;
-    use tonic::{Response, Status};
+    use tonic::{Response, Status, Request};
 
     use super::*;
 

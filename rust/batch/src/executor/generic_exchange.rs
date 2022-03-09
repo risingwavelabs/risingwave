@@ -7,9 +7,10 @@ use risingwave_common::error::Result;
 use risingwave_common::util::addr::is_local_address;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::{ExchangeSource as ProstExchangeSource, Field as NodeField};
+use risingwave_rpc_client::{ExchangeSource, GrpcExchangeSource};
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
-use crate::execution::exchange_source::{ExchangeSource, GrpcExchangeSource, LocalExchangeSource};
+use crate::execution::exchange_source::LocalExchangeSource;
 use crate::executor::{Executor, ExecutorBuilder};
 use crate::task::{BatchEnvironment, TaskId};
 
@@ -64,8 +65,7 @@ impl CreateSource for DefaultCreateSource {
             value.get_sink_id()
         );
         Ok(Box::new(
-            GrpcExchangeSource::create(peer_addr, task_id, value.get_sink_id()?.try_into()?)
-                .await?,
+            GrpcExchangeSource::create(peer_addr, value.get_sink_id()?.clone()).await?,
         ))
     }
 }
