@@ -171,6 +171,14 @@ where
     fn monitored(self, _stats: Arc<StateStoreStats>) -> MonitoredStateStore<Self> {
         panic!("the state store is already monitored")
     }
+
+    async fn replicate_batch(
+        &self,
+        kv_pairs: Vec<(Bytes, Option<Bytes>)>,
+        epoch: u64,
+    ) -> Result<()> {
+        self.inner.replicate_batch(kv_pairs, epoch).await
+    }
 }
 
 /// A state store iterator wrapper for monitoring metrics.

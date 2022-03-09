@@ -1,7 +1,6 @@
 use risingwave_common::array::DataChunk;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId};
+use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::error::Result;
-use risingwave_common::types::DataType;
 use risingwave_pb::plan::create_table_node::Info;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::ColumnDesc as ColumnDescProto;
@@ -60,18 +59,7 @@ impl BoxedExecutorBuilder for CreateTableExecutor {
 #[async_trait::async_trait]
 impl Executor for CreateTableExecutor {
     async fn open(&mut self) -> Result<()> {
-        let table_columns = self
-            .table_columns
-            .to_owned()
-            .iter()
-            .map(|col| {
-                Ok(ColumnDesc {
-                    data_type: DataType::from(col.get_column_type()?),
-                    column_id: ColumnId::from(col.get_column_id()),
-                    name: col.get_name().to_string(),
-                })
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let table_columns = self.table_columns.iter().cloned().map(Into::into).collect();
 
         match &self.info {
             Info::TableSource(_) => {
@@ -89,15 +77,11 @@ impl Executor for CreateTableExecutor {
                         "create associated materialized view: id={:?}, associated={:?}",
                         self.table_id, associated_table_id
                     );
-
-                    self.source_manager.register_associated_materialized_view(
-                        &associated_table_id,
-                        &self.table_id,
-                    )?;
+                    // TODO: there's nothing to do on compute node here for creating associated mv
                 } else {
                     // Create normal MV.
                     info!("create materialized view: id={:?}", self.table_id);
-                    // TODO: there's nothing to do on compute node for creating mv
+                    // TODO: there's nothing to do on compute node here for creating mv
                 }
             }
         }

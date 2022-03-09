@@ -7,10 +7,10 @@ static GLOBAL: Jemalloc = Jemalloc;
 #[cfg(not(tarpaulin_include))]
 #[tokio::main]
 async fn main() {
-    let opts = risingwave_compute::ComputeNodeOpts::parse();
+    let opts = risingwave_meta::MetaNodeOpts::parse();
 
     risingwave_logging::oneshot_common();
-    risingwave_logging::init_risingwave_logger(opts.enable_jaeger_tracing);
+    risingwave_logging::init_risingwave_logger(false, false);
 
-    risingwave_compute::start(opts).await
+    risingwave_meta::start(opts).await
 }

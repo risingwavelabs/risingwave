@@ -496,4 +496,9 @@ impl StateStoreStats {
             compaction_upload_sst_counts,
         }
     }
+
+    /// Create a new `StateStoreMetrics` instance used in tests or other places.
+    pub fn unused() -> Self {
+        Self::new(&Registry::new())
+    }
 }

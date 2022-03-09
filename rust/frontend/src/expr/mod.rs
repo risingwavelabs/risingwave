@@ -18,9 +18,8 @@ pub use expr_visitor::*;
 pub type ExprType = risingwave_pb::expr::expr_node::Type;
 
 /// the trait of bound exprssions
-pub trait Expr {
+pub trait Expr: Into<ExprImpl> {
     fn return_type(&self) -> DataType;
-    fn to_expr_impl(self) -> ExprImpl;
 }
 #[derive(Clone, Debug)]
 pub enum ExprImpl {
@@ -39,8 +38,25 @@ impl Expr for ExprImpl {
             ExprImpl::AggCall(expr) => expr.return_type(),
         }
     }
-    fn to_expr_impl(self) -> ExprImpl {
-        self
+}
+impl From<InputRef> for ExprImpl {
+    fn from(input_ref: InputRef) -> Self {
+        ExprImpl::InputRef(Box::new(input_ref))
+    }
+}
+impl From<Literal> for ExprImpl {
+    fn from(literal: Literal) -> Self {
+        ExprImpl::Literal(Box::new(literal))
+    }
+}
+impl From<FunctionCall> for ExprImpl {
+    fn from(func_call: FunctionCall) -> Self {
+        ExprImpl::FunctionCall(Box::new(func_call))
+    }
+}
+impl From<AggCall> for ExprImpl {
+    fn from(agg_call: AggCall) -> Self {
+        ExprImpl::AggCall(Box::new(agg_call))
     }
 }
 

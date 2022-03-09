@@ -11,20 +11,25 @@ use crate::executor::*;
 /// Note that this option will significantly increase the overhead of tracing.
 pub const ENABLE_BARRIER_AGGREGATION: bool = false;
 
+pub type FailedActors = HashSet<u32>;
+
 struct ManagedBarrierState {
     epoch: u64,
 
     /// Notify that the collection is finished.
-    collect_notifier: oneshot::Sender<()>,
+    collect_notifier: oneshot::Sender<FailedActors>,
 
     /// Actor ids remaining to be collected.
     remaining_actors: HashSet<u32>,
+
+    /// Actor ids that are reported failed.
+    failed_actors: FailedActors,
 }
 
 impl ManagedBarrierState {
     fn notify(self) {
         // Notify about barrier finishing.
-        if self.collect_notifier.send(()).is_err() {
+        if self.collect_notifier.send(self.failed_actors).is_err() {
             warn!(
                 "failed to notify barrier collection with epoch {}: rx is dropped",
                 self.epoch
@@ -60,9 +65,6 @@ pub struct LocalBarrierManager {
 
     /// Last epoch of barriers.
     last_epoch: Option<u64>,
-
-    /// Blacklist of failed senders.
-    failed_senders: HashSet<u32>,
 }
 
 impl Default for LocalBarrierManager {
@@ -78,7 +80,6 @@ impl LocalBarrierManager {
             span: tracing::Span::none(),
             state,
             last_epoch: None,
-            failed_senders: HashSet::new(),
         }
     }
 
@@ -101,52 +102,34 @@ impl LocalBarrierManager {
     /// When actor is cancelled or aborted, it should call this method to withdraw itself.
     /// For example, a source actor might be cancelled because of Kafka stream timeout,
     /// which would cause a chain of actors (itself and the downstream actors to abort).
-    /// TODO(#742): Should let global stream manager know the cancelled actors and decide what
-    /// to do.
+    // TODO: this is a workaround. When an actor (especially the source) encounters a problem, it
+    // should first report the situation to the meta service but not fails itself, and then let the
+    // meta decide whether to send the stop barrier to gracefully exit the actor.
     pub fn withdraw_actor(&mut self, actor_id: u32) {
         debug!("withdraw actor: {}", actor_id);
-        // Add it to local black list.
-        self.failed_senders.insert(actor_id);
 
-        if let BarrierState::Managed(managed_state) = &mut self.state {
-            let mut need_to_notify: bool = false;
+        // If the barrier state has been initialized, which means `send_barrier` has been
+        // called.
+        if let BarrierState::Managed(Some(state)) = &mut self.state {
+            // Add it to local black list.
+            state.failed_actors.insert(actor_id);
+            state.remaining_actors.remove(&actor_id);
 
-            // If the barrier state has been initialized, which means `send_barrier` has been
-            // called.
-            if let Some(barrier_state) = managed_state.as_mut() {
-                if barrier_state.remaining_actors.remove(&actor_id) {
-                    // If the actor is the last one to be withdrawn.
-                    if barrier_state.remaining_actors.is_empty() {
-                        need_to_notify = true;
-                    }
-                }
-            }
-
-            if need_to_notify {
-                // Reset this round of barrier and notify local stream manager.
-                let state = managed_state.take().unwrap();
-                state.notify();
-            }
+            self.may_notify_finishing();
         }
     }
 
     /// Broadcast a barrier to all senders. Returns a receiver which will get notified when this
     /// barrier is finished, in managed mode.
     /// Returns `Ok(None)` is receiver is not available.
-    /// TODO: async collect barrier flush state from hummock.
     pub fn send_barrier(
         &mut self,
         barrier: &Barrier,
         actor_ids_to_send: impl IntoIterator<Item = u32>,
         actor_ids_to_collect: impl IntoIterator<Item = u32>,
-    ) -> Result<Option<oneshot::Receiver<()>>> {
+    ) -> Result<Option<oneshot::Receiver<FailedActors>>> {
         let to_send = {
             let mut to_send: HashSet<u32> = actor_ids_to_send.into_iter().collect();
-            // For failed actors that have been locally observed
-            // and not tracked by global stream manager, untrack them.
-            // TODO(#742): Global stream manager should know failed actors and untrack them.
-            to_send.retain(|actor_id| !self.failed_senders.contains(actor_id));
-
             match &self.state {
                 BarrierState::Local => {
                     if to_send.is_empty() {
@@ -154,29 +137,19 @@ impl LocalBarrierManager {
                     }
                 }
                 BarrierState::Managed(_) => {
-                    // If there's no actor to send, return.
-                    if to_send.is_empty() {
-                        return Ok(None);
-                    }
+                    // There must be some actors to send to.
+                    assert!(!to_send.is_empty());
                 }
             }
             to_send
         };
-        let mut to_collect: HashSet<u32> = actor_ids_to_collect.into_iter().collect();
+
+        let to_collect: HashSet<u32> = actor_ids_to_collect.into_iter().collect();
         trace!(
             "send barrier {:?}, senders = {:?}, actor_ids_to_collect = {:?}",
             barrier,
             to_send,
             to_collect
-        );
-        // For failed actors that have been locally observed
-        // and not tracked by global stream manager, untrack them.
-        // TODO(#742): Global stream manager should know failed actors and untrack them.
-        to_collect.retain(|actor_id| !self.failed_senders.contains(actor_id));
-
-        info!(
-            "send barrier {:?}, senders = {:?}, actor_ids_to_collect = {:?}",
-            barrier, to_send, to_collect
         );
 
         let rx = match &mut self.state {
@@ -193,6 +166,7 @@ impl LocalBarrierManager {
                     epoch: barrier.epoch.curr,
                     collect_notifier: tx,
                     remaining_actors: to_collect,
+                    failed_actors: Default::default(),
                 });
 
                 Some(rx)
@@ -205,15 +179,15 @@ impl LocalBarrierManager {
                 .get(&actor_id)
                 .unwrap_or_else(|| panic!("sender for actor {} does not exist", actor_id));
 
-            match sender.send(Message::Barrier(barrier.clone())) {
-                Ok(it) => it,
-                Err(_) => {
-                    // Fail to send barrier to this actor (e.g. Kafka source timeout).
-                    error!("[LocalBarrierManager] Send barrier to actor {} failed. Make sure target actor is still alive.", actor_id);
+            // TODO: this is a workaround.
+            if let Err(err) = sender.send(Message::Barrier(barrier.clone())) {
+                // Fail to send barrier to this actor (e.g. Kafka source timeout).
+                error!(
+                    "Send barrier to actor {} failed: {}. Make sure target actor is still alive.",
+                    actor_id, err
+                );
 
-                    // // Remove this actor from the list of senders.
-                    // self.senders.remove(&actor_id);
-                }
+                self.withdraw_actor(actor_id);
             }
         }
 
@@ -259,16 +233,25 @@ impl LocalBarrierManager {
                         .collect_vec()
                 );
 
-                if state.remaining_actors.is_empty() {
-                    let state = managed_state.take().unwrap();
+                self.may_notify_finishing();
+            }
+        }
+
+        Ok(())
+    }
+
+    fn may_notify_finishing(&mut self) {
+        match &mut self.state {
+            BarrierState::Local => {}
+            BarrierState::Managed(state) => {
+                if state.as_mut().unwrap().remaining_actors.is_empty() {
+                    let state = state.take().unwrap();
                     self.last_epoch = Some(state.epoch);
                     // Notify about barrier finishing.
                     state.notify();
                 }
             }
         }
-
-        Ok(())
     }
 
     /// Returns whether [`BarrierState`] is `Local`.

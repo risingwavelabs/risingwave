@@ -14,8 +14,8 @@ log = "0.4"
 moka = { version = "0.7", features = ["future"] }
 prometheus = { version = "0.13", features = ["process"] }
 rand = "0.8"
-risingwave-pb = { path = "../prost" }
 risingwave_common = { path = "../common" }
+risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_storage = { path = "../storage" } 
 serde = { version = "1", features = ["derive"] }

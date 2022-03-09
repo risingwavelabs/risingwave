@@ -20,7 +20,7 @@ fn configure_risingwave_targets(targets: filter::Targets) -> filter::Targets {
 }
 
 /// Init logger for RisingWave binaries.
-pub fn init_risingwave_logger(enable_jaeger_tracing: bool) {
+pub fn init_risingwave_logger(enable_jaeger_tracing: bool, colorful: bool) {
     use std::panic;
 
     let default_hook = panic::take_hook();
@@ -34,7 +34,9 @@ pub fn init_risingwave_logger(enable_jaeger_tracing: bool) {
 
     let fmt_layer = {
         // Configure log output to stdout
-        let fmt_layer = tracing_subscriber::fmt::layer().compact().with_ansi(false);
+        let fmt_layer = tracing_subscriber::fmt::layer()
+            .compact()
+            .with_ansi(colorful);
         let filter = filter::Targets::new()
             // Only enable WARN and ERROR for 3rd-party crates
             .with_target("aws_endpoint", Level::WARN)

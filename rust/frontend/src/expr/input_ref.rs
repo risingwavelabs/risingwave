@@ -1,6 +1,6 @@
 use risingwave_common::types::DataType;
 
-use super::{Expr, ExprImpl};
+use super::Expr;
 use crate::expr::ExprType;
 #[derive(Clone)]
 pub struct InputRef {
@@ -29,10 +29,8 @@ impl Expr for InputRef {
     fn return_type(&self) -> DataType {
         self.data_type.clone()
     }
-    fn to_expr_impl(self) -> ExprImpl {
-        ExprImpl::InputRef(Box::new(self))
-    }
 }
+
 impl std::fmt::Debug for InputRef {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self.index)
