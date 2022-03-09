@@ -19,5 +19,5 @@ async fn main() {
 
 #[cfg(feature = "all-in-one")]
 fn main() {
-    panic!("meta-node binary cannot be used in all-in-one mode")
+    panic!("frontend-node binary cannot be used in all-in-one mode")
 }
