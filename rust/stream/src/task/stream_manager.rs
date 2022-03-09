@@ -391,7 +391,6 @@ impl StreamManagerCore {
         input_pos: usize,
         env: StreamEnvironment,
         store: impl StateStore,
-        streaming_metrics: Arc<StreamingMetrics>,
     ) -> Result<Box<dyn Executor>> {
         let op_info = node.get_identity().clone();
         // Create the input executor before creating itself
@@ -408,7 +407,6 @@ impl StreamManagerCore {
                     input_pos,
                     env.clone(),
                     store.clone(),
-                    streaming_metrics.clone(),
                 )
             })
             .try_collect()?;
@@ -432,7 +430,7 @@ impl StreamManagerCore {
             op_info,
             input,
             actor_id,
-            executor_stats: streaming_metrics,
+            executor_stats: self.streaming_metrics.clone(),
         };
         let executor = create_executor(executor_params, self, node, store);
         let temp_streaming_metrics = self.streaming_metrics.clone();
@@ -448,18 +446,9 @@ impl StreamManagerCore {
         actor_id: u32,
         node: &stream_plan::StreamNode,
         env: StreamEnvironment,
-        streaming_metrics: Arc<StreamingMetrics>,
     ) -> Result<Box<dyn Executor>> {
         dispatch_state_store!(self.state_store.clone(), store, {
-            self.create_nodes_inner(
-                fragment_id,
-                actor_id,
-                node,
-                0,
-                env,
-                store,
-                streaming_metrics,
-            )
+            self.create_nodes_inner(fragment_id, actor_id, node, 0, env, store)
         })
     }
 
@@ -642,13 +631,8 @@ impl StreamManagerCore {
         for actor_id in actors {
             let actor_id = *actor_id;
             let actor = self.actors.remove(&actor_id).unwrap();
-            let executor = self.create_nodes(
-                actor.fragment_id,
-                actor_id,
-                actor.get_nodes()?,
-                env.clone(),
-                self.streaming_metrics.clone(),
-            )?;
+            let executor =
+                self.create_nodes(actor.fragment_id, actor_id, actor.get_nodes()?, env.clone())?;
             let dispatcher = self.create_dispatcher(
                 executor,
                 actor.get_dispatcher()?,
