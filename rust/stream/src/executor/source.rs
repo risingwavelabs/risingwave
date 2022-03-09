@@ -397,9 +397,7 @@ mod tests {
             1,
             1,
             "SourceExecutor".to_string(),
-            Arc::new(StreamingMetrics::new(
-                prometheus::Registry::new(),
-            )),
+            Arc::new(StreamingMetrics::new(prometheus::Registry::new())),
         )
         .unwrap();
 

@@ -433,9 +433,12 @@ impl StreamManagerCore {
             executor_stats: self.streaming_metrics.clone(),
         };
         let executor = create_executor(executor_params, self, node, store);
-        let temp_streaming_metrics = self.streaming_metrics.clone();
-        let executor =
-            Self::wrap_executor_for_debug(executor?, actor_id, input_pos, temp_streaming_metrics)?;
+        let executor = Self::wrap_executor_for_debug(
+            executor?,
+            actor_id,
+            input_pos,
+            self.streaming_metrics.clone(),
+        )?;
         Ok(executor)
     }
 
@@ -448,14 +451,7 @@ impl StreamManagerCore {
         env: StreamEnvironment,
     ) -> Result<Box<dyn Executor>> {
         dispatch_state_store!(self.state_store.clone(), store, {
-            self.create_nodes_inner(
-                fragment_id,
-                actor_id,
-                node,
-                0,
-                env,
-                store,
-            )
+            self.create_nodes_inner(fragment_id, actor_id, node, 0, env, store)
         })
     }
 
@@ -638,12 +634,8 @@ impl StreamManagerCore {
         for actor_id in actors {
             let actor_id = *actor_id;
             let actor = self.actors.remove(&actor_id).unwrap();
-            let executor = self.create_nodes(
-                actor.fragment_id,
-                actor_id,
-                actor.get_nodes()?,
-                env.clone(),
-            )?;
+            let executor =
+                self.create_nodes(actor.fragment_id, actor_id, actor.get_nodes()?, env.clone())?;
             let dispatcher = self.create_dispatcher(
                 executor,
                 actor.get_dispatcher()?,
