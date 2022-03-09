@@ -78,7 +78,6 @@ impl FrontendMockMetaClient {
         let catalog_manager = Arc::new(
             StoredCatalogManager::new(
                 meta_store.clone(),
-                epoch_generator.clone(),
                 notification_manager.clone(),
             )
             .await

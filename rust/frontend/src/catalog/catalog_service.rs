@@ -21,6 +21,7 @@ pub const DEFAULT_SCHEMA_NAME: &str = "dev";
 
 #[derive(Default)]
 pub struct CatalogCache {
+    catalog_version: CatalogVersion,
     database_by_name: HashMap<String, Arc<DatabaseCatalog>>,
     db_name_by_id: HashMap<DatabaseId, String>,
 }
@@ -131,6 +132,14 @@ impl CatalogCache {
         })?;
         Ok(())
     }
+
+    pub fn get_version(&self) -> CatalogVersion {
+        self.catalog_version
+    }
+
+    pub fn set_version(&mut self, version: CatalogVersion) {
+        self.catalog_version = version;
+    }
 }
 
 impl TryFrom<Catalog> for CatalogCache {
@@ -138,6 +147,7 @@ impl TryFrom<Catalog> for CatalogCache {
 
     fn try_from(catalog: Catalog) -> Result<Self> {
         let mut cache = CatalogCache {
+            catalog_version: catalog.get_version(),
             database_by_name: HashMap::new(),
             db_name_by_id: HashMap::new(),
         };
@@ -205,6 +215,16 @@ impl CatalogConnector {
         }
     }
 
+    async fn wait_version(&self, version: CatalogVersion) -> Result<()> {
+        let mut rx = self.catalog_updated_rx.clone();
+        while *rx.borrow_and_update() < version {
+            rx.changed()
+                .await
+                .map_err(|e| RwError::from(InternalError(e.to_string())))?;
+        }
+        Ok(())
+    }
+
     pub async fn create_database(&self, db_name: &str) -> Result<()> {
         let (_, version) = self
             .meta_client
@@ -214,13 +234,7 @@ impl CatalogConnector {
                 ..Default::default()
             })
             .await?;
-        let mut rx = self.catalog_updated_rx.clone();
-        while *rx.borrow() < version {
-            rx.changed()
-                .await
-                .map_err(|e| RwError::from(InternalError(e.to_string())))?;
-        }
-        Ok(())
+        self.wait_version(version).await
     }
 
     pub async fn create_schema(&self, db_name: &str, schema_name: &str) -> Result<()> {
@@ -244,13 +258,7 @@ impl CatalogConnector {
                 }),
             })
             .await?;
-        let mut rx = self.catalog_updated_rx.clone();
-        while *rx.borrow() < version {
-            rx.changed()
-                .await
-                .map_err(|e| RwError::from(InternalError(e.to_string())))?;
-        }
-        Ok(())
+        self.wait_version(version).await
     }
 
     pub async fn create_table(
@@ -293,13 +301,7 @@ impl CatalogConnector {
             },
         );
         let (_, version) = self.meta_client.create_table(table.clone()).await?;
-        let mut rx = self.catalog_updated_rx.clone();
-        while *rx.borrow() < version {
-            rx.changed()
-                .await
-                .map_err(|e| RwError::from(InternalError(e.to_string())))?;
-        }
-        Ok(())
+        self.wait_version(version).await
     }
 
     pub async fn drop_table(
@@ -318,13 +320,7 @@ impl CatalogConnector {
 
         let table_ref_id = TableRefId::from(&table_id);
         let version = self.meta_client.drop_table(table_ref_id).await?;
-        let mut rx = self.catalog_updated_rx.clone();
-        while *rx.borrow() < version {
-            rx.changed()
-                .await
-                .map_err(|e| RwError::from(InternalError(e.to_string())))?;
-        }
-        Ok(())
+        self.wait_version(version).await
     }
 
     pub async fn drop_schema(&self, db_name: &str, schema_name: &str) -> Result<()> {
@@ -350,13 +346,7 @@ impl CatalogConnector {
             schema_id,
         };
         let version = self.meta_client.drop_schema(schema_ref_id).await?;
-        let mut rx = self.catalog_updated_rx.clone();
-        while *rx.borrow() < version {
-            rx.changed()
-                .await
-                .map_err(|e| RwError::from(InternalError(e.to_string())))?;
-        }
-        Ok(())
+        self.wait_version(version).await
     }
 
     pub async fn drop_database(&self, db_name: &str) -> Result<()> {
@@ -369,13 +359,7 @@ impl CatalogConnector {
             .id() as i32;
         let database_ref_id = DatabaseRefId { database_id };
         let version = self.meta_client.drop_database(database_ref_id).await?;
-        let mut rx = self.catalog_updated_rx.clone();
-        while *rx.borrow() < version {
-            rx.changed()
-                .await
-                .map_err(|e| RwError::from(InternalError(e.to_string())))?;
-        }
-        Ok(())
+        self.wait_version(version).await
     }
 
     pub fn get_database_snapshot(&self, db_name: &str) -> Option<Arc<DatabaseCatalog>> {

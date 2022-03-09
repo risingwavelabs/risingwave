@@ -122,7 +122,9 @@ impl ObserverManager {
 
         self.catalog_updated_tx
             .send(version)
-            .map_err(|e| RwError::from(InternalError(e.to_string())))
+            .map_err(|e| RwError::from(InternalError(e.to_string())))?;
+        self.catalog_cache.write().unwrap().set_version(version);
+        Ok(())
     }
 
     /// `update_schema` is called in `start` method.
@@ -164,7 +166,9 @@ impl ObserverManager {
 
         self.catalog_updated_tx
             .send(version)
-            .map_err(|e| RwError::from(InternalError(e.to_string())))
+            .map_err(|e| RwError::from(InternalError(e.to_string())))?;
+        self.catalog_cache.write().unwrap().set_version(version);
+        Ok(())
     }
 
     /// `update_table` is called in `start` method.
@@ -214,6 +218,8 @@ impl ObserverManager {
 
         self.catalog_updated_tx
             .send(version)
-            .map_err(|e| RwError::from(InternalError(e.to_string())))
+            .map_err(|e| RwError::from(InternalError(e.to_string())))?;
+        self.catalog_cache.write().unwrap().set_version(version);
+        Ok(())
     }
 }
