@@ -111,6 +111,13 @@ impl LogicalProject {
     pub fn expr_alias(&self) -> &[Option<String>] {
         self.expr_alias.as_ref()
     }
+
+    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
+        f.debug_struct(name)
+            .field("exprs", self.exprs())
+            .field("expr_alias", &format_args!("{:?}", self.expr_alias()))
+            .finish()
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalProject {
@@ -126,10 +133,7 @@ impl_plan_tree_node_for_unary! {LogicalProject}
 
 impl fmt::Display for LogicalProject {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("LogicalProject")
-            .field("exprs", self.exprs())
-            .field("expr_alias", &format_args!("{:?}", self.expr_alias()))
-            .finish()
+        self.fmt_with_name(f, "LogicalProject")
     }
 }
 

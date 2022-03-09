@@ -7,7 +7,7 @@ use risingwave_common::error::Result;
 use super::{ColPrunable, LogicalBase, PlanRef, ToBatch, ToStream};
 use crate::catalog::{ColumnId, TableId};
 use crate::optimizer::plan_node::BatchSeqScan;
-use crate::optimizer::property::{WithSchema};
+use crate::optimizer::property::WithSchema;
 
 /// `LogicalScan` returns contents of a table or other equivalent object
 #[derive(Debug, Clone)]
@@ -45,22 +45,26 @@ impl LogicalScan {
     ) -> Result<PlanRef> {
         Ok(Self::new(table_name, table_id, columns, schema).into())
     }
+
+    pub(super) fn fmt_fields(&self, f: &mut fmt::DebugStruct) {
+        let columns = self
+            .schema
+            .fields()
+            .iter()
+            .map(|f| f.name.clone())
+            .collect::<Vec<_>>();
+        f.field("table", &self.table_name)
+            .field("columns", &columns);
+    }
 }
 
 impl_plan_tree_node_for_leaf! {LogicalScan}
 
 impl fmt::Display for LogicalScan {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let columns = self
-            .schema()
-            .fields()
-            .iter()
-            .map(|f| f.name.clone())
-            .collect::<Vec<_>>();
-        f.debug_struct("LogicalScan")
-            .field("table", &self.table_name)
-            .field("columns", &columns)
-            .finish()
+        let mut s = f.debug_struct("LogicalScan");
+        self.fmt_fields(&mut s);
+        s.finish()
     }
 }
 
