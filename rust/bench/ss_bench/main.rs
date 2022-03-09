@@ -6,6 +6,7 @@ mod utils;
 use clap::Parser;
 use operations::*;
 use risingwave_common::config::StorageConfig;
+use risingwave_pb::common::WorkerType;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::monitor::DEFAULT_STATE_STORE_STATS;
 use risingwave_storage::{dispatch_state_store, StateStoreImpl};
@@ -116,7 +117,12 @@ async fn main() {
     });
 
     let meta_address = "http://127.0.0.1:5690";
-    let hummock_meta_client = MetaClient::new(meta_address).await.unwrap();
+    let mut hummock_meta_client = MetaClient::new(meta_address).await.unwrap();
+    let addr = "127.0.0.1:5690".parse().unwrap();
+    hummock_meta_client
+        .register(addr, WorkerType::ComputeNode)
+        .await
+        .unwrap();
 
     let state_store =
         match StateStoreImpl::new(&opts.store, config, hummock_meta_client, stats.clone()).await {
