@@ -2,9 +2,8 @@ use core::convert::From;
 use std::any::type_name;
 use std::fmt::Debug;
 
-use crate::array::RwError;
 use crate::error::ErrorCode::InternalError;
-use crate::error::Result;
+use crate::error::{Result, RwError};
 
 fn general_cmp<T1, T2, T3, F>(l: T1, r: T2, cmp: F) -> Result<bool>
 where

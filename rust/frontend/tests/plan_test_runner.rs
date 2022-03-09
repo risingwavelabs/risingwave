@@ -1,7 +1,7 @@
 // Data-driven tests.
 
 use anyhow::{anyhow, Result};
-use risingwave_common::array::RwError;
+use risingwave_common::error::RwError;
 use risingwave_frontend::binder::Binder;
 use risingwave_frontend::handler::{create_table, drop_table};
 use risingwave_frontend::planner::Planner;

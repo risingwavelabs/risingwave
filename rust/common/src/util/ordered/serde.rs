@@ -5,9 +5,9 @@ use memcomparable::from_slice;
 
 use super::OrderedDatum::{NormalOrder, ReversedOrder};
 use super::OrderedRow;
-use crate::array::{ArrayImpl, Row, RwError};
+use crate::array::{ArrayImpl, Row};
 use crate::catalog::ColumnId;
-use crate::error::{ErrorCode, Result};
+use crate::error::{ErrorCode, Result, RwError};
 use crate::types::{
     deserialize_datum_from, serialize_datum_into, serialize_datum_ref_into, DataType, Datum,
     Decimal, ScalarImpl,
