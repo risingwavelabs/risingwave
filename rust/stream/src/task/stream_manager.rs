@@ -308,7 +308,7 @@ impl StreamManagerCore {
 
     #[cfg(test)]
     fn for_test() -> Self {
-        let register = prometheus::default_registry().clone();
+        let register = prometheus::Registry::new();
         let streaming_metrics = Arc::new(StreamingMetrics::new(register));
         Self::with_store_and_context(
             StateStoreImpl::shared_in_memory_store(),
@@ -448,7 +448,14 @@ impl StreamManagerCore {
         env: StreamEnvironment,
     ) -> Result<Box<dyn Executor>> {
         dispatch_state_store!(self.state_store.clone(), store, {
-            self.create_nodes_inner(fragment_id, actor_id, node, 0, env, store)
+            self.create_nodes_inner(
+                fragment_id,
+                actor_id,
+                node,
+                0,
+                env,
+                store,
+            )
         })
     }
 
@@ -631,8 +638,12 @@ impl StreamManagerCore {
         for actor_id in actors {
             let actor_id = *actor_id;
             let actor = self.actors.remove(&actor_id).unwrap();
-            let executor =
-                self.create_nodes(actor.fragment_id, actor_id, actor.get_nodes()?, env.clone())?;
+            let executor = self.create_nodes(
+                actor.fragment_id,
+                actor_id,
+                actor.get_nodes()?,
+                env.clone(),
+            )?;
             let dispatcher = self.create_dispatcher(
                 executor,
                 actor.get_dispatcher()?,

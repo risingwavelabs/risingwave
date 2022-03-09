@@ -83,6 +83,7 @@ impl super::DebugExecutor for TraceExecutor {
             Ok(message) => {
                 if let Message::Chunk(ref chunk) = message {
                     if chunk.cardinality() > 0 {
+
                         self.metrics
                             .actor_row_count
                             .with_label_values(&[self.actor_id.to_string().as_str()])
