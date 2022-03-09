@@ -107,13 +107,13 @@ impl LevelHandler {
 impl From<&LevelHandler> for risingwave_pb::hummock::LevelHandler {
     fn from(lh: &LevelHandler) -> Self {
         let level_type = match lh {
-            LevelHandler::Nonoverlapping(_, _) => 0,
-            LevelHandler::Overlapping(_, _) => 1,
+            LevelHandler::Nonoverlapping(_, _) => risingwave_pb::hummock::LevelType::Nonoverlapping,
+            LevelHandler::Overlapping(_, _) => risingwave_pb::hummock::LevelType::Overlapping,
         };
         match lh {
             LevelHandler::Nonoverlapping(ssts, key_ranges)
             | LevelHandler::Overlapping(ssts, key_ranges) => risingwave_pb::hummock::LevelHandler {
-                level_type,
+                level_type: level_type as i32,
                 ssts: ssts
                     .iter()
                     .map_into::<risingwave_pb::hummock::SstableStat>()
@@ -138,9 +138,13 @@ impl From<&risingwave_pb::hummock::LevelHandler> for LevelHandler {
             .iter()
             .map(|it| (it.key_range.as_ref().unwrap().into(), it.task_id))
             .collect_vec();
-        match lh.level_type {
-            0 => LevelHandler::Nonoverlapping(ssts, key_ranges),
-            _ => LevelHandler::Overlapping(ssts, key_ranges),
+        match lh.level_type() {
+            risingwave_pb::hummock::LevelType::Nonoverlapping => {
+                LevelHandler::Nonoverlapping(ssts, key_ranges)
+            }
+            risingwave_pb::hummock::LevelType::Overlapping => {
+                LevelHandler::Overlapping(ssts, key_ranges)
+            }
         }
     }
 }
