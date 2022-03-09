@@ -1,5 +1,6 @@
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
+
 use async_trait::async_trait;
 use risingwave_common::error::Result;
 use tracing::event;
@@ -45,7 +46,7 @@ impl TraceExecutor {
         input_desc: String,
         input_pos: usize,
         actor_id: u32,
-        streaming_metrics: Arc<StreamingMetrics>
+        streaming_metrics: Arc<StreamingMetrics>,
     ) -> Self {
         let span_name = format!("{input_desc}_{input_pos}_next");
 
@@ -82,7 +83,10 @@ impl super::DebugExecutor for TraceExecutor {
             Ok(message) => {
                 if let Message::Chunk(ref chunk) = message {
                     if chunk.cardinality() > 0 {
-                        self.metrics.actor_row_count.with_label_values(&[self.actor_id.to_string().as_str()]).inc_by(chunk.cardinality() as u64);
+                        self.metrics
+                            .actor_row_count
+                            .with_label_values(&[self.actor_id.to_string().as_str()])
+                            .inc_by(chunk.cardinality() as u64);
                         event!(tracing::Level::TRACE, prev = %input_desc, msg = "chunk", "input = \n{:#?}", chunk);
                     }
                 }

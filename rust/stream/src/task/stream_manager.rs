@@ -21,7 +21,6 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
 use super::FailedActors;
-
 use crate::executor::*;
 use crate::task::{
     ConsumableChannelPair, SharedContext, StreamEnvironment, UpDownActorIds,
@@ -94,7 +93,11 @@ impl StreamManager {
         }
     }
 
-    pub fn new(addr: SocketAddr, state_store: StateStoreImpl, streaming_metrics: Arc<StreamingMetrics>) -> Self {
+    pub fn new(
+        addr: SocketAddr,
+        state_store: StateStoreImpl,
+        streaming_metrics: Arc<StreamingMetrics>,
+    ) -> Self {
         Self::with_core(StreamManagerCore::new(addr, state_store, streaming_metrics))
     }
 
@@ -276,12 +279,20 @@ fn update_upstreams(context: &SharedContext, ids: &[UpDownActorIds]) {
 }
 
 impl StreamManagerCore {
-    fn new(addr: SocketAddr, state_store: StateStoreImpl, streaming_metrics: Arc<StreamingMetrics>) -> Self {
+    fn new(
+        addr: SocketAddr,
+        state_store: StateStoreImpl,
+        streaming_metrics: Arc<StreamingMetrics>,
+    ) -> Self {
         let context = SharedContext::new(addr, state_store.clone());
         Self::with_store_and_context(state_store, context, streaming_metrics)
     }
 
-    fn with_store_and_context(state_store: StateStoreImpl, context: SharedContext,  streaming_metrics: Arc<StreamingMetrics>) -> Self {
+    fn with_store_and_context(
+        state_store: StateStoreImpl,
+        context: SharedContext,
+        streaming_metrics: Arc<StreamingMetrics>,
+    ) -> Self {
         let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
 
         Self {
@@ -302,8 +313,7 @@ impl StreamManagerCore {
         Self::with_store_and_context(
             StateStoreImpl::shared_in_memory_store(),
             SharedContext::for_test(),
-            streaming_metrics
-        
+            streaming_metrics,
         )
     }
 
@@ -381,7 +391,7 @@ impl StreamManagerCore {
         input_pos: usize,
         env: StreamEnvironment,
         store: impl StateStore,
-        streaming_metrics: Arc<StreamingMetrics>
+        streaming_metrics: Arc<StreamingMetrics>,
     ) -> Result<Box<dyn Executor>> {
         let op_info = node.get_identity().clone();
         // Create the input executor before creating itself
@@ -426,7 +436,8 @@ impl StreamManagerCore {
         };
         let executor = create_executor(executor_params, self, node, store);
         let temp_streaming_metrics = self.streaming_metrics.clone();
-        let executor = Self::wrap_executor_for_debug(executor?, actor_id, input_pos, temp_streaming_metrics)?;
+        let executor =
+            Self::wrap_executor_for_debug(executor?, actor_id, input_pos, temp_streaming_metrics)?;
         Ok(executor)
     }
 
@@ -440,7 +451,15 @@ impl StreamManagerCore {
         streaming_metrics: Arc<StreamingMetrics>,
     ) -> Result<Box<dyn Executor>> {
         dispatch_state_store!(self.state_store.clone(), store, {
-            self.create_nodes_inner(fragment_id, actor_id, node, 0, env, store, streaming_metrics)
+            self.create_nodes_inner(
+                fragment_id,
+                actor_id,
+                node,
+                0,
+                env,
+                store,
+                streaming_metrics,
+            )
         })
     }
 
@@ -448,16 +467,21 @@ impl StreamManagerCore {
         mut executor: Box<dyn Executor>,
         actor_id: u32,
         input_pos: usize,
-        streaming_metrics: Arc<StreamingMetrics>
+        streaming_metrics: Arc<StreamingMetrics>,
     ) -> Result<Box<dyn Executor>> {
         if !cfg!(debug_assertions) {
             return Ok(executor);
         }
         let identity = executor.identity().to_string();
 
-
         // Trace
-        executor = Box::new(TraceExecutor::new(executor, identity, input_pos, actor_id, streaming_metrics));
+        executor = Box::new(TraceExecutor::new(
+            executor,
+            identity,
+            input_pos,
+            actor_id,
+            streaming_metrics,
+        ));
         // Schema check
         executor = Box::new(SchemaCheckExecutor::new(executor));
         // Epoch check
@@ -618,8 +642,13 @@ impl StreamManagerCore {
         for actor_id in actors {
             let actor_id = *actor_id;
             let actor = self.actors.remove(&actor_id).unwrap();
-            let executor =
-                self.create_nodes(actor.fragment_id, actor_id, actor.get_nodes()?, env.clone(), self.streaming_metrics.clone())?;
+            let executor = self.create_nodes(
+                actor.fragment_id,
+                actor_id,
+                actor.get_nodes()?,
+                env.clone(),
+                self.streaming_metrics.clone(),
+            )?;
             let dispatcher = self.create_dispatcher(
                 executor,
                 actor.get_dispatcher()?,

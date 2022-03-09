@@ -1,17 +1,11 @@
 use prometheus::core::{AtomicU64, GenericCounterVec};
-use prometheus::{
-    register_int_counter_vec_with_registry,
-     Registry};
-
-
+use prometheus::{register_int_counter_vec_with_registry, Registry};
 
 pub struct StreamingMetrics {
     pub registry: Registry,
     pub actor_row_count: GenericCounterVec<AtomicU64>,
 
-
     pub source_output_row_count: GenericCounterVec<AtomicU64>,
-
 }
 
 impl StreamingMetrics {
@@ -31,7 +25,6 @@ impl StreamingMetrics {
             registry
         )
         .unwrap();
-   
 
         Self {
             registry,
@@ -40,5 +33,3 @@ impl StreamingMetrics {
         }
     }
 }
-
-

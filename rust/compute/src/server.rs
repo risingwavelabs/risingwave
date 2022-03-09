@@ -20,7 +20,6 @@ use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::task::{StreamEnvironment, StreamManager};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
-
 use tower::make::Shared;
 use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
@@ -82,7 +81,11 @@ pub async fn compute_node_serve(
     let streaming_metrics = Arc::new(StreamingMetrics::new(registry.clone()));
     // Initialize the managers.
     let batch_mgr = Arc::new(BatchManager::new());
-    let stream_mgr = Arc::new(StreamManager::new(addr, state_store.clone(), streaming_metrics.clone()));
+    let stream_mgr = Arc::new(StreamManager::new(
+        addr,
+        state_store.clone(),
+        streaming_metrics.clone(),
+    ));
     let source_mgr = Arc::new(MemSourceManager::new());
 
     // Initialize batch environment.
@@ -131,7 +134,10 @@ pub async fn compute_node_serve(
 
     // Boot metrics service.
     if opts.metrics_level > 0 {
-        MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone(), streaming_metrics.clone());
+        MetricsManager::boot_metrics_service(
+            opts.prometheus_listener_addr.clone(),
+            streaming_metrics.clone(),
+        );
     }
 
     // All set, let the meta service know we're ready.
@@ -151,8 +157,8 @@ impl MetricsManager {
             );
             let listen_socket_addr: SocketAddr = listen_addr.parse().unwrap();
             let service = ServiceBuilder::new()
-            .layer(AddExtensionLayer::new(streaming_metrics))
-            .service_fn(Self::metrics_service);
+                .layer(AddExtensionLayer::new(streaming_metrics))
+                .service_fn(Self::metrics_service);
             let serve_future = hyper::Server::bind(&listen_socket_addr).serve(Shared::new(service));
             if let Err(err) = serve_future.await {
                 eprintln!("server error: {}", err);

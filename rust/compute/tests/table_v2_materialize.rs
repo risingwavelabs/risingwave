@@ -138,7 +138,9 @@ async fn test_table_v2_materialize() -> Result<()> {
         1,
         1,
         "SourceExecutor".to_string(),
-        Arc::new(StreamingMetrics::new(prometheus::default_registry().clone())),
+        Arc::new(StreamingMetrics::new(
+            prometheus::default_registry().clone(),
+        )),
     )?;
 
     // Create a `Materialize` to write the changes to storage

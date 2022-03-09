@@ -2,6 +2,7 @@ use std::fmt::{Debug, Formatter};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+
 use async_trait::async_trait;
 use either::Either;
 use futures::stream::{select_with_strategy, PollNext};
@@ -147,7 +148,6 @@ impl SourceExecutor {
             }
         };
 
-    
         Ok(Self {
             source_id,
             source_desc,
@@ -259,7 +259,10 @@ impl Executor for SourceExecutor {
 
                 // self.metrics.boot_metrics_service(prometheus_addr);
                 let source_identify = "Table_".to_string() + &self.source_id.table_id().to_string();
-                self.metrics.source_output_row_count.with_label_values(&[source_identify.as_str()]).inc_by(chunk.cardinality() as u64);
+                self.metrics
+                    .source_output_row_count
+                    .with_label_values(&[source_identify.as_str()])
+                    .inc_by(chunk.cardinality() as u64);
                 // self.source_output_row_count
                 //     .add(chunk.cardinality() as u64, &self.attributes);
                 Ok(Message::Chunk(chunk))
@@ -398,7 +401,9 @@ mod tests {
             1,
             1,
             "SourceExecutor".to_string(),
-            Arc::new(StreamingMetrics::new(prometheus::default_registry().clone()))
+            Arc::new(StreamingMetrics::new(
+                prometheus::default_registry().clone(),
+            )),
         )
         .unwrap();
 
@@ -527,7 +532,9 @@ mod tests {
             1,
             1,
             "SourceExecutor".to_string(),
-            Arc::new(StreamingMetrics::new(prometheus::default_registry().clone()))
+            Arc::new(StreamingMetrics::new(
+                prometheus::default_registry().clone(),
+            )),
         )
         .unwrap();
 
