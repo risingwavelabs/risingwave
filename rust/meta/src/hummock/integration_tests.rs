@@ -16,6 +16,7 @@ use crate::hummock::mock_hummock_meta_client::MockHummockMetaClient;
 use crate::hummock::HummockManager;
 use crate::manager::{MetaSrvEnv, NotificationManager};
 use crate::rpc::metrics::MetaMetrics;
+use crate::storage::MemStore;
 
 async fn get_hummock_meta_client() -> MockHummockMetaClient {
     let env = MetaSrvEnv::for_test().await;
@@ -44,7 +45,7 @@ async fn get_hummock_meta_client() -> MockHummockMetaClient {
     MockHummockMetaClient::new(hummock_manager, worker_node.id)
 }
 
-async fn get_hummock_storage() -> HummockStorage {
+async fn get_hummock_storage() -> (HummockStorage, Arc<HummockManager<MemStore>>) {
     let remote_dir = "hummock_001_test".to_string();
     let options = HummockOptions {
         sstable_size: 64,
@@ -57,14 +58,15 @@ async fn get_hummock_storage() -> HummockStorage {
     let obj_client = Arc::new(InMemObjectStore::new());
     let sstable_store = Arc::new(SstableStore::new(obj_client.clone(), remote_dir));
     let local_version_manager = Arc::new(LocalVersionManager::new(sstable_store.clone()));
-    HummockStorage::with_default_stats(
+    let storage = HummockStorage::with_default_stats(
         options.clone(),
         sstable_store,
         local_version_manager.clone(),
         hummock_meta_client.clone(),
     )
     .await
-    .unwrap()
+    .unwrap();
+    (storage, hummock_meta_client.hummock_manager_ref())
 }
 
 #[tokio::test]
@@ -75,7 +77,7 @@ async fn test_compaction_basic() {
 
 #[tokio::test]
 async fn test_compaction_same_key_not_split() {
-    let storage = get_hummock_storage().await;
+    let (storage, hummock_storage_ref) = get_hummock_storage().await;
     let sub_compact_context = SubCompactContext {
         options: storage.options().clone(),
         local_version_manager: storage.local_version_manager().clone(),
@@ -114,9 +116,8 @@ async fn test_compaction_same_key_not_split() {
         .unwrap();
 
     // 3. get compact task
-    let mut compact_task = storage
-        .hummock_meta_client()
-        .get_compaction_task()
+    let mut compact_task = hummock_storage_ref
+        .get_compact_task()
         .await
         .unwrap()
         .unwrap();
@@ -158,11 +159,7 @@ async fn test_compaction_same_key_not_split() {
     assert!(table.meta.estimated_size > target_table_size);
 
     // 5. get compact task
-    let compact_task = storage
-        .hummock_meta_client()
-        .get_compaction_task()
-        .await
-        .unwrap();
+    let compact_task = hummock_storage_ref.get_compact_task().await.unwrap();
 
     assert!(compact_task.is_none());
 }
