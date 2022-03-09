@@ -8,7 +8,6 @@ use super::{ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStr
 use crate::binder::BaseTableRef;
 use crate::catalog::ColumnId;
 
-
 /// `LogicalInsert` iterates on input relation and insert the data into specified table.
 ///
 /// It corresponds to the `INSERT` statements in SQL. Especially, for `INSERT ... VALUES`
