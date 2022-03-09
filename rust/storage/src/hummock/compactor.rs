@@ -271,11 +271,7 @@ impl Compactor {
                 .sstable_store
                 .put(&sst, data, super::CachePolicy::Fill)
                 .await?;
-            if context.is_share_buffer_compact {
-                context.stats.addtable_upload_sst_counts.inc();
-            } else {
-                context.stats.compaction_upload_sst_counts.inc();
-            }
+
             output_ssts.push(sst);
         }
 
