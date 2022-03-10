@@ -557,11 +557,7 @@ mod tests {
                 r.values()
                     .iter()
                     .map(|s| {
-                        if let Some(t) = s {
-                            Some(t.to_string())
-                        } else {
-                            None
-                        }
+                        s.clone().map(|t| t.to_string())
                     })
                     .collect_vec()
             })
