@@ -110,6 +110,8 @@ impl RowLevelIter {
             self.row_idx = 0;
             self.chunk_idx += 1;
         }
+        // The default is unmatched for new row.
+        self.set_cur_row_matched(false);
     }
 
     pub fn reset_chunk(&mut self) {

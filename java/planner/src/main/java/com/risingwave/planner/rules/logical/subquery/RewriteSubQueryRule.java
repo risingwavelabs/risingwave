@@ -50,7 +50,7 @@ import org.apache.calcite.sql.type.SqlTypeFamily;
  *
  * <p>This file is adapted from flink.
  */
-class RewriteSubQueryRule extends RelOptRule {
+public class RewriteSubQueryRule extends RelOptRule {
   public static final RewriteSubQueryRule INSTANCE = new RewriteSubQueryRule();
 
   public RewriteSubQueryRule() {

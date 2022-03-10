@@ -5,9 +5,9 @@ use memcomparable::from_slice;
 
 use super::OrderedDatum::{NormalOrder, ReversedOrder};
 use super::OrderedRow;
-use crate::array::{ArrayImpl, Row, RwError};
+use crate::array::{ArrayImpl, Row};
 use crate::catalog::ColumnId;
-use crate::error::{ErrorCode, Result};
+use crate::error::{ErrorCode, Result, RwError};
 use crate::types::{
     deserialize_datum_from, serialize_datum_into, serialize_datum_ref_into, DataType, Datum,
     Decimal, ScalarImpl,
@@ -50,6 +50,7 @@ impl OrderedArraysSerializer {
 /// `OrderedRowSerializer` expects that the input row contains exactly the values needed to be
 /// serialized, not more and not less. This is because `Row` always needs to be constructed from
 /// chunk manually.
+#[derive(Clone)]
 pub struct OrderedRowSerializer {
     order_types: Vec<OrderType>,
 }
@@ -104,6 +105,9 @@ impl OrderedRowDeserializer {
 type KeyBytes = Vec<u8>;
 type ValueBytes = Vec<u8>;
 
+/// Serialize a row of data using cell-based serialization, and return corresponding vector of key
+/// and value. If all data of this row are null, there will be one cell of column id `-1` to
+/// represent a row of all null values.
 pub fn serialize_pk_and_row(
     pk_buf: &[u8],
     row: &Option<Row>,

@@ -84,13 +84,6 @@ impl HummockMetaClient for MockHummockMetaClient {
             .map_err(HummockError::meta_error)
     }
 
-    async fn get_compaction_task(&self) -> HummockResult<Option<CompactTask>> {
-        self.hummock_manager
-            .get_compact_task()
-            .await
-            .map_err(HummockError::meta_error)
-    }
-
     async fn report_compaction_task(
         &self,
         compact_task: CompactTask,
@@ -121,5 +114,11 @@ impl HummockMetaClient for MockHummockMetaClient {
         &self,
     ) -> HummockResult<Streaming<SubscribeCompactTasksResponse>> {
         unimplemented!()
+    }
+}
+
+impl MockHummockMetaClient {
+    pub fn hummock_manager_ref(&self) -> Arc<HummockManager<MemStore>> {
+        self.hummock_manager.clone()
     }
 }

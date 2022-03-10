@@ -134,6 +134,18 @@ message KeyRange {
   bool inf = 3;
 }
 
+message TableSetStatistics {
+  uint32 level_idx = 1;
+  double size_gb = 2;
+  uint64 cnt = 3;
+}
+
+message CompactMetrics {
+  TableSetStatistics read_level_n = 1;
+  TableSetStatistics read_level_nplus1 = 2;
+  TableSetStatistics write = 3;
+}
+
 message CompactTask {
   // SSTs to be compacted, which will be removed from LSM after compaction
   repeated LevelEntry input_ssts = 1;
@@ -149,13 +161,7 @@ message CompactTask {
   // compacion output will be added to [`target_level`] of LSM after compaction
   uint32 target_level = 6;
   bool is_target_ultimate_and_leveling = 7;
-}
-
-message GetCompactionTasksRequest {}
-
-message GetCompactionTasksResponse {
-  common.Status status = 1;
-  CompactTask compact_task = 2;
+  CompactMetrics metrics = 8;
 }
 
 message ReportCompactionTasksRequest {
@@ -214,13 +220,25 @@ message SubscribeCompactTasksRequest {}
 
 message SubscribeCompactTasksResponse {
   CompactTask compact_task = 1;
+  VacuumTask vacuum_task = 2;
+}
+
+message VacuumTask {
+  message VacuumTrackedData {
+    repeated uint64 sstable_ids = 1;
+  }
+  message VaccumOrphanData {}
+
+  oneof task {
+    VacuumTrackedData tracked = 1;
+    VaccumOrphanData orphan = 2;
+  }
 }
 
 service HummockManagerService {
   rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
   rpc UnpinVersion(UnpinVersionRequest) returns (UnpinVersionResponse);
   rpc AddTables(AddTablesRequest) returns (AddTablesResponse);
-  rpc GetCompactionTasks(GetCompactionTasksRequest) returns (GetCompactionTasksResponse);
   rpc ReportCompactionTasks(ReportCompactionTasksRequest) returns (ReportCompactionTasksResponse);
   rpc PinSnapshot(PinSnapshotRequest) returns (PinSnapshotResponse);
   rpc UnpinSnapshot(UnpinSnapshotRequest) returns (UnpinSnapshotResponse);

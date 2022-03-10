@@ -59,7 +59,12 @@ impl HummockContextPinnedVersionExt for HummockContextPinnedVersion {
 
     fn update_in_transaction(&self, trx: &mut Transaction) -> risingwave_common::error::Result<()> {
         if self.version_id.is_empty() {
-            self.delete_in_transaction(trx)?;
+            HummockContextPinnedVersion::delete_in_transaction(
+                HummockContextRefId {
+                    id: self.context_id,
+                },
+                trx,
+            )?;
         } else {
             self.upsert_in_transaction(trx)?;
         }

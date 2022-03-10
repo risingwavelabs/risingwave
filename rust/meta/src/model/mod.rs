@@ -109,8 +109,11 @@ pub trait Transactional: MetadataModel {
         );
         Ok(())
     }
-    fn delete_in_transaction(&self, trx: &mut Transaction) -> risingwave_common::error::Result<()> {
-        trx.delete(Self::cf_name(), self.key()?.encode_to_vec());
+    fn delete_in_transaction(
+        key: Self::KeyType,
+        trx: &mut Transaction,
+    ) -> risingwave_common::error::Result<()> {
+        trx.delete(Self::cf_name(), key.encode_to_vec());
         Ok(())
     }
 }

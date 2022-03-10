@@ -2,10 +2,9 @@ use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
 
 use log::{error, info};
-use risingwave_common::array::RwError;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{Database, Schema, Table};

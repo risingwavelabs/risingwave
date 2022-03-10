@@ -3,10 +3,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use risingwave_common::array::RwError;
 use risingwave_common::catalog::{CatalogVersion, DatabaseId, SchemaId, TableId};
 use risingwave_common::error::ErrorCode::{CatalogError, InternalError};
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table::Info as TableInfo;
 use risingwave_pb::meta::{Catalog, Database, Schema, Table};

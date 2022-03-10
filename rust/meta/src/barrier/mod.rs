@@ -5,8 +5,7 @@ use std::time::Duration;
 
 use futures::future::try_join_all;
 use itertools::Itertools;
-use risingwave_common::array::RwError;
-use risingwave_common::error::{Result, ToRwResult};
+use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::data::Barrier;

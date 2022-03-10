@@ -1,10 +1,9 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use risingwave_common::array::RwError;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_pb::meta::{Catalog, Database, Schema, Table};
 use risingwave_pb::plan::{ColumnDesc, DatabaseRefId, SchemaRefId, TableRefId};

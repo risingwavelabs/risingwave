@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 use std::time::Duration;
 
-use risingwave_common::array::InternalError;
+use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use tonic::transport::{Channel, Endpoint};

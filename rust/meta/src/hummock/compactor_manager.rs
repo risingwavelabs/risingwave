@@ -2,7 +2,7 @@ use std::ops::Add;
 use std::time::{Duration, Instant};
 
 use risingwave_common::error::Result;
-use risingwave_pb::hummock::{CompactTask, SubscribeCompactTasksResponse};
+use risingwave_pb::hummock::{CompactTask, SubscribeCompactTasksResponse, VacuumTask};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::RwLock;
 use tracing::warn;
@@ -56,7 +56,11 @@ impl CompactorManager {
 
     /// Try to assign a compact task.
     /// It will return false when no compactor is available.
-    pub async fn try_assign_compact_task(&self, compact_task: CompactTask) -> bool {
+    pub async fn try_assign_compact_task(
+        &self,
+        compact_task: Option<CompactTask>,
+        vacuum_task: Option<VacuumTask>,
+    ) -> bool {
         let mut guard = self.inner.write().await;
         // Pick a compactor
         loop {
@@ -69,7 +73,8 @@ impl CompactorManager {
             let compactor = &guard.compactors[compactor_index];
             if let Err(err) = compactor
                 .send(Ok(SubscribeCompactTasksResponse {
-                    compact_task: Some(compact_task.clone()),
+                    compact_task: compact_task.clone(),
+                    vacuum_task: vacuum_task.clone(),
                 }))
                 .await
             {
@@ -80,10 +85,12 @@ impl CompactorManager {
             break;
         }
         guard.next_compactor += 1;
-        // TODO #546: Cancel a task only requires task_id. compact_task.clone() can be avoided.
-        guard
-            .assigned_tasks
-            .push((compact_task, Instant::now().add(COMPACT_TASK_TIMEOUT)));
+        if let Some(compact_task) = compact_task {
+            // TODO #546: Cancel a task only requires task_id. compact_task.clone() can be avoided.
+            guard
+                .assigned_tasks
+                .push((compact_task, Instant::now().add(COMPACT_TASK_TIMEOUT)));
+        }
 
         true
     }
@@ -99,7 +106,9 @@ impl CompactorManager {
 #[cfg(test)]
 mod tests {
     use risingwave_common::error::Result;
-    use risingwave_pb::hummock::{CompactTask, SubscribeCompactTasksResponse};
+    use risingwave_pb::hummock::{
+        CompactMetrics, CompactTask, SubscribeCompactTasksResponse, TableSetStatistics,
+    };
     use tokio::sync::mpsc::error::TryRecvError;
 
     use crate::hummock::CompactorManager;
@@ -113,6 +122,11 @@ mod tests {
             task_id,
             target_level: 0,
             is_target_ultimate_and_leveling: false,
+            metrics: Some(CompactMetrics {
+                read_level_n: Some(TableSetStatistics::default()),
+                read_level_nplus1: Some(TableSetStatistics::default()),
+                write: Some(TableSetStatistics::default()),
+            }),
         }
     }
 
@@ -141,6 +155,7 @@ mod tests {
             .unwrap()
             .send(Ok(SubscribeCompactTasksResponse {
                 compact_task: Some(task.clone()),
+                vacuum_task: None,
             }))
             .await
             .unwrap();
@@ -166,7 +181,7 @@ mod tests {
         // No compactor available.
         assert!(
             !compactor_manager
-                .try_assign_compact_task(task.clone())
+                .try_assign_compact_task(Some(task.clone()), None)
                 .await
         );
 
@@ -174,7 +189,7 @@ mod tests {
         assert_eq!(compactor_manager.inner.read().await.compactors.len(), 1);
         assert!(
             compactor_manager
-                .try_assign_compact_task(task.clone())
+                .try_assign_compact_task(Some(task.clone()), None)
                 .await
         );
         assert_eq!(
@@ -187,7 +202,7 @@ mod tests {
         assert_eq!(compactor_manager.inner.read().await.compactors.len(), 1);
         assert!(
             !compactor_manager
-                .try_assign_compact_task(task.clone())
+                .try_assign_compact_task(Some(task.clone()), None)
                 .await
         );
         assert_eq!(compactor_manager.inner.read().await.compactors.len(), 0);
@@ -207,7 +222,7 @@ mod tests {
             let task = dummy_compact_task(2 * i as u64);
             assert!(
                 compactor_manager
-                    .try_assign_compact_task(task.clone())
+                    .try_assign_compact_task(Some(task.clone()), None)
                     .await
             );
             for j in 0..receivers.len() {

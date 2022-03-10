@@ -9,11 +9,11 @@ use risingwave_common::try_match_expand;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::{
-    AddTablesRequest, AddTablesResponse, GetCompactionTasksRequest, GetCompactionTasksResponse,
-    GetNewTableIdRequest, GetNewTableIdResponse, PinSnapshotRequest, PinSnapshotResponse,
-    PinVersionRequest, PinVersionResponse, ReportCompactionTasksRequest,
-    ReportCompactionTasksResponse, SubscribeCompactTasksRequest, SubscribeCompactTasksResponse,
-    UnpinSnapshotRequest, UnpinSnapshotResponse, UnpinVersionRequest, UnpinVersionResponse,
+    AddTablesRequest, AddTablesResponse, GetNewTableIdRequest, GetNewTableIdResponse,
+    PinSnapshotRequest, PinSnapshotResponse, PinVersionRequest, PinVersionResponse,
+    ReportCompactionTasksRequest, ReportCompactionTasksResponse, SubscribeCompactTasksRequest,
+    SubscribeCompactTasksResponse, UnpinSnapshotRequest, UnpinSnapshotResponse,
+    UnpinVersionRequest, UnpinVersionResponse,
 };
 use risingwave_pb::meta::catalog_service_client::CatalogServiceClient;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
@@ -296,13 +296,6 @@ pub trait MetaClientInner: Send + Sync {
         unimplemented!()
     }
 
-    async fn get_compaction_tasks(
-        &self,
-        _req: GetCompactionTasksRequest,
-    ) -> std::result::Result<GetCompactionTasksResponse, tonic::Status> {
-        unimplemented!()
-    }
-
     async fn report_compaction_tasks(
         &self,
         _req: ReportCompactionTasksRequest,
@@ -516,18 +509,6 @@ impl MetaClientInner for GrpcMetaClient {
             .hummock_client
             .to_owned()
             .add_tables(req)
-            .await?
-            .into_inner())
-    }
-
-    async fn get_compaction_tasks(
-        &self,
-        req: GetCompactionTasksRequest,
-    ) -> std::result::Result<GetCompactionTasksResponse, tonic::Status> {
-        Ok(self
-            .hummock_client
-            .to_owned()
-            .get_compaction_tasks(req)
             .await?
             .into_inner())
     }

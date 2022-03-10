@@ -1,24 +1,29 @@
 use risingwave_common::array::Row;
-use risingwave_common::catalog::ColumnId;
+use risingwave_common::catalog::{ColumnDesc, ColumnId};
+use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::mview::MViewTable;
-use risingwave_storage::table::ScannableTable;
+use risingwave_storage::table::TableIter;
 use risingwave_storage::Keyspace;
 
-use crate::executor::test_utils::schemas;
 use crate::executor::ManagedMViewState;
 
 #[tokio::test]
 async fn test_mview_table() {
     let state_store = MemoryStateStore::new();
-    let schema = schemas::iii();
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
-    let pk_columns = vec![0, 1];
+    let column_descs = vec![
+        ColumnDesc::unnamed(column_ids[0], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[1], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[2], DataType::Int32),
+    ];
+
+    // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
     let keyspace = Keyspace::executor_root(state_store, 0x42);
     let mut state = ManagedMViewState::new(keyspace.clone(), column_ids, order_types.clone());
-    let table = MViewTable::new_for_test(keyspace.clone(), schema, pk_columns.clone(), order_types);
+    let table = MViewTable::new_for_test(keyspace.clone(), column_descs, order_types);
     let epoch: u64 = 0;
 
     state.put(
@@ -80,13 +85,17 @@ async fn test_mview_table() {
 #[tokio::test]
 async fn test_mview_table_for_string() {
     let state_store = MemoryStateStore::new();
-    let schema = schemas::sss();
-    let pk_columns = vec![0, 1];
+    // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
     let keyspace = Keyspace::executor_root(state_store, 0x42);
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
+    let column_descs = vec![
+        ColumnDesc::unnamed(column_ids[0], DataType::Varchar),
+        ColumnDesc::unnamed(column_ids[1], DataType::Varchar),
+        ColumnDesc::unnamed(column_ids[2], DataType::Varchar),
+    ];
     let mut state = ManagedMViewState::new(keyspace.clone(), column_ids, order_types.clone());
-    let table = MViewTable::new_for_test(keyspace.clone(), schema, pk_columns.clone(), order_types);
+    let table = MViewTable::new_for_test(keyspace.clone(), column_descs, order_types);
     let epoch: u64 = 0;
 
     state.put(
@@ -208,14 +217,18 @@ async fn test_mview_table_for_string() {
 #[tokio::test]
 async fn test_mview_table_iter() {
     let state_store = MemoryStateStore::new();
-    let schema = schemas::iii();
-    let pk_columns = vec![0, 1];
+    // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
     let keyspace = Keyspace::executor_root(state_store, 0x42);
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
+    let column_descs = vec![
+        ColumnDesc::unnamed(column_ids[0], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[1], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[2], DataType::Int32),
+    ];
 
     let mut state = ManagedMViewState::new(keyspace.clone(), column_ids, order_types.clone());
-    let table = MViewTable::new_for_test(keyspace.clone(), schema, pk_columns.clone(), order_types);
+    let table = MViewTable::new_for_test(keyspace.clone(), column_descs, order_types);
     let epoch: u64 = 0;
 
     state.put(
@@ -258,38 +271,31 @@ async fn test_mview_table_iter() {
 #[tokio::test]
 async fn test_multi_mview_table_iter() {
     let state_store = MemoryStateStore::new();
-    let schema_1 = schemas::iii();
-    let schema_2 = schemas::sss();
-    let pk_columns = vec![0, 1];
+    // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
 
     let keyspace_1 = Keyspace::executor_root(state_store.clone(), 0x1111);
     let keyspace_2 = Keyspace::executor_root(state_store.clone(), 0x2222);
     let epoch: u64 = 0;
 
-    let mut state_1 = ManagedMViewState::new(
-        keyspace_1.clone(),
-        vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)],
-        order_types.clone(),
-    );
-    let mut state_2 = ManagedMViewState::new(
-        keyspace_2.clone(),
-        vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)],
-        order_types.clone(),
-    );
+    let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
+    let column_descs_1 = vec![
+        ColumnDesc::unnamed(column_ids[0], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[1], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[2], DataType::Int32),
+    ];
+    let column_descs_2 = vec![
+        ColumnDesc::unnamed(column_ids[0], DataType::Varchar),
+        ColumnDesc::unnamed(column_ids[1], DataType::Varchar),
+        ColumnDesc::unnamed(column_ids[2], DataType::Varchar),
+    ];
 
-    let table_1 = MViewTable::new_for_test(
-        keyspace_1.clone(),
-        schema_1.clone(),
-        pk_columns.clone(),
-        order_types.clone(),
-    );
-    let table_2 = MViewTable::new_for_test(
-        keyspace_2.clone(),
-        schema_2.clone(),
-        pk_columns.clone(),
-        order_types,
-    );
+    let mut state_1 =
+        ManagedMViewState::new(keyspace_1.clone(), column_ids.clone(), order_types.clone());
+    let mut state_2 = ManagedMViewState::new(keyspace_2.clone(), column_ids, order_types.clone());
+
+    let table_1 = MViewTable::new_for_test(keyspace_1.clone(), column_descs_1, order_types.clone());
+    let table_2 = MViewTable::new_for_test(keyspace_2.clone(), column_descs_2, order_types);
 
     state_1.put(
         Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
@@ -372,14 +378,18 @@ async fn test_multi_mview_table_iter() {
 #[tokio::test]
 async fn test_mview_scan_empty_column_ids_cardinality() {
     let state_store = MemoryStateStore::new();
-    let schema = schemas::iii();
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
-    let pk_columns = vec![0, 1];
+    let column_descs = vec![
+        ColumnDesc::unnamed(column_ids[0], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[1], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[2], DataType::Int32),
+    ];
+    // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
     let keyspace = Keyspace::executor_root(state_store, 0x42);
 
     let mut state = ManagedMViewState::new(keyspace.clone(), column_ids, order_types.clone());
-    let table = MViewTable::new_for_test(keyspace.clone(), schema, pk_columns.clone(), order_types);
+    let table = MViewTable::new_for_test(keyspace.clone(), column_descs, order_types);
     let epoch: u64 = 0;
 
     state.put(
@@ -402,8 +412,7 @@ async fn test_mview_scan_empty_column_ids_cardinality() {
 
     let chunk = {
         let mut iter = table.iter(u64::MAX).await.unwrap();
-        table
-            .collect_from_iter(&mut iter, &[0, 1, 2], None)
+        iter.collect_data_chunk(&table, None)
             .await
             .unwrap()
             .unwrap()

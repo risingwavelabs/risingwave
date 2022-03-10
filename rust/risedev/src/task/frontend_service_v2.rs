@@ -18,7 +18,12 @@ impl FrontendServiceV2 {
 
     fn frontend_v2(&self) -> Result<Command> {
         let prefix_bin = env::var("PREFIX_BIN")?;
-        Ok(Command::new(Path::new(&prefix_bin).join("frontend-v2")))
+
+        if let Ok(x) = env::var("ENABLE_ALL_IN_ONE") && x == "true" {
+            Ok(Command::new(Path::new(&prefix_bin).join("risingwave").join("frontend-v2")))
+        } else {
+            Ok(Command::new(Path::new(&prefix_bin).join("frontend-v2")))
+        }
     }
 }
 
@@ -46,9 +51,9 @@ impl Task for FrontendServiceV2 {
             }
             other_size => {
                 return Err(anyhow!(
-          "Cannot start node: {} meta nodes found in this configuration, but only 1 is needed.",
-          other_size
-        ));
+                    "Cannot start node: {} meta nodes found in this configuration, but only 1 is needed.",
+                    other_size
+                ));
             }
         };
 
