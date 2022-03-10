@@ -1,7 +1,7 @@
 use risingwave_common::error::Result;
 
 use crate::binder::BoundStatement;
-use crate::optimizer::plan_node::PlanRef;
+use crate::optimizer::PlanRoot;
 
 mod insert;
 mod query;
@@ -11,7 +11,7 @@ mod statement;
 mod table_ref;
 mod values;
 
-/// `Planner` converts a bounded statement to a `PlanNode` tree
+/// `Planner` converts a bounded statement to a [`crate::optimizer::plan_node::PlanNode`] tree
 pub struct Planner {}
 
 impl Planner {
@@ -19,7 +19,7 @@ impl Planner {
     pub fn new() -> Planner {
         Planner {}
     }
-    pub fn plan(&mut self, stmt: BoundStatement) -> Result<PlanRef> {
+    pub fn plan(&mut self, stmt: BoundStatement) -> Result<PlanRoot> {
         self.plan_statement(stmt)
     }
 }

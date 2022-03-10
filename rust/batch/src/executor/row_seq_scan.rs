@@ -1,21 +1,19 @@
-use std::sync::Arc;
-
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
-use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
+use risingwave_common::catalog::{ColumnDesc, Schema, TableId};
 use risingwave_common::error::Result;
 use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_storage::table::mview::new_adhoc_mview_table;
-use risingwave_storage::table::{ScannableTable, TableIterRef};
+use risingwave_storage::table::mview::{MViewTable, MViewTableIter};
+use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::executor::{Executor, ExecutorBuilder};
 
 /// Executor that scans data from row table
-pub struct RowSeqScanExecutor {
-    table: Arc<dyn ScannableTable>,
+pub struct RowSeqScanExecutor<S: StateStore> {
+    table: MViewTable<S>,
     /// An iterator to scan StateStore.
-    iter: Option<TableIterRef>,
+    iter: Option<MViewTableIter<S>>,
     primary: bool,
 
     chunk_size: usize,
@@ -25,18 +23,15 @@ pub struct RowSeqScanExecutor {
     epoch: u64,
 }
 
-impl RowSeqScanExecutor {
-    // TODO: decide the chunk size for row seq scan
-    pub const DEFAULT_CHUNK_SIZE: usize = 1024;
-
+impl<S: StateStore> RowSeqScanExecutor<S> {
     pub fn new(
-        table: Arc<dyn ScannableTable>,
+        table: MViewTable<S>,
         chunk_size: usize,
         primary: bool,
         identity: String,
         epoch: u64,
     ) -> Self {
-        let schema = table.schema().into_owned();
+        let schema = table.schema().clone();
 
         Self {
             table,
@@ -53,15 +48,18 @@ impl RowSeqScanExecutor {
     // For shared storage like Hummock, we are using a fake partition-scan now. If `self.primary` is
     // false, we'll ignore this scanning and yield no chunk.
     fn should_ignore(&self) -> bool {
-        if self.table.is_shared_storage() {
-            !self.primary
-        } else {
-            false
-        }
+        !self.primary
     }
 }
 
-impl BoxedExecutorBuilder for RowSeqScanExecutor {
+pub struct RowSeqScanExecutorBuilder {}
+
+impl RowSeqScanExecutorBuilder {
+    // TODO: decide the chunk size for row seq scan
+    pub const DEFAULT_CHUNK_SIZE: usize = 1024;
+}
+
+impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
         let seq_scan_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
@@ -69,32 +67,27 @@ impl BoxedExecutorBuilder for RowSeqScanExecutor {
         )?;
 
         let table_id = TableId::from(&seq_scan_node.table_ref_id);
-        let column_ids = seq_scan_node
-            .column_ids
+        let column_descs = seq_scan_node
+            .column_descs
             .iter()
-            .map(|column_id| ColumnId::new(*column_id))
+            .map(|column_desc| ColumnDesc::from(column_desc.clone()))
             .collect_vec();
-        let fields = seq_scan_node.fields.iter().map(Field::from).collect_vec();
-
-        let table = new_adhoc_mview_table(
-            source.global_batch_env().state_store(),
-            &table_id,
-            &column_ids,
-            &fields,
-        );
-
-        Ok(Box::new(Self::new(
-            table,
-            Self::DEFAULT_CHUNK_SIZE,
-            source.task_id.task_id == 0,
-            source.plan_node().get_identity().clone(),
-            source.epoch,
-        )))
+        dispatch_state_store!(source.global_batch_env().state_store(), state_store, {
+            let keyspace = Keyspace::table_root(state_store, &table_id);
+            let table = MViewTable::new_adhoc(keyspace, column_descs);
+            Ok(Box::new(RowSeqScanExecutor::new(
+                table,
+                RowSeqScanExecutorBuilder::DEFAULT_CHUNK_SIZE,
+                source.task_id.task_id == 0,
+                source.plan_node().get_identity().clone(),
+                source.epoch,
+            )))
+        })
     }
 }
 
 #[async_trait::async_trait]
-impl Executor for RowSeqScanExecutor {
+impl<S: StateStore> Executor for RowSeqScanExecutor<S> {
     async fn open(&mut self) -> Result<()> {
         if self.should_ignore() {
             info!("non-primary row seq scan, ignored");
@@ -111,10 +104,7 @@ impl Executor for RowSeqScanExecutor {
         }
 
         let iter = self.iter.as_mut().expect("executor not open");
-
-        let column_indices = (0..self.table.schema().len()).collect_vec();
-        self.table
-            .collect_from_iter(iter, &column_indices, Some(self.chunk_size))
+        iter.collect_data_chunk(&self.table, Some(self.chunk_size))
             .await
     }
 

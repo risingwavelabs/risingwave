@@ -1,6 +1,5 @@
 package com.risingwave.planner.sql;
 
-import static com.risingwave.common.config.BatchPlannerConfigurations.OPTIMIZER_ENABLE_CALCITE_SUBQUERY_EXPAND;
 import static java.util.Objects.requireNonNull;
 
 import com.risingwave.common.datatype.RisingWaveTypeFactory;
@@ -59,6 +58,8 @@ public class SqlConverter {
     private VolcanoPlanner planner = null;
     private RelOptCluster cluster = null;
 
+    private boolean withExpand = true;
+
     private Builder(ExecutionContext context) {
       this.context = context;
       this.rootSchema = context.getCalciteRootSchema();
@@ -66,6 +67,11 @@ public class SqlConverter {
 
     public Builder withDefaultSchema(List<String> newDefaultSchema) {
       defaultSchema = requireNonNull(newDefaultSchema, "Default schema can't be null!");
+      return this;
+    }
+
+    public Builder withExpand(boolean doExpand) {
+      withExpand = doExpand;
       return this;
     }
 
@@ -85,8 +91,7 @@ public class SqlConverter {
       this.config =
           this.config
               .addRelBuilderConfigTransform(c -> c.withSimplify(false))
-              .withExpand(
-                  context.getSessionConfiguration().get(OPTIMIZER_ENABLE_CALCITE_SUBQUERY_EXPAND));
+              .withExpand(this.withExpand);
 
       SqlToRelConverter sql2RelConverter =
           new RisingWaveSqlToRelConverter(

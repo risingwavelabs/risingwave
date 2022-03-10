@@ -2,9 +2,9 @@ use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
 
 use log::{error, info};
-use risingwave_common::array::RwError;
+use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{Database, Schema, Table};
@@ -16,8 +16,6 @@ use crate::catalog::catalog_service::CatalogCache;
 use crate::catalog::{CatalogError, DatabaseId, SchemaId};
 use crate::scheduler::schedule::WorkerNodeManagerRef;
 
-pub const UPDATE_FINISH_NOTIFICATION: i32 = 0;
-
 /// `ObserverManager` is used to update data based on notification from meta.
 /// Call `start` to spawn a new asynchronous task
 /// which receives meta's notification and update frontend's data.
@@ -25,7 +23,7 @@ pub(crate) struct ObserverManager {
     rx: Box<dyn NotificationStream>,
     worker_node_manager: WorkerNodeManagerRef,
     catalog_cache: Arc<RwLock<CatalogCache>>,
-    catalog_updated_tx: Sender<i32>,
+    catalog_updated_tx: Sender<CatalogVersion>,
 }
 
 impl ObserverManager {
@@ -34,7 +32,7 @@ impl ObserverManager {
         addr: SocketAddr,
         worker_node_manager: WorkerNodeManagerRef,
         catalog_cache: Arc<RwLock<CatalogCache>>,
-        catalog_updated_tx: Sender<i32>,
+        catalog_updated_tx: Sender<CatalogVersion>,
     ) -> Self {
         let rx = client.subscribe(addr, WorkerType::Frontend).await.unwrap();
         Self {
@@ -105,6 +103,7 @@ impl ObserverManager {
         );
         let db_name = database.get_database_name();
         let db_id = database.get_database_ref_id()?.database_id as u64;
+        let version = database.get_version();
 
         match operation {
             Operation::Add => self
@@ -121,8 +120,10 @@ impl ObserverManager {
         }
 
         self.catalog_updated_tx
-            .send(UPDATE_FINISH_NOTIFICATION)
-            .map_err(|e| RwError::from(InternalError(e.to_string())))
+            .send(version)
+            .map_err(|e| RwError::from(InternalError(e.to_string())))?;
+        self.catalog_cache.write().unwrap().set_version(version);
+        Ok(())
     }
 
     /// `update_schema` is called in `start` method.
@@ -142,6 +143,7 @@ impl ObserverManager {
             .ok_or_else(|| CatalogError::NotFound("database id", db_id.to_string()))?;
         let schema_name = schema.get_schema_name();
         let schema_id = schema_ref_id.schema_id as SchemaId;
+        let version = schema.get_version();
 
         match operation {
             Operation::Add => self.catalog_cache.write().unwrap().create_schema(
@@ -162,8 +164,10 @@ impl ObserverManager {
         }
 
         self.catalog_updated_tx
-            .send(UPDATE_FINISH_NOTIFICATION)
-            .map_err(|e| RwError::from(InternalError(e.to_string())))
+            .send(version)
+            .map_err(|e| RwError::from(InternalError(e.to_string())))?;
+        self.catalog_cache.write().unwrap().set_version(version);
+        Ok(())
     }
 
     /// `update_table` is called in `start` method.
@@ -190,6 +194,7 @@ impl ObserverManager {
             .unwrap()
             .get_schema_name(schema_id)
             .ok_or_else(|| CatalogError::NotFound("schema id", schema_id.to_string()))?;
+        let version = table.get_version();
 
         match operation {
             Operation::Add => {
@@ -211,7 +216,9 @@ impl ObserverManager {
         }
 
         self.catalog_updated_tx
-            .send(UPDATE_FINISH_NOTIFICATION)
-            .map_err(|e| RwError::from(InternalError(e.to_string())))
+            .send(version)
+            .map_err(|e| RwError::from(InternalError(e.to_string())))?;
+        self.catalog_cache.write().unwrap().set_version(version);
+        Ok(())
     }
 }

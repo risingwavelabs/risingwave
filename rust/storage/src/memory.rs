@@ -171,6 +171,31 @@ impl StateStore for MemoryStateStore {
 
         Ok(MemoryStateStoreIter::new(snapshot.into_iter()))
     }
+
+    async fn replicate_batch(
+        &self,
+        _kv_pairs: Vec<(Bytes, Option<Bytes>)>,
+        _epoch: u64,
+    ) -> Result<()> {
+        unimplemented!()
+    }
+
+    async fn reverse_iter<R, B>(&self, _key_range: R, _epoch: u64) -> Result<Self::Iter<'_>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]>,
+    {
+        unimplemented!()
+    }
+
+    async fn wait_epoch(&self, _epoch: u64) {
+        // memory backend doesn't support wait for epoch, so this is a no-op.
+    }
+
+    async fn sync(&self, _epoch: Option<u64>) -> Result<()> {
+        // memory backend doesn't support push to S3, so this is a no-op
+        Ok(())
+    }
 }
 
 pub struct MemoryStateStoreIter {

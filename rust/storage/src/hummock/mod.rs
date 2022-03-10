@@ -4,6 +4,7 @@ use std::fmt;
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
+use bytes::Bytes;
 use itertools::Itertools;
 
 mod block_cache;
@@ -27,6 +28,7 @@ mod state_store;
 #[cfg(test)]
 mod state_store_tests;
 mod utils;
+mod vacuum;
 pub mod value;
 mod version_cmp;
 
@@ -75,6 +77,8 @@ pub struct HummockOptions {
 
     /// checksum algorithm.
     pub checksum_algo: ChecksumAlg,
+    /// enable async checkpoint or not
+    pub async_checkpoint_enabled: bool,
 }
 
 impl HummockOptions {
@@ -86,6 +90,7 @@ impl HummockOptions {
             bloom_false_positive: 0.1,
             data_directory: "hummock_001".to_string(),
             checksum_algo: ChecksumAlg::XxHash64,
+            async_checkpoint_enabled: true,
         }
     }
 
@@ -97,6 +102,7 @@ impl HummockOptions {
             bloom_false_positive: 0.1,
             data_directory: "hummock_001_small".to_string(),
             checksum_algo: ChecksumAlg::XxHash64,
+            async_checkpoint_enabled: true,
         }
     }
 }
@@ -188,7 +194,7 @@ impl HummockStorage {
             .shared_buffer_manager
             .get(key, (version.max_committed_epoch() + 1)..=epoch)
         {
-            return Ok(v.into_put_value());
+            return Ok(v.into_put_value().map(|x| x.to_vec()));
         }
 
         for level in &version.levels() {
@@ -362,13 +368,41 @@ impl HummockStorage {
     ///   been committed. If such case happens, the outcome is non-predictable.
     pub async fn write_batch(
         &self,
-        kv_pairs: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
+        kv_pairs: impl Iterator<Item = (Bytes, HummockValue<Bytes>)>,
         epoch: u64,
     ) -> HummockResult<()> {
         let batch = kv_pairs
-            .map(|i| (FullKey::from_user_key(i.0, epoch).into_inner(), i.1))
+            .map(|i| {
+                (
+                    Bytes::from(FullKey::from_user_key(i.0.to_vec(), epoch).into_inner()),
+                    i.1,
+                )
+            })
             .collect_vec();
         self.shared_buffer_manager.write_batch(batch, epoch)?;
+
+        if !self.options.async_checkpoint_enabled {
+            return self.shared_buffer_manager.sync(Some(epoch)).await;
+        }
+        Ok(())
+    }
+
+    /// Replicate batch to shared buffer, without uploading to the storage backend.
+    pub async fn replicate_batch(
+        &self,
+        kv_pairs: impl Iterator<Item = (Bytes, HummockValue<Bytes>)>,
+        epoch: u64,
+    ) -> HummockResult<()> {
+        let batch = kv_pairs
+            .map(|i| {
+                (
+                    Bytes::from(FullKey::from_user_key(i.0.to_vec(), epoch).into_inner()),
+                    i.1,
+                )
+            })
+            .collect_vec();
+        self.shared_buffer_manager
+            .replicate_remote_batch(batch, epoch)?;
 
         // self.sync(epoch).await?;
         Ok(())

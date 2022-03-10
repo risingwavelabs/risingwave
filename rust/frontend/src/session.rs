@@ -13,7 +13,7 @@ use crate::catalog::catalog_service::{
     CatalogCache, CatalogConnector, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
 };
 use crate::handler::handle;
-use crate::observer::observer_manager::{ObserverManager, UPDATE_FINISH_NOTIFICATION};
+use crate::observer::observer_manager::ObserverManager;
 use crate::scheduler::schedule::WorkerNodeManager;
 use crate::FrontendOpts;
 pub struct QueryContext<'a> {
@@ -49,7 +49,7 @@ impl FrontendEnv {
         // Register in meta by calling `AddWorkerNode` RPC.
         meta_client.register(host, WorkerType::Frontend).await?;
 
-        let (catalog_updated_tx, catalog_updated_rx) = watch::channel(UPDATE_FINISH_NOTIFICATION);
+        let (catalog_updated_tx, catalog_updated_rx) = watch::channel(0);
         let catalog_cache = Arc::new(RwLock::new(CatalogCache::new(meta_client.clone()).await?));
         let catalog_manager = CatalogConnector::new(
             meta_client.clone(),

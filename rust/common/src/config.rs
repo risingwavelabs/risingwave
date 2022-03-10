@@ -13,6 +13,7 @@ const DEFAULT_BLOCK_SIZE: u32 = 64 * (1 << 10);
 const DEFAULT_BLOOM_FALSE_POSITIVE: f64 = 0.1;
 const DEFAULT_DATA_DIRECTORY: &str = "hummock_001";
 const DEFAULT_CHECKSUM_ALGORITHM: &str = "crc32c";
+const DEFAULT_ASYNC_CHECKPOINT_ENABLED: bool = true;
 
 /// TODO(TaoWu): The configs here may be preferable to be managed under corresponding module
 /// separately.
@@ -92,6 +93,9 @@ pub struct StorageConfig {
 
     /// Checksum algorithm (Crc32c, XxHash64).
     pub checksum_algo: String,
+
+    /// Whether to enable async checkpoint
+    pub async_checkpoint_enabled: bool,
 }
 
 impl Default for StorageConfig {
@@ -102,6 +106,7 @@ impl Default for StorageConfig {
             bloom_false_positive: DEFAULT_BLOOM_FALSE_POSITIVE,
             data_directory: DEFAULT_DATA_DIRECTORY.to_string(),
             checksum_algo: DEFAULT_CHECKSUM_ALGORITHM.to_string(),
+            async_checkpoint_enabled: DEFAULT_ASYNC_CHECKPOINT_ENABLED,
         }
     }
 }

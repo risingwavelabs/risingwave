@@ -1,14 +1,15 @@
 use risingwave_common::types::{DataType, ScalarImpl};
 
 use crate::expr::{
-    to_conjunctions, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, Literal,
+    to_conjunctions, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, Literal,
 };
 
 #[derive(Debug, Clone)]
 pub struct Condition {
-    /// condition bool expressions, linked with AND conjunction
+    /// Condition expressions in conjunction form (combined with `AND`)
     pub conjunctions: Vec<ExprImpl>,
 }
+
 impl Condition {
     pub fn with_expr(expr: ExprImpl) -> Self {
         Self {
@@ -31,11 +32,11 @@ impl Condition {
             for expr in iter {
                 ret = FunctionCall::new(ExprType::And, vec![ret, expr])
                     .unwrap()
-                    .to_expr_impl();
+                    .into();
             }
             ret
         } else {
-            Literal::new(Some(ScalarImpl::Bool(true)), DataType::Boolean).to_expr_impl()
+            Literal::new(Some(ScalarImpl::Bool(true)), DataType::Boolean).into()
         }
     }
 

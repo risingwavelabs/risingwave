@@ -1,6 +1,5 @@
 #![allow(dead_code)]
-use risingwave_common::array::RwError;
-use risingwave_common::error::ErrorCode;
+use risingwave_common::error::{ErrorCode, RwError};
 use thiserror::Error;
 
 pub(crate) mod catalog_service;

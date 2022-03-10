@@ -3,25 +3,32 @@ use std::fmt;
 use risingwave_common::catalog::Schema;
 
 use super::{
-    EqJoinPredicate, LogicalJoin, PlanRef, PlanTreeNodeBinary, ToBatchProst, ToDistributedBatch,
+    BatchBase, EqJoinPredicate, LogicalJoin, PlanRef, PlanTreeNodeBinary, ToBatchProst,
+    ToDistributedBatch,
 };
-use crate::optimizer::property::{
-    Direction, Distribution, FieldOrder, Order, WithDistribution, WithOrder, WithSchema,
-};
+use crate::optimizer::property::{Direction, Distribution, FieldOrder, Order, WithSchema};
 
+/// `BatchSortMergeJoin` implements [`super::LogicalJoin`] by merging left & right relations in
+/// a streaming manner. The input relation must have been ordered by the equi-join key(s).
 #[derive(Debug, Clone)]
 pub struct BatchSortMergeJoin {
+    pub base: BatchBase,
     logical: LogicalJoin,
     eq_join_predicate: EqJoinPredicate,
-    order: Order,
 }
 
 impl BatchSortMergeJoin {
     pub fn new(logical: LogicalJoin, eq_join_predicate: EqJoinPredicate) -> Self {
         let order = Self::derive_order(logical.left().order(), logical.right().order());
+        // TODO: derive from input
+        let base = BatchBase {
+            order,
+            dist: Distribution::any().clone(),
+        };
+
         Self {
             logical,
-            order,
+            base,
             eq_join_predicate,
         }
     }
@@ -84,14 +91,6 @@ impl PlanTreeNodeBinary for BatchSortMergeJoin {
     }
 }
 impl_plan_tree_node_for_binary! {BatchSortMergeJoin}
-
-impl WithOrder for BatchSortMergeJoin {
-    fn order(&self) -> &Order {
-        &self.order
-    }
-}
-
-impl WithDistribution for BatchSortMergeJoin {}
 
 impl WithSchema for BatchSortMergeJoin {
     fn schema(&self) -> &Schema {

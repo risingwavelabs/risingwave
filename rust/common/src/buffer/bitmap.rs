@@ -24,9 +24,9 @@ use std::ops::{BitAnd, BitOr};
 
 use risingwave_pb::data::Buffer as ProstBuffer;
 
-use crate::array::{Array, BoolArray, RwError};
+use crate::array::{Array, BoolArray};
 use crate::buffer::Buffer;
-use crate::error::Result;
+use crate::error::{Result, RwError};
 use crate::util::bit_util;
 
 #[derive(Default, Debug)]

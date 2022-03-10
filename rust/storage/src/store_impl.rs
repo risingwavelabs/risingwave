@@ -1,9 +1,8 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use risingwave_common::array::RwError;
 use risingwave_common::config::StorageConfig;
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 use risingwave_rpc_client::MetaClient;
 
 use crate::hummock::hummock_meta_client::RpcHummockMetaClient;
@@ -103,6 +102,7 @@ impl StateStoreImpl {
                                     unimplemented!("{} is not supported for Hummock", other)
                                 }
                             },
+                            async_checkpoint_enabled: config.async_checkpoint_enabled,
                         },
                         sstable_store.clone(),
                         Arc::new(LocalVersionManager::new(sstable_store)),

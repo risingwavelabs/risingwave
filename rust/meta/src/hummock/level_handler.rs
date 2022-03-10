@@ -45,10 +45,10 @@ impl From<&risingwave_pb::hummock::SstableStat> for SSTableStat {
 pub enum LevelHandler {
     /// * `Vec<SSTableStat>` - existing SSTs in this level, arranged in order no matter Tiering or
     ///   Leveling
-    /// * `Vec<(KeyRange, u64)>` - key ranges (and corresponding compaction task id) to be merged
-    ///   to bottom level in order
-    Nonoverlapping(Vec<SSTableStat>, Vec<(KeyRange, u64)>),
-    Overlapping(Vec<SSTableStat>, Vec<(KeyRange, u64)>),
+    /// * `Vec<(KeyRange, u64, u64)>` - key ranges (and corresponding compaction task id, #SSTs) to
+    ///   be merged to bottom level in order
+    Nonoverlapping(Vec<SSTableStat>, Vec<(KeyRange, u64, u64)>),
+    Overlapping(Vec<SSTableStat>, Vec<(KeyRange, u64, u64)>),
 }
 
 impl LevelHandler {
@@ -56,7 +56,7 @@ impl LevelHandler {
         match self {
             LevelHandler::Overlapping(_, compacting_key_ranges)
             | LevelHandler::Nonoverlapping(_, compacting_key_ranges) => {
-                compacting_key_ranges.retain(|(_, task_id)| *task_id != clear_task_id);
+                compacting_key_ranges.retain(|(_, task_id, _)| *task_id != clear_task_id);
             }
         }
     }

@@ -118,12 +118,17 @@ public class Configuration {
 
   private static ImmutableMap<String, ConfigEntry<?>> loadConfigRegistry() {
     // Load batch planner options.
-    List<ConfigEntry<?>> configEntries = loadConfigEntries(BatchPlannerConfigurations.class);
+    List<List<ConfigEntry<?>>> configEntriesList =
+        List.of(
+            loadConfigEntries(BatchPlannerConfigurations.class),
+            loadConfigEntries(StreamPlannerConfigurations.class));
     var mapBuilder = new ImmutableMap.Builder<String, ConfigEntry<?>>();
-    configEntries.forEach(
-        entry -> {
-          mapBuilder.put(entry.getKey(), entry);
-        });
+    for (var configEntries : configEntriesList) {
+      configEntries.forEach(
+          entry -> {
+            mapBuilder.put(entry.getKey(), entry);
+          });
+    }
     return mapBuilder.build();
   }
 

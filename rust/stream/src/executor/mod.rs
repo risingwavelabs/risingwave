@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
+use std::pin::Pin;
 use std::sync::Arc;
 
 pub use actor::Actor;
@@ -10,10 +11,12 @@ pub use chain::*;
 pub use debug::*;
 pub use dispatch::*;
 pub use filter::*;
+use futures::Stream;
 pub use global_simple_agg::*;
 pub use hash_agg::*;
 pub use hash_join::*;
 pub use local_simple_agg::*;
+pub use lookup::*;
 pub use merge::*;
 pub use monitor::*;
 pub use mview::*;
@@ -54,9 +57,10 @@ mod global_simple_agg;
 mod hash_agg;
 mod hash_join;
 mod local_simple_agg;
+mod lookup;
 mod managed_state;
 mod merge;
-mod monitor;
+pub mod monitor;
 mod mview;
 mod project;
 mod source;
@@ -70,7 +74,11 @@ mod integration_tests;
 mod test_utils;
 
 pub const INVALID_EPOCH: u64 = 0;
+
 pub trait ExprFn = Fn(&DataChunk) -> Result<Bitmap> + Send + Sync + 'static;
+
+/// Boxed stream of [`StreamMessage`].
+pub type BoxedExecutorStream = Pin<Box<dyn Stream<Item = Result<Message>> + Send>>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Mutation {
@@ -281,11 +289,11 @@ impl Message {
     /// will not continue, false otherwise.
     pub fn is_terminate(&self) -> bool {
         matches!(
-          self,
-          Message::Barrier(Barrier {
-            mutation,
-            ..
-          }) if mutation.as_deref().unwrap().is_stop()
+            self,
+            Message::Barrier(Barrier {
+                mutation,
+                ..
+            }) if mutation.as_deref().unwrap().is_stop()
         )
     }
 
@@ -443,10 +451,10 @@ macro_rules! build_executor {
                 },
             )*
             _ => Err(RwError::from(
-              ErrorCode::InternalError(format!(
-                "unsupported node:{:?}",
-                $node.get_node().unwrap()
-              )),
+                ErrorCode::InternalError(format!(
+                    "unsupported node:{:?}",
+                    $node.get_node().unwrap()
+                )),
             )),
         }
     }

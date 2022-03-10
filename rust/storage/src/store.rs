@@ -60,6 +60,13 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     ///   per-key modification history (e.g. in compaction), not across different keys.
     async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>, epoch: u64) -> Result<()>;
 
+    /// Functions the same as `ingest_batch`, except that data won't be persisted.
+    async fn replicate_batch(
+        &self,
+        kv_pairs: Vec<(Bytes, Option<Bytes>)>,
+        epoch: u64,
+    ) -> Result<()>;
+
     /// Open and return an iterator for given `key_range`.
     /// The returned iterator will iterate data based on a snapshot corresponding to the given
     /// `epoch`.
@@ -71,13 +78,10 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     /// Open and return a reversed iterator for given `key_range`.
     /// The returned iterator will iterate data based on a snapshot corresponding to the given
     /// `epoch`
-    async fn reverse_iter<R, B>(&self, _key_range: R, _epoch: u64) -> Result<Self::Iter<'_>>
+    async fn reverse_iter<R, B>(&self, key_range: R, epoch: u64) -> Result<Self::Iter<'_>>
     where
         R: RangeBounds<B> + Send,
-        B: AsRef<[u8]>,
-    {
-        unimplemented!()
-    }
+        B: AsRef<[u8]>;
 
     /// Create a `WriteBatch` associated with this state store.
     fn start_write_batch(&self) -> WriteBatch<Self> {
@@ -85,14 +89,12 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     }
 
     /// Wait until the epoch is committed and its data is ready to read.
-    async fn wait_epoch(&self, _epoch: u64) {}
+    async fn wait_epoch(&self, epoch: u64);
 
     /// Sync buffered data to S3.
     /// If epoch is None, all buffered data will be synced.
     /// Otherwise, only data of the provided epoch will be synced.
-    async fn sync(&self, _epoch: Option<u64>) -> Result<()> {
-        Ok(())
-    }
+    async fn sync(&self, epoch: Option<u64>) -> Result<()>;
 
     /// Create a [`MonitoredStateStore`] from this state store, with given `stats`.
     fn monitored(self, stats: Arc<StateStoreStats>) -> MonitoredStateStore<Self> {

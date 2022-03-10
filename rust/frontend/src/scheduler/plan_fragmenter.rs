@@ -10,7 +10,7 @@ use crate::optimizer::PlanRef;
 
 pub(crate) type StageId = u64;
 
-/// The Fragmenter splits query plan into fragments.
+/// `BatchPlanFragmenter` splits query plan stage into fragments.
 struct BatchPlanFragmenter {
     stage_graph_builder: StageGraphBuilder,
     next_stage_id: u64,
@@ -53,6 +53,7 @@ impl Query {
 }
 
 /// Fragment part of `Query`.
+#[derive(Debug)]
 pub(crate) struct QueryStage {
     pub id: StageId,
     pub root: PlanRef,
@@ -222,11 +223,13 @@ mod tests {
 
     use std::sync::Arc;
 
+    use risingwave_common::catalog::{Schema, TableId};
     use risingwave_pb::common::{ParallelUnit, WorkerNode, WorkerType};
     use risingwave_pb::plan::JoinType;
 
     use crate::optimizer::plan_node::{
-        BatchExchange, BatchHashJoin, BatchSeqScan, EqJoinPredicate, LogicalJoin, PlanNodeType,
+        BatchExchange, BatchHashJoin, BatchSeqScan, EqJoinPredicate, LogicalJoin, LogicalScan,
+        PlanNodeType,
     };
     use crate::optimizer::property::{Distribution, Order};
     use crate::optimizer::PlanRef;
@@ -234,8 +237,8 @@ mod tests {
     use crate::scheduler::schedule::{BatchScheduler, WorkerNodeManager};
     use crate::utils::Condition;
 
-    #[test]
-    fn test_fragmenter() {
+    #[tokio::test]
+    async fn test_fragmenter() {
         // Construct a Hash Join with Exchange node.
         // Logical plan:
         //
@@ -243,7 +246,13 @@ mod tests {
         //     /    \
         //   Scan  Scan
         //
-        let batch_plan_node: PlanRef = BatchSeqScan::default().into();
+        let batch_plan_node: PlanRef = BatchSeqScan::new(LogicalScan::new(
+            "".to_string(),
+            TableId::default(),
+            vec![],
+            Schema::default(),
+        ))
+        .into();
         let batch_exchange_node1: PlanRef = BatchExchange::new(
             batch_plan_node.clone(),
             Order::default(),
@@ -327,7 +336,7 @@ mod tests {
         let workers = vec![worker1.clone(), worker2.clone(), worker3.clone()];
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(workers));
         let mut scheduler = BatchScheduler::mock(worker_node_manager);
-        let _query_result_loc = scheduler.schedule(&query);
+        let _query_result_loc = scheduler.schedule(&query).await;
 
         let root = scheduler.get_scheduled_stage_unchecked(&0);
         assert_eq!(root.augmented_stage.exchange_source.len(), 1);

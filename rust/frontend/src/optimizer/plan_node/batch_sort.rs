@@ -2,26 +2,27 @@ use std::fmt;
 
 use risingwave_common::catalog::Schema;
 
-use super::{PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
-use crate::optimizer::property::{Distribution, Order, WithDistribution, WithOrder, WithSchema};
+use super::{BatchBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
+use crate::optimizer::property::{Distribution, Order, WithSchema};
 
+/// `BatchSort` buffers all data from input and sort these rows by specified order, providing the
+/// collation required by user or parent plan node.
 #[derive(Debug, Clone)]
 pub struct BatchSort {
-    order: Order,
+    pub base: BatchBase,
     input: PlanRef,
     schema: Schema,
-    dist: Distribution,
 }
 
 impl BatchSort {
     pub fn new(input: PlanRef, order: Order) -> Self {
         let schema = input.schema().clone();
         let dist = input.distribution().clone();
+        let base = BatchBase { order, dist };
         BatchSort {
             input,
-            order,
+            base,
             schema,
-            dist,
         }
     }
 }
@@ -37,21 +38,10 @@ impl PlanTreeNodeUnary for BatchSort {
         self.input.clone()
     }
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.order.clone())
+        Self::new(input, self.base.order.clone())
     }
 }
 impl_plan_tree_node_for_unary! {BatchSort}
-impl WithOrder for BatchSort {
-    fn order(&self) -> &Order {
-        &self.order
-    }
-}
-
-impl WithDistribution for BatchSort {
-    fn distribution(&self) -> &Distribution {
-        &self.dist
-    }
-}
 
 impl WithSchema for BatchSort {
     fn schema(&self) -> &Schema {

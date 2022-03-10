@@ -1,5 +1,7 @@
+#![feature(let_else)]
+
 use std::fs::OpenOptions;
-use std::io::{BufWriter, Write};
+use std::io::{BufRead, BufReader, BufWriter, Write};
 
 use anyhow::{anyhow, Context, Result};
 use console::style;
@@ -16,18 +18,20 @@ pub enum Components {
     ComputeNodeAndMetaNode,
     Frontend,
     Release,
+    AllInOne,
 }
 
 impl Components {
     pub fn title(&self) -> String {
         match self {
-            Self::MinIO => "MinIO / MinIO-CLI",
-            Self::PrometheusAndGrafana => "Prometheus / Grafana",
-            Self::Etcd => "Etcd",
-            Self::ComputeNodeAndMetaNode => "Build compute-node / meta-node",
-            Self::Frontend => "Build frontend",
-            Self::Tracing => "Tracing / Jaeger",
-            Self::Release => "Enable release mode",
+            Self::MinIO => "[Component] Hummock: MinIO + MinIO-CLI",
+            Self::PrometheusAndGrafana => "[Component] Metrics: Prometheus + Grafana",
+            Self::Etcd => "[Component] Etcd",
+            Self::ComputeNodeAndMetaNode => "[Build] Rust components",
+            Self::Frontend => "[Build] Java frontend",
+            Self::Tracing => "[Component] Tracing: Jaeger",
+            Self::Release => "[Build] Enable release mode",
+            Self::AllInOne => "[Build] Enable all-in-one binary",
         }
         .into()
     }
@@ -68,8 +72,28 @@ you download Jaeger."
                 "
 Build RisingWave in release mode"
             }
+            Self::AllInOne => {
+                "
+With this option enabled, RiseDev will help you create
+symlinks to `risingwave` all-in-one binary, so as to build
+and use `risingwave` in all-in-one mode."
+            }
         }
         .into()
+    }
+
+    pub fn from_env(env: impl AsRef<str>) -> Option<Self> {
+        match env.as_ref() {
+            "ENABLE_MINIO" => Some(Self::MinIO),
+            "ENABLE_PROMETHEUS_GRAFANA" => Some(Self::PrometheusAndGrafana),
+            "ENABLE_ETCD" => Some(Self::Etcd),
+            "ENABLE_BUILD_RUST" => Some(Self::ComputeNodeAndMetaNode),
+            "ENABLE_BUILD_FRONTEND" => Some(Self::Frontend),
+            "ENABLE_COMPUTE_TRACING" => Some(Self::Tracing),
+            "ENABLE_RELEASE_PROFILE" => Some(Self::Release),
+            "ENABLE_ALL_IN_ONE" => Some(Self::AllInOne),
+            _ => None,
+        }
     }
 
     pub fn env(&self) -> String {
@@ -81,6 +105,7 @@ Build RisingWave in release mode"
             Self::Frontend => "ENABLE_BUILD_FRONTEND",
             Self::Tracing => "ENABLE_COMPUTE_TRACING",
             Self::Release => "ENABLE_RELEASE_PROFILE",
+            Self::AllInOne => "ENABLE_ALL_IN_ONE",
         }
         .into()
     }
@@ -95,7 +120,7 @@ Build RisingWave in release mode"
     }
 }
 
-fn configure() -> Result<Vec<Components>> {
+fn configure(chosen: &[Components]) -> Result<Vec<Components>> {
     println!("=== Configure RiseDev ===");
     println!();
     println!("RiseDev includes several components. You can select the ones you need, so as to reduce build time.");
@@ -124,7 +149,7 @@ fn configure() -> Result<Vec<Components>> {
                     )
                     .dim()
                 ),
-                Components::default_enabled().contains(c),
+                chosen.contains(c),
             )
         })
         .collect_vec();
@@ -146,16 +171,46 @@ fn main() -> Result<()> {
         .nth(1)
         .ok_or_else(|| anyhow!("expect argv[1] to be component env file path"))?;
 
-    println!(
-        "RiseDev component config not found, generating {}",
-        file_path
-    );
+    let chosen = {
+        if let Ok(file) = OpenOptions::new().read(true).open(&file_path) {
+            let reader = BufReader::new(file);
+            let mut enabled = vec![];
+            for line in reader.lines() {
+                let line = line?;
+                let Some((component, val)) = line.split_once('=') else {
+                    println!("invalid config line {}, discarded", line);
+                    continue;
+                };
+                if component == "RISEDEV_CONFIGURED" {
+                    continue;
+                }
+                match Components::from_env(&component) {
+                    Some(component) => {
+                        if val == "true" {
+                            enabled.push(component);
+                        }
+                    }
+                    None => {
+                        println!("unknown configure {}, discarded", component);
+                        continue;
+                    }
+                }
+            }
+            enabled
+        } else {
+            println!(
+                "RiseDev component config not found, generating {}",
+                file_path
+            );
+            Components::default_enabled().to_vec()
+        }
+    };
 
     let chosen = if let Some(true) = std::env::args().nth(2).map(|x| x == "--default") {
         println!("Using default config");
         Components::default_enabled().to_vec()
     } else {
-        configure()?
+        configure(&chosen)?
     };
 
     println!("Writing configuration into {}...", file_path);

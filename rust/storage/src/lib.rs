@@ -23,7 +23,6 @@ pub mod cell_based_row_deserializer;
 pub mod hummock;
 pub mod keyspace;
 pub mod memory;
-pub mod metrics;
 pub mod monitor;
 pub mod object;
 pub mod panic_store;

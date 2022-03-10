@@ -3,19 +3,31 @@ use std::fmt;
 use risingwave_common::catalog::Schema;
 
 use super::{
-    EqJoinPredicate, LogicalJoin, PlanRef, PlanTreeNodeBinary, ToBatchProst, ToDistributedBatch,
+    BatchBase, EqJoinPredicate, LogicalJoin, PlanRef, PlanTreeNodeBinary, ToBatchProst,
+    ToDistributedBatch,
 };
-use crate::optimizer::property::{Distribution, WithDistribution, WithOrder, WithSchema};
+use crate::optimizer::property::{Distribution, Order, WithSchema};
 
+/// `BatchHashJoin` implements [`super::LogicalJoin`] with hash table. It builds a hash table
+/// from inner (right-side) relation and then probes with data from outer (left-side) relation to
+/// get output rows.
 #[derive(Debug, Clone)]
 pub struct BatchHashJoin {
+    pub base: BatchBase,
     logical: LogicalJoin,
     eq_join_predicate: EqJoinPredicate,
 }
 
 impl BatchHashJoin {
     pub fn new(logical: LogicalJoin, eq_join_predicate: EqJoinPredicate) -> Self {
+        // TODO: derive from input
+        let base = BatchBase {
+            order: Order::any().clone(),
+            dist: Distribution::any().clone(),
+        };
+
         Self {
+            base,
             logical,
             eq_join_predicate,
         }
@@ -54,10 +66,6 @@ impl PlanTreeNodeBinary for BatchHashJoin {
     }
 }
 impl_plan_tree_node_for_binary! {BatchHashJoin}
-
-impl WithOrder for BatchHashJoin {}
-
-impl WithDistribution for BatchHashJoin {}
 
 impl WithSchema for BatchHashJoin {
     fn schema(&self) -> &Schema {
