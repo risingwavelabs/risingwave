@@ -525,23 +525,23 @@ impl StreamManagerCore {
         trace!("Join non-equi condition: {:?}", condition);
 
         macro_rules! impl_create_hash_join_executor {
-                    ($( { $join_type_proto:ident, $join_type:ident } ),*) => {
-                        |typ| match typ {
-                            $( JoinTypeProto::$join_type_proto => Box::new(HashJoinExecutor::<_, { JoinType::$join_type }>::new(
-                                source_l,
-                                source_r,
-                                params_l,
-                                params_r,
-                                params.pk_indices,
-                                Keyspace::shared_executor_root(store.clone(), params.operator_id),
-                                params.executor_id,
-                                condition,
-                                params.op_info,
-                            )) as Box<dyn Executor>, )*
-                            _ => todo!("Join type {:?} not implemented", typ),
-                        }
-                    }
+            ($( { $join_type_proto:ident, $join_type:ident } ),*) => {
+                |typ| match typ {
+                    $( JoinTypeProto::$join_type_proto => Box::new(HashJoinExecutor::<_, { JoinType::$join_type }>::new(
+                        source_l,
+                        source_r,
+                        params_l,
+                        params_r,
+                        params.pk_indices,
+                        Keyspace::shared_executor_root(store.clone(), params.operator_id),
+                        params.executor_id,
+                        condition,
+                        params.op_info,
+                    )) as Box<dyn Executor>, )*
+                    _ => todo!("Join type {:?} not implemented", typ),
                 }
+            }
+        }
 
         macro_rules! for_all_join_types {
             ($macro:tt) => {

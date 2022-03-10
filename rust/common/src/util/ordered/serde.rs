@@ -5,7 +5,7 @@ use memcomparable::from_slice;
 
 use super::OrderedDatum::{NormalOrder, ReversedOrder};
 use super::OrderedRow;
-use crate::array::{ArrayImpl, Row};
+use crate::array::{ArrayImpl, Row, RowRef};
 use crate::catalog::ColumnId;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::types::{
@@ -65,6 +65,15 @@ impl OrderedRowSerializer {
             let mut serializer = memcomparable::Serializer::new(vec![]);
             serializer.set_reverse(*order_type == OrderType::Descending);
             serialize_datum_into(datum, &mut serializer).unwrap();
+            append_to.extend(serializer.into_inner());
+        }
+    }
+
+    pub fn serialize_row_ref(&self, row: &RowRef<'_>, append_to: &mut Vec<u8>) {
+        for (datum, order_type) in row.0.iter().zip_eq(self.order_types.iter()) {
+            let mut serializer = memcomparable::Serializer::new(vec![]);
+            serializer.set_reverse(*order_type == OrderType::Descending);
+            serialize_datum_ref_into(datum, &mut serializer).unwrap();
             append_to.extend(serializer.into_inner());
         }
     }
