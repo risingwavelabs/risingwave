@@ -10,7 +10,6 @@ use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
 use crate::monitor::StateStoreMetrics;
 use crate::object::InMemObjectStore;
 
-
 #[tokio::test]
 /// Fix this when we finished epoch management.
 #[ignore]
