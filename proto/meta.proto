@@ -139,8 +139,8 @@ message TableFragments {
     repeated stream_plan.StreamActor actors = 3;
   }
   plan.TableRefId table_ref_id = 1;
-  map<uint32, Fragment> fragments = 3;
-  map<uint32, ActorStatus> actor_status = 4;
+  map<uint32, Fragment> fragments = 2;
+  map<uint32, ActorStatus> actor_status = 3;
 }
 
 // TODO: remove this when dashboard refactored.

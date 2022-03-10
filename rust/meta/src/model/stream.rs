@@ -76,10 +76,6 @@ impl TableFragments {
     pub fn table_id(&self) -> TableId {
         self.table_id
     }
-    // /// Returns whether the table finished creating.
-    // pub fn is_created(&self) -> bool {
-    //     self.state == State::Created
-    // }
 
     /// Update state of all actors
     pub fn update_actors_state(&mut self, state: ActorState) {
