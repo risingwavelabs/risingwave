@@ -148,15 +148,11 @@ fn protobuf_type_mapping(f: &FieldDescriptor, descriptors: &Descriptors) -> Resu
         FieldType::Bool => DataType::Boolean,
         FieldType::String => DataType::Varchar,
         FieldType::Message(m) => {
-            let mut vec = vec![];
-            for f in m.fields() {
-                vec.push(protobuf_type_mapping(f, descriptors)?);
-            }
-            // let vec = m
-            //     .fields()
-            //     .into_iter()
-            //     .map(|f| protobuf_type_mapping(f, descriptors)?)
-            //     .collect_vec();
+            let vec = m
+                .fields()
+                .iter()
+                .map(|f| protobuf_type_mapping(f, descriptors))
+                .collect::<Result<Vec<_>>>()?;
             DataType::Struct { fields: vec.into() }
         }
         actual_type => {
@@ -176,25 +172,17 @@ pub fn pb_field_to_col_desc(
     let field_type = field_descriptor.field_type(descriptors);
     let data_type = protobuf_type_mapping(field_descriptor, descriptors)?;
     if let FieldType::Message(m) = field_type {
-        let mut column_vec = vec![];
-        for f in m.fields() {
-            column_vec.push(pb_field_to_col_desc(
-                f,
-                descriptors,
-                lastname.clone() + field_descriptor.name() + ".",
-            )?)
-        }
-        // let column_vec: Vec<ColumnDesc> = m
-        //     .fields()
-        //     .iter()
-        //     .map(|f| {
-        //         pb_field_to_col_desc(
-        //             f,
-        //             descriptors,
-        //             lastname.clone() + field_descriptor.name() + ".",
-        //         )?
-        //     })
-        //     .collect_vec();
+        let column_vec = m
+            .fields()
+            .iter()
+            .map(|f| {
+                pb_field_to_col_desc(
+                    f,
+                    descriptors,
+                    lastname.clone() + field_descriptor.name() + ".",
+                )
+            })
+            .collect::<Result<Vec<_>>>()?;
         Ok(ColumnDesc {
             column_type: Some(data_type.to_protobuf().unwrap()),
             column_descs: column_vec,
