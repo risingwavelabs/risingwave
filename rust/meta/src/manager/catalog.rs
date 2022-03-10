@@ -34,8 +34,9 @@ where
         let databases = Database::list(&*meta_store_ref).await?;
         let schemas = Schema::list(&*meta_store_ref).await?;
         let tables = Table::list(&*meta_store_ref).await?;
+        let version = CatalogVersionGenerator::new(&*meta_store_ref).await?;
 
-        let core = Mutex::new(CatalogManagerCore::new(databases, schemas, tables));
+        let core = Mutex::new(CatalogManagerCore::new(databases, schemas, tables, version));
         Ok(Self {
             core,
             meta_store_ref,
@@ -263,7 +264,12 @@ struct CatalogManagerCore {
 }
 
 impl CatalogManagerCore {
-    fn new(databases: Vec<Database>, schemas: Vec<Schema>, tables: Vec<Table>) -> Self {
+    fn new(
+        databases: Vec<Database>,
+        schemas: Vec<Schema>,
+        tables: Vec<Table>,
+        catalog_version: CatalogVersionGenerator,
+    ) -> Self {
         let mut table_ref_count = HashMap::new();
         let databases = HashMap::from_iter(
             databases
@@ -286,7 +292,6 @@ impl CatalogManagerCore {
 
             (TableId::from(&table.table_ref_id), table)
         }));
-        let catalog_version = CatalogVersionGenerator::new();
         Self {
             databases,
             schemas,
