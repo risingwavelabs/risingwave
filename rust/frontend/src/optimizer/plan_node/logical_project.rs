@@ -10,7 +10,7 @@ use super::{
     ToStream,
 };
 use crate::expr::{assert_input_ref, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
-use crate::optimizer::plan_node::CollectRequiredCols;
+use crate::optimizer::plan_node::CollectInputRef;
 use crate::optimizer::property::{Distribution, WithSchema};
 use crate::utils::ColIndexMapping;
 
@@ -141,14 +141,14 @@ impl ColPrunable for LogicalProject {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
         self.must_contain_columns(required_cols);
 
-        let mut visitor = CollectRequiredCols {
-            required_cols: FixedBitSet::with_capacity(self.input.schema().fields().len()),
+        let mut visitor = CollectInputRef {
+            input_bits: FixedBitSet::with_capacity(self.input.schema().fields().len()),
         };
         required_cols.ones().for_each(|id| {
             visitor.visit_expr(&self.exprs[id]);
         });
 
-        let child_required_cols = visitor.required_cols;
+        let child_required_cols = visitor.input_bits;
         let mut mapping = ColIndexMapping::with_remaining_columns(&child_required_cols);
 
         let (exprs, expr_alias) = required_cols

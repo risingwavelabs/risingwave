@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use prometheus::core::{AtomicU64, GenericCounter};
 use prometheus::{
     histogram_opts, register_histogram_with_registry, register_int_counter_with_registry,
@@ -84,29 +82,24 @@ macro_rules! for_all_metrics {
     };
 }
 
-macro_rules! define_state_store_stats {
+macro_rules! define_state_store_metrics {
     ($( $name:ident: $type:ty ),* ,) => {
-        /// [`StateStoreStats`] stores the performance and IO metrics of `XXXStore` such as
+        /// [`StateStoreMetrics`] stores the performance and IO metrics of `XXXStore` such as
         /// `RocksDBStateStore` and `TikvStateStore`.
         /// In practice, keep in mind that this represents the whole Hummock utilizations of
         /// a `RisingWave` instance. More granular utilizations of per `materialization view`
         /// job or a executor should be collected by views like `StateStats` and `JobStats`.
         #[derive(Debug)]
-        pub struct StateStoreStats {
+        pub struct StateStoreMetrics {
             $( pub $name: $type, )*
         }
     }
 
 }
-for_all_metrics! { define_state_store_stats }
+for_all_metrics! { define_state_store_metrics }
 
-lazy_static::lazy_static! {
-    pub static ref
-        DEFAULT_STATE_STORE_STATS: Arc<StateStoreStats> = Arc::new(StateStoreStats::new(prometheus::default_registry()));
-}
-
-impl StateStoreStats {
-    pub fn new(registry: &Registry) -> Self {
+impl StateStoreMetrics {
+    pub fn new(registry: Registry) -> Self {
         // ----- get -----
         let buckets = DEFAULT_BUCKETS.map(|x| x * GET_KEY_SIZE_SCALE).to_vec();
         let opts = histogram_opts!(
@@ -456,6 +449,6 @@ impl StateStoreStats {
 
     /// Create a new `StateStoreMetrics` instance used in tests or other places.
     pub fn unused() -> Self {
-        Self::new(&Registry::new())
+        Self::new(Registry::new())
     }
 }

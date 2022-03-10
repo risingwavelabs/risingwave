@@ -70,11 +70,17 @@ impl SharedContext {
 
     #[cfg(test)]
     pub fn for_test() -> Self {
+        use std::sync::Arc;
+
+        use risingwave_storage::monitor::StateStoreMetrics;
+
         Self {
             channel_map: Mutex::new(HashMap::new()),
             addr: *LOCAL_TEST_ADDR,
             barrier_manager: Mutex::new(LocalBarrierManager::for_test()),
-            state_store: StateStoreImpl::shared_in_memory_store(),
+            state_store: StateStoreImpl::shared_in_memory_store(Arc::new(
+                StateStoreMetrics::unused(),
+            )),
         }
     }
 

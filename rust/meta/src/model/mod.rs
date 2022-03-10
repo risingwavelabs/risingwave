@@ -1,10 +1,12 @@
 mod catalog;
+mod catalog_v2;
 mod cluster;
 mod hash_mapping;
 mod stream;
 
 use async_trait::async_trait;
 pub use catalog::*;
+pub use catalog_v2::*;
 pub use cluster::*;
 pub use hash_mapping::*;
 use prost::Message;

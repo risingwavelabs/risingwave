@@ -4,8 +4,8 @@ use fixedbitset::FixedBitSet;
 use risingwave_common::error::Result;
 
 use super::{
-    ColPrunable, CollectRequiredCols, LogicalBase, LogicalProject, PlanRef, PlanTreeNodeUnary,
-    ToBatch, ToStream,
+    ColPrunable, CollectInputRef, LogicalBase, LogicalProject, PlanRef, PlanTreeNodeUnary, ToBatch,
+    ToStream,
 };
 use crate::expr::{assert_input_ref, ExprImpl};
 use crate::optimizer::property::WithSchema;
@@ -41,6 +41,11 @@ impl LogicalFilter {
         let predicate = Condition::with_expr(predicate);
         Ok(Self::new(input, predicate).into())
     }
+
+    /// Get the predicate of the logical join.
+    pub fn predicate(&self) -> &Condition {
+        &self.predicate
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalFilter {
@@ -64,18 +69,18 @@ impl ColPrunable for LogicalFilter {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
         self.must_contain_columns(required_cols);
 
-        let mut visitor = CollectRequiredCols {
-            required_cols: required_cols.clone(),
+        let mut visitor = CollectInputRef {
+            input_bits: required_cols.clone(),
         };
         self.predicate.visit_expr(&mut visitor);
 
         let mut predicate = self.predicate.clone();
-        let mut mapping = ColIndexMapping::with_remaining_columns(&visitor.required_cols);
+        let mut mapping = ColIndexMapping::with_remaining_columns(&visitor.input_bits);
         predicate = predicate.rewrite_expr(&mut mapping);
 
-        let filter = LogicalFilter::new(self.input.prune_col(&visitor.required_cols), predicate);
+        let filter = LogicalFilter::new(self.input.prune_col(&visitor.input_bits), predicate);
 
-        if required_cols == &visitor.required_cols {
+        if required_cols == &visitor.input_bits {
             filter.into()
         } else {
             LogicalProject::with_mapping(

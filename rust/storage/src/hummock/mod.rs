@@ -46,7 +46,7 @@ use self::shared_buffer::SharedBufferManager;
 pub use self::sstable_store::*;
 pub use self::state_store::*;
 use self::utils::{bloom_filter_sstables, range_overlap};
-use super::monitor::StateStoreStats;
+use super::monitor::StateStoreMetrics;
 use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::iterator::ReverseUserIterator;
 use crate::hummock::local_version_manager::LocalVersionManager;
@@ -77,6 +77,8 @@ pub struct HummockOptions {
 
     /// checksum algorithm.
     pub checksum_algo: ChecksumAlg,
+    /// enable async checkpoint or not
+    pub async_checkpoint_enabled: bool,
 }
 
 impl HummockOptions {
@@ -88,6 +90,7 @@ impl HummockOptions {
             bloom_false_positive: 0.1,
             data_directory: "hummock_001".to_string(),
             checksum_algo: ChecksumAlg::XxHash64,
+            async_checkpoint_enabled: true,
         }
     }
 
@@ -99,6 +102,7 @@ impl HummockOptions {
             bloom_false_positive: 0.1,
             data_directory: "hummock_001_small".to_string(),
             checksum_algo: ChecksumAlg::XxHash64,
+            async_checkpoint_enabled: true,
         }
     }
 }
@@ -124,15 +128,14 @@ impl HummockStorage {
         sstable_store: SstableStoreRef,
         local_version_manager: Arc<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
+        hummock_metrics: Arc<StateStoreMetrics>,
     ) -> HummockResult<Self> {
-        use crate::monitor::DEFAULT_STATE_STORE_STATS;
-
         Self::new(
             options,
             sstable_store,
             local_version_manager,
             hummock_meta_client,
-            DEFAULT_STATE_STORE_STATS.clone(),
+            hummock_metrics,
         )
         .await
     }
@@ -143,8 +146,8 @@ impl HummockStorage {
         sstable_store: SstableStoreRef,
         local_version_manager: Arc<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
-        // TODO: should be separated `HummockStats` instead of `StateStoreStats`.
-        stats: Arc<StateStoreStats>,
+        // TODO: should be separated `HummockStats` instead of `StateStoreMetrics`.
+        stats: Arc<StateStoreMetrics>,
     ) -> HummockResult<Self> {
         let options = Arc::new(options);
 
@@ -377,7 +380,9 @@ impl HummockStorage {
             .collect_vec();
         self.shared_buffer_manager.write_batch(batch, epoch)?;
 
-        // self.sync(epoch).await?;
+        if !self.options.async_checkpoint_enabled {
+            return self.shared_buffer_manager.sync(Some(epoch)).await;
+        }
         Ok(())
     }
 

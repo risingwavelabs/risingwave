@@ -6,17 +6,8 @@ use serde::{Deserialize, Serialize};
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 
-const DEFAULT_HEARTBEAT_INTERVAL: u32 = 100;
-const DEFAULT_CHUNK_SIZE: u32 = 1024;
-const DEFAULT_SST_SIZE: u32 = 256 * (1 << 20);
-const DEFAULT_BLOCK_SIZE: u32 = 64 * (1 << 10);
-const DEFAULT_BLOOM_FALSE_POSITIVE: f64 = 0.1;
-const DEFAULT_DATA_DIRECTORY: &str = "hummock_001";
-const DEFAULT_CHECKSUM_ALGORITHM: &str = "crc32c";
-
 /// TODO(TaoWu): The configs here may be preferable to be managed under corresponding module
 /// separately.
-
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct ComputeNodeConfig {
     // For connection
@@ -38,40 +29,37 @@ pub struct ComputeNodeConfig {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ServerConfig {
+    #[serde(default = "default::heartbeat_interval")]
     pub heartbeat_interval: u32,
 }
 
 impl Default for ServerConfig {
     fn default() -> Self {
-        Self {
-            heartbeat_interval: DEFAULT_HEARTBEAT_INTERVAL,
-        }
+        toml::from_str("").unwrap()
     }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BatchConfig {
+    #[serde(default = "default::chunk_size")]
     pub chunk_size: u32,
 }
 
 impl Default for BatchConfig {
     fn default() -> Self {
-        Self {
-            chunk_size: DEFAULT_CHUNK_SIZE,
-        }
+        toml::from_str("").unwrap()
     }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StreamingConfig {
+    #[serde(default = "default::chunk_size")]
     pub chunk_size: u32,
 }
 
 impl Default for StreamingConfig {
     fn default() -> Self {
-        Self {
-            chunk_size: DEFAULT_CHUNK_SIZE,
-        }
+        toml::from_str("").unwrap()
     }
 }
 
@@ -79,30 +67,33 @@ impl Default for StreamingConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StorageConfig {
     /// Target size of the SSTable.
+    #[serde(default = "default::sst_size")]
     pub sstable_size: u32,
 
     /// Size of each block in bytes in SST.
+    #[serde(default = "default::block_size")]
     pub block_size: u32,
 
     /// False positive probability of bloom filter.
+    #[serde(default = "default::bloom_false_positive")]
     pub bloom_false_positive: f64,
 
     /// Remote directory for storing data and metadata objects.
+    #[serde(default = "default::data_directory")]
     pub data_directory: String,
 
     /// Checksum algorithm (Crc32c, XxHash64).
+    #[serde(default = "default::checksum_algorithm")]
     pub checksum_algo: String,
+
+    /// Whether to enable async checkpoint
+    #[serde(default = "default::async_checkpoint_enabled")]
+    pub async_checkpoint_enabled: bool,
 }
 
 impl Default for StorageConfig {
     fn default() -> Self {
-        Self {
-            sstable_size: DEFAULT_SST_SIZE,
-            block_size: DEFAULT_BLOCK_SIZE,
-            bloom_false_positive: DEFAULT_BLOOM_FALSE_POSITIVE,
-            data_directory: DEFAULT_DATA_DIRECTORY.to_string(),
-            checksum_algo: DEFAULT_CHECKSUM_ALGORITHM.to_string(),
-        }
+        toml::from_str("").unwrap()
     }
 }
 
@@ -121,6 +112,41 @@ impl ComputeNodeConfig {
     }
 }
 
+mod default {
+    pub fn heartbeat_interval() -> u32 {
+        100
+    }
+
+    pub fn chunk_size() -> u32 {
+        1024
+    }
+
+    pub fn sst_size() -> u32 {
+        // 256MB
+        268435456
+    }
+
+    pub fn block_size() -> u32 {
+        65536
+    }
+
+    pub fn bloom_false_positive() -> f64 {
+        0.1
+    }
+
+    pub fn data_directory() -> String {
+        "hummock_001".to_string()
+    }
+
+    pub fn checksum_algorithm() -> String {
+        "crc32c".to_string()
+    }
+
+    pub fn async_checkpoint_enabled() -> bool {
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -129,9 +155,36 @@ mod tests {
         use super::*;
 
         let cfg = ComputeNodeConfig::default();
-        assert_eq!(cfg.server.heartbeat_interval, DEFAULT_HEARTBEAT_INTERVAL);
+        assert_eq!(cfg.server.heartbeat_interval, default::heartbeat_interval());
 
         let cfg: ComputeNodeConfig = toml::from_str("").unwrap();
-        assert_eq!(cfg.storage.block_size, DEFAULT_BLOCK_SIZE);
+        assert_eq!(cfg.storage.block_size, default::block_size());
+
+        let partial_toml_str = r#"
+        [server]
+        heartbeat_interval = 10
+        
+        [batch]
+        chunk_size = 256
+        
+        [streaming]
+        
+        [storage]
+        sstable_size = 1024
+        data_directory = "test"
+        async_checkpoint_enabled = false
+    "#;
+        let cfg: ComputeNodeConfig = toml::from_str(partial_toml_str).unwrap();
+        assert_eq!(cfg.server.heartbeat_interval, 10);
+        assert_eq!(cfg.batch.chunk_size, 256);
+        assert_eq!(cfg.storage.sstable_size, 1024);
+        assert_eq!(cfg.storage.block_size, default::block_size());
+        assert_eq!(
+            cfg.storage.bloom_false_positive,
+            default::bloom_false_positive()
+        );
+        assert_eq!(cfg.storage.data_directory, "test");
+        assert_eq!(cfg.storage.checksum_algo, default::checksum_algorithm());
+        assert!(!cfg.storage.async_checkpoint_enabled);
     }
 }

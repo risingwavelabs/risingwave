@@ -24,14 +24,14 @@ pub enum Components {
 impl Components {
     pub fn title(&self) -> String {
         match self {
-            Self::MinIO => "MinIO / MinIO-CLI",
-            Self::PrometheusAndGrafana => "Prometheus / Grafana",
-            Self::Etcd => "Etcd",
-            Self::ComputeNodeAndMetaNode => "Build compute-node / meta-node",
-            Self::Frontend => "Build frontend",
-            Self::Tracing => "Tracing / Jaeger",
-            Self::Release => "Enable release mode",
-            Self::AllInOne => "Enable all-in-one binary",
+            Self::MinIO => "[Component] Hummock: MinIO + MinIO-CLI",
+            Self::PrometheusAndGrafana => "[Component] Metrics: Prometheus + Grafana",
+            Self::Etcd => "[Component] Etcd",
+            Self::ComputeNodeAndMetaNode => "[Build] Rust components",
+            Self::Frontend => "[Build] Java frontend",
+            Self::Tracing => "[Component] Tracing: Jaeger",
+            Self::Release => "[Build] Enable release mode",
+            Self::AllInOne => "[Build] Enable all-in-one binary",
         }
         .into()
     }
@@ -72,7 +72,12 @@ you download Jaeger."
                 "
 Build RisingWave in release mode"
             }
-            Self::AllInOne => "Enable all-in-one binary",
+            Self::AllInOne => {
+                "
+With this option enabled, RiseDev will help you create
+symlinks to `risingwave` all-in-one binary, so as to build
+and use `risingwave` in all-in-one mode."
+            }
         }
         .into()
     }

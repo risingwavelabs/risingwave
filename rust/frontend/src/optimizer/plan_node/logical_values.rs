@@ -8,7 +8,7 @@ use super::{ColPrunable, LogicalBase, PlanRef, ToBatch, ToStream};
 use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::property::WithSchema;
 
-/// `LogicalValues` build rows according to a list of expressions
+/// `LogicalValues` builds rows according to a list of expressions
 #[derive(Debug, Clone)]
 pub struct LogicalValues {
     pub base: LogicalBase,

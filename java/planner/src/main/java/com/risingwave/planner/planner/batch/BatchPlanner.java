@@ -1,5 +1,6 @@
 package com.risingwave.planner.planner.batch;
 
+import static com.risingwave.common.config.BatchPlannerConfigurations.ENABLE_NEW_SUBQUERY_PLANNER;
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase;
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.DISTRIBUTED;
 import static com.risingwave.planner.program.ChainedOptimizerProgram.OptimizerPhase.JOIN_REORDER;
@@ -56,7 +57,10 @@ public class BatchPlanner implements Planner<BatchPlan> {
       SqlNode ast,
       ExecutionContext context,
       BiFunction<ExecutionContext, RelCollation, OptimizerProgram> optimizerProgramProvider) {
-    SqlConverter sqlConverter = SqlConverter.builder(context).build();
+    SqlConverter sqlConverter =
+        SqlConverter.builder(context)
+            .withExpand(!context.getSessionConfiguration().get(ENABLE_NEW_SUBQUERY_PLANNER))
+            .build();
     RelRoot rawRoot = sqlConverter.toRel(ast);
     OptimizerProgram optimizerProgram = optimizerProgramProvider.apply(context, rawRoot.collation);
     RelNode optimized = optimizerProgram.optimize(rawRoot.rel, context);
