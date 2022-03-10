@@ -31,14 +31,21 @@ pub struct CreateMaterializedViewContext {
     pub upstream_node_actors: HashMap<NodeId, Vec<ActorId>>,
 }
 
+/// Stream Manager
 pub struct StreamManager<S>
 where
     S: MetaStore,
 {
+    /// Manages definition and status of fragments and actors
     fragment_manager_ref: FragmentManagerRef<S>,
 
+    /// Broadcasts and collect barriers
     barrier_manager_ref: BarrierManagerRef<S>,
+
+    /// Schedules streaming actors into compute nodes
     scheduler: Scheduler<S>,
+
+    /// Clients to stream service on compute nodes
     clients: StreamClientsRef,
 }
 
@@ -71,6 +78,7 @@ where
         ctx: CreateMaterializedViewContext,
     ) -> Result<()> {
         let actor_ids = table_fragments.actor_ids();
+
         let locations = self.scheduler.schedule(&actor_ids)?;
 
         let actor_info = locations

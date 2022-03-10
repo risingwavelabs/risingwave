@@ -14,9 +14,10 @@ use crate::cluster::NodeId;
 use crate::model::{ActorId, MetadataModel, TableFragments};
 use crate::storage::MetaStore;
 
-// TODO(eric): rename to ActorManager
+/// `FragmentManager` stores definition and status of fragment as well as the actors inside.
 pub struct FragmentManager<S> {
     meta_store_ref: Arc<S>,
+
     table_fragments: DashMap<TableId, TableFragments>,
 }
 

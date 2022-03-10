@@ -15,6 +15,8 @@ use crate::model::MetadataModel;
 /// Column family name for table fragments.
 const TABLE_FRAGMENTS_CF_NAME: &str = "cf/table_fragments";
 
+/// Fragments of a materialized view
+///
 /// We store whole fragments in a single column family as follow:
 /// `table_id` => `TableFragments`.
 #[derive(Debug, Clone)]
@@ -41,16 +43,8 @@ impl MetadataModel for TableFragments {
         Self::ProstType {
             table_ref_id: Some(TableRefId::from(&self.table_id)),
             state: self.state as i32,
-            fragments: self
-                .fragments
-                .clone()
-                .into_iter()
-                .collect::<HashMap<_, _>>(),
-            actor_status: self
-                .actor_status
-                .clone()
-                .into_iter()
-                .collect::<HashMap<_, _>>(),
+            fragments: self.fragments.clone().into_iter().collect(),
+            actor_status: self.actor_status.clone().into_iter().collect(),
         }
     }
 
@@ -58,7 +52,6 @@ impl MetadataModel for TableFragments {
         Self {
             table_id: TableId::from(&prost.table_ref_id),
             state: State::from_i32(prost.state).unwrap(),
-            // TODO(eric): why self use BTreeMap???
             fragments: prost.fragments.into_iter().collect(),
             actor_status: prost.actor_status.into_iter().collect(),
         }
@@ -79,7 +72,6 @@ impl TableFragments {
         }
     }
 
-    // TODO(eric): should be immutable and set on `new`
     /// Set the actor locations.
     pub fn set_actor_status(&mut self, actor_status: BTreeMap<ActorId, ActorStatus>) {
         self.actor_status = actor_status;
@@ -102,43 +94,27 @@ impl TableFragments {
 
     /// Returns actor ids associated with this table.
     pub fn actor_ids(&self) -> Vec<ActorId> {
-        let mut actors = vec![];
-        self.fragments.values().for_each(|fragment| {
-            actors.extend(
-                fragment
-                    .actors
-                    .iter()
-                    .map(|actor| actor.actor_id)
-                    .collect::<Vec<_>>(),
-            )
-        });
-        actors
+        self.fragments
+            .values()
+            .flat_map(|fragment| fragment.actors.iter().map(|actor| actor.actor_id).collect())
+            .collect()
     }
 
     /// Returns actors associated with this table.
     pub fn actors(&self) -> Vec<StreamActor> {
-        let mut actors = vec![];
         self.fragments
             .values()
-            .for_each(|fragment| actors.extend(fragment.actors.clone()));
-        actors
+            .flat_map(|fragment| fragment.actors.clone())
+            .collect()
     }
 
     /// Returns the actor ids with the given fragment type.
     fn filter_actor_ids(&self, fragment_type: FragmentType) -> Vec<ActorId> {
-        let mut actors = vec![];
-        self.fragments.values().for_each(|fragment| {
-            if fragment.fragment_type == fragment_type as i32 {
-                actors.extend(
-                    fragment
-                        .actors
-                        .iter()
-                        .map(|actor| actor.actor_id)
-                        .collect::<Vec<_>>(),
-                )
-            }
-        });
-        actors
+        self.fragments
+            .values()
+            .filter(|fragment| fragment.fragment_type == fragment_type as i32)
+            .flat_map(|fragment| fragment.actors.iter().map(|actor| actor.actor_id).collect())
+            .collect()
     }
 
     /// Returns source actor ids.
