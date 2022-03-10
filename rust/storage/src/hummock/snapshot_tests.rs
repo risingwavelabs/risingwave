@@ -158,6 +158,7 @@ async fn test_snapshot() {
         sstable_store,
         vm.clone(),
         mock_hummock_meta_client.clone(),
+        Arc::new(StateStoreMetrics::unused()),
     )
     .await
     .unwrap();
@@ -232,6 +233,7 @@ async fn test_snapshot_range_scan() {
         sstable_store,
         vm.clone(),
         mock_hummock_meta_client.clone(),
+        Arc::new(StateStoreMetrics::unused()),
     )
     .await
     .unwrap();
@@ -286,6 +288,7 @@ async fn test_snapshot_reverse_range_scan() {
         sstable_store.clone(),
         vm.clone(),
         mock_hummock_meta_client.clone(),
+        Arc::new(StateStoreMetrics::unused()),
     )
     .await
     .unwrap();

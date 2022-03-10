@@ -6,7 +6,7 @@ use bytes::Bytes;
 use futures::Future;
 use risingwave_common::error::Result;
 
-use super::StateStoreStats;
+use super::StateStoreMetrics;
 use crate::{StateStore, StateStoreIter};
 
 /// A state store wrapper for monitoring metrics.
@@ -14,11 +14,11 @@ use crate::{StateStore, StateStoreIter};
 pub struct MonitoredStateStore<S> {
     inner: S,
 
-    stats: Arc<StateStoreStats>,
+    stats: Arc<StateStoreMetrics>,
 }
 
 impl<S> MonitoredStateStore<S> {
-    pub fn new(inner: S, stats: Arc<StateStoreStats>) -> Self {
+    pub fn new(inner: S, stats: Arc<StateStoreMetrics>) -> Self {
         Self { inner, stats }
     }
     pub fn inner(&self) -> &S {
@@ -168,7 +168,7 @@ where
         self.inner.sync(epoch).await
     }
 
-    fn monitored(self, _stats: Arc<StateStoreStats>) -> MonitoredStateStore<Self> {
+    fn monitored(self, _stats: Arc<StateStoreMetrics>) -> MonitoredStateStore<Self> {
         panic!("the state store is already monitored")
     }
 
@@ -185,7 +185,7 @@ where
 pub struct MonitoredStateStoreIter<I> {
     inner: I,
 
-    stats: Arc<StateStoreStats>,
+    stats: Arc<StateStoreMetrics>,
 }
 
 #[async_trait]

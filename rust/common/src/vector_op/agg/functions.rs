@@ -4,21 +4,15 @@ use crate::array::Array;
 /// shorten the `where` clause of `GeneralAgg`, but to workaround an compiler
 /// error[E0582]: binding for associated type `Output` references lifetime `'a`,
 /// which does not appear in the trait input types.
-pub trait RTFn<'a, T, R>:
-    Fn(Option<R::RefItem<'a>>, Option<T::RefItem<'a>>) -> Option<R::RefItem<'a>>
+pub trait RTFn<'a, T, R> = Send
+    + 'static
+    + Fn(
+        Option<<R as Array>::RefItem<'a>>,
+        Option<<T as Array>::RefItem<'a>>,
+    ) -> Option<<R as Array>::RefItem<'a>>
 where
     T: Array,
-    R: Array,
-{
-}
-
-impl<'a, T, R, Z> RTFn<'a, T, R> for Z
-where
-    T: Array,
-    R: Array,
-    Z: Fn(Option<R::RefItem<'a>>, Option<T::RefItem<'a>>) -> Option<R::RefItem<'a>>,
-{
-}
+    R: Array;
 
 use std::convert::From;
 use std::ops::Add;

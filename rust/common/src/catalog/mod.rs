@@ -6,6 +6,9 @@ use core::fmt;
 pub use column::*;
 pub use physical_table::*;
 pub use schema::*;
+
+pub type CatalogVersion = u64;
+
 pub enum CatalogId {
     DatabaseId(DatabaseId),
     SchemaId(SchemaId),
