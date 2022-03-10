@@ -84,7 +84,7 @@ impl PgResponse {
     pub fn is_query(&self) -> bool {
         matches!(
             self.stmt_type,
-            StatementType::SELECT | StatementType::EXPLAIN
+            StatementType::SELECT | StatementType::EXPLAIN | StatementType::SHOW_TABLE
         )
     }
 

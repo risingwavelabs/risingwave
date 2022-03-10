@@ -68,7 +68,7 @@ pub async fn handle_show_table(
 
     Ok(PgResponse::new(
         StatementType::SHOW_TABLE,
-        0,
+        rows.len() as i32,
         rows,
         vec![
             PgFieldDescriptor::new("column_name".to_owned(), TypeOid::Varchar),
