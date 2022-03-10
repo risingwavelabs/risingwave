@@ -14,7 +14,7 @@ use crate::hummock::{
     HummockEpoch, HummockError, HummockResult, HummockSSTableId, HummockVersionId,
     TracedHummockError,
 };
-use crate::monitor::StateStoreStats;
+use crate::monitor::StateStoreMetrics;
 
 #[derive(Default)]
 pub struct RetryableError {}
@@ -54,12 +54,12 @@ pub trait HummockMetaClient: Send + Sync + 'static {
 pub struct RpcHummockMetaClient {
     meta_client: MetaClient,
 
-    // TODO: should be separated `HummockStats` instead of `StateStoreStats`.
-    stats: Arc<StateStoreStats>,
+    // TODO: should be separated `HummockStats` instead of `StateStoreMetrics`.
+    stats: Arc<StateStoreMetrics>,
 }
 
 impl RpcHummockMetaClient {
-    pub fn new(meta_client: MetaClient, stats: Arc<StateStoreStats>) -> RpcHummockMetaClient {
+    pub fn new(meta_client: MetaClient, stats: Arc<StateStoreMetrics>) -> RpcHummockMetaClient {
         RpcHummockMetaClient { meta_client, stats }
     }
 }

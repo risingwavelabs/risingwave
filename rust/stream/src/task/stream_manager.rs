@@ -319,10 +319,12 @@ impl StreamManagerCore {
 
     #[cfg(test)]
     fn for_test() -> Self {
+        use risingwave_storage::monitor::StateStoreMetrics;
+
         let register = prometheus::Registry::new();
         let streaming_metrics = Arc::new(StreamingMetrics::new(register));
         Self::with_store_and_context(
-            StateStoreImpl::shared_in_memory_store(),
+            StateStoreImpl::shared_in_memory_store(Arc::new(StateStoreMetrics::unused())),
             SharedContext::for_test(),
             streaming_metrics,
         )
