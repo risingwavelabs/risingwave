@@ -1,19 +1,23 @@
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::mem;
+use std::sync::Arc;
 
 use either::Either;
-use risingwave_common::array::{ArrayImpl, DataChunk};
+use itertools::Itertools;
+use risingwave_common::array::column::Column;
+use risingwave_common::array::{ArrayBuilderImpl, ArrayRef, DataChunk};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
-use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 
 use crate::executor::join::chunked_data::{ChunkedData, RowId};
 use crate::executor::join::hash_join::EquiJoinParams;
 use crate::executor::join::JoinType;
 
 const MAX_BUILD_ROW_COUNT: usize = u32::MAX as usize;
+
+type ProbeRowId = usize;
 
 pub(super) struct BuildTable {
     build_data: Vec<DataChunk>,
@@ -107,10 +111,16 @@ pub(super) struct ProbeTable<K> {
     ///
     /// See [`JoinType::need_join_remaining`]
     build_matched: Option<ChunkedData<bool>>,
+    probe_matched: Option<Vec<Option<ProbeRowId>>>,
+
+    /// Map from row ids in join result chunk to those in probe/build chunk
+    /// with length of batch size.
+    result_build_index: Vec<Option<RowId>>,
+    result_probe_index: Vec<Option<ProbeRowId>>,
+    result_offset: usize,
 
     /// Fields for generating one chunk during probe
     cur_probe_data: Option<ProbeData<K>>,
-    data_chunk_builder: RefCell<DataChunkBuilder>,
     cur_joined_build_row_id: Option<RowId>,
     cur_probe_row_id: usize,
 
@@ -118,6 +128,8 @@ pub(super) struct ProbeTable<K> {
     cur_remaining_build_row_id: Option<RowId>,
 
     params: EquiJoinParams,
+
+    array_builders: Vec<ArrayBuilderImpl>,
 }
 
 /// Iterator for joined row ids for one key.
@@ -143,22 +155,31 @@ impl<K: HashKey> TryFrom<BuildTable> for ProbeTable<K> {
             remaining_build_row_id = Some(RowId::default());
         }
 
-        let data_chunk_builder = RefCell::new(DataChunkBuilder::new(
-            build_table.params.output_types().to_vec(),
-            build_table.params.batch_size(),
-        ));
+        let result_build_index = Vec::with_capacity(build_table.params.batch_size());
+        let result_probe_index = Vec::with_capacity(build_table.params.batch_size());
+
+        let array_builders = build_table
+            .params
+            .output_types()
+            .iter()
+            .map(|data_type| data_type.create_array_builder(build_table.params.batch_size()))
+            .collect::<Result<Vec<_>>>()?;
 
         Ok(Self {
             build_table: hash_map,
             build_data: build_table.build_data,
             build_index,
             build_matched,
+            probe_matched: None,
+            result_build_index,
+            result_probe_index,
+            result_offset: 0,
             cur_probe_data: None,
-            data_chunk_builder,
             cur_joined_build_row_id: None,
             cur_probe_row_id: 0,
             cur_remaining_build_row_id: remaining_build_row_id,
             params: build_table.params,
+            array_builders,
         })
     }
 }
@@ -169,9 +190,13 @@ impl<K: HashKey> ProbeTable<K> {
     }
 
     pub(super) fn set_probe_data(&mut self, probe_data_chunk: DataChunk) -> Result<()> {
+        self.build_data_chunk()?;
         let probe_data_chunk = probe_data_chunk.compact()?;
         ensure!(probe_data_chunk.cardinality() > 0);
         let probe_keys = K::build(self.params.probe_key_columns(), &probe_data_chunk)?;
+        if self.params.join_type().need_build_flag() {
+            self.probe_matched = Some(Vec::with_capacity(probe_data_chunk.cardinality()))
+        }
 
         self.cur_probe_row_id = 0;
         self.cur_joined_build_row_id = self.first_joined_row_id(&probe_keys[0]);
@@ -196,12 +221,34 @@ impl<K: HashKey> ProbeTable<K> {
         }
     }
 
+    // fn process_non_equi_condition(&mut self) -> DataChunk {
+    //     match self.params.join_type() {
+    //         JoinType::Inner => self.process_inner_join_non_equi_condition(),
+    //         JoinType::LeftOuter | JoinType::FullOuter => {
+    //             self.process_outer_join_non_equi_condition()
+    //         }
+    //         JoinType::LeftSemi
+    //         | JoinType::LeftAnti
+    //         | JoinType::RightSemi
+    //         | JoinType::RightOuter => self.process_semi_join_non_equi_condition(),
+    //         JoinType::RightAnti => self.process_right_anti_join_non_equi_condition(),
+    //     }
+    // }
+
+    // fn process_inner_join_non_equi_condition(&mut self) -> DataChunk {}
+
+    // fn process_semi_join_non_equi_condition(&mut self) -> DataChunk {}
+
+    // fn process_right_anti_join_non_equi_condition(&mut self) -> DataChunk {}
+
+    // fn process_outer_join_non_equi_condition(&mut self) -> DataChunk {}
+
     pub(super) fn join_remaining(&mut self) -> Result<Option<DataChunk>> {
         self.do_join_remaining()
     }
 
-    pub(super) fn consume_left(self) -> Result<Option<DataChunk>> {
-        self.data_chunk_builder.borrow_mut().consume_all()
+    pub(super) fn consume_left(&mut self) -> Result<Option<DataChunk>> {
+        Ok(Some(self.finish_data_chunk()?))
     }
 
     fn do_inner_join(&mut self) -> Result<Option<DataChunk>> {
@@ -467,42 +514,92 @@ impl<K: HashKey> ProbeTable<K> {
         }
     }
 
+    /// Append a row id to result index array. Build the data chunk when the buffer is full.
     fn append_one_row(
         &mut self,
         build_row_id: Option<RowId>,
         probe_row_id: Option<usize>,
     ) -> Result<Option<DataChunk>> {
-        let row = self
-            .params
-            .output_columns()
-            .iter()
-            .copied()
-            .map(|column_id| {
-                match column_id {
-                    // probe side column
-                    Either::Left(idx) => probe_row_id.map(|row_id| {
-                        (
-                            self.cur_probe_data
+        assert_eq!(self.result_build_index.len(), self.result_probe_index.len());
+        self.result_build_index.push(build_row_id);
+        self.result_probe_index.push(probe_row_id);
+        if self.result_build_index.len() == self.params.batch_size() {
+            Ok(Some(self.finish_data_chunk()?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Append data chunk builders without producing DataChunk.
+    fn build_data_chunk(&mut self) -> Result<()> {
+        // The indices before the offset are already appended and dirty.
+        let offset = self.result_offset;
+        self.result_offset = self.result_build_index.len();
+        for (builder_idx, column_id) in self.params.output_columns().iter().copied().enumerate() {
+            match column_id {
+                // probe side column
+                Either::Left(idx) => {
+                    for probe_row_id in &self.result_probe_index[offset..] {
+                        if let Some(row_id) = probe_row_id {
+                            let array = self
+                                .cur_probe_data
                                 .as_ref()
                                 .unwrap()
                                 .probe_data_chunk
                                 .columns()[idx]
-                                .array_ref(),
-                            row_id,
-                        )
-                    }),
-                    // build side column
-                    Either::Right(idx) => build_row_id.map(|row_id| {
-                        (self.get_build_array(row_id, idx), row_id.row_id() as usize)
-                    }),
+                                .array_ref();
+                            self.array_builders[builder_idx]
+                                .append_array_element(array, *row_id)?;
+                        } else {
+                            self.array_builders[builder_idx].append_null()?;
+                        }
+                    }
                 }
-            });
 
-        self.data_chunk_builder.borrow_mut().append_one_row(row)
+                // build side column
+                Either::Right(idx) => {
+                    for build_row_id in &self.result_build_index[offset..] {
+                        if let Some(row_id) = build_row_id {
+                            let array_ref = self.get_build_array(*row_id, idx);
+                            let array = array_ref.as_ref();
+                            self.array_builders[builder_idx]
+                                .append_array_element(array, row_id.row_id())?;
+                        } else {
+                            self.array_builders[builder_idx].append_null()?;
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
-    fn get_build_array(&self, row_id: RowId, idx: usize) -> &ArrayImpl {
-        self.build_data[row_id.chunk_id()].columns()[idx].array_ref()
+    /// Produce a data chunk from builder.
+    fn finish_data_chunk(&mut self) -> Result<DataChunk> {
+        self.build_data_chunk()?;
+        let new_array_builders = self
+            .params
+            .output_types()
+            .iter()
+            .map(|data_type| data_type.create_array_builder(self.params.batch_size()))
+            .collect::<Result<Vec<_>>>()?;
+        let new_arrays = mem::replace(&mut self.array_builders, new_array_builders)
+            .into_iter()
+            .map(|builder| builder.finish())
+            .collect::<Result<Vec<_>>>()?;
+        let new_columns = new_arrays
+            .into_iter()
+            .map(|array| Column::new(Arc::new(array)))
+            .collect_vec();
+        self.result_build_index.clear();
+        self.result_probe_index.clear();
+        self.result_offset = 0;
+        DataChunk::try_from(new_columns)
+    }
+
+    fn get_build_array(&self, row_id: RowId, idx: usize) -> ArrayRef {
+        self.build_data[row_id.chunk_id()].columns()[idx].array()
     }
 
     fn all_build_row_ids(&self) -> impl Iterator<Item = RowId> + '_ {

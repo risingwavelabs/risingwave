@@ -5,12 +5,12 @@ use either::Either;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
+use risingwave_common::expr::BoxedExpression;
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_pb::plan::plan_node::NodeBody;
 
-use crate::executor::join::hash_join::HashJoinState::{Done, FirstProbe, Probe, ProbeRemaining};
 use crate::executor::join::hash_join_state::{BuildTable, ProbeTable};
 use crate::executor::join::JoinType;
 use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
@@ -85,6 +85,7 @@ pub(super) struct HashJoinExecutor<K> {
     state: HashJoinState<K>,
     schema: Schema,
     identity: String,
+    cond: Option<BoxedExpression>,
 }
 
 impl EquiJoinParams {
@@ -180,7 +181,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
 
         let probe_table = build_table.try_into()?;
 
-        self.state = FirstProbe(probe_table);
+        self.state = HashJoinState::FirstProbe(probe_table);
         Ok(())
     }
 
@@ -205,7 +206,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
 
         loop {
             if let Some(ret_data_chunk) = probe_table.join()? {
-                self.state = Probe(probe_table);
+                self.state = HashJoinState::Probe(probe_table);
                 return Ok(Some(ret_data_chunk));
             } else {
                 match self.left_child.next().await? {
@@ -214,10 +215,10 @@ impl<K: HashKey> HashJoinExecutor<K> {
                     }
                     None => {
                         return if probe_table.join_type().need_join_remaining() {
-                            self.state = ProbeRemaining(probe_table);
+                            self.state = HashJoinState::ProbeRemaining(probe_table);
                             Ok(None)
                         } else {
-                            self.state = Done;
+                            self.state = HashJoinState::Done;
                             probe_table.consume_left()
                         }
                     }
@@ -231,7 +232,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         mut probe_table: ProbeTable<K>,
     ) -> Result<Option<DataChunk>> {
         if let Some(ret_data_chunk) = probe_table.join_remaining()? {
-            self.state = ProbeRemaining(probe_table);
+            self.state = HashJoinState::ProbeRemaining(probe_table);
             Ok(Some(ret_data_chunk))
         } else {
             self.state = HashJoinState::Done;
@@ -254,6 +255,7 @@ impl<K> HashJoinExecutor<K> {
             state: HashJoinState::Build(BuildTable::with_params(params)),
             schema,
             identity,
+            cond: None,
         }
     }
 }
