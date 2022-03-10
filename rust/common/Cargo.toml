@@ -20,6 +20,7 @@ memcomparable = { path = "../utils/memcomparable" }
 more-asserts = "0.2"
 num-traits = "0.2"
 paste = "1"
+pgwire = { path = "../utils/pgwire" }
 prettytable-rs = "0.8"
 prost = "0.9"
 risingwave_pb = { path = "../prost" }

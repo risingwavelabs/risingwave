@@ -4,6 +4,7 @@ use std::hash::BuildHasher;
 use std::sync::Arc;
 
 use itertools::Itertools;
+use pgwire::types::Row as PgRow;
 use risingwave_pb::data::DataChunk as ProstDataChunk;
 
 use crate::array::column::Column;
@@ -89,6 +90,31 @@ impl DataChunk {
             visibility: None,
             cardinality,
         }
+    }
+
+    fn into_pg_rows(&self) -> Vec<PgRow> {
+        let len = self.cardinality();
+        let rows = (0..len)
+            .into_iter()
+            .map(|i| {
+                PgRow::new(
+                    self.row_at(i)
+                        .unwrap()
+                        .0
+                         .0
+                        .into_iter()
+                        .map(|data| {
+                            if let Some(d) = data {
+                                Some(d.to_string())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect_vec(),
+                )
+            })
+            .collect_vec();
+        rows
     }
 
     /// Build a `DataChunk` with rows.
@@ -420,6 +446,8 @@ pub type DataChunkRef = Arc<DataChunk>;
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
+
     use crate::array::column::Column;
     use crate::array::*;
     use crate::{column, column_nonnull};
@@ -506,6 +534,63 @@ mod tests {
                 assert_eq!(val.into_int32(), i as i32);
             }
         }
+    }
+
+    #[test]
+    fn test_into_pg_rows() {
+        let chunk = DataChunk::new(
+            vec![
+                column_nonnull!(I32Array, [1, 2, 3, 4]),
+                column!(I64Array, [Some(6), None, Some(7), None]),
+                column!(F32Array, [Some(6.01), None, Some(7.01), None]),
+                column!(Utf8Array, [Some("aaa"), None, Some("vvv"), None]),
+            ],
+            None,
+        );
+        let rows = chunk.into_pg_rows();
+        let expected = vec![
+            vec![
+                "1".to_string(),
+                "6".to_string(),
+                "6.01".to_string(),
+                "aaa".to_string(),
+            ],
+            vec![
+                "2".to_string(),
+                "".to_string(),
+                "".to_string(),
+                "".to_string(),
+            ],
+            vec![
+                "3".to_string(),
+                "7".to_string(),
+                "7.01".to_string(),
+                "vvv".to_string(),
+            ],
+            vec![
+                "4".to_string(),
+                "".to_string(),
+                "".to_string(),
+                "".to_string(),
+            ],
+        ];
+        let vec = rows
+            .into_iter()
+            .map(|r| {
+                r.values()
+                    .into_iter()
+                    .map(|s| {
+                        if let Some(t) = s {
+                            t.to_string()
+                        } else {
+                            "".to_string()
+                        }
+                    })
+                    .collect_vec()
+            })
+            .collect_vec();
+
+        assert_eq!(vec, expected);
     }
 
     #[test]
