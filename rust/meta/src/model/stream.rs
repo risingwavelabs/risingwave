@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, HashMap};
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 use risingwave_pb::meta::table_fragments::fragment::FragmentType;
-use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
+use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus, Fragment};
 use risingwave_pb::meta::TableFragments as ProstTableFragments;
 use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_plan::StreamActor;
@@ -23,8 +23,6 @@ const TABLE_FRAGMENTS_CF_NAME: &str = "cf/table_fragments";
 pub struct TableFragments {
     /// The table id.
     table_id: TableId,
-    /// The table state.
-    state: State,
     /// The table fragments.
     fragments: BTreeMap<FragmentId, Fragment>,
     /// The status of actors
@@ -42,7 +40,6 @@ impl MetadataModel for TableFragments {
     fn to_protobuf(&self) -> Self::ProstType {
         Self::ProstType {
             table_ref_id: Some(TableRefId::from(&self.table_id)),
-            state: self.state as i32,
             fragments: self.fragments.clone().into_iter().collect(),
             actor_status: self.actor_status.clone().into_iter().collect(),
         }
@@ -51,7 +48,6 @@ impl MetadataModel for TableFragments {
     fn from_protobuf(prost: Self::ProstType) -> Self {
         Self {
             table_id: TableId::from(&prost.table_ref_id),
-            state: State::from_i32(prost.state).unwrap(),
             fragments: prost.fragments.into_iter().collect(),
             actor_status: prost.actor_status.into_iter().collect(),
         }
@@ -66,7 +62,6 @@ impl TableFragments {
     pub fn new(table_id: TableId, fragments: BTreeMap<FragmentId, Fragment>) -> Self {
         Self {
             table_id,
-            state: State::Creating,
             fragments,
             actor_status: BTreeMap::default(),
         }
@@ -81,22 +76,23 @@ impl TableFragments {
     pub fn table_id(&self) -> TableId {
         self.table_id
     }
+    // /// Returns whether the table finished creating.
+    // pub fn is_created(&self) -> bool {
+    //     self.state == State::Created
+    // }
 
-    /// Returns whether the table finished creating.
-    pub fn is_created(&self) -> bool {
-        self.state == State::Created
-    }
-
-    /// Update table state.
-    pub fn update_state(&mut self, state: State) {
-        self.state = state;
+    /// Update state of all actors
+    pub fn update_actors_state(&mut self, state: ActorState) {
+        for actor_status in self.actor_status.values_mut() {
+            actor_status.set_state(state);
+        }
     }
 
     /// Returns actor ids associated with this table.
     pub fn actor_ids(&self) -> Vec<ActorId> {
         self.fragments
             .values()
-            .flat_map(|fragment| fragment.actors.iter().map(|actor| actor.actor_id).collect())
+            .flat_map(|fragment| fragment.actors.iter().map(|actor| actor.actor_id))
             .collect()
     }
 
@@ -113,7 +109,7 @@ impl TableFragments {
         self.fragments
             .values()
             .filter(|fragment| fragment.fragment_type == fragment_type as i32)
-            .flat_map(|fragment| fragment.actors.iter().map(|actor| actor.actor_id).collect())
+            .flat_map(|fragment| fragment.actors.iter().map(|actor| actor.actor_id))
             .collect()
     }
 
@@ -127,49 +123,53 @@ impl TableFragments {
         Self::filter_actor_ids(self, FragmentType::Sink)
     }
 
-    /// Returns actor locations group by node id.
-    pub fn node_actor_ids(&self) -> BTreeMap<NodeId, Vec<ActorId>> {
-        let mut actors = BTreeMap::default();
-        self.actor_status
-            .iter()
-            .for_each(|(&actor_id, actor_status)| {
-                actors
-                    .entry(actor_status.node_id as NodeId)
-                    .or_insert_with(Vec::new)
-                    .push(actor_id);
-            });
-
-        actors
+    /// Returns status of actors group by node id.
+    pub fn node_actors_status(&self) -> BTreeMap<NodeId, Vec<(ActorId, ActorState)>> {
+        let mut map = BTreeMap::default();
+        for (&actor_id, actor_status) in &self.actor_status {
+            let node_id = actor_status.node_id as NodeId;
+            map.entry(node_id)
+                .or_insert_with(Vec::new)
+                .push((actor_id, actor_status.state()));
+        }
+        map
     }
 
-    /// Returns the actors group by node id.
+    /// Returns actor locations group by node id.
+    pub fn node_actor_ids(&self) -> BTreeMap<NodeId, Vec<ActorId>> {
+        let mut map = BTreeMap::default();
+        for (&actor_id, actor_status) in &self.actor_status {
+            let node_id = actor_status.node_id as NodeId;
+            map.entry(node_id).or_insert_with(Vec::new).push(actor_id);
+        }
+        map
+    }
+
+    /// Returns the status of actors group by node id.
     pub fn node_actors(&self) -> BTreeMap<NodeId, Vec<StreamActor>> {
         let mut actors = BTreeMap::default();
-        self.fragments.values().for_each(|fragment| {
-            fragment.actors.iter().for_each(|actor| {
+        for fragment in self.fragments.values() {
+            for actor in &fragment.actors {
                 let node_id = self.actor_status[&actor.actor_id].node_id as NodeId;
                 actors
                     .entry(node_id)
                     .or_insert_with(Vec::new)
                     .push(actor.clone());
-            })
-        });
-
+            }
+        }
         actors
     }
 
-    pub fn node_source_actors(&self) -> BTreeMap<NodeId, Vec<ActorId>> {
-        let mut actors = BTreeMap::default();
+    pub fn node_source_actors_status(&self) -> BTreeMap<NodeId, Vec<(ActorId, ActorState)>> {
+        let mut map = BTreeMap::default();
         let source_actor_ids = self.source_actor_ids();
-        source_actor_ids.iter().for_each(|&actor_id| {
-            let node_id = self.actor_status[&actor_id].node_id as NodeId;
-            actors
-                .entry(node_id)
+        for &actor_id in &source_actor_ids {
+            let actor_status = &self.actor_status[&actor_id];
+            map.entry(actor_status.node_id as NodeId)
                 .or_insert_with(Vec::new)
-                .push(actor_id);
-        });
-
-        actors
+                .push((actor_id, actor_status.state()));
+        }
+        map
     }
 
     /// Returns actor map: `actor_id` => `StreamActor`.

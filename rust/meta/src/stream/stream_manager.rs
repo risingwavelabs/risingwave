@@ -89,7 +89,7 @@ where
                     actor_id,
                     ActorStatus {
                         node_id,
-                        state: ActorState::Running as i32,
+                        state: ActorState::Inactive as i32,
                     },
                 )
             })

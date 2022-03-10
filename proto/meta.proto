@@ -114,16 +114,13 @@ service HeartbeatService {
 
 // Fragments of a Materialized View
 message TableFragments {
-  // State of MView
-  enum State {
-    CREATING = 0;
-    CREATED = 1;
-  }
-
   // Current state of actor
   enum ActorState {
-    RUNNING = 0;
-    // e.g. Inactive, Failed...
+    // Initial state after creation
+    INACTIVE = 0;
+
+    // Running normally
+    RUNNING = 1;
   }
 
   // Runtime information of an actor
@@ -146,7 +143,6 @@ message TableFragments {
     repeated stream_plan.StreamActor actors = 3;
   }
   plan.TableRefId table_ref_id = 1;
-  State state = 2;
   map<uint32, Fragment> fragments = 3;
   map<uint32, ActorStatus> actor_status = 4;
 }
