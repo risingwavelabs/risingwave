@@ -24,11 +24,16 @@ pub struct LogicalFilter {
 
 impl LogicalFilter {
     pub fn new(input: PlanRef, predicate: Condition) -> Self {
+        let ctx = input.ctx();
         for cond in &predicate.conjunctions {
             assert_input_ref(cond, input.schema().fields().len());
         }
         let schema = input.schema().clone();
-        let base = LogicalBase { schema };
+        let base = LogicalBase {
+            schema,
+            ctx: ctx.clone(),
+            id: ctx.borrow_mut().get_id(),
+        };
         LogicalFilter {
             input,
             base,
@@ -103,6 +108,8 @@ impl ToStream for LogicalFilter {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
 
     use risingwave_common::catalog::{Field, Schema, TableId};
     use risingwave_common::types::DataType;
@@ -111,8 +118,9 @@ mod tests {
     use super::*;
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
     use crate::optimizer::plan_node::LogicalScan;
+    use crate::session::QueryContext;
 
-    #[test]
+    #[tokio::test]
     /// Pruning
     /// ```text
     /// Filter(cond: input_ref(1)<5)
@@ -124,7 +132,8 @@ mod tests {
     ///   Filter(cond: input_ref(0)<5)
     ///     TableScan(v2, v3)
     /// ```
-    fn test_prune_filter() {
+    async fn test_prune_filter() {
+        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
         let ty = DataType::Int32;
         let fields: Vec<Field> = vec![
             Field {
@@ -147,6 +156,7 @@ mod tests {
             Schema {
                 fields: fields.clone(),
             },
+            ctx,
         );
         let predicate: ExprImpl = ExprImpl::FunctionCall(Box::new(
             FunctionCall::new(
@@ -187,7 +197,7 @@ mod tests {
         assert_eq!(scan.schema().fields()[1], fields[2]);
     }
 
-    #[test]
+    #[tokio::test]
     /// Pruning
     /// ```text
     /// Filter(cond: input_ref(1)<5)
@@ -198,7 +208,8 @@ mod tests {
     ///   Filter(cond: input_ref(0)<5)
     ///     TableScan(v2, v3)
     /// ```
-    fn test_prune_filter_no_project() {
+    async fn test_prune_filter_no_project() {
+        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
         let ty = DataType::Int32;
         let fields: Vec<Field> = vec![
             Field {
@@ -221,6 +232,7 @@ mod tests {
             Schema {
                 fields: fields.clone(),
             },
+            ctx,
         );
         let predicate: ExprImpl = ExprImpl::FunctionCall(Box::new(
             FunctionCall::new(

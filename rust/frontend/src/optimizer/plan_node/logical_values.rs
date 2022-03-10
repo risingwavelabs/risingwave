@@ -7,6 +7,7 @@ use risingwave_common::error::Result;
 use super::{ColPrunable, LogicalBase, PlanRef, ToBatch, ToStream};
 use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::property::WithSchema;
+use crate::session::QueryContextRef;
 
 /// `LogicalValues` build rows according to a list of expressions
 #[derive(Debug, Clone)]
@@ -17,20 +18,24 @@ pub struct LogicalValues {
 
 impl LogicalValues {
     /// Create a LogicalValues node. Used internally by optimizer.
-    pub fn new(rows: Vec<Vec<ExprImpl>>, schema: Schema) -> Self {
+    pub fn new(rows: Vec<Vec<ExprImpl>>, schema: Schema, ctx: QueryContextRef) -> Self {
         for exprs in &rows {
             for (i, expr) in exprs.iter().enumerate() {
                 assert_eq!(schema.fields()[i].data_type(), expr.return_type())
             }
         }
-        let base = LogicalBase { schema };
+        let base = LogicalBase {
+            schema,
+            id: ctx.borrow_mut().get_id(),
+            ctx: ctx.clone(),
+        };
         Self { rows, base }
     }
 
     /// Create a LogicalValues node. Used by planner.
-    pub fn create(rows: Vec<Vec<ExprImpl>>, schema: Schema) -> Result<Self> {
+    pub fn create(rows: Vec<Vec<ExprImpl>>, schema: Schema, ctx: QueryContextRef) -> Result<Self> {
         // No additional checks after binder.
-        Ok(Self::new(rows, schema))
+        Ok(Self::new(rows, schema, ctx))
     }
 
     /// Get a reference to the logical values' rows.
@@ -58,7 +63,7 @@ impl ColPrunable for LogicalValues {
             .ones()
             .map(|id| (self.rows[id].clone(), self.schema().fields[id].clone()))
             .unzip();
-        Self::new(rows, Schema { fields }).into()
+        Self::new(rows, Schema { fields }, self.base.ctx.clone()).into()
     }
 }
 

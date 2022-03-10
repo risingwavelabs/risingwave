@@ -1,3 +1,6 @@
+use std::cell::RefCell;
+use std::fmt::Formatter;
+use std::rc::Rc;
 use std::sync::{Arc, RwLock};
 
 use pgwire::pg_response::PgResponse;
@@ -14,15 +17,43 @@ use crate::catalog::catalog_service::{
 };
 use crate::handler::handle;
 use crate::observer::observer_manager::ObserverManager;
+use crate::optimizer::plan_node::PlanNodeId;
 use crate::scheduler::schedule::WorkerNodeManager;
+use crate::test_utils::FrontendMockMetaClient;
 use crate::FrontendOpts;
-pub struct QueryContext<'a> {
-    pub session: &'a SessionImpl,
+
+pub struct QueryContext {
+    pub session_ctx: Arc<SessionContext>,
+    pub next_id: i32,
 }
 
-impl<'a> QueryContext<'a> {
-    pub fn new(session: &'a SessionImpl) -> Self {
-        Self { session }
+pub type QueryContextRef = Rc<RefCell<QueryContext>>;
+
+impl QueryContext {
+    pub fn new(session_ctx: Arc<SessionContext>) -> Self {
+        Self {
+            session_ctx,
+            next_id: 0,
+        }
+    }
+
+    pub fn get_id(&mut self) -> PlanNodeId {
+        let ret = PlanNodeId(self.next_id);
+        self.next_id += 1;
+        ret
+    }
+
+    pub async fn mock() -> Self {
+        Self {
+            session_ctx: Arc::new(SessionContext::mock().await),
+            next_id: 0,
+        }
+    }
+}
+
+impl std::fmt::Debug for QueryContext {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "QueryContext {{ current id = {} }}", self.next_id)
     }
 }
 
@@ -38,6 +69,20 @@ impl FrontendEnv {
     pub async fn init(opts: &FrontendOpts) -> Result<(Self, JoinHandle<()>)> {
         let meta_client = MetaClient::new(opts.meta_addr.clone().as_str()).await?;
         Self::with_meta_client(meta_client, opts).await
+    }
+
+    pub async fn mock() -> Self {
+        let meta_client = MetaClient::mock(FrontendMockMetaClient::new().await);
+        let (_catalog_updated_tx, catalog_updated_rx) = watch::channel(0);
+        let catalog_cache = Arc::new(RwLock::new(
+            CatalogCache::new(meta_client.clone()).await.unwrap(),
+        ));
+        let catalog_manager =
+            CatalogConnector::new(meta_client.clone(), catalog_cache, catalog_updated_rx);
+        Self {
+            meta_client,
+            catalog_manager,
+        }
     }
 
     pub async fn with_meta_client(
@@ -100,13 +145,23 @@ impl FrontendEnv {
 }
 
 pub struct SessionImpl {
+    pub ctx: Arc<SessionContext>,
+}
+
+pub struct SessionContext {
     env: FrontendEnv,
     database: String,
 }
 
-impl SessionImpl {
+impl SessionContext {
     pub fn new(env: FrontendEnv, database: String) -> Self {
         Self { env, database }
+    }
+    pub async fn mock() -> Self {
+        Self {
+            env: FrontendEnv::mock().await,
+            database: "dev".to_string(),
+        }
     }
 
     pub fn env(&self) -> &FrontendEnv {
@@ -118,6 +173,16 @@ impl SessionImpl {
     }
 }
 
+impl SessionImpl {
+    pub fn new(env: FrontendEnv, database: String) -> Self {
+        // Self { env, database }
+        let context = SessionContext { env, database };
+        Self {
+            ctx: Arc::new(context),
+        }
+    }
+}
+
 pub struct SessionManagerImpl {
     env: FrontendEnv,
     observer_join_handle: JoinHandle<()>,
@@ -126,8 +191,9 @@ pub struct SessionManagerImpl {
 impl SessionManager for SessionManagerImpl {
     fn connect(&self) -> Box<dyn Session> {
         Box::new(SessionImpl {
-            env: self.env.clone(),
-            database: "dev".to_string(),
+            ctx: Arc::new(SessionContext::new(self.env.clone(), "dev".to_string()))
+            // env: self.env.clone(),
+            // database: "dev".to_string(),
         })
     }
 }

@@ -19,11 +19,14 @@ pub struct BatchSortMergeJoin {
 
 impl BatchSortMergeJoin {
     pub fn new(logical: LogicalJoin, eq_join_predicate: EqJoinPredicate) -> Self {
+        let ctx = logical.base.ctx.clone();
         let order = Self::derive_order(logical.left().order(), logical.right().order());
         // TODO: derive from input
         let base = BatchBase {
             order,
             dist: Distribution::any().clone(),
+            id: ctx.borrow_mut().get_id(),
+            ctx: ctx.clone(),
         };
 
         Self {

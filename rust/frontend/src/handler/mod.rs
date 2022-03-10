@@ -10,7 +10,7 @@ pub mod drop_table;
 mod explain;
 
 pub(super) async fn handle(session: &SessionImpl, stmt: Statement) -> Result<PgResponse> {
-    let context = QueryContext::new(session);
+    let context = QueryContext::new(session.ctx.clone());
     match stmt {
         Statement::Explain {
             statement, verbose, ..

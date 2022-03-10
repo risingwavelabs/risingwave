@@ -38,8 +38,13 @@ impl fmt::Display for LogicalJoin {
 
 impl LogicalJoin {
     pub(crate) fn new(left: PlanRef, right: PlanRef, join_type: JoinType, on: Condition) -> Self {
+        let ctx = left.ctx();
         let schema = Self::derive_schema(left.schema(), right.schema(), join_type);
-        let base = LogicalBase { schema };
+        let base = LogicalBase {
+            schema,
+            id: ctx.borrow_mut().get_id(),
+            ctx: ctx.clone(),
+        };
         LogicalJoin {
             left,
             right,
@@ -208,6 +213,8 @@ impl ToStream for LogicalJoin {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
 
     use risingwave_common::catalog::{Field, TableId};
     use risingwave_common::types::DataType;
@@ -217,8 +224,9 @@ mod tests {
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef};
     use crate::optimizer::plan_node::{LogicalScan, PlanTreeNodeUnary};
     use crate::optimizer::property::WithSchema;
+    use crate::session::QueryContext;
 
-    #[test]
+    #[tokio::test]
     /// Pruning
     /// ```text
     /// Join(on: input_ref(1)=input_ref(3))
@@ -232,8 +240,9 @@ mod tests {
     ///     TableScan(v2, v3)
     ///     TableScan(v4)
     /// ```
-    fn test_prune_join() {
+    async fn test_prune_join() {
         let ty = DataType::Int32;
+        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
         let fields: Vec<Field> = (1..7)
             .map(|i| Field {
                 data_type: ty.clone(),
@@ -247,6 +256,7 @@ mod tests {
             Schema {
                 fields: fields[0..3].to_vec(),
             },
+            ctx.clone(),
         );
         let right = LogicalScan::new(
             "right".to_string(),
@@ -255,6 +265,7 @@ mod tests {
             Schema {
                 fields: fields[3..6].to_vec(),
             },
+            ctx,
         );
         let on: ExprImpl = ExprImpl::FunctionCall(Box::new(
             FunctionCall::new(
@@ -306,7 +317,7 @@ mod tests {
         assert_eq!(right.schema().fields(), &fields[3..4]);
     }
 
-    #[test]
+    #[tokio::test]
     /// Pruning
     /// ```text
     /// Join(on: input_ref(1)=input_ref(3))
@@ -319,8 +330,9 @@ mod tests {
     ///   TableScan(v2)
     ///   TableScan(v4)
     /// ```
-    fn test_prune_join_no_project() {
+    async fn test_prune_join_no_project() {
         let ty = DataType::Int32;
+        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
         let fields: Vec<Field> = (1..7)
             .map(|i| Field {
                 data_type: ty.clone(),
@@ -334,6 +346,7 @@ mod tests {
             Schema {
                 fields: fields[0..3].to_vec(),
             },
+            ctx.clone(),
         );
         let right = LogicalScan::new(
             "right".to_string(),
@@ -342,6 +355,7 @@ mod tests {
             Schema {
                 fields: fields[3..6].to_vec(),
             },
+            ctx,
         );
         let on: ExprImpl = ExprImpl::FunctionCall(Box::new(
             FunctionCall::new(

@@ -45,6 +45,7 @@ impl LogicalAgg {
         group_keys: Vec<usize>,
         input: PlanRef,
     ) -> Self {
+        let ctx = input.ctx();
         let schema = Self::derive_schema(
             input.schema(),
             &group_keys,
@@ -54,7 +55,11 @@ impl LogicalAgg {
                 .collect(),
             &agg_call_alias,
         );
-        let base = LogicalBase { schema };
+        let base = LogicalBase {
+            schema,
+            id: ctx.borrow_mut().get_id(),
+            ctx: ctx.clone(),
+        };
         Self {
             agg_calls,
             group_keys,
@@ -209,6 +214,8 @@ impl ToStream for LogicalAgg {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
 
     use risingwave_common::catalog::{Field, TableId};
     use risingwave_common::types::DataType;
@@ -216,8 +223,9 @@ mod tests {
     use super::*;
     use crate::expr::assert_eq_input_ref;
     use crate::optimizer::plan_node::LogicalScan;
+    use crate::session::QueryContext;
 
-    #[test]
+    #[tokio::test]
     /// Pruning
     /// ```text
     /// Agg(min(input_ref(2))) group by (input_ref(1))
@@ -227,8 +235,9 @@ mod tests {
     /// ```text
     /// Agg(max(input_ref(1))) group by (input_ref(0))
     ///  TableScan(v2, v3)
-    fn test_prune_all() {
+    async fn test_prune_all() {
         let ty = DataType::Int32;
+        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
         let fields: Vec<Field> = vec![
             Field {
                 data_type: ty.clone(),
@@ -250,6 +259,7 @@ mod tests {
             Schema {
                 fields: fields.clone(),
             },
+            ctx,
         );
         let agg_call = PlanAggCall {
             agg_kind: AggKind::Min,
@@ -284,7 +294,7 @@ mod tests {
         assert_eq!(scan.schema().fields(), &fields[1..]);
     }
 
-    #[test]
+    #[tokio::test]
     /// Pruning
     /// ```text
     /// Agg(min(input_ref(2))) group by (input_ref(1))
@@ -295,7 +305,8 @@ mod tests {
     /// Project(input_ref(1))
     ///   Agg(max(input_ref(1))) group by (input_ref(0))
     ///     TableScan(v2, v3)
-    fn test_prune_group_key() {
+    async fn test_prune_group_key() {
+        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
         let ty = DataType::Int32;
         let fields: Vec<Field> = vec![
             Field {
@@ -318,6 +329,7 @@ mod tests {
             Schema {
                 fields: fields.clone(),
             },
+            ctx,
         );
         let agg_call = PlanAggCall {
             agg_kind: AggKind::Min,
@@ -357,7 +369,7 @@ mod tests {
         assert_eq!(scan.schema().fields(), &fields[1..]);
     }
 
-    #[test]
+    #[tokio::test]
     /// Pruning
     /// ```text
     /// Agg(min(input_ref(2)), max(input_ref(1))) group by (input_ref(1), input_ref(2))
@@ -368,8 +380,9 @@ mod tests {
     /// Project(input_ref(0), input_ref(2))
     ///   Agg(max(input_ref(0))) group by (input_ref(0), input_ref(1))
     ///     TableScan(v2, v3)
-    fn test_prune_agg() {
+    async fn test_prune_agg() {
         let ty = DataType::Int32;
+        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
         let fields: Vec<Field> = vec![
             Field {
                 data_type: ty.clone(),
@@ -391,6 +404,7 @@ mod tests {
             Schema {
                 fields: fields.clone(),
             },
+            ctx,
         );
         let agg_calls = vec![
             PlanAggCall {

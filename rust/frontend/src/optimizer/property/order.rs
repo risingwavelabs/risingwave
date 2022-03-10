@@ -3,7 +3,9 @@ use paste::paste;
 use super::super::plan_node::*;
 use super::Convention;
 use crate::optimizer::PlanRef;
+use crate::session::QueryContextRef;
 use crate::{for_batch_plan_nodes, for_logical_plan_nodes, for_stream_plan_nodes};
+
 #[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
 pub struct Order {
@@ -50,7 +52,7 @@ impl Order {
     }
     pub fn enforce(&self, plan: PlanRef) -> PlanRef {
         assert_eq!(plan.convention(), Convention::Batch);
-        BatchSort::new(plan, self.clone()).into()
+        BatchSort::new(plan.clone(), self.clone()).into()
     }
     pub fn satisfies(&self, other: &Order) -> bool {
         if self.field_order.len() < other.field_order.len() {
@@ -103,6 +105,25 @@ macro_rules! impl_with_order_any {
 }
 for_logical_plan_nodes! {impl_with_order_any }
 for_stream_plan_nodes! {impl_with_order_any }
+
+pub trait WithContext {
+    fn ctx(&self) -> QueryContextRef;
+}
+
+macro_rules! impl_with_ctx_base {
+    ([], $( { $convention:ident, $name:ident }),*) => {
+        $(paste! {
+            impl WithContext for [<$convention $name>] {
+                fn ctx(&self) -> QueryContextRef {
+                    self.base.ctx.clone()
+                }
+            }
+        })*
+    }
+}
+for_batch_plan_nodes! {impl_with_ctx_base }
+for_logical_plan_nodes! {impl_with_ctx_base }
+for_stream_plan_nodes! {impl_with_ctx_base }
 
 #[cfg(test)]
 mod tests {
