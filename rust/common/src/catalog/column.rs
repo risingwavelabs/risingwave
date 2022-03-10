@@ -1,6 +1,7 @@
 use risingwave_pb::plan::ColumnDesc as ProstColumnDesc;
 
 use crate::types::DataType;
+use crate::util::sort_util::OrderType;
 
 /// Column ID is the unique identifier of a column in a table. Different from table ID,
 /// column ID is not globally unique.
@@ -37,7 +38,11 @@ pub struct ColumnDesc {
     pub column_id: ColumnId,
     pub name: String, // for debugging
 }
-
+#[derive(Clone, Debug)]
+pub struct OrderedColumnDesc {
+    column_desc: ColumnDesc,
+    order: OrderType,
+}
 impl ColumnDesc {
     pub fn unnamed(column_id: ColumnId, data_type: DataType) -> ColumnDesc {
         ColumnDesc {
