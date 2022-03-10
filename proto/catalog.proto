@@ -1,0 +1,69 @@
+syntax = "proto3";
+
+package catalog;
+
+option java_multiple_files = true;
+option java_package = "com.risingwave.proto.catalog";
+option optimize_for = SPEED;
+
+import "data.proto";
+import "plan.proto";
+
+enum RowFormatType {
+  JSON = 0;
+  PROTOBUF = 1;
+  DEBEZIUM_JSON = 2;
+  AVRO = 3;
+}
+
+message StreamSourceInfo {
+  map<string, string> properties = 1;
+  RowFormatType row_format = 2;
+  string row_schema_location = 3;
+  int32 row_id_index = 4;
+}
+
+message TableSourceInfo {
+  repeated plan.ColumnCatalog column_catalog = 1;
+}
+
+message Source {
+  int32 id = 1;
+  int32 schema_id = 2;
+  int32 database_id = 3;
+  string name = 4;
+
+  oneof info {
+    StreamSourceInfo stream_source = 5;
+    TableSourceInfo table_source = 6;
+  }
+}
+
+// View defines a view in system catalogs, it can only be queried and not be treated as a source.
+message View {
+  int32 id = 1;
+  string name = 2;
+  repeated plan.ColumnCatalog column_catalog = 3;
+}
+
+message Table {
+  int32 id = 1;
+  int32 schema_id = 2;
+  int32 database_id = 3;
+  string name = 4;
+  repeated plan.ColumnCatalog column_catalog = 5;
+  repeated int32 pk_column_ids = 6;
+  repeated plan.OrderType order_types = 7;
+  repeated int32 dependent_tables = 8;
+}
+
+message Schema {
+  int32 id = 1;
+  int32 database_id = 2;
+  string name = 3;
+}
+
+message Database {
+  int32 id = 1;
+  string name = 2;
+}
