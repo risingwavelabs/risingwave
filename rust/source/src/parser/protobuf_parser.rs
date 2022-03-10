@@ -185,8 +185,8 @@ pub fn pb_field_to_col_desc(
             .collect::<Result<Vec<_>>>()?;
         Ok(ColumnDesc {
             column_type: Some(data_type.to_protobuf().unwrap()),
-            column_descs: column_vec,
-            struct_name: m.name().to_string(),
+            field_descs: column_vec,
+            type_name: m.name().to_string(),
             name: lastname + field_descriptor.name(),
             ..Default::default()
         })

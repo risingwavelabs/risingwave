@@ -48,10 +48,10 @@ impl TableCatalog {
         id
     }
 
-    pub fn prost_column_desc_to_catalog(&mut self, col: &ProstColumnDesc) -> ColumnCatalog {
+    fn prost_column_desc_to_catalog(&mut self, col: &ProstColumnDesc) -> ColumnCatalog {
         if col.column_type.as_ref().expect("wrong type").type_name == TypeName::Struct as i32 {
             let v: Vec<ColumnCatalog> = col
-                .column_descs
+                .field_descs
                 .iter()
                 .map(|c| self.prost_column_desc_to_catalog(c))
                 .collect_vec();
@@ -60,7 +60,7 @@ impl TableCatalog {
                 data_type: DataType::Struct {
                     fields: data_types.into(),
                 },
-                type_name: Some(col.get_struct_name().to_string()),
+                type_name: Some(col.get_type_name().to_string()),
             };
             ColumnCatalog::new(
                 ColumnId::from(self.next_column_id()),
@@ -71,7 +71,7 @@ impl TableCatalog {
         } else {
             let desc = ColumnDesc {
                 data_type: col.get_column_type().expect("column type not found").into(),
-                type_name: Some(col.get_struct_name().to_string()),
+                type_name: Some(col.get_type_name().to_string()),
             };
             ColumnCatalog::new(
                 ColumnId::from(self.next_column_id()),

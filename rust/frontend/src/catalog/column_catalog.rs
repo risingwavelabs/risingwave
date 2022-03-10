@@ -7,7 +7,7 @@ use crate::catalog::ColumnId;
 #[derive(Debug, Clone)]
 pub struct ColumnDesc {
     pub data_type: DataType,
-    // when the data_type equal to struct, type_name have the value which is struct name
+    // The user-defined type's name. Empty if the column type is a builtin type.
     pub type_name: Option<String>,
 }
 
@@ -28,7 +28,7 @@ impl From<ProstColumnDesc> for ColumnDesc {
     fn from(col: ProstColumnDesc) -> Self {
         ColumnDesc {
             data_type: col.get_column_type().expect("column type not found").into(),
-            type_name: Some(col.get_struct_name().to_string()),
+            type_name: Some(col.get_type_name().to_string()),
         }
     }
 }
@@ -39,7 +39,8 @@ pub struct ColumnCatalog {
     id: ColumnId,
     name: String,
     desc: ColumnDesc,
-    pub sub_catalogs: Vec<ColumnCatalog>,
+    // For STRUCT type.
+    pub fields: Vec<ColumnCatalog>,
 }
 
 impl ColumnCatalog {
@@ -47,13 +48,13 @@ impl ColumnCatalog {
         id: ColumnId,
         name: String,
         desc: ColumnDesc,
-        sub_catalogs: Vec<ColumnCatalog>,
+        fields: Vec<ColumnCatalog>,
     ) -> ColumnCatalog {
         ColumnCatalog {
             id,
             name,
             desc,
-            sub_catalogs,
+            fields,
         }
     }
 

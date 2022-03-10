@@ -54,8 +54,8 @@ impl From<ProstColumnDesc> for ColumnDesc {
             column_type,
             column_id,
             name,
-            struct_name: _,
-            column_descs: _,
+            type_name: _,
+            field_descs: _,
         } = prost;
 
         Self {

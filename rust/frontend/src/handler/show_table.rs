@@ -1,7 +1,8 @@
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
-use risingwave_common::error::Result;
+use risingwave_common::error::ErrorCode::ItemNotFound;
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::ObjectName;
 
@@ -9,7 +10,7 @@ use crate::catalog::catalog_service::DEFAULT_SCHEMA_NAME;
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::session::SessionImpl;
 
-pub fn column_to_rows(column_catalog: &ColumnCatalog) -> Vec<Row> {
+pub(crate) fn column_to_rows(column_catalog: &ColumnCatalog) -> Vec<Row> {
     if let DataType::Struct { fields: _f } = column_catalog.data_type() {
         let mut v = vec![];
         let option = vec![
@@ -17,7 +18,7 @@ pub fn column_to_rows(column_catalog: &ColumnCatalog) -> Vec<Row> {
             Some(get_type_name(column_catalog)),
         ];
         v.push(Row::new(option));
-        for col in &column_catalog.sub_catalogs {
+        for col in &column_catalog.fields {
             v.append(&mut column_to_rows(col));
         }
         v
@@ -58,7 +59,7 @@ pub async fn handle_show_table(
         .get_schema(DEFAULT_SCHEMA_NAME)
         .unwrap()
         .get_table(str_table_name.as_str())
-        .unwrap();
+        .ok_or_else(|| RwError::from(ItemNotFound(str_table_name)))?;
 
     let mut rows = vec![];
     for col in table.columns() {

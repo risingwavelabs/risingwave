@@ -61,6 +61,7 @@ mod tests {
     use std::collections::HashMap;
     use std::io::Write;
 
+    use itertools::Itertools;
     use risingwave_common::types::DataType;
     use tempfile::NamedTempFile;
 
