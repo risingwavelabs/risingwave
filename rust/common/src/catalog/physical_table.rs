@@ -1,12 +1,11 @@
 use super::{OrderedColumnDesc, TableId};
 
-/// the catalog of physical table in our system which can be access by batch query, and the enum
-/// including the table descriptor all information for compute node to access data of the table.
 enum PhysicalTable {
     CellBased(CellBasedTableDesc),
 }
 
-/// the table descriptor of table with cell based encoding in state store
+/// the table descriptor of table with cell based encoding in state store and include all
+/// information for compute node to access data of the table.
 #[derive(Debug, Clone)]
 pub struct CellBasedTableDesc {
     /// id of the table, to find in Storage()
