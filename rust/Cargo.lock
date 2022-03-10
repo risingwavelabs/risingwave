@@ -3992,6 +3992,7 @@ dependencies = [
  "risingwave_pb",
  "tokio",
  "tonic",
+ "tracing",
 ]
 
 [[package]]

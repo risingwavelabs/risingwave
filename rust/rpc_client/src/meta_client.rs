@@ -29,7 +29,8 @@ use risingwave_pb::meta::{
     ListAllNodesRequest, ListAllNodesResponse, Schema, SubscribeRequest, SubscribeResponse, Table,
 };
 use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
-use tokio::sync::mpsc::Receiver;
+use tokio::sync::mpsc::{Receiver, UnboundedSender};
+use tokio::task::JoinHandle;
 use tonic::transport::{Channel, Endpoint};
 use tonic::{Status, Streaming};
 
@@ -211,6 +212,31 @@ impl MetaClient {
         let mut resp = self.inner.get_catalog(GetCatalogRequest {}).await?;
         let catalog = resp.catalog.take().unwrap();
         Ok(catalog)
+    }
+
+    pub fn start_heartbeat_loop(
+        meta_client: MetaClient,
+        min_interval: Duration,
+    ) -> (JoinHandle<()>, UnboundedSender<()>) {
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
+        let join_handle = tokio::spawn(async move {
+            let mut min_interval = tokio::time::interval(min_interval);
+            loop {
+                tokio::select! {
+                    // Wait for interval
+                    _ = min_interval.tick() => {},
+                    // Shutdown
+                    _ = shutdown_rx.recv() => {
+                        tracing::info!("Heartbeat loop is shutting down");
+                        return;
+                    }
+                }
+                if let Err(err) = meta_client.send_heartbeat(meta_client.worker_id()).await {
+                    tracing::warn!("Failed to send_heartbeat. {}", err);
+                }
+            }
+        });
+        (join_handle, shutdown_tx)
     }
 }
 

@@ -1,4 +1,5 @@
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{Session, SessionManager};
@@ -6,6 +7,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::common::WorkerType;
 use risingwave_rpc_client::MetaClient;
 use risingwave_sqlparser::parser::Parser;
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
@@ -121,6 +123,8 @@ impl SessionImpl {
 pub struct SessionManagerImpl {
     env: FrontendEnv,
     observer_join_handle: JoinHandle<()>,
+    heartbeat_join_handle: JoinHandle<()>,
+    _heartbeat_shutdown_sender: UnboundedSender<()>,
 }
 
 impl SessionManager for SessionManagerImpl {
@@ -135,15 +139,22 @@ impl SessionManager for SessionManagerImpl {
 impl SessionManagerImpl {
     pub async fn new(opts: &FrontendOpts) -> Result<Self> {
         let (env, join_handle) = FrontendEnv::init(opts).await?;
+        let (heartbeat_join_handle, _heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
+            env.meta_client.clone(),
+            Duration::from_millis(opts.heartbeat_interval as u64),
+        );
         Ok(Self {
             env,
             observer_join_handle: join_handle,
+            heartbeat_join_handle,
+            _heartbeat_shutdown_sender,
         })
     }
 
     /// Used in unit test. Called before `LocalMeta::stop`.
     pub fn terminate(&self) {
         self.observer_join_handle.abort();
+        self.heartbeat_join_handle.abort();
     }
 }
 

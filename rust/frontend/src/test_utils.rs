@@ -1,5 +1,6 @@
 use std::ffi::OsString;
 use std::sync::Arc;
+use std::time::Duration;
 
 use clap::StructOpt;
 use pgwire::pg_response::PgResponse;
@@ -82,9 +83,14 @@ impl FrontendMockMetaClient {
         );
 
         let cluster_manager = Arc::new(
-            StoredClusterManager::new(env.clone(), None, notification_manager.clone())
-                .await
-                .unwrap(),
+            StoredClusterManager::new(
+                env.clone(),
+                None,
+                notification_manager.clone(),
+                Duration::from_secs(3600),
+            )
+            .await
+            .unwrap(),
         );
 
         Self {

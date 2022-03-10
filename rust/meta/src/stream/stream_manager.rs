@@ -377,8 +377,15 @@ mod tests {
 
             let env = MetaSrvEnv::for_test().await;
             let notification_manager = Arc::new(NotificationManager::new());
-            let cluster_manager =
-                Arc::new(StoredClusterManager::new(env.clone(), None, notification_manager).await?);
+            let cluster_manager = Arc::new(
+                StoredClusterManager::new(
+                    env.clone(),
+                    None,
+                    notification_manager,
+                    Duration::from_secs(3600),
+                )
+                .await?,
+            );
             let host = HostAddress {
                 host: host.to_string(),
                 port: port as i32,

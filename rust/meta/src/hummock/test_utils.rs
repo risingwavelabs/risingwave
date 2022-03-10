@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use bytes::Bytes;
 use itertools::Itertools;
@@ -97,6 +98,7 @@ pub async fn setup_compute_env(
             env.clone(),
             Some(hummock_manager.clone()),
             Arc::new(NotificationManager::new()),
+            Duration::from_secs(1),
         )
         .await
         .unwrap(),

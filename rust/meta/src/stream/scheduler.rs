@@ -138,6 +138,8 @@ where
 
 #[cfg(test)]
 mod test {
+    use std::time::Duration;
+
     use risingwave_pb::common::HostAddress;
 
     use super::*;
@@ -147,8 +149,15 @@ mod test {
     async fn test_schedule() -> Result<()> {
         let env = MetaSrvEnv::for_test().await;
         let notification_manager = Arc::new(NotificationManager::new());
-        let cluster_manager =
-            Arc::new(StoredClusterManager::new(env.clone(), None, notification_manager).await?);
+        let cluster_manager = Arc::new(
+            StoredClusterManager::new(
+                env.clone(),
+                None,
+                notification_manager,
+                Duration::from_secs(3600),
+            )
+            .await?,
+        );
         let actors = (0..15).collect::<Vec<u32>>();
         for i in 0..10 {
             let host = HostAddress {

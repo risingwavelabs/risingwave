@@ -7,6 +7,7 @@ edition = "2021"
 async-trait = "0.1"
 risingwave_common = { path = "../common" }
 risingwave_pb = { path = "../prost" }
+tracing = { version = "0.1", features = ["release_max_level_info"] }
 tokio = { version = "1", features = [
     "rt",
     "rt-multi-thread",
