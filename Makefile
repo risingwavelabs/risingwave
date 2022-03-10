@@ -62,7 +62,7 @@ ss_bench_build:
 	cd rust && cargo build --workspace --bin ss-bench
 
 sqllogictest:
-	cargo install sqllogictest --version 0.2.0 --features bin
+	cargo install --git https://github.com/risinglightdb/sqllogictest-rs --features bin
 
 export DOCKER_GROUP_NAME ?= risingwave
 export DOCKER_IMAGE_TAG ?= latest
