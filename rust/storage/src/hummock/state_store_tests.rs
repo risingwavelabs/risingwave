@@ -1,8 +1,6 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use hyper::{Body, Request, Response};
-use prometheus::{Encoder, Registry, TextEncoder};
 
 use super::iterator::UserIterator;
 use super::{HummockOptions, HummockStorage};
@@ -12,21 +10,6 @@ use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
 use crate::monitor::StateStoreMetrics;
 use crate::object::InMemObjectStore;
 
-async fn prometheus_service(
-    _req: Request<Body>,
-    registry: &Registry,
-) -> Result<Response<Body>, hyper::Error> {
-    let encoder = TextEncoder::new();
-    let mut buffer = vec![];
-    let mf = registry.gather();
-    encoder.encode(&mf, &mut buffer).unwrap();
-    let response = Response::builder()
-        .header(hyper::header::CONTENT_TYPE, encoder.format_type())
-        .body(Body::from(buffer))
-        .unwrap();
-
-    Ok(response)
-}
 
 #[tokio::test]
 /// Fix this when we finished epoch management.
