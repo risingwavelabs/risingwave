@@ -102,6 +102,7 @@ impl StateStoreImpl {
                                     unimplemented!("{} is not supported for Hummock", other)
                                 }
                             },
+                            async_checkpoint_enabled: config.async_checkpoint_enabled,
                         },
                         sstable_store.clone(),
                         Arc::new(LocalVersionManager::new(sstable_store)),
