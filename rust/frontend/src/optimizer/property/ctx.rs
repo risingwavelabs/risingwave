@@ -9,7 +9,7 @@ pub trait WithContext {
     fn ctx(&self) -> QueryContextRef;
 }
 
-macro_rules! impl_with_ctx_base {
+macro_rules! impl_with_ctx {
     ([], $( { $convention:ident, $name:ident }),*) => {
         $(paste! {
             impl WithContext for [<$convention $name>] {
@@ -20,15 +20,15 @@ macro_rules! impl_with_ctx_base {
         })*
     }
 }
-for_batch_plan_nodes! {impl_with_ctx_base }
-for_logical_plan_nodes! {impl_with_ctx_base }
-for_stream_plan_nodes! {impl_with_ctx_base }
+for_batch_plan_nodes! { impl_with_ctx }
+for_logical_plan_nodes! { impl_with_ctx }
+for_stream_plan_nodes! { impl_with_ctx }
 
 pub trait WithId {
     fn id(&self) -> PlanNodeId;
 }
 
-macro_rules! impl_with_id_base {
+macro_rules! impl_with_id {
     ([], $( { $convention:ident, $name:ident }),*) => {
         $(paste! {
             impl WithId for [<$convention $name>] {
@@ -39,6 +39,6 @@ macro_rules! impl_with_id_base {
         })*
     }
 }
-for_batch_plan_nodes! {impl_with_id_base }
-for_logical_plan_nodes! {impl_with_id_base }
-for_stream_plan_nodes! {impl_with_id_base }
+for_batch_plan_nodes! { impl_with_id }
+for_logical_plan_nodes! { impl_with_id }
+for_stream_plan_nodes! { impl_with_id }

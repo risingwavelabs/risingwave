@@ -19,7 +19,6 @@ use crate::handler::handle;
 use crate::observer::observer_manager::ObserverManager;
 use crate::optimizer::plan_node::PlanNodeId;
 use crate::scheduler::schedule::WorkerNodeManager;
-use crate::test_utils::FrontendMockMetaClient;
 use crate::FrontendOpts;
 
 pub struct QueryContext {
@@ -44,6 +43,7 @@ impl QueryContext {
         ret
     }
 
+    #[cfg(test)]
     pub async fn mock() -> Self {
         Self {
             session_ctx: Arc::new(SessionContext::mock().await),
@@ -72,7 +72,9 @@ impl FrontendEnv {
         Self::with_meta_client(meta_client, opts).await
     }
 
+    #[cfg(test)]
     pub async fn mock() -> Self {
+        use crate::test_utils::FrontendMockMetaClient;
         let meta_client = MetaClient::mock(FrontendMockMetaClient::new().await);
         let (_catalog_updated_tx, catalog_updated_rx) = watch::channel(0);
         let catalog_cache = Arc::new(RwLock::new(
@@ -158,6 +160,8 @@ impl SessionContext {
     pub fn new(env: FrontendEnv, database: String) -> Self {
         Self { env, database }
     }
+
+    #[cfg(test)]
     pub async fn mock() -> Self {
         Self {
             env: FrontendEnv::mock().await,
@@ -176,7 +180,6 @@ impl SessionContext {
 
 impl SessionImpl {
     pub fn new(env: FrontendEnv, database: String) -> Self {
-        // Self { env, database }
         let context = SessionContext { env, database };
         Self {
             ctx: Arc::new(context),
@@ -192,9 +195,7 @@ pub struct SessionManagerImpl {
 impl SessionManager for SessionManagerImpl {
     fn connect(&self) -> Box<dyn Session> {
         Box::new(SessionImpl {
-            ctx: Arc::new(SessionContext::new(self.env.clone(), "dev".to_string()))
-            // env: self.env.clone(),
-            // database: "dev".to_string(),
+            ctx: Arc::new(SessionContext::new(self.env.clone(), "dev".to_string())),
         })
     }
 }

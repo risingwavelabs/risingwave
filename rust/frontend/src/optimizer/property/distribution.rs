@@ -28,9 +28,9 @@ impl Distribution {
     fn enforce(&self, plan: PlanRef, required_order: &Order) -> PlanRef {
         match plan.convention() {
             Convention::Batch => {
-                BatchExchange::new(plan.clone(), required_order.clone(), self.clone()).into()
+                BatchExchange::new(plan, required_order.clone(), self.clone()).into()
             }
-            Convention::Stream => StreamExchange::new(plan.clone(), self.clone()).into(),
+            Convention::Stream => StreamExchange::new(plan, self.clone()).into(),
             _ => unreachable!(),
         }
     }

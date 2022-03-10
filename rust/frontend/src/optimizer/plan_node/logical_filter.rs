@@ -118,6 +118,7 @@ mod tests {
     use super::*;
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
     use crate::optimizer::plan_node::LogicalScan;
+    use crate::optimizer::property::ctx::WithId;
     use crate::session::QueryContext;
 
     #[tokio::test]
@@ -185,6 +186,8 @@ mod tests {
         assert_eq!(filter.schema().fields().len(), 2);
         assert_eq!(filter.schema().fields()[0], fields[1]);
         assert_eq!(filter.schema().fields()[1], fields[2]);
+        assert_eq!(filter.id().0, 3);
+
         match filter.predicate.clone().to_expr() {
             ExprImpl::FunctionCall(call) => assert_eq_input_ref!(&call.inputs()[0], 0),
             _ => panic!("Expected function call"),
@@ -195,6 +198,7 @@ mod tests {
         assert_eq!(scan.schema().fields().len(), 2);
         assert_eq!(scan.schema().fields()[0], fields[1]);
         assert_eq!(scan.schema().fields()[1], fields[2]);
+        assert_eq!(scan.id().0, 2);
     }
 
     #[tokio::test]
