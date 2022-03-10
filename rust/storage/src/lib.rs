@@ -48,13 +48,6 @@ use risingwave_common::catalog::ColumnId;
 pub use store::{StateStore, StateStoreIter};
 pub use store_impl::StateStoreImpl;
 
-#[derive(Clone, Debug)]
-pub struct IndexDesc {
-    pub column_id: ColumnId,
-    pub data_type: DataType,
-    pub order: OrderType,
-}
-
 pub enum TableScanOptions {
     SequentialScan,
     SparseIndexScan,
