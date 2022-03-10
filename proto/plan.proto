@@ -49,7 +49,7 @@ message ColumnCatalog {
 
 message CellBasedTableDesc {
   int32 table_id = 1;
-  repeated OrderedColumn pk = 2;
+  repeated OrderedColumnDesc pk = 2;
 }
 
 message StreamSourceInfo {
