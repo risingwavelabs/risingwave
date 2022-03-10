@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use hyper::{Body, Request, Response};
-use prometheus::{Encoder, TextEncoder};
+use prometheus::{Encoder, Registry, TextEncoder};
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::ComputeNodeConfig;
@@ -136,7 +136,7 @@ pub async fn compute_node_serve(
     if opts.metrics_level > 0 {
         MetricsManager::boot_metrics_service(
             opts.prometheus_listener_addr.clone(),
-            streaming_metrics.clone(),
+            Arc::new(registry.clone()),
         );
     }
 
@@ -149,7 +149,7 @@ pub async fn compute_node_serve(
 pub struct MetricsManager {}
 
 impl MetricsManager {
-    pub fn boot_metrics_service(listen_addr: String, streaming_metrics: Arc<StreamingMetrics>) {
+    pub fn boot_metrics_service(listen_addr: String, registry: Arc<Registry>) {
         tokio::spawn(async move {
             info!(
                 "Prometheus listener for Prometheus is set up on http://{}",
@@ -157,7 +157,7 @@ impl MetricsManager {
             );
             let listen_socket_addr: SocketAddr = listen_addr.parse().unwrap();
             let service = ServiceBuilder::new()
-                .layer(AddExtensionLayer::new(streaming_metrics))
+                .layer(AddExtensionLayer::new(registry))
                 .service_fn(Self::metrics_service);
             let serve_future = hyper::Server::bind(&listen_socket_addr).serve(Shared::new(service));
             if let Err(err) = serve_future.await {
@@ -167,10 +167,10 @@ impl MetricsManager {
     }
 
     async fn metrics_service(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
-        let streaming_metrics = req.extensions().get::<Arc<StreamingMetrics>>().unwrap();
+        let registry = req.extensions().get::<Arc<Registry>>().unwrap();
         let encoder = TextEncoder::new();
         let mut buffer = vec![];
-        let mf = streaming_metrics.registry.gather();
+        let mf = registry.gather();
         encoder.encode(&mf, &mut buffer).unwrap();
         let response = Response::builder()
             .header(hyper::header::CONTENT_TYPE, encoder.format_type())
