@@ -3988,6 +3988,8 @@ name = "risingwave_rpc_client"
 version = "0.1.3"
 dependencies = [
  "async-trait",
+ "futures 0.3.21",
+ "log",
  "risingwave_common",
  "risingwave_pb",
  "tokio",

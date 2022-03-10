@@ -21,8 +21,8 @@ pub trait ColPrunable {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef;
 }
 
-/// impl ColPrunable for batch and streaming node.
-macro_rules! ban_prune_col {
+/// Implements ColPrunable for batch and streaming node.
+macro_rules! impl_prune_col {
     ([], $( { $convention:ident, $name:ident }),*) => {
         paste!{
             $(impl ColPrunable for [<$convention $name>] {
@@ -33,8 +33,8 @@ macro_rules! ban_prune_col {
         }
     }
 }
-for_batch_plan_nodes! { ban_prune_col }
-for_stream_plan_nodes! { ban_prune_col }
+for_batch_plan_nodes! { impl_prune_col }
+for_stream_plan_nodes! { impl_prune_col }
 
 /// Union all `InputRef`s' indexes in the expression with the initial `input_bits`.
 pub struct CollectInputRef {
