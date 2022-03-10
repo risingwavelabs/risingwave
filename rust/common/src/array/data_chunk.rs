@@ -92,9 +92,9 @@ impl DataChunk {
         }
     }
 
-    fn into_pg_rows(&self) -> Vec<PgRow> {
+    fn to_pg_rows(&self) -> Vec<PgRow> {
         let len = self.cardinality();
-        let rows = (0..len)
+        (0..len)
             .into_iter()
             .map(|i| {
                 PgRow::new(
@@ -104,17 +104,12 @@ impl DataChunk {
                          .0
                         .into_iter()
                         .map(|data| {
-                            if let Some(d) = data {
-                                Some(d.to_string())
-                            } else {
-                                None
-                            }
+                            data.map(|d|d.to_string())
                         })
                         .collect_vec(),
                 )
             })
-            .collect_vec();
-        rows
+            .collect_vec()
     }
 
     /// Build a `DataChunk` with rows.
@@ -547,7 +542,7 @@ mod tests {
             ],
             None,
         );
-        let rows = chunk.into_pg_rows();
+        let rows = chunk.to_pg_rows();
         let expected = vec![
             vec![
                 "1".to_string(),
