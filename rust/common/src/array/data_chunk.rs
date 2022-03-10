@@ -420,7 +420,6 @@ pub type DataChunkRef = Arc<DataChunk>;
 
 #[cfg(test)]
 mod tests {
-
     use crate::array::column::Column;
     use crate::array::*;
     use crate::{column, column_nonnull};
