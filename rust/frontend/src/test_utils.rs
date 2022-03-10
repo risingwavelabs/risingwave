@@ -76,12 +76,9 @@ impl FrontendMockMetaClient {
 
         let notification_manager = Arc::new(NotificationManager::new());
         let catalog_manager = Arc::new(
-            StoredCatalogManager::new(
-                meta_store.clone(),
-                notification_manager.clone(),
-            )
-            .await
-            .unwrap(),
+            StoredCatalogManager::new(meta_store.clone(), notification_manager.clone())
+                .await
+                .unwrap(),
         );
 
         let cluster_manager = Arc::new(
