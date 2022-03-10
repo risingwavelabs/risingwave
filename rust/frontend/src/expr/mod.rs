@@ -60,9 +60,11 @@ impl From<AggCall> for ExprImpl {
     }
 }
 
+/// A custom Debug implementation that is more concise and suitable to use with
+/// [`std::fmt::Formatter::debug_list`] in plan nodes. If the verbose output is preferred, it is
+/// still available via `{:#?}`.
 impl std::fmt::Debug for ExprImpl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Keep the default verbose fmt when `{:#?}` is used.
         if f.alternate() {
             return match self {
                 Self::InputRef(arg0) => f.debug_tuple("InputRef").field(arg0).finish(),
