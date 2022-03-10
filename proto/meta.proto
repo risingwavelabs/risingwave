@@ -75,14 +75,16 @@ message DropRequest {
 
 message DropResponse {
   common.Status status = 1;
+  uint64 version = 2;
 }
 
 message GetCatalogRequest {}
 
 message Catalog {
-  repeated Database databases = 1;
-  repeated Schema schemas = 2;
-  repeated Table tables = 3;
+  uint64 version = 1;
+  repeated Database databases = 2;
+  repeated Schema schemas = 3;
+  repeated Table tables = 4;
 }
 
 message GetCatalogResponse {

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
+use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
@@ -19,6 +20,7 @@ pub const DEFAULT_SCHEMA_NAME: &str = "dev";
 
 #[derive(Default)]
 pub struct CatalogCache {
+    catalog_version: CatalogVersion,
     database_by_name: HashMap<String, Arc<DatabaseCatalog>>,
     db_name_by_id: HashMap<DatabaseId, String>,
 }
@@ -129,6 +131,14 @@ impl CatalogCache {
         })?;
         Ok(())
     }
+
+    pub fn get_version(&self) -> CatalogVersion {
+        self.catalog_version
+    }
+
+    pub fn set_version(&mut self, version: CatalogVersion) {
+        self.catalog_version = version;
+    }
 }
 
 impl TryFrom<Catalog> for CatalogCache {
@@ -136,6 +146,7 @@ impl TryFrom<Catalog> for CatalogCache {
 
     fn try_from(catalog: Catalog) -> Result<Self> {
         let mut cache = CatalogCache {
+            catalog_version: catalog.get_version(),
             database_by_name: HashMap::new(),
             db_name_by_id: HashMap::new(),
         };
@@ -187,14 +198,14 @@ impl TryFrom<Catalog> for CatalogCache {
 pub struct CatalogConnector {
     meta_client: MetaClient,
     catalog_cache: Arc<RwLock<CatalogCache>>,
-    catalog_updated_rx: Receiver<i32>,
+    catalog_updated_rx: Receiver<CatalogVersion>,
 }
 
 impl CatalogConnector {
     pub fn new(
         meta_client: MetaClient,
         catalog_cache: Arc<RwLock<CatalogCache>>,
-        catalog_updated_rx: Receiver<i32>,
+        catalog_updated_rx: Receiver<CatalogVersion>,
     ) -> Self {
         Self {
             meta_client,
@@ -203,28 +214,26 @@ impl CatalogConnector {
         }
     }
 
+    async fn wait_version(&self, version: CatalogVersion) -> Result<()> {
+        let mut rx = self.catalog_updated_rx.clone();
+        while *rx.borrow_and_update() < version {
+            rx.changed()
+                .await
+                .map_err(|e| RwError::from(InternalError(e.to_string())))?;
+        }
+        Ok(())
+    }
+
     pub async fn create_database(&self, db_name: &str) -> Result<()> {
-        self.meta_client
+        let (_, version) = self
+            .meta_client
             .create_database(Database {
                 database_name: db_name.to_string(),
                 // Do not support MVCC DDL now.
                 ..Default::default()
             })
             .await?;
-        // TODO(zehua) Implement `catalog_version` in meta server.
-        let mut rx = self.catalog_updated_rx.clone();
-        while self
-            .catalog_cache
-            .read()
-            .unwrap()
-            .get_database(db_name)
-            .is_none()
-        {
-            rx.changed()
-                .await
-                .map_err(|e| RwError::from(InternalError(e.to_string())))?;
-        }
-        Ok(())
+        self.wait_version(version).await
     }
 
     pub async fn create_schema(&self, db_name: &str, schema_name: &str) -> Result<()> {
@@ -235,7 +244,8 @@ impl CatalogConnector {
             .get_database(db_name)
             .ok_or_else(|| RwError::from(CatalogError::NotFound("database", db_name.to_string())))?
             .id();
-        self.meta_client
+        let (_, version) = self
+            .meta_client
             .create_schema(Schema {
                 schema_name: schema_name.to_string(),
                 version: 0,
@@ -247,20 +257,7 @@ impl CatalogConnector {
                 }),
             })
             .await?;
-        // TODO(zehua) Implement `catalog_version` in meta server.
-        let mut rx = self.catalog_updated_rx.clone();
-        while self
-            .catalog_cache
-            .read()
-            .unwrap()
-            .get_schema(db_name, schema_name)
-            .is_none()
-        {
-            rx.changed()
-                .await
-                .map_err(|e| RwError::from(InternalError(e.to_string())))?;
-        }
-        Ok(())
+        self.wait_version(version).await
     }
 
     pub async fn create_table(
@@ -302,21 +299,8 @@ impl CatalogConnector {
                 ..Default::default()
             },
         );
-        self.meta_client.create_table(table.clone()).await?;
-        // TODO(zehua) Implement `catalog_version` in meta server.
-        let mut rx = self.catalog_updated_rx.clone();
-        while self
-            .catalog_cache
-            .read()
-            .unwrap()
-            .get_table(db_name, schema_name, &table.table_name)
-            .is_none()
-        {
-            rx.changed()
-                .await
-                .map_err(|e| RwError::from(InternalError(e.to_string())))?;
-        }
-        Ok(())
+        let (_, version) = self.meta_client.create_table(table.clone()).await?;
+        self.wait_version(version).await
     }
 
     pub async fn drop_table(
@@ -334,21 +318,8 @@ impl CatalogConnector {
             .id();
 
         let table_ref_id = TableRefId::from(&table_id);
-        self.meta_client.drop_table(table_ref_id).await?;
-        // TODO(zehua) Implement `catalog_version` in meta server.
-        let mut rx = self.catalog_updated_rx.clone();
-        while self
-            .catalog_cache
-            .read()
-            .unwrap()
-            .get_table(db_name, schema_name, table_name)
-            .is_some()
-        {
-            rx.changed()
-                .await
-                .map_err(|e| RwError::from(InternalError(e.to_string())))?;
-        }
-        Ok(())
+        let version = self.meta_client.drop_table(table_ref_id).await?;
+        self.wait_version(version).await
     }
 
     pub async fn drop_schema(&self, db_name: &str, schema_name: &str) -> Result<()> {
@@ -373,21 +344,8 @@ impl CatalogConnector {
             database_ref_id: Some(DatabaseRefId { database_id }),
             schema_id,
         };
-        self.meta_client.drop_schema(schema_ref_id).await?;
-        // TODO(zehua) Implement `catalog_version` in meta server.
-        let mut rx = self.catalog_updated_rx.clone();
-        while self
-            .catalog_cache
-            .read()
-            .unwrap()
-            .get_schema(db_name, schema_name)
-            .is_some()
-        {
-            rx.changed()
-                .await
-                .map_err(|e| RwError::from(InternalError(e.to_string())))?;
-        }
-        Ok(())
+        let version = self.meta_client.drop_schema(schema_ref_id).await?;
+        self.wait_version(version).await
     }
 
     pub async fn drop_database(&self, db_name: &str) -> Result<()> {
@@ -399,21 +357,8 @@ impl CatalogConnector {
             .ok_or_else(|| RwError::from(CatalogError::NotFound("database", db_name.to_string())))?
             .id() as i32;
         let database_ref_id = DatabaseRefId { database_id };
-        self.meta_client.drop_database(database_ref_id).await?;
-        // TODO(zehua) Implement `catalog_version` in meta server.
-        let mut rx = self.catalog_updated_rx.clone();
-        while self
-            .catalog_cache
-            .read()
-            .unwrap()
-            .get_database(db_name)
-            .is_some()
-        {
-            rx.changed()
-                .await
-                .map_err(|e| RwError::from(InternalError(e.to_string())))?;
-        }
-        Ok(())
+        let version = self.meta_client.drop_database(database_ref_id).await?;
+        self.wait_version(version).await
     }
 
     pub fn get_database_snapshot(&self, db_name: &str) -> Option<Arc<DatabaseCatalog>> {
@@ -470,7 +415,7 @@ mod tests {
     use crate::catalog::catalog_service::{
         CatalogCache, CatalogConnector, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
     };
-    use crate::observer::observer_manager::{ObserverManager, UPDATE_FINISH_NOTIFICATION};
+    use crate::observer::observer_manager::ObserverManager;
     use crate::scheduler::schedule::WorkerNodeManager;
     use crate::test_utils::FrontendMockMetaClient;
 
@@ -500,7 +445,7 @@ mod tests {
         // Init meta and catalog.
         let meta_client = MetaClient::mock(FrontendMockMetaClient::new().await);
 
-        let (catalog_updated_tx, catalog_updated_rx) = watch::channel(UPDATE_FINISH_NOTIFICATION);
+        let (catalog_updated_tx, catalog_updated_rx) = watch::channel(0);
         let catalog_cache = Arc::new(RwLock::new(
             CatalogCache::new(meta_client.clone()).await.unwrap(),
         ));
