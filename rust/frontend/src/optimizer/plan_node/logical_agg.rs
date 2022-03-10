@@ -250,8 +250,11 @@ impl PlanTreeNodeUnary for LogicalAgg {
 }
 impl_plan_tree_node_for_unary! {LogicalAgg}
 impl fmt::Display for LogicalAgg {
-    fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
-        todo!()
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("LogicalAgg")
+            .field("agg_calls", &self.agg_calls)
+            .field("agg_call_alias", &self.agg_call_alias)
+            .finish()
     }
 }
 
