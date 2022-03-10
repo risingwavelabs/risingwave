@@ -37,7 +37,7 @@ message ColumnDesc {
   string name = 3;
 }
 
-message OrderedColumn {
+message OrderedColumnDesc {
   ColumnDesc column_desc = 1;
   OrderType order = 2;
 }
