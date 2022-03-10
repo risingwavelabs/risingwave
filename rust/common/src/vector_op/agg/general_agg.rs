@@ -35,18 +35,20 @@ where
         }
     }
     pub(super) fn update_with_scalar_concrete(&mut self, input: &T, row_id: usize) -> Result<()> {
-        self.result = (self.f)(
+        let datum = (self.f)(
             self.result.as_ref().map(|x| x.as_scalar_ref()),
             input.value_at(row_id),
-        )
+        )?
         .map(|x| x.to_owned_scalar());
+        self.result = datum;
         Ok(())
     }
     pub(super) fn update_concrete(&mut self, input: &T) -> Result<()> {
-        let r = input
-            .iter()
-            .fold(self.result.as_ref().map(|x| x.as_scalar_ref()), &mut self.f)
-            .map(|x| x.to_owned_scalar());
+        let mut cur = self.result.as_ref().map(|x| x.as_scalar_ref());
+        for datum in input.iter() {
+            cur = (self.f)(cur, datum)?;
+        }
+        let r = cur.map(|x| x.to_owned_scalar());
         self.result = r;
         Ok(())
     }
@@ -67,7 +69,7 @@ where
                 builder.append(cur)?;
                 cur = None;
             }
-            cur = (self.f)(cur, v);
+            cur = (self.f)(cur, v)?;
         }
         self.result = cur.map(|x| x.to_owned_scalar());
         Ok(())
@@ -184,6 +186,50 @@ mod tests {
         agg_state.update(&input_chunk)?;
         agg_state.output(&mut builder)?;
         builder.finish()
+    }
+
+    #[test]
+    fn single_value_int32() -> Result<()> {
+        // zero row
+        let input = I32Array::from_slice(&[None]).unwrap();
+        let agg_type = AggKind::SingleValue;
+        let input_type = DataType::Int32;
+        let return_type = DataType::Int32;
+        let actual = eval_agg(
+            input_type.clone(),
+            Arc::new(input.into()),
+            &agg_type,
+            return_type.clone(),
+            ArrayBuilderImpl::Int32(I32ArrayBuilder::new(0)?),
+        )?;
+        let actual = actual.as_int32();
+        let actual = actual.iter().collect::<Vec<_>>();
+        assert_eq!(actual, &[None]);
+
+        // one row
+        let input = I32Array::from_slice(&[Some(1)]).unwrap();
+        let actual = eval_agg(
+            input_type.clone(),
+            Arc::new(input.into()),
+            &agg_type,
+            return_type.clone(),
+            ArrayBuilderImpl::Int32(I32ArrayBuilder::new(0)?),
+        )?;
+        let actual = actual.as_int32();
+        let actual = actual.iter().collect::<Vec<_>>();
+        assert_eq!(actual, &[Some(1)]);
+
+        // more than one row
+        let input = I32Array::from_slice(&[Some(1), Some(2)]).unwrap();
+        let actual = eval_agg(
+            input_type,
+            Arc::new(input.into()),
+            &agg_type,
+            return_type,
+            ArrayBuilderImpl::Int32(I32ArrayBuilder::new(0)?),
+        );
+        assert!(actual.is_err());
+        Ok(())
     }
 
     #[test]

@@ -49,25 +49,26 @@ where
             .value_at(row_id)
             .map(|scalar_ref| scalar_ref.to_owned_scalar().to_scalar_value());
         if self.exists.insert(value) {
-            self.result = (self.f)(
+            let datum = (self.f)(
                 self.result.as_ref().map(|x| x.as_scalar_ref()),
                 input.value_at(row_id),
-            )
+            )?
             .map(|x| x.to_owned_scalar());
+            self.result = datum;
         }
         Ok(())
     }
 
     fn update_concrete(&mut self, input: &T) -> Result<()> {
-        let r = input
-            .iter()
-            .filter(|scalar_ref| {
-                self.exists.insert(
-                    scalar_ref.map(|scalar_ref| scalar_ref.to_owned_scalar().to_scalar_value()),
-                )
-            })
-            .fold(self.result.as_ref().map(|x| x.as_scalar_ref()), &mut self.f)
-            .map(|x| x.to_owned_scalar());
+        let input = input.iter().filter(|scalar_ref| {
+            self.exists
+                .insert(scalar_ref.map(|scalar_ref| scalar_ref.to_owned_scalar().to_scalar_value()))
+        });
+        let mut cur = self.result.as_ref().map(|x| x.as_scalar_ref());
+        for datum in input {
+            cur = (self.f)(cur, datum)?;
+        }
+        let r = cur.map(|x| x.to_owned_scalar());
         self.result = r;
         Ok(())
     }
@@ -90,7 +91,7 @@ where
             }
             let scalar_impl = v.map(|scalar_ref| scalar_ref.to_owned_scalar().to_scalar_value());
             if self.exists.insert(scalar_impl) {
-                cur = (self.f)(cur, v);
+                cur = (self.f)(cur, v)?;
             }
         }
         self.result = cur.map(|x| x.to_owned_scalar());
