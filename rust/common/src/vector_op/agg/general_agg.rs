@@ -35,18 +35,20 @@ where
         }
     }
     pub(super) fn update_with_scalar_concrete(&mut self, input: &T, row_id: usize) -> Result<()> {
-        self.result = (self.f)(
+        let datum = (self.f)(
             self.result.as_ref().map(|x| x.as_scalar_ref()),
             input.value_at(row_id),
-        )
+        )?
         .map(|x| x.to_owned_scalar());
+        self.result = datum;
         Ok(())
     }
     pub(super) fn update_concrete(&mut self, input: &T) -> Result<()> {
-        let r = input
-            .iter()
-            .fold(self.result.as_ref().map(|x| x.as_scalar_ref()), &mut self.f)
-            .map(|x| x.to_owned_scalar());
+        let mut cur = self.result.as_ref().map(|x| x.as_scalar_ref());
+        for datum in input.iter() {
+            cur = (self.f)(cur, datum)?;
+        }
+        let r = cur.map(|x| x.to_owned_scalar());
         self.result = r;
         Ok(())
     }
@@ -67,7 +69,7 @@ where
                 builder.append(cur)?;
                 cur = None;
             }
-            cur = (self.f)(cur, v);
+            cur = (self.f)(cur, v)?;
         }
         self.result = cur.map(|x| x.to_owned_scalar());
         Ok(())

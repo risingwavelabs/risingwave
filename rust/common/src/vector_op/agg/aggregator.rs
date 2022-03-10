@@ -189,6 +189,15 @@ pub fn create_agg_state_unary(
         (Max, max_str, varchar, varchar),
         // Global Agg
         (Sum, sum, int64, int64),
+        (SingleValue, single_value, int16, int16),
+        (SingleValue, single_value, int32, int32),
+        (SingleValue, single_value, int64, int64),
+        (SingleValue, single_value, float32, float32),
+        (SingleValue, single_value, float64, float64),
+        (SingleValue, single_value, decimal, decimal),
+        (SingleValue, single_value, boolean, boolean),
+        (SingleValue, single_value_str, char, char),
+        (SingleValue, single_value_str, varchar, varchar),
     ];
     Ok(state)
 }
