@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use itertools::{enumerate, Itertools};
-use prometheus::core::{AtomicF64, GenericGauge};
+use prometheus::core::{AtomicF64, AtomicI64, GenericGauge};
 use prost::Message;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::hummock::hummock_version::HummockVersionRefId;
@@ -239,7 +239,7 @@ where
         }
     }
 
-    fn single_level_stat<T: FnMut(String) -> prometheus::Result<GenericGauge<AtomicF64>>>(
+    fn single_level_stat_bytes<T: FnMut(String) -> prometheus::Result<GenericGauge<AtomicF64>>>(
         mut metric_vec: T,
         level_stat: &TableSetStatistics,
     ) {
@@ -247,8 +247,16 @@ where
         metric_vec(level_label).unwrap().add(level_stat.size_gb);
     }
 
+    fn single_level_stat_sstn<T: FnMut(String) -> prometheus::Result<GenericGauge<AtomicI64>>>(
+        mut metric_vec: T,
+        level_stat: &TableSetStatistics,
+    ) {
+        let level_label = String::from("L") + &level_stat.level_idx.to_string();
+        metric_vec(level_label).unwrap().add(level_stat.cnt as i64);
+    }
+
     fn trigger_rw_stat(&self, compact_metrics: &CompactMetrics) {
-        Self::single_level_stat(
+        Self::single_level_stat_bytes(
             |label| {
                 self.metrics
                     .level_compact_read_curr
@@ -256,7 +264,7 @@ where
             },
             compact_metrics.read_level_n.as_ref().unwrap(),
         );
-        Self::single_level_stat(
+        Self::single_level_stat_bytes(
             |label| {
                 self.metrics
                     .level_compact_read_next
@@ -264,10 +272,35 @@ where
             },
             compact_metrics.read_level_nplus1.as_ref().unwrap(),
         );
-        Self::single_level_stat(
+        Self::single_level_stat_bytes(
             |label| {
                 self.metrics
                     .level_compact_write
+                    .get_metric_with_label_values(&[&label])
+            },
+            compact_metrics.write.as_ref().unwrap(),
+        );
+
+        Self::single_level_stat_sstn(
+            |label| {
+                self.metrics
+                    .level_compact_read_sstn_curr
+                    .get_metric_with_label_values(&[&label])
+            },
+            compact_metrics.read_level_n.as_ref().unwrap(),
+        );
+        Self::single_level_stat_sstn(
+            |label| {
+                self.metrics
+                    .level_compact_read_sstn_next
+                    .get_metric_with_label_values(&[&label])
+            },
+            compact_metrics.read_level_nplus1.as_ref().unwrap(),
+        );
+        Self::single_level_stat_sstn(
+            |label| {
+                self.metrics
+                    .level_compact_write_sstn
                     .get_metric_with_label_values(&[&label])
             },
             compact_metrics.write.as_ref().unwrap(),

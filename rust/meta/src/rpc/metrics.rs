@@ -34,6 +34,12 @@ pub struct MetaMetrics {
     pub level_compact_read_next: GaugeVec,
     /// GBs written into next level during history compactions to next level
     pub level_compact_write: GaugeVec,
+    /// num of SSTs read from current level during history compactions to next level
+    pub level_compact_read_sstn_curr: IntGaugeVec,
+    /// num of SSTs read from next level during history compactions to next level
+    pub level_compact_read_sstn_next: IntGaugeVec,
+    /// num of SSTs written into next level during history compactions to next level
+    pub level_compact_write_sstn: IntGaugeVec,
 }
 
 impl MetaMetrics {
@@ -96,6 +102,30 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let level_compact_read_sstn_curr = register_int_gauge_vec_with_registry!(
+            "storage_level_compact_read_sstn_curr",
+            "num of SSTs read from current level during history compactions to next level",
+            &["level_index"],
+            registry
+        )
+        .unwrap();
+
+        let level_compact_read_sstn_next = register_int_gauge_vec_with_registry!(
+            "storage_level_compact_read_sstn_next",
+            "num of SSTs read from next level during history compactions to next level",
+            &["level_index"],
+            registry
+        )
+        .unwrap();
+
+        let level_compact_write_sstn = register_int_gauge_vec_with_registry!(
+            "storage_level_compact_write_sstn",
+            "num of SSTs written into next level during history compactions to next level",
+            &["level_index"],
+            registry
+        )
+        .unwrap();
+
         Self {
             registry,
             grpc_latency,
@@ -105,6 +135,9 @@ impl MetaMetrics {
             level_compact_read_curr,
             level_compact_read_next,
             level_compact_write,
+            level_compact_read_sstn_curr,
+            level_compact_read_sstn_next,
+            level_compact_write_sstn,
         }
     }
 
