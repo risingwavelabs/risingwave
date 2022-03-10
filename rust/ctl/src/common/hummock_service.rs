@@ -4,7 +4,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use risingwave_common::config::StorageConfig;
 use risingwave_storage::hummock::HummockStateStore;
-use risingwave_storage::monitor::{MonitoredStateStore, StateStoreStats};
+use risingwave_storage::monitor::{MonitoredStateStore, StateStoreMetrics};
 use risingwave_storage::StateStoreImpl;
 
 use super::MetaServiceOpts;
@@ -48,7 +48,7 @@ impl HummockServiceOpts {
             &self.hummock_url,
             Arc::new(config),
             meta_client,
-            Arc::new(StateStoreStats::unused()),
+            Arc::new(StateStoreMetrics::unused()),
         )
         .await?;
 

@@ -14,7 +14,7 @@ use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::MetaClient;
 use risingwave_source::MemSourceManager;
 use risingwave_storage::hummock::compactor::Compactor;
-use risingwave_storage::monitor::DEFAULT_STATE_STORE_STATS;
+use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::StateStoreImpl;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::task::{StreamEnvironment, StreamManager};
@@ -52,14 +52,15 @@ pub async fn compute_node_serve(
         .await
         .unwrap();
 
+    let registry = prometheus::Registry::new();
     // Initialize state store.
-    let stats = DEFAULT_STATE_STORE_STATS.clone();
+    let state_store_metrics = Arc::new(StateStoreMetrics::new(registry.clone()));
     let storage_config = Arc::new(config.storage.clone());
     let state_store = StateStoreImpl::new(
         &opts.state_store,
         storage_config,
         meta_client.clone(),
-        stats.clone(),
+        state_store_metrics.clone(),
     )
     .await
     .unwrap();
@@ -72,12 +73,11 @@ pub async fn compute_node_serve(
             hummock.inner().storage.local_version_manager().clone(),
             hummock.inner().storage.hummock_meta_client().clone(),
             hummock.inner().storage.sstable_store(),
-            stats,
+            state_store_metrics,
         );
         compactor_handle = Some((compactor_join_handle, compactor_shutdown_sender));
     }
 
-    let registry = prometheus::default_registry().clone();
     let streaming_metrics = Arc::new(StreamingMetrics::new(registry.clone()));
     // Initialize the managers.
     let batch_mgr = Arc::new(BatchManager::new());
