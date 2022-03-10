@@ -31,7 +31,6 @@ message Source {
   int32 schema_id = 2;
   int32 database_id = 3;
   string name = 4;
-
   oneof info {
     StreamSourceInfo stream_source = 5;
     TableSourceInfo table_source = 6;
