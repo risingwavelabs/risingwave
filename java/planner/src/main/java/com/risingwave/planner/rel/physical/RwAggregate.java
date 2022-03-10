@@ -33,6 +33,7 @@ public abstract class RwAggregate extends Aggregate {
           .put(SqlKind.COUNT, AggCall.Type.COUNT)
           .put(SqlKind.MIN, AggCall.Type.MIN)
           .put(SqlKind.MAX, AggCall.Type.MAX)
+          .put(SqlKind.SINGLE_VALUE, AggCall.Type.SINGLE_VALUE)
           .build();
 
   /** derive Distribution trait for agg from input side. */
