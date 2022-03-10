@@ -10,7 +10,7 @@ pub trait RTFn<'a, T, R> = Send
     + Fn(
         Option<<R as Array>::RefItem<'a>>,
         Option<<T as Array>::RefItem<'a>>,
-    ) -> Option<<R as Array>::RefItem<'a>>
+    ) -> Result<Option<<R as Array>::RefItem<'a>>>
 where
     T: Array,
     R: Array;

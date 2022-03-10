@@ -189,6 +189,50 @@ mod tests {
     }
 
     #[test]
+    fn single_value_int32() -> Result<()> {
+        // zero row
+        let input = I32Array::from_slice(&[None]).unwrap();
+        let agg_type = AggKind::SingleValue;
+        let input_type = DataType::Int32;
+        let return_type = DataType::Int32;
+        let actual = eval_agg(
+            input_type.clone(),
+            Arc::new(input.into()),
+            &agg_type,
+            return_type.clone(),
+            ArrayBuilderImpl::Int32(I32ArrayBuilder::new(0)?),
+        )?;
+        let actual = actual.as_int32();
+        let actual = actual.iter().collect::<Vec<_>>();
+        assert_eq!(actual, &[None]);
+
+        // one row
+        let input = I32Array::from_slice(&[Some(1)]).unwrap();
+        let actual = eval_agg(
+            input_type.clone(),
+            Arc::new(input.into()),
+            &agg_type,
+            return_type.clone(),
+            ArrayBuilderImpl::Int32(I32ArrayBuilder::new(0)?),
+        )?;
+        let actual = actual.as_int32();
+        let actual = actual.iter().collect::<Vec<_>>();
+        assert_eq!(actual, &[Some(1)]);
+
+        // more than one row
+        let input = I32Array::from_slice(&[Some(1), Some(2)]).unwrap();
+        let actual = eval_agg(
+            input_type,
+            Arc::new(input.into()),
+            &agg_type,
+            return_type,
+            ArrayBuilderImpl::Int32(I32ArrayBuilder::new(0)?),
+        );
+        assert!(actual.is_err());
+        Ok(())
+    }
+
+    #[test]
     fn vec_sum_int32() -> Result<()> {
         let input = I32Array::from_slice(&[Some(1), Some(2), Some(3)]).unwrap();
         let agg_type = AggKind::Sum;
