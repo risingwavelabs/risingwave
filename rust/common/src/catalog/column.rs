@@ -1,4 +1,7 @@
-use risingwave_pb::plan::ColumnDesc as ProstColumnDesc;
+use risingwave_pb::plan::{
+    ColumnDesc as ProstColumnDesc, OrderType as OrderTypeProst,
+    OrderedColumnDesc as ProstOrderedColumnDesc,
+};
 
 use crate::types::DataType;
 use crate::util::sort_util::OrderType;
@@ -65,6 +68,15 @@ impl From<ProstColumnDesc> for ColumnDesc {
             data_type: DataType::from(&column_type.unwrap()),
             column_id: ColumnId::new(column_id),
             name,
+        }
+    }
+}
+
+impl From<ProstOrderedColumnDesc> for OrderedColumnDesc {
+    fn from(prost: ProstOrderedColumnDesc) -> Self {
+        Self {
+            column_desc: prost.column_desc.unwrap().into(),
+            order: OrderType::from_prost(&OrderTypeProst::from_i32(prost.order).unwrap()),
         }
     }
 }
