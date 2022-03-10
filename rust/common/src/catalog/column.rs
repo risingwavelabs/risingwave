@@ -1,5 +1,5 @@
 use risingwave_pb::plan::{
-    ColumnDesc as ProstColumnDesc, OrderType as OrderTypeProst,
+    ColumnDesc as ProstColumnDesc, OrderType as ProstOrderType,
     OrderedColumnDesc as ProstOrderedColumnDesc,
 };
 
@@ -76,7 +76,7 @@ impl From<ProstOrderedColumnDesc> for OrderedColumnDesc {
     fn from(prost: ProstOrderedColumnDesc) -> Self {
         Self {
             column_desc: prost.column_desc.unwrap().into(),
-            order: OrderType::from_prost(&OrderTypeProst::from_i32(prost.order).unwrap()),
+            order: OrderType::from_prost(&ProstOrderType::from_i32(prost.order).unwrap()),
         }
     }
 }
