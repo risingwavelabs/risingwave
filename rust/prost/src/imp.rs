@@ -31,3 +31,19 @@ impl crate::meta::Table {
         )
     }
 }
+
+impl crate::catalog::Source {
+    pub fn is_stream_source(&self) -> bool {
+        matches!(
+            self.get_info().unwrap(),
+            crate::catalog::source::Info::StreamSource(_)
+        )
+    }
+
+    pub fn is_table_source(&self) -> bool {
+        matches!(
+            self.get_info().unwrap(),
+            crate::catalog::source::Info::TableSource(_)
+        )
+    }
+}

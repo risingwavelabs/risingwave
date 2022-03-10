@@ -1,6 +1,8 @@
 #![allow(clippy::all)]
 
 #[rustfmt::skip]
+pub mod catalog;
+#[rustfmt::skip]
 pub mod common;
 #[rustfmt::skip]
 pub mod data;
