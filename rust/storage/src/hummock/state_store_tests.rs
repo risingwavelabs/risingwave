@@ -28,7 +28,6 @@ async fn prometheus_service(
     Ok(response)
 }
 
-
 #[tokio::test]
 /// Fix this when we finished epoch management.
 #[ignore]
