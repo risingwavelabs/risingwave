@@ -251,6 +251,8 @@ fn preflight_check() {
         || env::var("https_proxy").is_ok()
         || env::var("HTTP_PROXY").is_ok()
         || env::var("HTTPS_PROXY").is_ok()
+        || env::var("all_proxy").is_ok()
+        || env::var("ALL_PROXY").is_ok()
     {
         if let Ok(x) = env::var("no_proxy") && x.contains("127.0.0.1") && x.contains("::1") {
             println!(
