@@ -46,7 +46,7 @@ mod tests {
     use std::time::Duration;
 
     use risingwave_pb::data::DataChunk;
-    use risingwave_pb::plan::TaskSinkId;
+    use risingwave_pb::plan::{TaskId, TaskSinkId};
     use risingwave_pb::task_service::exchange_service_server::{
         ExchangeService, ExchangeServiceServer,
     };
@@ -117,9 +117,15 @@ mod tests {
         sleep(Duration::from_secs(1));
         assert!(server_run.load(Ordering::SeqCst));
 
-        let mut src = GrpcExchangeSource::create(addr, TaskSinkId::default())
-            .await
-            .unwrap();
+        let mut src = GrpcExchangeSource::create(
+            addr,
+            TaskSinkId {
+                task_id: Some(TaskId::default()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
         for _ in [0..3] {
             assert!(src.take_data().await.unwrap().is_some());
         }

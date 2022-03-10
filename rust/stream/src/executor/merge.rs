@@ -322,7 +322,7 @@ mod tests {
     };
     use risingwave_pb::task_service::{GetDataRequest, GetDataResponse, GetStreamRequest};
     use tokio_stream::wrappers::ReceiverStream;
-    use tonic::{Response, Status, Request};
+    use tonic::{Request, Response, Status};
 
     use super::*;
 
