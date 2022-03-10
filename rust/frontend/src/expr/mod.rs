@@ -21,7 +21,7 @@ pub type ExprType = risingwave_pb::expr::expr_node::Type;
 pub trait Expr: Into<ExprImpl> {
     fn return_type(&self) -> DataType;
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ExprImpl {
     // ColumnRef(Box<BoundColumnRef>), might be used in binder.
     InputRef(Box<InputRef>),
