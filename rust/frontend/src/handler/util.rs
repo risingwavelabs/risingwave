@@ -52,12 +52,7 @@ mod tests {
         ];
         let vec = rows
             .into_iter()
-            .map(|r| {
-                r.values()
-                    .iter()
-                    .map(|s| s.clone().map(|t| t.to_string()))
-                    .collect_vec()
-            })
+            .map(|r| r.values().iter().cloned().collect_vec())
             .collect_vec();
 
         assert_eq!(vec, expected);

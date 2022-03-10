@@ -420,7 +420,6 @@ pub type DataChunkRef = Arc<DataChunk>;
 
 #[cfg(test)]
 mod tests {
-    use itertools::Itertools;
 
     use crate::array::column::Column;
     use crate::array::*;
