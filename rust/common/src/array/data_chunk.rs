@@ -93,16 +93,10 @@ impl DataChunk {
     }
 
     fn to_pg_rows(&self) -> Vec<PgRow> {
-        let len = self.cardinality();
-        (0..len)
-            .into_iter()
-            .map(|i| {
+        self.rows()
+            .map(|r| {
                 PgRow::new(
-                    self.row_at(i)
-                        .unwrap()
-                        .0
-                         .0
-                        .into_iter()
+                    r.0.into_iter()
                         .map(|data| data.map(|d| d.to_string()))
                         .collect_vec(),
                 )
@@ -543,40 +537,30 @@ mod tests {
         let rows = chunk.to_pg_rows();
         let expected = vec![
             vec![
-                "1".to_string(),
-                "6".to_string(),
-                "6.01".to_string(),
-                "aaa".to_string(),
+                Some("1".to_string()),
+                Some("6".to_string()),
+                Some("6.01".to_string()),
+                Some("aaa".to_string()),
             ],
+            vec![Some("2".to_string()), None, None, None],
             vec![
-                "2".to_string(),
-                "".to_string(),
-                "".to_string(),
-                "".to_string(),
+                Some("3".to_string()),
+                Some("7".to_string()),
+                Some("7.01".to_string()),
+                Some("vvv".to_string()),
             ],
-            vec![
-                "3".to_string(),
-                "7".to_string(),
-                "7.01".to_string(),
-                "vvv".to_string(),
-            ],
-            vec![
-                "4".to_string(),
-                "".to_string(),
-                "".to_string(),
-                "".to_string(),
-            ],
+            vec![Some("4".to_string()), None, None, None],
         ];
         let vec = rows
             .into_iter()
             .map(|r| {
                 r.values()
-                    .into_iter()
+                    .iter()
                     .map(|s| {
                         if let Some(t) = s {
-                            t.to_string()
+                            Some(t.to_string())
                         } else {
-                            "".to_string()
+                            None
                         }
                     })
                     .collect_vec()
