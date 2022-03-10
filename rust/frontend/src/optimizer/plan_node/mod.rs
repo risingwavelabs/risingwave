@@ -43,6 +43,7 @@ pub trait PlanNode:
     + WithDistribution
     + WithSchema
     + WithContext
+    + WithId
     + ColPrunable
     + ToBatch
     + ToStream
@@ -55,7 +56,7 @@ pub trait PlanNode:
 impl_downcast!(PlanNode);
 pub type PlanRef = Rc<dyn PlanNode>;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Copy)]
 pub struct PlanNodeId(pub i32);
 
 /// the common fields of logical nodes, please make a field named `base` in
@@ -193,7 +194,7 @@ pub use stream_hash_join::StreamHashJoin;
 pub use stream_project::StreamProject;
 pub use stream_table_source::StreamTableSource;
 
-use crate::optimizer::property::WithContext;
+use crate::optimizer::property::{WithContext, WithId};
 use crate::session::QueryContextRef;
 
 /// [`for_all_plan_nodes`] includes all plan nodes. If you added a new plan node

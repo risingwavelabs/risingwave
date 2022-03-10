@@ -26,7 +26,8 @@ pub struct QueryContext {
     pub session_ctx: Arc<SessionContext>,
     pub next_id: i32,
 }
-
+/// The reference of `QueryContext`, our system assumes that frontend will not parallel for a query,
+/// so we use `RefCell` here.
 pub type QueryContextRef = Rc<RefCell<QueryContext>>;
 
 impl QueryContext {

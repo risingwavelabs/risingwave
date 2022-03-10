@@ -223,6 +223,7 @@ mod tests {
     use super::*;
     use crate::expr::assert_eq_input_ref;
     use crate::optimizer::plan_node::LogicalScan;
+    use crate::optimizer::property::ctx::WithId;
     use crate::session::QueryContext;
 
     #[tokio::test]
@@ -352,11 +353,13 @@ mod tests {
         let project = plan.as_logical_project().unwrap();
         assert_eq!(project.exprs().len(), 1);
         assert_eq_input_ref!(&project.exprs()[0], 1);
+        assert_eq!(project.id().0, 4);
 
         let agg_new = project.input();
         let agg_new = agg_new.as_logical_agg().unwrap();
         assert_eq!(agg_new.agg_call_alias(), vec![Some("min".to_string())]);
         assert_eq!(agg_new.group_keys(), vec![0]);
+        assert_eq!(agg_new.id().0, 3);
 
         assert_eq!(agg_new.agg_calls.len(), 1);
         let agg_call_new = agg_new.agg_calls[0].clone();
@@ -367,6 +370,7 @@ mod tests {
         let scan = agg_new.input();
         let scan = scan.as_logical_scan().unwrap();
         assert_eq!(scan.schema().fields(), &fields[1..]);
+        assert_eq!(scan.id().0, 2);
     }
 
     #[tokio::test]
