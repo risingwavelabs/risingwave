@@ -1,7 +1,11 @@
 use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
+use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::RwError;
 use risingwave_common::types::DataType;
+use risingwave_common::util::ordered::OrderedRowSerializer;
+use risingwave_common::util::sort_util::OrderType;
+use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::barrier_align::{AlignedMessage, BarrierAligner};
@@ -31,20 +35,32 @@ impl std::fmt::Debug for StreamJoinSide {
 
 /// Join side of Arrange Executor's stream
 pub struct ArrangeJoinSide<S: StateStore> {
-    /// Indices of the join key columns
-    pub key_indices: Vec<usize>,
+    /// Join key data types
+    pub arrange_key_types: Vec<DataType>,
 
     /// The primary key indices of this side, used for state store
     pub pk_indices: Vec<usize>,
 
-    /// The date type of each columns to join on
+    /// The datatype of columns in arrangement
     pub col_types: Vec<DataType>,
 
+    /// The column descriptors of columns in arrangement
+    pub col_descs: Vec<ColumnDesc>,
+
+    /// Order types of the arrangement (used for lookup)
+    pub order_types: Vec<OrderType>,
+
     /// Keyspace for the arrangement
-    pub arrangement: Keyspace<S>,
+    pub keyspace: Keyspace<S>,
 
     /// Whether to join with the arrangement of the current epoch
     pub use_current_epoch: bool,
+
+    /// Serializer for the arrangement
+    pub serializer: OrderedRowSerializer,
+
+    /// Deserializer for the arrangement
+    pub deserializer: CellBasedRowDeserializer,
 }
 
 /// Message from the [`arrange_join_stream`].
@@ -72,9 +88,8 @@ pub enum ArrangeMessage {
 /// * [Msg] Arrangement (batch)
 /// * [Do] replicate batch with epoch [2]
 /// * Barrier (prev = [2], current = [3])
-#[allow(dead_code)]
 #[try_stream(ok = ArrangeMessage, error = RwError)]
-async fn stream_lookup_arrange_prev_epoch(
+pub async fn stream_lookup_arrange_prev_epoch(
     stream: Box<dyn Executor>,
     arrangement: Box<dyn Executor>,
 ) {
@@ -111,9 +126,8 @@ async fn stream_lookup_arrange_prev_epoch(
 /// * [Msg] Stream (key = a)
 /// * [Do] lookup `a` in arrangement of epoch [2] (current epoch)
 /// * Barrier (prev = [2], current = [3])
-#[allow(dead_code)]
 #[try_stream(ok = ArrangeMessage, error = RwError)]
-async fn stream_lookup_arrange_this_epoch(
+pub async fn stream_lookup_arrange_this_epoch(
     stream: Box<dyn Executor>,
     arrangement: Box<dyn Executor>,
 ) {
@@ -145,9 +159,11 @@ async fn stream_lookup_arrange_this_epoch(
 impl<S: StateStore> std::fmt::Debug for ArrangeJoinSide<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ArrangeJoinSide")
-            .field("key_indices", &self.key_indices)
+            .field("arrange_key_types", &self.arrange_key_types)
             .field("pk_indices", &self.pk_indices)
             .field("col_types", &self.col_types)
+            .field("col_descs", &self.col_descs)
+            .field("order_types", &self.order_types)
             .field("use_current_epoch", &self.use_current_epoch)
             .finish()
     }
