@@ -6,10 +6,10 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::expr::AggKind;
 use risingwave_common::types::DataType;
 
-use super::{ColPrunable, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use super::{ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
 use crate::expr::ExprImpl;
 use crate::optimizer::plan_node::LogicalProject;
-use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
+use crate::optimizer::property::WithSchema;
 use crate::utils::ColIndexMapping;
 
 /// Aggregation Call
@@ -31,10 +31,10 @@ pub struct PlanAggCall {
 /// functions in the `SELECT` clause.
 #[derive(Clone, Debug)]
 pub struct LogicalAgg {
+    pub base: LogicalBase,
     agg_calls: Vec<PlanAggCall>,
     agg_call_alias: Vec<Option<String>>,
     group_keys: Vec<usize>,
-    schema: Schema,
     input: PlanRef,
 }
 
@@ -54,11 +54,12 @@ impl LogicalAgg {
                 .collect(),
             &agg_call_alias,
         );
+        let base = LogicalBase { schema };
         Self {
             agg_calls,
             group_keys,
             input,
-            schema,
+            base,
             agg_call_alias,
         }
     }
@@ -135,16 +136,6 @@ impl_plan_tree_node_for_unary! {LogicalAgg}
 impl fmt::Display for LogicalAgg {
     fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
         todo!()
-    }
-}
-
-impl WithOrder for LogicalAgg {}
-
-impl WithDistribution for LogicalAgg {}
-
-impl WithSchema for LogicalAgg {
-    fn schema(&self) -> &Schema {
-        &self.schema
     }
 }
 

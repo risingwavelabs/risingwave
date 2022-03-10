@@ -6,7 +6,8 @@ use futures::stream::{self, StreamExt};
 use futures::Future;
 use risingwave_common::error::RwError;
 use risingwave_pb::hummock::{
-    CompactTask, LevelEntry, LevelType, SstableInfo, SubscribeCompactTasksResponse, VacuumTask,
+    CompactMetrics, CompactTask, LevelEntry, LevelType, SstableInfo, SubscribeCompactTasksResponse,
+    TableSetStatistics, VacuumTask,
 };
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
@@ -35,7 +36,6 @@ pub struct SubCompactContext {
 }
 
 pub struct Compactor;
-
 impl Compactor {
     pub async fn run_compact(
         context: &SubCompactContext,
@@ -43,8 +43,26 @@ impl Compactor {
     ) -> HummockResult<()> {
         let mut overlapping_tables = vec![];
         let mut non_overlapping_table_seqs = vec![];
+        let target_level = compact_task.target_level;
+        let add_table = |accumu: &mut TableSetStatistics, table: &Sstable| {
+            accumu.size_gb += table.meta.estimated_size as f64 / (1024 * 1024 * 1024) as f64;
+            accumu.cnt += 1;
+        };
+        let accumulating_readsize =
+            |metrics: &mut CompactMetrics, level_idx: u32, tables: &Vec<Arc<Sstable>>| {
+                let read_statistics: &mut TableSetStatistics = if level_idx == target_level {
+                    metrics.read_level_nplus1.as_mut().unwrap()
+                } else {
+                    metrics.read_level_n.as_mut().unwrap()
+                };
+                for table in tables {
+                    add_table(read_statistics, table);
+                }
+            };
         for LevelEntry {
-            level: opt_level, ..
+            level_idx,
+            level: opt_level,
+            ..
         } in &compact_task.input_ssts
         {
             let level = opt_level.as_ref().unwrap();
@@ -52,6 +70,7 @@ impl Compactor {
                 .local_version_manager
                 .pick_few_tables(level.get_table_ids())
                 .await?;
+            accumulating_readsize(compact_task.metrics.as_mut().unwrap(), *level_idx, &tables);
             if level.get_level_type().unwrap() == LevelType::Nonoverlapping {
                 non_overlapping_table_seqs.push(tables);
             } else {
@@ -128,7 +147,28 @@ impl Compactor {
 
         sub_compact_outputsets.sort_by_key(|(sub_kr_idx, _)| *sub_kr_idx);
         for (_, sub_output) in sub_compact_outputsets {
-            compact_task.sorted_output_ssts.extend(sub_output);
+            for table in &sub_output {
+                add_table(
+                    compact_task
+                        .metrics
+                        .as_mut()
+                        .unwrap()
+                        .write
+                        .as_mut()
+                        .unwrap(),
+                    table,
+                );
+            }
+            compact_task
+                .sorted_output_ssts
+                .extend(sub_output.iter().map(|sst| SstableInfo {
+                    id: sst.id,
+                    key_range: Some(risingwave_pb::hummock::KeyRange {
+                        left: sst.meta.get_smallest_key().to_vec(),
+                        right: sst.meta.get_largest_key().to_vec(),
+                        inf: false,
+                    }),
+                }));
         }
 
         Ok(())
@@ -204,7 +244,7 @@ impl Compactor {
         context: SubCompactContext,
         kr: KeyRange,
         iter: MergeIterator<'_>,
-        output_sst_infos: &mut Vec<SstableInfo>,
+        output_ssts: &mut Vec<Sstable>,
         // TODO: better naming
         is_target_ultimate_and_leveling: bool,
         watermark: Epoch,
@@ -223,7 +263,7 @@ impl Compactor {
         // Seal table for each split
         builder.seal_current();
 
-        output_sst_infos.reserve(builder.len());
+        output_ssts.reserve(builder.len());
         // TODO: decide upload concurrency
         for (table_id, data, meta) in builder.finish() {
             let sst = Sstable { id: table_id, meta };
@@ -231,20 +271,8 @@ impl Compactor {
                 .sstable_store
                 .put(&sst, data, super::CachePolicy::Fill)
                 .await?;
-            if context.is_share_buffer_compact {
-                context.stats.addtable_upload_sst_counts.inc();
-            } else {
-                context.stats.compaction_upload_sst_counts.inc();
-            }
-            let info = SstableInfo {
-                id: table_id,
-                key_range: Some(risingwave_pb::hummock::KeyRange {
-                    left: sst.meta.get_smallest_key().to_vec(),
-                    right: sst.meta.get_largest_key().to_vec(),
-                    inf: false,
-                }),
-            };
-            output_sst_infos.push(info);
+
+            output_ssts.push(sst);
         }
 
         Ok(())

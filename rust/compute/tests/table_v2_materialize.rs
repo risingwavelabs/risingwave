@@ -21,7 +21,7 @@ use risingwave_storage::table::mview::MViewTable;
 use risingwave_storage::{Keyspace, StateStore, StateStoreImpl};
 use risingwave_stream::executor::{
     Barrier, Epoch, Executor as StreamExecutor, MaterializeExecutor, Message, PkIndices,
-    SourceExecutor,
+    SourceExecutor, StreamingMetrics,
 };
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -139,6 +139,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         1,
         1,
         "SourceExecutor".to_string(),
+        Arc::new(StreamingMetrics::unused()),
     )?;
 
     // Create a `Materialize` to write the changes to storage

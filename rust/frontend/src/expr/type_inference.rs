@@ -227,9 +227,9 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
     map
 }
 lazy_static::lazy_static! {
-  static ref FUNC_SIG_MAP: HashMap<FuncSign, DataTypeName> = {
-    build_type_derive_map()
-  };
+    static ref FUNC_SIG_MAP: HashMap<FuncSign, DataTypeName> = {
+        build_type_derive_map()
+    };
 }
 #[cfg(test)]
 mod tests {

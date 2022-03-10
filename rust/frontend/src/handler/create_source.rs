@@ -74,10 +74,10 @@ mod tests {
     syntax = "proto3";
     package test;
     message TestRecord {
-      int32 id = 1;
-      string city = 3;
-      int64 zipcode = 4;
-      float rate = 5;
+        int32 id = 1;
+        string city = 3;
+        int64 zipcode = 4;
+        float rate = 5;
     }"#;
         let temp_file = tempfile::Builder::new()
             .prefix("temp")

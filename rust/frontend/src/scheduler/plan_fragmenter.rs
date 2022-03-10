@@ -223,11 +223,13 @@ mod tests {
 
     use std::sync::Arc;
 
+    use risingwave_common::catalog::{Schema, TableId};
     use risingwave_pb::common::{ParallelUnit, WorkerNode, WorkerType};
     use risingwave_pb::plan::JoinType;
 
     use crate::optimizer::plan_node::{
-        BatchExchange, BatchHashJoin, BatchSeqScan, EqJoinPredicate, LogicalJoin, PlanNodeType,
+        BatchExchange, BatchHashJoin, BatchSeqScan, EqJoinPredicate, LogicalJoin, LogicalScan,
+        PlanNodeType,
     };
     use crate::optimizer::property::{Distribution, Order};
     use crate::optimizer::PlanRef;
@@ -244,7 +246,13 @@ mod tests {
         //     /    \
         //   Scan  Scan
         //
-        let batch_plan_node: PlanRef = BatchSeqScan::default().into();
+        let batch_plan_node: PlanRef = BatchSeqScan::new(LogicalScan::new(
+            "".to_string(),
+            TableId::default(),
+            vec![],
+            Schema::default(),
+        ))
+        .into();
         let batch_exchange_node1: PlanRef = BatchExchange::new(
             batch_plan_node.clone(),
             Order::default(),

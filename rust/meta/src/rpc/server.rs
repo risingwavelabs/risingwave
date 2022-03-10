@@ -103,8 +103,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             meta_store_ref: env.meta_store_ref(),
             has_test_data: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
-        tokio::spawn(dashboard_service.serve()); // TODO: join dashboard service back to local
-                                                 // thread
+        // TODO: join dashboard service back to local thread.
+        tokio::spawn(dashboard_service.serve());
     }
     let barrier_manager_ref = Arc::new(BarrierManager::new(
         env.clone(),
@@ -171,8 +171,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                 tokio_stream::wrappers::TcpListenerStream::new(listener),
                 async move {
                     tokio::select! {
-                      _ = tokio::signal::ctrl_c() => {},
-                      _ = shutdown_recv.recv() => {
+                        _ = tokio::signal::ctrl_c() => {},
+                        _ = shutdown_recv.recv() => {
                             if compaction_shutdown_sender.send(()).is_ok() {
                                 compaction_join_handle.await.unwrap();
                             }

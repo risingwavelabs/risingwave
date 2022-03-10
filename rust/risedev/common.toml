@@ -35,7 +35,7 @@ mkdir "${PREFIX_PATH}"
 private = true
 condition = { env_not_set = [ "RISEDEV_CONFIGURED" ] }
 script = '''
-#!@shell
+#!/bin/bash
 set -e
 echo "RiseDev is not configured, please run ./risedev configure"
 exit 1

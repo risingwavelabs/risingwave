@@ -2,8 +2,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Request, Response, Server};
+use hyper::{Body, Request, Response};
 use prometheus::{Encoder, TextEncoder};
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
@@ -17,9 +16,13 @@ use risingwave_source::MemSourceManager;
 use risingwave_storage::hummock::compactor::Compactor;
 use risingwave_storage::monitor::DEFAULT_STATE_STORE_STATS;
 use risingwave_storage::StateStoreImpl;
+use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::task::{StreamEnvironment, StreamManager};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
+use tower::make::Shared;
+use tower::ServiceBuilder;
+use tower_http::add_extension::AddExtensionLayer;
 
 use crate::rpc::service::exchange_service::ExchangeServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
@@ -74,9 +77,15 @@ pub async fn compute_node_serve(
         compactor_handle = Some((compactor_join_handle, compactor_shutdown_sender));
     }
 
+    let registry = prometheus::default_registry().clone();
+    let streaming_metrics = Arc::new(StreamingMetrics::new(registry.clone()));
     // Initialize the managers.
     let batch_mgr = Arc::new(BatchManager::new());
-    let stream_mgr = Arc::new(StreamManager::new(addr, state_store.clone()));
+    let stream_mgr = Arc::new(StreamManager::new(
+        addr,
+        state_store.clone(),
+        streaming_metrics.clone(),
+    ));
     let source_mgr = Arc::new(MemSourceManager::new());
 
     // Initialize batch environment.
@@ -108,8 +117,8 @@ pub async fn compute_node_serve(
             .add_service(StreamServiceServer::new(stream_srv))
             .serve_with_shutdown(addr, async move {
                 tokio::select! {
-                  _ = tokio::signal::ctrl_c() => {},
-                  _ = shutdown_recv.recv() => {
+                    _ = tokio::signal::ctrl_c() => {},
+                    _ = shutdown_recv.recv() => {
                         // Gracefully shutdown compactor
                         if let Some((compactor_join_handle, compactor_shutdown_sender)) = compactor_handle {
                             if compactor_shutdown_sender.send(()).is_ok() {
@@ -125,7 +134,10 @@ pub async fn compute_node_serve(
 
     // Boot metrics service.
     if opts.metrics_level > 0 {
-        MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone());
+        MetricsManager::boot_metrics_service(
+            opts.prometheus_listener_addr.clone(),
+            streaming_metrics.clone(),
+        );
     }
 
     // All set, let the meta service know we're ready.
@@ -137,29 +149,28 @@ pub async fn compute_node_serve(
 pub struct MetricsManager {}
 
 impl MetricsManager {
-    pub fn boot_metrics_service(listen_addr: String) {
+    pub fn boot_metrics_service(listen_addr: String, streaming_metrics: Arc<StreamingMetrics>) {
         tokio::spawn(async move {
             info!(
                 "Prometheus listener for Prometheus is set up on http://{}",
                 listen_addr
             );
-
             let listen_socket_addr: SocketAddr = listen_addr.parse().unwrap();
-            let serve_future =
-                Server::bind(&listen_socket_addr).serve(make_service_fn(|_| async {
-                    Ok::<_, hyper::Error>(service_fn(MetricsManager::metrics_service))
-                }));
-
+            let service = ServiceBuilder::new()
+                .layer(AddExtensionLayer::new(streaming_metrics))
+                .service_fn(Self::metrics_service);
+            let serve_future = hyper::Server::bind(&listen_socket_addr).serve(Shared::new(service));
             if let Err(err) = serve_future.await {
                 eprintln!("server error: {}", err);
             }
         });
     }
 
-    async fn metrics_service(_req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
+    async fn metrics_service(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
+        let streaming_metrics = req.extensions().get::<Arc<StreamingMetrics>>().unwrap();
         let encoder = TextEncoder::new();
         let mut buffer = vec![];
-        let mf = prometheus::gather();
+        let mf = streaming_metrics.registry.gather();
         encoder.encode(&mf, &mut buffer).unwrap();
         let response = Response::builder()
             .header(hyper::header::CONTENT_TYPE, encoder.format_type())

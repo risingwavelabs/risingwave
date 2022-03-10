@@ -1,7 +1,7 @@
 /// `array` builds an `Array` with `Option`.
 #[macro_export]
 macro_rules! array {
-    ($array:tt, [$( $value:expr ),*]) => {
+    ($array:ident, [$( $value:expr ),*]) => {
         {
             use $crate::array::Array;
             use $crate::array::ArrayBuilder;
@@ -28,7 +28,7 @@ macro_rules! array_nonnull {
                 builder.append(Some(value)).unwrap();
             }
             builder.finish().unwrap()
-          }
+        }
     };
 }
 

@@ -13,6 +13,7 @@ env_files = [
 
 [env]
 RUST_BACKTRACE = 1
+RISEDEV_CARGO_BUILD_FLAGS = { value = "--features=all-in-one", condition = { env_set = ["ENABLE_ALL_IN_ONE"] } }
 
 [config]
 skip_core_tasks = true
@@ -39,7 +40,7 @@ rm -rf "${PREFIX_CONFIG}"
 category = "Misc"
 description = "Dump logs in a folder"
 script = '''
-#!@shell
+#!/bin/bash
 set -e
 
 for out_file in ${PREFIX_LOG}/*.log
@@ -57,7 +58,7 @@ done
 category = "Misc"
 description = "Check if there is panic in log"
 script = '''
-#!@shell
+#!/bin/bash
 set -e
 
 for out_file in ${PREFIX_LOG}/*.log
@@ -75,14 +76,20 @@ category = "RisingWave"
 description = "Copy RisingWave binaries to bin"
 condition = { env_set = [ "ENABLE_BUILD_RUST" ] }
 script = '''
-#!@shell
+#!/bin/bash
 set -e
 rm -f "${PREFIX_BIN}/compute-node"
 rm -f "${PREFIX_BIN}/meta-node"
 rm -f "${PREFIX_BIN}/frontend-v2"
+rm -rf "${PREFIX_BIN}/risingwave"
 ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/compute-node" "${PREFIX_BIN}/compute-node"
 ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/meta-node" "${PREFIX_BIN}/meta-node"
 ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/frontend-v2" "${PREFIX_BIN}/frontend-v2"
+mkdir -p "${PREFIX_BIN}/risingwave"
+ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/meta-node"
+ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/compute-node"
+ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/frontend-node"
+ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/risectl"
 '''
 
 [tasks.build-risingwave]
@@ -90,9 +97,9 @@ category = "RisingWave"
 description = "Build RisingWave compute-node and meta-node"
 condition = { env_set = [ "ENABLE_BUILD_RUST" ] }
 script = '''
-#!@shell
+#!/bin/bash
 set -e
-cd rust && cargo build --profile ${RISINGWAVE_BUILD_PROFILE}
+cd rust && cargo build --profile ${RISINGWAVE_BUILD_PROFILE} ${RISEDEV_CARGO_BUILD_FLAGS}
 '''
 
 [tasks.build-frontend]
@@ -100,7 +107,7 @@ category = "RisingWave"
 description = "Build RisingWave frontend"
 condition = { env_set = [ "ENABLE_BUILD_FRONTEND" ] }
 script = '''
-#!@shell
+#!/bin/bash
 set -e
 cd java && ./gradlew build -x test
 '''
@@ -110,7 +117,7 @@ category = "RisingWave"
 description = "Post build RisingWave frontend"
 condition = { env_set = [ "ENABLE_BUILD_FRONTEND" ] }
 script = '''
-#!@shell
+#!/bin/bash
 
 set -e
 rm -f "${PREFIX_BIN}/risingwave-fe-runnable.jar"
@@ -121,7 +128,7 @@ ln -s "$(pwd)/java/pgserver/build/libs/risingwave-fe-runnable.jar" "${PREFIX_BIN
 category = "RiseDev - Prepare"
 description = "Copy necessary configuration files to RiseDev"
 script = '''
-#!@shell
+#!/bin/bash
 
 set -e
 
@@ -150,7 +157,7 @@ dependencies = [
   "prepare-config"
 ]
 script = '''
-#!@shell
+#!/bin/bash
 
 set -e
 tmux -V
@@ -231,7 +238,7 @@ description = "Start a RisingWave playground with dev-meta-node config"
 category = "RiseDev - Stop"
 description = "kill playground"
 script = '''
-#!@shell
+#!/bin/bash
 set -e
 tmux list-windows -t risedev -F "-#{pane_pid}" | xargs -n 1 kill -SIGINT
 tmux kill-session -t risedev
