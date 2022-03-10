@@ -10,7 +10,7 @@ use risingwave_pb::plan::{ExchangeSource as ProstExchangeSource, Field as NodeFi
 use risingwave_rpc_client::{ExchangeSource, GrpcExchangeSource};
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
-use crate::execution::exchange_source::LocalExchangeSource;
+use crate::execution::local_exchange::LocalExchangeSource;
 use crate::executor::{Executor, ExecutorBuilder};
 use crate::task::{BatchEnvironment, TaskId};
 

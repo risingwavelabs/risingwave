@@ -8,7 +8,6 @@ mod create_source;
 pub mod create_table;
 pub mod drop_table;
 mod explain;
-mod query;
 
 pub(super) async fn handle(session: &SessionImpl, stmt: Statement) -> Result<PgResponse> {
     let context = QueryContext::new(session);
@@ -24,7 +23,6 @@ pub(super) async fn handle(session: &SessionImpl, stmt: Statement) -> Result<PgR
             let table_object_name = ObjectName(vec![drop_statement.name]);
             drop_table::handle_drop_table(context, table_object_name).await
         }
-        Statement::Query(query) => query::handle_query(session, query).await,
         _ => Err(ErrorCode::NotImplementedError(format!("Unhandled ast: {:?}", stmt)).into()),
     }
 }
