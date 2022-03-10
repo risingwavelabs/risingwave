@@ -80,7 +80,7 @@ impl SourceReader for KafkaSplitReader {
         let partition_queue = self
             .consumer
             .split_partition_queue(self.topic.as_str(), split.partition)
-            .ok_or(anyhow!("Failed to split partition queue"))?;
+            .ok_or_else(|| anyhow!("Failed to split partition queue"))?;
 
         self.partition_queue = partition_queue;
         self.assigned_split = split;
