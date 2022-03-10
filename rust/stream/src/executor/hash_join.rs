@@ -36,7 +36,7 @@ pub mod JoinType {
 }
 
 /// Build a array and it's corresponding operations.
-struct StreamChunkBuilder {
+pub struct StreamChunkBuilder {
     /// operations in the data chunk to build
     ops: Vec<Op>,
     /// arrays in the data chunk to build
@@ -56,7 +56,7 @@ struct StreamChunkBuilder {
 }
 
 impl StreamChunkBuilder {
-    fn new(
+    pub fn new(
         capacity: usize,
         data_types: &[DataType],
         update_start_pos: usize,
@@ -76,7 +76,7 @@ impl StreamChunkBuilder {
     }
 
     /// append a row with coming update value and matched value.
-    fn append_row(&mut self, op: Op, row_update: &RowRef<'_>, row_matched: &Row) -> Result<()> {
+    pub fn append_row(&mut self, op: Op, row_update: &RowRef<'_>, row_matched: &Row) -> Result<()> {
         self.ops.push(op);
         for i in 0..row_update.size() {
             self.column_builders[i + self.update_start_pos].append_datum_ref(row_update[i])?;
@@ -88,7 +88,7 @@ impl StreamChunkBuilder {
     }
 
     /// append a row with coming update value and fill the other side with null.
-    fn append_row_update(&mut self, op: Op, row_update: &RowRef<'_>) -> Result<()> {
+    pub fn append_row_update(&mut self, op: Op, row_update: &RowRef<'_>) -> Result<()> {
         self.ops.push(op);
         for i in 0..row_update.size() {
             self.column_builders[i + self.update_start_pos].append_datum_ref(row_update[i])?;
@@ -100,7 +100,7 @@ impl StreamChunkBuilder {
     }
 
     /// append a row with matched value and fill the coming side with null.
-    fn append_row_matched(&mut self, op: Op, row_matched: &Row) -> Result<()> {
+    pub fn append_row_matched(&mut self, op: Op, row_matched: &Row) -> Result<()> {
         self.ops.push(op);
         for i in 0..self.column_builders.len() - row_matched.size() {
             self.column_builders[i + self.update_start_pos].append_datum_ref(None)?;
@@ -111,7 +111,7 @@ impl StreamChunkBuilder {
         Ok(())
     }
 
-    fn finish(self) -> Result<StreamChunk> {
+    pub fn finish(self) -> Result<StreamChunk> {
         let new_arrays = self
             .column_builders
             .into_iter()
