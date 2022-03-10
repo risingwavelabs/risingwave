@@ -103,9 +103,7 @@ impl DataChunk {
                         .0
                          .0
                         .into_iter()
-                        .map(|data| {
-                            data.map(|d|d.to_string())
-                        })
+                        .map(|data| data.map(|d| d.to_string()))
                         .collect_vec(),
                 )
             })
