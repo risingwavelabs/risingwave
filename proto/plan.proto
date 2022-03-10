@@ -37,9 +37,19 @@ message ColumnDesc {
   string name = 3;
 }
 
+message OrderedColumn {
+  ColumnDesc column_desc = 1;
+  OrderType order = 2;
+}
+
 message ColumnCatalog {
   ColumnDesc column_desc = 1;
-  bool is_hidden = 4;
+  bool is_hidden = 2;
+}
+
+message CellBasedTableDesc {
+  int32 table_id = 1;
+  repeated OrderedColumn pk = 2;
 }
 
 message StreamSourceInfo {
