@@ -17,7 +17,7 @@ use crate::vector_op::agg::general_sorted_grouper::EqGroups;
 pub struct GeneralDistinctAgg<T, F, R>
 where
     T: Array,
-    F: Send + for<'a> RTFn<'a, T, R>,
+    F: for<'a> RTFn<'a, T, R>,
     R: Array,
 {
     return_type: DataType,
@@ -30,7 +30,7 @@ where
 impl<T, F, R> GeneralDistinctAgg<T, F, R>
 where
     T: Array,
-    F: Send + for<'a> RTFn<'a, T, R>,
+    F: for<'a> RTFn<'a, T, R>,
     R: Array,
 {
     pub fn new(return_type: DataType, input_col_idx: usize, f: F) -> Self {
@@ -102,7 +102,7 @@ macro_rules! impl_aggregator {
     ($input:ty, $input_variant:ident, $result:ty, $result_variant:ident) => {
         impl<F> Aggregator for GeneralDistinctAgg<$input, F, $result>
         where
-            F: 'static + Send + for<'a> RTFn<'a, $input, $result>,
+            F: for<'a> RTFn<'a, $input, $result>,
         {
             fn return_type(&self) -> DataType {
                 self.return_type.clone()
