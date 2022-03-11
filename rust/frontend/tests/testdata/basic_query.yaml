@@ -37,6 +37,19 @@
     LogicalInsert { table_name: t, columns: [] }
       LogicalValues { rows: [[Literal(Literal { data: Some(Int32(22)), data_type: Int32 }), Literal(Literal { data: Some(Int32(33)), data_type: Int32 })], [Literal(Literal { data: Some(Int32(44)), data_type: Int32 }), Literal(Literal { data: Some(Int32(55)), data_type: Int32 })]], schema: Schema { fields: [Field { name = , data_type = Int32 }, Field { name = , data_type = Int32 }] } }
 
+- sql: |
+    create table t ();
+    SELECT (((((false is not true) is true) is not false) is false) is not null) is null FROM t;
+  plan: |
+    LogicalProject { exprs: [FunctionCall(FunctionCall { func_type: IsNull, return_type: Boolean, inputs: [FunctionCall(FunctionCall { func_type: IsNotNull, return_type: Boolean, inputs: [FunctionCall(FunctionCall { func_type: IsFalse, return_type: Boolean, inputs: [FunctionCall(FunctionCall { func_type: IsNotFalse, return_type: Boolean, inputs: [FunctionCall(FunctionCall { func_type: IsTrue, return_type: Boolean, inputs: [FunctionCall(FunctionCall { func_type: IsNotTrue, return_type: Boolean, inputs: [Literal(Literal { data: Some(Bool(false)), data_type: Boolean })] })] })] })] })] })] })], expr_alias: [None] }
+      LogicalScan { table: "t", columns: ["_row_id"] }
+
+- sql: |
+    create table t (v1 int);
+    SELECT (CASE WHEN v1 < 60 THEN 1 WHEN v1 >= 80 THEN 1.0 ELSE 1 END) FROM t;
+  plan: |
+    LogicalProject { exprs: [FunctionCall(FunctionCall { func_type: Case, return_type: Decimal, inputs: [FunctionCall(FunctionCall { func_type: LessThan, return_type: Boolean, inputs: [InputRef(1), Literal(Literal { data: Some(Int32(60)), data_type: Int32 })] }), FunctionCall(FunctionCall { func_type: GreaterThanOrEqual, return_type: Boolean, inputs: [InputRef(1), Literal(Literal { data: Some(Int32(80)), data_type: Int32 })] }), Literal(Literal { data: Some(Int32(1)), data_type: Int32 }), Literal(Literal { data: Some(Decimal(Normalized(1.0))), data_type: Decimal }), Literal(Literal { data: Some(Int32(1)), data_type: Int32 })] })], expr_alias: [None] }
+      LogicalScan { table: "t", columns: ["_row_id", "v1"] }
 
 - sql: |
     create table t (v1 int, v2 int);
