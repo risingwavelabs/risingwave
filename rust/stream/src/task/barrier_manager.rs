@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
+use std::iter::once;
 
-use itertools::Itertools;
 use risingwave_common::error::Result;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
@@ -11,24 +11,135 @@ use crate::executor::*;
 /// Note that this option will significantly increase the overhead of tracing.
 pub const ENABLE_BARRIER_AGGREGATION: bool = false;
 
-struct ManagedBarrierState {
-    epoch: u64,
+enum ManagedBarrierState {
+    Pending {
+        last_epoch: Option<u64>,
+    },
 
-    /// Notify that the collection is finished.
-    collect_notifier: oneshot::Sender<()>,
+    Stashed {
+        epoch: u64,
 
-    /// Actor ids remaining to be collected.
-    remaining_actors: HashSet<u32>,
+        collected_actors: HashSet<u32>,
+    },
+
+    Issued {
+        epoch: u64,
+
+        remaining_actors: HashSet<u32>,
+
+        collect_notifier: oneshot::Sender<()>,
+    },
 }
 
 impl ManagedBarrierState {
-    fn notify(self) {
-        // Notify about barrier finishing.
-        if self.collect_notifier.send(()).is_err() {
-            warn!(
-                "failed to notify barrier collection with epoch {}: rx is dropped",
-                self.epoch
-            )
+    fn collect(&mut self, actor_id: u32, barrier: &Barrier) {
+        match self {
+            ManagedBarrierState::Pending { last_epoch } => {
+                if let Some(last_epoch) = *last_epoch {
+                    assert_eq!(barrier.epoch.prev, last_epoch)
+                }
+
+                *self = Self::Stashed {
+                    epoch: barrier.epoch.curr,
+                    collected_actors: once(actor_id).collect(),
+                }
+            }
+
+            ManagedBarrierState::Stashed {
+                epoch,
+                collected_actors,
+            } => {
+                assert_eq!(barrier.epoch.curr, *epoch);
+
+                let new = collected_actors.insert(actor_id);
+                assert!(new);
+            }
+
+            ManagedBarrierState::Issued {
+                epoch,
+                remaining_actors,
+                ..
+            } => {
+                assert_eq!(barrier.epoch.curr, *epoch);
+
+                let exist = remaining_actors.remove(&actor_id);
+                assert!(exist);
+                self.may_notify();
+            }
+        }
+    }
+
+    fn may_notify(&mut self) {
+        let (epoch, to_notify) = match self {
+            ManagedBarrierState::Issued {
+                epoch,
+                remaining_actors,
+                ..
+            } => (*epoch, remaining_actors.is_empty()),
+
+            _ => unreachable!(),
+        };
+
+        if to_notify {
+            let state = std::mem::replace(
+                self,
+                Self::Pending {
+                    last_epoch: Some(epoch),
+                },
+            );
+
+            match state {
+                ManagedBarrierState::Issued {
+                    collect_notifier, ..
+                } => {
+                    if collect_notifier.send(()).is_err() {
+                        warn!("failed to notify barrier collection: rx is dropped")
+                    }
+                }
+
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    fn transform_to_issued(
+        &mut self,
+        barrier: &Barrier,
+        actor_ids_to_collect: impl IntoIterator<Item = u32>,
+        collect_notifier: oneshot::Sender<()>,
+    ) {
+        match self {
+            ManagedBarrierState::Pending { .. } => {
+                let remaining_actors = actor_ids_to_collect.into_iter().collect();
+
+                *self = Self::Issued {
+                    epoch: barrier.epoch.curr,
+                    remaining_actors,
+                    collect_notifier,
+                };
+                self.may_notify();
+            }
+
+            ManagedBarrierState::Stashed {
+                epoch,
+                collected_actors,
+            } => {
+                assert_eq!(barrier.epoch.curr, *epoch);
+
+                let remaining_actors = actor_ids_to_collect
+                    .into_iter()
+                    .filter(|a| collected_actors.contains(a))
+                    .collect();
+
+                *self = Self::Issued {
+                    epoch: barrier.epoch.curr,
+                    remaining_actors,
+                    collect_notifier,
+                };
+                self.may_notify();
+            }
+
+            ManagedBarrierState::Issued { .. } => panic!("barrier state has already been `Issued`"),
         }
     }
 }
@@ -41,7 +152,7 @@ enum BarrierState {
 
     /// In `Managed` mode, barriers are sent and collected according to the request from meta
     /// service. When the barrier is finished, the caller can be notified about this.
-    Managed(Option<ManagedBarrierState>),
+    Managed(ManagedBarrierState),
 }
 
 /// [`LocalBarrierManager`] manages barrier control flow, used by local stream manager.
@@ -57,9 +168,6 @@ pub struct LocalBarrierManager {
 
     /// Current barrier collection state.
     state: BarrierState,
-
-    /// Last epoch of barriers.
-    last_epoch: Option<u64>,
 }
 
 impl Default for LocalBarrierManager {
@@ -74,13 +182,14 @@ impl LocalBarrierManager {
             senders: HashMap::new(),
             span: tracing::Span::none(),
             state,
-            last_epoch: None,
         }
     }
 
     /// Create a [`LocalBarrierManager`] with managed mode.
     pub fn new() -> Self {
-        Self::with_state(BarrierState::Managed(None))
+        Self::with_state(BarrierState::Managed(ManagedBarrierState::Pending {
+            last_epoch: None, // TODO: specify last epoch
+        }))
     }
 
     #[cfg(test)]
@@ -130,18 +239,8 @@ impl LocalBarrierManager {
             BarrierState::Local => None,
 
             BarrierState::Managed(state) => {
-                // There should be only one epoch / barrier at a time.
-                assert!(state.is_none());
-                // There must be some actors to collect from.
-                assert!(!to_collect.is_empty());
-
                 let (tx, rx) = oneshot::channel();
-                *state = Some(ManagedBarrierState {
-                    epoch: barrier.epoch.curr,
-                    collect_notifier: tx,
-                    remaining_actors: to_collect,
-                });
-
+                state.transform_to_issued(barrier, to_collect, tx);
                 Some(rx)
             }
         };
@@ -172,36 +271,7 @@ impl LocalBarrierManager {
             BarrierState::Local => {}
 
             BarrierState::Managed(managed_state) => {
-                let current_epoch = managed_state.as_ref().map(|s| s.epoch);
-                if current_epoch != Some(barrier.epoch.curr) {
-                    panic!(
-                        "bad barrier with epoch {} from actor {}, while current epoch is {:?}, last epoch is {:?}",
-                        barrier.epoch.curr, actor_id, current_epoch, self.last_epoch
-                    );
-                }
-
-                let state = managed_state.as_mut().unwrap();
-                state.remaining_actors.remove(&actor_id);
-
-                tracing::trace!(
-                    target: "events::stream::barrier::collect_barrier",
-                    "collect_barrier: epoch = {}, actor_id = {}, remaining_actors = {:?}",
-                    barrier.epoch.curr,
-                    actor_id,
-                    state
-                        .remaining_actors
-                        .clone()
-                        .into_iter()
-                        .sorted()
-                        .collect_vec()
-                );
-
-                if state.remaining_actors.is_empty() {
-                    let state = managed_state.take().unwrap();
-                    self.last_epoch = Some(state.epoch);
-                    // Notify about barrier finishing.
-                    state.notify();
-                }
+                managed_state.collect(actor_id, barrier);
             }
         }
 
