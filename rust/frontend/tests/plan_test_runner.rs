@@ -1,3 +1,5 @@
+#![feature(let_chains)]
+
 // Data-driven tests.
 
 use std::cell::RefCell;
@@ -19,6 +21,7 @@ struct TestCase {
     sql: String,
     plan: Option<String>,
     binder_error: Option<String>,
+    planner_error: Option<String>,
     optimizer_error: Option<String>,
 }
 
@@ -60,19 +63,25 @@ impl TestCase {
             return Ok(());
         }
 
-        let plan = Planner::new(context).plan(bound.unwrap())?;
-        let mut output = String::new();
-        plan.as_subplan().explain(0, &mut output)?;
-        let expected_plan = self.plan.as_ref().unwrap().clone();
-        if expected_plan != output {
-            Err(anyhow!(
+        let actual_plan = Planner::new(context).plan(bound.unwrap()).map(|plan| {
+            let mut output = String::new();
+            plan.as_subplan().explain(0, &mut output).unwrap();
+            output
+        });
+
+        let actual_plan = check_err("planner", &self.planner_error, actual_plan)?;
+        if let Some(actual_plan) = &actual_plan
+            && let Some(expected_plan) = &self.plan
+            && expected_plan != actual_plan
+        {
+            return Err(anyhow!(
                 "Expected plan:\n{}\nActual plan:\n{}",
                 expected_plan,
-                output
-            ))
-        } else {
-            Ok(())
+                actual_plan,
+            ));
         }
+
+        Ok(())
     }
 }
 
