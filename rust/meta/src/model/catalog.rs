@@ -4,6 +4,7 @@ use risingwave_pb::meta::{Database, Schema, Table};
 use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
 
 use crate::model::MetadataModel;
+use crate::storage::MetaStore;
 
 /// Column family name for table.
 const TABLE_CF_NAME: &str = "cf/table";
@@ -58,8 +59,13 @@ impl_model_for_catalog!(Table, TABLE_CF_NAME, TableRefId, get_table_ref_id);
 pub struct CatalogVersionGenerator(CatalogVersion);
 
 impl CatalogVersionGenerator {
-    pub fn new() -> Self {
-        Self(FIRST_VERSION_ID)
+    pub async fn new<S>(store: &S) -> Result<Self>
+    where
+        S: MetaStore,
+    {
+        Ok(Self::select(store, &CATALOG_VERSION_ID_KEY.to_string())
+            .await?
+            .unwrap_or(Self(FIRST_VERSION_ID)))
     }
 
     pub fn version(&self) -> CatalogVersion {
@@ -163,6 +169,22 @@ mod tests {
         }
         let databases = Database::list(&**store).await?;
         assert!(databases.is_empty());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_catalog_version_generator() -> Result<()> {
+        let store = &MetaSrvEnv::for_test().await.meta_store_ref();
+        let mut version = CatalogVersionGenerator::new(&**store).await.unwrap();
+        assert_eq!(FIRST_VERSION_ID, version.version());
+
+        assert_eq!(FIRST_VERSION_ID + 1, version.next());
+        assert_eq!(FIRST_VERSION_ID + 1, version.version());
+        version.insert(&**store).await?;
+
+        let version = CatalogVersionGenerator::new(&**store).await.unwrap();
+        assert_eq!(FIRST_VERSION_ID + 1, version.version());
 
         Ok(())
     }

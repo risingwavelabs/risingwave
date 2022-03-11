@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -345,7 +346,7 @@ pub trait MetaClientInner: Send + Sync {
 }
 
 /// Client to meta server. Cloning the instance is lightweight.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct GrpcMetaClient {
     pub cluster_client: ClusterServiceClient<Channel>,
     pub heartbeat_client: HeartbeatServiceClient<Channel>,

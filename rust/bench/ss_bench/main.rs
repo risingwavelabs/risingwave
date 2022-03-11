@@ -8,7 +8,7 @@ use operations::*;
 use risingwave_common::config::StorageConfig;
 use risingwave_pb::common::WorkerType;
 use risingwave_rpc_client::MetaClient;
-use risingwave_storage::monitor::DEFAULT_STATE_STORE_STATS;
+use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::{dispatch_state_store, StateStoreImpl};
 
 use crate::utils::display_stats::print_statistics;
@@ -102,7 +102,7 @@ fn preprocess_options(opts: &mut Opts) {
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
     let mut opts = Opts::parse();
-    let stats = DEFAULT_STATE_STORE_STATS.clone();
+    let stats = Arc::new(StateStoreMetrics::unused());
 
     println!("Configurations before preprocess:\n {:?}", &opts);
     preprocess_options(&mut opts);

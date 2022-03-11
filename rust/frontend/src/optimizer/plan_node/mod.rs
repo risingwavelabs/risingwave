@@ -42,6 +42,8 @@ pub trait PlanNode:
     + WithOrder
     + WithDistribution
     + WithSchema
+    + WithContext
+    + WithId
     + ColPrunable
     + ToBatch
     + ToStream
@@ -54,16 +56,16 @@ pub trait PlanNode:
 impl_downcast!(PlanNode);
 pub type PlanRef = Rc<dyn PlanNode>;
 
-#[derive(Clone, Debug)]
-pub struct PlanNodeId(i32);
+#[derive(Clone, Debug, Copy)]
+pub struct PlanNodeId(pub i32);
 
 /// the common fields of logical nodes, please make a field named `base` in
 /// every planNode and correctly valued it when construct the planNode.
 #[derive(Clone, Debug)]
 pub struct LogicalBase {
-    //    TODO: assign nodeId from executor
-    //    pub id: PlanNodeId,
+    pub id: PlanNodeId,
     pub schema: Schema,
+    pub ctx: QueryContextRef,
 }
 
 /// the common fields of batch nodes, please make a field named `base` in
@@ -71,27 +73,27 @@ pub struct LogicalBase {
 
 #[derive(Clone, Debug)]
 pub struct BatchBase {
-    //    TODO: assign nodeId from executor
-    //    pub id: PlanNodeId,
+    pub id: PlanNodeId,
     /// the order property of the PlanNode's output, store an `Order::any()` here will not affect
     /// correctness, but insert unnecessary sort in plan
     pub order: Order,
     /// the distribution property of the PlanNode's output, store an `Distribution::any()` here
     /// will not affect correctness, but insert unnecessary exchange in plan
     pub dist: Distribution,
+
+    pub ctx: QueryContextRef,
 }
 
 /// the common fields of stream nodes, please make a field named `base` in
 /// every planNode and correctly valued it when construct the planNode.
 #[derive(Clone, Debug)]
 pub struct StreamBase {
-    //    TODO: assign nodeId from executor
-    //    pub id: PlanNodeId,
+    pub id: PlanNodeId,
     /// the distribution property of the PlanNode's output, store an `Distribution::any()` here
     /// will not affect correctness, but insert unnecessary exchange in plan
     pub dist: Distribution,
-    // TODO: pk derive
-    // pub pk_indices: Vec<u32>,
+    pub ctx: QueryContextRef, /* TODO: pk derive
+                               * pub pk_indices: Vec<u32> */
 }
 
 impl dyn PlanNode {
@@ -191,6 +193,9 @@ pub use stream_exchange::StreamExchange;
 pub use stream_hash_join::StreamHashJoin;
 pub use stream_project::StreamProject;
 pub use stream_table_source::StreamTableSource;
+
+use crate::optimizer::property::{WithContext, WithId};
+use crate::session::QueryContextRef;
 
 /// [`for_all_plan_nodes`] includes all plan nodes. If you added a new plan node
 /// inside the project, be sure to add here and in its conventions like [`for_logical_plan_nodes`]

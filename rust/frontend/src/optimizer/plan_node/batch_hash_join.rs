@@ -20,10 +20,13 @@ pub struct BatchHashJoin {
 
 impl BatchHashJoin {
     pub fn new(logical: LogicalJoin, eq_join_predicate: EqJoinPredicate) -> Self {
+        let ctx = logical.base.ctx.clone();
         // TODO: derive from input
         let base = BatchBase {
             order: Order::any().clone(),
             dist: Distribution::any().clone(),
+            id: ctx.borrow_mut().get_id(),
+            ctx: ctx.clone(),
         };
 
         Self {

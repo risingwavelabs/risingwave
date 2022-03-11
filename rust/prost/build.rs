@@ -6,6 +6,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed={}", proto_dir);
 
     let proto_files = vec![
+        "catalog",
         "common",
         "data",
         "expr",

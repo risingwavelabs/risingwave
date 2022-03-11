@@ -17,10 +17,13 @@ pub struct BatchProject {
 
 impl BatchProject {
     pub fn new(logical: LogicalProject) -> Self {
+        let ctx = logical.base.ctx.clone();
         // TODO: derive from input
         let base = BatchBase {
             order: Order::any().clone(),
             dist: Distribution::any().clone(),
+            id: ctx.borrow_mut().get_id(),
+            ctx: ctx.clone(),
         };
         BatchProject { logical, base }
     }

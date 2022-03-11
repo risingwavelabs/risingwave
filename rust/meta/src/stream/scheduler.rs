@@ -8,7 +8,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::common::{ActorInfo, WorkerType};
 
 use crate::cluster::{NodeId, NodeLocations, StoredClusterManager};
-use crate::model::{ActorId, ActorLocations};
+use crate::model::ActorId;
 use crate::storage::MetaStore;
 
 /// [`ScheduleCategory`] defines all supported categories.
@@ -35,7 +35,7 @@ where
 /// [`ScheduledLocations`] represents the location of scheduled result.
 pub struct ScheduledLocations {
     /// actor location map.
-    pub actor_locations: ActorLocations,
+    pub actor_locations: BTreeMap<ActorId, NodeId>,
     /// worker location map.
     pub node_locations: NodeLocations,
 }

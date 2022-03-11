@@ -5,6 +5,8 @@ edition = "2021"
 
 [dependencies]
 async-trait = "0.1"
+futures = { version = "0.3", default-features = false, features = ["alloc"] }
+log = "0.4"
 risingwave_common = { path = "../common" }
 risingwave_pb = { path = "../prost" }
 tracing = { version = "0.1", features = ["release_max_level_info"] }

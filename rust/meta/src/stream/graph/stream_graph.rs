@@ -296,7 +296,7 @@ where
 
             dispatch_upstreams.extend(upstream_actor_ids.iter());
             let chain_upstream_table_node_actors =
-                self.fragment_manager_ref.get_table_node_actors(&table_id)?;
+                self.fragment_manager_ref.table_node_actors(&table_id)?;
             let chain_upstream_node_actors = chain_upstream_table_node_actors
                 .iter()
                 .flat_map(|(node_id, actor_ids)| {

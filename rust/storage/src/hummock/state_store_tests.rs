@@ -1,67 +1,14 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use hyper::{Body, Request, Response};
-use prometheus::{Encoder, Registry, TextEncoder};
 
 use super::iterator::UserIterator;
 use super::{HummockOptions, HummockStorage};
 use crate::hummock::iterator::test_utils::mock_sstable_store_with_object_store;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
+use crate::monitor::StateStoreMetrics;
 use crate::object::InMemObjectStore;
-
-async fn prometheus_service(
-    _req: Request<Body>,
-    registry: &Registry,
-) -> Result<Response<Body>, hyper::Error> {
-    let encoder = TextEncoder::new();
-    let mut buffer = vec![];
-    let mf = registry.gather();
-    encoder.encode(&mf, &mut buffer).unwrap();
-    let response = Response::builder()
-        .header(hyper::header::CONTENT_TYPE, encoder.format_type())
-        .body(Body::from(buffer))
-        .unwrap();
-
-    Ok(response)
-}
-
-#[tokio::test]
-async fn test_prometheus_endpoint_hummock() {
-    // Create a hummock instance so as to fill the registry.
-    let hummock_options = HummockOptions::default_for_test();
-    let object_client = Arc::new(InMemObjectStore::new());
-    let sstable_store = mock_sstable_store_with_object_store(object_client.clone());
-    let local_version_manager = Arc::new(LocalVersionManager::new(sstable_store.clone()));
-    let _hummock_storage = HummockStorage::with_default_stats(
-        hummock_options,
-        sstable_store,
-        local_version_manager,
-        Arc::new(MockHummockMetaClient::new(Arc::new(
-            MockHummockMetaService::new(),
-        ))),
-    )
-    .await
-    .unwrap();
-
-    // Send a request to the prometheus service func.
-    let registry = prometheus::default_registry();
-    let mut response = prometheus_service(
-        Request::get("/metrics").body(Body::default()).unwrap(),
-        registry,
-    )
-    .await
-    .unwrap();
-
-    let bytes = hyper::body::to_bytes(response.body_mut()).await.unwrap();
-    let s = std::str::from_utf8(&bytes[..]).unwrap();
-
-    println!("\n---{}---\n", s);
-
-    assert!(s.contains("state_store_batched_write_counts"));
-    assert!(!s.contains("state_store_batched_counts"));
-}
 
 #[tokio::test]
 /// Fix this when we finished epoch management.
@@ -79,6 +26,7 @@ async fn test_basic() {
         Arc::new(MockHummockMetaClient::new(Arc::new(
             MockHummockMetaService::new(),
         ))),
+        Arc::new(StateStoreMetrics::unused()),
     )
     .await
     .unwrap();
@@ -222,6 +170,7 @@ async fn test_reload_storage() {
         sstable_store.clone(),
         local_version_manager.clone(),
         hummock_meta_client.clone(),
+        Arc::new(StateStoreMetrics::unused()),
     )
     .await
     .unwrap();
@@ -261,6 +210,7 @@ async fn test_reload_storage() {
         sstable_store,
         local_version_manager,
         hummock_meta_client,
+        Arc::new(StateStoreMetrics::unused()),
     )
     .await
     .unwrap();

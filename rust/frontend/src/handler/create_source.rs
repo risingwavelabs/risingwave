@@ -27,10 +27,10 @@ fn create_protobuf_table_schema(schema: &ProtobufSchema) -> Result<Table> {
 }
 
 pub(super) async fn handle_create_source(
-    context: QueryContext<'_>,
+    context: QueryContext,
     stmt: CreateSourceStatement,
 ) -> Result<PgResponse> {
-    let session = context.session;
+    let session = context.session_ctx;
     let mut table = match &stmt.source_schema {
         SourceSchema::Protobuf(protobuf_schema) => create_protobuf_table_schema(protobuf_schema)?,
         SourceSchema::Json => todo!(),
@@ -102,7 +102,7 @@ mod tests {
         let frontend = LocalFrontend::new().await;
         frontend.run_sql(sql).await.unwrap();
 
-        let catalog_manager = frontend.session().env().catalog_mgr();
+        let catalog_manager = frontend.session().ctx.env().catalog_mgr();
         let table = catalog_manager.get_table("dev", "dev", "t").unwrap();
         let columns = table
             .columns()

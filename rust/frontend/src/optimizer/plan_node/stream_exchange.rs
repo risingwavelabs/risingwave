@@ -16,8 +16,13 @@ pub struct StreamExchange {
 
 impl StreamExchange {
     pub fn new(input: PlanRef, dist: Distribution) -> Self {
+        let ctx = input.ctx();
         let schema = input.schema().clone();
-        let base = StreamBase { dist };
+        let base = StreamBase {
+            dist,
+            id: ctx.borrow_mut().get_id(),
+            ctx: ctx.clone(),
+        };
         StreamExchange {
             input,
             schema,

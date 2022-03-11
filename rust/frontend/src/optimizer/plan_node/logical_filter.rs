@@ -4,8 +4,8 @@ use fixedbitset::FixedBitSet;
 use risingwave_common::error::Result;
 
 use super::{
-    ColPrunable, CollectRequiredCols, LogicalBase, LogicalProject, PlanRef, PlanTreeNodeUnary,
-    ToBatch, ToStream,
+    ColPrunable, CollectInputRef, LogicalBase, LogicalProject, PlanRef, PlanTreeNodeUnary, ToBatch,
+    ToStream,
 };
 use crate::expr::{assert_input_ref, ExprImpl};
 use crate::optimizer::property::WithSchema;
@@ -24,11 +24,16 @@ pub struct LogicalFilter {
 
 impl LogicalFilter {
     pub fn new(input: PlanRef, predicate: Condition) -> Self {
+        let ctx = input.ctx();
         for cond in &predicate.conjunctions {
             assert_input_ref(cond, input.schema().fields().len());
         }
         let schema = input.schema().clone();
-        let base = LogicalBase { schema };
+        let base = LogicalBase {
+            schema,
+            ctx: ctx.clone(),
+            id: ctx.borrow_mut().get_id(),
+        };
         LogicalFilter {
             input,
             base,
@@ -40,6 +45,11 @@ impl LogicalFilter {
     pub fn create(input: PlanRef, predicate: ExprImpl) -> Result<PlanRef> {
         let predicate = Condition::with_expr(predicate);
         Ok(Self::new(input, predicate).into())
+    }
+
+    /// Get the predicate of the logical join.
+    pub fn predicate(&self) -> &Condition {
+        &self.predicate
     }
 }
 
@@ -64,18 +74,18 @@ impl ColPrunable for LogicalFilter {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
         self.must_contain_columns(required_cols);
 
-        let mut visitor = CollectRequiredCols {
-            required_cols: required_cols.clone(),
+        let mut visitor = CollectInputRef {
+            input_bits: required_cols.clone(),
         };
         self.predicate.visit_expr(&mut visitor);
 
         let mut predicate = self.predicate.clone();
-        let mut mapping = ColIndexMapping::with_remaining_columns(&visitor.required_cols);
+        let mut mapping = ColIndexMapping::with_remaining_columns(&visitor.input_bits);
         predicate = predicate.rewrite_expr(&mut mapping);
 
-        let filter = LogicalFilter::new(self.input.prune_col(&visitor.required_cols), predicate);
+        let filter = LogicalFilter::new(self.input.prune_col(&visitor.input_bits), predicate);
 
-        if required_cols == &visitor.required_cols {
+        if required_cols == &visitor.input_bits {
             filter.into()
         } else {
             LogicalProject::with_mapping(
@@ -103,6 +113,8 @@ impl ToStream for LogicalFilter {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
 
     use risingwave_common::catalog::{Field, Schema, TableId};
     use risingwave_common::types::DataType;
@@ -111,8 +123,10 @@ mod tests {
     use super::*;
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
     use crate::optimizer::plan_node::LogicalScan;
+    use crate::optimizer::property::ctx::WithId;
+    use crate::session::QueryContext;
 
-    #[test]
+    #[tokio::test]
     /// Pruning
     /// ```text
     /// Filter(cond: input_ref(1)<5)
@@ -124,7 +138,8 @@ mod tests {
     ///   Filter(cond: input_ref(0)<5)
     ///     TableScan(v2, v3)
     /// ```
-    fn test_prune_filter() {
+    async fn test_prune_filter() {
+        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
         let ty = DataType::Int32;
         let fields: Vec<Field> = vec![
             Field {
@@ -147,6 +162,7 @@ mod tests {
             Schema {
                 fields: fields.clone(),
             },
+            ctx,
         );
         let predicate: ExprImpl = ExprImpl::FunctionCall(Box::new(
             FunctionCall::new(
@@ -175,6 +191,8 @@ mod tests {
         assert_eq!(filter.schema().fields().len(), 2);
         assert_eq!(filter.schema().fields()[0], fields[1]);
         assert_eq!(filter.schema().fields()[1], fields[2]);
+        assert_eq!(filter.id().0, 3);
+
         match filter.predicate.clone().to_expr() {
             ExprImpl::FunctionCall(call) => assert_eq_input_ref!(&call.inputs()[0], 0),
             _ => panic!("Expected function call"),
@@ -185,9 +203,10 @@ mod tests {
         assert_eq!(scan.schema().fields().len(), 2);
         assert_eq!(scan.schema().fields()[0], fields[1]);
         assert_eq!(scan.schema().fields()[1], fields[2]);
+        assert_eq!(scan.id().0, 2);
     }
 
-    #[test]
+    #[tokio::test]
     /// Pruning
     /// ```text
     /// Filter(cond: input_ref(1)<5)
@@ -198,7 +217,8 @@ mod tests {
     ///   Filter(cond: input_ref(0)<5)
     ///     TableScan(v2, v3)
     /// ```
-    fn test_prune_filter_no_project() {
+    async fn test_prune_filter_no_project() {
+        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
         let ty = DataType::Int32;
         let fields: Vec<Field> = vec![
             Field {
@@ -221,6 +241,7 @@ mod tests {
             Schema {
                 fields: fields.clone(),
             },
+            ctx,
         );
         let predicate: ExprImpl = ExprImpl::FunctionCall(Box::new(
             FunctionCall::new(

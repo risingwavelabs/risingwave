@@ -127,6 +127,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
                     ManagedValueState::new(agg_call, keyspace, row_count).await?,
                 ))
             }
+            AggKind::SingleValue => todo!(),
         }
     }
 }
