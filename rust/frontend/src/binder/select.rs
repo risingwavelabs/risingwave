@@ -29,7 +29,7 @@ impl Binder {
 
         if let Some(selection) = &selection {
             let return_type = selection.return_type();
-            if !matches!(return_type, DataType::Boolean) {
+            if return_type != DataType::Boolean {
                 return Err(ErrorCode::InternalError(format!(
                     "argument of WHERE must be boolean, not type {:?}",
                     return_type
