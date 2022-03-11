@@ -4,8 +4,10 @@ use std::fmt::Display;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 
+#[derive(Debug)]
 pub struct ColumnBinding {
     pub table_name: String,
+    /// Index of the column in the table.
     pub index: usize,
     pub data_type: DataType,
 }
@@ -63,11 +65,11 @@ impl BindContext {
         column_name: &String,
         table_name: &String,
     ) -> Result<usize> {
-        let column_indexs = self
+        let column_indexes = self
             .indexs_of
             .get(column_name)
             .ok_or_else(|| ErrorCode::ItemNotFound(format!("Invalid column: {}", column_name)))?;
-        match column_indexs
+        match column_indexes
             .iter()
             .find(|column_index| self.columns[**column_index].table_name == *table_name)
         {

@@ -145,7 +145,7 @@ impl Binder {
             .for_each(|(index, column_catalog)| {
                 self.context.columns.push(ColumnBinding::new(
                     table_name.clone(),
-                    index,
+                    begin + index,
                     column_catalog.data_type(),
                 ));
                 self.context
@@ -154,6 +154,7 @@ impl Binder {
                     .or_default()
                     .push(self.context.columns.len() - 1);
             });
+
         match self.context.range_of.entry(table_name.clone()) {
             Entry::Occupied(_) => Err(ErrorCode::InternalError(format!(
                 "Duplicated table name: {}",
