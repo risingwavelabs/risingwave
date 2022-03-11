@@ -29,7 +29,7 @@ Currently, we use [sqllogictest-rs](https://github.com/singularity-data/sqllogic
 To install sqllogictest:
 
 ```shell
-make sqllogictest
+cargo install --git https://github.com/risinglightdb/sqllogictest-rs --features bin
 ```
 
 To run end-to-end tests with multiple compute-nodes, run the script:

@@ -322,6 +322,13 @@ impl Message {
         };
         Ok(res)
     }
+
+    pub fn as_chunk(&self) -> Option<&StreamChunk> {
+        match self {
+            Self::Chunk(chunk) => Some(chunk),
+            _ => None,
+        }
+    }
 }
 
 /// `Executor` supports handling of control messages.

@@ -23,7 +23,7 @@ pub type ParallelUnitId = u32;
 pub type NodeLocations = HashMap<NodeId, WorkerNode>;
 pub type StoredClusterManagerRef<S> = Arc<StoredClusterManager<S>>;
 
-const DEFAULT_WORKNODE_PARALLEL_DEGREE: usize = 8;
+const DEFAULT_WORK_NODE_PARALLEL_DEGREE: usize = 8;
 
 pub struct WorkerKey(pub HostAddress);
 
