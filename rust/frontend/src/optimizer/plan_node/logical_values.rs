@@ -44,7 +44,7 @@ impl LogicalValues {
     }
 }
 
-impl_plan_tree_node_for_leaf! {LogicalValues}
+impl_plan_tree_node_for_leaf! { LogicalValues }
 
 impl fmt::Display for LogicalValues {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -59,10 +59,15 @@ impl ColPrunable for LogicalValues {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
         self.must_contain_columns(required_cols);
 
-        let (rows, fields) = required_cols
+        let rows = self
+            .rows
+            .iter()
+            .map(|row| required_cols.ones().map(|i| row[i].clone()).collect())
+            .collect();
+        let fields = required_cols
             .ones()
-            .map(|id| (self.rows[id].clone(), self.schema().fields[id].clone()))
-            .unzip();
+            .map(|i| self.schema().fields[i].clone())
+            .collect();
         Self::new(rows, Schema { fields }, self.base.ctx.clone()).into()
     }
 }
