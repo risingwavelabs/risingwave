@@ -92,8 +92,8 @@ macro_rules! impl_with_dist_base {
         })*
     }
 }
-for_batch_plan_nodes! {impl_with_dist_base }
-for_stream_plan_nodes! {impl_with_dist_base }
+for_batch_plan_nodes! { impl_with_dist_base }
+for_stream_plan_nodes! { impl_with_dist_base }
 macro_rules! impl_with_dist_any {
     ([], $( { $convention:ident, $name:ident }),*) => {
         $(paste! {
@@ -105,7 +105,7 @@ macro_rules! impl_with_dist_any {
         })*
     }
 }
-for_logical_plan_nodes! {impl_with_dist_any }
+for_logical_plan_nodes! { impl_with_dist_any }
 
 #[cfg(test)]
 mod tests {

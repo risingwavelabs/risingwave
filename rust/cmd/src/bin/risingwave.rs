@@ -13,6 +13,7 @@ async fn main() {
     use std::pin::Pin;
 
     use clap::StructOpt;
+    use tokio::signal;
 
     /// Get the launch target of this all-in-one binary
     fn get_target() -> String {
@@ -78,6 +79,32 @@ async fn main() {
             risingwave_logging::init_risingwave_logger(false, true);
 
             risingwave_ctl::start().await
+        }),
+    );
+
+    fns.insert(
+        "playground",
+        Box::new(async move {
+            eprintln!("launching playground");
+
+            risingwave_logging::oneshot_common();
+            risingwave_logging::init_risingwave_logger(false, false);
+
+            let meta_opts = risingwave_meta::MetaNodeOpts::parse_from(["--backend mem"]);
+            let compute_opts =
+                risingwave_compute::ComputeNodeOpts::parse_from(["--state_store in-memory"]);
+            let frontend_opts = risingwave_frontend::FrontendOpts::parse_from([""]);
+
+            let _meta_handle = tokio::spawn(async move { risingwave_meta::start(meta_opts).await });
+            let _compute_handle =
+                tokio::spawn(async move { risingwave_compute::start(compute_opts).await });
+            let _frontend_handle =
+                tokio::spawn(async move { risingwave_frontend::start(frontend_opts).await });
+
+            // TODO: should we join all handles?
+            // Currently, not all services can be shutdown gracefully, just quit on Ctrl-C now.
+            signal::ctrl_c().await.unwrap();
+            println!("Exit");
         }),
     );
 
