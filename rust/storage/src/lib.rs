@@ -16,8 +16,8 @@
 #![feature(map_first_last)]
 #![feature(let_chains)]
 
-use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::OrderType;
+
+
 
 pub mod cell_based_row_deserializer;
 pub mod hummock;
@@ -44,7 +44,7 @@ pub mod tikv;
 pub mod tikv;
 
 pub use keyspace::{Keyspace, Segment};
-use risingwave_common::catalog::ColumnId;
+
 pub use store::{StateStore, StateStoreIter};
 pub use store_impl::StateStoreImpl;
 
