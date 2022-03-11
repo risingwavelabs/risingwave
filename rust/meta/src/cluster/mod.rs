@@ -95,7 +95,7 @@ where
                 // Generate parallel units.
                 let parallel_units = if r#type == WorkerType::ComputeNode {
                     self.generate_cn_parallel_units(
-                        DEFAULT_WORKNODE_PARALLEL_DEGREE as usize,
+                        DEFAULT_WORK_NODE_PARALLEL_DEGREE as usize,
                         &host_address,
                     )
                     .await?
@@ -248,7 +248,7 @@ where
             .id_gen_manager_ref
             .generate_interval::<{ IdCategory::ParallelUnit }>(parallel_degree as i32)
             .await? as usize;
-        let parallel_degree = DEFAULT_WORKNODE_PARALLEL_DEGREE;
+        let parallel_degree = DEFAULT_WORK_NODE_PARALLEL_DEGREE;
         let mut parallel_units = Vec::with_capacity(parallel_degree);
         let single_parallel_unit = ParallelUnit {
             id: start_id as u32,
@@ -418,7 +418,7 @@ mod tests {
         }
 
         let single_parallel_count = worker_count;
-        let hash_parallel_count = (DEFAULT_WORKNODE_PARALLEL_DEGREE - 1) * worker_count;
+        let hash_parallel_count = (DEFAULT_WORK_NODE_PARALLEL_DEGREE - 1) * worker_count;
         assert_cluster_manager(&cluster_manager, single_parallel_count, hash_parallel_count).await;
 
         let worker_to_delete_count = 4usize;
@@ -432,7 +432,7 @@ mod tests {
                 .await
                 .unwrap();
         }
-        assert_cluster_manager(&cluster_manager, 1, DEFAULT_WORKNODE_PARALLEL_DEGREE - 1).await;
+        assert_cluster_manager(&cluster_manager, 1, DEFAULT_WORK_NODE_PARALLEL_DEGREE - 1).await;
 
         let mapping = cluster_manager
             .dispatch_manager_ref
@@ -442,7 +442,7 @@ mod tests {
         let unique_parallel_units = HashSet::<u32>::from_iter(mapping.into_iter());
         assert_eq!(
             unique_parallel_units.len(),
-            DEFAULT_WORKNODE_PARALLEL_DEGREE - 1
+            DEFAULT_WORK_NODE_PARALLEL_DEGREE - 1
         );
 
         Ok(())
