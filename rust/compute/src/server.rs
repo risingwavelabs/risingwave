@@ -81,7 +81,7 @@ pub async fn compute_node_serve(
             hummock.inner().storage.local_version_manager().clone(),
             hummock.inner().storage.hummock_meta_client().clone(),
             hummock.inner().storage.sstable_store(),
-            state_store_metrics
+            state_store_metrics,
         ));
     }
 
