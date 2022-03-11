@@ -16,8 +16,14 @@ pub struct BatchExchange {
 
 impl BatchExchange {
     pub fn new(input: PlanRef, order: Order, dist: Distribution) -> Self {
+        let ctx = input.ctx();
         let schema = input.schema().clone();
-        let base = BatchBase { order, dist };
+        let base = BatchBase {
+            order,
+            dist,
+            id: ctx.borrow_mut().get_id(),
+            ctx: input.ctx(),
+        };
         BatchExchange {
             input,
             schema,

@@ -55,6 +55,7 @@ impl BatchEnvironment {
     #[cfg(test)]
     pub fn for_test() -> Self {
         use risingwave_source::MemSourceManager;
+        use risingwave_storage::monitor::StateStoreMetrics;
 
         BatchEnvironment {
             task_manager: Arc::new(BatchManager::new()),
@@ -62,7 +63,9 @@ impl BatchEnvironment {
             source_manager: std::sync::Arc::new(MemSourceManager::new()),
             config: Arc::new(BatchConfig::default()),
             worker_id: WorkerNodeId::default(),
-            state_store: StateStoreImpl::shared_in_memory_store(),
+            state_store: StateStoreImpl::shared_in_memory_store(Arc::new(
+                StateStoreMetrics::unused(),
+            )),
         }
     }
 

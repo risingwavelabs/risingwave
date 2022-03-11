@@ -109,9 +109,8 @@ impl EqJoinPredicate {
     }
 
     pub fn all_cond(&self) -> Condition {
-        let mut cond = self.eq_cond();
-        cond.and(self.non_eq_cond());
-        cond
+        let cond = self.eq_cond();
+        cond.and(self.non_eq_cond())
     }
 
     pub fn has_eq(&self) -> bool {

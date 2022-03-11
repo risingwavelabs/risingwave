@@ -21,9 +21,12 @@ impl fmt::Display for StreamProject {
 
 impl StreamProject {
     pub fn new(logical: LogicalProject) -> Self {
+        let ctx = logical.base.ctx.clone();
         // TODO: derive from input
         let base = StreamBase {
             dist: Distribution::any().clone(),
+            id: ctx.borrow_mut().get_id(),
+            ctx: ctx.clone(),
         };
         StreamProject { logical, base }
     }

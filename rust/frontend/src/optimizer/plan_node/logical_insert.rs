@@ -24,8 +24,13 @@ pub struct LogicalInsert {
 impl LogicalInsert {
     /// Create a LogicalInsert node. Used internally by optimizer.
     pub fn new(input: PlanRef, table: BaseTableRef, columns: Vec<ColumnId>) -> Self {
+        let ctx = input.ctx();
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
-        let base = LogicalBase { schema };
+        let base = LogicalBase {
+            schema,
+            id: ctx.borrow_mut().get_id(),
+            ctx: ctx.clone(),
+        };
         Self {
             table,
             columns,

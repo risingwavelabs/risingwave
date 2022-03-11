@@ -23,7 +23,7 @@ use super::{
     LocalVersionManager, SSTableBuilder, SSTableIterator, Sstable,
 };
 use crate::hummock::vacuum::Vacuum;
-use crate::monitor::StateStoreStats;
+use crate::monitor::StateStoreMetrics;
 
 #[derive(Clone)]
 pub struct SubCompactContext {
@@ -31,7 +31,7 @@ pub struct SubCompactContext {
     pub local_version_manager: Arc<LocalVersionManager>,
     pub hummock_meta_client: Arc<dyn HummockMetaClient>,
     pub sstable_store: SstableStoreRef,
-    pub stats: Arc<StateStoreStats>,
+    pub stats: Arc<StateStoreMetrics>,
     pub is_share_buffer_compact: bool,
 }
 
@@ -315,7 +315,7 @@ impl Compactor {
         local_version_manager: Arc<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         sstable_store: SstableStoreRef,
-        stats: Arc<StateStoreStats>,
+        stats: Arc<StateStoreMetrics>,
     ) -> (JoinHandle<()>, UnboundedSender<()>) {
         let sub_compact_context = SubCompactContext {
             options,

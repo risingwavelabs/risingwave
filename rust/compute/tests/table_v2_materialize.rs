@@ -16,7 +16,7 @@ use risingwave_pb::plan::create_table_node::Info;
 use risingwave_pb::plan::ColumnDesc as ProstColumnDesc;
 use risingwave_source::{MemSourceManager, SourceManager};
 use risingwave_storage::memory::MemoryStateStore;
-use risingwave_storage::monitor::DEFAULT_STATE_STORE_STATS;
+use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::table::mview::MViewTable;
 use risingwave_storage::{Keyspace, StateStore, StateStoreImpl};
 use risingwave_stream::executor::{
@@ -72,7 +72,7 @@ async fn test_table_v2_materialize() -> Result<()> {
     let _state_store_impl = StateStoreImpl::MemoryStateStore(
         memory_state_store
             .clone()
-            .monitored(DEFAULT_STATE_STORE_STATS.clone()),
+            .monitored(Arc::new(StateStoreMetrics::unused())),
     );
     let source_manager = Arc::new(MemSourceManager::new());
     let source_table_id = TableId::default();

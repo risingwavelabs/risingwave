@@ -87,9 +87,8 @@ impl PlanRoot {
         // TODO: add a `HeuristicOptimizer` here
         let mut plan = self.logical_plan.prune_col(&self.out_fields);
         plan = plan.to_batch_with_order_required(&self.required_order);
-        plan = plan.to_distributed_with_required(&self.required_order, &self.required_dist);
-        // FIXME: add a Batch Project for the Plan, to remove the unnecessary column in the
-        // result.
+        // TODO: plan.to_distributed_with_required()
+        // FIXME: add a Batch Project for the Plan, to remove the unnecessary column in the result.
         // TODO: do a final column pruning after add the batch project, but now the column
         // pruning is not used in batch node, need to think.
 
@@ -112,15 +111,20 @@ impl PlanRoot {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
     use risingwave_common::catalog::Field;
     use risingwave_common::types::DataType;
 
     use super::*;
     use crate::catalog::{ColumnId, TableId};
     use crate::optimizer::plan_node::LogicalScan;
+    use crate::session::QueryContext;
 
-    #[test]
-    fn test_as_subplan() {
+    #[tokio::test]
+    async fn test_as_subplan() {
+        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
         let scan = LogicalScan::create(
             "test_table".into(),
             TableId::new(3),
@@ -129,6 +133,7 @@ mod tests {
                 Field::with_name(DataType::Int32, "v1".into()),
                 Field::with_name(DataType::Varchar, "v2".into()),
             ]),
+            ctx,
         )
         .unwrap();
         let out_fields = FixedBitSet::with_capacity_and_blocks(2, [1]);

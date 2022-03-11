@@ -19,7 +19,7 @@ use super::local_version_manager::LocalVersionManager;
 use super::utils::range_overlap;
 use super::value::HummockValue;
 use super::{key, HummockError, HummockOptions, HummockResult, SstableStoreRef};
-use crate::monitor::StateStoreStats;
+use crate::monitor::StateStoreMetrics;
 
 type SharedBufferItem = (Bytes, HummockValue<Bytes>);
 
@@ -163,8 +163,8 @@ impl SharedBufferManager {
         options: Arc<HummockOptions>,
         local_version_manager: Arc<LocalVersionManager>,
         sstable_store: SstableStoreRef,
-        // TODO: should be separated `HummockStats` instead of `StateStoreStats`.
-        stats: Arc<StateStoreStats>,
+        // TODO: should be separated `HummockStats` instead of `StateStoreMetrics`.
+        stats: Arc<StateStoreMetrics>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> Self {
         let (uploader_tx, uploader_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -351,8 +351,8 @@ pub struct SharedBufferUploader {
     options: Arc<HummockOptions>,
 
     /// Statistics.
-    // TODO: should be separated `HummockStats` instead of `StateStoreStats`.
-    stats: Arc<StateStoreStats>,
+    // TODO: should be separated `HummockStats` instead of `StateStoreMetrics`.
+    stats: Arc<StateStoreMetrics>,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
     sstable_store: SstableStoreRef,
 
@@ -364,7 +364,7 @@ impl SharedBufferUploader {
         options: Arc<HummockOptions>,
         local_version_manager: Arc<LocalVersionManager>,
         sstable_store: SstableStoreRef,
-        stats: Arc<StateStoreStats>,
+        stats: Arc<StateStoreMetrics>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         rx: tokio::sync::mpsc::UnboundedReceiver<SharedBufferUploaderItem>,
     ) -> Self {
@@ -519,7 +519,7 @@ mod tests {
     use crate::hummock::shared_buffer::SharedBufferManager;
     use crate::hummock::value::HummockValue;
     use crate::hummock::{HummockOptions, SstableStore};
-    use crate::monitor::DEFAULT_STATE_STORE_STATS;
+    use crate::monitor::StateStoreMetrics;
     use crate::object::{InMemObjectStore, ObjectStore};
 
     fn transform_shared_buffer(
@@ -675,7 +675,7 @@ mod tests {
             Arc::new(HummockOptions::default_for_test()),
             vm,
             sstable_store,
-            DEFAULT_STATE_STORE_STATS.clone(),
+            Arc::new(StateStoreMetrics::unused()),
             mock_hummock_meta_client,
         )
     }

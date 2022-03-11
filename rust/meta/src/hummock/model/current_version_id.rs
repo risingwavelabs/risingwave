@@ -8,7 +8,7 @@ use crate::storage::{MetaStore, Transaction};
 
 /// Hummock version id key.
 /// `cf(hummock_default)`: `hummock_version_id_key` -> `HummockVersionRefId`
-const HUMMOCK_VERSION_ID_LEY: &str = "version_id";
+const HUMMOCK_VERSION_ID_KEY: &str = "version_id";
 
 /// `CurrentHummockVersionId` tracks the current version id.
 pub struct CurrentHummockVersionId {
@@ -27,7 +27,7 @@ impl CurrentHummockVersionId {
     }
 
     fn key() -> &'static str {
-        HUMMOCK_VERSION_ID_LEY
+        HUMMOCK_VERSION_ID_KEY
     }
 
     pub async fn get<S: MetaStore>(meta_store_ref: &S) -> Result<CurrentHummockVersionId> {

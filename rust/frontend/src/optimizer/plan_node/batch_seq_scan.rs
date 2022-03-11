@@ -21,10 +21,13 @@ impl WithSchema for BatchSeqScan {
 
 impl BatchSeqScan {
     pub fn new(logical: LogicalScan) -> Self {
+        let ctx = logical.base.ctx.clone();
         // TODO: derive from input
         let base = BatchBase {
+            id: ctx.borrow_mut().get_id(),
             order: Order::any().clone(),
             dist: Distribution::any().clone(),
+            ctx: ctx.clone(),
         };
 
         Self { logical, base }
