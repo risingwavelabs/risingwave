@@ -51,7 +51,7 @@ message Table {
   string name = 4;
   repeated plan.ColumnCatalog column_catalog = 5;
   repeated int32 pk_column_ids = 6;
-  repeated plan.OrderType order_types = 7;
+  repeated plan.OrderType pk_orders = 7;
   repeated int32 dependent_tables = 8;
 }
 
