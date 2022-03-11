@@ -46,7 +46,6 @@ pub struct SourceExecutor {
 
     /// current allocated row id
     next_row_id: AtomicU64,
-    first_execution: bool,
 
     /// Identity string
     identity: String,
@@ -159,7 +158,6 @@ impl SourceExecutor {
                 barrier_receiver,
             }),
             next_row_id: AtomicU64::from(0u64),
-            first_execution: true,
             identity: format!("SourceExecutor {:X}", executor_id),
             op_info,
             reader_stream: None,
@@ -204,14 +202,15 @@ impl SourceReader {
         loop {
             match stream_reader.next().await {
                 Err(e) => {
+                    // TODO: report this error to meta service to mark the actors failed.
                     error!("hang up stream reader due to polling error: {}", e);
 
                     // Drop the reader, then the error might be caught by the writer side.
-                    // Then hang up this stream by breaking the loop.
                     drop(stream_reader);
+                    // Then hang up this stream by breaking the loop.
                     break;
                 }
-                item => yield item,
+                Ok(chunk) => yield chunk,
             }
         }
     }
@@ -244,11 +243,9 @@ impl SourceReader {
 #[async_trait]
 impl Executor for SourceExecutor {
     async fn next(&mut self) -> Result<Message> {
-        if self.first_execution {
-            let mut reader = self.reader.take().unwrap();
+        if let Some(mut reader) = self.reader.take() {
             reader.stream_reader.open().await?;
-            self.first_execution = false;
-            self.reader_stream = Some(reader.into_stream().boxed());
+            self.reader_stream.replace(reader.into_stream().boxed());
         }
 
         match self.reader_stream.as_mut().unwrap().next().await {

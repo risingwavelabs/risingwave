@@ -663,7 +663,9 @@ impl StreamManagerCore {
             let actor = Actor::new(dispatcher, actor_id, self.context.clone());
             self.handles.insert(
                 actor_id,
-                tokio::spawn(async move { actor.run().await.unwrap() }),
+                tokio::spawn(async move {
+                    actor.run().await.unwrap(); // unwrap the actor result to panic on error
+                }),
             );
         }
 
