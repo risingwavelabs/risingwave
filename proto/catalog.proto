@@ -53,7 +53,7 @@ message Table {
   string name = 4;
   repeated plan.ColumnCatalog column_catalog = 5;
   repeated int32 pk_column_ids = 6;
-  repeated plan.OrderType order_types = 7;
+  repeated plan.OrderType pk_orders = 7;
   repeated uint32 dependent_tables = 8;
 }
 
@@ -122,7 +122,7 @@ message CreateMaterializedSourceRequest {
   string name = 3;
   TableSourceInfo source_info = 4;
   repeated int32 pk_column_ids = 5;
-  repeated plan.OrderType order_types = 6;
+  repeated plan.OrderType pk_orders = 6;
   stream_plan.StreamNode stream_node = 7;
 }
 
@@ -139,7 +139,7 @@ message CreateMaterializedViewRequest {
   string name = 3;
   repeated plan.ColumnCatalog column_catalog = 4;
   repeated int32 pk_column_ids = 5;
-  repeated plan.OrderType order_types = 6;
+  repeated plan.OrderType pk_orders = 6;
   repeated uint32 dependent_tables = 7;
   stream_plan.StreamNode stream_node = 8;
 }
