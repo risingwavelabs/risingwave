@@ -10,7 +10,7 @@ mod level_handler;
 mod mock_hummock_meta_client;
 mod model;
 #[cfg(test)]
-mod test_utils;
+pub mod test_utils;
 mod vacuum;
 
 use std::sync::Arc;

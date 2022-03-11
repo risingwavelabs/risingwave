@@ -1,21 +1,27 @@
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
+use std::ops::Add;
 use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 
+use itertools::Itertools;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::{HostAddress, ParallelUnit, ParallelUnitType, WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::RwLock;
+use tokio::task::JoinHandle;
 
 use crate::hummock::HummockManager;
 use crate::manager::{
     HashDispatchManager, HashDispatchManagerRef, IdCategory, IdGeneratorManagerRef, MetaSrvEnv,
     NotificationManagerRef,
 };
-use crate::model::{MetadataModel, Worker};
+use crate::model::{MetadataModel, Worker, INVALID_EXPIRE_AT};
 use crate::storage::MetaStore;
 
 pub type NodeId = u32;
@@ -25,6 +31,7 @@ pub type StoredClusterManagerRef<S> = Arc<StoredClusterManager<S>>;
 
 const DEFAULT_WORK_NODE_PARALLEL_DEGREE: usize = 8;
 
+/// [`StoredClusterManager`] manager cluster/worker meta data in [`MetaStore`].
 pub struct WorkerKey(pub HostAddress);
 
 impl PartialEq<Self> for WorkerKey {
@@ -47,8 +54,8 @@ pub struct StoredClusterManager<S> {
     id_gen_manager_ref: IdGeneratorManagerRef<S>,
     hummock_manager_ref: Option<Arc<HummockManager<S>>>,
     dispatch_manager_ref: HashDispatchManagerRef<S>,
+    max_heartbeat_interval: Duration,
     notification_manager_ref: NotificationManagerRef,
-
     core: RwLock<StoredClusterManagerCore>,
 }
 
@@ -60,6 +67,7 @@ where
         env: MetaSrvEnv<S>,
         hummock_manager_ref: Option<Arc<HummockManager<S>>>,
         notification_manager_ref: NotificationManagerRef,
+        max_heartbeat_interval: Duration,
     ) -> Result<Self> {
         let meta_store_ref = env.meta_store_ref();
         let core = StoredClusterManagerCore::new(meta_store_ref.clone()).await?;
@@ -73,6 +81,7 @@ where
             hummock_manager_ref,
             dispatch_manager_ref,
             notification_manager_ref,
+            max_heartbeat_interval,
             core: RwLock::new(core),
         })
     }
@@ -83,7 +92,7 @@ where
         r#type: WorkerType,
     ) -> Result<(WorkerNode, bool)> {
         let mut core = self.core.write().await;
-        match core.get_worker_node(host_address.clone()) {
+        match core.get_worker_by_host(host_address.clone()) {
             Some(worker) => Ok((worker.to_protobuf(), false)),
             None => {
                 // Generate worker id.
@@ -133,7 +142,7 @@ where
 
     pub async fn activate_worker_node(&self, host_address: HostAddress) -> Result<()> {
         let mut core = self.core.write().await;
-        match core.get_worker_node(host_address.clone()) {
+        match core.get_worker_by_host(host_address.clone()) {
             Some(worker) => {
                 let mut worker_node = worker.to_protobuf();
                 if worker_node.state == State::Running as i32 {
@@ -167,7 +176,7 @@ where
 
     pub async fn delete_worker_node(&self, host_address: HostAddress) -> Result<()> {
         let mut core = self.core.write().await;
-        match core.get_worker_node(host_address.clone()) {
+        match core.get_worker_by_host(host_address.clone()) {
             Some(worker) => {
                 let worker_node = worker.to_protobuf();
 
@@ -211,6 +220,99 @@ where
                 "Worker node does not exist!".to_string(),
             ))),
         }
+    }
+
+    pub async fn heartbeat(&self, worker_id: u32) -> Result<()> {
+        let mut core = self.core.write().await;
+        // 1. Get unique key. TODO: avoid this step
+        let key = match core.get_worker_by_id(worker_id) {
+            None => {
+                return Ok(());
+            }
+            Some(worker_2) => worker_2.to_protobuf().host.unwrap(),
+        };
+
+        // 2. Update expire_at
+        let expire_at = SystemTime::now()
+            .add(self.max_heartbeat_interval)
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("Clock may have gone backwards")
+            .as_secs();
+        core.update_worker_ttl(key, expire_at);
+
+        Ok(())
+    }
+
+    async fn update_worker_ttl(&self, host_address: HostAddress, expire_at: u64) {
+        let mut core = self.core.write().await;
+        core.update_worker_ttl(host_address, expire_at);
+    }
+
+    /// TODO: Java frontend doesn't send heartbeat. Remove this function after we use
+    /// Rust frontend.
+    async fn get_workers_to_init_or_delete(&self, now: u64) -> Vec<Worker> {
+        let core = self.core.read().await;
+        core.get_workers_to_init_or_delete(now)
+    }
+
+    pub async fn start_heartbeat_checker(
+        cluster_manager_ref: StoredClusterManagerRef<S>,
+        check_interval: Duration,
+    ) -> (JoinHandle<()>, UnboundedSender<()>) {
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
+        let join_handle = tokio::spawn(async move {
+            let mut min_interval = tokio::time::interval(check_interval);
+            loop {
+                tokio::select! {
+                    // Wait for interval
+                    _ = min_interval.tick() => {},
+                    // Shutdown
+                    _ = shutdown_rx.recv() => {
+                        tracing::info!("Heartbeat checker is shutting down");
+                        return;
+                    }
+                }
+                let now = SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .expect("Clock may have gone backwards")
+                    .as_secs();
+                let workers_to_init_or_delete =
+                    cluster_manager_ref.get_workers_to_init_or_delete(now).await;
+                for worker in workers_to_init_or_delete {
+                    let key = worker.key().expect("illegal key");
+                    if worker.expire_at() == INVALID_EXPIRE_AT {
+                        // Initialize expire_at
+                        cluster_manager_ref
+                            .update_worker_ttl(
+                                key,
+                                now + cluster_manager_ref.max_heartbeat_interval.as_secs(),
+                            )
+                            .await;
+                        continue;
+                    }
+                    match cluster_manager_ref.delete_worker_node(key.clone()).await {
+                        Ok(_) => {
+                            tracing::debug!(
+                                "Deleted expired worker {} {}:{}",
+                                worker.worker_id(),
+                                key.host,
+                                key.port
+                            );
+                        }
+                        Err(err) => {
+                            tracing::warn!(
+                                "Failed to delete worker {} {}:{}. {}",
+                                worker.worker_id(),
+                                key.host,
+                                key.port,
+                                err
+                            );
+                        }
+                    }
+                }
+            }
+        });
+        (join_handle, shutdown_tx)
     }
 
     /// Get live nodes with the specified type and state.
@@ -309,8 +411,15 @@ impl StoredClusterManagerCore {
         })
     }
 
-    fn get_worker_node(&self, host_address: HostAddress) -> Option<Worker> {
+    fn get_worker_by_host(&self, host_address: HostAddress) -> Option<Worker> {
         self.workers.get(&WorkerKey(host_address)).cloned()
+    }
+
+    fn get_worker_by_id(&self, id: u32) -> Option<Worker> {
+        self.workers
+            .iter()
+            .find(|(_, worker)| worker.worker_id() == id)
+            .map(|(_, worker)| worker.clone())
     }
 
     fn add_worker_node(&mut self, worker: Worker) {
@@ -374,6 +483,24 @@ impl StoredClusterManagerCore {
             ParallelUnitType::Hash => self.hash_parallel_units.clone(),
         }
     }
+
+    fn update_worker_ttl(&mut self, host_address: HostAddress, expire_at: u64) {
+        match self.workers.entry(WorkerKey(host_address)) {
+            Entry::Occupied(mut worker) => {
+                worker.get_mut().set_expire_at(expire_at);
+            }
+            Entry::Vacant(_) => {}
+        }
+    }
+
+    fn get_workers_to_init_or_delete(&self, now: u64) -> Vec<Worker> {
+        self.workers
+            .iter()
+            .filter(|(_, worker)| worker.worker_type() != WorkerType::Frontend)
+            .filter(|(_, worker)| worker.expire_at() < now)
+            .map(|(_, worker)| worker.clone())
+            .collect_vec()
+    }
 }
 
 #[cfg(test)]
@@ -381,6 +508,7 @@ mod tests {
     use std::collections::HashSet;
 
     use super::*;
+    use crate::hummock::test_utils::setup_compute_env;
     use crate::manager::NotificationManager;
     use crate::rpc::metrics::MetaMetrics;
     use crate::storage::MemStore;
@@ -398,6 +526,7 @@ mod tests {
                 env.clone(),
                 Some(hummock_manager.clone()),
                 Arc::new(NotificationManager::new()),
+                Duration::new(0, 0),
             )
             .await
             .unwrap(),
@@ -461,5 +590,71 @@ mod tests {
             .await;
         assert_eq!(single_parallel_units.len(), single_parallel_count);
         assert_eq!(hash_parallel_units.len(), hash_parallel_count);
+    }
+
+    // This test takes seconds because the TTL is measured in seconds.
+    #[tokio::test]
+    #[ignore]
+    async fn test_heartbeat() {
+        let (_env, _hummock_manager, cluster_manager, worker_node) = setup_compute_env(1).await;
+        let context_id_1 = worker_node.id;
+        let fake_host_address_2 = HostAddress {
+            host: "127.0.0.1".to_string(),
+            port: 2,
+        };
+        let (_worker_node_2, _) = cluster_manager
+            .add_worker_node(fake_host_address_2, WorkerType::ComputeNode)
+            .await
+            .unwrap();
+        // Two live nodes
+        assert_eq!(
+            cluster_manager
+                .list_worker_node(WorkerType::ComputeNode, None)
+                .await
+                .len(),
+            2
+        );
+
+        let ttl = cluster_manager.max_heartbeat_interval;
+        let check_interval = std::cmp::min(Duration::from_millis(100), ttl / 4);
+
+        // Keep worker 1 alive
+        let cluster_manager_ref = cluster_manager.clone();
+        let keep_alive_join_handle = tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(cluster_manager_ref.max_heartbeat_interval / 3).await;
+                cluster_manager_ref.heartbeat(context_id_1).await.unwrap();
+            }
+        });
+
+        tokio::time::sleep(ttl * 2 + check_interval).await;
+
+        // One node has actually expired but still got two, because heartbeat check is not
+        // started.
+        assert_eq!(
+            cluster_manager
+                .list_worker_node(WorkerType::ComputeNode, None)
+                .await
+                .len(),
+            2
+        );
+
+        let (join_handle, shutdown_sender) =
+            StoredClusterManager::start_heartbeat_checker(cluster_manager.clone(), check_interval)
+                .await;
+        tokio::time::sleep(ttl * 2 + check_interval).await;
+
+        // One live node left.
+        assert_eq!(
+            cluster_manager
+                .list_worker_node(WorkerType::ComputeNode, None)
+                .await
+                .len(),
+            1
+        );
+
+        shutdown_sender.send(()).unwrap();
+        join_handle.await.unwrap();
+        keep_alive_join_handle.abort();
     }
 }
