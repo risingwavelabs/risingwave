@@ -297,6 +297,9 @@ where
                 let workers_to_init_or_delete = cluster_manager_ref
                     .workers
                     .iter()
+                    // TODO: Java frontend doesn't send heartbeat. Remove this line after we use
+                    // Rust frontend.
+                    .filter(|worker| worker.worker_type() != WorkerType::Frontend)
                     .filter(|worker| worker.expire_at() < now)
                     .map(|worker| worker.value().clone())
                     .collect_vec();
@@ -308,8 +311,26 @@ where
                             key,
                             now + cluster_manager_ref.max_heartbeat_interval.as_secs(),
                         );
-                    } else if let Err(err) = cluster_manager_ref.delete_worker_node(key).await {
-                        tracing::warn!("Failed to delete_worker_node. {}", err);
+                        continue;
+                    }
+                    match cluster_manager_ref.delete_worker_node(key.clone()).await {
+                        Ok(_) => {
+                            tracing::debug!(
+                                "Deleted expired worker {} {}:{}",
+                                worker.worker_id(),
+                                key.host,
+                                key.port
+                            );
+                        }
+                        Err(err) => {
+                            tracing::warn!(
+                                "Failed to delete worker {} {}:{}. {}",
+                                worker.worker_id(),
+                                key.host,
+                                key.port,
+                                err
+                            );
+                        }
                     }
                 }
             }
@@ -330,7 +351,6 @@ mod tests {
 
     // This test takes seconds because the TTL is measured in seconds.
     #[tokio::test]
-    #[ignore]
     async fn test_heartbeat() {
         let (_env, _hummock_manager, cluster_manager, worker_node) = setup_compute_env(1).await;
         let context_id_1 = worker_node.id;
@@ -362,7 +382,7 @@ mod tests {
             }
         });
 
-        tokio::time::sleep(ttl + check_interval).await;
+        tokio::time::sleep(ttl * 2 + check_interval).await;
 
         // One node has actually expired but still got two, because heartbeat check is not started.
         assert_eq!(
