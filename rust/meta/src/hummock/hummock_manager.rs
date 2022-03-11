@@ -256,6 +256,18 @@ where
     }
 
     fn trigger_rw_stat(&self, compact_metrics: &CompactMetrics) {
+        self.metrics
+            .level_compact_frequence
+            .get_metric_with_label_values(&[&(String::from("L")
+                + &compact_metrics
+                    .read_level_n
+                    .as_ref()
+                    .unwrap()
+                    .level_idx
+                    .to_string())])
+            .unwrap()
+            .inc();
+
         Self::single_level_stat_bytes(
             |label| {
                 self.metrics

@@ -5,8 +5,9 @@ use hyper::{Body, Request, Response};
 use itertools::Itertools;
 use prometheus::{
     histogram_opts, register_gauge_vec_with_registry, register_histogram_vec_with_registry,
-    register_histogram_with_registry, register_int_gauge_vec_with_registry, Encoder, GaugeVec,
-    Histogram, HistogramVec, IntGaugeVec, Registry, TextEncoder, DEFAULT_BUCKETS,
+    register_histogram_with_registry, register_int_counter_vec_with_registry,
+    register_int_gauge_vec_with_registry, Encoder, GaugeVec, Histogram, HistogramVec,
+    IntCounterVec, IntGaugeVec, Registry, TextEncoder, DEFAULT_BUCKETS,
 };
 use tower::make::Shared;
 use tower::ServiceBuilder;
@@ -40,6 +41,8 @@ pub struct MetaMetrics {
     pub level_compact_read_sstn_next: IntGaugeVec,
     /// num of SSTs written into next level during history compactions to next level
     pub level_compact_write_sstn: IntGaugeVec,
+    /// num of compactions from each level to next level
+    pub level_compact_frequence: IntCounterVec,
 }
 
 impl MetaMetrics {
@@ -126,6 +129,14 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let level_compact_frequence = register_int_counter_vec_with_registry!(
+            "storage_level_compact_frequence",
+            "num of compactions from each level to next level",
+            &["level_index"],
+            registry
+        )
+        .unwrap();
+
         Self {
             registry,
             grpc_latency,
@@ -138,6 +149,7 @@ impl MetaMetrics {
             level_compact_read_sstn_curr,
             level_compact_read_sstn_next,
             level_compact_write_sstn,
+            level_compact_frequence,
         }
     }
 
