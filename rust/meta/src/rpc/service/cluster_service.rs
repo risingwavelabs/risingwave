@@ -93,7 +93,7 @@ where
         } else {
             Some(risingwave_pb::common::worker_node::State::Running)
         };
-        let node_list = self.scm.list_worker_node(worker_type, worker_state);
+        let node_list = self.scm.list_worker_node(worker_type, worker_state).await;
         Ok(Response::new(ListAllNodesResponse {
             status: None,
             nodes: node_list,

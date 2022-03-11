@@ -79,7 +79,7 @@ where
     ) -> Result<()> {
         let actor_ids = table_fragments.actor_ids();
 
-        let locations = self.scheduler.schedule(&actor_ids)?;
+        let locations = self.scheduler.schedule(&actor_ids).await?;
 
         let actor_info = locations
             .actor_locations

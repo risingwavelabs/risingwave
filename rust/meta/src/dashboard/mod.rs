@@ -70,12 +70,15 @@ mod handlers {
         srv.add_test_data().await.map_err(err)?;
 
         use risingwave_pb::common::WorkerType;
-        let result = srv.cluster_manager.list_worker_node(
-            WorkerType::from_i32(ty)
-                .ok_or_else(|| anyhow!("invalid worker type"))
-                .map_err(err)?,
-            None,
-        );
+        let result = srv
+            .cluster_manager
+            .list_worker_node(
+                WorkerType::from_i32(ty)
+                    .ok_or_else(|| anyhow!("invalid worker type"))
+                    .map_err(err)?,
+                None,
+            )
+            .await;
         Ok(result.into())
     }
 
@@ -102,7 +105,8 @@ mod handlers {
         let node_actors = srv.fragment_manager.all_node_actors().map_err(err)?;
         let nodes = srv
             .cluster_manager
-            .list_worker_node(WorkerType::ComputeNode, None);
+            .list_worker_node(WorkerType::ComputeNode, None)
+            .await;
         let actors = nodes
             .iter()
             .map(|node| ActorLocation {

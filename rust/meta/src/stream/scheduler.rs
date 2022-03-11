@@ -102,11 +102,14 @@ where
     /// The result `Vec<WorkerNode>` contains two parts.
     /// The first part is the schedule result of `actors`, the second part is the schedule result of
     /// `enforced_round_actors`.
-    pub fn schedule(&self, actors: &[ActorId]) -> Result<ScheduledLocations> {
-        let nodes = self.cluster_manager.list_worker_node(
-            WorkerType::ComputeNode,
-            Some(risingwave_pb::common::worker_node::State::Running),
-        );
+    pub async fn schedule(&self, actors: &[ActorId]) -> Result<ScheduledLocations> {
+        let nodes = self
+            .cluster_manager
+            .list_worker_node(
+                WorkerType::ComputeNode,
+                Some(risingwave_pb::common::worker_node::State::Running),
+            )
+            .await;
         if nodes.is_empty() {
             return Err(InternalError("no available node exist".to_string()).into());
         }
@@ -160,13 +163,15 @@ mod test {
                 .await?;
             cluster_manager.activate_worker_node(host).await?;
         }
-        let workers = cluster_manager.list_worker_node(
-            WorkerType::ComputeNode,
-            Some(risingwave_pb::common::worker_node::State::Running),
-        );
+        let workers = cluster_manager
+            .list_worker_node(
+                WorkerType::ComputeNode,
+                Some(risingwave_pb::common::worker_node::State::Running),
+            )
+            .await;
 
         let simple_schedule = Scheduler::new(ScheduleCategory::Simple, cluster_manager.clone());
-        let nodes = simple_schedule.schedule(&actors)?;
+        let nodes = simple_schedule.schedule(&actors).await?;
         assert_eq!(nodes.actor_locations.len(), actors.len());
         assert!(nodes
             .actor_locations
@@ -175,7 +180,7 @@ mod test {
 
         let round_bin_schedule =
             Scheduler::new(ScheduleCategory::RoundRobin, cluster_manager.clone());
-        let nodes = round_bin_schedule.schedule(&actors)?;
+        let nodes = round_bin_schedule.schedule(&actors).await?;
         assert_eq!(nodes.actor_locations.len(), actors.len());
         assert!(nodes
             .actor_locations
@@ -184,7 +189,7 @@ mod test {
             .all(|(idx, (_, &n))| n == workers[idx % workers.len()].id));
 
         let hash_schedule = Scheduler::new(ScheduleCategory::Hash, cluster_manager.clone());
-        let nodes = hash_schedule.schedule(&actors)?;
+        let nodes = hash_schedule.schedule(&actors).await?;
         assert_eq!(nodes.actor_locations.len(), actors.len());
         Ok(())
     }
