@@ -2,8 +2,7 @@ use std::marker::PhantomData;
 
 use risingwave_common::error::Result;
 use risingwave_common::types::{
-    deserialize_datum_from, deserialize_datum_not_null_from, serialize_datum_into, DataType, Datum,
-    Scalar, ScalarImpl,
+    deserialize_datum_from, serialize_datum_into, DataType, Datum, Scalar,
 };
 use smallvec::SmallVec;
 
@@ -49,13 +48,13 @@ impl<K: Scalar, const EXTREME_TYPE: usize> ExtremeSerializer<K, EXTREME_TYPE> {
     /// Serialize key and `pk` (or, `row_id`s) into a sort key
     ///
     /// TODO: support `&K` instead of `K` as parameter.
-    pub fn serialize(&self, key: K, pk: &ExtremePk) -> Result<Vec<u8>> {
+    pub fn serialize(&self, key: Option<K>, pk: &ExtremePk) -> Result<Vec<u8>> {
         let mut serializer = memcomparable::Serializer::new(vec![]);
         serializer.set_reverse(self.is_reversed_order());
 
         // 1. key
-        let key: ScalarImpl = key.into();
-        key.serialize(&mut serializer)?;
+        let key: Datum = key.map(|x| x.into());
+        serialize_datum_into(&key, &mut serializer)?;
 
         // 2. pk
         assert_eq!(pk.len(), self.pk_data_types.len(), "mismatch pk length");
@@ -78,7 +77,7 @@ impl<K: Scalar, const EXTREME_TYPE: usize> ExtremeSerializer<K, EXTREME_TYPE> {
         deserializer.set_reverse(self.is_reversed_order());
 
         // 1. key
-        let _key = deserialize_datum_not_null_from(self.data_type.clone(), &mut deserializer)?;
+        let _key = deserialize_datum_from(&self.data_type, &mut deserializer)?;
 
         // 2. pk
         let mut pk = ExtremePk::with_capacity(self.pk_data_types.len());
@@ -121,7 +120,7 @@ mod tests {
                 .map(|x| (x as i64).to_scalar_value().into())
                 .collect();
             for key in key_cases {
-                let encoded_key = s.serialize(key, &pk)?;
+                let encoded_key = s.serialize(Some(key), &pk)?;
                 let decoded_pk = s.get_pk(&encoded_key)?;
                 assert_eq!(pk, decoded_pk);
             }
