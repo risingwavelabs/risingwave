@@ -6,8 +6,8 @@ option java_multiple_files = true;
 option java_package = "com.risingwave.proto.catalog";
 option optimize_for = SPEED;
 
-import "plan.proto";
 import "common.proto";
+import "plan.proto";
 import "stream_plan.proto";
 
 enum RowFormatType {
