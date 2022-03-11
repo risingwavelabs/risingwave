@@ -164,7 +164,7 @@ mod tests {
         let frontend = LocalFrontend::new().await;
         frontend.run_sql(sql).await.unwrap();
 
-        let catalog_manager = frontend.session().env().catalog_mgr();
+        let catalog_manager = frontend.session().ctx.env().catalog_mgr();
         let table = catalog_manager.get_table("dev", "dev", "t").unwrap();
 
         let mut rows = vec![];
