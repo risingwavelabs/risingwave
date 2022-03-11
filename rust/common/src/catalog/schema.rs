@@ -74,8 +74,14 @@ impl Schema {
 }
 
 impl Field {
-    pub fn with_name(data_type: DataType, name: String) -> Self {
-        Self { data_type, name }
+    pub fn with_name<S>(data_type: DataType, name: S) -> Self
+    where
+        S: Into<String>,
+    {
+        Self {
+            data_type,
+            name: name.into(),
+        }
     }
 
     pub fn unnamed(data_type: DataType) -> Self {

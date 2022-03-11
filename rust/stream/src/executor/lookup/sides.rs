@@ -4,7 +4,7 @@ use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::RwError;
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::OrderedRowSerializer;
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -12,7 +12,7 @@ use crate::executor::barrier_align::{AlignedMessage, BarrierAligner};
 use crate::executor::{Barrier, Executor};
 
 /// Join side of Lookup Executor's stream
-pub struct StreamJoinSide {
+pub(crate) struct StreamJoinSide {
     /// Indices of the join key columns
     pub key_indices: Vec<usize>,
 
@@ -34,10 +34,7 @@ impl std::fmt::Debug for StreamJoinSide {
 }
 
 /// Join side of Arrange Executor's stream
-pub struct ArrangeJoinSide<S: StateStore> {
-    /// Join key data types
-    pub arrange_key_types: Vec<DataType>,
-
+pub(crate) struct ArrangeJoinSide<S: StateStore> {
     /// The primary key indices of this side, used for state store
     pub pk_indices: Vec<usize>,
 
@@ -47,8 +44,11 @@ pub struct ArrangeJoinSide<S: StateStore> {
     /// The column descriptors of columns in arrangement
     pub col_descs: Vec<ColumnDesc>,
 
-    /// Order types of the arrangement (used for lookup)
-    pub order_types: Vec<OrderType>,
+    /// Order rules of the arrangement (used for lookup)
+    pub order_rules: Vec<OrderPair>,
+
+    /// Key indices for the join
+    pub join_key_indices: Vec<usize>,
 
     /// Keyspace for the arrangement
     pub keyspace: Keyspace<S>,
@@ -159,11 +159,10 @@ pub async fn stream_lookup_arrange_this_epoch(
 impl<S: StateStore> std::fmt::Debug for ArrangeJoinSide<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ArrangeJoinSide")
-            .field("arrange_key_types", &self.arrange_key_types)
             .field("pk_indices", &self.pk_indices)
             .field("col_types", &self.col_types)
             .field("col_descs", &self.col_descs)
-            .field("order_types", &self.order_types)
+            .field("order_rules", &self.order_rules)
             .field("use_current_epoch", &self.use_current_epoch)
             .finish()
     }
