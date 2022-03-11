@@ -55,7 +55,7 @@ pub struct DataChunk {
 }
 
 impl DataChunk {
-    fn new(columns: Vec<Column>, visibility: Option<Bitmap>) -> Self {
+    pub fn new(columns: Vec<Column>, visibility: Option<Bitmap>) -> Self {
         let cardinality = if let Some(bitmap) = &visibility {
             // with visibility bitmap
             let card = bitmap.iter().map(|visible| visible as usize).sum();
