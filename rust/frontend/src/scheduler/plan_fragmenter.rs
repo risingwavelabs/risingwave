@@ -220,7 +220,8 @@ impl BatchPlanFragmenter {
 
 #[cfg(test)]
 mod tests {
-
+    use std::cell::RefCell;
+    use std::rc::Rc;
     use std::sync::Arc;
 
     use risingwave_common::catalog::{Schema, TableId};
@@ -235,6 +236,7 @@ mod tests {
     use crate::optimizer::PlanRef;
     use crate::scheduler::plan_fragmenter::BatchPlanFragmenter;
     use crate::scheduler::schedule::{BatchScheduler, WorkerNodeManager};
+    use crate::session::QueryContext;
     use crate::utils::Condition;
 
     #[tokio::test]
@@ -246,11 +248,13 @@ mod tests {
         //     /    \
         //   Scan  Scan
         //
+        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
         let batch_plan_node: PlanRef = BatchSeqScan::new(LogicalScan::new(
             "".to_string(),
             TableId::default(),
             vec![],
             Schema::default(),
+            ctx,
         ))
         .into();
         let batch_exchange_node1: PlanRef = BatchExchange::new(

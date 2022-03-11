@@ -16,8 +16,13 @@ pub struct LogicalLimit {
 
 impl LogicalLimit {
     fn new(input: PlanRef, limit: usize, offset: usize) -> Self {
+        let ctx = input.ctx();
         let schema = input.schema().clone();
-        let base = LogicalBase { schema };
+        let base = LogicalBase {
+            schema,
+            id: ctx.borrow_mut().get_id(),
+            ctx: ctx.clone(),
+        };
         LogicalLimit {
             input,
             limit,

@@ -4,6 +4,7 @@ use super::super::plan_node::*;
 use super::Convention;
 use crate::optimizer::PlanRef;
 use crate::{for_batch_plan_nodes, for_logical_plan_nodes, for_stream_plan_nodes};
+
 #[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
 pub struct Order {

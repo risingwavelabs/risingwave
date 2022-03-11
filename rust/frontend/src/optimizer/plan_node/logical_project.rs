@@ -25,6 +25,7 @@ pub struct LogicalProject {
 
 impl LogicalProject {
     fn new(input: PlanRef, exprs: Vec<ExprImpl>, expr_alias: Vec<Option<String>>) -> Self {
+        let ctx = input.ctx();
         // Merge contiguous Project nodes.
         if let Some(input) = input.as_logical_project() {
             let mut subst = Substitute {
@@ -42,7 +43,11 @@ impl LogicalProject {
         for expr in &exprs {
             assert_input_ref(expr, input.schema().fields().len());
         }
-        let base = LogicalBase { schema };
+        let base = LogicalBase {
+            schema,
+            id: ctx.borrow_mut().get_id(),
+            ctx: ctx.clone(),
+        };
         LogicalProject {
             input,
             base,
@@ -208,6 +213,8 @@ impl ExprRewriter for Substitute {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
 
     use risingwave_common::catalog::{Field, TableId};
     use risingwave_common::types::DataType;
@@ -216,9 +223,11 @@ mod tests {
     use super::*;
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
     use crate::optimizer::plan_node::LogicalScan;
+    use crate::session::QueryContext;
 
-    #[test]
-    fn test_contiguous_project() {
+    #[tokio::test]
+    async fn test_contiguous_project() {
+        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
         let ty = DataType::Int32;
         let fields: Vec<Field> = (1..4)
             .map(|i| Field {
@@ -231,6 +240,7 @@ mod tests {
             TableId::new(0),
             vec![1.into(), 2.into(), 3.into()],
             Schema { fields },
+            ctx,
         );
         let inner = LogicalProject::new(
             table_scan.into(),
@@ -278,7 +288,7 @@ mod tests {
         assert_eq_input_ref!(&outermost.exprs()[0], 0);
     }
 
-    #[test]
+    #[tokio::test]
     /// Pruning
     /// ```text
     /// Project(1, input_ref(2), input_ref(0)<5)
@@ -289,8 +299,9 @@ mod tests {
     /// Project(input_ref(1), input_ref(0)<5)
     ///   TableScan(v1, v3)
     /// ```
-    fn test_prune_project() {
+    async fn test_prune_project() {
         let ty = DataType::Int32;
+        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
         let fields: Vec<Field> = vec![
             Field {
                 data_type: ty.clone(),
@@ -312,6 +323,7 @@ mod tests {
             Schema {
                 fields: fields.clone(),
             },
+            ctx,
         );
         let project = LogicalProject::new(
             table_scan.into(),

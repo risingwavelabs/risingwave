@@ -16,9 +16,12 @@ pub struct BatchLimit {
 
 impl BatchLimit {
     pub fn new(logical: LogicalLimit) -> Self {
+        let ctx = logical.base.ctx.clone();
         let base = BatchBase {
             order: logical.input().order().clone(),
             dist: logical.input().distribution().clone(),
+            id: ctx.borrow_mut().get_id(),
+            ctx: ctx.clone(),
         };
         BatchLimit { logical, base }
     }

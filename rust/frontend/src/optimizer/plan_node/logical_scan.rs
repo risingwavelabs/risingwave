@@ -8,6 +8,7 @@ use super::{ColPrunable, LogicalBase, PlanRef, ToBatch, ToStream};
 use crate::catalog::{ColumnId, TableId};
 use crate::optimizer::plan_node::BatchSeqScan;
 use crate::optimizer::property::WithSchema;
+use crate::session::QueryContextRef;
 
 /// `LogicalScan` returns contents of a table or other equivalent object
 #[derive(Debug, Clone)]
@@ -26,8 +27,13 @@ impl LogicalScan {
         table_id: TableId,
         columns: Vec<ColumnId>,
         schema: Schema,
+        ctx: QueryContextRef,
     ) -> Self {
-        let base = LogicalBase { schema };
+        let base = LogicalBase {
+            schema,
+            id: ctx.borrow_mut().get_id(),
+            ctx: ctx.clone(),
+        };
         Self {
             table_name,
             table_id,
@@ -42,8 +48,9 @@ impl LogicalScan {
         table_id: TableId,
         columns: Vec<ColumnId>,
         schema: Schema,
+        ctx: QueryContextRef,
     ) -> Result<PlanRef> {
-        Ok(Self::new(table_name, table_id, columns, schema).into())
+        Ok(Self::new(table_name, table_id, columns, schema, ctx).into())
     }
 
     pub(super) fn fmt_fields(&self, f: &mut fmt::DebugStruct) {
@@ -82,6 +89,7 @@ impl ColPrunable for LogicalScan {
             self.table_id,
             columns,
             Schema { fields },
+            self.base.ctx.clone(),
         )
         .into()
     }
