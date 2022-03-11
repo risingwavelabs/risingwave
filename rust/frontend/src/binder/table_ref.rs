@@ -43,9 +43,9 @@ impl Binder {
             Some(t) => t,
             None => return Ok(None),
         };
-        let mut root = self.bind_table_with_join(first)?;
+        let mut root = self.bind_table_with_joins(first)?;
         for t in from_iter {
-            let right = self.bind_table_with_join(t)?;
+            let right = self.bind_table_with_joins(t)?;
             root = TableRef::Join(Box::new(JoinRef {
                 left: root,
                 right,
@@ -55,7 +55,7 @@ impl Binder {
         Ok(Some(root))
     }
 
-    pub(super) fn bind_table_with_join(&mut self, table: TableWithJoins) -> Result<TableRef> {
+    pub(super) fn bind_table_with_joins(&mut self, table: TableWithJoins) -> Result<TableRef> {
         let mut root = self.bind_table_factor(table.relation)?;
         for join in table.joins {
             let right = self.bind_table_factor(join.relation)?;
