@@ -85,6 +85,8 @@ async fn main() {
     fns.insert(
         "playground",
         Box::new(async move {
+            eprintln!("launching playground");
+
             risingwave_logging::oneshot_common();
             risingwave_logging::init_risingwave_logger(false, false);
 
