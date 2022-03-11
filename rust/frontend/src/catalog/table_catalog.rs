@@ -1,13 +1,12 @@
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
-use risingwave_common::catalog::{CellBasedTableDesc, ColumnDesc, ColumnId, OrderedColumnDesc};
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::catalog::{CellBasedTableDesc, ColumnDesc, OrderedColumnDesc};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::plan::{ColumnCatalog, OrderType as ProstOrderType};
 
-use crate::catalog::{CatalogError, TableId};
+use crate::catalog::TableId;
 
 #[derive(Clone)]
 pub struct TableCatalog {
