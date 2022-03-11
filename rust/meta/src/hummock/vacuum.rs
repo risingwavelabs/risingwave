@@ -1,8 +1,12 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use itertools::Itertools;
+use risingwave_common::error::Result;
+use risingwave_pb::hummock::vacuum_task::{Task, VaccumOrphanData};
 use risingwave_pb::hummock::{vacuum_task, VacuumTask};
+use risingwave_storage::hummock::HummockSSTableId;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 
@@ -16,6 +20,8 @@ const ORPHAN_SST_RETENTION_INTERVAL: Duration = Duration::from_secs(60 * 60 * 24
 pub struct VacuumTrigger<S> {
     hummock_manager_ref: Arc<HummockManager<S>>,
     compactor_manager_ref: Arc<CompactorManager>,
+    /// Orphan sst ids which have been dispatched to vacuum nodes but are not replied yet.
+    pending_orphan_sst_ids: parking_lot::RwLock<HashSet<HummockSSTableId>>,
 }
 
 impl<S> VacuumTrigger<S>
@@ -29,12 +35,13 @@ where
         Self {
             hummock_manager_ref,
             compactor_manager_ref,
+            pending_orphan_sst_ids: Default::default(),
         }
     }
 
     /// Start a worker to periodically vacuum hummock
-    pub async fn start_vacuum_trigger(
-        vacuum: VacuumTrigger<S>,
+    pub fn start_vacuum_trigger(
+        vacuum: Arc<VacuumTrigger<S>>,
     ) -> (JoinHandle<()>, UnboundedSender<()>)
     where
         S: MetaStore,
@@ -140,52 +147,94 @@ where
 
     /// Return number of orphan SSTs to delete.
     /// An orphan SST can be deleted when:
-    /// - The SST is not tracked in meta, the `meta_create_timestamp` is not set.
+    /// - The SST is not tracked in meta, that's to say `meta_create_timestamp` is not set.
     /// - And the SST has existed longer than `ORPHAN_SST_RETENTION_INTERVAL`.
     async fn vacuum_orphan_data(
         vacuum: &VacuumTrigger<S>,
         orphan_sst_retention_interval: Duration,
-    ) -> risingwave_common::error::Result<u64> {
-        let now = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        let ssts_to_delete = vacuum
-            .hummock_manager_ref
-            .list_sstable_id_infos_asc()
-            .await?
-            .into_iter()
-            .filter(|sstable_id_info| {
-                sstable_id_info.meta_create_timestamp == INVALID_CREATE_TIMESTAMP
-                    && std::cmp::max(now - sstable_id_info.id_create_timestamp, 0)
-                        >= orphan_sst_retention_interval.as_secs()
-            })
-            .map(|sstable_id_info| sstable_id_info.id)
-            .collect_vec();
+    ) -> risingwave_common::error::Result<Vec<HummockSSTableId>> {
+        // Select orphan SSTs.
+        let ssts_to_delete = {
+            // 1. Retry the pending sst ids first.
+            let pending_sst_ids = vacuum
+                .pending_orphan_sst_ids
+                .read()
+                .iter()
+                .cloned()
+                .collect_vec();
+            if !pending_sst_ids.is_empty() {
+                pending_sst_ids
+            } else {
+                // 2. If no pending sst ids, then fetch new ones.
+                let now = SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
+                let ssts_to_delete = vacuum
+                    .hummock_manager_ref
+                    .list_sstable_id_infos_asc()
+                    .await?
+                    .into_iter()
+                    .filter(|sstable_id_info| {
+                        sstable_id_info.meta_create_timestamp == INVALID_CREATE_TIMESTAMP
+                            && std::cmp::max(now - sstable_id_info.id_create_timestamp, 0)
+                                >= orphan_sst_retention_interval.as_secs()
+                    })
+                    .map(|sstable_id_info| sstable_id_info.id)
+                    .collect_vec();
 
-        if ssts_to_delete.is_empty() {
-            return Ok(0);
-        }
+                if ssts_to_delete.is_empty() {
+                    return Ok(vec![]);
+                }
+                // Keep these sst ids, so that we can remove them from metadata later.
+                vacuum
+                    .pending_orphan_sst_ids
+                    .write()
+                    .extend(ssts_to_delete.clone());
+                ssts_to_delete
+            }
+        };
 
-        let ssts_to_delete_count = ssts_to_delete.len() as u64;
+        // Select a vacuum node to process the task
         if !vacuum
             .compactor_manager_ref
             .try_assign_compact_task(
                 None,
                 Some(VacuumTask {
                     task: Some(vacuum_task::Task::Orphan(vacuum_task::VaccumOrphanData {
-                        // The sstable id doesn't necessarily have a counterpart SST file in S3, but
+                        // The SST id doesn't necessarily have a counterpart SST file in S3, but
                         // it's OK trying to delete it.
-                        sstable_ids: ssts_to_delete,
+                        sstable_ids: ssts_to_delete.clone(),
                     })),
                 }),
             )
             .await
         {
-            return Ok(0);
+            return Ok(vec![]);
         }
 
-        Ok(ssts_to_delete_count)
+        Ok(ssts_to_delete)
+    }
+
+    pub async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()> {
+        if let Some(Task::Orphan(VaccumOrphanData { sstable_ids })) = vacuum_task.task {
+            let delete_meta = self
+                .pending_orphan_sst_ids
+                .read()
+                .iter()
+                .filter(|p| sstable_ids.contains(p))
+                .cloned()
+                .collect_vec();
+            if !delete_meta.is_empty() {
+                self.hummock_manager_ref
+                    .delete_sstable_ids(&delete_meta)
+                    .await?;
+                self.pending_orphan_sst_ids
+                    .write()
+                    .retain(|p| !delete_meta.contains(p));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -194,6 +243,9 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
+    use risingwave_pb::hummock::vacuum_task::VaccumOrphanData;
+    use risingwave_pb::hummock::{vacuum_task, VacuumTask};
+
     use crate::hummock::test_utils::{generate_test_tables, setup_compute_env};
     use crate::hummock::{CompactorManager, VacuumTrigger};
 
@@ -201,8 +253,8 @@ mod tests {
     async fn test_shutdown_vacuum() {
         let (_env, hummock_manager, _cluster_manager, _worker_node) = setup_compute_env(80).await;
         let compactor_manager = Arc::new(CompactorManager::new());
-        let vacuum = VacuumTrigger::new(hummock_manager, compactor_manager);
-        let (join_handle, shutdown_sender) = VacuumTrigger::start_vacuum_trigger(vacuum).await;
+        let vacuum = Arc::new(VacuumTrigger::new(hummock_manager, compactor_manager));
+        let (join_handle, shutdown_sender) = VacuumTrigger::start_vacuum_trigger(vacuum);
         shutdown_sender.send(()).unwrap();
         join_handle.await.unwrap();
     }
@@ -212,7 +264,10 @@ mod tests {
         let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
         let context_id = worker_node.id;
         let compactor_manager = Arc::new(CompactorManager::default());
-        let vacuum = VacuumTrigger::new(hummock_manager.clone(), compactor_manager.clone());
+        let vacuum = Arc::new(VacuumTrigger::new(
+            hummock_manager.clone(),
+            compactor_manager.clone(),
+        ));
 
         // Current state: {v0: []}
         // No tracked data to vacuum.
@@ -281,30 +336,52 @@ mod tests {
         let (_env, hummock_manager, _cluster_manager, _worker_node) = setup_compute_env(80).await;
         let compactor_manager = Arc::new(CompactorManager::default());
         let vacuum = VacuumTrigger::new(hummock_manager.clone(), compactor_manager.clone());
-        // 1. acquire 2 sstable ids.
+        // 1. acquire 2 SST ids.
         hummock_manager.get_new_table_id().await.unwrap();
         hummock_manager.get_new_table_id().await.unwrap();
-        // 2. no expired sstable id.
+        // 2. no expired SST id.
         assert_eq!(
             VacuumTrigger::vacuum_orphan_data(&vacuum, Duration::from_secs(60))
                 .await
-                .unwrap(),
+                .unwrap()
+                .len(),
             0
         );
-        // 3. 2 expired sstable id but no vacuum node
+        // 3. 2 expired SST id but no vacuum node.
         assert_eq!(
             VacuumTrigger::vacuum_orphan_data(&vacuum, Duration::from_secs(0))
                 .await
-                .unwrap(),
+                .unwrap()
+                .len(),
             0
         );
         let _receiver = compactor_manager.add_compactor().await;
-        // 4. 2 expired sstable id
+        // 4. 2 expired SST ids.
+        let sst_ids = VacuumTrigger::vacuum_orphan_data(&vacuum, Duration::from_secs(0))
+            .await
+            .unwrap();
+        assert_eq!(sst_ids.len(), 2);
+        // 5. got the same 2 expired sst ids because the previous pending SST ids are not
+        // reported.
+        let sst_ids_2 = VacuumTrigger::vacuum_orphan_data(&vacuum, Duration::from_secs(0))
+            .await
+            .unwrap();
+        assert_eq!(sst_ids, sst_ids_2);
+        // 6. report the previous pending SST ids to indicate their success.
+        vacuum
+            .report_vacuum_task(VacuumTask {
+                task: Some(vacuum_task::Task::Orphan(VaccumOrphanData {
+                    sstable_ids: sst_ids_2,
+                })),
+            })
+            .await
+            .unwrap();
         assert_eq!(
             VacuumTrigger::vacuum_orphan_data(&vacuum, Duration::from_secs(0))
                 .await
-                .unwrap(),
-            2
+                .unwrap()
+                .len(),
+            0
         );
     }
 }

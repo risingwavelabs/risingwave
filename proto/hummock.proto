@@ -250,6 +250,14 @@ message VacuumTask {
   }
 }
 
+message ReportVacuumTaskRequest {
+  VacuumTask vacuum_task = 1;
+}
+
+message ReportVacuumTaskResponse {
+  common.Status status = 1;
+}
+
 service HummockManagerService {
   rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
   rpc UnpinVersion(UnpinVersionRequest) returns (UnpinVersionResponse);
@@ -261,4 +269,5 @@ service HummockManagerService {
   rpc AbortEpoch(AbortEpochRequest) returns (AbortEpochResponse);
   rpc GetNewTableId(GetNewTableIdRequest) returns (GetNewTableIdResponse);
   rpc SubscribeCompactTasks(SubscribeCompactTasksRequest) returns (stream SubscribeCompactTasksResponse);
+  rpc ReportVacuumTask(ReportVacuumTaskRequest) returns (ReportVacuumTaskResponse);
 }

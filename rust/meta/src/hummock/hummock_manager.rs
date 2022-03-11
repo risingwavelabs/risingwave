@@ -871,4 +871,14 @@ where
         let versioning_guard = self.versioning.read().await;
         SstableIdInfo::list(versioning_guard.meta_store_ref.as_ref()).await
     }
+
+    pub async fn delete_sstable_ids(&self, sst_ids: impl AsRef<[HummockSSTableId]>) -> Result<()> {
+        let versioning_guard = self.versioning.write().await;
+        let mut transaction = Transaction::default();
+        for sst_id in sst_ids.as_ref() {
+            SstableIdInfo::delete_in_transaction(SstableRefId { id: *sst_id }, &mut transaction)?;
+        }
+        self.commit_trx(versioning_guard.meta_store_ref.as_ref(), transaction, None)
+            .await
+    }
 }
