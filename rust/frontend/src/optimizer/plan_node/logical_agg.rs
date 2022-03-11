@@ -1,5 +1,5 @@
+use std::collections::HashMap;
 use std::fmt;
-use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
@@ -9,7 +9,7 @@ use risingwave_common::expr::AggKind;
 use risingwave_common::types::DataType;
 
 use super::{ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
-use crate::expr::{AggCall, Expr, ExprImpl, ExprRewriter, InputRef};
+use crate::expr::{Expr, ExprImpl, FunctionCall, InputRef};
 use crate::optimizer::plan_node::LogicalProject;
 use crate::optimizer::property::WithSchema;
 use crate::utils::ColIndexMapping;
@@ -107,41 +107,42 @@ impl LogicalAgg {
         group_exprs: Vec<ExprImpl>,
         input: PlanRef,
     ) -> Result<PlanRef> {
-        // Notice: we now assume the only thing can appear in GROUP BY clause is an input column
-        // name.
+        // TODO: support more complicated expression in GROUP BY clause, because we currently assume
+        // the only thing can appear in GROUP BY clause is an input column name.
+
+        // `project` contains all the ExprImpl inside aggregates(e.g. v1 + v2 for min(v1 + v2)) and
+        // GROUP BY clause(e.g. v1 for group by v1).
         let mut project: Vec<ExprImpl> = vec![];
         let mut group_keys = vec![];
-        let input_refs =
+        let group_column_index =
             LogicalAgg::traverse_group_expr(group_exprs, &mut project, &mut group_keys)?;
 
         let mut agg_calls = vec![];
-        LogicalAgg::traverse_select_expr(&select_exprs, &mut project, &mut agg_calls, &input_refs)?;
+        let select_exprs = select_exprs
+            .into_iter()
+            .map(|select_expr| {
+                LogicalAgg::rewrite_select_expr(
+                    select_expr,
+                    &mut project,
+                    &mut agg_calls,
+                    &group_column_index,
+                )
+            })
+            .try_collect()?;
 
         // This LogicalProject focuses on the exprs in aggregates and GROUP BY clause.
         let expr_alias = vec![None; project.len()];
-        let logical_project = LogicalProject::create(input, project.clone(), expr_alias);
+        let logical_project = LogicalProject::create(input, project, expr_alias);
 
-        // Assume the output order of LogicalAgg will be [group column, aggregate result], same as
-        // the order of `project`.
         // This LogicalAgg foucuses on calculating the aggregates and grouping.
         let agg_call_alias = vec![None; agg_calls.len()];
         let logical_agg = LogicalAgg::new(agg_calls, agg_call_alias, group_keys, logical_project);
 
-        let mut rewrite_agg = RewriteAgg {
-            index: input_refs.len(),
-            input_refs,
-        };
-        // We should consider the cases like `select 1, v1, min(v2) from t group by v1`, in wthich
-        // `1` wouldn't get into `project`.
-        let exprs = select_exprs
-            .into_iter()
-            .map(|expr| rewrite_agg.rewrite_expr(expr))
-            .collect();
         // This LogicalProject focuse on tranforming the aggregates and grouping columns to
         // InputRef.
         Ok(LogicalProject::create(
-            Rc::new(logical_agg),
-            exprs,
+            logical_agg.into(),
+            select_exprs,
             select_alias,
         ))
     }
@@ -150,16 +151,14 @@ impl LogicalAgg {
         group_exprs: Vec<ExprImpl>,
         project: &mut Vec<ExprImpl>,
         group_keys: &mut Vec<usize>,
-    ) -> Result<Vec<InputRef>> {
-        let mut input_refs = vec![];
+    ) -> Result<HashMap<InputRef, usize>> {
+        let mut group_column_index = HashMap::new();
         for (index, group_expr) in group_exprs.into_iter().enumerate() {
-            // May or may not: the order between match arms affects the final result in current
-            // implementation.
             match group_expr {
                 ExprImpl::InputRef(input_ref) => {
                     project.push((*input_ref).clone().into());
                     group_keys.push(index);
-                    input_refs.push(*input_ref);
+                    group_column_index.insert(*input_ref, index);
                 }
                 _ => {
                     return Err(ErrorCode::InvalidInputSyntax(
@@ -169,46 +168,58 @@ impl LogicalAgg {
                 }
             }
         }
-        Ok(input_refs)
+        Ok(group_column_index)
     }
 
-    fn traverse_select_expr(
-        select_exprs: &[ExprImpl],
+    /// Rewrite the `select_exprs` so that it can be used by the last LogicalProject, and get
+    /// aggregates in SELECT clause.
+    fn rewrite_select_expr(
+        select_expr: ExprImpl,
         project: &mut Vec<ExprImpl>,
         agg_calls: &mut Vec<PlanAggCall>,
-        input_refs: &Vec<InputRef>,
-    ) -> Result<()> {
-        for select_expr in select_exprs {
-            // May or may not: the order between match arms affects the final result in current
-            // implementation.
-            match select_expr {
-                ExprImpl::InputRef(input_ref) => {
-                    if !input_refs.iter().any(|input| *input == **input_ref) {
-                        return Err(ErrorCode::InvalidInputSyntax("column must appear in the GROUP BY clause or be used in an aggregate function".into()).into());
-                    }
-                }
-                ExprImpl::Literal(_) => {}
-                ExprImpl::FunctionCall(func_call) => {
-                    return LogicalAgg::traverse_select_expr(
-                        func_call.inputs(),
-                        project,
-                        agg_calls,
-                        input_refs,
-                    );
-                }
-                ExprImpl::AggCall(agg_call) => {
-                    let begin = project.len();
-                    let end = begin + agg_call.inputs().len();
-                    project.extend(agg_call.inputs().iter().cloned());
-                    agg_calls.push(PlanAggCall {
-                        agg_kind: agg_call.agg_kind().clone(),
-                        return_type: agg_call.return_type().clone(),
-                        inputs: (begin..end).collect(),
-                    });
+        group_column_index: &HashMap<InputRef, usize>,
+    ) -> Result<ExprImpl> {
+        match select_expr {
+            ExprImpl::InputRef(input_ref) => {
+                if let Some(index) = group_column_index.get(&input_ref) {
+                    Ok(InputRef::new(*index, input_ref.data_type()).into())
+                } else {
+                    Err(ErrorCode::InvalidInputSyntax("column must appear in the GROUP BY clause or be used in an aggregate function".into()).into())
                 }
             }
+            ExprImpl::Literal(literal) => Ok(ExprImpl::from(*literal)),
+            ExprImpl::FunctionCall(func_call) => {
+                let inputs: Vec<ExprImpl> = func_call
+                    .inputs()
+                    .iter()
+                    .map(|input| {
+                        LogicalAgg::rewrite_select_expr(
+                            input.clone(),
+                            project,
+                            agg_calls,
+                            group_column_index,
+                        )
+                    })
+                    .try_collect()?;
+                let func_call = FunctionCall::new(func_call.get_expr_type(), inputs)
+                    .ok_or_else(|| ErrorCode::InternalError("Create FunctionCall fails".into()))?;
+                Ok(ExprImpl::from(func_call))
+            }
+            ExprImpl::AggCall(agg_call) => {
+                let begin = project.len();
+                let end = begin + agg_call.inputs().len();
+                project.extend(agg_call.inputs().iter().cloned());
+                agg_calls.push(PlanAggCall {
+                    agg_kind: agg_call.agg_kind(),
+                    return_type: agg_call.return_type(),
+                    inputs: (begin..end).collect(),
+                });
+                Ok(ExprImpl::from(InputRef::new(
+                    group_column_index.len() + agg_calls.len() - 1,
+                    agg_call.return_type(),
+                )))
+            }
         }
-        Ok(())
     }
 
     /// Get a reference to the logical agg's agg call alias.
@@ -224,28 +235,6 @@ impl LogicalAgg {
     /// Get a reference to the logical agg's group keys.
     pub fn group_keys(&self) -> &[usize] {
         self.group_keys.as_ref()
-    }
-}
-
-struct RewriteAgg {
-    index: usize,
-    input_refs: Vec<InputRef>,
-}
-
-impl ExprRewriter for RewriteAgg {
-    // Agg -> InputRef (select min(v1))
-    fn rewrite_agg_call(&mut self, agg_call: AggCall) -> ExprImpl {
-        let input_ref = InputRef::new(self.index, agg_call.return_type()).into();
-        self.index += 1;
-        input_ref
-    }
-    // InputRef -> InputRef(select v1 from t group by v1)
-    fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
-        if let Some(index) = self.input_refs.iter().position(|input| *input == input_ref) {
-            InputRef::new(index, input_ref.data_type()).into()
-        } else {
-            unreachable!()
-        }
     }
 }
 
@@ -349,7 +338,7 @@ mod tests {
     use risingwave_common::types::DataType;
 
     use super::*;
-    use crate::expr::{assert_eq_input_ref, ExprType, FunctionCall};
+    use crate::expr::{assert_eq_input_ref, AggCall, ExprType, FunctionCall};
     use crate::optimizer::plan_node::LogicalScan;
     use crate::optimizer::property::ctx::WithId;
     use crate::session::QueryContext;
@@ -435,12 +424,12 @@ mod tests {
 
         // Test case: select v1, min(v2) + max(v3) from t group by v1;
         {
-            let min_v2 = AggCall::new(AggKind::Min, vec![input_ref_2.into()]).unwrap();
-            let max_v3 = AggCall::new(AggKind::Max, vec![input_ref_3.into()]).unwrap();
+            let min_v2 = AggCall::new(AggKind::Min, vec![input_ref_2.clone().into()]).unwrap();
+            let max_v3 = AggCall::new(AggKind::Max, vec![input_ref_3.clone().into()]).unwrap();
             let func_call =
                 FunctionCall::new(ExprType::Add, vec![min_v2.into(), max_v3.into()]).unwrap();
             let select_exprs = vec![input_ref_1.clone().into(), ExprImpl::from(func_call)];
-            let group_exprs = vec![input_ref_1.into()];
+            let group_exprs = vec![input_ref_1.clone().into()];
 
             let (exprs, agg_calls, group_keys) = gen_internal_value(select_exprs, group_exprs);
 
@@ -459,6 +448,28 @@ mod tests {
             assert_eq!(agg_calls[0].inputs, vec![1]);
             assert_eq!(agg_calls[1].agg_kind, AggKind::Max);
             assert_eq!(agg_calls[1].inputs, vec![2]);
+            assert_eq!(group_keys, vec![0]);
+        }
+
+        // Test case: select v2, min(v1 * v3) from test group by v2;
+        {
+            let v1_mult_v3 = FunctionCall::new(
+                ExprType::Multiply,
+                vec![input_ref_1.into(), input_ref_3.into()],
+            )
+            .unwrap();
+            let agg_call = AggCall::new(AggKind::Min, vec![v1_mult_v3.into()]).unwrap();
+            let select_exprs = vec![input_ref_2.clone().into(), agg_call.into()];
+            let group_exprs = vec![input_ref_2.into()];
+
+            let (exprs, agg_calls, group_keys) = gen_internal_value(select_exprs, group_exprs);
+
+            assert_eq_input_ref!(&exprs[0], 0);
+            assert_eq_input_ref!(&exprs[1], 1);
+
+            assert_eq!(agg_calls.len(), 1);
+            assert_eq!(agg_calls[0].agg_kind, AggKind::Min);
+            assert_eq!(agg_calls[0].inputs, vec![1]);
             assert_eq!(group_keys, vec![0]);
         }
     }
