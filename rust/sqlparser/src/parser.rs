@@ -839,7 +839,15 @@ impl Parser {
         } else if let Token::Word(w) = &tok {
             match w.keyword {
                 Keyword::IS => {
-                    if self.parse_keyword(Keyword::NULL) {
+                    if self.parse_keyword(Keyword::TRUE) {
+                        Ok(Expr::IsTrue(Box::new(expr)))
+                    } else if self.parse_keywords(&[Keyword::NOT, Keyword::TRUE]) {
+                        Ok(Expr::IsNotTrue(Box::new(expr)))
+                    } else if self.parse_keyword(Keyword::FALSE) {
+                        Ok(Expr::IsFalse(Box::new(expr)))
+                    } else if self.parse_keywords(&[Keyword::NOT, Keyword::FALSE]) {
+                        Ok(Expr::IsNotFalse(Box::new(expr)))
+                    } else if self.parse_keyword(Keyword::NULL) {
                         Ok(Expr::IsNull(Box::new(expr)))
                     } else if self.parse_keywords(&[Keyword::NOT, Keyword::NULL]) {
                         Ok(Expr::IsNotNull(Box::new(expr)))
@@ -852,7 +860,7 @@ impl Parser {
                         Ok(Expr::IsNotDistinctFrom(Box::new(expr), Box::new(expr2)))
                     } else {
                         self.expected(
-                            "[NOT] NULL or [NOT] DISTINCT FROM after IS",
+                            "[NOT] TRUE or [NOT] FALSE or [NOT] NULL or [NOT] DISTINCT FROM after IS",
                             self.peek_token(),
                         )
                     }

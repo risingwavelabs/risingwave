@@ -13,6 +13,24 @@ mod value;
 impl Binder {
     pub(super) fn bind_expr(&mut self, expr: Expr) -> Result<ExprImpl> {
         match expr {
+            Expr::IsNull(expr)=>Ok(ExprImpl::FunctionCall(Box::new(
+                self.bind_is_operator(ExprType::IsNull,*expr)?,
+            ))),
+            Expr::IsNotNull(expr)=>Ok(ExprImpl::FunctionCall(Box::new(
+                self.bind_is_operator(ExprType::IsNotNull,*expr)?,
+            ))),
+            Expr::IsTrue(expr)=>Ok(ExprImpl::FunctionCall(Box::new(
+                self.bind_is_operator(ExprType::IsTrue,*expr)?,
+            ))),
+            Expr::IsNotTrue(expr)=>Ok(ExprImpl::FunctionCall(Box::new(
+                self.bind_is_operator(ExprType::IsNotTrue,*expr)?,
+            ))),
+            Expr::IsFalse(expr)=>Ok(ExprImpl::FunctionCall(Box::new(
+                self.bind_is_operator(ExprType::IsFalse,*expr)?,
+            ))),
+            Expr::IsNotFalse(expr)=>Ok(ExprImpl::FunctionCall(Box::new(
+                self.bind_is_operator(ExprType::IsNotFalse,*expr)?,
+            ))),
             Expr::Identifier(ident) => self.bind_column(&[ident]),
             Expr::CompoundIdentifier(idents) => self.bind_column(&idents),
             Expr::Value(v) => Ok(ExprImpl::Literal(Box::new(self.bind_value(v)?))),
@@ -52,6 +70,16 @@ impl Binder {
         FunctionCall::new(func_type, vec![expr]).ok_or_else(|| {
             ErrorCode::NotImplementedError(format!("{:?} {:?}", op, return_type)).into()
         })
+    }
+
+    pub(super) fn bind_is_operator(
+        &mut self,
+        func_type: ExprType,
+        expr: Expr,
+    ) -> Result<FunctionCall> {
+        let expr = self.bind_expr(expr)?;
+        let return_type = expr.return_type();
+        Ok(FunctionCall::new_with_return_type(func_type, vec![expr],return_type))
     }
 
     pub(super) fn bind_cast(&mut self, expr: Expr, data_type: AstDataType) -> Result<FunctionCall> {
