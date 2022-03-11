@@ -183,13 +183,13 @@ impl<S: StateStore> SimpleExecutor for MaterializeExecutor<S> {
 #[cfg(test)]
 mod tests {
 
-    use itertools::Itertools;
+    
     use risingwave_common::array::{I32Array, Op};
-    use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
+    use risingwave_common::catalog::{Field, Schema, TableId};
     use risingwave_common::column_nonnull;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
-    use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::plan::ColumnDesc;
+    
+    
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::Keyspace;
 
