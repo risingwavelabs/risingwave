@@ -65,7 +65,7 @@ impl Binder {
                     let join = JoinRef {
                         left: root,
                         right,
-                        cond: cond,
+                        cond,
                     };
                     root = TableRef::Join(Box::new(join));
                 }
