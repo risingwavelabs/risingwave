@@ -530,7 +530,7 @@ impl<K: HashKey> ProbeTable<K> {
         }
     }
 
-    /// Append data chunk builders without producing DataChunk.
+    /// Append data chunk builders without producing [`DataChunk`].
     fn build_data_chunk(&mut self) -> Result<()> {
         // The indices before the offset are already appended and dirty.
         let offset = self.result_offset;

@@ -166,6 +166,10 @@ impl Array for StructArray {
         &self.bitmap
     }
 
+    fn set_bitmap(&mut self, bitmap: Bitmap) {
+        self.bitmap = bitmap;
+    }
+
     fn hash_at<H: std::hash::Hasher>(&self, idx: usize, state: &mut H) {
         if !self.is_null(idx) {
             self.children.iter().for_each(|a| a.hash_at(idx, state))

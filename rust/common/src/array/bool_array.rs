@@ -72,6 +72,10 @@ impl Array for BoolArray {
         &self.bitmap
     }
 
+    fn set_bitmap(&mut self, bitmap: Bitmap) {
+        self.bitmap = bitmap;
+    }
+
     #[inline(always)]
     fn hash_at<H: Hasher>(&self, idx: usize, state: &mut H) {
         if !self.is_null(idx) {

@@ -157,6 +157,8 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
         self.null_bitmap().is_set(idx).map(|v| !v).unwrap()
     }
 
+    fn set_bitmap(&mut self, bitmap: Bitmap);
+
     fn hash_at<H: Hasher>(&self, idx: usize, state: &mut H);
 
     fn hash_vec<H: Hasher>(&self, hashers: &mut [H]) {

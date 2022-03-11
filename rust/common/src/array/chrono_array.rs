@@ -49,6 +49,10 @@ macro_rules! get_chrono_array {
                     self.data.len()
                 }
 
+                fn set_bitmap(&mut self, bitmap: Bitmap) {
+                    self.bitmap = bitmap;
+                }
+
                 fn iter(&self) -> Self::Iter<'_> {
                     ArrayIterator::new(self)
                 }
