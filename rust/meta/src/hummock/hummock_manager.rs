@@ -1,13 +1,14 @@
 use std::sync::Arc;
 
 use itertools::{enumerate, Itertools};
+use prometheus::core::{AtomicF64, GenericGauge};
 use prost::Message;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::hummock::hummock_version::HummockVersionRefId;
 use risingwave_pb::hummock::{
-    CompactTask, HummockContextPinnedSnapshot, HummockContextPinnedVersion, HummockContextRefId,
-    HummockSnapshot, HummockTablesToDelete, HummockVersion, Level, LevelType, SstableInfo,
-    SstableRefId, UncommittedEpoch,
+    CompactMetrics, CompactTask, HummockContextPinnedSnapshot, HummockContextPinnedVersion,
+    HummockContextRefId, HummockSnapshot, HummockTablesToDelete, HummockVersion, Level, LevelType,
+    SstableInfo, SstableRefId, TableSetStatistics, UncommittedEpoch,
 };
 use risingwave_storage::hummock::{
     HummockContextId, HummockEpoch, HummockRefCount, HummockSSTableId, HummockVersionId,
@@ -238,6 +239,41 @@ where
         }
     }
 
+    fn single_level_stat<T: FnMut(String) -> prometheus::Result<GenericGauge<AtomicF64>>>(
+        mut metric_vec: T,
+        level_stat: &TableSetStatistics,
+    ) {
+        let level_label = String::from("L") + &level_stat.level_idx.to_string();
+        metric_vec(level_label).unwrap().add(level_stat.size_gb);
+    }
+
+    fn trigger_rw_stat(&self, compact_metrics: &CompactMetrics) {
+        Self::single_level_stat(
+            |label| {
+                self.metrics
+                    .level_compact_read_curr
+                    .get_metric_with_label_values(&[&label])
+            },
+            compact_metrics.read_level_n.as_ref().unwrap(),
+        );
+        Self::single_level_stat(
+            |label| {
+                self.metrics
+                    .level_compact_read_next
+                    .get_metric_with_label_values(&[&label])
+            },
+            compact_metrics.read_level_nplus1.as_ref().unwrap(),
+        );
+        Self::single_level_stat(
+            |label| {
+                self.metrics
+                    .level_compact_write
+                    .get_metric_with_label_values(&[&label])
+            },
+            compact_metrics.write.as_ref().unwrap(),
+        );
+    }
+
     pub async fn add_tables(
         &self,
         context_id: HummockContextId,
@@ -451,7 +487,7 @@ where
     /// been processed previously.
     pub async fn report_compact_task(
         &self,
-        compact_task: CompactTask,
+        mut compact_task: CompactTask,
         task_result: bool,
     ) -> Result<bool> {
         let output_table_compact_entries: Vec<_> = compact_task
@@ -472,6 +508,7 @@ where
             .sum();
         let output_sst_count = compact_task.sorted_output_ssts.len();
 
+        let compact_task_metrics = compact_task.metrics.take();
         let (sorted_output_ssts, delete_table_ids) = match compact_status.report_compact_task(
             output_table_compact_entries,
             compact_task,
@@ -563,6 +600,7 @@ where
             tracing::debug!("Cancel hummock compaction task id {}", compact_task_id);
         }
         self.trigger_sst_stat(&compact_status);
+        self.trigger_rw_stat(compact_task_metrics.as_ref().unwrap());
         Ok(true)
     }
 

@@ -1,6 +1,6 @@
 onlyif risingwave
 statement ok
-SET enable_new_subquery_planner TO on
+SET enable_new_subquery_batch_planner TO on
 
 query TI
 select
@@ -48,4 +48,4 @@ Supplier#000000005 15
 
 onlyif risingwave
 statement ok
-SET enable_new_subquery_planner TO off
+SET enable_new_subquery_batch_planner TO off

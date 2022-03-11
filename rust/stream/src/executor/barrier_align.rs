@@ -1,11 +1,10 @@
-use std::pin::Pin;
-
 use async_stream::try_stream;
-use futures::{Stream, StreamExt};
+use futures::StreamExt;
 use risingwave_common::error::Result;
 use tokio::select;
 
 use super::{Barrier, Executor, Message, StreamChunk};
+use crate::executor::BoxedExecutorStream;
 
 #[derive(Debug, PartialEq)]
 enum BarrierWaitState {
@@ -33,9 +32,9 @@ impl<'a> TryFrom<&'a AlignedMessage> for &'a Barrier {
 
 pub struct BarrierAligner {
     /// The input from the left executor
-    input_l: Pin<Box<dyn Stream<Item = Result<Message>> + Send>>,
+    input_l: BoxedExecutorStream,
     /// The input from the right executor
-    input_r: Pin<Box<dyn Stream<Item = Result<Message>> + Send>>,
+    input_r: BoxedExecutorStream,
     /// The barrier state
     state: BarrierWaitState,
 }

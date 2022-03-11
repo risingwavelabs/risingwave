@@ -156,13 +156,6 @@ dependencies = [
   "post-build-frontend",
   "prepare-config"
 ]
-script = '''
-#!/bin/bash
-
-set -e
-tmux -V
-echo "Note: please make sure tmux version >= 3.2a"
-'''
 
 [tasks.playground]
 alias = "dev"

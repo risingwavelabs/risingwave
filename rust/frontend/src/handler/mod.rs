@@ -9,9 +9,10 @@ pub mod create_table;
 pub mod drop_table;
 mod explain;
 pub mod show_table;
+pub mod util;
 
 pub(super) async fn handle(session: &SessionImpl, stmt: Statement) -> Result<PgResponse> {
-    let context = QueryContext::new(session);
+    let context = QueryContext::new(session.ctx.clone());
     match stmt {
         Statement::Explain {
             statement, verbose, ..
@@ -25,7 +26,7 @@ pub(super) async fn handle(session: &SessionImpl, stmt: Statement) -> Result<PgR
             drop_table::handle_drop_table(context, table_object_name).await
         }
         Statement::ShowTable { table_name } => {
-            show_table::handle_show_table(session, table_name).await
+            show_table::handle_show_table(context, table_name).await
         }
         _ => Err(ErrorCode::NotImplementedError(format!("Unhandled ast: {:?}", stmt)).into()),
     }

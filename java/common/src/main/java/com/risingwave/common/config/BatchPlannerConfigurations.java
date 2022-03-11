@@ -49,7 +49,7 @@ public class BatchPlannerConfigurations {
 
   @Config
   public static final ConfigEntry<Boolean> ENABLE_NEW_SUBQUERY_PLANNER =
-      ConfigEntry.<Boolean>builder("enable_new_subquery_planner")
+      ConfigEntry.<Boolean>builder("enable_new_subquery_batch_planner")
           .setOptional(true)
           .withDefaultValue(false)
           .withConverter(BOOLEAN_PARSER)

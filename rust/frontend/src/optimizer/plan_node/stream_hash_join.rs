@@ -16,9 +16,12 @@ pub struct StreamHashJoin {
 
 impl StreamHashJoin {
     pub fn new(logical: LogicalJoin) -> Self {
+        let ctx = logical.base.ctx.clone();
         // TODO: derive from input
         let base = StreamBase {
             dist: Distribution::any().clone(),
+            id: ctx.borrow_mut().get_id(),
+            ctx: ctx.clone(),
         };
         Self { logical, base }
     }

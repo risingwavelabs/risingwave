@@ -71,6 +71,7 @@ impl CellBasedRowDeserializer {
         Ok(result)
     }
 
+    /// Take the remaining data out of the deserializer.
     pub fn take(&mut self) -> Option<(Vec<u8>, Row)> {
         let cur_pk_bytes = self.pk_bytes.take();
         cur_pk_bytes.map(|bytes| {

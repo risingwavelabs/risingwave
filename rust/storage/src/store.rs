@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use risingwave_common::error::Result;
 
-use crate::monitor::{MonitoredStateStore, StateStoreStats};
+use crate::monitor::{MonitoredStateStore, StateStoreMetrics};
 use crate::write_batch::WriteBatch;
 
 #[async_trait]
@@ -97,7 +97,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     async fn sync(&self, epoch: Option<u64>) -> Result<()>;
 
     /// Create a [`MonitoredStateStore`] from this state store, with given `stats`.
-    fn monitored(self, stats: Arc<StateStoreStats>) -> MonitoredStateStore<Self> {
+    fn monitored(self, stats: Arc<StateStoreMetrics>) -> MonitoredStateStore<Self> {
         MonitoredStateStore::new(self, stats)
     }
 }

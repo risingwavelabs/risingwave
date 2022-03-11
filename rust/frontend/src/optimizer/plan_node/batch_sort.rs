@@ -16,9 +16,15 @@ pub struct BatchSort {
 
 impl BatchSort {
     pub fn new(input: PlanRef, order: Order) -> Self {
+        let ctx = input.ctx();
         let schema = input.schema().clone();
         let dist = input.distribution().clone();
-        let base = BatchBase { order, dist };
+        let base = BatchBase {
+            order,
+            dist,
+            ctx: ctx.clone(),
+            id: ctx.borrow_mut().get_id(),
+        };
         BatchSort {
             input,
             base,

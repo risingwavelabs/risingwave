@@ -8,7 +8,7 @@ use risingwave_sqlparser::ast::ObjectName;
 
 use crate::catalog::catalog_service::DEFAULT_SCHEMA_NAME;
 use crate::catalog::column_catalog::ColumnCatalog;
-use crate::session::SessionImpl;
+use crate::session::QueryContext;
 
 pub(crate) fn column_to_rows(column_catalog: &ColumnCatalog) -> Vec<Row> {
     if let DataType::Struct { fields: _f } = column_catalog.data_type() {
@@ -45,11 +45,11 @@ fn get_type_name(column_catalog: &ColumnCatalog) -> String {
 }
 
 pub async fn handle_show_table(
-    session: &SessionImpl,
+    context: QueryContext,
     table_name: ObjectName,
 ) -> Result<PgResponse> {
     let str_table_name = table_name.to_string();
-
+    let session = context.session_ctx;
     let catalog_mgr = session.env().catalog_mgr();
     let catalog = catalog_mgr
         .get_database_snapshot(session.database())

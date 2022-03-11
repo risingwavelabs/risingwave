@@ -11,12 +11,12 @@ use super::{
 };
 use crate::expr::ExprImpl;
 use crate::optimizer::plan_node::{
-    BatchHashJoin, BatchSortMergeJoin, CollectRequiredCols, EqJoinPredicate, LogicalFilter,
+    BatchHashJoin, BatchSortMergeJoin, CollectInputRef, EqJoinPredicate, LogicalFilter,
 };
 use crate::optimizer::property::{Distribution, Order, WithSchema};
 use crate::utils::{ColIndexMapping, Condition};
 
-/// `LogicalJoin` that combines two relations according to some condition.
+/// `LogicalJoin` combines two relations according to some condition.
 ///
 /// Each output row has fields from the left and right inputs. The set of output rows is a subset
 /// of the cartesian product of the two inputs; precisely which subset depends on the join
@@ -38,8 +38,13 @@ impl fmt::Display for LogicalJoin {
 
 impl LogicalJoin {
     pub(crate) fn new(left: PlanRef, right: PlanRef, join_type: JoinType, on: Condition) -> Self {
+        let ctx = left.ctx();
         let schema = Self::derive_schema(left.schema(), right.schema(), join_type);
-        let base = LogicalBase { schema };
+        let base = LogicalBase {
+            schema,
+            id: ctx.borrow_mut().get_id(),
+            ctx: ctx.clone(),
+        };
         LogicalJoin {
             left,
             right,
@@ -74,6 +79,11 @@ impl LogicalJoin {
     pub fn on(&self) -> &Condition {
         &self.on
     }
+
+    /// Get the join type of the logical join.
+    pub fn join_type(&self) -> JoinType {
+        self.join_type
+    }
 }
 
 impl PlanTreeNodeBinary for LogicalJoin {
@@ -102,17 +112,17 @@ impl ColPrunable for LogicalJoin {
 
         let left_len = self.left.schema().fields.len();
 
-        let mut visitor = CollectRequiredCols {
-            required_cols: required_cols.clone(),
+        let mut visitor = CollectInputRef {
+            input_bits: required_cols.clone(),
         };
         self.on.visit_expr(&mut visitor);
 
         let mut on = self.on.clone();
-        let mut mapping = ColIndexMapping::with_remaining_columns(&visitor.required_cols);
+        let mut mapping = ColIndexMapping::with_remaining_columns(&visitor.input_bits);
         on = on.rewrite_expr(&mut mapping);
 
         let (left_required_cols, right_required_cols): (FixedBitSet, FixedBitSet) =
-            visitor.required_cols.ones().partition_map(|i| {
+            visitor.input_bits.ones().partition_map(|i| {
                 if i < left_len {
                     Either::Left(i)
                 } else {
@@ -127,7 +137,7 @@ impl ColPrunable for LogicalJoin {
             on,
         );
 
-        if required_cols == &visitor.required_cols {
+        if required_cols == &visitor.input_bits {
             join.into()
         } else {
             LogicalProject::with_mapping(
@@ -208,6 +218,8 @@ impl ToStream for LogicalJoin {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
 
     use risingwave_common::catalog::{Field, TableId};
     use risingwave_common::types::DataType;
@@ -217,8 +229,9 @@ mod tests {
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef};
     use crate::optimizer::plan_node::{LogicalScan, PlanTreeNodeUnary};
     use crate::optimizer::property::WithSchema;
+    use crate::session::QueryContext;
 
-    #[test]
+    #[tokio::test]
     /// Pruning
     /// ```text
     /// Join(on: input_ref(1)=input_ref(3))
@@ -232,8 +245,9 @@ mod tests {
     ///     TableScan(v2, v3)
     ///     TableScan(v4)
     /// ```
-    fn test_prune_join() {
+    async fn test_prune_join() {
         let ty = DataType::Int32;
+        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
         let fields: Vec<Field> = (1..7)
             .map(|i| Field {
                 data_type: ty.clone(),
@@ -247,6 +261,7 @@ mod tests {
             Schema {
                 fields: fields[0..3].to_vec(),
             },
+            ctx.clone(),
         );
         let right = LogicalScan::new(
             "right".to_string(),
@@ -255,6 +270,7 @@ mod tests {
             Schema {
                 fields: fields[3..6].to_vec(),
             },
+            ctx,
         );
         let on: ExprImpl = ExprImpl::FunctionCall(Box::new(
             FunctionCall::new(
@@ -306,7 +322,7 @@ mod tests {
         assert_eq!(right.schema().fields(), &fields[3..4]);
     }
 
-    #[test]
+    #[tokio::test]
     /// Pruning
     /// ```text
     /// Join(on: input_ref(1)=input_ref(3))
@@ -319,8 +335,9 @@ mod tests {
     ///   TableScan(v2)
     ///   TableScan(v4)
     /// ```
-    fn test_prune_join_no_project() {
+    async fn test_prune_join_no_project() {
         let ty = DataType::Int32;
+        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
         let fields: Vec<Field> = (1..7)
             .map(|i| Field {
                 data_type: ty.clone(),
@@ -334,6 +351,7 @@ mod tests {
             Schema {
                 fields: fields[0..3].to_vec(),
             },
+            ctx.clone(),
         );
         let right = LogicalScan::new(
             "right".to_string(),
@@ -342,6 +360,7 @@ mod tests {
             Schema {
                 fields: fields[3..6].to_vec(),
             },
+            ctx,
         );
         let on: ExprImpl = ExprImpl::FunctionCall(Box::new(
             FunctionCall::new(

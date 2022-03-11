@@ -4,9 +4,9 @@ use std::sync::Arc;
 use hyper::{Body, Request, Response};
 use itertools::Itertools;
 use prometheus::{
-    histogram_opts, register_histogram_vec_with_registry, register_histogram_with_registry,
-    register_int_gauge_vec_with_registry, Encoder, Histogram, HistogramVec, IntGaugeVec, Registry,
-    TextEncoder, DEFAULT_BUCKETS,
+    histogram_opts, register_gauge_vec_with_registry, register_histogram_vec_with_registry,
+    register_histogram_with_registry, register_int_gauge_vec_with_registry, Encoder, GaugeVec,
+    Histogram, HistogramVec, IntGaugeVec, Registry, TextEncoder, DEFAULT_BUCKETS,
 };
 use tower::make::Shared;
 use tower::ServiceBuilder;
@@ -28,6 +28,12 @@ pub struct MetaMetrics {
     pub level_sst_num: IntGaugeVec,
     /// num of SSTs to be merged to next level in each level
     pub level_compact_cnt: IntGaugeVec,
+    /// GBs read from current level during history compactions to next level
+    pub level_compact_read_curr: GaugeVec,
+    /// GBs read from next level during history compactions to next level
+    pub level_compact_read_next: GaugeVec,
+    /// GBs written into next level during history compactions to next level
+    pub level_compact_write: GaugeVec,
 }
 
 impl MetaMetrics {
@@ -66,12 +72,39 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let level_compact_read_curr = register_gauge_vec_with_registry!(
+            "storage_level_compact_read_curr",
+            "GBs read from current level during history compactions to next level",
+            &["level_index"],
+            registry
+        )
+        .unwrap();
+
+        let level_compact_read_next = register_gauge_vec_with_registry!(
+            "storage_level_compact_read_next",
+            "GBs read from next level during history compactions to next level",
+            &["level_index"],
+            registry
+        )
+        .unwrap();
+
+        let level_compact_write = register_gauge_vec_with_registry!(
+            "storage_level_compact_write",
+            "GBs written into next level during history compactions to next level",
+            &["level_index"],
+            registry
+        )
+        .unwrap();
+
         Self {
             registry,
             grpc_latency,
             barrier_latency,
             level_sst_num,
             level_compact_cnt,
+            level_compact_read_curr,
+            level_compact_read_next,
+            level_compact_write,
         }
     }
 
