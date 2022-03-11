@@ -3,18 +3,27 @@ use std::fmt;
 use risingwave_common::catalog::Schema;
 
 use super::{LogicalFilter, PlanRef, PlanTreeNodeUnary, ToStreamProst};
-use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
+use crate::optimizer::plan_node::StreamBase;
+use crate::optimizer::property::{Distribution, WithSchema};
 use crate::utils::Condition;
 
 /// `StreamFilter` implements [`super::LogicalFilter`]
 #[derive(Debug, Clone)]
 pub struct StreamFilter {
+    pub base: StreamBase,
     logical: LogicalFilter,
 }
 
 impl StreamFilter {
     pub fn new(logical: LogicalFilter) -> Self {
-        StreamFilter { logical }
+        let ctx = logical.base.ctx.clone();
+        // TODO: derive from input
+        let base = StreamBase {
+            dist: Distribution::any().clone(),
+            id: ctx.borrow_mut().get_id(),
+            ctx: ctx.clone(),
+        };
+        StreamFilter { logical, base }
     }
 
     pub fn predicate(&self) -> &Condition {
@@ -39,10 +48,6 @@ impl PlanTreeNodeUnary for StreamFilter {
 }
 
 impl_plan_tree_node_for_unary! { StreamFilter }
-
-impl WithOrder for StreamFilter {}
-
-impl WithDistribution for StreamFilter {}
 
 impl WithSchema for StreamFilter {
     fn schema(&self) -> &Schema {

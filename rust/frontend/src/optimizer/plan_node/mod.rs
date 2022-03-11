@@ -230,14 +230,14 @@ macro_rules! for_all_plan_nodes {
             // ,{ Logical, Sort } we don't need a LogicalSort, just require the Order
             ,{ Batch, Project }
             ,{ Batch, Filter }
-          ,{ Batch, SeqScan }
+            ,{ Batch, SeqScan }
             ,{ Batch, HashJoin }
             ,{ Batch, SortMergeJoin }
             ,{ Batch, Sort }
             ,{ Batch, Exchange }
             ,{ Batch, Limit }
             ,{ Stream, Project }
-          ,{ Stream, Filter }
+            ,{ Stream, Filter }
             ,{ Stream, TableSource }
             ,{ Stream, HashJoin }
             ,{ Stream, Exchange }

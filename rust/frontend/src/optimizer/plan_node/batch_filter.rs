@@ -3,18 +3,28 @@ use std::fmt;
 use risingwave_common::catalog::Schema;
 
 use super::{LogicalFilter, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
-use crate::optimizer::property::{Distribution, WithDistribution, WithOrder, WithSchema};
+use crate::optimizer::plan_node::BatchBase;
+use crate::optimizer::property::{Distribution, Order, WithSchema};
 use crate::utils::Condition;
 
 /// `BatchFilter` implements [`super::LogicalFilter`]
 #[derive(Debug, Clone)]
 pub struct BatchFilter {
+    pub base: BatchBase,
     logical: LogicalFilter,
 }
 
 impl BatchFilter {
     pub fn new(logical: LogicalFilter) -> Self {
-        BatchFilter { logical }
+        let ctx = logical.base.ctx.clone();
+        // TODO: derive from input
+        let base = BatchBase {
+            order: Order::any().clone(),
+            dist: Distribution::any().clone(),
+            id: ctx.borrow_mut().get_id(),
+            ctx: ctx.clone(),
+        };
+        BatchFilter { logical, base }
     }
 
     pub fn predicate(&self) -> &Condition {
@@ -39,10 +49,6 @@ impl PlanTreeNodeUnary for BatchFilter {
 }
 
 impl_plan_tree_node_for_unary! { BatchFilter }
-
-impl WithOrder for BatchFilter {}
-
-impl WithDistribution for BatchFilter {}
 
 impl WithSchema for BatchFilter {
     fn schema(&self) -> &Schema {
