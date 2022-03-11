@@ -153,6 +153,7 @@ mod to_prost;
 pub use to_prost::*;
 
 mod batch_exchange;
+mod batch_filter;
 mod batch_hash_join;
 mod batch_limit;
 mod batch_project;
@@ -169,11 +170,13 @@ mod logical_scan;
 mod logical_topn;
 mod logical_values;
 mod stream_exchange;
+mod stream_filter;
 mod stream_hash_join;
 mod stream_project;
 mod stream_table_source;
 
 pub use batch_exchange::BatchExchange;
+pub use batch_filter::BatchFilter;
 pub use batch_hash_join::BatchHashJoin;
 pub use batch_limit::BatchLimit;
 pub use batch_project::BatchProject;
@@ -190,6 +193,7 @@ pub use logical_scan::LogicalScan;
 pub use logical_topn::LogicalTopN;
 pub use logical_values::LogicalValues;
 pub use stream_exchange::StreamExchange;
+pub use stream_filter::StreamFilter;
 pub use stream_hash_join::StreamHashJoin;
 pub use stream_project::StreamProject;
 pub use stream_table_source::StreamTableSource;
@@ -225,13 +229,15 @@ macro_rules! for_all_plan_nodes {
             ,{ Logical, TopN }
             // ,{ Logical, Sort } we don't need a LogicalSort, just require the Order
             ,{ Batch, Project }
-            ,{ Batch, SeqScan }
+            ,{ Batch, Filter }
+          ,{ Batch, SeqScan }
             ,{ Batch, HashJoin }
             ,{ Batch, SortMergeJoin }
             ,{ Batch, Sort }
             ,{ Batch, Exchange }
             ,{ Batch, Limit }
             ,{ Stream, Project }
+          ,{ Stream, Filter }
             ,{ Stream, TableSource }
             ,{ Stream, HashJoin }
             ,{ Stream, Exchange }
@@ -266,6 +272,7 @@ macro_rules! for_batch_plan_nodes {
         $macro! {
             [$($x),*]
             ,{ Batch, Project }
+            ,{ Batch, Filter }
             ,{ Batch, SeqScan }
             ,{ Batch, HashJoin }
             ,{ Batch, Limit }
@@ -283,6 +290,7 @@ macro_rules! for_stream_plan_nodes {
         $macro! {
             [$($x),*]
             ,{ Stream, Project }
+            ,{ Stream, Filter }
             ,{ Stream, TableSource }
             ,{ Stream, HashJoin }
             ,{ Stream, Exchange }

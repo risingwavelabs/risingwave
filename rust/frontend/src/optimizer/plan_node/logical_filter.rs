@@ -8,6 +8,7 @@ use super::{
     ToStream,
 };
 use crate::expr::{assert_input_ref, ExprImpl};
+use crate::optimizer::plan_node::{BatchFilter, StreamFilter};
 use crate::optimizer::property::WithSchema;
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -101,13 +102,17 @@ impl ColPrunable for LogicalFilter {
 
 impl ToBatch for LogicalFilter {
     fn to_batch(&self) -> PlanRef {
-        todo!()
+        let new_input = self.input().to_batch();
+        let new_logical = self.clone_with_input(new_input);
+        BatchFilter::new(new_logical).into()
     }
 }
 
 impl ToStream for LogicalFilter {
     fn to_stream(&self) -> PlanRef {
-        todo!()
+        let new_input = self.input().to_batch();
+        let new_logical = self.clone_with_input(new_input);
+        StreamFilter::new(new_logical).into()
     }
 }
 
