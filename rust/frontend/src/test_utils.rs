@@ -22,6 +22,7 @@ use risingwave_pb::meta::{
     ListAllNodesRequest, ListAllNodesResponse, SubscribeRequest,
 };
 use risingwave_rpc_client::{MetaClient, MetaClientInner, NotificationStream};
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 use tonic::Request;
 
@@ -32,6 +33,8 @@ pub struct LocalFrontend {
     pub opts: FrontendOpts,
     pub session: SessionImpl,
     pub observer_join_handle: JoinHandle<()>,
+    _heartbeat_join_handle: JoinHandle<()>,
+    _heartbeat_shutdown_sender: UnboundedSender<()>,
 }
 
 impl LocalFrontend {
@@ -39,14 +42,17 @@ impl LocalFrontend {
         let args: [OsString; 0] = []; // No argument.
         let opts: FrontendOpts = FrontendOpts::parse_from(args);
         let meta_client = MetaClient::mock(FrontendMockMetaClient::new().await);
-        let (env, observer_join_handle) = FrontendEnv::with_meta_client(meta_client, &opts)
-            .await
-            .unwrap();
+        let (env, observer_join_handle, heartbeat_join_handle, heartbeat_shutdown_sender) =
+            FrontendEnv::with_meta_client(meta_client, &opts)
+                .await
+                .unwrap();
         let session = SessionImpl::new(env, "dev".to_string());
         Self {
             opts,
             session,
             observer_join_handle,
+            _heartbeat_join_handle: heartbeat_join_handle,
+            _heartbeat_shutdown_sender: heartbeat_shutdown_sender,
         }
     }
 

@@ -172,6 +172,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
     let sub_tasks: Vec<(JoinHandle<()>, UnboundedSender<()>)> = vec![
         hummock::start_compaction_trigger(hummock_manager, compactor_manager),
+        #[cfg(not(test))]
         StoredClusterManager::start_heartbeat_checker(
             cluster_manager.clone(),
             Duration::from_secs(1),

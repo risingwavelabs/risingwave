@@ -255,14 +255,12 @@ where
             Some(worker_2) => worker_2.value().key()?,
         };
         // 2. Update expire_at
-        if let Entry::Occupied(mut worker) = self.workers.entry(WorkerKey(key)) {
-            let expire_at = SystemTime::now()
-                .add(self.max_heartbeat_interval)
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .expect("Clock may have gone backwards")
-                .as_secs();
-            worker.get_mut().set_expire_at(expire_at);
-        }
+        let expire_at = SystemTime::now()
+            .add(self.max_heartbeat_interval)
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("Clock may have gone backwards")
+            .as_secs();
+        self.update_worker_ttl(key, expire_at);
         Ok(())
     }
 
