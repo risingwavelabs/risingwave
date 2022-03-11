@@ -140,20 +140,10 @@ mod tests {
     /// ```
     async fn test_prune_filter() {
         let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
-        let ty = DataType::Int32;
         let fields: Vec<Field> = vec![
-            Field {
-                data_type: ty.clone(),
-                name: "v1".to_string(),
-            },
-            Field {
-                data_type: ty.clone(),
-                name: "v2".to_string(),
-            },
-            Field {
-                data_type: ty.clone(),
-                name: "v3".to_string(),
-            },
+            Field::with_name(DataType::Int32, "v1"),
+            Field::with_name(DataType::Int32, "v2"),
+            Field::with_name(DataType::Int32, "v3"),
         ];
         let table_scan = LogicalScan::new(
             "test".to_string(),
@@ -168,8 +158,8 @@ mod tests {
             FunctionCall::new(
                 Type::LessThan,
                 vec![
-                    ExprImpl::InputRef(Box::new(InputRef::new(1, ty.clone()))),
-                    ExprImpl::Literal(Box::new(Literal::new(None, ty))),
+                    ExprImpl::InputRef(Box::new(InputRef::new(1, DataType::Int32))),
+                    ExprImpl::Literal(Box::new(Literal::new(None, DataType::Int32))),
                 ],
             )
             .unwrap(),
