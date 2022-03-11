@@ -22,6 +22,9 @@ pub mod stream_service;
 pub mod hummock;
 
 #[rustfmt::skip]
+#[path = "catalog.serde.rs"]
+pub mod catalog_serde;
+#[rustfmt::skip]
 #[path = "common.serde.rs"]
 pub mod common_serde;
 #[rustfmt::skip]

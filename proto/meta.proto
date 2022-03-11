@@ -6,6 +6,7 @@ option java_multiple_files = true;
 option java_package = "com.risingwave.proto.metanode";
 option optimize_for = SPEED;
 
+import "catalog.proto";
 import "common.proto";
 import "plan.proto";
 import "stream_plan.proto";
@@ -245,9 +246,14 @@ message SubscribeResponse {
   Operation operation = 2;
   oneof info {
     common.WorkerNode node = 3;
+    // TODO: remove below fields, using new message defined in catalog.
     Database database = 4;
     Schema schema = 5;
     Table table = 6;
+    catalog.Database database_v2 = 7;
+    catalog.Schema schema_v2 = 8;
+    catalog.Table table_v2 = 9;
+    catalog.Source source = 10;
   }
 }
 
