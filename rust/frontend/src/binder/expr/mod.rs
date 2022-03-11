@@ -13,24 +13,35 @@ mod value;
 impl Binder {
     pub(super) fn bind_expr(&mut self, expr: Expr) -> Result<ExprImpl> {
         match expr {
-            Expr::IsNull(expr)=>Ok(ExprImpl::FunctionCall(Box::new(
-                self.bind_is_operator(ExprType::IsNull,*expr)?,
+            Expr::IsNull(expr) => Ok(ExprImpl::FunctionCall(Box::new(
+                self.bind_is_operator(ExprType::IsNull, *expr)?,
             ))),
-            Expr::IsNotNull(expr)=>Ok(ExprImpl::FunctionCall(Box::new(
-                self.bind_is_operator(ExprType::IsNotNull,*expr)?,
+            Expr::IsNotNull(expr) => Ok(ExprImpl::FunctionCall(Box::new(
+                self.bind_is_operator(ExprType::IsNotNull, *expr)?,
             ))),
-            Expr::IsTrue(expr)=>Ok(ExprImpl::FunctionCall(Box::new(
-                self.bind_is_operator(ExprType::IsTrue,*expr)?,
+            Expr::IsTrue(expr) => Ok(ExprImpl::FunctionCall(Box::new(
+                self.bind_is_operator(ExprType::IsTrue, *expr)?,
             ))),
-            Expr::IsNotTrue(expr)=>Ok(ExprImpl::FunctionCall(Box::new(
-                self.bind_is_operator(ExprType::IsNotTrue,*expr)?,
+            Expr::IsNotTrue(expr) => Ok(ExprImpl::FunctionCall(Box::new(
+                self.bind_is_operator(ExprType::IsNotTrue, *expr)?,
             ))),
-            Expr::IsFalse(expr)=>Ok(ExprImpl::FunctionCall(Box::new(
-                self.bind_is_operator(ExprType::IsFalse,*expr)?,
+            Expr::IsFalse(expr) => Ok(ExprImpl::FunctionCall(Box::new(
+                self.bind_is_operator(ExprType::IsFalse, *expr)?,
             ))),
-            Expr::IsNotFalse(expr)=>Ok(ExprImpl::FunctionCall(Box::new(
-                self.bind_is_operator(ExprType::IsNotFalse,*expr)?,
+            Expr::IsNotFalse(expr) => Ok(ExprImpl::FunctionCall(Box::new(
+                self.bind_is_operator(ExprType::IsNotFalse, *expr)?,
             ))),
+            Expr::Case {
+                operand,
+                conditions,
+                results,
+                else_result,
+            } => Ok(ExprImpl::FunctionCall(Box::new(self.bind_case(
+                operand,
+                conditions,
+                results,
+                else_result,
+            )?))),
             Expr::Identifier(ident) => self.bind_column(&[ident]),
             Expr::CompoundIdentifier(idents) => self.bind_column(&idents),
             Expr::Value(v) => Ok(ExprImpl::Literal(Box::new(self.bind_value(v)?))),
@@ -72,6 +83,49 @@ impl Binder {
         })
     }
 
+    pub(super) fn bind_case(
+        &mut self,
+        operand: Option<Box<Expr>>,
+        conditions: Vec<Expr>,
+        results: Vec<Expr>,
+        else_result: Option<Box<Expr>>,
+    ) -> Result<FunctionCall> {
+        let mut inputs = match operand {
+            Some(t) => vec![self.bind_expr(*t)?],
+            None => Vec::new(),
+        };
+        for item in &conditions {
+            inputs.push(self.bind_expr(item.clone())?);
+        }
+        for item in &results {
+            inputs.push(self.bind_expr(item.clone())?);
+        }
+        if else_result.is_some() {
+            inputs.push(self.bind_expr(*else_result.clone().unwrap())?);
+        }
+        let mut return_type = self
+            .bind_expr(results.get(0).unwrap().clone())?
+            .return_type();
+        for i in 1..results.len() {
+            let _return_type = self
+                .bind_expr(results.get(i).unwrap().clone())?
+                .return_type();
+            return_type = Binder::find_compat(return_type, _return_type)?;
+        }
+        let return_type = match else_result {
+            Some(t) => {
+                let _return_type = self.bind_expr(*t)?.return_type();
+                Binder::find_compat(return_type, _return_type)?
+            }
+            None => return_type,
+        };
+        Ok(FunctionCall::new_with_return_type(
+            ExprType::Case,
+            inputs,
+            return_type,
+        ))
+    }
+
     pub(super) fn bind_is_operator(
         &mut self,
         func_type: ExprType,
@@ -79,7 +133,11 @@ impl Binder {
     ) -> Result<FunctionCall> {
         let expr = self.bind_expr(expr)?;
         let return_type = expr.return_type();
-        Ok(FunctionCall::new_with_return_type(func_type, vec![expr],return_type))
+        Ok(FunctionCall::new_with_return_type(
+            func_type,
+            vec![expr],
+            return_type,
+        ))
     }
 
     pub(super) fn bind_cast(&mut self, expr: Expr, data_type: AstDataType) -> Result<FunctionCall> {

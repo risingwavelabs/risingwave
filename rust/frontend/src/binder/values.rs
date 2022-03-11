@@ -46,7 +46,7 @@ impl Binder {
     }
 
     /// Find compatible type for `left` and `right`.
-    fn find_compat(left: DataType, right: DataType) -> Result<DataType> {
+    pub fn find_compat(left: DataType, right: DataType) -> Result<DataType> {
         if (left == right || left.is_numeric() && right.is_numeric())
             || (left.is_string() && right.is_string()
                 || (left.is_date_or_timestamp() && right.is_date_or_timestamp()))
