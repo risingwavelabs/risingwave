@@ -320,7 +320,7 @@ impl Compactor {
         let sub_compact_context = SubCompactContext {
             options,
             local_version_manager,
-            hummock_meta_client,
+            hummock_meta_client: hummock_meta_client.clone(),
             sstable_store: sstable_store.clone(),
             stats,
             is_share_buffer_compact: false,
@@ -379,7 +379,13 @@ impl Compactor {
                                 }
                             }
                             if let Some(VacuumTask { task: Some(task) }) = vacuum_task {
-                                if let Err(e) = Vacuum::vacuum(sstable_store.clone(), task).await {
+                                if let Err(e) = Vacuum::vacuum(
+                                    sstable_store.clone(),
+                                    task,
+                                    hummock_meta_client.clone(),
+                                )
+                                .await
+                                {
                                     tracing::warn!("failed to vacuum. {}", e);
                                 }
                             }

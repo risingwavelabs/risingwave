@@ -1,6 +1,9 @@
-use risingwave_pb::hummock::vacuum_task;
-use risingwave_pb::hummock::vacuum_task::{Task, VaccumOrphanData, VacuumTrackedData};
+use std::sync::Arc;
 
+use risingwave_pb::hummock::vacuum_task::{Task, VaccumOrphanData, VacuumTrackedData};
+use risingwave_pb::hummock::{vacuum_task, VacuumTask};
+
+use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::SstableStoreRef;
 
 pub struct Vacuum {}
@@ -9,8 +12,9 @@ impl Vacuum {
     pub async fn vacuum(
         sstable_store_ref: SstableStoreRef,
         vacuum_task: vacuum_task::Task,
+        hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> risingwave_common::error::Result<()> {
-        match vacuum_task {
+        match vacuum_task.clone() {
             Task::Tracked(VacuumTrackedData { sstable_ids })
             | Task::Orphan(VaccumOrphanData { sstable_ids }) => {
                 for sstable_id in &sstable_ids {
@@ -23,6 +27,13 @@ impl Vacuum {
                         .delete(sstable_store_ref.get_sst_data_path(*sstable_id).as_str())
                         .await?;
                 }
+
+                hummock_meta_client
+                    .report_vacuum_task(VacuumTask {
+                        task: Some(vacuum_task),
+                    })
+                    .await?;
+
                 tracing::debug!(
                     "vacuum {} tracked SSTs, {:?}",
                     sstable_ids.len(),
@@ -43,6 +54,7 @@ mod tests {
     use risingwave_pb::hummock::vacuum_task;
 
     use crate::hummock::iterator::test_utils::{default_builder_opt_for_test, gen_test_sstable};
+    use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
     use crate::hummock::vacuum::Vacuum;
     use crate::hummock::SstableStore;
     use crate::object::InMemObjectStore;
@@ -76,8 +88,14 @@ mod tests {
                 .chain(iter::once(nonexistent_id))
                 .collect_vec(),
         });
-        Vacuum::vacuum(sstable_store_ref, vacuum_task)
-            .await
-            .unwrap();
+        Vacuum::vacuum(
+            sstable_store_ref,
+            vacuum_task,
+            Arc::new(MockHummockMetaClient::new(Arc::new(
+                MockHummockMetaService::new(),
+            ))),
+        )
+        .await
+        .unwrap();
     }
 }
