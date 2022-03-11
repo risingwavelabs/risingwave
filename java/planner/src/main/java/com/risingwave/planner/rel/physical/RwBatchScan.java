@@ -5,10 +5,10 @@ import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.TableCatalog;
 import com.risingwave.planner.rel.common.RwScan;
 import com.risingwave.planner.rel.common.dist.RwDistributions;
+import com.risingwave.proto.plan.CellBasedTableDesc;
 import com.risingwave.proto.plan.ColumnDesc;
 import com.risingwave.proto.plan.PlanNode;
 import com.risingwave.proto.plan.RowSeqScanNode;
-import com.risingwave.rpc.Messages;
 import java.util.Collections;
 import java.util.List;
 import org.apache.calcite.plan.RelOptCluster;
@@ -56,8 +56,11 @@ public class RwBatchScan extends RwScan implements RisingWaveBatchPhyRel {
   @Override
   public PlanNode serialize() {
     var table = getTable().unwrapOrThrow(TableCatalog.class);
-    var tableRefId = Messages.getTableRefId(tableId);
-    var builder = RowSeqScanNode.newBuilder().setTableRefId(tableRefId);
+
+    // FIXME: here should add pk's desc in the table desc.
+    var builder =
+        RowSeqScanNode.newBuilder()
+            .setTableDesc(CellBasedTableDesc.newBuilder().setTableId(tableId.getValue()).build());
 
     columnIds.forEach(
         c -> {

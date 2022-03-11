@@ -37,7 +37,7 @@ macro_rules! impl_model_for_catalog {
     };
 }
 
-impl_model_for_catalog!(Source, CATALOG_SOURCE_CF_NAME, i32, get_id);
-impl_model_for_catalog!(Table, CATALOG_TABLE_CF_NAME, i32, get_id);
-impl_model_for_catalog!(Schema, CATALOG_SCHEMA_CF_NAME, i32, get_id);
-impl_model_for_catalog!(Database, CATALOG_DATABASE_CF_NAME, i32, get_id);
+impl_model_for_catalog!(Source, CATALOG_SOURCE_CF_NAME, u32, get_id);
+impl_model_for_catalog!(Table, CATALOG_TABLE_CF_NAME, u32, get_id);
+impl_model_for_catalog!(Schema, CATALOG_SCHEMA_CF_NAME, u32, get_id);
+impl_model_for_catalog!(Database, CATALOG_DATABASE_CF_NAME, u32, get_id);

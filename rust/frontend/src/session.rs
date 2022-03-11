@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::fmt::Formatter;
 use std::rc::Rc;
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{Session, SessionManager};
@@ -9,6 +10,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::common::WorkerType;
 use risingwave_rpc_client::MetaClient;
 use risingwave_sqlparser::parser::Parser;
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
@@ -67,7 +69,9 @@ pub struct FrontendEnv {
 }
 
 impl FrontendEnv {
-    pub async fn init(opts: &FrontendOpts) -> Result<(Self, JoinHandle<()>)> {
+    pub async fn init(
+        opts: &FrontendOpts,
+    ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, UnboundedSender<()>)> {
         let meta_client = MetaClient::new(opts.meta_addr.clone().as_str()).await?;
         Self::with_meta_client(meta_client, opts).await
     }
@@ -91,11 +95,16 @@ impl FrontendEnv {
     pub async fn with_meta_client(
         mut meta_client: MetaClient,
         opts: &FrontendOpts,
-    ) -> Result<(Self, JoinHandle<()>)> {
+    ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, UnboundedSender<()>)> {
         let host = opts.host.parse().unwrap();
 
         // Register in meta by calling `AddWorkerNode` RPC.
         meta_client.register(host, WorkerType::Frontend).await?;
+
+        let (heartbeat_join_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
+            meta_client.clone(),
+            Duration::from_millis(opts.heartbeat_interval as u64),
+        );
 
         let (catalog_updated_tx, catalog_updated_rx) = watch::channel(0);
         let catalog_cache = Arc::new(RwLock::new(CatalogCache::new(meta_client.clone()).await?));
@@ -135,6 +144,8 @@ impl FrontendEnv {
                 catalog_manager,
             },
             observer_join_handle,
+            heartbeat_join_handle,
+            heartbeat_shutdown_sender,
         ))
     }
 
@@ -190,6 +201,8 @@ impl SessionImpl {
 pub struct SessionManagerImpl {
     env: FrontendEnv,
     observer_join_handle: JoinHandle<()>,
+    heartbeat_join_handle: JoinHandle<()>,
+    _heartbeat_shutdown_sender: UnboundedSender<()>,
 }
 
 impl SessionManager for SessionManagerImpl {
@@ -202,16 +215,20 @@ impl SessionManager for SessionManagerImpl {
 
 impl SessionManagerImpl {
     pub async fn new(opts: &FrontendOpts) -> Result<Self> {
-        let (env, join_handle) = FrontendEnv::init(opts).await?;
+        let (env, join_handle, heartbeat_join_handle, heartbeat_shutdown_sender) =
+            FrontendEnv::init(opts).await?;
         Ok(Self {
             env,
             observer_join_handle: join_handle,
+            heartbeat_join_handle,
+            _heartbeat_shutdown_sender: heartbeat_shutdown_sender,
         })
     }
 
     /// Used in unit test. Called before `LocalMeta::stop`.
     pub fn terminate(&self) {
         self.observer_join_handle.abort();
+        self.heartbeat_join_handle.abort();
     }
 }
 

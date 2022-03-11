@@ -1,4 +1,5 @@
 pub mod catalog_service;
+pub mod catalog_service_v2;
 pub mod cluster_service;
 pub mod epoch_service;
 pub mod heartbeat_service;
