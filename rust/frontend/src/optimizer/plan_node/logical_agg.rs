@@ -4,6 +4,7 @@ use std::rc::Rc;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::expr::AggKind;
 use risingwave_common::types::DataType;
 
@@ -105,16 +106,16 @@ impl LogicalAgg {
         select_alias: Vec<Option<String>>,
         group_exprs: Vec<ExprImpl>,
         input: PlanRef,
-    ) -> PlanRef {
+    ) -> Result<PlanRef> {
         // Notice: we now assume the only thing can appear in GROUP BY clause is an input column
         // name.
         let mut project: Vec<ExprImpl> = vec![];
         let mut group_keys = vec![];
         let input_refs =
-            LogicalAgg::traverse_group_expr(group_exprs, &mut project, &mut group_keys);
+            LogicalAgg::traverse_group_expr(group_exprs, &mut project, &mut group_keys)?;
 
         let mut agg_calls = vec![];
-        LogicalAgg::traverse_select_expr(&select_exprs, &mut project, &mut agg_calls, &input_refs);
+        LogicalAgg::traverse_select_expr(&select_exprs, &mut project, &mut agg_calls, &input_refs)?;
 
         // This LogicalProject focuses on the exprs in aggregates and GROUP BY clause.
         let expr_alias = vec![None; project.len()];
@@ -137,14 +138,18 @@ impl LogicalAgg {
             .collect();
         // This LogicalProject focuse on tranforming the aggregates and grouping columns to
         // InputRef.
-        LogicalProject::create(Rc::new(logical_agg), exprs, select_alias)
+        Ok(LogicalProject::create(
+            Rc::new(logical_agg),
+            exprs,
+            select_alias,
+        ))
     }
 
     fn traverse_group_expr(
         group_exprs: Vec<ExprImpl>,
         project: &mut Vec<ExprImpl>,
         group_keys: &mut Vec<usize>,
-    ) -> Vec<InputRef> {
+    ) -> Result<Vec<InputRef>> {
         let mut input_refs = vec![];
         for (index, group_expr) in group_exprs.into_iter().enumerate() {
             match group_expr {
@@ -154,11 +159,14 @@ impl LogicalAgg {
                     input_refs.push(*input_ref);
                 }
                 _ => {
-                    panic!("GROUP BY clause cannot contain aggregates!");
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "GROUP BY clause cannot contain aggregates!".into(),
+                    )
+                    .into());
                 }
             }
         }
-        input_refs
+        Ok(input_refs)
     }
 
     fn traverse_select_expr(
@@ -166,17 +174,17 @@ impl LogicalAgg {
         project: &mut Vec<ExprImpl>,
         agg_calls: &mut Vec<PlanAggCall>,
         input_refs: &Vec<InputRef>,
-    ) {
+    ) -> Result<()> {
         for select_expr in select_exprs {
             match select_expr {
                 ExprImpl::InputRef(input_ref) => {
                     if !input_refs.iter().any(|input| *input == **input_ref) {
-                        panic!("column must appear in the GROUP BY clause or be used in an aggregate function");
+                        return Err(ErrorCode::InvalidInputSyntax("column must appear in the GROUP BY clause or be used in an aggregate function".into()).into());
                     }
                 }
                 ExprImpl::Literal(_) => {}
                 ExprImpl::FunctionCall(func_call) => {
-                    LogicalAgg::traverse_select_expr(
+                    return LogicalAgg::traverse_select_expr(
                         func_call.inputs(),
                         project,
                         agg_calls,
@@ -195,6 +203,7 @@ impl LogicalAgg {
                 }
             }
         }
+        Ok(())
     }
 
     /// Get a reference to the logical agg's agg call alias.
@@ -230,7 +239,7 @@ impl ExprRewriter for RewriteAgg {
         if let Some(index) = self.input_refs.iter().position(|input| *input == input_ref) {
             InputRef::new(index, input_ref.data_type()).into()
         } else {
-            panic!("unreachable");
+            unreachable!()
         }
     }
 }
