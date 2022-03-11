@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use hyper::{Body, Request, Response};
 use prometheus::{Encoder, Registry, TextEncoder};
@@ -54,6 +55,12 @@ pub async fn compute_node_serve(
         .await
         .unwrap();
 
+    let mut sub_tasks: Vec<(JoinHandle<()>, UnboundedSender<()>)> =
+        vec![MetaClient::start_heartbeat_loop(
+            meta_client.clone(),
+            Duration::from_millis(opts.heartbeat_interval as u64),
+        )];
+
     let registry = prometheus::Registry::new();
     // Initialize state store.
     let state_store_metrics = Arc::new(StateStoreMetrics::new(registry.clone()));
@@ -68,16 +75,14 @@ pub async fn compute_node_serve(
     .unwrap();
 
     // A hummock compactor is deployed along with compute node for now.
-    let mut compactor_handle = None;
     if let StateStoreImpl::HummockStateStore(hummock) = state_store.clone() {
-        let (compactor_join_handle, compactor_shutdown_sender) = Compactor::start_compactor(
+        sub_tasks.push(Compactor::start_compactor(
             hummock.inner().storage.options().clone(),
             hummock.inner().storage.local_version_manager().clone(),
             hummock.inner().storage.hummock_meta_client().clone(),
             hummock.inner().storage.sstable_store(),
             state_store_metrics,
-        );
-        compactor_handle = Some((compactor_join_handle, compactor_shutdown_sender));
+        ));
     }
 
     let streaming_metrics = Arc::new(StreamingMetrics::new(registry.clone()));
@@ -121,10 +126,11 @@ pub async fn compute_node_serve(
                 tokio::select! {
                     _ = tokio::signal::ctrl_c() => {},
                     _ = shutdown_recv.recv() => {
-                        // Gracefully shutdown compactor
-                        if let Some((compactor_join_handle, compactor_shutdown_sender)) = compactor_handle {
-                            if compactor_shutdown_sender.send(()).is_ok() {
-                                compactor_join_handle.await.unwrap();
+                        for (join_handle, shutdown_sender) in sub_tasks {
+                            if shutdown_sender.send(()).is_ok() {
+                                if let Err(err) = join_handle.await {
+                                    tracing::warn!("shutdown err: {}", err);
+                                }
                             }
                         }
                     },

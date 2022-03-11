@@ -27,6 +27,10 @@ pub struct FrontendOpts {
 
     #[clap(long, default_value = "http://127.0.0.1:5690")]
     pub meta_addr: String,
+
+    /// Interval to send heartbeat in ms
+    #[clap(long, default_value = "1000")]
+    pub heartbeat_interval: u32,
 }
 
 /// Start frontend
