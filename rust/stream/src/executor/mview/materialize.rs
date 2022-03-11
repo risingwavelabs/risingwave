@@ -183,14 +183,10 @@ impl<S: StateStore> SimpleExecutor for MaterializeExecutor<S> {
 #[cfg(test)]
 mod tests {
 
-    use itertools::Itertools;
     use risingwave_common::array::{I32Array, Op};
-    use risingwave_common::catalog::{ColumnId, Schema, TableId};
+    use risingwave_common::catalog::{Field, Schema, TableId};
     use risingwave_common::column_nonnull;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
-    use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::DataType;
-    use risingwave_pb::plan::ColumnDesc;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::Keyspace;
 
@@ -203,28 +199,11 @@ mod tests {
         let memory_state_store = MemoryStateStore::new();
         let table_id = TableId::new(1);
         // Two columns of int32 type, the first column is PK.
-        let columns = vec![
-            ColumnDesc {
-                column_type: Some(DataType {
-                    type_name: TypeName::Int32 as i32,
-                    ..Default::default()
-                }),
-                name: "v1".to_string(),
-                column_id: 0,
-            },
-            ColumnDesc {
-                column_type: Some(DataType {
-                    type_name: TypeName::Int32 as i32,
-                    ..Default::default()
-                }),
-                name: "v2".to_string(),
-                column_id: 1,
-            },
-        ];
-        let column_ids = columns
-            .iter()
-            .map(|c| ColumnId::from(c.column_id))
-            .collect_vec();
+        let schema = Schema::new(vec![
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Int32),
+        ]);
+        let column_ids = vec![0.into(), 1.into()];
 
         // Prepare source chunks.
         let chunk1 = StreamChunk::new(
@@ -245,7 +224,6 @@ mod tests {
         );
 
         // Prepare stream executors.
-        let schema = Schema::try_from(&columns).unwrap();
         let source = MockSource::with_messages(
             schema.clone(),
             PkIndices::new(),
