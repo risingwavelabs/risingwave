@@ -376,9 +376,7 @@ mod tests {
             "test".to_string(),
             TableId::new(0),
             vec![1.into(), 2.into(), 3.into()],
-            Schema {
-                fields: fields.clone(),
-            },
+            Schema { fields },
             ctx,
         );
         let input = Rc::new(table_scan);
@@ -437,12 +435,12 @@ mod tests {
 
         // Test case: select v1, min(v2) + max(v3) from t group by v1;
         {
-            let min_v2 = AggCall::new(AggKind::Min, vec![input_ref_2.clone().into()]).unwrap();
+            let min_v2 = AggCall::new(AggKind::Min, vec![input_ref_2.into()]).unwrap();
             let max_v3 = AggCall::new(AggKind::Max, vec![input_ref_3.into()]).unwrap();
             let func_call =
                 FunctionCall::new(ExprType::Add, vec![min_v2.into(), max_v3.into()]).unwrap();
             let select_exprs = vec![input_ref_1.clone().into(), ExprImpl::from(func_call)];
-            let group_exprs = vec![input_ref_1.clone().into()];
+            let group_exprs = vec![input_ref_1.into()];
 
             let (exprs, agg_calls, group_keys) = gen_internal_value(select_exprs, group_exprs);
 
