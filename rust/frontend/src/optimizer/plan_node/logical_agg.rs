@@ -9,7 +9,7 @@ use risingwave_common::expr::AggKind;
 use risingwave_common::types::DataType;
 
 use super::{ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
-use crate::expr::{AggCall, ExprImpl, ExprRewriter, InputRef};
+use crate::expr::{AggCall, Expr, ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::plan_node::LogicalProject;
 use crate::optimizer::property::WithSchema;
 use crate::utils::ColIndexMapping;
@@ -119,12 +119,13 @@ impl LogicalAgg {
 
         // This LogicalProject focuses on the exprs in aggregates and GROUP BY clause.
         let expr_alias = vec![None; project.len()];
-        let logical_project = LogicalProject::create(input, project.clone(), expr_alias.clone());
+        let logical_project = LogicalProject::create(input, project.clone(), expr_alias);
 
         // Assume the output order of LogicalAgg will be [group column, aggregate result], same as
         // the order of `project`.
         // This LogicalAgg foucuses on calculating the aggregates and grouping.
-        let logical_agg = LogicalAgg::new(agg_calls, expr_alias, group_keys, logical_project);
+        let agg_call_alias = vec![None; agg_calls.len()];
+        let logical_agg = LogicalAgg::new(agg_calls, agg_call_alias, group_keys, logical_project);
 
         let mut rewrite_agg = RewriteAgg {
             index: input_refs.len(),
@@ -152,6 +153,8 @@ impl LogicalAgg {
     ) -> Result<Vec<InputRef>> {
         let mut input_refs = vec![];
         for (index, group_expr) in group_exprs.into_iter().enumerate() {
+            // May or may not: the order between match arms affects the final result in current
+            // implementation.
             match group_expr {
                 ExprImpl::InputRef(input_ref) => {
                     project.push((*input_ref).clone().into());
@@ -176,6 +179,8 @@ impl LogicalAgg {
         input_refs: &Vec<InputRef>,
     ) -> Result<()> {
         for select_expr in select_exprs {
+            // May or may not: the order between match arms affects the final result in current
+            // implementation.
             match select_expr {
                 ExprImpl::InputRef(input_ref) => {
                     if !input_refs.iter().any(|input| *input == **input_ref) {
@@ -193,11 +198,11 @@ impl LogicalAgg {
                 }
                 ExprImpl::AggCall(agg_call) => {
                     let begin = project.len();
-                    let end = begin + agg_call.inputs.len();
-                    project.extend(agg_call.inputs.clone().into_iter());
+                    let end = begin + agg_call.inputs().len();
+                    project.extend(agg_call.inputs().iter().cloned());
                     agg_calls.push(PlanAggCall {
-                        agg_kind: agg_call.agg_kind.clone(),
-                        return_type: agg_call.return_type.clone(),
+                        agg_kind: agg_call.agg_kind().clone(),
+                        return_type: agg_call.return_type().clone(),
                         inputs: (begin..end).collect(),
                     });
                 }
@@ -226,11 +231,11 @@ struct RewriteAgg {
     index: usize,
     input_refs: Vec<InputRef>,
 }
-// May or may not: the order between match arms affects the final result in current implementation.
+
 impl ExprRewriter for RewriteAgg {
     // Agg -> InputRef (select min(v1))
     fn rewrite_agg_call(&mut self, agg_call: AggCall) -> ExprImpl {
-        let input_ref = InputRef::new(self.index, agg_call.return_type).into();
+        let input_ref = InputRef::new(self.index, agg_call.return_type()).into();
         self.index += 1;
         input_ref
     }
@@ -344,10 +349,121 @@ mod tests {
     use risingwave_common::types::DataType;
 
     use super::*;
-    use crate::expr::assert_eq_input_ref;
+    use crate::expr::{assert_eq_input_ref, ExprType, FunctionCall};
     use crate::optimizer::plan_node::LogicalScan;
     use crate::optimizer::property::ctx::WithId;
     use crate::session::QueryContext;
+
+    #[tokio::test]
+    async fn test_create() {
+        let ty = DataType::Int32;
+        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
+        let fields: Vec<Field> = vec![
+            Field {
+                data_type: ty.clone(),
+                name: "v1".to_string(),
+            },
+            Field {
+                data_type: ty.clone(),
+                name: "v2".to_string(),
+            },
+            Field {
+                data_type: ty.clone(),
+                name: "v3".to_string(),
+            },
+        ];
+        let table_scan = LogicalScan::new(
+            "test".to_string(),
+            TableId::new(0),
+            vec![1.into(), 2.into(), 3.into()],
+            Schema {
+                fields: fields.clone(),
+            },
+            ctx,
+        );
+        let input = Rc::new(table_scan);
+        let input_ref_1 = InputRef::new(0, ty.clone());
+        let input_ref_2 = InputRef::new(1, ty.clone());
+        let input_ref_3 = InputRef::new(2, ty.clone());
+
+        let gen_internal_value = |select_exprs: Vec<ExprImpl>,
+                                  group_exprs|
+         -> (Vec<ExprImpl>, Vec<PlanAggCall>, Vec<usize>) {
+            let select_alias = vec![None; select_exprs.len()];
+            let plan =
+                LogicalAgg::create(select_exprs, select_alias, group_exprs, input.clone()).unwrap();
+            let logical_project = plan.as_logical_project().unwrap();
+            let exprs = logical_project.exprs();
+
+            let plan = logical_project.input();
+            let logical_agg = plan.as_logical_agg().unwrap();
+            let agg_calls = logical_agg.agg_calls().to_vec();
+            let group_keys = logical_agg.group_keys().to_vec();
+
+            (exprs.clone(), agg_calls, group_keys)
+        };
+
+        // Test case: select v1 from test group by v1;
+        {
+            let select_exprs = vec![input_ref_1.clone().into()];
+            let group_exprs = vec![input_ref_1.clone().into()];
+
+            let (exprs, agg_calls, group_keys) = gen_internal_value(select_exprs, group_exprs);
+
+            assert_eq!(exprs.len(), 1);
+            assert_eq_input_ref!(&exprs[0], 0);
+
+            assert_eq!(agg_calls.len(), 0);
+            assert_eq!(group_keys, vec![0]);
+        }
+
+        // Test case: select v1, min(v2) from test group by v1;
+        {
+            let min_v2 = AggCall::new(AggKind::Min, vec![input_ref_2.clone().into()]).unwrap();
+            let select_exprs = vec![input_ref_1.clone().into(), min_v2.into()];
+            let group_exprs = vec![input_ref_1.clone().into()];
+
+            let (exprs, agg_calls, group_keys) = gen_internal_value(select_exprs, group_exprs);
+
+            assert_eq!(exprs.len(), 2);
+            assert_eq_input_ref!(&exprs[0], 0);
+            assert_eq_input_ref!(&exprs[1], 1);
+
+            assert_eq!(agg_calls.len(), 1);
+            assert_eq!(agg_calls[0].agg_kind, AggKind::Min);
+            assert_eq!(agg_calls[0].inputs, vec![1]);
+            assert_eq!(group_keys, vec![0]);
+        }
+
+        // Test case: select v1, min(v2) + max(v3) from t group by v1;
+        {
+            let min_v2 = AggCall::new(AggKind::Min, vec![input_ref_2.clone().into()]).unwrap();
+            let max_v3 = AggCall::new(AggKind::Max, vec![input_ref_3.into()]).unwrap();
+            let func_call =
+                FunctionCall::new(ExprType::Add, vec![min_v2.into(), max_v3.into()]).unwrap();
+            let select_exprs = vec![input_ref_1.clone().into(), ExprImpl::from(func_call)];
+            let group_exprs = vec![input_ref_1.clone().into()];
+
+            let (exprs, agg_calls, group_keys) = gen_internal_value(select_exprs, group_exprs);
+
+            assert_eq_input_ref!(&exprs[0], 0);
+            if let ExprImpl::FunctionCall(func_call) = &exprs[1] {
+                assert_eq!(func_call.get_expr_type(), ExprType::Add);
+                let inputs = func_call.inputs();
+                assert_eq_input_ref!(&inputs[0], 1);
+                assert_eq_input_ref!(&inputs[1], 2);
+            } else {
+                panic!("Wrong expression type!");
+            }
+
+            assert_eq!(agg_calls.len(), 2);
+            assert_eq!(agg_calls[0].agg_kind, AggKind::Min);
+            assert_eq!(agg_calls[0].inputs, vec![1]);
+            assert_eq!(agg_calls[1].agg_kind, AggKind::Max);
+            assert_eq!(agg_calls[1].inputs, vec![2]);
+            assert_eq!(group_keys, vec![0]);
+        }
+    }
 
     #[tokio::test]
     /// Pruning

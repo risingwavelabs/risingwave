@@ -6,9 +6,9 @@ use super::{Expr, ExprImpl};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct AggCall {
-    pub agg_kind: AggKind,
-    pub return_type: DataType,
-    pub inputs: Vec<ExprImpl>,
+    agg_kind: AggKind,
+    return_type: DataType,
+    inputs: Vec<ExprImpl>,
 }
 impl AggCall {
     #![allow(clippy::diverging_sub_expression)]
