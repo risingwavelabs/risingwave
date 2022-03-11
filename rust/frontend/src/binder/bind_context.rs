@@ -7,7 +7,6 @@ use risingwave_common::types::DataType;
 #[derive(Debug)]
 pub struct ColumnBinding {
     pub table_name: String,
-    /// Index of the column in the table.
     pub index: usize,
     pub data_type: DataType,
 }
@@ -60,6 +59,7 @@ impl BindContext {
             Ok(columns[0])
         }
     }
+
     pub fn get_index_with_table_name(
         &self,
         column_name: &String,
