@@ -43,10 +43,6 @@ impl Worker {
         WorkerType::from_i32(self.worker_node.r#type).unwrap()
     }
 
-    pub fn worker_node(&self) -> WorkerNode {
-        self.worker_node.clone()
-    }
-
     pub fn worker_id(&self) -> u32 {
         self.worker_node.id
     }
