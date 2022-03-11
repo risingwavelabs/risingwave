@@ -4,10 +4,9 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
-use super::{ColPrunable, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use super::{ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
 use crate::binder::BaseTableRef;
 use crate::catalog::ColumnId;
-use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 
 /// `LogicalInsert` iterates on input relation and insert the data into specified table.
 ///
@@ -16,21 +15,27 @@ use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct LogicalInsert {
+    pub base: LogicalBase,
     table: BaseTableRef,
     columns: Vec<ColumnId>,
     input: PlanRef,
-    schema: Schema,
 }
 
 impl LogicalInsert {
     /// Create a LogicalInsert node. Used internally by optimizer.
     pub fn new(input: PlanRef, table: BaseTableRef, columns: Vec<ColumnId>) -> Self {
+        let ctx = input.ctx();
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
+        let base = LogicalBase {
+            schema,
+            id: ctx.borrow_mut().get_id(),
+            ctx: ctx.clone(),
+        };
         Self {
             table,
             columns,
             input,
-            schema,
+            base,
         }
     }
 
@@ -49,16 +54,6 @@ impl PlanTreeNodeUnary for LogicalInsert {
     }
 }
 impl_plan_tree_node_for_unary! {LogicalInsert}
-
-impl WithSchema for LogicalInsert {
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-}
-
-impl WithOrder for LogicalInsert {}
-
-impl WithDistribution for LogicalInsert {}
 
 impl fmt::Display for LogicalInsert {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

@@ -54,8 +54,8 @@ mod handlers {
     impl IntoResponse for DashboardError {
         fn into_response(self) -> axum::response::Response {
             let mut resp = Json(json!({
-              "error": format!("{}", self.0),
-              "info":  format!("{:?}", self.0),
+                "error": format!("{}", self.0),
+                "info":  format!("{:?}", self.0),
             }))
             .into_response();
             *resp.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
@@ -99,7 +99,7 @@ mod handlers {
     ) -> Result<Json<Vec<ActorLocation>>> {
         use risingwave_pb::common::WorkerType;
 
-        let node_actors = srv.fragment_manager.load_all_node_actors().map_err(err)?;
+        let node_actors = srv.fragment_manager.all_node_actors().map_err(err)?;
         let nodes = srv
             .cluster_manager
             .list_worker_node(WorkerType::ComputeNode, None);

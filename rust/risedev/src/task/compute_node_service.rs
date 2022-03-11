@@ -19,7 +19,12 @@ impl ComputeNodeService {
 
     fn compute_node(&self) -> Result<Command> {
         let prefix_bin = env::var("PREFIX_BIN")?;
-        Ok(Command::new(Path::new(&prefix_bin).join("compute-node")))
+
+        if let Ok(x) = env::var("ENABLE_ALL_IN_ONE") && x == "true" {
+            Ok(Command::new(Path::new(&prefix_bin).join("risingwave").join("compute-node")))
+        } else {
+            Ok(Command::new(Path::new(&prefix_bin).join("compute-node")))
+        }
     }
 }
 
@@ -64,13 +69,13 @@ impl Task for ComputeNodeService {
             1 => {
                 let minio = &provide_minio[0];
                 cmd.arg("--state-store").arg(format!(
-          "hummock+minio://{hummock_user}:{hummock_password}@{minio_addr}:{minio_port}/{hummock_bucket}",
-          hummock_user = minio.hummock_user,
-          hummock_password = minio.hummock_password,
-          hummock_bucket = minio.hummock_bucket,
-          minio_addr = minio.address,
-          minio_port = minio.port,
-        ));
+                    "hummock+minio://{hummock_user}:{hummock_password}@{minio_addr}:{minio_port}/{hummock_bucket}",
+                    hummock_user = minio.hummock_user,
+                    hummock_password = minio.hummock_password,
+                    hummock_bucket = minio.hummock_bucket,
+                    minio_addr = minio.address,
+                    minio_port = minio.port,
+                ));
             }
             other_size => {
                 return Err(anyhow!(
@@ -94,9 +99,9 @@ impl Task for ComputeNodeService {
             }
             other_size => {
                 return Err(anyhow!(
-          "Cannot start node: {} meta nodes found in this configuration, but only 1 is needed.",
-          other_size
-        ));
+                    "Cannot start node: {} meta nodes found in this configuration, but only 1 is needed.",
+                    other_size
+                ));
             }
         };
 

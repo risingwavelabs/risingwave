@@ -8,14 +8,11 @@ use either::Either;
 use futures::stream::{select_with_strategy, PollNext};
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
-use opentelemetry::metrics::{Counter, MeterProvider};
-use opentelemetry::KeyValue;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{
-    ArrayBuilder, ArrayImpl, I64ArrayBuilder, InternalError, RwError, StreamChunk,
-};
+use risingwave_common::array::{ArrayBuilder, ArrayImpl, I64ArrayBuilder, StreamChunk};
 use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
-use risingwave_common::error::Result;
+use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
@@ -23,7 +20,7 @@ use risingwave_source::*;
 use risingwave_storage::StateStore;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
-use crate::executor::monitor::DEFAULT_COMPUTE_STATS;
+use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Executor, ExecutorBuilder, Message, PkIndices, PkIndicesRef};
 use crate::task::{ExecutorParams, StreamManagerCore};
 
@@ -66,10 +63,8 @@ pub struct SourceExecutor {
     reader_stream: Option<ReaderStream>,
 
     // monitor
-    /// attributes of the OpenTelemetry monitor
-    attributes: Vec<KeyValue>,
-
-    source_output_row_count: Counter<u64>,
+    metrics: Arc<StreamingMetrics>,
+    source_identify: String,
 }
 
 pub struct SourceExecutorBuilder {}
@@ -120,6 +115,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             params.executor_id,
             params.operator_id,
             params.op_info,
+            params.executor_stats,
         )?))
     }
 }
@@ -136,6 +132,7 @@ impl SourceExecutor {
         executor_id: u64,
         operator_id: u64,
         op_info: String,
+        streaming_metrics: Arc<StreamingMetrics>,
     ) -> Result<Self> {
         let source = source_desc.clone().source;
         let stream_reader: Box<dyn StreamSourceReader> = match source.as_ref() {
@@ -150,13 +147,7 @@ impl SourceExecutor {
                 Box::new(s.stream_reader(TableV2ReaderContext, column_ids.clone())?)
             }
         };
-        let source_identify = "Table_".to_string() + &source_id.table_id().to_string();
-        let meter = DEFAULT_COMPUTE_STATS
-            .clone()
-            .prometheus_exporter
-            .provider()
-            .unwrap()
-            .meter("stream_source_monitor", None);
+
         Ok(Self {
             source_id,
             source_desc,
@@ -170,13 +161,10 @@ impl SourceExecutor {
             next_row_id: AtomicU64::from(0u64),
             first_execution: true,
             identity: format!("SourceExecutor {:X}", executor_id),
-            attributes: vec![KeyValue::new("source_id", source_identify)],
-            source_output_row_count: meter
-                .u64_counter("stream_source_output_rows_counts")
-                .with_description("")
-                .init(),
             op_info,
             reader_stream: None,
+            metrics: streaming_metrics,
+            source_identify: "Table_".to_string() + &source_id.table_id().to_string(),
         })
     }
 
@@ -279,8 +267,11 @@ impl Executor for SourceExecutor {
                 if !matches!(self.source_desc.source.as_ref(), SourceImpl::TableV2(_)) {
                     chunk = self.refill_row_id_column(chunk);
                 }
-                self.source_output_row_count
-                    .add(chunk.cardinality() as u64, &self.attributes);
+
+                self.metrics
+                    .source_output_row_count
+                    .with_label_values(&[self.source_identify.as_str()])
+                    .inc_by(chunk.cardinality() as u64);
                 Ok(Message::Chunk(chunk))
             }
 
@@ -416,6 +407,7 @@ mod tests {
             1,
             1,
             "SourceExecutor".to_string(),
+            Arc::new(StreamingMetrics::new(prometheus::Registry::new())),
         )
         .unwrap();
 
@@ -544,6 +536,7 @@ mod tests {
             1,
             1,
             "SourceExecutor".to_string(),
+            Arc::new(StreamingMetrics::unused()),
         )
         .unwrap();
 

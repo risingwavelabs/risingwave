@@ -10,7 +10,7 @@ use crate::optimizer::PlanRef;
 
 pub(crate) type StageId = u64;
 
-/// `BatchPlanFragmenter` splits query plan stage into fragments.
+/// `BatchPlanFragmenter` splits a query plan into fragments.
 struct BatchPlanFragmenter {
     stage_graph_builder: StageGraphBuilder,
     next_stage_id: u64,
@@ -220,19 +220,23 @@ impl BatchPlanFragmenter {
 
 #[cfg(test)]
 mod tests {
-
+    use std::cell::RefCell;
+    use std::rc::Rc;
     use std::sync::Arc;
 
+    use risingwave_common::catalog::{Schema, TableId};
     use risingwave_pb::common::{ParallelUnit, WorkerNode, WorkerType};
     use risingwave_pb::plan::JoinType;
 
     use crate::optimizer::plan_node::{
-        BatchExchange, BatchHashJoin, BatchSeqScan, EqJoinPredicate, LogicalJoin, PlanNodeType,
+        BatchExchange, BatchHashJoin, BatchSeqScan, EqJoinPredicate, LogicalJoin, LogicalScan,
+        PlanNodeType,
     };
     use crate::optimizer::property::{Distribution, Order};
     use crate::optimizer::PlanRef;
     use crate::scheduler::plan_fragmenter::BatchPlanFragmenter;
     use crate::scheduler::schedule::{BatchScheduler, WorkerNodeManager};
+    use crate::session::QueryContext;
     use crate::utils::Condition;
 
     #[tokio::test]
@@ -244,7 +248,15 @@ mod tests {
         //     /    \
         //   Scan  Scan
         //
-        let batch_plan_node: PlanRef = BatchSeqScan::default().into();
+        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
+        let batch_plan_node: PlanRef = BatchSeqScan::new(LogicalScan::new(
+            "".to_string(),
+            TableId::default(),
+            vec![],
+            Schema::default(),
+            ctx,
+        ))
+        .into();
         let batch_exchange_node1: PlanRef = BatchExchange::new(
             batch_plan_node.clone(),
             Order::default(),

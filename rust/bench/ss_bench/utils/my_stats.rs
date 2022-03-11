@@ -3,7 +3,7 @@ use std::fmt::{Display, Formatter};
 use itertools::Itertools;
 use prometheus::core::Metric;
 use prometheus::proto::Histogram;
-use risingwave_storage::monitor::StateStoreStats;
+use risingwave_storage::monitor::StateStoreMetrics;
 
 #[derive(Clone, Default)]
 pub(crate) struct MyStateStoreStats {
@@ -12,7 +12,7 @@ pub(crate) struct MyStateStoreStats {
 }
 
 impl MyStateStoreStats {
-    pub(crate) fn from_prom_stats(stats: &StateStoreStats) -> Self {
+    pub(crate) fn from_prom_stats(stats: &StateStoreMetrics) -> Self {
         Self {
             batch_write_latency: MyHistogram::from_prom_hist(
                 stats.batch_write_latency.metric().get_histogram(),

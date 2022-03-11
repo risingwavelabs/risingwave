@@ -2,12 +2,12 @@ use std::collections::{btree_map, hash_map};
 
 macro_rules! impl_flush_status {
     ([], $( { $entry_type:ty, $struct_name:ident } ),*) => {
-         /// Represents an entry in the `flush_buffer`. No `FlushStatus` associated with a key means no-op.
-         ///
-         /// ```plain
-         /// No-op --(insert)-> Insert --(delete)-> No-op
-         ///        \------(delete)-> Delete --(insert)-> DeleteInsert --(delete)-> Delete
-         /// ```
+        /// Represents an entry in the `flush_buffer`. No `FlushStatus` associated with a key means no-op.
+        ///
+        /// ```plain
+        /// No-op --(insert)-> Insert --(delete)-> No-op
+        ///        \------(delete)-> Delete --(insert)-> DeleteInsert --(delete)-> Delete
+        /// ```
         $(
             pub enum $struct_name<T> {
                 /// The entry will be deleted.

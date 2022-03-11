@@ -1,5 +1,5 @@
+pub mod cell_based_table;
 pub mod mview;
-pub mod row_table;
 
 use risingwave_common::array::Row;
 use risingwave_common::error::Result;

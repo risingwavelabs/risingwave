@@ -2,6 +2,12 @@
 
 # Usage Example
 
+Before starting ss-bench, the meta service needs to be initialized. A simple way is using Risedev:
+
+```shell
+~/code/risingwave: ./risedev d
+```
+
 ```shell
 ~/code/risingwave/rust: cargo run --bin ss-bench -- \
  --benchmarks "writebatch,getseq,getrandom,prefixscanrandom,deleterandom" \
@@ -29,7 +35,7 @@
 - `Hummock+MinIO`
   
   - Format: `hummock+minio://key:secret@address:port/bucket`
-  - Example: `hummock+minio://INTEGRATION_TEST_ACCESS_KEY:INTEGRATION_TEST_SECRET_KEY@127.0.0.1:9000/myminio`
+  - Example: `hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001`
 
 - `Hummock+S3`
   
@@ -158,8 +164,8 @@ Example: `--benchmarks "writebatch,prefixscanrandom,getrandom"`
 - `--statistics`
   - Detailed statistics of storage backend
 
-- `--calibrate-metric`
-  - Print performance by both self-measured metric and the state store metric system. This can be used to calibrate metric parameters, especially bucket specification.
+- `--calibrate-histogram`
+  - Print performance by both self-measured metric and the state store metric system. This can be used to calibrate histogram parameters, especially bucket specification.
 
 # Metrics
 

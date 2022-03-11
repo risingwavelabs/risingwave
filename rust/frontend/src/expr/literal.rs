@@ -15,6 +15,9 @@ impl Literal {
     pub fn get_expr_type(&self) -> ExprType {
         ExprType::ConstantValue
     }
+    pub fn get_data(&self) -> &Datum {
+        &self.data
+    }
 }
 impl Expr for Literal {
     fn return_type(&self) -> DataType {

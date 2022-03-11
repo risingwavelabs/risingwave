@@ -8,17 +8,13 @@ use futures::channel::mpsc::{Receiver, Sender};
 use futures::future::select_all;
 use futures::{SinkExt, StreamExt};
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::ToRwResult;
 use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
-use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
-use risingwave_pb::task_service::{GetStreamRequest, GetStreamResponse};
+use risingwave_pb::task_service::GetStreamResponse;
 use risingwave_rpc_client::ComputeClient;
 use risingwave_storage::StateStore;
-use tonic::transport::Channel;
-use tonic::{Request, Streaming};
+use tonic::Streaming;
 use tracing_futures::Instrument;
 
 use super::{Barrier, Executor, Message, PkIndicesRef, Result};
@@ -27,7 +23,7 @@ use crate::task::{ExecutorParams, StreamManagerCore, UpDownActorIds};
 
 /// Receive data from `gRPC` and forwards to `MergerExecutor`/`ReceiverExecutor`
 pub struct RemoteInput {
-    client: ExchangeServiceClient<Channel>,
+    client: ComputeClient,
     stream: Streaming<GetStreamResponse>,
     sender: Sender<Message>,
 
@@ -42,19 +38,8 @@ impl RemoteInput {
         up_down_ids: UpDownActorIds,
         sender: Sender<Message>,
     ) -> Result<Self> {
-        let mut client = ComputeClient::new(&addr).await?.get_channel();
-        let req = GetStreamRequest {
-            up_fragment_id: up_down_ids.0,
-            down_fragment_id: up_down_ids.1,
-        };
-        let stream = client
-            .get_stream(Request::new(req))
-            .await
-            .to_rw_result_with(format!(
-                "failed to create stream from remote_input {} from fragment {} to fragment {}",
-                addr, up_down_ids.0, up_down_ids.1
-            ))?
-            .into_inner();
+        let client = ComputeClient::new(&addr).await?;
+        let stream = client.get_stream(up_down_ids.0, up_down_ids.1).await?;
         Ok(Self {
             client,
             stream,
@@ -253,17 +238,6 @@ impl Executor for MergeExecutor {
             for ch in self.active.drain(..) {
                 futures.push(ch.into_future());
             }
-
-            if futures.is_empty() {
-                // All channels are terminated. This could happen when all upstream actors have been
-                // terminated.
-                return Err(InternalError(format!(
-                    "[MergeExecutor (ActorId: {})] All channels have been terminated",
-                    self.actor_id
-                ))
-                .into());
-            }
-
             let ((message, from), _id, remains) = select_all(futures)
                 .instrument(tracing::trace_span!("idle"))
                 .await;
@@ -271,12 +245,12 @@ impl Executor for MergeExecutor {
                 self.active.push(fut.into_inner().unwrap());
             }
 
-            match message {
-                Some(Message::Chunk(chunk)) => {
+            match message.unwrap() {
+                Message::Chunk(chunk) => {
                     self.active.push(from);
                     return Ok(Message::Chunk(chunk));
                 }
-                Some(Message::Barrier(barrier)) => {
+                Message::Barrier(barrier) => {
                     if let Some(Mutation::Stop(actors)) = barrier.mutation.as_deref() {
                         if actors.contains(&self.actor_id) {
                             self.terminated += 1;
@@ -292,13 +266,6 @@ impl Executor for MergeExecutor {
 
                     self.blocked.push(from);
                 }
-                None => {
-                    return Err(InternalError(format!(
-                        "[MergeExecutor (ActorId: {})] No message received from channels.",
-                        self.actor_id
-                    ))
-                    .into());
-                }
             }
 
             if self.terminated == self.num_inputs {
@@ -311,14 +278,7 @@ impl Executor for MergeExecutor {
                 let barrier = self.next_barrier.take().unwrap();
                 return Ok(Message::Barrier(barrier));
             }
-
-            if self.active.is_empty() {
-                return Err(InternalError(format!(
-                    "[MergeExecutor (ActorId: {})] Active is empty.",
-                    self.actor_id
-                ))
-                .into());
-            }
+            assert!(!self.active.is_empty())
         }
     }
 
@@ -360,9 +320,9 @@ mod tests {
     use risingwave_pb::task_service::exchange_service_server::{
         ExchangeService, ExchangeServiceServer,
     };
-    use risingwave_pb::task_service::{GetDataRequest, GetDataResponse};
+    use risingwave_pb::task_service::{GetDataRequest, GetDataResponse, GetStreamRequest};
     use tokio_stream::wrappers::ReceiverStream;
-    use tonic::{Response, Status};
+    use tonic::{Request, Response, Status};
 
     use super::*;
 
@@ -420,20 +380,20 @@ mod tests {
             // expect n chunks
             for _ in 0..CHANNEL_NUMBER {
                 assert_matches!(merger.next().await.unwrap(), Message::Chunk(chunk) => {
-                  assert_eq!(chunk.ops().len() as u64, epoch);
+                    assert_eq!(chunk.ops().len() as u64, epoch);
                 });
             }
             // expect a barrier
             assert_matches!(merger.next().await.unwrap(), Message::Barrier(Barrier{epoch:barrier_epoch,mutation:_,..}) => {
-              assert_eq!(barrier_epoch.curr, epoch);
+                assert_eq!(barrier_epoch.curr, epoch);
             });
         }
         assert_matches!(
-          merger.next().await.unwrap(),
-          Message::Barrier(Barrier {
-            mutation,
-            ..
-          }) if mutation.as_deref().unwrap().is_stop()
+            merger.next().await.unwrap(),
+            Message::Barrier(Barrier {
+                mutation,
+                ..
+            }) if mutation.as_deref().unwrap().is_stop()
         );
 
         for handle in handles {
@@ -524,13 +484,13 @@ mod tests {
             remote_input.run().await
         });
         assert_matches!(rx.next().await.unwrap(), Message::Chunk(chunk) => {
-          let (ops, columns, visibility) = chunk.into_inner();
-          assert_eq!(ops.len() as u64, 0);
-          assert_eq!(columns.len() as u64, 0);
-          assert_eq!(visibility, None);
+            let (ops, columns, visibility) = chunk.into_inner();
+            assert_eq!(ops.len() as u64, 0);
+            assert_eq!(columns.len() as u64, 0);
+            assert_eq!(visibility, None);
         });
         assert_matches!(rx.next().await.unwrap(), Message::Barrier(Barrier { epoch: barrier_epoch, mutation: _, .. }) => {
-          assert_eq!(barrier_epoch.curr, 12345);
+            assert_eq!(barrier_epoch.curr, 12345);
         });
         assert!(rpc_called.load(Ordering::SeqCst));
         input_handle.await.unwrap();

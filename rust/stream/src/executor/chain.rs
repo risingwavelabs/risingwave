@@ -178,10 +178,10 @@ impl Executor for ChainExecutor {
 mod test {
 
     use async_trait::async_trait;
-    use risingwave_common::array::{Array, I32Array, Op, RwError, StreamChunk};
+    use risingwave_common::array::{Array, I32Array, Op, StreamChunk};
     use risingwave_common::catalog::Schema;
     use risingwave_common::column_nonnull;
-    use risingwave_common::error::{ErrorCode, Result};
+    use risingwave_common::error::{ErrorCode, Result, RwError};
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType;
     use risingwave_pb::plan::ColumnDesc;

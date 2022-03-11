@@ -37,12 +37,12 @@ impl super::DebugExecutor for EpochCheckExecutor {
 
             if stale {
                 panic!(
-          "epoch check failed on {}: last epoch is {:?}, while the epoch of incoming barrier is {}.\nstale barrier: {:?}",
-          self.input.identity(),
-          self.last_epoch,
-          new_epoch,
-          b
-        );
+                    "epoch check failed on {}: last epoch is {:?}, while the epoch of incoming barrier is {}.\nstale barrier: {:?}",
+                    self.input.identity(),
+                    self.last_epoch,
+                    new_epoch,
+                    b
+                );
             }
             self.last_epoch = Some(new_epoch);
         }

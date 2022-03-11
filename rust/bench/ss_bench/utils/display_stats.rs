@@ -1,22 +1,24 @@
 use prometheus::core::{AtomicU64, Collector, GenericCounter, Metric};
 use prometheus::Histogram;
 use risingwave_storage::for_all_metrics;
-use risingwave_storage::monitor::DEFAULT_STATE_STORE_STATS;
+use risingwave_storage::monitor::StateStoreMetrics;
 
-use super::my_metrics::MyStateStoreStats;
-use crate::utils::my_metrics::MyHistogram;
+use super::my_stats::MyStateStoreStats;
+use crate::utils::my_stats::MyHistogram;
 
 #[derive(Default)]
-pub(crate) struct DisplayStat {
+pub(crate) struct DisplayStats {
     pub(crate) prev_stat: MyStateStoreStats,
     pub(crate) cur_stat: MyStateStoreStats,
 }
 
-impl DisplayStat {
+impl DisplayStats {
     pub(crate) fn update_stat(&mut self) {
         // (Ting Sun) TODO: eliminate this clone
         self.prev_stat = self.cur_stat.clone();
-        self.cur_stat = MyStateStoreStats::from_prom_stats(&**DEFAULT_STATE_STORE_STATS);
+        self.cur_stat = MyStateStoreStats::from_prom_stats(&StateStoreMetrics::new(
+            prometheus::Registry::new(),
+        ));
     }
 
     pub(crate) fn display_write_batch(&mut self) {
@@ -108,7 +110,7 @@ impl Print for Histogram {
 
 macro_rules! print_statistics {
     ($( $name:ident: $type:ty ),* ,) => {
-        pub(crate) fn print_statistics(stats: &risingwave_storage::monitor::StateStoreStats) {
+        pub(crate) fn print_statistics(stats: &risingwave_storage::monitor::StateStoreMetrics) {
             println!("STATISTICS:");
             // print for all fields
             $( stats.$name.print(); )*

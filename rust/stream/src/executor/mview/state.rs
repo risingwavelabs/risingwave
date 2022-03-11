@@ -28,6 +28,7 @@ pub struct ManagedMViewState<S: StateStore> {
 }
 
 impl<S: StateStore> ManagedMViewState<S> {
+    /// Create a [`ManagedMViewState`].
     pub fn new(
         keyspace: Keyspace<S>,
         column_ids: Vec<ColumnId>,
@@ -43,6 +44,8 @@ impl<S: StateStore> ManagedMViewState<S> {
         }
     }
 
+    /// Put a key into the managed mview state. [`arrange_keys`] is composed of group keys and
+    /// primary keys.
     pub fn put(&mut self, pk: Row, value: Row) {
         assert_eq!(self.order_types.len(), pk.size());
         assert_eq!(self.column_ids.len(), value.size());
@@ -50,6 +53,8 @@ impl<S: StateStore> ManagedMViewState<S> {
         FlushStatus::do_insert(self.cache.entry(pk), value);
     }
 
+    /// Delete a key from the managed mview state. [`arrange_keys`] is composed of group keys and
+    /// primary keys.
     pub fn delete(&mut self, pk: Row) {
         assert_eq!(self.order_types.len(), pk.size());
 
@@ -60,17 +65,15 @@ impl<S: StateStore> ManagedMViewState<S> {
         self.cache.clear();
     }
 
-    // TODO(MrCroxx): flush can be performed in another coroutine by taking the snapshot of
-    // cache.
     pub async fn flush(&mut self, epoch: u64) -> Result<()> {
         let mut batch = self.keyspace.state_store().start_write_batch();
         batch.reserve(self.cache.len() * self.column_ids.len());
         let mut local = batch.prefixify(&self.keyspace);
 
-        for (pk, cells) in self.cache.drain() {
+        for (arrange_keys, cells) in self.cache.drain() {
             let row = cells.into_option();
-            let pk_buf = serialize_pk(&pk, &self.key_serializer)?;
-            let bytes = serialize_pk_and_row(&pk_buf, &row, &self.column_ids)?;
+            let arrange_key_buf = serialize_pk(&arrange_keys, &self.key_serializer)?;
+            let bytes = serialize_pk_and_row(&arrange_key_buf, &row, &self.column_ids)?;
             for (key, value) in bytes {
                 match value {
                     Some(val) => local.put(key, val),
@@ -78,7 +81,7 @@ impl<S: StateStore> ManagedMViewState<S> {
                 }
             }
         }
-        batch.ingest(epoch).await.unwrap();
+        batch.ingest(epoch).await?;
         Ok(())
     }
 }

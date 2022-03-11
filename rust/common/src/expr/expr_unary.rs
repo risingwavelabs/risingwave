@@ -52,50 +52,50 @@ macro_rules! gen_cast_impl {
 }
 
 macro_rules! gen_cast {
-  ($($x:tt, )* ) => {
-    gen_cast_impl! {
-      [$($x),*],
-      { varchar, date, str_to_date},
-      { varchar, timestamp, str_to_timestamp},
-      { varchar, timestampz, str_to_timestampz},
-      { varchar, int16, str_to_i16},
-      { varchar, int32, str_to_i32},
-      { varchar, int64, str_to_i64},
-      { varchar, float32, str_to_real},
-      { varchar, float64, str_to_double},
-      { varchar, decimal, str_to_decimal},
-      { varchar, boolean, str_to_bool},
-      { boolean, varchar, bool_to_str},
-      // TODO: decide whether nullability-cast should be allowed (#2350)
-      { boolean, boolean, |x| Ok(x)},
-      { int16, int32, general_cast },
-      { int16, int64, general_cast },
-      { int16, float32, general_cast },
-      { int16, float64, general_cast },
-      { int16, decimal, general_cast },
-      { int32, int16, general_cast },
-      { int32, int64, general_cast },
-      { int32, float64, general_cast },
-      { int32, decimal, general_cast },
-      { int64, int16, general_cast },
-      { int64, int32, general_cast },
-      { int64, decimal, general_cast },
-      { float32, float64, general_cast },
-      { float32, decimal, general_cast },
-      { float32, int16, to_i16 },
-      { float32, int32, to_i32 },
-      { float32, int64, to_i64 },
-      { float64, decimal, general_cast },
-      { float64, int16, to_i16 },
-      { float64, int32, to_i32 },
-      { float64, int64, to_i64 },
-      { decimal, decimal, dec_to_dec },
-      { decimal, int16, deci_to_i16 },
-      { decimal, int32, deci_to_i32 },
-      { decimal, int64, deci_to_i64 },
-      { date, timestamp, date_to_timestamp }
-    }
-  };
+    ($($x:tt, )* ) => {
+        gen_cast_impl! {
+        [$($x),*],
+        { varchar, date, str_to_date},
+        { varchar, timestamp, str_to_timestamp},
+        { varchar, timestampz, str_to_timestampz},
+        { varchar, int16, str_to_i16},
+        { varchar, int32, str_to_i32},
+        { varchar, int64, str_to_i64},
+        { varchar, float32, str_to_real},
+        { varchar, float64, str_to_double},
+        { varchar, decimal, str_to_decimal},
+        { varchar, boolean, str_to_bool},
+        { boolean, varchar, bool_to_str},
+        // TODO: decide whether nullability-cast should be allowed (#2350)
+        { boolean, boolean, |x| Ok(x)},
+        { int16, int32, general_cast },
+        { int16, int64, general_cast },
+        { int16, float32, general_cast },
+        { int16, float64, general_cast },
+        { int16, decimal, general_cast },
+        { int32, int16, general_cast },
+        { int32, int64, general_cast },
+        { int32, float64, general_cast },
+        { int32, decimal, general_cast },
+        { int64, int16, general_cast },
+        { int64, int32, general_cast },
+        { int64, decimal, general_cast },
+        { float32, float64, general_cast },
+        { float32, decimal, general_cast },
+        { float32, int16, to_i16 },
+        { float32, int32, to_i32 },
+        { float32, int64, to_i64 },
+        { float64, decimal, general_cast },
+        { float64, int16, to_i16 },
+        { float64, int32, to_i32 },
+        { float64, int64, to_i64 },
+        { decimal, decimal, dec_to_dec },
+        { decimal, int16, deci_to_i16 },
+        { decimal, int32, deci_to_i32 },
+        { decimal, int64, deci_to_i64 },
+        { date, timestamp, date_to_timestamp }
+        }
+    };
 }
 
 /// This macro helps to create neg expression.
@@ -286,6 +286,11 @@ pub fn new_unary_expr(
             return_type,
             lower,
         )),
+        (ProstType::Ascii, _, _) => Box::new(UnaryExpression::<Utf8Array, I32Array, _>::new(
+            child_expr,
+            return_type,
+            ascii,
+        )),
         (ProstType::Neg, _, _) => {
             gen_neg! { child_expr, return_type }
         }
@@ -325,14 +330,6 @@ pub fn new_rtrim_expr(expr_ia1: BoxedExpression, return_type: DataType) -> Boxed
         expr_ia1,
         return_type,
         rtrim,
-    ))
-}
-
-pub fn new_ascii_expr(expr_ia1: BoxedExpression, return_type: DataType) -> BoxedExpression {
-    Box::new(UnaryExpression::<Utf8Array, I32Array, _>::new(
-        expr_ia1,
-        return_type,
-        ascii,
     ))
 }
 

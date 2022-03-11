@@ -40,9 +40,8 @@ pub use utf8_array::*;
 
 use crate::array::iterator::ArrayImplIterator;
 use crate::buffer::Bitmap;
-pub use crate::error::ErrorCode::InternalError;
-use crate::error::Result;
-pub use crate::error::RwError;
+use crate::error::ErrorCode::InternalError;
+use crate::error::{Result, RwError};
 use crate::types::*;
 
 pub type I64Array = PrimitiveArray<i64>;

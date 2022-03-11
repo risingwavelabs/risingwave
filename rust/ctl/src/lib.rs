@@ -14,6 +14,8 @@ struct Cli {
 enum Commands {
     /// list latest Hummock version on meta node
     ListVersion,
+    /// list all Hummock key-value pairs
+    ListKv,
 }
 
 pub async fn start() {
@@ -21,5 +23,6 @@ pub async fn start() {
 
     match &cli.command {
         Commands::ListVersion => cmd_impl::list_version().await.unwrap(),
+        Commands::ListKv => cmd_impl::list_kv().await.unwrap(),
     }
 }

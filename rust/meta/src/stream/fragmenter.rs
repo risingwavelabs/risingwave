@@ -5,9 +5,8 @@ use std::sync::Arc;
 
 use async_recursion::async_recursion;
 use itertools::Itertools;
-use risingwave_common::array::RwError;
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 use risingwave_pb::meta::table_fragments::fragment::FragmentType;
 use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::stream_plan::dispatcher::DispatcherType;

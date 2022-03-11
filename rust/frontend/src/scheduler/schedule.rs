@@ -14,7 +14,7 @@ use crate::scheduler::plan_fragmenter::{Query, QueryStageRef, StageId};
 
 pub(crate) type TaskId = u64;
 
-/// `BatchScheduler` dispatch query fragments to compute nodes
+/// `BatchScheduler` dispatches query fragments to compute nodes.
 pub(crate) struct BatchScheduler {
     worker_manager: WorkerNodeManagerRef,
     scheduled_stage_sender: mpsc::UnboundedSender<ScheduledStage>,
@@ -303,14 +303,14 @@ mod tests {
 
     use super::WorkerNodeManager;
     use crate::catalog::catalog_service::CatalogCache;
-    use crate::observer::observer_manager::{ObserverManager, UPDATE_FINISH_NOTIFICATION};
+    use crate::observer::observer_manager::ObserverManager;
     use crate::test_utils::FrontendMockMetaClient;
 
     #[tokio::test]
     async fn test_add_and_delete_worker_node() {
         let mut meta_client = MetaClient::mock(FrontendMockMetaClient::new().await);
 
-        let (catalog_updated_tx, _) = watch::channel(UPDATE_FINISH_NOTIFICATION);
+        let (catalog_updated_tx, _) = watch::channel(0);
         let catalog_cache = Arc::new(RwLock::new(
             CatalogCache::new(meta_client.clone()).await.unwrap(),
         ));

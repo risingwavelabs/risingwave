@@ -21,5 +21,6 @@
 extern crate log;
 extern crate test;
 
+pub mod common;
 pub mod executor;
 pub mod task;
