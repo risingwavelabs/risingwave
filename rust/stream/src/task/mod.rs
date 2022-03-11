@@ -8,10 +8,10 @@ use risingwave_storage::StateStoreImpl;
 
 use crate::executor::Message;
 
-mod barrier;
+mod barrier_manager;
 mod env;
 mod stream_manager;
-pub use barrier::*;
+pub use barrier_manager::*;
 pub use env::*;
 pub use stream_manager::*;
 #[cfg(test)]
