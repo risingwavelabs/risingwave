@@ -130,8 +130,8 @@ mod tests {
             TableId::new(3),
             vec![ColumnId::new(2), ColumnId::new(7)],
             Schema::new(vec![
-                Field::with_name(DataType::Int32, "v1".into()),
-                Field::with_name(DataType::Varchar, "v2".into()),
+                Field::with_name(DataType::Int32, "v1"),
+                Field::with_name(DataType::Varchar, "v2"),
             ]),
             ctx,
         )
@@ -146,7 +146,7 @@ mod tests {
         let subplan = root.as_subplan();
         assert_eq!(
             subplan.schema(),
-            &Schema::new(vec![Field::with_name(DataType::Int32, "v1".into()),])
+            &Schema::new(vec![Field::with_name(DataType::Int32, "v1"),])
         );
     }
 }
