@@ -55,7 +55,7 @@ impl Binder {
         Ok(Some(root))
     }
 
-    pub(super) fn bind_table_with_joins(&mut self, table: TableWithJoins) -> Result<TableRef> {
+    fn bind_table_with_joins(&mut self, table: TableWithJoins) -> Result<TableRef> {
         let mut root = self.bind_table_factor(table.relation)?;
         for join in table.joins {
             let right = self.bind_table_factor(join.relation)?;
