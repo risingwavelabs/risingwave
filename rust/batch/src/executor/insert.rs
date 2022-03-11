@@ -15,9 +15,9 @@ use risingwave_source::SourceManagerRef;
 use super::BoxedExecutor;
 use crate::executor::{BoxedExecutorBuilder, Executor, ExecutorBuilder};
 
-/// `InsertExecutor` implements table insertion with values from its child executor.
+/// [`InsertExecutor`] implements table insertion with values from its child executor.
 pub struct InsertExecutor {
-    /// target table id
+    /// Target table id.
     table_id: TableId,
     source_manager: SourceManagerRef,
     worker_id: u32,
@@ -57,7 +57,6 @@ impl Executor for InsertExecutor {
         Ok(())
     }
 
-    // TODO: refactor this function since we only have `TableV2` now.
     async fn next(&mut self) -> Result<Option<DataChunk>> {
         if self.executed {
             return Ok(None);
@@ -67,10 +66,9 @@ impl Executor for InsertExecutor {
         let source = source_desc.source.as_table_v2();
 
         let mut notifiers = Vec::new();
-        let mut rows_inserted = 0;
 
         while let Some(child_chunk) = self.child.next().await? {
-            let len = child_chunk.capacity();
+            let len = child_chunk.cardinality();
             assert!(child_chunk.visibility().is_none());
 
             // add row-id column as first column
@@ -93,15 +91,18 @@ impl Executor for InsertExecutor {
             let notifier = source.write_chunk(chunk)?;
 
             notifiers.push(notifier);
-            rows_inserted += len;
         }
 
         // Wait for all chunks to be taken / written.
-        try_join_all(notifiers).await.map_err(|_| {
-            RwError::from(ErrorCode::InternalError(
-                "failed to wait chunks to be written".to_owned(),
-            ))
-        })?;
+        let rows_inserted = try_join_all(notifiers)
+            .await
+            .map_err(|_| {
+                RwError::from(ErrorCode::InternalError(
+                    "failed to wait chunks to be written".to_owned(),
+                ))
+            })?
+            .into_iter()
+            .sum::<usize>();
 
         // create ret value
         {
