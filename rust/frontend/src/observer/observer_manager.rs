@@ -72,6 +72,7 @@ impl ObserverManager {
                             self.update_table(operation, table)
                                 .unwrap_or_else(|e| error!("{}", e.to_string()));
                         }
+                        Some(_) => todo!(),
                         None => (),
                     }
                 }

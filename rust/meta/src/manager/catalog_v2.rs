@@ -8,9 +8,10 @@ use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::catalog::{Database, Schema, Source, Table};
+use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::Mutex;
 
-use crate::manager::NotificationManagerRef;
+use crate::manager::{NotificationManagerRef, NotificationTarget};
 use crate::model::{CatalogVersionGenerator, MetadataModel};
 use crate::storage::MetaStore;
 
@@ -53,7 +54,13 @@ where
             database.insert(&*self.meta_store_ref).await?;
             core.add_database(database);
 
-            // TODO: Notify frontends to create database.
+            self.nm
+                .notify(
+                    Operation::Add,
+                    &Info::DatabaseV2(database.to_owned()),
+                    NotificationTarget::Frontend,
+                )
+                .await?;
             Ok(version)
         } else {
             Err(RwError::from(InternalError(
@@ -70,7 +77,13 @@ where
             Database::delete(&*self.meta_store_ref, &database_id).await?;
             core.drop_database(&database);
 
-            // TODO: Notify frontends to drop database.
+            self.nm
+                .notify(
+                    Operation::Delete,
+                    &Info::DatabaseV2(database),
+                    NotificationTarget::Frontend,
+                )
+                .await?;
             Ok(version)
         } else {
             Err(RwError::from(InternalError(
@@ -86,7 +99,13 @@ where
             schema.insert(&*self.meta_store_ref).await?;
             core.add_schema(schema);
 
-            // TODO: Notify frontends to create schema.
+            self.nm
+                .notify(
+                    Operation::Add,
+                    &Info::SchemaV2(schema.to_owned()),
+                    NotificationTarget::Frontend,
+                )
+                .await?;
             Ok(version)
         } else {
             Err(RwError::from(InternalError(
@@ -103,7 +122,13 @@ where
             Schema::delete(&*self.meta_store_ref, &schema_id).await?;
             core.drop_schema(&schema);
 
-            // TODO: Notify frontends to drop schema.
+            self.nm
+                .notify(
+                    Operation::Delete,
+                    &Info::SchemaV2(schema),
+                    NotificationTarget::Frontend,
+                )
+                .await?;
             Ok(version)
         } else {
             Err(RwError::from(InternalError(
@@ -119,7 +144,13 @@ where
             table.insert(&*self.meta_store_ref).await?;
             core.add_table(table);
 
-            // TODO: Notify frontends to create schema.
+            self.nm
+                .notify(
+                    Operation::Add,
+                    &Info::TableV2(table.to_owned()),
+                    NotificationTarget::Frontend,
+                )
+                .await?;
             Ok(version)
         } else {
             Err(RwError::from(InternalError(
@@ -136,7 +167,13 @@ where
             Table::delete(&*self.meta_store_ref, &table_id).await?;
             core.drop_table(&table);
 
-            // TODO: Notify frontends to drop table.
+            self.nm
+                .notify(
+                    Operation::Delete,
+                    &Info::TableV2(table),
+                    NotificationTarget::Frontend,
+                )
+                .await?;
             Ok(version)
         } else {
             Err(RwError::from(InternalError(
@@ -152,7 +189,13 @@ where
             source.insert(&*self.meta_store_ref).await?;
             core.add_source(source);
 
-            // TODO: Notify frontends to create source.
+            self.nm
+                .notify(
+                    Operation::Add,
+                    &Info::Source(source.to_owned()),
+                    NotificationTarget::Frontend,
+                )
+                .await?;
             Ok(version)
         } else {
             Err(RwError::from(InternalError(
@@ -169,7 +212,13 @@ where
             Source::delete(&*self.meta_store_ref, &source_id).await?;
             core.drop_source(&source);
 
-            // TODO: Notify frontends to drop source.
+            self.nm
+                .notify(
+                    Operation::Delete,
+                    &Info::Source(source),
+                    NotificationTarget::Frontend,
+                )
+                .await?;
             Ok(version)
         } else {
             Err(RwError::from(InternalError(
