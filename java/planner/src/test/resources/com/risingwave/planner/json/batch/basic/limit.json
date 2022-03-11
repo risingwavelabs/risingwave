@@ -1,11 +1,7 @@
 {
   "children": [{
     "rowSeqScan": {
-      "tableRefId": {
-        "schemaRefId": {
-          "databaseRefId": {
-          }
-        },
+      "tableDesc": {
         "tableId": 9
       },
       "columnDescs": [{

@@ -29,7 +29,7 @@ pub type ParallelUnitId = u32;
 pub type NodeLocations = HashMap<NodeId, WorkerNode>;
 pub type StoredClusterManagerRef<S> = Arc<StoredClusterManager<S>>;
 
-const DEFAULT_WORKNODE_PARALLEL_DEGREE: usize = 8;
+const DEFAULT_WORK_NODE_PARALLEL_DEGREE: usize = 8;
 
 /// [`StoredClusterManager`] manager cluster/worker meta data in [`MetaStore`].
 pub struct StoredClusterManager<S> {
@@ -114,10 +114,10 @@ where
                 let start_id = self
                     .id_gen_manager_ref
                     .generate_interval::<{ IdCategory::ParallelUnit }>(
-                        DEFAULT_WORKNODE_PARALLEL_DEGREE as i32,
+                        DEFAULT_WORK_NODE_PARALLEL_DEGREE as i32,
                     )
                     .await? as usize;
-                let parallel_units = (start_id..start_id + DEFAULT_WORKNODE_PARALLEL_DEGREE)
+                let parallel_units = (start_id..start_id + DEFAULT_WORK_NODE_PARALLEL_DEGREE)
                     .map(|id| ParallelUnit { id: id as u32 })
                     .collect_vec();
 

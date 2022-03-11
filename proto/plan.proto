@@ -48,7 +48,7 @@ message ColumnCatalog {
 }
 
 message CellBasedTableDesc {
-  int32 table_id = 1;
+  uint32 table_id = 1;
   repeated OrderedColumnDesc pk = 2;
 }
 
@@ -70,7 +70,7 @@ message MaterializedViewInfo {
 }
 
 message RowSeqScanNode {
-  TableRefId table_ref_id = 1;
+  CellBasedTableDesc table_desc = 1;
   repeated ColumnDesc column_descs = 2;
 }
 
