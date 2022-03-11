@@ -82,14 +82,13 @@ impl Executor for InsertExecutor {
             let rowid_column = once(Column::new(Arc::new(ArrayImpl::from(
                 builder.finish().unwrap(),
             ))));
-            let child_columns = child_chunk.columns().iter().map(|c| c.to_owned());
+            let child_columns = child_chunk.into_parts().0.into_iter();
 
             // put row id column to the last to match the behavior of mview
             let columns = child_columns.chain(rowid_column).collect();
             let chunk = StreamChunk::new(vec![Op::Insert; len], columns, None);
 
             let notifier = source.write_chunk(chunk)?;
-
             notifiers.push(notifier);
         }
 
