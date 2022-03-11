@@ -73,10 +73,10 @@ impl From<&ProstTable> for TableCatalog {
             })
             .collect();
 
-        Ok(Self {
+        Self {
             id,
             columns,
             pk_desc,
-        })
+        }
     }
 }
