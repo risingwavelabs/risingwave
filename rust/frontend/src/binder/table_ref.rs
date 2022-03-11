@@ -1,17 +1,29 @@
 use std::collections::hash_map::Entry;
 
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_sqlparser::ast::{ObjectName, TableFactor, TableWithJoins};
+use risingwave_common::types::DataType;
+use risingwave_sqlparser::ast::{
+    JoinConstraint, JoinOperator, ObjectName, TableFactor, TableWithJoins,
+};
 
 use super::bind_context::ColumnBinding;
 use crate::binder::Binder;
 use crate::catalog::catalog_service::DEFAULT_SCHEMA_NAME;
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::TableId;
+use crate::expr::{Expr, ExprImpl};
 
 #[derive(Debug)]
 pub enum TableRef {
     BaseTable(Box<BaseTableRef>),
+    Join(Box<JoinRef>),
+}
+
+#[derive(Debug)]
+pub struct JoinRef {
+    pub left: TableRef,
+    pub right: TableRef,
+    pub cond: Option<ExprImpl>,
 }
 
 #[derive(Debug, Clone)]
@@ -26,13 +38,67 @@ impl Binder {
         &mut self,
         from: Vec<TableWithJoins>,
     ) -> Result<Option<TableRef>> {
-        // Joins are not supported yet.
-        let first = match from.into_iter().next() {
+        let mut from_iter = from.into_iter();
+        let first = match from_iter.next() {
             Some(t) => t,
             None => return Ok(None),
         };
-        self.bind_table_factor(first.relation).map(Some)
+        let mut root = self.bind_table_with_joins(first)?;
+        for t in from_iter {
+            let right = self.bind_table_with_joins(t)?;
+            root = TableRef::Join(Box::new(JoinRef {
+                left: root,
+                right,
+                cond: None,
+            }));
+        }
+        Ok(Some(root))
     }
+
+    fn bind_table_with_joins(&mut self, table: TableWithJoins) -> Result<TableRef> {
+        let mut root = self.bind_table_factor(table.relation)?;
+        for join in table.joins {
+            let right = self.bind_table_factor(join.relation)?;
+            match join.join_operator {
+                JoinOperator::Inner(constraint) => {
+                    let cond = self.bind_join_constraint(constraint)?;
+                    let join = JoinRef {
+                        left: root,
+                        right,
+                        cond,
+                    };
+                    root = TableRef::Join(Box::new(join));
+                }
+                _ => return Err(ErrorCode::NotImplementedError("Non inner-join".into()).into()),
+            }
+        }
+
+        Ok(root)
+    }
+
+    fn bind_join_constraint(&mut self, constraint: JoinConstraint) -> Result<Option<ExprImpl>> {
+        Ok(match constraint {
+            JoinConstraint::None => None,
+            JoinConstraint::Natural => {
+                return Err(ErrorCode::NotImplementedError("Natural join".into()).into())
+            }
+            JoinConstraint::On(expr) => {
+                let bound_expr = self.bind_expr(expr)?;
+                if bound_expr.return_type() != DataType::Boolean {
+                    return Err(ErrorCode::InternalError(format!(
+                        "argument of ON must be boolean, not type {:?}",
+                        bound_expr.return_type()
+                    ))
+                    .into());
+                }
+                Some(bound_expr)
+            }
+            JoinConstraint::Using(_columns) => {
+                return Err(ErrorCode::NotImplementedError("USING".into()).into())
+            }
+        })
+    }
+
     pub(super) fn bind_table_factor(&mut self, table_factor: TableFactor) -> Result<TableRef> {
         match table_factor {
             TableFactor::Table { name, .. } => {
@@ -41,6 +107,7 @@ impl Binder {
             _ => Err(ErrorCode::NotImplementedError(format!("{:?}", table_factor)).into()),
         }
     }
+
     pub(super) fn bind_table(&mut self, name: ObjectName) -> Result<BaseTableRef> {
         let mut identifiers = name.0;
         let table_name = identifiers

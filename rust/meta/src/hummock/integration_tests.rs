@@ -1,5 +1,6 @@
 use std::iter::once;
 use std::sync::Arc;
+use std::time::Duration;
 
 use bytes::Bytes;
 use risingwave_pb::common::{HostAddress, WorkerType};
@@ -26,10 +27,14 @@ async fn get_hummock_meta_client() -> MockHummockMetaClient {
             .unwrap(),
     );
     let notification_manager = Arc::new(NotificationManager::new());
-    let cluster_manager =
-        StoredClusterManager::new(env, Some(hummock_manager.clone()), notification_manager)
-            .await
-            .unwrap();
+    let cluster_manager = StoredClusterManager::new(
+        env,
+        Some(hummock_manager.clone()),
+        notification_manager,
+        Duration::from_secs(3600),
+    )
+    .await
+    .unwrap();
     let fake_host_address = HostAddress {
         host: "127.0.0.1".to_string(),
         port: 80,
