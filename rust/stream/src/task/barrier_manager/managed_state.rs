@@ -5,6 +5,7 @@ use tokio::sync::oneshot;
 
 use crate::executor::Barrier;
 
+#[derive(Debug)]
 pub(super) enum ManagedBarrierState {
     Pending {
         last_epoch: Option<u64>,
@@ -50,7 +51,7 @@ impl ManagedBarrierState {
                     collect_notifier, ..
                 } => {
                     if collect_notifier.send(()).is_err() {
-                        warn!("failed to notify barrier collection: rx is dropped")
+                        warn!("failed to notify barrier collection with epoch {}", epoch)
                     }
                 }
 
@@ -60,6 +61,14 @@ impl ManagedBarrierState {
     }
 
     pub(super) fn collect(&mut self, actor_id: u32, barrier: &Barrier) {
+        tracing::trace!(
+            target: "events::stream::barrier::collect_barrier",
+            "collect_barrier: epoch = {}, actor_id = {}, state = {:#?}",
+            barrier.epoch.curr,
+            actor_id,
+            self
+        );
+
         match self {
             ManagedBarrierState::Pending { last_epoch } => {
                 if let Some(last_epoch) = *last_epoch {
@@ -122,7 +131,7 @@ impl ManagedBarrierState {
 
                 let remaining_actors = actor_ids_to_collect
                     .into_iter()
-                    .filter(|a| collected_actors.contains(a))
+                    .filter(|a| !collected_actors.contains(a))
                     .collect();
 
                 *self = Self::Issued {

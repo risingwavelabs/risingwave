@@ -63,11 +63,6 @@ impl LocalBarrierManager {
         }))
     }
 
-    #[cfg(test)]
-    pub fn for_test() -> Self {
-        Self::with_state(BarrierState::Local)
-    }
-
     /// Register sender for source actors, used to send barriers.
     pub fn register_sender(&mut self, actor_id: u32, sender: UnboundedSender<Message>) {
         debug!("register sender: {}", actor_id);
@@ -142,6 +137,13 @@ impl LocalBarrierManager {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+impl LocalBarrierManager {
+    pub fn for_test() -> Self {
+        Self::with_state(BarrierState::Local)
     }
 
     /// Returns whether [`BarrierState`] is `Local`.
