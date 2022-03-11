@@ -1,61 +1,83 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
+use itertools::Itertools;
+use risingwave_common::catalog::{CellBasedTableDesc, ColumnDesc, ColumnId, OrderedColumnDesc};
 use risingwave_common::error::{Result, RwError};
-use risingwave_pb::meta::Table;
+use risingwave_common::util::sort_util::OrderType;
+use risingwave_pb::catalog::Table as ProstTable;
+use risingwave_pb::plan::{ColumnCatalog, OrderType as ProstOrderType};
 
-use crate::catalog::column_catalog::{ColumnCatalog, ColumnDesc};
-use crate::catalog::{CatalogError, ColumnId, TableId};
+use crate::catalog::{CatalogError, TableId};
 
 #[derive(Clone)]
 pub struct TableCatalog {
-    table_id: TableId,
-    next_column_id: i32,
+    id: TableId,
     columns: Vec<ColumnCatalog>,
+    pk_desc: Vec<OrderedColumnDesc>,
 }
 
 pub const ROWID_NAME: &str = "_row_id";
 
 impl TableCatalog {
-    pub fn new(table_id: TableId) -> Self {
-        Self {
-            table_id,
-            next_column_id: 0,
-            columns: Vec::new(),
-        }
+    /// Get a reference to the table catalog's table id.
+    pub fn id(&self) -> TableId {
+        self.id
     }
 
-    pub fn add_column(&mut self, col_name: &str, col_desc: ColumnDesc) -> Result<()> {
-        let col_catalog = ColumnCatalog::new(
-            ColumnId::from(self.next_column_id),
-            col_name.to_string(),
-            col_desc,
-        );
-        self.next_column_id += 1;
-        self.columns.push(col_catalog);
-        Ok(())
-    }
-
+    /// Get a reference to the table catalog's columns.
     pub fn columns(&self) -> &[ColumnCatalog] {
         &self.columns
     }
 
-    pub fn id(&self) -> TableId {
-        self.table_id
+    /// Get a reference to the table catalog's pk desc.
+    pub fn pk_desc(&self) -> &[OrderedColumnDesc] {
+        self.pk_desc.as_ref()
+    }
+
+    /// Get a CellBasedTableDesc of the table.
+    pub fn cell_based_table(&self) -> CellBasedTableDesc {
+        CellBasedTableDesc {
+            table_id: self.id,
+            pk: self.pk_desc,
+        }
     }
 }
 
-impl TryFrom<&Table> for TableCatalog {
-    type Error = RwError;
-
-    fn try_from(tb: &Table) -> Result<Self> {
-        let mut table_catalog = Self::new(TableId::from(&tb.table_ref_id));
-        let mut names = HashSet::new();
-        for col in &tb.column_descs {
-            if !names.insert(col.name.clone()) {
-                return Err(CatalogError::Duplicated("column", col.name.clone()).into());
+impl From<&ProstTable> for TableCatalog {
+    fn from(tb: &ProstTable) -> Self {
+        let id = tb.id;
+        let columns = tb.column_catalog;
+        let mut col_names = HashSet::new();
+        let mut col_descs: HashMap<i32, ColumnDesc> = HashMap::new();
+        for col in &columns {
+            let col_desc = col.column_desc.unwrap();
+            let col_name = col_desc.name.clone();
+            if !col_names.insert(col_name) {
+                panic!("duplicated column name {} in talbe {} ", col_name, tb.name)
             }
-            table_catalog.add_column(&col.name, ColumnDesc::new(col.get_column_type()?.into()))?;
+            let col_id = col_desc.column_id;
+            col_descs.insert(col_id, col_desc.into());
         }
-        Ok(table_catalog)
+        let pk_desc = tb
+            .pk_column_ids
+            .clone()
+            .into_iter()
+            .zip_eq(
+                tb.pk_orders
+                    .clone()
+                    .into_iter()
+                    .map(|x| OrderType::from_prost(&ProstOrderType::from_i32(x).unwrap())),
+            )
+            .map(|(col_id, order)| OrderedColumnDesc {
+                column_desc: col_descs.get(&col_id).unwrap().clone(),
+                order,
+            })
+            .collect();
+
+        Ok(Self {
+            id,
+            columns,
+            pk_desc,
+        })
     }
 }
