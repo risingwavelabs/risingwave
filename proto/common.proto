@@ -32,7 +32,7 @@ enum WorkerType {
 }
 
 enum ParallelUnitType {
-  SIMPLE = 0;
+  SINGLE = 0;
   HASH = 1;
 }
 

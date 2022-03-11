@@ -1,7 +1,6 @@
 #![allow(dead_code)]
 
 use std::collections::{BTreeMap, HashMap};
-use std::slice;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -71,12 +70,6 @@ where
                 .collect_vec(),
         )
         .await
-    }
-
-    pub async fn delete_parallel_unit_mapping(&self, parallel_unit: &ParallelUnit) -> Result<()> {
-        let mut core = self.core.lock().await;
-        core.delete_worker_mapping(slice::from_ref(parallel_unit))
-            .await
     }
 
     pub async fn get_worker_mapping(&self) -> Result<Vec<ParallelUnitId>> {

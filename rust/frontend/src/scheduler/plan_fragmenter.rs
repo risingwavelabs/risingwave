@@ -363,7 +363,7 @@ mod tests {
         let parallel_degree = 8;
         let mut parallel_units = vec![ParallelUnit {
             id: start_id,
-            r#type: ParallelUnitType::Simple as i32,
+            r#type: ParallelUnitType::Single as i32,
             node_host: None,
         }];
         for id in start_id + 1..start_id + parallel_degree {
