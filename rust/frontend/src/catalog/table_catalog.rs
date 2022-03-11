@@ -74,9 +74,7 @@ impl From<&ProstTable> for TableCatalog {
             .collect();
 
         Self {
-            id: TableId {
-                table_id: id as u32,
-            },
+            id: TableId { table_id: id },
             columns,
             pk_desc,
         }
