@@ -7,26 +7,36 @@ use crate::executor::Barrier;
 
 #[derive(Debug)]
 pub(super) enum ManagedBarrierState {
+    /// Currently no barrier on the flight.
     Pending {
+        /// Last epoch of barriers.
+        // TODO: an initial value should be specified
         last_epoch: Option<u64>,
     },
 
+    /// Barriers from some actors have been collected and stashed, however no `send_barrier`
+    /// request from the meta service is issued.
     Stashed {
         epoch: u64,
 
+        /// Actor ids we've collected and stashed.
         collected_actors: HashSet<u32>,
     },
 
+    /// Meta service has issued a `send_barrier` request. We're collecting barriers now.
     Issued {
         epoch: u64,
 
+        /// Actor ids remaining to be collected.
         remaining_actors: HashSet<u32>,
 
+        /// Notify that the collection is finished.
         collect_notifier: oneshot::Sender<()>,
     },
 }
 
 impl ManagedBarrierState {
+    /// Notify if we have collected barriers from all actor ids. The state must be `Issued`.
     fn may_notify(&mut self) {
         let (epoch, to_notify) = match self {
             ManagedBarrierState::Issued {
@@ -41,7 +51,7 @@ impl ManagedBarrierState {
         if to_notify {
             let state = std::mem::replace(
                 self,
-                Self::Pending {
+                ManagedBarrierState::Pending {
                     last_epoch: Some(epoch),
                 },
             );
@@ -50,6 +60,7 @@ impl ManagedBarrierState {
                 ManagedBarrierState::Issued {
                     collect_notifier, ..
                 } => {
+                    // Notify about barrier finishing.
                     if collect_notifier.send(()).is_err() {
                         warn!("failed to notify barrier collection with epoch {}", epoch)
                     }
@@ -60,6 +71,7 @@ impl ManagedBarrierState {
         }
     }
 
+    /// Collect a `barrier` from the actor with `actor_id`.
     pub(super) fn collect(&mut self, actor_id: u32, barrier: &Barrier) {
         tracing::trace!(
             target: "events::stream::barrier::collect_barrier",
@@ -105,6 +117,8 @@ impl ManagedBarrierState {
         }
     }
 
+    /// When the meta service issues a `send_barrier` request, call this function to transform to
+    /// `Issued` and start to collect or to notify.
     pub(super) fn transform_to_issued(
         &mut self,
         barrier: &Barrier,

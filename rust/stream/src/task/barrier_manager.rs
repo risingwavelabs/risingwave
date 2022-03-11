@@ -99,6 +99,9 @@ impl LocalBarrierManager {
             BarrierState::Local => None,
 
             BarrierState::Managed(state) => {
+                // There must be some actors to collect from.
+                assert!(!to_collect.is_empty());
+
                 let (tx, rx) = oneshot::channel();
                 state.transform_to_issued(barrier, to_collect, tx);
                 Some(rx)
