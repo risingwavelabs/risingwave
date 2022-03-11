@@ -28,7 +28,7 @@ message ActorInfo {
 enum WorkerType {
   FRONTEND = 0;
   COMPUTE_NODE = 1;
-  UNKNOWN = 2;
+  RISE_CTL = 2;
 }
 
 enum ParallelUnitType {

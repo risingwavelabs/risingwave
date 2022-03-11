@@ -1,19 +1,20 @@
+use std::fmt::Debug;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{CatalogVersion, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::try_match_expand;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::{
-    AddTablesRequest, AddTablesResponse, GetCompactionTasksRequest, GetCompactionTasksResponse,
-    GetNewTableIdRequest, GetNewTableIdResponse, PinSnapshotRequest, PinSnapshotResponse,
-    PinVersionRequest, PinVersionResponse, ReportCompactionTasksRequest,
-    ReportCompactionTasksResponse, SubscribeCompactTasksRequest, SubscribeCompactTasksResponse,
-    UnpinSnapshotRequest, UnpinSnapshotResponse, UnpinVersionRequest, UnpinVersionResponse,
+    AddTablesRequest, AddTablesResponse, GetNewTableIdRequest, GetNewTableIdResponse,
+    PinSnapshotRequest, PinSnapshotResponse, PinVersionRequest, PinVersionResponse,
+    ReportCompactionTasksRequest, ReportCompactionTasksResponse, SubscribeCompactTasksRequest,
+    SubscribeCompactTasksResponse, UnpinSnapshotRequest, UnpinSnapshotResponse,
+    UnpinVersionRequest, UnpinVersionResponse,
 };
 use risingwave_pb::meta::catalog_service_client::CatalogServiceClient;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
@@ -124,49 +125,56 @@ impl MetaClient {
         Ok(())
     }
 
-    pub async fn create_table(&self, table: Table) -> Result<TableId> {
-        Ok(TableId {
-            table_id: self.create_catalog_body(CatalogBody::Table(table)).await? as u32,
-        })
+    pub async fn create_table(&self, table: Table) -> Result<(TableId, CatalogVersion)> {
+        let (table_id, version) = self.create_catalog_body(CatalogBody::Table(table)).await?;
+        Ok((
+            TableId {
+                table_id: table_id as u32,
+            },
+            version,
+        ))
     }
 
-    pub async fn create_database(&self, db: Database) -> Result<DatabaseId> {
+    pub async fn create_database(&self, db: Database) -> Result<(DatabaseId, CatalogVersion)> {
         self.create_catalog_body(CatalogBody::Database(db)).await
     }
 
-    pub async fn create_schema(&self, schema: Schema) -> Result<SchemaId> {
+    pub async fn create_schema(&self, schema: Schema) -> Result<(SchemaId, CatalogVersion)> {
         self.create_catalog_body(CatalogBody::Schema(schema)).await
     }
 
-    pub async fn create_catalog_body(&self, catalog_body: CatalogBody) -> Result<i32> {
+    pub async fn create_catalog_body(
+        &self,
+        catalog_body: CatalogBody,
+    ) -> Result<(i32, CatalogVersion)> {
         let request = CreateRequest {
             catalog_body: Some(catalog_body),
             ..Default::default()
         };
         let resp = self.inner.create(request).await?;
-        Ok(resp.id)
+        Ok((resp.id, resp.version))
     }
 
-    pub async fn drop_table(&self, table_ref_id: TableRefId) -> Result<()> {
+    pub async fn drop_table(&self, table_ref_id: TableRefId) -> Result<CatalogVersion> {
         self.drop_catalog(CatalogId::TableId(table_ref_id)).await
     }
 
-    pub async fn drop_schema(&self, schema_ref_id: SchemaRefId) -> Result<()> {
+    pub async fn drop_schema(&self, schema_ref_id: SchemaRefId) -> Result<CatalogVersion> {
         self.drop_catalog(CatalogId::SchemaId(schema_ref_id)).await
     }
 
-    pub async fn drop_database(&self, database_ref_id: DatabaseRefId) -> Result<()> {
+    pub async fn drop_database(&self, database_ref_id: DatabaseRefId) -> Result<CatalogVersion> {
         self.drop_catalog(CatalogId::DatabaseId(database_ref_id))
             .await
     }
 
-    pub async fn drop_catalog(&self, catalog_id: CatalogId) -> Result<()> {
+    pub async fn drop_catalog(&self, catalog_id: CatalogId) -> Result<CatalogVersion> {
         let request = DropRequest {
             catalog_id: Some(catalog_id),
             ..Default::default()
         };
-        MetaClientInner::drop(self.inner.as_ref(), request).await?;
-        Ok(())
+        let resp = MetaClientInner::drop(self.inner.as_ref(), request).await?;
+        Ok(resp.version)
     }
 
     /// Unregister the current node to the cluster.
@@ -289,13 +297,6 @@ pub trait MetaClientInner: Send + Sync {
         unimplemented!()
     }
 
-    async fn get_compaction_tasks(
-        &self,
-        _req: GetCompactionTasksRequest,
-    ) -> std::result::Result<GetCompactionTasksResponse, tonic::Status> {
-        unimplemented!()
-    }
-
     async fn report_compaction_tasks(
         &self,
         _req: ReportCompactionTasksRequest,
@@ -319,7 +320,7 @@ pub trait MetaClientInner: Send + Sync {
 }
 
 /// Client to meta server. Cloning the instance is lightweight.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct GrpcMetaClient {
     pub cluster_client: ClusterServiceClient<Channel>,
     pub heartbeat_client: HeartbeatServiceClient<Channel>,
@@ -509,18 +510,6 @@ impl MetaClientInner for GrpcMetaClient {
             .hummock_client
             .to_owned()
             .add_tables(req)
-            .await?
-            .into_inner())
-    }
-
-    async fn get_compaction_tasks(
-        &self,
-        req: GetCompactionTasksRequest,
-    ) -> std::result::Result<GetCompactionTasksResponse, tonic::Status> {
-        Ok(self
-            .hummock_client
-            .to_owned()
-            .get_compaction_tasks(req)
             .await?
             .into_inner())
     }

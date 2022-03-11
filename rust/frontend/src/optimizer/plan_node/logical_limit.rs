@@ -1,27 +1,33 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
-use risingwave_common::catalog::Schema;
 
-use super::{BatchLimit, ColPrunable, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
-use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
+use super::{BatchLimit, ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use crate::optimizer::property::WithSchema;
 
+/// `LogicalLimit` fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone)]
 pub struct LogicalLimit {
+    pub base: LogicalBase,
     input: PlanRef,
     limit: usize,
     offset: usize,
-    schema: Schema,
 }
 
 impl LogicalLimit {
     fn new(input: PlanRef, limit: usize, offset: usize) -> Self {
+        let ctx = input.ctx();
         let schema = input.schema().clone();
+        let base = LogicalBase {
+            schema,
+            id: ctx.borrow_mut().get_id(),
+            ctx: ctx.clone(),
+        };
         LogicalLimit {
             input,
             limit,
             offset,
-            schema,
+            base,
         }
     }
 
@@ -46,18 +52,10 @@ impl fmt::Display for LogicalLimit {
     }
 }
 
-impl WithOrder for LogicalLimit {}
-
-impl WithDistribution for LogicalLimit {}
-
-impl WithSchema for LogicalLimit {
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-}
-
 impl ColPrunable for LogicalLimit {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
+        self.must_contain_columns(required_cols);
+
         let new_input = self.input.prune_col(required_cols);
         self.clone_with_input(new_input).into()
     }

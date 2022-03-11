@@ -40,14 +40,8 @@ impl StateStore for HummockStateStore {
 
     async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>, epoch: u64) -> Result<()> {
         self.storage
-            .write_batch(
-                kv_pairs
-                    .into_iter()
-                    .map(|(k, v)| (k.to_vec(), v.map(|x| x.to_vec()).into())),
-                epoch,
-            )
+            .write_batch(kv_pairs.into_iter().map(|(k, v)| (k, v.into())), epoch)
             .await?;
-
         Ok(())
     }
 
@@ -80,6 +74,17 @@ impl StateStore for HummockStateStore {
 
     async fn sync(&self, epoch: Option<u64>) -> Result<()> {
         self.storage.sync(epoch).await?;
+        Ok(())
+    }
+
+    async fn replicate_batch(
+        &self,
+        kv_pairs: Vec<(Bytes, Option<Bytes>)>,
+        epoch: u64,
+    ) -> Result<()> {
+        self.storage
+            .replicate_batch(kv_pairs.into_iter().map(|(k, v)| (k, v.into())), epoch)
+            .await?;
         Ok(())
     }
 }

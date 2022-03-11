@@ -37,9 +37,19 @@ message ColumnDesc {
   string name = 3;
 }
 
+message OrderedColumnDesc {
+  ColumnDesc column_desc = 1;
+  OrderType order = 2;
+}
+
 message ColumnCatalog {
   ColumnDesc column_desc = 1;
-  bool is_hidden = 4;
+  bool is_hidden = 2;
+}
+
+message CellBasedTableDesc {
+  uint32 table_id = 1;
+  repeated OrderedColumnDesc pk = 2;
 }
 
 message StreamSourceInfo {
@@ -60,9 +70,8 @@ message MaterializedViewInfo {
 }
 
 message RowSeqScanNode {
-  TableRefId table_ref_id = 1;
-  repeated int32 column_ids = 2;
-  repeated Field fields = 3;
+  CellBasedTableDesc table_desc = 1;
+  repeated ColumnDesc column_descs = 2;
 }
 
 message SourceScanNode {
@@ -86,7 +95,7 @@ message FilterScanNode {
 }
 
 message InsertNode {
-  TableRefId table_ref_id = 1;
+  TableRefId table_source_ref_id = 1;
   repeated int32 column_ids = 2;
 }
 

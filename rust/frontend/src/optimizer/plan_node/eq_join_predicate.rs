@@ -1,15 +1,15 @@
 use fixedbitset::FixedBitSet;
 
-use crate::expr::{get_inputs_col_index, Expr, ExprImpl, ExprType, FunctionCall, InputRef};
+use crate::expr::{get_inputs_col_index, ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::utils::Condition;
 
-/// the join predicate used in optimizer
+/// The join predicate used in optimizer
 #[derive(Debug, Clone)]
 pub struct EqJoinPredicate {
-    /// other conditions, linked with AND conjunction.
+    /// Other conditions, linked with `AND` conjunction.
     other_cond: Condition,
 
-    /// the equal columns indexes(in the input schema) both sides,
+    /// The equal columns indexes(in the input schema) both sides,
     /// the first is from the left table and the second is from the right table.
     /// now all are normal equal(not null-safe-equal),
     eq_keys: Vec<(InputRef, InputRef)>,
@@ -17,7 +17,7 @@ pub struct EqJoinPredicate {
 
 #[allow(dead_code)]
 impl EqJoinPredicate {
-    /// the new method for `JoinPredicate` without any analysis, check or rewrite.
+    /// The new method for `JoinPredicate` without any analysis, check or rewrite.
     pub fn new(other_cond: Condition, eq_keys: Vec<(InputRef, InputRef)>) -> Self {
         Self {
             other_cond,
@@ -96,9 +96,9 @@ impl EqJoinPredicate {
                 .iter()
                 .cloned()
                 .map(|(l, r)| {
-                    FunctionCall::new(ExprType::Equal, vec![l.to_expr_impl(), r.to_expr_impl()])
+                    FunctionCall::new(ExprType::Equal, vec![l.into(), r.into()])
                         .unwrap()
-                        .to_expr_impl()
+                        .into()
                 })
                 .collect(),
         }
@@ -109,9 +109,8 @@ impl EqJoinPredicate {
     }
 
     pub fn all_cond(&self) -> Condition {
-        let mut cond = self.eq_cond();
-        cond.and(self.non_eq_cond());
-        cond
+        let cond = self.eq_cond();
+        cond.and(self.non_eq_cond())
     }
 
     pub fn has_eq(&self) -> bool {

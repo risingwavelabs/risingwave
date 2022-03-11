@@ -1,16 +1,15 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use risingwave_common::array::RwError;
 use risingwave_common::config::StorageConfig;
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 use risingwave_rpc_client::MetaClient;
 
 use crate::hummock::hummock_meta_client::RpcHummockMetaClient;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::{HummockStateStore, SstableStore};
 use crate::memory::MemoryStateStore;
-use crate::monitor::{MonitoredStateStore as Monitored, StateStoreStats};
+use crate::monitor::{MonitoredStateStore as Monitored, StateStoreMetrics};
 use crate::object::S3ObjectStore;
 use crate::rocksdb_local::RocksDBStateStore;
 use crate::tikv::TikvStateStore;
@@ -26,12 +25,8 @@ pub enum StateStoreImpl {
 }
 
 impl StateStoreImpl {
-    pub fn shared_in_memory_store() -> Self {
-        use crate::monitor::DEFAULT_STATE_STORE_STATS;
-
-        Self::MemoryStateStore(
-            MemoryStateStore::shared().monitored(DEFAULT_STATE_STORE_STATS.clone()),
-        )
+    pub fn shared_in_memory_store(state_store_metrics: Arc<StateStoreMetrics>) -> Self {
+        Self::MemoryStateStore(MemoryStateStore::shared().monitored(state_store_metrics))
     }
 }
 
@@ -63,7 +58,7 @@ impl StateStoreImpl {
         s: &str,
         config: Arc<StorageConfig>,
         meta_client: MetaClient,
-        stats: Arc<StateStoreStats>,
+        stats: Arc<StateStoreMetrics>,
     ) -> Result<Self> {
         let store = match s {
             hummock if hummock.starts_with("hummock") => {
@@ -103,6 +98,7 @@ impl StateStoreImpl {
                                     unimplemented!("{} is not supported for Hummock", other)
                                 }
                             },
+                            async_checkpoint_enabled: config.async_checkpoint_enabled,
                         },
                         sstable_store.clone(),
                         Arc::new(LocalVersionManager::new(sstable_store)),
@@ -115,7 +111,7 @@ impl StateStoreImpl {
                 StateStoreImpl::HummockStateStore(inner.monitored(stats))
             }
 
-            "in_memory" | "in-memory" => StateStoreImpl::shared_in_memory_store(),
+            "in_memory" | "in-memory" => StateStoreImpl::shared_in_memory_store(stats.clone()),
 
             tikv if tikv.starts_with("tikv") => {
                 let inner =

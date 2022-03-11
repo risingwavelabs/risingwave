@@ -35,10 +35,12 @@ impl Header {
     }
 
     /// Decode decodes the header.
-    pub fn decode(&mut self, bytes: &mut impl Buf) {
+    pub fn decode(bytes: &mut impl Buf) -> Self {
         let h = bytes.get_u32_le();
-        self.overlap = (h >> 16) as u16;
-        self.diff = h as u16;
+        Self {
+            overlap: (h >> 16) as u16,
+            diff: h as u16,
+        }
     }
 }
 
@@ -226,14 +228,14 @@ impl SSTableBuilder {
     /// Returns true if we roughly reached capacity
     pub fn reach_capacity(&self) -> bool {
         let block_size = self.data_buf.len() as u32 + // actual length of current buffer
-                                 self.entry_offsets.len() as u32 * 4 + // all entry offsets size
-                                 4 + // count of all entry offsets
-                                 8 + // checksum bytes
-                                 4; // checksum length
+            self.entry_offsets.len() as u32 * 4 + // all entry offsets size
+            4 + // count of all entry offsets
+            8 + // checksum bytes
+            4; // checksum length
 
         let estimated_size = block_size +
-                                  4 + // index length
-                                  5 * self.meta.block_metas.len() as u32; // TODO: why 5?
+            4 + // index length
+            5 * self.meta.block_metas.len() as u32; // TODO: why 5?
         estimated_size as u32 > self.options.table_capacity
     }
 
@@ -302,7 +304,7 @@ pub(super) mod tests {
 
     #[test]
     fn test_header_encode_decode() {
-        let mut header = Header {
+        let header = Header {
             overlap: 23333,
             diff: 23334,
         };
@@ -310,9 +312,9 @@ pub(super) mod tests {
         let mut buf = BytesMut::new();
         header.encode(&mut buf);
         let mut buf = buf.freeze();
-        header.decode(&mut buf);
-        assert_eq!(header.overlap, 23333);
-        assert_eq!(header.diff, 23334);
+        let decoded_header = Header::decode(&mut buf);
+        assert_eq!(decoded_header.overlap, 23333);
+        assert_eq!(decoded_header.diff, 23334);
     }
 
     /// The key (with epoch 0) of an index in the test table
@@ -339,7 +341,6 @@ pub(super) mod tests {
         opts: SSTableBuilderOptions,
         sstable_store: SstableStoreRef,
     ) -> Sstable {
-        const REMOTE_DIR: &str = "test";
         let mut b = SSTableBuilder::new(opts);
 
         for i in 0..TEST_KEYS_COUNT {
@@ -356,10 +357,6 @@ pub(super) mod tests {
             .await
             .unwrap();
         sst
-    }
-
-    fn key(prefix: &[u8], i: usize) -> Bytes {
-        Bytes::from([prefix, format!("{:04}", i).as_bytes()].concat())
     }
 
     pub fn default_builder_opt_for_test() -> SSTableBuilderOptions {

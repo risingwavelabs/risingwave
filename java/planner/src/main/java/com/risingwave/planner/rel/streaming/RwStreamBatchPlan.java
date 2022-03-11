@@ -4,6 +4,7 @@ import com.google.common.collect.ImmutableList;
 import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.MaterializedViewCatalog;
 import com.risingwave.catalog.TableCatalog;
+import com.risingwave.proto.plan.ColumnDesc;
 import com.risingwave.proto.plan.Field;
 import com.risingwave.proto.streaming.plan.BatchPlanNode;
 import com.risingwave.proto.streaming.plan.StreamNode;
@@ -110,12 +111,26 @@ public class RwStreamBatchPlan extends TableScan implements RisingWaveStreamingR
     return builder.build();
   }
 
+  private ImmutableList<ColumnDesc> generateColumnDesc() {
+    var table = getTable().unwrapOrThrow(TableCatalog.class);
+    var builder = ImmutableList.<ColumnDesc>builder();
+    for (var columnId : columnIds) {
+      var columnDescBuilder = ColumnDesc.newBuilder();
+      var column = table.getColumnChecked(columnId);
+      var dataType = column.getDesc().getDataType().getProtobufType();
+      columnDescBuilder.setColumnType(dataType);
+      columnDescBuilder.setColumnId(columnId.getValue());
+      columnDescBuilder.setName(column.getName());
+      builder.add(columnDescBuilder.build());
+    }
+    return builder.build();
+  }
+
   @Override
   public StreamNode serialize() {
     BatchPlanNode.Builder builder = BatchPlanNode.newBuilder();
     builder.setTableRefId(Messages.getTableRefId(tableId)).addAllPkIndices(primaryKeyIndices);
-    columnIds.forEach(c -> builder.addColumnIds(c.getValue()));
-    getFields().forEach(builder::addFields);
+    builder.addAllColumnDescs(generateColumnDesc());
     BatchPlanNode batchPlanNode = builder.build();
     return StreamNode.newBuilder()
         .setBatchPlanNode(batchPlanNode)

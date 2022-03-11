@@ -2,11 +2,14 @@ use std::fmt;
 
 use risingwave_common::catalog::Schema;
 
-use super::{LogicalProject, PlanRef, PlanTreeNodeUnary, ToStreamProst};
-use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
+use super::{LogicalProject, PlanRef, PlanTreeNodeUnary, StreamBase, ToStreamProst};
+use crate::optimizer::property::{Distribution, WithSchema};
 
+/// `StreamProject` implements [`super::LogicalProject`] to evaluate specified expressions on input
+/// rows.
 #[derive(Debug, Clone)]
 pub struct StreamProject {
+    pub base: StreamBase,
     logical: LogicalProject,
 }
 
@@ -18,7 +21,14 @@ impl fmt::Display for StreamProject {
 
 impl StreamProject {
     pub fn new(logical: LogicalProject) -> Self {
-        StreamProject { logical }
+        let ctx = logical.base.ctx.clone();
+        // TODO: derive from input
+        let base = StreamBase {
+            dist: Distribution::any().clone(),
+            id: ctx.borrow_mut().get_id(),
+            ctx: ctx.clone(),
+        };
+        StreamProject { logical, base }
     }
 }
 
@@ -36,9 +46,5 @@ impl WithSchema for StreamProject {
         self.logical.schema()
     }
 }
-
-impl WithDistribution for StreamProject {}
-
-impl WithOrder for StreamProject {}
 
 impl ToStreamProst for StreamProject {}

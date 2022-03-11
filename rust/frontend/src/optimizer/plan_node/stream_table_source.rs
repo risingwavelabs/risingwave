@@ -2,11 +2,14 @@ use std::fmt;
 
 use risingwave_common::catalog::Schema;
 
-use super::ToStreamProst;
-use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
+use super::{StreamBase, ToStreamProst};
+use crate::optimizer::property::WithSchema;
 
+/// `StreamTableSource` continuously streams data from internal table or various kinds of
+/// external sources.
 #[derive(Debug, Clone)]
 pub struct StreamTableSource {
+    pub base: StreamBase,
     // TODO(catalog)
 }
 
@@ -22,9 +25,5 @@ impl fmt::Display for StreamTableSource {
         todo!()
     }
 }
-
-impl WithDistribution for StreamTableSource {}
-
-impl WithOrder for StreamTableSource {}
 
 impl ToStreamProst for StreamTableSource {}

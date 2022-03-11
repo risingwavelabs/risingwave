@@ -1,10 +1,9 @@
 //! Hummock state store's SST builder, format and iterator
 
-// TODO: enable checksum
-#![allow(dead_code)]
-
 // Copyright 2021 TiKV Project Authors. Licensed under Apache-2.0.
 
+mod block;
+pub use block::*;
 mod block_iterator;
 mod bloom;
 use bloom::Bloom;
@@ -18,94 +17,9 @@ mod reverse_sstable_iterator;
 pub use reverse_sstable_iterator::*;
 mod utils;
 
-use std::sync::Arc;
-
-use bytes::{Buf, Bytes};
-use prost::Message;
-use risingwave_pb::hummock::{Checksum, SstableMeta};
-use utils::verify_checksum;
+use risingwave_pb::hummock::SstableMeta;
 
 use super::{HummockError, HummockResult};
-
-/// Block contains several entries. It can be obtained from an SST.
-#[derive(Default)]
-pub struct Block {
-    offset: usize,
-    data: Bytes,
-    checksum: Checksum,
-    entries_index_start: usize,
-    entry_offsets: Vec<u32>,
-    checksum_len: usize,
-}
-
-impl Block {
-    fn size(&self) -> u64 {
-        3 * std::mem::size_of::<usize>() as u64
-            + self.data.len() as u64
-            + self.checksum_len as u64
-            + self.entry_offsets.len() as u64 * std::mem::size_of::<u32>() as u64
-    }
-
-    fn verify_checksum(&self) -> HummockResult<()> {
-        // let checksum = prost::Message::decode(self.checksum.clone())?;
-        verify_checksum(&self.checksum, &self.data)
-    }
-
-    /// Structure of Block:
-    /// ```plain
-    /// +-------------------+-----------------+--------------------+--------------+------------------+
-    /// | Entry1            | Entry2          | Entry3             | Entry4       | Entry5
-    /// +-------------------+-----------------+--------------------+--------------+------------------+
-    /// | Entry6            | ...             | ...                | ...          | EntryN
-    /// +-------------------+-----------------+--------------------+--------------+------------------+
-    /// | Offsets list used to perform binary | Offsets list Size  | Block        | Checksum Size
-    /// | search in the block                 | (4 Bytes)          | Checksum     | (4 Bytes)
-    /// +-------------------------------------+--------------------+--------------+------------------+
-    /// ```
-    /// Decode block from given bytes
-    pub fn decode(data: Bytes, block_offset: usize) -> HummockResult<Arc<Block>> {
-        // read checksum length
-        let mut read_pos = data.len() - 4;
-        let checksum_len = (&data[read_pos..read_pos + 4]).get_u32() as usize;
-
-        if checksum_len > data.len() {
-            return Err(HummockError::invalid_block());
-        }
-
-        // read checksum
-        read_pos -= checksum_len;
-        let checksum = Checksum::decode(&data[read_pos..read_pos + checksum_len])?;
-
-        // check raw data
-        verify_checksum(&checksum, &data[..read_pos])?;
-
-        // read entries num
-        read_pos -= 4;
-        let entries_num = (&data[read_pos..read_pos + 4]).get_u32() as usize;
-
-        // read entries position
-        let entries_index_start = read_pos - entries_num * 4;
-        let entries_index_end = entries_index_start + entries_num * 4;
-
-        // read entries
-        let mut entry_offsets_ptr = &data[entries_index_start..entries_index_end];
-        let mut entry_offsets = Vec::with_capacity(entries_num);
-        for _ in 0..entries_num {
-            entry_offsets.push(entry_offsets_ptr.get_u32_le());
-        }
-
-        let blk = Arc::new(Block {
-            offset: block_offset,
-            entries_index_start,
-            data: data.clone(),
-            entry_offsets,
-            checksum_len,
-            checksum,
-        });
-
-        Ok(blk)
-    }
-}
 
 /// [`SSTable`] is a handle for accessing SST in [`TableManager`].
 pub struct Sstable {

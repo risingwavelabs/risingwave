@@ -5,10 +5,10 @@ import com.risingwave.catalog.ColumnCatalog;
 import com.risingwave.catalog.TableCatalog;
 import com.risingwave.planner.rel.common.RwScan;
 import com.risingwave.planner.rel.common.dist.RwDistributions;
-import com.risingwave.proto.plan.Field;
+import com.risingwave.proto.plan.CellBasedTableDesc;
+import com.risingwave.proto.plan.ColumnDesc;
 import com.risingwave.proto.plan.PlanNode;
 import com.risingwave.proto.plan.RowSeqScanNode;
-import com.risingwave.rpc.Messages;
 import java.util.Collections;
 import java.util.List;
 import org.apache.calcite.plan.RelOptCluster;
@@ -56,20 +56,21 @@ public class RwBatchScan extends RwScan implements RisingWaveBatchPhyRel {
   @Override
   public PlanNode serialize() {
     var table = getTable().unwrapOrThrow(TableCatalog.class);
-    var tableRefId = Messages.getTableRefId(tableId);
-    var builder = RowSeqScanNode.newBuilder().setTableRefId(tableRefId);
+
+    // FIXME: here should add pk's desc in the table desc.
+    var builder =
+        RowSeqScanNode.newBuilder()
+            .setTableDesc(CellBasedTableDesc.newBuilder().setTableId(tableId.getValue()).build());
 
     columnIds.forEach(
         c -> {
-          builder.addColumnIds(c.getValue());
           var dataType = table.getColumnChecked(c).getDesc().getDataType().getProtobufType();
-          builder.addFields(
-              Field.newBuilder()
-                  .setDataType(dataType)
-                  .setName(table.getColumnChecked(c).getName())
-                  .build());
+          var columnDescBuilder = ColumnDesc.newBuilder();
+          columnDescBuilder.setColumnId(c.getValue());
+          columnDescBuilder.setColumnType(dataType);
+          columnDescBuilder.setName(table.getColumnChecked(c).getName());
+          builder.addColumnDescs(columnDescBuilder.build());
         });
-
     return PlanNode.newBuilder()
         .setRowSeqScan(builder.build())
         .setIdentity(BatchPlan.getCurrentNodeIdentity(this))

@@ -1,16 +1,18 @@
 use std::sync::Arc;
 
 use itertools::{enumerate, Itertools};
+use prometheus::core::{AtomicF64, GenericGauge};
 use prost::Message;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::hummock::hummock_version::HummockVersionRefId;
 use risingwave_pb::hummock::{
-    CompactTask, HummockContextPinnedSnapshot, HummockContextPinnedVersion, HummockContextRefId,
-    HummockSnapshot, HummockTablesToDelete, HummockVersion, Level, LevelType, SstableInfo,
-    UncommittedEpoch,
+    CompactMetrics, CompactTask, HummockContextPinnedSnapshot, HummockContextPinnedVersion,
+    HummockContextRefId, HummockSnapshot, HummockTablesToDelete, HummockVersion, Level, LevelType,
+    SstableInfo, SstableRefId, TableSetStatistics, UncommittedEpoch,
 };
 use risingwave_storage::hummock::{
-    HummockContextId, HummockEpoch, HummockSSTableId, HummockVersionId, INVALID_EPOCH,
+    HummockContextId, HummockEpoch, HummockRefCount, HummockSSTableId, HummockVersionId,
+    INVALID_EPOCH,
 };
 use tokio::sync::{Mutex, RwLock};
 
@@ -205,17 +207,71 @@ where
     }
 
     fn trigger_sst_stat(&self, compact_status: &CompactStatus) {
+        let reduce_compact_cnt = |compacting_key_ranges: &Vec<(
+            risingwave_storage::hummock::key_range::KeyRange,
+            u64,
+            u64,
+        )>| {
+            compacting_key_ranges
+                .iter()
+                .fold(0, |accum, elem| accum + elem.2)
+        };
         for (idx, level_handler) in enumerate(compact_status.level_handlers.iter()) {
-            let sst_cnt = match level_handler {
-                LevelHandler::Nonoverlapping(ssts, _) => ssts.len(),
-                LevelHandler::Overlapping(ssts, _) => ssts.len(),
+            let (sst_num, compact_cnt) = match level_handler {
+                LevelHandler::Nonoverlapping(ssts, compacting_key_ranges) => {
+                    (ssts.len(), reduce_compact_cnt(compacting_key_ranges))
+                }
+                LevelHandler::Overlapping(ssts, compacting_key_ranges) => {
+                    (ssts.len(), reduce_compact_cnt(compacting_key_ranges))
+                }
             };
+            let level_label = String::from("L") + &idx.to_string();
             self.metrics
-                .level_payload
-                .get_metric_with_label_values(&[&(String::from("L") + &idx.to_string())])
+                .level_sst_num
+                .get_metric_with_label_values(&[&level_label])
                 .unwrap()
-                .set(sst_cnt as i64);
+                .set(sst_num as i64);
+            self.metrics
+                .level_compact_cnt
+                .get_metric_with_label_values(&[&level_label])
+                .unwrap()
+                .set(compact_cnt as i64);
         }
+    }
+
+    fn single_level_stat<T: FnMut(String) -> prometheus::Result<GenericGauge<AtomicF64>>>(
+        mut metric_vec: T,
+        level_stat: &TableSetStatistics,
+    ) {
+        let level_label = String::from("L") + &level_stat.level_idx.to_string();
+        metric_vec(level_label).unwrap().add(level_stat.size_gb);
+    }
+
+    fn trigger_rw_stat(&self, compact_metrics: &CompactMetrics) {
+        Self::single_level_stat(
+            |label| {
+                self.metrics
+                    .level_compact_read_curr
+                    .get_metric_with_label_values(&[&label])
+            },
+            compact_metrics.read_level_n.as_ref().unwrap(),
+        );
+        Self::single_level_stat(
+            |label| {
+                self.metrics
+                    .level_compact_read_next
+                    .get_metric_with_label_values(&[&label])
+            },
+            compact_metrics.read_level_nplus1.as_ref().unwrap(),
+        );
+        Self::single_level_stat(
+            |label| {
+                self.metrics
+                    .level_compact_write
+                    .get_metric_with_label_values(&[&label])
+            },
+            compact_metrics.write.as_ref().unwrap(),
+        );
     }
 
     pub async fn add_tables(
@@ -431,7 +487,7 @@ where
     /// been processed previously.
     pub async fn report_compact_task(
         &self,
-        compact_task: CompactTask,
+        mut compact_task: CompactTask,
         task_result: bool,
     ) -> Result<bool> {
         let output_table_compact_entries: Vec<_> = compact_task
@@ -452,6 +508,7 @@ where
             .sum();
         let output_sst_count = compact_task.sorted_output_ssts.len();
 
+        let compact_task_metrics = compact_task.metrics.take();
         let (sorted_output_ssts, delete_table_ids) = match compact_status.report_compact_task(
             output_table_compact_entries,
             compact_task,
@@ -511,7 +568,7 @@ where
             version.upsert_in_transaction(&mut transaction)?;
             let mut tables_to_delete = HummockTablesToDelete::select(
                 &*versioning_guard.meta_store_ref,
-                &HummockVersionRefId { id: new_version_id },
+                &HummockVersionRefId { id: old_version_id },
             )
             .await?
             .unwrap_or(HummockTablesToDelete {
@@ -520,7 +577,12 @@ where
             });
             tables_to_delete.id.extend(delete_table_ids);
             if tables_to_delete.id.is_empty() {
-                tables_to_delete.delete_in_transaction(&mut transaction)?;
+                HummockTablesToDelete::delete_in_transaction(
+                    HummockVersionRefId {
+                        id: tables_to_delete.version_id,
+                    },
+                    &mut transaction,
+                )?;
             } else {
                 tables_to_delete.upsert_in_transaction(&mut transaction)?;
             }
@@ -538,6 +600,7 @@ where
             tracing::debug!("Cancel hummock compaction task id {}", compact_task_id);
         }
         self.trigger_sst_stat(&compact_status);
+        self.trigger_rw_stat(compact_task_metrics.as_ref().unwrap());
         Ok(true)
     }
 
@@ -625,11 +688,10 @@ where
 
                 // remove tables of the aborting epoch
                 for table_id in &uncommitted_epoch.table_ids {
-                    SstableInfo {
-                        id: *table_id,
-                        key_range: None,
-                    }
-                    .delete_in_transaction(&mut transaction)?
+                    SstableInfo::delete_in_transaction(
+                        SstableRefId { id: *table_id },
+                        &mut transaction,
+                    )?;
                 }
                 hummock_version.uncommitted_epochs.swap_remove(idx);
 
@@ -662,7 +724,12 @@ where
         .await?;
         let mut to_commit = false;
         if let Some(pinned_version) = pinned_version {
-            pinned_version.delete_in_transaction(&mut transaction)?;
+            HummockContextPinnedVersion::delete_in_transaction(
+                HummockContextRefId {
+                    id: pinned_version.context_id,
+                },
+                &mut transaction,
+            )?;
             to_commit = true;
         }
         let pinned_snapshot = HummockContextPinnedSnapshot::select(
@@ -671,12 +738,105 @@ where
         )
         .await?;
         if let Some(pinned_snapshot) = pinned_snapshot {
-            pinned_snapshot.delete_in_transaction(&mut transaction)?;
+            HummockContextPinnedSnapshot::delete_in_transaction(
+                HummockContextRefId {
+                    id: pinned_snapshot.context_id,
+                },
+                &mut transaction,
+            )?;
             to_commit = true;
         }
         if !to_commit {
             return Ok(());
         }
+        self.commit_trx(versioning_guard.meta_store_ref.as_ref(), transaction, None)
+            .await
+    }
+
+    /// List version ids in ascending order. TODO: support limit parameter
+    pub async fn list_version_ids_asc(&self) -> Result<Vec<HummockVersionId>> {
+        let versioning_guard = self.versioning.read().await;
+        let version_ids = HummockVersion::list(versioning_guard.meta_store_ref.as_ref())
+            .await?
+            .iter()
+            .map(|version| version.id)
+            .sorted()
+            .collect_vec();
+        Ok(version_ids)
+    }
+
+    /// Get the reference count of given version id
+    pub async fn get_version_pin_count(
+        &self,
+        version_id: HummockVersionId,
+    ) -> Result<HummockRefCount> {
+        let versioning_guard = self.versioning.read().await;
+        let version_pins =
+            HummockContextPinnedVersion::list(versioning_guard.meta_store_ref.as_ref()).await?;
+        let count = version_pins
+            .iter()
+            .filter(|version_pin| version_pin.version_id.contains(&version_id))
+            .count();
+        Ok(count as HummockRefCount)
+    }
+
+    /// Get the `SSTable` ids which are guaranteed not to be included after `version_id`, thus they
+    /// can be deleted if all versions LE than `version_id` are not referenced.
+    pub async fn get_ssts_to_delete(
+        &self,
+        version_id: HummockVersionId,
+    ) -> Result<Vec<HummockSSTableId>> {
+        let versioning_guard = self.versioning.read().await;
+        let ssts_to_delete = HummockTablesToDelete::select(
+            versioning_guard.meta_store_ref.as_ref(),
+            &HummockVersionRefId { id: version_id },
+        )
+        .await?;
+        match ssts_to_delete {
+            None => Ok(vec![]),
+            Some(ssts) => Ok(ssts.id),
+        }
+    }
+
+    /// Delete metadata of the given `version_id`
+    pub async fn delete_version(&self, version_id: HummockVersionId) -> Result<()> {
+        let versioning_guard = self.versioning.write().await;
+        let mut transaction = Transaction::default();
+        let key = HummockVersionRefId { id: version_id };
+        // Delete record in HummockVersion if any.
+        let version =
+            HummockVersion::select(versioning_guard.meta_store_ref.as_ref(), &key).await?;
+        if let Some(version) = version {
+            HummockVersion::delete_in_transaction(
+                HummockVersionRefId { id: version.id },
+                &mut transaction,
+            )?;
+        }
+        // Delete record in HummockTablesToDelete if any.
+        let ssts_to_delete =
+            HummockTablesToDelete::select(versioning_guard.meta_store_ref.as_ref(), &key).await?;
+        if let Some(ssts_to_delete) = ssts_to_delete {
+            // Delete tracked sstables.
+            for sst_id in ssts_to_delete.id {
+                SstableInfo::delete_in_transaction(SstableRefId { id: sst_id }, &mut transaction)?;
+            }
+            HummockTablesToDelete::delete_in_transaction(
+                HummockVersionRefId {
+                    id: ssts_to_delete.version_id,
+                },
+                &mut transaction,
+            )?;
+        }
+        // Delete record in HummockContextPinnedVersion if any.
+        let version_pins =
+            HummockContextPinnedVersion::list(versioning_guard.meta_store_ref.as_ref()).await?;
+        for mut version_pin in version_pins {
+            if version_pin.version_id.contains(&version_id) {
+                version_pin.unpin_version(version_id);
+                version_pin.update_in_transaction(&mut transaction)?;
+            }
+        }
+
         self.commit_trx(versioning_guard.meta_store_ref.as_ref(), transaction, None)
             .await
     }

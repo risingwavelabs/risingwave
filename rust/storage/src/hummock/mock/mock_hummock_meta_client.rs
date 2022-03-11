@@ -84,10 +84,6 @@ impl HummockMetaClient for MockHummockMetaClient {
         Ok(resp.version.unwrap())
     }
 
-    async fn get_compaction_task(&self) -> HummockResult<Option<CompactTask>> {
-        unimplemented!()
-    }
-
     async fn report_compaction_task(
         &self,
         _compact_task: CompactTask,

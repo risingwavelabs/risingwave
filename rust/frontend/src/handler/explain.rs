@@ -1,3 +1,6 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
@@ -9,11 +12,12 @@ use crate::planner::Planner;
 use crate::session::QueryContext;
 
 pub(super) fn handle_explain(
-    context: QueryContext<'_>,
+    context: QueryContext,
     stmt: Statement,
     _verbose: bool,
 ) -> Result<PgResponse> {
-    let session = context.session;
+    let context = Rc::new(RefCell::new(context));
+    let session = context.borrow().session_ctx.clone();
     let catalog_mgr = session.env().catalog_mgr();
     let catalog = catalog_mgr
         .get_database_snapshot(session.database())
@@ -21,10 +25,12 @@ pub(super) fn handle_explain(
     // bind, plan, optimize, and serialize here
     let mut binder = Binder::new(catalog);
     let bound = binder.bind(stmt)?;
-    let mut planner = Planner::new();
-    let plan = planner.plan(bound)?;
+    let mut planner = Planner::new(context);
+    let logical = planner.plan(bound)?;
+    let batch = logical.gen_batch_query_plan();
     let mut output = String::new();
-    plan.explain(0, &mut output)
+    batch
+        .explain(0, &mut output)
         .map_err(|e| ErrorCode::InternalError(e.to_string()))?;
 
     let rows = output

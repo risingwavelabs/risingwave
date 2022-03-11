@@ -88,31 +88,31 @@ fn read_naivedatetime(cursor: &mut Cursor<&[u8]>) -> Result<NaiveDateTimeWrapper
 
 macro_rules! read_one_value_array {
     ($({ $type:ident, $builder:ty }),*) => {
-      paste! {
-        $(
-          pub fn [<read_ $type:lower _array>](array: &ProstArray, cardinality: usize) -> Result<ArrayImpl> {
-            ensure!(
-              array.get_values().len() == 1,
-              "Must have only 1 buffer in a {} array", stringify!($type)
-            );
+        paste! {
+            $(
+            pub fn [<read_ $type:lower _array>](array: &ProstArray, cardinality: usize) -> Result<ArrayImpl> {
+                ensure!(
+                    array.get_values().len() == 1,
+                    "Must have only 1 buffer in a {} array", stringify!($type)
+                );
 
-            let buf = array.get_values()[0].get_body().as_slice();
+                let buf = array.get_values()[0].get_body().as_slice();
 
-            let mut builder = $builder::new(cardinality)?;
-            let bitmap: Bitmap = array.get_null_bitmap()?.try_into()?;
-            let mut cursor = Cursor::new(buf);
-            for not_null in bitmap.iter() {
-              if not_null {
-                builder.append(Some([<read_ $type:lower>](&mut cursor)?))?;
-              } else {
-                builder.append(None)?;
-              }
+                let mut builder = $builder::new(cardinality)?;
+                let bitmap: Bitmap = array.get_null_bitmap()?.try_into()?;
+                let mut cursor = Cursor::new(buf);
+                for not_null in bitmap.iter() {
+                    if not_null {
+                        builder.append(Some([<read_ $type:lower>](&mut cursor)?))?;
+                    } else {
+                        builder.append(None)?;
+                    }
+                }
+                let arr = builder.finish()?;
+                Ok(arr.into())
             }
-            let arr = builder.finish()?;
-            Ok(arr.into())
-          }
-        )*
-      }
+            )*
+        }
     };
 }
 

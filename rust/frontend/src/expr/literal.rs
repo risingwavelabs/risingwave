@@ -1,6 +1,6 @@
 use risingwave_common::types::{DataType, Datum};
 
-use super::{Expr, ExprImpl};
+use super::Expr;
 use crate::expr::ExprType;
 #[derive(Clone, Debug, PartialEq)]
 pub struct Literal {
@@ -15,12 +15,12 @@ impl Literal {
     pub fn get_expr_type(&self) -> ExprType {
         ExprType::ConstantValue
     }
+    pub fn get_data(&self) -> &Datum {
+        &self.data
+    }
 }
 impl Expr for Literal {
     fn return_type(&self) -> DataType {
         self.data_type.clone()
-    }
-    fn to_expr_impl(self) -> ExprImpl {
-        ExprImpl::Literal(Box::new(self))
     }
 }

@@ -3,9 +3,11 @@ use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use bytes::Bytes;
 use itertools::Itertools;
 use parking_lot::RwLock as PLRwLock;
 use risingwave_common::error::Result;
+use risingwave_pb::hummock::SstableInfo;
 use tokio::task::JoinHandle;
 
 use super::compactor::{Compactor, SubCompactContext};
@@ -17,9 +19,9 @@ use super::local_version_manager::LocalVersionManager;
 use super::utils::range_overlap;
 use super::value::HummockValue;
 use super::{key, HummockError, HummockOptions, HummockResult, SstableStoreRef};
-use crate::monitor::StateStoreStats;
+use crate::monitor::StateStoreMetrics;
 
-type SharedBufferItem = (Vec<u8>, HummockValue<Vec<u8>>);
+type SharedBufferItem = (Bytes, HummockValue<Bytes>);
 
 /// A write batch stored in the shared buffer.
 #[derive(Clone, Debug)]
@@ -42,9 +44,9 @@ impl SharedBufferBatch {
         // user key.
         match self
             .inner
-            .binary_search_by(|m| key::user_key(m.0.as_slice()).cmp(user_key))
+            .binary_search_by(|m| key::user_key(&m.0).cmp(user_key))
         {
-            Ok(i) => Some(self.inner[i].1.clone()),
+            Ok(i) => Some(self.inner[i].1.to_vec()),
             Err(_) => None,
         }
     }
@@ -58,19 +60,19 @@ impl SharedBufferBatch {
     }
 
     pub fn start_key(&self) -> &[u8] {
-        self.inner.first().unwrap().0.as_slice()
+        &self.inner.first().unwrap().0
     }
 
     pub fn end_key(&self) -> &[u8] {
-        self.inner.last().unwrap().0.as_slice()
+        &self.inner.last().unwrap().0
     }
 
     pub fn start_user_key(&self) -> &[u8] {
-        key::user_key(self.inner.first().unwrap().0.as_slice())
+        key::user_key(&self.inner.first().unwrap().0)
     }
 
     pub fn end_user_key(&self) -> &[u8] {
-        key::user_key(self.inner.last().unwrap().0.as_slice())
+        key::user_key(&self.inner.last().unwrap().0)
     }
 
     pub fn epoch(&self) -> u64 {
@@ -111,7 +113,7 @@ impl<const DIRECTION: usize> HummockIterator for SharedBufferBatchIterator<DIREC
     }
 
     fn key(&self) -> &[u8] {
-        self.current_item().0.as_slice()
+        &self.current_item().0
     }
 
     fn value(&self) -> HummockValue<&[u8]> {
@@ -132,7 +134,7 @@ impl<const DIRECTION: usize> HummockIterator for SharedBufferBatchIterator<DIREC
         // user key.
         match self
             .inner
-            .binary_search_by(|probe| key::user_key(probe.0.as_slice()).cmp(key::user_key(key)))
+            .binary_search_by(|probe| key::user_key(&probe.0).cmp(key::user_key(key)))
         {
             Ok(i) => {
                 self.current_idx = i;
@@ -161,8 +163,8 @@ impl SharedBufferManager {
         options: Arc<HummockOptions>,
         local_version_manager: Arc<LocalVersionManager>,
         sstable_store: SstableStoreRef,
-        // TODO: should be separated `HummockStats` instead of `StateStoreStats`.
-        stats: Arc<StateStoreStats>,
+        // TODO: should be separated `HummockStats` instead of `StateStoreMetrics`.
+        stats: Arc<StateStoreMetrics>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> Self {
         let (uploader_tx, uploader_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -193,6 +195,21 @@ impl SharedBufferManager {
         self.uploader_tx
             .send(SharedBufferUploaderItem::Batch(batch))
             .map_err(HummockError::shared_buffer_error)
+    }
+
+    /// Put a write batch into shared buffer. The batch will won't be synced to S3 asynchronously.
+    pub fn replicate_remote_batch(
+        &self,
+        batch: Vec<SharedBufferItem>,
+        epoch: u64,
+    ) -> HummockResult<()> {
+        let batch = SharedBufferBatch::new(batch, epoch);
+        self.shared_buffer
+            .write()
+            .entry(epoch)
+            .or_insert(BTreeMap::new())
+            .insert(batch.end_user_key().to_vec(), batch.clone());
+        Ok(())
     }
 
     // TODO: support time-based syncing
@@ -334,8 +351,8 @@ pub struct SharedBufferUploader {
     options: Arc<HummockOptions>,
 
     /// Statistics.
-    // TODO: should be separated `HummockStats` instead of `StateStoreStats`.
-    stats: Arc<StateStoreStats>,
+    // TODO: should be separated `HummockStats` instead of `StateStoreMetrics`.
+    stats: Arc<StateStoreMetrics>,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
     sstable_store: SstableStoreRef,
 
@@ -347,7 +364,7 @@ impl SharedBufferUploader {
         options: Arc<HummockOptions>,
         local_version_manager: Arc<LocalVersionManager>,
         sstable_store: SstableStoreRef,
-        stats: Arc<StateStoreStats>,
+        stats: Arc<StateStoreMetrics>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         rx: tokio::sync::mpsc::UnboundedReceiver<SharedBufferUploaderItem>,
     ) -> Self {
@@ -402,7 +419,23 @@ impl SharedBufferUploader {
 
         // Add all tables at once.
         let timer = self.stats.batch_write_add_l0_latency.start_timer();
-        let version = self.hummock_meta_client.add_tables(epoch, tables).await?;
+        let version = self
+            .hummock_meta_client
+            .add_tables(
+                epoch,
+                tables
+                    .iter()
+                    .map(|sst| SstableInfo {
+                        id: sst.id,
+                        key_range: Some(risingwave_pb::hummock::KeyRange {
+                            left: sst.meta.get_smallest_key().to_vec(),
+                            right: sst.meta.get_largest_key().to_vec(),
+                            inf: false,
+                        }),
+                    })
+                    .collect(),
+            )
+            .await?;
         timer.observe_duration();
 
         // Ensure the added data is available locally
@@ -470,6 +503,9 @@ impl SharedBufferUploader {
 mod tests {
     use std::sync::Arc;
 
+    use bytes::Bytes;
+    use itertools::Itertools;
+
     use super::SharedBufferBatch;
     use crate::hummock::iterator::test_utils::{
         iterator_test_key_of, iterator_test_key_of_epoch, test_value_of,
@@ -483,8 +519,17 @@ mod tests {
     use crate::hummock::shared_buffer::SharedBufferManager;
     use crate::hummock::value::HummockValue;
     use crate::hummock::{HummockOptions, SstableStore};
-    use crate::monitor::DEFAULT_STATE_STORE_STATS;
+    use crate::monitor::StateStoreMetrics;
     use crate::object::{InMemObjectStore, ObjectStore};
+
+    fn transform_shared_buffer(
+        batches: Vec<(Vec<u8>, HummockValue<Vec<u8>>)>,
+    ) -> Vec<(Bytes, HummockValue<Bytes>)> {
+        batches
+            .into_iter()
+            .map(|(k, v)| (k.into(), v.into()))
+            .collect_vec()
+    }
 
     #[tokio::test]
     async fn test_shared_buffer_batch_basic() {
@@ -503,18 +548,19 @@ mod tests {
                 HummockValue::Put(b"value3".to_vec()),
             ),
         ];
-        let shared_buffer_batch = SharedBufferBatch::new(shared_buffer_items.clone(), epoch);
+        let shared_buffer_batch =
+            SharedBufferBatch::new(transform_shared_buffer(shared_buffer_items.clone()), epoch);
 
         // Sketch
         assert_eq!(shared_buffer_batch.start_key(), shared_buffer_items[0].0);
         assert_eq!(shared_buffer_batch.end_key(), shared_buffer_items[2].0);
         assert_eq!(
             shared_buffer_batch.start_user_key(),
-            user_key(shared_buffer_items[0].0.as_slice())
+            user_key(&shared_buffer_items[0].0)
         );
         assert_eq!(
             shared_buffer_batch.end_user_key(),
-            user_key(shared_buffer_items[2].0.as_slice())
+            user_key(&shared_buffer_items[2].0)
         );
 
         // Point lookup
@@ -575,7 +621,8 @@ mod tests {
                 HummockValue::Put(b"value3".to_vec()),
             ),
         ];
-        let shared_buffer_batch = SharedBufferBatch::new(shared_buffer_items.clone(), epoch);
+        let shared_buffer_batch =
+            SharedBufferBatch::new(transform_shared_buffer(shared_buffer_items.clone()), epoch);
 
         // Seek to 2nd key with current epoch, expect last two items to return
         let mut iter = shared_buffer_batch.iter();
@@ -628,7 +675,7 @@ mod tests {
             Arc::new(HummockOptions::default_for_test()),
             vm,
             sstable_store,
-            DEFAULT_STATE_STORE_STATS.clone(),
+            Arc::new(StateStoreMetrics::unused()),
             mock_hummock_meta_client,
         )
     }
@@ -643,19 +690,25 @@ mod tests {
         let mut shared_buffer_items = Vec::new();
         for key in put_keys {
             shared_buffer_items.push((
-                key_with_epoch(key.clone(), epoch),
-                HummockValue::Put(test_value_of(0, *idx)),
+                Bytes::from(key_with_epoch(key.clone(), epoch)),
+                HummockValue::Put(test_value_of(0, *idx).into()),
             ));
             *idx += 1;
         }
         for key in delete_keys {
-            shared_buffer_items.push((key_with_epoch(key.clone(), epoch), HummockValue::Delete));
+            shared_buffer_items.push((
+                Bytes::from(key_with_epoch(key.clone(), epoch)),
+                HummockValue::Delete,
+            ));
         }
-        shared_buffer_items.sort_by(|l, r| user_key(l.0.as_slice()).cmp(r.0.as_slice()));
+        shared_buffer_items.sort_by(|l, r| user_key(&l.0).cmp(&r.0));
         shared_buffer_manager
             .write_batch(shared_buffer_items.clone(), epoch)
             .unwrap();
         shared_buffer_items
+            .iter()
+            .map(|(k, v)| (k.to_vec(), v.to_vec()))
+            .collect_vec()
     }
 
     #[tokio::test]

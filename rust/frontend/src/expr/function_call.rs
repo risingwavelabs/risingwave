@@ -3,7 +3,7 @@ use risingwave_common::types::DataType;
 use super::{infer_type, Expr, ExprImpl};
 use crate::expr::ExprType;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct FunctionCall {
     func_type: ExprType,
     return_type: DataType,
@@ -60,8 +60,5 @@ impl FunctionCall {
 impl Expr for FunctionCall {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
-    }
-    fn to_expr_impl(self) -> ExprImpl {
-        ExprImpl::FunctionCall(Box::new(self))
     }
 }

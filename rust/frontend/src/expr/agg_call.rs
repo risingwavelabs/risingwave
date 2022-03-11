@@ -4,7 +4,7 @@ use risingwave_common::types::DataType;
 
 use super::{Expr, ExprImpl};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct AggCall {
     agg_kind: AggKind,
     return_type: DataType,
@@ -13,8 +13,7 @@ pub struct AggCall {
 impl AggCall {
     #![allow(clippy::diverging_sub_expression)]
     /// Returns error if the function name matches with an existing function
-    /// but with illegal arguments. `Ok(None)` is returned when there's no matching
-    /// function.
+    /// but with illegal arguments.
     pub fn new(agg_kind: AggKind, inputs: Vec<ExprImpl>) -> Result<Self> {
         // TODO(TaoWu): Add arguments validator.
         let return_type = match agg_kind {
@@ -45,8 +44,5 @@ impl AggCall {
 impl Expr for AggCall {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
-    }
-    fn to_expr_impl(self) -> ExprImpl {
-        ExprImpl::AggCall(Box::new(self))
     }
 }

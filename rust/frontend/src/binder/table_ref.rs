@@ -1,3 +1,5 @@
+use std::collections::hash_map::Entry;
+
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{ObjectName, TableFactor, TableWithJoins};
 
@@ -11,6 +13,7 @@ use crate::catalog::TableId;
 pub enum TableRef {
     BaseTable(Box<BaseTableRef>),
 }
+
 #[derive(Debug, Clone)]
 pub struct BaseTableRef {
     pub name: String, // explain-only
@@ -55,23 +58,45 @@ impl Binder {
             .and_then(|c| c.get_table(&table_name))
             .ok_or_else(|| ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name)))?;
         let columns = table_catalog.columns().to_vec();
+        let table_id = table_catalog.id();
 
-        columns.iter().enumerate().for_each(|(index, column)| {
-            self.context
-                .columns
-                .entry(column.name().to_string())
-                .or_default()
-                .push(ColumnBinding::new(
-                    table_name.clone(),
-                    index,
-                    column.data_type(),
-                ))
-        });
+        self.bind_context(&columns, table_name.clone())?;
 
         Ok(BaseTableRef {
             name: table_name,
-            table_id: table_catalog.id(),
+            table_id,
             columns,
         })
+    }
+
+    /// Fill the BindContext for table.
+    fn bind_context(&mut self, columns: &[ColumnCatalog], table_name: String) -> Result<()> {
+        let begin = self.context.columns.len();
+        columns
+            .iter()
+            .enumerate()
+            .for_each(|(index, column_catalog)| {
+                self.context.columns.push(ColumnBinding::new(
+                    table_name.clone(),
+                    index,
+                    column_catalog.data_type(),
+                ));
+                self.context
+                    .indexs_of
+                    .entry(column_catalog.name().to_string())
+                    .or_default()
+                    .push(self.context.columns.len() - 1);
+            });
+        match self.context.range_of.entry(table_name.clone()) {
+            Entry::Occupied(_) => Err(ErrorCode::InternalError(format!(
+                "Duplicated table name: {}",
+                table_name
+            ))
+            .into()),
+            Entry::Vacant(entry) => {
+                entry.insert((begin, self.context.columns.len()));
+                Ok(())
+            }
+        }
     }
 }

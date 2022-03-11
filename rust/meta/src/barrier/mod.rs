@@ -5,8 +5,7 @@ use std::time::Duration;
 
 use futures::future::try_join_all;
 use itertools::Itertools;
-use risingwave_common::array::RwError;
-use risingwave_common::error::{Result, ToRwResult};
+use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::data::Barrier;
@@ -71,7 +70,7 @@ impl ScheduledBarriers {
         }
     }
 
-    /// Pop a schduled barrier from the buffer, or a default checkpoint barrier if not exists.
+    /// Pop a scheduled barrier from the buffer, or a default checkpoint barrier if not exists.
     async fn pop_or_default(&self) -> Scheduled {
         let mut buffer = self.buffer.write().await;
 
@@ -102,7 +101,7 @@ impl ScheduledBarriers {
         }
     }
 
-    /// Attach `new_notifiers` to the very first schduled barrier. If there's no one scheduled, a
+    /// Attach `new_notifiers` to the very first scheduled barrier. If there's no one scheduled, a
     /// default checkpoint barrier will be created.
     async fn attach_notifiers(&self, new_notifiers: impl IntoIterator<Item = Notifier>) {
         let mut buffer = self.buffer.write().await;
