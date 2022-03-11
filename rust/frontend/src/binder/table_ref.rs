@@ -79,7 +79,9 @@ impl Binder {
     fn bind_join_constraint(&mut self, constraint: JoinConstraint) -> Result<Option<ExprImpl>> {
         Ok(match constraint {
             JoinConstraint::None => None,
-            JoinConstraint::Natural => None,
+            JoinConstraint::Natural => {
+                return Err(ErrorCode::NotImplementedError("Natural join".into()).into())
+            }
             JoinConstraint::On(expr) => {
                 let bound_expr = self.bind_expr(expr)?;
                 if bound_expr.return_type() != DataType::Boolean {
