@@ -213,6 +213,8 @@ impl SourceReader {
                 Ok(chunk) => yield chunk,
             }
         }
+
+        futures::future::pending().await
     }
 
     #[try_stream(ok = Message, error = RwError)]
