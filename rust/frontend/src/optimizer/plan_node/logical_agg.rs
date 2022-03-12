@@ -9,7 +9,9 @@ use risingwave_common::expr::AggKind;
 use risingwave_common::types::DataType;
 
 use super::{ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
-use crate::expr::{Expr, ExprImpl, FunctionCall, InputRef};
+use crate::expr::{
+    AggCall, Expr, ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef, Literal,
+};
 use crate::optimizer::plan_node::LogicalProject;
 use crate::optimizer::property::WithSchema;
 use crate::utils::ColIndexMapping;
@@ -38,6 +40,71 @@ pub struct LogicalAgg {
     agg_call_alias: Vec<Option<String>>,
     group_keys: Vec<usize>,
     input: PlanRef,
+}
+
+#[derive(Default)]
+struct ExprHandler {
+    // `project` contains all the ExprImpl inside aggregates(e.g. v1 + v2 for min(v1 + v2)) and
+    // GROUP BY clause(e.g. v1 for group by v1).
+    pub project: Vec<ExprImpl>,
+    pub group_keys: Vec<usize>,
+    group_column_index: HashMap<InputRef, usize>,
+    index: usize,
+    pub agg_calls: Vec<PlanAggCall>,
+    pub error: Option<ErrorCode>,
+}
+
+impl ExprVisitor for ExprHandler {
+    fn visit_function_call(&mut self, _func_call: &FunctionCall) {
+        self.error = Some(ErrorCode::InvalidInputSyntax(
+            "GROUP BY clause cannot contain aggregates!".into(),
+        ));
+    }
+    fn visit_agg_call(&mut self, _agg_call: &AggCall) {
+        self.error = Some(ErrorCode::InvalidInputSyntax(
+            "GROUP BY clause cannot contain aggregates!".into(),
+        ));
+    }
+    fn visit_literal(&mut self, _: &Literal) {
+        self.error = Some(ErrorCode::InvalidInputSyntax(
+            "GROUP BY clause cannot contain aggregates!".into(),
+        ));
+    }
+    fn visit_input_ref(&mut self, input_ref: &InputRef) {
+        self.project.push(input_ref.clone().into());
+        self.group_keys.push(self.index);
+        self.group_column_index
+            .insert(input_ref.clone(), self.index);
+        self.index += 1;
+    }
+}
+
+impl ExprRewriter for ExprHandler {
+    fn rewrite_agg_call(&mut self, agg_call: AggCall) -> ExprImpl {
+        let begin = self.project.len();
+        let end = begin + agg_call.inputs().len();
+        self.project.extend(agg_call.inputs().iter().cloned());
+        self.agg_calls.push(PlanAggCall {
+            agg_kind: agg_call.agg_kind(),
+            return_type: agg_call.return_type(),
+            inputs: (begin..end).collect(),
+        });
+        ExprImpl::from(InputRef::new(
+            self.group_column_index.len() + self.agg_calls.len() - 1,
+            agg_call.return_type(),
+        ))
+    }
+    fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
+        if let Some(index) = self.group_column_index.get(&input_ref) {
+            InputRef::new(*index, input_ref.data_type()).into()
+        } else {
+            self.error = Some(ErrorCode::InvalidInputSyntax(
+                "column must appear in the GROUP BY clause or be used in an aggregate function"
+                    .into(),
+            ));
+            input_ref.into()
+        }
+    }
 }
 
 impl LogicalAgg {
@@ -102,7 +169,7 @@ impl LogicalAgg {
     /// ```
     #[allow(unused_variables)]
     pub fn create(
-        select_exprs: Vec<ExprImpl>,
+        mut select_exprs: Vec<ExprImpl>,
         select_alias: Vec<Option<String>>,
         group_exprs: Vec<ExprImpl>,
         input: PlanRef,
@@ -110,116 +177,43 @@ impl LogicalAgg {
         // TODO: support more complicated expression in GROUP BY clause, because we currently assume
         // the only thing can appear in GROUP BY clause is an input column name.
 
-        // `project` contains all the ExprImpl inside aggregates(e.g. v1 + v2 for min(v1 + v2)) and
-        // GROUP BY clause(e.g. v1 for group by v1).
-        let mut project: Vec<ExprImpl> = vec![];
-        let mut group_keys = vec![];
-        let group_column_index =
-            LogicalAgg::traverse_group_expr(group_exprs, &mut project, &mut group_keys)?;
+        let mut expr_handler = ExprHandler::default();
+        for group_expr in &group_exprs {
+            expr_handler.visit_expr(group_expr);
+            if let Some(error) = expr_handler.error {
+                return Err(error.into());
+            }
+        }
 
-        let mut agg_calls = vec![];
-        let select_exprs = select_exprs
-            .into_iter()
-            .map(|select_expr| {
-                LogicalAgg::rewrite_select_expr(
-                    select_expr,
-                    &mut project,
-                    &mut agg_calls,
-                    &group_column_index,
-                )
-            })
-            .try_collect()?;
+        let mut rewrited_select_exprs = vec![];
+        for select_expr in select_exprs.drain(..) {
+            let rewrited_expr = expr_handler.rewrite_expr(select_expr);
+            if let Some(error) = expr_handler.error {
+                return Err(error.into());
+            }
+            rewrited_select_exprs.push(rewrited_expr);
+        }
 
         // This LogicalProject focuses on the exprs in aggregates and GROUP BY clause.
-        let expr_alias = vec![None; project.len()];
-        let logical_project = LogicalProject::create(input, project, expr_alias);
+        let expr_alias = vec![None; expr_handler.project.len()];
+        let logical_project = LogicalProject::create(input, expr_handler.project, expr_alias);
 
         // This LogicalAgg foucuses on calculating the aggregates and grouping.
-        let agg_call_alias = vec![None; agg_calls.len()];
-        let logical_agg = LogicalAgg::new(agg_calls, agg_call_alias, group_keys, logical_project);
+        let agg_call_alias = vec![None; expr_handler.agg_calls.len()];
+        let logical_agg = LogicalAgg::new(
+            expr_handler.agg_calls,
+            agg_call_alias,
+            expr_handler.group_keys,
+            logical_project,
+        );
 
         // This LogicalProject focuse on tranforming the aggregates and grouping columns to
         // InputRef.
         Ok(LogicalProject::create(
             logical_agg.into(),
-            select_exprs,
+            rewrited_select_exprs,
             select_alias,
         ))
-    }
-
-    fn traverse_group_expr(
-        group_exprs: Vec<ExprImpl>,
-        project: &mut Vec<ExprImpl>,
-        group_keys: &mut Vec<usize>,
-    ) -> Result<HashMap<InputRef, usize>> {
-        let mut group_column_index = HashMap::new();
-        for (index, group_expr) in group_exprs.into_iter().enumerate() {
-            match group_expr {
-                ExprImpl::InputRef(input_ref) => {
-                    project.push((*input_ref).clone().into());
-                    group_keys.push(index);
-                    group_column_index.insert(*input_ref, index);
-                }
-                _ => {
-                    return Err(ErrorCode::InvalidInputSyntax(
-                        "GROUP BY clause cannot contain aggregates!".into(),
-                    )
-                    .into());
-                }
-            }
-        }
-        Ok(group_column_index)
-    }
-
-    /// Rewrite the `select_exprs` so that it can be used by the last LogicalProject, and get
-    /// aggregates in SELECT clause.
-    fn rewrite_select_expr(
-        select_expr: ExprImpl,
-        project: &mut Vec<ExprImpl>,
-        agg_calls: &mut Vec<PlanAggCall>,
-        group_column_index: &HashMap<InputRef, usize>,
-    ) -> Result<ExprImpl> {
-        match select_expr {
-            ExprImpl::InputRef(input_ref) => {
-                if let Some(index) = group_column_index.get(&input_ref) {
-                    Ok(InputRef::new(*index, input_ref.data_type()).into())
-                } else {
-                    Err(ErrorCode::InvalidInputSyntax("column must appear in the GROUP BY clause or be used in an aggregate function".into()).into())
-                }
-            }
-            ExprImpl::Literal(literal) => Ok(ExprImpl::from(*literal)),
-            ExprImpl::FunctionCall(func_call) => {
-                let inputs: Vec<ExprImpl> = func_call
-                    .inputs()
-                    .iter()
-                    .map(|input| {
-                        LogicalAgg::rewrite_select_expr(
-                            input.clone(),
-                            project,
-                            agg_calls,
-                            group_column_index,
-                        )
-                    })
-                    .try_collect()?;
-                let func_call = FunctionCall::new(func_call.get_expr_type(), inputs)
-                    .ok_or_else(|| ErrorCode::InternalError("Create FunctionCall fails".into()))?;
-                Ok(ExprImpl::from(func_call))
-            }
-            ExprImpl::AggCall(agg_call) => {
-                let begin = project.len();
-                let end = begin + agg_call.inputs().len();
-                project.extend(agg_call.inputs().iter().cloned());
-                agg_calls.push(PlanAggCall {
-                    agg_kind: agg_call.agg_kind(),
-                    return_type: agg_call.return_type(),
-                    inputs: (begin..end).collect(),
-                });
-                Ok(ExprImpl::from(InputRef::new(
-                    group_column_index.len() + agg_calls.len() - 1,
-                    agg_call.return_type(),
-                )))
-            }
-        }
     }
 
     /// Get a reference to the logical agg's agg call alias.
