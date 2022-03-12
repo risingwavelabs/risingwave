@@ -24,9 +24,7 @@ message StreamSourceInfo {
   int32 row_id_index = 4;
 }
 
-message TableSourceInfo {
-  repeated plan.ColumnCatalog column_catalog = 1;
-}
+message TableSourceInfo {}
 
 message Source {
   uint32 id = 1;
@@ -101,13 +99,7 @@ message CreateSchemaResponse {
 }
 
 message CreateSourceRequest {
-  uint32 database_id = 1;
-  uint32 schema_id = 2;
-  string name = 3;
-  oneof info {
-    StreamSourceInfo stream_source = 4;
-    TableSourceInfo table_source = 5;
-  }
+  Source source = 1;
 }
 
 message CreateSourceResponse {
@@ -117,13 +109,9 @@ message CreateSourceResponse {
 }
 
 message CreateMaterializedSourceRequest {
-  uint32 database_id = 1;
-  uint32 schema_id = 2;
-  string name = 3;
-  TableSourceInfo source_info = 4;
-  repeated int32 pk_column_ids = 5;
-  repeated plan.OrderType pk_orders = 6;
-  stream_plan.StreamNode stream_node = 7;
+  Source source = 1;
+  Table materialized_view = 2;
+  stream_plan.StreamNode stream_node = 3;
 }
 
 message CreateMaterializedSourceResponse {
@@ -134,14 +122,8 @@ message CreateMaterializedSourceResponse {
 }
 
 message CreateMaterializedViewRequest {
-  uint32 database_id = 1;
-  uint32 schema_id = 2;
-  string name = 3;
-  repeated plan.ColumnCatalog column_catalog = 4;
-  repeated int32 pk_column_ids = 5;
-  repeated plan.OrderType pk_orders = 6;
-  repeated uint32 dependent_tables = 7;
-  stream_plan.StreamNode stream_node = 8;
+  Table materialized_view = 1;
+  stream_plan.StreamNode stream_node = 2;
 }
 
 message CreateMaterializedViewResponse {
