@@ -9,9 +9,7 @@ use risingwave_common::expr::AggKind;
 use risingwave_common::types::DataType;
 
 use super::{ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
-use crate::expr::{
-    AggCall, Expr, ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef, Literal,
-};
+use crate::expr::{AggCall, Expr, ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::plan_node::LogicalProject;
 use crate::optimizer::property::WithSchema;
 use crate::utils::ColIndexMapping;
@@ -42,40 +40,37 @@ pub struct LogicalAgg {
     input: PlanRef,
 }
 
-#[derive(Default)]
 struct ExprHandler {
     // `project` contains all the ExprImpl inside aggregates(e.g. v1 + v2 for min(v1 + v2)) and
     // GROUP BY clause(e.g. v1 for group by v1).
     pub project: Vec<ExprImpl>,
-    pub group_keys: Vec<usize>,
     group_column_index: HashMap<InputRef, usize>,
-    index: usize,
     pub agg_calls: Vec<PlanAggCall>,
     pub error: Option<ErrorCode>,
 }
 
-impl ExprVisitor for ExprHandler {
-    fn visit_function_call(&mut self, _func_call: &FunctionCall) {
-        self.error = Some(ErrorCode::InvalidInputSyntax(
-            "GROUP BY clause cannot contain aggregates!".into(),
-        ));
+impl ExprHandler {
+    fn new(group_exprs: Vec<ExprImpl>) -> Result<Self> {
+        let mut group_column_index = HashMap::new();
+        for (index, expr) in group_exprs.iter().enumerate() {
+            if let ExprImpl::InputRef(input_ref) = expr {
+                group_column_index.insert(*input_ref.clone(), index);
+            } else {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "GROUP BY clause cannot contain aggregates!".into(),
+                )
+                .into());
+            }
+        }
+        Ok(ExprHandler {
+            project: group_exprs,
+            group_column_index,
+            agg_calls: vec![],
+            error: None,
+        })
     }
-    fn visit_agg_call(&mut self, _agg_call: &AggCall) {
-        self.error = Some(ErrorCode::InvalidInputSyntax(
-            "GROUP BY clause cannot contain aggregates!".into(),
-        ));
-    }
-    fn visit_literal(&mut self, _: &Literal) {
-        self.error = Some(ErrorCode::InvalidInputSyntax(
-            "GROUP BY clause cannot contain aggregates!".into(),
-        ));
-    }
-    fn visit_input_ref(&mut self, input_ref: &InputRef) {
-        self.project.push(input_ref.clone().into());
-        self.group_keys.push(self.index);
-        self.group_column_index
-            .insert(input_ref.clone(), self.index);
-        self.index += 1;
+    fn num_groups(&self) -> usize {
+        self.group_column_index.len()
     }
 }
 
@@ -177,13 +172,7 @@ impl LogicalAgg {
         // TODO: support more complicated expression in GROUP BY clause, because we currently assume
         // the only thing can appear in GROUP BY clause is an input column name.
 
-        let mut expr_handler = ExprHandler::default();
-        for group_expr in &group_exprs {
-            expr_handler.visit_expr(group_expr);
-            if let Some(error) = expr_handler.error {
-                return Err(error.into());
-            }
-        }
+        let mut expr_handler = ExprHandler::new(group_exprs)?;
 
         let mut rewrited_select_exprs = vec![];
         for select_expr in select_exprs.drain(..) {
@@ -196,6 +185,7 @@ impl LogicalAgg {
 
         // This LogicalProject focuses on the exprs in aggregates and GROUP BY clause.
         let expr_alias = vec![None; expr_handler.project.len()];
+        let group_keys = (0..expr_handler.num_groups()).collect();
         let logical_project = LogicalProject::create(input, expr_handler.project, expr_alias);
 
         // This LogicalAgg foucuses on calculating the aggregates and grouping.
@@ -203,7 +193,7 @@ impl LogicalAgg {
         let logical_agg = LogicalAgg::new(
             expr_handler.agg_calls,
             agg_call_alias,
-            expr_handler.group_keys,
+            group_keys,
             logical_project,
         );
 
