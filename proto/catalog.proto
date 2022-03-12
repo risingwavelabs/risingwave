@@ -110,7 +110,7 @@ message CreateSourceResponse {
 
 message CreateMaterializedSourceRequest {
   Source source = 1;
-  Table table = 2;
+  Table materialized_view = 2;
   stream_plan.StreamNode stream_node = 3;
 }
 
@@ -122,7 +122,7 @@ message CreateMaterializedSourceResponse {
 }
 
 message CreateMaterializedViewRequest {
-  Table table = 1;
+  Table materialized_view = 1;
   stream_plan.StreamNode stream_node = 2;
 }
 
