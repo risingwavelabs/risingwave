@@ -69,9 +69,6 @@ impl ExprHandler {
             error: None,
         })
     }
-    fn num_groups(&self) -> usize {
-        self.group_column_index.len()
-    }
 }
 
 impl ExprRewriter for ExprHandler {
@@ -164,7 +161,7 @@ impl LogicalAgg {
     /// ```
     #[allow(unused_variables)]
     pub fn create(
-        mut select_exprs: Vec<ExprImpl>,
+        select_exprs: Vec<ExprImpl>,
         select_alias: Vec<Option<String>>,
         group_exprs: Vec<ExprImpl>,
         input: PlanRef,
@@ -172,20 +169,22 @@ impl LogicalAgg {
         // TODO: support more complicated expression in GROUP BY clause, because we currently assume
         // the only thing can appear in GROUP BY clause is an input column name.
 
+        let group_keys = (0..group_exprs.len()).collect();
         let mut expr_handler = ExprHandler::new(group_exprs)?;
 
-        let mut rewrited_select_exprs = vec![];
-        for select_expr in select_exprs.drain(..) {
-            let rewrited_expr = expr_handler.rewrite_expr(select_expr);
-            if let Some(error) = expr_handler.error {
-                return Err(error.into());
-            }
-            rewrited_select_exprs.push(rewrited_expr);
-        }
+        let rewrited_select_exprs = select_exprs
+            .into_iter()
+            .map(|expr| {
+                let rewrited_expr = expr_handler.rewrite_expr(expr);
+                if let Some(error) = expr_handler.error.take() {
+                    return Err(error.into());
+                }
+                Ok(rewrited_expr)
+            })
+            .collect::<Result<_>>()?;
 
         // This LogicalProject focuses on the exprs in aggregates and GROUP BY clause.
         let expr_alias = vec![None; expr_handler.project.len()];
-        let group_keys = (0..expr_handler.num_groups()).collect();
         let logical_project = LogicalProject::create(input, expr_handler.project, expr_alias);
 
         // This LogicalAgg foucuses on calculating the aggregates and grouping.
