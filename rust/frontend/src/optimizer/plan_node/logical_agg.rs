@@ -72,20 +72,31 @@ impl ExprHandler {
 }
 
 impl ExprRewriter for ExprHandler {
+    // When there is an agg call, there are 3 things to do:
+    // 1. eval its inputs via project;
+    // 2. add a PlanAggCall to agg;
+    // 3. rewrite it as an InputRef to the agg result in select list.
+    //
+    // Note that the rewriter does not traverse into inputs of agg calls.
     fn rewrite_agg_call(&mut self, agg_call: AggCall) -> ExprImpl {
+        let return_type = agg_call.return_type();
+        let (agg_kind, inputs) = agg_call.decompose();
+
         let begin = self.project.len();
-        let end = begin + agg_call.inputs().len();
-        self.project.extend(agg_call.inputs().iter().cloned());
+        self.project.extend(inputs);
+        let end = self.project.len();
+
         self.agg_calls.push(PlanAggCall {
-            agg_kind: agg_call.agg_kind(),
-            return_type: agg_call.return_type(),
+            agg_kind,
+            return_type: return_type.clone(),
             inputs: (begin..end).collect(),
         });
         ExprImpl::from(InputRef::new(
             self.group_column_index.len() + self.agg_calls.len() - 1,
-            agg_call.return_type(),
+            return_type,
         ))
     }
+    // When there is an InputRef (outside of agg call), it must refers to a group column.
     fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
         if let Some(index) = self.group_column_index.get(&input_ref) {
             InputRef::new(*index, input_ref.data_type()).into()
