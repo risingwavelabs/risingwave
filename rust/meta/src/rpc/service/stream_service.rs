@@ -65,7 +65,8 @@ where
         let req = request.into_inner();
         let worker_count = self
             .cluster_manager
-            .get_worker_count(WorkerType::ComputeNode);
+            .get_worker_count(WorkerType::ComputeNode)
+            .await;
         let mut ctx = CreateMaterializedViewContext::default();
 
         let mut fragmenter = StreamFragmenter::new(

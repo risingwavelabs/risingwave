@@ -194,7 +194,8 @@ where
             let info = {
                 let all_nodes = self
                     .cluster_manager
-                    .list_worker_node(WorkerType::ComputeNode, Some(Running));
+                    .list_worker_node(WorkerType::ComputeNode, Some(Running))
+                    .await;
                 let all_actor_infos = self
                     .fragment_manager
                     .load_all_actors(command.creating_table_id())?;

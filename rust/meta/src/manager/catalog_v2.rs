@@ -15,10 +15,10 @@ use crate::manager::{NotificationManagerRef, NotificationTarget};
 use crate::model::{CatalogVersionGenerator, MetadataModel};
 use crate::storage::MetaStore;
 
-pub type DatabaseId = i32;
-pub type SchemaId = i32;
-pub type TableId = i32;
-pub type SourceId = i32;
+pub type DatabaseId = u32;
+pub type SchemaId = u32;
+pub type TableId = u32;
+pub type SourceId = u32;
 
 pub type Catalog = (Vec<Database>, Vec<Schema>, Vec<Table>, Vec<Source>);
 

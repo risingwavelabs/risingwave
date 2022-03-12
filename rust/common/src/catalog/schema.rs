@@ -1,6 +1,6 @@
 use std::ops::Index;
 
-use risingwave_pb::plan::{ColumnDesc, Field as ProstField};
+use risingwave_pb::plan::Field as ProstField;
 
 use crate::array::ArrayBuilderImpl;
 use crate::error::Result;
@@ -49,21 +49,6 @@ impl Schema {
         &self.fields
     }
 
-    // TODO(eric): Remove this
-    pub fn try_from<'a, I: IntoIterator<Item = &'a ColumnDesc>>(cols: I) -> Result<Self> {
-        Ok(Self {
-            fields: cols
-                .into_iter()
-                .map(|col| {
-                    Ok(Field {
-                        data_type: DataType::from(col.get_column_type()?),
-                        name: col.get_name().to_string(),
-                    })
-                })
-                .collect::<Result<Vec<_>>>()?,
-        })
-    }
-
     /// Create array builders for all fields in this schema.
     pub fn create_array_builders(&self, capacity: usize) -> Result<Vec<ArrayBuilderImpl>> {
         self.fields
@@ -74,8 +59,14 @@ impl Schema {
 }
 
 impl Field {
-    pub fn with_name(data_type: DataType, name: String) -> Self {
-        Self { data_type, name }
+    pub fn with_name<S>(data_type: DataType, name: S) -> Self
+    where
+        S: Into<String>,
+    {
+        Self {
+            data_type,
+            name: name.into(),
+        }
     }
 
     pub fn unnamed(data_type: DataType) -> Self {

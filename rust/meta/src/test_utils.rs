@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 
@@ -17,10 +19,15 @@ impl LocalMeta {
     /// Start a local meta node in the background.
     pub async fn start(port: u16) -> Self {
         let addr = Self::meta_addr_inner(port).parse().unwrap();
-        let (join_handle, shutdown_sender) =
-            crate::rpc::server::rpc_serve(addr, None, None, MetaStoreBackend::Mem)
-                .await
-                .unwrap();
+        let (join_handle, shutdown_sender) = crate::rpc::server::rpc_serve(
+            addr,
+            None,
+            None,
+            MetaStoreBackend::Mem,
+            Duration::from_secs(3600),
+        )
+        .await
+        .unwrap();
         Self {
             port,
             join_handle,
