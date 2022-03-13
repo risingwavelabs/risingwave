@@ -24,11 +24,11 @@ fn columns_to_prost(columns: &[ColumnDef]) -> Result<Vec<ColumnDesc>> {
 }
 
 pub async fn handle_create_table(
-    context: QueryContext<'_>,
+    context: QueryContext,
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
 ) -> Result<PgResponse> {
-    let session = context.session;
+    let session = context.session_ctx;
     let mut table = Table {
         info: Info::TableSource(TableSourceInfo::default()).into(),
         ..Default::default()
@@ -67,7 +67,7 @@ mod tests {
         let frontend = LocalFrontend::new().await;
         frontend.run_sql(sql).await.unwrap();
 
-        let catalog_manager = frontend.session().env().catalog_mgr();
+        let catalog_manager = frontend.session().ctx.env().catalog_mgr();
         let table = catalog_manager
             .get_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "t")
             .unwrap();

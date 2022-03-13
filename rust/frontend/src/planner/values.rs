@@ -6,6 +6,6 @@ use crate::planner::Planner;
 
 impl Planner {
     pub(super) fn plan_values(&mut self, values: BoundValues) -> Result<PlanRef> {
-        Ok(LogicalValues::create(values.rows, values.schema)?.into())
+        Ok(LogicalValues::create(values.rows, values.schema, self.ctx())?.into())
     }
 }

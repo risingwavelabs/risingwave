@@ -14,4 +14,4 @@
 mod meta_client;
 pub use meta_client::{GrpcMetaClient, MetaClient, MetaClientInner, NotificationStream};
 mod compute_client;
-pub use compute_client::ComputeClient;
+pub use compute_client::{ComputeClient, ExchangeSource, GrpcExchangeSource};

@@ -1,4 +1,8 @@
+use std::cell::RefCell;
+use std::fmt::Formatter;
+use std::rc::Rc;
 use std::sync::{Arc, RwLock};
+use std::time::Duration;
 
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{Session, SessionManager};
@@ -6,6 +10,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::common::WorkerType;
 use risingwave_rpc_client::MetaClient;
 use risingwave_sqlparser::parser::Parser;
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
@@ -13,16 +18,45 @@ use crate::catalog::catalog_service::{
     CatalogCache, CatalogConnector, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
 };
 use crate::handler::handle;
-use crate::observer::observer_manager::{ObserverManager, UPDATE_FINISH_NOTIFICATION};
+use crate::observer::observer_manager::ObserverManager;
+use crate::optimizer::plan_node::PlanNodeId;
 use crate::scheduler::schedule::WorkerNodeManager;
 use crate::FrontendOpts;
-pub struct QueryContext<'a> {
-    pub session: &'a SessionImpl,
+
+pub struct QueryContext {
+    pub session_ctx: Arc<SessionContext>,
+    pub next_id: i32,
+}
+/// The reference of `QueryContext`, our system assumes that frontend will not parallel for a query,
+/// so we use `RefCell` here.
+pub type QueryContextRef = Rc<RefCell<QueryContext>>;
+
+impl QueryContext {
+    pub fn new(session_ctx: Arc<SessionContext>) -> Self {
+        Self {
+            session_ctx,
+            next_id: 0,
+        }
+    }
+
+    pub fn get_id(&mut self) -> PlanNodeId {
+        let ret = PlanNodeId(self.next_id);
+        self.next_id += 1;
+        ret
+    }
+
+    #[cfg(test)]
+    pub async fn mock() -> Self {
+        Self {
+            session_ctx: Arc::new(SessionContext::mock().await),
+            next_id: 0,
+        }
+    }
 }
 
-impl<'a> QueryContext<'a> {
-    pub fn new(session: &'a SessionImpl) -> Self {
-        Self { session }
+impl std::fmt::Debug for QueryContext {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "QueryContext {{ current id = {} }}", self.next_id)
     }
 }
 
@@ -35,21 +69,44 @@ pub struct FrontendEnv {
 }
 
 impl FrontendEnv {
-    pub async fn init(opts: &FrontendOpts) -> Result<(Self, JoinHandle<()>)> {
+    pub async fn init(
+        opts: &FrontendOpts,
+    ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, UnboundedSender<()>)> {
         let meta_client = MetaClient::new(opts.meta_addr.clone().as_str()).await?;
         Self::with_meta_client(meta_client, opts).await
+    }
+
+    #[cfg(test)]
+    pub async fn mock() -> Self {
+        use crate::test_utils::FrontendMockMetaClient;
+        let meta_client = MetaClient::mock(FrontendMockMetaClient::new().await);
+        let (_catalog_updated_tx, catalog_updated_rx) = watch::channel(0);
+        let catalog_cache = Arc::new(RwLock::new(
+            CatalogCache::new(meta_client.clone()).await.unwrap(),
+        ));
+        let catalog_manager =
+            CatalogConnector::new(meta_client.clone(), catalog_cache, catalog_updated_rx);
+        Self {
+            meta_client,
+            catalog_manager,
+        }
     }
 
     pub async fn with_meta_client(
         mut meta_client: MetaClient,
         opts: &FrontendOpts,
-    ) -> Result<(Self, JoinHandle<()>)> {
+    ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, UnboundedSender<()>)> {
         let host = opts.host.parse().unwrap();
 
         // Register in meta by calling `AddWorkerNode` RPC.
         meta_client.register(host, WorkerType::Frontend).await?;
 
-        let (catalog_updated_tx, catalog_updated_rx) = watch::channel(UPDATE_FINISH_NOTIFICATION);
+        let (heartbeat_join_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
+            meta_client.clone(),
+            Duration::from_millis(opts.heartbeat_interval as u64),
+        );
+
+        let (catalog_updated_tx, catalog_updated_rx) = watch::channel(0);
         let catalog_cache = Arc::new(RwLock::new(CatalogCache::new(meta_client.clone()).await?));
         let catalog_manager = CatalogConnector::new(
             meta_client.clone(),
@@ -87,6 +144,8 @@ impl FrontendEnv {
                 catalog_manager,
             },
             observer_join_handle,
+            heartbeat_join_handle,
+            heartbeat_shutdown_sender,
         ))
     }
 
@@ -100,13 +159,25 @@ impl FrontendEnv {
 }
 
 pub struct SessionImpl {
+    pub ctx: Arc<SessionContext>,
+}
+
+pub struct SessionContext {
     env: FrontendEnv,
     database: String,
 }
 
-impl SessionImpl {
+impl SessionContext {
     pub fn new(env: FrontendEnv, database: String) -> Self {
         Self { env, database }
+    }
+
+    #[cfg(test)]
+    pub async fn mock() -> Self {
+        Self {
+            env: FrontendEnv::mock().await,
+            database: "dev".to_string(),
+        }
     }
 
     pub fn env(&self) -> &FrontendEnv {
@@ -118,32 +189,46 @@ impl SessionImpl {
     }
 }
 
+impl SessionImpl {
+    pub fn new(env: FrontendEnv, database: String) -> Self {
+        let context = SessionContext { env, database };
+        Self {
+            ctx: Arc::new(context),
+        }
+    }
+}
+
 pub struct SessionManagerImpl {
     env: FrontendEnv,
     observer_join_handle: JoinHandle<()>,
+    heartbeat_join_handle: JoinHandle<()>,
+    _heartbeat_shutdown_sender: UnboundedSender<()>,
 }
 
 impl SessionManager for SessionManagerImpl {
     fn connect(&self) -> Box<dyn Session> {
         Box::new(SessionImpl {
-            env: self.env.clone(),
-            database: "dev".to_string(),
+            ctx: Arc::new(SessionContext::new(self.env.clone(), "dev".to_string())),
         })
     }
 }
 
 impl SessionManagerImpl {
     pub async fn new(opts: &FrontendOpts) -> Result<Self> {
-        let (env, join_handle) = FrontendEnv::init(opts).await?;
+        let (env, join_handle, heartbeat_join_handle, heartbeat_shutdown_sender) =
+            FrontendEnv::init(opts).await?;
         Ok(Self {
             env,
             observer_join_handle: join_handle,
+            heartbeat_join_handle,
+            _heartbeat_shutdown_sender: heartbeat_shutdown_sender,
         })
     }
 
     /// Used in unit test. Called before `LocalMeta::stop`.
     pub fn terminate(&self) {
         self.observer_join_handle.abort();
+        self.heartbeat_join_handle.abort();
     }
 }
 

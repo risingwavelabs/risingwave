@@ -7,10 +7,7 @@ use risingwave_common::array::{Array, ArrayImpl};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
 use risingwave_common::expr::AggKind;
-use risingwave_common::types::{
-    deserialize_datum_not_null_from, serialize_datum_not_null_into, DataType, Datum, ScalarImpl,
-    ScalarRef,
-};
+use risingwave_common::types::*;
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -29,7 +26,7 @@ pub type ManagedMaxState<S, A> = GenericManagedState<S, A, { variants::EXTREME_M
 ///   in the `BTreeMap` should be `(Datum, RowId)`.
 /// * The order encoded key and the `Ord` implementation of the sort key must be the same. If they
 ///   are different, it is more likely a bug of the encoder, and should be fixed.
-/// * Key can't be null.
+/// * Key can be null.
 ///
 /// In the state store, the datum is stored as `sort_key -> encoded_value`. Therefore, we should
 /// have the following relationship:
@@ -45,12 +42,13 @@ pub struct GenericManagedState<S: StateStore, A: Array, const EXTREME_TYPE: usiz
 where
     A::OwnedItem: Ord,
 {
-    /// Top N elements in the state, which stores the mapping of sort key -> (dirty, original
-    /// value). This BTreeMap always maintain the elements that we are sure it's top n.
-    top_n: BTreeMap<(A::OwnedItem, ExtremePk), ScalarImpl>,
+    /// Top N elements in the state, which stores the mapping of (sort key, pk) ->
+    /// (original sort key). This BTreeMap always maintain the elements that we are sure
+    /// it's top n.
+    top_n: BTreeMap<(Option<A::OwnedItem>, ExtremePk), Datum>,
 
     /// The actions that will be taken on next flush
-    flush_buffer: BTreeMap<(A::OwnedItem, ExtremePk), FlushStatus<ScalarImpl>>,
+    flush_buffer: BTreeMap<(Option<A::OwnedItem>, ExtremePk), FlushStatus<Datum>>,
 
     /// Number of items in the state including those not in top n cache but in state store.
     total_count: usize,
@@ -181,8 +179,8 @@ where
                 continue;
             }
 
-            // Assert key is not null
-            let key = key.expect("sort key can't be null").to_owned_scalar();
+            // sort key may be null
+            let key = option_to_owned_scalar(&key);
 
             // Concat pk with the original key to create a composed key
             let composed_key = (
@@ -217,7 +215,7 @@ where
                         }
                     }
 
-                    let value: ScalarImpl = key.clone().into();
+                    let value: Option<ScalarImpl> = key.clone().map(|x| x.into());
 
                     if do_insert {
                         self.top_n.insert(composed_key.clone(), value.clone());
@@ -239,16 +237,16 @@ where
         Ok(())
     }
 
-    fn get_output_from_cache(&self) -> Option<ScalarImpl> {
+    fn get_output_from_cache(&self) -> Datum {
         match EXTREME_TYPE {
             variants::EXTREME_MIN => {
                 if let Some((_, v)) = self.top_n.first_key_value() {
-                    return Some(v.clone());
+                    return v.clone();
                 }
             }
             variants::EXTREME_MAX => {
                 if let Some((_, v)) = self.top_n.last_key_value() {
-                    return Some(v.clone());
+                    return v.clone();
                 }
             }
             _ => unimplemented!(),
@@ -281,10 +279,8 @@ where
 
             for (raw_key, raw_value) in all_data {
                 let mut deserializer = memcomparable::Deserializer::new(&raw_value[..]);
-                let value =
-                    deserialize_datum_not_null_from(self.data_type.clone(), &mut deserializer)?
-                        .unwrap();
-                let key = value.clone().try_into().unwrap();
+                let value = deserialize_datum_from(&self.data_type, &mut deserializer)?;
+                let key = value.clone().map(|x| x.try_into().unwrap());
                 let pks = self.serializer.get_pk(&raw_key[..])?;
                 self.top_n.insert((key, pks), value);
             }
@@ -317,7 +313,7 @@ where
             match v.into_option() {
                 Some(v) => {
                     let mut serializer = memcomparable::Serializer::new(vec![]);
-                    serialize_datum_not_null_into(&Some(v), &mut serializer)?;
+                    serialize_datum_into(&v, &mut serializer)?;
                     let value = serializer.into_inner();
                     local.put(key_encoded, value);
                 }
@@ -370,16 +366,15 @@ where
 {
     #[cfg(test)]
     #[allow(dead_code)]
-    pub async fn iterate_store(&self) -> Result<Vec<(A::OwnedItem, ExtremePk)>> {
+    pub async fn iterate_store(&self) -> Result<Vec<(Option<A::OwnedItem>, ExtremePk)>> {
         let epoch = u64::MAX;
         let all_data = self.keyspace.scan_strip_prefix(None, epoch).await?;
         let mut result = vec![];
 
         for (raw_key, raw_value) in all_data {
             let mut deserializer = memcomparable::Deserializer::new(&raw_value[..]);
-            let value = deserialize_datum_not_null_from(self.data_type.clone(), &mut deserializer)?
-                .unwrap();
-            let key = value.clone().try_into().unwrap();
+            let value = deserialize_datum_from(&self.data_type, &mut deserializer)?;
+            let key = value.clone().map(|x| x.try_into().unwrap());
             let pks = self.serializer.get_pk(&raw_key[..])?;
             result.push((key, pks));
         }
@@ -388,7 +383,7 @@ where
 
     #[cfg(test)]
     #[allow(dead_code)]
-    pub async fn iterate_topn_cache(&self) -> Result<Vec<(A::OwnedItem, ExtremePk)>> {
+    pub async fn iterate_topn_cache(&self) -> Result<Vec<(Option<A::OwnedItem>, ExtremePk)>> {
         Ok(self.top_n.iter().map(|(k, _)| k.clone()).collect())
     }
 }
@@ -622,15 +617,25 @@ mod tests {
 
     #[tokio::test]
     async fn test_replicated_value_min() {
-        test_replicated_value::<{ variants::EXTREME_MIN }>().await
+        test_replicated_value_not_null::<{ variants::EXTREME_MIN }>().await
     }
 
     #[tokio::test]
     async fn test_replicated_value_max() {
-        test_replicated_value::<{ variants::EXTREME_MAX }>().await
+        test_replicated_value_not_null::<{ variants::EXTREME_MAX }>().await
     }
 
-    async fn test_replicated_value<const EXTREME_TYPE: usize>() {
+    #[tokio::test]
+    async fn test_replicated_value_min_with_null() {
+        test_replicated_value_with_null::<{ variants::EXTREME_MIN }>().await
+    }
+
+    #[tokio::test]
+    async fn test_replicated_value_max_with_null() {
+        test_replicated_value_with_null::<{ variants::EXTREME_MAX }>().await
+    }
+
+    async fn test_replicated_value_not_null<const EXTREME_TYPE: usize>() {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
 
@@ -661,11 +666,12 @@ mod tests {
         .unwrap()
         .into();
 
-        let extreme = ScalarImpl::Int64(match EXTREME_TYPE {
-            variants::EXTREME_MIN => 1,
-            variants::EXTREME_MAX => 5,
+        let extreme = match EXTREME_TYPE {
+            variants::EXTREME_MIN => Some(ScalarImpl::Int64(1)),
+            variants::EXTREME_MAX => Some(ScalarImpl::Int64(5)),
             _ => unreachable!(),
-        });
+        };
+
         let mut epoch = 0;
 
         // insert 1, 5
@@ -696,10 +702,7 @@ mod tests {
         write_batch.ingest(epoch).await.unwrap();
 
         // The minimum should be 1, or the maximum should be 5
-        assert_eq!(
-            managed_state.get_output(epoch).await.unwrap(),
-            Some(extreme.clone())
-        );
+        assert_eq!(managed_state.get_output(epoch).await.unwrap(), extreme);
 
         // delete 1 1 4 5 1 4
         managed_state
@@ -714,10 +717,108 @@ mod tests {
         write_batch.ingest(epoch).await.unwrap();
 
         // The minimum should still be 1, or the maximum should still be 5
-        assert_eq!(
-            managed_state.get_output(epoch).await.unwrap(),
-            Some(extreme)
-        );
+        assert_eq!(managed_state.get_output(epoch).await.unwrap(), extreme);
+    }
+
+    async fn test_replicated_value_with_null<const EXTREME_TYPE: usize>() {
+        let store = MemoryStateStore::new();
+        let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
+
+        let mut managed_state = GenericManagedState::<_, I64Array, EXTREME_TYPE>::new(
+            keyspace.clone(),
+            DataType::Int64,
+            Some(3),
+            0,
+            smallvec![DataType::Int64],
+        )
+        .await
+        .unwrap();
+        assert!(!managed_state.is_dirty());
+
+        let value_buffer =
+            I64Array::from_slice(&[Some(1), Some(1), Some(4), Some(5), Some(1), Some(4)])
+                .unwrap()
+                .into();
+
+        let pk_buffer = I64Array::from_slice(&[
+            Some(1001),
+            Some(1002),
+            Some(1003),
+            Some(1004),
+            Some(1005),
+            Some(1006),
+        ])
+        .unwrap()
+        .into();
+
+        let extreme = match EXTREME_TYPE {
+            variants::EXTREME_MIN => None,
+            variants::EXTREME_MAX => Some(ScalarImpl::Int64(5)),
+            _ => unreachable!(),
+        };
+
+        let mut epoch = 0;
+
+        // insert 1, 5
+        managed_state
+            .apply_batch(
+                &[Op::Insert; 2],
+                None,
+                &[
+                    &I64Array::from_slice(&[Some(1), Some(5)]).unwrap().into(),
+                    &I64Array::from_slice(&[Some(2001), Some(2002)])
+                        .unwrap()
+                        .into(),
+                ],
+                epoch,
+            )
+            .await
+            .unwrap();
+
+        let null_buffer = &I64Array::from_slice(&[None, None, None]).unwrap().into();
+        let null_pk_buffer = &I64Array::from_slice(&[Some(3001), Some(3002), Some(3003)])
+            .unwrap()
+            .into();
+
+        // insert None None None
+        managed_state
+            .apply_batch(
+                &[Op::Insert; 3],
+                None,
+                &[null_buffer, null_pk_buffer],
+                epoch,
+            )
+            .await
+            .unwrap();
+
+        // insert 1 1 4 5 1 4
+        managed_state
+            .apply_batch(&[Op::Insert; 6], None, &[&value_buffer, &pk_buffer], epoch)
+            .await
+            .unwrap();
+
+        // flush
+        let mut write_batch = store.start_write_batch();
+        managed_state.flush(&mut write_batch).unwrap();
+        write_batch.ingest(epoch).await.unwrap();
+
+        // The minimum should be None, or the maximum should be 5
+        assert_eq!(managed_state.get_output(epoch).await.unwrap(), extreme);
+
+        // delete 1 1 4 5 1 4
+        managed_state
+            .apply_batch(&[Op::Delete; 6], None, &[&value_buffer, &pk_buffer], epoch)
+            .await
+            .unwrap();
+
+        // flush
+        epoch += 1;
+        let mut write_batch = store.start_write_batch();
+        managed_state.flush(&mut write_batch).unwrap();
+        write_batch.ingest(epoch).await.unwrap();
+
+        // The minimum should still be None, or the maximum should still be 5
+        assert_eq!(managed_state.get_output(epoch).await.unwrap(), extreme);
     }
 
     #[tokio::test]

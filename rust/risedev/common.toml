@@ -4,6 +4,7 @@ ARCH = { source = "${CARGO_MAKE_RUST_TARGET_ARCH}", mapping = { x86_64 = "amd64"
 SYSTEM = "${OS}-${ARCH}"
 SYSTEM_AMD64 = "${OS}-amd64" # some components do not support darwin-arm64 for now, use amd64 for fallback
 PREFIX = "${PWD}/.risingwave"
+PREFIX_USR_BIN = "${PWD}/.bin"
 PREFIX_BIN = "${PREFIX}/bin"
 PREFIX_CONFIG = "${PREFIX}/config"
 PREFIX_DATA = "${PREFIX}/data"
@@ -35,7 +36,7 @@ mkdir "${PREFIX_PATH}"
 private = true
 condition = { env_not_set = [ "RISEDEV_CONFIGURED" ] }
 script = '''
-#!@shell
+#!/bin/bash
 set -e
 echo "RiseDev is not configured, please run ./risedev configure"
 exit 1

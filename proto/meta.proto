@@ -6,6 +6,7 @@ option java_multiple_files = true;
 option java_package = "com.risingwave.proto.metanode";
 option optimize_for = SPEED;
 
+import "catalog.proto";
 import "common.proto";
 import "plan.proto";
 import "stream_plan.proto";
@@ -75,14 +76,16 @@ message DropRequest {
 
 message DropResponse {
   common.Status status = 1;
+  uint64 version = 2;
 }
 
 message GetCatalogRequest {}
 
 message Catalog {
-  repeated Database databases = 1;
-  repeated Schema schemas = 2;
-  repeated Table tables = 3;
+  uint64 version = 1;
+  repeated Database databases = 2;
+  repeated Schema schemas = 3;
+  repeated Table tables = 4;
 }
 
 message GetCatalogResponse {
@@ -111,10 +114,22 @@ service HeartbeatService {
 }
 
 // Below for stream manager.
+
+// Fragments of a Materialized View
 message TableFragments {
-  enum State {
-    CREATING = 0;
-    CREATED = 1;
+  // Current state of actor
+  enum ActorState {
+    // Initial state after creation
+    INACTIVE = 0;
+    // Running normally
+    RUNNING = 1;
+  }
+  // Runtime information of an actor
+  message ActorStatus {
+    // Current on which node
+    uint32 node_id = 1;
+    // Current state
+    ActorState state = 2;
   }
   message Fragment {
     enum FragmentType {
@@ -127,9 +142,8 @@ message TableFragments {
     repeated stream_plan.StreamActor actors = 3;
   }
   plan.TableRefId table_ref_id = 1;
-  State state = 2;
-  map<uint32, Fragment> fragments = 3;
-  map<uint32, uint32> actor_locations = 4;
+  map<uint32, Fragment> fragments = 2;
+  map<uint32, ActorStatus> actor_status = 3;
 }
 
 // TODO: remove this when dashboard refactored.
@@ -232,9 +246,14 @@ message SubscribeResponse {
   Operation operation = 2;
   oneof info {
     common.WorkerNode node = 3;
+    // TODO: remove below fields, using new message defined in catalog.
     Database database = 4;
     Schema schema = 5;
     Table table = 6;
+    catalog.Database database_v2 = 7;
+    catalog.Schema schema_v2 = 8;
+    catalog.Table table_v2 = 9;
+    catalog.Source source = 10;
   }
 }
 

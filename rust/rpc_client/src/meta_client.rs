@@ -1,8 +1,9 @@
+use std::fmt::Debug;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{CatalogVersion, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::try_match_expand;
@@ -29,7 +30,8 @@ use risingwave_pb::meta::{
     ListAllNodesRequest, ListAllNodesResponse, Schema, SubscribeRequest, SubscribeResponse, Table,
 };
 use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
-use tokio::sync::mpsc::Receiver;
+use tokio::sync::mpsc::{Receiver, UnboundedSender};
+use tokio::task::JoinHandle;
 use tonic::transport::{Channel, Endpoint};
 use tonic::{Status, Streaming};
 
@@ -124,49 +126,56 @@ impl MetaClient {
         Ok(())
     }
 
-    pub async fn create_table(&self, table: Table) -> Result<TableId> {
-        Ok(TableId {
-            table_id: self.create_catalog_body(CatalogBody::Table(table)).await? as u32,
-        })
+    pub async fn create_table(&self, table: Table) -> Result<(TableId, CatalogVersion)> {
+        let (table_id, version) = self.create_catalog_body(CatalogBody::Table(table)).await?;
+        Ok((
+            TableId {
+                table_id: table_id as u32,
+            },
+            version,
+        ))
     }
 
-    pub async fn create_database(&self, db: Database) -> Result<DatabaseId> {
+    pub async fn create_database(&self, db: Database) -> Result<(DatabaseId, CatalogVersion)> {
         self.create_catalog_body(CatalogBody::Database(db)).await
     }
 
-    pub async fn create_schema(&self, schema: Schema) -> Result<SchemaId> {
+    pub async fn create_schema(&self, schema: Schema) -> Result<(SchemaId, CatalogVersion)> {
         self.create_catalog_body(CatalogBody::Schema(schema)).await
     }
 
-    pub async fn create_catalog_body(&self, catalog_body: CatalogBody) -> Result<i32> {
+    pub async fn create_catalog_body(
+        &self,
+        catalog_body: CatalogBody,
+    ) -> Result<(i32, CatalogVersion)> {
         let request = CreateRequest {
             catalog_body: Some(catalog_body),
             ..Default::default()
         };
         let resp = self.inner.create(request).await?;
-        Ok(resp.id)
+        Ok((resp.id, resp.version))
     }
 
-    pub async fn drop_table(&self, table_ref_id: TableRefId) -> Result<()> {
+    pub async fn drop_table(&self, table_ref_id: TableRefId) -> Result<CatalogVersion> {
         self.drop_catalog(CatalogId::TableId(table_ref_id)).await
     }
 
-    pub async fn drop_schema(&self, schema_ref_id: SchemaRefId) -> Result<()> {
+    pub async fn drop_schema(&self, schema_ref_id: SchemaRefId) -> Result<CatalogVersion> {
         self.drop_catalog(CatalogId::SchemaId(schema_ref_id)).await
     }
 
-    pub async fn drop_database(&self, database_ref_id: DatabaseRefId) -> Result<()> {
+    pub async fn drop_database(&self, database_ref_id: DatabaseRefId) -> Result<CatalogVersion> {
         self.drop_catalog(CatalogId::DatabaseId(database_ref_id))
             .await
     }
 
-    pub async fn drop_catalog(&self, catalog_id: CatalogId) -> Result<()> {
+    pub async fn drop_catalog(&self, catalog_id: CatalogId) -> Result<CatalogVersion> {
         let request = DropRequest {
             catalog_id: Some(catalog_id),
             ..Default::default()
         };
-        MetaClientInner::drop(self.inner.as_ref(), request).await?;
-        Ok(())
+        let resp = MetaClientInner::drop(self.inner.as_ref(), request).await?;
+        Ok(resp.version)
     }
 
     /// Unregister the current node to the cluster.
@@ -204,6 +213,31 @@ impl MetaClient {
         let mut resp = self.inner.get_catalog(GetCatalogRequest {}).await?;
         let catalog = resp.catalog.take().unwrap();
         Ok(catalog)
+    }
+
+    pub fn start_heartbeat_loop(
+        meta_client: MetaClient,
+        min_interval: Duration,
+    ) -> (JoinHandle<()>, UnboundedSender<()>) {
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
+        let join_handle = tokio::spawn(async move {
+            let mut min_interval = tokio::time::interval(min_interval);
+            loop {
+                tokio::select! {
+                    // Wait for interval
+                    _ = min_interval.tick() => {},
+                    // Shutdown
+                    _ = shutdown_rx.recv() => {
+                        tracing::info!("Heartbeat loop is shutting down");
+                        return;
+                    }
+                }
+                if let Err(err) = meta_client.send_heartbeat(meta_client.worker_id()).await {
+                    tracing::warn!("Failed to send_heartbeat. {}", err);
+                }
+            }
+        });
+        (join_handle, shutdown_tx)
     }
 }
 
@@ -312,7 +346,7 @@ pub trait MetaClientInner: Send + Sync {
 }
 
 /// Client to meta server. Cloning the instance is lightweight.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct GrpcMetaClient {
     pub cluster_client: ClusterServiceClient<Channel>,
     pub heartbeat_client: HeartbeatServiceClient<Channel>,

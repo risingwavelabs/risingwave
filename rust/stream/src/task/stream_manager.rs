@@ -20,7 +20,6 @@ use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreI
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
-use super::FailedActors;
 use crate::executor::*;
 use crate::task::{
     ConsumableChannelPair, SharedContext, StreamEnvironment, UpDownActorIds,
@@ -32,11 +31,13 @@ lazy_static::lazy_static! {
     pub static ref LOCAL_TEST_ADDR: SocketAddr = "127.0.0.1:2333".parse().unwrap();
 }
 
+pub type ActorHandle = JoinHandle<()>;
+
 pub struct StreamManagerCore {
     /// Each processor runs in a future. Upon receiving a `Terminate` message, they will exit.
     /// `handles` store join handles of these futures, and therefore we could wait their
     /// termination.
-    handles: HashMap<u32, JoinHandle<Result<()>>>,
+    handles: HashMap<u32, ActorHandle>,
 
     pub(crate) context: Arc<SharedContext>,
 
@@ -52,6 +53,8 @@ pub struct StreamManagerCore {
 
     /// The state store of Hummuck
     state_store: StateStoreImpl,
+
+    streaming_metrics: Arc<StreamingMetrics>,
 }
 
 /// `StreamManager` manages all stream executors in this project.
@@ -61,12 +64,25 @@ pub struct StreamManager {
 
 pub struct ExecutorParams {
     pub env: StreamEnvironment,
+
+    /// Indices of primary keys
     pub pk_indices: PkIndices,
+
+    /// Executor id, unique across all actors.
     pub executor_id: u64,
+
+    /// Operator id, unique for each operator in fragment.
     pub operator_id: u64,
+
+    /// Information of the operator from plan node.
     pub op_info: String,
+
+    /// The input executor.
     pub input: Vec<Box<dyn Executor>>,
+
+    /// Id of the actor.
     pub actor_id: u32,
+    pub executor_stats: Arc<StreamingMetrics>,
 }
 
 impl Debug for ExecutorParams {
@@ -90,8 +106,12 @@ impl StreamManager {
         }
     }
 
-    pub fn new(addr: SocketAddr, state_store: StateStoreImpl) -> Self {
-        Self::with_core(StreamManagerCore::new(addr, state_store))
+    pub fn new(
+        addr: SocketAddr,
+        state_store: StateStoreImpl,
+        streaming_metrics: Arc<StreamingMetrics>,
+    ) -> Self {
+        Self::with_core(StreamManagerCore::new(addr, state_store, streaming_metrics))
     }
 
     #[cfg(test)]
@@ -106,7 +126,7 @@ impl StreamManager {
         barrier: &Barrier,
         actor_ids_to_send: impl IntoIterator<Item = u32>,
         actor_ids_to_collect: impl IntoIterator<Item = u32>,
-    ) -> Result<oneshot::Receiver<FailedActors>> {
+    ) -> Result<oneshot::Receiver<()>> {
         let core = self.core.lock().unwrap();
         let mut barrier_manager = core.context.lock_barrier_manager();
         let rx = barrier_manager
@@ -121,11 +141,11 @@ impl StreamManager {
         barrier: &Barrier,
         actor_ids_to_send: impl IntoIterator<Item = u32>,
         actor_ids_to_collect: impl IntoIterator<Item = u32>,
-    ) -> Result<FailedActors> {
+    ) -> Result<()> {
         let rx = self.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
 
-        // Wait for all actors to finish this barrier.
-        let failed_actors = rx.await.unwrap();
+        // Wait for all actors finishing this barrier.
+        rx.await.unwrap();
 
         // Sync states from shared buffer to S3 before telling meta service we've done.
         dispatch_state_store!(self.state_store(), store, {
@@ -140,7 +160,7 @@ impl StreamManager {
             }
         });
 
-        Ok(failed_actors)
+        Ok(())
     }
 
     /// Broadcast a barrier to all senders. Returns immediately, and caller won't be notified when
@@ -191,9 +211,9 @@ impl StreamManager {
 
     /// This function was called while [`StreamManager`] exited.
     pub async fn wait_all(self) -> Result<()> {
-        let handles = self.core.lock().unwrap().wait_all()?;
+        let handles = self.core.lock().unwrap().take_all_handles()?;
         for (_id, handle) in handles {
-            handle.await??;
+            handle.await?;
         }
         Ok(())
     }
@@ -202,7 +222,7 @@ impl StreamManager {
     pub async fn wait_actors(&self, actor_ids: &[u32]) -> Result<()> {
         let handles = self.core.lock().unwrap().remove_actor_handles(actor_ids)?;
         for handle in handles {
-            handle.await.unwrap()?
+            handle.await.unwrap();
         }
         Ok(())
     }
@@ -272,12 +292,20 @@ fn update_upstreams(context: &SharedContext, ids: &[UpDownActorIds]) {
 }
 
 impl StreamManagerCore {
-    fn new(addr: SocketAddr, state_store: StateStoreImpl) -> Self {
+    fn new(
+        addr: SocketAddr,
+        state_store: StateStoreImpl,
+        streaming_metrics: Arc<StreamingMetrics>,
+    ) -> Self {
         let context = SharedContext::new(addr, state_store.clone());
-        Self::with_store_and_context(state_store, context)
+        Self::with_store_and_context(state_store, context, streaming_metrics)
     }
 
-    fn with_store_and_context(state_store: StateStoreImpl, context: SharedContext) -> Self {
+    fn with_store_and_context(
+        state_store: StateStoreImpl,
+        context: SharedContext,
+        streaming_metrics: Arc<StreamingMetrics>,
+    ) -> Self {
         let (tx, rx) = channel(LOCAL_OUTPUT_CHANNEL_SIZE);
 
         Self {
@@ -287,14 +315,20 @@ impl StreamManagerCore {
             actors: HashMap::new(),
             mock_source: (Some(tx), Some(rx)),
             state_store,
+            streaming_metrics,
         }
     }
 
     #[cfg(test)]
     fn for_test() -> Self {
+        use risingwave_storage::monitor::StateStoreMetrics;
+
+        let register = prometheus::Registry::new();
+        let streaming_metrics = Arc::new(StreamingMetrics::new(register));
         Self::with_store_and_context(
-            StateStoreImpl::shared_in_memory_store(),
+            StateStoreImpl::shared_in_memory_store(Arc::new(StateStoreMetrics::unused())),
             SharedContext::for_test(),
+            streaming_metrics,
         )
     }
 
@@ -411,9 +445,15 @@ impl StreamManagerCore {
             op_info,
             input,
             actor_id,
+            executor_stats: self.streaming_metrics.clone(),
         };
         let executor = create_executor(executor_params, self, node, store);
-        let executor = Self::wrap_executor_for_debug(executor?, actor_id, input_pos)?;
+        let executor = Self::wrap_executor_for_debug(
+            executor?,
+            actor_id,
+            input_pos,
+            self.streaming_metrics.clone(),
+        )?;
         Ok(executor)
     }
 
@@ -434,6 +474,7 @@ impl StreamManagerCore {
         mut executor: Box<dyn Executor>,
         actor_id: u32,
         input_pos: usize,
+        streaming_metrics: Arc<StreamingMetrics>,
     ) -> Result<Box<dyn Executor>> {
         if !cfg!(debug_assertions) {
             return Ok(executor);
@@ -441,7 +482,13 @@ impl StreamManagerCore {
         let identity = executor.identity().to_string();
 
         // Trace
-        executor = Box::new(TraceExecutor::new(executor, identity, input_pos, actor_id));
+        executor = Box::new(TraceExecutor::new(
+            executor,
+            identity,
+            input_pos,
+            actor_id,
+            streaming_metrics,
+        ));
         // Schema check
         executor = Box::new(SchemaCheckExecutor::new(executor));
         // Epoch check
@@ -482,23 +529,23 @@ impl StreamManagerCore {
         trace!("Join non-equi condition: {:?}", condition);
 
         macro_rules! impl_create_hash_join_executor {
-                    ($( { $join_type_proto:ident, $join_type:ident } ),*) => {
-                        |typ| match typ {
-                            $( JoinTypeProto::$join_type_proto => Box::new(HashJoinExecutor::<_, { JoinType::$join_type }>::new(
-                                source_l,
-                                source_r,
-                                params_l,
-                                params_r,
-                                params.pk_indices,
-                                Keyspace::shared_executor_root(store.clone(), params.operator_id),
-                                params.executor_id,
-                                condition,
-                                params.op_info,
-                            )) as Box<dyn Executor>, )*
-                            _ => todo!("Join type {:?} not implemented", typ),
-                        }
-                    }
+            ($( { $join_type_proto:ident, $join_type:ident } ),*) => {
+                |typ| match typ {
+                    $( JoinTypeProto::$join_type_proto => Box::new(HashJoinExecutor::<_, { JoinType::$join_type }>::new(
+                        source_l,
+                        source_r,
+                        params_l,
+                        params_r,
+                        params.pk_indices,
+                        Keyspace::shared_executor_root(store.clone(), params.operator_id),
+                        params.executor_id,
+                        condition,
+                        params.op_info,
+                    )) as Box<dyn Executor>, )*
+                    _ => todo!("Join type {:?} not implemented", typ),
                 }
+            }
+        }
 
         macro_rules! for_all_join_types {
             ($macro:tt) => {
@@ -614,20 +661,22 @@ impl StreamManagerCore {
             trace!("build actor: {:#?}", &dispatcher);
 
             let actor = Actor::new(dispatcher, actor_id, self.context.clone());
-            self.handles.insert(actor_id, tokio::spawn(actor.run()));
+            self.handles.insert(
+                actor_id,
+                tokio::spawn(async move {
+                    actor.run().await.unwrap(); // unwrap the actor result to panic on error
+                }),
+            );
         }
 
         Ok(())
     }
 
-    pub fn wait_all(&mut self) -> Result<HashMap<u32, JoinHandle<Result<()>>>> {
+    pub fn take_all_handles(&mut self) -> Result<HashMap<u32, ActorHandle>> {
         Ok(std::mem::take(&mut self.handles))
     }
 
-    pub fn remove_actor_handles(
-        &mut self,
-        actor_ids: &[u32],
-    ) -> Result<Vec<JoinHandle<Result<()>>>> {
+    pub fn remove_actor_handles(&mut self, actor_ids: &[u32]) -> Result<Vec<ActorHandle>> {
         actor_ids
             .iter()
             .map(|actor_id| {

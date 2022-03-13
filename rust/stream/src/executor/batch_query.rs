@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 use itertools::Itertools;
-use risingwave_common::array::{Op, RwError, StreamChunk};
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::catalog::{ColumnDesc, Schema, TableId};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
@@ -54,26 +54,12 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
     ) -> Result<Box<dyn Executor>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::BatchPlanNode)?;
         let table_id = TableId::from(&node.table_ref_id);
-
-        // TODO(lmatz): Send ColumnDesc directly.
-        let column_ids = node
-            .column_ids
+        let column_descs = node
+            .column_descs
             .iter()
-            .map(|column_id| ColumnId::new(*column_id))
+            .map(|column_desc| ColumnDesc::from(column_desc.clone()))
             .collect_vec();
-        let fields = node.fields.iter().map(Field::from).collect_vec();
-
         let keyspace = Keyspace::table_root(state_store, &table_id);
-        let column_descs = column_ids
-            .into_iter()
-            .zip_eq(fields.into_iter())
-            .map(|(column_id, field)| ColumnDesc {
-                data_type: field.data_type,
-                column_id,
-                name: field.name,
-            })
-            .collect_vec();
-
         let table = MViewTable::new_adhoc(keyspace, column_descs);
         Ok(Box::new(BatchQueryExecutor::new(
             table,

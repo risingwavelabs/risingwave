@@ -4,19 +4,20 @@ use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 
-use super::{ColPrunable, PlanRef, ToBatch, ToStream};
+use super::{ColPrunable, LogicalBase, PlanRef, ToBatch, ToStream};
 use crate::catalog::{ColumnId, TableId};
 use crate::optimizer::plan_node::BatchSeqScan;
-use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
+use crate::optimizer::property::WithSchema;
+use crate::session::QueryContextRef;
 
 /// `LogicalScan` returns contents of a table or other equivalent object
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct LogicalScan {
+    pub base: LogicalBase,
     table_name: String,
     table_id: TableId,
     columns: Vec<ColumnId>,
-    schema: Schema,
 }
 
 impl LogicalScan {
@@ -26,12 +27,18 @@ impl LogicalScan {
         table_id: TableId,
         columns: Vec<ColumnId>,
         schema: Schema,
+        ctx: QueryContextRef,
     ) -> Self {
+        let base = LogicalBase {
+            schema,
+            id: ctx.borrow_mut().get_id(),
+            ctx: ctx.clone(),
+        };
         Self {
             table_name,
             table_id,
             columns,
-            schema,
+            base,
         }
     }
 
@@ -41,13 +48,14 @@ impl LogicalScan {
         table_id: TableId,
         columns: Vec<ColumnId>,
         schema: Schema,
+        ctx: QueryContextRef,
     ) -> Result<PlanRef> {
-        Ok(Self::new(table_name, table_id, columns, schema).into())
+        Ok(Self::new(table_name, table_id, columns, schema, ctx).into())
     }
 
     pub(super) fn fmt_fields(&self, f: &mut fmt::DebugStruct) {
         let columns = self
-            .schema
+            .schema()
             .fields()
             .iter()
             .map(|f| f.name.clone())
@@ -57,15 +65,7 @@ impl LogicalScan {
     }
 }
 
-impl WithSchema for LogicalScan {
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-}
 impl_plan_tree_node_for_leaf! {LogicalScan}
-impl WithOrder for LogicalScan {}
-
-impl WithDistribution for LogicalScan {}
 
 impl fmt::Display for LogicalScan {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -81,14 +81,16 @@ impl ColPrunable for LogicalScan {
 
         let (columns, fields) = required_cols
             .ones()
-            .map(|id| (self.columns[id], self.schema.fields[id].clone()))
+            .map(|id| (self.columns[id], self.schema().fields[id].clone()))
             .unzip();
-        Self {
-            table_name: self.table_name.clone(),
-            table_id: self.table_id,
+
+        Self::new(
+            self.table_name.clone(),
+            self.table_id,
             columns,
-            schema: Schema { fields },
-        }
+            Schema { fields },
+            self.base.ctx.clone(),
+        )
         .into()
     }
 }

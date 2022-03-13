@@ -48,13 +48,16 @@ impl StreamEnvironment {
     #[cfg(test)]
     pub fn for_test() -> Self {
         use risingwave_source::MemSourceManager;
+        use risingwave_storage::monitor::StateStoreMetrics;
 
         StreamEnvironment {
             server_addr: SocketAddr::V4("127.0.0.1:5688".parse().unwrap()),
             source_manager: Arc::new(MemSourceManager::new()),
             config: Arc::new(StreamingConfig::default()),
             worker_id: WorkerNodeId::default(),
-            state_store: StateStoreImpl::shared_in_memory_store(),
+            state_store: StateStoreImpl::shared_in_memory_store(Arc::new(
+                StateStoreMetrics::unused(),
+            )),
         }
     }
 

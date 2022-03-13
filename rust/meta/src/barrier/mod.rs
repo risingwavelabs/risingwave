@@ -1,12 +1,11 @@
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 use std::iter::once;
 use std::sync::Arc;
 use std::time::Duration;
 
 use futures::future::try_join_all;
 use itertools::Itertools;
-use risingwave_common::array::RwError;
-use risingwave_common::error::{Result, ToRwResult};
+use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::data::Barrier;
@@ -21,7 +20,6 @@ use self::info::BarrierActorInfo;
 use crate::cluster::{StoredClusterManager, StoredClusterManagerRef};
 use crate::hummock::HummockManager;
 use crate::manager::{EpochGeneratorRef, MetaSrvEnv, StreamClientsRef, INVALID_EPOCH};
-use crate::model::ActorId;
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
@@ -72,7 +70,7 @@ impl ScheduledBarriers {
         }
     }
 
-    /// Pop a schduled barrier from the buffer, or a default checkpoint barrier if not exists.
+    /// Pop a scheduled barrier from the buffer, or a default checkpoint barrier if not exists.
     async fn pop_or_default(&self) -> Scheduled {
         let mut buffer = self.buffer.write().await;
 
@@ -103,7 +101,7 @@ impl ScheduledBarriers {
         }
     }
 
-    /// Attach `new_notifiers` to the very first schduled barrier. If there's no one scheduled, a
+    /// Attach `new_notifiers` to the very first scheduled barrier. If there's no one scheduled, a
     /// default checkpoint barrier will be created.
     async fn attach_notifiers(&self, new_notifiers: impl IntoIterator<Item = Notifier>) {
         let mut buffer = self.buffer.write().await;
@@ -182,10 +180,7 @@ where
         let mut min_interval = tokio::time::interval(Self::INTERVAL);
         min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
-        // TODO: these states should be persisted!
-        let mut ignored_actors = HashSet::<ActorId>::new();
         let mut prev_epoch = INVALID_EPOCH;
-
         loop {
             tokio::select! {
                 // Wait for the minimal interval,
@@ -199,7 +194,8 @@ where
             let info = {
                 let all_nodes = self
                     .cluster_manager
-                    .list_worker_node(WorkerType::ComputeNode, Some(Running));
+                    .list_worker_node(WorkerType::ComputeNode, Some(Running))
+                    .await;
                 let all_actor_infos = self
                     .fragment_manager
                     .load_all_actors(command.creating_table_id())?;
@@ -218,14 +214,8 @@ where
             let new_epoch = self.epoch_generator.generate()?.into_inner();
 
             let collect_futures = info.node_map.iter().filter_map(|(node_id, node)| {
-                let actor_ids_to_send = info
-                    .actor_ids_to_send(node_id)
-                    .filter(|id| !ignored_actors.contains(id))
-                    .collect_vec();
-                let actor_ids_to_collect = info
-                    .actor_ids_to_collect(node_id)
-                    .filter(|id| !ignored_actors.contains(id))
-                    .collect_vec();
+                let actor_ids_to_send = info.actor_ids_to_send(node_id).collect_vec();
+                let actor_ids_to_collect = info.actor_ids_to_collect(node_id).collect_vec();
 
                 if actor_ids_to_send.is_empty() || actor_ids_to_collect.is_empty() {
                     // No need to send barrier for this node.
@@ -258,16 +248,9 @@ where
                         );
 
                         // This RPC returns only if this worker node has collected this barrier.
-                        // TODO(#742): Injection errors should be further distinguished like:
-                        // 1. Non-fatal injection errors (like inner-DAG barrier propagation errors)
-                        // should not panic `BarrierManager`. 2. If this
-                        // worker node has not collected this barrier, it might should retry.
-                        // 3. BarrierManager should distinguish failures and let `StreamManager`
-                        // cancel related jobs.
-                        let response = client.inject_barrier(request).await.to_rw_result()?;
-                        let failed_actors = response.into_inner().failed_actor_ids;
+                        client.inject_barrier(request).await.to_rw_result()?;
 
-                        Ok::<_, RwError>(failed_actors)
+                        Ok::<_, RwError>(())
                     }
                     .into()
                 }
@@ -275,29 +258,23 @@ where
 
             let mut notifiers = notifiers;
             notifiers.iter_mut().for_each(Notifier::notify_to_send);
-
-            // Wait all barriers collected.
             let timer = self.metrics.barrier_latency.start_timer();
-            let collect_result: Result<Vec<Vec<ActorId>>> = try_join_all(collect_futures).await;
+            // wait all barriers collected
+            let collect_result = try_join_all(collect_futures).await;
             timer.observe_duration();
-
-            // Commit Hummock epoch.
             if prev_epoch != INVALID_EPOCH {
-                match &collect_result {
-                    Ok(_) => self.hummock_manager.commit_epoch(prev_epoch).await?,
-                    Err(_) => self.hummock_manager.abort_epoch(prev_epoch).await?,
+                match collect_result {
+                    Ok(_) => {
+                        self.hummock_manager.commit_epoch(prev_epoch).await?;
+                    }
+                    Err(err) => {
+                        self.hummock_manager.abort_epoch(prev_epoch).await?;
+                        return Err(err);
+                    }
                 };
             }
             prev_epoch = new_epoch;
-
-            // Record failed actors.
-            // TODO: these states should be persisted in actor's status.
-            let failed_actors = collect_result?.into_iter().flatten();
-            ignored_actors.extend(failed_actors);
-
-            // Do some post stuffs.
-            command_context.post_collect().await?;
-
+            command_context.post_collect().await?; // do some post stuffs
             notifiers.iter_mut().for_each(Notifier::notify_collected);
         }
     }

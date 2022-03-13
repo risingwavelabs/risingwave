@@ -322,6 +322,9 @@ pub fn new_binary_expr(
             NaiveDateTimeArray,
             _,
         >::new(l, r, ret, tumble_start)),
+        Type::Position => Box::new(BinaryExpression::<Utf8Array, Utf8Array, I32Array, _>::new(
+            l, r, ret, position,
+        )),
         tp => {
             unimplemented!(
                 "The expression {:?} using vectorized expression framework is not supported yet!",
@@ -341,19 +344,6 @@ pub fn new_like_default(
         expr_ia2,
         return_type,
         like_default,
-    ))
-}
-
-pub fn new_position_expr(
-    expr_ia1: BoxedExpression,
-    expr_ia2: BoxedExpression,
-    return_type: DataType,
-) -> BoxedExpression {
-    Box::new(BinaryExpression::<Utf8Array, Utf8Array, I32Array, _>::new(
-        expr_ia1,
-        expr_ia2,
-        return_type,
-        position,
     ))
 }
 

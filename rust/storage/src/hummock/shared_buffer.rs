@@ -7,6 +7,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use parking_lot::RwLock as PLRwLock;
 use risingwave_common::error::Result;
+use risingwave_pb::hummock::SstableInfo;
 use tokio::task::JoinHandle;
 
 use super::compactor::{Compactor, SubCompactContext};
@@ -18,7 +19,7 @@ use super::local_version_manager::LocalVersionManager;
 use super::utils::range_overlap;
 use super::value::HummockValue;
 use super::{key, HummockError, HummockOptions, HummockResult, SstableStoreRef};
-use crate::monitor::StateStoreStats;
+use crate::monitor::StateStoreMetrics;
 
 type SharedBufferItem = (Bytes, HummockValue<Bytes>);
 
@@ -162,8 +163,8 @@ impl SharedBufferManager {
         options: Arc<HummockOptions>,
         local_version_manager: Arc<LocalVersionManager>,
         sstable_store: SstableStoreRef,
-        // TODO: should be separated `HummockStats` instead of `StateStoreStats`.
-        stats: Arc<StateStoreStats>,
+        // TODO: should be separated `HummockStats` instead of `StateStoreMetrics`.
+        stats: Arc<StateStoreMetrics>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> Self {
         let (uploader_tx, uploader_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -350,8 +351,8 @@ pub struct SharedBufferUploader {
     options: Arc<HummockOptions>,
 
     /// Statistics.
-    // TODO: should be separated `HummockStats` instead of `StateStoreStats`.
-    stats: Arc<StateStoreStats>,
+    // TODO: should be separated `HummockStats` instead of `StateStoreMetrics`.
+    stats: Arc<StateStoreMetrics>,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
     sstable_store: SstableStoreRef,
 
@@ -363,7 +364,7 @@ impl SharedBufferUploader {
         options: Arc<HummockOptions>,
         local_version_manager: Arc<LocalVersionManager>,
         sstable_store: SstableStoreRef,
-        stats: Arc<StateStoreStats>,
+        stats: Arc<StateStoreMetrics>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         rx: tokio::sync::mpsc::UnboundedReceiver<SharedBufferUploaderItem>,
     ) -> Self {
@@ -418,7 +419,23 @@ impl SharedBufferUploader {
 
         // Add all tables at once.
         let timer = self.stats.batch_write_add_l0_latency.start_timer();
-        let version = self.hummock_meta_client.add_tables(epoch, tables).await?;
+        let version = self
+            .hummock_meta_client
+            .add_tables(
+                epoch,
+                tables
+                    .iter()
+                    .map(|sst| SstableInfo {
+                        id: sst.id,
+                        key_range: Some(risingwave_pb::hummock::KeyRange {
+                            left: sst.meta.get_smallest_key().to_vec(),
+                            right: sst.meta.get_largest_key().to_vec(),
+                            inf: false,
+                        }),
+                    })
+                    .collect(),
+            )
+            .await?;
         timer.observe_duration();
 
         // Ensure the added data is available locally
@@ -502,7 +519,7 @@ mod tests {
     use crate::hummock::shared_buffer::SharedBufferManager;
     use crate::hummock::value::HummockValue;
     use crate::hummock::{HummockOptions, SstableStore};
-    use crate::monitor::DEFAULT_STATE_STORE_STATS;
+    use crate::monitor::StateStoreMetrics;
     use crate::object::{InMemObjectStore, ObjectStore};
 
     fn transform_shared_buffer(
@@ -658,7 +675,7 @@ mod tests {
             Arc::new(HummockOptions::default_for_test()),
             vm,
             sstable_store,
-            DEFAULT_STATE_STORE_STATS.clone(),
+            Arc::new(StateStoreMetrics::unused()),
             mock_hummock_meta_client,
         )
     }

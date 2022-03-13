@@ -1,11 +1,16 @@
+#![feature(let_chains)]
+
 // Data-driven tests.
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use anyhow::{anyhow, Result};
-use risingwave_common::array::RwError;
+use risingwave_common::error::RwError;
 use risingwave_frontend::binder::Binder;
 use risingwave_frontend::handler::{create_table, drop_table};
 use risingwave_frontend::planner::Planner;
-use risingwave_frontend::session::QueryContext;
+use risingwave_frontend::session::{QueryContext, QueryContextRef};
 use risingwave_frontend::test_utils::LocalFrontend;
 use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
@@ -16,6 +21,7 @@ struct TestCase {
     sql: String,
     plan: Option<String>,
     binder_error: Option<String>,
+    planner_error: Option<String>,
     optimizer_error: Option<String>,
 }
 
@@ -25,10 +31,10 @@ impl TestCase {
         let session = frontend.session();
         let statements = Parser::parse_sql(&self.sql).unwrap();
         for stmt in statements {
-            let context = QueryContext::new(session);
+            let context = QueryContext::new(session.ctx.clone());
             match stmt.clone() {
                 Statement::Query(_) | Statement::Insert { .. } => {
-                    self.test_query(&stmt, context)?
+                    self.test_query(&stmt, Rc::new(RefCell::new(context)))?
                 }
                 Statement::CreateTable { name, columns, .. } => {
                     create_table::handle_create_table(context, name, columns).await?;
@@ -43,8 +49,8 @@ impl TestCase {
         Ok(())
     }
 
-    fn test_query(&self, stmt: &Statement, context: QueryContext<'_>) -> Result<()> {
-        let session = context.session;
+    fn test_query(&self, stmt: &Statement, context: QueryContextRef) -> Result<()> {
+        let session = context.borrow().session_ctx.clone();
         let catalog = session
             .env()
             .catalog_mgr()
@@ -57,19 +63,25 @@ impl TestCase {
             return Ok(());
         }
 
-        let plan = Planner::new().plan(bound.unwrap())?;
-        let mut output = String::new();
-        plan.as_subplan().explain(0, &mut output)?;
-        let expected_plan = self.plan.as_ref().unwrap().clone();
-        if expected_plan != output {
-            Err(anyhow!(
+        let actual_plan = Planner::new(context).plan(bound.unwrap()).map(|plan| {
+            let mut output = String::new();
+            plan.as_subplan().explain(0, &mut output).unwrap();
+            output
+        });
+
+        let actual_plan = check_err("planner", &self.planner_error, actual_plan)?;
+        if let Some(actual_plan) = &actual_plan
+            && let Some(expected_plan) = &self.plan
+            && expected_plan != actual_plan
+        {
+            return Err(anyhow!(
                 "Expected plan:\n{}\nActual plan:\n{}",
                 expected_plan,
-                output
-            ))
-        } else {
-            Ok(())
+                actual_plan,
+            ));
         }
+
+        Ok(())
     }
 }
 

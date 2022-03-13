@@ -21,8 +21,8 @@ pub struct MaterializeExecutor<S: StateStore> {
 
     local_state: ManagedMViewState<S>,
 
-    /// Columns of primary keys
-    pk_columns: Vec<usize>,
+    /// Columns of arrange keys (including pk, group keys, join keys, etc.)
+    arrange_columns: Vec<usize>,
 
     /// Identity string
     identity: String,
@@ -76,12 +76,12 @@ impl<S: StateStore> MaterializeExecutor<S> {
         executor_id: u64,
         op_info: String,
     ) -> Self {
-        let pk_columns = keys.iter().map(|k| k.column_idx).collect();
-        let pk_order_types = keys.iter().map(|k| k.order_type).collect();
+        let arrange_columns = keys.iter().map(|k| k.column_idx).collect();
+        let arrange_order_types = keys.iter().map(|k| k.order_type).collect();
         Self {
             input,
-            local_state: ManagedMViewState::new(keyspace, column_ids, pk_order_types),
-            pk_columns,
+            local_state: ManagedMViewState::new(keyspace, column_ids, arrange_order_types),
+            arrange_columns,
             identity: format!("MaterializeExecutor {:X}", executor_id),
             op_info,
         }
@@ -110,7 +110,7 @@ impl<S: StateStore> Executor for MaterializeExecutor<S> {
     }
 
     fn pk_indices(&self) -> PkIndicesRef {
-        &self.pk_columns
+        &self.arrange_columns
     }
 
     fn identity(&self) -> &str {
@@ -130,7 +130,7 @@ impl<S: StateStore> std::fmt::Debug for MaterializeExecutor<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MaterializeExecutor")
             .field("input", &self.input)
-            .field("pk_columns", &self.pk_columns)
+            .field("arrange_columns", &self.arrange_columns)
             .finish()
     }
 }
@@ -153,8 +153,8 @@ impl<S: StateStore> SimpleExecutor for MaterializeExecutor<S> {
             }
 
             // assemble pk row
-            let pk_row = Row(self
-                .pk_columns
+            let arrange_row = Row(self
+                .arrange_columns
                 .iter()
                 .map(|col_idx| chunk.column_at(*col_idx).array_ref().datum_at(idx))
                 .collect_vec());
@@ -168,10 +168,10 @@ impl<S: StateStore> SimpleExecutor for MaterializeExecutor<S> {
 
             match op {
                 Insert | UpdateInsert => {
-                    self.local_state.put(pk_row, row);
+                    self.local_state.put(arrange_row, row);
                 }
                 Delete | UpdateDelete => {
-                    self.local_state.delete(pk_row);
+                    self.local_state.delete(arrange_row);
                 }
             }
         }
@@ -183,17 +183,12 @@ impl<S: StateStore> SimpleExecutor for MaterializeExecutor<S> {
 #[cfg(test)]
 mod tests {
 
-    use itertools::Itertools;
     use risingwave_common::array::{I32Array, Op};
-    use risingwave_common::catalog::{ColumnId, Schema, TableId};
+    use risingwave_common::catalog::{Field, Schema, TableId};
     use risingwave_common::column_nonnull;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
-    use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::DataType;
-    use risingwave_pb::plan::ColumnDesc;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::monitor::DEFAULT_STATE_STORE_STATS;
-    use risingwave_storage::{Keyspace, StateStoreImpl};
+    use risingwave_storage::Keyspace;
 
     use crate::executor::test_utils::*;
     use crate::executor::*;
@@ -202,36 +197,13 @@ mod tests {
     async fn test_materialize_executor() {
         // Prepare storage and memtable.
         let memory_state_store = MemoryStateStore::new();
-        let _state_store_impl = StateStoreImpl::MemoryStateStore(
-            memory_state_store
-                .clone()
-                .monitored(DEFAULT_STATE_STORE_STATS.clone()),
-        );
-        // let store_mgr = Arc::new(SimpleTableManager::new(store.clone()));
         let table_id = TableId::new(1);
         // Two columns of int32 type, the first column is PK.
-        let columns = vec![
-            ColumnDesc {
-                column_type: Some(DataType {
-                    type_name: TypeName::Int32 as i32,
-                    ..Default::default()
-                }),
-                name: "v1".to_string(),
-                column_id: 0,
-            },
-            ColumnDesc {
-                column_type: Some(DataType {
-                    type_name: TypeName::Int32 as i32,
-                    ..Default::default()
-                }),
-                name: "v2".to_string(),
-                column_id: 1,
-            },
-        ];
-        let column_ids = columns
-            .iter()
-            .map(|c| ColumnId::from(c.column_id))
-            .collect_vec();
+        let schema = Schema::new(vec![
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Int32),
+        ]);
+        let column_ids = vec![0.into(), 1.into()];
 
         // Prepare source chunks.
         let chunk1 = StreamChunk::new(
@@ -252,7 +224,6 @@ mod tests {
         );
 
         // Prepare stream executors.
-        let schema = Schema::try_from(&columns).unwrap();
         let source = MockSource::with_messages(
             schema.clone(),
             PkIndices::new(),
@@ -264,7 +235,7 @@ mod tests {
             ],
         );
 
-        let keyspace = Keyspace::table_root(memory_state_store, &table_id);
+        let keyspace = Keyspace::table_root(memory_state_store.clone(), &table_id);
 
         let mut materialize_executor = Box::new(MaterializeExecutor::new(
             Box::new(source),
@@ -280,6 +251,17 @@ mod tests {
         // First stream chunk. We check the existence of (3) -> (3,6)
         match materialize_executor.next().await.unwrap() {
             Message::Barrier(_) => {
+                // Simply assert there is 3 rows (6 elements) in state store instead of doing full
+                // comparison
+                assert_eq!(
+                    memory_state_store
+                        .scan::<_, Vec<u8>>(.., None, u64::MAX)
+                        .await
+                        .unwrap()
+                        .len(),
+                    6
+                );
+
                 // FIXME: restore this test by using new `RowTable` interface
                 // let datum = table
                 //     .get(Row(vec![Some(3_i32.into())]), 1, u64::MAX)
@@ -295,6 +277,17 @@ mod tests {
         // Second stream chunk. We check the existence of (7) -> (7,8)
         match materialize_executor.next().await.unwrap() {
             Message::Barrier(_) => {
+                // Simply assert there is  3 +1 -1 = 3 rows (6 element) in state store instead of
+                // doing full comparison
+                assert_eq!(
+                    memory_state_store
+                        .scan::<_, Vec<u8>>(.., None, u64::MAX)
+                        .await
+                        .unwrap()
+                        .len(),
+                    6
+                );
+
                 // FIXME: restore this test by using new `RowTable` interface
                 // let datum = table
                 //     .get(Row(vec![Some(7_i32.into())]), 1, u64::MAX)

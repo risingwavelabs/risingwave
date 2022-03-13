@@ -5,9 +5,9 @@ use memcomparable::from_slice;
 
 use super::OrderedDatum::{NormalOrder, ReversedOrder};
 use super::OrderedRow;
-use crate::array::{ArrayImpl, Row, RwError};
+use crate::array::{ArrayImpl, Row, RowRef};
 use crate::catalog::ColumnId;
-use crate::error::{ErrorCode, Result};
+use crate::error::{ErrorCode, Result, RwError};
 use crate::types::{
     deserialize_datum_from, serialize_datum_into, serialize_datum_ref_into, DataType, Datum,
     Decimal, ScalarImpl,
@@ -68,6 +68,15 @@ impl OrderedRowSerializer {
             append_to.extend(serializer.into_inner());
         }
     }
+
+    pub fn serialize_row_ref(&self, row: &RowRef<'_>, append_to: &mut Vec<u8>) {
+        for (datum, order_type) in row.0.iter().zip_eq(self.order_types.iter()) {
+            let mut serializer = memcomparable::Serializer::new(vec![]);
+            serializer.set_reverse(*order_type == OrderType::Descending);
+            serialize_datum_ref_into(datum, &mut serializer).unwrap();
+            append_to.extend(serializer.into_inner());
+        }
+    }
 }
 
 /// Deserializer of the `Row`.
@@ -105,6 +114,9 @@ impl OrderedRowDeserializer {
 type KeyBytes = Vec<u8>;
 type ValueBytes = Vec<u8>;
 
+/// Serialize a row of data using cell-based serialization, and return corresponding vector of key
+/// and value. If all data of this row are null, there will be one cell of column id `-1` to
+/// represent a row of all null values.
 pub fn serialize_pk_and_row(
     pk_buf: &[u8],
     row: &Option<Row>,

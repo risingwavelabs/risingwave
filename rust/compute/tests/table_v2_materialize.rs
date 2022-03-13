@@ -4,10 +4,10 @@ use itertools::Itertools;
 use risingwave_batch::executor::{
     CreateTableExecutor, Executor as BatchExecutor, InsertExecutor, RowSeqScanExecutor,
 };
-use risingwave_common::array::{Array, DataChunk, F64Array, RwError};
+use risingwave_common::array::{Array, DataChunk, F64Array};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
 use risingwave_common::column_nonnull;
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::IntoOrdered;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_pb::data::data_type::TypeName;
@@ -16,12 +16,12 @@ use risingwave_pb::plan::create_table_node::Info;
 use risingwave_pb::plan::ColumnDesc as ProstColumnDesc;
 use risingwave_source::{MemSourceManager, SourceManager};
 use risingwave_storage::memory::MemoryStateStore;
-use risingwave_storage::monitor::DEFAULT_STATE_STORE_STATS;
+use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::table::mview::MViewTable;
 use risingwave_storage::{Keyspace, StateStore, StateStoreImpl};
 use risingwave_stream::executor::{
     Barrier, Epoch, Executor as StreamExecutor, MaterializeExecutor, Message, PkIndices,
-    SourceExecutor,
+    SourceExecutor, StreamingMetrics,
 };
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -72,7 +72,7 @@ async fn test_table_v2_materialize() -> Result<()> {
     let _state_store_impl = StateStoreImpl::MemoryStateStore(
         memory_state_store
             .clone()
-            .monitored(DEFAULT_STATE_STORE_STATS.clone()),
+            .monitored(Arc::new(StateStoreMetrics::unused())),
     );
     let source_manager = Arc::new(MemSourceManager::new());
     let source_table_id = TableId::default();
@@ -139,6 +139,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         1,
         1,
         "SourceExecutor".to_string(),
+        Arc::new(StreamingMetrics::unused()),
     )?;
 
     // Create a `Materialize` to write the changes to storage

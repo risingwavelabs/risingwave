@@ -3,9 +3,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use risingwave_common::catalog::{CatalogId, DatabaseId, SchemaId, TableId};
-use risingwave_common::error::ErrorCode::CatalogError;
-use risingwave_common::error::Result;
+use risingwave_common::catalog::{CatalogVersion, DatabaseId, SchemaId, TableId};
+use risingwave_common::error::ErrorCode::{CatalogError, InternalError};
+use risingwave_common::error::{Result, RwError};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table::Info as TableInfo;
 use risingwave_pb::meta::{Catalog, Database, Schema, Table};
@@ -13,7 +13,7 @@ use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
 use tokio::sync::Mutex;
 
 use super::{NotificationManagerRef, NotificationTarget};
-use crate::model::MetadataModel;
+use crate::model::{CatalogVersionGenerator, MetadataModel};
 use crate::storage::MetaStore;
 
 /// [`StoredCatalogManager`] manages meta operations including retrieving catalog info, creating
@@ -34,8 +34,9 @@ where
         let databases = Database::list(&*meta_store_ref).await?;
         let schemas = Schema::list(&*meta_store_ref).await?;
         let tables = Table::list(&*meta_store_ref).await?;
+        let version = CatalogVersionGenerator::new(&*meta_store_ref).await?;
 
-        let core = Mutex::new(CatalogManagerCore::new(databases, schemas, tables));
+        let core = Mutex::new(CatalogManagerCore::new(databases, schemas, tables, version));
         Ok(Self {
             core,
             meta_store_ref,
@@ -48,10 +49,13 @@ where
         core.get_catalog()
     }
 
-    pub async fn create_database(&self, database: Database) -> Result<Option<CatalogId>> {
+    pub async fn create_database(&self, mut database: Database) -> Result<CatalogVersion> {
         let mut core = self.core.lock().await;
         let database_id = DatabaseId::from(&database.database_ref_id);
         if !core.has_database(&database_id) {
+            let version = core.new_version_id(&*self.meta_store_ref).await?;
+            database.version = version;
+
             database.insert(&*self.meta_store_ref).await?;
             core.add_database(database.clone());
 
@@ -65,21 +69,22 @@ where
                 .await?;
             // TODO(Zehua) Error handling of `notify` method.
 
-            Ok(Some(CatalogId::DatabaseId(database_id)))
+            Ok(version)
         } else {
-            Ok(None)
+            Err(RwError::from(InternalError(
+                "database already exists".to_string(),
+            )))
         }
     }
 
-    pub async fn delete_database(
-        &self,
-        database_ref_id: &DatabaseRefId,
-    ) -> Result<Option<CatalogId>> {
+    pub async fn delete_database(&self, database_ref_id: &DatabaseRefId) -> Result<CatalogVersion> {
         let mut core = self.core.lock().await;
         let database_id = DatabaseId::from(&Some(database_ref_id.clone()));
         if core.has_database(&database_id) {
             Database::delete(&*self.meta_store_ref, database_ref_id).await?;
-            let database = core.delete_database(&database_id).unwrap();
+            let version = core.new_version_id(&*self.meta_store_ref).await?;
+            let mut database = core.delete_database(&database_id).unwrap();
+            database.version = version;
 
             // Notify frontends to delete database.
             self.nm
@@ -91,16 +96,21 @@ where
                 .await?;
             // TODO(Zehua) Error handling of `notify` method.
 
-            Ok(Some(CatalogId::DatabaseId(database_id)))
+            Ok(version)
         } else {
-            Ok(None)
+            Err(RwError::from(InternalError(
+                "database doesn't exist".to_string(),
+            )))
         }
     }
 
-    pub async fn create_schema(&self, schema: Schema) -> Result<Option<CatalogId>> {
+    pub async fn create_schema(&self, mut schema: Schema) -> Result<CatalogVersion> {
         let mut core = self.core.lock().await;
         let schema_id = SchemaId::from(&schema.schema_ref_id);
         if !core.has_schema(&schema_id) {
+            let version = core.new_version_id(&*self.meta_store_ref).await?;
+            schema.version = version;
+
             schema.insert(&*self.meta_store_ref).await?;
             core.add_schema(schema.clone());
 
@@ -114,18 +124,23 @@ where
                 .await?;
             // TODO(Zehua) Error handling of `notify` method.
 
-            Ok(Some(CatalogId::SchemaId(schema_id)))
+            Ok(version)
         } else {
-            Ok(None)
+            Err(RwError::from(InternalError(
+                "schema already exists".to_string(),
+            )))
         }
     }
 
-    pub async fn delete_schema(&self, schema_ref_id: &SchemaRefId) -> Result<Option<CatalogId>> {
+    pub async fn delete_schema(&self, schema_ref_id: &SchemaRefId) -> Result<CatalogVersion> {
         let mut core = self.core.lock().await;
         let schema_id = SchemaId::from(&Some(schema_ref_id.clone()));
         if core.has_schema(&schema_id) {
             Schema::delete(&*self.meta_store_ref, schema_ref_id).await?;
-            let schema = core.delete_schema(&schema_id).unwrap();
+            let version = core.new_version_id(&*self.meta_store_ref).await?;
+
+            let mut schema = core.delete_schema(&schema_id).unwrap();
+            schema.version = version;
 
             // Notify frontends to delete schema.
             self.nm
@@ -137,16 +152,21 @@ where
                 .await?;
             // TODO(Zehua) Error handling of `notify` method.
 
-            Ok(Some(CatalogId::SchemaId(schema_id)))
+            Ok(version)
         } else {
-            Ok(None)
+            Err(RwError::from(InternalError(
+                "schema doesn't exist".to_string(),
+            )))
         }
     }
 
-    pub async fn create_table(&self, table: Table) -> Result<Option<CatalogId>> {
+    pub async fn create_table(&self, mut table: Table) -> Result<CatalogVersion> {
         let mut core = self.core.lock().await;
         let table_id = TableId::from(&table.table_ref_id);
         if !core.has_table(&table_id) {
+            let version = core.new_version_id(&*self.meta_store_ref).await?;
+            table.version = version;
+
             table.insert(&*self.meta_store_ref).await?;
             core.add_table(table.clone());
 
@@ -167,13 +187,15 @@ where
                 .await?;
             // TODO(Zehua) Error handling of `notify` method.
 
-            Ok(Some(CatalogId::TableId(table_id)))
+            Ok(version)
         } else {
-            Ok(None)
+            Err(RwError::from(InternalError(
+                "table already exists".to_string(),
+            )))
         }
     }
 
-    pub async fn delete_table(&self, table_ref_id: &TableRefId) -> Result<Option<CatalogId>> {
+    pub async fn delete_table(&self, table_ref_id: &TableRefId) -> Result<CatalogVersion> {
         let mut core = self.core.lock().await;
         let table_id = TableId::from(&Some(table_ref_id.clone()));
         if core.has_table(&table_id) {
@@ -189,7 +211,9 @@ where
                 .into()),
                 None => {
                     Table::delete(&*self.meta_store_ref, table_ref_id).await?;
-                    let table = core.delete_table(&table_id).unwrap();
+                    let version = core.new_version_id(&*self.meta_store_ref).await?;
+
+                    let mut table = core.delete_table(&table_id).unwrap();
                     let dependent_tables: Vec<TableId> = if let TableInfo::MaterializedView(
                         mview_info,
                     ) = table.get_info().unwrap()
@@ -206,6 +230,7 @@ where
                     for dependent_table_id in dependent_tables {
                         core.decrease_ref_count(dependent_table_id);
                     }
+                    table.version = version;
 
                     // Notify frontends to delete table.
                     self.nm
@@ -217,11 +242,13 @@ where
                         .await?;
                     // TODO(Zehua) Error handling of `notify` method.
 
-                    Ok(Some(CatalogId::TableId(table_id)))
+                    Ok(version)
                 }
             }
         } else {
-            Ok(None)
+            Err(RwError::from(InternalError(
+                "table doesn't exist".to_string(),
+            )))
         }
     }
 }
@@ -233,10 +260,16 @@ struct CatalogManagerCore {
     schemas: HashMap<SchemaId, Schema>,
     tables: HashMap<TableId, Table>,
     table_ref_count: HashMap<TableId, usize>,
+    catalog_version: CatalogVersionGenerator,
 }
 
 impl CatalogManagerCore {
-    fn new(databases: Vec<Database>, schemas: Vec<Schema>, tables: Vec<Table>) -> Self {
+    fn new(
+        databases: Vec<Database>,
+        schemas: Vec<Schema>,
+        tables: Vec<Table>,
+        catalog_version: CatalogVersionGenerator,
+    ) -> Self {
         let mut table_ref_count = HashMap::new();
         let databases = HashMap::from_iter(
             databases
@@ -264,11 +297,22 @@ impl CatalogManagerCore {
             schemas,
             tables,
             table_ref_count,
+            catalog_version,
         }
+    }
+
+    async fn new_version_id<S>(&mut self, store: &S) -> Result<CatalogVersion>
+    where
+        S: MetaStore,
+    {
+        let version = self.catalog_version.next();
+        self.catalog_version.insert(store).await?;
+        Ok(version)
     }
 
     fn get_catalog(&self) -> Catalog {
         Catalog {
+            version: self.catalog_version.version(),
             databases: self.databases.values().cloned().collect(),
             schemas: self.schemas.values().cloned().collect(),
             tables: self.tables.values().cloned().collect(),

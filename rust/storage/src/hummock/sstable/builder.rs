@@ -228,14 +228,14 @@ impl SSTableBuilder {
     /// Returns true if we roughly reached capacity
     pub fn reach_capacity(&self) -> bool {
         let block_size = self.data_buf.len() as u32 + // actual length of current buffer
-                                 self.entry_offsets.len() as u32 * 4 + // all entry offsets size
-                                 4 + // count of all entry offsets
-                                 8 + // checksum bytes
-                                 4; // checksum length
+            self.entry_offsets.len() as u32 * 4 + // all entry offsets size
+            4 + // count of all entry offsets
+            8 + // checksum bytes
+            4; // checksum length
 
         let estimated_size = block_size +
-                                  4 + // index length
-                                  5 * self.meta.block_metas.len() as u32; // TODO: why 5?
+            4 + // index length
+            5 * self.meta.block_metas.len() as u32; // TODO: why 5?
         estimated_size as u32 > self.options.table_capacity
     }
 
