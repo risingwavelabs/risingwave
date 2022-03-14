@@ -21,40 +21,30 @@ impl DatabaseCatalog {
         }
     }
 
-    pub fn create_schema_with_id(&mut self, schema_name: &str, schema_id: SchemaId) -> Result<()> {
+    pub fn create_schema_with_id(&mut self, schema_name: &str, schema_id: SchemaId) {
         self.schema_by_name
             .try_insert(
                 schema_name.to_string(),
                 SchemaCatalog::new(schema_id, schema_name.to_string()),
             )
-            .map(|_val| ())
-            .map_err(|_| CatalogError::Duplicated("schema", schema_name.to_string()))?;
+            .unwrap();
         self.schema_name_by_id
             .try_insert(schema_id, schema_name.to_string())
-            .map(|_val| ())
-            .map_err(|_| CatalogError::Duplicated("schema id", schema_id.to_string()).into())
+            .unwrap();
     }
 
-    pub fn drop_schema(&mut self, schema_name: &str) -> Result<()> {
-        let schema = self.schema_by_name.remove(schema_name).ok_or_else(|| {
-            RwError::from(CatalogError::NotFound("schema", schema_name.to_string()))
-        })?;
-        self.schema_name_by_id.remove(&schema.id()).ok_or_else(|| {
-            RwError::from(CatalogError::NotFound("schema id", schema.id().to_string()))
-        })?;
-        Ok(())
+    pub fn drop_schema(&mut self, schema_id: SchemaId) {
+        let name = self.schema_name_by_id.remove(&schema_id).unwrap();
+        self.schema_by_name.remove(&name).unwrap();
     }
 
-    pub fn get_schema(&self, schema: &str) -> Option<&SchemaCatalog> {
-        self.schema_by_name.get(schema)
+    pub fn get_schema_by_name(&self, name: &str) -> Option<&SchemaCatalog> {
+        self.schema_by_name.get(name)
     }
 
-    pub fn get_schema_mut(&mut self, schema: &str) -> Option<&mut SchemaCatalog> {
-        self.schema_by_name.get_mut(schema)
-    }
-
-    pub fn get_schema_name(&self, schema_id: SchemaId) -> Option<String> {
-        self.schema_name_by_id.get(&schema_id).cloned()
+    pub fn get_schema_mut(&mut self, schema_id: SchemaId) -> Option<&mut SchemaCatalog> {
+        let name = self.schema_name_by_id.get(&schema_id).unwrap();
+        self.schema_by_name.get_mut(name)
     }
 
     pub fn id(&self) -> u64 {
