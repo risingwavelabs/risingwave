@@ -217,18 +217,10 @@ message GenerateInt32SeriesNode {
   int32 step = 3;
 }
 
-message QueryId {
-  string trace_id = 1;
-}
-
-message StageId {
-  QueryId query_id = 1;
-  uint32 stage_id = 2;
-}
-
 message TaskId {
-  StageId stage_id = 1;
-  uint32 task_id = 2;
+  string query_id = 1;
+  uint32 stage_id = 2;
+  uint32 task_id = 3;
 }
 
 message TaskSinkId {
