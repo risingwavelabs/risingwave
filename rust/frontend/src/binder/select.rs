@@ -6,7 +6,7 @@ use risingwave_sqlparser::ast::{Select, SelectItem};
 
 use super::bind_context::Clause;
 use crate::binder::{Binder, TableRef};
-use crate::expr::{Expr, ExprImpl};
+use crate::expr::{Expr, ExprImpl, InputRef};
 
 #[derive(Debug)]
 pub struct BoundSelect {
@@ -48,6 +48,7 @@ impl Binder {
             selection,
         })
     }
+
     pub fn bind_project(&mut self, select_items: Vec<SelectItem>) -> Result<Vec<ExprImpl>> {
         let mut select_list = vec![];
         for item in select_items {
@@ -64,5 +65,15 @@ impl Binder {
             }
         }
         Ok(select_list)
+    }
+
+    pub fn bind_all_columns(&mut self) -> Result<Vec<ExprImpl>> {
+        let bound_columns = self
+            .context
+            .columns
+            .iter()
+            .map(|column| InputRef::new(column.index, column.data_type.clone()).into())
+            .collect();
+        Ok(bound_columns)
     }
 }
