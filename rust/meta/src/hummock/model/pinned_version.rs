@@ -1,20 +1,19 @@
 use prost::Message;
-use risingwave_pb::hummock::{HummockContextPinnedVersion, HummockContextRefId};
+use risingwave_pb::hummock::{HummockContextRefId, HummockPinnedVersion};
 use risingwave_storage::hummock::HummockVersionId;
 
 use crate::model::{MetadataModel, Transactional};
-use crate::storage::Transaction;
 
-/// Column family name for hummock context pinned version
-/// `cf(hummock_context_pinned_version)`: `HummockContextRefId` -> `HummockContextPinnedVersion`
-const HUMMOCK_CONTEXT_PINNED_VERSION_CF_NAME: &str = "cf/hummock_context_pinned_version";
+/// Column family name for hummock pinned version
+/// `cf(hummock_pinned_version)`: `HummockContextRefId` -> `HummockPinnedVersion`
+const HUMMOCK_PINNED_VERSION_CF_NAME: &str = "cf/hummock_pinned_version";
 
-impl MetadataModel for HummockContextPinnedVersion {
-    type ProstType = HummockContextPinnedVersion;
+impl MetadataModel for HummockPinnedVersion {
+    type ProstType = HummockPinnedVersion;
     type KeyType = HummockContextRefId;
 
     fn cf_name() -> String {
-        String::from(HUMMOCK_CONTEXT_PINNED_VERSION_CF_NAME)
+        String::from(HUMMOCK_PINNED_VERSION_CF_NAME)
     }
 
     fn to_protobuf(&self) -> Self::ProstType {
@@ -36,13 +35,12 @@ impl MetadataModel for HummockContextPinnedVersion {
     }
 }
 
-pub trait HummockContextPinnedVersionExt {
+pub trait HummockPinnedVersionExt {
     fn pin_version(&mut self, version_id: HummockVersionId);
     fn unpin_version(&mut self, version_id: HummockVersionId);
-    fn update_in_transaction(&self, trx: &mut Transaction) -> risingwave_common::error::Result<()>;
 }
 
-impl HummockContextPinnedVersionExt for HummockContextPinnedVersion {
+impl HummockPinnedVersionExt for HummockPinnedVersion {
     fn pin_version(&mut self, version_id: HummockVersionId) {
         let found = self.version_id.iter().position(|&v| v == version_id);
         if found.is_none() {
@@ -56,20 +54,6 @@ impl HummockContextPinnedVersionExt for HummockContextPinnedVersion {
             self.version_id.remove(pos);
         }
     }
-
-    fn update_in_transaction(&self, trx: &mut Transaction) -> risingwave_common::error::Result<()> {
-        if self.version_id.is_empty() {
-            HummockContextPinnedVersion::delete_in_transaction(
-                HummockContextRefId {
-                    id: self.context_id,
-                },
-                trx,
-            )?;
-        } else {
-            self.upsert_in_transaction(trx)?;
-        }
-        Ok(())
-    }
 }
 
-impl Transactional for HummockContextPinnedVersion {}
+impl Transactional for HummockPinnedVersion {}
