@@ -1,6 +1,5 @@
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
-use risingwave_common::types::DataType;
 
 use crate::binder::BoundSelect;
 use crate::expr::ExprImpl;
@@ -22,12 +21,13 @@ impl Planner {
     }
 
     /// Helper to create a dummy node as child of LogicalProject.
-    /// For example, `select 1+2, 3*4` will be `Project([1+2, 3+4]) - Values([[0]])`.
+    /// For example, `select 1+2, 3*4` will be `Project([1+2, 3+4]) - Values([[]])`.
     fn create_dummy_values(&self) -> Result<PlanRef> {
-        let rows = vec![vec![ExprImpl::literal_int(0)]];
-        let fields = vec![Field::with_name(DataType::Int32, "_dummy")];
-        let schema = Schema::new(fields);
-        Ok(LogicalValues::create(rows, schema, self.ctx.clone()))
+        Ok(LogicalValues::create(
+            vec![vec![]],
+            Schema::default(),
+            self.ctx.clone(),
+        ))
     }
 
     fn plan_project(&mut self, input: PlanRef, project: Vec<ExprImpl>) -> Result<PlanRef> {
