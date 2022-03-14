@@ -99,6 +99,10 @@ message InsertNode {
   repeated int32 column_ids = 2;
 }
 
+message DeleteNode {
+  TableRefId table_source_ref_id = 1;
+}
+
 message ValuesNode {
   message ExprTuple {
     repeated expr.ExprNode cells = 1;
@@ -248,6 +252,7 @@ message PlanNode {
   repeated PlanNode children = 1;
   oneof node_body {
     InsertNode insert = 2;
+    DeleteNode delete = 3;
     ProjectNode project = 4;
     CreateTableNode create_table = 5;
     DropTableNode drop_table = 6;

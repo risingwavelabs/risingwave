@@ -32,10 +32,21 @@ pub enum ExprImpl {
 }
 
 impl ExprImpl {
-    /// A constant boolean value.
-    pub fn literal_bool<const V: bool>() -> Self {
+    /// A literal int value.
+    #[inline(always)]
+    #[allow(dead_code)]
+    pub fn literal_int(v: i32) -> Self {
         Self::Literal(Box::new(Literal::new(
-            Some(V.to_scalar_value()),
+            Some(v.to_scalar_value()),
+            DataType::Int32,
+        )))
+    }
+
+    /// A literal boolean value.
+    #[inline(always)]
+    pub fn literal_bool(v: bool) -> Self {
+        Self::Literal(Box::new(Literal::new(
+            Some(v.to_scalar_value()),
             DataType::Boolean,
         )))
     }

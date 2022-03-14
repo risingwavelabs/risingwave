@@ -16,7 +16,7 @@ struct TableSourceV2Core {
     ///
     /// When a `StreamReader` is created, a channel will be created and the sender will be
     /// saved here. The insert statement will take one channel randomly.
-    changes_txs: Vec<mpsc::UnboundedSender<(StreamChunk, oneshot::Sender<()>)>>,
+    changes_txs: Vec<mpsc::UnboundedSender<(StreamChunk, oneshot::Sender<usize>)>>,
 }
 
 /// [`TableSourceV2`] is a special internal source to handle table updates from user,
@@ -59,7 +59,10 @@ impl TableSourceV2 {
 
     /// Asynchronously write stream chunk into table. Changes writen here will be simply passed to
     /// the associated streaming task via channel, and then be materialized to storage there.
-    pub fn write_chunk(&self, chunk: StreamChunk) -> Result<oneshot::Receiver<()>> {
+    ///
+    /// Returns an oneshot channel which will be notified when the chunk is taken by some reader,
+    /// and the `usize` represents the cardinality of this chunk.
+    pub fn write_chunk(&self, chunk: StreamChunk) -> Result<oneshot::Receiver<usize>> {
         let tx = {
             let core = self.core.read().unwrap();
             core.changes_txs
@@ -77,10 +80,12 @@ impl TableSourceV2 {
 
     /// Write stream chunk into table using `write_chunk`, and then block until a reader consumes
     /// the chunk.
-    pub async fn blocking_write_chunk(&self, chunk: StreamChunk) -> Result<()> {
+    ///
+    /// Returns the cardinality of this chunk.
+    pub async fn blocking_write_chunk(&self, chunk: StreamChunk) -> Result<usize> {
         let rx = self.write_chunk(chunk)?;
-        rx.await.unwrap();
-        Ok(())
+        let written_cardinality = rx.await.unwrap();
+        Ok(written_cardinality)
     }
 }
 
@@ -113,9 +118,8 @@ impl BatchSourceReader for TableV2BatchReader {
 /// structure of "`MView` on `MView`".
 #[derive(Debug)]
 pub struct TableV2StreamReader {
-    /// The receiver of the changes channel. This field is `Some` only if the reader has been
-    /// `open`ed.
-    rx: mpsc::UnboundedReceiver<(StreamChunk, oneshot::Sender<()>)>,
+    /// The receiver of the changes channel.
+    rx: mpsc::UnboundedReceiver<(StreamChunk, oneshot::Sender<usize>)>,
 
     /// Mappings from the source column to the column to be read.
     column_indices: Vec<usize>,
@@ -146,7 +150,9 @@ impl StreamSourceReader for TableV2StreamReader {
             .collect();
         let chunk = StreamChunk::new(ops, selected_columns, bitmap);
 
-        notifier.send(()).ok();
+        // Notify about that we've taken the chunk.
+        notifier.send(chunk.cardinality()).ok();
+
         Ok(chunk)
     }
 }

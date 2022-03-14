@@ -51,7 +51,7 @@ public class RwLogicalAggregate extends Aggregate implements RisingWaveLogicalRe
         .allMatch(
             (agg) -> {
               var kind = agg.getAggregation().getKind();
-              return kind == SqlKind.SUM || kind == SqlKind.COUNT;
+              return kind == SqlKind.SUM || kind == SqlKind.COUNT || kind == SqlKind.SINGLE_VALUE;
             });
   }
 

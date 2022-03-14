@@ -62,6 +62,10 @@ impl LogicalScan {
         f.field("table", &self.table_name)
             .field("columns", &columns);
     }
+
+    pub fn table_id(&self) -> u32 {
+        self.table_id.table_id
+    }
 }
 
 impl_plan_tree_node_for_leaf! {LogicalScan}

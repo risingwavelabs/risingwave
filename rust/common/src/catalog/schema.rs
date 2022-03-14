@@ -1,6 +1,7 @@
 use std::ops::Index;
 
-use risingwave_pb::plan::Field as ProstField;
+#[allow(unused_imports)]
+use risingwave_pb::plan::{ColumnDesc, ExchangeInfo, Field as ProstField};
 
 use crate::array::ArrayBuilderImpl;
 use crate::error::Result;
@@ -16,6 +17,15 @@ pub struct Field {
 impl std::fmt::Debug for Field {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}:{:?}", self.name, self.data_type)
+    }
+}
+
+impl Field {
+    pub fn to_prost(&self) -> Result<ProstField> {
+        Ok(ProstField {
+            data_type: Some(self.data_type.to_protobuf()?),
+            name: self.name.to_string(),
+        })
     }
 }
 
@@ -93,5 +103,46 @@ impl Index<usize> for Schema {
 
     fn index(&self, index: usize) -> &Self::Output {
         &self.fields[index]
+    }
+}
+
+#[allow(unused)]
+pub mod test_utils {
+    use super::*;
+
+    fn field_n<const N: usize>(data_type: DataType) -> Schema {
+        Schema::new(vec![Field::unnamed(data_type); N])
+    }
+
+    fn int32_n<const N: usize>() -> Schema {
+        field_n::<N>(DataType::Int32)
+    }
+
+    /// Create a util schema **for test only** with two int32 fields.
+    pub fn ii() -> Schema {
+        int32_n::<2>()
+    }
+
+    /// Create a util schema **for test only** with three int32 fields.
+    pub fn iii() -> Schema {
+        int32_n::<3>()
+    }
+
+    fn varchar_n<const N: usize>() -> Schema {
+        field_n::<N>(DataType::Varchar)
+    }
+
+    /// Create a util schema **for test only** with three varchar fields.
+    pub fn sss() -> Schema {
+        varchar_n::<3>()
+    }
+
+    fn decimal_n<const N: usize>() -> Schema {
+        field_n::<N>(DataType::Decimal)
+    }
+
+    /// Create a util schema **for test only** with three decimal fields.
+    pub fn ddd() -> Schema {
+        decimal_n::<3>()
     }
 }

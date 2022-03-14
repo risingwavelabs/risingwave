@@ -208,19 +208,20 @@ mod tests {
     use assert_matches::assert_matches;
     use itertools::Itertools;
     use risingwave_common::array::{I64Array, Op, Row, StreamChunk};
+    use risingwave_common::catalog::schema_test_utils;
     use risingwave_common::column_nonnull;
     use risingwave_common::error::Result;
     use risingwave_common::expr::AggKind;
     use risingwave_common::types::DataType;
 
     use super::LocalSimpleAggExecutor;
-    use crate::executor::test_utils::{schemas, MockSource};
+    use crate::executor::test_utils::MockSource;
     use crate::executor::{AggArgs, AggCall, Executor, Message};
     use crate::row_nonnull;
 
     #[tokio::test]
     async fn test_no_chunk() -> Result<()> {
-        let schema = schemas::iii();
+        let schema = schema_test_utils::ii();
         let mut source = MockSource::new(schema, vec![2]);
         source.push_barrier(1, false);
         source.push_barrier(2, false);
@@ -269,7 +270,7 @@ mod tests {
             ],
             Some((vec![true, false, true, true]).try_into().unwrap()),
         );
-        let schema = schemas::iii();
+        let schema = schema_test_utils::iii();
 
         let mut source = MockSource::new(schema, vec![2]); // pk\
         source.push_barrier(1, false);
