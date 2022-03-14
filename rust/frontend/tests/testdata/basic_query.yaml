@@ -96,5 +96,10 @@
     create table t2 (v1 int, v2 int);
     create table t3 (v1 int, v2 int);
     select * from t1 join t2 on (t1.v1 = t2.v1) join t3 on (t2.v2 = t3.v2);
-  planner_error: |
-    Feature is not yet implemented: join plan not implemented, JoinRef { left: Join(JoinRef { left: BaseTable(BaseTableRef { name: "t1", table_id: TableId { table_id: 0 }, columns: [ColumnCatalog { id: ColumnId(0), name: "_row_id", desc: ColumnDesc { data_type: Int64 } }, ColumnCatalog { id: ColumnId(1), name: "v1", desc: ColumnDesc { data_type: Int32 } }, ColumnCatalog { id: ColumnId(2), name: "v2", desc: ColumnDesc { data_type: Int32 } }] }), right: BaseTable(BaseTableRef { name: "t2", table_id: TableId { table_id: 1 }, columns: [ColumnCatalog { id: ColumnId(0), name: "_row_id", desc: ColumnDesc { data_type: Int64 } }, ColumnCatalog { id: ColumnId(1), name: "v1", desc: ColumnDesc { data_type: Int32 } }, ColumnCatalog { id: ColumnId(2), name: "v2", desc: ColumnDesc { data_type: Int32 } }] }), cond: Some(Equal($1, $4)) }), right: BaseTable(BaseTableRef { name: "t3", table_id: TableId { table_id: 2 }, columns: [ColumnCatalog { id: ColumnId(0), name: "_row_id", desc: ColumnDesc { data_type: Int64 } }, ColumnCatalog { id: ColumnId(1), name: "v1", desc: ColumnDesc { data_type: Int32 } }, ColumnCatalog { id: ColumnId(2), name: "v2", desc: ColumnDesc { data_type: Int32 } }] }), cond: Some(Equal($5, $8)) }
+  plan: |
+    LogicalProject { exprs: [$0, $1, $2, $3, $4, $5, $6, $7, $8], expr_alias: [None, None, None, None, None, None, None, None, None] }
+      LogicalJoin { type: Inner, on: Condition { conjunctions: [Equal($5, $8)] } }
+        LogicalJoin { type: Inner, on: Condition { conjunctions: [Equal($1, $4)] } }
+          LogicalScan { table: "t1", columns: ["_row_id", "v1", "v2"] }
+          LogicalScan { table: "t2", columns: ["_row_id", "v1", "v2"] }
+        LogicalScan { table: "t3", columns: ["_row_id", "v1", "v2"] }

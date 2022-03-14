@@ -111,7 +111,10 @@ impl StateStoreImpl {
                 StateStoreImpl::HummockStateStore(inner.monitored(stats))
             }
 
-            "in_memory" | "in-memory" => StateStoreImpl::shared_in_memory_store(stats.clone()),
+            "in_memory" | "in-memory" => {
+                tracing::warn!("in-memory state backend should never be used in benchmarks and production environment.");
+                StateStoreImpl::shared_in_memory_store(stats.clone())
+            }
 
             tikv if tikv.starts_with("tikv") => {
                 let inner =
