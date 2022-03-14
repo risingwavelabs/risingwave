@@ -136,7 +136,7 @@ impl FrontendConfig {
 
 mod default {
     pub fn heartbeat_interval() -> u32 {
-        100
+        1000
     }
 
     pub fn chunk_size() -> u32 {
