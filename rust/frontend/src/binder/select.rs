@@ -4,7 +4,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Expr, Select, SelectItem};
 
-use super::bind_context::Clause;
+use super::bind_context::{Clause, ColumnBinding};
 use crate::binder::{Binder, TableRef};
 use crate::expr::{Expr as _, ExprImpl, InputRef};
 
@@ -73,9 +73,17 @@ impl Binder {
                     select_list.push(expr);
                     aliases.push(Some(alias.value));
                 }
-                SelectItem::QualifiedWildcard(_) => todo!(),
+                SelectItem::QualifiedWildcard(obj_name) => {
+                    let table_name = &obj_name.0.last().unwrap().value;
+                    let (begin, end) = self.context.range_of.get(table_name).ok_or_else(|| {
+                        ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name))
+                    })?;
+                    let (exprs, names) = Self::bind_columns(&self.context.columns[*begin..*end])?;
+                    select_list.extend(exprs);
+                    aliases.extend(names);
+                }
                 SelectItem::Wildcard => {
-                    let (exprs, names) = self.bind_all_columns()?;
+                    let (exprs, names) = Self::bind_columns(&self.context.columns[..])?;
                     select_list.extend(exprs);
                     aliases.extend(names);
                 }
@@ -84,10 +92,8 @@ impl Binder {
         Ok((select_list, aliases))
     }
 
-    pub fn bind_all_columns(&mut self) -> Result<(Vec<ExprImpl>, Vec<Option<String>>)> {
-        let bound_columns = self
-            .context
-            .columns
+    pub fn bind_columns(columns: &[ColumnBinding]) -> Result<(Vec<ExprImpl>, Vec<Option<String>>)> {
+        let bound_columns = columns
             .iter()
             .map(|column| {
                 (
