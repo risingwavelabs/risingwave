@@ -10,14 +10,16 @@ use crate::catalog::{CatalogError, SchemaId};
 #[derive(Clone, Debug)]
 pub struct SchemaCatalog {
     schema_id: SchemaId,
+    name: String,
     tables: HashMap<TableId, TableCatalog>,
     table_name_to_id: HashMap<String, TableId>,
 }
 
 impl SchemaCatalog {
-    pub fn new(schema_id: SchemaId) -> Self {
+    pub fn new(schema_id: SchemaId, name: String) -> Self {
         Self {
             schema_id,
+            name,
             tables: HashMap::new(),
             table_name_to_id: HashMap::new(),
         }

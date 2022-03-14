@@ -23,7 +23,10 @@ impl DatabaseCatalog {
 
     pub fn create_schema_with_id(&mut self, schema_name: &str, schema_id: SchemaId) -> Result<()> {
         self.schema_by_name
-            .try_insert(schema_name.to_string(), SchemaCatalog::new(schema_id))
+            .try_insert(
+                schema_name.to_string(),
+                SchemaCatalog::new(schema_id, schema_name.to_string()),
+            )
             .map(|_val| ())
             .map_err(|_| CatalogError::Duplicated("schema", schema_name.to_string()))?;
         self.schema_name_by_id
