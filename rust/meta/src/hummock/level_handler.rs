@@ -26,7 +26,9 @@ impl From<&SSTableStat> for risingwave_pb::hummock::SstableStat {
         risingwave_pb::hummock::SstableStat {
             key_range: Some(stat.key_range.clone().into()),
             table_id: stat.table_id,
-            compact_task: stat.compact_task,
+            compact_task: stat
+                .compact_task
+                .map(|it| risingwave_pb::hummock::sstable_stat::CompactTaskId { id: it }),
         }
     }
 }
@@ -36,7 +38,7 @@ impl From<&risingwave_pb::hummock::SstableStat> for SSTableStat {
         SSTableStat {
             key_range: stat.key_range.as_ref().unwrap().into(),
             table_id: stat.table_id,
-            compact_task: stat.compact_task,
+            compact_task: stat.compact_task.as_ref().map(|it| it.id),
         }
     }
 }
@@ -123,6 +125,7 @@ impl From<&LevelHandler> for risingwave_pb::hummock::LevelHandler {
                     .map(|it| KeyRangeTaskId {
                         key_range: Some(it.0.clone().into()),
                         task_id: it.1,
+                        ssts: it.2,
                     })
                     .collect(),
             },
@@ -136,7 +139,7 @@ impl From<&risingwave_pb::hummock::LevelHandler> for LevelHandler {
         let key_ranges = lh
             .key_ranges
             .iter()
-            .map(|it| (it.key_range.as_ref().unwrap().into(), it.task_id))
+            .map(|it| (it.key_range.as_ref().unwrap().into(), it.task_id, it.ssts))
             .collect_vec();
         match lh.level_type() {
             risingwave_pb::hummock::LevelType::Nonoverlapping => {

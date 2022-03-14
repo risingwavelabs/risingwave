@@ -167,13 +167,17 @@ message CompactTask {
 message SstableStat {
   KeyRange key_range = 1;
   uint64 table_id = 2;
-  optional uint64 compact_task = 3;
+  message CompactTaskId {
+    uint64 id = 1;
+  }
+  CompactTaskId compact_task = 3;
 }
 
 message LevelHandler {
   message KeyRangeTaskId {
     KeyRange key_range = 1;
     uint64 task_id = 2;
+    uint64 ssts = 3;
   }
   LevelType level_type = 1;
   repeated SstableStat ssts = 2;
