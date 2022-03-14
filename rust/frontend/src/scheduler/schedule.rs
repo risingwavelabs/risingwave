@@ -167,7 +167,7 @@ impl AugmentedStage {
         Some(risingwave_pb::plan::TaskId {
             task_id: task_id as u32,
             stage_id: stage_id as u32,
-            query_id: query_id,
+            query_id,
         })
     }
 }
