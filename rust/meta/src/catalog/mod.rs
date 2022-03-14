@@ -22,8 +22,8 @@ mod rw_table_source;
 /// `for_all_catalog_table_impl` includes all system catalogs. If you added a new system catalog, be
 /// sure to add a corresponding entry here.
 ///
-/// Every tuple has four elements:
-/// `{table, table id, table name, table schema}`
+/// Every tuple has five elements:
+/// `{table, id, name, schema, list function}`
 macro_rules! for_all_catalog_table_impl {
     ($macro:tt $(, $x:tt)*) => {
         $macro! {
