@@ -1,4 +1,4 @@
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Scalar};
 mod input_ref;
 pub use input_ref::*;
 mod literal;
@@ -21,6 +21,7 @@ pub type ExprType = risingwave_pb::expr::expr_node::Type;
 pub trait Expr: Into<ExprImpl> {
     fn return_type(&self) -> DataType;
 }
+
 #[derive(Clone, PartialEq)]
 pub enum ExprImpl {
     // ColumnRef(Box<BoundColumnRef>), might be used in binder.
@@ -29,6 +30,17 @@ pub enum ExprImpl {
     FunctionCall(Box<FunctionCall>),
     AggCall(Box<AggCall>),
 }
+
+impl ExprImpl {
+    /// A constant boolean value.
+    pub fn literal_bool<const V: bool>() -> Self {
+        Self::Literal(Box::new(Literal::new(
+            Some(V.to_scalar_value()),
+            DataType::Boolean,
+        )))
+    }
+}
+
 impl Expr for ExprImpl {
     fn return_type(&self) -> DataType {
         match self {
@@ -39,21 +51,25 @@ impl Expr for ExprImpl {
         }
     }
 }
+
 impl From<InputRef> for ExprImpl {
     fn from(input_ref: InputRef) -> Self {
         ExprImpl::InputRef(Box::new(input_ref))
     }
 }
+
 impl From<Literal> for ExprImpl {
     fn from(literal: Literal) -> Self {
         ExprImpl::Literal(Box::new(literal))
     }
 }
+
 impl From<FunctionCall> for ExprImpl {
     fn from(func_call: FunctionCall) -> Self {
         ExprImpl::FunctionCall(Box::new(func_call))
     }
 }
+
 impl From<AggCall> for ExprImpl {
     fn from(agg_call: AggCall) -> Self {
         ExprImpl::AggCall(Box::new(agg_call))
