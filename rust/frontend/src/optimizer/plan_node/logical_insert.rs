@@ -13,7 +13,6 @@ use crate::catalog::ColumnId;
 /// It corresponds to the `INSERT` statements in SQL. Especially, for `INSERT ... VALUES`
 /// statements, the input relation would be [`super::LogicalValues`].
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct LogicalInsert {
     pub base: LogicalBase,
     table: BaseTableRef,

@@ -4,6 +4,7 @@ use crate::binder::BoundStatement;
 use crate::optimizer::PlanRoot;
 use crate::session::QueryContextRef;
 
+mod delete;
 mod insert;
 mod query;
 mod select;
