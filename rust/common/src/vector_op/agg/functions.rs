@@ -5,15 +5,37 @@ use crate::error::{ErrorCode, Result};
 /// shorten the `where` clause of `GeneralAgg`, but to workaround an compiler
 /// error[E0582]: binding for associated type `Output` references lifetime `'a`,
 /// which does not appear in the trait input types.
-pub trait RTFn<'a, T, R> = Send
-    + 'static
-    + Fn(
-        Option<<R as Array>::RefItem<'a>>,
-        Option<<T as Array>::RefItem<'a>>,
-    ) -> Result<Option<<R as Array>::RefItem<'a>>>
+pub trait RTFn<'a, T, R>: Send + 'static
 where
     T: Array,
-    R: Array;
+    R: Array,
+{
+    fn eval(
+        &mut self,
+        result: Option<<R as Array>::RefItem<'a>>,
+        input: Option<<T as Array>::RefItem<'a>>,
+    ) -> Result<Option<<R as Array>::RefItem<'a>>>;
+}
+
+impl<'a, T, R, Z> RTFn<'a, T, R> for Z
+where
+    T: Array,
+    R: Array,
+    Z: Send
+        + 'static
+        + Fn(
+            Option<<R as Array>::RefItem<'a>>,
+            Option<<T as Array>::RefItem<'a>>,
+        ) -> Result<Option<<R as Array>::RefItem<'a>>>,
+{
+    fn eval(
+        &mut self,
+        result: Option<<R as Array>::RefItem<'a>>,
+        input: Option<<T as Array>::RefItem<'a>>,
+    ) -> Result<Option<<R as Array>::RefItem<'a>>> {
+        self.call((result, input))
+    }
+}
 
 use std::convert::From;
 use std::ops::Add;
@@ -83,20 +105,33 @@ pub fn count_str(r: Option<i64>, i: Option<&str>) -> Result<Option<i64>> {
     count(r, i)
 }
 
-pub fn single_value<'a, T>(result: Option<T>, input: Option<T>) -> Result<Option<T>>
-where
-    T: ScalarRef<'a> + PartialOrd,
-{
-    match (result, input) {
-        (None, _) => Ok(input),
-        (Some(_), None) => Ok(result),
-        (Some(_), Some(_)) => Err(ErrorCode::InternalError(
-            "SingleValue aggregation can only accept exactly one value. But there is more than one.".to_string(),
-        )
-        .into()),
+pub struct SingleValue {
+    count: usize,
+}
+
+impl SingleValue {
+    pub fn new() -> Self {
+        Self { count: 0 }
     }
 }
 
-pub fn single_value_str<'a>(r: Option<&'a str>, i: Option<&'a str>) -> Result<Option<&'a str>> {
-    single_value(r, i)
+impl<'a, T> RTFn<'a, T, T> for SingleValue
+where
+    T: Array,
+{
+    fn eval(
+        &mut self,
+        _result: Option<<T as Array>::RefItem<'a>>,
+        input: Option<<T as Array>::RefItem<'a>>,
+    ) -> Result<Option<<T as Array>::RefItem<'a>>> {
+        self.count += 1;
+        if self.count > 1 {
+            Err(ErrorCode::InternalError(
+                "SingleValue aggregation can only accept exactly one value. But there is more than one.".to_string(),
+            )
+              .into())
+        } else {
+            Ok(input)
+        }
+    }
 }

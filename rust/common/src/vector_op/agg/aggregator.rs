@@ -191,15 +191,15 @@ pub fn create_agg_state_unary(
         (Sum, sum, int64, int64),
         // We remark that SingleValue does not produce a runtime error when it receives zero row.
         // Therefore, we do NOT need to change the logic in GeneralAgg::output_concrete.
-        (SingleValue, single_value, int16, int16),
-        (SingleValue, single_value, int32, int32),
-        (SingleValue, single_value, int64, int64),
-        (SingleValue, single_value, float32, float32),
-        (SingleValue, single_value, float64, float64),
-        (SingleValue, single_value, decimal, decimal),
-        (SingleValue, single_value, boolean, boolean),
-        (SingleValue, single_value_str, char, char),
-        (SingleValue, single_value_str, varchar, varchar),
+        (SingleValue, SingleValue::new(), int16, int16),
+        (SingleValue, SingleValue::new(), int32, int32),
+        (SingleValue, SingleValue::new(), int64, int64),
+        (SingleValue, SingleValue::new(), float32, float32),
+        (SingleValue, SingleValue::new(), float64, float64),
+        (SingleValue, SingleValue::new(), decimal, decimal),
+        (SingleValue, SingleValue::new(), boolean, boolean),
+        (SingleValue, SingleValue::new(), char, char),
+        (SingleValue, SingleValue::new(), varchar, varchar),
     ];
     Ok(state)
 }

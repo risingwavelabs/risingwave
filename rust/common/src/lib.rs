@@ -13,6 +13,7 @@
 #![feature(binary_heap_drain_sorted)]
 #![feature(is_sorted)]
 #![feature(backtrace)]
+#![feature(fn_traits)]
 
 #[macro_use]
 pub mod error;
