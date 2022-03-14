@@ -27,7 +27,7 @@ pub struct LogicalJoin {
     left: PlanRef,
     right: PlanRef,
     on: Condition,
-    pub join_type: JoinType,
+    join_type: JoinType,
 }
 
 impl fmt::Display for LogicalJoin {

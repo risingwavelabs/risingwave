@@ -96,7 +96,7 @@ impl ToDistributedBatch for BatchHashJoin {
 impl ToBatchProst for BatchHashJoin {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::HashJoin(HashJoinNode {
-            join_type: self.logical.join_type as i32,
+            join_type: self.logical.join_type() as i32,
             left_key: self
                 .eq_join_predicate
                 .left_eq_indexes()

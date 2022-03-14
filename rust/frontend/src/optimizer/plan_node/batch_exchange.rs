@@ -62,7 +62,7 @@ impl ToDistributedBatch for BatchExchange {
     }
 }
 
-/// The serialization of Batch Exchange is default cuz it will be rewrite in scheduler.
+/// The serialization of Batch Exchange is default cuz it will be rewritten in scheduler.
 impl ToBatchProst for BatchExchange {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::Exchange(ExchangeNode {

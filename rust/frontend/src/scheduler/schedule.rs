@@ -78,12 +78,12 @@ impl AugmentedStage {
     }
 
     /// Serialize augmented stage into plan node. Used by task manager to construct task.
-    pub fn to_prost(&self, task_id: TaskId, query: &Query) -> PlanFragment {
-        let prost_root = self.rewrite_exchange(self.query_stage.root.clone(), task_id, query);
-        PlanFragment {
+    pub fn to_prost(&self, task_id: TaskId, query: &Query) -> Result<PlanFragment> {
+        let prost_root = self.rewrite_exchange(self.query_stage.root.clone(), task_id, query)?;
+        Ok(PlanFragment {
             root: Some(prost_root),
             exchange_info: Some(self.query_stage.distribution.to_prost(self.parallelism)),
-        }
+        })
     }
 
     fn rewrite_exchange(
@@ -91,7 +91,7 @@ impl AugmentedStage {
         plan_node: PlanRef,
         task_id: TaskId,
         query: &Query,
-    ) -> plan::PlanNode {
+    ) -> Result<plan::PlanNode> {
         let mut current_node = plan_node.to_batch_prost();
         // Clear children first.
         current_node.children.clear();
@@ -106,17 +106,17 @@ impl AugmentedStage {
                 .unwrap();
             let scheduled_stage = self.exchange_source.get(source_stage_id).unwrap();
             let exchange_node =
-                Self::create_exchange_node(scheduled_stage, plan_node, task_id, query);
+                Self::create_exchange_node(scheduled_stage, plan_node, task_id, query)?;
             current_node.node_body = Some(exchange_node);
         } else {
             for child in plan_node.inputs() {
                 current_node
                     .children
-                    .push(self.rewrite_exchange(child, task_id, query))
+                    .push(self.rewrite_exchange(child, task_id, query)?)
             }
         }
 
-        current_node
+        Ok(current_node)
     }
 
     fn create_exchange_node(
@@ -124,7 +124,7 @@ impl AugmentedStage {
         plan_node: PlanRef,
         task_id: TaskId,
         query: &Query,
-    ) -> pb_batch_node::NodeBody {
+    ) -> Result<pb_batch_node::NodeBody> {
         let mut exchange_node = ExchangeNode {
             ..Default::default()
         };
@@ -146,6 +146,12 @@ impl AugmentedStage {
                 ),
             });
             // Construct exchange source into exchange node.
+            // Consider a HashJoin -> Exchange -> Scan. Assume parallelism of HashJoin is 4, while
+            // the Scan is 3. (HashJoin -> Exchange will be one stage, Scan will be
+            // another stage). 3 Scan Tasks will run in 3 different nodes. Each nodes
+            // will create 4 local channel (0, 1, 2, 3), after local hash shuffle.
+            // Task 0 of HashJoin will pull all 0 channels from 3 nodes,  Task 1 of HashJoin will
+            // pull all 1 channels from 3 nodes, etc.
             let exchange_source = ExchangeSource {
                 host: host.clone(),
                 sink_id,
@@ -156,9 +162,9 @@ impl AugmentedStage {
         let input = plan_node.inputs()[0].clone();
         let schema = input.schema();
         for field in &schema.fields {
-            exchange_node.input_schema.push(field.to_prost());
+            exchange_node.input_schema.push(field.to_prost()?);
         }
-        NodeBody::Exchange(exchange_node)
+        Ok(NodeBody::Exchange(exchange_node))
     }
 
     // Construct TaskId in prost.
@@ -252,7 +258,7 @@ pub(crate) struct QueryResultLocation {
 }
 
 impl BatchScheduler {
-    /// Given a `Query` (Already split by )
+    /// Given a `Query` (Already split by plan fragmenter)
     pub async fn schedule(&mut self, query: &Query) -> QueryResultLocation {
         // First schedule all leaf stages.
         for leaf_stage_id in &query.leaf_stages() {

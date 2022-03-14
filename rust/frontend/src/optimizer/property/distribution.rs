@@ -29,10 +29,11 @@ impl Distribution {
                 Distribution::Single => DistributionMode::Single,
                 Distribution::Broadcast => DistributionMode::Broadcast,
                 Distribution::HashShard(_keys) => DistributionMode::Hash,
+                // TODO: Should panic if AnyShard or Any
                 _ => DistributionMode::Hash,
             } as i32,
             distribution: match self {
-                Distribution::Single | Distribution::AnyShard | Distribution::Any => None,
+                Distribution::Single => None,
                 Distribution::Broadcast => Some(DistributionProst::BroadcastInfo(BroadcastInfo {
                     count: output_count,
                 })),
@@ -41,6 +42,8 @@ impl Distribution {
                     keys: keys.iter().map(|num| *num as u32).collect(),
                     hash_method: HashMethod::Crc32 as i32,
                 })),
+                // TODO: Should panic if AnyShard or Any
+                Distribution::AnyShard | Distribution::Any => None,
             },
         }
     }

@@ -26,7 +26,6 @@ pub use decimal::Decimal;
 pub use interval::*;
 pub use ordered_float::IntoOrdered;
 use paste::paste;
-use risingwave_pb::data::DataType as DataTypeProst;
 
 use crate::array::{ArrayBuilderImpl, PrimitiveArrayItemType, StructRef, StructValue};
 
@@ -61,26 +60,6 @@ pub enum DataSize {
     Fixed(usize),
     /// For types with variable size, e.g. string.
     Variable,
-}
-
-impl DataType {
-    pub fn to_prost(&self) -> DataTypeProst {
-        let type_name = match self {
-            DataType::Int16 => TypeName::Int16,
-            DataType::Int32 => TypeName::Int32,
-            DataType::Int64 => TypeName::Int64,
-            DataType::Float32 => TypeName::Float,
-            DataType::Float64 => TypeName::Double,
-            DataType::Boolean => TypeName::Boolean,
-            // TODO: add other types serialization in need.
-            _ => unimplemented!("{:?} serialize to prost is unimplemented yet", self),
-        };
-
-        DataTypeProst {
-            type_name: type_name as i32,
-            ..Default::default()
-        }
-    }
 }
 
 impl From<&ProstDataType> for DataType {

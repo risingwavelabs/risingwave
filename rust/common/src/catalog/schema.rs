@@ -21,11 +21,11 @@ impl std::fmt::Debug for Field {
 }
 
 impl Field {
-    pub fn to_prost(&self) -> ProstField {
-        ProstField {
-            data_type: Some(self.data_type.to_prost()),
+    pub fn to_prost(&self) -> Result<ProstField> {
+        Ok(ProstField {
+            data_type: Some(self.data_type.to_protobuf()?),
             name: self.name.to_string(),
-        }
+        })
     }
 }
 

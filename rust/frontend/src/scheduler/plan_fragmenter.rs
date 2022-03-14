@@ -272,13 +272,13 @@ mod tests {
         let batch_exchange_node1: PlanRef = BatchExchange::new(
             batch_plan_node.clone(),
             Order::default(),
-            Distribution::AnyShard,
+            Distribution::HashShard(vec![0, 1, 2]),
         )
         .into();
         let batch_exchange_node2: PlanRef = BatchExchange::new(
             batch_plan_node.clone(),
             Order::default(),
-            Distribution::AnyShard,
+            Distribution::HashShard(vec![0, 1, 2]),
         )
         .into();
         let hash_join_node: PlanRef = BatchHashJoin::new(
@@ -393,7 +393,7 @@ mod tests {
         assert_eq!(scan_node_2.assignments.get(&2).unwrap(), &worker3);
 
         // Check that the serialized exchange source node has been filled with correct info.
-        let prost_node_root = root.augmented_stage.to_prost(0, &query);
+        let prost_node_root = root.augmented_stage.to_prost(0, &query).unwrap();
         assert_eq!(
             prost_node_root.exchange_info.unwrap().mode,
             DistributionMode::Single as i32
@@ -409,7 +409,7 @@ mod tests {
             panic!("The root node should be exchange single");
         }
 
-        let prost_join_node = join_node.augmented_stage.to_prost(0, &query);
+        let prost_join_node = join_node.augmented_stage.to_prost(0, &query).unwrap();
         assert_eq!(prost_join_node.root.as_ref().unwrap().children.len(), 2);
         assert_eq!(
             prost_join_node.exchange_info.unwrap().mode,
