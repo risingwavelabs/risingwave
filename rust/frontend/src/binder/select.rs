@@ -12,6 +12,7 @@ use crate::expr::{Expr, ExprImpl};
 pub struct BoundSelect {
     pub distinct: bool,
     pub select_items: Vec<ExprImpl>,
+    pub aliases: Vec<Option<String>>,
     pub from: Option<TableRef>,
     pub selection: Option<ExprImpl>,
 }
@@ -38,9 +39,11 @@ impl Binder {
             }
         }
         let select_items = self.bind_project(select.projection)?;
+        let aliases = vec![None; select_items.len()];
         Ok(BoundSelect {
             distinct: select.distinct,
             select_items,
+            aliases,
             from,
             selection,
         })
