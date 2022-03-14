@@ -6,7 +6,6 @@ use risingwave_sqlparser::ast::Statement;
 mod bind_context;
 pub(crate) mod expr;
 mod insert;
-mod project;
 mod query;
 mod select;
 mod set_expr;

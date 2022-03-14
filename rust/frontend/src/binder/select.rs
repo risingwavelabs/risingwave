@@ -2,7 +2,7 @@ use std::fmt::Debug;
 
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::Select;
+use risingwave_sqlparser::ast::{Select, SelectItem};
 
 use super::bind_context::Clause;
 use crate::binder::{Binder, TableRef};
@@ -47,5 +47,22 @@ impl Binder {
             from,
             selection,
         })
+    }
+    pub fn bind_project(&mut self, select_items: Vec<SelectItem>) -> Result<Vec<ExprImpl>> {
+        let mut select_list = vec![];
+        for item in select_items {
+            match item {
+                SelectItem::UnnamedExpr(expr) => {
+                    let expr = self.bind_expr(expr)?;
+                    select_list.push(expr);
+                }
+                SelectItem::ExprWithAlias { .. } => todo!(),
+                SelectItem::QualifiedWildcard(_) => todo!(),
+                SelectItem::Wildcard => {
+                    select_list.extend(self.bind_all_columns()?.into_iter());
+                }
+            }
+        }
+        Ok(select_list)
     }
 }
