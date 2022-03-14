@@ -1,0 +1,9 @@
+statement ok
+create table t (v1 int not null);
+
+select v1 from t1;
+--
+(0 rows)
+
+statement ok
+drop table t;
