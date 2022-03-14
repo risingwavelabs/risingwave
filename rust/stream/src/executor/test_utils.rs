@@ -207,4 +207,3 @@ impl Executor for MockAsyncSource {
 pub fn create_in_memory_keyspace() -> Keyspace<MemoryStateStore> {
     Keyspace::executor_root(MemoryStateStore::new(), 0x2333)
 }
-
