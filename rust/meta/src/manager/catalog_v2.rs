@@ -12,7 +12,7 @@ use risingwave_pb::catalog::{Database, Schema, Source, Table, VirtualTable};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::Mutex;
 
-use crate::catalog::{SystemCatalogCore};
+use crate::catalog::SystemCatalogCore;
 use crate::manager::{NotificationManagerRef, NotificationTarget};
 use crate::model::{CatalogVersionGenerator, MetadataModel};
 use crate::storage::MetaStore;
