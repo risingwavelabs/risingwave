@@ -19,11 +19,11 @@ pub struct EqJoinPredicate {
 
 impl fmt::Display for EqJoinPredicate {
     fn fmt(&self, f: &mut fmt::Formatter) -> std::fmt::Result {
-        let mut eq_keys_it = self.eq_keys().into_iter();
-        if let Some((k1, k2)) = eq_keys_it.next() {
+        let mut eq_keys = self.eq_keys().iter();
+        if let Some((k1, k2)) = eq_keys.next() {
             write!(f, "{} = {}", k1, k2)?;
         }
-        for (k1, k2) in eq_keys_it {
+        for (k1, k2) in eq_keys {
             write!(f, "AND {} = {}", k1, k2)?;
         }
         if !self.other_cond.is_empty() {
