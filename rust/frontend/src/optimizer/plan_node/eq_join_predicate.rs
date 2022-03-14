@@ -1,3 +1,5 @@
+use std::fmt;
+
 use fixedbitset::FixedBitSet;
 
 use crate::expr::{get_inputs_col_index, ExprImpl, ExprType, FunctionCall, InputRef};
@@ -15,7 +17,23 @@ pub struct EqJoinPredicate {
     eq_keys: Vec<(InputRef, InputRef)>,
 }
 
-#[allow(dead_code)]
+impl fmt::Display for EqJoinPredicate {
+    fn fmt(&self, f: &mut fmt::Formatter) -> std::fmt::Result {
+        let mut eq_keys_it = self.eq_keys().into_iter();
+        if let Some((k1, k2)) = eq_keys_it.next() {
+            write!(f, "{} = {}", k1, k2)?;
+        }
+        for (k1, k2) in eq_keys_it {
+            write!(f, "AND {} = {}", k1, k2)?;
+        }
+        if !self.other_cond.is_empty() {
+            write!(f, "AND {}", self.other_cond)?;
+        }
+
+        Ok(())
+    }
+}
+
 impl EqJoinPredicate {
     /// The new method for `JoinPredicate` without any analysis, check or rewrite.
     pub fn new(other_cond: Condition, eq_keys: Vec<(InputRef, InputRef)>) -> Self {
