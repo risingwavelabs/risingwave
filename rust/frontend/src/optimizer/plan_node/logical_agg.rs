@@ -40,9 +40,11 @@ pub struct LogicalAgg {
     input: PlanRef,
 }
 
+/// `ExprHandler` extracts agg calls and references to group columns from select list, in
+/// preparation for generating a plan like `LogicalProject - LogicalAgg - LogicalProject`.
 struct ExprHandler {
-    // `project` contains all the ExprImpl inside aggregates(e.g. v1 + v2 for min(v1 + v2)) and
-    // GROUP BY clause(e.g. v1 for group by v1).
+    // `project` contains all the ExprImpl inside GROUP BY clause (e.g. v1 for group by v1)
+    // followed by those inside aggregates (e.g. v1 + v2 for min(v1 + v2)).
     pub project: Vec<ExprImpl>,
     group_column_index: HashMap<InputRef, usize>,
     pub agg_calls: Vec<PlanAggCall>,
@@ -53,11 +55,13 @@ impl ExprHandler {
     fn new(group_exprs: Vec<ExprImpl>) -> Result<Self> {
         let mut group_column_index = HashMap::new();
         for (index, expr) in group_exprs.iter().enumerate() {
+            // TODO: support more complicated expression in GROUP BY clause, because we currently
+            // assume the only thing can appear in GROUP BY clause is an input column name.
             if let ExprImpl::InputRef(input_ref) = expr {
                 group_column_index.insert(*input_ref.clone(), index);
             } else {
-                return Err(ErrorCode::InvalidInputSyntax(
-                    "GROUP BY clause cannot contain aggregates!".into(),
+                return Err(ErrorCode::NotImplementedError(
+                    "GROUP BY only supported on input column names!".into(),
                 )
                 .into());
             }
@@ -177,20 +181,17 @@ impl LogicalAgg {
         group_exprs: Vec<ExprImpl>,
         input: PlanRef,
     ) -> Result<PlanRef> {
-        // TODO: support more complicated expression in GROUP BY clause, because we currently assume
-        // the only thing can appear in GROUP BY clause is an input column name.
-
         let group_keys = (0..group_exprs.len()).collect();
         let mut expr_handler = ExprHandler::new(group_exprs)?;
 
-        let rewrited_select_exprs = select_exprs
+        let rewritten_select_exprs = select_exprs
             .into_iter()
             .map(|expr| {
-                let rewrited_expr = expr_handler.rewrite_expr(expr);
+                let rewritten_expr = expr_handler.rewrite_expr(expr);
                 if let Some(error) = expr_handler.error.take() {
                     return Err(error.into());
                 }
-                Ok(rewrited_expr)
+                Ok(rewritten_expr)
             })
             .collect::<Result<_>>()?;
 
@@ -211,7 +212,7 @@ impl LogicalAgg {
         // InputRef.
         Ok(LogicalProject::create(
             logical_agg.into(),
-            rewrited_select_exprs,
+            rewritten_select_exprs,
             select_alias,
         ))
     }
