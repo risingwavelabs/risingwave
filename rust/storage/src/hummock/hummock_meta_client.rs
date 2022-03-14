@@ -3,8 +3,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use risingwave_pb::hummock::{
     AddTablesRequest, CompactTask, GetNewTableIdRequest, HummockSnapshot, HummockVersion,
-    PinSnapshotRequest, PinVersionRequest, ReportCompactionTasksRequest, SstableInfo,
-    SubscribeCompactTasksRequest, SubscribeCompactTasksResponse, UnpinSnapshotRequest,
+    HummockVersionRefId, PinSnapshotRequest, PinVersionRequest, ReportCompactionTasksRequest,
+    SstableInfo, SubscribeCompactTasksRequest, SubscribeCompactTasksResponse, UnpinSnapshotRequest,
     UnpinVersionRequest,
 };
 use risingwave_rpc_client::MetaClient;
@@ -29,9 +29,15 @@ impl tokio_retry::Condition<TracedHummockError> for RetryableError {
 /// Define the rpc client trait to ease unit test.
 #[async_trait]
 pub trait HummockMetaClient: Send + Sync + 'static {
-    async fn pin_version(&self) -> HummockResult<HummockVersion>;
+    async fn pin_version(
+        &self,
+        last_pinned: Option<HummockVersionRefId>,
+    ) -> HummockResult<HummockVersion>;
     async fn unpin_version(&self, pinned_version_id: HummockVersionId) -> HummockResult<()>;
-    async fn pin_snapshot(&self) -> HummockResult<HummockEpoch>;
+    async fn pin_snapshot(
+        &self,
+        last_pinned: Option<HummockSnapshot>,
+    ) -> HummockResult<HummockEpoch>;
     async fn unpin_snapshot(&self, pinned_epoch: HummockEpoch) -> HummockResult<()>;
     async fn get_new_table_id(&self) -> HummockResult<HummockSSTableId>;
     async fn add_tables(
@@ -67,7 +73,10 @@ impl RpcHummockMetaClient {
 // TODO #93 idempotent retry
 #[async_trait]
 impl HummockMetaClient for RpcHummockMetaClient {
-    async fn pin_version(&self) -> HummockResult<HummockVersion> {
+    async fn pin_version(
+        &self,
+        last_pinned: Option<HummockVersionRefId>,
+    ) -> HummockResult<HummockVersion> {
         self.stats.pin_version_counts.inc();
         let timer = self.stats.pin_version_latency.start_timer();
         let result = self
@@ -75,6 +84,7 @@ impl HummockMetaClient for RpcHummockMetaClient {
             .inner
             .pin_version(PinVersionRequest {
                 context_id: self.meta_client.worker_id(),
+                last_pinned,
             })
             .await
             .map_err(HummockError::meta_error)?;
@@ -97,7 +107,10 @@ impl HummockMetaClient for RpcHummockMetaClient {
         Ok(())
     }
 
-    async fn pin_snapshot(&self) -> HummockResult<HummockEpoch> {
+    async fn pin_snapshot(
+        &self,
+        last_pinned: Option<HummockSnapshot>,
+    ) -> HummockResult<HummockEpoch> {
         self.stats.pin_snapshot_counts.inc();
         let timer = self.stats.pin_snapshot_latency.start_timer();
         let result = self
@@ -105,6 +118,7 @@ impl HummockMetaClient for RpcHummockMetaClient {
             .inner
             .pin_snapshot(PinSnapshotRequest {
                 context_id: self.meta_client.worker_id(),
+                last_pinned,
             })
             .await
             .map_err(HummockError::meta_error)?;

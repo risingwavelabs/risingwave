@@ -3,7 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use risingwave_pb::hummock::{
     AddTablesRequest, CommitEpochRequest, CompactTask, GetNewTableIdRequest, HummockSnapshot,
-    HummockVersion, PinSnapshotRequest, PinVersionRequest, SstableInfo,
+    HummockVersion, HummockVersionRefId, PinSnapshotRequest, PinVersionRequest, SstableInfo,
     SubscribeCompactTasksResponse, UnpinSnapshotRequest, UnpinVersionRequest,
 };
 use tonic::Streaming;
@@ -26,10 +26,16 @@ impl MockHummockMetaClient {
 
 #[async_trait]
 impl HummockMetaClient for MockHummockMetaClient {
-    async fn pin_version(&self) -> HummockResult<HummockVersion> {
+    async fn pin_version(
+        &self,
+        _last_pinned: Option<HummockVersionRefId>,
+    ) -> HummockResult<HummockVersion> {
         let response = self
             .mock_hummock_meta_service
-            .pin_version(PinVersionRequest { context_id: 0 });
+            .pin_version(PinVersionRequest {
+                context_id: 0,
+                last_pinned: None,
+            });
         Ok(response.pinned_version.unwrap())
     }
 
@@ -42,10 +48,16 @@ impl HummockMetaClient for MockHummockMetaClient {
         Ok(())
     }
 
-    async fn pin_snapshot(&self) -> HummockResult<HummockEpoch> {
+    async fn pin_snapshot(
+        &self,
+        _last_pinned: Option<HummockSnapshot>,
+    ) -> HummockResult<HummockEpoch> {
         let epoch = self
             .mock_hummock_meta_service
-            .pin_snapshot(PinSnapshotRequest { context_id: 0 })
+            .pin_snapshot(PinSnapshotRequest {
+                context_id: 0,
+                last_pinned: None,
+            })
             .snapshot
             .unwrap()
             .epoch;

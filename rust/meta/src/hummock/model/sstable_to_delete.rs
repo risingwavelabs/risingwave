@@ -1,6 +1,5 @@
 use prost::Message;
-use risingwave_pb::hummock::hummock_version::HummockVersionRefId;
-use risingwave_pb::hummock::HummockTablesToDelete;
+use risingwave_pb::hummock::{HummockTablesToDelete, HummockVersionRefId};
 
 use crate::model::{MetadataModel, Transactional};
 

@@ -1,6 +1,5 @@
 use prost::Message;
-use risingwave_pb::hummock::hummock_version::HummockVersionRefId;
-use risingwave_pb::hummock::HummockVersion;
+use risingwave_pb::hummock::{HummockVersion, HummockVersionRefId};
 
 use crate::model::{MetadataModel, Transactional};
 

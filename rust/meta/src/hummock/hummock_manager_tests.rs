@@ -4,9 +4,12 @@ use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::{
-    HummockContextPinnedSnapshot, HummockContextPinnedVersion, HummockSnapshot, SstableInfo,
+    HummockContextPinnedSnapshot, HummockContextPinnedVersion, HummockSnapshot,
+    HummockVersionRefId, SstableInfo,
 };
-use risingwave_storage::hummock::{HummockContextId, FIRST_VERSION_ID, INVALID_EPOCH};
+use risingwave_storage::hummock::{
+    HummockContextId, FIRST_VERSION_ID, INVALID_EPOCH, INVALID_VERSION_ID,
+};
 
 use crate::hummock::test_utils::*;
 use crate::model::MetadataModel;
@@ -22,7 +25,7 @@ async fn test_hummock_pin_unpin() -> Result<()> {
         .await?
         .is_empty());
     for _ in 0..2 {
-        let hummock_version = hummock_manager.pin_version(context_id).await.unwrap();
+        let hummock_version = hummock_manager.pin_version(context_id, None).await.unwrap();
         assert_eq!(version_id, hummock_version.id);
         assert_eq!(2, hummock_version.levels.len());
         assert_eq!(0, hummock_version.levels[0].table_ids.len());
@@ -50,7 +53,10 @@ async fn test_hummock_pin_unpin() -> Result<()> {
         .await?
         .is_empty());
     for _ in 0..2 {
-        let pin_result = hummock_manager.pin_snapshot(context_id).await.unwrap();
+        let pin_result = hummock_manager
+            .pin_snapshot(context_id, None)
+            .await
+            .unwrap();
         assert_eq!(pin_result.epoch, epoch);
         let pinned_snapshots = HummockContextPinnedSnapshot::list(&*env.meta_store_ref()).await?;
         assert_eq!(pinned_snapshots.len(), 1);
@@ -153,7 +159,7 @@ async fn test_hummock_table() -> Result<()> {
         .collect_vec();
     assert_eq!(original_tables, fetched_tables);
 
-    let pinned_version = hummock_manager.pin_version(context_id).await?;
+    let pinned_version = hummock_manager.pin_version(context_id, None).await?;
     assert_eq!(
         Ordering::Equal,
         pinned_version
@@ -195,7 +201,7 @@ async fn test_hummock_transaction() -> Result<()> {
             .unwrap();
 
         // Get tables before committing epoch1. No tables should be returned.
-        let mut pinned_version = hummock_manager.pin_version(context_id).await?;
+        let mut pinned_version = hummock_manager.pin_version(context_id, None).await?;
         let uncommitted_epoch = pinned_version.uncommitted_epochs.first_mut().unwrap();
         assert_eq!(epoch1, uncommitted_epoch.epoch);
         assert_eq!(pinned_version.max_committed_epoch, INVALID_EPOCH);
@@ -213,7 +219,7 @@ async fn test_hummock_transaction() -> Result<()> {
         committed_tables.extend(tables_in_epoch1.clone());
 
         // Get tables after committing epoch1. All tables committed in epoch1 should be returned
-        let pinned_version = hummock_manager.pin_version(context_id).await?;
+        let pinned_version = hummock_manager.pin_version(context_id, None).await?;
         assert!(pinned_version.uncommitted_epochs.is_empty());
         assert_eq!(pinned_version.max_committed_epoch, epoch1);
         assert_eq!(
@@ -241,7 +247,7 @@ async fn test_hummock_transaction() -> Result<()> {
 
         // Get tables before committing epoch2. tables_in_epoch1 should be returned and
         // tables_in_epoch2 should be invisible.
-        let mut pinned_version = hummock_manager.pin_version(context_id).await?;
+        let mut pinned_version = hummock_manager.pin_version(context_id, None).await?;
         let uncommitted_epoch = pinned_version.uncommitted_epochs.first_mut().unwrap();
         assert_eq!(epoch2, uncommitted_epoch.epoch);
         uncommitted_epoch.table_ids.sort_unstable();
@@ -262,7 +268,7 @@ async fn test_hummock_transaction() -> Result<()> {
 
         // Get tables after committing epoch2. tables_in_epoch1 and tables_in_epoch2 should be
         // returned
-        let pinned_version = hummock_manager.pin_version(context_id).await?;
+        let pinned_version = hummock_manager.pin_version(context_id, None).await?;
         assert!(pinned_version.uncommitted_epochs.is_empty());
         assert_eq!(pinned_version.max_committed_epoch, epoch2);
         assert_eq!(
@@ -295,7 +301,7 @@ async fn test_hummock_transaction() -> Result<()> {
 
         // Get tables before committing epoch3 and epoch4. tables_in_epoch1 and tables_in_epoch2
         // should be returned
-        let mut pinned_version = hummock_manager.pin_version(context_id).await?;
+        let mut pinned_version = hummock_manager.pin_version(context_id, None).await?;
         let uncommitted_epoch3 = pinned_version
             .uncommitted_epochs
             .iter_mut()
@@ -326,7 +332,7 @@ async fn test_hummock_transaction() -> Result<()> {
 
         // Get tables after aborting epoch3. tables_in_epoch1 and tables_in_epoch2 should be
         // returned
-        let mut pinned_version = hummock_manager.pin_version(context_id).await?;
+        let mut pinned_version = hummock_manager.pin_version(context_id, None).await?;
         assert!(pinned_version
             .uncommitted_epochs
             .iter_mut()
@@ -353,7 +359,7 @@ async fn test_hummock_transaction() -> Result<()> {
 
         // Get tables after committing epoch4. tables_in_epoch1, tables_in_epoch2, tables_in_epoch4
         // should be returned.
-        let pinned_version = hummock_manager.pin_version(context_id).await?;
+        let pinned_version = hummock_manager.pin_version(context_id, None).await?;
         assert!(pinned_version.uncommitted_epochs.is_empty());
         assert_eq!(pinned_version.max_committed_epoch, epoch4);
         assert_eq!(
@@ -396,10 +402,22 @@ async fn test_release_context_resource() -> Result<()> {
             .len(),
         0
     );
-    hummock_manager.pin_version(context_id_1).await.unwrap();
-    hummock_manager.pin_version(context_id_2).await.unwrap();
-    hummock_manager.pin_snapshot(context_id_1).await.unwrap();
-    hummock_manager.pin_snapshot(context_id_2).await.unwrap();
+    hummock_manager
+        .pin_version(context_id_1, None)
+        .await
+        .unwrap();
+    hummock_manager
+        .pin_version(context_id_2, None)
+        .await
+        .unwrap();
+    hummock_manager
+        .pin_snapshot(context_id_1, None)
+        .await
+        .unwrap();
+    hummock_manager
+        .pin_snapshot(context_id_2, None)
+        .await
+        .unwrap();
     assert_eq!(
         HummockContextPinnedVersion::list(&*env.meta_store_ref())
             .await
@@ -477,9 +495,9 @@ async fn test_context_id_validation() {
         .await
         .unwrap();
 
-    hummock_manager.pin_version(context_id).await.unwrap();
+    hummock_manager.pin_version(context_id, None).await.unwrap();
     // Pin multiple times is OK.
-    hummock_manager.pin_version(context_id).await.unwrap();
+    hummock_manager.pin_version(context_id, None).await.unwrap();
 
     // Remove the node from cluster will invalidate context id.
     cluster_manager
@@ -487,7 +505,10 @@ async fn test_context_id_validation() {
         .await
         .unwrap();
     // Invalid context id is rejected.
-    let error = hummock_manager.pin_version(context_id).await.unwrap_err();
+    let error = hummock_manager
+        .pin_version(context_id, None)
+        .await
+        .unwrap_err();
     assert!(matches!(error.inner(), ErrorCode::InternalError(_)));
     assert_eq!(error.to_string(), "internal error: transaction aborted");
 }
@@ -537,7 +558,10 @@ async fn test_hummock_manager_basic() {
         0
     );
     for _ in 0..2 {
-        let version = hummock_manager.pin_version(context_id_1).await.unwrap();
+        let version = hummock_manager
+            .pin_version(context_id_1, None)
+            .await
+            .unwrap();
         assert_eq!(version.id, FIRST_VERSION_ID + 1);
         assert_eq!(
             hummock_manager
@@ -549,7 +573,10 @@ async fn test_hummock_manager_basic() {
     }
 
     for _ in 0..2 {
-        let version = hummock_manager.pin_version(context_id_2).await.unwrap();
+        let version = hummock_manager
+            .pin_version(context_id_2, None)
+            .await
+            .unwrap();
         assert_eq!(version.id, FIRST_VERSION_ID + 1);
         assert_eq!(
             hummock_manager
@@ -587,4 +614,177 @@ async fn test_hummock_manager_basic() {
         hummock_manager.list_version_ids_asc().await.unwrap(),
         vec![FIRST_VERSION_ID + 1]
     );
+}
+
+#[tokio::test]
+async fn test_retryable_pin_version() {
+    let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
+    let context_id = worker_node.id;
+    // Pin a version with smallest last_pin
+    // [ v0 ] -> [ v0:pinned ]
+    let version = hummock_manager
+        .pin_version(
+            context_id,
+            Some(HummockVersionRefId {
+                id: INVALID_VERSION_ID,
+            }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(version.id, FIRST_VERSION_ID);
+
+    let mut epoch: u64 = 1;
+    let mut table_id = 1;
+    // [ v0:pinned, v1, v2 ]
+    for _ in 0..2 {
+        let (test_tables, _) = generate_test_tables(epoch, &mut table_id);
+        // Increase the version
+        hummock_manager
+            .add_tables(context_id, test_tables.clone(), epoch)
+            .await
+            .unwrap();
+        epoch += 1;
+    }
+
+    // Retry and results the same version pinned.
+    // [ v0:pinned, v1, v2 ] -> [ v0:pinned, v1, v2 ]
+    let version_retry = hummock_manager
+        .pin_version(
+            context_id,
+            Some(HummockVersionRefId {
+                id: INVALID_VERSION_ID,
+            }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(version_retry.id, version.id);
+
+    // Use correct last_pin to pin newer version.
+    // [ v0:pinned, v1, v2 ] -> [ v0:pinned, v1, v2:pinned ]
+    let version_2 = hummock_manager
+        .pin_version(context_id, Some(HummockVersionRefId { id: version.id }))
+        .await
+        .unwrap();
+    assert_eq!(version_2.id, version.id + 2);
+
+    // [ v0:pinned, v1, v2:pinned ] -> [ v0:pinned, v1, v2:pinned, v3, v4 ]
+    for _ in 0..2 {
+        let (test_tables, _) = generate_test_tables(epoch, &mut table_id);
+        // Increase the version
+        hummock_manager
+            .add_tables(context_id, test_tables.clone(), epoch)
+            .await
+            .unwrap();
+        epoch += 1;
+    }
+
+    // Retry and results the same version pinned.
+    // [ v0:pinned, v1, v2:pinned, v3, v4 ] -> [ v0:pinned, v1, v2:pinned, v3, v4 ]
+    let version_2_retry = hummock_manager
+        .pin_version(context_id, Some(HummockVersionRefId { id: version.id }))
+        .await
+        .unwrap();
+    assert_eq!(version_2_retry.id, version_2.id);
+
+    // Use None as last_pin to pin greatest version
+    // [ v0:pinned, v1, v2:pinned, v3, v4 ] -> [ v0:pinned, v1, v2:pinned, v3, v4:pinned ]
+    let version_3 = hummock_manager.pin_version(context_id, None).await.unwrap();
+    assert_eq!(version_3.id, version.id + 4);
+}
+
+#[tokio::test]
+async fn test_retryable_pin_snapshot() {
+    let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
+    let context_id = worker_node.id;
+
+    let mut epoch: u64 = 1;
+    let mut table_id = 1;
+    let (test_tables, _) = generate_test_tables(epoch, &mut table_id);
+    hummock_manager
+        .add_tables(context_id, test_tables.clone(), epoch)
+        .await
+        .unwrap();
+    // [ ] -> [ e0 ]
+    hummock_manager.commit_epoch(epoch).await.unwrap();
+    epoch += 1;
+
+    // Pin a snapshot with smallest last_pin
+    // [ e0 ] -> [ e0:pinned ]
+    let snapshot = hummock_manager
+        .pin_snapshot(
+            context_id,
+            Some(HummockSnapshot {
+                epoch: INVALID_EPOCH,
+            }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(snapshot.epoch, epoch - 1);
+
+    let (test_tables, _) = generate_test_tables(epoch, &mut table_id);
+    hummock_manager
+        .add_tables(context_id, test_tables.clone(), epoch)
+        .await
+        .unwrap();
+    // [ e0:pinned ] -> [ e0:pinned, e1 ]
+    hummock_manager.commit_epoch(epoch).await.unwrap();
+    epoch += 1;
+
+    // Retry and results the same snapshot pinned.
+    // [ e0:pinned, e1 ] -> [ e0:pinned, e1 ]
+    let snapshot_retry = hummock_manager
+        .pin_snapshot(
+            context_id,
+            Some(HummockSnapshot {
+                epoch: INVALID_EPOCH,
+            }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(snapshot_retry.epoch, snapshot.epoch);
+
+    // Use correct last_pin to pin newer snapshot.
+    // [ e0:pinned, e1 ] -> [ e0:pinned, e1:pinned ]
+    let snapshot_2 = hummock_manager
+        .pin_snapshot(
+            context_id,
+            Some(HummockSnapshot {
+                epoch: snapshot.epoch,
+            }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(snapshot_2.epoch, snapshot.epoch + 1);
+
+    for _ in 0..2 {
+        let (test_tables, _) = generate_test_tables(epoch, &mut table_id);
+        hummock_manager
+            .add_tables(context_id, test_tables.clone(), epoch)
+            .await
+            .unwrap();
+        hummock_manager.commit_epoch(epoch).await.unwrap();
+        epoch += 1;
+    }
+    // [ e0:pinned, e1:pinned ] -> [ e0:pinned, e1:pinned, e2, e3 ]
+
+    // Retry and results the same snapshot pinned.
+    // [ e0:pinned, e1:pinned, e2, e3 ] -> [ e0:pinned, e1:pinned, e2, e3 ]
+    let snapshot_2_retry = hummock_manager
+        .pin_snapshot(
+            context_id,
+            Some(HummockSnapshot {
+                epoch: snapshot.epoch,
+            }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(snapshot_2.epoch, snapshot_2_retry.epoch);
+
+    // Use None as last_pin to pin greatest snapshot
+    // [ e0:pinned, e1:pinned, e2, e3 ] -> [ e0:pinned, e1:pinned, e2, e3:pinned ]
+    let snapshot_3 = hummock_manager
+        .pin_snapshot(context_id, None)
+        .await
+        .unwrap();
+    assert_eq!(snapshot_3.epoch, snapshot_2.epoch + 2);
 }

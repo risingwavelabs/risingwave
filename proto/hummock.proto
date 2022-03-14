@@ -62,10 +62,11 @@ message UncommittedEpoch {
   repeated uint64 table_ids = 2;
 }
 
+message HummockVersionRefId {
+  uint64 id = 1;
+}
+
 message HummockVersion {
-  message HummockVersionRefId {
-    uint64 id = 1;
-  }
   uint64 id = 1;
   repeated Level levels = 2;
   repeated UncommittedEpoch uncommitted_epochs = 3;
@@ -89,6 +90,7 @@ message AddTablesResponse {
 
 message PinVersionRequest {
   uint32 context_id = 1;
+  HummockVersionRefId last_pinned = 2;
 }
 
 message PinVersionResponse {
@@ -107,6 +109,7 @@ message UnpinVersionResponse {
 
 message PinSnapshotRequest {
   uint32 context_id = 1;
+  HummockSnapshot last_pinned = 2;
 }
 
 message PinSnapshotResponse {

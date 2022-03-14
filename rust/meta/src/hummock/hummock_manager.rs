@@ -4,11 +4,11 @@ use itertools::{enumerate, Itertools};
 use prometheus::core::{AtomicF64, GenericGauge};
 use prost::Message;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::hummock::hummock_version::HummockVersionRefId;
 use risingwave_pb::hummock::{
     CompactMetrics, CompactTask, HummockContextPinnedSnapshot, HummockContextPinnedVersion,
-    HummockContextRefId, HummockSnapshot, HummockTablesToDelete, HummockVersion, Level, LevelType,
-    SstableInfo, SstableRefId, TableSetStatistics, UncommittedEpoch,
+    HummockContextRefId, HummockSnapshot, HummockTablesToDelete, HummockVersion,
+    HummockVersionRefId, Level, LevelType, SstableInfo, SstableRefId, TableSetStatistics,
+    UncommittedEpoch,
 };
 use risingwave_storage::hummock::{
     HummockContextId, HummockEpoch, HummockRefCount, HummockSSTableId, HummockVersionId,
@@ -144,18 +144,20 @@ where
         meta_store_ref.txn(trx).await.map_err(Into::into)
     }
 
-    pub async fn pin_version(&self, context_id: HummockContextId) -> Result<HummockVersion> {
+    /// Pin a hummock version that is greater than `last_pinned`. The pin belongs to `context_id`
+    /// and will be unpinned when `context_id` is invalidated.
+    /// `last_pinned` is an optional parameter to make `pin_version` retryable when set correctly:
+    /// 1. If `last_pinned` is None, always pin and return the current greatest version.
+    /// 2. If `last_pinned` is not None, `pin_version` is retryable:
+    /// 2.1 Return the smallest already pinned version of `context_id` that is greater than
+    /// `last_pinned`, if any.
+    /// 2.2 Otherwise pin and return the current greatest version.
+    pub async fn pin_version(
+        &self,
+        context_id: HummockContextId,
+        last_pinned: Option<HummockVersionRefId>,
+    ) -> Result<HummockVersion> {
         let versioning_guard = self.versioning.write().await;
-        let version_id = CurrentHummockVersionId::get(versioning_guard.meta_store_ref.as_ref())
-            .await?
-            .id();
-        let hummock_version = HummockVersion::select(
-            &*versioning_guard.meta_store_ref,
-            &HummockVersionRefId { id: version_id },
-        )
-        .await?
-        .unwrap();
-        // pin the version
         let mut context_pinned_version = HummockContextPinnedVersion::select(
             &*versioning_guard.meta_store_ref,
             &HummockContextRefId { id: context_id },
@@ -165,6 +167,36 @@ where
             context_id,
             version_id: vec![],
         });
+
+        let version_id = match last_pinned {
+            None => CurrentHummockVersionId::get(versioning_guard.meta_store_ref.as_ref())
+                .await?
+                .id(),
+            Some(last_pinned) => {
+                let partition_point = context_pinned_version
+                    .version_id
+                    .iter()
+                    .sorted()
+                    .cloned()
+                    .collect_vec()
+                    .partition_point(|p| *p <= last_pinned.id);
+                if partition_point < context_pinned_version.version_id.len() {
+                    context_pinned_version.version_id[partition_point]
+                } else {
+                    CurrentHummockVersionId::get(versioning_guard.meta_store_ref.as_ref())
+                        .await?
+                        .id()
+                }
+            }
+        };
+
+        let hummock_version = HummockVersion::select(
+            &*versioning_guard.meta_store_ref,
+            &HummockVersionRefId { id: version_id },
+        )
+        .await?
+        .unwrap();
+
         context_pinned_version.pin_version(version_id);
         let mut transaction = Transaction::default();
         context_pinned_version.update_in_transaction(&mut transaction)?;
@@ -377,7 +409,14 @@ where
         Ok(hummock_version)
     }
 
-    pub async fn pin_snapshot(&self, context_id: HummockContextId) -> Result<HummockSnapshot> {
+    /// Pin a hummock snapshot that is greater than `last_pinned`. The pin belongs to `context_id`
+    /// and will be unpinned when `context_id` is invalidated.
+    /// `last_pinned` is to make `pin_snapshot` retryable, see `pin_version` for detail.
+    pub async fn pin_snapshot(
+        &self,
+        context_id: HummockContextId,
+        last_pinned: Option<HummockSnapshot>,
+    ) -> Result<HummockSnapshot> {
         let versioning_guard = self.versioning.write().await;
 
         // Use the max_committed_epoch in storage as the snapshot ts so only committed changes are
@@ -391,7 +430,7 @@ where
         )
         .await?
         .unwrap();
-        let max_committed_epoch = version.max_committed_epoch;
+
         let mut context_pinned_snapshot = HummockContextPinnedSnapshot::select(
             &*versioning_guard.meta_store_ref,
             &HummockContextRefId { id: context_id },
@@ -401,7 +440,26 @@ where
             context_id,
             snapshot_id: vec![],
         });
-        context_pinned_snapshot.pin_snapshot(max_committed_epoch);
+
+        let epoch = match last_pinned {
+            None => version.max_committed_epoch,
+            Some(last_pinned) => {
+                let partition_point = context_pinned_snapshot
+                    .snapshot_id
+                    .iter()
+                    .sorted()
+                    .cloned()
+                    .collect_vec()
+                    .partition_point(|p| *p <= last_pinned.epoch);
+                if partition_point < context_pinned_snapshot.snapshot_id.len() {
+                    context_pinned_snapshot.snapshot_id[partition_point]
+                } else {
+                    version.max_committed_epoch
+                }
+            }
+        };
+
+        context_pinned_snapshot.pin_snapshot(epoch);
         let mut transaction = Transaction::default();
         context_pinned_snapshot.update_in_transaction(&mut transaction)?;
         self.commit_trx(
@@ -410,9 +468,7 @@ where
             Some(context_id),
         )
         .await?;
-        Ok(HummockSnapshot {
-            epoch: max_committed_epoch,
-        })
+        Ok(HummockSnapshot { epoch })
     }
 
     pub async fn unpin_snapshot(
