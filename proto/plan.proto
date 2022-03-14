@@ -227,14 +227,14 @@ message TaskId {
   uint32 task_id = 3;
 }
 
-message TaskSinkId {
+message TaskOutputId {
   TaskId task_id = 1;
-  uint32 sink_id = 2;
+  uint32 output_id = 2;
 }
 
 // ExchangeSource describes where to read results from children operators
 message ExchangeSource {
-  TaskSinkId sink_id = 1;
+  TaskOutputId task_output_id = 1;
   common.HostAddress host = 2;
 }
 
