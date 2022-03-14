@@ -102,7 +102,7 @@ impl CatalogCache {
         table_name: &str,
     ) -> Option<&TableCatalog> {
         self.get_schema(db_name, schema_name)
-            .and_then(|schema| schema.get_table(table_name))
+            .and_then(|schema| schema.get_table_by_name(table_name))
     }
 
     pub fn drop_table(&mut self, db_name: &str, schema_name: &str, table_name: &str) -> Result<()> {

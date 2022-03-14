@@ -8,9 +8,10 @@ use risingwave_pb::plan::{ColumnCatalog, OrderType as ProstOrderType};
 
 use crate::catalog::TableId;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TableCatalog {
     id: TableId,
+    name: String,
     columns: Vec<ColumnCatalog>,
     pk_desc: Vec<OrderedColumnDesc>,
 }
@@ -40,11 +41,17 @@ impl TableCatalog {
             pk: self.pk_desc,
         }
     }
+
+    /// Get a reference to the table catalog's name.
+    pub fn name(&self) -> &str {
+        self.name.as_ref()
+    }
 }
 
 impl From<&ProstTable> for TableCatalog {
     fn from(tb: &ProstTable) -> Self {
         let id = tb.id;
+        let name = tb.name.clone();
         let columns = tb.column_catalog;
         let mut col_names = HashSet::new();
         let mut col_descs: HashMap<i32, ColumnDesc> = HashMap::new();
@@ -75,6 +82,7 @@ impl From<&ProstTable> for TableCatalog {
 
         Self {
             id: id.into(),
+            name,
             columns,
             pk_desc,
         }

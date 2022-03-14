@@ -1,43 +1,44 @@
 use std::collections::HashMap;
 
+use risingwave_common::catalog::TableId;
 use risingwave_common::error::{Result, RwError};
-use risingwave_pb::meta::Table;
+use risingwave_pb::catalog::Table as ProstTable;
 
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::{CatalogError, SchemaId};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SchemaCatalog {
     schema_id: SchemaId,
-    table_by_name: HashMap<String, TableCatalog>,
+    tables: HashMap<TableId, TableCatalog>,
+    table_name_to_id: HashMap<String, TableId>,
 }
 
 impl SchemaCatalog {
     pub fn new(schema_id: SchemaId) -> Self {
         Self {
             schema_id,
-            table_by_name: HashMap::new(),
+            tables: HashMap::new(),
+            table_name_to_id: HashMap::new(),
         }
     }
-    pub fn create_table(&mut self, table: &Table) -> Result<()> {
-        let table_name = &table.table_name;
-        let table_catalog = table.try_into()?;
+    pub fn add_table(&mut self, prost: &ProstTable) {
+        let name = prost.name;
+        let id = prost.id.into();
+        let table = prost.into();
 
-        self.table_by_name
-            .try_insert(table_name.clone(), table_catalog)
-            .map(|_val| ())
-            .map_err(|_| CatalogError::Duplicated("table", table_name.clone()).into())
+        self.tables.try_insert(id, table).unwrap();
+        self.table_name_to_id.try_insert(name, id).unwrap();
     }
 
-    pub fn drop_table(&mut self, table_name: &str) -> Result<()> {
-        self.table_by_name.remove(table_name).ok_or_else(|| {
-            RwError::from(CatalogError::NotFound("table", table_name.to_string()))
-        })?;
-        Ok(())
+    pub fn drop_table(&mut self, id: TableId) {
+        let table = self.tables.remove(&id).unwrap();
+        self.table_name_to_id.remove(table.name()).unwrap();
     }
 
-    pub fn get_table(&self, table_name: &str) -> Option<&TableCatalog> {
-        self.table_by_name.get(table_name)
+    pub fn get_table_by_name(&self, table_name: &str) -> Option<&TableCatalog> {
+        let id = self.table_name_to_id.get(table_name)?;
+        self.tables.get(id)
     }
 
     pub fn id(&self) -> SchemaId {
