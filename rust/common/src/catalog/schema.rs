@@ -95,3 +95,35 @@ impl Index<usize> for Schema {
         &self.fields[index]
     }
 }
+
+#[allow(unused)]
+pub mod test_utils {
+    use super::*;
+
+    fn field_n<const N: usize>(data_type: DataType) -> Schema {
+        Schema::new(vec![Field::unnamed(data_type); N])
+    }
+
+    fn int32_n<const N: usize>() -> Schema {
+        field_n::<N>(DataType::Int32)
+    }
+
+    /// Create a util schema **for test only** with two int32 fields.
+    pub fn ii() -> Schema {
+        int32_n::<2>()
+    }
+
+    /// Create a util schema **for test only** with three int32 fields.
+    pub fn iii() -> Schema {
+        int32_n::<3>()
+    }
+
+    fn varchar_n<const N: usize>() -> Schema {
+        field_n::<N>(DataType::Varchar)
+    }
+
+    /// Create a util schema **for test only** with three varchar fields.
+    pub fn sss() -> Schema {
+        varchar_n::<3>()
+    }
+}

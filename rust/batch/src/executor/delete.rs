@@ -1,11 +1,8 @@
-use std::iter::once;
 use std::sync::Arc;
 
 use futures::future::try_join_all;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{
-    ArrayBuilder, ArrayImpl, DataChunk, I64ArrayBuilder, Op, PrimitiveArrayBuilder, StreamChunk,
-};
+use risingwave_common::array::{ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, StreamChunk};
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
