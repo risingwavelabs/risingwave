@@ -42,7 +42,8 @@ public class CreateTaskBroadcaster {
         throw new PgException(PgErrorCode.INTERNAL_ERROR, "Create Task failed");
       }
       TaskOutputId taskOutputId = Messages.buildTaskOutputId(createTaskRequest.getTaskId());
-      var iterator = client.getData(GetDataRequest.newBuilder().setTaskOutputId(taskOutputId).build());
+      var iterator =
+          client.getData(GetDataRequest.newBuilder().setTaskOutputId(taskOutputId).build());
       responseIterators.add(iterator);
     }
     // Wait for create table task finished.

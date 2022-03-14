@@ -14,7 +14,8 @@ public class HashDistribution implements Distribution {
 
   @Override
   public ExchangeInfo toExchangeInfo(int outputCount) {
-    var hashInfo = ExchangeInfo.HashInfo.newBuilder()
+    var hashInfo =
+        ExchangeInfo.HashInfo.newBuilder()
             .addAllKeys(this.keys)
             .setOutputCount(outputCount)
             .build();

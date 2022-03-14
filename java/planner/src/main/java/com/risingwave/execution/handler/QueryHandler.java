@@ -51,7 +51,8 @@ public class QueryHandler implements SqlHandler {
         throw new RuntimeException(exp);
       }
 
-      TaskOutputId taskOutput = Messages.buildTaskOutputId(resultLocation.getTaskId().toTaskIdProto());
+      TaskOutputId taskOutput =
+          Messages.buildTaskOutputId(resultLocation.getTaskId().toTaskIdProto());
       ComputeClient client =
           context.getComputeClientManager().getOrCreate(resultLocation.getNode());
       Iterator<GetDataResponse> iter =

@@ -192,7 +192,8 @@ public class QueryStage {
                   TaskOutputId.newBuilder()
                       .setTaskId(taskId.toTaskIdProto())
                       .setOutputId(currentTaskId);
-              var source = ExchangeSource.newBuilder().setTaskOutputId(taskOutputId).setHost(host).build();
+              var source =
+                  ExchangeSource.newBuilder().setTaskOutputId(taskOutputId).setHost(host).build();
               builder.addSources(source);
             });
     var fieldList = relNode.getInput(0).getRowType().getFieldList();
