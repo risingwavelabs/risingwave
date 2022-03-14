@@ -33,6 +33,7 @@ pub async fn list_auth_info<S: MetaStore>(store: &S) -> Result<Vec<Row>> {
         return Ok(rows);
     }
 
+    // A workaround to initialize the auth table with default records.
     let row = Row::new(vec![
         Some(ScalarImpl::Utf8("risingwave".into())),
         Some(ScalarImpl::Bool(true)),
