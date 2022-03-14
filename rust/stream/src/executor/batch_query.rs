@@ -138,10 +138,6 @@ impl<S: StateStore> Executor for BatchQueryExecutor<S> {
         }
         Ok(())
     }
-
-    fn reset(&mut self, _epoch: u64) {
-        // nothing to do
-    }
 }
 
 #[cfg(test)]

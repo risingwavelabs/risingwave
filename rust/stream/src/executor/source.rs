@@ -293,11 +293,6 @@ impl Executor for SourceExecutor {
     fn logical_operator_info(&self) -> &str {
         &self.op_info
     }
-
-    // TODO: implement reset after introduce connector here.
-    fn reset(&mut self, _epoch: u64) {
-        todo!()
-    }
 }
 
 impl Debug for SourceExecutor {

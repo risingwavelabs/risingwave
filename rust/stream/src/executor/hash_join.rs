@@ -217,12 +217,6 @@ impl<S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<S,
 
         Ok(())
     }
-
-    fn reset(&mut self, epoch: u64) {
-        self.side_l.ht.clear();
-        self.side_r.ht.clear();
-        self.update_executor_state(ExecutorState::Active(epoch));
-    }
 }
 
 #[allow(clippy::too_many_arguments)]
