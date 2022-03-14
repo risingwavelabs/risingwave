@@ -86,7 +86,7 @@ impl Default for BatchManager {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_pb::plan::{QueryId, StageId, TaskSinkId as ProstTaskSinkId};
+    use risingwave_pb::plan::TaskSinkId as ProstTaskSinkId;
     use tonic::Code;
 
     use crate::task::{BatchManager, TaskId};
@@ -111,13 +111,9 @@ mod tests {
 
         let sink_id = ProstTaskSinkId {
             task_id: Some(risingwave_pb::plan::TaskId {
-                stage_id: Some(StageId {
-                    query_id: Some(QueryId {
-                        trace_id: "".to_string(),
-                    }),
-                    stage_id: 0,
-                }),
+                stage_id: 0,
                 task_id: 0,
+                query_id: "".to_owned(),
             }),
             sink_id: 0,
         };

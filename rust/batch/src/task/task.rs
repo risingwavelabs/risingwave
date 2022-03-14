@@ -3,10 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_pb::plan::{
-    PlanFragment, QueryId as ProstQueryId, StageId as ProstStageId, TaskId as ProstTaskId,
-    TaskSinkId as ProstSinkId,
-};
+use risingwave_pb::plan::{PlanFragment, TaskId as ProstTaskId, TaskSinkId as ProstSinkId};
 use risingwave_pb::task_service::task_info::TaskStatus;
 use risingwave_pb::task_service::GetDataResponse;
 use tracing_futures::Instrument;
@@ -51,9 +48,9 @@ impl TryFrom<&ProstTaskId> for TaskId {
     type Error = RwError;
     fn try_from(prost: &ProstTaskId) -> Result<Self> {
         Ok(TaskId {
-            task_id: prost.get_task_id(),
-            stage_id: prost.get_stage_id()?.get_stage_id(),
-            query_id: String::from(prost.get_stage_id()?.get_query_id()?.get_trace_id()),
+            task_id: prost.task_id,
+            stage_id: prost.stage_id,
+            query_id: prost.query_id.clone(),
         })
     }
 }
@@ -62,12 +59,8 @@ impl TaskId {
     pub fn to_prost(&self) -> ProstTaskId {
         ProstTaskId {
             task_id: self.task_id,
-            stage_id: Some(ProstStageId {
-                query_id: Some(ProstQueryId {
-                    trace_id: self.query_id.clone(),
-                }),
-                stage_id: self.stage_id,
-            }),
+            stage_id: self.stage_id,
+            query_id: self.query_id.clone(),
         }
     }
 }

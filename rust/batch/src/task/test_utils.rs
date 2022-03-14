@@ -11,8 +11,7 @@ use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::values_node::ExprTuple;
 use risingwave_pb::plan::{
     exchange_info, ColumnDesc, CreateTableNode, ExchangeInfo, Field as NodeField, InsertNode,
-    PlanFragment, PlanNode, QueryId, StageId, TaskId as ProstTaskId, TaskSinkId as ProstSinkId,
-    ValuesNode,
+    PlanFragment, PlanNode, TaskId as ProstTaskId, TaskSinkId as ProstSinkId, ValuesNode,
 };
 use risingwave_pb::task_service::GetDataResponse;
 
@@ -57,13 +56,9 @@ pub struct TestRunner {
 impl TestRunner {
     pub fn new() -> Self {
         let tid = ProstTaskId {
-            stage_id: Some(StageId {
-                query_id: Some(QueryId {
-                    trace_id: "".to_string(),
-                }),
-                stage_id: 0,
-            }),
+            stage_id: 0,
             task_id: 0,
+            query_id: "".to_owned(),
         };
         Self {
             tid,
