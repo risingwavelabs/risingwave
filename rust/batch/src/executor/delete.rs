@@ -17,7 +17,6 @@ pub struct DeleteExecutor {
     /// Target table id.
     table_id: TableId,
     source_manager: SourceManagerRef,
-    worker_id: u32,
 
     child: BoxedExecutor,
     executed: bool,
@@ -26,16 +25,10 @@ pub struct DeleteExecutor {
 }
 
 impl DeleteExecutor {
-    pub fn new(
-        table_id: TableId,
-        source_manager: SourceManagerRef,
-        child: BoxedExecutor,
-        worker_id: u32,
-    ) -> Self {
+    pub fn new(table_id: TableId, source_manager: SourceManagerRef, child: BoxedExecutor) -> Self {
         Self {
             table_id,
             source_manager,
-            worker_id,
             child,
             executed: false,
             // TODO: support `RETURNING`
@@ -76,7 +69,7 @@ impl Executor for DeleteExecutor {
         }
 
         // Wait for all chunks to be taken / written.
-        let rows_inserted = try_join_all(notifiers)
+        let rows_deleted = try_join_all(notifiers)
             .await
             .map_err(|_| {
                 RwError::from(ErrorCode::InternalError(
@@ -89,7 +82,7 @@ impl Executor for DeleteExecutor {
         // create ret value
         {
             let mut array_builder = PrimitiveArrayBuilder::<i64>::new(1)?;
-            array_builder.append(Some(rows_inserted as i64))?;
+            array_builder.append(Some(rows_deleted as i64))?;
 
             let array = array_builder.finish()?;
             let ret_chunk = DataChunk::builder()
@@ -136,7 +129,105 @@ impl BoxedExecutorBuilder for DeleteExecutor {
             table_id,
             source.global_batch_env().source_manager_ref(),
             child,
-            source.global_batch_env().worker_id(),
         )))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use risingwave_common::array::{Array, I64Array};
+    use risingwave_common::catalog::{schema_test_utils, ColumnDesc, ColumnId};
+    use risingwave_common::column_nonnull;
+    use risingwave_source::{
+        MemSourceManager, Source, SourceManager, StreamSourceReader, TableV2ReaderContext,
+    };
+
+    use super::*;
+    use crate::executor::test_utils::MockExecutor;
+    use crate::*;
+
+    #[tokio::test]
+    async fn test_delete_executor() -> Result<()> {
+        let source_manager = Arc::new(MemSourceManager::new());
+
+        // Schema for mock executor.
+        let schema = schema_test_utils::ii();
+        let mut mock_executor = MockExecutor::new(schema.clone());
+
+        // Schema of the table
+        let schema = schema_test_utils::ii();
+
+        let table_columns: Vec<_> = schema
+            .fields
+            .iter()
+            .enumerate()
+            .map(|(i, f)| ColumnDesc {
+                data_type: f.data_type.clone(),
+                column_id: ColumnId::from(i as i32), // use column index as column id
+                name: f.name.clone(),
+            })
+            .collect();
+
+        let col1 = column_nonnull! { I64Array, [1, 3, 5, 7, 9] };
+        let col2 = column_nonnull! { I64Array, [2, 4, 6, 8, 10] };
+        let data_chunk: DataChunk = DataChunk::builder().columns(vec![col1, col2]).build();
+        mock_executor.add(data_chunk.clone());
+
+        // Create the table.
+        let table_id = TableId::new(0);
+        source_manager.create_table_source_v2(&table_id, table_columns.to_vec())?;
+
+        // Create reader
+        let source_desc = source_manager.get_source(&table_id)?;
+        let source = source_desc.source.as_table_v2();
+        let mut reader = source.stream_reader(TableV2ReaderContext, vec![0.into(), 1.into()])?;
+
+        // Delete
+        let mut delete_executor =
+            DeleteExecutor::new(table_id, source_manager.clone(), Box::new(mock_executor));
+        let handle = tokio::spawn(async move {
+            delete_executor.open().await.unwrap();
+            let result = delete_executor.next().await.unwrap().unwrap();
+            delete_executor.close().await.unwrap();
+            assert_eq!(
+                result
+                    .column_at(0)
+                    .array()
+                    .as_int64()
+                    .iter()
+                    .collect::<Vec<_>>(),
+                vec![Some(5)] // deleted rows
+            );
+        });
+
+        // Read
+        reader.open().await?;
+        let chunk = reader.next().await?;
+
+        assert_eq!(chunk.ops().to_vec(), vec![Op::Delete; 5]);
+
+        assert_eq!(
+            chunk.columns()[0]
+                .array()
+                .as_int64()
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![Some(1), Some(3), Some(5), Some(7), Some(9)]
+        );
+
+        assert_eq!(
+            chunk.columns()[1]
+                .array()
+                .as_int64()
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
+        );
+
+        handle.await.unwrap();
+
+        Ok(())
     }
 }

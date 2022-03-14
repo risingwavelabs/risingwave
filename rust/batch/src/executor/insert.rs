@@ -164,7 +164,7 @@ mod tests {
     use std::sync::Arc;
 
     use risingwave_common::array::{Array, I64Array};
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
+    use risingwave_common::catalog::{schema_test_utils, ColumnDesc, ColumnId};
     use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
     use risingwave_source::{
@@ -178,27 +178,16 @@ mod tests {
     use crate::*;
 
     #[tokio::test]
-    async fn test_insert_executor_for_table_v2() -> Result<()> {
+    async fn test_insert_executor() -> Result<()> {
         let source_manager = Arc::new(MemSourceManager::new());
         let store = MemoryStateStore::new();
 
         // Schema for mock executor.
-        let schema = Schema {
-            fields: vec![
-                Field::unnamed(DataType::Int64),
-                Field::unnamed(DataType::Int64),
-            ],
-        };
+        let schema = schema_test_utils::ii();
         let mut mock_executor = MockExecutor::new(schema.clone());
 
-        // Schema of first table
-        let schema = Schema {
-            fields: vec![
-                Field::unnamed(DataType::Decimal),
-                Field::unnamed(DataType::Decimal),
-                Field::unnamed(DataType::Decimal),
-            ],
-        };
+        // Schema of the table
+        let schema = schema_test_utils::iii();
 
         let table_columns: Vec<_> = schema
             .fields
@@ -216,7 +205,7 @@ mod tests {
         let data_chunk: DataChunk = DataChunk::builder().columns(vec![col1, col2]).build();
         mock_executor.add(data_chunk.clone());
 
-        // Create the first table.
+        // Create the table.
         let table_id = TableId::new(0);
         source_manager.create_table_source_v2(&table_id, table_columns.to_vec())?;
 
@@ -268,6 +257,7 @@ mod tests {
             vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
         );
 
+        // Row id column
         assert_eq!(
             chunk.columns()[2]
                 .array()

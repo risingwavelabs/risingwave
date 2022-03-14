@@ -126,4 +126,13 @@ pub mod test_utils {
     pub fn sss() -> Schema {
         varchar_n::<3>()
     }
+
+    fn decimal_n<const N: usize>() -> Schema {
+        field_n::<N>(DataType::Decimal)
+    }
+
+    /// Create a util schema **for test only** with three decimal fields.
+    pub fn ddd() -> Schema {
+        decimal_n::<3>()
+    }
 }
