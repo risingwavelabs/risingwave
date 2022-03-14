@@ -47,10 +47,6 @@ pub struct ComputeNodeOpts {
     /// Enable reporting tracing information to jaeger
     #[clap(long)]
     pub enable_jaeger_tracing: bool,
-
-    /// Interval to send heartbeat in ms
-    #[clap(long, default_value = "1000")]
-    pub heartbeat_interval: u32,
 }
 
 use crate::server::compute_node_serve;

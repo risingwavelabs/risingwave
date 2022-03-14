@@ -27,6 +27,13 @@ pub struct ComputeNodeConfig {
     pub storage: StorageConfig,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct FrontendConfig {
+    // For connection
+    #[serde(default)]
+    pub server: ServerConfig,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ServerConfig {
     #[serde(default = "default::heartbeat_interval")]
@@ -107,6 +114,21 @@ impl ComputeNodeConfig {
             )))
         })?;
         let config: ComputeNodeConfig = toml::from_str(config_str.as_str())
+            .map_err(|e| RwError::from(InternalError(format!("parse error {}", e))))?;
+        Ok(config)
+    }
+}
+
+impl FrontendConfig {
+    pub fn init(path: PathBuf) -> Result<Self> {
+        let config_str = fs::read_to_string(path.clone()).map_err(|e| {
+            RwError::from(InternalError(format!(
+                "failed to open config file '{}': {}",
+                path.to_string_lossy(),
+                e
+            )))
+        })?;
+        let config: FrontendConfig = toml::from_str(config_str.as_str())
             .map_err(|e| RwError::from(InternalError(format!("parse error {}", e))))?;
         Ok(config)
     }

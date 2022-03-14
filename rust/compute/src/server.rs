@@ -58,7 +58,7 @@ pub async fn compute_node_serve(
     let mut sub_tasks: Vec<(JoinHandle<()>, UnboundedSender<()>)> =
         vec![MetaClient::start_heartbeat_loop(
             meta_client.clone(),
-            Duration::from_millis(opts.heartbeat_interval as u64),
+            Duration::from_millis(config.server.heartbeat_interval as u64),
         )];
 
     let registry = prometheus::Registry::new();
