@@ -12,16 +12,16 @@ pub(crate) const RW_STREAM_SOURCE_NAME: &str = "rw_stream_source";
 
 lazy_static::lazy_static! {
     pub static ref RW_STREAM_SOURCE_SCHEMA: Schema = Schema {
-      fields: vec![
-        Field::with_name(DataType::Int32, "id"),
-        Field::with_name(DataType::Int32, "database_id"),
-        Field::with_name(DataType::Int32, "schema_id"),
-        Field::with_name(DataType::Varchar, "rel_name"),
-        Field::with_name(DataType::Int32, "row_format"),
-        Field::with_name(DataType::Int32, "row_id_index"),
-        Field::with_name(DataType::Varchar, "row_schema_location"),
-        Field::with_name(DataType::Varchar, "properties")
-      ],
+        fields: vec![
+            Field::with_name(DataType::Int32, "id"),
+            Field::with_name(DataType::Int32, "database_id"),
+            Field::with_name(DataType::Int32, "schema_id"),
+            Field::with_name(DataType::Varchar, "rel_name"),
+            Field::with_name(DataType::Int32, "row_format"),
+            Field::with_name(DataType::Int32, "row_id_index"),
+            Field::with_name(DataType::Varchar, "row_schema_location"),
+            Field::with_name(DataType::Varchar, "properties")
+        ],
     };
 }
 

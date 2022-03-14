@@ -11,12 +11,12 @@ pub(crate) const RW_MATERIALIZED_VIEW_NAME: &str = "rw_materialized_view";
 
 lazy_static::lazy_static! {
     pub static ref RW_MATERIALIZED_VIEW_SCHEMA: Schema = Schema {
-      fields: vec![
-        Field::with_name(DataType::Int32, "id"),
-        Field::with_name(DataType::Int32, "database_id"),
-        Field::with_name(DataType::Int32, "schema_id"),
-        Field::with_name(DataType::Varchar, "rel_name"),
-      ],
+        fields: vec![
+            Field::with_name(DataType::Int32, "id"),
+            Field::with_name(DataType::Int32, "database_id"),
+            Field::with_name(DataType::Int32, "schema_id"),
+            Field::with_name(DataType::Varchar, "rel_name"),
+        ],
     };
 }
 

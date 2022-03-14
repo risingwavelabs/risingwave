@@ -11,12 +11,12 @@ pub(crate) const RW_TABLE_SOURCE_NAME: &str = "rw_table_source";
 
 lazy_static::lazy_static! {
     pub static ref RW_TABLE_SOURCE_SCHEMA: Schema = Schema {
-      fields: vec![
-        Field::with_name(DataType::Int32, "id"),
-        Field::with_name(DataType::Int32, "database_id"),
-        Field::with_name(DataType::Int32, "schema_id"),
-        Field::with_name(DataType::Varchar, "rel_name"),
-      ],
+        fields: vec![
+            Field::with_name(DataType::Int32, "id"),
+            Field::with_name(DataType::Int32, "database_id"),
+            Field::with_name(DataType::Int32, "schema_id"),
+            Field::with_name(DataType::Varchar, "rel_name"),
+        ],
     };
 }
 
