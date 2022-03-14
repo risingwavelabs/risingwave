@@ -1,3 +1,5 @@
+use std::fmt;
+
 use risingwave_common::types::DataType;
 
 use super::Expr;
@@ -7,6 +9,13 @@ pub struct InputRef {
     index: usize,
     data_type: DataType,
 }
+
+impl fmt::Display for InputRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "${}", self.index + 1)
+    }
+}
+
 impl InputRef {
     pub fn new(index: usize, data_type: DataType) -> Self {
         InputRef { index, data_type }
