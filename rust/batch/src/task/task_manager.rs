@@ -3,11 +3,11 @@ use std::sync::{Arc, Mutex};
 
 use risingwave_common::error::ErrorCode::TaskNotFound;
 use risingwave_common::error::{Result, RwError};
-use risingwave_pb::plan::{PlanFragment, TaskId as ProstTaskId, TaskSinkId as ProstSinkId};
+use risingwave_pb::plan::{PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstOutputId};
 
 use crate::task::env::BatchEnvironment;
 use crate::task::task::{BatchTaskExecution, TaskId};
-use crate::task::TaskSink;
+use crate::task::TaskOutput;
 
 /// `BatchManager` is responsible for managing all batch tasks.
 #[derive(Clone)]
@@ -41,14 +41,14 @@ impl BatchManager {
         Ok(())
     }
 
-    pub fn take_sink(&self, sink_id: &ProstSinkId) -> Result<TaskSink> {
-        let task_id = TaskId::try_from(sink_id.get_task_id()?)?;
+    pub fn take_output(&self, output_id: &ProstOutputId) -> Result<TaskOutput> {
+        let task_id = TaskId::try_from(output_id.get_task_id()?)?;
         self.tasks
             .lock()
             .unwrap()
             .get(&task_id)
             .ok_or(TaskNotFound)?
-            .get_task_sink(sink_id)
+            .get_task_output(output_id)
     }
 
     #[cfg(test)]
@@ -86,7 +86,7 @@ impl Default for BatchManager {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_pb::plan::TaskSinkId as ProstTaskSinkId;
+    use risingwave_pb::plan::TaskOutputId as ProstTaskOutputId;
     use tonic::Code;
 
     use crate::task::{BatchManager, TaskId};
@@ -109,15 +109,15 @@ mod tests {
             Code::Internal
         );
 
-        let sink_id = ProstTaskSinkId {
+        let output_id = ProstTaskOutputId {
             task_id: Some(risingwave_pb::plan::TaskId {
                 stage_id: 0,
                 task_id: 0,
                 query_id: "".to_owned(),
             }),
-            sink_id: 0,
+            output_id: 0,
         };
-        match manager.take_sink(&sink_id) {
+        match manager.take_output(&output_id) {
             Err(e) => assert_eq!(e.to_grpc_status().code(), Code::Internal),
             Ok(_) => unreachable!(),
         };

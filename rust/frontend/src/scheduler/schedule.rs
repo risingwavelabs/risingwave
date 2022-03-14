@@ -128,8 +128,8 @@ impl AugmentedStage {
         };
         for (child_task_id, worker_node) in &stage.assignments {
             let host = &worker_node.host;
-            let sink_id = Some(risingwave_pb::plan::TaskSinkId {
-                sink_id: task_id as u32,
+            let task_output_id = Some(risingwave_pb::plan::TaskOutputId {
+                output_id: task_id as u32,
                 task_id: Self::construct_prost_task_id(
                     *child_task_id,
                     stage.id(),
@@ -145,7 +145,7 @@ impl AugmentedStage {
             // pull all 1 channels from 3 nodes, etc.
             let exchange_source = ExchangeSource {
                 host: host.clone(),
-                sink_id,
+                task_output_id,
             };
             exchange_node.sources.push(exchange_source);
         }
