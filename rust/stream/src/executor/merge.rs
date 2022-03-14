@@ -159,10 +159,6 @@ impl Executor for ReceiverExecutor {
     fn logical_operator_info(&self) -> &str {
         &self.op_info
     }
-
-    fn reset(&mut self, _epoch: u64) {
-        // nothing to do
-    }
 }
 
 /// `MergeExecutor` merges data from multiple channels. Dataflow from one channel
@@ -296,10 +292,6 @@ impl Executor for MergeExecutor {
 
     fn logical_operator_info(&self) -> &str {
         &self.op_info
-    }
-
-    fn reset(&mut self, _epoch: u64) {
-        // nothing to do
     }
 }
 

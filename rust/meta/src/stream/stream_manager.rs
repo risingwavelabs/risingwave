@@ -4,8 +4,9 @@ use std::time::Instant;
 
 use itertools::Itertools;
 use log::{debug, info};
+use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
-use risingwave_pb::common::ActorInfo;
+use risingwave_pb::common::{ActorInfo, WorkerType};
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
 use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_service::{
@@ -13,12 +14,13 @@ use risingwave_pb::stream_service::{
 };
 use uuid::Uuid;
 
+use super::ScheduledLocations;
 use crate::barrier::{BarrierManagerRef, Command};
-use crate::cluster::{NodeId, StoredClusterManager};
+use crate::cluster::{NodeId, StoredClusterManagerRef};
 use crate::manager::{MetaSrvEnv, StreamClientsRef};
 use crate::model::{ActorId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::{FragmentManagerRef, ScheduleCategory, Scheduler};
+use crate::stream::{FragmentManagerRef, Scheduler};
 
 pub type StreamManagerRef<S> = Arc<StreamManager<S>>;
 
@@ -42,6 +44,9 @@ where
     /// Broadcasts and collect barriers
     barrier_manager_ref: BarrierManagerRef<S>,
 
+    /// Maintains information of the cluster
+    cluster_manager_ref: StoredClusterManagerRef<S>,
+
     /// Schedules streaming actors into compute nodes
     scheduler: Scheduler<S>,
 
@@ -57,12 +62,13 @@ where
         env: MetaSrvEnv<S>,
         fragment_manager_ref: FragmentManagerRef<S>,
         barrier_manager_ref: BarrierManagerRef<S>,
-        cluster_manager: Arc<StoredClusterManager<S>>,
+        cluster_manager_ref: StoredClusterManagerRef<S>,
     ) -> Result<Self> {
         Ok(Self {
             fragment_manager_ref,
             barrier_manager_ref,
-            scheduler: Scheduler::new(ScheduleCategory::RoundRobin, cluster_manager),
+            cluster_manager_ref: cluster_manager_ref.clone(),
+            scheduler: Scheduler::new(cluster_manager_ref),
             clients: env.stream_clients_ref(),
         })
     }
@@ -77,18 +83,35 @@ where
         mut table_fragments: TableFragments,
         ctx: CreateMaterializedViewContext,
     ) -> Result<()> {
-        let actor_ids = table_fragments.actor_ids();
+        let nodes = self
+            .cluster_manager_ref
+            .list_worker_node(
+                WorkerType::ComputeNode,
+                Some(risingwave_pb::common::worker_node::State::Running),
+            )
+            .await;
+        if nodes.is_empty() {
+            return Err(InternalError("no available node exist".to_string()).into());
+        }
 
-        let locations = self.scheduler.schedule(&actor_ids).await?;
+        let mut locations = ScheduledLocations::new();
+        locations.node_locations = nodes
+            .into_iter()
+            .map(|node| (node.id, node))
+            .collect();
+
+        for fragment in table_fragments.fragments() {
+            self.scheduler.schedule(fragment, &mut locations).await?;
+        }
 
         let actor_info = locations
             .actor_locations
             .iter()
-            .map(|(&actor_id, &node_id)| {
+            .map(|(&actor_id, parallel_unit)| {
                 (
                     actor_id,
                     ActorStatus {
-                        node_id,
+                        node_id: parallel_unit.node_id,
                         state: ActorState::Inactive as i32,
                     },
                 )
@@ -281,6 +304,7 @@ mod tests {
 
     use super::*;
     use crate::barrier::BarrierManager;
+    use crate::cluster::StoredClusterManager;
     use crate::hummock::HummockManager;
     use crate::manager::{MetaSrvEnv, NotificationManager};
     use crate::model::ActorId;

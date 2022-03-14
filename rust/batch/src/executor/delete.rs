@@ -1,11 +1,8 @@
-use std::iter::once;
 use std::sync::Arc;
 
 use futures::future::try_join_all;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{
-    ArrayBuilder, ArrayImpl, DataChunk, I64ArrayBuilder, Op, PrimitiveArrayBuilder, StreamChunk,
-};
+use risingwave_common::array::{ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, StreamChunk};
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
@@ -15,12 +12,11 @@ use risingwave_source::SourceManagerRef;
 use super::BoxedExecutor;
 use crate::executor::{BoxedExecutorBuilder, Executor, ExecutorBuilder};
 
-/// [`InsertExecutor`] implements table insertion with values from its child executor.
-pub struct InsertExecutor {
+/// [`DeleteExecutor`] implements table deletion with values from its child executor.
+pub struct DeleteExecutor {
     /// Target table id.
     table_id: TableId,
     source_manager: SourceManagerRef,
-    worker_id: u32,
 
     child: BoxedExecutor,
     executed: bool,
@@ -28,32 +24,27 @@ pub struct InsertExecutor {
     identity: String,
 }
 
-impl InsertExecutor {
-    pub fn new(
-        table_id: TableId,
-        source_manager: SourceManagerRef,
-        child: BoxedExecutor,
-        worker_id: u32,
-    ) -> Self {
+impl DeleteExecutor {
+    pub fn new(table_id: TableId, source_manager: SourceManagerRef, child: BoxedExecutor) -> Self {
         Self {
             table_id,
             source_manager,
-            worker_id,
             child,
             executed: false,
+            // TODO: support `RETURNING`
             schema: Schema {
                 fields: vec![Field::unnamed(DataType::Int64)],
             },
-            identity: "InsertExecutor".to_string(),
+            identity: "DeleteExecutor".to_string(),
         }
     }
 }
 
 #[async_trait::async_trait]
-impl Executor for InsertExecutor {
+impl Executor for DeleteExecutor {
     async fn open(&mut self) -> Result<()> {
         self.child.open().await?;
-        info!("Insert executor");
+        info!("Delete executor");
         Ok(())
     }
 
@@ -71,29 +62,14 @@ impl Executor for InsertExecutor {
             let len = child_chunk.cardinality();
             assert!(child_chunk.visibility().is_none());
 
-            // add row-id column as first column
-            let mut builder = I64ArrayBuilder::new(len).unwrap();
-            for _ in 0..len {
-                builder
-                    .append(Some(source.next_row_id(self.worker_id)))
-                    .unwrap();
-            }
-
-            let rowid_column = once(Column::new(Arc::new(ArrayImpl::from(
-                builder.finish().unwrap(),
-            ))));
-            let child_columns = child_chunk.into_parts().0.into_iter();
-
-            // put row id column to the last to match the behavior of mview
-            let columns = child_columns.chain(rowid_column).collect();
-            let chunk = StreamChunk::new(vec![Op::Insert; len], columns, None);
+            let chunk = StreamChunk::from_parts(vec![Op::Delete; len], child_chunk);
 
             let notifier = source.write_chunk(chunk)?;
             notifiers.push(notifier);
         }
 
         // Wait for all chunks to be taken / written.
-        let rows_inserted = try_join_all(notifiers)
+        let rows_deleted = try_join_all(notifiers)
             .await
             .map_err(|_| {
                 RwError::from(ErrorCode::InternalError(
@@ -106,7 +82,7 @@ impl Executor for InsertExecutor {
         // create ret value
         {
             let mut array_builder = PrimitiveArrayBuilder::<i64>::new(1)?;
-            array_builder.append(Some(rows_inserted as i64))?;
+            array_builder.append(Some(rows_deleted as i64))?;
 
             let array = array_builder.finish()?;
             let ret_chunk = DataChunk::builder()
@@ -120,7 +96,7 @@ impl Executor for InsertExecutor {
 
     async fn close(&mut self) -> Result<()> {
         self.child.close().await?;
-        info!("Cleaning insert executor.");
+        info!("Cleaning delete executor.");
         Ok(())
     }
 
@@ -133,14 +109,14 @@ impl Executor for InsertExecutor {
     }
 }
 
-impl BoxedExecutorBuilder for InsertExecutor {
+impl BoxedExecutorBuilder for DeleteExecutor {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        let insert_node = try_match_expand!(
+        let delete_node = try_match_expand!(
             source.plan_node().get_node_body().unwrap(),
-            NodeBody::Insert
+            NodeBody::Delete
         )?;
 
-        let table_id = TableId::from(&insert_node.table_source_ref_id);
+        let table_id = TableId::from(&delete_node.table_source_ref_id);
 
         let proto_child = source.plan_node.get_children().get(0).ok_or_else(|| {
             RwError::from(ErrorCode::InternalError(String::from(
@@ -153,41 +129,35 @@ impl BoxedExecutorBuilder for InsertExecutor {
             table_id,
             source.global_batch_env().source_manager_ref(),
             child,
-            source.global_batch_env().worker_id(),
         )))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Bound;
     use std::sync::Arc;
 
     use risingwave_common::array::{Array, I64Array};
     use risingwave_common::catalog::{schema_test_utils, ColumnDesc, ColumnId};
     use risingwave_common::column_nonnull;
-    use risingwave_common::types::DataType;
     use risingwave_source::{
         MemSourceManager, Source, SourceManager, StreamSourceReader, TableV2ReaderContext,
     };
-    use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::*;
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
     use crate::*;
 
     #[tokio::test]
-    async fn test_insert_executor() -> Result<()> {
+    async fn test_delete_executor() -> Result<()> {
         let source_manager = Arc::new(MemSourceManager::new());
-        let store = MemoryStateStore::new();
 
         // Schema for mock executor.
         let schema = schema_test_utils::ii();
         let mut mock_executor = MockExecutor::new(schema.clone());
 
         // Schema of the table
-        let schema = schema_test_utils::iii();
+        let schema = schema_test_utils::ii();
 
         let table_columns: Vec<_> = schema
             .fields
@@ -212,18 +182,15 @@ mod tests {
         // Create reader
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.source.as_table_v2();
-        let mut reader =
-            source.stream_reader(TableV2ReaderContext, vec![0.into(), 1.into(), 2.into()])?;
+        let mut reader = source.stream_reader(TableV2ReaderContext, vec![0.into(), 1.into()])?;
 
-        // Insert
-        let mut insert_executor =
-            InsertExecutor::new(table_id, source_manager.clone(), Box::new(mock_executor), 0);
+        // Delete
+        let mut delete_executor =
+            DeleteExecutor::new(table_id, source_manager.clone(), Box::new(mock_executor));
         let handle = tokio::spawn(async move {
-            insert_executor.open().await.unwrap();
-            let fields = &insert_executor.schema().fields;
-            assert_eq!(fields[0].data_type, DataType::Int64);
-            let result = insert_executor.next().await.unwrap().unwrap();
-            insert_executor.close().await.unwrap();
+            delete_executor.open().await.unwrap();
+            let result = delete_executor.next().await.unwrap().unwrap();
+            delete_executor.close().await.unwrap();
             assert_eq!(
                 result
                     .column_at(0)
@@ -231,13 +198,15 @@ mod tests {
                     .as_int64()
                     .iter()
                     .collect::<Vec<_>>(),
-                vec![Some(5)] // inserted rows
+                vec![Some(5)] // deleted rows
             );
         });
 
         // Read
         reader.open().await?;
         let chunk = reader.next().await?;
+
+        assert_eq!(chunk.ops().to_vec(), vec![Op::Delete; 5]);
 
         assert_eq!(
             chunk.columns()[0]
@@ -256,23 +225,6 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
         );
-
-        // Row id column
-        assert_eq!(
-            chunk.columns()[2]
-                .array()
-                .as_int64()
-                .iter()
-                .collect::<Vec<_>>(),
-            vec![Some(0), Some(1), Some(2), Some(3), Some(4)]
-        );
-
-        // There's nothing in store since `TableSourceV2` has no side effect.
-        // Data will be materialized in associated streaming task.
-        let epoch = u64::MAX;
-        let full_range = (Bound::<Vec<u8>>::Unbounded, Bound::<Vec<u8>>::Unbounded);
-        let store_content = store.scan(full_range, None, epoch).await?;
-        assert!(store_content.is_empty());
 
         handle.await.unwrap();
 

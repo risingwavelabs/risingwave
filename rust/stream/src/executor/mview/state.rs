@@ -61,10 +61,6 @@ impl<S: StateStore> ManagedMViewState<S> {
         FlushStatus::do_delete(self.cache.entry(pk));
     }
 
-    pub fn clear_cache(&mut self) {
-        self.cache.clear();
-    }
-
     pub async fn flush(&mut self, epoch: u64) -> Result<()> {
         let mut batch = self.keyspace.state_store().start_write_batch();
         batch.reserve(self.cache.len() * self.column_ids.len());
@@ -88,18 +84,18 @@ impl<S: StateStore> ManagedMViewState<S> {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::catalog::schema_test_utils;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
-    use crate::executor::test_utils::schemas;
 
     #[tokio::test]
     async fn test_mview_state() {
         // Only assert pk and columns can be successfully put/delete/flush,
         // and the ammount of rows is expected.
         let state_store = MemoryStateStore::new();
-        let _schema = schemas::ii();
+        let _schema = schema_test_utils::ii();
         let keyspace = Keyspace::executor_root(state_store.clone(), 0x42);
 
         let mut state = ManagedMViewState::new(

@@ -88,7 +88,7 @@ async fn main() {
             eprintln!("launching playground");
 
             risingwave_logging::oneshot_common();
-            risingwave_logging::init_risingwave_logger(false, false);
+            risingwave_logging::init_risingwave_logger(false, true);
 
             let meta_opts = risingwave_meta::MetaNodeOpts::parse_from(["--backend mem"]);
             let compute_opts =

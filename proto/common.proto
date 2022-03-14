@@ -39,7 +39,7 @@ enum ParallelUnitType {
 message ParallelUnit {
   uint32 id = 1;
   ParallelUnitType type = 2;
-  HostAddress node_host = 3;
+  uint32 node_id = 3;
 }
 
 message WorkerNode {

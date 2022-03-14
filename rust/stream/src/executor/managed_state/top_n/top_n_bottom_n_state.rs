@@ -305,13 +305,12 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
         Ok(())
     }
 
-    pub fn clear_cache(&mut self, force: bool) {
-        if !force {
-            assert!(
-                !self.is_dirty(),
-                "cannot clear cache while top n bottom n state is dirty"
-            );
-        }
+    pub fn clear_cache(&mut self) {
+        assert!(
+            !self.is_dirty(),
+            "cannot clear cache while top n bottom n state is dirty"
+        );
+
         self.top_n.clear();
         self.bottom_n.clear();
     }

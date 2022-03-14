@@ -75,7 +75,7 @@ The Rust components use `tokio-tracing` to handle both logging and tracing. The 
 * Third-party libraries: warn
 * Other libraries: debug
 
-If you need to adjust log levels, simply change the logging filters in `compute_node.rs` and `meta_node.rs`.
+If you need to adjust log levels, simply change the logging filters in `utils/logging`.
 
 ## Code Formatting
 
