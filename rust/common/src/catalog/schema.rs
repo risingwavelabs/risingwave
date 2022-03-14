@@ -1,6 +1,7 @@
 use std::ops::Index;
 
-use risingwave_pb::plan::Field as ProstField;
+#[allow(unused_imports)]
+use risingwave_pb::plan::{ColumnDesc, ExchangeInfo, Field as ProstField};
 
 use crate::array::ArrayBuilderImpl;
 use crate::error::Result;
@@ -16,6 +17,15 @@ pub struct Field {
 impl std::fmt::Debug for Field {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}:{:?}", self.name, self.data_type)
+    }
+}
+
+impl Field {
+    pub fn to_prost(&self) -> Result<ProstField> {
+        Ok(ProstField {
+            data_type: Some(self.data_type.to_protobuf()?),
+            name: self.name.to_string(),
+        })
     }
 }
 
