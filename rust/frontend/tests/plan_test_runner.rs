@@ -9,6 +9,7 @@ use anyhow::{anyhow, Result};
 use risingwave_common::error::RwError;
 use risingwave_frontend::binder::Binder;
 use risingwave_frontend::handler::{create_table, drop_table};
+use risingwave_frontend::optimizer::{PlanRef, PlanRoot};
 use risingwave_frontend::planner::Planner;
 use risingwave_frontend::session::{QueryContext, QueryContextRef};
 use risingwave_frontend::test_utils::LocalFrontend;
@@ -19,7 +20,8 @@ use serde::Deserialize;
 #[derive(Debug, PartialEq, Deserialize)]
 struct TestCase {
     sql: String,
-    plan: Option<String>,
+    logical_plan: Option<String>,
+    batch_plan: Option<String>,
     binder_error: Option<String>,
     planner_error: Option<String>,
     optimizer_error: Option<String>,
@@ -63,28 +65,55 @@ impl TestCase {
             return Ok(());
         }
 
-        let actual_plan = Planner::new(context).plan(bound.unwrap()).map(|plan| {
-            let mut output = String::new();
-            plan.as_subplan().explain(0, &mut output).unwrap();
-            output
-        });
+        let actual_plan = Planner::new(context).plan(bound.unwrap());
+        let actual_plan = check_err("logical_plan", &self.planner_error, actual_plan)?;
+        check_logical_plan("logical_plan", &self.logical_plan, &actual_plan)?;
 
-        let actual_plan = check_err("planner", &self.planner_error, actual_plan)?;
-        if let Some(actual_plan) = &actual_plan
-            && let Some(expected_plan) = &self.plan
-            && expected_plan != actual_plan
-        {
-            return Err(anyhow!(
-                "Expected plan:\n{}\nActual plan:\n{}",
-                expected_plan,
-                actual_plan,
-            ));
+        if let (Some(actual_plan), Some(expected_plan)) = (&actual_plan, &self.batch_plan) {
+            let actual_plan = actual_plan.gen_batch_query_plan();
+            check_plan_eq("batch_plan", expected_plan.clone(), actual_plan)?;
         }
 
         Ok(())
     }
 }
 
+fn check_logical_plan(
+    ctx: &str,
+    expected_plan: &Option<String>,
+    actual_plan: &Option<PlanRoot>,
+) -> Result<()> {
+    match (expected_plan, actual_plan) {
+        (Some(expected_plan), Some(actual_plan)) => {
+            check_plan_eq(ctx, expected_plan.clone(), actual_plan.clone().as_subplan())
+        }
+        (None, None) => Ok(()),
+        (None, Some(_)) => Ok(()),
+        (Some(expected_plan), None) => Err(anyhow!(
+            "Expected {}:\n{},\nbut failure occurred.",
+            ctx,
+            *expected_plan
+        )),
+    }
+}
+
+fn check_plan_eq(ctx: &str, expected: String, actual_plan: PlanRef) -> Result<()> {
+    let mut actual = String::new();
+    actual_plan.explain(0, &mut actual).unwrap();
+    if *expected != actual {
+        Err(anyhow!(
+            "Expected {}:\n{}\nActual {}:\n{}",
+            ctx,
+            expected,
+            ctx,
+            actual,
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+/// Compare the error with the expected error, fail if they are mismatched.
 fn check_err<T>(
     ctx: &str,
     expected_err: &Option<String>,
@@ -116,7 +145,7 @@ async fn run_test_file(_file_name: &str, file_content: &str) {
     let cases: Vec<TestCase> = serde_yaml::from_str(file_content).unwrap();
     for c in cases {
         if let Err(e) = c.run().await {
-            println!("\nTest case failed, the input SQL:\n  {}\n{}", c.sql, e);
+            println!("\nTest case failed, the input SQL:\n{}\n{}", c.sql, e);
             failed_num += 1;
         }
     }
@@ -126,7 +155,8 @@ async fn run_test_file(_file_name: &str, file_content: &str) {
     }
 }
 
-// Traverses the 'testdata/' directory and runs all files.
+/// Traverses the 'testdata/' directory and runs all files.
+/// This is the entry point of `plan_test_runner`.
 #[tokio::test]
 async fn run_all_test_files() {
     use walkdir::WalkDir;
