@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use risingwave_common::catalog::{CatalogVersion, TableId};
-use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::ErrorCode::{self, InternalError};
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::try_match_expand;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
@@ -269,7 +269,7 @@ pub trait MetaClientInner: Send + Sync {
     }
 
     async fn heartbeat(&self, _req: HeartbeatRequest) -> Result<HeartbeatResponse> {
-        unimplemented!()
+        Err(ErrorCode::NotImplementedError("heartbeat is not implemented".into()).into())
     }
 
     async fn create(&self, _req: CreateRequest) -> Result<CreateResponse> {
