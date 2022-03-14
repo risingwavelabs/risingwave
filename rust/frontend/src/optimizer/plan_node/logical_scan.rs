@@ -12,7 +12,6 @@ use crate::session::QueryContextRef;
 
 /// `LogicalScan` returns contents of a table or other equivalent object
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct LogicalScan {
     pub base: LogicalBase,
     table_name: String,
