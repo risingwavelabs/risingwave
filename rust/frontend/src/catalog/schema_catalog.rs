@@ -11,8 +11,8 @@ use crate::catalog::{CatalogError, SchemaId};
 pub struct SchemaCatalog {
     schema_id: SchemaId,
     name: String,
-    tables: HashMap<TableId, TableCatalog>,
-    table_name_to_id: HashMap<String, TableId>,
+    table_by_name: HashMap<String, TableCatalog>,
+    table_name_by_id: HashMap<TableId, String>,
 }
 
 impl SchemaCatalog {
@@ -20,8 +20,8 @@ impl SchemaCatalog {
         Self {
             schema_id,
             name,
-            tables: HashMap::new(),
-            table_name_to_id: HashMap::new(),
+            table_by_name: HashMap::new(),
+            table_name_by_id: HashMap::new(),
         }
     }
     pub fn add_table(&mut self, prost: &ProstTable) {
@@ -29,18 +29,17 @@ impl SchemaCatalog {
         let id = prost.id.into();
         let table = prost.into();
 
-        self.tables.try_insert(id, table).unwrap();
-        self.table_name_to_id.try_insert(name, id).unwrap();
+        self.table_by_name.try_insert(name, table).unwrap();
+        self.table_name_by_id.try_insert(id, name).unwrap();
     }
 
     pub fn drop_table(&mut self, id: TableId) {
-        let table = self.tables.remove(&id).unwrap();
-        self.table_name_to_id.remove(table.name()).unwrap();
+        let name = self.table_name_by_id.remove(&id).unwrap();
+        self.table_by_name.remove(&name).unwrap();
     }
 
     pub fn get_table_by_name(&self, table_name: &str) -> Option<&TableCatalog> {
-        let id = self.table_name_to_id.get(table_name)?;
-        self.tables.get(id)
+        self.table_by_name.get(table_name)
     }
 
     pub fn id(&self) -> SchemaId {
