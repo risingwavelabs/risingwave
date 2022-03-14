@@ -16,11 +16,11 @@ use crate::expr::{Expr, ExprImpl};
 #[derive(Debug)]
 pub enum TableRef {
     BaseTable(Box<BaseTableRef>),
-    Join(Box<Join>),
+    Join(Box<BoundJoin>),
 }
 
 #[derive(Debug)]
-pub struct Join {
+pub struct BoundJoin {
     pub left: TableRef,
     pub right: TableRef,
     pub cond: ExprImpl,
@@ -46,7 +46,7 @@ impl Binder {
         let mut root = self.bind_table_with_joins(first)?;
         for t in from_iter {
             let right = self.bind_table_with_joins(t)?;
-            root = TableRef::Join(Box::new(Join {
+            root = TableRef::Join(Box::new(BoundJoin {
                 left: root,
                 right,
                 cond: ExprImpl::literal_bool::<true>(),
@@ -62,7 +62,7 @@ impl Binder {
             match join.join_operator {
                 JoinOperator::Inner(constraint) => {
                     let cond = self.bind_join_constraint(constraint)?;
-                    let join = Join {
+                    let join = BoundJoin {
                         left: root,
                         right,
                         cond,
