@@ -1,6 +1,7 @@
 use itertools::Itertools;
 use pgwire::types::Row;
 use risingwave_common::array::DataChunk;
+
 pub fn to_pg_rows(chunk: DataChunk) -> Vec<Row> {
     chunk
         .rows()

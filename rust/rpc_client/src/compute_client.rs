@@ -139,6 +139,13 @@ impl GrpcExchangeSource {
         let client = ComputeClient::new(&addr).await?;
         client.get_data(sink_id).await
     }
+
+    pub async fn create_with_client(
+        compute_client: ComputeClient,
+        sink_id: TaskSinkId,
+    ) -> Result<Self> {
+        compute_client.get_data(sink_id).await
+    }
 }
 
 #[async_trait::async_trait]
