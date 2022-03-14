@@ -5,7 +5,9 @@ use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
-use risingwave_pb::meta::{Catalog, Database, Schema, Table};
+use risingwave_pb::catalog::{
+    Database as ProstDatabase, Schema as ProstSchema, Table as ProstTable,
+};
 use risingwave_pb::plan::{ColumnDesc, DatabaseRefId, SchemaRefId, TableRefId};
 use risingwave_rpc_client::MetaClient;
 use tokio::sync::watch::Receiver;
@@ -21,7 +23,7 @@ pub const DEFAULT_SCHEMA_NAME: &str = "dev";
 #[derive(Default)]
 pub struct CatalogCache {
     catalog_version: CatalogVersion,
-    database_by_name: HashMap<String, Arc<DatabaseCatalog>>,
+    database_by_name: HashMap<String, DatabaseCatalog>,
     db_name_by_id: HashMap<DatabaseId, String>,
 }
 
@@ -38,63 +40,49 @@ impl CatalogCache {
     pub async fn new(client: MetaClient) -> Result<Self> {
         client.get_catalog().await.and_then(TryInto::try_into)
     }
-
-    pub fn create_database(&mut self, db_name: &str, db_id: DatabaseId) -> Result<()> {
-        self.database_by_name
-            .try_insert(db_name.to_string(), Arc::new(DatabaseCatalog::new(db_id)))
-            .map(|_| ())
-            .map_err(|_| CatalogError::Duplicated("database", db_name.to_string()))?;
-        self.db_name_by_id
-            .try_insert(db_id, db_name.to_string())
-            .map(|_| ())
-            .map_err(|_| CatalogError::Duplicated("database id", db_id.to_string()).into())
+    fn get_database_mut(&mut self, db_id: DatabaseId) -> Option<&mut DatabaseCatalog> {
+        let name = self.db_name_by_id.get(&db_id)?;
+        self.database_by_name.get_mut(name)
     }
 
-    pub fn get_database(&self, db_name: &str) -> Option<&DatabaseCatalog> {
-        Some(self.database_by_name.get(db_name)?.as_ref())
+    pub fn create_database(&mut self, db: &ProstDatabase) {
+        let name = db.name;
+        let id = db.id.into();
+
+        self.database_by_name.try_insert(name, db.into()).unwrap();
+        self.db_name_by_id.try_insert(id, name).unwrap();
+    }
+    pub fn create_table(&mut self, proto: &ProstTable) {
+        self.get_database_mut(proto.database_id)
+            .unwrap()
+            .get_schema_mut(proto.schema_id)
+            .unwrap()
+            .create_table(proto);
+    }
+    pub fn create_schema(&mut self, proto: &ProstSchema) {
+        self.get_database_mut(proto.database_id)
+            .unwrap()
+            .create_schema(proto);
     }
 
-    fn get_database_mut(&mut self, db_name: &str) -> Option<&mut DatabaseCatalog> {
-        Some(Arc::make_mut(self.database_by_name.get_mut(db_name)?))
+    pub fn get_database_by_name(&self, db_name: &str) -> Option<&DatabaseCatalog> {
+        self.database_by_name.get(db_name)
     }
 
-    fn get_database_snapshot(&self, db_name: &str) -> Option<Arc<DatabaseCatalog>> {
-        self.database_by_name.get(db_name).cloned()
+    pub fn get_schema_by_name(&self, db_name: &str, schema_name: &str) -> Option<&SchemaCatalog> {
+        self.get_database_by_name(db_name)?
+            .get_schema_by_name(schema_name)
     }
 
-    pub fn get_database_name(&self, db_id: DatabaseId) -> Option<String> {
-        self.db_name_by_id.get(&db_id).cloned()
-    }
-
-    pub fn create_schema(
-        &mut self,
+    pub fn get_table_by_name(
+        &self,
         db_name: &str,
         schema_name: &str,
-        schema_id: SchemaId,
-    ) -> Result<()> {
-        self.get_database_mut(db_name).map_or(
-            Err(CatalogError::NotFound("schema", db_name.to_string()).into()),
-            |db| db.create_schema_with_id(schema_name, schema_id),
-        )
+        table_name: &str,
+    ) -> Option<&TableCatalog> {
+        self.get_schema_by_name(db_name, schema_name)?
+            .get_table_by_name(table_name)
     }
-
-    fn get_schema(&self, db_name: &str, schema_name: &str) -> Option<&SchemaCatalog> {
-        self.get_database(db_name)
-            .and_then(|db| db.get_schema(schema_name))
-    }
-
-    fn get_schema_mut(&mut self, db_name: &str, schema_name: &str) -> Option<&mut SchemaCatalog> {
-        self.get_database_mut(db_name)
-            .and_then(|db| db.get_schema_mut(schema_name))
-    }
-
-    pub fn create_table(&mut self, db_name: &str, schema_name: &str, table: &Table) -> Result<()> {
-        self.get_schema_mut(db_name, schema_name).map_or(
-            Err(CatalogError::NotFound("table", table.table_name.to_string()).into()),
-            |schema| schema.create_table(table),
-        )
-    }
-
     fn get_table(
         &self,
         db_name: &str,
@@ -130,14 +118,6 @@ impl CatalogCache {
             ))
         })?;
         Ok(())
-    }
-
-    pub fn get_version(&self) -> CatalogVersion {
-        self.catalog_version
-    }
-
-    pub fn set_version(&mut self, version: CatalogVersion) {
-        self.catalog_version = version;
     }
 }
 

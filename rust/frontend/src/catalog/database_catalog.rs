@@ -1,36 +1,25 @@
 use std::collections::HashMap;
 
 use risingwave_common::error::{Result, RwError};
+use risingwave_pb::catalog::{Database as ProstDatabase, Schema as ProstSchema};
 
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::{CatalogError, DatabaseId, SchemaId};
-
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct DatabaseCatalog {
     id: DatabaseId,
+    name: String,
     schema_by_name: HashMap<String, SchemaCatalog>,
     schema_name_by_id: HashMap<SchemaId, String>,
 }
 
 impl DatabaseCatalog {
-    pub fn new(id: DatabaseId) -> Self {
-        Self {
-            id,
-            schema_by_name: HashMap::new(),
-            schema_name_by_id: HashMap::new(),
-        }
-    }
-
-    pub fn create_schema_with_id(&mut self, schema_name: &str, schema_id: SchemaId) {
-        self.schema_by_name
-            .try_insert(
-                schema_name.to_string(),
-                SchemaCatalog::new(schema_id, schema_name.to_string()),
-            )
-            .unwrap();
-        self.schema_name_by_id
-            .try_insert(schema_id, schema_name.to_string())
-            .unwrap();
+    pub fn create_schema(&mut self, proto: &ProstSchema) {
+        let name = proto.name;
+        let id = proto.id;
+        let schema = proto.into();
+        self.schema_by_name.try_insert(name, schema).unwrap();
+        self.schema_name_by_id.try_insert(id.into(), name).unwrap();
     }
 
     pub fn drop_schema(&mut self, schema_id: SchemaId) {
@@ -47,7 +36,17 @@ impl DatabaseCatalog {
         self.schema_by_name.get_mut(name)
     }
 
-    pub fn id(&self) -> u64 {
+    pub fn id(&self) -> DatabaseId {
         self.id
+    }
+}
+impl From<&ProstDatabase> for DatabaseCatalog {
+    fn from(db: &ProstDatabase) -> Self {
+        Self {
+            id: db.id.into(),
+            name: db.name,
+            schema_by_name: HashMap::new(),
+            schema_name_by_id: HashMap::new(),
+        }
     }
 }

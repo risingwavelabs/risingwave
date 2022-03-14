@@ -2,29 +2,21 @@ use std::collections::HashMap;
 
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{Result, RwError};
-use risingwave_pb::catalog::Table as ProstTable;
+use risingwave_pb::catalog::{Schema as ProstSchema, Table as ProstTable};
 
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::{CatalogError, SchemaId};
 
 #[derive(Clone, Debug)]
 pub struct SchemaCatalog {
-    schema_id: SchemaId,
+    id: SchemaId,
     name: String,
     table_by_name: HashMap<String, TableCatalog>,
     table_name_by_id: HashMap<TableId, String>,
 }
 
 impl SchemaCatalog {
-    pub fn new(schema_id: SchemaId, name: String) -> Self {
-        Self {
-            schema_id,
-            name,
-            table_by_name: HashMap::new(),
-            table_name_by_id: HashMap::new(),
-        }
-    }
-    pub fn add_table(&mut self, prost: &ProstTable) {
+    pub fn create_table(&mut self, prost: &ProstTable) {
         let name = prost.name;
         let id = prost.id.into();
         let table = prost.into();
@@ -43,6 +35,17 @@ impl SchemaCatalog {
     }
 
     pub fn id(&self) -> SchemaId {
-        self.schema_id
+        self.id
+    }
+}
+
+impl From<&ProstSchema> for SchemaCatalog {
+    fn from(schema: &ProstSchema) -> Self {
+        Self {
+            id: schema.id.into(),
+            name: schema.name,
+            table_by_name: HashMap::new(),
+            table_name_by_id: HashMap::new(),
+        }
     }
 }
