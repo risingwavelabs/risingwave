@@ -49,7 +49,7 @@ impl Binder {
             root = TableRef::Join(Box::new(BoundJoin {
                 left: root,
                 right,
-                cond: ExprImpl::literal_bool::<true>(),
+                cond: ExprImpl::literal_bool(true),
             }));
         }
         Ok(Some(root))
@@ -78,7 +78,7 @@ impl Binder {
 
     fn bind_join_constraint(&mut self, constraint: JoinConstraint) -> Result<ExprImpl> {
         Ok(match constraint {
-            JoinConstraint::None => ExprImpl::literal_bool::<true>(),
+            JoinConstraint::None => ExprImpl::literal_bool(true),
             JoinConstraint::Natural => {
                 return Err(ErrorCode::NotImplementedError("Natural join".into()).into())
             }

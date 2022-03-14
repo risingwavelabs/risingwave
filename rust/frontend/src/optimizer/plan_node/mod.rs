@@ -161,6 +161,7 @@ mod batch_project;
 mod batch_seq_scan;
 mod batch_sort;
 mod batch_sort_merge_join;
+mod batch_values;
 mod logical_agg;
 mod logical_filter;
 mod logical_insert;
@@ -185,6 +186,7 @@ pub use batch_project::BatchProject;
 pub use batch_seq_scan::BatchSeqScan;
 pub use batch_sort::BatchSort;
 pub use batch_sort_merge_join::BatchSortMergeJoin;
+pub use batch_values::BatchValues;
 pub use logical_agg::LogicalAgg;
 pub use logical_filter::LogicalFilter;
 pub use logical_insert::LogicalInsert;
@@ -235,6 +237,7 @@ macro_rules! for_all_plan_nodes {
             ,{ Batch, Insert }
             ,{ Batch, SeqScan }
             ,{ Batch, HashJoin }
+            ,{ Batch, Values }
             ,{ Batch, SortMergeJoin }
             ,{ Batch, Sort }
             ,{ Batch, Exchange }
@@ -278,6 +281,7 @@ macro_rules! for_batch_plan_nodes {
             ,{ Batch, Filter }
             ,{ Batch, SeqScan }
             ,{ Batch, HashJoin }
+            ,{ Batch, Values }
             ,{ Batch, Limit }
             ,{ Batch, SortMergeJoin }
             ,{ Batch, Sort }
@@ -350,4 +354,5 @@ macro_rules! impl_down_cast_fn {
         }
     }
 }
+
 for_all_plan_nodes! { impl_down_cast_fn }
