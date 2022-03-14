@@ -155,6 +155,7 @@ pub use to_prost::*;
 mod batch_exchange;
 mod batch_filter;
 mod batch_hash_join;
+mod batch_insert;
 mod batch_limit;
 mod batch_project;
 mod batch_seq_scan;
@@ -178,6 +179,7 @@ mod stream_table_source;
 pub use batch_exchange::BatchExchange;
 pub use batch_filter::BatchFilter;
 pub use batch_hash_join::BatchHashJoin;
+pub use batch_insert::BatchInsert;
 pub use batch_limit::BatchLimit;
 pub use batch_project::BatchProject;
 pub use batch_seq_scan::BatchSeqScan;
@@ -230,6 +232,7 @@ macro_rules! for_all_plan_nodes {
             // ,{ Logical, Sort } we don't need a LogicalSort, just require the Order
             ,{ Batch, Project }
             ,{ Batch, Filter }
+            ,{ Batch, Insert }
             ,{ Batch, SeqScan }
             ,{ Batch, HashJoin }
             ,{ Batch, SortMergeJoin }
@@ -279,6 +282,7 @@ macro_rules! for_batch_plan_nodes {
             ,{ Batch, SortMergeJoin }
             ,{ Batch, Sort }
             ,{ Batch, Exchange }
+            ,{ Batch, Insert }
         }
     };
 }

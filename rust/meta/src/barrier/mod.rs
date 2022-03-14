@@ -194,7 +194,8 @@ where
             let info = {
                 let all_nodes = self
                     .cluster_manager
-                    .list_worker_node(WorkerType::ComputeNode, Some(Running));
+                    .list_worker_node(WorkerType::ComputeNode, Some(Running))
+                    .await;
                 let all_actor_infos = self
                     .fragment_manager
                     .load_all_actors(command.creating_table_id())?;
@@ -216,8 +217,9 @@ where
                 let actor_ids_to_send = info.actor_ids_to_send(node_id).collect_vec();
                 let actor_ids_to_collect = info.actor_ids_to_collect(node_id).collect_vec();
 
-                if actor_ids_to_send.is_empty() || actor_ids_to_collect.is_empty() {
-                    // No need to send barrier for this node.
+                if actor_ids_to_collect.is_empty() {
+                    // No need to send or collect barrier for this node.
+                    assert!(actor_ids_to_send.is_empty());
                     None
                 } else {
                     let mutation = mutation.clone();
@@ -257,22 +259,23 @@ where
 
             let mut notifiers = notifiers;
             notifiers.iter_mut().for_each(Notifier::notify_to_send);
+
+            // Wait for all barriers collected
             let timer = self.metrics.barrier_latency.start_timer();
-            // wait all barriers collected
             let collect_result = try_join_all(collect_futures).await;
-            timer.observe_duration();
+
+            // Commit this epoch to Hummock
             if prev_epoch != INVALID_EPOCH {
                 match collect_result {
-                    Ok(_) => {
-                        self.hummock_manager.commit_epoch(prev_epoch).await?;
-                    }
-                    Err(err) => {
-                        self.hummock_manager.abort_epoch(prev_epoch).await?;
-                        return Err(err);
-                    }
+                    Ok(_) => self.hummock_manager.commit_epoch(prev_epoch).await?,
+                    Err(_) => self.hummock_manager.abort_epoch(prev_epoch).await?,
                 };
             }
+            collect_result?;
             prev_epoch = new_epoch;
+
+            timer.observe_duration();
+
             command_context.post_collect().await?; // do some post stuffs
             notifiers.iter_mut().for_each(Notifier::notify_collected);
         }

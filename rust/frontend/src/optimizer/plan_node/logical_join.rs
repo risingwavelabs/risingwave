@@ -1,4 +1,4 @@
-use std::fmt;
+use std::fmt::{self};
 
 use fixedbitset::FixedBitSet;
 use itertools::{Either, Itertools};
@@ -31,8 +31,11 @@ pub struct LogicalJoin {
 }
 
 impl fmt::Display for LogicalJoin {
-    fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
-        todo!()
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("LogicalJoin")
+            .field("type", &self.join_type())
+            .field("on", &self.on)
+            .finish()
     }
 }
 

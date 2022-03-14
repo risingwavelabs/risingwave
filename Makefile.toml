@@ -109,7 +109,8 @@ condition = { env_set = [ "ENABLE_BUILD_RUST" ] }
 script = '''
 #!/bin/bash
 set -e
-cd rust && cargo build --profile ${RISINGWAVE_BUILD_PROFILE} ${RISEDEV_CARGO_BUILD_FLAGS}
+echo "**Reminder**: risedev will only build risingwave_cmd crate"
+cd rust && cargo build -p risingwave_cmd --profile "${RISINGWAVE_BUILD_PROFILE}" ${RISEDEV_CARGO_BUILD_FLAGS}
 '''
 
 [tasks.build-frontend]
