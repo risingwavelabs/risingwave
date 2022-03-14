@@ -20,7 +20,7 @@ pub use query::BoundQuery;
 pub use select::BoundSelect;
 pub use set_expr::BoundSetExpr;
 pub use statement::BoundStatement;
-pub use table_ref::{BaseTableRef, TableRef};
+pub use table_ref::{BaseTableRef, BoundJoin, TableRef};
 pub use values::BoundValues;
 
 use crate::catalog::database_catalog::DatabaseCatalog;
