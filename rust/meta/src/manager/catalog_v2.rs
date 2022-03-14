@@ -4,13 +4,15 @@ use std::collections::{HashMap, HashSet};
 use std::option::Option::Some;
 use std::sync::Arc;
 
+use risingwave_common::array::Row;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, RwError};
-use risingwave_pb::catalog::{Database, Schema, Source, Table};
+use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_pb::catalog::{Database, Schema, Source, Table, VirtualTable};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::Mutex;
 
+use crate::catalog::{SystemCatalogCore};
 use crate::manager::{NotificationManagerRef, NotificationTarget};
 use crate::model::{CatalogVersionGenerator, MetadataModel};
 use crate::storage::MetaStore;
@@ -226,6 +228,25 @@ where
             )))
         }
     }
+
+    pub async fn list_sys_tables(&self) -> Result<Vec<VirtualTable>> {
+        let core = self.core.lock().await;
+        Ok(core
+            .system_catalog
+            .list_tables()
+            .iter()
+            .map(|t| t.catalog())
+            .collect())
+    }
+
+    pub async fn list_sys_records(&self, table_id: TableId) -> Result<Vec<Row>> {
+        let core = self.core.lock().await;
+        let table = core
+            .system_catalog
+            .get_table(&risingwave_common::catalog::TableId { table_id })
+            .ok_or_else(|| ErrorCode::ItemNotFound(format!("relation \"{}\"", table_id)))?;
+        table.list(&*self.meta_store_ref).await
+    }
 }
 
 type DatabaseKey = DatabaseId;
@@ -245,6 +266,8 @@ struct CatalogManagerCore<S> {
     sources: HashSet<SourceKey>,
     /// Cached table key information.
     tables: HashSet<TableKey>,
+    /// System catalog core.
+    system_catalog: SystemCatalogCore,
     /// Table refer count mapping.
     table_ref_count: HashMap<TableId, usize>,
 
@@ -283,6 +306,7 @@ where
         }));
 
         let version_generator = CatalogVersionGenerator::new(&*meta_store_ref).await?;
+        let system_catalog = SystemCatalogCore::new(&*meta_store_ref).await?;
 
         Ok(Self {
             meta_store_ref,
@@ -290,6 +314,7 @@ where
             schemas,
             sources,
             tables,
+            system_catalog,
             table_ref_count,
             version_generator,
         })

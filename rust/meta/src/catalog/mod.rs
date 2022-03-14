@@ -1,12 +1,11 @@
 #![allow(dead_code)]
 use std::collections::HashMap;
-use std::sync::RwLock;
 
 use risingwave_common::array::Row;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
-use risingwave_pb::meta::{Database, Schema, Table};
-use risingwave_pb::plan::{ColumnDesc, DatabaseRefId, SchemaRefId, TableRefId};
+use risingwave_pb::catalog::{Database, Schema, VirtualTable};
+use risingwave_pb::plan::{ColumnCatalog, ColumnDesc};
 
 use crate::catalog::rw_authid::*;
 use crate::catalog::rw_materialized_view::*;
@@ -47,11 +46,11 @@ macro_rules! catalog_table_impl {
     };
 }
 
-const SYSTEM_CATALOG_DATABASE_ID: i32 = 1;
+const SYSTEM_CATALOG_DATABASE_ID: u32 = 1;
 // TODO: changing sys database name from "dev" to another name, currently only for compatibility
 //  with the frontend.
 const SYSTEM_CATALOG_DATABASE_NAME: &str = "dev";
-const SYSTEM_CATALOG_SCHEMA_ID: i32 = 1;
+const SYSTEM_CATALOG_SCHEMA_ID: u32 = 1;
 const SYSTEM_CATALOG_SCHEMA_NAME: &str = "rw_catalog";
 
 for_all_catalog_table_impl! { catalog_table_impl }
@@ -76,33 +75,27 @@ macro_rules! impl_catalog_func {
             }
 
             /// Returns table proto.
-            pub fn catalog(&self) -> Table {
+            pub fn catalog(&self) -> VirtualTable {
                 match self {
                     $( Self::$table => {
-                            let column_descs = $schema
+                            let column_catalog = $schema
                                 .fields
                                 .iter()
                                 .enumerate()
-                                .map(|(id, field)| ColumnDesc {
-                                    column_type: Some(field.data_type.to_protobuf().unwrap()),
-                                    column_id: id as i32,
-                                    name: field.name.clone(),
+                                .map(|(id, field)| ColumnCatalog {
+                                    column_desc: Some(ColumnDesc {
+                                        column_type: Some(field.data_type.to_protobuf().unwrap()),
+                                        column_id: id as i32,
+                                        name: field.name.clone(),
+                                    }),
+                                    ..Default::default()
                                 })
                                 .collect();
 
-                            Table {
-                                table_ref_id: Some(TableRefId {
-                                    schema_ref_id: Some(SchemaRefId {
-                                        database_ref_id: Some(DatabaseRefId {
-                                            database_id: SYSTEM_CATALOG_DATABASE_ID,
-                                        }),
-                                        schema_id: SYSTEM_CATALOG_SCHEMA_ID,
-                                    }),
-                                    table_id: $id,
-                                }),
-                                table_name: $name.to_string(),
-                                column_descs,
-                                ..Default::default()
+                            VirtualTable {
+                                id: $id,
+                                name: $name.to_string(),
+                                column_catalog,
                             }
                     }, )*
                 }
@@ -121,11 +114,11 @@ macro_rules! impl_catalog_func {
 for_all_catalog_table_impl! { impl_catalog_func }
 
 /// Defines `SystemCatalogSrv` to serve as system catalogs service.
-pub struct SystemCatalogSrv {
-    catalogs: RwLock<HashMap<TableId, RwCatalogTable>>,
+pub struct SystemCatalogCore {
+    catalogs: HashMap<TableId, RwCatalogTable>,
 }
 
-impl SystemCatalogSrv {
+impl SystemCatalogCore {
     pub async fn new<S: MetaStore>(store: &S) -> Result<Self> {
         let mut catalogs = HashMap::new();
         macro_rules! init_catalog_mapping {
@@ -144,46 +137,40 @@ impl SystemCatalogSrv {
         for_all_catalog_table_impl! { init_catalog_mapping }
 
         // initialize system catalogs data in meta store if needed.
-        let database_ref_id = DatabaseRefId {
-            database_id: SYSTEM_CATALOG_DATABASE_ID,
-        };
-        let schema_ref_id = SchemaRefId {
-            database_ref_id: Some(database_ref_id.clone()),
-            schema_id: SYSTEM_CATALOG_SCHEMA_ID,
-        };
-        if Database::select(store, &database_ref_id).await?.is_none() {
+        if Database::select(store, &SYSTEM_CATALOG_DATABASE_ID)
+            .await?
+            .is_none()
+        {
             Database {
-                database_ref_id: Some(database_ref_id),
-                database_name: SYSTEM_CATALOG_DATABASE_NAME.to_string(),
-                ..Default::default()
+                id: SYSTEM_CATALOG_DATABASE_ID,
+                name: SYSTEM_CATALOG_DATABASE_NAME.to_string(),
             }
             .insert(store)
             .await?;
         }
 
-        if Schema::select(store, &schema_ref_id).await?.is_none() {
+        if Schema::select(store, &SYSTEM_CATALOG_SCHEMA_ID)
+            .await?
+            .is_none()
+        {
             Schema {
-                schema_ref_id: Some(schema_ref_id),
-                schema_name: SYSTEM_CATALOG_SCHEMA_NAME.to_string(),
+                id: SYSTEM_CATALOG_SCHEMA_ID,
+                name: SYSTEM_CATALOG_SCHEMA_NAME.to_string(),
                 ..Default::default()
             }
             .insert(store)
             .await?;
         }
 
-        Ok(Self {
-            catalogs: RwLock::new(catalogs),
-        })
+        Ok(Self { catalogs })
     }
 
     pub fn get_table(&self, table_id: &TableId) -> Option<RwCatalogTable> {
-        let guard = self.catalogs.read().unwrap();
-        guard.get(table_id).cloned()
+        self.catalogs.get(table_id).cloned()
     }
 
     pub fn list_tables(&self) -> Vec<RwCatalogTable> {
-        let guard = self.catalogs.read().unwrap();
-        guard.values().cloned().collect()
+        self.catalogs.values().cloned().collect()
     }
 }
 
@@ -197,12 +184,12 @@ mod tests {
         let store = MetaSrvEnv::for_test().await.meta_store_ref();
         assert_eq!(RwCatalogTable::Auth.table_id().table_id, 1);
         assert_eq!(RwCatalogTable::Auth.name(), RW_AUTH_NAME);
-        assert!(RwCatalogTable::Auth.list(&*store).await?.is_empty());
+        assert_eq!(RwCatalogTable::Auth.list(&*store).await?.len(), 1);
 
         assert_eq!(RwCatalogTable::StreamSource.table_id().table_id, 2);
         assert_eq!(RwCatalogTable::StreamSource.name(), RW_STREAM_SOURCE_NAME);
         assert_eq!(
-            RwCatalogTable::StreamSource.catalog().table_name,
+            RwCatalogTable::StreamSource.catalog().name,
             RW_STREAM_SOURCE_NAME
         );
 
@@ -212,7 +199,7 @@ mod tests {
     #[tokio::test]
     async fn test_system_catalog_srv() -> Result<()> {
         let store = MetaSrvEnv::for_test().await.meta_store_ref();
-        let catalog_srv = SystemCatalogSrv::new(&*store).await?;
+        let catalog_srv = SystemCatalogCore::new(&*store).await?;
         assert_eq!(
             catalog_srv.get_table(&TableId { table_id: 1 }),
             Some(RwCatalogTable::Auth)
