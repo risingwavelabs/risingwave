@@ -113,7 +113,7 @@ macro_rules! impl_catalog_func {
 
 for_all_catalog_table_impl! { impl_catalog_func }
 
-/// Defines `SystemCatalogSrv` to serve as system catalogs service.
+/// Defines `SystemCatalogCore` to serve as system catalogs service.
 pub struct SystemCatalogCore {
     catalogs: HashMap<TableId, RwCatalogTable>,
 }
