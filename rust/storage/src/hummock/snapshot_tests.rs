@@ -5,13 +5,13 @@ use risingwave_pb::hummock::SstableInfo;
 
 use super::*;
 use crate::hummock::iterator::test_utils::{
-    default_builder_opt_for_test, iterator_test_key_of, iterator_test_key_of_epoch,
+    default_builder_opt_for_test, gen_test_sstable_data, iterator_test_key_of,
+    iterator_test_key_of_epoch,
 };
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
 use crate::hummock::test_utils::default_config_for_test;
 use crate::hummock::value::HummockValue;
-use crate::hummock::SSTableBuilder;
 use crate::object::{InMemObjectStore, ObjectStore};
 
 const TEST_KEY_TABLE_ID: u64 = 233;
@@ -29,14 +29,15 @@ async fn gen_and_upload_table(
     }
     let table_id = hummock_meta_client.get_new_table_id().await.unwrap();
 
-    let mut b = SSTableBuilder::new(default_builder_opt_for_test());
-    for kv in kv_pairs {
-        b.add(
-            &iterator_test_key_of_epoch(TEST_KEY_TABLE_ID, kv.0, epoch),
-            kv.1.as_slice(),
-        );
-    }
-    let (data, meta) = b.finish();
+    let (data, meta) = gen_test_sstable_data(
+        default_builder_opt_for_test(),
+        kv_pairs.into_iter().map(|(key, value)| {
+            (
+                iterator_test_key_of_epoch(TEST_KEY_TABLE_ID, key, epoch),
+                value,
+            )
+        }),
+    );
     // get remote table
     let sstable_store = Arc::new(SstableStore::new(object_store, remote_dir.to_string()));
     let sst = Sstable { id: table_id, meta };
@@ -75,14 +76,15 @@ async fn gen_and_upload_table_with_sstable_store(
     }
     let table_id = hummock_meta_client.get_new_table_id().await.unwrap();
 
-    let mut b = SSTableBuilder::new(default_builder_opt_for_test());
-    for kv in kv_pairs {
-        b.add(
-            &iterator_test_key_of_epoch(TEST_KEY_TABLE_ID, kv.0, epoch),
-            kv.1.as_slice(),
-        );
-    }
-    let (data, meta) = b.finish();
+    let (data, meta) = gen_test_sstable_data(
+        default_builder_opt_for_test(),
+        kv_pairs.into_iter().map(|(key, value)| {
+            (
+                iterator_test_key_of_epoch(TEST_KEY_TABLE_ID, key, epoch),
+                value,
+            )
+        }),
+    );
     let sst = Sstable { id: table_id, meta };
     sstable_store
         .put(&sst, data, CachePolicy::Fill)

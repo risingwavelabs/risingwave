@@ -2,6 +2,7 @@
 
 // TODO: Cleanup this file, see issue #547 .
 
+use std::iter::Iterator;
 use std::sync::Arc;
 
 use super::variants::*;
@@ -12,7 +13,9 @@ use crate::hummock::{
 use crate::object::{InMemObjectStore, ObjectStoreRef};
 
 pub trait IndexMapper: Fn(u64, usize) -> Vec<u8> + Send + Sync + 'static {}
+
 impl<T> IndexMapper for T where T: Fn(u64, usize) -> Vec<u8> + Send + Sync + 'static {}
+
 type BoxedIndexMapper = Box<dyn IndexMapper>;
 
 /// `assert_eq` two `Vec<u8>` with human-readable format.
@@ -67,6 +70,7 @@ impl Default for TestIteratorConfig {
         }
     }
 }
+
 /// Test iterator stores a buffer of key-value pairs `Vec<(Bytes, Bytes)>` and yields the data
 /// stored in the buffer.
 pub struct TestIteratorInner<const DIRECTION: usize> {
@@ -74,11 +78,13 @@ pub struct TestIteratorInner<const DIRECTION: usize> {
     data: Vec<(Bytes, Bytes)>,
     cur_idx: usize,
 }
+
 pub struct TestValidator {
     cfg: Arc<TestIteratorConfig>,
     key: Vec<u8>,
     value: Vec<u8>,
 }
+
 #[derive(Default)]
 pub struct TestIteratorBuilder<const DIRECTION: usize> {
     cfg: TestIteratorConfig,
@@ -209,6 +215,18 @@ impl<const DIRECTION: usize> HummockIterator for TestIteratorInner<DIRECTION> {
         Ok(())
     }
 
+    fn key(&self) -> &[u8] {
+        self.key()
+    }
+
+    fn value(&self) -> HummockValue<&[u8]> {
+        self.value()
+    }
+
+    fn is_valid(&self) -> bool {
+        self.cur_idx < self.data.len()
+    }
+
     async fn rewind(&mut self) -> HummockResult<()> {
         self.cur_idx = 0;
         Ok(())
@@ -217,24 +235,14 @@ impl<const DIRECTION: usize> HummockIterator for TestIteratorInner<DIRECTION> {
     async fn seek(&mut self, key: &[u8]) -> HummockResult<()> {
         self.seek_inner(key)
     }
-
-    fn is_valid(&self) -> bool {
-        self.cur_idx < self.data.len()
-    }
-
-    fn key(&self) -> &[u8] {
-        self.key()
-    }
-
-    fn value(&self) -> HummockValue<&[u8]> {
-        self.value()
-    }
 }
 
 pub const TEST_KEYS_COUNT: usize = 10;
+
 use async_trait::async_trait;
 use bytes::Bytes;
 use itertools::Itertools;
+use risingwave_pb::hummock::SstableMeta;
 
 use super::HummockIterator;
 
@@ -293,16 +301,15 @@ pub async fn gen_test_sstable_base(
     idx_mapping: impl Fn(usize) -> usize,
     sstable_store: SstableStoreRef,
 ) -> Sstable {
-    let mut b = SSTableBuilder::new(opts);
-
-    for i in 0..TEST_KEYS_COUNT {
-        b.add(
-            &iterator_test_key_of(table_idx, idx_mapping(i)),
-            HummockValue::Put(&test_value_of(table_idx, idx_mapping(i))),
-        );
-    }
-
-    let (data, meta) = b.finish();
+    let (data, meta) = gen_test_sstable_data(
+        opts,
+        (0..TEST_KEYS_COUNT).map(|i| {
+            (
+                iterator_test_key_of(table_idx, idx_mapping(i)),
+                HummockValue::Put(test_value_of(table_idx, idx_mapping(i))),
+            )
+        }),
+    );
     let sst = Sstable {
         id: table_idx,
         meta,
@@ -312,6 +319,17 @@ pub async fn gen_test_sstable_base(
         .await
         .unwrap();
     sst
+}
+
+pub fn gen_test_sstable_data(
+    opts: SSTableBuilderOptions,
+    kv_iter: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
+) -> (Bytes, SstableMeta) {
+    let mut b = SSTableBuilder::new(opts);
+    for (key, value) in kv_iter {
+        b.add(&key, value.as_slice())
+    }
+    b.finish()
 }
 
 pub fn mock_sstable_store() -> SstableStoreRef {
@@ -327,6 +345,7 @@ pub fn mock_sstable_store_with_object_store(object_store: ObjectStoreRef) -> Sst
 #[cfg(test)]
 mod metatest {
     use super::*;
+
     #[tokio::test]
     async fn test_basic() {
         let (_, val) = TestIteratorBuilder::<FORWARD>::default()
@@ -335,6 +354,6 @@ mod metatest {
             .finish();
 
         let expected = iterator_test_key_of(0, 9);
-        assert!(expected.as_slice() == test_key!(val, 3));
+        assert_eq!(expected.as_slice(), test_key!(val, 3));
     }
 }

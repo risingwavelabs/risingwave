@@ -82,7 +82,7 @@ pub struct UserIterator<'a> {
     _version: Option<Arc<ScopedLocalVersion>>,
 }
 
-// TODO: decide wheher this should also impl `HummockIterator`
+// TODO: decide whether this should also impl `HummockIterator`
 impl<'a> UserIterator<'a> {
     /// Create [`UserIterator`] with maximum epoch.
     #[cfg(test)]
@@ -116,7 +116,7 @@ impl<'a> UserIterator<'a> {
     /// Returned result:
     /// - if `Ok(())` is returned, it means that the iterator successfully move to the next position
     ///   (may reach to the end and thus not valid)
-    /// - if `Err(_) ` is returned, it means that some error happended.
+    /// - if `Err(_) ` is returned, it means that some error happened.
     pub async fn next(&mut self) -> HummockResult<()> {
         while self.iterator.is_valid() {
             let full_key = self.iterator.key();
@@ -143,7 +143,7 @@ impl<'a> UserIterator<'a> {
                         return Ok(());
                     }
                     // It means that the key is deleted from the storage.
-                    // Deleted kv and the previous verisons (if any) of the key should not be
+                    // Deleted kv and the previous versions (if any) of the key should not be
                     // returned to user.
                     HummockValue::Delete => {}
                 }
@@ -235,15 +235,16 @@ mod tests {
 
     use super::*;
     use crate::hummock::iterator::test_utils::{
-        default_builder_opt_for_test, iterator_test_key_of, iterator_test_key_of_epoch,
-        mock_sstable_store, test_key, test_value_of, TestIteratorBuilder, TEST_KEYS_COUNT,
+        default_builder_opt_for_test, gen_test_sstable_data, iterator_test_key_of,
+        iterator_test_key_of_epoch, mock_sstable_store, test_key, test_value_of,
+        TestIteratorBuilder, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::variants::FORWARD;
     use crate::hummock::iterator::BoxedHummockIterator;
     use crate::hummock::key::user_key;
     use crate::hummock::sstable::{SSTableIterator, Sstable};
     use crate::hummock::value::HummockValue;
-    use crate::hummock::{CachePolicy, SSTableBuilder, SstableStoreRef};
+    use crate::hummock::{CachePolicy, SstableStoreRef};
 
     #[tokio::test]
     async fn test_basic() {
@@ -714,14 +715,12 @@ mod tests {
         kv_pairs: Vec<(u64, usize, u64, HummockValue<Vec<u8>>)>,
         sstable_store: SstableStoreRef,
     ) -> Sstable {
-        let mut b = SSTableBuilder::new(default_builder_opt_for_test());
-        for kv in kv_pairs {
-            b.add(
-                key_range_test_key(kv.0, kv.1, kv.2).as_slice(),
-                kv.3.as_slice(),
-            );
-        }
-        let (data, meta) = b.finish();
+        let (data, meta) = gen_test_sstable_data(
+            default_builder_opt_for_test(),
+            kv_pairs
+                .into_iter()
+                .map(|kv| (key_range_test_key(kv.0, kv.1, kv.2), kv.3)),
+        );
         let sst = Sstable { id: sst_id, meta };
         sstable_store
             .put(&sst, data, CachePolicy::Fill)
