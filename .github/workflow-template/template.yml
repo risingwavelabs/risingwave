@@ -191,7 +191,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-3node
-          timeout 80s sqllogictest -p 4567 -d dev --engine risingwave './e2e_test/batch/**/*.slt'
+          timeout 130s sqllogictest -p 4567 -d dev --engine risingwave './e2e_test/batch/**/*.slt'
 
       - name: Kill cluster
         run: |
