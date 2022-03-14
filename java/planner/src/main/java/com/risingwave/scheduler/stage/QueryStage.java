@@ -162,7 +162,7 @@ public class QueryStage {
 
   private ExchangeNode createExchange(
       ScheduledStage stage, RisingWaveBatchPhyRel relNode, final int currentTaskId) {
-    var builder = ExchangeNode.newBuilder().setSourceStageId(stage.getStageId().toStageIdProto());
+    var builder = ExchangeNode.newBuilder();
     stage
         .getAssignments()
         .forEach(
