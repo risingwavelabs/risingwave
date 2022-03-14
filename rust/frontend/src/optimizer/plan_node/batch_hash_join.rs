@@ -43,8 +43,10 @@ impl BatchHashJoin {
 }
 
 impl fmt::Display for BatchHashJoin {
-    fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
-        todo!()
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("BatchHashJoin")
+            .field("eq_join_predicate", self.eq_join_predicate())
+            .finish()
     }
 }
 
