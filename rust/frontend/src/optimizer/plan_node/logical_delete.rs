@@ -1,3 +1,4 @@
+use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
@@ -19,6 +20,7 @@ impl LogicalDelete {
     /// Create a [`LogicalDelete`] node. Used internally by optimizer.
     pub fn new(input: PlanRef, table: BaseTableRef) -> Self {
         let ctx = input.ctx();
+        // TODO: support `RETURNING`.
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
         let id = ctx.borrow_mut().get_id();
         let base = LogicalBase { id, schema, ctx };
@@ -51,9 +53,10 @@ impl std::fmt::Display for LogicalDelete {
 }
 
 impl ColPrunable for LogicalDelete {
-    fn prune_col(&self, required_cols: &fixedbitset::FixedBitSet) -> PlanRef {
-        // TODO: do we need to do column pruning for deletion?
-        self.clone_with_input(self.input.prune_col(required_cols))
+    fn prune_col(&self, _required_cols: &FixedBitSet) -> PlanRef {
+        let mut all_cols = FixedBitSet::with_capacity(self.input.schema().len());
+        all_cols.insert_range(..);
+        self.clone_with_input(self.input.prune_col(&all_cols))
             .into()
     }
 }
