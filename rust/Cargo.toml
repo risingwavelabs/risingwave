@@ -11,7 +11,7 @@ members = [
   "meta",
   "prost",
   "prost/helpers",
-  "risedev",
+  "risedevtool",
   "rpc_client",
   "source",
   "sqlparser",
