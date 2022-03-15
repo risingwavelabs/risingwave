@@ -72,7 +72,13 @@ And you can configure components for RiseDev.
 ./risedev configure
 ```
 
-For more information, refer to `README.md` under `rust/risedev`.
+For developers who only develop Rust code (e.g., frontend-v2), use the following command to start an all-in-one process:
+
+```
+./risedev p
+```
+
+For more information, refer to `README.md` under `rust/risedevtool`.
 
 ### Dashboard
 
@@ -83,9 +89,11 @@ cd rust/meta/src/dashboard && npx reload -b
 ```
 
 ## Contributing
+
 Thanks for your interest in contributing to the project, please refer to the [CONTRIBUTING.md](https://github.com/singularity-data/risingwave-dev/blob/main/CONTRIBUTING.md).
 
 ## Toolchain
+
 Currently, we are using nightly toolchain `nightly-2022-03-09`. If anyone needs to upgrade
 the toolchain, be sure to bump `rust-toolchain` file as well as GitHub workflow.
 
