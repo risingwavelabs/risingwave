@@ -102,52 +102,6 @@ impl CatalogCache {
     }
 }
 
-impl TryFrom<Catalog> for CatalogCache {
-    type Error = RwError;
-
-    fn try_from(catalog: Catalog) -> Result<Self> {
-        let mut cache = CatalogCache {
-            catalog_version: catalog.get_version(),
-            database_by_name: HashMap::new(),
-            db_name_by_id: HashMap::new(),
-        };
-
-        for database in catalog.get_databases() {
-            let db_name = database.get_database_name();
-            let db_id = database.get_database_ref_id()?.database_id as DatabaseId;
-            cache.create_database(db_name, db_id)?;
-        }
-
-        for schema in catalog.get_schemas() {
-            let schema_ref_id = schema.get_schema_ref_id()?;
-            let db_id = schema_ref_id.get_database_ref_id()?.database_id as DatabaseId;
-            let db_name = cache
-                .get_database_name(db_id)
-                .ok_or_else(|| CatalogError::NotFound("database id", db_id.to_string()))?;
-            let schema_name = schema.get_schema_name();
-            let schema_id = schema_ref_id.schema_id as SchemaId;
-            cache.create_schema(&db_name, schema_name, schema_id)?;
-        }
-
-        for table in catalog.get_tables() {
-            let schema_ref_id = table.get_table_ref_id()?.get_schema_ref_id()?;
-            let db_id = schema_ref_id.get_database_ref_id()?.database_id as DatabaseId;
-            let db_name = cache
-                .get_database_name(db_id)
-                .ok_or_else(|| CatalogError::NotFound("database id", db_id.to_string()))?;
-            let schema_id = schema_ref_id.schema_id as SchemaId;
-            let schema_name = cache
-                .get_database(&db_name)
-                .unwrap()
-                .get_schema_name(schema_id)
-                .ok_or_else(|| CatalogError::NotFound("schema id", schema_id.to_string()))?;
-            cache.create_table(&db_name, &schema_name, table)?;
-        }
-
-        Ok(cache)
-    }
-}
-
 /// For DDL (create table/schema/database), only send rpc to meta. Create and delete actions will be
 /// done by `ObserverManager`. For get catalog request (get table/schema/database), check the root
 /// catalog cache only. Should be used by DDL handler.
