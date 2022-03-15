@@ -26,7 +26,11 @@ use crate::pg_response::PgResponse;
 /// The interface for a database system behind pgwire protocol.
 /// We can mock it for testing purpose.
 pub trait SessionManager: Send + Sync {
+<<<<<<< HEAD
     fn connect(&self, database: &str) -> Result<Arc<dyn Session>, Box<dyn Error + Send + Sync>>;
+=======
+    fn connect(&self) -> Arc<dyn Session>;
+>>>>>>> aa996054 (refactor(session): run statement use Arc and remove SessionContext (#913))
 }
 
 /// A psql connection. Each connection binds with a database. Switching database will need to
@@ -98,11 +102,16 @@ mod tests {
     struct TestSessionManager {}
 
     impl SessionManager for TestSessionManager {
+<<<<<<< HEAD
         fn connect(
             &self,
             _database: &str,
         ) -> Result<Arc<dyn super::Session>, Box<dyn Error + Send + Sync>> {
             Ok(Arc::new(TestSession {}))
+=======
+        fn connect(&self) -> Arc<dyn super::Session> {
+            Arc::new(TestSession {})
+>>>>>>> aa996054 (refactor(session): run statement use Arc and remove SessionContext (#913))
         }
     }
 
