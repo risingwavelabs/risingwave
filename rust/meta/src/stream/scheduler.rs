@@ -93,8 +93,8 @@ where
     /// [`schedule`] schedules input fragments to different parallel units (workers).
     /// The schedule procedure is two-fold:
     /// (1) For normal fragments, we schedule them to all the hash parallel units in the cluster.
-    /// (2) For singleton fragments, we apply the round robin strategy. One single parallel unit in 
-    /// the cluster is assigned to a singleton fragment once, and all the single parallel units take 
+    /// (2) For singleton fragments, we apply the round robin strategy. One single parallel unit in
+    /// the cluster is assigned to a singleton fragment once, and all the single parallel units take
     /// turns.
     pub async fn schedule(
         &self,
@@ -145,7 +145,8 @@ mod test {
     use std::time::Duration;
 
     use itertools::Itertools;
-    use risingwave_pb::{common::{HostAddress, WorkerType}, stream_plan::StreamActor};
+    use risingwave_pb::common::{HostAddress, WorkerType};
+    use risingwave_pb::stream_plan::StreamActor;
 
     use super::*;
     use crate::manager::{MetaSrvEnv, NotificationManager};
@@ -178,59 +179,79 @@ mod test {
 
         let scheduler = Scheduler::new(cluster_manager);
         let mut locations = ScheduledLocations::new();
-        
-        let mut actor_id = 1u32;
-        let single_fragments = (1..6u32).map(|id| {
-            let fragment = Fragment {
-                fragment_id: id,
-                fragment_type: 0,
-                actors: vec![StreamActor {
-                    actor_id,
-                    fragment_id: id,
-                    nodes: None,
-                    dispatcher: None,
-                    downstream_actor_id: vec![],
-                    upstream_actor_id: vec![],
-                }],
-            };
-            actor_id += 1;
-            fragment
-        })
-        .collect_vec();
 
-        let normal_fragments = (6..8u32).map(|fragment_id| {
-            let actors = (actor_id..actor_id + node_count * 7).map(|id| {
-                StreamActor {
-                    actor_id: id,
+        let mut actor_id = 1u32;
+        let single_fragments = (1..6u32)
+            .map(|id| {
+                let fragment = Fragment {
+                    fragment_id: id,
+                    fragment_type: 0,
+                    actors: vec![StreamActor {
+                        actor_id,
+                        fragment_id: id,
+                        nodes: None,
+                        dispatcher: None,
+                        downstream_actor_id: vec![],
+                        upstream_actor_id: vec![],
+                    }],
+                };
+                actor_id += 1;
+                fragment
+            })
+            .collect_vec();
+
+        let normal_fragments = (6..8u32)
+            .map(|fragment_id| {
+                let actors = (actor_id..actor_id + node_count * 7)
+                    .map(|id| StreamActor {
+                        actor_id: id,
+                        fragment_id,
+                        nodes: None,
+                        dispatcher: None,
+                        downstream_actor_id: vec![],
+                        upstream_actor_id: vec![],
+                    })
+                    .collect_vec();
+                actor_id += node_count * 7;
+                Fragment {
                     fragment_id,
-                    nodes: None,
-                    dispatcher: None,
-                    downstream_actor_id: vec![],
-                    upstream_actor_id: vec![],
+                    fragment_type: 0,
+                    actors,
                 }
-            }).collect_vec();
-            actor_id += node_count * 7;
-            Fragment {
-                fragment_id,
-                fragment_type: 0,
-                actors,
-            }
-        }).collect_vec();
+            })
+            .collect_vec();
 
         // Test round robin schedule for singleton fragments
         for fragment in single_fragments {
             scheduler.schedule(fragment, &mut locations).await.unwrap();
         }
         assert_eq!(locations.actor_locations.get(&1).unwrap().id, 0);
-        assert_eq!(locations.actor_locations.get(&1), locations.actor_locations.get(&5));
+        assert_eq!(
+            locations.actor_locations.get(&1),
+            locations.actor_locations.get(&5)
+        );
 
         // Test normal schedule for other fragments
         for fragment in &normal_fragments {
-            scheduler.schedule(fragment.clone(), &mut locations).await.unwrap();
+            scheduler
+                .schedule(fragment.clone(), &mut locations)
+                .await
+                .unwrap();
         }
-        assert_eq!(locations.actor_locations.iter().filter(|(actor_id, _)| {
-            normal_fragments[1].actors.iter().map(|actor| actor.actor_id).contains(actor_id)
-        }).count(), (node_count * 7) as usize);
+        assert_eq!(
+            locations
+                .actor_locations
+                .iter()
+                .filter(|(actor_id, _)| {
+                    normal_fragments[1]
+                        .actors
+                        .iter()
+                        .map(|actor| actor.actor_id)
+                        .contains(actor_id)
+                })
+                .count(),
+            (node_count * 7) as usize
+        );
 
         Ok(())
     }
