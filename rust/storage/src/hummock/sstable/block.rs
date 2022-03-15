@@ -93,8 +93,8 @@ mod tests {
     use bytes::BytesMut;
 
     use crate::assert_bytes_eq;
-    use crate::hummock::iterator::test_utils::gen_test_sstable_data;
     use crate::hummock::key::key_with_epoch;
+    use crate::hummock::test_utils::gen_test_sstable_data;
     use crate::hummock::value::HummockValue;
     use crate::hummock::{Block, BlockIterator, SSTableBuilderOptions};
 

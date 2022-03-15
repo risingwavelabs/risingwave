@@ -45,8 +45,11 @@ mod tests {
     use itertools::Itertools;
     use risingwave_pb::hummock::vacuum_task;
 
-    use crate::hummock::iterator::test_utils::{default_builder_opt_for_test, gen_test_sstable};
+    use crate::hummock::test_utils::{
+        default_builder_opt_for_test, gen_test_sstable, test_key_of, test_value_of,
+    };
     use crate::hummock::vacuum::Vacuum;
+    use crate::hummock::value::HummockValue;
     use crate::hummock::SstableStore;
     use crate::object::InMemObjectStore;
 
@@ -62,8 +65,9 @@ mod tests {
         let mut sstables = vec![];
         for sstable_id in &sst_ids {
             let sstable = gen_test_sstable(
-                *sstable_id,
                 default_builder_opt_for_test(),
+                *sstable_id,
+                (0..10).map(|i| (test_key_of(i), HummockValue::Put(test_value_of(i)))),
                 sstable_store_ref.clone(),
             )
             .await;

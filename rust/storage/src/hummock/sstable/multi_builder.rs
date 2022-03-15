@@ -130,7 +130,7 @@ mod tests {
     use HummockValue::Put;
 
     use super::*;
-    use crate::hummock::builder::tests::default_builder_opt_for_test;
+    use crate::hummock::test_utils::default_builder_opt_for_test;
     use crate::hummock::SSTableBuilderOptions;
 
     #[tokio::test]

@@ -11,8 +11,8 @@ mod test {
 
     use super::*;
     use crate::hummock::iterator::test_utils::{
-        default_builder_opt_for_test, gen_test_sstable, iterator_test_key_of, mock_sstable_store,
-        test_key, test_value_of, TestIteratorBuilder, TEST_KEYS_COUNT,
+        default_builder_opt_for_test, gen_iterator_test_sstable, iterator_test_key_of,
+        iterator_test_value_of, mock_sstable_store, test_key, TestIteratorBuilder, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::{BoxedHummockIterator, HummockIterator};
     use crate::hummock::ReverseSSTableIterator;
@@ -28,7 +28,7 @@ mod test {
                         iterator_test_key_of(id, base_key_value - x * 3 + (3 - iter_id as usize))
                     })
                     .map_value(move |id, x| {
-                        test_value_of(id, base_key_value - x * 3 + (3 - iter_id as usize))
+                        iterator_test_value_of(id, base_key_value - x * 3 + (3 - iter_id as usize))
                     })
                     .finish()
             })
@@ -110,9 +110,11 @@ mod test {
     async fn test_reverse_merge_invalidate_reset() {
         let sstable_store = mock_sstable_store();
         let table0 =
-            gen_test_sstable(0, default_builder_opt_for_test(), sstable_store.clone()).await;
+            gen_iterator_test_sstable(0, default_builder_opt_for_test(), sstable_store.clone())
+                .await;
         let table1 =
-            gen_test_sstable(1, default_builder_opt_for_test(), sstable_store.clone()).await;
+            gen_iterator_test_sstable(1, default_builder_opt_for_test(), sstable_store.clone())
+                .await;
         let iters: Vec<BoxedHummockIterator> = vec![
             Box::new(ReverseSSTableIterator::new(
                 Arc::new(table1),

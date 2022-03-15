@@ -171,8 +171,8 @@ mod tests {
 
     use super::super::SSTableBuilderOptions;
     use super::*;
-    use crate::hummock::iterator::test_utils::gen_test_sstable_data;
-    use crate::hummock::{CachePolicy, HummockValue, Sstable, SstableStore};
+    use crate::hummock::test_utils::gen_test_sstable;
+    use crate::hummock::{CachePolicy, HummockValue, SstableStore};
     use crate::object::{InMemObjectStore, ObjectStore};
 
     #[tokio::test]
@@ -185,8 +185,13 @@ mod tests {
             checksum_algo: risingwave_pb::hummock::checksum::Algorithm::XxHash64,
         };
 
-        let (data, meta) = gen_test_sstable_data(
+        let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
+        let sstable_store = Arc::new(SstableStore::new(obj_client, REMOTE_DIR.to_string()));
+
+        // let sst = Sstable { id: 0, meta };
+        let sst = gen_test_sstable(
             opt,
+            0,
             (0..10).map(|i| {
                 let string_to_byte_vec =
                     |s: String| s.as_str().as_bytes().iter().cloned().collect_vec();
@@ -194,15 +199,9 @@ mod tests {
                 let value_buffer = string_to_byte_vec(format!("val_{}", i));
                 (key, HummockValue::Put(value_buffer))
             }),
-        );
-
-        let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
-        let sstable_store = SstableStore::new(obj_client, REMOTE_DIR.to_string());
-        let sst = Sstable { id: 0, meta };
-        sstable_store
-            .put(&sst, data, CachePolicy::Fill)
-            .await
-            .unwrap();
+            sstable_store.clone(),
+        )
+        .await;
         let block = sstable_store.get(&sst, 0, CachePolicy::Fill).await.unwrap();
 
         let mut blk_iter = BlockIterator::new(block);
