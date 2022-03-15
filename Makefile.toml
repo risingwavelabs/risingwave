@@ -275,5 +275,7 @@ script = '''
 #!/bin/bash
 set -e
 cd rust && cargo run --bin planner-test-apply
-yq -N -I4 -i '.. style="literal"' frontend/test_runner/tests/testdata/*.apply.yaml
+for f in frontend/test_runner/tests/testdata/*.apply.yaml; do
+  yq -N -I4 -i '.. style="literal"' "$f"
+done
 '''

@@ -1,9 +1,11 @@
+use std::fmt;
+
 use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
-use super::{ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use super::{BatchDelete, ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
 use crate::binder::BaseTableRef;
 
 /// [`LogicalDelete`] iterates on input relation and delete the data from specified table.
@@ -32,6 +34,12 @@ impl LogicalDelete {
     pub fn create(input: PlanRef, table: BaseTableRef) -> Result<Self> {
         Ok(Self::new(input, table))
     }
+
+    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
+        f.debug_struct(name)
+            .field("table_name", &self.table.name)
+            .finish()
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalDelete {
@@ -46,9 +54,9 @@ impl PlanTreeNodeUnary for LogicalDelete {
 
 impl_plan_tree_node_for_unary! { LogicalDelete }
 
-impl std::fmt::Display for LogicalDelete {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "LogicalDelete {{ table_name: {} }}", self.table.name)
+impl fmt::Display for LogicalDelete {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.fmt_with_name(f, "LogicalDelete")
     }
 }
 
@@ -63,7 +71,9 @@ impl ColPrunable for LogicalDelete {
 
 impl ToBatch for LogicalDelete {
     fn to_batch(&self) -> PlanRef {
-        todo!()
+        let new_input = self.input().to_batch();
+        let new_logical = self.clone_with_input(new_input);
+        BatchDelete::new(new_logical).into()
     }
 }
 

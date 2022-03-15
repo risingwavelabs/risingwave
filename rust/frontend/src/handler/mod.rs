@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use pgwire::pg_response::PgResponse;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{ObjectName, Statement};
@@ -11,8 +13,8 @@ mod explain;
 mod query;
 pub mod util;
 
-pub(super) async fn handle(session: &SessionImpl, stmt: Statement) -> Result<PgResponse> {
-    let context = QueryContext::new(session.ctx.clone());
+pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result<PgResponse> {
+    let context = QueryContext::new(session.clone());
     match stmt {
         Statement::Explain {
             statement, verbose, ..

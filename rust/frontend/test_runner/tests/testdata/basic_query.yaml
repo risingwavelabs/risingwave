@@ -1,117 +1,150 @@
-- sql: values (11, 22), (33+(1+2), 44);
+- sql: |-
+    values (11, 22), (33+(1+2), 44);
   logical_plan: |
     LogicalValues { rows: [[11:Int32, 22:Int32], [Add(33:Int32, Add(1:Int32, 2:Int32)), 44:Int32]], schema: Schema { fields: [:Int32, :Int32] } }
   batch_plan: |
     BatchValues { rows: [[11:Int32, 22:Int32], [Add(33:Int32, Add(1:Int32, 2:Int32)), 44:Int32]] }
-
-- sql: select * from t
-  binder_error: "Item not found: relation \"t\""
-
+- sql: |-
+    select * from t
+  binder_error: |-
+    Item not found: relation "t"
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select * from t;
+  logical_plan: |
+    LogicalProject { exprs: [$0, $1, $2], expr_alias: [Some("_row_id"), Some("v1"), Some("v2")] }
+      LogicalScan { table: "t", columns: ["_row_id", "v1", "v2"] }
   batch_plan: |
     BatchProject { exprs: [$0, $1, $2], expr_alias: [Some("_row_id"), Some("v1"), Some("v2")] }
       BatchScan { table: "t", columns: ["_row_id", "v1", "v2"] }
-
+  stream_plan: |
+    StreamProject { exprs: [$0, $1, $2], expr_alias: [Some("_row_id"), Some("v1"), Some("v2")] }
+      StreamTableSource { logical: LogicalScan { table: "t", columns: ["_row_id", "v1", "v2"] } }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select t2.* from t;
-  binder_error: "Item not found: relation \"t2\""
-
+  binder_error: |-
+    Item not found: relation "t2"
 - sql: |
     create table t ();
     select * from t where 1>2 and 1=1 and 3<1 and 4<>1 or 1=1 and 2>=1 and 1<=2;
+  logical_plan: |
+    LogicalProject { exprs: [$0], expr_alias: [Some("_row_id")] }
+      LogicalFilter { predicate: Condition { conjunctions: [Or(And(And(And(GreaterThan(1:Int32, 2:Int32), Equal(1:Int32, 1:Int32)), LessThan(3:Int32, 1:Int32)), NotEqual(4:Int32, 1:Int32)), And(And(Equal(1:Int32, 1:Int32), GreaterThanOrEqual(2:Int32, 1:Int32)), LessThanOrEqual(1:Int32, 2:Int32)))] } }
+        LogicalScan { table: "t", columns: ["_row_id"] }
   batch_plan: |
     BatchProject { exprs: [$0], expr_alias: [Some("_row_id")] }
       BatchFilter { predicate: Condition { conjunctions: [Or(And(And(And(GreaterThan(1:Int32, 2:Int32), Equal(1:Int32, 1:Int32)), LessThan(3:Int32, 1:Int32)), NotEqual(4:Int32, 1:Int32)), And(And(Equal(1:Int32, 1:Int32), GreaterThanOrEqual(2:Int32, 1:Int32)), LessThanOrEqual(1:Int32, 2:Int32)))] } }
         BatchScan { table: "t", columns: ["_row_id"] }
-
+  stream_plan: |
+    StreamProject { exprs: [$0], expr_alias: [Some("_row_id")] }
+      StreamFilter { predicate: Condition { conjunctions: [Or(And(And(And(GreaterThan(1:Int32, 2:Int32), Equal(1:Int32, 1:Int32)), LessThan(3:Int32, 1:Int32)), NotEqual(4:Int32, 1:Int32)), And(And(Equal(1:Int32, 1:Int32), GreaterThanOrEqual(2:Int32, 1:Int32)), LessThanOrEqual(1:Int32, 2:Int32)))] } }
+        StreamTableSource { logical: LogicalScan { table: "t", columns: ["_row_id"] } }
 - sql: |
     create table t (v1 int);
     select * from t where v1<1;
+  logical_plan: |
+    LogicalProject { exprs: [$0, $1], expr_alias: [Some("_row_id"), Some("v1")] }
+      LogicalFilter { predicate: Condition { conjunctions: [LessThan($1, 1:Int32)] } }
+        LogicalScan { table: "t", columns: ["_row_id", "v1"] }
   batch_plan: |
     BatchProject { exprs: [$0, $1], expr_alias: [Some("_row_id"), Some("v1")] }
       BatchFilter { predicate: Condition { conjunctions: [LessThan($1, 1:Int32)] } }
         BatchScan { table: "t", columns: ["_row_id", "v1"] }
-
+  stream_plan: |
+    StreamProject { exprs: [$0, $1], expr_alias: [Some("_row_id"), Some("v1")] }
+      StreamFilter { predicate: Condition { conjunctions: [LessThan($1, 1:Int32)] } }
+        StreamTableSource { logical: LogicalScan { table: "t", columns: ["_row_id", "v1"] } }
 - sql: |
     create table t (v1 int, v2 int);
     insert into t values (22, 33), (44, 55);
   logical_plan: |
-    LogicalInsert { table_name: t, columns: [] }
+    LogicalInsert { table_name: "t", columns: [] }
       LogicalValues { rows: [[22:Int32, 33:Int32], [44:Int32, 55:Int32]], schema: Schema { fields: [:Int32, :Int32] } }
-
+  batch_plan: |
+    BatchInsert { table_name: "t", columns: [] }
+      BatchValues { rows: [[22:Int32, 33:Int32], [44:Int32, 55:Int32]] }
 - sql: |
     create table t (v1 int, v2 int);
     delete from t where v1 = 1;
   logical_plan: |
-    LogicalDelete { table_name: t }
+    LogicalDelete { table_name: "t" }
       LogicalFilter { predicate: Condition { conjunctions: [Equal($1, 1:Int32)] } }
         LogicalScan { table: "t", columns: ["_row_id", "v1", "v2"] }
-
+  batch_plan: |
+    BatchDelete { table_name: "t" }
+      BatchFilter { predicate: Condition { conjunctions: [Equal($1, 1:Int32)] } }
+        BatchScan { table: "t", columns: ["_row_id", "v1", "v2"] }
 - sql: |
     create table t (v1 int, v2 int);
     delete from t;
   logical_plan: |
-    LogicalDelete { table_name: t }
+    LogicalDelete { table_name: "t" }
       LogicalScan { table: "t", columns: ["_row_id", "v1", "v2"] }
-
+  batch_plan: |
+    BatchDelete { table_name: "t" }
+      BatchScan { table: "t", columns: ["_row_id", "v1", "v2"] }
 - sql: |
     create table t (v1 int, v2 int);
     select v1 from t;
+  logical_plan: |
+    LogicalProject { exprs: [$1], expr_alias: [Some("v1")] }
+      LogicalScan { table: "t", columns: ["_row_id", "v1", "v2"] }
   batch_plan: |
     BatchProject { exprs: [$0], expr_alias: [Some("v1")] }
       BatchScan { table: "t", columns: ["v1"] }
-
+  stream_plan: |
+    StreamProject { exprs: [$0], expr_alias: [Some("v1")] }
+      StreamTableSource { logical: LogicalScan { table: "t", columns: ["v1"] } }
 - sql: |
     values(cast(1 as bigint));
+  logical_plan: |
+    LogicalValues { rows: [[1:Int32::Int64]], schema: Schema { fields: [:Int64] } }
   batch_plan: |
     BatchValues { rows: [[1:Int32::Int64]] }
-
 - sql: |
     values(not true);
+  logical_plan: |
+    LogicalValues { rows: [[Not(true:Boolean)]], schema: Schema { fields: [:Boolean] } }
   batch_plan: |
     BatchValues { rows: [[Not(true:Boolean)]] }
-
 - sql: |
     values(must_be_unimplemented_func(1));
-  binder_error: |
+  binder_error: |-
     Feature is not yet implemented: unsupported function: Ident { value: "must_be_unimplemented_func", quote_style: None }
-
 - sql: |
     values(sum(1));
-  binder_error: |
+  binder_error: |-
     Invalid input syntax: aggregate functions are not allowed in VALUES
-
 - sql: |
     values(count(1));
-  binder_error: |
+  binder_error: |-
     Invalid input syntax: aggregate functions are not allowed in VALUES
-
 - sql: |
     values(min(1));
-  binder_error: |
+  binder_error: |-
     Invalid input syntax: aggregate functions are not allowed in VALUES
-
-# Nested aggregate function.
 - sql: |
     values(1 + max(1));
-  binder_error: |
+  binder_error: |-
     Invalid input syntax: aggregate functions are not allowed in VALUES
-
 - sql: |
     create table t (v1 int);
     select v1 from t where min(v1);
-  binder_error: |
+  binder_error: |-
     Invalid input syntax: aggregate functions are not allowed in WHERE
-
-# Inner join
 - sql: |
     create table t1 (v1 int, v2 int);
     create table t2 (v1 int, v2 int);
     create table t3 (v1 int, v2 int);
     select * from t1 join t2 on (t1.v1 = t2.v1) join t3 on (t2.v2 = t3.v2);
+  logical_plan: |
+    LogicalProject { exprs: [$0, $1, $2, $3, $4, $5, $6, $7, $8], expr_alias: [Some("_row_id"), Some("v1"), Some("v2"), Some("_row_id"), Some("v1"), Some("v2"), Some("_row_id"), Some("v1"), Some("v2")] }
+      LogicalJoin { type: Inner, on: Condition { conjunctions: [Equal($5, $8)] } }
+        LogicalJoin { type: Inner, on: Condition { conjunctions: [Equal($1, $4)] } }
+          LogicalScan { table: "t1", columns: ["_row_id", "v1", "v2"] }
+          LogicalScan { table: "t2", columns: ["_row_id", "v1", "v2"] }
+        LogicalScan { table: "t3", columns: ["_row_id", "v1", "v2"] }
   batch_plan: |
     BatchProject { exprs: [$0, $1, $2, $3, $4, $5, $6, $7, $8], expr_alias: [Some("_row_id"), Some("v1"), Some("v2"), Some("_row_id"), Some("v1"), Some("v2"), Some("_row_id"), Some("v1"), Some("v2")] }
       BatchHashJoin(predicate: $6 = $9)
