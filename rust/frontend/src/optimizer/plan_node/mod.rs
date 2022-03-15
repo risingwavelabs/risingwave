@@ -161,7 +161,6 @@ mod batch_limit;
 mod batch_project;
 mod batch_seq_scan;
 mod batch_sort;
-mod batch_sort_merge_join;
 mod batch_values;
 mod logical_agg;
 mod logical_delete;
@@ -188,7 +187,6 @@ pub use batch_limit::BatchLimit;
 pub use batch_project::BatchProject;
 pub use batch_seq_scan::BatchSeqScan;
 pub use batch_sort::BatchSort;
-pub use batch_sort_merge_join::BatchSortMergeJoin;
 pub use batch_values::BatchValues;
 pub use logical_agg::LogicalAgg;
 pub use logical_delete::LogicalDelete;
@@ -244,7 +242,6 @@ macro_rules! for_all_plan_nodes {
             ,{ Batch, SeqScan }
             ,{ Batch, HashJoin }
             ,{ Batch, Values }
-            ,{ Batch, SortMergeJoin }
             ,{ Batch, Sort }
             ,{ Batch, Exchange }
             ,{ Batch, Limit }
@@ -290,7 +287,6 @@ macro_rules! for_batch_plan_nodes {
             ,{ Batch, HashJoin }
             ,{ Batch, Values }
             ,{ Batch, Limit }
-            ,{ Batch, SortMergeJoin }
             ,{ Batch, Sort }
             ,{ Batch, Exchange }
             ,{ Batch, Insert }

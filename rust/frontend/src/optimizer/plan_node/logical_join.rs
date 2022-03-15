@@ -10,10 +10,8 @@ use super::{
     ToStream,
 };
 use crate::expr::ExprImpl;
-use crate::optimizer::plan_node::{
-    BatchHashJoin, BatchSortMergeJoin, CollectInputRef, EqJoinPredicate, LogicalFilter,
-};
-use crate::optimizer::property::{Distribution, Order, WithSchema};
+use crate::optimizer::plan_node::{BatchHashJoin, CollectInputRef, EqJoinPredicate, LogicalFilter};
+use crate::optimizer::property::{Distribution, WithSchema};
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalJoin` combines two relations according to some condition.
@@ -155,7 +153,7 @@ impl ColPrunable for LogicalJoin {
 }
 
 impl ToBatch for LogicalJoin {
-    fn to_batch_with_order_required(&self, _required_order: &Order) -> PlanRef {
+    fn to_batch(&self) -> PlanRef {
         let predicate = EqJoinPredicate::create(
             self.left.schema().len(),
             self.right.schema().len(),
@@ -165,39 +163,20 @@ impl ToBatch for LogicalJoin {
         let has_non_eq = predicate.has_non_eq();
         let has_eq = predicate.has_eq();
         if has_eq && (!has_non_eq || can_pull_filter) {
-            let need_pull_filter = has_non_eq;
             let new_left = self.left().to_batch();
-            let sort_join_required_order = BatchSortMergeJoin::left_required_order(&predicate);
-            let use_sort_merge_join = new_left.order().satisfies(&sort_join_required_order);
+            let new_right = self.right().to_batch();
+            let new_logical = self.clone_with_left_right(new_left, new_right);
+            let phy_join = BatchHashJoin::new(new_logical, predicate.clone()).into();
 
-            let phy_join = if use_sort_merge_join {
-                let right_required_order = BatchSortMergeJoin::right_required_order_from_left_order(
-                    new_left.order(),
-                    &predicate,
-                );
-                let new_right = self
-                    .left()
-                    .to_batch_with_order_required(&right_required_order);
-                let new_logical = self.clone_with_left_right(new_left, new_right);
-                BatchSortMergeJoin::new(new_logical, predicate.clone()).into()
+            if has_non_eq {
+                // Add a filter on top of the join to handle non-equi conditions
+                LogicalFilter::new(phy_join, predicate.non_eq_cond()).to_batch()
             } else {
-                let new_right = self.right().to_batch();
-                let new_logical = self.clone_with_left_right(new_left, new_right);
-                BatchHashJoin::new(new_logical, predicate.clone()).into()
-            };
-
-            if need_pull_filter {
-                let _filter = LogicalFilter::new(phy_join, predicate.non_eq_cond());
-                todo!()
-                // TODO: add a BatchFilter on the top of the join.
-            } else {
-                return phy_join;
+                phy_join
             }
+        } else {
+            todo!("nested loop join")
         }
-        todo!(); // nestedLoopJoin
-    }
-    fn to_batch(&self) -> PlanRef {
-        self.to_batch_with_order_required(Order::any())
     }
 }
 
