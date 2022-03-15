@@ -235,25 +235,39 @@ message SubscribeRequest {
   common.HostAddress host = 2;
 }
 
+message SubscribeFrontendSnapshot {
+  repeated common.WorkerNode nodes = 1;
+  repeated catalog.Database database = 2;
+  repeated catalog.Schema schema = 3;
+  repeated catalog.Source source = 4;
+  repeated catalog.Table table = 5;
+  repeated catalog.VirtualTable view = 6;
+}
+
 message SubscribeResponse {
   enum Operation {
     INVALID = 0;
     ADD = 1;
     DELETE = 2;
     UPDATE = 3;
+    SNAPSHOT = 4;
   }
   common.Status status = 1;
   Operation operation = 2;
+  uint64 version = 3;
   oneof info {
-    common.WorkerNode node = 3;
-    // TODO: remove below fields, using new message defined in catalog.
-    Database database = 4;
-    Schema schema = 5;
-    Table table = 6;
-    catalog.Database database_v2 = 7;
-    catalog.Schema schema_v2 = 8;
-    catalog.Table table_v2 = 9;
-    catalog.Source source = 10;
+    common.WorkerNode node = 4;
+    // will be deprecated and replaced by catalog.Database
+    Database database = 5;
+    // will be deprecated and replaced by catalog.Schema
+    Schema schema = 6;
+    // will be deprecated and replaced by catalog.Table
+    Table table = 7;
+    catalog.Database database_v2 = 8;
+    catalog.Schema schema_v2 = 9;
+    catalog.Table table_v2 = 10;
+    catalog.Source source = 11;
+    SubscribeFrontendSnapshot snapshot = 12;
   }
 }
 
