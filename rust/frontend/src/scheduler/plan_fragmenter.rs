@@ -402,7 +402,6 @@ mod tests {
         if let risingwave_pb::plan::plan_node::NodeBody::Exchange(exchange) =
             prost_node_root.root.unwrap().node_body.unwrap()
         {
-            assert_eq!(exchange.source_stage_id.unwrap().stage_id, 1);
             assert_eq!(exchange.sources.len(), 3);
             assert_eq!(exchange.input_schema.len(), 4);
         } else {
@@ -431,7 +430,6 @@ mod tests {
         if let risingwave_pb::plan::plan_node::NodeBody::Exchange(exchange) =
             exchange_1.node_body.unwrap()
         {
-            assert_eq!(exchange.source_stage_id.unwrap().stage_id, 2);
             assert_eq!(exchange.sources.len(), 3);
             assert_eq!(exchange.input_schema.len(), 2);
         } else {

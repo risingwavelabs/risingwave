@@ -10,7 +10,6 @@ use risingwave_pb::hummock::{
 use risingwave_storage::hummock::key::{user_key, FullKey};
 use risingwave_storage::hummock::key_range::KeyRange;
 use risingwave_storage::hummock::{HummockEpoch, HummockSSTableId};
-use serde::{Deserialize, Serialize};
 
 use crate::hummock::level_handler::{LevelHandler, SSTableStat};
 use crate::hummock::model::HUMMOCK_DEFAULT_CF_NAME;
@@ -20,8 +19,7 @@ use crate::storage::{MetaStore, Transaction};
 /// `cf(hummock_default)`: `hummock_compact_status_key` -> `CompactStatus`
 pub(crate) const HUMMOCK_COMPACT_STATUS_KEY: &str = "compact_status";
 
-// TODO define CompactStatus in prost instead
-#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct CompactStatus {
     pub(crate) level_handlers: Vec<LevelHandler>,
     pub(crate) next_compact_task_id: u64,

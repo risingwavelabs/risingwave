@@ -1,6 +1,8 @@
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
+use risingwave_pb::plan::plan_node::NodeBody;
+use risingwave_pb::plan::ValuesNode;
 
 use super::{
     BatchBase, LogicalValues, PlanRef, PlanTreeNodeLeaf, ToBatchProst, ToDistributedBatch,
@@ -49,4 +51,11 @@ impl ToDistributedBatch for BatchValues {
     }
 }
 
-impl ToBatchProst for BatchValues {}
+// TODO: fill ValuesNode
+impl ToBatchProst for BatchValues {
+    fn to_batch_prost_body(&self) -> NodeBody {
+        NodeBody::Values(ValuesNode {
+            ..Default::default()
+        })
+    }
+}

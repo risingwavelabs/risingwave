@@ -23,6 +23,7 @@ tokio = { version = "1", features = [
     "signal",
     "fs",
 ] }
+tracing = { version = "0.1", features = ["release_max_level_info"] }
 
 [[bin]]
 name = "frontend-v2"

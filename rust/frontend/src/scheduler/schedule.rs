@@ -16,9 +16,7 @@ type ScheduledStageSender = std::sync::mpsc::Sender<ScheduledStage>;
 type ScheduledStageReceiver = std::sync::mpsc::Receiver<ScheduledStage>;
 use risingwave_pb::plan;
 use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_pb::plan::{
-    plan_node as pb_batch_node, ExchangeNode, ExchangeSource, PlanFragment, QueryId,
-};
+use risingwave_pb::plan::{plan_node as pb_batch_node, ExchangeNode, ExchangeSource, PlanFragment};
 
 pub(crate) type TaskId = u64;
 
@@ -128,17 +126,10 @@ impl AugmentedStage {
         let mut exchange_node = ExchangeNode {
             ..Default::default()
         };
-        let pb_stage_id = risingwave_pb::plan::StageId {
-            stage_id: stage.augmented_stage.query_stage.id as u32,
-            query_id: Some(QueryId {
-                trace_id: query.query_id.to_string(),
-            }),
-        };
-        exchange_node.source_stage_id = Some(pb_stage_id);
         for (child_task_id, worker_node) in &stage.assignments {
             let host = &worker_node.host;
-            let sink_id = Some(risingwave_pb::plan::TaskSinkId {
-                sink_id: task_id as u32,
+            let task_output_id = Some(risingwave_pb::plan::TaskOutputId {
+                output_id: task_id as u32,
                 task_id: Self::construct_prost_task_id(
                     *child_task_id,
                     stage.id(),
@@ -154,7 +145,7 @@ impl AugmentedStage {
             // pull all 1 channels from 3 nodes, etc.
             let exchange_source = ExchangeSource {
                 host: host.clone(),
-                sink_id,
+                task_output_id,
             };
             exchange_node.sources.push(exchange_source);
         }
@@ -171,15 +162,12 @@ impl AugmentedStage {
     fn construct_prost_task_id(
         task_id: TaskId,
         stage_id: StageId,
-        trace_id: String,
+        query_id: String,
     ) -> Option<risingwave_pb::plan::TaskId> {
-        let stage_id = Some(risingwave_pb::plan::StageId {
-            stage_id: stage_id as u32,
-            query_id: Some(QueryId { trace_id }),
-        });
         Some(risingwave_pb::plan::TaskId {
             task_id: task_id as u32,
-            stage_id,
+            stage_id: stage_id as u32,
+            query_id,
         })
     }
 }

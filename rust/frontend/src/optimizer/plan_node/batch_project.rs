@@ -1,6 +1,8 @@
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
+use risingwave_pb::plan::plan_node::NodeBody;
+use risingwave_pb::plan::ProjectNode;
 
 use super::{
     BatchBase, LogicalProject, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
@@ -61,4 +63,11 @@ impl ToDistributedBatch for BatchProject {
     }
 }
 
-impl ToBatchProst for BatchProject {}
+// TODO: fill ProjectNode
+impl ToBatchProst for BatchProject {
+    fn to_batch_prost_body(&self) -> NodeBody {
+        NodeBody::Project(ProjectNode {
+            select_list: vec![],
+        })
+    }
+}

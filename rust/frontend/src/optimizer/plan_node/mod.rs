@@ -163,6 +163,7 @@ mod batch_sort;
 mod batch_sort_merge_join;
 mod batch_values;
 mod logical_agg;
+mod logical_delete;
 mod logical_filter;
 mod logical_insert;
 mod logical_join;
@@ -188,6 +189,7 @@ pub use batch_sort::BatchSort;
 pub use batch_sort_merge_join::BatchSortMergeJoin;
 pub use batch_values::BatchValues;
 pub use logical_agg::LogicalAgg;
+pub use logical_delete::LogicalDelete;
 pub use logical_filter::LogicalFilter;
 pub use logical_insert::LogicalInsert;
 pub use logical_join::LogicalJoin;
@@ -227,6 +229,7 @@ macro_rules! for_all_plan_nodes {
             ,{ Logical, Project }
             ,{ Logical, Scan }
             ,{ Logical, Insert }
+            ,{ Logical, Delete }
             ,{ Logical, Join }
             ,{ Logical, Values }
             ,{ Logical, Limit }
@@ -261,6 +264,7 @@ macro_rules! for_logical_plan_nodes {
             ,{ Logical, Project }
             ,{ Logical, Scan }
             ,{ Logical, Insert }
+            ,{ Logical, Delete }
             ,{ Logical, Join }
             ,{ Logical, Values }
             ,{ Logical, Limit }
@@ -312,7 +316,7 @@ macro_rules! enum_plan_node_type {
         paste!{
             /// each enum value represent a PlanNode struct type, help us to dispatch and downcast
             #[derive(PartialEq, Debug)]
-            pub enum PlanNodeType{
+            pub enum PlanNodeType {
                 $( [<$convention $name>] ),*
             }
 
