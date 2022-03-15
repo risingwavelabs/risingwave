@@ -5,8 +5,8 @@ use itertools::Itertools;
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, RwError};
-use risingwave_pb::plan::{QueryId, StageId, TaskId, TaskSinkId};
+use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_pb::plan::{TaskId, TaskOutputId};
 use risingwave_rpc_client::{ComputeClient, ExchangeSource, GrpcExchangeSource};
 use risingwave_sqlparser::ast::{Query, Statement};
 
@@ -21,22 +21,20 @@ pub async fn handle_query(context: QueryContext, query: Box<Query>) -> Result<Pg
     let catalog_mgr = session.env().catalog_mgr();
     let catalog = catalog_mgr
         .get_database_snapshot(session.database())
-        .unwrap();
+        .ok_or_else(|| ErrorCode::InternalError(String::from("catalog not found")))?;
     let mut binder = Binder::new(catalog);
     let bound = binder.bind(Statement::Query(query))?;
-    let nodes = Planner::new(Rc::new(RefCell::new(context)))
+    let plan = Planner::new(Rc::new(RefCell::new(context)))
         .plan(bound)?
         .gen_batch_query_plan()
-        .to_batch_prost()
-        .children
-        .clone();
+        .to_batch_prost();
 
     // Choose the first node by WorkerNodeManager.
     let manager = WorkerNodeManager::new(session.env().meta_client().clone()).await?;
     let address = manager
         .list_worker_nodes()
         .get(0)
-        .ok_or_else(|| RwError::from(InternalError("first work node not found".to_string())))?
+        .ok_or_else(|| RwError::from(InternalError("No working node available".to_string())))?
         .host
         .as_ref()
         .ok_or_else(|| RwError::from(InternalError("host address not found".to_string())))?
@@ -45,31 +43,24 @@ pub async fn handle_query(context: QueryContext, query: Box<Query>) -> Result<Pg
 
     // Build task id and task sink id
     let task_id = TaskId {
-        stage_id: Some(StageId {
-            query_id: Some(QueryId {
-                trace_id: uuid::Uuid::new_v4().to_string(),
-            }),
-            stage_id: 0,
-        }),
+        query_id: "".to_string(),
+        stage_id: 0,
         task_id: 0,
     };
-    let task_sink_id = TaskSinkId {
+    let task_sink_id = TaskOutputId {
         task_id: Some(task_id.clone()),
-        sink_id: 0,
+        output_id: 0,
     };
 
     let mut rows = vec![];
-    for node in nodes {
-        compute_client
-            .create_task(task_id.clone(), node.clone())
+    compute_client.create_task(task_id.clone(), plan).await?;
+    let mut source =
+        GrpcExchangeSource::create_with_client(compute_client.clone(), task_sink_id.clone())
             .await?;
-        let mut source =
-            GrpcExchangeSource::create_with_client(compute_client.clone(), task_sink_id.clone())
-                .await?;
-        while let Some(chunk) = source.take_data().await? {
-            rows.append(&mut to_pg_rows(chunk));
-        }
+    while let Some(chunk) = source.take_data().await? {
+        rows.append(&mut to_pg_rows(chunk));
     }
+
     let pg_len = {
         if !rows.is_empty() {
             rows.get(0).unwrap().values().len() as i32

@@ -137,14 +137,14 @@ pub struct GrpcExchangeSource {
 impl GrpcExchangeSource {
     pub async fn create(addr: SocketAddr, output_id: TaskOutputId) -> Result<Self> {
         let client = ComputeClient::new(&addr).await?;
-        client.get_data(output_id).await
+        Self::create_with_client(client, output_id).await
     }
 
     pub async fn create_with_client(
         compute_client: ComputeClient,
-        sink_id: TaskSinkId,
+        output_id: TaskOutputId,
     ) -> Result<Self> {
-        compute_client.get_data(sink_id).await
+        compute_client.get_data(output_id).await
     }
 }
 
