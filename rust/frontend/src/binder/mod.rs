@@ -4,9 +4,9 @@ use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::Statement;
 
 mod bind_context;
+mod delete;
 pub(crate) mod expr;
 mod insert;
-mod project;
 mod query;
 mod select;
 mod set_expr;
@@ -15,6 +15,7 @@ mod table_ref;
 mod values;
 
 pub use bind_context::BindContext;
+pub use delete::BoundDelete;
 pub use insert::BoundInsert;
 pub use query::BoundQuery;
 pub use select::BoundSelect;

@@ -35,7 +35,7 @@ impl TestCase {
         for stmt in statements {
             let context = QueryContext::new(session.ctx.clone());
             match stmt.clone() {
-                Statement::Query(_) | Statement::Insert { .. } => {
+                Statement::Query(_) | Statement::Insert { .. } | Statement::Delete { .. } => {
                     self.test_query(&stmt, Rc::new(RefCell::new(context)))?
                 }
                 Statement::CreateTable { name, columns, .. } => {

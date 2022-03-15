@@ -15,6 +15,11 @@
       BatchScan { table: "t", columns: ["_row_id", "v1", "v2"] }
 
 - sql: |
+    create table t (v1 bigint, v2 double precision);
+    select t2.* from t;
+  binder_error: "Item not found: relation \"t2\""
+
+- sql: |
     create table t ();
     select * from t where 1>2 and 1=1 and 3<1 and 4<>1 or 1=1 and 2>=1 and 1<=2;
   batch_plan: |
@@ -33,9 +38,24 @@
 - sql: |
     create table t (v1 int, v2 int);
     insert into t values (22, 33), (44, 55);
-  batch_plan: |
-    BatchInsert { LogicalInsert { table_name: t, columns: [] } }
-      BatchValues { rows: [[22:Int32], [44:Int32]] }
+  logical_plan: |
+    LogicalInsert { table_name: t, columns: [] }
+      LogicalValues { rows: [[22:Int32, 33:Int32], [44:Int32, 55:Int32]], schema: Schema { fields: [:Int32, :Int32] } }
+
+- sql: |
+    create table t (v1 int, v2 int);
+    delete from t where v1 = 1;
+  logical_plan: |
+    LogicalDelete { table_name: t }
+      LogicalFilter { predicate: Condition { conjunctions: [Equal($1, 1:Int32)] } }
+        LogicalScan { table: "t", columns: ["_row_id", "v1", "v2"] }
+
+- sql: |
+    create table t (v1 int, v2 int);
+    delete from t;
+  logical_plan: |
+    LogicalDelete { table_name: t }
+      LogicalScan { table: "t", columns: ["_row_id", "v1", "v2"] }
 
 - sql: |
     create table t (v1 int, v2 int);

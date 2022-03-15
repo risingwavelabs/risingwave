@@ -366,9 +366,6 @@ pub trait Executor: Send + Debug + 'static {
     fn init(&mut self, _epoch: u64) -> Result<()> {
         unreachable!()
     }
-
-    /// Clear the executor's in-memory cache and reset to specific epoch.
-    fn reset(&mut self, _epoch: u64);
 }
 
 #[derive(Debug)]

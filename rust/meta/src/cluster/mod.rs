@@ -223,6 +223,7 @@ where
     }
 
     pub async fn heartbeat(&self, worker_id: u32) -> Result<()> {
+        tracing::debug!("heartbeat from {}", worker_id);
         let mut core = self.core.write().await;
         // 1. Get unique key. TODO: avoid this step
         let key = match core.get_worker_by_id(worker_id) {
@@ -292,20 +293,24 @@ where
                     }
                     match cluster_manager_ref.delete_worker_node(key.clone()).await {
                         Ok(_) => {
-                            tracing::debug!(
-                                "Deleted expired worker {} {}:{}",
+                            tracing::warn!(
+                                "Deleted expired worker {} {}:{}; expired at {}, now {}",
                                 worker.worker_id(),
                                 key.host,
-                                key.port
+                                key.port,
+                                worker.expire_at(),
+                                now,
                             );
                         }
                         Err(err) => {
                             tracing::warn!(
-                                "Failed to delete worker {} {}:{}. {}",
+                                "Failed to delete expired worker {} {}:{}; expired at {}, now {}. {}",
                                 worker.worker_id(),
                                 key.host,
                                 key.port,
-                                err
+                                worker.expire_at(),
+                                now,
+                                err,
                             );
                         }
                     }

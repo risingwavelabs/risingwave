@@ -16,10 +16,6 @@ public class QueryId {
     return id;
   }
 
-  public com.risingwave.proto.plan.QueryId toQueryIdProto() {
-    return com.risingwave.proto.plan.QueryId.newBuilder().setTraceId(id).build();
-  }
-
   public static QueryId next() {
     return new QueryId(UUID.randomUUID().toString());
   }
