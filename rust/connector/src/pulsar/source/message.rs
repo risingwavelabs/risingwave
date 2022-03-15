@@ -1,12 +1,14 @@
 use anyhow::anyhow;
+use pulsar::consumer::Message;
 use serde::{Deserialize, Serialize};
 
-use crate::base::{SourceMessage, SourceOffset};
+use crate::base::{InnerMessage, SourceMessage, SourceOffset};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PulsarMessage {
     pub payload: Option<Vec<u8>>,
     pub offset: i64,
+    pub split_id: String,
 }
 
 impl SourceMessage for PulsarMessage {
@@ -23,11 +25,12 @@ impl SourceMessage for PulsarMessage {
     }
 }
 
-impl PulsarMessage {
-    pub fn new(message: pulsar::consumer::Message<Vec<u8>>) -> PulsarMessage {
-        PulsarMessage {
-            payload: Some(message.payload.data),
-            offset: message.message_id.id.entry_id as i64,
+impl From<Message<Vec<u8>>> for InnerMessage {
+    fn from(msg: Message<Vec<u8>>) -> Self {
+        InnerMessage {
+            payload: Some(bytes::Bytes::from(msg.payload.data)),
+            offset: msg.message_id.id.entry_id.to_string(),
+            split_id: msg.topic,
         }
     }
 }
