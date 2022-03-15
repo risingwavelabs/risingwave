@@ -3,7 +3,6 @@ use std::fmt::{self};
 use fixedbitset::FixedBitSet;
 use itertools::{Either, Itertools};
 use risingwave_common::catalog::Schema;
-use risingwave_pb::plan::plan_node::NodeBody::HashJoin;
 use risingwave_pb::plan::JoinType;
 
 use super::{
@@ -11,7 +10,9 @@ use super::{
     ToStream,
 };
 use crate::expr::ExprImpl;
-use crate::optimizer::plan_node::{BatchHashJoin, CollectInputRef, EqJoinPredicate, LogicalFilter};
+use crate::optimizer::plan_node::{
+    BatchFilter, BatchHashJoin, CollectInputRef, EqJoinPredicate, LogicalFilter, StreamFilter,
+};
 use crate::optimizer::property::{Distribution, WithSchema};
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -106,7 +107,8 @@ impl PlanTreeNodeBinary for LogicalJoin {
         Self::new(left, right, self.join_type, self.on.clone())
     }
 }
-impl_plan_tree_node_for_binary! {LogicalJoin}
+
+impl_plan_tree_node_for_binary! { LogicalJoin }
 
 impl ColPrunable for LogicalJoin {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
@@ -168,7 +170,7 @@ impl ToBatch for LogicalJoin {
 
         let left = self.left().to_batch();
         let right = self.right().to_batch();
-        let logical = self.clone_with_left_right(left, right);
+        let logical_join = self.clone_with_left_right(left, right);
 
         if predicate.has_eq() {
             // Convert to Hash Join for equal joins
@@ -177,11 +179,12 @@ impl ToBatch for LogicalJoin {
             if pull_filter {
                 let equi_cond =
                     EqJoinPredicate::new(Condition::true_cond(), predicate.eq_keys().to_vec());
-                let logical = logical.clone_with_cond(equi_cond.eq_cond());
-                let hash_join = BatchHashJoin::new(logical, equi_cond).into();
-                LogicalFilter::new(hash_join, predicate.non_eq_cond()).to_batch()
+                let logical_join = logical_join.clone_with_cond(equi_cond.eq_cond());
+                let hash_join = BatchHashJoin::new(logical_join, equi_cond).into();
+                let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond()).into();
+                BatchFilter::new(logical_filter).into()
             } else {
-                BatchHashJoin::new(logical, predicate).into()
+                BatchHashJoin::new(logical_join, predicate).into()
             }
         } else {
             // Convert to Nested-loop Join for non-equal joins
@@ -203,7 +206,7 @@ impl ToStream for LogicalJoin {
         let right = self
             .right()
             .to_stream_with_dist_required(&Distribution::HashShard(predicate.right_eq_indexes()));
-        let logical = self.clone_with_left_right(left, right);
+        let logical_join = self.clone_with_left_right(left, right);
 
         if predicate.has_eq() {
             // Convert to Hash Join for equal joins
@@ -212,11 +215,12 @@ impl ToStream for LogicalJoin {
             if pull_filter {
                 let equi_cond =
                     EqJoinPredicate::new(Condition::true_cond(), predicate.eq_keys().to_vec());
-                let logical = logical.clone_with_cond(equi_cond.eq_cond());
-                let hash_join = StreamHashJoin::new(logical, equi_cond).into();
-                LogicalFilter::new(hash_join, predicate.non_eq_cond()).to_stream()
+                let logical_join = logical_join.clone_with_cond(equi_cond.eq_cond());
+                let hash_join = StreamHashJoin::new(logical_join, equi_cond).into();
+                let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond()).into();
+                StreamFilter::new(logical_filter).into()
             } else {
-                StreamHashJoin::new(logical, predicate).into()
+                StreamHashJoin::new(logical_join, predicate).into()
             }
         } else {
             // Convert to Nested-loop Join for non-equal joins
@@ -231,16 +235,15 @@ mod tests {
     use std::rc::Rc;
 
     use risingwave_common::catalog::{Field, TableId};
-    use risingwave_common::types::DataType;
+    use risingwave_common::types::{DataType, Datum};
     use risingwave_pb::expr::expr_node::Type;
 
     use super::*;
-    use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef};
+    use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
     use crate::optimizer::plan_node::{LogicalScan, PlanTreeNodeUnary};
     use crate::optimizer::property::WithSchema;
     use crate::session::QueryContext;
 
-    #[tokio::test]
     /// Pruning
     /// ```text
     /// Join(on: input_ref(1)=input_ref(3))
@@ -254,6 +257,7 @@ mod tests {
     ///     TableScan(v2, v3)
     ///     TableScan(v4)
     /// ```
+    #[tokio::test]
     async fn test_prune_join() {
         let ty = DataType::Int32;
         let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
@@ -331,7 +335,6 @@ mod tests {
         assert_eq!(right.schema().fields(), &fields[3..4]);
     }
 
-    #[tokio::test]
     /// Pruning
     /// ```text
     /// Join(on: input_ref(1)=input_ref(3))
@@ -344,6 +347,7 @@ mod tests {
     ///   TableScan(v2)
     ///   TableScan(v4)
     /// ```
+    #[tokio::test]
     async fn test_prune_join_no_project() {
         let ty = DataType::Int32;
         let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
@@ -414,5 +418,178 @@ mod tests {
         let right = join.right();
         let right = right.as_logical_scan().unwrap();
         assert_eq!(right.schema().fields(), &fields[3..4]);
+    }
+
+    /// Convert
+    /// ```text
+    /// Join(on: ($1 = $3) AND ($2 == 42))
+    ///   TableScan(v1, v2, v3)
+    ///   TableScan(v4, v5, v6)
+    /// ```
+    /// to
+    /// ```text
+    /// Filter($2 == 42)
+    ///   HashJoin(on: $1 = $3)
+    ///     TableScan(v1, v2, v3)
+    ///     TableScan(v4, v5, v6)
+    /// ```
+    #[tokio::test]
+    async fn test_join_to_batch() {
+        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
+        let fields: Vec<Field> = (1..7)
+            .map(|i| Field {
+                data_type: DataType::Int32,
+                name: format!("v{}", i),
+            })
+            .collect();
+        let left = LogicalScan::new(
+            "left".to_string(),
+            TableId::new(0),
+            vec![1.into(), 2.into(), 3.into()],
+            Schema {
+                fields: fields[0..3].to_vec(),
+            },
+            ctx.clone(),
+        );
+        let right = LogicalScan::new(
+            "right".to_string(),
+            TableId::new(0),
+            vec![4.into(), 5.into(), 6.into()],
+            Schema {
+                fields: fields[3..6].to_vec(),
+            },
+            ctx,
+        );
+
+        let equi_cond = ExprImpl::FunctionCall(Box::new(
+            FunctionCall::new(
+                Type::Equal,
+                vec![
+                    ExprImpl::InputRef(Box::new(InputRef::new(1, DataType::Int32))),
+                    ExprImpl::InputRef(Box::new(InputRef::new(3, DataType::Int32))),
+                ],
+            )
+            .unwrap(),
+        ));
+        let non_equi_cond = ExprImpl::FunctionCall(Box::new(
+            FunctionCall::new(
+                Type::Equal,
+                vec![
+                    ExprImpl::InputRef(Box::new(InputRef::new(2, DataType::Int32))),
+                    ExprImpl::Literal(Box::new(Literal::new(
+                        Datum::Some(42_i32.into()),
+                        DataType::Int32,
+                    ))),
+                ],
+            )
+            .unwrap(),
+        ));
+        // Condition: ($1 = $3) AND ($2 == 42)
+        let on_cond = ExprImpl::FunctionCall(Box::new(
+            FunctionCall::new(Type::And, vec![equi_cond.clone(), non_equi_cond.clone()]).unwrap(),
+        ));
+
+        let join_type = JoinType::Inner;
+        let logical_join = LogicalJoin::new(
+            left.into(),
+            right.into(),
+            join_type,
+            Condition::with_expr(on_cond),
+        );
+
+        // Perform `to_batch`
+        let result = logical_join.to_batch();
+
+        // Expected plan: Filter($2 == 42) --> HashJoin($1 = $3)
+        let batch_filter = result.as_batch_filter().unwrap();
+        assert_eq!(batch_filter.predicate().as_expr(), non_equi_cond);
+
+        let input = batch_filter.input();
+        let hash_join = input.as_batch_hash_join().unwrap();
+        assert_eq!(hash_join.eq_join_predicate().eq_cond().as_expr(), equi_cond);
+    }
+
+    /// Convert
+    /// ```text
+    /// Join(join_type: left outer, on: ($1 = $3) AND ($2 == 42))
+    ///   TableScan(v1, v2, v3)
+    ///   TableScan(v4, v5, v6)
+    /// ```
+    /// to
+    /// ```text
+    /// HashJoin(join_type: left outer, on: ($1 = $3) AND ($2 == 42))
+    ///   TableScan(v1, v2, v3)
+    ///   TableScan(v4, v5, v6)
+    /// ```
+    #[tokio::test]
+    async fn test_join_to_stream() {
+        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
+        let fields: Vec<Field> = (1..7)
+            .map(|i| Field {
+                data_type: DataType::Int32,
+                name: format!("v{}", i),
+            })
+            .collect();
+        let left = LogicalScan::new(
+            "left".to_string(),
+            TableId::new(0),
+            vec![1.into(), 2.into(), 3.into()],
+            Schema {
+                fields: fields[0..3].to_vec(),
+            },
+            ctx.clone(),
+        );
+        let right = LogicalScan::new(
+            "right".to_string(),
+            TableId::new(0),
+            vec![4.into(), 5.into(), 6.into()],
+            Schema {
+                fields: fields[3..6].to_vec(),
+            },
+            ctx,
+        );
+
+        let equi_cond = ExprImpl::FunctionCall(Box::new(
+            FunctionCall::new(
+                Type::Equal,
+                vec![
+                    ExprImpl::InputRef(Box::new(InputRef::new(1, DataType::Int32))),
+                    ExprImpl::InputRef(Box::new(InputRef::new(3, DataType::Int32))),
+                ],
+            )
+            .unwrap(),
+        ));
+        let non_equi_cond = ExprImpl::FunctionCall(Box::new(
+            FunctionCall::new(
+                Type::Equal,
+                vec![
+                    ExprImpl::InputRef(Box::new(InputRef::new(2, DataType::Int32))),
+                    ExprImpl::Literal(Box::new(Literal::new(
+                        Datum::Some(42_i32.into()),
+                        DataType::Int32,
+                    ))),
+                ],
+            )
+            .unwrap(),
+        ));
+        // Condition: ($1 = $3) AND ($2 == 42)
+        let on_cond = ExprImpl::FunctionCall(Box::new(
+            FunctionCall::new(Type::And, vec![equi_cond, non_equi_cond]).unwrap(),
+        ));
+
+        let join_type = JoinType::LeftOuter;
+        let logical_join = LogicalJoin::new(
+            left.into(),
+            right.into(),
+            join_type,
+            Condition::with_expr(on_cond.clone()),
+        );
+
+        // Perform `to_stream`
+        let result = logical_join.to_stream();
+
+        // Expected plan: HashJoin(($1 = $3) AND ($2 == 42))
+        let hash_join = result.as_stream_hash_join().unwrap();
+        assert_eq!(hash_join.eq_join_predicate().all_cond().as_expr(), on_cond);
     }
 }

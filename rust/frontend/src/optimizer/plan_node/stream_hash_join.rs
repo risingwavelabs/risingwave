@@ -43,7 +43,7 @@ impl StreamHashJoin {
 }
 
 impl fmt::Display for StreamHashJoin {
-    fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "StreamHashJoin(predicate: {})", self.eq_join_predicate())
     }
 }
@@ -56,7 +56,10 @@ impl PlanTreeNodeBinary for StreamHashJoin {
         self.logical.right()
     }
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_left_right(left, right))
+        Self::new(
+            self.logical.clone_with_left_right(left, right),
+            self.eq_join_predicate.clone(),
+        )
     }
     fn left_dist_required(&self) -> &Distribution {
         todo!()

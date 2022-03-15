@@ -62,6 +62,21 @@ impl Condition {
         }
     }
 
+    pub fn as_expr(&self) -> ExprImpl {
+        let mut iter = self.conjunctions.iter();
+        if let Some(e) = iter.next() {
+            let mut ret = e.clone();
+            for expr in iter {
+                ret = FunctionCall::new(ExprType::And, vec![ret, expr.clone()])
+                    .unwrap()
+                    .into();
+            }
+            ret
+        } else {
+            Literal::new(Some(ScalarImpl::Bool(true)), DataType::Boolean).into()
+        }
+    }
+
     #[must_use]
     pub fn and(self, other: Self) -> Self {
         let mut ret = self;
