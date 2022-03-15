@@ -63,7 +63,7 @@
       LogicalValues { rows: [[22:Int32, 33:Int32], [44:Int32, 55:Int32]], schema: Schema { fields: [:Int32, :Int32] } }
   batch_plan: |
     BatchInsert { table_name: "t", columns: [] }
-      BatchValues { rows: [[22:Int32], [44:Int32]] }
+      BatchValues { rows: [[22:Int32, 33:Int32], [44:Int32, 55:Int32]] }
 - sql: |
     create table t (v1 int, v2 int);
     delete from t where v1 = 1;
