@@ -100,8 +100,8 @@ impl Binder {
         for item in &results {
             inputs.push(self.bind_expr(item.clone())?);
         }
-        if else_result.is_some() {
-            inputs.push(self.bind_expr(*else_result.clone().unwrap())?);
+        if let Some(expr)=else_result.clone() {
+            inputs.push(self.bind_expr(*expr)?);
         }
         let mut return_type = self
             .bind_expr(results.get(0).unwrap().clone())?
@@ -132,12 +132,7 @@ impl Binder {
         expr: Expr,
     ) -> Result<FunctionCall> {
         let expr = self.bind_expr(expr)?;
-        let return_type = expr.return_type();
-        Ok(FunctionCall::new_with_return_type(
-            func_type,
-            vec![expr],
-            return_type,
-        ))
+        Ok(FunctionCall::new(func_type, vec![expr]).unwrap())
     }
 
     pub(super) fn bind_cast(&mut self, expr: Expr, data_type: AstDataType) -> Result<FunctionCall> {
