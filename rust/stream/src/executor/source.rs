@@ -16,6 +16,7 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_source::connector_source::ConnectorSource;
 use risingwave_source::*;
 use risingwave_storage::StateStore;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
@@ -26,6 +27,7 @@ use crate::task::{ExecutorParams, StreamManagerCore};
 
 struct SourceReader {
     /// The reader for stream source
+    // TODO change stream_reader to StreamSource
     pub stream_reader: Box<dyn StreamSourceReader>,
     /// The reader for barrier
     pub barrier_receiver: UnboundedReceiver<Message>,
@@ -135,6 +137,7 @@ impl SourceExecutor {
     ) -> Result<Self> {
         let source = source_desc.clone().source;
         let stream_reader: Box<dyn StreamSourceReader> = match source.as_ref() {
+            // TODO add connector source here
             SourceImpl::HighLevelKafka(s) => Box::new(s.stream_reader(
                 HighLevelKafkaSourceReaderContext {
                     query_id: Some(format!("source-operator-{}", operator_id)),
@@ -304,6 +307,18 @@ impl Debug for SourceExecutor {
             .finish()
     }
 }
+
+pub struct StreamSource {
+    connector_source: ConnectorSource,
+}
+
+// impl StreamSource {
+//     pub fn new() -> Self {}
+
+//     async fn open();
+
+//     async fn next(&self) -> ;
+// }
 
 #[cfg(test)]
 mod tests {

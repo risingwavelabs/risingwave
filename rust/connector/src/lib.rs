@@ -12,12 +12,19 @@
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
 
-mod base;
+pub mod base;
 mod filesystem;
 mod kafka;
-mod kinesis;
+pub mod kinesis;
 mod pulsar;
 mod state;
+
+use crate::kinesis::config::AwsConfigInfo;
+
+#[derive(Clone, Debug)]
+pub enum ConnectorConfig {
+    Kinesis(AwsConfigInfo),
+}
 
 #[cfg(test)]
 mod tests {

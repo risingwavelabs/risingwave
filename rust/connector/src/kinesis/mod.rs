@@ -1,4 +1,4 @@
-mod config;
+pub mod config;
 mod enumerator;
-mod source;
+pub mod source;
 mod split;

@@ -27,7 +27,7 @@ pub trait SourceSplit {
 }
 
 #[async_trait]
-pub trait SourceReader: Sized {
+pub trait SourceReader: 'static {
     async fn next(&mut self) -> Result<Option<Vec<InnerMessage>>>;
     async fn assign_split<'a>(&'a mut self, split: &'a [u8]) -> Result<()>;
 }

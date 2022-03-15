@@ -1,3 +1,3 @@
 mod message;
-mod reader;
+pub mod reader;
 mod state;

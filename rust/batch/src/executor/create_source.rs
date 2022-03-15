@@ -6,6 +6,8 @@ use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
+use risingwave_connector::kinesis::config::AwsConfigInfo;
+use risingwave_connector::ConnectorConfig;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::RowFormatType;
 use risingwave_source::parser::JSONParser;
@@ -19,6 +21,7 @@ use crate::executor::{Executor, ExecutorBuilder};
 
 const UPSTREAM_SOURCE_KEY: &str = "upstream.source";
 const KAFKA_SOURCE: &str = "kafka";
+const KINESIS_SOURCE: &str = "kinesis";
 
 const KAFKA_TOPIC_KEY: &str = "kafka.topic";
 const KAFKA_BOOTSTRAP_SERVERS_KEY: &str = "kafka.bootstrap.servers";
@@ -29,7 +32,7 @@ const PROTOBUF_FILE_URL_SCHEME: &str = "file";
 
 pub(super) struct CreateSourceExecutor {
     table_id: TableId,
-    config: SourceConfig,
+    config: ConnectorConfig,
     format: SourceFormat,
     parser: Option<Arc<dyn SourceParser>>,
     columns: Vec<SourceColumnDesc>,
@@ -106,7 +109,9 @@ impl BoxedExecutorBuilder for CreateSourceExecutor {
         }
 
         let config = match get_from_properties!(properties, UPSTREAM_SOURCE_KEY).as_str() {
-            KAFKA_SOURCE => CreateSourceExecutor::extract_kafka_config(properties),
+            // TODO add new connector config here -> new type config
+            // KAFKA_SOURCE => CreateSourceExecutor::extract_kafka_config(properties),
+            KINESIS_SOURCE => AwsConfigInfo::build(properties),
             other => Err(RwError::from(ProtocolError(format!(
                 "source type {} not supported",
                 other
