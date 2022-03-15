@@ -13,6 +13,11 @@
       LogicalScan { table: "t", columns: ["_row_id", "v1", "v2"] }
 
 - sql: |
+    create table t (v1 bigint, v2 double precision);
+    select t2.* from t;
+  binder_error: "Item not found: relation \"t2\""
+
+- sql: |
     create table t ();
     select * from t where 1>2 and 1=1 and 3<1 and 4<>1 or 1=1 and 2>=1 and 1<=2;
   plan: |
