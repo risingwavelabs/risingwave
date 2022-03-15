@@ -1,7 +1,6 @@
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
 
-use log::{error, info};
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
@@ -50,7 +49,7 @@ impl ObserverManager {
             loop {
                 if let Ok(resp) = self.rx.next().await {
                     if resp.is_none() {
-                        error!("Stream of notification terminated.");
+                        tracing::error!("Stream of notification terminated.");
                         break;
                     }
                     let resp = resp.unwrap();
@@ -59,18 +58,18 @@ impl ObserverManager {
                     match resp.info {
                         Some(Info::Database(database)) => {
                             self.update_database(operation, database)
-                                .unwrap_or_else(|e| error!("{}", e.to_string()));
+                                .unwrap_or_else(|e| tracing::error!("{}", e.to_string()));
                         }
                         Some(Info::Node(node)) => {
                             self.update_worker_node_manager(operation, node);
                         }
                         Some(Info::Schema(schema)) => {
                             self.update_schema(operation, schema)
-                                .unwrap_or_else(|e| error!("{}", e.to_string()));
+                                .unwrap_or_else(|e| tracing::error!("{}", e.to_string()));
                         }
                         Some(Info::Table(table)) => {
                             self.update_table(operation, table)
-                                .unwrap_or_else(|e| error!("{}", e.to_string()));
+                                .unwrap_or_else(|e| tracing::error!("{}", e.to_string()));
                         }
                         Some(_) => todo!(),
                         None => (),
@@ -83,7 +82,7 @@ impl ObserverManager {
     /// `update_worker_node_manager` is called in `start` method.
     /// It calls `add_worker_node` and `remove_worker_node` of `WorkerNodeManager`.
     fn update_worker_node_manager(&self, operation: Operation, node: WorkerNode) {
-        info!(
+        tracing::debug!(
             "Update worker nodes, operation: {:?}, node: {:?}",
             operation, node
         );
@@ -98,7 +97,7 @@ impl ObserverManager {
     /// `update_database` is called in `start` method.
     /// It calls `create_database` and `drop_database` of `CatalogCache`.
     fn update_database(&self, operation: Operation, database: Database) -> Result<()> {
-        info!(
+        tracing::debug!(
             "Update database, operation: {:?}, database: {:?}",
             operation, database
         );
@@ -130,7 +129,7 @@ impl ObserverManager {
     /// `update_schema` is called in `start` method.
     /// It calls `create_schema` and `drop_schema` of `CatalogCache`.
     fn update_schema(&self, operation: Operation, schema: Schema) -> Result<()> {
-        info!(
+        tracing::debug!(
             "Update schema, operation: {:?}, schema: {:?}",
             operation, schema
         );
@@ -174,7 +173,7 @@ impl ObserverManager {
     /// `update_table` is called in `start` method.
     /// It calls `create_table` and `drop_table` of `CatalogCache`.
     fn update_table(&self, operation: Operation, table: Table) -> Result<()> {
-        info!(
+        tracing::debug!(
             "Update table, operation: {:?}, table: {:?}",
             operation, table
         );

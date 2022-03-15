@@ -3691,6 +3691,7 @@ dependencies = [
  "risingwave_meta",
  "tikv-jemallocator",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
