@@ -40,6 +40,13 @@ impl LogicalInsert {
     pub fn create(input: PlanRef, table: BaseTableRef, columns: Vec<ColumnId>) -> Result<Self> {
         Ok(Self::new(input, table, columns))
     }
+
+    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
+        f.debug_struct(name)
+            .field("table_name", &self.table.name)
+            .field("columns", &self.columns)
+            .finish()
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalInsert {
@@ -54,11 +61,7 @@ impl_plan_tree_node_for_unary! {LogicalInsert}
 
 impl fmt::Display for LogicalInsert {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "LogicalInsert {{ table_name: {}, columns: {:?} }}",
-            self.table.name, self.columns,
-        )
+        self.fmt_with_name(f, "LogicalInsert")
     }
 }
 
