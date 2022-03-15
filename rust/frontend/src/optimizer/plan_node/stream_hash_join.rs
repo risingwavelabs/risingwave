@@ -3,6 +3,7 @@ use std::fmt;
 use risingwave_common::catalog::Schema;
 
 use super::{LogicalJoin, PlanRef, PlanTreeNodeBinary, StreamBase, ToStreamProst};
+use crate::optimizer::plan_node::EqJoinPredicate;
 use crate::optimizer::property::{Distribution, WithSchema};
 
 /// `BatchHashJoin` implements [`super::LogicalJoin`] with hash table. It builds a hash table
@@ -12,10 +13,14 @@ use crate::optimizer::property::{Distribution, WithSchema};
 pub struct StreamHashJoin {
     pub base: StreamBase,
     logical: LogicalJoin,
+
+    /// The join condition must be equivalent to `logical.on`, but seperated into equi and non-equi
+    /// parts to facilitate execution later
+    eq_join_predicate: EqJoinPredicate,
 }
 
 impl StreamHashJoin {
-    pub fn new(logical: LogicalJoin) -> Self {
+    pub fn new(logical: LogicalJoin, eq_join_predicate: EqJoinPredicate) -> Self {
         let ctx = logical.base.ctx.clone();
         // TODO: derive from input
         let base = StreamBase {
@@ -23,13 +28,23 @@ impl StreamHashJoin {
             id: ctx.borrow_mut().get_id(),
             ctx: ctx.clone(),
         };
-        Self { logical, base }
+
+        Self {
+            base,
+            logical,
+            eq_join_predicate,
+        }
+    }
+
+    /// Get a reference to the batch hash join's eq join predicate.
+    pub fn eq_join_predicate(&self) -> &EqJoinPredicate {
+        &self.eq_join_predicate
     }
 }
 
 impl fmt::Display for StreamHashJoin {
     fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
-        todo!()
+        write!(f, "StreamHashJoin(predicate: {})", self.eq_join_predicate())
     }
 }
 
@@ -50,7 +65,9 @@ impl PlanTreeNodeBinary for StreamHashJoin {
         todo!()
     }
 }
-impl_plan_tree_node_for_binary! {StreamHashJoin}
+
+impl_plan_tree_node_for_binary! { StreamHashJoin }
+
 impl WithSchema for StreamHashJoin {
     fn schema(&self) -> &Schema {
         self.logical.schema()
