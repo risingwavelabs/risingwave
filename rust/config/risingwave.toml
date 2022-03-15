@@ -1,5 +1,5 @@
 [server]
-heartbeat_interval = 100
+heartbeat_interval = 1000
 
 [batch]
 chunk_size = 1024

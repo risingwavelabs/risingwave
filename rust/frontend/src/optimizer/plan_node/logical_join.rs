@@ -1,4 +1,4 @@
-use std::fmt;
+use std::fmt::{self};
 
 use fixedbitset::FixedBitSet;
 use itertools::{Either, Itertools};
@@ -31,8 +31,11 @@ pub struct LogicalJoin {
 }
 
 impl fmt::Display for LogicalJoin {
-    fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
-        todo!()
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("LogicalJoin")
+            .field("type", &self.join_type())
+            .field("on", &self.on)
+            .finish()
     }
 }
 
@@ -178,7 +181,7 @@ impl ToBatch for LogicalJoin {
                 let new_logical = self.clone_with_left_right(new_left, new_right);
                 BatchSortMergeJoin::new(new_logical, predicate.clone()).into()
             } else {
-                let new_right = self.left().to_batch();
+                let new_right = self.right().to_batch();
                 let new_logical = self.clone_with_left_right(new_left, new_right);
                 BatchHashJoin::new(new_logical, predicate.clone()).into()
             };

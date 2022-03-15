@@ -1,4 +1,8 @@
 use paste::paste;
+use risingwave_pb::plan::exchange_info::{
+    BroadcastInfo, Distribution as DistributionProst, DistributionMode, HashInfo,
+};
+use risingwave_pb::plan::ExchangeInfo;
 
 use super::super::plan_node::*;
 use crate::optimizer::property::{Convention, Order};
@@ -18,6 +22,29 @@ static ANY_DISTRIBUTION: Distribution = Distribution::Any;
 
 #[allow(dead_code)]
 impl Distribution {
+    pub fn to_prost(&self, output_count: u32) -> ExchangeInfo {
+        ExchangeInfo {
+            mode: match self {
+                Distribution::Single => DistributionMode::Single,
+                Distribution::Broadcast => DistributionMode::Broadcast,
+                Distribution::HashShard(_keys) => DistributionMode::Hash,
+                // TODO: Should panic if AnyShard or Any
+                _ => DistributionMode::Hash,
+            } as i32,
+            distribution: match self {
+                Distribution::Single => None,
+                Distribution::Broadcast => Some(DistributionProst::BroadcastInfo(BroadcastInfo {
+                    count: output_count,
+                })),
+                Distribution::HashShard(keys) => Some(DistributionProst::HashInfo(HashInfo {
+                    output_count,
+                    keys: keys.iter().map(|num| *num as u32).collect(),
+                })),
+                // TODO: Should panic if AnyShard or Any
+                Distribution::AnyShard | Distribution::Any => None,
+            },
+        }
+    }
     pub fn enforce_if_not_satisfies(&self, plan: PlanRef, required_order: &Order) -> PlanRef {
         if !plan.distribution().satisfies(self) {
             self.enforce(plan, required_order)

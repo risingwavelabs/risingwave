@@ -1,6 +1,8 @@
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
+use risingwave_pb::plan::plan_node::NodeBody;
+use risingwave_pb::plan::ExchangeNode;
 
 use super::{BatchBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::property::{Distribution, Order, WithDistribution, WithOrder, WithSchema};
@@ -60,4 +62,11 @@ impl ToDistributedBatch for BatchExchange {
     }
 }
 
-impl ToBatchProst for BatchExchange {}
+/// The serialization of Batch Exchange is default cuz it will be rewritten in scheduler.
+impl ToBatchProst for BatchExchange {
+    fn to_batch_prost_body(&self) -> NodeBody {
+        NodeBody::Exchange(ExchangeNode {
+            ..Default::default()
+        })
+    }
+}

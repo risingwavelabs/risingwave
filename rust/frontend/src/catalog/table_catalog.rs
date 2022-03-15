@@ -60,7 +60,7 @@ impl TableCatalog {
                 data_type: DataType::Struct {
                     fields: data_types.into(),
                 },
-                type_name: Some(col.get_type_name().to_string()),
+                type_name: col.get_type_name().to_string(),
             };
             ColumnCatalog::new(
                 ColumnId::from(self.next_column_id()),
@@ -71,7 +71,7 @@ impl TableCatalog {
         } else {
             let desc = ColumnDesc {
                 data_type: col.get_column_type().expect("column type not found").into(),
-                type_name: Some(col.get_type_name().to_string()),
+                type_name: col.get_type_name().to_string(),
             };
             ColumnCatalog::new(
                 ColumnId::from(self.next_column_id()),

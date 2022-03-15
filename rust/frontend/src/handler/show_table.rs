@@ -33,12 +33,7 @@ pub(crate) fn column_to_rows(column_catalog: &ColumnCatalog) -> Vec<Row> {
 
 fn get_type_name(column_catalog: &ColumnCatalog) -> String {
     if let DataType::Struct { fields: _f } = column_catalog.data_type() {
-        column_catalog
-            .col_desc_ref()
-            .type_name
-            .as_ref()
-            .unwrap()
-            .to_string()
+        column_catalog.col_desc_ref().type_name.clone()
     } else {
         format!("{:?}", &column_catalog.data_type())
     }

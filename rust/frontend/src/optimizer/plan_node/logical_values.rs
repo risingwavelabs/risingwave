@@ -2,9 +2,8 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
 
-use super::{ColPrunable, LogicalBase, PlanRef, ToBatch, ToStream};
+use super::{BatchValues, ColPrunable, LogicalBase, PlanRef, ToBatch, ToStream};
 use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::property::WithSchema;
 use crate::session::QueryContextRef;
@@ -33,9 +32,9 @@ impl LogicalValues {
     }
 
     /// Create a LogicalValues node. Used by planner.
-    pub fn create(rows: Vec<Vec<ExprImpl>>, schema: Schema, ctx: QueryContextRef) -> Result<Self> {
+    pub fn create(rows: Vec<Vec<ExprImpl>>, schema: Schema, ctx: QueryContextRef) -> PlanRef {
         // No additional checks after binder.
-        Ok(Self::new(rows, schema, ctx))
+        Self::new(rows, schema, ctx).into()
     }
 
     /// Get a reference to the logical values' rows.
@@ -74,7 +73,7 @@ impl ColPrunable for LogicalValues {
 
 impl ToBatch for LogicalValues {
     fn to_batch(&self) -> PlanRef {
-        todo!()
+        BatchValues::new(self.clone()).into()
     }
 }
 

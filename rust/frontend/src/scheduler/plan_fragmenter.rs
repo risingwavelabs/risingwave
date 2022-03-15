@@ -28,7 +28,7 @@ impl BatchPlanFragmenter {
 /// Contains the connection info of each stage.
 pub(crate) struct Query {
     /// Query id should always be unique.
-    query_id: Uuid,
+    pub(crate) query_id: Uuid,
     pub(crate) stage_graph: StageGraph,
 }
 
@@ -71,7 +71,7 @@ pub(crate) struct StageGraph {
     parent_edges: HashMap<StageId, HashSet<StageId>>,
     /// Indicates which stage the exchange executor is running on.
     /// Look up child stage for exchange source so that parent stage knows where to pull data.
-    exchange_id_to_stage: HashMap<u64, StageId>,
+    pub(crate) exchange_id_to_stage: HashMap<i32, StageId>,
 }
 
 impl StageGraph {
@@ -88,7 +88,7 @@ struct StageGraphBuilder {
     stages: HashMap<StageId, QueryStageRef>,
     child_edges: HashMap<StageId, HashSet<StageId>>,
     parent_edges: HashMap<StageId, HashSet<StageId>>,
-    exchange_id_to_stage: HashMap<u64, StageId>,
+    exchange_id_to_stage: HashMap<i32, StageId>,
 }
 
 impl StageGraphBuilder {
@@ -127,7 +127,7 @@ impl StageGraphBuilder {
     /// # Arguments
     ///
     /// * `exchange_id` - The operator id of exchange executor.
-    pub fn link_to_child(&mut self, parent_id: StageId, exchange_id: u64, child_id: StageId) {
+    pub fn link_to_child(&mut self, parent_id: StageId, exchange_id: i32, child_id: StageId) {
         let child_ids = self.child_edges.get_mut(&parent_id);
         // If the parent id does not exist, create a new set containing the child ids. Otherwise
         // just insert.
@@ -204,9 +204,11 @@ impl BatchPlanFragmenter {
                 // link with current stage.
                 let child_query_stage =
                     self.new_query_stage(child_node.clone(), child_node.distribution().clone());
-                // TODO(Bowen): replace mock exchange id 0 to real operator id (#67).
-                self.stage_graph_builder
-                    .link_to_child(cur_stage.id, 0, child_query_stage.id);
+                self.stage_graph_builder.link_to_child(
+                    cur_stage.id,
+                    node.id().0,
+                    child_query_stage.id,
+                );
                 self.build_stage(&child_query_stage, child_node);
             }
         } else {
@@ -224,8 +226,12 @@ mod tests {
     use std::rc::Rc;
     use std::sync::Arc;
 
-    use risingwave_common::catalog::{Schema, TableId};
-    use risingwave_pb::common::{ParallelUnit, ParallelUnitType, WorkerNode, WorkerType};
+    use risingwave_common::catalog::{Field, Schema, TableId};
+    use risingwave_common::types::DataType;
+    use risingwave_pb::common::{
+        HostAddress, ParallelUnit, ParallelUnitType, WorkerNode, WorkerType,
+    };
+    use risingwave_pb::plan::exchange_info::DistributionMode;
     use risingwave_pb::plan::JoinType;
 
     use crate::optimizer::plan_node::{
@@ -249,24 +255,30 @@ mod tests {
         //   Scan  Scan
         //
         let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
+        let fields = vec![
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Float64),
+        ];
         let batch_plan_node: PlanRef = BatchSeqScan::new(LogicalScan::new(
             "".to_string(),
             TableId::default(),
             vec![],
-            Schema::default(),
+            Schema {
+                fields: fields.clone(),
+            },
             ctx,
         ))
         .into();
         let batch_exchange_node1: PlanRef = BatchExchange::new(
             batch_plan_node.clone(),
             Order::default(),
-            Distribution::AnyShard,
+            Distribution::HashShard(vec![0, 1, 2]),
         )
         .into();
         let batch_exchange_node2: PlanRef = BatchExchange::new(
             batch_plan_node.clone(),
             Order::default(),
-            Distribution::AnyShard,
+            Distribution::HashShard(vec![0, 1, 2]),
         )
         .into();
         let hash_join_node: PlanRef = BatchHashJoin::new(
@@ -288,7 +300,7 @@ mod tests {
 
         // Break the plan node into fragments.
         let fragmenter = BatchPlanFragmenter::new();
-        let query = fragmenter.split(batch_exchange_node3).unwrap();
+        let query = fragmenter.split(batch_exchange_node3.clone()).unwrap();
 
         assert_eq!(query.stage_graph.id, 0);
         assert_eq!(query.stage_graph.stages.len(), 4);
@@ -319,21 +331,30 @@ mod tests {
         let worker1 = WorkerNode {
             id: 0,
             r#type: WorkerType::ComputeNode as i32,
-            host: None,
+            host: Some(HostAddress {
+                host: "127.0.0.1".to_string(),
+                port: 5687,
+            }),
             state: risingwave_pb::common::worker_node::State::Running as i32,
             parallel_units: generate_parallel_units(0),
         };
         let worker2 = WorkerNode {
             id: 1,
             r#type: WorkerType::ComputeNode as i32,
-            host: None,
+            host: Some(HostAddress {
+                host: "127.0.0.1".to_string(),
+                port: 5688,
+            }),
             state: risingwave_pb::common::worker_node::State::Running as i32,
             parallel_units: generate_parallel_units(8),
         };
         let worker3 = WorkerNode {
             id: 2,
             r#type: WorkerType::ComputeNode as i32,
-            host: None,
+            host: Some(HostAddress {
+                host: "127.0.0.1".to_string(),
+                port: 5689,
+            }),
             state: risingwave_pb::common::worker_node::State::Running as i32,
             parallel_units: generate_parallel_units(16),
         };
@@ -370,6 +391,50 @@ mod tests {
         assert_eq!(scan_node_2.assignments.get(&0).unwrap(), &worker1);
         assert_eq!(scan_node_2.assignments.get(&1).unwrap(), &worker2);
         assert_eq!(scan_node_2.assignments.get(&2).unwrap(), &worker3);
+
+        // Check that the serialized exchange source node has been filled with correct info.
+        let prost_node_root = root.augmented_stage.to_prost(0, &query).unwrap();
+        assert_eq!(
+            prost_node_root.exchange_info.unwrap().mode,
+            DistributionMode::Single as i32
+        );
+        assert_eq!(prost_node_root.root.clone().unwrap().children.len(), 0);
+        if let risingwave_pb::plan::plan_node::NodeBody::Exchange(exchange) =
+            prost_node_root.root.unwrap().node_body.unwrap()
+        {
+            assert_eq!(exchange.sources.len(), 3);
+            assert_eq!(exchange.input_schema.len(), 4);
+        } else {
+            panic!("The root node should be exchange single");
+        }
+
+        let prost_join_node = join_node.augmented_stage.to_prost(0, &query).unwrap();
+        assert_eq!(prost_join_node.root.as_ref().unwrap().children.len(), 2);
+        assert_eq!(
+            prost_join_node.exchange_info.unwrap().mode,
+            DistributionMode::Hash as i32
+        );
+        if let risingwave_pb::plan::plan_node::NodeBody::HashJoin(_) = prost_join_node
+            .root
+            .as_ref()
+            .unwrap()
+            .node_body
+            .as_ref()
+            .unwrap()
+        {
+        } else {
+            panic!("The node should be hash join node");
+        }
+
+        let exchange_1 = prost_join_node.root.as_ref().unwrap().children[0].clone();
+        if let risingwave_pb::plan::plan_node::NodeBody::Exchange(exchange) =
+            exchange_1.node_body.unwrap()
+        {
+            assert_eq!(exchange.sources.len(), 3);
+            assert_eq!(exchange.input_schema.len(), 2);
+        } else {
+            panic!("The node should be exchange node");
+        }
     }
 
     fn generate_parallel_units(start_id: u32) -> Vec<ParallelUnit> {

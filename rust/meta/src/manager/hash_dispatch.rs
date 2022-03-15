@@ -163,8 +163,6 @@ where
 
         self.key_mapping.insert(&*self.meta_store_ref).await?;
 
-        dbg!(&self.load_balancer);
-
         Ok(())
     }
 
@@ -237,8 +235,6 @@ where
 
         // Persist mapping
         self.key_mapping.insert(&*self.meta_store_ref).await?;
-
-        dbg!(&self.load_balancer);
 
         Ok(())
     }

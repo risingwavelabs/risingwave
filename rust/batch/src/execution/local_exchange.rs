@@ -2,33 +2,36 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::error::Result;
 use risingwave_rpc_client::ExchangeSource;
 
-use crate::task::{BatchEnvironment, TaskId, TaskSink, TaskSinkId};
+use crate::task::{BatchEnvironment, TaskId, TaskOutput, TaskOutputId};
 
 /// Exchange data from a local task execution.
 pub struct LocalExchangeSource {
-    task_sink: TaskSink,
+    task_output: TaskOutput,
 
     /// Id of task which contains the `ExchangeExecutor` of this source.
     task_id: TaskId,
 }
 
 impl LocalExchangeSource {
-    pub fn create(sink_id: TaskSinkId, env: BatchEnvironment, task_id: TaskId) -> Result<Self> {
-        let task_sink = env.task_manager().take_sink(&sink_id.to_prost())?;
-        Ok(Self { task_sink, task_id })
+    pub fn create(output_id: TaskOutputId, env: BatchEnvironment, task_id: TaskId) -> Result<Self> {
+        let task_output = env.task_manager().take_output(&output_id.to_prost())?;
+        Ok(Self {
+            task_output,
+            task_id,
+        })
     }
 }
 
 #[async_trait::async_trait]
 impl ExchangeSource for LocalExchangeSource {
     async fn take_data(&mut self) -> Result<Option<DataChunk>> {
-        let ret = self.task_sink.direct_take_data().await?;
+        let ret = self.task_output.direct_take_data().await?;
         if let Some(data) = ret {
             let data = data.compact()?;
             trace!(
-                "Receiver task: {:?}, source task sink: {:?}, data: {:?}",
+                "Receiver task: {:?}, source task output: {:?}, data: {:?}",
                 self.task_id,
-                self.task_sink.id(),
+                self.task_output.id(),
                 data
             );
             Ok(Some(data))
@@ -46,7 +49,7 @@ mod tests {
     use std::time::Duration;
 
     use risingwave_pb::data::DataChunk;
-    use risingwave_pb::plan::{TaskId, TaskSinkId};
+    use risingwave_pb::plan::{TaskId, TaskOutputId};
     use risingwave_pb::task_service::exchange_service_server::{
         ExchangeService, ExchangeServiceServer,
     };
@@ -119,7 +122,7 @@ mod tests {
 
         let mut src = GrpcExchangeSource::create(
             addr,
-            TaskSinkId {
+            TaskOutputId {
                 task_id: Some(TaskId::default()),
                 ..Default::default()
             },
@@ -140,7 +143,7 @@ mod tests {
     #[tokio::test]
     async fn test_unconnectable_node() {
         let addr = "127.0.0.1:1001".parse().unwrap();
-        let res = GrpcExchangeSource::create(addr, TaskSinkId::default()).await;
+        let res = GrpcExchangeSource::create(addr, TaskOutputId::default()).await;
         assert!(res.is_err());
     }
 }

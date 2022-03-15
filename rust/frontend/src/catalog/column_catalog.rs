@@ -8,14 +8,14 @@ use crate::catalog::ColumnId;
 pub struct ColumnDesc {
     pub data_type: DataType,
     // The user-defined type's name. Empty if the column type is a builtin type.
-    pub type_name: Option<String>,
+    pub type_name: String,
 }
 
 impl ColumnDesc {
     pub fn new(data_type: DataType) -> Self {
         ColumnDesc {
             data_type,
-            type_name: None,
+            type_name: "".to_string(),
         }
     }
 
@@ -28,7 +28,7 @@ impl From<ProstColumnDesc> for ColumnDesc {
     fn from(col: ProstColumnDesc) -> Self {
         ColumnDesc {
             data_type: col.get_column_type().expect("column type not found").into(),
-            type_name: Some(col.get_type_name().to_string()),
+            type_name: col.get_type_name().to_string(),
         }
     }
 }

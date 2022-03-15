@@ -88,8 +88,4 @@ impl<S: StateStore> Executor for LookupExecutor<S> {
     fn clear_cache(&mut self) -> Result<()> {
         Ok(())
     }
-
-    fn reset(&mut self, _epoch: u64) {
-        self.last_barrier = None;
-    }
 }

@@ -427,11 +427,6 @@ impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
     fn logical_operator_info(&self) -> &str {
         &self.op_info
     }
-
-    fn reset(&mut self, epoch: u64) {
-        self.state_map.clear();
-        self.update_executor_state(ExecutorState::Active(epoch));
-    }
 }
 
 impl<K: HashKey, S: StateStore> StatefulExecutor for HashAggExecutor<K, S> {
