@@ -85,10 +85,10 @@ message DropResponse {
   uint64 version = 2;
 }
 
-// will be deprecated and replaced by catalog.CatalogService
+// will be deprecated and replaced by NotificationService
 message GetCatalogRequest {}
 
-// will be deprecated and replaced by catalog.CatalogService
+// will be deprecated and replaced by SubscribeFrontendSnapshot
 message Catalog {
   uint64 version = 1;
   repeated Database databases = 2;
