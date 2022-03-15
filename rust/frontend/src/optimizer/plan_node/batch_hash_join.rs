@@ -70,7 +70,8 @@ impl PlanTreeNodeBinary for BatchHashJoin {
         todo!()
     }
 }
-impl_plan_tree_node_for_binary! {BatchHashJoin}
+
+impl_plan_tree_node_for_binary! { BatchHashJoin }
 
 impl WithSchema for BatchHashJoin {
     fn schema(&self) -> &Schema {
