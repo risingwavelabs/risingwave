@@ -1,40 +1,40 @@
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select * from t order by v1 desc;
-  plan: |
+  logical_plan: |
     LogicalProject { exprs: [$0, $1, $2], expr_alias: [Some("_row_id"), Some("v1"), Some("v2")] }
       LogicalScan { table: "t", columns: ["_row_id", "v1", "v2"] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select t.* from t order by v1;
-  plan: |
+  logical_plan: |
     LogicalProject { exprs: [$0, $1, $2], expr_alias: [Some("_row_id"), Some("v1"), Some("v2")] }
       LogicalScan { table: "t", columns: ["_row_id", "v1", "v2"] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select v1, v1+1 from t order by v1;
-  plan: |
+  logical_plan: |
     LogicalProject { exprs: [$1, Add($1, 1:Int32)], expr_alias: [Some("v1"), None] }
       LogicalScan { table: "t", columns: ["_row_id", "v1", "v2"] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select t.v1 from t order by v1;
-  plan: |
+  logical_plan: |
     LogicalProject { exprs: [$1], expr_alias: [Some("v1")] }
       LogicalScan { table: "t", columns: ["_row_id", "v1", "v2"] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select v1 as a1 from t order by a1;
-  plan: |
+  logical_plan: |
     LogicalProject { exprs: [$1], expr_alias: [Some("a1")] }
       LogicalScan { table: "t", columns: ["_row_id", "v1", "v2"] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select * from t order by 1+1;
-  binder_error: |
+  binder_error: |-
     Feature is not yet implemented: ORDER BY BinaryOp { left: Value(Number("1", false)), op: Plus, right: Value(Number("1", false)) }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select * from t order by v;
-  binder_error: |
+  binder_error: |-
     Item not found: output column "v"
