@@ -64,10 +64,23 @@ impl Task for ComputeNodeService {
         }
 
         let provide_minio = self.config.provide_minio.as_ref().unwrap();
-        match provide_minio.len() {
-            0 => {}
-            1 => {
-                let minio = &provide_minio[0];
+
+        match (
+            self.config.enable_in_memory_kv_state_backend,
+            provide_minio.as_slice(),
+        ) {
+            (true, []) => {
+                cmd.arg("--state-store").arg("in-memory");
+            }
+            (true, _) => {
+                return Err(anyhow!(
+                "When `enable_in_memory_kv_state_backend` is enabled, no minio should be provided.",
+            ))
+            }
+            (false, []) => {
+                cmd.arg("--state-store").arg("hummock+memory");
+            }
+            (false, [minio]) => {
                 cmd.arg("--state-store").arg(format!(
                     "hummock+minio://{hummock_user}:{hummock_password}@{minio_addr}:{minio_port}/{hummock_bucket}",
                     hummock_user = minio.hummock_user,
@@ -77,30 +90,29 @@ impl Task for ComputeNodeService {
                     minio_port = minio.port,
                 ));
             }
-            other_size => {
+            (false, other_size) => {
                 return Err(anyhow!(
                     "{} minio instance found in config, but only 1 is needed",
-                    other_size
+                    other_size.len()
                 ))
             }
         }
 
         let provide_meta_node = self.config.provide_meta_node.as_ref().unwrap();
-        match provide_meta_node.len() {
-            0 => {
+        match provide_meta_node.as_slice() {
+            [] => {
                 return Err(anyhow!(
                     "Cannot start node: no meta node found in this configuration."
                 ));
             }
-            1 => {
-                let meta_node = &provide_meta_node[0];
+            [meta_node] => {
                 cmd.arg("--meta-address")
                     .arg(format!("http://{}:{}", meta_node.address, meta_node.port));
             }
-            other_size => {
+            other_meta_nodes => {
                 return Err(anyhow!(
                     "Cannot start node: {} meta nodes found in this configuration, but only 1 is needed.",
-                    other_size
+                    other_meta_nodes.len()
                 ));
             }
         };
