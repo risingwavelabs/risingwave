@@ -17,6 +17,7 @@ where
     S: MetaStore,
 {
     cluster_manager: Arc<StoredClusterManager<S>>,
+    /// Round robin counter for singleton fragments
     single_rr: AtomicUsize,
 }
 /// [`ScheduledLocations`] represents the location of scheduled result.
@@ -89,15 +90,12 @@ where
         }
     }
 
-    /// [`schedule`] schedules input actors to different workers.
+    /// [`schedule`] schedules input fragments to different parallel units (workers).
     /// The schedule procedure is two-fold:
-    /// (1) For regular actors, we use some strategies to schedule them.
-    /// (2) For source actors under certain cases (determined elsewhere), we enforce round robin
-    /// strategy to ensure that each compute node will have one source node.
-    ///
-    /// The result `Vec<WorkerNode>` contains two parts.
-    /// The first part is the schedule result of `actors`, the second part is the schedule result of
-    /// `enforced_round_actors`.
+    /// (1) For normal fragments, we schedule them to all the hash parallel units in the cluster.
+    /// (2) For singleton fragments, we apply the round robin strategy. One single parallel unit in 
+    /// the cluster is assigned to a singleton fragment once, and all the single parallel units take 
+    /// turns.
     pub async fn schedule(
         &self,
         fragment: Fragment,
@@ -146,7 +144,8 @@ where
 mod test {
     use std::time::Duration;
 
-    use risingwave_pb::common::{HostAddress, WorkerType};
+    use itertools::Itertools;
+    use risingwave_pb::{common::{HostAddress, WorkerType}, stream_plan::StreamActor};
 
     use super::*;
     use crate::manager::{MetaSrvEnv, NotificationManager};
@@ -164,8 +163,9 @@ mod test {
             )
             .await?,
         );
-        let actors = (0..15).collect::<Vec<u32>>();
-        for i in 0..10 {
+
+        let node_count = 4;
+        for i in 0..node_count {
             let host = HostAddress {
                 host: "127.0.0.1".to_string(),
                 port: i as i32,
@@ -175,23 +175,62 @@ mod test {
                 .await?;
             cluster_manager.activate_worker_node(host).await?;
         }
-        let workers = cluster_manager
-            .list_worker_node(
-                WorkerType::ComputeNode,
-                Some(risingwave_pb::common::worker_node::State::Running),
-            )
-            .await;
 
-        // let scheduler =
-        //     Scheduler::new(cluster_manager.clone());
-        // let mut locations = ScheduledLocations::new();
-        // let nodes = scheduler.schedule(&actors, &mut locations).await?;
-        // assert_eq!(nodes.actor_locations.len(), actors.len());
-        // assert!(nodes
-        //     .actor_locations
-        //     .iter()
-        //     .enumerate()
-        //     .all(|(idx, (_, &n))| n == workers[idx % workers.len()].id));
+        let scheduler = Scheduler::new(cluster_manager);
+        let mut locations = ScheduledLocations::new();
+        
+        let mut actor_id = 1u32;
+        let single_fragments = (1..6u32).map(|id| {
+            let fragment = Fragment {
+                fragment_id: id,
+                fragment_type: 0,
+                actors: vec![StreamActor {
+                    actor_id,
+                    fragment_id: id,
+                    nodes: None,
+                    dispatcher: None,
+                    downstream_actor_id: vec![],
+                    upstream_actor_id: vec![],
+                }],
+            };
+            actor_id += 1;
+            fragment
+        })
+        .collect_vec();
+
+        let normal_fragments = (6..8u32).map(|fragment_id| {
+            let actors = (actor_id..actor_id + node_count * 7).map(|id| {
+                StreamActor {
+                    actor_id: id,
+                    fragment_id,
+                    nodes: None,
+                    dispatcher: None,
+                    downstream_actor_id: vec![],
+                    upstream_actor_id: vec![],
+                }
+            }).collect_vec();
+            actor_id += node_count * 7;
+            Fragment {
+                fragment_id,
+                fragment_type: 0,
+                actors,
+            }
+        }).collect_vec();
+
+        // Test round robin schedule for singleton fragments
+        for fragment in single_fragments {
+            scheduler.schedule(fragment, &mut locations).await.unwrap();
+        }
+        assert_eq!(locations.actor_locations.get(&1).unwrap().id, 0);
+        assert_eq!(locations.actor_locations.get(&1), locations.actor_locations.get(&5));
+
+        // Test normal schedule for other fragments
+        for fragment in &normal_fragments {
+            scheduler.schedule(fragment.clone(), &mut locations).await.unwrap();
+        }
+        assert_eq!(locations.actor_locations.iter().filter(|(actor_id, _)| {
+            normal_fragments[1].actors.iter().map(|actor| actor.actor_id).contains(actor_id)
+        }).count(), (node_count * 7) as usize);
 
         Ok(())
     }
