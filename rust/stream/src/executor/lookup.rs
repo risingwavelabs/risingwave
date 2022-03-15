@@ -11,12 +11,18 @@ mod sides;
 use self::sides::*;
 mod impl_;
 
+#[cfg(test)]
+mod tests;
+
 use super::{Barrier, Executor, Message, PkIndices, PkIndicesRef};
 
 pub type BoxedArrangeStream = Pin<Box<dyn Stream<Item = Result<ArrangeMessage>> + Send>>;
 
 /// `LookupExecutor` takes one input stream and one arrangement. It joins the input stream with the
-/// arrangement. Currently, it only supports inner join.
+/// arrangement. Currently, it only supports inner join. See [`LookupExecutorParams`] for more
+/// information.
+///
+/// The output schema is `| stream columns | arrangement columns |`.
 pub struct LookupExecutor<S: StateStore> {
     /// the data types of the formed new columns
     output_data_types: Vec<DataType>,
@@ -43,11 +49,12 @@ pub struct LookupExecutor<S: StateStore> {
 impl<S: StateStore> std::fmt::Debug for LookupExecutor<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LookupExecutor")
-            .field("stream", &self.stream)
-            .field("arrangement", &self.arrangement)
-            .field("pk_indices", &self.pk_indices)
-            .field("schema", &self.schema)
             .field("output_data_types", &self.output_data_types)
+            .field("schema", &self.schema)
+            .field("pk_indices", &self.pk_indices)
+            .field("arrangement", &self.arrangement)
+            .field("stream", &self.stream)
+            .field("last_barrier", &self.last_barrier)
             .finish()
     }
 }
@@ -80,9 +87,5 @@ impl<S: StateStore> Executor for LookupExecutor<S> {
 
     fn clear_cache(&mut self) -> Result<()> {
         Ok(())
-    }
-
-    fn reset(&mut self, _epoch: u64) {
-        self.last_barrier = None;
     }
 }

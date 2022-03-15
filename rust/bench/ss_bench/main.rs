@@ -5,7 +5,7 @@ mod utils;
 
 use clap::Parser;
 use operations::*;
-use risingwave_common::config::StorageConfig;
+use risingwave_common::config::{parse_checksum_algo, StorageConfig};
 use risingwave_pb::common::WorkerType;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::monitor::StateStoreMetrics;
@@ -110,7 +110,7 @@ async fn main() {
 
     let config = Arc::new(StorageConfig {
         bloom_false_positive: opts.bloom_false_positive,
-        checksum_algo: opts.checksum_algo.clone(),
+        checksum_algo: parse_checksum_algo(&opts.checksum_algo).unwrap(),
         sstable_size: opts.table_size_mb * (1 << 20),
         block_size: opts.block_size_kb * (1 << 10),
         data_directory: "hummock_001".to_string(),

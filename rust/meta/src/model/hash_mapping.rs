@@ -1,8 +1,7 @@
 #![allow(dead_code)]
 
-use itertools::Itertools;
 use risingwave_common::error::Result;
-use risingwave_pb::common::{HashMapping, ParallelUnit};
+use risingwave_pb::common::HashMapping;
 
 use super::MetadataModel;
 use crate::cluster::ParallelUnitId;
@@ -44,15 +43,13 @@ impl MetadataModel for ConsistentHashMapping {
     }
 }
 
-impl From<&Vec<ParallelUnitId>> for ConsistentHashMapping {
-    fn from(mapping: &Vec<ParallelUnitId>) -> Self {
-        let parallel_units: Vec<ParallelUnit> =
-            mapping.iter().map(|&id| ParallelUnit { id }).collect();
-        Self(HashMapping { parallel_units })
-    }
-}
-
 impl ConsistentHashMapping {
+    pub fn new() -> Self {
+        Self(HashMapping {
+            parallel_units: Vec::new(),
+        })
+    }
+
     pub fn update_mapping(
         &mut self,
         virtual_key: VirtualKey,
@@ -64,27 +61,18 @@ impl ConsistentHashMapping {
             virtual_key,
             self.0.get_parallel_units().len()
         );
-        let old_id = self.0.parallel_units[virtual_key].id;
-        self.0.parallel_units[virtual_key] = ParallelUnit {
-            id: parallel_unit_id,
-        };
+        let old_id = self.0.parallel_units[virtual_key];
+        self.0.parallel_units[virtual_key] = parallel_unit_id;
         Ok(old_id)
     }
 
     pub fn set_mapping(&mut self, parallel_unit_ids: Vec<ParallelUnitId>) -> Result<()> {
-        self.0.parallel_units = parallel_unit_ids
-            .into_iter()
-            .map(|id| ParallelUnit { id })
-            .collect_vec();
+        self.0.parallel_units = parallel_unit_ids;
         Ok(())
     }
 
     pub fn get_mapping(&self) -> Vec<ParallelUnitId> {
-        self.0
-            .parallel_units
-            .iter()
-            .map(|parallel_unit| parallel_unit.id)
-            .collect()
+        self.0.parallel_units.clone()
     }
 
     pub fn clear_mapping(&mut self) {

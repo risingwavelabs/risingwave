@@ -12,7 +12,6 @@ use crate::session::QueryContextRef;
 
 /// `LogicalScan` returns contents of a table or other equivalent object
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct LogicalScan {
     pub base: LogicalBase,
     table_name: String,
@@ -62,6 +61,10 @@ impl LogicalScan {
             .collect::<Vec<_>>();
         f.field("table", &self.table_name)
             .field("columns", &columns);
+    }
+
+    pub fn table_id(&self) -> u32 {
+        self.table_id.table_id
     }
 }
 

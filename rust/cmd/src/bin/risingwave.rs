@@ -13,6 +13,7 @@ async fn main() {
     use std::pin::Pin;
 
     use clap::StructOpt;
+    use tokio::signal;
 
     /// Get the launch target of this all-in-one binary
     fn get_target() -> String {
@@ -78,6 +79,47 @@ async fn main() {
             risingwave_logging::init_risingwave_logger(false, true);
 
             risingwave_ctl::start().await
+        }),
+    );
+
+    fns.insert(
+        "playground",
+        Box::new(async move {
+            eprintln!("launching playground");
+
+            risingwave_logging::oneshot_common();
+            risingwave_logging::init_risingwave_logger(false, true);
+
+            // TODO: match opts from each component. Currently, we rely
+            // on default config of `compute-node` points to the default host of `meta-node`.
+
+            tracing::warn!("playground is using default config for cli args and toml configs. Any changes to `risingwave.toml` will not take effect.");
+
+            let meta_opts = risingwave_meta::MetaNodeOpts::parse_from(["meta-node", "--backend", "mem"]);
+            let compute_opts =
+                risingwave_compute::ComputeNodeOpts::parse_from(["compute-node", "--state-store", "hummock+memory"]);
+            let frontend_opts = risingwave_frontend::FrontendOpts::parse_from(["frontend-node"]);
+
+            tracing::info!("starting meta-node thread using {:#?}", meta_opts);
+
+            let _meta_handle = tokio::spawn(async move { risingwave_meta::start(meta_opts).await });
+
+            // TODO: wait for online instead of instantly proceeding
+
+            tracing::info!("starting compute-node thread using {:#?}", compute_opts);
+
+            let _compute_handle =
+                tokio::spawn(async move { risingwave_compute::start(compute_opts).await });
+
+                tracing::info!("starting frontend-node thread using {:#?}", frontend_opts);
+
+            let _frontend_handle =
+                tokio::spawn(async move { risingwave_frontend::start(frontend_opts).await });
+
+            // TODO: should we join all handles?
+            // Currently, not all services can be shutdown gracefully, just quit on Ctrl-C now.
+            signal::ctrl_c().await.unwrap();
+            println!("Exit");
         }),
     );
 

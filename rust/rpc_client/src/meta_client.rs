@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use risingwave_common::catalog::{CatalogVersion, TableId};
-use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::ErrorCode::{self, InternalError};
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::try_match_expand;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
@@ -30,7 +30,8 @@ use risingwave_pb::meta::{
     ListAllNodesRequest, ListAllNodesResponse, Schema, SubscribeRequest, SubscribeResponse, Table,
 };
 use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
-use tokio::sync::mpsc::Receiver;
+use tokio::sync::mpsc::{Receiver, UnboundedSender};
+use tokio::task::JoinHandle;
 use tonic::transport::{Channel, Endpoint};
 use tonic::{Status, Streaming};
 
@@ -213,6 +214,32 @@ impl MetaClient {
         let catalog = resp.catalog.take().unwrap();
         Ok(catalog)
     }
+
+    pub fn start_heartbeat_loop(
+        meta_client: MetaClient,
+        min_interval: Duration,
+    ) -> (JoinHandle<()>, UnboundedSender<()>) {
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
+        let join_handle = tokio::spawn(async move {
+            let mut min_interval = tokio::time::interval(min_interval);
+            loop {
+                tokio::select! {
+                    // Wait for interval
+                    _ = min_interval.tick() => {},
+                    // Shutdown
+                    _ = shutdown_rx.recv() => {
+                        tracing::info!("Heartbeat loop is shutting down");
+                        return;
+                    }
+                }
+                tracing::debug!("heartbeat");
+                if let Err(err) = meta_client.send_heartbeat(meta_client.worker_id()).await {
+                    tracing::warn!("Failed to send_heartbeat. {}", err);
+                }
+            }
+        });
+        (join_handle, shutdown_tx)
+    }
 }
 
 /// [`MetaClientInner`] is the low-level api to meta.
@@ -243,7 +270,7 @@ pub trait MetaClientInner: Send + Sync {
     }
 
     async fn heartbeat(&self, _req: HeartbeatRequest) -> Result<HeartbeatResponse> {
-        unimplemented!()
+        Err(ErrorCode::NotImplementedError("heartbeat is not implemented".into()).into())
     }
 
     async fn create(&self, _req: CreateRequest) -> Result<CreateResponse> {

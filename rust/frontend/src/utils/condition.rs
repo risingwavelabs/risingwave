@@ -1,3 +1,5 @@
+use std::fmt;
+
 use fixedbitset::FixedBitSet;
 use risingwave_common::types::{DataType, ScalarImpl};
 
@@ -12,7 +14,24 @@ pub struct Condition {
     pub conjunctions: Vec<ExprImpl>,
 }
 
+impl fmt::Display for Condition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut conjunctions = self.conjunctions.iter();
+        if let Some(expr) = conjunctions.next() {
+            write!(f, "{:?}", expr)?;
+        }
+        for expr in conjunctions {
+            write!(f, "AND {:?}", expr)?;
+        }
+        Ok(())
+    }
+}
+
 impl Condition {
+    pub fn is_empty(&self) -> bool {
+        self.conjunctions.is_empty()
+    }
+
     pub fn with_expr(expr: ExprImpl) -> Self {
         Self {
             conjunctions: to_conjunctions(expr),

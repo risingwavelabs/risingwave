@@ -6,7 +6,9 @@ option java_multiple_files = true;
 option java_package = "com.risingwave.proto.catalog";
 option optimize_for = SPEED;
 
+import "common.proto";
 import "plan.proto";
+import "stream_plan.proto";
 
 enum RowFormatType {
   JSON = 0;
@@ -22,14 +24,12 @@ message StreamSourceInfo {
   int32 row_id_index = 4;
 }
 
-message TableSourceInfo {
-  repeated plan.ColumnCatalog column_catalog = 1;
-}
+message TableSourceInfo {}
 
 message Source {
-  int32 id = 1;
-  int32 schema_id = 2;
-  int32 database_id = 3;
+  uint32 id = 1;
+  uint32 schema_id = 2;
+  uint32 database_id = 3;
   string name = 4;
   oneof info {
     StreamSourceInfo stream_source = 5;
@@ -37,31 +37,157 @@ message Source {
   }
 }
 
-// View defines a view in system catalogs, it can only be queried and not be treated as a source.
-message View {
-  int32 id = 1;
+// VirtualTable defines a view in system catalogs, it can only be queried and not be treated as a source.
+message VirtualTable {
+  uint32 id = 1;
   string name = 2;
   repeated plan.ColumnCatalog column_catalog = 3;
 }
 
 message Table {
-  int32 id = 1;
-  int32 schema_id = 2;
-  int32 database_id = 3;
+  uint32 id = 1;
+  uint32 schema_id = 2;
+  uint32 database_id = 3;
   string name = 4;
   repeated plan.ColumnCatalog column_catalog = 5;
   repeated int32 pk_column_ids = 6;
-  repeated plan.OrderType order_types = 7;
-  repeated int32 dependent_tables = 8;
+  repeated plan.OrderType pk_orders = 7;
+  repeated uint32 dependent_tables = 8;
 }
 
 message Schema {
-  int32 id = 1;
-  int32 database_id = 2;
+  uint32 id = 1;
+  uint32 database_id = 2;
   string name = 3;
 }
 
 message Database {
-  int32 id = 1;
+  uint32 id = 1;
   string name = 2;
+}
+
+message GetCatalogRequest {}
+
+message GetCatalogResponse {
+  common.Status status = 1;
+  repeated Database database = 2;
+  repeated Schema schema = 3;
+  repeated Source source = 4;
+  repeated Table table = 5;
+  repeated VirtualTable view = 6;
+}
+
+message CreateDatabaseRequest {
+  string name = 1;
+}
+
+message CreateDatabaseResponse {
+  common.Status status = 1;
+  uint32 database_id = 2;
+  uint64 version = 3;
+}
+
+message CreateSchemaRequest {
+  uint32 database_id = 1;
+  string name = 2;
+}
+
+message CreateSchemaResponse {
+  common.Status status = 1;
+  uint32 schema_id = 2;
+  uint64 version = 3;
+}
+
+message CreateSourceRequest {
+  Source source = 1;
+}
+
+message CreateSourceResponse {
+  common.Status status = 1;
+  uint32 source_id = 2;
+  uint64 version = 3;
+}
+
+message CreateMaterializedSourceRequest {
+  Source source = 1;
+  Table materialized_view = 2;
+  stream_plan.StreamNode stream_node = 3;
+}
+
+message CreateMaterializedSourceResponse {
+  common.Status status = 1;
+  uint32 source_id = 2;
+  uint32 table_id = 3;
+  uint64 version = 4;
+}
+
+message CreateMaterializedViewRequest {
+  Table materialized_view = 1;
+  stream_plan.StreamNode stream_node = 2;
+}
+
+message CreateMaterializedViewResponse {
+  common.Status status = 1;
+  uint32 table_id = 2;
+  uint64 version = 3;
+}
+
+message DropDatabaseRequest {
+  uint32 database_id = 1;
+}
+
+message DropDatabaseResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
+message DropSchemaRequest {
+  uint32 schema_id = 1;
+}
+
+message DropSchemaResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
+message DropSourceRequest {
+  uint32 source_id = 1;
+}
+
+message DropSourceResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
+message DropMaterializedSourceRequest {
+  uint32 source_id = 1;
+  uint32 table_id = 2;
+}
+
+message DropMaterializedSourceResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
+message DropMaterializedViewRequest {
+  uint32 table_id = 1;
+}
+
+message DropMaterializedViewResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
+service CatalogService {
+  rpc GetCatalog(GetCatalogRequest) returns (GetCatalogResponse);
+  rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
+  rpc CreateSchema(CreateSchemaRequest) returns (CreateSchemaResponse);
+  rpc CreateSource(CreateSourceRequest) returns (CreateSourceResponse);
+  rpc CreateMaterializedSource(CreateMaterializedSourceRequest) returns (CreateMaterializedSourceResponse);
+  rpc CreateMaterializedView(CreateMaterializedViewRequest) returns (CreateMaterializedViewResponse);
+  rpc DropDatabase(DropDatabaseRequest) returns (DropDatabaseResponse);
+  rpc DropSchema(DropSchemaRequest) returns (DropSchemaResponse);
+  rpc DropSource(DropSourceRequest) returns (DropSourceResponse);
+  rpc DropMaterializedSource(DropMaterializedSourceRequest) returns (DropMaterializedSourceResponse);
+  rpc DropMaterializedView(DropMaterializedViewRequest) returns (DropMaterializedViewResponse);
 }

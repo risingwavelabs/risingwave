@@ -5,7 +5,7 @@ use core::fmt;
 
 pub use column::*;
 pub use physical_table::*;
-pub use schema::*;
+pub use schema::{test_utils as schema_test_utils, Field, Schema};
 
 pub type CatalogVersion = u64;
 

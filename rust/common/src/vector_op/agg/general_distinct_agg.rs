@@ -49,11 +49,13 @@ where
             .value_at(row_id)
             .map(|scalar_ref| scalar_ref.to_owned_scalar().to_scalar_value());
         if self.exists.insert(value) {
-            let datum = (self.f)(
-                self.result.as_ref().map(|x| x.as_scalar_ref()),
-                input.value_at(row_id),
-            )?
-            .map(|x| x.to_owned_scalar());
+            let datum = self
+                .f
+                .eval(
+                    self.result.as_ref().map(|x| x.as_scalar_ref()),
+                    input.value_at(row_id),
+                )?
+                .map(|x| x.to_owned_scalar());
             self.result = datum;
         }
         Ok(())
@@ -66,7 +68,7 @@ where
         });
         let mut cur = self.result.as_ref().map(|x| x.as_scalar_ref());
         for datum in input {
-            cur = (self.f)(cur, datum)?;
+            cur = self.f.eval(cur, datum)?;
         }
         let r = cur.map(|x| x.to_owned_scalar());
         self.result = r;
@@ -91,7 +93,7 @@ where
             }
             let scalar_impl = v.map(|scalar_ref| scalar_ref.to_owned_scalar().to_scalar_value());
             if self.exists.insert(scalar_impl) {
-                cur = (self.f)(cur, v)?;
+                cur = self.f.eval(cur, v)?;
             }
         }
         self.result = cur.map(|x| x.to_owned_scalar());

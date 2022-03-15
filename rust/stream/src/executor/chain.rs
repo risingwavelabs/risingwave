@@ -168,10 +168,6 @@ impl Executor for ChainExecutor {
     fn logical_operator_info(&self) -> &str {
         &self.op_info
     }
-
-    fn reset(&mut self, _epoch: u64) {
-        // nothing to do
-    }
 }
 
 #[cfg(test)]
@@ -179,12 +175,10 @@ mod test {
 
     use async_trait::async_trait;
     use risingwave_common::array::{Array, I32Array, Op, StreamChunk};
-    use risingwave_common::catalog::Schema;
+    use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::column_nonnull;
     use risingwave_common::error::{ErrorCode, Result, RwError};
-    use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::DataType;
-    use risingwave_pb::plan::ColumnDesc;
+    use risingwave_common::types::DataType;
 
     use super::ChainExecutor;
     use crate::executor::test_utils::MockSource;
@@ -243,23 +237,11 @@ mod test {
         fn init(&mut self, _: u64) -> Result<()> {
             Ok(())
         }
-
-        fn reset(&mut self, _epoch: u64) {
-            // nothing to do
-        }
     }
 
     #[tokio::test]
     async fn test_basic() {
-        let columns = vec![ColumnDesc {
-            column_type: Some(DataType {
-                type_name: TypeName::Int32 as i32,
-                ..Default::default()
-            }),
-            name: "v1".to_string(),
-            ..Default::default()
-        }];
-        let schema = Schema::try_from(&columns).unwrap();
+        let schema = Schema::new(vec![Field::unnamed(DataType::Int32)]);
         let first = Box::new(MockSnapshot::with_chunks(
             schema.clone(),
             PkIndices::new(),

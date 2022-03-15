@@ -89,7 +89,7 @@ macro_rules! impl_with_order_base {
         })*
     }
 }
-for_batch_plan_nodes! {impl_with_order_base }
+for_batch_plan_nodes! { impl_with_order_base }
 
 macro_rules! impl_with_order_any {
     ([], $( { $convention:ident, $name:ident }),*) => {
@@ -102,8 +102,8 @@ macro_rules! impl_with_order_any {
         })*
     }
 }
-for_logical_plan_nodes! {impl_with_order_any }
-for_stream_plan_nodes! {impl_with_order_any }
+for_logical_plan_nodes! { impl_with_order_any }
+for_stream_plan_nodes! { impl_with_order_any }
 
 #[cfg(test)]
 mod tests {

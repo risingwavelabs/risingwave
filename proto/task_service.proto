@@ -69,7 +69,7 @@ service TaskService {
 }
 
 message GetDataRequest {
-  plan.TaskSinkId sink_id = 1;
+  plan.TaskOutputId task_output_id = 1;
 }
 
 message GetStreamResponse {

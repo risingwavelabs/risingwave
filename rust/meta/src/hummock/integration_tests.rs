@@ -1,13 +1,15 @@
 use std::iter::once;
 use std::sync::Arc;
+use std::time::Duration;
 
 use bytes::Bytes;
+use risingwave_common::config::StorageConfig;
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 use risingwave_storage::hummock::compactor::{Compactor, SubCompactContext};
 use risingwave_storage::hummock::local_version_manager::LocalVersionManager;
 use risingwave_storage::hummock::value::HummockValue;
-use risingwave_storage::hummock::{HummockOptions, HummockStorage, SstableStore};
+use risingwave_storage::hummock::{HummockStorage, SstableStore};
 use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::object::InMemObjectStore;
 
@@ -26,10 +28,14 @@ async fn get_hummock_meta_client() -> MockHummockMetaClient {
             .unwrap(),
     );
     let notification_manager = Arc::new(NotificationManager::new());
-    let cluster_manager =
-        StoredClusterManager::new(env, Some(hummock_manager.clone()), notification_manager)
-            .await
-            .unwrap();
+    let cluster_manager = StoredClusterManager::new(
+        env,
+        Some(hummock_manager.clone()),
+        notification_manager,
+        Duration::from_secs(3600),
+    )
+    .await
+    .unwrap();
     let fake_host_address = HostAddress {
         host: "127.0.0.1".to_string(),
         port: 80,
@@ -47,14 +53,14 @@ async fn get_hummock_meta_client() -> MockHummockMetaClient {
 
 async fn get_hummock_storage() -> (HummockStorage, Arc<HummockManager<MemStore>>) {
     let remote_dir = "hummock_001_test".to_string();
-    let options = HummockOptions {
+    let options = Arc::new(StorageConfig {
         sstable_size: 64,
         block_size: 1 << 10,
         bloom_false_positive: 0.1,
         data_directory: remote_dir.clone(),
         checksum_algo: ChecksumAlg::XxHash64,
         async_checkpoint_enabled: true,
-    };
+    });
     let hummock_meta_client = Arc::new(get_hummock_meta_client().await);
     let obj_client = Arc::new(InMemObjectStore::new());
     let sstable_store = Arc::new(SstableStore::new(obj_client.clone(), remote_dir));

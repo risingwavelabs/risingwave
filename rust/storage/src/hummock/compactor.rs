@@ -4,6 +4,7 @@ use std::time::Duration;
 use bytes::{Bytes, BytesMut};
 use futures::stream::{self, StreamExt};
 use futures::Future;
+use risingwave_common::config::StorageConfig;
 use risingwave_common::error::RwError;
 use risingwave_pb::hummock::{
     CompactMetrics, CompactTask, LevelEntry, LevelType, SstableInfo, SubscribeCompactTasksResponse,
@@ -19,7 +20,7 @@ use super::multi_builder::CapacitySplitTableBuilder;
 use super::sstable_store::SstableStoreRef;
 use super::version_cmp::VersionedComparator;
 use super::{
-    HummockError, HummockMetaClient, HummockOptions, HummockResult, HummockStorage, HummockValue,
+    HummockError, HummockMetaClient, HummockResult, HummockStorage, HummockValue,
     LocalVersionManager, SSTableBuilder, SSTableIterator, Sstable,
 };
 use crate::hummock::vacuum::Vacuum;
@@ -27,7 +28,7 @@ use crate::monitor::StateStoreMetrics;
 
 #[derive(Clone)]
 pub struct SubCompactContext {
-    pub options: Arc<HummockOptions>,
+    pub options: Arc<StorageConfig>,
     pub local_version_manager: Arc<LocalVersionManager>,
     pub hummock_meta_client: Arc<dyn HummockMetaClient>,
     pub sstable_store: SstableStoreRef,
@@ -311,7 +312,7 @@ impl Compactor {
     }
 
     pub fn start_compactor(
-        options: Arc<HummockOptions>,
+        options: Arc<StorageConfig>,
         local_version_manager: Arc<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         sstable_store: SstableStoreRef,

@@ -8,6 +8,7 @@ use super::{
     ToStream,
 };
 use crate::expr::{assert_input_ref, ExprImpl};
+use crate::optimizer::plan_node::{BatchFilter, StreamFilter};
 use crate::optimizer::property::WithSchema;
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -101,13 +102,17 @@ impl ColPrunable for LogicalFilter {
 
 impl ToBatch for LogicalFilter {
     fn to_batch(&self) -> PlanRef {
-        todo!()
+        let new_input = self.input().to_batch();
+        let new_logical = self.clone_with_input(new_input);
+        BatchFilter::new(new_logical).into()
     }
 }
 
 impl ToStream for LogicalFilter {
     fn to_stream(&self) -> PlanRef {
-        todo!()
+        let new_input = self.input().to_stream();
+        let new_logical = self.clone_with_input(new_input);
+        StreamFilter::new(new_logical).into()
     }
 }
 
@@ -140,20 +145,10 @@ mod tests {
     /// ```
     async fn test_prune_filter() {
         let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
-        let ty = DataType::Int32;
         let fields: Vec<Field> = vec![
-            Field {
-                data_type: ty.clone(),
-                name: "v1".to_string(),
-            },
-            Field {
-                data_type: ty.clone(),
-                name: "v2".to_string(),
-            },
-            Field {
-                data_type: ty.clone(),
-                name: "v3".to_string(),
-            },
+            Field::with_name(DataType::Int32, "v1"),
+            Field::with_name(DataType::Int32, "v2"),
+            Field::with_name(DataType::Int32, "v3"),
         ];
         let table_scan = LogicalScan::new(
             "test".to_string(),
@@ -168,8 +163,8 @@ mod tests {
             FunctionCall::new(
                 Type::LessThan,
                 vec![
-                    ExprImpl::InputRef(Box::new(InputRef::new(1, ty.clone()))),
-                    ExprImpl::Literal(Box::new(Literal::new(None, ty))),
+                    ExprImpl::InputRef(Box::new(InputRef::new(1, DataType::Int32))),
+                    ExprImpl::Literal(Box::new(Literal::new(None, DataType::Int32))),
                 ],
             )
             .unwrap(),

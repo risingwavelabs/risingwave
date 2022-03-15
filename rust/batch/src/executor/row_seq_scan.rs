@@ -66,7 +66,9 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             NodeBody::RowSeqScan
         )?;
 
-        let table_id = TableId::from(&seq_scan_node.table_ref_id);
+        let table_id = TableId {
+            table_id: seq_scan_node.table_desc.as_ref().unwrap().table_id,
+        };
         let column_descs = seq_scan_node
             .column_descs
             .iter()

@@ -4,7 +4,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
-use super::{ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use super::{BatchInsert, ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
 use crate::binder::BaseTableRef;
 use crate::catalog::ColumnId;
 
@@ -13,7 +13,6 @@ use crate::catalog::ColumnId;
 /// It corresponds to the `INSERT` statements in SQL. Especially, for `INSERT ... VALUES`
 /// statements, the input relation would be [`super::LogicalValues`].
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct LogicalInsert {
     pub base: LogicalBase,
     table: BaseTableRef,
@@ -22,15 +21,13 @@ pub struct LogicalInsert {
 }
 
 impl LogicalInsert {
-    /// Create a LogicalInsert node. Used internally by optimizer.
+    /// Create a [`LogicalInsert`] node. Used internally by optimizer.
     pub fn new(input: PlanRef, table: BaseTableRef, columns: Vec<ColumnId>) -> Self {
         let ctx = input.ctx();
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
-        let base = LogicalBase {
-            schema,
-            id: ctx.borrow_mut().get_id(),
-            ctx: ctx.clone(),
-        };
+        let id = ctx.borrow_mut().get_id();
+        let base = LogicalBase { id, schema, ctx };
+
         Self {
             table,
             columns,
@@ -39,7 +36,7 @@ impl LogicalInsert {
         }
     }
 
-    /// Create a LogicalInsert node. Used by planner.
+    /// Create a [`LogicalInsert`] node. Used by planner.
     pub fn create(input: PlanRef, table: BaseTableRef, columns: Vec<ColumnId>) -> Result<Self> {
         Ok(Self::new(input, table, columns))
     }
@@ -66,19 +63,23 @@ impl fmt::Display for LogicalInsert {
 }
 
 impl ColPrunable for LogicalInsert {
-    fn prune_col(&self, _required_cols: &fixedbitset::FixedBitSet) -> PlanRef {
-        panic!("column pruning should not be called on insert")
+    fn prune_col(&self, required_cols: &fixedbitset::FixedBitSet) -> PlanRef {
+        // TODO: special handling for insert column pruning
+        self.clone_with_input(self.input.prune_col(required_cols))
+            .into()
     }
 }
 
 impl ToBatch for LogicalInsert {
     fn to_batch(&self) -> PlanRef {
-        todo!()
+        let new_input = self.input().to_batch();
+        let new_logical = self.clone_with_input(new_input);
+        BatchInsert::new(new_logical).into()
     }
 }
 
 impl ToStream for LogicalInsert {
     fn to_stream(&self) -> PlanRef {
-        todo!()
+        unreachable!("insert should always be converted to batch plan");
     }
 }

@@ -1,3 +1,4 @@
+#![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]
 #![warn(clippy::doc_markdown)]
 #![warn(clippy::explicit_into_iter_loop)]
@@ -15,9 +16,6 @@
 #![feature(backtrace)]
 #![feature(map_first_last)]
 #![feature(let_chains)]
-
-use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::OrderType;
 
 pub mod cell_based_row_deserializer;
 pub mod hummock;
@@ -44,16 +42,8 @@ pub mod tikv;
 pub mod tikv;
 
 pub use keyspace::{Keyspace, Segment};
-use risingwave_common::catalog::ColumnId;
 pub use store::{StateStore, StateStoreIter};
 pub use store_impl::StateStoreImpl;
-
-#[derive(Clone, Debug)]
-pub struct IndexDesc {
-    pub column_id: ColumnId,
-    pub data_type: DataType,
-    pub order: OrderType,
-}
 
 pub enum TableScanOptions {
     SequentialScan,

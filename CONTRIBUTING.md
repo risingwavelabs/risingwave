@@ -10,10 +10,10 @@ We support both unit tests and end-to-end tests.
 
 ### Unit Testing
 
-To run unit tests for Rust, run the following commands under the root directory:
+To run unit tests for Rust, run the following commands under the `rust` directory:
 
 ```shell
-make rust_test
+cargo test --workspace
 ```
 
 To run unit tests for Java, run the following commands under the root directory:
@@ -29,7 +29,7 @@ Currently, we use [sqllogictest-rs](https://github.com/singularity-data/sqllogic
 To install sqllogictest:
 
 ```shell
-make sqllogictest
+cargo install --git https://github.com/risinglightdb/sqllogictest-rs --features bin
 ```
 
 To run end-to-end tests with multiple compute-nodes, run the script:
@@ -50,6 +50,7 @@ It will start processes in the background. After testing, you can run the follow
 
 ```shell
 ./risedev k
+./risedev clean-data
 ```
 
 ## Monitoring
@@ -75,7 +76,7 @@ The Rust components use `tokio-tracing` to handle both logging and tracing. The 
 * Third-party libraries: warn
 * Other libraries: debug
 
-If you need to adjust log levels, simply change the logging filters in `compute_node.rs` and `meta_node.rs`.
+If you need to adjust log levels, simply change the logging filters in `utils/logging`.
 
 ## Code Formatting
 

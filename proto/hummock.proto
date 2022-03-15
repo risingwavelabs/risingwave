@@ -178,6 +178,38 @@ message CompactTask {
   CompactMetrics metrics = 8;
 }
 
+message SstableStat {
+  KeyRange key_range = 1;
+  uint64 table_id = 2;
+  message CompactTaskId {
+    uint64 id = 1;
+  }
+  CompactTaskId compact_task = 3;
+}
+
+message LevelHandler {
+  message KeyRangeTaskId {
+    KeyRange key_range = 1;
+    uint64 task_id = 2;
+    uint64 ssts = 3;
+  }
+  LevelType level_type = 1;
+  repeated SstableStat ssts = 2;
+  repeated KeyRangeTaskId key_ranges = 3;
+}
+
+message CompactStatus {
+  repeated LevelHandler level_handlers = 1;
+  uint64 next_compact_task_id = 2;
+}
+
+message GetCompactionTasksRequest {}
+
+message GetCompactionTasksResponse {
+  common.Status status = 1;
+  CompactTask compact_task = 2;
+}
+
 message ReportCompactionTasksRequest {
   CompactTask compact_task = 2;
   bool task_result = 3;
