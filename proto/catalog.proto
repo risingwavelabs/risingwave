@@ -67,7 +67,7 @@ message Database {
 }
 
 message CreateDatabaseRequest {
-  string name = 1;
+  Database db = 1;
 }
 
 message CreateDatabaseResponse {
@@ -77,8 +77,7 @@ message CreateDatabaseResponse {
 }
 
 message CreateSchemaRequest {
-  uint32 database_id = 1;
-  string name = 2;
+  Schema schema = 1;
 }
 
 message CreateSchemaResponse {
