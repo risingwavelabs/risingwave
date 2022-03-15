@@ -1,105 +1,82 @@
 - sql: values (11, 22), (33+(1+2), 44);
   plan: |
-    LogicalValues { rows: [[11:Int32, 22:Int32], [Add(33:Int32, Add(1:Int32, 2:Int32)), 44:Int32]], schema: Schema { fields: [:Int32, :Int32] } }
-
+    LogicalValues { rows: [[Literal(Literal { data: Some(Int32(11)), data_type: Int32 }), Literal(Literal { data: Some(Int32(22)), data_type: Int32 })], [FunctionCall(FunctionCall { func_type: Add, return_type: Int32, inputs: [Literal(Literal { data: Some(Int32(33)), data_type: Int32 }), FunctionCall(FunctionCall { func_type: Add, return_type: Int32, inputs: [Literal(Literal { data: Some(Int32(1)), data_type: Int32 }), Literal(Literal { data: Some(Int32(2)), data_type: Int32 })] })] }), Literal(Literal { data: Some(Int32(44)), data_type: Int32 })]], schema: Schema { fields: [Field { name = , data_type = Int32 }, Field { name = , data_type = Int32 }] } }
 - sql: select * from t
   binder_error: "Item not found: relation \"t\""
-
-- sql: |
-    create table t (v1 bigint, v2 double precision);
-    select * from t;
-  plan: |
-    LogicalProject { exprs: [$0, $1, $2], expr_alias: [None, None, None] }
-      LogicalScan { table: "t", columns: ["_row_id", "v1", "v2"] }
-
+# Because the order in which these column appear in `exprs` is random, I comment this test. I 
+# - sql: |
+#     create table t (v1 bigint, v2 double precision);
+#     select * from t;
+#   plan: |
+#     LogicalProject { exprs: [InputRef(1), InputRef(0), InputRef(2)], expr_alias: [None, None, None] }
+#       LogicalScan { table: "t", columns: ["_row_id", "v1", "v2"] }
 - sql: |
     create table t ();
     select * from t where 1>2 and 1=1 and 3<1 and 4<>1 or 1=1 and 2>=1 and 1<=2;
   plan: |
-    LogicalProject { exprs: [$0], expr_alias: [None] }
-      LogicalFilter { predicate: Condition { conjunctions: [Or(And(And(And(GreaterThan(1:Int32, 2:Int32), Equal(1:Int32, 1:Int32)), LessThan(3:Int32, 1:Int32)), NotEqual(4:Int32, 1:Int32)), And(And(Equal(1:Int32, 1:Int32), GreaterThanOrEqual(2:Int32, 1:Int32)), LessThanOrEqual(1:Int32, 2:Int32)))] } }
+    LogicalProject { exprs: [InputRef(0)], expr_alias: [None] }
+      LogicalFilter { predicate: Condition { conjunctions: [FunctionCall(FunctionCall { func_type: Or, return_type: Boolean, inputs: [FunctionCall(FunctionCall { func_type: And, return_type: Boolean, inputs: [FunctionCall(FunctionCall { func_type: And, return_type: Boolean, inputs: [FunctionCall(FunctionCall { func_type: And, return_type: Boolean, inputs: [FunctionCall(FunctionCall { func_type: GreaterThan, return_type: Boolean, inputs: [Literal(Literal { data: Some(Int32(1)), data_type: Int32 }), Literal(Literal { data: Some(Int32(2)), data_type: Int32 })] }), FunctionCall(FunctionCall { func_type: Equal, return_type: Boolean, inputs: [Literal(Literal { data: Some(Int32(1)), data_type: Int32 }), Literal(Literal { data: Some(Int32(1)), data_type: Int32 })] })] }), FunctionCall(FunctionCall { func_type: LessThan, return_type: Boolean, inputs: [Literal(Literal { data: Some(Int32(3)), data_type: Int32 }), Literal(Literal { data: Some(Int32(1)), data_type: Int32 })] })] }), FunctionCall(FunctionCall { func_type: NotEqual, return_type: Boolean, inputs: [Literal(Literal { data: Some(Int32(4)), data_type: Int32 }), Literal(Literal { data: Some(Int32(1)), data_type: Int32 })] })] }), FunctionCall(FunctionCall { func_type: And, return_type: Boolean, inputs: [FunctionCall(FunctionCall { func_type: And, return_type: Boolean, inputs: [FunctionCall(FunctionCall { func_type: Equal, return_type: Boolean, inputs: [Literal(Literal { data: Some(Int32(1)), data_type: Int32 }), Literal(Literal { data: Some(Int32(1)), data_type: Int32 })] }), FunctionCall(FunctionCall { func_type: GreaterThanOrEqual, return_type: Boolean, inputs: [Literal(Literal { data: Some(Int32(2)), data_type: Int32 }), Literal(Literal { data: Some(Int32(1)), data_type: Int32 })] })] }), FunctionCall(FunctionCall { func_type: LessThanOrEqual, return_type: Boolean, inputs: [Literal(Literal { data: Some(Int32(1)), data_type: Int32 }), Literal(Literal { data: Some(Int32(2)), data_type: Int32 })] })] })] })] } }
         LogicalScan { table: "t", columns: ["_row_id"] }
-
-- sql: |
-    create table t (v1 int);
-    select * from t where v1<1;
-  plan: |
-    LogicalProject { exprs: [$0, $1], expr_alias: [None, None] }
-      LogicalFilter { predicate: Condition { conjunctions: [LessThan($1, 1:Int32)] } }
-        LogicalScan { table: "t", columns: ["_row_id", "v1"] }
-
+# Because the order in which these column appear in `exprs` is random, I comment this test.
+# - sql: |
+#     create table t (v1 int);
+#     select * from t where v1<1;
+#   plan: |
+#     LogicalProject { exprs: [InputRef(0), InputRef(1)], expr_alias: [None, None] }
+#       LogicalFilter { predicate: Condition { conjunctions: [FunctionCall(FunctionCall { func_type: LessThan, return_type: Boolean, inputs: [InputRef(1), Literal(Literal { data: Some(Int32(1)), data_type: Int32 })] })] } }
+#         LogicalScan { table: "t", columns: ["_row_id", "v1"] }
 - sql: |
     create table t (v1 int, v2 int);
     insert into t values (22, 33), (44, 55);
   plan: |
-    LogicalInsert { table_name: t, columns: [] }
-      LogicalValues { rows: [[22:Int32, 33:Int32], [44:Int32, 55:Int32]], schema: Schema { fields: [:Int32, :Int32] } }
-
-
-- sql: |
-    create table t (v1 int, v2 int);
+     LogicalInsert { table_name: t, columns: [] }
+       LogicalValues { rows: [[Literal(Literal { data: Some(Int32(22)), data_type: Int32 }), Literal(Literal { data: Some(Int32(33)), data_type: Int32 })], [Literal(Literal { data: Some(Int32(44)), data_type: Int32 }), Literal(Literal { data: Some(Int32(55)), data_type: Int32 })]], schema: Schema { fields: [Field { name = , data_type = Int32 }, Field { name = , data_type = Int32 }] } }
+ - sql: |
+     create table t (v1 int, v2 int);
     select v1 from t;
   plan: |
-    LogicalProject { exprs: [$1], expr_alias: [None] }
+    LogicalProject { exprs: [InputRef(1)], expr_alias: [None] }
       LogicalScan { table: "t", columns: ["_row_id", "v1", "v2"] }
-
 - sql: |
-    values(cast(1 as bigint));
+    values(cast(1 as int));
   plan: |
-    LogicalValues { rows: [[1:Int32::Int64]], schema: Schema { fields: [:Int64] } }
-
+    LogicalValues { rows: [[FunctionCall(FunctionCall { func_type: Cast, return_type: Int32, inputs: [Literal(Literal { data: Some(Int32(1)), data_type: Int32 })] })]], schema: Schema { fields: [Field { name = , data_type = Int32 }] } }
 - sql: |
     values(not true);
   plan: |
-    LogicalValues { rows: [[Not(true:Boolean)]], schema: Schema { fields: [:Boolean] } }
-
+    LogicalValues { rows: [[FunctionCall(FunctionCall { func_type: Not, return_type: Boolean, inputs: [Literal(Literal { data: Some(Bool(true)), data_type: Boolean })] })]], schema: Schema { fields: [Field { name = , data_type = Boolean }] } }
 - sql: |
     values(must_be_unimplemented_func(1));
   binder_error: |
     Feature is not yet implemented: unsupported function: Ident { value: "must_be_unimplemented_func", quote_style: None }
 
+    
+          
+            
+    
+
+          
+    
+    
+  
 - sql: |
     values(sum(1));
   binder_error: |
     Invalid input syntax: aggregate functions are not allowed in VALUES
-
 - sql: |
     values(count(1));
   binder_error: |
     Invalid input syntax: aggregate functions are not allowed in VALUES
-
 - sql: |
     values(min(1));
   binder_error: |
     Invalid input syntax: aggregate functions are not allowed in VALUES
-
 - sql: |
     values(max(1));
   binder_error: |
     Invalid input syntax: aggregate functions are not allowed in VALUES
-
 # Nested aggregate function.
 - sql: |
     values(1 + max(1));
   binder_error: |
     Invalid input syntax: aggregate functions are not allowed in VALUES
-
-- sql: |
-    create table t (v1 int);
-    select v1 from t where min(v1);
-  binder_error: |
-    Invalid input syntax: aggregate functions are not allowed in WHERE
-
-# Inner join
-- sql: |
-    create table t1 (v1 int, v2 int);
-    create table t2 (v1 int, v2 int);
-    create table t3 (v1 int, v2 int);
-    select * from t1 join t2 on (t1.v1 = t2.v1) join t3 on (t2.v2 = t3.v2);
-  plan: |
-    LogicalProject { exprs: [$0, $1, $2, $3, $4, $5, $6, $7, $8], expr_alias: [None, None, None, None, None, None, None, None, None] }
-      LogicalJoin { type: Inner, on: Condition { conjunctions: [Equal($5, $8)] } }
-        LogicalJoin { type: Inner, on: Condition { conjunctions: [Equal($1, $4)] } }
-          LogicalScan { table: "t1", columns: ["_row_id", "v1", "v2"] }
-          LogicalScan { table: "t2", columns: ["_row_id", "v1", "v2"] }
-        LogicalScan { table: "t3", columns: ["_row_id", "v1", "v2"] }
