@@ -11,7 +11,7 @@ use risingwave_pb::catalog::{Database, Schema, Source, Table};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::Mutex;
 
-use crate::manager::{NotificationManagerRef, NotificationTarget};
+use crate::manager::NotificationManagerRef;
 use crate::model::{CatalogVersionGenerator, MetadataModel};
 use crate::storage::MetaStore;
 
@@ -55,12 +55,9 @@ where
             core.add_database(database);
 
             self.nm
-                .notify(
-                    Operation::Add,
-                    &Info::DatabaseV2(database.to_owned()),
-                    NotificationTarget::Frontend,
-                )
-                .await?;
+                .notify_fe(Operation::Add, &Info::DatabaseV2(database.to_owned()))
+                .await;
+
             Ok(version)
         } else {
             Err(RwError::from(InternalError(
@@ -78,12 +75,9 @@ where
             core.drop_database(&database);
 
             self.nm
-                .notify(
-                    Operation::Delete,
-                    &Info::DatabaseV2(database),
-                    NotificationTarget::Frontend,
-                )
-                .await?;
+                .notify_fe(Operation::Delete, &Info::DatabaseV2(database))
+                .await;
+
             Ok(version)
         } else {
             Err(RwError::from(InternalError(
@@ -100,12 +94,9 @@ where
             core.add_schema(schema);
 
             self.nm
-                .notify(
-                    Operation::Add,
-                    &Info::SchemaV2(schema.to_owned()),
-                    NotificationTarget::Frontend,
-                )
-                .await?;
+                .notify_fe(Operation::Add, &Info::SchemaV2(schema.to_owned()))
+                .await;
+
             Ok(version)
         } else {
             Err(RwError::from(InternalError(
@@ -123,12 +114,9 @@ where
             core.drop_schema(&schema);
 
             self.nm
-                .notify(
-                    Operation::Delete,
-                    &Info::SchemaV2(schema),
-                    NotificationTarget::Frontend,
-                )
-                .await?;
+                .notify_fe(Operation::Delete, &Info::SchemaV2(schema))
+                .await;
+
             Ok(version)
         } else {
             Err(RwError::from(InternalError(
@@ -145,12 +133,9 @@ where
             core.add_table(table);
 
             self.nm
-                .notify(
-                    Operation::Add,
-                    &Info::TableV2(table.to_owned()),
-                    NotificationTarget::Frontend,
-                )
-                .await?;
+                .notify_fe(Operation::Add, &Info::TableV2(table.to_owned()))
+                .await;
+
             Ok(version)
         } else {
             Err(RwError::from(InternalError(
@@ -168,12 +153,9 @@ where
             core.drop_table(&table);
 
             self.nm
-                .notify(
-                    Operation::Delete,
-                    &Info::TableV2(table),
-                    NotificationTarget::Frontend,
-                )
-                .await?;
+                .notify_fe(Operation::Delete, &Info::TableV2(table))
+                .await;
+
             Ok(version)
         } else {
             Err(RwError::from(InternalError(
@@ -190,12 +172,9 @@ where
             core.add_source(source);
 
             self.nm
-                .notify(
-                    Operation::Add,
-                    &Info::Source(source.to_owned()),
-                    NotificationTarget::Frontend,
-                )
-                .await?;
+                .notify_fe(Operation::Add, &Info::Source(source.to_owned()))
+                .await;
+
             Ok(version)
         } else {
             Err(RwError::from(InternalError(
@@ -213,12 +192,9 @@ where
             core.drop_source(&source);
 
             self.nm
-                .notify(
-                    Operation::Delete,
-                    &Info::Source(source),
-                    NotificationTarget::Frontend,
-                )
-                .await?;
+                .notify_fe(Operation::Delete, &Info::Source(source))
+                .await;
+
             Ok(version)
         } else {
             Err(RwError::from(InternalError(

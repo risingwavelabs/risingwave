@@ -12,6 +12,7 @@ use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{HummockStorage, SstableStore};
 use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::object::InMemObjectStore;
+use tokio::sync::mpsc;
 
 use crate::cluster::StoredClusterManager;
 use crate::hummock::mock_hummock_meta_client::MockHummockMetaClient;
@@ -27,7 +28,8 @@ async fn get_hummock_meta_client() -> MockHummockMetaClient {
             .await
             .unwrap(),
     );
-    let notification_manager = Arc::new(NotificationManager::new());
+    let (_, delete_worker_receiver) = mpsc::unbounded_channel();
+    let notification_manager = Arc::new(NotificationManager::new(delete_worker_receiver));
     let cluster_manager = StoredClusterManager::new(
         env,
         Some(hummock_manager.clone()),

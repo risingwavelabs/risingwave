@@ -275,7 +275,7 @@ mod tests {
         BroadcastActorInfoTableResponse, BuildActorsResponse, DropActorsRequest,
         DropActorsResponse, InjectBarrierRequest, InjectBarrierResponse, UpdateActorsResponse,
     };
-    use tokio::sync::mpsc::UnboundedSender;
+    use tokio::sync::mpsc::{self, UnboundedSender};
     use tokio::task::JoinHandle;
     use tonic::{Request, Response, Status};
 
@@ -399,7 +399,8 @@ mod tests {
             sleep(Duration::from_secs(1));
 
             let env = MetaSrvEnv::for_test().await;
-            let notification_manager = Arc::new(NotificationManager::new());
+            let (_, delete_worker_receiver) = mpsc::unbounded_channel();
+            let notification_manager = Arc::new(NotificationManager::new(delete_worker_receiver));
             let cluster_manager = Arc::new(
                 StoredClusterManager::new(
                     env.clone(),

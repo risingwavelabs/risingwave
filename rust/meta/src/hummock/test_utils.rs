@@ -10,6 +10,7 @@ use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
     HummockEpoch, HummockSSTableId, SSTableBuilder, SSTableBuilderOptions,
 };
+use tokio::sync::mpsc;
 
 use crate::cluster::StoredClusterManager;
 use crate::hummock::HummockManager;
@@ -93,11 +94,12 @@ pub async fn setup_compute_env(
             .await
             .unwrap(),
     );
+    let (_, delete_worker_receiver) = mpsc::unbounded_channel();
     let cluster_manager = Arc::new(
         StoredClusterManager::new(
             env.clone(),
             Some(hummock_manager.clone()),
-            Arc::new(NotificationManager::new()),
+            Arc::new(NotificationManager::new(delete_worker_receiver)),
             Duration::from_secs(1),
         )
         .await

@@ -32,6 +32,7 @@ pub type StoredClusterManagerRef<S> = Arc<StoredClusterManager<S>>;
 const DEFAULT_WORK_NODE_PARALLEL_DEGREE: usize = 8;
 
 /// [`StoredClusterManager`] manager cluster/worker meta data in [`MetaStore`].
+#[derive(Debug)]
 pub struct WorkerKey(pub HostAddress);
 
 impl PartialEq<Self> for WorkerKey {
@@ -158,12 +159,8 @@ where
                 // Notify frontends of new compute node.
                 if worker_node.r#type == WorkerType::ComputeNode as i32 {
                     self.notification_manager_ref
-                        .notify(
-                            Operation::Add,
-                            &Info::Node(worker_node),
-                            crate::manager::NotificationTarget::Frontend,
-                        )
-                        .await?
+                        .notify_fe(Operation::Add, &Info::Node(worker_node))
+                        .await;
                 }
 
                 Ok(())
@@ -206,12 +203,8 @@ where
                 // Notify frontends to delete compute node.
                 if worker_node.r#type == WorkerType::ComputeNode as i32 {
                     self.notification_manager_ref
-                        .notify(
-                            Operation::Delete,
-                            &Info::Node(worker_node),
-                            crate::manager::NotificationTarget::Frontend,
-                        )
-                        .await?
+                        .notify_fe(Operation::Delete, &Info::Node(worker_node))
+                        .await;
                 }
 
                 Ok(())
@@ -259,6 +252,7 @@ where
     pub async fn start_heartbeat_checker(
         cluster_manager_ref: StoredClusterManagerRef<S>,
         check_interval: Duration,
+        delete_worker_sender: UnboundedSender<WorkerKey>,
     ) -> (JoinHandle<()>, UnboundedSender<()>) {
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
         let join_handle = tokio::spawn(async move {
@@ -293,6 +287,7 @@ where
                     }
                     match cluster_manager_ref.delete_worker_node(key.clone()).await {
                         Ok(_) => {
+                            delete_worker_sender.send(WorkerKey(key.clone())).unwrap();
                             tracing::warn!(
                                 "Deleted expired worker {} {}:{}; expired at {}, now {}",
                                 worker.worker_id(),
@@ -512,6 +507,8 @@ impl StoredClusterManagerCore {
 mod tests {
     use std::collections::HashSet;
 
+    use tokio::sync::mpsc;
+
     use super::*;
     use crate::hummock::test_utils::setup_compute_env;
     use crate::manager::NotificationManager;
@@ -526,11 +523,13 @@ mod tests {
                 .await
                 .unwrap(),
         );
+
+        let (_, delete_worker_receiver) = mpsc::unbounded_channel();
         let cluster_manager = Arc::new(
             StoredClusterManager::new(
                 env.clone(),
                 Some(hummock_manager.clone()),
-                Arc::new(NotificationManager::new()),
+                Arc::new(NotificationManager::new(delete_worker_receiver)),
                 Duration::new(0, 0),
             )
             .await
@@ -644,9 +643,13 @@ mod tests {
             2
         );
 
-        let (join_handle, shutdown_sender) =
-            StoredClusterManager::start_heartbeat_checker(cluster_manager.clone(), check_interval)
-                .await;
+        let (delete_worker_sender, _) = mpsc::unbounded_channel();
+        let (join_handle, shutdown_sender) = StoredClusterManager::start_heartbeat_checker(
+            cluster_manager.clone(),
+            check_interval,
+            delete_worker_sender,
+        )
+        .await;
         tokio::time::sleep(ttl * 2 + check_interval).await;
 
         // One live node left.
