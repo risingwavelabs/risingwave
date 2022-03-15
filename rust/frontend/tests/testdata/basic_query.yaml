@@ -45,6 +45,13 @@
 
 - sql: |
     create table t (v1 int, v2 int);
+    delete from t;
+  plan: |
+    LogicalDelete { table_name: t }
+      LogicalScan { table: "t", columns: ["_row_id", "v1", "v2"] }
+
+- sql: |
+    create table t (v1 int, v2 int);
     select v1 from t;
   plan: |
     LogicalProject { exprs: [$1], expr_alias: [None] }
