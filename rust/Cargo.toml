@@ -8,6 +8,7 @@ members = [
   "connector",
   "ctl",
   "frontend",
+  "frontend/test_runner",
   "meta",
   "prost",
   "prost/helpers",

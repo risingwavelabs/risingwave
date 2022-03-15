@@ -9,6 +9,7 @@ use crate::hummock::iterator::test_utils::{
 };
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
+use crate::hummock::test_utils::default_config_for_test;
 use crate::hummock::value::HummockValue;
 use crate::hummock::SSTableBuilder;
 use crate::object::{InMemObjectStore, ObjectStore};
@@ -152,7 +153,7 @@ async fn test_snapshot() {
         mock_hummock_meta_service.clone(),
     ));
 
-    let hummock_options = HummockOptions::default_for_test();
+    let hummock_options = Arc::new(default_config_for_test());
     let hummock_storage = HummockStorage::with_default_stats(
         hummock_options,
         sstable_store,
@@ -227,7 +228,7 @@ async fn test_snapshot_range_scan() {
     let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
         mock_hummock_meta_service.clone(),
     ));
-    let hummock_options = HummockOptions::default_for_test();
+    let hummock_options = Arc::new(default_config_for_test());
     let hummock_storage = HummockStorage::with_default_stats(
         hummock_options,
         sstable_store,
@@ -282,7 +283,7 @@ async fn test_snapshot_reverse_range_scan() {
     let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
         mock_hummock_meta_service.clone(),
     ));
-    let hummock_options = HummockOptions::default_for_test();
+    let hummock_options = Arc::new(default_config_for_test());
     let hummock_storage = HummockStorage::with_default_stats(
         hummock_options,
         sstable_store.clone(),

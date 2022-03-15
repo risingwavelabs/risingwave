@@ -78,9 +78,7 @@ impl StateStoreImpl {
     ) -> Result<Self> {
         let store = match s {
             hummock if hummock.starts_with("hummock") => {
-                use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
-
-                use crate::hummock::{HummockOptions, HummockStorage};
+                use crate::hummock::HummockStorage;
 
                 let object_store = match hummock {
                     s3 if s3.starts_with("hummock+s3://") => Arc::new(
@@ -111,20 +109,7 @@ impl StateStoreImpl {
                 ));
                 let inner = HummockStateStore::new(
                     HummockStorage::new(
-                        HummockOptions {
-                            sstable_size: config.sstable_size,
-                            block_size: config.block_size,
-                            bloom_false_positive: config.bloom_false_positive,
-                            data_directory: config.data_directory.to_string(),
-                            checksum_algo: match config.checksum_algo.as_str() {
-                                "crc32c" => ChecksumAlg::Crc32c,
-                                "xxhash64" => ChecksumAlg::XxHash64,
-                                other => {
-                                    unimplemented!("{} is not supported for Hummock", other)
-                                }
-                            },
-                            async_checkpoint_enabled: config.async_checkpoint_enabled,
-                        },
+                        config.clone(),
                         sstable_store.clone(),
                         Arc::new(LocalVersionManager::new(sstable_store)),
                         Arc::new(RpcHummockMetaClient::new(meta_client, stats.clone())),
