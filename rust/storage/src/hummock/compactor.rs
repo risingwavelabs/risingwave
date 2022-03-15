@@ -261,8 +261,18 @@ impl Compactor {
         });
 
         let has_user_key_overlap = !is_target_ultimate_and_leveling;
+
+        // Monitor time cost building shared buffer to SSTs.
+        let build_l0_sst_timer = if context.is_share_buffer_compact {
+            Some(context.stats.write_build_l0_sst_time.start_timer())
+        } else {
+            None
+        };
         Compactor::compact_and_build_sst(&mut builder, kr, iter, has_user_key_overlap, watermark)
             .await?;
+        if let Some(timer) = build_l0_sst_timer {
+            timer.observe_duration();
+        }
 
         // Seal table for each split
         builder.seal_current();
@@ -271,10 +281,17 @@ impl Compactor {
         // TODO: decide upload concurrency
         for (table_id, data, meta) in builder.finish() {
             let sst = Sstable { id: table_id, meta };
-            context
+            let len = context
                 .sstable_store
                 .put(&sst, data, super::CachePolicy::Fill)
                 .await?;
+
+            if context.is_share_buffer_compact {
+                context
+                    .stats
+                    .write_shared_buffer_sync_size
+                    .observe(len as _);
+            }
 
             output_ssts.push(sst);
         }

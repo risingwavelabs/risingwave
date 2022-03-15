@@ -124,9 +124,9 @@ where
             return Ok(());
         }
 
-        self.stats.batched_write_counts.inc();
+        self.stats.write_batch_counts.inc();
         self.stats
-            .batch_write_tuple_counts
+            .write_batch_tuple_counts
             .inc_by(kv_pairs.len() as _);
 
         let total_size = kv_pairs
@@ -134,11 +134,11 @@ where
             .map(|(k, v)| k.len() + v.as_ref().map(|v| v.len()).unwrap_or_default())
             .sum::<usize>();
 
-        let timer = self.stats.batch_write_latency.start_timer();
+        let timer = self.stats.write_batch_shared_buffer_time.start_timer();
         self.inner.ingest_batch(kv_pairs, epoch).await?;
         timer.observe_duration();
 
-        self.stats.batch_write_size.observe(total_size as _);
+        self.stats.write_batch_size.observe(total_size as _);
 
         Ok(())
     }
@@ -165,7 +165,11 @@ where
     }
 
     async fn sync(&self, epoch: Option<u64>) -> Result<()> {
-        self.inner.sync(epoch).await
+        self.stats.write_shared_buffer_sync_counts.inc();
+        let timer = self.stats.write_shared_buffer_sync_time.start_timer();
+        self.inner.sync(epoch).await?;
+        timer.observe_duration();
+        Ok(())
     }
 
     fn monitored(self, _stats: Arc<StateStoreMetrics>) -> MonitoredStateStore<Self> {

@@ -419,7 +419,6 @@ impl SharedBufferUploader {
         }
 
         // Add all tables at once.
-        let timer = self.stats.batch_write_add_l0_latency.start_timer();
         let version = self
             .hummock_meta_client
             .add_tables(
@@ -437,7 +436,6 @@ impl SharedBufferUploader {
                     .collect(),
             )
             .await?;
-        timer.observe_duration();
 
         // Ensure the added data is available locally
         self.local_version_manager.try_set_version(version);
