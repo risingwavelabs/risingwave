@@ -95,10 +95,7 @@ where
         }
 
         let mut locations = ScheduledLocations::new();
-        locations.node_locations = nodes
-            .into_iter()
-            .map(|node| (node.id, node))
-            .collect();
+        locations.node_locations = nodes.into_iter().map(|node| (node.id, node)).collect();
 
         for fragment in table_fragments.fragments() {
             self.scheduler.schedule(fragment, &mut locations).await?;

@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result};
+use risingwave_common::error::Result;
 use risingwave_pb::common::{ActorInfo, ParallelUnit, ParallelUnitType};
 use risingwave_pb::meta::table_fragments::Fragment;
 
@@ -103,7 +103,6 @@ where
         fragment: Fragment,
         locations: &mut ScheduledLocations,
     ) -> Result<()> {
-
         if fragment.actors.is_empty() {
             return Err(InternalError("fragment has no actor".to_string()).into());
         }
