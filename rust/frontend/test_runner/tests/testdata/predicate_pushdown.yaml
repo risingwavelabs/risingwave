@@ -1,0 +1,17 @@
+- sql: |
+    create table t1 (v1 int, v2 int, v3 int);
+    create table t2 (v1 int, v2 int, v3 int);
+    select * from t1 join t2 on t1.v1=t2.v2 and t1.v1>1 where t2.v2>2;
+  logical_plan: |
+    LogicalProject { exprs: [$0, $1, $2, $3, $4, $5, $6, $7], expr_alias: [Some("_row_id"), Some("v1"), Some("v2"), Some("v3"), Some("_row_id"), Some("v1"), Some("v2"), Some("v3")] }
+      LogicalFilter { predicate: Condition { conjunctions: [GreaterThan($6, 2:Int32)] } }
+        LogicalJoin { type: Inner, on: Condition { conjunctions: [Equal($1, $6), GreaterThan($1, 1:Int32)] } }
+          LogicalScan { table: "t1", columns: ["_row_id", "v1", "v2", "v3"] }
+          LogicalScan { table: "t2", columns: ["_row_id", "v1", "v2", "v3"] }
+  batch_plan: |
+    BatchProject { exprs: [$0, $1, $2, $3, $4, $5, $6, $7], expr_alias: [Some("_row_id"), Some("v1"), Some("v2"), Some("v3"), Some("_row_id"), Some("v1"), Some("v2"), Some("v3")] }
+      BatchHashJoin(predicate: $2 = $7)
+        BatchFilter { predicate: Condition { conjunctions: [GreaterThan($1, 1:Int32)] } }
+          BatchScan { table: "t1", columns: ["_row_id", "v1", "v2", "v3"] }
+        BatchFilter { predicate: Condition { conjunctions: [GreaterThan($2, 2:Int32)] } }
+          BatchScan { table: "t2", columns: ["_row_id", "v1", "v2", "v3"] }
