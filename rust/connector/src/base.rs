@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
+//
 use std::collections::HashMap;
 
 use anyhow::{anyhow, Result};
@@ -48,7 +48,7 @@ pub trait SourceSplit {
 }
 
 #[async_trait]
-pub trait SourceReader {
+pub trait SourceReader: Sized {
     async fn next(&mut self) -> Result<Option<Vec<InnerMessage>>>;
     async fn assign_split<'a>(&'a mut self, split: &'a [u8]) -> Result<()>;
 }
