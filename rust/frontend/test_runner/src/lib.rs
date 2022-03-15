@@ -16,7 +16,9 @@ use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use serde::{Deserialize, Serialize};
 
+#[serde_with::skip_serializing_none]
 #[derive(Debug, PartialEq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct TestCase {
     pub sql: String,
     pub logical_plan: Option<String>,
@@ -27,7 +29,9 @@ pub struct TestCase {
     pub optimizer_error: Option<String>,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Debug, PartialEq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct TestCaseResult {
     pub logical_plan: Option<String>,
     pub batch_plan: Option<String>,

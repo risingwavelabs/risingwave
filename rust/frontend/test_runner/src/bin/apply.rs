@@ -26,7 +26,17 @@ async fn main() -> Result<()> {
                 .to_string_lossy()
                 .contains(".apply.yaml")
         {
-            println!(".. {:?}", entry.file_name());
+            let target = path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .split('.')
+                .next()
+                .unwrap()
+                .to_string()
+                + ".apply.yaml";
+
+            println!(".. {:?} -> {:?}", entry.file_name(), target);
 
             let file_content = tokio::fs::read_to_string(path).await?;
             let cases: Vec<TestCase> = serde_yaml::from_str(&file_content)?;
@@ -40,20 +50,7 @@ async fn main() -> Result<()> {
 
             let contents = serde_yaml::to_string(&updated_cases)?;
 
-            tokio::fs::write(
-                path.parent().unwrap().join(
-                    path.file_name()
-                        .unwrap()
-                        .to_string_lossy()
-                        .split('.')
-                        .next()
-                        .unwrap()
-                        .to_string()
-                        + ".apply.yaml",
-                ),
-                &contents,
-            )
-            .await?;
+            tokio::fs::write(path.parent().unwrap().join(target), &contents).await?;
         }
     }
 

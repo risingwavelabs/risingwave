@@ -32,7 +32,7 @@ with the expected tree.
 
 Firstly, we will need to create a placeholder in yaml testcases:
 
-```
+```yaml
 - sql: |
     create table t1 (v1 int, v2 int);
     create table t2 (v1 int, v2 int);
@@ -45,4 +45,4 @@ Firstly, we will need to create a placeholder in yaml testcases:
 ./risedev apply-planner-test
 ```
 
-Then we can find the updated tests at `*.apply.yaml`
+Then we can find the updated tests at `*.apply.yaml`. If everything is okay, you may copy and overwrite the current plan tests.
