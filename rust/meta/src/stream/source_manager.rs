@@ -31,9 +31,8 @@ pub struct CreateSourceContext {
     pub properties: HashMap<String, String>,
 }
 
-
 pub struct DropSourceContext {
-    pub(crate) table_id: TableRefId,
+    pub id: u32,
 }
 
 impl<S> SourceManager<S>
