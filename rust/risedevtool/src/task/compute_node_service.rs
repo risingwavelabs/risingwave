@@ -64,26 +64,28 @@ impl Task for ComputeNodeService {
         }
 
         let provide_minio = self.config.provide_minio.as_ref().unwrap();
+        let provide_aws_s3 = self.config.provide_aws_s3.as_ref().unwrap();
         let provide_compute_node = self.config.provide_compute_node.as_ref().unwrap();
 
         let is_shared_backend = match (
             self.config.enable_in_memory_kv_state_backend,
             provide_minio.as_slice(),
+            provide_aws_s3.as_slice(),
         ) {
-            (true, []) => {
+            (true, [], []) => {
                 cmd.arg("--state-store").arg("in-memory");
                 false
             }
-            (true, _) => {
+            (true, _, _) => {
                 return Err(anyhow!(
-                "When `enable_in_memory_kv_state_backend` is enabled, no minio should be provided.",
+                "When `enable_in_memory_kv_state_backend` is enabled, no minio and aws-s3 should be provided.",
             ))
             }
-            (false, []) => {
+            (false, [], []) => {
                 cmd.arg("--state-store").arg("hummock+memory");
                 false
             }
-            (false, [minio]) => {
+            (false, [minio], []) => {
                 cmd.arg("--state-store").arg(format!(
                     "hummock+minio://{hummock_user}:{hummock_password}@{minio_addr}:{minio_port}/{hummock_bucket}",
                     hummock_user = minio.hummock_user,
@@ -94,10 +96,16 @@ impl Task for ComputeNodeService {
                 ));
                 true
             }
-            (false, other_size) => {
+            (false, [], [aws_s3]) => {
+                cmd.arg("--state-store").arg(format!(
+                    "hummock+s3://{}", aws_s3.bucket
+                ));
+                true
+            }
+            (false, other_minio, other_s3) => {
                 return Err(anyhow!(
-                    "{} minio instance found in config, but only 1 is needed",
-                    other_size.len()
+                    "{} minio and {} s3 instance found in config, but only 1 is needed",
+                    other_minio.len(), other_s3.len()
                 ))
             }
         };

@@ -11,6 +11,7 @@ pub struct ComputeNodeConfig {
     pub provide_minio: Option<Vec<MinioConfig>>,
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
     pub provide_compute_node: Option<Vec<ComputeNodeConfig>>,
+    pub provide_aws_s3: Option<Vec<AwsS3Config>>,
     pub provide_jaeger: Option<Vec<JaegerConfig>>,
     pub user_managed: bool,
     pub enable_in_memory_kv_state_backend: bool,
@@ -94,6 +95,13 @@ pub struct JaegerConfig {
     pub dashboard_port: u16,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct AwsS3Config {
+    pub id: String,
+    pub bucket: String,
+}
+
 /// All service configuration
 #[derive(Clone, Debug, PartialEq)]
 pub enum ServiceConfig {
@@ -106,6 +114,7 @@ pub enum ServiceConfig {
     Prometheus(PrometheusConfig),
     Grafana(GrafanaConfig),
     Jaeger(JaegerConfig),
+    AwsS3(AwsS3Config),
 }
 
 impl ServiceConfig {
@@ -120,6 +129,7 @@ impl ServiceConfig {
             Self::Prometheus(c) => &c.id,
             Self::Grafana(c) => &c.id,
             Self::Jaeger(c) => &c.id,
+            Self::AwsS3(c) => &c.id,
         }
     }
 }
