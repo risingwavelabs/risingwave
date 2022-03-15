@@ -41,8 +41,8 @@ use tokio::task::JoinHandle;
 use tonic::transport::{Channel, Endpoint};
 use tonic::{Status, Streaming};
 
-type DatabaseId = i32;
-type SchemaId = i32;
+type DatabaseId = u32;
+type SchemaId = u32;
 
 /// Client to meta server. Cloning the instance is lightweight.
 #[derive(Clone)]
@@ -132,58 +132,22 @@ impl MetaClient {
         Ok(())
     }
 
-    pub async fn create_table(&self, table: Table) -> Result<(TableId, CatalogVersion)> {
-        let (table_id, version) = self.create_catalog_body(CatalogBody::Table(table)).await?;
-        Ok((
-            TableId {
-                table_id: table_id as u32,
-            },
-            version,
-        ))
+    pub async fn create_database(&self, db: ProstDatabase) -> Result<(DatabaseId, CatalogVersion)> {
+        let request = CreateDatabaseRequest { name: db.name };
+        let resp = self.inner.create_database(request).await?;
+        // TODO: handle error in `resp.status` here
+        Ok((resp.database_id.into(), resp.version))
     }
 
-    pub async fn create_database(&self, db: Database) -> Result<(DatabaseId, CatalogVersion)> {
-        self.create_catalog_body(CatalogBody::Database(db)).await
-    }
-
-    pub async fn create_schema(&self, schema: Schema) -> Result<(SchemaId, CatalogVersion)> {
-        self.create_catalog_body(CatalogBody::Schema(schema)).await
-    }
-
-    pub async fn create_catalog_body(
-        &self,
-        catalog_body: CatalogBody,
-    ) -> Result<(i32, CatalogVersion)> {
-        let request = CreateRequest {
-            catalog_body: Some(catalog_body),
-            ..Default::default()
+    pub async fn create_schema(&self, schema: ProstSchema) -> Result<(SchemaId, CatalogVersion)> {
+        let request = CreateSchemaRequest {
+            name: schema.name,
+            database_id: schema.database_id,
         };
-        let resp = self.inner.create(request).await?;
-        Ok((resp.id, resp.version))
+        let resp = self.inner.create_schema(request).await?;
+        // TODO: handle error in `resp.status` here
+        Ok((resp.schema_id.into(), resp.version))
     }
-
-    pub async fn drop_table(&self, table_ref_id: TableRefId) -> Result<CatalogVersion> {
-        self.drop_catalog(CatalogId::TableId(table_ref_id)).await
-    }
-
-    pub async fn drop_schema(&self, schema_ref_id: SchemaRefId) -> Result<CatalogVersion> {
-        self.drop_catalog(CatalogId::SchemaId(schema_ref_id)).await
-    }
-
-    pub async fn drop_database(&self, database_ref_id: DatabaseRefId) -> Result<CatalogVersion> {
-        self.drop_catalog(CatalogId::DatabaseId(database_ref_id))
-            .await
-    }
-
-    pub async fn drop_catalog(&self, catalog_id: CatalogId) -> Result<CatalogVersion> {
-        let request = DropRequest {
-            catalog_id: Some(catalog_id),
-            ..Default::default()
-        };
-        let resp = MetaClientInner::drop(self.inner.as_ref(), request).await?;
-        Ok(resp.version)
-    }
-
     /// Unregister the current node to the cluster.
     pub async fn unregister(&self, addr: SocketAddr) -> Result<()> {
         let host_address = HostAddress {
@@ -212,13 +176,6 @@ impl MetaClient {
         };
         let resp = self.inner.list_all_nodes(request).await?;
         Ok(resp.nodes)
-    }
-
-    /// Get Catalog from meta.
-    pub async fn get_catalog(&self) -> Result<Catalog> {
-        let mut resp = self.inner.get_catalog(GetCatalogRequest {}).await?;
-        let catalog = resp.catalog.take().unwrap();
-        Ok(catalog)
     }
 
     pub fn start_heartbeat_loop(

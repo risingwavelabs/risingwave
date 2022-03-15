@@ -38,9 +38,6 @@ pub struct CatalogCache {
 ///       - table catalog
 ///        - column catalog
 impl CatalogCache {
-    pub async fn new(client: MetaClient) -> Result<Self> {
-        client.get_catalog().await.and_then(TryInto::try_into)
-    }
     fn get_database_mut(&mut self, db_id: DatabaseId) -> Option<&mut DatabaseCatalog> {
         let name = self.db_name_by_id.get(&db_id)?;
         self.database_by_name.get_mut(name)
@@ -103,8 +100,7 @@ impl CatalogCache {
 }
 
 /// For DDL (create table/schema/database), only send rpc to meta. Create and delete actions will be
-/// done by `ObserverManager`. For get catalog request (get table/schema/database), check the root
-/// catalog cache only. Should be used by DDL handler.
+/// done by `ObserverManager`. Should be used by DDL handler.
 ///
 /// Some changes need to be done in future:
 /// 1. Support more fields for ddl in future (#2473)
@@ -235,84 +231,6 @@ impl CatalogConnector {
         let table_ref_id = TableRefId::from(&table_id);
         let version = self.meta_client.drop_table(table_ref_id).await?;
         self.wait_version(version).await
-    }
-
-    pub async fn drop_schema(&self, db_name: &str, schema_name: &str) -> Result<()> {
-        let database_id = self
-            .catalog_cache
-            .read()
-            .unwrap()
-            .get_database(db_name)
-            .ok_or_else(|| RwError::from(CatalogError::NotFound("database", db_name.to_string())))?
-            .id() as i32;
-        let schema_id = self
-            .catalog_cache
-            .read()
-            .unwrap()
-            .get_schema(db_name, schema_name)
-            .ok_or_else(|| {
-                RwError::from(CatalogError::NotFound("schema", schema_name.to_string()))
-            })?
-            .id() as i32;
-
-        let schema_ref_id = SchemaRefId {
-            database_ref_id: Some(DatabaseRefId { database_id }),
-            schema_id,
-        };
-        let version = self.meta_client.drop_schema(schema_ref_id).await?;
-        self.wait_version(version).await
-    }
-
-    pub async fn drop_database(&self, db_name: &str) -> Result<()> {
-        let database_id = self
-            .catalog_cache
-            .read()
-            .unwrap()
-            .get_database(db_name)
-            .ok_or_else(|| RwError::from(CatalogError::NotFound("database", db_name.to_string())))?
-            .id() as i32;
-        let database_ref_id = DatabaseRefId { database_id };
-        let version = self.meta_client.drop_database(database_ref_id).await?;
-        self.wait_version(version).await
-    }
-
-    pub fn get_database_snapshot(&self, db_name: &str) -> Option<Arc<DatabaseCatalog>> {
-        self.catalog_cache
-            .read()
-            .unwrap()
-            .get_database_snapshot(db_name)
-    }
-
-    /// Get catalog will not query meta service. The sync of schema is done by periodically push of
-    /// meta. Frontend should not pull and update the catalog voluntarily.
-    #[cfg(test)]
-    pub fn get_table(
-        &self,
-        db_name: &str,
-        schema_name: &str,
-        table_name: &str,
-    ) -> Option<TableCatalog> {
-        self.catalog_cache
-            .read()
-            .unwrap()
-            .get_table(db_name, schema_name, table_name)
-            .cloned()
-    }
-
-    pub fn get_database(&self, db_name: &str) -> Option<DatabaseCatalog> {
-        self.catalog_cache
-            .read()
-            .unwrap()
-            .get_database(db_name)
-            .cloned()
-    }
-
-    pub fn get_schema(&self, db_name: &str, schema_name: &str) -> Option<SchemaCatalog> {
-        self.catalog_cache
-            .read()
-            .unwrap()
-            .get_schema(db_name, schema_name)
-            .cloned()
     }
 }
 
