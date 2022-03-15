@@ -8,6 +8,7 @@ use risingwave_common::types::DataType;
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Schema as ProstSchema, Table as ProstTable,
 };
+use risingwave_pb::meta::Catalog;
 use risingwave_pb::plan::{ColumnDesc, DatabaseRefId, SchemaRefId, TableRefId};
 use risingwave_rpc_client::MetaClient;
 use tokio::sync::watch::Receiver;
@@ -52,6 +53,13 @@ impl CatalogCache {
         self.database_by_name.try_insert(name, db.into()).unwrap();
         self.db_name_by_id.try_insert(id, name).unwrap();
     }
+
+    pub fn create_schema(&mut self, proto: &ProstSchema) {
+        self.get_database_mut(proto.database_id)
+            .unwrap()
+            .create_schema(proto);
+    }
+
     pub fn create_table(&mut self, proto: &ProstTable) {
         self.get_database_mut(proto.database_id)
             .unwrap()
@@ -59,12 +67,21 @@ impl CatalogCache {
             .unwrap()
             .create_table(proto);
     }
-    pub fn create_schema(&mut self, proto: &ProstSchema) {
-        self.get_database_mut(proto.database_id)
-            .unwrap()
-            .create_schema(proto);
-    }
 
+    pub fn drop_database(&mut self, db_id: DatabaseId) {
+        let name = self.db_name_by_id.remove(&db_id).unwrap();
+        let database = self.database_by_name.remove(&name).unwrap();
+    }
+    pub fn drop_schema(&mut self, schema_id: SchemaId, db_id: DatabaseId) {
+        self.get_database_mut(db_id).unwrap().drop_schema(schema_id);
+    }
+    pub fn drop_table(&mut self, schema_id: SchemaId, db_id: DatabaseId, tb_id: TableId) {
+        self.get_database_mut(db_id)
+            .unwrap()
+            .get_schema_mut(schema_id)
+            .unwrap()
+            .drop_table(tb_id);
+    }
     pub fn get_database_by_name(&self, db_name: &str) -> Option<&DatabaseCatalog> {
         self.database_by_name.get(db_name)
     }
@@ -82,42 +99,6 @@ impl CatalogCache {
     ) -> Option<&TableCatalog> {
         self.get_schema_by_name(db_name, schema_name)?
             .get_table_by_name(table_name)
-    }
-    fn get_table(
-        &self,
-        db_name: &str,
-        schema_name: &str,
-        table_name: &str,
-    ) -> Option<&TableCatalog> {
-        self.get_schema(db_name, schema_name)
-            .and_then(|schema| schema.get_table_by_name(table_name))
-    }
-
-    pub fn drop_table(&mut self, db_name: &str, schema_name: &str, table_name: &str) -> Result<()> {
-        self.get_schema_mut(db_name, schema_name).map_or(
-            Err(CatalogError::NotFound("schema", schema_name.to_string()).into()),
-            |schema| schema.drop_table(table_name),
-        )
-    }
-
-    pub fn drop_schema(&mut self, db_name: &str, schema_name: &str) -> Result<()> {
-        self.get_database_mut(db_name).map_or(
-            Err(CatalogError::NotFound("database", db_name.to_string()).into()),
-            |db| db.drop_schema(schema_name),
-        )
-    }
-
-    pub fn drop_database(&mut self, db_name: &str) -> Result<()> {
-        let database = self.database_by_name.remove(db_name).ok_or_else(|| {
-            RwError::from(CatalogError::NotFound("database", db_name.to_string()))
-        })?;
-        self.db_name_by_id.remove(&database.id()).ok_or_else(|| {
-            RwError::from(CatalogError::NotFound(
-                "database id",
-                database.id().to_string(),
-            ))
-        })?;
-        Ok(())
     }
 }
 
