@@ -152,6 +152,7 @@ pub use eq_join_predicate::*;
 mod to_prost;
 pub use to_prost::*;
 
+mod batch_delete;
 mod batch_exchange;
 mod batch_filter;
 mod batch_hash_join;
@@ -178,6 +179,7 @@ mod stream_hash_join;
 mod stream_project;
 mod stream_table_source;
 
+pub use batch_delete::BatchDelete;
 pub use batch_exchange::BatchExchange;
 pub use batch_filter::BatchFilter;
 pub use batch_hash_join::BatchHashJoin;
@@ -238,6 +240,7 @@ macro_rules! for_all_plan_nodes {
             ,{ Batch, Project }
             ,{ Batch, Filter }
             ,{ Batch, Insert }
+            ,{ Batch, Delete }
             ,{ Batch, SeqScan }
             ,{ Batch, HashJoin }
             ,{ Batch, Values }
@@ -291,6 +294,7 @@ macro_rules! for_batch_plan_nodes {
             ,{ Batch, Sort }
             ,{ Batch, Exchange }
             ,{ Batch, Insert }
+            ,{ Batch, Delete }
         }
     };
 }
