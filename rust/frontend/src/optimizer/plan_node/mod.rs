@@ -236,7 +236,6 @@ macro_rules! for_all_plan_nodes {
             ,{ Batch, SeqScan }
             ,{ Batch, HashJoin }
             ,{ Batch, Values }
-            ,{ Batch, SortMergeJoin }
             ,{ Batch, Sort }
             ,{ Batch, Exchange }
             ,{ Batch, Limit }
@@ -281,7 +280,6 @@ macro_rules! for_batch_plan_nodes {
             ,{ Batch, HashJoin }
             ,{ Batch, Values }
             ,{ Batch, Limit }
-            ,{ Batch, SortMergeJoin }
             ,{ Batch, Sort }
             ,{ Batch, Exchange }
             ,{ Batch, Insert }

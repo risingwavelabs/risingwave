@@ -11,7 +11,7 @@ use super::{
 };
 use crate::expr::ExprImpl;
 use crate::optimizer::plan_node::{BatchHashJoin, CollectInputRef, EqJoinPredicate, LogicalFilter};
-use crate::optimizer::property::{Distribution, Order, WithSchema};
+use crate::optimizer::property::{Distribution, WithSchema};
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalJoin` combines two relations according to some condition.
@@ -153,7 +153,7 @@ impl ColPrunable for LogicalJoin {
 }
 
 impl ToBatch for LogicalJoin {
-    fn to_batch_with_order_required(&self, _required_order: &Order) -> PlanRef {
+    fn to_batch(&self) -> PlanRef {
         let predicate = EqJoinPredicate::create(
             self.left.schema().len(),
             self.right.schema().len(),
@@ -177,9 +177,6 @@ impl ToBatch for LogicalJoin {
         } else {
             todo!("nested loop join")
         }
-    }
-    fn to_batch(&self) -> PlanRef {
-        self.to_batch_with_order_required(Order::any())
     }
 }
 
