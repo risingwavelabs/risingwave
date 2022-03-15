@@ -1,5 +1,6 @@
 use std::fmt::Debug;
 
+use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Expr, Select, SelectItem};
@@ -16,6 +17,7 @@ pub struct BoundSelect {
     pub aliases: Vec<Option<String>>,
     pub from: Option<TableRef>,
     pub selection: Option<ExprImpl>,
+    pub group_by: Vec<ExprImpl>,
 }
 
 impl BoundSelect {
@@ -39,8 +41,10 @@ impl BoundSelect {
 
 impl Binder {
     pub(super) fn bind_select(&mut self, select: Select) -> Result<BoundSelect> {
+        // Bind FROM clause.
         let from = self.bind_vec_table_with_joins(select.from)?;
 
+        // Bind WHERE clause.
         self.context.clause = Some(Clause::Where);
         let selection = select
             .selection
@@ -58,13 +62,24 @@ impl Binder {
                 .into());
             }
         }
+
+        // Bind GROUP BY clause.
+        let group_by = select
+            .group_by
+            .drain(..)
+            .map(|expr| self.bind_expr(expr))
+            .try_collect()?;
+
+        // Bind SELECT clause.
         let (select_items, aliases) = self.bind_project(select.projection)?;
+
         Ok(BoundSelect {
             distinct: select.distinct,
             select_items,
             aliases,
             from,
             selection,
+            group_by,
         })
     }
 

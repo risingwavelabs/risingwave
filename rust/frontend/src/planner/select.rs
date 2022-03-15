@@ -7,14 +7,17 @@ use crate::optimizer::plan_node::{LogicalProject, LogicalValues, PlanRef};
 use crate::planner::Planner;
 impl Planner {
     pub(super) fn plan_select(&mut self, select: BoundSelect) -> Result<PlanRef> {
+        // Plan FROM clause.
         let mut root = match select.from {
             None => self.create_dummy_values()?,
             Some(t) => self.plan_table_ref(t)?,
         };
+        // Plan WHERE clause.
         root = match select.selection {
             None => root,
             Some(t) => LogicalFilter::create(root, t)?,
         };
+        // Plan SELECT caluse.
         Ok(LogicalProject::create(
             root,
             select.select_items,
