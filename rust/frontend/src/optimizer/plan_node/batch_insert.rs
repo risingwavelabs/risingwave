@@ -29,7 +29,7 @@ impl BatchInsert {
 
 impl fmt::Display for BatchInsert {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "BatchInsert {{ {} }}", self.logical)
+        self.logical.fmt_with_name(f, "BatchInsert")
     }
 }
 

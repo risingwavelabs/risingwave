@@ -12,6 +12,7 @@ pub struct ComputeNodeConfig {
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
     pub provide_jaeger: Option<Vec<JaegerConfig>>,
     pub user_managed: bool,
+    pub enable_in_memory_kv_state_backend: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

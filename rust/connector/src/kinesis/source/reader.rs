@@ -11,7 +11,7 @@ use aws_sdk_kinesis::Client as kinesis_client;
 use aws_smithy_types::DateTime;
 use http::uri::Uri;
 
-use crate::base::{SourceMessage, SourceReader};
+use crate::base::{InnerMessage, SourceReader};
 use crate::kinesis::config::AwsConfigInfo;
 use crate::kinesis::source::message::KinesisMessage;
 use crate::kinesis::source::state::KinesisSplitReaderState;
@@ -28,7 +28,7 @@ pub struct KinesisSplitReader {
 
 #[async_trait]
 impl SourceReader for KinesisSplitReader {
-    async fn next(&mut self) -> Result<Option<Vec<Vec<u8>>>> {
+    async fn next(&mut self) -> Result<Option<Vec<InnerMessage>>> {
         if self.assigned_split.is_none() {
             return Err(anyhow::Error::msg(
                 "you should call `assign_split` before calling `next`".to_string(),
@@ -78,7 +78,7 @@ impl SourceReader for KinesisSplitReader {
                 continue;
             }
 
-            let mut record_collection: Vec<Vec<u8>> = Vec::new();
+            let mut record_collection: Vec<InnerMessage> = Vec::new();
             for record in records {
                 if !is_stopping(
                     record.sequence_number.as_ref().unwrap(),
@@ -87,17 +87,16 @@ impl SourceReader for KinesisSplitReader {
                     return Ok(Some(record_collection));
                 }
                 self.latest_sequence_num = record.sequence_number().unwrap().to_string();
-                record_collection.push(
-                    KinesisMessage::new(self.shard_id.clone(), record)
-                        .serialize()?
-                        .into_bytes(),
-                );
+                record_collection.push(InnerMessage::from(KinesisMessage::new(
+                    self.shard_id.clone(),
+                    record,
+                )));
             }
             return Ok(Some(record_collection));
         }
     }
 
-    async fn assign_split<'a>(&mut self, split: &'a [u8]) -> Result<()> {
+    async fn assign_split<'a>(&'a mut self, split: &'a [u8]) -> Result<()> {
         let split: KinesisSplit = serde_json::from_str(from_utf8(split)?)?;
         self.shard_id = split.shard_id.clone();
         match &split.start_position.clone() {

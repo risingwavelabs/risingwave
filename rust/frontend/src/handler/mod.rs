@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use pgwire::pg_response::PgResponse;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{ObjectName, Statement};
@@ -8,10 +10,11 @@ mod create_source;
 pub mod create_table;
 pub mod drop_table;
 mod explain;
+mod query;
 pub mod util;
 
-pub(super) async fn handle(session: &SessionImpl, stmt: Statement) -> Result<PgResponse> {
-    let context = QueryContext::new(session.ctx.clone());
+pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result<PgResponse> {
+    let context = QueryContext::new(session.clone());
     match stmt {
         Statement::Explain {
             statement, verbose, ..
@@ -24,6 +27,7 @@ pub(super) async fn handle(session: &SessionImpl, stmt: Statement) -> Result<PgR
             let table_object_name = ObjectName(vec![drop_statement.name]);
             drop_table::handle_drop_table(context, table_object_name).await
         }
+        Statement::Query(query) => query::handle_query(context, query).await,
         _ => Err(ErrorCode::NotImplementedError(format!("Unhandled ast: {:?}", stmt)).into()),
     }
 }

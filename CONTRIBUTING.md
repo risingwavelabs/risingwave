@@ -10,10 +10,10 @@ We support both unit tests and end-to-end tests.
 
 ### Unit Testing
 
-To run unit tests for Rust, run the following commands under the root directory:
+To run unit tests for Rust, run the following commands under the `rust` directory:
 
 ```shell
-make rust_test
+cargo test --workspace
 ```
 
 To run unit tests for Java, run the following commands under the root directory:
@@ -50,7 +50,11 @@ It will start processes in the background. After testing, you can run the follow
 
 ```shell
 ./risedev k
+./risedev clean-data
 ```
+
+As our codebase is constantly changing, and all persistent data might not be in a stable format, if there's
+some unexpected decode error, try `./risedev clean-data` first.
 
 ## Monitoring
 

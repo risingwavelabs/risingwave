@@ -2,9 +2,8 @@ use itertools::Itertools;
 use risingwave_pb::hummock::level_handler::KeyRangeTaskId;
 use risingwave_pb::hummock::SstableInfo;
 use risingwave_storage::hummock::key_range::KeyRange;
-use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SSTableStat {
     pub key_range: KeyRange,
     pub table_id: u64,
@@ -43,7 +42,7 @@ impl From<&risingwave_pb::hummock::SstableStat> for SSTableStat {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum LevelHandler {
     /// * `Vec<SSTableStat>` - existing SSTs in this level, arranged in order no matter Tiering or
     ///   Leveling

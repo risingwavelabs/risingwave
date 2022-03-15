@@ -1,12 +1,11 @@
 use std::cmp;
 
 use bytes::Bytes;
-use serde::{Deserialize, Serialize};
 
 use super::version_cmp::VersionedComparator;
 
 /// TODO: Ord Trait with 'a'+epoch>'aa'+epoch issue
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub struct KeyRange {
     pub left: Bytes,
     pub right: Bytes,
