@@ -10,6 +10,7 @@ use risingwave_pb::plan::TableRefId;
 
 use risingwave_connector::base::SplitEnumerator;
 use risingwave_connector::{extract_split_enumerator, SplitEnumeratorImpl};
+use risingwave_pb::catalog::StreamSourceInfo;
 
 use crate::manager::StoredCatalogManagerRef;
 use crate::storage::MetaStore;
@@ -20,8 +21,7 @@ pub struct SourceManager<S>
     where
         S: MetaStore,
 {
-    catalog_manager_ref: StoredCatalogManagerRef<S>,
-    enumerators: DashMap<TableRefId, Arc<SplitEnumeratorImpl>>,
+    _phantom: std::marker::PhantomData<S>,
 }
 
 pub struct CreateSourceContext {
@@ -30,6 +30,7 @@ pub struct CreateSourceContext {
     pub discovery_new_split: bool,
     pub properties: HashMap<String, String>,
 }
+
 
 pub struct DropSourceContext {
     pub(crate) table_id: TableRefId,
@@ -40,24 +41,10 @@ impl<S> SourceManager<S>
         S: MetaStore,
 {
     pub async fn new(catalog_manager_ref: StoredCatalogManagerRef<S>) -> Result<Self> {
-        Ok(Self {
-            catalog_manager_ref,
-            enumerators: DashMap::new(),
-        })
+        todo!()
     }
 
     pub async fn create_source(&self, ctx: CreateSourceContext) -> Result<()> {
-        match self.enumerators.entry(ctx.table_id) {
-            Entry::Occupied(_) => {
-                return Err(format!("source already exists: {:?}", ctx.table_id).into());
-            }
-
-            Entry::Vacant(e) => {
-                let enumerator = extract_split_enumerator(&ctx.properties)?;
-                e.insert(Arc::new(enumerator));
-            }
-        }
-
         todo!()
     }
 
@@ -66,17 +53,6 @@ impl<S> SourceManager<S>
     }
 
     pub async fn list_splits(&self, table_id: TableRefId) -> Result<()> {
-
-        match self.enumerators.entry(table_id) {
-            Entry::Occupied(e) => {
-
-            }
-            Entry::Vacant(_) => {
-                return Err(format!("source not found: {:?}", table_id).into());
-            }
-        }
-
-
         todo!()
     }
 }

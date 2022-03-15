@@ -38,8 +38,6 @@ pub struct StreamServiceImpl<S>
     fragment_manager_ref: FragmentManagerRef<S>,
     cluster_manager: StoredClusterManagerRef<S>,
 
-    source_manager_ref: SourceManagerRef<S>,
-
     #[allow(dead_code)]
     epoch_generator: EpochGeneratorRef,
 }
@@ -60,7 +58,6 @@ impl<S> StreamServiceImpl<S>
             fragment_manager_ref,
             id_gen_manager_ref: env.id_gen_manager_ref(),
             cluster_manager,
-            source_manager_ref,
             epoch_generator: env.epoch_generator_ref(),
         }
     }

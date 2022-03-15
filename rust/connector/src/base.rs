@@ -15,6 +15,7 @@
 use anyhow::Result;
 use std::collections::{BTreeMap, HashMap};
 use std::hash::Hash;
+use anyhow::Error;
 use async_trait::async_trait;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
@@ -63,7 +64,6 @@ pub enum SplitEnumeratorImpl {
     Pulsar(pulsar::enumerator::PulsarSplitEnumerator),
 }
 
-const UPSTREAM_SOURCE: String = "upstream.source".to_string();
 
 pub fn extract_split_enumerator(properties: &HashMap<String, String>) -> Result<SplitEnumeratorImpl> {
     todo!()
