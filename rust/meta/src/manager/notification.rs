@@ -28,8 +28,8 @@ pub type NotificationManagerRef = Arc<NotificationManager>;
 impl NotificationManager {
     pub fn new(rx: UnboundedReceiver<WorkerKey>) -> Self {
         Self(Mutex::new(NotificationManagerCore {
-            fe_observers: HashMap::new(),
-            be_observers: HashMap::new(),
+            fe_senders: HashMap::new(),
+            be_senders: HashMap::new(),
             rx,
         }))
     }
@@ -44,8 +44,8 @@ impl NotificationManager {
         let mut core_guard = self.0.lock().await;
         let (tx, rx) = mpsc::channel(BUFFER_SIZE);
         match worker_type {
-            WorkerType::ComputeNode => core_guard.be_observers.insert(WorkerKey(host_address), tx),
-            WorkerType::Frontend => core_guard.fe_observers.insert(WorkerKey(host_address), tx),
+            WorkerType::ComputeNode => core_guard.be_senders.insert(WorkerKey(host_address), tx),
+            WorkerType::Frontend => core_guard.fe_senders.insert(WorkerKey(host_address), tx),
             _ => unreachable!(),
         };
 
@@ -73,15 +73,19 @@ impl NotificationManager {
 }
 
 struct NotificationManagerCore {
-    fe_observers: HashMap<WorkerKey, Sender<Notification>>,
-    be_observers: HashMap<WorkerKey, Sender<Notification>>,
+    /// The notification sender to frontends.
+    fe_senders: HashMap<WorkerKey, Sender<Notification>>,
+    /// The notification sender to backends.
+    be_senders: HashMap<WorkerKey, Sender<Notification>>,
+    /// Receiver used in heartbeat. Receive the worker keys of disconnected workers from
+    /// `StoredClusterManager::start_heartbeat_checker`.
     rx: UnboundedReceiver<WorkerKey>,
 }
 
 impl NotificationManagerCore {
     async fn notify_fe(&mut self, operation: Operation, info: &Info) {
         let mut keys = HashSet::new();
-        for (worker_key, sender) in &self.fe_observers {
+        for (worker_key, sender) in &self.fe_senders {
             loop {
                 // Heartbeat may delete worker.
                 // We assume that after a worker is disconnected, before it recalls subscribe, we
@@ -111,7 +115,7 @@ impl NotificationManagerCore {
     /// Send a `SubscribeResponse` to backend.
     async fn notify_be(&mut self, operation: Operation, info: &Info) {
         let mut keys = HashSet::new();
-        for (worker_key, sender) in &self.be_observers {
+        for (worker_key, sender) in &self.be_senders {
             loop {
                 // Heartbeat may delete worker.
                 // We assume that after a worker is disconnected, before it recalls subscribe, we
@@ -140,9 +144,9 @@ impl NotificationManagerCore {
 
     fn remove_by_key(&mut self, keys: HashSet<WorkerKey>) {
         keys.into_iter().for_each(|key| {
-            self.fe_observers
+            self.fe_senders
                 .remove(&key)
-                .or_else(|| self.be_observers.remove(&key));
+                .or_else(|| self.be_senders.remove(&key));
         });
     }
 }
