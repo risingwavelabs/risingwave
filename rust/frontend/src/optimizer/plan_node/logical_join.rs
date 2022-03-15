@@ -181,7 +181,7 @@ impl ToBatch for LogicalJoin {
                     EqJoinPredicate::new(Condition::true_cond(), predicate.eq_keys().to_vec());
                 let logical_join = logical_join.clone_with_cond(equi_cond.eq_cond());
                 let hash_join = BatchHashJoin::new(logical_join, equi_cond).into();
-                let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond()).into();
+                let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond());
                 BatchFilter::new(logical_filter).into()
             } else {
                 BatchHashJoin::new(logical_join, predicate).into()
@@ -217,7 +217,7 @@ impl ToStream for LogicalJoin {
                     EqJoinPredicate::new(Condition::true_cond(), predicate.eq_keys().to_vec());
                 let logical_join = logical_join.clone_with_cond(equi_cond.eq_cond());
                 let hash_join = StreamHashJoin::new(logical_join, equi_cond).into();
-                let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond()).into();
+                let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond());
                 StreamFilter::new(logical_filter).into()
             } else {
                 StreamHashJoin::new(logical_join, predicate).into()
