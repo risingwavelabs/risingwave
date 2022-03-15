@@ -7,7 +7,6 @@ mod bind_context;
 mod delete;
 pub(crate) mod expr;
 mod insert;
-mod project;
 mod query;
 mod select;
 mod set_expr;

@@ -3,7 +3,7 @@ use std::fmt;
 use risingwave_common::catalog::Schema;
 
 use super::{BatchBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
-use crate::optimizer::property::{Distribution, Order, WithSchema};
+use crate::optimizer::property::{Distribution, Order, WithOrder, WithSchema};
 
 /// `BatchSort` buffers all data from input and sort these rows by specified order, providing the
 /// collation required by user or parent plan node.
@@ -34,8 +34,10 @@ impl BatchSort {
 }
 
 impl fmt::Display for BatchSort {
-    fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
-        todo!()
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("BatchSort")
+            .field("order", self.order())
+            .finish()
     }
 }
 

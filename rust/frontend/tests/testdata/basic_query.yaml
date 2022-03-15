@@ -9,14 +9,19 @@
     create table t (v1 bigint, v2 double precision);
     select * from t;
   plan: |
-    LogicalProject { exprs: [$0, $1, $2], expr_alias: [None, None, None] }
+    LogicalProject { exprs: [$0, $1, $2], expr_alias: [Some("_row_id"), Some("v1"), Some("v2")] }
       LogicalScan { table: "t", columns: ["_row_id", "v1", "v2"] }
+
+- sql: |
+    create table t (v1 bigint, v2 double precision);
+    select t2.* from t;
+  binder_error: "Item not found: relation \"t2\""
 
 - sql: |
     create table t ();
     select * from t where 1>2 and 1=1 and 3<1 and 4<>1 or 1=1 and 2>=1 and 1<=2;
   plan: |
-    LogicalProject { exprs: [$0], expr_alias: [None] }
+    LogicalProject { exprs: [$0], expr_alias: [Some("_row_id")] }
       LogicalFilter { predicate: Condition { conjunctions: [Or(And(And(And(GreaterThan(1:Int32, 2:Int32), Equal(1:Int32, 1:Int32)), LessThan(3:Int32, 1:Int32)), NotEqual(4:Int32, 1:Int32)), And(And(Equal(1:Int32, 1:Int32), GreaterThanOrEqual(2:Int32, 1:Int32)), LessThanOrEqual(1:Int32, 2:Int32)))] } }
         LogicalScan { table: "t", columns: ["_row_id"] }
 
@@ -24,7 +29,7 @@
     create table t (v1 int);
     select * from t where v1<1;
   plan: |
-    LogicalProject { exprs: [$0, $1], expr_alias: [None, None] }
+    LogicalProject { exprs: [$0, $1], expr_alias: [Some("_row_id"), Some("v1")] }
       LogicalFilter { predicate: Condition { conjunctions: [LessThan($1, 1:Int32)] } }
         LogicalScan { table: "t", columns: ["_row_id", "v1"] }
 
@@ -54,7 +59,7 @@
     create table t (v1 int, v2 int);
     select v1 from t;
   plan: |
-    LogicalProject { exprs: [$1], expr_alias: [None] }
+    LogicalProject { exprs: [$1], expr_alias: [Some("v1")] }
       LogicalScan { table: "t", columns: ["_row_id", "v1", "v2"] }
 
 - sql: |
@@ -111,7 +116,7 @@
     create table t3 (v1 int, v2 int);
     select * from t1 join t2 on (t1.v1 = t2.v1) join t3 on (t2.v2 = t3.v2);
   plan: |
-    LogicalProject { exprs: [$0, $1, $2, $3, $4, $5, $6, $7, $8], expr_alias: [None, None, None, None, None, None, None, None, None] }
+    LogicalProject { exprs: [$0, $1, $2, $3, $4, $5, $6, $7, $8], expr_alias: [Some("_row_id"), Some("v1"), Some("v2"), Some("_row_id"), Some("v1"), Some("v2"), Some("_row_id"), Some("v1"), Some("v2")] }
       LogicalJoin { type: Inner, on: Condition { conjunctions: [Equal($5, $8)] } }
         LogicalJoin { type: Inner, on: Condition { conjunctions: [Equal($1, $4)] } }
           LogicalScan { table: "t1", columns: ["_row_id", "v1", "v2"] }

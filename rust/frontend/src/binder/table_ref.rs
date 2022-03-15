@@ -145,6 +145,7 @@ impl Binder {
             .for_each(|(index, column_catalog)| {
                 self.context.columns.push(ColumnBinding::new(
                     table_name.clone(),
+                    column_catalog.name().into(),
                     begin + index,
                     column_catalog.data_type(),
                 ));
