@@ -1,6 +1,6 @@
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{DataType as AstDataType, Expr, UnaryOperator};
+use risingwave_sqlparser::ast::{DataType as AstDataType, Expr, UnaryOperator, BinaryOperator};
 
 use crate::binder::Binder;
 use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall};
@@ -90,12 +90,13 @@ impl Binder {
         results: Vec<Expr>,
         else_result: Option<Box<Expr>>,
     ) -> Result<FunctionCall> {
-        let mut inputs = match operand {
-            Some(t) => vec![self.bind_expr(*t)?],
-            None => Vec::new(),
-        };
+        let mut inputs = Vec::new();
         for item in &conditions {
-            inputs.push(self.bind_expr(item.clone())?);
+            let _item = match operand {
+                Some(ref t) => Expr::BinaryOp{left:t.clone(),op:BinaryOperator::Eq,right:Box::new(item.clone())},
+                None => item.clone(),
+            };
+            inputs.push(self.bind_expr(_item)?);
         }
         for item in &results {
             inputs.push(self.bind_expr(item.clone())?);
