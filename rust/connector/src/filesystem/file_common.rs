@@ -11,14 +11,15 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
+//
 use anyhow::Result;
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use tokio::sync as tokio_sync;
 
 /// ``EntryStat`` Describes a directory or file. A file is a generic concept,
 /// and can be a local file, a distributed file system, or a bucket in S3.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct EntryStat {
     pub(crate) path: String,
     pub(crate) atime: i64,
