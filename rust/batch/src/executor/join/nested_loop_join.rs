@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use risingwave_common::array::column::Column;
 use risingwave_common::array::data_chunk_iter::RowRef;
-use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
+use risingwave_common::array::{ArrayBuilderImpl, DataChunk, Row};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
@@ -16,7 +16,6 @@ use crate::executor::join::chunked_data::RowId;
 use crate::executor::join::row_level_iter::RowLevelIter;
 use crate::executor::join::JoinType;
 use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
-use crate::risingwave_common::array::Array;
 
 /// Nested loop join executor.
 ///
@@ -277,7 +276,7 @@ impl NestedLoopJoinExecutor {
                 JoinType::LeftOuter => self.do_left_outer_join(),
                 JoinType::LeftSemi => self.do_left_semi_join(),
                 JoinType::LeftAnti => self.do_left_anti_join(),
-                JoinType::RightOuter => self.do_inner_join(),
+                JoinType::RightOuter => self.do_right_outer_join(),
                 JoinType::RightSemi => self.do_right_semi_join(),
                 JoinType::RightAnti => self.do_right_anti_join(),
                 _ => unimplemented!("Do not support other join types!"),
@@ -305,13 +304,11 @@ impl NestedLoopJoinExecutor {
                 }
             }
         } else {
-            self.state =
-                // TODO: Right Semi join can be optimized : Do not need join remaining (#792).
-                if self.join_type.need_join_remaining() || self.join_type == JoinType::RightSemi {
-                    NestedLoopJoinState::ProbeRemaining
-                } else {
-                    NestedLoopJoinState::Done
-                };
+            self.state = if self.join_type.need_join_remaining() {
+                NestedLoopJoinState::ProbeRemaining
+            } else {
+                NestedLoopJoinState::Done
+            };
         }
         Ok(None)
     }
@@ -321,7 +318,6 @@ impl NestedLoopJoinExecutor {
     fn probe_remaining(&mut self) -> Result<Option<DataChunk>> {
         match self.join_type {
             JoinType::RightOuter => self.do_probe_remaining_right_outer(),
-            JoinType::RightSemi => self.do_probe_remaining_right_semi(),
             JoinType::RightAnti => self.do_probe_remaining_right_anti(),
             _ => unimplemented!(""),
         }
@@ -340,19 +336,6 @@ impl NestedLoopJoinExecutor {
             // Join with current row.
             let sel_vector = self.join_expr.eval(&new_chunk)?;
             let ret_chunk = new_chunk.with_visibility(sel_vector.as_bool().try_into()?);
-            // Check the eval result and record some flags to prepare for outer/semi join.
-            for (row_idx, vis_opt) in sel_vector.as_bool().iter().enumerate() {
-                if vis_opt == Some(true) {
-                    if self.join_type.need_join_remaining() || self.join_type == JoinType::RightSemi
-                    {
-                        self.build_table.set_build_matched(RowId::new(
-                            self.build_table.get_chunk_idx(),
-                            row_idx,
-                        ))?;
-                    }
-                    self.probe_side_source.set_cur_row_matched(true);
-                }
-            }
             self.build_table.advance_chunk();
             Ok(ProbeResult {
                 cur_row_finished: false,
@@ -369,6 +352,11 @@ impl NestedLoopJoinExecutor {
 
     fn do_left_outer_join(&mut self) -> Result<ProbeResult> {
         let ret = self.do_inner_join()?;
+        if let Some(inner) = ret.chunk.as_ref() {
+            if inner.cardinality() > 0 {
+                self.probe_side_source.set_cur_row_matched(true);
+            }
+        }
         // Append (probed_row, None) to chunk builder if current row finished probing and do not
         // find any match.
         if ret.cur_row_finished && !self.probe_side_source.get_cur_row_matched() {
@@ -389,6 +377,11 @@ impl NestedLoopJoinExecutor {
 
     fn do_left_semi_join(&mut self) -> Result<ProbeResult> {
         let mut ret = self.do_inner_join()?;
+        if let Some(inner) = ret.chunk.as_ref() {
+            if inner.cardinality() > 0 {
+                self.probe_side_source.set_cur_row_matched(true);
+            }
+        }
         ret.chunk = None;
         // Append (probed_row, None) to chunk builder if current row finished probing and do not
         // find any match.
@@ -406,6 +399,11 @@ impl NestedLoopJoinExecutor {
 
     fn do_left_anti_join(&mut self) -> Result<ProbeResult> {
         let mut ret = self.do_inner_join()?;
+        if let Some(inner) = ret.chunk.as_ref() {
+            if inner.cardinality() > 0 {
+                self.probe_side_source.set_cur_row_matched(true);
+            }
+        }
         ret.chunk = None;
         if ret.cur_row_finished && !self.probe_side_source.get_cur_row_matched() {
             assert!(ret.chunk.is_none());
@@ -420,14 +418,55 @@ impl NestedLoopJoinExecutor {
         Ok(ret)
     }
 
+    fn do_right_outer_join(&mut self) -> Result<ProbeResult> {
+        let ret = self.do_inner_join()?;
+        // Mark matched rows to prepare for probe remaining.
+        self.mark_matched_rows(&ret)?;
+        Ok(ret)
+    }
+
+    /// Scan through probe results chunk and mark matched rows in build table. Therefore in probe
+    /// remaining, scan through build table and we can know each row whether has been matched in
+    /// probing. Used by `RIGHT_SEMI/ANTI/OUTER` Join.
+    fn mark_matched_rows<'a>(&'a mut self, ret: &'a ProbeResult) -> Result<Vec<Row>> {
+        let mut rows_ref = vec![];
+        if let Some(inner_chunk) = ret.chunk.as_ref() {
+            for row_idx in 0..inner_chunk.capacity() {
+                let (row_ref, vis) = inner_chunk.row_at(row_idx)?;
+                if vis {
+                    let row_id = RowId::new(self.build_table.get_chunk_idx() - 1, row_idx);
+                    // Only write this row if it have not been marked before.
+                    if !self.build_table.is_build_matched(row_id)?
+                        && self.join_type == JoinType::RightSemi
+                    {
+                        rows_ref.push(row_ref.row_by_slice(
+                            &(self.probe_side_schema.len()..row_ref.size()).collect::<Vec<usize>>(),
+                        ));
+                    }
+                    self.build_table.set_build_matched(row_id)?;
+                    self.probe_side_source.set_cur_row_matched(true);
+                }
+            }
+        }
+        Ok(rows_ref)
+    }
+
     fn do_right_semi_join(&mut self) -> Result<ProbeResult> {
         let mut ret = self.do_inner_join()?;
+        let rows = self.mark_matched_rows(&ret)?;
         ret.chunk = None;
+        if !rows.is_empty() {
+            let ret_chunk =
+                DataChunk::from_rows(&rows, &self.build_table.get_schema().data_types())?;
+            ret.chunk = Some(ret_chunk);
+        }
         Ok(ret)
     }
 
     fn do_right_anti_join(&mut self) -> Result<ProbeResult> {
         let mut ret = self.do_inner_join()?;
+        // Mark matched rows to prepare for probe remaining.
+        self.mark_matched_rows(&ret)?;
         ret.chunk = None;
         Ok(ret)
     }
@@ -447,21 +486,6 @@ impl NestedLoopJoinExecutor {
                     .chunk_builder
                     .append_one_row_ref(RowRef::new(cur_row_vec))?
                 {
-                    return Ok(Some(ret_chunk));
-                }
-            }
-            self.build_table.advance_row();
-        }
-        Ok(None)
-    }
-
-    fn do_probe_remaining_right_semi(&mut self) -> Result<Option<DataChunk>> {
-        while let Some(cur_row) = self.build_table.get_current_row_ref() {
-            if self
-                .build_table
-                .is_build_matched(self.build_table.get_current_row_id())?
-            {
-                if let Some(ret_chunk) = self.chunk_builder.append_one_row_ref(cur_row)? {
                     return Ok(Some(ret_chunk));
                 }
             }
