@@ -5,9 +5,11 @@ use log::{error, info};
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
+use risingwave_pb::catalog::{
+    Database as ProstDatabase, Schema as ProstSchema, Table as ProstTable,
+};
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::{Database, Schema, Table};
 use risingwave_rpc_client::{MetaClient, NotificationStream};
 use tokio::sync::watch::Sender;
 use tokio::task::JoinHandle;
@@ -58,6 +60,28 @@ impl ObserverManager {
 
                     match resp.info {
                         Some(Info::Database(database)) => {
+                            panic!(
+                                "recive a outdate version catalog notify from meta {:?}",
+                                resp
+                            );
+                        }
+                        Some(Info::Schema(schema)) => {
+                            panic!(
+                                "recive a outdate version catalog notify from meta {:?}",
+                                resp
+                            );
+                        }
+                        Some(Info::Table(table)) => {
+                            panic!(
+                                "recive a outdate version catalog notify from meta {:?}",
+                                resp
+                            );
+                        }
+                        Some(Info::Node(node)) => {
+                            self.update_worker_node_manager(operation, node);
+                        }
+
+                        Some(Info::DatabaseV2(database)) => {
                             self.update_database(operation, database)
                                 .unwrap_or_else(|e| error!("{}", e.to_string()));
                         }
@@ -72,7 +96,7 @@ impl ObserverManager {
                             self.update_table(operation, table)
                                 .unwrap_or_else(|e| error!("{}", e.to_string()));
                         }
-                        Some(_) => todo!(),
+
                         None => (),
                     }
                 }
@@ -97,22 +121,14 @@ impl ObserverManager {
 
     /// `update_database` is called in `start` method.
     /// It calls `create_database` and `drop_database` of `CatalogCache`.
-    fn update_database(&self, operation: Operation, database: Database) -> Result<()> {
+    fn update_database(&self, operation: Operation, db: ProstDatabase) -> Result<()> {
         info!(
             "Update database, operation: {:?}, database: {:?}",
-            operation, database
+            operation, db
         );
-        let db_name = database.get_database_name();
-        let db_id = database.get_database_ref_id()?.database_id as u64;
-        let version = database.get_version();
-
         match operation {
-            Operation::Add => self
-                .catalog_cache
-                .write()
-                .unwrap()
-                .create_database(db_name, db_id)?,
-            Operation::Delete => self.catalog_cache.write().unwrap().drop_database(db_name)?,
+            Operation::Add => self.catalog_cache.write().unwrap().create_database(&db),
+            Operation::Delete => self.catalog_cache.write().unwrap().drop_database(db.id),
             _ => {
                 return Err(RwError::from(InternalError(
                     "Unsupported operation.".to_string(),

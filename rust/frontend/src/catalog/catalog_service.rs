@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use risingwave_common::catalog::CatalogVersion;
+use risingwave_common::catalog::{CatalogVersion, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Schema as ProstSchema, Table as ProstTable,
 };
-use risingwave_pb::meta::Catalog;
+use risingwave_pb::meta::{Catalog, Database as OldProstDatabase};
 use risingwave_pb::plan::{ColumnDesc, DatabaseRefId, SchemaRefId, TableRefId};
 use risingwave_rpc_client::MetaClient;
 use tokio::sync::watch::Receiver;
