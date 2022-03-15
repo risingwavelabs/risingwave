@@ -45,6 +45,8 @@ pub enum AwsCredential {
 pub enum FileSystemOptError {
     #[error("AWS {0} SDK  Error {1}.")]
     AwsSdkInnerError(String, String),
+    #[error("S3 Bucket {0} download object {1} Error.")]
+    GetS3ObjectError(String, String),
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -141,12 +143,30 @@ pub async fn new_share_config(
 
 #[derive(Debug, Clone)]
 pub struct S3SourceConfig {
-    bucket: String,
-    sqs_queue_name: String,
-    shared_config: aws_config::Config,
-    custom_config: Option<AwsCustomConfig>,
-    sqs_config: SqsReceiveMsgConfig,
-    match_pattern: Option<String>,
+    pub(crate) bucket: String,
+    pub(crate) sqs_queue_name: String,
+    pub(crate) shared_config: aws_config::Config,
+    pub(crate) custom_config: Option<AwsCustomConfig>,
+    pub(crate) sqs_config: SqsReceiveMsgConfig,
+    pub(crate) match_pattern: Option<String>,
+}
+
+pub(crate) fn new_s3_client(s3_source_config: S3SourceConfig) -> s3_client::Client {
+    let config_for_s3 = match s3_source_config.custom_config {
+        Some(conf) => {
+            let retry_conf = aws_config::RetryConfig::new().with_max_attempts(conf.max_retry_times);
+            let timeout_conf = aws_config::TimeoutConfig::new()
+                .with_connect_timeout(Some(conf.conn_time_out))
+                .with_read_timeout(Some(conf.read_time_out));
+
+            s3_config::Builder::from(&s3_source_config.shared_config)
+                .retry_config(retry_conf)
+                .timeout_config(timeout_conf)
+                .build()
+        }
+        None => s3_config::Config::new(&s3_source_config.shared_config),
+    };
+    s3_client::Client::from_conf(config_for_s3)
 }
 
 #[derive(Debug, Clone)]
@@ -173,22 +193,7 @@ impl S3Directory {
     }
 
     pub fn new(s3_source_config: S3SourceConfig) -> Self {
-        let config_for_s3 = match s3_source_config.clone().custom_config {
-            Some(conf) => {
-                let retry_conf =
-                    aws_config::RetryConfig::new().with_max_attempts(conf.max_retry_times);
-                let timeout_conf = aws_config::TimeoutConfig::new()
-                    .with_connect_timeout(Some(conf.conn_time_out))
-                    .with_read_timeout(Some(conf.read_time_out));
-
-                s3_config::Builder::from(&s3_source_config.shared_config)
-                    .retry_config(retry_conf)
-                    .timeout_config(timeout_conf)
-                    .build()
-            }
-            None => s3_config::Config::new(&s3_source_config.shared_config),
-        };
-        let client_for_s3 = s3_client::Client::from_conf(config_for_s3);
+        let client_for_s3 = new_s3_client(s3_source_config.clone());
         let client_for_sqs = aws_sdk_sqs::Client::new(&s3_source_config.shared_config);
         Self {
             source_config: s3_source_config,
@@ -437,7 +442,7 @@ impl Directory for S3Directory {
 }
 
 #[cfg(test)]
-mod test {
+pub(crate) mod test {
     use std::sync::Arc;
 
     use aws_smithy_http::byte_stream::ByteStream;
@@ -448,8 +453,8 @@ mod test {
         new_share_config, AwsCredential, S3Directory, S3SourceConfig, SqsReceiveMsgConfig,
     };
 
-    const TEST_REGION_NAME: &str = "cn-north-1";
-    const BUCKET_NAME: &str = "dd-storage-s3";
+    pub const TEST_REGION_NAME: &str = "cn-north-1";
+    pub const BUCKET_NAME: &str = "dd-storage-s3";
     const JSON_DATA: &str = r#"
         {
             "name": "John Doe",
@@ -483,7 +488,7 @@ mod test {
         println!("put_object complete");
     }
 
-    fn new_s3_source_config(shared_config: aws_config::Config) -> S3SourceConfig {
+    pub fn new_s3_source_config(shared_config: aws_config::Config) -> S3SourceConfig {
         S3SourceConfig {
             bucket: BUCKET_NAME.to_string(),
             sqs_queue_name: "s3-dd-storage-notify-queue".to_string(),
