@@ -84,7 +84,8 @@ impl ObserverManager {
     fn update_worker_node_manager(&self, operation: Operation, node: WorkerNode) {
         tracing::debug!(
             "Update worker nodes, operation: {:?}, node: {:?}",
-            operation, node
+            operation,
+            node
         );
 
         match operation {
@@ -99,7 +100,8 @@ impl ObserverManager {
     fn update_database(&self, operation: Operation, database: Database) -> Result<()> {
         tracing::debug!(
             "Update database, operation: {:?}, database: {:?}",
-            operation, database
+            operation,
+            database
         );
         let db_name = database.get_database_name();
         let db_id = database.get_database_ref_id()?.database_id as u64;
@@ -131,7 +133,8 @@ impl ObserverManager {
     fn update_schema(&self, operation: Operation, schema: Schema) -> Result<()> {
         tracing::debug!(
             "Update schema, operation: {:?}, schema: {:?}",
-            operation, schema
+            operation,
+            schema
         );
         let schema_ref_id = schema.get_schema_ref_id()?;
         let db_id = schema_ref_id.get_database_ref_id()?.database_id as DatabaseId;
@@ -175,7 +178,8 @@ impl ObserverManager {
     fn update_table(&self, operation: Operation, table: Table) -> Result<()> {
         tracing::debug!(
             "Update table, operation: {:?}, table: {:?}",
-            operation, table
+            operation,
+            table
         );
         let schema_ref_id = table.get_table_ref_id()?.get_schema_ref_id()?;
         let db_id = schema_ref_id.get_database_ref_id()?.database_id as DatabaseId;
