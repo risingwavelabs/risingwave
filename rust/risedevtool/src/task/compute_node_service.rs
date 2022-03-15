@@ -64,13 +64,15 @@ impl Task for ComputeNodeService {
         }
 
         let provide_minio = self.config.provide_minio.as_ref().unwrap();
+        let provide_compute_node = self.config.provide_compute_node.as_ref().unwrap();
 
-        match (
+        let is_shared_backend = match (
             self.config.enable_in_memory_kv_state_backend,
             provide_minio.as_slice(),
         ) {
             (true, []) => {
                 cmd.arg("--state-store").arg("in-memory");
+                false
             }
             (true, _) => {
                 return Err(anyhow!(
@@ -79,6 +81,7 @@ impl Task for ComputeNodeService {
             }
             (false, []) => {
                 cmd.arg("--state-store").arg("hummock+memory");
+                false
             }
             (false, [minio]) => {
                 cmd.arg("--state-store").arg(format!(
@@ -89,6 +92,7 @@ impl Task for ComputeNodeService {
                     minio_addr = minio.address,
                     minio_port = minio.port,
                 ));
+                true
             }
             (false, other_size) => {
                 return Err(anyhow!(
@@ -96,6 +100,12 @@ impl Task for ComputeNodeService {
                     other_size.len()
                 ))
             }
+        };
+
+        if provide_compute_node.len() > 1 && !is_shared_backend {
+            return Err(anyhow!(
+                "should use a shared backend (e.g. MinIO) for multiple compute-node configuration. Consider adding `use: minio` in risedev config."
+            ));
         }
 
         let provide_meta_node = self.config.provide_meta_node.as_ref().unwrap();

@@ -10,6 +10,7 @@ pub struct ComputeNodeConfig {
     pub exporter_port: u16,
     pub provide_minio: Option<Vec<MinioConfig>>,
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
+    pub provide_compute_node: Option<Vec<ComputeNodeConfig>>,
     pub provide_jaeger: Option<Vec<JaegerConfig>>,
     pub user_managed: bool,
     pub enable_in_memory_kv_state_backend: bool,
