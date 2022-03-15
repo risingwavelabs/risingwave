@@ -31,7 +31,7 @@ use crate::FrontendOpts;
 
 pub struct LocalFrontend {
     pub opts: FrontendOpts,
-    pub session: SessionImpl,
+    pub session: Arc<SessionImpl>,
     pub observer_join_handle: JoinHandle<()>,
     _heartbeat_join_handle: JoinHandle<()>,
     _heartbeat_shutdown_sender: UnboundedSender<()>,
@@ -46,7 +46,7 @@ impl LocalFrontend {
             FrontendEnv::with_meta_client(meta_client, &opts)
                 .await
                 .unwrap();
-        let session = SessionImpl::new(env, "dev".to_string());
+        let session = Arc::new(SessionImpl::new(env, "dev".to_string()));
         Self {
             opts,
             session,
@@ -61,11 +61,15 @@ impl LocalFrontend {
         sql: impl Into<String>,
     ) -> std::result::Result<PgResponse, Box<dyn std::error::Error + Send + Sync>> {
         let sql = sql.into();
-        self.session.run_statement(sql.as_str()).await
+        self.session.clone().run_statement(sql.as_str()).await
     }
 
     pub fn session(&self) -> &SessionImpl {
         &self.session
+    }
+
+    pub fn session_ref(&self) -> Arc<SessionImpl> {
+        self.session.clone()
     }
 }
 

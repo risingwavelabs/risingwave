@@ -27,7 +27,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// |--------------------------|---------------------|----------------------|
 /// | Join predicate (on)      | Not Pushed          | Pushed               |
 /// | Where predicate (filter) | Pushed              | Not Pushed           |
-struct FilterJoinRule {}
+pub struct FilterJoinRule {}
 impl Rule for FilterJoinRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let filter = plan.as_logical_filter()?;

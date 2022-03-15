@@ -1,8 +1,9 @@
 use anyhow::anyhow;
 use aws_sdk_kinesis::model::Record;
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
-use crate::base::{SourceMessage, SourceOffset};
+use crate::base::{InnerMessage, SourceMessage, SourceOffset};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct KinesisMessage {
@@ -23,6 +24,19 @@ impl SourceMessage for KinesisMessage {
 
     fn serialize(&self) -> anyhow::Result<String> {
         serde_json::to_string(self).map_err(|e| anyhow!(e))
+    }
+}
+
+impl From<KinesisMessage> for InnerMessage {
+    fn from(msg: KinesisMessage) -> Self {
+        InnerMessage {
+            payload: msg
+                .payload
+                .as_ref()
+                .map(|payload| Bytes::copy_from_slice(payload)),
+            offset: msg.sequence_number.clone(),
+            split_id: msg.shard_id,
+        }
     }
 }
 

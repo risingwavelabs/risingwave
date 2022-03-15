@@ -238,18 +238,11 @@ impl<S: StateStore> Executor for AppendOnlyTopNExecutor<S> {
     }
 
     fn clear_cache(&mut self) -> Result<()> {
-        self.managed_lower_state.clear_cache(false);
-        self.managed_higher_state.clear_cache(false);
+        self.managed_lower_state.clear_cache();
+        self.managed_higher_state.clear_cache();
         self.first_execution = true;
 
         Ok(())
-    }
-
-    fn reset(&mut self, epoch: u64) {
-        self.managed_lower_state.clear_cache(true);
-        self.managed_higher_state.clear_cache(true);
-        self.first_execution = true;
-        self.update_executor_state(ExecutorState::Active(epoch));
     }
 }
 

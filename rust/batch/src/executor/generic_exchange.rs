@@ -52,9 +52,9 @@ impl CreateSource for DefaultCreateSource {
     ) -> Result<Box<dyn ExchangeSource>> {
         let peer_addr = value.get_host()?.to_socket_addr()?;
         if is_local_address(env.server_address(), &peer_addr) {
-            trace!("Exchange locally [{:?}]", value.get_sink_id());
+            trace!("Exchange locally [{:?}]", value.get_task_output_id());
             return Ok(Box::new(LocalExchangeSource::create(
-                value.get_sink_id()?.try_into()?,
+                value.get_task_output_id()?.try_into()?,
                 env,
                 task_id,
             )?));
@@ -62,10 +62,10 @@ impl CreateSource for DefaultCreateSource {
         trace!(
             "Exchange remotely from {} [{:?}]",
             &peer_addr,
-            value.get_sink_id()
+            value.get_task_output_id()
         );
         Ok(Box::new(
-            GrpcExchangeSource::create(peer_addr, value.get_sink_id()?.clone()).await?,
+            GrpcExchangeSource::create(peer_addr, value.get_task_output_id()?.clone()).await?,
         ))
     }
 }

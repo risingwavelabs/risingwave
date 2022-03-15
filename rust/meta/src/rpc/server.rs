@@ -176,7 +176,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         StoredClusterManager::start_heartbeat_checker(
             cluster_manager.clone(),
             Duration::from_secs(1),
-        ),
+        )
+        .await,
     ];
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();

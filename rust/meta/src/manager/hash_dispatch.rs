@@ -1,12 +1,11 @@
 #![allow(dead_code)]
 
 use std::collections::{BTreeMap, HashMap};
-use std::slice;
 use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::error::Result;
-use risingwave_pb::common::WorkerNode;
+use risingwave_pb::common::{ParallelUnit, ParallelUnitType, WorkerNode, WorkerType};
 use tokio::sync::Mutex;
 
 use crate::cluster::ParallelUnitId;
@@ -30,7 +29,12 @@ where
     pub async fn new(compute_nodes: &[WorkerNode], meta_store_ref: Arc<S>) -> Result<Self> {
         let mut core = HashDispatchManagerCore::new(meta_store_ref);
         if !compute_nodes.is_empty() {
-            core.add_worker_mapping_from_empty(compute_nodes).await?;
+            let parallel_units = compute_nodes
+                .iter()
+                .flat_map(|node| node.parallel_units.to_owned())
+                .filter(|parallel_unit| parallel_unit.r#type == ParallelUnitType::Hash as i32)
+                .collect_vec();
+            core.add_worker_mapping_from_empty(&parallel_units).await?;
         }
         Ok(Self {
             core: Mutex::new(core),
@@ -38,18 +42,34 @@ where
     }
 
     pub async fn add_worker_mapping(&self, compute_node: &WorkerNode) -> Result<()> {
+        assert_eq!(compute_node.r#type, WorkerType::ComputeNode as i32);
         let mut core = self.core.lock().await;
+        let hash_parallel_units = compute_node
+            .parallel_units
+            .clone()
+            .into_iter()
+            .filter(|parallel_unit| parallel_unit.r#type == ParallelUnitType::Hash as i32)
+            .collect_vec();
         if core.load_balancer.is_empty() {
-            core.add_worker_mapping_from_empty(slice::from_ref(compute_node))
+            core.add_worker_mapping_from_empty(&hash_parallel_units)
                 .await
         } else {
-            core.add_worker_mapping(compute_node).await
+            core.add_worker_mapping(&hash_parallel_units).await
         }
     }
 
     pub async fn delete_worker_mapping(&self, compute_node: &WorkerNode) -> Result<()> {
+        assert_eq!(compute_node.r#type, WorkerType::ComputeNode as i32);
         let mut core = self.core.lock().await;
-        core.delete_worker_mapping(compute_node).await
+        core.delete_worker_mapping(
+            &compute_node
+                .parallel_units
+                .clone()
+                .into_iter()
+                .filter(|parallel_unit| parallel_unit.r#type == ParallelUnitType::Hash as i32)
+                .collect_vec(),
+        )
+        .await
     }
 
     pub async fn get_worker_mapping(&self) -> Result<Vec<ParallelUnitId>> {
@@ -61,8 +81,8 @@ where
 /// [`HashDispatchManagerCore`] contains the core logic for mapping change when one or more nodes
 /// enter or leave the cluster.
 struct HashDispatchManagerCore<S> {
-    /// Total number of parallel units in cluster.
-    total_parallels: usize,
+    /// Total number of hash parallel units in cluster.
+    total_hash_parallels: usize,
     /// Mapping from virtual key to parallel unit, which is persistent.
     key_mapping: ConsistentHashMapping,
     /// Mapping from parallel unit to virtual key, which is volatile.
@@ -87,12 +107,12 @@ where
     S: MetaStore,
 {
     fn new(meta_store_ref: Arc<S>) -> Self {
-        let key_mapping = ConsistentHashMapping::from(&Vec::new());
+        let key_mapping = ConsistentHashMapping::new();
         let owner_mapping: HashMap<ParallelUnitId, Vec<VirtualKey>> = HashMap::new();
         let load_balancer: BTreeMap<usize, Vec<ParallelUnitId>> = BTreeMap::new();
 
         Self {
-            total_parallels: 0,
+            total_hash_parallels: 0,
             key_mapping,
             owner_mapping,
             load_balancer,
@@ -100,39 +120,26 @@ where
         }
     }
 
-    async fn add_worker_mapping_from_empty(&mut self, compute_nodes: &[WorkerNode]) -> Result<()> {
-        assert!(
-            !compute_nodes.is_empty(),
-            "There should be at least one compute node."
-        );
-
+    async fn add_worker_mapping_from_empty(
+        &mut self,
+        parallel_units: &[ParallelUnit],
+    ) -> Result<()> {
         let mut key_mapping = Vec::with_capacity(VIRTUAL_KEY_COUNT);
-        self.total_parallels = compute_nodes
-            .iter()
-            .map(|node| node.parallel_units.len())
-            .sum();
-        let hash_shard_size = VIRTUAL_KEY_COUNT / self.total_parallels;
+        self.total_hash_parallels = parallel_units.len();
+        let hash_shard_size = VIRTUAL_KEY_COUNT / self.total_hash_parallels;
         let mut init_bound = hash_shard_size;
 
-        compute_nodes.iter().for_each(|node| {
-            let parallel_units = &node.parallel_units;
-            assert!(
-                !parallel_units.is_empty(),
-                "A compute node should have at least one parallel unit."
-            );
-            parallel_units.iter().for_each(|parallel_unit| {
-                let parallel_unit_id = parallel_unit.id;
-                key_mapping.resize(init_bound, parallel_unit_id);
-                let virtual_keys = (init_bound - hash_shard_size..init_bound).collect();
-                self.owner_mapping.insert(parallel_unit_id, virtual_keys);
-                init_bound += hash_shard_size;
-            });
+        parallel_units.iter().for_each(|parallel_unit| {
+            let parallel_unit_id = parallel_unit.id;
+            key_mapping.resize(init_bound, parallel_unit_id);
+            let virtual_keys = (init_bound - hash_shard_size..init_bound).collect();
+            self.owner_mapping.insert(parallel_unit_id, virtual_keys);
+            init_bound += hash_shard_size;
         });
 
-        let parallel_units = self.owner_mapping.keys().cloned().collect_vec();
         let mut parallel_unit_iter = parallel_units.iter().cycle();
         for virtual_key in init_bound - hash_shard_size..VIRTUAL_KEY_COUNT {
-            let &id = parallel_unit_iter.next().unwrap();
+            let id = parallel_unit_iter.next().unwrap().id;
             key_mapping.push(id);
             self.owner_mapping.entry(id).or_default().push(virtual_key);
         }
@@ -159,17 +166,12 @@ where
         Ok(())
     }
 
-    async fn add_worker_mapping(&mut self, compute_node: &WorkerNode) -> Result<()> {
-        assert!(
-            !compute_node.parallel_units.is_empty(),
-            "A compute node should have at least one parallel unit."
-        );
-
-        self.total_parallels += compute_node.parallel_units.len();
+    async fn add_worker_mapping(&mut self, parallel_units: &[ParallelUnit]) -> Result<()> {
+        self.total_hash_parallels += parallel_units.len();
 
         let hash_shard_size =
-            (VIRTUAL_KEY_COUNT as f64 / self.total_parallels as f64).round() as usize;
-        let mut new_keys_count = compute_node.parallel_units.len() * hash_shard_size;
+            (VIRTUAL_KEY_COUNT as f64 / self.total_hash_parallels as f64).round() as usize;
+        let mut new_keys_count = parallel_units.len() * hash_shard_size;
         let mut new_keys = Vec::new();
 
         while new_keys_count != 0 {
@@ -212,8 +214,8 @@ where
             new_keys_count -= 1;
         }
 
-        for i in 0..compute_node.parallel_units.len() {
-            let parallel_unit_id = compute_node.parallel_units[i].id;
+        for i in 0..parallel_units.len() {
+            let parallel_unit_id = parallel_units[i].id;
             let allocated_keys = new_keys[i * hash_shard_size..(i + 1) * hash_shard_size].to_vec();
 
             // Update key mapping
@@ -237,13 +239,12 @@ where
         Ok(())
     }
 
-    async fn delete_worker_mapping(&mut self, compute_node: &WorkerNode) -> Result<()> {
+    async fn delete_worker_mapping(&mut self, parallel_units: &[ParallelUnit]) -> Result<()> {
         assert!(
             !self.owner_mapping.is_empty(),
             "HashDispatcherManager: mapping is currently empty, cannot delete worker mapping."
         );
 
-        let parallel_units = &compute_node.parallel_units;
         let mut released_keys = Vec::new();
 
         parallel_units.iter().for_each(|parallel_unit| {
@@ -310,7 +311,7 @@ where
         // Persist mapping
         self.key_mapping.insert(&*self.meta_store_ref).await?;
 
-        self.total_parallels -= parallel_units.len();
+        self.total_hash_parallels -= parallel_units.len();
 
         Ok(())
     }
@@ -340,7 +341,11 @@ mod tests {
             .map(|node_id| {
                 let parallel_units = (0..parallel_unit_per_node)
                     .map(|_| {
-                        let parallel_unit = ParallelUnit { id: current_id };
+                        let parallel_unit = ParallelUnit {
+                            id: current_id,
+                            r#type: ParallelUnitType::Hash as i32,
+                            node_host: None,
+                        };
                         current_id += 1;
                         parallel_unit
                     })
@@ -417,7 +422,11 @@ mod tests {
             .map(|node_id| {
                 let parallel_units = (0..init_parallel_unit_per_node)
                     .map(|_| {
-                        let parallel_unit = ParallelUnit { id: current_id };
+                        let parallel_unit = ParallelUnit {
+                            id: current_id,
+                            r#type: ParallelUnitType::Hash as i32,
+                            node_host: None,
+                        };
                         current_id += 1;
                         parallel_unit
                     })
@@ -447,7 +456,11 @@ mod tests {
             .map(|node_id| {
                 let parallel_units = (0..parallel_unit_per_node)
                     .map(|_| {
-                        let parallel_unit = ParallelUnit { id: current_id };
+                        let parallel_unit = ParallelUnit {
+                            id: current_id,
+                            r#type: ParallelUnitType::Hash as i32,
+                            node_host: None,
+                        };
                         current_id += 1;
                         parallel_unit
                     })

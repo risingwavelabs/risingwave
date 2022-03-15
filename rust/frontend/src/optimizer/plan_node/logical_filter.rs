@@ -110,7 +110,7 @@ impl ToBatch for LogicalFilter {
 
 impl ToStream for LogicalFilter {
     fn to_stream(&self) -> PlanRef {
-        let new_input = self.input().to_batch();
+        let new_input = self.input().to_stream();
         let new_logical = self.clone_with_input(new_input);
         StreamFilter::new(new_logical).into()
     }

@@ -11,7 +11,7 @@ impl Planner {
         let plan = self.plan_set_expr(query.body)?;
         // plan order and limit here
         let order = Order {
-            field_order: vec![],
+            field_order: query.order,
         };
         let dist = Distribution::Any;
         let mut out_fields = FixedBitSet::with_capacity(plan.schema().len());

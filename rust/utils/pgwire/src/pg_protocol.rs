@@ -27,7 +27,7 @@ where
     is_terminate: bool,
 
     session_mgr: Arc<dyn SessionManager>,
-    session: Option<Box<dyn Session>>,
+    session: Option<Arc<dyn Session>>,
 }
 
 /// States flow happened from top to down.
@@ -107,7 +107,7 @@ where
 
     async fn process_query_msg(&mut self, query: FeQueryMessage) -> Result<()> {
         info!("receive query: {}", query.get_sql());
-        let session = self.session.as_ref().unwrap();
+        let session = self.session.clone().unwrap();
 
         // execute query
         let process_res = session.run_statement(query.get_sql()).await;

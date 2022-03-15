@@ -35,7 +35,7 @@ where
         request: Request<HeartbeatRequest>,
     ) -> Result<Response<HeartbeatResponse>, Status> {
         let req = request.into_inner();
-        let result = self.cluster_manager_ref.heartbeat(req.node_id);
+        let result = self.cluster_manager_ref.heartbeat(req.node_id).await;
         match result {
             Ok(_) => Ok(Response::new(HeartbeatResponse { status: None })),
             Err(e) => Err(e.to_grpc_status()),

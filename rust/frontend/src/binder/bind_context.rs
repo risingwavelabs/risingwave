@@ -4,16 +4,19 @@ use std::fmt::Display;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 
+#[derive(Debug)]
 pub struct ColumnBinding {
     pub table_name: String,
+    pub column_name: String,
     pub index: usize,
     pub data_type: DataType,
 }
 
 impl ColumnBinding {
-    pub fn new(table_name: String, index: usize, data_type: DataType) -> Self {
+    pub fn new(table_name: String, column_name: String, index: usize, data_type: DataType) -> Self {
         ColumnBinding {
             table_name,
+            column_name,
             index,
             data_type,
         }
@@ -58,16 +61,17 @@ impl BindContext {
             Ok(columns[0])
         }
     }
+
     pub fn get_index_with_table_name(
         &self,
         column_name: &String,
         table_name: &String,
     ) -> Result<usize> {
-        let column_indexs = self
+        let column_indexes = self
             .indexs_of
             .get(column_name)
             .ok_or_else(|| ErrorCode::ItemNotFound(format!("Invalid column: {}", column_name)))?;
-        match column_indexs
+        match column_indexes
             .iter()
             .find(|column_index| self.columns[**column_index].table_name == *table_name)
         {

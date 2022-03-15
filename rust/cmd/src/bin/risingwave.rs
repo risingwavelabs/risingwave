@@ -88,16 +88,31 @@ async fn main() {
             eprintln!("launching playground");
 
             risingwave_logging::oneshot_common();
-            risingwave_logging::init_risingwave_logger(false, false);
+            risingwave_logging::init_risingwave_logger(false, true);
 
-            let meta_opts = risingwave_meta::MetaNodeOpts::parse_from(["--backend mem"]);
+            // TODO: match opts from each component. Currently, we rely
+            // on default config of `compute-node` points to the default host of `meta-node`.
+
+            tracing::warn!("playground is using default config for cli args and toml configs. Any changes to `risingwave.toml` will not take effect.");
+
+            let meta_opts = risingwave_meta::MetaNodeOpts::parse_from(["meta-node", "--backend", "mem"]);
             let compute_opts =
-                risingwave_compute::ComputeNodeOpts::parse_from(["--state_store in-memory"]);
-            let frontend_opts = risingwave_frontend::FrontendOpts::parse_from([""]);
+                risingwave_compute::ComputeNodeOpts::parse_from(["compute-node", "--state-store", "hummock+memory"]);
+            let frontend_opts = risingwave_frontend::FrontendOpts::parse_from(["frontend-node"]);
+
+            tracing::info!("starting meta-node thread using {:#?}", meta_opts);
 
             let _meta_handle = tokio::spawn(async move { risingwave_meta::start(meta_opts).await });
+
+            // TODO: wait for online instead of instantly proceeding
+
+            tracing::info!("starting compute-node thread using {:#?}", compute_opts);
+
             let _compute_handle =
                 tokio::spawn(async move { risingwave_compute::start(compute_opts).await });
+
+                tracing::info!("starting frontend-node thread using {:#?}", frontend_opts);
+
             let _frontend_handle =
                 tokio::spawn(async move { risingwave_frontend::start(frontend_opts).await });
 
