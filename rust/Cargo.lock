@@ -3843,7 +3843,6 @@ dependencies = [
 name = "risingwave_frontend"
 version = "0.1.3"
 dependencies = [
- "anyhow",
  "async-trait",
  "byteorder",
  "bytes",
@@ -3864,8 +3863,6 @@ dependencies = [
  "risingwave_rpc_client",
  "risingwave_source",
  "risingwave_sqlparser",
- "serde",
- "serde_yaml",
  "smallvec",
  "tempfile",
  "thiserror",
@@ -3873,6 +3870,19 @@ dependencies = [
  "tonic",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "risingwave_frontend_test_runner"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "risingwave_frontend",
+ "risingwave_sqlparser",
+ "serde",
+ "serde_yaml",
+ "tempfile",
+ "tokio",
  "walkdir",
 ]
 
