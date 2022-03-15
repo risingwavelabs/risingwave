@@ -3,6 +3,7 @@ use std::fmt::{self};
 use fixedbitset::FixedBitSet;
 use itertools::{Either, Itertools};
 use risingwave_common::catalog::Schema;
+use risingwave_pb::plan::plan_node::NodeBody::HashJoin;
 use risingwave_pb::plan::JoinType;
 
 use super::{
@@ -85,6 +86,11 @@ impl LogicalJoin {
     pub fn join_type(&self) -> JoinType {
         self.join_type
     }
+
+    /// Clone with new `on` condition
+    pub fn clone_with_cond(&self, cond: Condition) -> Self {
+        Self::new(self.left.clone(), self.right.clone(), self.join_type, cond)
+    }
 }
 
 impl PlanTreeNodeBinary for LogicalJoin {
@@ -159,22 +165,26 @@ impl ToBatch for LogicalJoin {
             self.right.schema().len(),
             self.on.clone(),
         );
-        let can_pull_filter = self.join_type == JoinType::Inner;
-        let has_non_eq = predicate.has_non_eq();
-        let has_eq = predicate.has_eq();
-        if has_eq && (!has_non_eq || can_pull_filter) {
-            let new_left = self.left().to_batch();
-            let new_right = self.right().to_batch();
-            let new_logical = self.clone_with_left_right(new_left, new_right);
-            let phy_join = BatchHashJoin::new(new_logical, predicate.clone()).into();
 
-            if has_non_eq {
-                // Add a filter on top of the join to handle non-equi conditions
-                LogicalFilter::new(phy_join, predicate.non_eq_cond()).to_batch()
+        let left = self.left().to_batch();
+        let right = self.right().to_batch();
+        let logical = self.clone_with_left_right(left, right);
+
+        if predicate.has_eq() {
+            // Convert to Hash Join for equal joins
+            // For inner joins, pull non-equi conditions to a filter operator on top of it
+            let pull_filter = self.join_type == JoinType::Inner && predicate.has_non_eq();
+            if pull_filter {
+                let equi_cond =
+                    EqJoinPredicate::new(Condition::true_cond(), predicate.eq_keys().to_vec());
+                let logical = logical.clone_with_cond(equi_cond.eq_cond());
+                let hash_join = BatchHashJoin::new(logical, equi_cond).into();
+                LogicalFilter::new(hash_join, predicate.non_eq_cond()).to_batch()
             } else {
-                phy_join
+                BatchHashJoin::new(logical, predicate).into()
             }
         } else {
+            // Convert to Nested-loop Join for non-equal joins
             todo!("nested loop join")
         }
     }
@@ -187,14 +197,31 @@ impl ToStream for LogicalJoin {
             self.right.schema().len(),
             self.on.clone(),
         );
-        assert!(!predicate.has_non_eq());
         let left = self
             .left()
             .to_stream_with_dist_required(&Distribution::HashShard(predicate.left_eq_indexes()));
         let right = self
             .right()
             .to_stream_with_dist_required(&Distribution::HashShard(predicate.right_eq_indexes()));
-        StreamHashJoin::new(self.clone_with_left_right(left, right)).into()
+        let logical = self.clone_with_left_right(left, right);
+
+        if predicate.has_eq() {
+            // Convert to Hash Join for equal joins
+            // For inner joins, pull non-equi conditions to a filter operator on top of it
+            let pull_filter = self.join_type == JoinType::Inner && predicate.has_non_eq();
+            if pull_filter {
+                let equi_cond =
+                    EqJoinPredicate::new(Condition::true_cond(), predicate.eq_keys().to_vec());
+                let logical = logical.clone_with_cond(equi_cond.eq_cond());
+                let hash_join = StreamHashJoin::new(logical, equi_cond).into();
+                LogicalFilter::new(hash_join, predicate.non_eq_cond()).to_stream()
+            } else {
+                StreamHashJoin::new(logical, predicate).into()
+            }
+        } else {
+            // Convert to Nested-loop Join for non-equal joins
+            todo!("nested loop join")
+        }
     }
 }
 
