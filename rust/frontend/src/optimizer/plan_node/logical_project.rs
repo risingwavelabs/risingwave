@@ -12,7 +12,7 @@ use super::{
 use crate::expr::{assert_input_ref, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::plan_node::CollectInputRef;
 use crate::optimizer::property::{Distribution, WithSchema};
-use crate::utils::ColIndexMapping;
+use crate::utils::{ColIndexMapping, Substitute};
 
 /// `LogicalProject` computes a set of expressions from its input relation.
 #[derive(Debug, Clone)]
@@ -192,25 +192,6 @@ impl ToStream for LogicalProject {
         self.to_stream_with_dist_required(Distribution::any())
     }
 }
-
-/// Substitute `InputRef` with corresponding `ExprImpl`.
-struct Substitute {
-    mapping: Vec<ExprImpl>,
-}
-
-impl ExprRewriter for Substitute {
-    fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
-        assert_eq!(
-            self.mapping[input_ref.index()].return_type(),
-            input_ref.return_type(),
-            "Type mismatch when substituting {:?} with {:?}",
-            input_ref,
-            self.mapping[input_ref.index()],
-        );
-        self.mapping[input_ref.index()].clone()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;
