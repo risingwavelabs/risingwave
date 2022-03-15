@@ -10,12 +10,13 @@ use risingwave_storage::hummock::HummockSSTableId;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 
-use crate::hummock::model::INVALID_CREATE_TIMESTAMP;
+use crate::hummock::model::INVALID_TIMESTAMP;
 use crate::hummock::{CompactorManager, HummockManager};
 use crate::storage::MetaStore;
 
 const VACUUM_TRIGGER_INTERVAL: Duration = Duration::from_secs(10);
 const ORPHAN_SST_RETENTION_INTERVAL: Duration = Duration::from_secs(60 * 60 * 24);
+const MARKED_DELETION_SST_RETENTION_INTERVAL: Duration = Duration::from_secs(60);
 
 pub struct VacuumTrigger<S> {
     hummock_manager_ref: Arc<HummockManager<S>>,
@@ -62,6 +63,7 @@ where
                 if let Err(err) = Self::vacuum_tracked_data(&vacuum).await {
                     tracing::warn!("vacuum tracked data err {}", err);
                 }
+                // vacuum_orphan_data can be invoked less frequently.
                 if let Err(err) =
                     Self::vacuum_orphan_data(&vacuum, ORPHAN_SST_RETENTION_INTERVAL).await
                 {
@@ -106,9 +108,10 @@ where
                 .await?;
             // Step 1. Delete SSTs in object store.
             // TODO: Currently We reuse the compactor node as vacuum node.
-            // TODO: Currently we don't block step 2 until vacuum task is completed by
-            // assigned worker in step 1. This can leads to orphan SSTs if the vacuum task
-            // fails.
+            // We deliberately don't block step 2 to wait until vacuum task is completed in step 1.
+            // This can leads to orphan SSTs if the vacuum task fails in step 1 while
+            // metadata has been updated in step2. These orphan SSTs will be handled later in
+            // vacuum_orphan_data.
             if !ssts_to_delete.is_empty() {
                 tracing::debug!(
                     "try to vacuum {} tracked SSTs, {:?}",
@@ -147,8 +150,12 @@ where
 
     /// Return number of orphan SSTs to delete.
     /// An orphan SST can be deleted when:
-    /// - The SST is not tracked in meta, that's to say `meta_create_timestamp` is not set.
-    /// - And the SST has existed longer than `ORPHAN_SST_RETENTION_INTERVAL`.
+    /// - The SST is 1) not tracked in meta, that's to say `meta_create_timestamp` is not set, 2)
+    ///   and the SST has existed longer than `ORPHAN_SST_RETENTION_INTERVAL` since
+    ///   `id_create_timestamp`.
+    /// - Or the SST is 1) marked for deletion by `vacuum_tracked_data`, that's to say
+    ///   `meta_delete_timestamp` is set, 2) and the SST has existed longer than
+    ///   `MARKED_DELETE_SST_RETENTION_INTERVAL` since `meta_delete_timestamp`.
     async fn vacuum_orphan_data(
         vacuum: &VacuumTrigger<S>,
         orphan_sst_retention_interval: Duration,
@@ -176,9 +183,16 @@ where
                     .await?
                     .into_iter()
                     .filter(|sstable_id_info| {
-                        sstable_id_info.meta_create_timestamp == INVALID_CREATE_TIMESTAMP
-                            && std::cmp::max(now - sstable_id_info.id_create_timestamp, 0)
-                                >= orphan_sst_retention_interval.as_secs()
+                        let is_orphan = sstable_id_info.meta_create_timestamp == INVALID_TIMESTAMP
+                            && now >= sstable_id_info.id_create_timestamp
+                            && now - sstable_id_info.id_create_timestamp
+                                >= orphan_sst_retention_interval.as_secs();
+                        let is_marked_for_deletion = sstable_id_info.meta_delete_timestamp
+                            != INVALID_TIMESTAMP
+                            && now >= sstable_id_info.meta_delete_timestamp
+                            && now - sstable_id_info.meta_delete_timestamp
+                                >= MARKED_DELETION_SST_RETENTION_INTERVAL.as_secs();
+                        is_orphan || is_marked_for_deletion
                     })
                     .map(|sstable_id_info| sstable_id_info.id)
                     .collect_vec();

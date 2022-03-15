@@ -21,7 +21,7 @@ use crate::hummock::compaction::CompactStatus;
 use crate::hummock::level_handler::{LevelHandler, SSTableStat};
 use crate::hummock::model::{
     CurrentHummockVersionId, HummockContextPinnedSnapshotExt, HummockContextPinnedVersionExt,
-    INVALID_CREATE_TIMESTAMP,
+    INVALID_TIMESTAMP,
 };
 use crate::manager::{IdCategory, IdGeneratorManagerRef, MetaSrvEnv};
 use crate::model::{MetadataModel, Transactional, Worker};
@@ -729,7 +729,8 @@ where
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap()
                 .as_secs(),
-            meta_create_timestamp: INVALID_CREATE_TIMESTAMP,
+            meta_create_timestamp: INVALID_TIMESTAMP,
+            meta_delete_timestamp: INVALID_TIMESTAMP,
         }
         .insert(versioning_guard.meta_store_ref.as_ref())
         .await?;
@@ -839,12 +840,20 @@ where
         let ssts_to_delete =
             HummockTablesToDelete::select(versioning_guard.meta_store_ref.as_ref(), &key).await?;
         if let Some(ssts_to_delete) = ssts_to_delete {
-            // Delete tracked sstables.
+            // Mark tracked sstables to delete.
             for sst_id in ssts_to_delete.id {
-                SstableIdInfo::delete_in_transaction(
-                    SstableRefId { id: sst_id },
-                    &mut transaction,
-                )?;
+                if let Some(mut sstable_id_info) = SstableIdInfo::select(
+                    versioning_guard.meta_store_ref.as_ref(),
+                    &SstableRefId { id: sst_id },
+                )
+                .await?
+                {
+                    sstable_id_info.meta_delete_timestamp = SystemTime::now()
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs();
+                    sstable_id_info.upsert_in_transaction(&mut transaction)?;
+                }
             }
             HummockTablesToDelete::delete_in_transaction(
                 HummockVersionRefId {
