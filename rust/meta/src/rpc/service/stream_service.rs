@@ -130,12 +130,12 @@ impl<S> StreamManagerService for StreamServiceImpl<S>
         &self,
         _request: Request<CreateSourceRequest>,
     ) -> TonicResponse<CreateSourceResponse> {
-        let _req = _request.into_inner();
+        let req = _request.into_inner();
 
         match self.source_manager_ref.create_source(CreateSourceContext {
             table_id: Default::default(),
-            discovery_new_split: false,
-            properties: Default::default(),
+            discovery_new_split: true,
+            properties: req.properties.clone(),
         }).await {
             Ok(()) => Ok(Response::new(CreateSourceResponse { status: None })),
             Err(e) => Err(e.to_grpc_status()),

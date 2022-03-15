@@ -25,6 +25,7 @@ pub struct SourceManager<S>
 }
 
 pub struct CreateSourceContext {
+    pub name: String,
     pub table_id: TableRefId,
     pub discovery_new_split: bool,
     pub properties: HashMap<String, String>,
@@ -50,6 +51,7 @@ impl<S> SourceManager<S>
             Entry::Occupied(_) => {
                 return Err(format!("source already exists: {:?}", ctx.table_id).into());
             }
+
             Entry::Vacant(e) => {
                 let enumerator = extract_split_enumerator(&ctx.properties)?;
                 e.insert(Arc::new(enumerator));
@@ -64,11 +66,6 @@ impl<S> SourceManager<S>
     }
 
     pub async fn list_splits(&self, table_id: TableRefId) -> Result<()> {
-        // let x = self.enumerators.entry(&table_id).map(|e| {
-        //
-        //     enumerator.list_splits().await
-        // });
-        //
 
         match self.enumerators.entry(table_id) {
             Entry::Occupied(e) => {

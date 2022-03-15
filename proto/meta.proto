@@ -203,47 +203,12 @@ message FlushResponse {
   common.Status status = 1;
 }
 
-message CreateSourceRequest {
-  uint32 node_id = 1;
-  plan.TableRefId table_ref_id = 2;
-
-  enum RowFormatType {
-    JSON = 0;
-    PROTOBUF = 1;
-    DEBEZIUM_JSON = 2;
-    AVRO = 3;
-  }
-
-  repeated plan.ColumnDesc column_descs = 3;
-  RowFormatType format = 4;
-  map<string, string> properties = 5;
-  string schema_location = 6;
-  int32 row_id_index = 7;
-}
-
-message CreateSourceResponse {
-  common.Status status = 1;
-}
-
-
-message DropSourceRequest {
-  uint32 node_id = 1;
-  plan.TableRefId table_ref_id = 2;
-}
-
-message DropSourceResponse {
-  common.Status status = 1;
-}
-
 service StreamManagerService {
   // will be deprecated and replaced by catalog.CreateMaterializedSource and catalog.CreateMaterializedView
   rpc CreateMaterializedView(CreateMaterializedViewRequest) returns (CreateMaterializedViewResponse);
   // will be deprecated and replaced by catalog.DropMaterializedSource and catalog.DropMaterializedView
   rpc DropMaterializedView(DropMaterializedViewRequest) returns (DropMaterializedViewResponse);
 
-  rpc CreateSource(CreateSourceRequest) returns (CreateSourceResponse);
-  rpc DropSource(DropSourceRequest) returns (DropSourceResponse);
-  
   rpc Flush(FlushRequest) returns (FlushResponse);
 }
 
