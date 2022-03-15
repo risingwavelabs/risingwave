@@ -1,11 +1,13 @@
 use std::cell::RefCell;
 use std::fmt::Formatter;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{Session, SessionManager};
+use risingwave_common::config::FrontendConfig;
 use risingwave_common::error::Result;
 use risingwave_pb::common::WorkerType;
 use risingwave_rpc_client::MetaClient;
@@ -60,6 +62,15 @@ impl std::fmt::Debug for QueryContext {
     }
 }
 
+fn load_config(opts: &FrontendOpts) -> FrontendConfig {
+    if opts.config_path.is_empty() {
+        return FrontendConfig::default();
+    }
+
+    let config_path = PathBuf::from(opts.config_path.to_owned());
+    FrontendConfig::init(config_path).unwrap()
+}
+
 /// The global environment for the frontend server.
 #[derive(Clone)]
 pub struct FrontendEnv {
@@ -96,6 +107,9 @@ impl FrontendEnv {
         mut meta_client: MetaClient,
         opts: &FrontendOpts,
     ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, UnboundedSender<()>)> {
+        let config = load_config(opts);
+        tracing::info!("Starting compute node with config {:?}", config);
+
         let host = opts.host.parse().unwrap();
 
         // Register in meta by calling `AddWorkerNode` RPC.
@@ -103,7 +117,7 @@ impl FrontendEnv {
 
         let (heartbeat_join_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
             meta_client.clone(),
-            Duration::from_millis(opts.heartbeat_interval as u64),
+            Duration::from_millis(config.server.heartbeat_interval as u64),
         );
 
         let (catalog_updated_tx, catalog_updated_rx) = watch::channel(0);

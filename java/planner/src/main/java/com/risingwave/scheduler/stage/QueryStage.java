@@ -15,7 +15,7 @@ import com.risingwave.proto.plan.Field;
 import com.risingwave.proto.plan.MergeSortExchangeNode;
 import com.risingwave.proto.plan.PlanFragment;
 import com.risingwave.proto.plan.PlanNode;
-import com.risingwave.proto.plan.TaskSinkId;
+import com.risingwave.proto.plan.TaskOutputId;
 import com.risingwave.scheduler.exchange.Distribution;
 import com.risingwave.scheduler.query.Query;
 import java.util.NoSuchElementException;
@@ -162,7 +162,7 @@ public class QueryStage {
 
   private ExchangeNode createExchange(
       ScheduledStage stage, RisingWaveBatchPhyRel relNode, final int currentTaskId) {
-    var builder = ExchangeNode.newBuilder().setSourceStageId(stage.getStageId().toStageIdProto());
+    var builder = ExchangeNode.newBuilder();
     stage
         .getAssignments()
         .forEach(
@@ -188,11 +188,12 @@ public class QueryStage {
               // The first task (task id 0) in the current stage should fetch sink id 0 of all the
               // tasks in the previous stage
               // The second task (task id 1) ... sink id 1 ...
-              var sinkId =
-                  TaskSinkId.newBuilder()
+              var taskOutputId =
+                  TaskOutputId.newBuilder()
                       .setTaskId(taskId.toTaskIdProto())
-                      .setSinkId(currentTaskId);
-              var source = ExchangeSource.newBuilder().setSinkId(sinkId).setHost(host).build();
+                      .setOutputId(currentTaskId);
+              var source =
+                  ExchangeSource.newBuilder().setTaskOutputId(taskOutputId).setHost(host).build();
               builder.addSources(source);
             });
     var fieldList = relNode.getInput(0).getRowType().getFieldList();

@@ -61,10 +61,6 @@ impl<S: StateStore> ManagedMViewState<S> {
         FlushStatus::do_delete(self.cache.entry(pk));
     }
 
-    pub fn clear_cache(&mut self) {
-        self.cache.clear();
-    }
-
     pub async fn flush(&mut self, epoch: u64) -> Result<()> {
         let mut batch = self.keyspace.state_store().start_write_batch();
         batch.reserve(self.cache.len() * self.column_ids.len());

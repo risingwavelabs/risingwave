@@ -13,7 +13,7 @@ mod statement;
 mod table_ref;
 mod values;
 
-/// `Planner` converts a bounded statement to a [`crate::optimizer::plan_node::PlanNode`] tree
+/// `Planner` converts a bound statement to a [`crate::optimizer::plan_node::PlanNode`] tree
 pub struct Planner {
     ctx: QueryContextRef,
 }

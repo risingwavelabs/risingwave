@@ -181,7 +181,7 @@ impl ToBatch for LogicalJoin {
                 let new_logical = self.clone_with_left_right(new_left, new_right);
                 BatchSortMergeJoin::new(new_logical, predicate.clone()).into()
             } else {
-                let new_right = self.left().to_batch();
+                let new_right = self.right().to_batch();
                 let new_logical = self.clone_with_left_right(new_left, new_right);
                 BatchHashJoin::new(new_logical, predicate.clone()).into()
             };
