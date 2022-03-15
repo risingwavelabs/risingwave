@@ -78,7 +78,7 @@ pub async fn handle_query(context: QueryContext, query: Box<Query>) -> Result<Pg
         }
     };
 
-    // todo()!
+    // TODO: from bound extract column_name and data_type to build pg_desc
     let pg_descs = (0..pg_len)
         .into_iter()
         .map(|_i| PgFieldDescriptor::new("item".to_string(), TypeOid::Varchar))

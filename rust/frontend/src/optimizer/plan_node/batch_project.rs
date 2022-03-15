@@ -63,6 +63,7 @@ impl ToDistributedBatch for BatchProject {
     }
 }
 
+// TODO: fill ProjectNode
 impl ToBatchProst for BatchProject {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::Project(ProjectNode {
