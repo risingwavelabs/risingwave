@@ -7,7 +7,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::plan::exchange_info::DistributionMode;
-use risingwave_pb::plan::{ExchangeInfo, PlanFragment, PlanNode, TaskId, TaskSinkId};
+use risingwave_pb::plan::{ExchangeInfo, PlanFragment, PlanNode, TaskId, TaskOutputId};
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::task_service_client::TaskServiceClient;
 use risingwave_pb::task_service::{
@@ -41,29 +41,29 @@ impl ComputeClient {
         })
     }
 
-    pub async fn get_data(&self, sink_id: TaskSinkId) -> Result<GrpcExchangeSource> {
-        let stream = self.get_data_inner(sink_id.clone()).await?;
+    pub async fn get_data(&self, output_id: TaskOutputId) -> Result<GrpcExchangeSource> {
+        let stream = self.get_data_inner(output_id.clone()).await?;
         let addr = self.addr;
         Ok(GrpcExchangeSource {
             client: self.clone(),
             stream,
             addr,
-            task_id: sink_id.get_task_id().unwrap().clone(),
-            sink_id,
+            task_id: output_id.get_task_id().unwrap().clone(),
+            output_id,
         })
     }
 
-    async fn get_data_inner(&self, sink_id: TaskSinkId) -> Result<Streaming<GetDataResponse>> {
+    async fn get_data_inner(&self, output_id: TaskOutputId) -> Result<Streaming<GetDataResponse>> {
         Ok(self
             .exchange_client
             .to_owned()
             .get_data(GetDataRequest {
-                sink_id: Some(sink_id.clone()),
+                task_output_id: Some(output_id.clone()),
             })
             .await
             .to_rw_result_with(format!(
-                "failed to create stream {:?} for sink_id={:?}",
-                self.addr, sink_id
+                "failed to create stream {:?} for output_id={:?}",
+                self.addr, output_id
             ))?
             .into_inner())
     }
@@ -130,14 +130,14 @@ pub struct GrpcExchangeSource {
 
     // Address of the remote endpoint.
     addr: SocketAddr,
-    sink_id: TaskSinkId,
+    output_id: TaskOutputId,
     task_id: TaskId,
 }
 
 impl GrpcExchangeSource {
-    pub async fn create(addr: SocketAddr, sink_id: TaskSinkId) -> Result<Self> {
+    pub async fn create(addr: SocketAddr, output_id: TaskOutputId) -> Result<Self> {
         let client = ComputeClient::new(&addr).await?;
-        client.get_data(sink_id).await
+        client.get_data(output_id).await
     }
 
     pub async fn create_with_client(
@@ -160,9 +160,9 @@ impl ExchangeSource for GrpcExchangeSource {
         let data = DataChunk::from_protobuf(task_data.get_record_batch()?)?.compact()?;
 
         trace!(
-            "Receiver task: {:?}, sink = {:?}, data = {:?}",
+            "Receiver task: {:?}, output = {:?}, data = {:?}",
             self.task_id,
-            self.sink_id,
+            self.output_id,
             data
         );
 

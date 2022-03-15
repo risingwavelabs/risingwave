@@ -1,5 +1,4 @@
 use paste::paste;
-use risingwave_pb::plan::exchange_info::hash_info::HashMethod;
 use risingwave_pb::plan::exchange_info::{
     BroadcastInfo, Distribution as DistributionProst, DistributionMode, HashInfo,
 };
@@ -40,7 +39,6 @@ impl Distribution {
                 Distribution::HashShard(keys) => Some(DistributionProst::HashInfo(HashInfo {
                     output_count,
                     keys: keys.iter().map(|num| *num as u32).collect(),
-                    hash_method: HashMethod::Crc32 as i32,
                 })),
                 // TODO: Should panic if AnyShard or Any
                 Distribution::AnyShard | Distribution::Any => None,
