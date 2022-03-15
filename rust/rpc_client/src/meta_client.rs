@@ -7,6 +7,12 @@ use risingwave_common::catalog::{CatalogVersion, TableId};
 use risingwave_common::error::ErrorCode::{self, InternalError};
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::try_match_expand;
+use risingwave_pb::catalog::{
+    CreateDatabaseRequest, CreateDatabaseResponse, CreateMaterializedSourceRequest,
+    CreateMaterializedSourceResponse, CreateMaterializedViewRequest,
+    CreateMaterializedViewResponse, CreateSchemaRequest, CreateSchemaResponse,
+    Database as ProstDatabase, Schema as ProstSchema, Table as ProstTable,
+};
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::{
@@ -273,10 +279,12 @@ pub trait MetaClientInner: Send + Sync {
         Err(ErrorCode::NotImplementedError("heartbeat is not implemented".into()).into())
     }
 
+    // the old catalog interface will be deprecated soon
     async fn create(&self, _req: CreateRequest) -> Result<CreateResponse> {
         unimplemented!()
     }
 
+    // the old catalog interface will be deprecated soon
     async fn drop(&self, _req: DropRequest) -> Result<DropResponse> {
         unimplemented!()
     }
@@ -285,6 +293,7 @@ pub trait MetaClientInner: Send + Sync {
         unimplemented!()
     }
 
+    // the old catalog interface will be deprecated soon
     async fn get_catalog(&self, _req: GetCatalogRequest) -> Result<GetCatalogResponse> {
         unimplemented!()
     }
@@ -342,6 +351,28 @@ pub trait MetaClientInner: Send + Sync {
         &self,
         _req: SubscribeCompactTasksRequest,
     ) -> std::result::Result<Streaming<SubscribeCompactTasksResponse>, tonic::Status> {
+        unimplemented!()
+    }
+
+    async fn create_database(&self, _req: CreateDatabaseRequest) -> Result<CreateDatabaseResponse> {
+        unimplemented!()
+    }
+
+    async fn create_schema(&self, _req: CreateSchemaRequest) -> Result<CreateSchemaResponse> {
+        unimplemented!()
+    }
+
+    async fn create_materialized_source(
+        &self,
+        _req: CreateMaterializedSourceRequest,
+    ) -> Result<CreateMaterializedSourceResponse> {
+        unimplemented!()
+    }
+
+    async fn create_materialized_view(
+        &self,
+        _req: CreateMaterializedViewRequest,
+    ) -> Result<CreateMaterializedViewResponse> {
         unimplemented!()
     }
 }
