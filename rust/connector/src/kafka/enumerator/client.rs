@@ -32,6 +32,20 @@ pub struct KafkaSplitEnumerator {
     stop_offset: KafkaOffset,
 }
 
+impl KafkaSplitEnumerator {
+    pub fn new(properties: &HashMap<String, String>) -> KafkaSplitEnumerator {
+
+        let client = BaseConsumer::client()
+
+        KafkaSplitEnumerator {
+            broker_address: properties.get("bootstrap.servers").unwrap().to_string(),
+            topic: properties.get("topic").unwrap().to_string(),
+            start_offset: KafkaOffset::Earliest,
+            stop_offset: KafkaOffset::Latest,
+        }
+    }
+}
+
 #[async_trait]
 impl SplitEnumerator for KafkaSplitEnumerator {
     type Split = KafkaSplit;

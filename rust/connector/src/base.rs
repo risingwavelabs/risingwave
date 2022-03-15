@@ -15,7 +15,10 @@
 use anyhow::Result;
 use std::collections::{BTreeMap, HashMap};
 use std::hash::Hash;
-use anyhow::Error;
+
+use anyhow::{anyhow, Error};
+
+
 use async_trait::async_trait;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
@@ -64,7 +67,17 @@ pub enum SplitEnumeratorImpl {
     Pulsar(pulsar::enumerator::PulsarSplitEnumerator),
 }
 
-
 pub fn extract_split_enumerator(properties: &HashMap<String, String>) -> Result<SplitEnumeratorImpl> {
+    let source_type = match properties.get("upstream.source") {
+        None => return Err(anyhow!("upstream.source not found")),
+        Some(value) => value,
+    };
+
+    match source_type.as_ref() {
+        "kafka" => {
+            kafka::enumerator::KafkaSplitEnumerator { broker_address: val, topic: val, admin_client: val, start_offset: val, stop_offset: val }
+        }
+    }
+
     todo!()
 }
