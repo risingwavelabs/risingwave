@@ -227,6 +227,7 @@ macro_rules! for_all_plan_nodes {
             ,{ Logical, Project }
             ,{ Logical, Scan }
             ,{ Logical, Insert }
+            ,{ Logical, Delete }
             ,{ Logical, Join }
             ,{ Logical, Values }
             ,{ Logical, Limit }
@@ -260,6 +261,7 @@ macro_rules! for_logical_plan_nodes {
             ,{ Logical, Project }
             ,{ Logical, Scan }
             ,{ Logical, Insert }
+            ,{ Logical, Delete }
             ,{ Logical, Join }
             ,{ Logical, Values }
             ,{ Logical, Limit }
@@ -310,7 +312,7 @@ macro_rules! enum_plan_node_type {
         paste!{
             /// each enum value represent a PlanNode struct type, help us to dispatch and downcast
             #[derive(PartialEq, Debug)]
-            pub enum PlanNodeType{
+            pub enum PlanNodeType {
                 $( [<$convention $name>] ),*
             }
 
