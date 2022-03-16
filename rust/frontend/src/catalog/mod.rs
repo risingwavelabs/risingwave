@@ -2,6 +2,7 @@
 use risingwave_common::error::{ErrorCode, RwError};
 use thiserror::Error;
 
+pub(crate) mod catalog_connector;
 pub(crate) mod catalog_service;
 pub(crate) mod database_catalog;
 mod schema_catalog;
@@ -11,8 +12,6 @@ pub(crate) type DatabaseId = u32;
 pub(crate) type SchemaId = u32;
 pub(crate) type TableId = risingwave_common::catalog::TableId;
 pub(crate) type ColumnId = risingwave_common::catalog::ColumnId;
-
-pub use catalog_service::CatalogConnector;
 
 #[derive(Error, Debug)]
 pub enum CatalogError {

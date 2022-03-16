@@ -13,7 +13,7 @@ use risingwave_rpc_client::{MetaClient, NotificationStream};
 use tokio::sync::watch::Sender;
 use tokio::task::JoinHandle;
 
-use crate::catalog::catalog_service::CatalogCache;
+use crate::catalog::catalog_service::Catalog;
 use crate::catalog::{CatalogError, DatabaseId, SchemaId};
 use crate::scheduler::schedule::WorkerNodeManagerRef;
 
@@ -23,7 +23,7 @@ use crate::scheduler::schedule::WorkerNodeManagerRef;
 pub(crate) struct ObserverManager {
     rx: Box<dyn NotificationStream>,
     worker_node_manager: WorkerNodeManagerRef,
-    catalog_cache: Arc<RwLock<CatalogCache>>,
+    catalog_cache: Arc<RwLock<Catalog>>,
     catalog_updated_tx: Sender<CatalogVersion>,
 }
 
@@ -32,7 +32,7 @@ impl ObserverManager {
         client: MetaClient,
         addr: SocketAddr,
         worker_node_manager: WorkerNodeManagerRef,
-        catalog_cache: Arc<RwLock<CatalogCache>>,
+        catalog_cache: Arc<RwLock<Catalog>>,
         catalog_updated_tx: Sender<CatalogVersion>,
     ) -> Self {
         let rx = client.subscribe(addr, WorkerType::Frontend).await.unwrap();
