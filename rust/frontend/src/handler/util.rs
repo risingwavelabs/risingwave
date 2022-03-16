@@ -26,10 +26,17 @@ pub fn get_pg_field_descs(bound: BoundStatement) -> Result<Vec<PgFieldDescriptor
         if let BoundSetExpr::Select(select) = query.body {
             let mut pg_descs = vec![];
             for i in 0..select.select_items.len() {
-                pg_descs.push(PgFieldDescriptor::new(
-                    select.aliases[i].as_ref().unwrap().to_string(),
-                    data_type_to_type_oid(select.select_items[i].return_type()),
-                ));
+                if let Some(t) = select.aliases[i].as_ref() {
+                    pg_descs.push(PgFieldDescriptor::new(
+                        t.to_string(),
+                        data_type_to_type_oid(select.select_items[i].return_type()),
+                    ));
+                } else {
+                    return Err(ErrorCode::InternalError(
+                        "select aliase cannot be None".to_string(),
+                    )
+                    .into());
+                }
             }
             Ok(pg_descs)
         } else {
@@ -88,7 +95,7 @@ mod tests {
             ],
             aliases: vec![
                 Some("column1".to_string()),
-                Some("column2".to_string()),
+                Some("".to_string()),
                 Some("column3".to_string()),
             ],
             from: None,
@@ -108,11 +115,7 @@ mod tests {
                 .into_iter()
                 .map(|p| { p.get_name().to_string() })
                 .collect_vec(),
-            [
-                "column1".to_string(),
-                "column2".to_string(),
-                "column3".to_string()
-            ]
+            ["column1".to_string(), "".to_string(), "column3".to_string()]
         );
         assert_eq!(
             pg_descs
