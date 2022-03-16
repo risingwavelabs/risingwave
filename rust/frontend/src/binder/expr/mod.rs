@@ -91,19 +91,22 @@ impl Binder {
         else_result: Option<Box<Expr>>,
     ) -> Result<FunctionCall> {
         let mut inputs = Vec::new();
-        for item in &conditions {
-            let _item = match operand {
+        // suppose lengths of conditions and results are the same
+        if conditions.len() != results.len() {
+            todo!();
+        }
+        for i in 0..conditions.len() {
+            let condition = conditions.get(i).unwrap();
+            let _condition = match operand {
                 Some(ref t) => Expr::BinaryOp {
                     left: t.clone(),
                     op: BinaryOperator::Eq,
-                    right: Box::new(item.clone()),
+                    right: Box::new(condition.clone()),
                 },
-                None => item.clone(),
+                None => condition.clone(),
             };
-            inputs.push(self.bind_expr(_item)?);
-        }
-        for item in &results {
-            inputs.push(self.bind_expr(item.clone())?);
+            inputs.push(self.bind_expr(_condition)?);
+            inputs.push(self.bind_expr(results.get(i).unwrap().clone())?);
         }
         if let Some(expr) = else_result.clone() {
             inputs.push(self.bind_expr(*expr)?);
