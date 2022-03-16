@@ -66,7 +66,7 @@ impl Binder {
         // Bind GROUP BY clause.
         let group_by = select
             .group_by
-            .drain(..)
+            .into_iter()
             .map(|expr| self.bind_expr(expr))
             .try_collect()?;
 

@@ -8,14 +8,17 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::expr::AggKind;
 use risingwave_common::types::DataType;
 
-use super::{ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use super::{
+    BatchHashAgg, BatchSimpleAgg, ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary,
+    StreamHashAgg, StreamSimpleAgg, ToBatch, ToStream,
+};
 use crate::expr::{AggCall, Expr, ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::plan_node::LogicalProject;
 use crate::optimizer::property::WithSchema;
 use crate::utils::ColIndexMapping;
 
 /// Aggregation Call
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct PlanAggCall {
     /// Kind of aggregation function
     pub agg_kind: AggKind,
@@ -25,6 +28,15 @@ pub struct PlanAggCall {
 
     /// Column indexes of input columns
     pub inputs: Vec<usize>,
+}
+
+impl fmt::Debug for PlanAggCall {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AggCall")
+            .field("agg_kind", &self.agg_kind)
+            .field("inputs", &self.inputs)
+            .finish()
+    }
 }
 
 /// `LogicalAgg` groups input data by their group keys and computes aggregation functions.
@@ -86,14 +98,30 @@ impl ExprRewriter for ExprHandler {
         let return_type = agg_call.return_type();
         let (agg_kind, inputs) = agg_call.decompose();
 
-        let begin = self.project.len();
+        // Deal with special cases like `select v1, max(v2) + min(v3) * count(v1) from t group by
+        // v1;`, in which columns appear in GROUP BY clause also appear in aggregates' input.
+        let mut begin = self.project.len();
+        let mut input_indexes = vec![];
+        let inputs: Vec<ExprImpl> = inputs
+            .into_iter()
+            .filter(|expr| {
+                if let ExprImpl::InputRef(input_ref) = expr {
+                    if let Some(index) = self.group_column_index.get(input_ref) {
+                        input_indexes.push(*index);
+                        return false;
+                    }
+                }
+                input_indexes.push(begin);
+                begin += 1;
+                true
+            })
+            .collect();
         self.project.extend(inputs);
-        let end = self.project.len();
 
         self.agg_calls.push(PlanAggCall {
             agg_kind,
             return_type: return_type.clone(),
-            inputs: (begin..end).collect(),
+            inputs: input_indexes,
         });
         ExprImpl::from(InputRef::new(
             self.group_column_index.len() + self.agg_calls.len() - 1,
@@ -174,7 +202,6 @@ impl LogicalAgg {
     /// ```text
     /// LogicalProject -> LogicalAgg -> LogicalProject -> input
     /// ```
-    #[allow(unused_variables)]
     pub fn create(
         select_exprs: Vec<ExprImpl>,
         select_alias: Vec<Option<String>>,
@@ -247,11 +274,12 @@ impl PlanTreeNodeUnary for LogicalAgg {
     }
 }
 impl_plan_tree_node_for_unary! {LogicalAgg}
+
 impl fmt::Display for LogicalAgg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("LogicalAgg")
             .field("agg_calls", &self.agg_calls)
-            .field("agg_call_alias", &self.agg_call_alias)
+            .field("group_keys", &self.group_keys)
             .finish()
     }
 }
@@ -314,13 +342,25 @@ impl ColPrunable for LogicalAgg {
 
 impl ToBatch for LogicalAgg {
     fn to_batch(&self) -> PlanRef {
-        todo!()
+        let new_input = self.input().to_batch();
+        let new_logical = self.clone_with_input(new_input);
+        if self.group_keys().is_empty() {
+            BatchSimpleAgg::new(new_logical).into()
+        } else {
+            BatchHashAgg::new(new_logical).into()
+        }
     }
 }
 
 impl ToStream for LogicalAgg {
     fn to_stream(&self) -> PlanRef {
-        todo!()
+        let new_input = self.input().to_batch();
+        let new_logical = self.clone_with_input(new_input);
+        if self.group_keys().is_empty() {
+            StreamSimpleAgg::new(new_logical).into()
+        } else {
+            StreamHashAgg::new(new_logical).into()
+        }
     }
 }
 
