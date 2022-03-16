@@ -113,33 +113,6 @@ impl FrontendMockMetaClient {
 
 #[async_trait::async_trait]
 impl MetaClientInner for FrontendMockMetaClient {
-    async fn create(&self, req: CreateRequest) -> Result<CreateResponse> {
-        Ok(self
-            .catalog_srv
-            .create(Request::new(req))
-            .await
-            .to_rw_result()?
-            .into_inner())
-    }
-
-    async fn drop(&self, req: DropRequest) -> Result<DropResponse> {
-        Ok(self
-            .catalog_srv
-            .drop(Request::new(req))
-            .await
-            .to_rw_result()?
-            .into_inner())
-    }
-
-    async fn get_catalog(&self, req: GetCatalogRequest) -> Result<GetCatalogResponse> {
-        Ok(self
-            .catalog_srv
-            .get_catalog(Request::new(req))
-            .await
-            .to_rw_result()?
-            .into_inner())
-    }
-
     async fn list_all_nodes(&self, req: ListAllNodesRequest) -> Result<ListAllNodesResponse> {
         Ok(self
             .cluster_srv
