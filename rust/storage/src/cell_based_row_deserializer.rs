@@ -131,8 +131,6 @@ mod tests {
         let mut result = vec![];
         let mut deserializer = CellBasedRowDeserializer::new(partial_table_column_descs);
         for (key_bytes, value_bytes) in bytes {
-            println!("key: {:?}", Bytes::from(key_bytes.clone()));
-            println!("value: {:?} ", Bytes::from(value_bytes.clone().unwrap()));
             let pk_and_row = deserializer
                 .deserialize(&Bytes::from(key_bytes), &Bytes::from(value_bytes.unwrap()))
                 .unwrap();
