@@ -24,7 +24,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /** Handler of user queries. */
-@HandlerSignature(sqlKinds = {SqlKind.SELECT, SqlKind.INSERT, SqlKind.ORDER_BY})
+@HandlerSignature(sqlKinds = {SqlKind.SELECT, SqlKind.INSERT, SqlKind.DELETE, SqlKind.ORDER_BY})
 public class QueryHandler implements SqlHandler {
 
   private static final Logger log = LoggerFactory.getLogger(QueryHandler.class);
