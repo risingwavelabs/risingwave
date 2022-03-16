@@ -7,7 +7,7 @@ use pgwire::types::Row;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::Statement;
 
-use crate::binder::{Binder, BoundStatement};
+use crate::binder::Binder;
 use crate::planner::Planner;
 use crate::session::QueryContext;
 
@@ -22,19 +22,20 @@ pub(super) fn handle_explain(
     let catalog = catalog_mgr
         .get_database_snapshot(session.database())
         .unwrap();
-    // bind, plan, optimize, and serialize here
-    let mut binder = Binder::new(catalog);
-    let bound = binder.bind(stmt)?;
 
-    let res = match &bound {
-        BoundStatement::CreateView(_) => {
+    let res = match &stmt {
+        Statement::CreateView {
+            or_replace: false,
+            materialized: true,
+            query,
+            ..
+        } => {
+            let mut binder = Binder::new(catalog);
+            let bound = binder.bind(Statement::Query(query.clone()))?;
             let mut planner = Planner::new(context);
             let logical = planner.plan(bound)?;
             let stream = logical.gen_create_mv_plan();
-            let mut output = String::new();
-            stream
-                .explain(0, &mut output)
-                .map_err(|e| ErrorCode::InternalError(e.to_string()))?;
+            let output = stream.explain_to_string()?;
 
             let rows = output
                 .lines()
@@ -51,14 +52,13 @@ pub(super) fn handle_explain(
                 )],
             )
         }
-        BoundStatement::Query(_) => {
+        Statement::Query(query) => {
+            let mut binder = Binder::new(catalog);
+            let bound = binder.bind(Statement::Query(query.clone()))?;
             let mut planner = Planner::new(context);
             let logical = planner.plan(bound)?;
             let batch = logical.gen_batch_query_plan();
-            let mut output = String::new();
-            batch
-                .explain(0, &mut output)
-                .map_err(|e| ErrorCode::InternalError(e.to_string()))?;
+            let output = batch.explain_to_string()?;
 
             let rows = output
                 .lines()

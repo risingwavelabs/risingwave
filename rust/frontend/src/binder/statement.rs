@@ -9,7 +9,6 @@ pub enum BoundStatement {
     Insert(Box<BoundInsert>),
     Delete(Box<BoundDelete>),
     Query(Box<BoundQuery>),
-    CreateView(Box<BoundQuery>),
 }
 
 impl Binder {

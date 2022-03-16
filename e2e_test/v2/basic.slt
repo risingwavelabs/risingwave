@@ -1,9 +1,3 @@
-query T
-explain select 1;
-----
-BatchProject { exprs: [1:Int32], expr_alias: [None] }
-    BatchValues { rows: [[]] }
-
 statement ok
 create table t (v1 int not null);
 
