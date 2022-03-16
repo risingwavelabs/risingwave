@@ -76,7 +76,7 @@ fn load_config(opts: &FrontendOpts) -> FrontendConfig {
 pub struct FrontendEnv {
     meta_client: MetaClient,
     // Different session may access catalog manager at the same time.
-    catalog_manager: CatalogConnector,
+    catalog_connector: CatalogConnector,
 }
 
 impl FrontendEnv {

@@ -1,7 +1,8 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use parking_lot::lock_api::ArcRwLockReadGuard;
-use parking_lot::RawRwLock;
+use parking_lot::{RawRwLock, RwLock};
 use risingwave_common::catalog::{CatalogVersion, TableId};
 use risingwave_meta::manager::SourceId;
 use risingwave_pb::catalog::{
@@ -12,8 +13,13 @@ use crate::catalog::database_catalog::DatabaseCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::{DatabaseId, SchemaId};
-
-pub struct CatalogReadGuard(ArcRwLockReadGuard<RawRwLock, Catalog>);
+pub type CatalogReadGuard = ArcRwLockReadGuard<RawRwLock, Catalog>;
+pub struct CatalogReader(Arc<RwLock<Catalog>>);
+impl CatalogReader {
+    fn read_guard(&self) -> CatalogReadGuard {
+        self.0.read_arc()
+    }
+}
 
 /// Root catalog of database catalog. Manage all database/schema/table in memory on frontend. it
 /// is protected by a RwLock. only [`ObserverManager`] will get its mut reference and do write to
