@@ -132,40 +132,44 @@ jobs:
       - name: Prepare RiseDev playground
         run: ~/cargo-make/makers pre-start-playground
       - name: e2e test streaming 3-node
+        timeout-minutes: 2
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-3node
-          timeout 120s sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
+          sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
           ~/cargo-make/makers logs
           ~/cargo-make/makers check-logs
       - name: e2e test rust frontend
+        timeout-minutes: 1
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-v2
-          timeout 1m sqllogictest -p 4566 -d dev './e2e_test/v2/*.slt'
+          sqllogictest -p 4566 -d dev './e2e_test/v2/*.slt'
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
           ~/cargo-make/makers logs
           ~/cargo-make/makers check-logs
       - name: e2e test streaming 3-node w/o cache
+        timeout-minutes: 2
         run: |
           ~/cargo-make/makers clean-data
           RW_NO_CACHE=1 ~/cargo-make/makers ci-3node
-          timeout 120s sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
+          sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
           ~/cargo-make/makers logs
           ~/cargo-make/makers check-logs
       - name: e2e test batch 3-node
+        timeout-minutes: 2
         run: |
           ~/cargo-make/makers clean-data
           RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-3node
-          timeout 130s sqllogictest -p 4567 -d dev --engine risingwave './e2e_test/batch/**/*.slt'
+          sqllogictest -p 4567 -d dev --engine risingwave './e2e_test/batch/**/*.slt'
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
