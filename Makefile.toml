@@ -5,6 +5,7 @@ extend = [
   {path = "rust/risedevtool/etcd.toml"},
   {path = "rust/risedevtool/jaeger.toml"},
   {path = "rust/risedevtool/risedev-components.toml"},
+  {path = "rust/frontend/test_runner/planner_test.toml"},
 ]
 
 env_files = [
@@ -269,13 +270,3 @@ alias = "kill-risedev"
 
 [tasks.fill-kafka]
 command = "scripts/source/prepare_source.sh"
-
-[tasks.apply-planner-test]
-script = '''
-#!/bin/bash
-set -e
-cd rust && cargo run --bin planner-test-apply
-for f in frontend/test_runner/tests/testdata/*.apply.yaml; do
-  yq -N -I4 -i '.. style="literal"' "$f"
-done
-'''
