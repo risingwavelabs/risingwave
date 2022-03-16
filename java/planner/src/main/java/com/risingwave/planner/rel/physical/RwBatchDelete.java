@@ -75,6 +75,7 @@ public class RwBatchDelete extends TableModify implements RisingWaveBatchPhyRel 
         .build();
   }
 
+  // Patch the `RwBatchScan` to contain all columns including the hidden `_row_id`.
   private static void patchScan(RelNode node, MaterializedViewCatalog mvCatalog) {
     var inputLength = node.getInputs().size();
     for (var i = 0; i < inputLength; i++) {
