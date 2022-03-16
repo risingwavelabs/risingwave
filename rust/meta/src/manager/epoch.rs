@@ -86,6 +86,8 @@ impl EpochGenerator for MemEpochGenerator {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::error::Result;
+
     use super::*;
 
     #[test]
