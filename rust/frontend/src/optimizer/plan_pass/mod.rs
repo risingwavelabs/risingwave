@@ -10,7 +10,7 @@ mod heuristic;
 pub use heuristic::*;
 
 /// `PlanPass` receive a plan tree and transform it to a new one.
-trait PlanPass {
+pub trait PlanPass {
     fn pass(&mut self, plan: PlanRef) -> PlanRef {
         self.pass_with_require(plan, Order::any(), Distribution::any())
     }

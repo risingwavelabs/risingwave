@@ -32,17 +32,19 @@ with the expected tree.
 
 Firstly, we will need to create a placeholder in yaml testcases:
 
-```
+```yaml
 - sql: |
     create table t1 (v1 int, v2 int);
     create table t2 (v1 int, v2 int);
     create table t3 (v1 int, v2 int);
     select * from t1 join t2 on (t1.v1 = t2.v1) join t3 on (t2.v2 = t3.v2);
-  batch_plan: test
+  logical_plan: ""
+  batch_plan: ""
+  stream_plan: ""
 ```
 
 ```
 ./risedev apply-planner-test
 ```
 
-Then we can find the updated tests at `*.apply.yaml`
+Then we can find the updated tests at `*.apply.yaml`. If everything is okay, you may copy and overwrite the current plan tests.

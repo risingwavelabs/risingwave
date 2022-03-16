@@ -34,6 +34,7 @@ impl NotificationService for NotificationServiceImpl {
         let rx = self
             .nm
             .subscribe(host_address, worker_type)
+            .await
             .map_err(|e| e.to_grpc_status())?;
 
         Ok(Response::new(rx))

@@ -152,6 +152,7 @@ pub use eq_join_predicate::*;
 mod to_prost;
 pub use to_prost::*;
 
+mod batch_delete;
 mod batch_exchange;
 mod batch_filter;
 mod batch_hash_join;
@@ -160,7 +161,6 @@ mod batch_limit;
 mod batch_project;
 mod batch_seq_scan;
 mod batch_sort;
-mod batch_sort_merge_join;
 mod batch_values;
 mod logical_agg;
 mod logical_delete;
@@ -178,6 +178,7 @@ mod stream_hash_join;
 mod stream_project;
 mod stream_table_source;
 
+pub use batch_delete::BatchDelete;
 pub use batch_exchange::BatchExchange;
 pub use batch_filter::BatchFilter;
 pub use batch_hash_join::BatchHashJoin;
@@ -186,7 +187,6 @@ pub use batch_limit::BatchLimit;
 pub use batch_project::BatchProject;
 pub use batch_seq_scan::BatchSeqScan;
 pub use batch_sort::BatchSort;
-pub use batch_sort_merge_join::BatchSortMergeJoin;
 pub use batch_values::BatchValues;
 pub use logical_agg::LogicalAgg;
 pub use logical_delete::LogicalDelete;
@@ -238,10 +238,10 @@ macro_rules! for_all_plan_nodes {
             ,{ Batch, Project }
             ,{ Batch, Filter }
             ,{ Batch, Insert }
+            ,{ Batch, Delete }
             ,{ Batch, SeqScan }
             ,{ Batch, HashJoin }
             ,{ Batch, Values }
-            ,{ Batch, SortMergeJoin }
             ,{ Batch, Sort }
             ,{ Batch, Exchange }
             ,{ Batch, Limit }
@@ -287,10 +287,10 @@ macro_rules! for_batch_plan_nodes {
             ,{ Batch, HashJoin }
             ,{ Batch, Values }
             ,{ Batch, Limit }
-            ,{ Batch, SortMergeJoin }
             ,{ Batch, Sort }
             ,{ Batch, Exchange }
             ,{ Batch, Insert }
+            ,{ Batch, Delete }
         }
     };
 }
