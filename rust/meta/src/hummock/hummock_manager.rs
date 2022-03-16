@@ -62,7 +62,7 @@ where
     S: MetaStore,
 {
     pub async fn new(env: MetaSrvEnv<S>, metrics: Arc<MetaMetrics>) -> Result<HummockManager<S>> {
-        let mut instance = HummockManager {
+        let instance = HummockManager {
             id_gen_manager_ref: env.id_gen_manager_ref(),
             versioning: RwLock::new(Versioning {
                 meta_store_ref: env.meta_store_ref(),
@@ -85,7 +85,7 @@ where
     }
 
     /// load state from meta store.
-    async fn load_meta_store_state(&mut self) -> Result<()> {
+    async fn load_meta_store_state(&self) -> Result<()> {
         let mut compaction_guard = self.compaction.lock().await;
         compaction_guard.compact_status =
             CompactStatus::get(compaction_guard.meta_store_ref.as_ref())
@@ -107,25 +107,27 @@ where
 
         // Insert the initial version.
         if versioning_guard.hummock_versions.is_empty() {
-            let init_version_id = versioning_guard.current_version_id.id();
-            versioning_guard.hummock_versions.insert(
-                init_version_id,
-                HummockVersion {
-                    id: init_version_id,
-                    levels: vec![
-                        Level {
-                            level_type: LevelType::Overlapping as i32,
-                            table_ids: vec![],
-                        },
-                        Level {
-                            level_type: LevelType::Nonoverlapping as i32,
-                            table_ids: vec![],
-                        },
-                    ],
-                    uncommitted_epochs: vec![],
-                    max_committed_epoch: INVALID_EPOCH,
-                },
-            );
+            let init_version = HummockVersion {
+                id: versioning_guard.current_version_id.id(),
+                levels: vec![
+                    Level {
+                        level_type: LevelType::Overlapping as i32,
+                        table_ids: vec![],
+                    },
+                    Level {
+                        level_type: LevelType::Nonoverlapping as i32,
+                        table_ids: vec![],
+                    },
+                ],
+                uncommitted_epochs: vec![],
+                max_committed_epoch: INVALID_EPOCH,
+            };
+            init_version
+                .insert(versioning_guard.meta_store_ref.as_ref())
+                .await?;
+            versioning_guard
+                .hummock_versions
+                .insert(init_version.id, init_version);
         }
 
         versioning_guard.pinned_versions =
@@ -206,11 +208,19 @@ where
             context_pinned_version_copy,
         );
 
-        Ok(versioning_guard
+        let ret = Ok(versioning_guard
             .hummock_versions
             .get(&version_id)
             .unwrap()
-            .clone())
+            .clone());
+
+        #[cfg(test)]
+        {
+            drop(versioning_guard);
+            self.check_state_consistency().await;
+        }
+
+        ret
     }
 
     pub async fn unpin_version(
@@ -240,6 +250,13 @@ where
             context_pinned_version_copy.context_id,
             context_pinned_version_copy,
         );
+
+        #[cfg(test)]
+        {
+            drop(versioning_guard);
+            self.check_state_consistency().await;
+        }
+
         Ok(())
     }
 
@@ -413,6 +430,13 @@ where
             .hummock_versions
             .insert(hummock_version_copy.id, hummock_version_copy.clone());
 
+        #[cfg(test)]
+        {
+            drop(versioning_guard);
+            drop(compaction_guard);
+            self.check_state_consistency().await;
+        }
+
         Ok(hummock_version_copy)
     }
 
@@ -451,6 +475,12 @@ where
             context_pinned_snapshot_copy,
         );
 
+        #[cfg(test)]
+        {
+            drop(versioning_guard);
+            self.check_state_consistency().await;
+        }
+
         Ok(HummockSnapshot {
             epoch: max_committed_epoch,
         })
@@ -486,6 +516,12 @@ where
             context_pinned_snapshot_copy,
         );
 
+        #[cfg(test)]
+        {
+            drop(versioning_guard);
+            self.check_state_consistency().await;
+        }
+
         Ok(())
     }
 
@@ -493,7 +529,7 @@ where
         let mut compaction_guard = self.compaction.lock().await;
         let mut compact_status_copy = compaction_guard.compact_status.clone();
         let compact_task = compact_status_copy.get_compact_task();
-        match compact_task {
+        let ret = match compact_task {
             None => Ok(None),
             Some(mut compact_task) => {
                 let mut transaction = Transaction::default();
@@ -518,7 +554,15 @@ where
                 compaction_guard.compact_status = compact_status_copy;
                 Ok(Some(compact_task))
             }
+        };
+
+        #[cfg(test)]
+        {
+            drop(compaction_guard);
+            self.check_state_consistency().await;
         }
+
+        ret
     }
 
     /// `report_compact_task` is retryable. `task_id` in `compact_task` parameter is used as the
@@ -647,6 +691,12 @@ where
         self.trigger_sst_stat(&compaction_guard.compact_status);
         self.trigger_rw_stat(compact_task_metrics.as_ref().unwrap());
 
+        #[cfg(test)]
+        {
+            drop(compaction_guard);
+            self.check_state_consistency().await;
+        }
+
         Ok(true)
     }
 
@@ -708,6 +758,13 @@ where
             .hummock_versions
             .insert(hummock_version_copy.id, hummock_version_copy);
         tracing::trace!("new committed epoch {}", epoch);
+
+        #[cfg(test)]
+        {
+            drop(versioning_guard);
+            self.check_state_consistency().await;
+        }
+
         Ok(())
     }
 
@@ -725,7 +782,7 @@ where
             .clone();
 
         // get tables in the committing epoch
-        match hummock_version_copy
+        let ret = match hummock_version_copy
             .uncommitted_epochs
             .iter()
             .position(|e| e.epoch == epoch)
@@ -756,7 +813,15 @@ where
                 Ok(())
             }
             None => Ok(()),
+        };
+
+        #[cfg(test)]
+        {
+            drop(versioning_guard);
+            self.check_state_consistency().await;
         }
+
+        ret
     }
 
     pub async fn get_new_table_id(&self) -> Result<HummockSSTableId> {
@@ -800,6 +865,13 @@ where
         // Update in-mem state
         versioning_guard.pinned_versions.remove(&context_id);
         versioning_guard.pinned_snapshots.remove(&context_id);
+
+        #[cfg(test)]
+        {
+            drop(versioning_guard);
+            self.check_state_consistency().await;
+        }
+
         Ok(())
     }
 
@@ -883,6 +955,44 @@ where
         versioning_guard.hummock_versions.remove(&version_id);
         versioning_guard.stale_sstables.remove(&version_id);
 
+        #[cfg(test)]
+        {
+            drop(versioning_guard);
+            self.check_state_consistency().await;
+        }
+
         Ok(())
+    }
+
+    // TODO: use proc macro to call check_state_consistency
+    #[cfg(test)]
+    pub async fn check_state_consistency(&self) {
+        let get_state = || async {
+            let compaction_guard = self.compaction.lock().await;
+            let versioning_guard = self.versioning.read().await;
+            let compact_status_copy = compaction_guard.compact_status.clone();
+            let current_version_id_copy = versioning_guard.current_version_id.clone();
+            let hummmock_versions_copy = versioning_guard.hummock_versions.clone();
+            let pinned_versions_copy = versioning_guard.pinned_versions.clone();
+            let pinned_snapshots_copy = versioning_guard.pinned_snapshots.clone();
+            let stale_sstables_copy = versioning_guard.stale_sstables.clone();
+            (
+                compact_status_copy,
+                current_version_id_copy,
+                hummmock_versions_copy,
+                pinned_versions_copy,
+                pinned_snapshots_copy,
+                stale_sstables_copy,
+            )
+        };
+        let mem_state = get_state().await;
+        self.load_meta_store_state()
+            .await
+            .expect("Failed to load state from meta store");
+        let loaded_state = get_state().await;
+        assert_eq!(
+            mem_state, loaded_state,
+            "hummock in-mem state is inconsistent with meta store state",
+        );
     }
 }
