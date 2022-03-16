@@ -146,6 +146,7 @@ impl Compactor {
             sub_result?
         }
 
+        // `sorted_output_ssts` must be sorted by key range
         sub_compact_outputsets.sort_by_key(|(sub_kr_idx, _)| *sub_kr_idx);
         for (_, sub_output) in sub_compact_outputsets {
             for table in &sub_output {
@@ -225,6 +226,7 @@ impl Compactor {
             let epoch = get_epoch(iter_key);
 
             if epoch < watermark {
+                // Only retain latest key which satisfies epoch < watermark
                 skip_key = BytesMut::from(iter_key);
                 if matches!(iter.value(), HummockValue::Delete) && !has_user_key_overlap {
                     iter.next().await?;
@@ -232,6 +234,7 @@ impl Compactor {
                 }
             }
 
+            // Don't allow two SSTs to share same user key
             sst_builder
                 .add_full_key(FullKey::from_slice(iter_key), iter.value(), is_new_user_key)
                 .await?;

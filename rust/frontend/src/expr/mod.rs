@@ -8,6 +8,7 @@ pub use function_call::*;
 mod agg_call;
 pub use agg_call::*;
 mod type_inference;
+use risingwave_pb::expr::ExprNode;
 pub use type_inference::*;
 mod utils;
 pub use utils::*;
@@ -20,6 +21,15 @@ pub type ExprType = risingwave_pb::expr::expr_node::Type;
 /// the trait of bound exprssions
 pub trait Expr: Into<ExprImpl> {
     fn return_type(&self) -> DataType;
+
+    // TODO: replace this with real serialization cc @neverchanje
+    fn to_prost(&self) -> ExprNode {
+        ExprNode {
+            expr_type: 0,
+            rex_node: None,
+            return_type: None,
+        }
+    }
 }
 
 #[derive(Clone, PartialEq)]

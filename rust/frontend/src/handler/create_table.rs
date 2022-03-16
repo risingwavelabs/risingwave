@@ -17,7 +17,7 @@ fn columns_to_prost(columns: &[ColumnDef]) -> Result<Vec<ColumnDesc>> {
             Ok(ColumnDesc {
                 column_id: idx as i32,
                 name: col.name.to_string(),
-                column_type: Some(bind_data_type(&col.data_type)?.to_protobuf()?),
+                column_type: Some(bind_data_type(&col.data_type)?.to_protobuf()),
             })
         })
         .collect::<Result<_>>()
