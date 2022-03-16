@@ -15,7 +15,7 @@ fn configure_risingwave_targets_jaeger(targets: filter::Targets) -> filter::Targ
         .with_target("risingwave_stream", Level::TRACE)
         .with_target("risingwave_batch", Level::TRACE)
         .with_target("risingwave_storage", Level::TRACE)
-        .with_target("risingwave_sqlparser", Level::TRACE)
+        .with_target("risingwave_sqlparser", Level::INFO)
         // disable events that are too verbose
         // if you want to enable any of them, find the target name and set it to `TRACE`
         // .with_target("events::stream::mview::scan", Level::TRACE)
@@ -30,7 +30,7 @@ fn configure_risingwave_targets_fmt(targets: filter::Targets) -> filter::Targets
         .with_target("risingwave_stream", Level::DEBUG)
         .with_target("risingwave_batch", Level::DEBUG)
         .with_target("risingwave_storage", Level::DEBUG)
-        .with_target("risingwave_sqlparser", Level::DEBUG)
+        .with_target("risingwave_sqlparser", Level::INFO)
         // disable events that are too verbose
         // if you want to enable any of them, find the target name and set it to `TRACE`
         // .with_target("events::stream::mview::scan", Level::TRACE)
