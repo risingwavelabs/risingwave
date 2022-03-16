@@ -138,250 +138,189 @@ impl CatalogConnector {
     pub async fn create_database(&self, db_name: &str) -> Result<()> {
         let (_, version) = self
             .meta_client
-            .create_database(Database {
-                database_name: db_name.to_string(),
-                // Do not support MVCC DDL now.
-                ..Default::default()
+            .create_database(ProstDatabase {
+                name: db_name.to_string(),
+                id: 0,
             })
             .await?;
         self.wait_version(version).await
     }
 
-    pub async fn create_schema(&self, db_name: &str, schema_name: &str) -> Result<()> {
-        let database_id = self
-            .catalog_cache
-            .read()
-            .unwrap()
-            .get_database(db_name)
-            .ok_or_else(|| RwError::from(CatalogError::NotFound("database", db_name.to_string())))?
-            .id();
+    pub async fn create_schema(&self, db_id: DatabaseId, schema_name: &str) -> Result<()> {
         let (_, version) = self
             .meta_client
-            .create_schema(Schema {
-                schema_name: schema_name.to_string(),
-                version: 0,
-                schema_ref_id: Some(SchemaRefId {
-                    database_ref_id: Some(DatabaseRefId {
-                        database_id: database_id as i32,
-                    }),
-                    schema_id: 0,
-                }),
+            .create_schema(ProstSchema {
+                id: 0,
+                name: schema_name.to_string(),
+                database_id: db_id,
             })
             .await?;
         self.wait_version(version).await
     }
 
-    pub async fn create_table(
-        &self,
-        db_name: &str,
-        schema_name: &str,
-        mut table: Table,
-    ) -> Result<()> {
-        let database_id = self
-            .catalog_cache
-            .read()
-            .unwrap()
-            .get_database(db_name)
-            .ok_or_else(|| RwError::from(CatalogError::NotFound("database", db_name.to_string())))?
-            .id() as i32;
-        let schema_id = self
-            .catalog_cache
-            .read()
-            .unwrap()
-            .get_schema(db_name, schema_name)
-            .ok_or_else(|| {
-                RwError::from(CatalogError::NotFound("schema", schema_name.to_string()))
-            })?
-            .id() as i32;
-        let schema_ref_id = Some(SchemaRefId {
-            database_ref_id: Some(DatabaseRefId { database_id }),
-            schema_id,
-        });
-        table.table_ref_id = Some(TableRefId {
-            schema_ref_id: schema_ref_id.clone(),
-            table_id: 0,
-        });
-        // Append hidden column ROWID.
-        table.column_descs.insert(
-            0,
-            ColumnDesc {
-                name: ROWID_NAME.to_string(),
-                column_type: Some(DataType::Int64.to_protobuf()?),
-                ..Default::default()
-            },
-        );
-        let (_, version) = self.meta_client.create_table(table.clone()).await?;
-        self.wait_version(version).await
+    /// for the `CREATE TABLE statement`
+    pub async fn create_materialized_table_source(&self, table: ProstTable) -> Result<()> {
+        todo!()
     }
 
-    pub async fn drop_table(
+    // TODO: maybe here to pass a materialize plan node
+    pub async fn create_materialized_view(
         &self,
-        db_name: &str,
-        schema_name: &str,
-        table_name: &str,
+        db_id: DatabaseId,
+        schema_id: SchemaId,
     ) -> Result<()> {
-        let table_id = self
-            .catalog_cache
-            .read()
-            .unwrap()
-            .get_table(db_name, schema_name, table_name)
-            .ok_or_else(|| RwError::from(CatalogError::NotFound("table", table_name.to_string())))?
-            .id();
-
-        let table_ref_id = TableRefId::from(&table_id);
-        let version = self.meta_client.drop_table(table_ref_id).await?;
-        self.wait_version(version).await
+        todo!()
     }
 }
 
-#[cfg(test)]
-mod tests {
+// #[cfg(test)]
+// mod tests {
 
-    use std::sync::{Arc, RwLock};
+//     use std::sync::{Arc, RwLock};
 
-    use risingwave_common::types::DataType;
-    use risingwave_pb::meta::table::Info;
-    use risingwave_pb::plan::{ColumnDesc, TableSourceInfo};
-    use risingwave_rpc_client::MetaClient;
-    use tokio::sync::watch;
+//     use risingwave_common::types::DataType;
+//     use risingwave_pb::meta::table::Info;
+//     use risingwave_pb::plan::{ColumnDesc, TableSourceInfo};
+//     use risingwave_rpc_client::MetaClient;
+//     use tokio::sync::watch;
 
-    use crate::catalog::catalog_service::{
-        CatalogCache, CatalogConnector, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
-    };
-    use crate::observer::observer_manager::ObserverManager;
-    use crate::scheduler::schedule::WorkerNodeManager;
-    use crate::test_utils::FrontendMockMetaClient;
+//     use crate::catalog::catalog_service::{
+//         CatalogCache, CatalogConnector, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
+//     };
+//     use crate::observer::observer_manager::ObserverManager;
+//     use crate::scheduler::schedule::WorkerNodeManager;
+//     use crate::test_utils::FrontendMockMetaClient;
 
-    fn create_test_table(test_table_name: &str, columns: Vec<(String, DataType)>) -> Table {
-        let column_descs = columns
-            .iter()
-            .map(|c| ColumnDesc {
-                name: c.0.clone(),
-                column_type: Some(c.1.to_protobuf().unwrap()),
-                ..Default::default()
-            })
-            .collect();
-        Table {
-            table_name: test_table_name.to_string(),
-            column_descs,
-            info: Info::TableSource(TableSourceInfo::default()).into(),
-            ..Default::default()
-        }
-    }
+//     fn create_test_table(test_table_name: &str, columns: Vec<(String, DataType)>) -> Table {
+//         let column_descs = columns
+//             .iter()
+//             .map(|c| ColumnDesc {
+//                 name: c.0.clone(),
+//                 column_type: Some(c.1.to_protobuf().unwrap()),
+//                 ..Default::default()
+//             })
+//             .collect();
+//         Table {
+//             table_name: test_table_name.to_string(),
+//             column_descs,
+//             info: Info::TableSource(TableSourceInfo::default()).into(),
+//             ..Default::default()
+//         }
+//     }
 
-    use risingwave_pb::meta::Table;
+//     use risingwave_pb::meta::Table;
 
-    use crate::catalog::table_catalog::ROWID_NAME;
+//     use crate::catalog::table_catalog::ROWID_NAME;
 
-    #[tokio::test]
-    async fn test_create_and_drop_table() {
-        // Init meta and catalog.
-        let meta_client = MetaClient::mock(FrontendMockMetaClient::new().await);
+//     #[tokio::test]
+//     async fn test_create_and_drop_table() {
+//         // Init meta and catalog.
+//         let meta_client = MetaClient::mock(FrontendMockMetaClient::new().await);
 
-        let (catalog_updated_tx, catalog_updated_rx) = watch::channel(0);
-        let catalog_cache = Arc::new(RwLock::new(
-            CatalogCache::new(meta_client.clone()).await.unwrap(),
-        ));
-        let catalog_mgr = CatalogConnector::new(
-            meta_client.clone(),
-            catalog_cache.clone(),
-            catalog_updated_rx,
-        );
+//         let (catalog_updated_tx, catalog_updated_rx) = watch::channel(0);
+//         let catalog_cache = Arc::new(RwLock::new(
+//             CatalogCache::new(meta_client.clone()).await.unwrap(),
+//         ));
+//         let catalog_mgr = CatalogConnector::new(
+//             meta_client.clone(),
+//             catalog_cache.clone(),
+//             catalog_updated_rx,
+//         );
 
-        let worker_node_manager =
-            Arc::new(WorkerNodeManager::new(meta_client.clone()).await.unwrap());
+//         let worker_node_manager =
+//             Arc::new(WorkerNodeManager::new(meta_client.clone()).await.unwrap());
 
-        let observer_manager = ObserverManager::new(
-            meta_client.clone(),
-            "127.0.0.1:12345".parse().unwrap(), // Random value, not used here.
-            worker_node_manager,
-            catalog_cache,
-            catalog_updated_tx,
-        )
-        .await;
-        observer_manager.start();
+//         let observer_manager = ObserverManager::new(
+//             meta_client.clone(),
+//             "127.0.0.1:12345".parse().unwrap(), // Random value, not used here.
+//             worker_node_manager,
+//             catalog_cache,
+//             catalog_updated_tx,
+//         )
+//         .await;
+//         observer_manager.start();
 
-        // Create db and schema.
-        catalog_mgr
-            .create_database(DEFAULT_DATABASE_NAME)
-            .await
-            .unwrap();
-        assert!(catalog_mgr.get_database(DEFAULT_DATABASE_NAME).is_some());
-        catalog_mgr
-            .create_schema(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME)
-            .await
-            .unwrap();
-        assert!(catalog_mgr
-            .get_schema(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME)
-            .is_some());
+//         // Create db and schema.
+//         catalog_mgr
+//             .create_database(DEFAULT_DATABASE_NAME)
+//             .await
+//             .unwrap();
+//         assert!(catalog_mgr.get_database(DEFAULT_DATABASE_NAME).is_some());
+//         catalog_mgr
+//             .create_schema(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME)
+//             .await
+//             .unwrap();
+//         assert!(catalog_mgr
+//             .get_schema(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME)
+//             .is_some());
 
-        // Create table.
-        let test_table_name = "t";
-        let table = create_test_table(
-            test_table_name,
-            vec![
-                ("v1".to_string(), DataType::Int32),
-                ("v2".to_string(), DataType::Int32),
-            ],
-        );
-        catalog_mgr
-            .create_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, table)
-            .await
-            .unwrap();
-        assert!(catalog_mgr
-            .get_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, test_table_name)
-            .is_some());
+//         // Create table.
+//         let test_table_name = "t";
+//         let table = create_test_table(
+//             test_table_name,
+//             vec![
+//                 ("v1".to_string(), DataType::Int32),
+//                 ("v2".to_string(), DataType::Int32),
+//             ],
+//         );
+//         catalog_mgr
+//             .create_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, table)
+//             .await
+//             .unwrap();
+//         assert!(catalog_mgr
+//             .get_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, test_table_name)
+//             .is_some());
 
-        // Get catalog from meta and check the table info.
-        let catalog = meta_client.get_catalog().await.unwrap();
-        assert_eq!(catalog.tables.len(), 1);
-        assert_eq!(catalog.tables[0].table_name, test_table_name);
-        let expected_table = create_test_table(
-            test_table_name,
-            vec![
-                (ROWID_NAME.to_string(), DataType::Int64),
-                ("v1".to_string(), DataType::Int32),
-                ("v2".to_string(), DataType::Int32),
-            ],
-        );
-        assert_eq!(catalog.tables[0].column_descs, expected_table.column_descs);
+//         // Get catalog from meta and check the table info.
+//         let catalog = meta_client.get_catalog().await.unwrap();
+//         assert_eq!(catalog.tables.len(), 1);
+//         assert_eq!(catalog.tables[0].table_name, test_table_name);
+//         let expected_table = create_test_table(
+//             test_table_name,
+//             vec![
+//                 (ROWID_NAME.to_string(), DataType::Int64),
+//                 ("v1".to_string(), DataType::Int32),
+//                 ("v2".to_string(), DataType::Int32),
+//             ],
+//         );
+//         assert_eq!(catalog.tables[0].column_descs, expected_table.column_descs);
 
-        // -----  test drop table, schema and database  -----
+//         // -----  test drop table, schema and database  -----
 
-        catalog_mgr
-            .drop_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, test_table_name)
-            .await
-            .unwrap();
-        // Ensure the table has been dropped from cache.
-        assert!(catalog_mgr
-            .get_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, test_table_name)
-            .is_none());
-        // Ensure the table has been dropped from meta.
-        let catalog = meta_client.get_catalog().await.unwrap();
-        assert_eq!(catalog.tables.len(), 0);
+//         catalog_mgr
+//             .drop_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, test_table_name)
+//             .await
+//             .unwrap();
+//         // Ensure the table has been dropped from cache.
+//         assert!(catalog_mgr
+//             .get_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, test_table_name)
+//             .is_none());
+//         // Ensure the table has been dropped from meta.
+//         let catalog = meta_client.get_catalog().await.unwrap();
+//         assert_eq!(catalog.tables.len(), 0);
 
-        catalog_mgr
-            .drop_schema(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME)
-            .await
-            .unwrap();
-        // Ensure the schema has been dropped from cache.
-        assert!(catalog_mgr
-            .get_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, test_table_name)
-            .is_none());
-        // Ensure the schema has been dropped from meta.
-        let catalog = meta_client.get_catalog().await.unwrap();
-        assert_eq!(catalog.schemas.len(), 0);
+//         catalog_mgr
+//             .drop_schema(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME)
+//             .await
+//             .unwrap();
+//         // Ensure the schema has been dropped from cache.
+//         assert!(catalog_mgr
+//             .get_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, test_table_name)
+//             .is_none());
+//         // Ensure the schema has been dropped from meta.
+//         let catalog = meta_client.get_catalog().await.unwrap();
+//         assert_eq!(catalog.schemas.len(), 0);
 
-        catalog_mgr
-            .drop_database(DEFAULT_DATABASE_NAME)
-            .await
-            .unwrap();
-        // Ensure the db has been dropped from cache.
-        assert!(catalog_mgr
-            .get_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, test_table_name)
-            .is_none());
-        // Ensure the db has been dropped from meta.
-        let catalog = meta_client.get_catalog().await.unwrap();
-        assert_eq!(catalog.databases.len(), 0);
-    }
-}
+//         catalog_mgr
+//             .drop_database(DEFAULT_DATABASE_NAME)
+//             .await
+//             .unwrap();
+//         // Ensure the db has been dropped from cache.
+//         assert!(catalog_mgr
+//             .get_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, test_table_name)
+//             .is_none());
+//         // Ensure the db has been dropped from meta.
+//         let catalog = meta_client.get_catalog().await.unwrap();
+//         assert_eq!(catalog.databases.len(), 0);
+//     }
+// }
