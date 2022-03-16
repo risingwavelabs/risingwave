@@ -31,7 +31,9 @@ impl Binder {
 
             Statement::Query(q) => Ok(BoundStatement::Query(self.bind_query(*q)?.into())),
 
-            _ => Err(ErrorCode::NotImplementedError(format!("{:?}", stmt)).into()),
+            _ => Err(
+                ErrorCode::NotImplementedError(format!("unsupported statement {:?}", stmt)).into(),
+            ),
         }
     }
 }
