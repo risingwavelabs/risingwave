@@ -7,7 +7,7 @@ use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_rpc_client::MetaClient;
 use tokio::sync::mpsc;
 
-use crate::optimizer::plan_node::{PlanNode, PlanNodeType};
+use crate::optimizer::plan_node::PlanNodeType;
 use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
 use crate::scheduler::plan_fragmenter::{Query, QueryStageRef, StageId};
