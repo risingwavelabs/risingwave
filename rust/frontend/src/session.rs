@@ -155,6 +155,16 @@ impl FrontendEnv {
     pub fn meta_client(&self) -> &MetaClient {
         &self.meta_client
     }
+
+    /// Get a reference to the frontend env's catalog writer.
+    pub fn catalog_writer(&self) -> &CatalogWriter {
+        &self.catalog_writer
+    }
+
+    /// Get a reference to the frontend env's catalog reader.
+    pub fn catalog_reader(&self) -> &CatalogReader {
+        &self.catalog_reader
+    }
 }
 
 pub struct SessionImpl {

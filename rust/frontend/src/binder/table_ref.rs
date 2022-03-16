@@ -113,7 +113,8 @@ impl Binder {
         }
     }
 
-    pub(super) fn bind_table(&mut self, name: ObjectName) -> Result<BaseTableRef> {
+    /// return the (schema_name, table_name)
+    pub fn resolve_table_name(name: ObjectName) -> Result<(String, String)> {
         let mut identifiers = name.0;
         let table_name = identifiers
             .pop()
@@ -125,6 +126,10 @@ impl Binder {
             .map(|ident| ident.value)
             .unwrap_or_else(|| DEFAULT_SCHEMA_NAME.into());
 
+        Ok((schema_name, table_name))
+    }
+    pub(super) fn bind_table(&mut self, name: ObjectName) -> Result<BaseTableRef> {
+        let (schema_name, table_name) = Self::resolve_table_name(name)?;
         let schema_catalog = self
             .get_schema_by_name(&schema_name)
             .ok_or_else(|| ErrorCode::ItemNotFound(format!("schema \"{}\"", schema_name)))?;
