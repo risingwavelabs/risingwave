@@ -1,6 +1,6 @@
 use std::collections::hash_map::Entry;
 
-use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
+use risingwave_common::catalog::{CellBasedTableDesc, ColumnDesc, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_pb::plan::ColumnCatalog;
@@ -30,7 +30,8 @@ pub struct BoundJoin {
 pub struct BaseTableRef {
     pub name: String, // explain-only
     pub table_id: TableId,
-    pub columns: Vec<ColumnCatalog>,
+    pub cell_based_desc: CellBasedTableDesc,
+    pub columns: Vec<ColumnDesc>,
 }
 
 impl Binder {
@@ -118,24 +119,32 @@ impl Binder {
             .pop()
             .ok_or_else(|| ErrorCode::InternalError("empty table name".into()))?
             .value;
+
         let schema_name = identifiers
             .pop()
             .map(|ident| ident.value)
             .unwrap_or_else(|| DEFAULT_SCHEMA_NAME.into());
 
-        let table_catalog = self
-            .catalog
-            .get_schema_by_name(db_name, schema_name)
-            .get_schema(&schema_name)
-            .and_then(|c| c.get_table(&table_name))
+        let schema_catalog = self
+            .get_schema_by_name(&schema_name)
+            .ok_or_else(|| ErrorCode::ItemNotFound(format!("schema \"{}\"", schema_name)))?;
+
+        let table_catalog = schema_catalog
+            .get_table_by_name(&table_name)
             .ok_or_else(|| ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name)))?;
         let columns = table_catalog.columns().to_vec();
         let table_id = table_catalog.id();
-
+        let cell_based_desc = table_catalog.cell_based_table();
         self.bind_context(&columns, table_name.clone())?;
+        let columns = table_catalog
+            .columns()
+            .iter()
+            .map(|c| c.column_desc.unwrap().into())
+            .collect::<Vec<ColumnDesc>>();
 
         Ok(BaseTableRef {
             name: table_name,
+            cell_based_desc,
             table_id,
             columns,
         })
@@ -148,15 +157,16 @@ impl Binder {
             .iter()
             .enumerate()
             .for_each(|(index, column_catalog)| {
+                let col_desc = ColumnDesc::from(column_catalog.column_desc.unwrap());
                 self.context.columns.push(ColumnBinding::new(
                     table_name.clone(),
-                    column_catalog.name().into(),
+                    column_catalog.column_desc.unwrap().name.into(),
                     begin + index,
-                    column_catalog.data_type(),
+                    col_desc.data_type,
                 ));
                 self.context
                     .indexs_of
-                    .entry(column_catalog.name().to_string())
+                    .entry(column_catalog.column_desc.unwrap().name.to_string())
                     .or_default()
                     .push(self.context.columns.len() - 1);
             });

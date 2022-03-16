@@ -4,6 +4,7 @@ use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::Statement;
 
 use crate::catalog::catalog::Catalog;
+use crate::catalog::schema_catalog::SchemaCatalog;
 
 mod bind_context;
 mod delete;
@@ -49,6 +50,11 @@ impl Binder {
     pub fn bind(&mut self, stmt: Statement) -> Result<BoundStatement> {
         self.bind_statement(stmt)
     }
+
+    fn get_schema_by_name(&self, schema_name: &String) -> Option<&SchemaCatalog> {
+        self.catalog.get_schema_by_name(&self.db_name, &schema_name)
+    }
+
     #[cfg(test)]
     pub fn mock_with_catalog(catalog: Catalog, db_name: String) -> Binder {
         use parking_lot::RwLock;
