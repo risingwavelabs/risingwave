@@ -11,7 +11,7 @@ fn yaml_to_string(y: &Yaml) -> Result<String> {
     match y {
         Yaml::Integer(x) => Ok(format!("{}", x)),
         Yaml::String(x) => Ok(x.clone()),
-        _ => Err(anyhow!("{:?} cannot be conveted to string", y)),
+        _ => Err(anyhow!("{:?} cannot be converted to string", y)),
     }
 }
 
