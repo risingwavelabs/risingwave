@@ -27,7 +27,6 @@ impl HummockStateStore {
     }
 }
 
-// Note(eric): How about removing HummockStateStore and just impl StateStore for HummockStorage?
 #[async_trait]
 impl StateStore for HummockStateStore {
     type Iter<'a> = HummockStateStoreIter<'a>;
