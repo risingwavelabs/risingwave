@@ -60,7 +60,9 @@ impl ScheduledLocations {
                     *actor_id,
                     ActorInfo {
                         actor_id: *actor_id,
-                        host: self.node_locations[&parallel_unit.worker_node_id].host.clone(),
+                        host: self.node_locations[&parallel_unit.worker_node_id]
+                            .host
+                            .clone(),
                     },
                 )
             })
@@ -73,7 +75,9 @@ impl ScheduledLocations {
             .iter()
             .map(|(actor_id, parallel_unit)| ActorInfo {
                 actor_id: *actor_id,
-                host: self.node_locations[&parallel_unit.worker_node_id].host.clone(),
+                host: self.node_locations[&parallel_unit.worker_node_id]
+                    .host
+                    .clone(),
             })
             .collect::<Vec<_>>()
     }
