@@ -183,6 +183,8 @@ where
             return Ok(vec![]);
         }
 
+        tracing::debug!("Try to vacuum SSTs {:?}", ssts_to_delete);
+
         Ok(ssts_to_delete)
     }
 

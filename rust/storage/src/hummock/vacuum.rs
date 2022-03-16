@@ -45,11 +45,11 @@ mod tests {
     use itertools::Itertools;
     use risingwave_pb::hummock::VacuumTask;
 
-    use crate::hummock::iterator::test_utils::{default_builder_opt_for_test};
+    use crate::hummock::iterator::test_utils::default_builder_opt_for_test;
     use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
+    use crate::hummock::test_utils::gen_default_test_sstable;
     use crate::hummock::vacuum::Vacuum;
     use crate::hummock::SstableStore;
-    use crate::hummock::test_utils::gen_default_test_sstable;
     use crate::object::InMemObjectStore;
 
     #[tokio::test]
