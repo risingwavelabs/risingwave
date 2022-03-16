@@ -26,7 +26,7 @@ impl fmt::Display for EqJoinPredicate {
         for (k1, k2) in eq_keys {
             write!(f, "AND {} = {}", k1, k2)?;
         }
-        if !self.other_cond.is_empty() {
+        if !self.other_cond.always_true() {
             write!(f, "AND {}", self.other_cond)?;
         }
 
