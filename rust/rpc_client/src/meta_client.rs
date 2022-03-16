@@ -133,7 +133,7 @@ impl MetaClient {
     }
 
     pub async fn create_database(&self, db: ProstDatabase) -> Result<(DatabaseId, CatalogVersion)> {
-        let request = CreateDatabaseRequest { name: db.name };
+        let request = CreateDatabaseRequest { db: Some(db) };
         let resp = self.inner.create_database(request).await?;
         // TODO: handle error in `resp.status` here
         Ok((resp.database_id.into(), resp.version))
@@ -141,8 +141,7 @@ impl MetaClient {
 
     pub async fn create_schema(&self, schema: ProstSchema) -> Result<(SchemaId, CatalogVersion)> {
         let request = CreateSchemaRequest {
-            name: schema.name,
-            database_id: schema.database_id,
+            schema: Some(schema),
         };
         let resp = self.inner.create_schema(request).await?;
         // TODO: handle error in `resp.status` here
