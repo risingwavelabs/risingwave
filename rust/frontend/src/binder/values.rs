@@ -7,7 +7,7 @@ use super::bind_context::Clause;
 use crate::binder::Binder;
 use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BoundValues {
     pub rows: Vec<Vec<ExprImpl>>,
     pub schema: Schema,

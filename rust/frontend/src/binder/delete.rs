@@ -4,7 +4,7 @@ use risingwave_sqlparser::ast::{Expr, ObjectName};
 use super::{BaseTableRef, Binder};
 use crate::expr::ExprImpl;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BoundDelete {
     pub table: BaseTableRef,
     pub selection: Option<ExprImpl>,

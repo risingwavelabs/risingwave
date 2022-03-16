@@ -1,8 +1,6 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use itertools::Itertools;
-use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
@@ -12,7 +10,7 @@ use risingwave_rpc_client::{ComputeClient, ExchangeSource, GrpcExchangeSource};
 use risingwave_sqlparser::ast::{Query, Statement};
 
 use crate::binder::Binder;
-use crate::handler::util::to_pg_rows;
+use crate::handler::util::{get_pg_field_descs, to_pg_rows};
 use crate::planner::Planner;
 use crate::scheduler::schedule::WorkerNodeManager;
 use crate::session::QueryContext;
@@ -27,7 +25,7 @@ pub async fn handle_query(context: QueryContext, query: Box<Query>) -> Result<Pg
     let mut binder = Binder::new(catalog);
     let bound = binder.bind(Statement::Query(query))?;
     let plan = Planner::new(Rc::new(RefCell::new(context)))
-        .plan(bound)?
+        .plan(bound.clone())?
         .gen_batch_query_plan()
         .to_batch_prost();
 
@@ -78,19 +76,7 @@ pub async fn handle_query(context: QueryContext, query: Box<Query>) -> Result<Pg
         rows.append(&mut to_pg_rows(chunk));
     }
 
-    let pg_len = {
-        if !rows.is_empty() {
-            rows.get(0).unwrap().values().len() as i32
-        } else {
-            0
-        }
-    };
-
-    // TODO: from bound extract column_name and data_type to build pg_desc
-    let pg_descs = (0..pg_len)
-        .into_iter()
-        .map(|_i| PgFieldDescriptor::new("item".to_string(), TypeOid::Varchar))
-        .collect_vec();
+    let pg_descs = get_pg_field_descs(bound)?;
 
     // Unpin corresponding snapshot.
     meta_client
