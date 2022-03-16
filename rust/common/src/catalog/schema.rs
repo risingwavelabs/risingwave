@@ -66,6 +66,14 @@ impl Schema {
             .map(|field| field.data_type.create_array_builder(capacity))
             .collect()
     }
+
+    pub fn to_prost(&self) -> Result<Vec<ProstField>> {
+        self.fields
+            .clone()
+            .into_iter()
+            .map(|field| field.to_prost())
+            .collect::<Result<Vec<ProstField>>>()
+    }
 }
 
 impl Field {
