@@ -1,6 +1,4 @@
 #![allow(dead_code)]
-use std::sync::Arc;
-
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::tonic_err;
 use risingwave_pb::catalog::catalog_service_server::CatalogService;
@@ -16,7 +14,7 @@ use risingwave_pb::common::ParallelUnitType;
 use risingwave_pb::plan::TableRefId;
 use tonic::{Request, Response, Status};
 
-use crate::cluster::StoredClusterManager;
+use crate::cluster::StoredClusterManagerRef;
 use crate::manager::{CatalogManagerRef, IdCategory, IdGeneratorManagerRef, MetaSrvEnv};
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
@@ -30,7 +28,7 @@ where
     id_gen_manager: IdGeneratorManagerRef<S>,
     catalog_manager: CatalogManagerRef<S>,
     stream_manager: StreamManagerRef<S>,
-    cluster_manager: Arc<StoredClusterManager<S>>,
+    cluster_manager: StoredClusterManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
 }
 
@@ -42,7 +40,7 @@ where
         env: MetaSrvEnv<S>,
         catalog_manager: CatalogManagerRef<S>,
         stream_manager: StreamManagerRef<S>,
-        cluster_manager: Arc<StoredClusterManager<S>>,
+        cluster_manager: StoredClusterManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
     ) -> Self {
         Self {
