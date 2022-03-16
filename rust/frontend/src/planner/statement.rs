@@ -10,6 +10,7 @@ impl Planner {
             BoundStatement::Insert(i) => self.plan_insert(*i),
             BoundStatement::Delete(d) => self.plan_delete(*d),
             BoundStatement::Query(q) => self.plan_query(*q),
+            BoundStatement::CreateView(q) => self.plan_query(*q),
         }
     }
 }

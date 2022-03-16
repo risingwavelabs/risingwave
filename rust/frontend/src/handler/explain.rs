@@ -7,7 +7,7 @@ use pgwire::types::Row;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::Statement;
 
-use crate::binder::Binder;
+use crate::binder::{Binder, BoundStatement};
 use crate::planner::Planner;
 use crate::session::QueryContext;
 
@@ -25,26 +25,58 @@ pub(super) fn handle_explain(
     // bind, plan, optimize, and serialize here
     let mut binder = Binder::new(catalog);
     let bound = binder.bind(stmt)?;
-    let mut planner = Planner::new(context);
-    let logical = planner.plan(bound)?;
-    let batch = logical.gen_batch_query_plan();
-    let mut output = String::new();
-    batch
-        .explain(0, &mut output)
-        .map_err(|e| ErrorCode::InternalError(e.to_string()))?;
 
-    let rows = output
-        .lines()
-        .map(|s| Row::new(vec![Some(s.into())]))
-        .collect::<Vec<_>>();
-    let res = PgResponse::new(
-        StatementType::EXPLAIN,
-        rows.len() as i32,
-        rows,
-        vec![PgFieldDescriptor::new(
-            "QUERY PLAN".to_owned(),
-            TypeOid::Varchar,
-        )],
-    );
+    let res = match &bound {
+        BoundStatement::CreateView(_) => {
+            let mut planner = Planner::new(context);
+            let logical = planner.plan(bound)?;
+            let stream = logical.gen_create_mv_plan();
+            let mut output = String::new();
+            stream
+                .explain(0, &mut output)
+                .map_err(|e| ErrorCode::InternalError(e.to_string()))?;
+
+            let rows = output
+                .lines()
+                .map(|s| Row::new(vec![Some(s.into())]))
+                .collect::<Vec<_>>();
+
+            PgResponse::new(
+                StatementType::EXPLAIN,
+                rows.len() as i32,
+                rows,
+                vec![PgFieldDescriptor::new(
+                    "QUERY PLAN".to_owned(),
+                    TypeOid::Varchar,
+                )],
+            )
+        }
+        BoundStatement::Query(_) => {
+            let mut planner = Planner::new(context);
+            let logical = planner.plan(bound)?;
+            let batch = logical.gen_batch_query_plan();
+            let mut output = String::new();
+            batch
+                .explain(0, &mut output)
+                .map_err(|e| ErrorCode::InternalError(e.to_string()))?;
+
+            let rows = output
+                .lines()
+                .map(|s| Row::new(vec![Some(s.into())]))
+                .collect::<Vec<_>>();
+
+            PgResponse::new(
+                StatementType::EXPLAIN,
+                rows.len() as i32,
+                rows,
+                vec![PgFieldDescriptor::new(
+                    "QUERY PLAN".to_owned(),
+                    TypeOid::Varchar,
+                )],
+            )
+        }
+        _ => return Err(ErrorCode::NotImplementedError("cannot explain".into()).into()),
+    };
+
     Ok(res)
 }
