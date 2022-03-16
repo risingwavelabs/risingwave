@@ -40,8 +40,7 @@ impl Components {
         match self {
             Self::MinIO => {
                 "
-Required by Hummock state store.
-(Also required by ./risedev dev)"
+Required by Hummock state store."
             }
             Self::PrometheusAndGrafana => {
                 "
@@ -111,12 +110,7 @@ and use `risingwave` in all-in-one mode."
     }
 
     pub fn default_enabled() -> &'static [Self] {
-        &[
-            Self::MinIO,
-            Self::PrometheusAndGrafana,
-            Self::ComputeNodeAndMetaNode,
-            Self::Frontend,
-        ]
+        &[Self::ComputeNodeAndMetaNode, Self::Frontend]
     }
 }
 

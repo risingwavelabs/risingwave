@@ -7,7 +7,6 @@ use risingwave_pb::catalog::{
     CreateSourceResponse, DropDatabaseRequest, DropDatabaseResponse, DropMaterializedSourceRequest,
     DropMaterializedSourceResponse, DropMaterializedViewRequest, DropMaterializedViewResponse,
     DropSchemaRequest, DropSchemaResponse, DropSourceRequest, DropSourceResponse,
-    GetCatalogRequest, GetCatalogResponse,
 };
 use tonic::{Request, Response, Status};
 
@@ -47,13 +46,6 @@ impl<S> CatalogService for CatalogServiceImpl<S>
 where
     S: MetaStore,
 {
-    async fn get_catalog(
-        &self,
-        _request: Request<GetCatalogRequest>,
-    ) -> Result<Response<GetCatalogResponse>, Status> {
-        todo!()
-    }
-
     async fn create_database(
         &self,
         _request: Request<CreateDatabaseRequest>,

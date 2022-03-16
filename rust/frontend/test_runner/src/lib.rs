@@ -112,7 +112,9 @@ impl TestCase {
 
         let logical_plan = match Planner::new(context).plan(bound) {
             Ok(logical_plan) => {
-                ret.logical_plan = Some(explain_plan(&logical_plan.clone().as_subplan()));
+                if self.logical_plan.is_some() {
+                    ret.logical_plan = Some(explain_plan(&logical_plan.clone().as_subplan()));
+                }
                 logical_plan
             }
             Err(err) => {
