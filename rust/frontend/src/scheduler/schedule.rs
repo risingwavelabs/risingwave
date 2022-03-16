@@ -76,13 +76,12 @@ impl AugmentedStage {
     }
 
     /// Serialize augmented stage into plan node. Used by task manager to construct task.
-    // FIXME: should do rewrite outside of `to_prost`
-    pub fn to_prost(&self, task_id: TaskId, query: &Query) -> Result<PlanFragment> {
-        let prost_root = self.rewrite_exchange(self.query_stage.root.clone(), task_id, query)?;
-        Ok(PlanFragment {
+    pub fn to_prost(&self, task_id: TaskId, query: &Query) -> PlanFragment {
+        let prost_root = self.rewrite_exchange(self.query_stage.root.clone(), task_id, query);
+        PlanFragment {
             root: Some(prost_root),
             exchange_info: Some(self.query_stage.distribution.to_prost(self.parallelism)),
-        })
+        }
     }
 
     fn rewrite_exchange(
@@ -90,7 +89,7 @@ impl AugmentedStage {
         plan_node: PlanRef,
         task_id: TaskId,
         query: &Query,
-    ) -> Result<plan::PlanNode> {
+    ) -> plan::PlanNode {
         let mut current_node = plan_node.to_batch_prost();
         // Clear children first.
         current_node.children.clear();
@@ -105,17 +104,17 @@ impl AugmentedStage {
                 .unwrap();
             let scheduled_stage = self.exchange_source.get(source_stage_id).unwrap();
             let exchange_node =
-                Self::create_exchange_node(scheduled_stage, plan_node, task_id, query)?;
+                Self::create_exchange_node(scheduled_stage, plan_node, task_id, query);
             current_node.node_body = Some(exchange_node);
         } else {
             for child in plan_node.inputs() {
                 current_node
                     .children
-                    .push(self.rewrite_exchange(child, task_id, query)?)
+                    .push(self.rewrite_exchange(child, task_id, query))
             }
         }
 
-        Ok(current_node)
+        current_node
     }
 
     fn create_exchange_node(
@@ -123,7 +122,7 @@ impl AugmentedStage {
         plan_node: PlanRef,
         task_id: TaskId,
         query: &Query,
-    ) -> Result<pb_batch_node::NodeBody> {
+    ) -> pb_batch_node::NodeBody {
         let mut exchange_node = ExchangeNode {
             ..Default::default()
         };
@@ -156,7 +155,7 @@ impl AugmentedStage {
         for field in &schema.fields {
             exchange_node.input_schema.push(field.to_prost());
         }
-        Ok(NodeBody::Exchange(exchange_node))
+        NodeBody::Exchange(exchange_node)
     }
 
     // Construct TaskId in prost.
