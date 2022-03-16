@@ -20,7 +20,7 @@ pub async fn handle_query(context: QueryContext, query: Box<Query>) -> Result<Pg
     let catalog = catalog_mgr
         .get_database_snapshot(session.database())
         .ok_or_else(|| ErrorCode::InternalError(String::from("catalog not found")))?;
-    let mut binder = Binder::new(catalog.clone());
+    let mut binder = Binder::new(catalog);
     let bound = binder.bind(Statement::Query(query))?;
     let plan = Planner::new(Rc::new(RefCell::new(context)))
         .plan(bound.clone())?
