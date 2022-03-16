@@ -14,7 +14,7 @@
     create table t (v1 bigint, v2 double precision);
     select v1, v1+1 from t order by v1;
   logical_plan: |
-    LogicalProject { exprs: [$1, Add($1, 1:Int32)], expr_alias: [Some("v1"), None] }
+    LogicalProject { exprs: [$1, ($1 + 1:Int32)], expr_alias: [Some("v1"), None] }
       LogicalScan { table: "t", columns: ["_row_id", "v1", "v2"] }
 - sql: |
     create table t (v1 bigint, v2 double precision);

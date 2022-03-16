@@ -2,7 +2,7 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
 use super::{ExecuteContext, Task};
 use crate::{GrafanaConfig, GrafanaGen};
@@ -26,6 +26,10 @@ impl GrafanaService {
         Ok(Path::new(&prefix_bin).join("grafana"))
     }
 
+    fn grafana_server_path(&self) -> Result<PathBuf> {
+        Ok(self.grafana_root.join("bin").join("grafana-server"))
+    }
+
     fn grafana(&self) -> Result<Command> {
         let mut command = Command::new(self.grafana_root.join("bin").join("grafana-server"));
         command.current_dir(self.grafana_root.join("bin"));
@@ -37,6 +41,11 @@ impl Task for GrafanaService {
     fn execute(&mut self, ctx: &mut ExecuteContext<impl std::io::Write>) -> anyhow::Result<()> {
         ctx.service(self);
         ctx.pb.set_message("starting...");
+
+        let path = self.grafana_server_path()?;
+        if !path.exists() {
+            return Err(anyhow!("grafana-server binary not found in {:?}\nDid you enable monitoring feature in `./risedev configure`?", path));
+        }
 
         std::fs::write(
             self.grafana_root.join("conf").join("custom.ini"),

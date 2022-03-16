@@ -12,7 +12,7 @@ use risingwave_pb::meta::{Catalog, Database, Schema, Table};
 use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
 use tokio::sync::Mutex;
 
-use super::{NotificationManagerRef, NotificationTarget};
+use super::NotificationManagerRef;
 use crate::model::{CatalogVersionGenerator, MetadataModel};
 use crate::storage::MetaStore;
 
@@ -61,13 +61,8 @@ where
 
             // Notify frontends to create database.
             self.nm
-                .notify(
-                    Operation::Add,
-                    &Info::Database(database),
-                    NotificationTarget::Frontend,
-                )
-                .await?;
-            // TODO(Zehua) Error handling of `notify` method.
+                .notify_fe(Operation::Add, &Info::Database(database))
+                .await;
 
             Ok(version)
         } else {
@@ -88,13 +83,8 @@ where
 
             // Notify frontends to delete database.
             self.nm
-                .notify(
-                    Operation::Delete,
-                    &Info::Database(database),
-                    NotificationTarget::Frontend,
-                )
-                .await?;
-            // TODO(Zehua) Error handling of `notify` method.
+                .notify_fe(Operation::Delete, &Info::Database(database))
+                .await;
 
             Ok(version)
         } else {
@@ -116,13 +106,8 @@ where
 
             // Notify frontends to create schema.
             self.nm
-                .notify(
-                    Operation::Add,
-                    &Info::Schema(schema),
-                    NotificationTarget::Frontend,
-                )
-                .await?;
-            // TODO(Zehua) Error handling of `notify` method.
+                .notify_fe(Operation::Add, &Info::Schema(schema))
+                .await;
 
             Ok(version)
         } else {
@@ -144,13 +129,8 @@ where
 
             // Notify frontends to delete schema.
             self.nm
-                .notify(
-                    Operation::Delete,
-                    &Info::Schema(schema),
-                    NotificationTarget::Frontend,
-                )
-                .await?;
-            // TODO(Zehua) Error handling of `notify` method.
+                .notify_fe(Operation::Delete, &Info::Schema(schema))
+                .await;
 
             Ok(version)
         } else {
@@ -178,14 +158,7 @@ where
             }
 
             // Notify frontends to create table.
-            self.nm
-                .notify(
-                    Operation::Add,
-                    &Info::Table(table),
-                    NotificationTarget::Frontend,
-                )
-                .await?;
-            // TODO(Zehua) Error handling of `notify` method.
+            self.nm.notify_fe(Operation::Add, &Info::Table(table)).await;
 
             Ok(version)
         } else {
@@ -234,13 +207,8 @@ where
 
                     // Notify frontends to delete table.
                     self.nm
-                        .notify(
-                            Operation::Delete,
-                            &Info::Table(table),
-                            NotificationTarget::Frontend,
-                        )
-                        .await?;
-                    // TODO(Zehua) Error handling of `notify` method.
+                        .notify_fe(Operation::Delete, &Info::Table(table))
+                        .await;
 
                     Ok(version)
                 }

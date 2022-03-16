@@ -38,7 +38,9 @@ Firstly, we will need to create a placeholder in yaml testcases:
     create table t2 (v1 int, v2 int);
     create table t3 (v1 int, v2 int);
     select * from t1 join t2 on (t1.v1 = t2.v1) join t3 on (t2.v2 = t3.v2);
-  batch_plan: test
+  logical_plan: ""
+  batch_plan: ""
+  stream_plan: ""
 ```
 
 ```

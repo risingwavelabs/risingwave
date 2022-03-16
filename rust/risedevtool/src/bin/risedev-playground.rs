@@ -15,9 +15,9 @@ use console::style;
 use indicatif::{MultiProgress, ProgressBar};
 use risedev::util::complete_spin;
 use risedev::{
-    ComputeNodeService, ConfigExpander, ConfigureTmuxTask, EnsureStopService, ExecuteContext,
-    FrontendService, FrontendServiceV2, GrafanaService, JaegerService, MetaNodeService,
-    MinioService, PrometheusService, ServiceConfig, Task, RISEDEV_SESSION_NAME,
+    AwsS3Config, ComputeNodeService, ConfigExpander, ConfigureTmuxTask, EnsureStopService,
+    ExecuteContext, FrontendService, FrontendServiceV2, GrafanaService, JaegerService,
+    MetaNodeService, MinioService, PrometheusService, ServiceConfig, Task, RISEDEV_SESSION_NAME,
 };
 use tempfile::tempdir;
 use yaml_rust::YamlEmitter;
@@ -99,17 +99,22 @@ fn task_main(
 
     for step in steps {
         let service = services.get(step).unwrap();
-        ports.push(match service {
-            ServiceConfig::Minio(c) => (c.port, c.id.clone()),
-            ServiceConfig::Etcd(c) => (c.port, c.id.clone()),
-            ServiceConfig::Prometheus(c) => (c.port, c.id.clone()),
-            ServiceConfig::ComputeNode(c) => (c.port, c.id.clone()),
-            ServiceConfig::MetaNode(c) => (c.port, c.id.clone()),
-            ServiceConfig::Frontend(c) => (c.port, c.id.clone()),
-            ServiceConfig::FrontendV2(c) => (c.port, c.id.clone()),
-            ServiceConfig::Grafana(c) => (c.port, c.id.clone()),
-            ServiceConfig::Jaeger(c) => (c.dashboard_port, c.id.clone()),
-        });
+        let listen_info = match service {
+            ServiceConfig::Minio(c) => Some((c.port, c.id.clone())),
+            ServiceConfig::Etcd(c) => Some((c.port, c.id.clone())),
+            ServiceConfig::Prometheus(c) => Some((c.port, c.id.clone())),
+            ServiceConfig::ComputeNode(c) => Some((c.port, c.id.clone())),
+            ServiceConfig::MetaNode(c) => Some((c.port, c.id.clone())),
+            ServiceConfig::Frontend(c) => Some((c.port, c.id.clone())),
+            ServiceConfig::FrontendV2(c) => Some((c.port, c.id.clone())),
+            ServiceConfig::Grafana(c) => Some((c.port, c.id.clone())),
+            ServiceConfig::Jaeger(c) => Some((c.dashboard_port, c.id.clone())),
+            ServiceConfig::AwsS3(_) => None,
+        };
+
+        if let Some(x) = listen_info {
+            ports.push(x);
+        }
     }
 
     {
@@ -235,6 +240,29 @@ fn task_main(
                     "dashboard http://{}:{}/",
                     c.dashboard_address, c.dashboard_port
                 ));
+            }
+            ServiceConfig::AwsS3(c) => {
+                let mut ctx =
+                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
+
+                struct AwsService(AwsS3Config);
+                impl Task for AwsService {
+                    fn execute(
+                        &mut self,
+                        _ctx: &mut ExecuteContext<impl std::io::Write>,
+                    ) -> anyhow::Result<()> {
+                        Ok(())
+                    }
+
+                    fn id(&self) -> String {
+                        self.0.id.clone()
+                    }
+                }
+
+                ctx.service(&AwsService(c.clone()));
+                ctx.complete_spin();
+                ctx.pb
+                    .set_message(format!("using AWS s3 bucket {}", c.bucket));
             }
         }
 

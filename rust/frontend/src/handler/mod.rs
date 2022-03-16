@@ -6,6 +6,7 @@ use risingwave_sqlparser::ast::{ObjectName, Statement};
 
 use crate::session::{QueryContext, SessionImpl};
 
+mod create_mv;
 mod create_source;
 pub mod create_table;
 pub mod drop_table;
@@ -28,6 +29,13 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
             drop_table::handle_drop_table(context, table_object_name).await
         }
         Statement::Query(query) => query::handle_query(context, query).await,
+        Statement::CreateView {
+            materialized: true,
+            or_replace: false,
+            name,
+            query,
+            ..
+        } => create_mv::handle_create_mv(context, name, query).await,
         _ => Err(ErrorCode::NotImplementedError(format!("Unhandled ast: {:?}", stmt)).into()),
     }
 }
