@@ -235,22 +235,7 @@ pub trait MetaClientInner: Send + Sync {
         Err(ErrorCode::NotImplementedError("heartbeat is not implemented".into()).into())
     }
 
-    // the old catalog interface will be deprecated soon
-    async fn create(&self, _req: CreateRequest) -> Result<CreateResponse> {
-        unimplemented!()
-    }
-
-    // the old catalog interface will be deprecated soon
-    async fn drop(&self, _req: DropRequest) -> Result<DropResponse> {
-        unimplemented!()
-    }
-
     async fn list_all_nodes(&self, _req: ListAllNodesRequest) -> Result<ListAllNodesResponse> {
-        unimplemented!()
-    }
-
-    // the old catalog interface will be deprecated soon
-    async fn get_catalog(&self, _req: GetCatalogRequest) -> Result<GetCatalogResponse> {
         unimplemented!()
     }
 
@@ -428,41 +413,11 @@ impl MetaClientInner for GrpcMetaClient {
             .into_inner())
     }
 
-    async fn create(&self, req: CreateRequest) -> Result<CreateResponse> {
-        Ok(self
-            .catalog_client
-            .to_owned()
-            .create(req)
-            .await
-            .to_rw_result()?
-            .into_inner())
-    }
-
-    async fn drop(&self, req: DropRequest) -> Result<DropResponse> {
-        Ok(self
-            .catalog_client
-            .to_owned()
-            .drop(req)
-            .await
-            .to_rw_result()?
-            .into_inner())
-    }
-
     async fn list_all_nodes(&self, req: ListAllNodesRequest) -> Result<ListAllNodesResponse> {
         Ok(self
             .cluster_client
             .to_owned()
             .list_all_nodes(req)
-            .await
-            .to_rw_result()?
-            .into_inner())
-    }
-
-    async fn get_catalog(&self, req: GetCatalogRequest) -> Result<GetCatalogResponse> {
-        Ok(self
-            .catalog_client
-            .to_owned()
-            .get_catalog(req)
             .await
             .to_rw_result()?
             .into_inner())
