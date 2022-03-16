@@ -24,7 +24,7 @@ impl fmt::Debug for InputRef {
                 .field("data_type", &self.data_type)
                 .finish()
         } else {
-            write!(f, "${}", self.index + 1)
+            write!(f, "${}", self.index)
         }
     }
 }
