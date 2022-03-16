@@ -136,7 +136,6 @@ jobs:
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers ci-3node
           sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
-          sleep 233
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
