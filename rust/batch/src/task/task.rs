@@ -101,7 +101,7 @@ impl TaskOutput {
                 Ok(Some(chunk)) => {
                     let chunk = chunk.compact()?;
                     trace!("Task output: {:?}, data: {:?}", self.output_id, chunk);
-                    let pb = chunk.to_protobuf()?;
+                    let pb = chunk.to_protobuf();
                     let resp = GetDataResponse {
                         record_batch: Some(pb),
                         ..Default::default()

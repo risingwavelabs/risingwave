@@ -6,6 +6,7 @@ use std::fmt::Write;
 use std::fs::{File, OpenOptions};
 use std::io::Read;
 use std::path::Path;
+use std::process::Command;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -274,7 +275,7 @@ fn task_main(
     Ok((stat, log_buffer))
 }
 
-fn preflight_check() {
+fn preflight_check_proxy() -> Result<()> {
     if env::var("http_proxy").is_ok()
         || env::var("https_proxy").is_ok()
         || env::var("HTTP_PROXY").is_ok()
@@ -297,6 +298,45 @@ fn preflight_check() {
             );
         }
     }
+
+    Ok(())
+}
+
+fn preflight_check_ulimit() -> Result<()> {
+    let ulimit = Command::new("ulimit").arg("-n").output()?.stdout;
+    let ulimit = String::from_utf8(ulimit)?;
+    let ulimit: usize = ulimit.trim().parse()?;
+    if ulimit < 8192 {
+        println!(
+            "[{}] {} - ulimit for file handler is too low (currently {}). If you meet too many open files error, considering changing the ulimit.",
+            style("risedev-preflight-check").bold(),
+            style("WARN").yellow().bold(),
+            ulimit
+        );
+    }
+    Ok(())
+}
+
+fn preflight_check() -> Result<()> {
+    if let Err(e) = preflight_check_proxy() {
+        println!(
+            "[{}] {} - failed to run proxy preflight check: {}",
+            style("risedev-preflight-check").bold(),
+            style("WARN").yellow().bold(),
+            e
+        );
+    }
+
+    if let Err(e) = preflight_check_ulimit() {
+        println!(
+            "[{}] {} - failed to run ulimit preflight check: {}",
+            style("risedev-preflight-check").bold(),
+            style("WARN").yellow().bold(),
+            e
+        );
+    }
+
+    Ok(())
 }
 
 fn main() -> Result<()> {
@@ -316,7 +356,7 @@ fn main() -> Result<()> {
         )?;
     }
 
-    preflight_check();
+    preflight_check()?;
 
     let task_name = std::env::args()
         .nth(1)

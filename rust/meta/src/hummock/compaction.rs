@@ -13,6 +13,7 @@ use risingwave_storage::hummock::{HummockEpoch, HummockSSTableId};
 
 use crate::hummock::level_handler::{LevelHandler, SSTableStat};
 use crate::hummock::model::HUMMOCK_DEFAULT_CF_NAME;
+use crate::storage;
 use crate::storage::{MetaStore, Transaction};
 
 /// Hummock `compact_status` key
@@ -45,14 +46,21 @@ impl CompactStatus {
         HUMMOCK_COMPACT_STATUS_KEY
     }
 
-    pub async fn get<S: MetaStore>(meta_store_ref: &S) -> Result<CompactStatus> {
-        meta_store_ref
+    pub async fn get<S: MetaStore>(meta_store_ref: &S) -> Result<Option<CompactStatus>> {
+        match meta_store_ref
             .get_cf(CompactStatus::cf_name(), CompactStatus::key().as_bytes())
             .await
-            // TODO replace unwrap
             .map(|v| risingwave_pb::hummock::CompactStatus::decode(&mut Cursor::new(v)).unwrap())
             .map(|s| (&s).into())
-            .map_err(Into::into)
+        {
+            Ok(compact_status) => Ok(Some(compact_status)),
+            Err(err) => {
+                if !matches!(err, storage::Error::ItemNotFound(_)) {
+                    return Err(err.into());
+                }
+                Ok(None)
+            }
+        }
     }
 
     pub fn update_in_transaction(&self, trx: &mut Transaction) {
@@ -96,6 +104,7 @@ impl CompactStatus {
         let is_select_level_leveling = matches!(prior, LevelHandler::Nonoverlapping(_, _));
         let target_level = select_level + 1;
         let is_target_level_leveling = matches!(posterior, LevelHandler::Nonoverlapping(_, _));
+        // plan to select and merge table(s) in `select_level` into `target_level`
         match prior {
             LevelHandler::Overlapping(l_n, compacting_key_ranges)
             | LevelHandler::Nonoverlapping(l_n, compacting_key_ranges) => {
@@ -111,6 +120,8 @@ impl CompactStatus {
                     let mut select_level_inputs = vec![*table_id];
                     let key_range;
                     let mut tier_key_range;
+                    // Must ensure that there exists no SSTs in `select_level` which have
+                    // overlapping user key with `select_level_inputs`
                     if !is_select_level_leveling {
                         tier_key_range = sst_key_range.clone();
 
@@ -154,6 +165,8 @@ impl CompactStatus {
                             compacting_key_ranges.partition_point(|(ongoing_key_range, _, _)| {
                                 user_key(&ongoing_key_range.right) < user_key(&key_range.left)
                             });
+                        // if following condition is not satisfied, it may result in two overlapping
+                        // SSTs in target level
                         if insert_point >= compacting_key_ranges.len()
                             || user_key(&compacting_key_ranges[insert_point].0.left)
                                 > user_key(&key_range.right)
@@ -180,6 +193,7 @@ impl CompactStatus {
                                         overlap_end += 1;
                                     }
                                     if overlap_all_idle {
+                                        // Here, we have known that `select_level_input` is valid
                                         compacting_key_ranges.insert(
                                             insert_point,
                                             (

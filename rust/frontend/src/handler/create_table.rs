@@ -8,18 +8,16 @@ use risingwave_sqlparser::ast::{ColumnDef, ObjectName};
 use crate::binder::expr::bind_data_type;
 use crate::session::QueryContext;
 
-fn columns_to_prost(columns: &[ColumnDef]) -> Result<Vec<ColumnDesc>> {
+fn columns_to_prost(columns: &[ColumnDef]) -> Vec<ColumnDesc> {
     columns
         .iter()
         .enumerate()
-        .map(|(idx, col)| {
-            Ok(ColumnDesc {
-                column_id: idx as i32,
-                name: col.name.to_string(),
-                column_type: Some(bind_data_type(&col.data_type)?.to_protobuf()?),
-            })
+        .map(|(idx, col)| ColumnDesc {
+            column_id: idx as i32,
+            name: col.name.to_string(),
+            column_type: Some(bind_data_type(&col.data_type).to_protobuf()),
         })
-        .collect::<Result<_>>()
+        .collect()
 }
 
 pub async fn handle_create_table(
@@ -35,7 +33,7 @@ pub async fn handle_create_table(
 
     // Only support simple create table.
     table.table_name = table_name.to_string();
-    table.column_descs = columns_to_prost(&columns)?;
+    table.column_descs = columns_to_prost(&columns);
 
     let catalog_mgr = session.env().catalog_mgr();
     catalog_mgr

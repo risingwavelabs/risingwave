@@ -509,7 +509,7 @@ mod tests {
 
     use super::SharedBufferBatch;
     use crate::hummock::iterator::test_utils::{
-        iterator_test_key_of, iterator_test_key_of_epoch, test_value_of,
+        iterator_test_key_of, iterator_test_key_of_epoch, iterator_test_value_of,
     };
     use crate::hummock::iterator::{
         BoxedHummockIterator, HummockIterator, MergeIterator, ReverseMergeIterator,
@@ -693,7 +693,7 @@ mod tests {
         for key in put_keys {
             shared_buffer_items.push((
                 Bytes::from(key_with_epoch(key.clone(), epoch)),
-                HummockValue::Put(test_value_of(0, *idx).into()),
+                HummockValue::Put(iterator_test_value_of(0, *idx).into()),
             ));
             *idx += 1;
         }

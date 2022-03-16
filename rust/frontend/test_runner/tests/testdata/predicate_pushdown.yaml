@@ -4,8 +4,8 @@
     select * from t1 join t2 on t1.v1=t2.v2 and t1.v1>1 where t2.v2>2;
   batch_plan: |
     BatchProject { exprs: [$0, $1, $2, $3, $4, $5, $6, $7], expr_alias: [Some("_row_id"), Some("v1"), Some("v2"), Some("v3"), Some("_row_id"), Some("v1"), Some("v2"), Some("v3")] }
-      BatchHashJoin(predicate: $2 = $7)
-        BatchFilter { predicate: Condition { conjunctions: [GreaterThan($1, 1:Int32)] } }
+      BatchHashJoin(predicate: $1 = $6)
+        BatchFilter { predicate: Condition { conjunctions: [($1 > 1:Int32)] } }
           BatchScan { table: "t1", columns: ["_row_id", "v1", "v2", "v3"] }
-        BatchFilter { predicate: Condition { conjunctions: [GreaterThan($2, 2:Int32)] } }
+        BatchFilter { predicate: Condition { conjunctions: [($2 > 2:Int32)] } }
           BatchScan { table: "t2", columns: ["_row_id", "v1", "v2", "v3"] }
