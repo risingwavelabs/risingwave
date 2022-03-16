@@ -244,7 +244,6 @@ impl Compactor {
             // Among keys with same user key, only retain keys which satisfy `epoch` >= `watermark`,
             // and the latest key which satisfies `epoch` < `watermark`
             if epoch < watermark {
-                // Only retain latest key which satisfies epoch < watermark
                 skip_key = BytesMut::from(iter_key);
                 if matches!(iter.value(), HummockValue::Delete) && !has_user_key_overlap {
                     iter.next().await?;
