@@ -5,9 +5,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_pb::data::{
-    Array as ProstArray, ArrayType as ProstArrayType, DataType as ProstDataType, StructArrayData,
-};
+use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, StructArrayData};
 
 use super::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, NULL_VAL_FOR_HASH,
@@ -140,26 +138,18 @@ impl Array for StructArray {
         ArrayIterator::new(self)
     }
 
-    fn to_protobuf(&self) -> Result<ProstArray> {
-        let children_array = self
-            .children
-            .iter()
-            .map(|a| a.to_protobuf())
-            .collect::<Result<Vec<ProstArray>>>()?;
-        let children_type = self
-            .children_type
-            .iter()
-            .map(|t| t.to_protobuf())
-            .collect::<Result<Vec<ProstDataType>>>()?;
-        Ok(ProstArray {
+    fn to_protobuf(&self) -> ProstArray {
+        let children_array = self.children.iter().map(|a| a.to_protobuf()).collect();
+        let children_type = self.children_type.iter().map(|t| t.to_protobuf()).collect();
+        ProstArray {
             array_type: ProstArrayType::Struct as i32,
             struct_array_data: Some(StructArrayData {
                 children_array,
                 children_type,
             }),
-            null_bitmap: Some(self.bitmap.to_protobuf()?),
+            null_bitmap: Some(self.bitmap.to_protobuf()),
             values: vec![],
-        })
+        }
     }
 
     fn null_bitmap(&self) -> &Bitmap {
@@ -386,7 +376,7 @@ mod tests {
     #[test]
     fn test_struct_new_empty() {
         let arr = StructArray::from_slices(&[true, false, true, false], vec![], vec![]).unwrap();
-        let actual = StructArray::from_protobuf(&arr.to_protobuf().unwrap()).unwrap();
+        let actual = StructArray::from_protobuf(&arr.to_protobuf()).unwrap();
         assert_eq!(ArrayImpl::Struct(arr), actual);
     }
 
@@ -402,7 +392,7 @@ mod tests {
             vec![DataType::Int32, DataType::Float32],
         )
         .unwrap();
-        let actual = StructArray::from_protobuf(&arr.to_protobuf().unwrap()).unwrap();
+        let actual = StructArray::from_protobuf(&arr.to_protobuf()).unwrap();
         assert_eq!(ArrayImpl::Struct(arr), actual);
 
         let arr = try_match_expand!(actual, ArrayImpl::Struct).unwrap();

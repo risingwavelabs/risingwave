@@ -146,7 +146,7 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
     fn iter(&self) -> Self::Iter<'_>;
 
     /// Serialize to protobuf
-    fn to_protobuf(&self) -> Result<ProstArray>;
+    fn to_protobuf(&self) -> ProstArray;
 
     /// Get the null `Bitmap` from `Array`.
     fn null_bitmap(&self) -> &Bitmap;
@@ -446,7 +446,7 @@ macro_rules! impl_array {
                 }
             }
 
-            pub fn to_protobuf(&self) -> Result<ProstArray> {
+            pub fn to_protobuf(&self) -> ProstArray {
                 match self {
                     $( Self::$variant_name(inner) => inner.to_protobuf(), )*
                 }

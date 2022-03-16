@@ -130,12 +130,12 @@ impl DataType {
         }
     }
 
-    pub fn to_protobuf(&self) -> Result<ProstDataType> {
-        Ok(ProstDataType {
+    pub fn to_protobuf(&self) -> ProstDataType {
+        ProstDataType {
             type_name: self.prost_type_name() as i32,
             is_nullable: true,
             ..Default::default()
-        })
+        }
     }
 
     pub fn data_size(&self) -> DataSize {

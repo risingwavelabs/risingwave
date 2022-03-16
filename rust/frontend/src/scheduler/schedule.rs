@@ -76,6 +76,7 @@ impl AugmentedStage {
     }
 
     /// Serialize augmented stage into plan node. Used by task manager to construct task.
+    // FIXME: should do rewrite outside of `to_prost`
     pub fn to_prost(&self, task_id: TaskId, query: &Query) -> Result<PlanFragment> {
         let prost_root = self.rewrite_exchange(self.query_stage.root.clone(), task_id, query)?;
         Ok(PlanFragment {
@@ -153,7 +154,7 @@ impl AugmentedStage {
         let input = plan_node.inputs()[0].clone();
         let schema = input.schema();
         for field in &schema.fields {
-            exchange_node.input_schema.push(field.to_prost()?);
+            exchange_node.input_schema.push(field.to_prost());
         }
         Ok(NodeBody::Exchange(exchange_node))
     }
