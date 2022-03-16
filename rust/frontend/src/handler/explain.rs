@@ -40,7 +40,7 @@ pub(super) fn handle_explain(
         stmt => {
             let bound = binder.bind(stmt)?;
             let logical = planner.plan(bound)?;
-            logical.gen_create_mv_plan()
+            logical.gen_batch_query_plan()
         }
     };
 
