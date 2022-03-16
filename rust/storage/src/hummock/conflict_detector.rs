@@ -1,34 +1,59 @@
+//! This mod implements a `ConflictDetector` that  detect write key conflict in each epoch
+
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use bytes::Bytes;
-/// This mod implements a `ConflictDetector` that  detect write key conflict in each epoch
 use dashmap::{DashMap, DashSet};
 
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockEpoch;
 
-struct EpochStatus {
-    written_key: DashSet<Bytes>,
-    deleted: bool,
-}
-
-impl EpochStatus {
-    fn new() -> EpochStatus {
-        EpochStatus {
-            written_key: DashSet::new(),
-            deleted: false,
-        }
-    }
-}
-
 pub struct ConflictDetector {
-    // epoch -> (key-sets, epoch-deleted)
-    epoch_history: DashMap<HummockEpoch, EpochStatus>,
+    // epoch -> key-sets
+    epoch_history: DashMap<HummockEpoch, DashSet<Bytes>>,
+    epoch_watermark: AtomicU64,
 }
+
+const CAS_MAX_ATTEMPT: usize = 10;
 
 impl ConflictDetector {
     pub fn new() -> ConflictDetector {
         ConflictDetector {
             epoch_history: DashMap::new(),
+            epoch_watermark: AtomicU64::new(HummockEpoch::MIN),
         }
+    }
+
+    pub fn get_epoch_watermark(&self) -> HummockEpoch {
+        self.epoch_watermark.load(Ordering::Relaxed)
+    }
+
+    pub fn set_watermark(&self, epoch: HummockEpoch) {
+        let mut attempt_count = 0;
+        // set the new watermark with CAS to enable detection in concurrent update
+        while attempt_count < CAS_MAX_ATTEMPT {
+            attempt_count += 1;
+            let current_watermark = self.get_epoch_watermark();
+            assert!(
+                epoch > current_watermark,
+                "not allowed to set epoch watermark to equal to or lower than current watermark: current is {}, epoch to set {}",
+                current_watermark,
+                epoch
+            );
+            if self
+                .epoch_watermark
+                .compare_exchange(
+                    current_watermark,
+                    epoch,
+                    Ordering::Relaxed,
+                    Ordering::Relaxed,
+                )
+                .is_ok()
+            {
+                return;
+            }
+        }
+        unreachable!("CAS attempt exceeds maximum");
     }
 
     /// Check whether there is key conflict for the given `kv_pairs` and add the key in `kv_pairs`
@@ -39,35 +64,28 @@ impl ConflictDetector {
         kv_pairs: &[(Bytes, HummockValue<Bytes>)],
         epoch: HummockEpoch,
     ) {
-        let entry = self
-            .epoch_history
-            .entry(epoch)
-            .or_insert(EpochStatus::new());
-
         assert!(
-            !entry.value().deleted,
+            epoch > self.get_epoch_watermark(),
             "write to an archived epoch: {}",
             epoch
         );
 
-        for (key, _) in kv_pairs.iter() {
+        let written_key = self.epoch_history.entry(epoch).or_insert(DashSet::new());
+
+        for (key, value) in kv_pairs.iter() {
             assert!(
-                entry.written_key.insert(key.clone()),
-                "key {:?} is written again after previously written",
-                key
+                written_key.insert(key.clone()),
+                "key {:?} is written again after previously written, value is {:?}",
+                key,
+                value,
             );
         }
     }
 
     /// Archive an epoch. An archived epoch cannot be written anymore.
     pub fn archive_epoch(&self, epoch: HummockEpoch) {
-        let mut entry = self
-            .epoch_history
-            .entry(epoch)
-            .or_insert(EpochStatus::new());
-        assert!(!entry.deleted, "archive an archived epoch: {}", epoch);
-        entry.written_key.clear();
-        entry.deleted = true;
+        self.epoch_history.remove(&epoch);
+        self.set_watermark(epoch);
     }
 }
 
@@ -165,18 +183,27 @@ mod test {
                 .as_slice(),
             233,
         );
-        assert!(!detector
-            .epoch_history
-            .get(&233)
-            .unwrap()
-            .written_key
-            .is_empty());
+        assert!(!detector.epoch_history.get(&233).unwrap().is_empty());
         detector.archive_epoch(233);
-        assert!(detector
-            .epoch_history
-            .get(&233)
-            .unwrap()
-            .written_key
-            .is_empty());
+        assert!(detector.epoch_history.get(&233).is_none());
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_write_below_epoch_watermark() {
+        let detector = ConflictDetector::new();
+        detector.check_conflict_and_track_write_batch(
+            once((Bytes::from("key1"), HummockValue::Delete))
+                .collect_vec()
+                .as_slice(),
+            233,
+        );
+        detector.archive_epoch(233);
+        detector.check_conflict_and_track_write_batch(
+            once((Bytes::from("key1"), HummockValue::Delete))
+                .collect_vec()
+                .as_slice(),
+            232,
+        );
     }
 }

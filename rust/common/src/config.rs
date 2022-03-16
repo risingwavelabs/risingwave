@@ -203,7 +203,7 @@ mod default {
     }
 
     pub fn write_conflict_detection_enabled() -> bool {
-        false
+        cfg!(debug_assertions)
     }
 }
 
