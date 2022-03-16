@@ -250,7 +250,7 @@ message SubscribeRequest {
   common.HostAddress host = 2;
 }
 
-message SubscribeFrontendSnapshot {
+message MetaSnapshot {
   repeated common.WorkerNode nodes = 1;
   repeated catalog.Database database = 2;
   repeated catalog.Schema schema = 3;
@@ -282,7 +282,7 @@ message SubscribeResponse {
     catalog.Schema schema_v2 = 9;
     catalog.Table table_v2 = 10;
     catalog.Source source = 11;
-    SubscribeFrontendSnapshot fe_snapshot = 12;
+    MetaSnapshot fe_snapshot = 12;
   }
 }
 
