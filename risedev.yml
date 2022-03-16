@@ -30,19 +30,29 @@ risedev:
     - use: compute-node
     - use: frontend
 
-  # The default configuration will start 1 MinIO, 1 compute node, 1 meta node and 1 frontend.
+  # The default configuration will start 1 compute node, 1 meta node and 1 frontend.
   default:
-    - use: minio
+    # If you want to use the local s3 storage, enable the following line
+    # - use: minio
+
+    # If you want to use aws-s3, configure AK and SK in env var and enable the following lines:
+    # - use: aws-s3
+    #   bucket: some-bucket
+
     # if you want to enable etcd backend, uncomment the following line.
     # - use: etcd
+
     - use: meta-node
     - use: compute-node
     - use: frontend
+
     # If you want to enable metrics, uncomment those two lines.
     # - use: prometheus
     # - use: grafana
+
     # If you want to enable tracing, uncomment the following line.
     # - use: jaeger
+
     # If you want to use the new frontend, uncomment the following line.
     # - use: frontend-v2
 
@@ -111,7 +121,6 @@ template:
     provide-prometheus: "prometheus*"
 
   etcd:
-
     # Id of this instance
     id: "etcd"
 
@@ -143,11 +152,17 @@ template:
     # Minio instances used by this compute node
     provide-minio: "minio*"
 
+    # AWS s3 bucket used by this compute node
+    provide-aws-s3: "aws-s3*"
+
     # Meta-nodes used by this compute node
     provide-meta-node: "meta-node*"
 
     # Jaeger used by this compute node
     provide-jaeger: "jaeger*"
+
+    # Sanity check: should use shared storage if there're multiple compute nodes
+    provide-compute-node: "compute-node*"
 
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
@@ -259,3 +274,13 @@ template:
 
     # Jaeger has a lot of ports open, and we don't want to make this config more complex.
     # So we keep the default value of jaeger instead of making it part of RiseDev config.
+
+  # aws-s3 is a placeholder service to provide configurations
+  aws-s3:
+    # Id to be picked-up by services
+    id: aws-s3
+
+    # The bucket to be used for AWS S3
+    bucket: test-bucket
+
+    # access key, secret key and region should be set in aws config (either by env var or .aws/config)

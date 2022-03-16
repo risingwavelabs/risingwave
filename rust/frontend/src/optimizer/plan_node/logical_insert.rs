@@ -1,5 +1,6 @@
 use std::fmt;
 
+use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
@@ -40,6 +41,13 @@ impl LogicalInsert {
     pub fn create(input: PlanRef, table: BaseTableRef, columns: Vec<ColumnId>) -> Result<Self> {
         Ok(Self::new(input, table, columns))
     }
+
+    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
+        f.debug_struct(name)
+            .field("table_name", &self.table.name)
+            .field("columns", &self.columns)
+            .finish()
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalInsert {
@@ -54,18 +62,15 @@ impl_plan_tree_node_for_unary! {LogicalInsert}
 
 impl fmt::Display for LogicalInsert {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "LogicalInsert {{ table_name: {}, columns: {:?} }}",
-            self.table.name, self.columns,
-        )
+        self.fmt_with_name(f, "LogicalInsert")
     }
 }
 
 impl ColPrunable for LogicalInsert {
-    fn prune_col(&self, required_cols: &fixedbitset::FixedBitSet) -> PlanRef {
-        // TODO: special handling for insert column pruning
-        self.clone_with_input(self.input.prune_col(required_cols))
+    fn prune_col(&self, _required_cols: &FixedBitSet) -> PlanRef {
+        let mut all_cols = FixedBitSet::with_capacity(self.input.schema().len());
+        all_cols.insert_range(..);
+        self.clone_with_input(self.input.prune_col(&all_cols))
             .into()
     }
 }

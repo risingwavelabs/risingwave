@@ -16,7 +16,9 @@ use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use serde::{Deserialize, Serialize};
 
+#[serde_with::skip_serializing_none]
 #[derive(Debug, PartialEq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct TestCase {
     pub sql: String,
     pub logical_plan: Option<String>,
@@ -27,7 +29,9 @@ pub struct TestCase {
     pub optimizer_error: Option<String>,
 }
 
+#[serde_with::skip_serializing_none]
 #[derive(Debug, PartialEq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct TestCaseResult {
     pub logical_plan: Option<String>,
     pub batch_plan: Option<String>,
@@ -56,13 +60,13 @@ impl TestCase {
     /// Run the test case, and return the expected output.
     pub async fn run(&self, do_check_result: bool) -> Result<TestCaseResult> {
         let frontend = LocalFrontend::new().await;
-        let session = frontend.session();
+        let session = frontend.session_ref();
         let statements = Parser::parse_sql(&self.sql).unwrap();
 
         let mut result = None;
 
         for stmt in statements {
-            let context = QueryContext::new(session.ctx.clone());
+            let context = QueryContext::new(session.clone());
             match stmt.clone() {
                 Statement::Query(_) | Statement::Insert { .. } | Statement::Delete { .. } => {
                     if result.is_some() {
@@ -108,7 +112,9 @@ impl TestCase {
 
         let logical_plan = match Planner::new(context).plan(bound) {
             Ok(logical_plan) => {
-                ret.logical_plan = Some(explain_plan(&logical_plan.clone().as_subplan()));
+                if self.logical_plan.is_some() {
+                    ret.logical_plan = Some(explain_plan(&logical_plan.clone().as_subplan()));
+                }
                 logical_plan
             }
             Err(err) => {

@@ -79,6 +79,8 @@ impl NotificationManager {
                     status: None,
                     operation: operation as i32,
                     info: Some(info.clone()),
+                    // TODO: pass the version when call notify
+                    version: 0,
                 }))
                 .await
                 .to_rw_result_with(format!(

@@ -28,10 +28,6 @@ impl fmt::Display for Condition {
 }
 
 impl Condition {
-    pub fn is_empty(&self) -> bool {
-        self.conjunctions.is_empty()
-    }
-
     pub fn with_expr(expr: ExprImpl) -> Self {
         Self {
             conjunctions: to_conjunctions(expr),
@@ -53,6 +49,21 @@ impl Condition {
         if let Some(mut ret) = iter.next() {
             for expr in iter {
                 ret = FunctionCall::new(ExprType::And, vec![ret, expr])
+                    .unwrap()
+                    .into();
+            }
+            ret
+        } else {
+            Literal::new(Some(ScalarImpl::Bool(true)), DataType::Boolean).into()
+        }
+    }
+
+    pub fn as_expr(&self) -> ExprImpl {
+        let mut iter = self.conjunctions.iter();
+        if let Some(e) = iter.next() {
+            let mut ret = e.clone();
+            for expr in iter {
+                ret = FunctionCall::new(ExprType::And, vec![ret, expr.clone()])
                     .unwrap()
                     .into();
             }
