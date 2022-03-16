@@ -5,7 +5,7 @@ statement ok
 explain select * from texplain;
 
 statement ok
-explain create materialized_view mv1 as select v1 from texplain;
+explain create materialized view mv1 as select v1 from texplain;
 
 statement ok
 drop table texplain;
