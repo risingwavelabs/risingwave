@@ -95,6 +95,11 @@ impl Binder {
         if conditions.len() != results.len() {
             todo!();
         }
+        let results_expr: Vec<ExprImpl> = results
+            .into_iter()
+            .map(|expr| self.bind_expr(expr).unwrap())
+            .collect();
+        let mut return_type = Binder::find_proper_type(&results_expr)?;
         for i in 0..conditions.len() {
             let condition = conditions.get(i).unwrap();
             let _condition = match operand {
@@ -106,21 +111,12 @@ impl Binder {
                 None => condition.clone(),
             };
             inputs.push(self.bind_expr(_condition)?);
-            inputs.push(self.bind_expr(results.get(i).unwrap().clone())?);
+            inputs.push(results_expr.get(i).unwrap().clone());
         }
         if let Some(expr) = else_result.clone() {
             inputs.push(self.bind_expr(*expr)?);
         }
-        let mut return_type = self
-            .bind_expr(results.get(0).unwrap().clone())?
-            .return_type();
-        for i in 1..results.len() {
-            let _return_type = self
-                .bind_expr(results.get(i).unwrap().clone())?
-                .return_type();
-            return_type = Binder::find_compat(return_type, _return_type)?;
-        }
-        let return_type = match else_result {
+        return_type = match else_result {
             Some(t) => {
                 let _return_type = self.bind_expr(*t)?.return_type();
                 Binder::find_compat(return_type, _return_type)?

@@ -65,6 +65,15 @@ impl Binder {
         }
     }
 
+    /// Find proper type over a collection of exprs
+    pub fn find_proper_type(exprs: &[ExprImpl]) -> Result<DataType> {
+        let mut return_type = exprs.get(0).unwrap().return_type();
+        for i in 1..exprs.len() {
+            return_type = Self::find_compat(return_type, exprs.get(i).unwrap().return_type())?;
+        }
+        Ok(return_type)
+    }
+
     /// Check if cast needs to be inserted.
     fn ensure_type(expr: ExprImpl, ty: DataType) -> ExprImpl {
         if ty == expr.return_type() {
