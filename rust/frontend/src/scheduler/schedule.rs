@@ -153,7 +153,7 @@ impl AugmentedStage {
         let input = plan_node.inputs()[0].clone();
         let schema = input.schema();
         for field in &schema.fields {
-            exchange_node.input_schema.push(field.to_prost()?);
+            exchange_node.input_schema.push(field.to_prost());
         }
         Ok(NodeBody::Exchange(exchange_node))
     }

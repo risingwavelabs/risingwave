@@ -59,7 +59,7 @@ impl WithSchema for StreamExchange {
 impl ToStreamProst for StreamExchange {
     fn to_stream_prost_body(&self) -> Node {
         Node::ExchangeNode(ExchangeNode {
-            fields: self.schema.to_prost().unwrap(),
+            fields: self.schema.to_prost(),
             dispatcher: Some(Dispatcher {
                 r#type: match &self.base.dist {
                     Distribution::HashShard(_) => DispatcherType::Hash,
