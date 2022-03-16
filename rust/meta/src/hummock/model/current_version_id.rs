@@ -1,18 +1,42 @@
-use prost::Message;
 use risingwave_common::error::Result;
 use risingwave_pb::hummock::hummock_version::HummockVersionRefId;
 use risingwave_storage::hummock::{HummockVersionId, FIRST_VERSION_ID};
 
 use crate::hummock::model::HUMMOCK_DEFAULT_CF_NAME;
-use crate::storage::{MetaStore, Transaction};
+use crate::model::{MetadataModel, Transactional};
+use crate::storage::MetaStore;
 
-/// Hummock version id key.
+/// Hummock current version id key.
 /// `cf(hummock_default)`: `hummock_version_id_key` -> `HummockVersionRefId`
-const HUMMOCK_VERSION_ID_KEY: &str = "version_id";
+const HUMMOCK_VERSION_ID_KEY: &str = "current_version_id";
 
+#[derive(Clone, Debug, PartialEq)]
 pub struct CurrentHummockVersionId {
     id: HummockVersionId,
 }
+
+impl MetadataModel for CurrentHummockVersionId {
+    type ProstType = HummockVersionRefId;
+    type KeyType = String;
+
+    fn cf_name() -> String {
+        HUMMOCK_DEFAULT_CF_NAME.to_string()
+    }
+
+    fn to_protobuf(&self) -> Self::ProstType {
+        HummockVersionRefId { id: self.id }
+    }
+
+    fn from_protobuf(prost: Self::ProstType) -> Self {
+        Self { id: prost.id }
+    }
+
+    fn key(&self) -> Result<Self::KeyType> {
+        Ok(HUMMOCK_VERSION_ID_KEY.to_string())
+    }
+}
+
+impl Transactional for CurrentHummockVersionId {}
 
 impl CurrentHummockVersionId {
     pub fn new() -> CurrentHummockVersionId {
@@ -21,25 +45,8 @@ impl CurrentHummockVersionId {
         }
     }
 
-    fn cf_name() -> &'static str {
-        HUMMOCK_DEFAULT_CF_NAME
-    }
-
-    fn key() -> &'static str {
-        HUMMOCK_VERSION_ID_KEY
-    }
-
-    pub async fn get<S: MetaStore>(meta_store_ref: &S) -> Result<CurrentHummockVersionId> {
-        let byte_vec = meta_store_ref
-            .get_cf(
-                CurrentHummockVersionId::cf_name(),
-                CurrentHummockVersionId::key().as_bytes(),
-            )
-            .await?;
-        let instant = CurrentHummockVersionId {
-            id: HummockVersionRefId::decode(byte_vec.as_slice())?.id,
-        };
-        Ok(instant)
+    pub async fn get<S: MetaStore>(meta_store_ref: &S) -> Result<Option<CurrentHummockVersionId>> {
+        CurrentHummockVersionId::select(meta_store_ref, &HUMMOCK_VERSION_ID_KEY.to_string()).await
     }
 
     /// Increase version id, return previous one
@@ -47,14 +54,6 @@ impl CurrentHummockVersionId {
         let previous_id = self.id;
         self.id += 1;
         previous_id
-    }
-
-    pub fn update_in_transaction(&self, trx: &mut Transaction) {
-        trx.put(
-            CurrentHummockVersionId::cf_name().to_string(),
-            CurrentHummockVersionId::key().as_bytes().to_vec(),
-            HummockVersionRefId { id: self.id }.encode_to_vec(),
-        );
     }
 
     pub fn id(&self) -> HummockVersionId {
