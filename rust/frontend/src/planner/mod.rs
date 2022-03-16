@@ -19,13 +19,15 @@ pub struct Planner {
 }
 
 impl Planner {
-    #[allow(clippy::new_without_default)]
     pub fn new(ctx: QueryContextRef) -> Planner {
         Planner { ctx }
     }
+
+    /// Plan a [`BoundStatement`]. Need to bind a statement before plan.
     pub fn plan(&mut self, stmt: BoundStatement) -> Result<PlanRoot> {
         self.plan_statement(stmt)
     }
+
     pub fn ctx(&self) -> QueryContextRef {
         self.ctx.clone()
     }
