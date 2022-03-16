@@ -18,6 +18,7 @@ use std::time::Duration;
 
 pub use compactor_manager::*;
 pub use hummock_manager::*;
+use itertools::Itertools;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 pub use vacuum::*;
@@ -59,6 +60,11 @@ where
                     continue;
                 }
             };
+            let input_ssts = compact_task
+                .input_ssts
+                .iter()
+                .flat_map(|v| v.level.as_ref().unwrap().table_ids.clone())
+                .collect_vec();
             if !compactor_manager_ref
                 .try_assign_compact_task(Some(compact_task.clone()), None)
                 .await
@@ -71,7 +77,9 @@ where
                 {
                     tracing::warn!("failed to report_compact_task {}", e);
                 }
+                continue;
             }
+            tracing::debug!("Try to compact SSTs {:?}", input_ssts);
         }
     });
 

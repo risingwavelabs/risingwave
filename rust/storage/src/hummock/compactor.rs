@@ -4,6 +4,7 @@ use std::time::Duration;
 use bytes::{Bytes, BytesMut};
 use futures::stream::{self, StreamExt};
 use futures::Future;
+use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
 use risingwave_common::error::RwError;
 use risingwave_pb::hummock::{
@@ -288,12 +289,6 @@ impl Compactor {
     ) -> HummockResult<()> {
         let result = Compactor::run_compact(context, &mut compact_task).await;
         if result.is_err() {
-            for _sst_to_delete in &compact_task.sorted_output_ssts {
-                // TODO: delete these tables in (S3) storage
-                // However, if we request a table_id from hummock storage service every time we
-                // generate a table, we would not delete here, or we should notify
-                // hummock storage service to delete them.
-            }
             compact_task.sorted_output_ssts.clear();
         }
 
@@ -376,6 +371,12 @@ impl Compactor {
                             vacuum_task,
                         })) => {
                             if let Some(compact_task) = compact_task {
+                                let input_ssts = compact_task
+                                    .input_ssts
+                                    .iter()
+                                    .flat_map(|v| v.level.as_ref().unwrap().table_ids.clone())
+                                    .collect_vec();
+                                tracing::debug!("Try to compact SSTs {:?}", input_ssts);
                                 if let Err(e) =
                                     Compactor::compact(&sub_compact_context, compact_task).await
                                 {
@@ -383,6 +384,7 @@ impl Compactor {
                                 }
                             }
                             if let Some(vacuum_task) = vacuum_task {
+                                tracing::debug!("Try to vacuum SSTs {:?}", vacuum_task.sstable_ids);
                                 if let Err(e) = Vacuum::vacuum(
                                     sstable_store.clone(),
                                     vacuum_task,
