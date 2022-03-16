@@ -170,7 +170,7 @@ impl<S: StateStore> MViewTableIter<S> {
     const SCAN_LIMIT: usize = 1024;
 
     async fn new(keyspace: Keyspace<S>, table_descs: Vec<ColumnDesc>, epoch: u64) -> Result<Self> {
-        keyspace.state_store().wait_epoch(epoch).await;
+        keyspace.state_store().wait_epoch(epoch).await?;
 
         let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_descs);
 

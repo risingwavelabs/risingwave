@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 pub mod plan_node;
 pub use plan_node::PlanRef;
 pub mod property;
@@ -61,6 +60,7 @@ impl PlanRoot {
     }
 
     /// Get a reference to the plan root's schema.
+    #[allow(dead_code)]
     fn schema(&self) -> &Schema {
         &self.schema
     }
