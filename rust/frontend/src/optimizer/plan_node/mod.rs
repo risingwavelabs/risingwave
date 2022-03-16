@@ -121,7 +121,6 @@ impl dyn PlanNode {
         }
     }
 
-    #[allow(unreachable_code)]
     pub fn to_stream_prost(&self) -> StreamPlanProst {
         let node = Some(self.to_stream_prost_body());
         let input = self
@@ -130,12 +129,13 @@ impl dyn PlanNode {
             .map(|plan| plan.to_stream_prost())
             .collect();
         let identity = format!("{:?}", self);
+        // TODO: support pk_indices and operator_id
         StreamPlanProst {
             input,
             identity,
             node,
-            operator_id: todo!(),
-            pk_indices: todo!(),
+            operator_id: 0,
+            pk_indices: vec![],
         }
     }
 }

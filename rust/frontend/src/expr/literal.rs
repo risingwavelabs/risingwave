@@ -4,7 +4,6 @@ use super::Expr;
 use crate::expr::ExprType;
 #[derive(Clone, PartialEq)]
 pub struct Literal {
-    #[allow(dead_code)]
     data: Datum,
     data_type: DataType,
 }

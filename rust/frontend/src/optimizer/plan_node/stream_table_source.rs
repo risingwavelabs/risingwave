@@ -1,6 +1,7 @@
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
+use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 
 use super::{LogicalScan, StreamBase, ToStreamProst};
 use crate::optimizer::property::{Distribution, WithSchema};
@@ -41,4 +42,9 @@ impl fmt::Display for StreamTableSource {
     }
 }
 
-impl ToStreamProst for StreamTableSource {}
+impl ToStreamProst for StreamTableSource {
+    fn to_stream_prost_body(&self) -> ProstStreamNode {
+        // TODO: support real serialization
+        ProstStreamNode::SourceNode(Default::default())
+    }
+}
