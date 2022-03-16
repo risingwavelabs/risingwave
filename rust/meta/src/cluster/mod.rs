@@ -32,6 +32,7 @@ pub type StoredClusterManagerRef<S> = Arc<StoredClusterManager<S>>;
 const DEFAULT_WORK_NODE_PARALLEL_DEGREE: usize = 8;
 
 /// [`StoredClusterManager`] manager cluster/worker meta data in [`MetaStore`].
+#[derive(Debug)]
 pub struct WorkerKey(pub HostAddress);
 
 impl PartialEq<Self> for WorkerKey {
@@ -158,12 +159,8 @@ where
                 // Notify frontends of new compute node.
                 if worker_node.r#type == WorkerType::ComputeNode as i32 {
                     self.notification_manager_ref
-                        .notify(
-                            Operation::Add,
-                            &Info::Node(worker_node),
-                            crate::manager::NotificationTarget::Frontend,
-                        )
-                        .await?
+                        .notify_fe(Operation::Add, &Info::Node(worker_node))
+                        .await;
                 }
 
                 Ok(())
@@ -206,12 +203,8 @@ where
                 // Notify frontends to delete compute node.
                 if worker_node.r#type == WorkerType::ComputeNode as i32 {
                     self.notification_manager_ref
-                        .notify(
-                            Operation::Delete,
-                            &Info::Node(worker_node),
-                            crate::manager::NotificationTarget::Frontend,
-                        )
-                        .await?
+                        .notify_fe(Operation::Delete, &Info::Node(worker_node))
+                        .await;
                 }
 
                 Ok(())
@@ -293,6 +286,9 @@ where
                     }
                     match cluster_manager_ref.delete_worker_node(key.clone()).await {
                         Ok(_) => {
+                            cluster_manager_ref
+                                .notification_manager_ref
+                                .delete_sender(WorkerKey(key.clone()));
                             tracing::warn!(
                                 "Deleted expired worker {} {}:{}; expired at {}, now {}",
                                 worker.worker_id(),
@@ -526,6 +522,7 @@ mod tests {
                 .await
                 .unwrap(),
         );
+
         let cluster_manager = Arc::new(
             StoredClusterManager::new(
                 env.clone(),

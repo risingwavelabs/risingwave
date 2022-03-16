@@ -13,7 +13,7 @@ use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
 use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
 use tokio::net::TcpListener;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{self, UnboundedSender};
 use tokio::task::JoinHandle;
 
 use super::intercept::MetricsMiddlewareLayer;
@@ -100,6 +100,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             .unwrap(),
     );
     let compactor_manager = Arc::new(hummock::CompactorManager::new());
+
     let notification_manager = Arc::new(NotificationManager::new());
     let cluster_manager = Arc::new(
         StoredClusterManager::new(
@@ -180,7 +181,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         .await,
     ];
 
-    let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
+    let (shutdown_send, mut shutdown_recv) = mpsc::unbounded_channel();
     let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()
             .layer(MetricsMiddlewareLayer::new(meta_metrics.clone()))
