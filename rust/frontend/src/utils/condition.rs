@@ -28,10 +28,6 @@ impl fmt::Display for Condition {
 }
 
 impl Condition {
-    pub fn is_empty(&self) -> bool {
-        self.conjunctions.is_empty()
-    }
-
     pub fn with_expr(expr: ExprImpl) -> Self {
         Self {
             conjunctions: to_conjunctions(expr),
