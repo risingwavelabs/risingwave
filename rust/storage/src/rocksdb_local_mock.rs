@@ -57,7 +57,7 @@ impl StateStore for RocksDBStateStore {
         unimplemented!()
     }
 
-    async fn wait_epoch(&self, _epoch: u64) {
+    async fn wait_epoch(&self, _epoch: u64) -> Result<()> {
         unimplemented!()
     }
 

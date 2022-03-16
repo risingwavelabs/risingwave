@@ -1,6 +1,9 @@
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
+use risingwave_pb::stream_plan::dispatcher::DispatcherType;
+use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::{Dispatcher, ExchangeNode};
 
 use super::{PlanRef, PlanTreeNodeUnary, StreamBase, ToStreamProst};
 use crate::optimizer::property::{Distribution, WithDistribution, WithSchema};
@@ -53,4 +56,22 @@ impl WithSchema for StreamExchange {
     }
 }
 
-impl ToStreamProst for StreamExchange {}
+impl ToStreamProst for StreamExchange {
+    fn to_stream_prost_body(&self) -> Node {
+        Node::ExchangeNode(ExchangeNode {
+            fields: self.schema.to_prost().unwrap(),
+            dispatcher: Some(Dispatcher {
+                r#type: match &self.base.dist {
+                    Distribution::HashShard(_) => DispatcherType::Hash,
+                    Distribution::Single => DispatcherType::Simple,
+                    Distribution::Broadcast => DispatcherType::Broadcast,
+                    _ => panic!("Do not allow Any or AnyShard in serialization process"),
+                } as i32,
+                column_indices: match &self.base.dist {
+                    Distribution::HashShard(keys) => keys.iter().map(|num| *num as u32).collect(),
+                    _ => vec![],
+                },
+            }),
+        })
+    }
+}

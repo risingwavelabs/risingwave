@@ -68,7 +68,7 @@ impl StateStore for TikvStateStore {
         unimplemented!()
     }
 
-    async fn wait_epoch(&self, _epoch: u64) {
+    async fn wait_epoch(&self, _epoch: u64) -> Result<()> {
         unimplemented!()
     }
 

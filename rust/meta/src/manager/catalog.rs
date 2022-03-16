@@ -96,8 +96,11 @@ where
 
     pub async fn create_schema(&self, mut schema: Schema) -> Result<CatalogVersion> {
         let mut core = self.core.lock().await;
-        let schema_id = SchemaId::from(&schema.schema_ref_id);
-        if !core.has_schema(&schema_id) {
+        let exist = core
+            .schemas
+            .values()
+            .any(|s| s.schema_name == schema.schema_name);
+        if !exist {
             let version = core.new_version_id(&*self.meta_store_ref).await?;
             schema.version = version;
 
@@ -142,8 +145,11 @@ where
 
     pub async fn create_table(&self, mut table: Table) -> Result<CatalogVersion> {
         let mut core = self.core.lock().await;
-        let table_id = TableId::from(&table.table_ref_id);
-        if !core.has_table(&table_id) {
+        let exist = core
+            .tables
+            .values()
+            .any(|t| t.table_name == table.table_name);
+        if !exist {
             let version = core.new_version_id(&*self.meta_store_ref).await?;
             table.version = version;
 
