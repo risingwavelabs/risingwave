@@ -53,6 +53,9 @@ It will start processes in the background. After testing, you can run the follow
 ./risedev clean-data
 ```
 
+As our codebase is constantly changing, and all persistent data might not be in a stable format, if there's
+some unexpected decode error, try `./risedev clean-data` first.
+
 ## Monitoring
 
 Uncomment `grafana` and `prometheus` services in `risedev.yml`, and you can view the metrics.

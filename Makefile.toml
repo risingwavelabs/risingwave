@@ -5,6 +5,7 @@ extend = [
   {path = "rust/risedevtool/etcd.toml"},
   {path = "rust/risedevtool/jaeger.toml"},
   {path = "rust/risedevtool/risedev-components.toml"},
+  {path = "rust/frontend/test_runner/planner_test.toml"},
 ]
 
 env_files = [

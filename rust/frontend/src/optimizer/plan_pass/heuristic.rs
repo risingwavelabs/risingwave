@@ -27,6 +27,13 @@ pub struct HeuristicOptimizer {
 }
 
 impl HeuristicOptimizer {
+    pub fn new(rules: Vec<BoxedRule>) -> Self {
+        Self {
+            apply_order: Default::default(),
+            rules,
+        }
+    }
+
     fn optimize_self_node(&mut self, mut plan: PlanRef) -> PlanRef {
         for rule in &self.rules {
             if let Some(applied) = rule.apply(plan.clone()) {

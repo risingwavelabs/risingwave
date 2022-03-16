@@ -1,8 +1,8 @@
 use std::env;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
 use crate::{EtcdConfig, Task};
 
@@ -15,11 +15,13 @@ impl EtcdService {
         Ok(Self { config })
     }
 
-    fn etcd() -> Result<Command> {
+    fn path() -> Result<PathBuf> {
         let prefix_bin = env::var("PREFIX_BIN")?;
-        Ok(Command::new(
-            Path::new(&prefix_bin).join("etcd").join("etcd"),
-        ))
+        Ok(Path::new(&prefix_bin).join("etcd").join("etcd"))
+    }
+
+    fn etcd() -> Result<Command> {
+        Ok(Command::new(Self::path()?))
     }
 }
 
@@ -30,6 +32,11 @@ impl Task for EtcdService {
     ) -> anyhow::Result<()> {
         ctx.service(self);
         ctx.pb.set_message("starting...");
+
+        let path = Self::path()?;
+        if !path.exists() {
+            return Err(anyhow!("etcd binary not found in {:?}\nDid you enable etcd feature in `./risedev configure`?", path));
+        }
 
         let mut cmd = Self::etcd()?;
         let listen_urls = format!("http://{}:{}", self.config.address, self.config.port);

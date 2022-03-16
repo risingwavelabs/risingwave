@@ -1,9 +1,10 @@
 use anyhow::anyhow;
+use bytes::Bytes;
 use rdkafka::message::BorrowedMessage;
 use rdkafka::Message;
 use serde::{Deserialize, Serialize};
 
-use crate::base::{SourceMessage, SourceOffset};
+use crate::base::{InnerMessage, SourceMessage, SourceOffset};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct KafkaMessage {
@@ -27,13 +28,12 @@ impl SourceMessage for KafkaMessage {
     }
 }
 
-impl<'a> From<BorrowedMessage<'a>> for KafkaMessage {
+impl<'a> From<BorrowedMessage<'a>> for InnerMessage {
     fn from(message: BorrowedMessage<'a>) -> Self {
-        KafkaMessage {
-            partition: message.partition(),
-            offset: message.offset(),
-            key: message.key().map(|key| key.to_vec()),
-            payload: message.payload().map(|m| m.to_vec()),
+        InnerMessage {
+            payload: message.payload().map(Bytes::copy_from_slice),
+            offset: message.offset().to_string(),
+            split_id: message.partition().to_string(),
         }
     }
 }

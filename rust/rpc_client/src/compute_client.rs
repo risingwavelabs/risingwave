@@ -88,7 +88,7 @@ impl ComputeClient {
             .into_inner())
     }
 
-    pub async fn create_task(&self, task_id: TaskId, plan: PlanNode) -> Result<()> {
+    pub async fn create_task(&self, task_id: TaskId, plan: PlanNode, epoch: u64) -> Result<()> {
         let plan = PlanFragment {
             root: Some(plan),
             exchange_info: Some(ExchangeInfo {
@@ -100,7 +100,7 @@ impl ComputeClient {
             .create_task_inner(CreateTaskRequest {
                 task_id: Some(task_id),
                 plan: Some(plan),
-                ..Default::default()
+                epoch,
             })
             .await?;
         Ok(())

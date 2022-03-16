@@ -121,6 +121,8 @@ impl NotificationManagerCore {
                         status: None,
                         operation: operation as i32,
                         info: Some(info.clone()),
+                        // TODO: pass the version when call notify
+                        version: 0,
                     }))
                     .await;
                 if result.is_ok() {
@@ -151,6 +153,8 @@ impl NotificationManagerCore {
                         status: None,
                         operation: operation as i32,
                         info: Some(info.clone()),
+                        // TODO: pass the version when call notify
+                        version: 0,
                     }))
                     .await;
                 if result.is_ok() {

@@ -4,7 +4,7 @@ use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 
-use super::{ColPrunable, LogicalBase, PlanRef, ToBatch, ToStream};
+use super::{ColPrunable, LogicalBase, PlanRef, StreamTableSource, ToBatch, ToStream};
 use crate::catalog::{ColumnId, TableId};
 use crate::optimizer::plan_node::BatchSeqScan;
 use crate::optimizer::property::WithSchema;
@@ -106,6 +106,6 @@ impl ToBatch for LogicalScan {
 
 impl ToStream for LogicalScan {
     fn to_stream(&self) -> PlanRef {
-        todo!()
+        StreamTableSource::new(self.clone()).into()
     }
 }
