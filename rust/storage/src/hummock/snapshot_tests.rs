@@ -73,7 +73,6 @@ async fn gen_and_upload_table_with_sstable_store(
     }
     let table_id = hummock_meta_client.get_new_table_id().await.unwrap();
 
-    // let sst = Sstable { id: table_id, meta };
     let sst = gen_test_sstable(
         default_builder_opt_for_test(),
         table_id,

@@ -188,7 +188,6 @@ mod tests {
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
         let sstable_store = Arc::new(SstableStore::new(obj_client, REMOTE_DIR.to_string()));
 
-        // let sst = Sstable { id: 0, meta };
         let sst = gen_test_sstable(
             opt,
             0,
