@@ -147,6 +147,7 @@ impl MetaClient {
         // TODO: handle error in `resp.status` here
         Ok((resp.schema_id.into(), resp.version))
     }
+
     /// Unregister the current node to the cluster.
     pub async fn unregister(&self, addr: SocketAddr) -> Result<()> {
         let host_address = HostAddress {
@@ -324,6 +325,7 @@ pub struct GrpcMetaClient {
     pub cluster_client: ClusterServiceClient<Channel>,
     pub heartbeat_client: HeartbeatServiceClient<Channel>,
     pub catalog_client: CatalogServiceClient<Channel>,
+    // TODO: add catalog client for catalogV2
     pub hummock_client: HummockManagerServiceClient<Channel>,
     pub notification_client: NotificationServiceClient<Channel>,
 }
@@ -517,6 +519,32 @@ impl MetaClientInner for GrpcMetaClient {
             .subscribe_compact_tasks(req)
             .await?
             .into_inner())
+    }
+
+    async fn create_database(&self, _req: CreateDatabaseRequest) -> Result<CreateDatabaseResponse> {
+        // TODO: add catalog client for catalogV2
+        todo!()
+    }
+
+    async fn create_schema(&self, _req: CreateSchemaRequest) -> Result<CreateSchemaResponse> {
+        // TODO: add catalog client for catalogV2
+        todo!()
+    }
+
+    async fn create_materialized_source(
+        &self,
+        _req: CreateMaterializedSourceRequest,
+    ) -> Result<CreateMaterializedSourceResponse> {
+        // TODO: add catalog client for catalogV2
+        todo!()
+    }
+
+    async fn create_materialized_view(
+        &self,
+        _req: CreateMaterializedViewRequest,
+    ) -> Result<CreateMaterializedViewResponse> {
+        // TODO: add catalog client for catalogV2
+        todo!()
     }
 }
 
