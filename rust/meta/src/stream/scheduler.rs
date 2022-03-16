@@ -144,7 +144,6 @@ mod test {
     use std::time::Duration;
 
     use risingwave_pb::common::HostAddress;
-    use tokio::sync::mpsc;
 
     use super::*;
     use crate::manager::{MetaSrvEnv, NotificationManager};
@@ -152,8 +151,7 @@ mod test {
     #[tokio::test]
     async fn test_schedule() -> Result<()> {
         let env = MetaSrvEnv::for_test().await;
-        let (_, delete_worker_receiver) = mpsc::unbounded_channel();
-        let notification_manager = Arc::new(NotificationManager::new(delete_worker_receiver));
+        let notification_manager = Arc::new(NotificationManager::new());
         let cluster_manager = Arc::new(
             StoredClusterManager::new(
                 env.clone(),

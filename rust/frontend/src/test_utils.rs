@@ -22,7 +22,7 @@ use risingwave_pb::meta::{
     ListAllNodesRequest, ListAllNodesResponse, SubscribeRequest,
 };
 use risingwave_rpc_client::{MetaClient, MetaClientInner, NotificationStream};
-use tokio::sync::mpsc::{self, UnboundedSender};
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 use tonic::Request;
 
@@ -81,8 +81,7 @@ impl FrontendMockMetaClient {
         let epoch_generator = Arc::new(MemEpochGenerator::default());
         let env = MetaSrvEnv::<MemStore>::new(meta_store.clone(), epoch_generator.clone()).await;
 
-        let (_, delete_worker_receiver) = mpsc::unbounded_channel();
-        let notification_manager = Arc::new(NotificationManager::new(delete_worker_receiver));
+        let notification_manager = Arc::new(NotificationManager::new());
         let catalog_manager = Arc::new(
             StoredCatalogManager::new(meta_store.clone(), notification_manager.clone())
                 .await

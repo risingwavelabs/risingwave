@@ -101,12 +101,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     );
     let compactor_manager = Arc::new(hummock::CompactorManager::new());
 
-    #[cfg(not(test))]
-    let (delete_worker_sender, delete_worker_receiver) = mpsc::unbounded_channel();
-    #[cfg(test)]
-    let (_, delete_worker_receiver) = mpsc::unbounded_channel();
-
-    let notification_manager = Arc::new(NotificationManager::new(delete_worker_receiver));
+    let notification_manager = Arc::new(NotificationManager::new());
     let cluster_manager = Arc::new(
         StoredClusterManager::new(
             env.clone(),
@@ -182,7 +177,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         StoredClusterManager::start_heartbeat_checker(
             cluster_manager.clone(),
             Duration::from_secs(1),
-            delete_worker_sender,
         )
         .await,
     ];
