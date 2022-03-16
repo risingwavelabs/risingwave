@@ -8,8 +8,6 @@ use risingwave_sqlparser::ast::{
 
 use super::bind_context::ColumnBinding;
 use crate::binder::Binder;
-use crate::catalog::catalog_service::DEFAULT_SCHEMA_NAME;
-use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::TableId;
 use crate::expr::{Expr, ExprImpl};
 

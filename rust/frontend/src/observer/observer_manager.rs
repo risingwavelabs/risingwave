@@ -1,12 +1,8 @@
 use std::net::SocketAddr;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
+use parking_lot::RwLock;
 use risingwave_common::catalog::CatalogVersion;
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, RwError};
-use risingwave_pb::catalog::{
-    Database as ProstDatabase, Schema as ProstSchema, Table as ProstTable,
-};
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_rpc_client::{MetaClient, NotificationStream};
@@ -14,7 +10,6 @@ use tokio::sync::watch::Sender;
 use tokio::task::JoinHandle;
 
 use crate::catalog::catalog_service::Catalog;
-use crate::catalog::{CatalogError, DatabaseId, SchemaId};
 use crate::scheduler::schedule::WorkerNodeManagerRef;
 
 /// `ObserverManager` is used to update data based on notification from meta.
@@ -23,7 +18,7 @@ use crate::scheduler::schedule::WorkerNodeManagerRef;
 pub(crate) struct ObserverManager {
     rx: Box<dyn NotificationStream>,
     worker_node_manager: WorkerNodeManagerRef,
-    catalog_cache: Arc<RwLock<Catalog>>,
+    catalog: Arc<RwLock<Catalog>>,
     catalog_updated_tx: Sender<CatalogVersion>,
 }
 
@@ -32,14 +27,14 @@ impl ObserverManager {
         client: MetaClient,
         addr: SocketAddr,
         worker_node_manager: WorkerNodeManagerRef,
-        catalog_cache: Arc<RwLock<Catalog>>,
+        catalog: Arc<RwLock<Catalog>>,
         catalog_updated_tx: Sender<CatalogVersion>,
     ) -> Self {
         let rx = client.subscribe(addr, WorkerType::Frontend).await.unwrap();
         Self {
             rx,
             worker_node_manager,
-            catalog_cache,
+            catalog,
             catalog_updated_tx,
         }
     }
@@ -56,7 +51,7 @@ impl ObserverManager {
                     }
                     let resp = resp.unwrap();
                     let operation = resp.operation();
-                    let catalog_guard = self.catalog_cache.write().unwrap();
+                    let catalog_guard = self.catalog.write();
                     match resp.info {
                         Some(Info::Database(database)) => {
                             panic!(

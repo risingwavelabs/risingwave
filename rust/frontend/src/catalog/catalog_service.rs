@@ -14,7 +14,9 @@ use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::{DatabaseId, SchemaId};
 pub type CatalogReadGuard = ArcRwLockReadGuard<RawRwLock, Catalog>;
-pub struct CatalogReader(Arc<RwLock<Catalog>>);
+
+#[derive(Clone)]
+pub struct CatalogReader(pub Arc<RwLock<Catalog>>);
 impl CatalogReader {
     fn read_guard(&self) -> CatalogReadGuard {
         self.0.read_arc()

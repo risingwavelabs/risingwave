@@ -2,8 +2,8 @@
 use risingwave_common::error::{ErrorCode, RwError};
 use thiserror::Error;
 
-pub(crate) mod catalog_connector;
 pub(crate) mod catalog_service;
+pub(crate) mod catalog_writer;
 pub(crate) mod database_catalog;
 mod schema_catalog;
 pub(crate) mod table_catalog;

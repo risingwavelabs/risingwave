@@ -13,12 +13,12 @@ use crate::catalog::table_catalog::{TableCatalog, ROWID_NAME};
 /// For DDL (create table/schema/database), only send rpc to meta. Create and delete actions will be
 /// done by `ObserverManager`. Should be used by DDL handler.
 #[derive(Clone)]
-pub struct CatalogConnector {
+pub struct CatalogWriter {
     meta_client: MetaClient,
     catalog_updated_rx: Receiver<CatalogVersion>,
 }
 
-impl CatalogConnector {
+impl CatalogWriter {
     pub fn new(meta_client: MetaClient, catalog_updated_rx: Receiver<CatalogVersion>) -> Self {
         Self {
             meta_client,
