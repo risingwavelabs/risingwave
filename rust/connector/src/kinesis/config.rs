@@ -112,7 +112,6 @@ impl AwsConfigInfo {
                 RwError::from(ProtocolError("Both Kinesis credential access key and Kinesis secret key should be provided or not provided at the same time.".into()))
             );
         } else if let (Some(access), Some(secret)) = (access_key, secret_key) {
-            let x = properties.get(KINESIS_CREDENTIALS_SESSION_TOKEN).cloned();
             credentials = Some(AwsCredentials {
                 access_key_id: access.clone(),
                 secret_access_key: secret.clone(),

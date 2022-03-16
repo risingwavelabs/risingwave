@@ -13,11 +13,11 @@
 #![feature(binary_heap_drain_sorted)]
 
 pub use parser::*;
-mod parser;
+pub mod parser;
 
 mod base;
 pub use base::*;
 
-mod connector_source;
-mod mem_source_manager;
+pub mod connector_source;
+pub mod mem_source_manager;
 mod table_v2;

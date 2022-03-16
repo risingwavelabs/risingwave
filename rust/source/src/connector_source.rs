@@ -1,14 +1,23 @@
+use std::fmt::Debug;
+
+use lazy_static::__Deref;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_connector::base::SourceReader;
 
-use crate::{SourceChunkBuilder, SourceColumnDesc, SourceParser};
+use crate::{build_columns, SourceColumnDesc, SourceParser};
 
 pub struct ConnectorSource {
     pub parser: Box<dyn SourceParser>,
     pub reader: Box<dyn SourceReader>,
     pub column_descs: Box<Vec<SourceColumnDesc>>,
+}
+
+impl Debug for ConnectorSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConnectorSource").finish()
+    }
 }
 
 impl ConnectorSource {
@@ -25,21 +34,26 @@ impl ConnectorSource {
     }
 
     pub fn assign_split<'a>(&mut self, split: &'a [u8]) -> Result<()> {
-        self.reader
-            .assign_split(split)
+        let mut runtime = tokio::runtime::Runtime::new().expect("Unable to create a runtime");
+        runtime
+            .block_on(self.reader.assign_split(split))
             .map_err(|e: anyhow::Error| RwError::from(InternalError(e.to_string())))
     }
 
     pub fn next(&mut self) -> Result<StreamChunk> {
         let mut runtime = tokio::runtime::Runtime::new().expect("Unable to create a runtime");
-        let payload = runtime.block_on(self.reader.next())?;
+        let payload = runtime
+            .block_on(self.reader.next())
+            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
         match payload {
             None => Ok(StreamChunk::default()),
             Some(batch) => {
                 let mut events = Vec::with_capacity(batch.len());
                 for msg in batch {
-                    events.push(self.parser.parse(&msg, &self.columns)?);
+                    if let Some(content) = msg.payload {
+                        events.push(self.parser.parse(content.deref(), &self.column_descs)?);
+                    }
                 }
 
                 let mut ops = vec![];
@@ -51,7 +65,7 @@ impl ConnectorSource {
                 }
                 Ok(StreamChunk::new(
                     ops,
-                    SourceChunkBuilder::build_columns(&self.columns, rows.as_ref())?,
+                    build_columns(&self.column_descs, rows.as_ref())?,
                     None,
                 ))
             }

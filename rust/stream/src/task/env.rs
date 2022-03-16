@@ -47,7 +47,7 @@ impl StreamEnvironment {
     // Create an instance for testing purpose.
     #[cfg(test)]
     pub fn for_test() -> Self {
-        use risingwave_source::MemSourceManager;
+        use risingwave_source::mem_source_manager::MemSourceManager;
         use risingwave_storage::monitor::StateStoreMetrics;
 
         StreamEnvironment {

@@ -1,4 +1,6 @@
+use core::marker::{Send, Sync};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use risingwave_common::catalog::{ColumnDesc, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
@@ -14,6 +16,14 @@ use crate::{SourceColumnDesc, SourceDesc, SourceFormat, SourceImpl, SourceManage
 #[derive(Debug)]
 pub struct MemSourceManager {
     sources: HashMap<TableId, SourceDesc>,
+}
+
+impl MemSourceManager {
+    fn new() -> Self {
+        Self {
+            sources: HashMap::new(),
+        }
+    }
 }
 
 impl SourceManager for MemSourceManager {
@@ -33,7 +43,7 @@ impl SourceManager for MemSourceManager {
 
         // Table sources do not need columns and format
         let desc = SourceDesc {
-            source: Box::new(source),
+            source: Arc::new(source),
             columns: source_columns,
             format: SourceFormat::Invalid,
             row_id_index: Some(0), // always use the first column as row_id
@@ -71,11 +81,11 @@ impl SourceManager for MemSourceManager {
         let source = ConnectorSource {
             parser,
             reader,
-            column_descs: columns,
+            column_descs: Box::new(columns.clone()),
         };
 
         let desc = SourceDesc {
-            source: Box::new(SourceImpl::Connector(source)),
+            source: Arc::new(SourceImpl::Connector(source)),
             format,
             columns,
             row_id_index,

@@ -1,6 +1,7 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
@@ -35,7 +36,8 @@ impl From<&ColumnDesc> for SourceColumnDesc {
     }
 }
 
-pub type SourceRef = Box<SourceImpl>;
+pub type SourceRef = Arc<SourceImpl>;
+pub type SourceManagerRef = Arc<dyn SourceManager>;
 
 #[derive(Debug)]
 pub enum SourceImpl {
@@ -61,9 +63,9 @@ pub struct SourceDesc {
     pub row_id_index: Option<usize>,
 }
 
-pub trait SourceManager: Debug + Sync + Send {
+pub trait SourceManager: Debug {
     fn create_source(
-        &self,
+        &mut self,
         source_id: &TableId,
         format: SourceFormat,
         parser: Box<dyn SourceParser>,
@@ -71,10 +73,14 @@ pub trait SourceManager: Debug + Sync + Send {
         columns: Vec<SourceColumnDesc>,
         row_id_index: Option<usize>,
     ) -> Result<()>;
-    fn create_table_source_v2(&self, table_id: &TableId, columns: Vec<ColumnDesc>) -> Result<()>;
+    fn create_table_source_v2(
+        &mut self,
+        table_id: &TableId,
+        columns: Vec<ColumnDesc>,
+    ) -> Result<()>;
 
-    fn get_source(&self, source_id: &TableId) -> Result<SourceDesc>;
-    fn drop_source(&self, source_id: &TableId) -> Result<()>;
+    fn get_source(&mut self, source_id: &TableId) -> Result<SourceDesc>;
+    fn drop_source(&mut self, source_id: &TableId) -> Result<()>;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -86,30 +92,28 @@ pub enum SourceFormat {
     Avro,
 }
 
-pub(crate) trait SourceChunkBuilder {
-    fn build_columns(
-        column_descs: &[SourceColumnDesc],
-        rows: &[Vec<Datum>],
-    ) -> Result<Vec<Column>> {
-        let mut builders = column_descs
-            .iter()
-            .map(|k| k.data_type.create_array_builder(DEFAULT_CHUNK_BUFFER_SIZE))
-            .collect::<Result<Vec<ArrayBuilderImpl>>>()?;
+pub fn build_columns(
+    column_descs: &[SourceColumnDesc],
+    rows: &[Vec<Datum>],
+) -> Result<Vec<Column>> {
+    let mut builders = column_descs
+        .iter()
+        .map(|k| k.data_type.create_array_builder(DEFAULT_CHUNK_BUFFER_SIZE))
+        .collect::<Result<Vec<ArrayBuilderImpl>>>()?;
 
-        for row in rows {
-            row.iter()
-                .zip_eq(&mut builders)
-                .try_for_each(|(datum, builder)| builder.append_datum(datum))?
-        }
-
-        builders
-            .into_iter()
-            .map(|builder| builder.finish().map(|arr| Column::new(Arc::new(arr))))
-            .collect::<Result<Vec<Column>>>()
+    for row in rows {
+        row.iter()
+            .zip_eq(&mut builders)
+            .try_for_each(|(datum, builder)| builder.append_datum(datum))?
     }
 
-    fn build_datachunk(column_desc: &[SourceColumnDesc], rows: &[Vec<Datum>]) -> Result<DataChunk> {
-        let columns = Self::build_columns(column_desc, rows)?;
-        Ok(DataChunk::builder().columns(columns).build())
-    }
+    builders
+        .into_iter()
+        .map(|builder| builder.finish().map(|arr| Column::new(Arc::new(arr))))
+        .collect::<Result<Vec<Column>>>()
+}
+
+pub fn build_datachunk(column_desc: &[SourceColumnDesc], rows: &[Vec<Datum>]) -> Result<DataChunk> {
+    let columns = build_columns(column_desc, rows)?;
+    Ok(DataChunk::builder().columns(columns).build())
 }

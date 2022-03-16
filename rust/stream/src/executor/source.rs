@@ -1,4 +1,5 @@
 use std::fmt::{Debug, Formatter};
+use std::marker::Send;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -14,16 +15,86 @@ use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
+use risingwave_connector::state;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_source::connector_source::ConnectorSource;
 use risingwave_source::*;
-use risingwave_storage::StateStore;
+use risingwave_storage::memory::MemoryStateStore;
+use risingwave_storage::{Keyspace, StateStore};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+use tokio::sync::{mpsc, oneshot};
 
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Executor, ExecutorBuilder, Message, PkIndices, PkIndicesRef};
 use crate::task::{ExecutorParams, StreamManagerCore};
+
+#[async_trait]
+pub trait StreamSourceReader: Send + 'static {
+    /// `init` is called once to initialize the reader
+    async fn open(&mut self) -> Result<()>;
+
+    /// `next` always returns a StreamChunk. If the queue is empty, it will
+    /// block until new data coming
+    async fn next(&mut self) -> Result<StreamChunk>;
+}
+
+#[derive(Debug, Send)]
+pub struct ConnectorStreamSource {
+    source_reader: ConnectorSource,
+    state_store: state::SourceStateHandler<MemoryStateStore>,
+}
+
+#[async_trait]
+impl StreamSourceReader for ConnectorStreamSource {
+    async fn open(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    async fn next(&mut self) -> Result<StreamChunk> {
+        self.source_reader.next()
+    }
+}
+
+pub struct TableV2StreamSource {
+    /// The receiver of the changes channel.
+    rx: mpsc::UnboundedReceiver<(StreamChunk, oneshot::Sender<usize>)>,
+
+    /// Mappings from the source column to the column to be read.
+    column_indices: Vec<usize>,
+}
+
+#[async_trait]
+impl StreamSourceReader for TableV2StreamSource {
+    async fn open(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    async fn next(&mut self) -> Result<StreamChunk> {
+        let (chunk, notifier) = self
+            .rx
+            .recv()
+            .await
+            .expect("TableSourceV2 dropped before associated streaming task terminated");
+
+        // Caveats: this function is an arm of `tokio::select`. We should ensure there's no `await`
+        // after here.
+
+        let (ops, columns, bitmap) = chunk.into_inner();
+
+        let selected_columns = self
+            .column_indices
+            .iter()
+            .map(|i| columns[*i].clone())
+            .collect();
+        let chunk = StreamChunk::new(ops, selected_columns, bitmap);
+
+        // Notify about that we've taken the chunk.
+        notifier.send(chunk.cardinality()).ok();
+
+        Ok(chunk)
+    }
+}
 
 struct SourceReader {
     /// The reader for stream source
@@ -137,16 +208,34 @@ impl SourceExecutor {
     ) -> Result<Self> {
         let source = source_desc.clone().source;
         let stream_reader: Box<dyn StreamSourceReader> = match source.as_ref() {
-            // TODO add connector source here
-            SourceImpl::HighLevelKafka(s) => Box::new(s.stream_reader(
-                HighLevelKafkaSourceReaderContext {
-                    query_id: Some(format!("source-operator-{}", operator_id)),
-                    bound_timestamp_ms: None,
-                },
-                column_ids.clone(),
-            )?),
+            // TODO(tabVersion) build stream source here
+            SourceImpl::Connector(cs) => {
+                let mem_state_store = MemoryStateStore::new();
+                Box::new(ConnectorStreamSource {
+                    source_reader: cs.clone(),
+                    state_store: state::SourceStateHandler::new(Keyspace::executor_root(
+                        mem_state_store,
+                        executor_id.clone(),
+                    )),
+                })
+            }
             SourceImpl::TableV2(s) => {
-                Box::new(s.stream_reader(TableV2ReaderContext, column_ids.clone())?)
+                let column_indices = column_ids
+                    .clone()
+                    .into_iter()
+                    .map(|id| {
+                        s.column_descs
+                            .iter()
+                            .position(|c| c.column_id == id)
+                            .expect("column id not exists")
+                    })
+                    .collect();
+
+                let mut core = s.core.write().unwrap();
+                let (tx, rx) = mpsc::unbounded_channel();
+                core.changes_txs.push(tx);
+
+                Box::new(TableV2StreamSource { rx, column_indices })
             }
         };
 

@@ -17,7 +17,7 @@ mod filesystem;
 mod kafka;
 pub mod kinesis;
 mod pulsar;
-mod state;
+pub mod state;
 
 use crate::kinesis::config::AwsConfigInfo;
 

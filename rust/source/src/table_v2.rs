@@ -8,10 +8,10 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
 use tokio::sync::{mpsc, oneshot};
 
-use crate::{BatchSourceReader, Source, StreamSourceReader};
+// use crate::{BatchSourceReader, Source, StreamSourceReader};
 
 #[derive(Debug)]
-struct TableSourceV2Core {
+pub struct TableSourceV2Core {
     /// The senders of the changes channel.
     ///
     /// When a `StreamReader` is created, a channel will be created and the sender will be
@@ -27,13 +27,13 @@ struct TableSourceV2Core {
 /// effects.
 #[derive(Debug)]
 pub struct TableSourceV2 {
-    core: RwLock<TableSourceV2Core>,
+    pub core: RwLock<TableSourceV2Core>,
 
     /// All columns in this table.
-    column_descs: Vec<ColumnDesc>,
+    pub column_descs: Vec<ColumnDesc>,
 
     /// Curren allocated row id.
-    next_row_id: AtomicUsize,
+    pub next_row_id: AtomicUsize,
 }
 
 impl TableSourceV2 {
@@ -89,172 +89,172 @@ impl TableSourceV2 {
     }
 }
 
-#[derive(Debug)]
-pub struct TableV2ReaderContext;
+// #[derive(Debug)]
+// pub struct TableV2ReaderContext;
 
 // TODO: Currently batch read directly calls api from `ScannableTable` instead of using
 // `BatchReader`.
-#[derive(Debug)]
-pub struct TableV2BatchReader;
+// #[derive(Debug)]
+// pub struct TableV2BatchReader;
 
-#[async_trait]
-impl BatchSourceReader for TableV2BatchReader {
-    async fn open(&mut self) -> Result<()> {
-        unimplemented!()
-    }
+// #[async_trait]
+// impl BatchSourceReader for TableV2BatchReader {
+//     async fn open(&mut self) -> Result<()> {
+//         unimplemented!()
+//     }
 
-    async fn next(&mut self) -> Result<Option<risingwave_common::array::DataChunk>> {
-        unimplemented!()
-    }
+//     async fn next(&mut self) -> Result<Option<risingwave_common::array::DataChunk>> {
+//         unimplemented!()
+//     }
 
-    async fn close(&mut self) -> Result<()> {
-        unimplemented!()
-    }
-}
+//     async fn close(&mut self) -> Result<()> {
+//         unimplemented!()
+//     }
+// }
 
-/// [`TableV2StreamReader`] reads changes from a certain table continuously.
-/// This struct should be only used for associated materialize task, thus the reader should be
-/// created only once. Further streaming task relying on this table source should follow the
-/// structure of "`MView` on `MView`".
-#[derive(Debug)]
-pub struct TableV2StreamReader {
-    /// The receiver of the changes channel.
-    rx: mpsc::UnboundedReceiver<(StreamChunk, oneshot::Sender<usize>)>,
+// / [`TableV2StreamReader`] reads changes from a certain table continuously.
+// / This struct should be only used for associated materialize task, thus the reader should be
+// / created only once. Further streaming task relying on this table source should follow the
+// / structure of "`MView` on `MView`".
+// #[derive(Debug)]
+// pub struct TableV2StreamReader {
+//     /// The receiver of the changes channel.
+//     rx: mpsc::UnboundedReceiver<(StreamChunk, oneshot::Sender<usize>)>,
 
-    /// Mappings from the source column to the column to be read.
-    column_indices: Vec<usize>,
-}
+//     /// Mappings from the source column to the column to be read.
+//     column_indices: Vec<usize>,
+// }
 
-#[async_trait]
-impl StreamSourceReader for TableV2StreamReader {
-    async fn open(&mut self) -> Result<()> {
-        Ok(())
-    }
+// #[async_trait]
+// impl StreamSourceReader for TableV2StreamReader {
+//     async fn open(&mut self) -> Result<()> {
+//         Ok(())
+//     }
 
-    async fn next(&mut self) -> Result<StreamChunk> {
-        let (chunk, notifier) = self
-            .rx
-            .recv()
-            .await
-            .expect("TableSourceV2 dropped before associated streaming task terminated");
+//     async fn next(&mut self) -> Result<StreamChunk> {
+//         let (chunk, notifier) = self
+//             .rx
+//             .recv()
+//             .await
+//             .expect("TableSourceV2 dropped before associated streaming task terminated");
 
-        // Caveats: this function is an arm of `tokio::select`. We should ensure there's no `await`
-        // after here.
+//         // Caveats: this function is an arm of `tokio::select`. We should ensure there's no
+// `await`         // after here.
 
-        let (ops, columns, bitmap) = chunk.into_inner();
+//         let (ops, columns, bitmap) = chunk.into_inner();
 
-        let selected_columns = self
-            .column_indices
-            .iter()
-            .map(|i| columns[*i].clone())
-            .collect();
-        let chunk = StreamChunk::new(ops, selected_columns, bitmap);
+//         let selected_columns = self
+//             .column_indices
+//             .iter()
+//             .map(|i| columns[*i].clone())
+//             .collect();
+//         let chunk = StreamChunk::new(ops, selected_columns, bitmap);
 
-        // Notify about that we've taken the chunk.
-        notifier.send(chunk.cardinality()).ok();
+//         // Notify about that we've taken the chunk.
+//         notifier.send(chunk.cardinality()).ok();
 
-        Ok(chunk)
-    }
-}
+//         Ok(chunk)
+//     }
+// }
 
-#[async_trait]
-impl Source for TableSourceV2 {
-    type ReaderContext = TableV2ReaderContext;
-    type BatchReader = TableV2BatchReader;
-    type StreamReader = TableV2StreamReader;
+// #[async_trait]
+// impl Source for TableSourceV2 {
+//     type ReaderContext = TableV2ReaderContext;
+//     type BatchReader = TableV2BatchReader;
+//     type StreamReader = TableV2StreamReader;
 
-    fn batch_reader(
-        &self,
-        _context: Self::ReaderContext,
-        _column_ids: Vec<ColumnId>,
-    ) -> Result<Self::BatchReader> {
-        unreachable!("should use table_scan instead of stream_scan to read the table source")
-    }
+//     fn batch_reader(
+//         &self,
+//         _context: Self::ReaderContext,
+//         _column_ids: Vec<ColumnId>,
+//     ) -> Result<Self::BatchReader> {
+//         unreachable!("should use table_scan instead of stream_scan to read the table source")
+//     }
 
-    fn stream_reader(
-        &self,
-        _context: Self::ReaderContext,
-        column_ids: Vec<ColumnId>,
-    ) -> Result<Self::StreamReader> {
-        let column_indices = column_ids
-            .into_iter()
-            .map(|id| {
-                self.column_descs
-                    .iter()
-                    .position(|c| c.column_id == id)
-                    .expect("column id not exists")
-            })
-            .collect();
+//     fn stream_reader(
+//         &self,
+//         _context: Self::ReaderContext,
+//         column_ids: Vec<ColumnId>,
+//     ) -> Result<Self::StreamReader> {
+//         let column_indices = column_ids
+//             .into_iter()
+//             .map(|id| {
+//                 self.column_descs
+//                     .iter()
+//                     .position(|c| c.column_id == id)
+//                     .expect("column id not exists")
+//             })
+//             .collect();
 
-        let mut core = self.core.write().unwrap();
-        let (tx, rx) = mpsc::unbounded_channel();
-        core.changes_txs.push(tx);
+//         let mut core = self.core.write().unwrap();
+//         let (tx, rx) = mpsc::unbounded_channel();
+//         core.changes_txs.push(tx);
 
-        Ok(TableV2StreamReader { rx, column_indices })
-    }
-}
+//         Ok(TableV2StreamReader { rx, column_indices })
+//     }
+// }
 
-#[cfg(test)]
-mod tests {
+// #[cfg(test)]
+// mod tests {
 
-    use std::sync::Arc;
+//     use std::sync::Arc;
 
-    use assert_matches::assert_matches;
-    use itertools::Itertools;
-    use risingwave_common::array::{Array, I64Array, Op};
-    use risingwave_common::column_nonnull;
-    use risingwave_common::types::DataType;
-    use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::Keyspace;
+//     use assert_matches::assert_matches;
+//     use itertools::Itertools;
+//     use risingwave_common::array::{Array, I64Array, Op};
+//     use risingwave_common::column_nonnull;
+//     use risingwave_common::types::DataType;
+//     use risingwave_storage::memory::MemoryStateStore;
+//     use risingwave_storage::Keyspace;
 
-    use super::*;
+//     use super::*;
 
-    fn new_source() -> TableSourceV2 {
-        let store = MemoryStateStore::new();
-        let _keyspace = Keyspace::table_root(store, &Default::default());
+//     fn new_source() -> TableSourceV2 {
+//         let store = MemoryStateStore::new();
+//         let _keyspace = Keyspace::table_root(store, &Default::default());
 
-        TableSourceV2::new(vec![ColumnDesc::unnamed(
-            ColumnId::from(0),
-            DataType::Int64,
-        )])
-    }
+//         TableSourceV2::new(vec![ColumnDesc::unnamed(
+//             ColumnId::from(0),
+//             DataType::Int64,
+//         )])
+//     }
 
-    #[tokio::test]
-    async fn test_table_source_v2() -> Result<()> {
-        let source = Arc::new(new_source());
-        let mut reader = source.stream_reader(TableV2ReaderContext, vec![ColumnId::from(0)])?;
+//     #[tokio::test]
+//     async fn test_table_source_v2() -> Result<()> {
+//         let source = Arc::new(new_source());
+//         let mut reader = source.stream_reader(TableV2ReaderContext, vec![ColumnId::from(0)])?;
 
-        macro_rules! write_chunk {
-            ($i:expr) => {{
-                let source = source.clone();
-                let chunk = StreamChunk::new(
-                    vec![Op::Insert],
-                    vec![column_nonnull!(I64Array, [$i])],
-                    None,
-                );
-                tokio::spawn(async move {
-                    source.blocking_write_chunk(chunk).await.unwrap();
-                })
-            }};
-        }
+//         macro_rules! write_chunk {
+//             ($i:expr) => {{
+//                 let source = source.clone();
+//                 let chunk = StreamChunk::new(
+//                     vec![Op::Insert],
+//                     vec![column_nonnull!(I64Array, [$i])],
+//                     None,
+//                 );
+//                 tokio::spawn(async move {
+//                     source.blocking_write_chunk(chunk).await.unwrap();
+//                 })
+//             }};
+//         }
 
-        write_chunk!(0);
+//         write_chunk!(0);
 
-        reader.open().await?;
+//         reader.open().await?;
 
-        macro_rules! check_next_chunk {
-            ($i: expr) => {
-                assert_matches!(reader.next().await?, chunk => {
-                    assert_eq!(chunk.columns()[0].array_ref().as_int64().iter().collect_vec(), vec![Some($i)]);
-                });
-            }
-        }
+//         macro_rules! check_next_chunk {
+//             ($i: expr) => {
+//                 assert_matches!(reader.next().await?, chunk => {
+//                     assert_eq!(chunk.columns()[0].array_ref().as_int64().iter().collect_vec(),
+// vec![Some($i)]);                 });
+//             }
+//         }
 
-        check_next_chunk!(0);
+//         check_next_chunk!(0);
 
-        write_chunk!(1);
-        check_next_chunk!(1);
+//         write_chunk!(1);
+//         check_next_chunk!(1);
 
-        Ok(())
-    }
-}
+//         Ok(())
+//     }
+// }
