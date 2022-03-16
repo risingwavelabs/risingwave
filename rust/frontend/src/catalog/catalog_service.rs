@@ -21,7 +21,7 @@ pub type CatalogReadGuard = ArcRwLockReadGuard<RawRwLock, Catalog>;
 #[derive(Clone)]
 pub struct CatalogReader(pub Arc<RwLock<Catalog>>);
 impl CatalogReader {
-    fn read_guard(&self) -> CatalogReadGuard {
+    pub fn read_guard(&self) -> CatalogReadGuard {
         self.0.read_arc()
     }
 }

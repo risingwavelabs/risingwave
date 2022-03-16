@@ -92,8 +92,7 @@ mod tests {
 
     #[test]
     fn test_bind_values() {
-        let catalog = DatabaseCatalog::new(0);
-        let mut binder = Binder::new(Arc::new(catalog));
+        let mut binder = Binder::mock();
 
         // Test i32 -> decimal.
         let expr1 = Expr::Value(Value::Number("1".to_string(), false));

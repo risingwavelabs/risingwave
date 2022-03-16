@@ -1,7 +1,9 @@
 use std::collections::hash_map::Entry;
 
+use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
+use risingwave_pb::plan::ColumnCatalog;
 use risingwave_sqlparser::ast::{
     JoinConstraint, JoinOperator, ObjectName, TableFactor, TableWithJoins,
 };
@@ -123,6 +125,7 @@ impl Binder {
 
         let table_catalog = self
             .catalog
+            .get_schema_by_name(db_name, schema_name)
             .get_schema(&schema_name)
             .and_then(|c| c.get_table(&table_name))
             .ok_or_else(|| ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name)))?;

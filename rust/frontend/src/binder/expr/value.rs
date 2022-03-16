@@ -49,8 +49,7 @@ mod tests {
 
         use super::*;
 
-        let catalog = DatabaseCatalog::new(0);
-        let mut binder = Binder::new(Arc::new(catalog));
+        let mut binder = Binder::mock();
         let values = vec![
             "1",
             "111111111111111",
