@@ -10,12 +10,6 @@ pub enum ApplyOrder {
     BottomUp,
 }
 
-impl Default for ApplyOrder {
-    fn default() -> Self {
-        ApplyOrder::TopDown
-    }
-}
-
 // TODO: we should have a builder of HeuristicOptimizer here
 /// A rule-based heuristic optimizer, which traverses every plan nodes and tries to
 /// apply each rule on them.
@@ -25,11 +19,8 @@ pub struct HeuristicOptimizer {
 }
 
 impl HeuristicOptimizer {
-    pub fn new(rules: Vec<BoxedRule>) -> Self {
-        Self {
-            apply_order: Default::default(),
-            rules,
-        }
+    pub fn new(apply_order: ApplyOrder, rules: Vec<BoxedRule>) -> Self {
+        Self { apply_order, rules }
     }
 
     fn optimize_node(&self, mut plan: PlanRef) -> PlanRef {

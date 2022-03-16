@@ -12,7 +12,7 @@ use itertools::Itertools as _;
 use property::{Distribution, Order};
 use risingwave_common::catalog::Schema;
 
-use self::heuristic::HeuristicOptimizer;
+use self::heuristic::{ApplyOrder, HeuristicOptimizer};
 use self::plan_node::LogicalProject;
 use self::rule::FilterJoinRule;
 use crate::expr::InputRef;
@@ -94,7 +94,7 @@ impl PlanRoot {
         // Predicate Push-down
         plan = {
             let rules = vec![FilterJoinRule::create()];
-            let heuristic_optimizer = HeuristicOptimizer::new(rules);
+            let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
             heuristic_optimizer.optimize(plan)
         };
 
@@ -119,7 +119,7 @@ impl PlanRoot {
         // Predicate Push-down
         plan = {
             let rules = vec![FilterJoinRule::create()];
-            let heuristic_optimizer = HeuristicOptimizer::new(rules);
+            let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
             heuristic_optimizer.optimize(plan)
         };
 
