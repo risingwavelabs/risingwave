@@ -344,7 +344,7 @@ mod tests {
                         let parallel_unit = ParallelUnit {
                             id: current_id,
                             r#type: ParallelUnitType::Hash as i32,
-                            node_host: None,
+                            worker_node_id: node_id,
                         };
                         current_id += 1;
                         parallel_unit
@@ -425,7 +425,7 @@ mod tests {
                         let parallel_unit = ParallelUnit {
                             id: current_id,
                             r#type: ParallelUnitType::Hash as i32,
-                            node_host: None,
+                            worker_node_id: node_id,
                         };
                         current_id += 1;
                         parallel_unit
@@ -459,7 +459,7 @@ mod tests {
                         let parallel_unit = ParallelUnit {
                             id: current_id,
                             r#type: ParallelUnitType::Hash as i32,
-                            node_host: None,
+                            worker_node_id: node_id,
                         };
                         current_id += 1;
                         parallel_unit

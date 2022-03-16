@@ -18,11 +18,11 @@ use std::time::Duration;
 
 pub use compactor_manager::*;
 pub use hummock_manager::*;
+use itertools::Itertools;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 pub use vacuum::*;
 
-use crate::hummock;
 use crate::storage::MetaStore;
 
 const COMPACT_TRIGGER_INTERVAL: Duration = Duration::from_secs(10);
@@ -37,12 +37,6 @@ where
 {
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
     let join_handle = tokio::spawn(async move {
-        // Start the vacuum trigger
-        let vacuum_trigger =
-            hummock::VacuumTrigger::new(hummock_manager_ref.clone(), compactor_manager_ref.clone());
-        let (vacuum_join_handle, vacuum_shutdown_sender) =
-            hummock::VacuumTrigger::start_vacuum_trigger(vacuum_trigger).await;
-
         let mut min_interval = tokio::time::interval(COMPACT_TRIGGER_INTERVAL);
         loop {
             tokio::select! {
@@ -51,10 +45,6 @@ where
                 // Shutdown compactor
                 _ = shutdown_rx.recv() => {
                     tracing::info!("compaction trigger is shutting down");
-                    // Shutdown vacuum trigger
-                    if vacuum_shutdown_sender.send(()).is_ok() {
-                        vacuum_join_handle.await.unwrap();
-                    }
                     return;
                 }
             }
@@ -70,6 +60,11 @@ where
                     continue;
                 }
             };
+            let input_ssts = compact_task
+                .input_ssts
+                .iter()
+                .flat_map(|v| v.level.as_ref().unwrap().table_ids.clone())
+                .collect_vec();
             if !compactor_manager_ref
                 .try_assign_compact_task(Some(compact_task.clone()), None)
                 .await
@@ -82,7 +77,9 @@ where
                 {
                     tracing::warn!("failed to report_compact_task {}", e);
                 }
+                continue;
             }
+            tracing::debug!("Try to compact SSTs {:?}", input_ssts);
         }
     });
 

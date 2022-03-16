@@ -21,11 +21,11 @@ impl std::fmt::Debug for Field {
 }
 
 impl Field {
-    pub fn to_prost(&self) -> Result<ProstField> {
-        Ok(ProstField {
-            data_type: Some(self.data_type.to_protobuf()?),
+    pub fn to_prost(&self) -> ProstField {
+        ProstField {
+            data_type: Some(self.data_type.to_protobuf()),
             name: self.name.to_string(),
-        })
+        }
     }
 }
 
@@ -64,6 +64,14 @@ impl Schema {
         self.fields
             .iter()
             .map(|field| field.data_type.create_array_builder(capacity))
+            .collect()
+    }
+
+    pub fn to_prost(&self) -> Vec<ProstField> {
+        self.fields
+            .clone()
+            .into_iter()
+            .map(|field| field.to_prost())
             .collect()
     }
 }

@@ -60,13 +60,13 @@ impl TestCase {
     /// Run the test case, and return the expected output.
     pub async fn run(&self, do_check_result: bool) -> Result<TestCaseResult> {
         let frontend = LocalFrontend::new().await;
-        let session = frontend.session();
+        let session = frontend.session_ref();
         let statements = Parser::parse_sql(&self.sql).unwrap();
 
         let mut result = None;
 
         for stmt in statements {
-            let context = QueryContext::new(session.ctx.clone());
+            let context = QueryContext::new(session.clone());
             match stmt.clone() {
                 Statement::Query(_) | Statement::Insert { .. } | Statement::Delete { .. } => {
                     if result.is_some() {
@@ -112,7 +112,9 @@ impl TestCase {
 
         let logical_plan = match Planner::new(context).plan(bound) {
             Ok(logical_plan) => {
-                ret.logical_plan = Some(explain_plan(&logical_plan.clone().as_subplan()));
+                if self.logical_plan.is_some() {
+                    ret.logical_plan = Some(explain_plan(&logical_plan.clone().as_subplan()));
+                }
                 logical_plan
             }
             Err(err) => {
@@ -136,9 +138,7 @@ impl TestCase {
 }
 
 fn explain_plan(plan: &PlanRef) -> String {
-    let mut actual = String::new();
-    plan.explain(0, &mut actual).unwrap();
-    actual
+    plan.explain_to_string().expect("failed to explain")
 }
 
 fn check_result(expected: &TestCase, actual: &TestCaseResult) -> Result<()> {

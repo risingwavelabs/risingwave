@@ -4,9 +4,10 @@ use std::sync::Arc;
 use hyper::{Body, Request, Response};
 use itertools::Itertools;
 use prometheus::{
-    histogram_opts, register_gauge_vec_with_registry, register_histogram_vec_with_registry,
-    register_histogram_with_registry, register_int_gauge_vec_with_registry, Encoder, GaugeVec,
-    Histogram, HistogramVec, IntGaugeVec, Registry, TextEncoder, DEFAULT_BUCKETS,
+    histogram_opts, register_counter_vec_with_registry, register_histogram_vec_with_registry,
+    register_histogram_with_registry, register_int_counter_vec_with_registry,
+    register_int_gauge_vec_with_registry, CounterVec, Encoder, Histogram, HistogramVec,
+    IntCounterVec, IntGaugeVec, Registry, TextEncoder, DEFAULT_BUCKETS,
 };
 use tower::make::Shared;
 use tower::ServiceBuilder;
@@ -29,11 +30,19 @@ pub struct MetaMetrics {
     /// num of SSTs to be merged to next level in each level
     pub level_compact_cnt: IntGaugeVec,
     /// GBs read from current level during history compactions to next level
-    pub level_compact_read_curr: GaugeVec,
+    pub level_compact_read_curr: CounterVec,
     /// GBs read from next level during history compactions to next level
-    pub level_compact_read_next: GaugeVec,
+    pub level_compact_read_next: CounterVec,
     /// GBs written into next level during history compactions to next level
-    pub level_compact_write: GaugeVec,
+    pub level_compact_write: CounterVec,
+    /// num of SSTs read from current level during history compactions to next level
+    pub level_compact_read_sstn_curr: IntCounterVec,
+    /// num of SSTs read from next level during history compactions to next level
+    pub level_compact_read_sstn_next: IntCounterVec,
+    /// num of SSTs written into next level during history compactions to next level
+    pub level_compact_write_sstn: IntCounterVec,
+    /// num of compactions from each level to next level
+    pub level_compact_frequence: IntCounterVec,
 }
 
 impl MetaMetrics {
@@ -72,7 +81,7 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        let level_compact_read_curr = register_gauge_vec_with_registry!(
+        let level_compact_read_curr = register_counter_vec_with_registry!(
             "storage_level_compact_read_curr",
             "GBs read from current level during history compactions to next level",
             &["level_index"],
@@ -80,7 +89,7 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        let level_compact_read_next = register_gauge_vec_with_registry!(
+        let level_compact_read_next = register_counter_vec_with_registry!(
             "storage_level_compact_read_next",
             "GBs read from next level during history compactions to next level",
             &["level_index"],
@@ -88,9 +97,41 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        let level_compact_write = register_gauge_vec_with_registry!(
+        let level_compact_write = register_counter_vec_with_registry!(
             "storage_level_compact_write",
             "GBs written into next level during history compactions to next level",
+            &["level_index"],
+            registry
+        )
+        .unwrap();
+
+        let level_compact_read_sstn_curr = register_int_counter_vec_with_registry!(
+            "storage_level_compact_read_sstn_curr",
+            "num of SSTs read from current level during history compactions to next level",
+            &["level_index"],
+            registry
+        )
+        .unwrap();
+
+        let level_compact_read_sstn_next = register_int_counter_vec_with_registry!(
+            "storage_level_compact_read_sstn_next",
+            "num of SSTs read from next level during history compactions to next level",
+            &["level_index"],
+            registry
+        )
+        .unwrap();
+
+        let level_compact_write_sstn = register_int_counter_vec_with_registry!(
+            "storage_level_compact_write_sstn",
+            "num of SSTs written into next level during history compactions to next level",
+            &["level_index"],
+            registry
+        )
+        .unwrap();
+
+        let level_compact_frequence = register_int_counter_vec_with_registry!(
+            "storage_level_compact_frequence",
+            "num of compactions from each level to next level",
             &["level_index"],
             registry
         )
@@ -105,6 +146,10 @@ impl MetaMetrics {
             level_compact_read_curr,
             level_compact_read_next,
             level_compact_write,
+            level_compact_read_sstn_curr,
+            level_compact_read_sstn_next,
+            level_compact_write_sstn,
+            level_compact_frequence,
         }
     }
 

@@ -13,13 +13,13 @@ use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::TableId;
 use crate::expr::{Expr, ExprImpl};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum TableRef {
     BaseTable(Box<BaseTableRef>),
     Join(Box<BoundJoin>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BoundJoin {
     pub left: TableRef,
     pub right: TableRef,
@@ -104,7 +104,11 @@ impl Binder {
             TableFactor::Table { name, .. } => {
                 Ok(TableRef::BaseTable(Box::new(self.bind_table(name)?)))
             }
-            _ => Err(ErrorCode::NotImplementedError(format!("{:?}", table_factor)).into()),
+            _ => Err(ErrorCode::NotImplementedError(format!(
+                "unsupported table factor {:?}",
+                table_factor
+            ))
+            .into()),
         }
     }
 

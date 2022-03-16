@@ -1,5 +1,5 @@
 use std::env;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{anyhow, Result};
@@ -16,9 +16,13 @@ impl MinioService {
         Ok(Self { config })
     }
 
-    fn minio(&self) -> Result<Command> {
+    fn minio_path(&self) -> Result<PathBuf> {
         let prefix_bin = env::var("PREFIX_BIN")?;
-        Ok(Command::new(Path::new(&prefix_bin).join("minio")))
+        Ok(Path::new(&prefix_bin).join("minio"))
+    }
+
+    fn minio(&self) -> Result<Command> {
+        Ok(Command::new(self.minio_path()?))
     }
 }
 
@@ -26,6 +30,11 @@ impl Task for MinioService {
     fn execute(&mut self, ctx: &mut ExecuteContext<impl std::io::Write>) -> anyhow::Result<()> {
         ctx.service(self);
         ctx.pb.set_message("starting...");
+
+        let path = self.minio_path()?;
+        if !path.exists() {
+            return Err(anyhow!("minio binary not found in {:?}\nDid you enable minio feature in `./risedev configure`?", path));
+        }
 
         let mut cmd = self.minio()?;
 

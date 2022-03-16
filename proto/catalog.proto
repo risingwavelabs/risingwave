@@ -66,19 +66,8 @@ message Database {
   string name = 2;
 }
 
-message GetCatalogRequest {}
-
-message GetCatalogResponse {
-  common.Status status = 1;
-  repeated Database database = 2;
-  repeated Schema schema = 3;
-  repeated Source source = 4;
-  repeated Table table = 5;
-  repeated VirtualTable view = 6;
-}
-
 message CreateDatabaseRequest {
-  string name = 1;
+  Database db = 1;
 }
 
 message CreateDatabaseResponse {
@@ -88,8 +77,7 @@ message CreateDatabaseResponse {
 }
 
 message CreateSchemaRequest {
-  uint32 database_id = 1;
-  string name = 2;
+  Schema schema = 1;
 }
 
 message CreateSchemaResponse {
@@ -179,7 +167,6 @@ message DropMaterializedViewResponse {
 }
 
 service CatalogService {
-  rpc GetCatalog(GetCatalogRequest) returns (GetCatalogResponse);
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
   rpc CreateSchema(CreateSchemaRequest) returns (CreateSchemaResponse);
   rpc CreateSource(CreateSourceRequest) returns (CreateSourceResponse);

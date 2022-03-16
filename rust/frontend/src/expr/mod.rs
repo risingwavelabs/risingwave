@@ -8,6 +8,7 @@ pub use function_call::*;
 mod agg_call;
 pub use agg_call::*;
 mod type_inference;
+use risingwave_pb::expr::ExprNode;
 pub use type_inference::*;
 mod utils;
 pub use utils::*;
@@ -20,6 +21,15 @@ pub type ExprType = risingwave_pb::expr::expr_node::Type;
 /// the trait of bound exprssions
 pub trait Expr: Into<ExprImpl> {
     fn return_type(&self) -> DataType;
+
+    // TODO: replace this with real serialization cc @neverchanje
+    fn to_prost(&self) -> ExprNode {
+        ExprNode {
+            expr_type: 0,
+            rex_node: None,
+            return_type: None,
+        }
+    }
 }
 
 #[derive(Clone, PartialEq)]
@@ -101,41 +111,10 @@ impl std::fmt::Debug for ExprImpl {
             };
         }
         match self {
-            Self::InputRef(input_ref) => write!(f, "${}", input_ref.index()),
-            Self::Literal(literal) => {
-                use risingwave_common::for_all_scalar_variants;
-                use risingwave_common::types::ScalarImpl::*;
-                macro_rules! scalar_write_inner {
-                    ([], $( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
-                        match literal.get_data() {
-                            None => write!(f, "null"),
-                            $( Some($variant_name(v)) => write!(f, "{:?}", v) ),*
-                        }?;
-                    };
-                }
-                for_all_scalar_variants! { scalar_write_inner }
-                write!(f, ":{:?}", literal.return_type())
-            }
-            Self::FunctionCall(func_call) => {
-                if let ExprType::Cast = func_call.get_expr_type() {
-                    func_call.inputs()[0].fmt(f)?;
-                    return write!(f, "::{:?}", func_call.return_type());
-                }
-                let func_name = format!("{:?}", func_call.get_expr_type());
-                let mut builder = f.debug_tuple(&func_name);
-                func_call.inputs().iter().for_each(|child| {
-                    builder.field(child);
-                });
-                builder.finish()
-            }
-            Self::AggCall(agg_call) => {
-                let agg_name = format!("{:?}", agg_call.agg_kind());
-                let mut builder = f.debug_tuple(&agg_name);
-                agg_call.inputs().iter().for_each(|child| {
-                    builder.field(child);
-                });
-                builder.finish()
-            }
+            Self::InputRef(x) => write!(f, "{:?}", x),
+            Self::Literal(x) => write!(f, "{:?}", x),
+            Self::FunctionCall(x) => write!(f, "{:?}", x),
+            Self::AggCall(x) => write!(f, "{:?}", x),
         }
     }
 }

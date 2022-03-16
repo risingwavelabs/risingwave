@@ -55,7 +55,7 @@ impl CompactorManager {
     }
 
     /// Try to assign a compact task.
-    /// It will return false when no compactor is available.
+    /// Return false if no compactor is available.
     pub async fn try_assign_compact_task(
         &self,
         compact_task: Option<CompactTask>,

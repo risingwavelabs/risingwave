@@ -416,7 +416,7 @@ mod tests {
             let (tx, rx) = tokio::sync::mpsc::channel(10);
             self.rpc_called.store(true, Ordering::SeqCst);
             // send stream_chunk
-            let stream_chunk = StreamChunk::default().to_protobuf().unwrap();
+            let stream_chunk = StreamChunk::default().to_protobuf();
             tx.send(Ok(GetStreamResponse {
                 message: Some(StreamMessage {
                     stream_message: Some(

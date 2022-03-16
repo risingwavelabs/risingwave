@@ -15,7 +15,7 @@ pub const GET_SNAPSHOT_LATENCY_SCALE: f64 = 0.0001;
 
 pub const BATCH_WRITE_SIZE_SCALE: f64 = 20000.0;
 pub const BATCH_WRITE_LATENCY_SCALE: f64 = 0.1;
-pub const BATCH_WRITE_BUILD_TABLE_LATENCY_SCALE: f64 = 0.0001;
+pub const BATCH_WRITE_BUILD_TABLE_LATENCY_SCALE: f64 = 1.0;
 pub const BATCH_WRITE_ADD_L0_LATENCT_SCALE: f64 = 0.00001;
 
 pub const RANGE_SCAN_SIZE_SCALE: f64 = 10000.0;
@@ -50,12 +50,14 @@ macro_rules! for_all_metrics {
             range_scan_size: Histogram,
             range_scan_latency: Histogram,
 
-            batched_write_counts: GenericCounter<AtomicU64>,
-            batch_write_tuple_counts: GenericCounter<AtomicU64>,
-            batch_write_latency: Histogram,
-            batch_write_size: Histogram,
-            batch_write_build_table_latency: Histogram,
-            batch_write_add_l0_latency: Histogram,
+            write_batch_counts: GenericCounter<AtomicU64>,
+            write_batch_tuple_counts: GenericCounter<AtomicU64>,
+            write_batch_shared_buffer_time: Histogram,
+            write_batch_size: Histogram,
+            write_build_l0_sst_time: Histogram,
+            write_shared_buffer_sync_time: Histogram,
+            write_shared_buffer_sync_counts: GenericCounter<AtomicU64>,
+            write_shared_buffer_sync_size: Histogram,
 
             iter_counts: GenericCounter<AtomicU64>,
             iter_next_counts: GenericCounter<AtomicU64>,
@@ -178,15 +180,15 @@ impl StateStoreMetrics {
         let range_scan_latency = register_histogram_with_registry!(opts, registry).unwrap();
 
         // ----- write_batch -----
-        let batched_write_counts = register_int_counter_with_registry!(
-            "state_store_batched_write_counts",
+        let write_batch_counts = register_int_counter_with_registry!(
+            "state_store_write_batch_counts",
             "Total number of batched write requests that have been issued to state store",
             registry
         )
         .unwrap();
 
-        let batch_write_tuple_counts = register_int_counter_with_registry!(
-            "state_store_batched_write_tuple_counts",
+        let write_batch_tuple_counts = register_int_counter_with_registry!(
+            "state_store_write_batch_tuple_counts",
             "Total number of batched write kv pairs requests that have been issued to state store",
             registry
         )
@@ -196,40 +198,57 @@ impl StateStoreMetrics {
             .map(|x| x * BATCH_WRITE_LATENCY_SCALE)
             .to_vec();
         let opts = histogram_opts!(
-            "state_store_batched_write_latency",
-            "Total time of batched write that have been issued to state store",
+            "state_store_write_batch_shared_buffer_time",
+            "Total time of batched write that have been issued to state store. With shared buffer on, this is the latency writing to the shared buffer.",
             buckets
         );
-        let batch_write_latency = register_histogram_with_registry!(opts, registry).unwrap();
+        let write_batch_shared_buffer_time =
+            register_histogram_with_registry!(opts, registry).unwrap();
 
         let buckets = DEFAULT_BUCKETS.map(|x| x * BATCH_WRITE_SIZE_SCALE).to_vec();
         let opts = histogram_opts!(
-            "state_store_batched_write_size",
+            "state_store_write_batch_size",
             "Total size of batched write that have been issued to state store",
             buckets
         );
-        let batch_write_size = register_histogram_with_registry!(opts, registry).unwrap();
+        let write_batch_size = register_histogram_with_registry!(opts, registry).unwrap();
 
         let buckets = DEFAULT_BUCKETS
             .map(|x| x * BATCH_WRITE_BUILD_TABLE_LATENCY_SCALE)
             .to_vec();
         let opts = histogram_opts!(
-            "state_store_batch_write_build_table_latency",
+            "state_store_write_build_l0_sst_time",
             "Total time of batch_write_build_table that have been issued to state store",
             buckets
         );
-        let batch_write_build_table_latency =
-            register_histogram_with_registry!(opts, registry).unwrap();
+        let write_build_l0_sst_time = register_histogram_with_registry!(opts, registry).unwrap();
 
         let buckets = DEFAULT_BUCKETS
             .map(|x| x * BATCH_WRITE_ADD_L0_LATENCT_SCALE)
             .to_vec();
         let opts = histogram_opts!(
-            "state_store_batch_write_add_l0_ssts_latency",
-            "Total time of add_l0_ssts that have been issued to state store",
+            "state_store_write_shared_buffer_sync_time",
+            "Histogram of time spent from compacting shared buffer to remote storage.",
             buckets
         );
-        let batch_write_add_l0_latency = register_histogram_with_registry!(opts, registry).unwrap();
+        let write_shared_buffer_sync_time =
+            register_histogram_with_registry!(opts, registry).unwrap();
+
+        let write_shared_buffer_sync_counts = register_int_counter_with_registry!(
+            "state_store_write_shared_buffer_sync_counts",
+            "Total number of sync requests issued from shared buffer to remote storage",
+            registry
+        )
+        .unwrap();
+
+        let buckets = DEFAULT_BUCKETS.to_vec();
+        let opts = histogram_opts!(
+            "state_store_write_shared_buffer_sync_size",
+            "Histogram of batch size compacted from shared buffer to remote storage.",
+            buckets
+        );
+        let write_shared_buffer_sync_size =
+            register_histogram_with_registry!(opts, registry).unwrap();
 
         // ----- iter -----
         let iter_counts = register_int_counter_with_registry!(
@@ -416,12 +435,14 @@ impl StateStoreMetrics {
             range_scan_size,
             range_scan_latency,
 
-            batched_write_counts,
-            batch_write_tuple_counts,
-            batch_write_latency,
-            batch_write_size,
-            batch_write_build_table_latency,
-            batch_write_add_l0_latency,
+            write_batch_counts,
+            write_batch_tuple_counts,
+            write_batch_shared_buffer_time,
+            write_batch_size,
+            write_build_l0_sst_time,
+            write_shared_buffer_sync_time,
+            write_shared_buffer_sync_counts,
+            write_shared_buffer_sync_size,
 
             iter_counts,
             iter_next_counts,

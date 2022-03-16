@@ -20,6 +20,9 @@ rust: rust_check_all rust_test
 
 rust_check_all: rust_fmt_check rust_clippy_check rust_cargo_sort_check
 
+rust_fmt:
+	cd rust && cargo fmt --all
+
 rust_fmt_check:
 	cd rust && cargo fmt --all -- --check
 

@@ -1,6 +1,8 @@
-use risingwave_pb::hummock::vacuum_task;
-use risingwave_pb::hummock::vacuum_task::Task;
+use std::sync::Arc;
 
+use risingwave_pb::hummock::VacuumTask;
+
+use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::SstableStoreRef;
 
 pub struct Vacuum {}
@@ -8,31 +10,29 @@ pub struct Vacuum {}
 impl Vacuum {
     pub async fn vacuum(
         sstable_store_ref: SstableStoreRef,
-        vacuum_task: vacuum_task::Task,
+        vacuum_task: VacuumTask,
+        hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> risingwave_common::error::Result<()> {
-        match vacuum_task {
-            Task::Tracked(tracked) => {
-                for sstable_id in &tracked.sstable_ids {
-                    sstable_store_ref
-                        .store()
-                        .delete(sstable_store_ref.get_sst_meta_path(*sstable_id).as_str())
-                        .await?;
-                    sstable_store_ref
-                        .store()
-                        .delete(sstable_store_ref.get_sst_data_path(*sstable_id).as_str())
-                        .await?;
-                }
-                tracing::debug!(
-                    "vacuum {} tracked SSTs, {:?}",
-                    tracked.sstable_ids.len(),
-                    tracked.sstable_ids
-                );
-            }
-            Task::Orphan(_orphan) => {
-                // #93
-                todo!()
-            }
+        let sst_ids = vacuum_task.sstable_ids;
+        for sst_id in &sst_ids {
+            sstable_store_ref
+                .store()
+                .delete(sstable_store_ref.get_sst_meta_path(*sst_id).as_str())
+                .await?;
+            sstable_store_ref
+                .store()
+                .delete(sstable_store_ref.get_sst_data_path(*sst_id).as_str())
+                .await?;
         }
+
+        // TODO: report progress instead of in one go.
+        hummock_meta_client
+            .report_vacuum_task(VacuumTask {
+                sstable_ids: sst_ids.clone(),
+            })
+            .await?;
+
+        tracing::debug!("vacuum {} tracked SSTs, {:?}", sst_ids.len(), sst_ids);
         Ok(())
     }
 }
@@ -43,9 +43,11 @@ mod tests {
     use std::sync::Arc;
 
     use itertools::Itertools;
-    use risingwave_pb::hummock::vacuum_task;
+    use risingwave_pb::hummock::VacuumTask;
 
-    use crate::hummock::iterator::test_utils::{default_builder_opt_for_test, gen_test_sstable};
+    use crate::hummock::iterator::test_utils::default_builder_opt_for_test;
+    use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
+    use crate::hummock::test_utils::gen_default_test_sstable;
     use crate::hummock::vacuum::Vacuum;
     use crate::hummock::SstableStore;
     use crate::object::InMemObjectStore;
@@ -61,9 +63,9 @@ mod tests {
         let sst_ids = (1..10).collect_vec();
         let mut sstables = vec![];
         for sstable_id in &sst_ids {
-            let sstable = gen_test_sstable(
-                *sstable_id,
+            let sstable = gen_default_test_sstable(
                 default_builder_opt_for_test(),
+                *sstable_id,
                 sstable_store_ref.clone(),
             )
             .await;
@@ -73,14 +75,20 @@ mod tests {
         // Delete all existent SSTs and a nonexistent SSTs. Trying to delete a nonexistent SST is
         // OK.
         let nonexistent_id = 11u64;
-        let vacuum_task = vacuum_task::Task::Tracked(vacuum_task::VacuumTrackedData {
+        let vacuum_task = VacuumTask {
             sstable_ids: sst_ids
                 .into_iter()
                 .chain(iter::once(nonexistent_id))
                 .collect_vec(),
-        });
-        Vacuum::vacuum(sstable_store_ref, vacuum_task)
-            .await
-            .unwrap();
+        };
+        Vacuum::vacuum(
+            sstable_store_ref,
+            vacuum_task,
+            Arc::new(MockHummockMetaClient::new(Arc::new(
+                MockHummockMetaService::new(),
+            ))),
+        )
+        .await
+        .unwrap();
     }
 }

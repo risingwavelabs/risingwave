@@ -1,8 +1,11 @@
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
+use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
+use risingwave_pb::stream_plan::ProjectNode;
 
 use super::{LogicalProject, PlanRef, PlanTreeNodeUnary, StreamBase, ToStreamProst};
+use crate::expr::Expr;
 use crate::optimizer::property::{Distribution, WithSchema};
 
 /// `StreamProject` implements [`super::LogicalProject`] to evaluate specified expressions on input
@@ -14,8 +17,8 @@ pub struct StreamProject {
 }
 
 impl fmt::Display for StreamProject {
-    fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
-        todo!()
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.logical.fmt_with_name(f, "StreamProject")
     }
 }
 
@@ -47,4 +50,10 @@ impl WithSchema for StreamProject {
     }
 }
 
-impl ToStreamProst for StreamProject {}
+impl ToStreamProst for StreamProject {
+    fn to_stream_prost_body(&self) -> ProstStreamNode {
+        ProstStreamNode::ProjectNode(ProjectNode {
+            select_list: self.logical.exprs().iter().map(Expr::to_prost).collect(),
+        })
+    }
+}

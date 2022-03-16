@@ -3,8 +3,6 @@ use std::hash::Hash;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use risingwave_common::error::Result;
-
 pub const EPOCH_PHYSICAL_SHIFT_BITS: u8 = 16;
 pub const INVALID_EPOCH: u64 = 0;
 
@@ -55,7 +53,7 @@ impl fmt::Display for Epoch {
 }
 
 pub trait EpochGenerator: Sync + Send + 'static {
-    fn generate(&self) -> Result<Epoch>;
+    fn generate(&self) -> Epoch;
 }
 
 pub type EpochGeneratorRef = Arc<dyn EpochGenerator>;
@@ -79,23 +77,25 @@ impl MemEpochGenerator {
 }
 
 impl EpochGenerator for MemEpochGenerator {
-    fn generate(&self) -> Result<Epoch> {
+    fn generate(&self) -> Epoch {
         let mut ce = self.current_epoch.lock().unwrap();
         *ce = ce.next();
-        Ok(*ce)
+        *ce
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::error::Result;
+
     use super::*;
 
     #[test]
     fn test_epoch_generator() -> Result<()> {
         let generator = MemEpochGenerator::new();
-        let mut pre = generator.generate().unwrap();
+        let mut pre = generator.generate();
         loop {
-            let epoch = generator.generate().unwrap();
+            let epoch = generator.generate();
             assert!(epoch > pre);
             if epoch.physical_time() > pre.physical_time() {
                 break;

@@ -8,14 +8,15 @@ use crate::optimizer::property::{Direction, FieldOrder};
 
 /// A validated sql query, including order and union.
 /// An example of its relationship with BoundSetExpr and BoundSelect can be found here: https://bit.ly/3GQwgPz
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BoundQuery {
     pub body: BoundSetExpr,
     pub order: Vec<FieldOrder>,
 }
 
 impl Binder {
-    pub(super) fn bind_query(&mut self, query: Query) -> Result<BoundQuery> {
+    /// Bind a [`Query`].
+    pub fn bind_query(&mut self, query: Query) -> Result<BoundQuery> {
         let body = self.bind_set_expr(query.body)?;
         let mut name_to_index = HashMap::new();
         match &body {
