@@ -1,12 +1,8 @@
 //! Hummock is the state store of the streaming system.
 
-#[cfg(debug_assertions)]
-use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::ops::RangeBounds;
 use std::sync::Arc;
-#[cfg(debug_assertions)]
-use std::sync::Mutex;
 
 use bytes::Bytes;
 use itertools::Itertools;
@@ -16,6 +12,7 @@ pub use block_cache::*;
 mod sstable;
 pub use sstable::*;
 pub mod compactor;
+mod conflict_detector;
 mod error;
 pub mod hummock_meta_client;
 mod iterator;
@@ -79,9 +76,6 @@ pub struct HummockStorage {
     sstable_store: SstableStoreRef,
     /// Manager for immutable shared buffers
     shared_buffer_manager: Arc<SharedBufferManager>,
-
-    #[cfg(debug_assertions)]
-    history_written_key: Arc<Mutex<HashMap<HummockEpoch, HashSet<Bytes>>>>,
 }
 
 impl HummockStorage {
@@ -128,19 +122,8 @@ impl HummockStorage {
         // Ensure at least one available version in cache.
         local_version_manager.wait_epoch(HummockEpoch::MIN).await;
 
-        #[cfg(debug_assertions)]
         let instance = Self {
-            options,
-            local_version_manager,
-            hummock_meta_client,
-            sstable_store,
-            shared_buffer_manager,
-            history_written_key: Arc::new(Mutex::new(HashMap::new())),
-        };
-
-        #[cfg(not(debug_assertions))]
-        let instance = Self {
-            options,
+            options: options.clone(),
             local_version_manager,
             hummock_meta_client,
             sstable_store,
@@ -344,27 +327,6 @@ impl HummockStorage {
     ) -> HummockResult<()> {
         let batch = kv_pairs
             .map(|(key, value)| {
-                #[cfg(debug_assertions)]
-                // in debug mode, detect whether a key to be written has been written previously
-                {
-                    // assert the current key has not been written in the given epoch
-                    if let Some(written_keys) = self.history_written_key.lock().unwrap().get(&epoch)
-                    {
-                        assert!(
-                            !written_keys.contains(&key),
-                            "key {:?} is written again after previously written",
-                            key
-                        );
-                    }
-                    // add current key to `history_written_key`
-                    self.history_written_key
-                        .lock()
-                        .unwrap()
-                        .entry(epoch)
-                        .or_insert_with(HashSet::new)
-                        .insert(key.clone());
-                }
-
                 (
                     Bytes::from(FullKey::from_user_key(key.to_vec(), epoch).into_inner()),
                     value,
@@ -442,29 +404,5 @@ impl HummockStorage {
 impl fmt::Debug for HummockStorage {
     fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
         todo!()
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use bytes::Bytes;
-
-    use crate::hummock::test_utils::mock_hummock_storage;
-    use crate::hummock::value::HummockValue;
-
-    #[cfg(debug_assertions)]
-    #[tokio::test]
-    #[should_panic]
-    async fn test_write_conflict_detect() {
-        let storage = mock_hummock_storage().await;
-        storage
-            .write_batch(
-                (0..2)
-                    .map(|_| (Bytes::from("conflicted-key"), HummockValue::Delete))
-                    .into_iter(),
-                233,
-            )
-            .await
-            .unwrap();
     }
 }

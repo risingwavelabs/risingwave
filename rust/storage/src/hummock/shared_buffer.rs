@@ -20,6 +20,7 @@ use super::local_version_manager::LocalVersionManager;
 use super::utils::range_overlap;
 use super::value::HummockValue;
 use super::{key, HummockError, HummockResult, SstableStoreRef};
+use crate::hummock::conflict_detector::ConflictDetector;
 use crate::monitor::StateStoreMetrics;
 
 type SharedBufferItem = (Bytes, HummockValue<Bytes>);
@@ -357,6 +358,10 @@ pub struct SharedBufferUploader {
     hummock_meta_client: Arc<dyn HummockMetaClient>,
     sstable_store: SstableStoreRef,
 
+    /// For conflict key detection. Enabled by setting `write_conflict_detection_enabled` to true
+    /// in `StorageConfig`
+    write_conflict_detector: Option<Arc<ConflictDetector>>,
+
     rx: tokio::sync::mpsc::UnboundedReceiver<SharedBufferUploaderItem>,
 }
 
@@ -371,18 +376,27 @@ impl SharedBufferUploader {
     ) -> Self {
         Self {
             batches_to_upload: BTreeMap::new(),
-            options,
+            options: options.clone(),
             local_version_manager,
 
             stats,
             hummock_meta_client,
             sstable_store,
+            write_conflict_detector: if options.write_conflict_detection_enabled {
+                Some(Arc::new(ConflictDetector::new()))
+            } else {
+                None
+            },
             rx,
         }
     }
 
     /// Upload buffer batches to S3.
     async fn sync(&mut self, epoch: u64) -> HummockResult<()> {
+        if let Some(detector) = &self.write_conflict_detector {
+            detector.archive_epoch(epoch);
+        }
+
         let buffers = match self.batches_to_upload.remove(&epoch) {
             Some(m) => m,
             None => return Ok(()),
@@ -448,6 +462,10 @@ impl SharedBufferUploader {
     async fn handle(&mut self, item: SharedBufferUploaderItem) -> Result<()> {
         match item {
             SharedBufferUploaderItem::Batch(m) => {
+                if let Some(detector) = &self.write_conflict_detector {
+                    detector.check_conflict_and_track_write_batch(&m.inner, m.epoch);
+                }
+
                 self.batches_to_upload
                     .entry(m.epoch())
                     .or_insert(Vec::new())
@@ -477,7 +495,7 @@ impl SharedBufferUploader {
                 if let Some(tx) = sync_item.notifier {
                     tx.send(res).map_err(|_| {
                         HummockError::shared_buffer_error(
-                            "Failed to notify shared buffer sync becuase of send drop",
+                            "Failed to notify shared buffer sync because of send drop",
                         )
                     })?;
                 }
@@ -592,15 +610,15 @@ mod tests {
         assert_eq!(output, shared_buffer_items);
 
         // Backward iterator
-        let mut revverse_iter = shared_buffer_batch.reverse_iter();
-        revverse_iter.rewind().await.unwrap();
+        let mut reverse_iter = shared_buffer_batch.reverse_iter();
+        reverse_iter.rewind().await.unwrap();
         let mut output = vec![];
-        while revverse_iter.is_valid() {
+        while reverse_iter.is_valid() {
             output.push((
-                revverse_iter.key().to_owned(),
-                revverse_iter.value().to_owned_value(),
+                reverse_iter.key().to_owned(),
+                reverse_iter.value().to_owned_value(),
             ));
-            revverse_iter.next().await.unwrap();
+            reverse_iter.next().await.unwrap();
         }
         output.reverse();
         assert_eq!(output, shared_buffer_items);
