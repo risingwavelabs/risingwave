@@ -272,16 +272,7 @@ message SubscribeCompactTasksResponse {
 }
 
 message VacuumTask {
-  message VacuumTrackedData {
-    repeated uint64 sstable_ids = 1;
-  }
-  message VaccumOrphanData {
-    repeated uint64 sstable_ids = 1;
-  }
-  oneof task {
-    VacuumTrackedData tracked = 1;
-    VaccumOrphanData orphan = 2;
-  }
+  repeated uint64 sstable_ids = 1;
 }
 
 message ReportVacuumTaskRequest {

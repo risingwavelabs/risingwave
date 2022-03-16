@@ -1,7 +1,7 @@
 mod current_version_id;
 mod pinned_snapshot;
 mod pinned_version;
-mod sstable_id_info;
+pub mod sstable_id_info;
 mod sstable_to_delete;
 mod version;
 

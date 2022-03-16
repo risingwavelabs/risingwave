@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::time::SystemTime;
 
 use itertools::{enumerate, Itertools};
 use prometheus::core::{AtomicF64, GenericGauge};
@@ -20,8 +19,8 @@ use tokio::sync::{Mutex, RwLock};
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::level_handler::{LevelHandler, SSTableStat};
 use crate::hummock::model::{
-    CurrentHummockVersionId, HummockContextPinnedSnapshotExt, HummockContextPinnedVersionExt,
-    INVALID_TIMESTAMP,
+    sstable_id_info, CurrentHummockVersionId, HummockContextPinnedSnapshotExt,
+    HummockContextPinnedVersionExt, INVALID_TIMESTAMP,
 };
 use crate::manager::{IdCategory, IdGeneratorManagerRef, MetaSrvEnv};
 use crate::model::{MetadataModel, Transactional, Worker};
@@ -279,10 +278,10 @@ where
     pub async fn add_tables(
         &self,
         context_id: HummockContextId,
-        tables: Vec<SstableInfo>,
+        sstables: Vec<SstableInfo>,
         epoch: HummockEpoch,
     ) -> Result<HummockVersion> {
-        let stats = tables.iter().map(SSTableStat::from).collect_vec();
+        let stats = sstables.iter().map(SSTableStat::from).collect_vec();
 
         // Hold the compact status lock so that no one else could add/drop SST or search compaction
         // plan.
@@ -320,30 +319,31 @@ where
         .await?
         .unwrap();
 
-        let existent_sstable_ids = SstableIdInfo::list(&*versioning_guard.meta_store_ref)
-            .await?
-            .into_iter()
-            .filter(|e| tables.iter().any(|t| t.id == e.id))
-            .collect_vec();
-
-        #[cfg(not(test))]
-        // The sstable ids are acquired via get_new_table_id
-        assert_eq!(existent_sstable_ids.len(), tables.len());
-
-        if existent_sstable_ids
-            .iter()
-            .any(|t| t.meta_create_timestamp != 0)
-        {
-            // Retry an add_tables request is OK if the original request has completed successfully.
-            return Ok(hummock_version);
-        }
-        let meta_create_timestamp = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        for mut existent_sstable_id in existent_sstable_ids {
-            existent_sstable_id.meta_create_timestamp = meta_create_timestamp;
-            existent_sstable_id.upsert_in_transaction(&mut transaction)?;
+        // Track SST in meta.
+        for sst_id in sstables.iter().map(|s| s.id) {
+            let sst_id_info = SstableIdInfo::select(
+                versioning_guard.meta_store_ref.as_ref(),
+                &SstableRefId { id: sst_id },
+            )
+            .await?;
+            match sst_id_info {
+                None => {
+                    #[cfg(not(test))]
+                    return Err(ErrorCode::MetaError(format!(
+                        "invalid sst id {}, may have been vacuumed",
+                        sst_id
+                    ))
+                    .into());
+                }
+                Some(mut sst_id_info) => {
+                    if sst_id_info.meta_create_timestamp != INVALID_TIMESTAMP {
+                        // This is a duplicate request.
+                        return Ok(hummock_version);
+                    }
+                    sst_id_info.meta_create_timestamp = sstable_id_info::get_timestamp_now();
+                    sst_id_info.upsert_in_transaction(&mut transaction)?;
+                }
+            }
         }
 
         // check whether the epoch is valid
@@ -362,13 +362,13 @@ where
             .find(|e| e.epoch == epoch)
         {
             Some(uncommitted_epoch) => {
-                tables
+                sstables
                     .iter()
                     .for_each(|t| uncommitted_epoch.table_ids.push(t.id));
             }
             None => hummock_version.uncommitted_epochs.push(UncommittedEpoch {
                 epoch,
-                table_ids: tables.iter().map(|t| t.id).collect(),
+                table_ids: sstables.iter().map(|t| t.id).collect(),
             }),
         };
         current_version_id.increase();
@@ -513,12 +513,16 @@ where
             CompactStatus::get(compaction_guard.meta_store_ref.as_ref()).await?;
 
         let compact_task_id = compact_task.task_id;
-        let input_sst_count: usize = compact_task
+        let input_sst_ids = compact_task
             .input_ssts
             .iter()
-            .map(|v| v.level.as_ref().unwrap().table_ids.len())
-            .sum();
-        let output_sst_count = compact_task.sorted_output_ssts.len();
+            .flat_map(|v| v.level.as_ref().unwrap().table_ids.clone())
+            .collect_vec();
+        let output_sst_ids = compact_task
+            .sorted_output_ssts
+            .iter()
+            .map(|s| s.id)
+            .collect_vec();
 
         let compact_task_metrics = compact_task.metrics.take();
         let delete_table_ids = match compact_status.report_compact_task(
@@ -594,15 +598,38 @@ where
             } else {
                 tables_to_delete.upsert_in_transaction(&mut transaction)?;
             }
+
+            for sst_id in &output_sst_ids {
+                let sst_id_info = SstableIdInfo::select(
+                    versioning_guard.meta_store_ref.as_ref(),
+                    &SstableRefId { id: *sst_id },
+                )
+                .await?;
+                match sst_id_info {
+                    None => {
+                        return Err(ErrorCode::MetaError(format!(
+                            "invalid sst id {}, may have been vacuumed",
+                            sst_id
+                        ))
+                        .into());
+                    }
+                    Some(mut sst_id_info) => {
+                        sst_id_info.meta_create_timestamp = sstable_id_info::get_timestamp_now();
+                        sst_id_info.upsert_in_transaction(&mut transaction)?;
+                    }
+                }
+            }
         }
         self.commit_trx(compaction_guard.meta_store_ref.as_ref(), transaction, None)
             .await?;
         if task_result {
             tracing::debug!(
-                "Finish hummock compaction task id {}, compact {} SSTs to {} SSTs",
+                "Finish hummock compaction task id {}, compact {} SSTs {:?} to {} SSTs {:?}",
                 compact_task_id,
-                input_sst_count,
-                output_sst_count
+                input_sst_ids.len(),
+                input_sst_ids,
+                output_sst_ids.len(),
+                output_sst_ids,
             );
         } else {
             tracing::debug!("Cancel hummock compaction task id {}", compact_task_id);
@@ -725,10 +752,7 @@ where
         let versioning_guard = self.versioning.write().await;
         SstableIdInfo {
             id: sstable_id,
-            id_create_timestamp: SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
+            id_create_timestamp: sstable_id_info::get_timestamp_now(),
             meta_create_timestamp: INVALID_TIMESTAMP,
             meta_delete_timestamp: INVALID_TIMESTAMP,
         }
@@ -848,10 +872,7 @@ where
                 )
                 .await?
                 {
-                    sstable_id_info.meta_delete_timestamp = SystemTime::now()
-                        .duration_since(SystemTime::UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs();
+                    sstable_id_info.meta_delete_timestamp = sstable_id_info::get_timestamp_now();
                     sstable_id_info.upsert_in_transaction(&mut transaction)?;
                 }
             }
@@ -876,7 +897,7 @@ where
             .await
     }
 
-    pub async fn list_sstable_id_infos_asc(&self) -> Result<Vec<SstableIdInfo>> {
+    pub async fn list_sstable_id_infos(&self) -> Result<Vec<SstableIdInfo>> {
         let versioning_guard = self.versioning.read().await;
         SstableIdInfo::list(versioning_guard.meta_store_ref.as_ref()).await
     }

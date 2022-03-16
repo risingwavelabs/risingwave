@@ -1,3 +1,5 @@
+use std::time::SystemTime;
+
 use prost::Message;
 use risingwave_pb::hummock::{SstableIdInfo, SstableRefId};
 
@@ -37,3 +39,10 @@ impl MetadataModel for SstableIdInfo {
 }
 
 impl Transactional for SstableIdInfo {}
+
+pub fn get_timestamp_now() -> u64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+}
