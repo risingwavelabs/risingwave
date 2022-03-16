@@ -17,26 +17,32 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use itertools::Itertools;
+< < < < < < < HEAD
 use log::info;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::ErrorCode::InternalError;
+== == == =
+use log::{debug, info};
+use uuid::Uuid;
+
+> > > > > > > a9410a9a (add create source)
 use risingwave_common::error::{Result, ToRwResult};
+use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_pb::common::{ActorInfo, WorkerType};
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
 use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
 };
-use uuid::Uuid;
 
-use super::ScheduledLocations;
 use crate::barrier::{BarrierManagerRef, Command};
 use crate::cluster::{NodeId, StoredClusterManagerRef};
 use crate::manager::{MetaSrvEnv, StreamClientsRef};
 use crate::model::{ActorId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::{FragmentManagerRef, ScheduleCategory, Scheduler, SourceManagerRef};
+use crate::stream::{FragmentManagerRef, Scheduler, SourceManagerRef};
 
+use super::ScheduledLocations;
 
 pub type StreamManagerRef<S> = Arc<StreamManager<S>>;
 
@@ -52,14 +58,11 @@ pub struct CreateMaterializedViewContext {
 }
 
 /// Stream Manager
-<<<<<<< HEAD
-pub struct StreamManager<S> {
-=======
+
 pub struct StreamManager<S>
     where
         S: MetaStore,
 {
->>>>>>> 7d79d64d (fix code)
     /// Manages definition and status of fragments and actors
     fragment_manager_ref: FragmentManagerRef<S>,
 
@@ -307,12 +310,20 @@ mod tests {
     use std::thread::sleep;
     use std::time::Duration;
 
+    use tokio::sync::mpsc::UnboundedSender;
+    use tokio::task::JoinHandle;
+    use tonic::{Request, Response, Status};
+
     use risingwave_common::catalog::TableId;
     use risingwave_common::error::tonic_err;
     use risingwave_pb::common::{HostAddress, WorkerType};
+
     use risingwave_pb::meta::table_fragments::fragment::{FragmentDistributionType, FragmentType};
+
     use risingwave_pb::meta::table_fragments::Fragment;
+    use risingwave_pb::meta::table_fragments::fragment::FragmentType;
     use risingwave_pb::stream_plan::*;
+
     use risingwave_pb::stream_service::stream_service_server::{
         StreamService, StreamServiceServer,
     };
@@ -321,7 +332,14 @@ mod tests {
     use tokio::task::JoinHandle;
     use tonic::{Request, Response, Status};
 
-    use super::*;
+    use risingwave_pb::stream_service::{
+        BroadcastActorInfoTableResponse, BuildActorsResponse, DropActorsRequest,
+        DropActorsResponse, InjectBarrierRequest, InjectBarrierResponse, UpdateActorsResponse,
+    };
+    use risingwave_pb::stream_service::stream_service_server::{
+        StreamService, StreamServiceServer,
+    };
+
     use crate::barrier::BarrierManager;
     use crate::cluster::StoredClusterManager;
     use crate::hummock::HummockManager;
@@ -330,6 +348,8 @@ mod tests {
     use crate::rpc::metrics::MetaMetrics;
     use crate::storage::MemStore;
     use crate::stream::FragmentManager;
+
+    use super::*;
 
     struct FakeFragmentState {
         actor_streams: Mutex<HashMap<ActorId, StreamActor>>,

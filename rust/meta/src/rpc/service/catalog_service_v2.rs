@@ -3,32 +3,33 @@
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::tonic_err;
 use risingwave_pb::catalog::catalog_service_server::CatalogService;
+use risingwave_pb::catalog::source::Info;
+use risingwave_pb::catalog::source::Info::StreamSource;
 use risingwave_pb::catalog::{
     CreateDatabaseRequest, CreateDatabaseResponse, CreateMaterializedSourceRequest,
     CreateMaterializedSourceResponse, CreateMaterializedViewRequest,
     CreateMaterializedViewResponse, CreateSchemaRequest, CreateSchemaResponse, CreateSourceRequest,
     CreateSourceResponse, DropDatabaseRequest, DropDatabaseResponse, DropMaterializedSourceRequest,
     DropMaterializedSourceResponse, DropMaterializedViewRequest, DropMaterializedViewResponse,
-    DropSchemaRequest, DropSchemaResponse, DropSourceRequest, DropSourceResponse,
+    DropSchemaRequest, DropSchemaResponse, DropSourceRequest, DropSourceResponse, Source,
 };
 use risingwave_pb::common::ParallelUnitType;
 use risingwave_pb::plan::TableRefId;
 use tonic::{Request, Response, Status};
-use risingwave_pb::catalog::source::Info;
-use risingwave_pb::catalog::source::Info::StreamSource;
-
 
 use crate::cluster::StoredClusterManagerRef;
 use crate::manager::{CatalogManagerRef, IdCategory, IdGeneratorManagerRef, MetaSrvEnv};
 use crate::model::TableFragments;
 use crate::rpc::service::stream_service::TonicResponse;
 use crate::storage::MetaStore;
-use crate::stream::{FragmentManagerRef, SourceManagerRef, StreamFragmenter, StreamManagerRef};
+use crate::stream::{
+    CreateSourceContext, FragmentManagerRef, SourceManagerRef, StreamFragmenter, StreamManagerRef,
+};
 
 #[derive(Clone)]
 pub struct CatalogServiceImpl<S>
-    where
-        S: MetaStore,
+where
+    S: MetaStore,
 {
     id_gen_manager: IdGeneratorManagerRef<S>,
     catalog_manager: CatalogManagerRef<S>,
@@ -36,12 +37,11 @@ pub struct CatalogServiceImpl<S>
     cluster_manager: StoredClusterManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
     source_manager: SourceManagerRef<S>,
-
 }
 
 impl<S> CatalogServiceImpl<S>
-    where
-        S: MetaStore,
+where
+    S: MetaStore,
 {
     pub fn new(
         env: MetaSrvEnv<S>,
@@ -64,8 +64,8 @@ impl<S> CatalogServiceImpl<S>
 
 #[async_trait::async_trait]
 impl<S> CatalogService for CatalogServiceImpl<S>
-    where
-        S: MetaStore,
+where
+    S: MetaStore,
 {
     async fn create_database(
         &self,
@@ -119,35 +119,48 @@ impl<S> CatalogService for CatalogServiceImpl<S>
 
     async fn create_source(
         &self,
-        _request: Request<CreateSourceRequest>,
+        request: Request<CreateSourceRequest>,
     ) -> TonicResponse<CreateSourceResponse> {
-        let req = _request.into_inner();
-        let source = req.source.ok_or(Status::invalid_argument("source"))?;
+        //use crate::stream::CreateSourceContext;
+        let req = request.into_inner();
+        let source_id = self
+            .id_gen_manager
+            .generate::<{ IdCategory::Source }>()
+            .await
+            .map_err(tonic_err)? as u32;
 
+        let mut source = req.get_source().map_err(tonic_err)?.clone();
+        //
+        // let stream_source = match source.get_info().map_err(tonic_err)? {
+        //     StreamSource(s) => s,
+        //     _ => return Err(Status::invalid_argument("not a stream source")),
+        // };
 
-        let _source_info = match source.clone().info {
-            Some(StreamSource(s)) => { s }
-            _ => return Err(Status::invalid_argument("source info illegal")),
-        };
+        // create source in source manager,
+        // The long-running split enumerator will register at this point
+        // let _ = self
+        //     .source_manager
+        //     .create_source(CreateSourceContext {
+        //         source_id,
+        //         discovery_new_split: true,
+        //         properties: stream_source.get_properties().clone(),
+        //     })
+        //     .await
+        //     .map_err(tonic_err)?;
 
-        // let _resp = self.source_manager.create_source(CreateSourceContext {
-        //     name: "".to_string(),
-        //     table_id: Default::default(),
-        //     discovery_new_split: false,
-        //     properties: Default::default(),
-        // }).await;
+        // save source to catalog
+        source.id = source_id as u32;
+        let version = self
+            .catalog_manager
+            .create_source(&source)
+            .await
+            .map_err(tonic_err)?;
 
-
-        match self.catalog_manager.create_source(&source).await {
-            Ok(x) => {
-                Ok(Response::new(CreateSourceResponse {
-                    status: None,
-                    source_id: 0,
-                    version: 0,
-                }))
-            }
-            Err(e) => Err(Status::internal(e.to_string())),
-        }
+        Ok(Response::new(CreateSourceResponse {
+            status: None,
+            source_id,
+            version,
+        }))
     }
 
     async fn create_materialized_source(

@@ -1,32 +1,35 @@
 use std::collections::{BTreeMap, HashMap};
-use std::sync::{Arc};
-use dashmap::DashMap;
+use std::sync::Arc;
+
 use dashmap::mapref::entry::Entry;
 use dashmap::mapref::one::Ref;
-use tokio::sync::{Mutex, RwLock};
-
+use dashmap::DashMap;
 use risingwave_common::error::Result;
-use risingwave_pb::plan::TableRefId;
-
 use risingwave_connector::base::SplitEnumerator;
 use risingwave_connector::{extract_split_enumerator, SplitEnumeratorImpl};
-use risingwave_pb::catalog::StreamSourceInfo;
+use risingwave_pb::catalog::{Source, StreamSourceInfo};
+use risingwave_pb::plan::TableRefId;
+use tokio::sync::{Mutex, RwLock};
 
-use crate::manager::StoredCatalogManagerRef;
+use crate::barrier::BarrierManagerRef;
+use crate::cluster::StoredClusterManagerRef;
+use crate::manager::{MetaSrvEnv, StoredCatalogManagerRef};
+use crate::model::MetadataModel;
 use crate::storage::MetaStore;
 
 pub type SourceManagerRef<S> = Arc<SourceManager<S>>;
 
 pub struct SourceManager<S>
-    where
-        S: MetaStore,
+where
+    S: MetaStore,
 {
-    _phantom: std::marker::PhantomData<S>,
+    meta_store_ref: Arc<S>,
+    barrier_manager_ref: BarrierManagerRef<S>,
 }
 
 pub struct CreateSourceContext {
     pub name: String,
-    pub table_id: TableRefId,
+    pub source_id: u32,
     pub discovery_new_split: bool,
     pub properties: HashMap<String, String>,
 }
@@ -36,11 +39,19 @@ pub struct DropSourceContext {
 }
 
 impl<S> SourceManager<S>
-    where
-        S: MetaStore,
+where
+    S: MetaStore,
 {
-    pub async fn new(catalog_manager_ref: StoredCatalogManagerRef<S>) -> Result<Self> {
-        todo!()
+    pub async fn new(
+        meta_store_ref: Arc<S>,
+        barrier_manager_ref: BarrierManagerRef<S>,
+    ) -> Result<Self> {
+        //        let sources = Source::list(&*meta_store_ref).await?;
+
+        Ok(Self {
+            meta_store_ref,
+            barrier_manager_ref,
+        })
     }
 
     pub async fn create_source(&self, ctx: CreateSourceContext) -> Result<()> {

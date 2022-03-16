@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 // Copyright 2022 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -17,6 +18,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::hash::Hash;
 
 use anyhow::{anyhow, Error};
+
 
 
 use async_trait::async_trait;
@@ -67,17 +69,17 @@ pub enum SplitEnumeratorImpl {
     Pulsar(pulsar::enumerator::PulsarSplitEnumerator),
 }
 
-pub fn extract_split_enumerator(properties: &HashMap<String, String>) -> Result<SplitEnumeratorImpl> {
-    let source_type = match properties.get("upstream.source") {
-        None => return Err(anyhow!("upstream.source not found")),
-        Some(value) => value,
-    };
-
-    match source_type.as_ref() {
-        "kafka" => {
-            kafka::enumerator::KafkaSplitEnumerator { broker_address: val, topic: val, admin_client: val, start_offset: val, stop_offset: val }
-        }
-    }
+pub fn extract_split_enumerator(_properties: &HashMap<String, String>) -> Result<SplitEnumeratorImpl> {
+    // let source_type = match properties.get("upstream.source") {
+    //     None => return Err(anyhow!("upstream.source not found")),
+    //     Some(value) => value,
+    // };
+    //
+    // match source_type.as_ref() {
+    //     "kafka" => {
+    //         kafka::enumerator::KafkaSplitEnumerator { broker_address: val, topic: val, admin_client: val, start_offset: val, stop_offset: val }
+    //     }
+    // }
 
     todo!()
 }
