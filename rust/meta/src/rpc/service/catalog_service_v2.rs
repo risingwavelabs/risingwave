@@ -1,4 +1,7 @@
 #![allow(dead_code)]
+use std::sync::Arc;
+
+use risingwave_common::catalog::TableId;
 use risingwave_common::error::tonic_err;
 use risingwave_pb::catalog::catalog_service_server::CatalogService;
 use risingwave_pb::catalog::{
@@ -9,11 +12,15 @@ use risingwave_pb::catalog::{
     DropMaterializedSourceResponse, DropMaterializedViewRequest, DropMaterializedViewResponse,
     DropSchemaRequest, DropSchemaResponse, DropSourceRequest, DropSourceResponse,
 };
+use risingwave_pb::common::ParallelUnitType;
+use risingwave_pb::plan::TableRefId;
 use tonic::{Request, Response, Status};
 
+use crate::cluster::StoredClusterManager;
 use crate::manager::{CatalogManagerRef, IdCategory, IdGeneratorManagerRef, MetaSrvEnv};
+use crate::model::TableFragments;
 use crate::storage::MetaStore;
-use crate::stream::StreamManagerRef;
+use crate::stream::{FragmentManagerRef, StreamFragmenter, StreamManagerRef};
 
 #[derive(Clone)]
 pub struct CatalogServiceImpl<S>
@@ -23,6 +30,8 @@ where
     id_gen_manager: IdGeneratorManagerRef<S>,
     catalog_manager: CatalogManagerRef<S>,
     stream_manager: StreamManagerRef<S>,
+    cluster_manager: Arc<StoredClusterManager<S>>,
+    fragment_manager: FragmentManagerRef<S>,
 }
 
 impl<S> CatalogServiceImpl<S>
@@ -33,11 +42,15 @@ where
         env: MetaSrvEnv<S>,
         catalog_manager: CatalogManagerRef<S>,
         stream_manager: StreamManagerRef<S>,
+        cluster_manager: Arc<StoredClusterManager<S>>,
+        fragment_manager: FragmentManagerRef<S>,
     ) -> Self {
         Self {
             id_gen_manager: env.id_gen_manager_ref(),
             catalog_manager,
             stream_manager,
+            cluster_manager,
+            fragment_manager,
         }
     }
 }
@@ -56,18 +69,18 @@ where
             .id_gen_manager
             .generate::<{ IdCategory::Database }>()
             .await
-            .map_err(|e| e.to_grpc_status())?;
+            .map_err(tonic_err)? as u32;
         let mut database = req.get_db().map_err(tonic_err)?.clone();
-        database.id = id as u32;
+        database.id = id;
         let version = self
             .catalog_manager
             .create_database(&database)
             .await
-            .map_err(|e| e.to_grpc_status())?;
+            .map_err(tonic_err)?;
 
         Ok(Response::new(CreateDatabaseResponse {
             status: None,
-            database_id: id as u32,
+            database_id: id,
             version,
         }))
     }
@@ -81,18 +94,18 @@ where
             .id_gen_manager
             .generate::<{ IdCategory::Schema }>()
             .await
-            .map_err(|e| e.to_grpc_status())?;
+            .map_err(tonic_err)? as u32;
         let mut schema = req.get_schema().map_err(tonic_err)?.clone();
-        schema.id = id as u32;
+        schema.id = id;
         let version = self
             .catalog_manager
             .create_schema(&schema)
             .await
-            .map_err(|e| e.to_grpc_status())?;
+            .map_err(tonic_err)?;
 
         Ok(Response::new(CreateSchemaResponse {
             status: None,
-            schema_id: id as u32,
+            schema_id: id,
             version,
         }))
     }
@@ -113,9 +126,50 @@ where
 
     async fn create_materialized_view(
         &self,
-        _request: Request<CreateMaterializedViewRequest>,
+        request: Request<CreateMaterializedViewRequest>,
     ) -> Result<Response<CreateMaterializedViewResponse>, Status> {
-        todo!()
+        use crate::stream::CreateMaterializedViewContext;
+        let req = request.into_inner();
+        let id = self
+            .id_gen_manager
+            .generate::<{ IdCategory::Table }>()
+            .await
+            .map_err(tonic_err)? as u32;
+
+        // 1. create mv in stream manager
+        let hash_parallel_count = self
+            .cluster_manager
+            .get_parallel_unit_count(Some(ParallelUnitType::Hash))
+            .await;
+        let mut ctx = CreateMaterializedViewContext::default();
+        let mut fragmenter = StreamFragmenter::new(
+            self.id_gen_manager.clone(),
+            self.fragment_manager.clone(),
+            hash_parallel_count as u32,
+        );
+        let graph = fragmenter
+            .generate_graph(req.get_stream_node().map_err(tonic_err)?, &mut ctx)
+            .await
+            .map_err(tonic_err)?;
+        let table_fragments = TableFragments::new(TableId::new(id), graph);
+        self.stream_manager
+            .create_materialized_view(table_fragments, ctx)
+            .await
+            .map_err(tonic_err)?;
+
+        // 2. append the mv into the catalog
+        let mut mview = req.get_materialized_view().map_err(tonic_err)?.clone();
+        mview.id = id as u32;
+        let version = self
+            .catalog_manager
+            .create_table(&mview)
+            .await
+            .map_err(tonic_err)?;
+        Ok(Response::new(CreateMaterializedViewResponse {
+            status: None,
+            table_id: id,
+            version,
+        }))
     }
 
     async fn drop_database(
@@ -128,7 +182,7 @@ where
             .catalog_manager
             .drop_database(database_id)
             .await
-            .map_err(|e| e.to_grpc_status())?;
+            .map_err(tonic_err)?;
         Ok(Response::new(DropDatabaseResponse {
             status: None,
             version,
@@ -145,7 +199,7 @@ where
             .catalog_manager
             .drop_schema(schema_id)
             .await
-            .map_err(|e| e.to_grpc_status())?;
+            .map_err(tonic_err)?;
         Ok(Response::new(DropSchemaResponse {
             status: None,
             version,
@@ -168,8 +222,27 @@ where
 
     async fn drop_materialized_view(
         &self,
-        _request: Request<DropMaterializedViewRequest>,
+        request: Request<DropMaterializedViewRequest>,
     ) -> Result<Response<DropMaterializedViewResponse>, Status> {
-        todo!()
+        let req = request.into_inner();
+        let mview_id = req.get_table_id();
+        // 1. drop table in catalog
+        let version = self
+            .catalog_manager
+            .drop_table(mview_id)
+            .await
+            .map_err(tonic_err)?;
+
+        // 2. drop mv in stream manager
+        // TODO: maybe we should refactor this and use catalog_v2's TableId (u32)
+        self.stream_manager
+            .drop_materialized_view(&TableRefId::from(&TableId::new(mview_id)))
+            .await
+            .map_err(tonic_err)?;
+
+        Ok(Response::new(DropMaterializedViewResponse {
+            status: None,
+            version,
+        }))
     }
 }
