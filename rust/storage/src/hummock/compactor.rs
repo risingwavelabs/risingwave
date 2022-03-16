@@ -8,7 +8,7 @@ use risingwave_common::config::StorageConfig;
 use risingwave_common::error::RwError;
 use risingwave_pb::hummock::{
     CompactMetrics, CompactTask, LevelEntry, LevelType, SstableInfo, SubscribeCompactTasksResponse,
-    TableSetStatistics, VacuumTask,
+    TableSetStatistics,
 };
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
@@ -324,7 +324,7 @@ impl Compactor {
         let sub_compact_context = SubCompactContext {
             options,
             local_version_manager,
-            hummock_meta_client,
+            hummock_meta_client: hummock_meta_client.clone(),
             sstable_store: sstable_store.clone(),
             stats,
             is_share_buffer_compact: false,
@@ -382,8 +382,14 @@ impl Compactor {
                                     tracing::warn!("failed to compact. {}", RwError::from(e));
                                 }
                             }
-                            if let Some(VacuumTask { task: Some(task) }) = vacuum_task {
-                                if let Err(e) = Vacuum::vacuum(sstable_store.clone(), task).await {
+                            if let Some(vacuum_task) = vacuum_task {
+                                if let Err(e) = Vacuum::vacuum(
+                                    sstable_store.clone(),
+                                    vacuum_task,
+                                    hummock_meta_client.clone(),
+                                )
+                                .await
+                                {
                                     tracing::warn!("failed to vacuum. {}", e);
                                 }
                             }

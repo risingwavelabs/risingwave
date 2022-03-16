@@ -3,9 +3,7 @@ use std::cmp::Ordering;
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::common::{HostAddress, WorkerType};
-use risingwave_pb::hummock::{
-    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, SstableInfo,
-};
+use risingwave_pb::hummock::{HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot};
 use risingwave_storage::hummock::{HummockContextId, FIRST_VERSION_ID, INVALID_EPOCH};
 
 use crate::hummock::test_utils::*;
@@ -94,8 +92,8 @@ async fn test_hummock_compaction_task() -> Result<()> {
 
     // Add some sstables and commit.
     let epoch: u64 = 1;
-    let mut table_id = 1;
-    let (original_tables, _) = generate_test_tables(epoch, &mut table_id);
+    let table_id = 1;
+    let (original_tables, _) = generate_test_tables(epoch, (table_id..table_id + 2).collect());
     hummock_manager
         .add_tables(context_id, original_tables.clone(), epoch)
         .await
@@ -144,25 +142,17 @@ async fn test_hummock_compaction_task() -> Result<()> {
 
 #[tokio::test]
 async fn test_hummock_table() -> Result<()> {
-    let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
+    let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
 
     let epoch: u64 = 1;
-    let mut table_id = 1;
-    let (original_tables, _) = generate_test_tables(epoch, &mut table_id);
+    let table_id = 1;
+    let (original_tables, _) = generate_test_tables(epoch, (table_id..table_id + 2).collect());
     hummock_manager
         .add_tables(context_id, original_tables.clone(), epoch)
         .await
         .unwrap();
     hummock_manager.commit_epoch(epoch).await.unwrap();
-
-    // Confirm tables are successfully added
-    let fetched_tables = SstableInfo::list(&*env.meta_store_ref())
-        .await?
-        .into_iter()
-        .sorted_by_key(|t| t.id)
-        .collect_vec();
-    assert_eq!(original_tables, fetched_tables);
 
     let pinned_version = hummock_manager.pin_version(context_id).await?;
     assert_eq!(
@@ -199,7 +189,9 @@ async fn test_hummock_transaction() -> Result<()> {
     let epoch1: u64 = 1;
     {
         // Add tables in epoch1
-        let (tables_in_epoch1, _) = generate_test_tables(epoch1, &mut table_id);
+        let (tables_in_epoch1, _) =
+            generate_test_tables(epoch1, (table_id..table_id + 2).collect());
+        table_id += 2;
         hummock_manager
             .add_tables(context_id, tables_in_epoch1.clone(), epoch1)
             .await
@@ -244,7 +236,9 @@ async fn test_hummock_transaction() -> Result<()> {
     let epoch2 = epoch1 + 1;
     {
         // Add tables in epoch2
-        let (tables_in_epoch2, _) = generate_test_tables(epoch2, &mut table_id);
+        let (tables_in_epoch2, _) =
+            generate_test_tables(epoch2, (table_id..table_id + 2).collect());
+        table_id += 2;
         hummock_manager
             .add_tables(context_id, tables_in_epoch2.clone(), epoch2)
             .await
@@ -293,12 +287,15 @@ async fn test_hummock_transaction() -> Result<()> {
     let epoch4 = epoch3 + 1;
     {
         // Add tables in epoch3 and epoch4
-        let (tables_in_epoch3, _) = generate_test_tables(epoch3, &mut table_id);
+        let (tables_in_epoch3, _) =
+            generate_test_tables(epoch3, (table_id..table_id + 2).collect());
+        table_id += 2;
         hummock_manager
             .add_tables(context_id, tables_in_epoch3.clone(), epoch3)
             .await
             .unwrap();
-        let (tables_in_epoch4, _) = generate_test_tables(epoch4, &mut table_id);
+        let (tables_in_epoch4, _) =
+            generate_test_tables(epoch4, (table_id..table_id + 2).collect());
         hummock_manager
             .add_tables(context_id, tables_in_epoch4.clone(), epoch4)
             .await
@@ -477,8 +474,8 @@ async fn test_context_id_validation() {
     let invalid_context_id = HummockContextId::MAX;
     let context_id = worker_node.id;
     let epoch: u64 = 1;
-    let mut table_id = 1;
-    let (original_tables, _) = generate_test_tables(epoch, &mut table_id);
+    let table_id = 1;
+    let (original_tables, _) = generate_test_tables(epoch, (table_id..table_id + 2).collect());
 
     // Invalid context id is rejected.
     let error = hummock_manager
@@ -532,8 +529,8 @@ async fn test_hummock_manager_basic() {
 
     // Add some sstables and commit.
     let epoch: u64 = 1;
-    let mut table_id = 1;
-    let (original_tables, _) = generate_test_tables(epoch, &mut table_id);
+    let table_id = 1;
+    let (original_tables, _) = generate_test_tables(epoch, (table_id..table_id + 2).collect());
     hummock_manager
         .add_tables(context_id_1, original_tables.clone(), epoch)
         .await

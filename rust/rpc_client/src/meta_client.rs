@@ -12,9 +12,9 @@ use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServic
 use risingwave_pb::hummock::{
     AddTablesRequest, AddTablesResponse, GetNewTableIdRequest, GetNewTableIdResponse,
     PinSnapshotRequest, PinSnapshotResponse, PinVersionRequest, PinVersionResponse,
-    ReportCompactionTasksRequest, ReportCompactionTasksResponse, SubscribeCompactTasksRequest,
-    SubscribeCompactTasksResponse, UnpinSnapshotRequest, UnpinSnapshotResponse,
-    UnpinVersionRequest, UnpinVersionResponse,
+    ReportCompactionTasksRequest, ReportCompactionTasksResponse, ReportVacuumTaskRequest,
+    ReportVacuumTaskResponse, SubscribeCompactTasksRequest, SubscribeCompactTasksResponse,
+    UnpinSnapshotRequest, UnpinSnapshotResponse, UnpinVersionRequest, UnpinVersionResponse,
 };
 use risingwave_pb::meta::catalog_service_client::CatalogServiceClient;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
@@ -344,6 +344,13 @@ pub trait MetaClientInner: Send + Sync {
     ) -> std::result::Result<Streaming<SubscribeCompactTasksResponse>, tonic::Status> {
         unimplemented!()
     }
+
+    async fn report_vacuum_task(
+        &self,
+        _req: ReportVacuumTaskRequest,
+    ) -> std::result::Result<ReportVacuumTaskResponse, tonic::Status> {
+        unimplemented!()
+    }
 }
 
 /// Client to meta server. Cloning the instance is lightweight.
@@ -573,6 +580,18 @@ impl MetaClientInner for GrpcMetaClient {
             .hummock_client
             .to_owned()
             .subscribe_compact_tasks(req)
+            .await?
+            .into_inner())
+    }
+
+    async fn report_vacuum_task(
+        &self,
+        req: ReportVacuumTaskRequest,
+    ) -> std::result::Result<ReportVacuumTaskResponse, tonic::Status> {
+        Ok(self
+            .hummock_client
+            .to_owned()
+            .report_vacuum_task(req)
             .await?
             .into_inner())
     }
