@@ -8,7 +8,7 @@ use crate::optimizer::property::{Direction, FieldOrder};
 
 /// A validated sql query, including order and union.
 /// An example of its relationship with BoundSetExpr and BoundSelect can be found here: https://bit.ly/3GQwgPz
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BoundQuery {
     pub body: BoundSetExpr,
     pub order: Vec<FieldOrder>,

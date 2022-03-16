@@ -1,6 +1,13 @@
 use itertools::Itertools;
+use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::types::Row;
 use risingwave_common::array::DataChunk;
+use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::types::DataType;
+
+use crate::binder::{BoundSetExpr, BoundStatement};
+use crate::expr::Expr;
+
 pub fn to_pg_rows(chunk: DataChunk) -> Vec<Row> {
     chunk
         .rows()
@@ -12,6 +19,51 @@ pub fn to_pg_rows(chunk: DataChunk) -> Vec<Row> {
             )
         })
         .collect_vec()
+}
+
+pub fn get_pg_field_descs(bound: BoundStatement) -> Result<Vec<PgFieldDescriptor>> {
+    if let BoundStatement::Query(query) = bound {
+        if let BoundSetExpr::Select(select) = query.body {
+            let mut pg_descs = vec![];
+            for i in 0..select.select_items.len() {
+                pg_descs.push(PgFieldDescriptor::new(
+                    select.aliases[i].as_ref().unwrap().to_string(),
+                    data_type_to_type_oid(select.select_items[i].return_type()),
+                ));
+            }
+            Ok(pg_descs)
+        } else {
+            Err(ErrorCode::NotImplementedError(
+                "get pg_field descs only support select bound_set_expr".to_string(),
+            )
+            .into())
+        }
+    } else {
+        Err(ErrorCode::NotImplementedError(
+            "get pg_field descs only support query bound_statement".to_string(),
+        )
+        .into())
+    }
+}
+
+pub fn data_type_to_type_oid(data_type: DataType) -> TypeOid {
+    match data_type {
+        DataType::Int16 => TypeOid::SmallInt,
+        DataType::Int32 => TypeOid::Int,
+        DataType::Int64 => TypeOid::BigInt,
+        DataType::Float32 => TypeOid::Float4,
+        DataType::Float64 => TypeOid::Float8,
+        DataType::Boolean => TypeOid::Boolean,
+        DataType::Char => TypeOid::CharArray,
+        DataType::Varchar => TypeOid::Varchar,
+        DataType::Date => TypeOid::Date,
+        DataType::Time => TypeOid::Time,
+        DataType::Timestamp => TypeOid::Timestamp,
+        DataType::Timestampz => TypeOid::Timestampz,
+        DataType::Decimal => TypeOid::Decimal,
+        DataType::Interval => TypeOid::Varchar,
+        DataType::Struct { .. } => TypeOid::Varchar,
+    }
 }
 
 #[cfg(test)]

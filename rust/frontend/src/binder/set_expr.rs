@@ -5,7 +5,7 @@ use crate::binder::{Binder, BoundSelect, BoundValues};
 
 /// Part of a validated query, without order or limit clause. It may be composed of smaller
 /// BoundSetExprs via set operators (e.g. union).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum BoundSetExpr {
     Select(Box<BoundSelect>),
     Values(Box<BoundValues>),

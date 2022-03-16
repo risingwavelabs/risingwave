@@ -13,13 +13,13 @@ use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::TableId;
 use crate::expr::{Expr, ExprImpl};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum TableRef {
     BaseTable(Box<BaseTableRef>),
     Join(Box<BoundJoin>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BoundJoin {
     pub left: TableRef,
     pub right: TableRef,
