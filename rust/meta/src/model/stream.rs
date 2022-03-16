@@ -68,8 +68,8 @@ impl TableFragments {
         }
     }
 
-    pub fn fragments(&self) -> Vec<Fragment> {
-        self.fragments.values().cloned().collect_vec()
+    pub fn fragments(&self) -> Vec<&Fragment> {
+        self.fragments.values().collect_vec()
     }
 
     /// Set the actor locations.

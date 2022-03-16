@@ -98,7 +98,9 @@ where
         locations.node_locations = nodes.into_iter().map(|node| (node.id, node)).collect();
 
         for fragment in table_fragments.fragments() {
-            self.scheduler.schedule(fragment, &mut locations).await?;
+            self.scheduler
+                .schedule(fragment.clone(), &mut locations)
+                .await?;
         }
 
         let actor_info = locations
