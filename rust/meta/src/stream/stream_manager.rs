@@ -110,7 +110,7 @@ where
                 (
                     actor_id,
                     ActorStatus {
-                        node_id: parallel_unit.node_id,
+                        node_id: parallel_unit.worker_node_id,
                         state: ActorState::Inactive as i32,
                     },
                 )

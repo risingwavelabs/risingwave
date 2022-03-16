@@ -368,14 +368,14 @@ where
         let single_parallel_unit = ParallelUnit {
             id: start_id as u32,
             r#type: ParallelUnitType::Single as i32,
-            node_id,
+            worker_node_id: node_id,
         };
         parallel_units.push(single_parallel_unit);
         (start_id + 1..start_id + parallel_degree).for_each(|id| {
             let hash_parallel_unit = ParallelUnit {
                 id: id as u32,
                 r#type: ParallelUnitType::Hash as i32,
-                node_id,
+                worker_node_id: node_id,
             };
             parallel_units.push(hash_parallel_unit);
         });

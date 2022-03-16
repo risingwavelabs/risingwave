@@ -43,7 +43,7 @@ impl ScheduledLocations {
             .iter()
             .for_each(|(actor_id, parallel_unit)| {
                 node_actors
-                    .entry(parallel_unit.node_id)
+                    .entry(parallel_unit.worker_node_id)
                     .or_insert_with(Vec::new)
                     .push(*actor_id);
             });
@@ -60,7 +60,7 @@ impl ScheduledLocations {
                     *actor_id,
                     ActorInfo {
                         actor_id: *actor_id,
-                        host: self.node_locations[&parallel_unit.node_id].host.clone(),
+                        host: self.node_locations[&parallel_unit.worker_node_id].host.clone(),
                     },
                 )
             })
@@ -73,7 +73,7 @@ impl ScheduledLocations {
             .iter()
             .map(|(actor_id, parallel_unit)| ActorInfo {
                 actor_id: *actor_id,
-                host: self.node_locations[&parallel_unit.node_id].host.clone(),
+                host: self.node_locations[&parallel_unit.worker_node_id].host.clone(),
             })
             .collect::<Vec<_>>()
     }

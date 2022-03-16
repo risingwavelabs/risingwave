@@ -442,13 +442,13 @@ mod tests {
         let mut parallel_units = vec![ParallelUnit {
             id: start_id,
             r#type: ParallelUnitType::Single as i32,
-            node_id,
+            worker_node_id: node_id,
         }];
         for id in start_id + 1..start_id + parallel_degree {
             parallel_units.push(ParallelUnit {
                 id,
                 r#type: ParallelUnitType::Hash as i32,
-                node_id,
+                worker_node_id: node_id,
             });
         }
         parallel_units
