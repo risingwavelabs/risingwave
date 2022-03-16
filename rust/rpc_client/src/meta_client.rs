@@ -232,7 +232,7 @@ impl MetaClient {
                         return;
                     }
                 }
-                tracing::debug!("heartbeat");
+                tracing::trace!(target: "events::meta::client_heartbeat", "heartbeat");
                 if let Err(err) = meta_client.send_heartbeat(meta_client.worker_id()).await {
                     tracing::warn!("Failed to send_heartbeat. {}", err);
                 }

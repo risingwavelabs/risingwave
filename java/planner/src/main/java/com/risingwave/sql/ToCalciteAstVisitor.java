@@ -23,29 +23,7 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 import org.apache.calcite.avatica.util.TimeUnit;
 import org.apache.calcite.schema.ColumnStrategy;
-import org.apache.calcite.sql.JoinConditionType;
-import org.apache.calcite.sql.JoinType;
-import org.apache.calcite.sql.SqlBasicCall;
-import org.apache.calcite.sql.SqlBasicTypeNameSpec;
-import org.apache.calcite.sql.SqlCharStringLiteral;
-import org.apache.calcite.sql.SqlDataTypeSpec;
-import org.apache.calcite.sql.SqlExplain;
-import org.apache.calcite.sql.SqlExplainFormat;
-import org.apache.calcite.sql.SqlExplainLevel;
-import org.apache.calcite.sql.SqlIdentifier;
-import org.apache.calcite.sql.SqlInsert;
-import org.apache.calcite.sql.SqlIntervalQualifier;
-import org.apache.calcite.sql.SqlJoin;
-import org.apache.calcite.sql.SqlKind;
-import org.apache.calcite.sql.SqlLiteral;
-import org.apache.calcite.sql.SqlNode;
-import org.apache.calcite.sql.SqlNodeList;
-import org.apache.calcite.sql.SqlOperator;
-import org.apache.calcite.sql.SqlOrderBy;
-import org.apache.calcite.sql.SqlSelect;
-import org.apache.calcite.sql.SqlSelectKeyword;
-import org.apache.calcite.sql.SqlSetOption;
-import org.apache.calcite.sql.SqlSyntax;
+import org.apache.calcite.sql.*;
 import org.apache.calcite.sql.ddl.SqlDdlNodes;
 import org.apache.calcite.sql.fun.SqlCase;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
@@ -375,6 +353,15 @@ public class ToCalciteAstVisitor extends AstVisitor<SqlNode, Void> {
     }
 
     return new SqlInsert(SqlParserPos.ZERO, keywords, table, source, columnList);
+  }
+
+  @Override
+  public SqlNode visitDelete(Delete node, Void context) {
+    // TODO: suppport alias and returning
+    var table = visitTable((Table<?>) node.getRelation(), context);
+    var where = node.getWhere().map(exp -> exp.accept(this, context)).orElse(null);
+
+    return new SqlDelete(SqlParserPos.ZERO, table, where, null, null);
   }
 
   @Override

@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 pub mod plan_node;
 pub use plan_node::PlanRef;
 pub mod property;
@@ -61,6 +60,7 @@ impl PlanRoot {
     }
 
     /// Get a reference to the plan root's schema.
+    #[allow(dead_code)]
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -90,8 +90,7 @@ impl PlanRoot {
         let mut plan = self.logical_plan.clone();
         let rules: Vec<BoxedRule> = vec![Box::new(FilterJoinRule {})];
         let mut heuristic_optimizer = HeuristicOptimizer::new(rules);
-        plan =
-            heuristic_optimizer.pass_with_require(plan, &self.required_order, &self.required_dist);
+        plan = heuristic_optimizer.pass(plan);
         plan = plan.prune_col(&self.out_fields);
         plan = plan.to_batch_with_order_required(&self.required_order);
         // TODO: plan.to_distributed_with_required()

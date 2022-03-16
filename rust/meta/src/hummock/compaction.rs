@@ -13,6 +13,7 @@ use risingwave_storage::hummock::{HummockEpoch, HummockSSTableId};
 
 use crate::hummock::level_handler::{LevelHandler, SSTableStat};
 use crate::hummock::model::HUMMOCK_DEFAULT_CF_NAME;
+use crate::storage;
 use crate::storage::{MetaStore, Transaction};
 
 /// Hummock `compact_status` key
@@ -45,14 +46,21 @@ impl CompactStatus {
         HUMMOCK_COMPACT_STATUS_KEY
     }
 
-    pub async fn get<S: MetaStore>(meta_store_ref: &S) -> Result<CompactStatus> {
-        meta_store_ref
+    pub async fn get<S: MetaStore>(meta_store_ref: &S) -> Result<Option<CompactStatus>> {
+        match meta_store_ref
             .get_cf(CompactStatus::cf_name(), CompactStatus::key().as_bytes())
             .await
-            // TODO replace unwrap
             .map(|v| risingwave_pb::hummock::CompactStatus::decode(&mut Cursor::new(v)).unwrap())
             .map(|s| (&s).into())
-            .map_err(Into::into)
+        {
+            Ok(compact_status) => Ok(Some(compact_status)),
+            Err(err) => {
+                if !matches!(err, storage::Error::ItemNotFound(_)) {
+                    return Err(err.into());
+                }
+                Ok(None)
+            }
+        }
     }
 
     pub fn update_in_transaction(&self, trx: &mut Transaction) {

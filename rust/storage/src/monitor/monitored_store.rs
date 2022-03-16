@@ -160,7 +160,7 @@ where
             .await
     }
 
-    async fn wait_epoch(&self, epoch: u64) {
+    async fn wait_epoch(&self, epoch: u64) -> Result<()> {
         self.inner.wait_epoch(epoch).await
     }
 

@@ -225,17 +225,17 @@ message HummockContextRefId {
   uint32 id = 1;
 }
 
-message HummockContextPinnedVersion {
+message HummockPinnedVersion {
   uint32 context_id = 1;
   repeated uint64 version_id = 2;
 }
 
-message HummockContextPinnedSnapshot {
+message HummockPinnedSnapshot {
   uint32 context_id = 1;
   repeated uint64 snapshot_id = 2;
 }
 
-message HummockTablesToDelete {
+message HummockStaleSstables {
   uint64 version_id = 1;
   // sstable ids
   repeated uint64 id = 2;
